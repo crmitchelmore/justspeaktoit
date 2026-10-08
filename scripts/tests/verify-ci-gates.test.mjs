@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { assessCIGates as assessOracle } from '../verify-ci-gates.mjs';
@@ -8,6 +10,184 @@ import { assessCIGates as assessOracle } from '../verify-ci-gates.mjs';
 const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
 const makefile = readFileSync(new URL('../../Makefile', import.meta.url), 'utf8');
 const aggregate = workflow.slice(workflow.indexOf('\n  required-macos:'));
+const jobBodies = Object.fromEntries([...workflow.matchAll(/^  ([a-z][a-z0-9-]+):\n([\s\S]*?)(?=^  [a-z][a-z0-9-]+:\n|$(?![\s\S]))/gm)]
+  .map(([, id, body]) => [id, body]));
+const appleJobs = [
+  'build-macos', 'release-validation', 'api-compatibility', 'lint',
+  'build-ios', 'build-ios-keyboard', 'core-journey-e2e', 'core-journey-fixture-ui',
+];
+
+function route(id, github, vars = {}) {
+  const expression = jobBodies[id].match(/runs-on: \$\{\{ (.+) \}\}/)?.[1];
+  assert.ok(expression, `${id}: must retain guarded routing`);
+  return new Function('github', 'vars', 'fromJSON', `return (${expression});`)(github, vars, JSON.parse);
+}
+
+function routingContext(event = 'pull_request', repository = 'crmitchelmore/justspeaktoit', number = 1200) {
+  return {
+    event_name: event, ref: 'refs/heads/main', sha: 'merge-sha', repository: 'crmitchelmore/justspeaktoit',
+    event: { number, pull_request: { head: { sha: 'head-sha', repo: { full_name: repository } } } },
+  };
+}
+
+test('all compatible Apple CI lanes default to standard same-OS hosted Intel', () => {
+  for (const id of appleJobs) {
+    for (const event of ['pull_request', 'push']) {
+      assert.deepEqual(route(id, routingContext(event)), ['macos-26-intel'], id);
+    }
+  }
+  assert.doesNotMatch(workflow, /macos-latest|macos-26-(?:large|xlarge)/);
+});
+
+test('native pool still requires the exact reviewed source and trusted event', () => {
+  for (const id of ['build-macos', 'api-compatibility']) {
+    assert.deepEqual(route(id, routingContext(), { JSTI_NATIVE_APPROVED_SHA: 'head-sha' }),
+      ['jsti-macos-build', 'macOS']);
+    assert.deepEqual(route(id, routingContext(), { JSTI_NATIVE_APPROVED_SHA: 'merge-sha' }),
+      ['macos-26-intel'], 'PR approval must match the source head, not merge SHA');
+    assert.deepEqual(route(id, routingContext('pull_request', 'fork/repo'), { JSTI_NATIVE_APPROVED_SHA: 'head-sha' }),
+      ['macos-26-intel'], 'forks cannot enter the native pool');
+    assert.deepEqual(route(id, routingContext('push'), { JSTI_NATIVE_APPROVED_SHA: 'merge-sha' }),
+      ['jsti-macos-build', 'macOS']);
+    assert.deepEqual(route(id, { ...routingContext('push'), ref: 'refs/heads/feature' },
+      { JSTI_NATIVE_APPROVED_SHA: 'merge-sha' }), ['macos-26-intel']);
+    assert.deepEqual(route(id, routingContext('workflow_dispatch'), { JSTI_NATIVE_APPROVED_SHA: 'merge-sha' }),
+      ['macos-26-intel']);
+  }
+});
+
+test('standalone iOS SwiftPM compilation stays hosted with no new native admission', () => {
+  const body = jobBodies['build-ios-swiftpm'];
+  assert.match(body, /^\s+runs-on: macos-26-intel$/m);
+  assert.match(body, /^\s+timeout-minutes: 30$/m);
+  assert.match(body, /run: swift build --disable-dependency-cache --target SpeakiOSLib/);
+  assert.doesNotMatch(body, /if:|jsti-macos-build|bravo-mini-local/);
+});
+
+test('historical owner-approved native route retains its source and event guards', () => {
+  for (const id of appleJobs.filter(id => !['build-macos', 'api-compatibility'].includes(id))) {
+    assert.deepEqual(route(id, routingContext('pull_request', 'crmitchelmore/justspeaktoit', 1038)),
+      ['bravo-mini-local', 'macOS', 'ARM64']);
+    assert.deepEqual(route(id, routingContext('pull_request', 'fork/repo', 1038)), ['macos-26-intel']);
+    assert.deepEqual(route(id, routingContext('push', 'crmitchelmore/justspeaktoit', 1038)), ['macos-26-intel']);
+  }
+});
+
+test('every Apple build cache isolates architecture, host and workspace, including restore prefixes', () => {
+  const cacheLines = workflow.match(/^\s+(?:key:|restore-keys:).*(?:\n\s+\$\{\{[^\n]+)?/gm);
+  assert.equal(cacheLines.length, 7, 'three Swift keys and restore prefixes plus the lint tooling key');
+  for (const line of cacheLines) {
+    assert.ok(line.includes('${{ runner.arch }}'), line);
+    assert.ok(line.includes("${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}"), line);
+    assert.ok(line.includes('${{ github.workspace }}'), line);
+  }
+});
+
+const simulatorPreparation = jobBodies['build-ios'].match(
+  /- name: Select iOS Simulator\n        run: \|\n([\s\S]*?)(?=\n      - name:)/,
+)?.[1].replace(/^          /gm, '');
+assert.ok(simulatorPreparation, 'simulator selection must reject unavailable devices');
+const iosPreparation = readFileSync(new URL('../prepare-ios-ci.py', import.meta.url), 'utf8');
+
+function prepareSimulator(devices) {
+  const directory = mkdtempSync(join(tmpdir(), 'ios-ci-readiness-'));
+  const environmentFile = join(directory, 'environment');
+  try {
+    const result = spawnSync('/bin/bash', ['-c', `
+      xcrun() {
+        if [[ "$*" == "simctl list devices available -j" ]]; then
+          printf '%s\\n' "$SIM_DEVICES_JSON"
+        else
+          echo "Unexpected simulator command" >&2
+          return 64
+        fi
+      }
+      ${simulatorPreparation}
+    `], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        GITHUB_ENV: environmentFile,
+        SIM_DEVICES_JSON: JSON.stringify({ devices }),
+      },
+    });
+    assert.ifError(result.error);
+    return { ...result, environment: existsSync(environmentFile) ? readFileSync(environmentFile, 'utf8') : null };
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+test('iOS workloads are partitioned without extending budgets or dropping tests', () => {
+  const body = jobBodies['build-ios'];
+  assert.match(body, /^\s+timeout-minutes: 30$/m);
+  assert.ok(body.indexOf('Select iOS Simulator') < body.indexOf('- name: Prepare iOS Simulator'));
+  assert.match(body, /python3 scripts\/prepare-ios-ci\.py "\$SIMULATOR_ID"/);
+  assert.doesNotMatch(iosPreparation, /"swift"/);
+  assert.doesNotMatch(iosPreparation, /"tuist"/);
+  assert.match(iosPreparation, /boot.wait\(timeout=600\)/);
+  assert.match(body, /xcodebuild test-without-building/);
+  assert.match(body, /needs: build-ios-test-products/);
+  assert.match(body, /artifact-ids: \$\{\{ needs.build-ios-test-products.outputs.artifact-id \}\}/);
+  assert.match(body, /scripts\/ios-test-products.py unpack/);
+  assert.match(body, /-testProductsPath "\$RUNNER_TEMP\/ios-test-products\/SpeakiOS.xctestproducts"/);
+  assert.match(body, /name: Upload complete iOS XCTest log separately\n\s+if: always\(\)/);
+  const products = jobBodies['build-ios-test-products'];
+  assert.match(products, /^\s+runs-on: macos-26-intel$/m);
+  assert.match(products, /^\s+timeout-minutes: 30$/m);
+  assert.match(products, /TUIST_IOS_KEYBOARD=1 tuist generate/);
+  assert.match(products, /xcodebuild build-for-testing/);
+  assert.match(products, /-only-testing:SpeakiOSTests/);
+  assert.match(products, /-only-testing:SpeakiOSUITests/);
+  assert.match(products, /ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO/);
+  assert.match(products, /scripts\/ios-test-products.py pack/);
+  assert.doesNotMatch(products, /simctl|bravo-mini-local|jsti-macos-build/);
+  assert.match(aggregate, /^\s+- build-ios-test-products$/m);
+  assert.match(aggregate, /needs\.build-ios-test-products\.result != 'success'/);
+  assert.match(body, /-only-testing:SpeakiOSTests/);
+  assert.match(body, /-only-testing:SpeakiOSUITests/);
+  assert.match(body, /verify-ios-test-evidence\.py/);
+  const devices = jobBodies['build-ios-keyboard'];
+  assert.match(devices, /^\s+timeout-minutes: 30$/m);
+  assert.match(devices, /Build Keyboard Extension, hand-off shape/);
+  assert.match(devices, /Build Keyboard Extension, direct-capture shape/);
+  assert.match(devices, /Build watchOS App \(feature-flagged\)/);
+  assert.match(devices, /TUIST_WATCH_APP=1 TUIST_IOS_KEYBOARD=1 TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0 tuist generate/);
+  assert.match(devices, /-scheme JustSpeakWatchApp/);
+  assert.match(devices, /-destination generic\/platform=watchOS/);
+  assert.match(devices, /-scheme SpeakiOS/);
+  assert.match(devices, /-destination generic\/platform=iOS/);
+  assert.match(aggregate, /^\s+- build-ios-swiftpm$/m);
+  assert.match(aggregate, /needs\.build-ios-swiftpm\.result != 'success'/);
+});
+
+test('iOS selection prefers an available Pro before starting preparation', () => {
+  const result = prepareSimulator({ runtime: [
+    { name: 'iPhone 17 Pro', udid: 'unavailable', isAvailable: false },
+    { name: 'iPhone 16', udid: 'fallback', isAvailable: true },
+    { name: 'iPhone 17 Pro', udid: 'preferred', isAvailable: true },
+  ] });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.environment, 'SIMULATOR_ID=preferred\n');
+});
+
+test('iOS preparation falls back to an available iPhone, not a watch', () => {
+  const result = prepareSimulator({ runtime: [
+    { name: 'Apple Watch', udid: 'watch', isAvailable: true },
+    { name: 'iPhone 16', udid: 'fallback', isAvailable: true },
+  ] });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.environment, 'SIMULATOR_ID=fallback\n');
+});
+
+test('missing simulator explicitly fails instead of publishing a usable destination', () => {
+  const missing = prepareSimulator({ runtime: [] });
+  assert.equal(missing.status, 1);
+  assert.match(missing.stdout, /::error::No available iPhone simulator/);
+  assert.doesNotMatch(missing.stdout, /READINESS/);
+  assert.equal(missing.environment, null);
+});
+
 const predicate = aggregate.match(/name: Reject unsuccessful CI gates\n        if: >-\n([\s\S]*?)\n        env:/)?.[1];
 assert.ok(predicate, 'must test the actual workflow rejection predicate');
 // GitHub property names permit hyphens; adapt those paths for local evaluation.
@@ -121,7 +301,7 @@ test('every tracked tooling test is discovered by make test-tooling', () => {
 
 function passing() {
   return Object.fromEntries([
-    'build-macos', 'build-ios', 'build-ios-keyboard', 'lint',
+    'build-macos', 'build-ios', 'build-ios-swiftpm', 'build-ios-test-products', 'build-ios-keyboard', 'lint',
     'release-paths', 'release-validation', 'core-journey-e2e',
     'core-journey-fixture-ui', 'api-compatibility',
   ].map(id => [id, { result: 'success', outputs: { package: 'true', 'core-journey': 'true' } }]));

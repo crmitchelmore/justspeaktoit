@@ -30,7 +30,7 @@ jobs:
     runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && '["jsti-macos-build","macOS"]' || '["macos-26-intel"]') }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       # Swift build state embeds absolute paths. Scope both exact and fallback
       # keys to the architecture, stable host identity and checkout workspace.
@@ -187,7 +187,7 @@ jobs:
     needs: release-paths
     if: needs.release-paths.outputs.core-journey == 'true'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       # Debug CI populates the shared cache. This bounded gate only restores;
       # uploading gigabytes afterwards must not consume its ten-minute budget.
@@ -218,7 +218,7 @@ jobs:
     needs: release-paths
     if: needs.release-paths.outputs.core-journey == 'true'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - name: Install Tuist
         run: brew install tuist
@@ -264,7 +264,7 @@ jobs:
     needs: release-paths
     if: needs.release-paths.outputs.package == 'true'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - name: Cache Swift packages (release)
         uses: actions/cache@v6
@@ -282,7 +282,7 @@ jobs:
     runs-on: macos-26-intel
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
       - name: Build iOS Library
@@ -470,7 +470,7 @@ jobs:
     runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-26-intel"]') }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -546,7 +546,7 @@ jobs:
     runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-26-intel"]') }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - name: Cache lint tooling
         uses: actions/cache@v6
@@ -573,7 +573,7 @@ jobs:
       run:
         working-directory: workers/paid-access
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -603,7 +603,7 @@ jobs:
     timeout-minutes: 30
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           # The baseline treeish must be resolvable locally.
           fetch-depth: 0

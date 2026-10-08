@@ -262,15 +262,11 @@ struct ModelPicker: View {
     } else if trimmed.isEmpty, let first = options.first {
       _selection = State(initialValue: first.id)
       _customValue = State(initialValue: "")
-      DispatchQueue.main.async {
-        value.wrappedValue = first.id
-      }
+      Self.repair(value, from: value.wrappedValue, to: first.id)
     } else if !allowsCustom, let first = options.first {
       _selection = State(initialValue: first.id)
       _customValue = State(initialValue: "")
-      DispatchQueue.main.async {
-        value.wrappedValue = first.id
-      }
+      Self.repair(value, from: value.wrappedValue, to: first.id)
     } else if !allowsCustom {
       _selection = State(initialValue: "")
       _customValue = State(initialValue: "")
@@ -384,6 +380,12 @@ struct ModelPicker: View {
       }
     }
     .onChange(of: selection) { _, newValue in
+      // Only a user choice writes through. Selections that merely mirror the
+      // bound value, or show that it is not one of these options, must not.
+      let mirroredValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+      if newValue.isEmpty || newValue.caseInsensitiveCompare(mirroredValue) == .orderedSame {
+        return
+      }
       if newValue == ModelCatalog.customOptionID {
         if customValue.isEmpty {
           customValue = value
@@ -399,10 +401,21 @@ struct ModelPicker: View {
       }
     }
     .onChange(of: value) { _, newValue in
-      syncSelection(with: newValue)
+      // Several pickers can share one setting (Apple and remote live models),
+      // so a value chosen elsewhere is reflected, never overwritten.
+      syncSelection(with: newValue, repairsInvalidValue: false)
     }
     .onChange(of: options.map(\.id)) { _, _ in
-      syncSelection(with: value)
+      syncSelection(with: value, repairsInvalidValue: true)
+    }
+  }
+
+  /// Replaces an invalid value on the next turn unless something else has
+  /// changed it in the meantime.
+  private static func repair(_ value: Binding<String>, from invalidValue: String, to replacement: String) {
+    DispatchQueue.main.async {
+      guard value.wrappedValue == invalidValue else { return }
+      value.wrappedValue = replacement
     }
   }
 
@@ -452,7 +465,7 @@ struct ModelPicker: View {
   }
 
   // swiftlint:disable:next cyclomatic_complexity
-  private func syncSelection(with newValue: String) {
+  private func syncSelection(with newValue: String, repairsInvalidValue: Bool) {
     let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
     if let match = options.first(where: { $0.id.caseInsensitiveCompare(trimmed) == .orderedSame }) {
       if selection != match.id {
@@ -468,7 +481,7 @@ struct ModelPicker: View {
       if customValue != trimmed {
         customValue = trimmed
       }
-    } else if let first = options.first {
+    } else if repairsInvalidValue, let first = options.first {
       if selection != first.id {
         selection = first.id
       }

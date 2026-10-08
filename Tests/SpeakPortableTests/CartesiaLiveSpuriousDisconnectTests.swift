@@ -42,6 +42,7 @@ final class CartesiaLiveSpuriousDisconnectTests: XCTestCase {
         fixture.socket.turn("Kept.")
         let finish = fixture.finish()
         await fixture.waitForFinishes(1)
+        await fixture.waitForHeldClose()
         fixture.socket.completeSend()
         XCTAssertEqual(fixture.socket.closeCommands, 1)
         for _ in 0..<200 where fixture.socket.cancels == 0 {
@@ -63,6 +64,7 @@ final class CartesiaLiveSpuriousDisconnectTests: XCTestCase {
         fixture.startAndOpen()
         let finish = fixture.finish()
         await fixture.waitForFinishes(1)
+        await fixture.waitForHeldClose()
         fixture.socket.completeSend()
         fixture.socket.turn("Kept.")
         fixture.socket.closeByPeer(Self.notConnected)
@@ -81,6 +83,7 @@ final class CartesiaLiveSpuriousDisconnectTests: XCTestCase {
         fixture.startAndOpen()
         let finish = fixture.finish()
         await fixture.waitForFinishes(1)
+        await fixture.waitForHeldClose()
         fixture.socket.completeSend()
         fixture.socket.closeByPeer(Self.notConnected)
         fixture.clock.fire(Self.retry)
@@ -97,6 +100,7 @@ final class CartesiaLiveSpuriousDisconnectTests: XCTestCase {
         fixture.startAndOpen()
         let finish = fixture.finish()
         await fixture.waitForFinishes(1)
+        await fixture.waitForHeldClose()
         fixture.socket.completeSend()
         fixture.socket.turn("Kept.")
         fixture.socket.closeByPeer(Self.notConnected)
@@ -106,5 +110,18 @@ final class CartesiaLiveSpuriousDisconnectTests: XCTestCase {
         XCTAssertEqual(transcript, "Kept.")
         XCTAssertEqual(fixture.log.entries, [.finished("Kept.")])
         XCTAssertEqual(fixture.socket.cancels, 1)
+    }
+}
+
+private extension CartesiaLiveFixture {
+    /// Waits, within a bound, until `{"type":"close"}` is held by the socket.
+    /// A registered finish hands it over only after the client's lock is
+    /// released, so completing the send any earlier would complete nothing.
+    func waitForHeldClose(file: StaticString = #filePath, line: UInt = #line) async {
+        for _ in 0..<1_000 {
+            if socket.closeCommands >= 1, socket.pendingCompletions >= 1 { return }
+            try? await Task.sleep(for: .milliseconds(2))
+        }
+        XCTFail("The close command was never handed to the transport", file: file, line: line)
     }
 }

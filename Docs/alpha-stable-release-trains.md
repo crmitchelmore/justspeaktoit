@@ -50,6 +50,67 @@ personal token.
 The local Codex Run action launches Alpha with `script/build_and_run.sh`.
 Alpha starts without a global recording hotkey; configure one in Settings.
 
+### Direct Mac launch failures
+
+Archive/export success is not launch acceptance. Both pre-notarisation and
+post-notarisation launch gates must keep their candidate child alive. An early
+exit (including the initial two-second check) records the exact PID and exit
+status, content-free output/log accounting and structured crash evidence.
+Crash-report delivery is polled for up to ten seconds;
+system-log collection has its own five-second timeout. Missing diagnostics do
+not turn a failed launch into a pass.
+
+The direct Mac workflow preserves this evidence even when packaging fails, as
+`mac-launch-diagnostics-<manifest>-<attempt>` (seven-day retention), separated by
+architecture and launch phase. It uploads only collected launch evidence, not
+signing environment, profiles, keychains or export logs. Locally, run
+`VERIFY_LAUNCH_DIAGNOSTICS_DIR="$PWD/.artifacts/launch" scripts/verify-launch.sh /path/to/candidate.app`
+to retain the same evidence without replacing an installed app. Each crash
+report read is limited to 1 MiB. Discovery examines at most 256 directory entries
+per polling pass, selects at most eight recent candidates before reading, and
+reads at most eight report revisions in total. At most three structured reports
+are retained; scan truncation, invalid/oversized reports and attribution rejection
+are recorded as counters, without echoing untrusted filenames or parse errors.
+
+Candidate stdout/stderr flows through an owned FIFO into a streaming discard
+reader; unified logs flow through a subprocess pipe with a five-second timeout.
+Each read is at most 32 KiB. No raw stream is spooled to disk, retained or echoed:
+only generated numeric byte counts, timeout/availability and exit status are
+saved. Slow or sustained producers cannot grow diagnostic temporary files.
+The FIFO reader has a separate bounded termination path and never replaces the
+candidate PID used by the launch gate.
+
+Crash projections retain only known exception types, numeric exception codes,
+frame offsets and image UUIDs/allowlisted image names for offline symbolication.
+Free-form symbols, messages, environment, paths and arbitrary report text are
+not uploaded. Modern reports must match the executable path, PID and launch
+timestamp, and have a capture timestamp within the observed launch interval;
+legacy reports must match path/PID and a crash timestamp within that interval.
+For Apple's `/Users/USER/*/` path redaction, the complete app/executable suffix,
+process name and the bundle identifier recorded before launch must also match.
+The log query uses the recorded launch interval and executable path as well as
+PID, rather than a sliding post-exit window. Reports with missing identity
+fields are rejected explicitly. These checks reduce PID-reuse misattribution;
+they do not assert that a numeric PID is an enduring process identity.
+
+This is defense in depth against accidentally emitted signing/key data, not a
+sandbox or protection from malicious repository code: the trusted release
+candidate already runs with the workflow's authority. Raw stdout, unified logs
+and crash-report text are intentionally unavailable in artifacts. A segfault
+alone does not establish its root cause; retained UUIDs/offsets can be matched
+to the exact build's binaries/dSYMs without persisting arbitrary candidate text.
+
+Keep the `AnyView` boundary around normal launch content inside `SpeakApp`'s
+scene. Without it, an isolated Release Alpha candidate from the `alpha-build-23`
+app source crashed while SwiftUI's `AppGraph` resolved scene-associated-type
+metadata: its expanded view tree reached `PaidAccessManager` and
+`Published<String?>` metadata, then dereferenced a null pointer in the Swift
+runtime. The boundary leaves the content, service bootstrap, onboarding and
+paid-access feature gate unchanged while preventing that eager scene metadata
+expansion. `SpeakAppSceneMetadataTests` exercises the associated-type witness
+without starting app services. Local ad-hoc launch acceptance does not replace
+the signed archive/export and notarisation gates on the release runner.
+
 ## Stable
 
 1. Select a delivered and tested `alpha-build-N` and explicit Mac/iOS versions.

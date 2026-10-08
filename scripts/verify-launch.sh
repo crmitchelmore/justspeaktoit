@@ -11,6 +11,8 @@
 #
 # This script is designed to run in CI (GitHub Actions macOS runners) and locally.
 # It does NOT require accessibility permissions or user interaction.
+# Failure evidence is saved to VERIFY_LAUNCH_DIAGNOSTICS_DIR (or a temporary
+# directory); VERIFY_LAUNCH_DIAGNOSTICS_WAIT bounds crash-report delivery polling.
 
 set -euo pipefail
 
@@ -63,8 +65,41 @@ if [ ! -x "$APP_EXECUTABLE" ]; then
     exit 1
 fi
 PROCESS_NAME="$(basename "$APP_EXECUTABLE")"
+APP_BUNDLE_ID="$(python3 - "$APP_PATH" <<'PYTHON'
+import pathlib, plistlib, sys
+path = pathlib.Path(sys.argv[1])
+if path.suffix == '.app':
+    with (path / 'Contents/Info.plist').open('rb') as handle:
+        print(plistlib.load(handle).get('CFBundleIdentifier', ''))
+PYTHON
+)"
 APP_PID=""
 CRASH_MARKER="$(mktemp "${TMPDIR:-/tmp}/verify-launch.XXXXXX")"
+PROCESS_OUTPUT="$(mktemp "${TMPDIR:-/tmp}/verify-launch-output.XXXXXX")"
+OUTPUT_FIFO="$(mktemp "${TMPDIR:-/tmp}/verify-launch-fifo.XXXXXX")"
+rm -f "$OUTPUT_FIFO"
+mkfifo "$OUTPUT_FIFO"
+CAPTURE_PID=""
+verify_capture_alive() {
+    if ! kill -0 "$CAPTURE_PID" 2>/dev/null; then
+        echo "❌ Output capture failed; launch cannot be verified"
+        exit 1
+    fi
+}
+finish_capture() {
+    if [ -n "$CAPTURE_PID" ]; then
+        kill "$CAPTURE_PID" 2>/dev/null || true
+        for _ in {1..10}; do
+            if ! kill -0 "$CAPTURE_PID" 2>/dev/null; then break; fi
+            sleep 0.1
+        done
+        if kill -0 "$CAPTURE_PID" 2>/dev/null; then
+            kill -9 "$CAPTURE_PID" 2>/dev/null || true
+        fi
+        wait "$CAPTURE_PID" 2>/dev/null || true
+        CAPTURE_PID=""
+    fi
+}
 cleanup() {
     if [ -n "$APP_PID" ]; then
         kill "$APP_PID" 2>/dev/null || true
@@ -74,28 +109,48 @@ cleanup() {
         fi
         wait "$APP_PID" 2>/dev/null || true
     fi
-    rm -f "$CRASH_MARKER"
+    finish_capture
+    rm -f "$CRASH_MARKER" "$PROCESS_OUTPUT" "$OUTPUT_FIFO"
 }
 trap cleanup EXIT
 
-# --- Mark this run's crash-report interval ---
-CRASH_DIR="$HOME/Library/Logs/DiagnosticReports"
-CRASH_COUNT_BEFORE=0
-if [ -d "$CRASH_DIR" ]; then
-    CRASH_COUNT_BEFORE=$(find "$CRASH_DIR" -name "${PROCESS_NAME}*" -newer "$CRASH_MARKER" 2>/dev/null | wc -l | tr -d ' ' || echo "0")
-fi
+collect_failure_diagnostics() {
+    FAILURE_END_NS=$(_now_ns)
+    CHILD_PID="$APP_PID"
+    CHILD_STATUS=0
+    wait "$CHILD_PID" 2>/dev/null || CHILD_STATUS=$?
+    # The child is reaped; never send cleanup signals to a potentially reused PID.
+    APP_PID=""
+    finish_capture
+    echo "  Candidate PID: $CHILD_PID; exit status: $CHILD_STATUS"
+    DIAGNOSTICS_DIR="${VERIFY_LAUNCH_DIAGNOSTICS_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/verify-launch-diagnostics.XXXXXX")}"
+    mkdir -p "$DIAGNOSTICS_DIR"
+    printf 'executable=%s\npid=%s\nexit_status=%s\n' \
+        "$APP_EXECUTABLE" "$CHILD_PID" "$CHILD_STATUS" > "$DIAGNOSTICS_DIR/launch.txt"
+    python3 -B "$(dirname "$0")/collect-launch-diagnostics.py" \
+        --pid "$CHILD_PID" --name "$PROCESS_NAME" --marker "$CRASH_MARKER" \
+        --executable "$APP_EXECUTABLE" --start-ns "$LAUNCH_START_NS" --end-ns "$FAILURE_END_NS" \
+        --bundle-id "$APP_BUNDLE_ID" \
+        --stdout "$PROCESS_OUTPUT" --output "$DIAGNOSTICS_DIR" \
+        --wait "${VERIFY_LAUNCH_DIAGNOSTICS_WAIT:-10}" \
+        || echo "⚠️ Launch diagnostic collection failed"
+}
 
 # --- Launch the app ---
+python3 -B "$(dirname "$0")/launch_diagnostics.py" "$OUTPUT_FIFO" "$PROCESS_OUTPUT" &
+CAPTURE_PID=$!
 LAUNCH_START_NS=$(_now_ns)
 echo "  Launching candidate executable..."
-"$APP_EXECUTABLE" &
+"$APP_EXECUTABLE" > "$OUTPUT_FIFO" 2>&1 &
 APP_PID=$!
 sleep 2
 
 if ! kill -0 "$APP_PID" 2>/dev/null; then
     echo "❌ Candidate process exited during launch"
+    collect_failure_diagnostics
     exit 1
 fi
+verify_capture_alive
 
 echo "  PID: $APP_PID"
 
@@ -123,45 +178,13 @@ while [ $ELAPSED -lt "$TIMEOUT_SECONDS" ]; do
     if ! kill -0 "$APP_PID" 2>/dev/null; then
         echo "❌ Process died after ${ELAPSED}s"
 
-        # Check for crash reports
-        if [ -d "$CRASH_DIR" ]; then
-            CRASH_FILES=$(find "$CRASH_DIR" -name "${PROCESS_NAME}*" -newer "$CRASH_MARKER" 2>/dev/null || true)
-            if [ -n "$CRASH_FILES" ]; then
-                echo ""
-                echo "📋 Crash report(s) found:"
-                echo "$CRASH_FILES"
-                echo ""
-                # Print the first few lines of the most recent crash report
-                LATEST=$(echo "$CRASH_FILES" | head -1)
-                echo "--- Start of crash report ---"
-                head -50 "$LATEST" 2>/dev/null || true
-                echo "--- End of excerpt ---"
-            fi
-        fi
-
-        # Check system log for crash entries
-        echo ""
-        echo "📋 Recent system log entries:"
-        log show --predicate "process == '${PROCESS_NAME}'" --last 30s --style compact 2>/dev/null | tail -20 || true
-
+        collect_failure_diagnostics
         exit 1
     fi
+    verify_capture_alive
 done
 
 echo "  ✅ Process still alive after ${TIMEOUT_SECONDS}s"
-
-# --- Check for crash reports generated during launch ---
-CRASH_COUNT_AFTER=0
-if [ -d "$CRASH_DIR" ]; then
-    CRASH_COUNT_AFTER=$(find "$CRASH_DIR" -name "${PROCESS_NAME}*" -newer "$CRASH_MARKER" 2>/dev/null | wc -l | tr -d ' ')
-fi
-
-if [ "$CRASH_COUNT_AFTER" -gt "$CRASH_COUNT_BEFORE" ]; then
-    echo "⚠️  New crash reports detected (before: $CRASH_COUNT_BEFORE, after: $CRASH_COUNT_AFTER)"
-    echo "  This may indicate a crash-and-relaunch cycle."
-    find "$CRASH_DIR" -name "${PROCESS_NAME}*" -newer "$CRASH_MARKER" 2>/dev/null
-    # Don't fail — the process is running. But warn.
-fi
 
 # The EXIT trap terminates only the child this invocation launched.
 echo "✅ Launch verification passed"

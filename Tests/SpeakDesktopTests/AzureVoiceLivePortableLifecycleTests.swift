@@ -8,6 +8,40 @@ import XCTest
 /// The shared Azure Voice Live client's connection, readiness and live
 /// delivery, driven through a fake transport and clock. Synthetic data only.
 final class AzureVoiceLivePortableLifecycleTests: XCTestCase {
+    func testProxyRequestUsesLoopbackAndLocalTokenWithoutChangingLiveProtocol() throws {
+        let token = String(repeating: "a", count: 43)
+        let fixture = AzureVoiceLiveFixture(
+            model: "mai-transcribe", credentials: "local-proxy/" + token,
+            endpoint: "http://127.0.0.1:8765"
+        )
+        fixture.start()
+        let request = try XCTUnwrap(fixture.factory.requests.first)
+        XCTAssertEqual(request.url?.scheme, "ws")
+        XCTAssertEqual(request.url?.host, "127.0.0.1")
+        XCTAssertEqual(request.url?.port, 8765)
+        XCTAssertEqual(request.url?.path, "/voice-live/realtime")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "api-key"), token)
+        fixture.becomeReady()
+        XCTAssertTrue(fixture.client.isSessionReady)
+        XCTAssertEqual(
+            (fixture.socket.sessionUpdate?["session"] as? [String: Any])?["modalities"] as? [String], ["text"]
+        )
+        XCTAssertTrue(fixture.events.errors.isEmpty)
+    }
+
+    func testProxyCredentialsNeverReachAzureAndAzureKeysNeverReachLoopback() {
+        let token = String(repeating: "a", count: 43)
+        for (credentials, endpoint) in [
+            ("local-proxy/" + token, AzureVoiceLiveFixture.endpoint),
+            (AzureVoiceLiveFixture.credentials, "http://127.0.0.1:8765")
+        ] {
+            let fixture = AzureVoiceLiveFixture(credentials: credentials, endpoint: endpoint)
+            fixture.start()
+            XCTAssertTrue(fixture.factory.requests.isEmpty)
+            XCTAssertEqual(fixture.events.errors.count, 1)
+        }
+    }
+
     func testRequestUsesTheResourceOriginAndKeyHeaderAndConfiguresTranscriptionOnly() throws {
         let fixture = AzureVoiceLiveFixture()
         fixture.start()

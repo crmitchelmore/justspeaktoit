@@ -37,7 +37,8 @@ struct SpeakApp: App {
                     // onboarding, or install the HUD and menu bar.
                     Color.clear.frame(width: 1, height: 1)
                 } else {
-                    normalLaunchContent
+                    // Bound the scene's generic metadata before SwiftUI creates its graph.
+                    AnyView(normalLaunchContent)
                 }
             }
             .tint(.brandAccent)

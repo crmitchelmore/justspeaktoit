@@ -93,6 +93,152 @@ Azure rejects the unsigned zero values previously sent by the app.
 
 ## Verification
 
+### Local Entra proxy (batch/live transcription and TTS)
+
+`scripts/azure-speech-proxy.py` is a dependency-free Python 3 bridge for
+subscriptions that disable Azure resource keys. Sign in with `az login` and
+grant the signed-in account **Cognitive Services Speech User** on the resource.
+The proxy uses Azure CLI's Speech-scoped Entra token, caches it in memory and
+refreshes it before expiry. It does not create an app registration, save an
+Entra token or change subscription authentication policies.
+
+Start it with an explicit subscription and custom resource endpoint:
+
+```bash
+python3 scripts/azure-speech-proxy.py \
+  --subscription YOUR_SUBSCRIPTION_ID \
+  --resource https://YOUR_RESOURCE.cognitiveservices.azure.com \
+  --token-file /path/to/private-directory/azure-proxy-token \
+  --port 8765
+```
+
+The parent directory must already exist. The token file is created with mode
+`600` and reused on restart. It is a local client credential, **not an Azure API
+key**. Keep it out of source control. Native clients send its value in
+`Ocp-Apim-Subscription-Key` for HTTP or `api-key` for WebSocket upgrades; both
+headers are consumed locally and never forwarded. Azure receives an Entra bearer
+token and the fixed inference request, never the local token.
+Do not omit the local token: loopback alone does not prevent another
+local process or a browser from attempting to spend your Azure quota.
+
+This is a **trusted-machine development tool**, not a security boundary against
+malicious local software. Plaintext loopback does not authenticate the server:
+another process occupying the configured port could receive the local token and
+recording. A health response checks compatibility, not server identity. Start the
+intended proxy before configuring the app, keep the token private, and do not use
+this transport on an untrusted/shared host. It never exposes an Entra token to the
+app. Capture, resampling and local-model inference remain native and in-process;
+only explicitly selected Azure cloud requests use this user-operated relay.
+
+Only these native-client routes are accepted:
+
+| Local route | Upstream route |
+| --- | --- |
+| `POST /cognitiveservices/v1` | `/tts/cognitiveservices/v1` |
+| `GET /cognitiveservices/voices/list` | `/tts/cognitiveservices/voices/list` |
+| `POST /speechtotext/transcriptions:transcribe?api-version=2025-10-15` | Same path and pinned API version |
+| WebSocket `/voice-live/realtime?api-version=2026-04-10&model=gpt-4.1` | Same route on the resource's `.services.ai.azure.com` host |
+| `GET /health` | Local readiness only; does not verify Azure model access |
+
+Synthesis uses the existing Azure SSML body and `X-Microsoft-OutputFormat`
+header. It supports the app's current MP3 and WAV formats. The server binds only
+to `127.0.0.1`, requires the exact Host header and local token, rejects browser
+requests, redirects, external SSML audio/lexicon references and arbitrary
+forwarding targets, and bounds request size, response size and concurrency.
+It never logs tokens, SSML or Azure response bodies. Errors are explicit;
+expired sign-in requires `az login` again. All inference still uses the selected
+corporate identity, subscription, permissions and applicable policies.
+
+Recorded-audio transcription forwards the app's multipart WAV and definition
+unchanged. The proxy accepts Fast Transcription, MAI-Transcribe-2 and 1.5, optional
+locales and phrase lists; uploaded WAV files only, never audio URLs. Multipart
+uploads are limited to 32 MiB. Unsupported models, options and oversized uploads
+are rejected explicitly. Azure error status codes are preserved for bad inputs,
+authentication and rate limits without returning provider bodies that might
+contain recordings or credentials.
+Uploads have a 30-second total receive deadline; upstream response bodies have
+a 180-second total deadline. Saturated admission returns HTTP 503. The app checks
+the complete multipart size before constructing or sending an oversized upload.
+
+Voice Live tunnels native WebSocket frames over certificate-validated TLS to the
+same resource's Foundry host. It preserves the existing shared client's readiness,
+audio ordering and finalisation protocol, with text-only transcription and no
+assistant responses. The tunnel has a 60-second idle limit, one-hour session
+limit, 256 MiB upload limit and 64 MiB download limit; four concurrent HTTP/live
+connections share the proxy's admission limit. A failed upgraded tunnel closes
+with WebSocket error 1011 rather than returning an HTTP-shaped success.
+
+**Builds containing the local-proxy changes can use it for batch and live transcription:**
+
+1. Set **Azure resource endpoint** to `http://127.0.0.1:8765`.
+2. In **Azure Speech (Transcription)**, save `local-proxy/` followed by the value
+   of the private token file. This is the local proxy credential, not an Entra
+   token or Azure key; the existing Azure credential slot is used. It replaces
+   that build's Azure credential, so retain your direct Azure key separately if
+   you plan to switch back. Save the endpoint before validating the token.
+3. Select **Remote → Batch → Azure MAI-Transcribe-2 (Preview)**, or Azure Fast
+   Transcription, for recorded audio. For live transcription select
+   **Remote → Streaming → Azure MAI Transcribe (Voice Live, Preview)** or Azure Speech.
+
+Only the literal IPv4 loopback origin with an explicit port is allowed; enter
+`127.0.0.1`, not `localhost`, a LAN address, a path or a query. The shared transcription
+clients require the `local-proxy/` credential prefix before sending anything to
+loopback and strips it from the local request header. An ordinary Azure key is
+never sent to the proxy, and a proxy credential is never sent to Azure.
+Direct Azure HTTPS endpoint validation is unchanged. Direct TTS still rejects
+proxy credentials; the app's TTS settings do not route through this endpoint.
+
+**Previously installed Alpha builds still reject loopback endpoints; an app
+update containing these changes is required.** No installed app or saved
+credentials are modified by running the script. Voice output in the app still
+uses its regional endpoint; the proxy's TTS routes remain usable by standalone
+native clients. This proxy implements the existing Voice Live `mai-transcribe`
+model, **not MAI-Transcribe-2-Streaming**. The latter is a separate deployment/API
+at `/mai/v1/realtime` with a different session and event contract.
+No TLS interception, Entra app registration or API-key policy exemption is needed.
+
+Run the offline proxy checks with:
+
+```bash
+python3 -m unittest discover -s scripts/tests -p 'test_azure_speech_proxy.py' -v
+```
+
+`AzureLocalProxyTests` runs the actual shared batch client against a stub to
+check credential isolation and multipart model selection. Its opt-in live test
+uses `JSTI_AZURE_PROXY_TOKEN_FILE`, `JSTI_AZURE_TEST_ENDPOINT` and
+`JSTI_AZURE_TEST_WAV` (a synthetic canonical 16 kHz PCM16 mono WAV containing
+"the quick brown fox jumps over the lazy dog"). With those explicitly configured,
+run `SPEAK_PORTABLE_CORE=1 swift test --filter AzureLocalProxyTests`; otherwise
+the batch check is skipped and CI never reads credentials or spends Azure quota.
+Set `JSTI_AZURE_PROXY_STREAMING=1` as well to opt into the real shared Voice Live
+client check. It sends the synthetic fixture in paced 100 ms PCM chunks, requires
+live text before stopping and the full expected final phrase without errors,
+and checks both `mai-transcribe` and `azure-speech`.
+Preserve `Package.resolved` when switching to the dependency-free portable graph.
+
+On 7 October 2026, the loopback proxy returned HTTP 200 and valid WAV and MP3
+audio for both `en-US-Harper:MAI-Voice-2.1` and
+`en-US-Harper:MAI-Voice-2.1-Flash`, using a fixed synthetic phrase. Voice listing
+returned 958 entries. Incorrect local tokens returned 401 and browser-origin
+requests returned 403. These receipts verify native HTTP requests through the
+proxy, not integration with the installed app.
+
+The upgraded proxy also transcribed a synthetic "the quick brown fox jumps over
+the lazy dog" recording through Fast Transcription, MAI-Transcribe-2 and
+MAI-Transcribe-1.5, each returning HTTP 200 and the complete expected phrase.
+The compiled shared `AzureBatchTranscriptionClient` separately passed the
+opt-in loopback test with Fast Transcription and MAI-Transcribe-2. The macOS app
+compiled with the endpoint/credential changes; the installed Alpha application
+was not replaced or configured by these checks.
+
+The streaming proxy then passed the compiled shared `AzureVoiceLiveClient` check
+for both `mai-transcribe` and `azure-speech` on the same Entra-authenticated
+resource. Both produced live text before finalisation and retained the complete
+synthetic phrase through stop, without client errors. Fast and MAI-Transcribe-2
+batch requests passed again on the upgraded server. These are real client/proxy
+receipts, not installed-Alpha microphone acceptance or proof of the dedicated
+MAI-Transcribe-2-Streaming API.
+
 Contract tests cover endpoint validation, secret-free URLs, multipart model
 selection, timing conversion, empty input, SSML escaping, MAI voice identity,
 streaming transcript ordering/deduplication and shared routing/credentials.
@@ -120,8 +266,8 @@ finalisation now retains VAD and waits for the commit/configuration acknowledgem
 and pending transcription finals. All five opt-in tests pass on the corrected client.
 These are compiled-client checks; installed-app microphone routing and iOS device
 acceptance remain separate release gates. The live-input receipts predate the
-shared portable Voice Live client that macOS, iOS and Windows now use, which has
-no live receipt yet.
+shared portable Voice Live client that macOS, iOS and Windows now use; its newer
+Entra/loopback receipt is recorded above.
 
 For extended tests, set `JSTI_AZURE_TEST_EXTENDED=1`, the custom resource origin
 in `JSTI_AZURE_TEST_ENDPOINT`, and a mono signed 16-bit little-endian 24kHz PCM

@@ -101,8 +101,7 @@ registration status, process identity, ordered events, and the actual
 screenshots to `xcresult` before cleanup. Registration/input failures fail the
 test; no permission-denied skip or internal event injection exists. The existing
 `Core Journey Fixture UI` job selects this suite with the bootstrap/fixture suites
-under its thirty-minute timeout (cold Tuist resolution and an x86_64 Xcode
-build on hosted Intel exceed ten minutes). This is new native coverage pending cold-runner CI
+under its ten-minute timeout. This is new native coverage pending cold-runner CI
 validation, not an established flake-rate or full-journey claim.
 
 This probe intentionally leaves MainManager's recording listeners disabled; its
@@ -152,8 +151,7 @@ attached to `xcresult`. This is a full batch **clipboard-route** journey; it doe
 not claim a physical microphone, permission-denial regression, direct AX
 insertion, or native editor delivery on a runner without posting permission.
 
-The native CI job selects all four UI suites under its thirty-minute timeout (cold Tuist resolution and an x86_64 Xcode
-build on hosted Intel exceed ten minutes).
+The native CI job selects all four UI suites under its ten-minute timeout.
 `scripts/verify-core-journey-ui.py` reuses the required gate's XCTest parser and
 fails missing, all-skipped, partially-skipped, or zero-test suites, even after a
 successful xcodebuild exit. Its `coverage.json` is uploaded with the native logs.

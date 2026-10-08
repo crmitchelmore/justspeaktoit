@@ -16,11 +16,13 @@ public struct AzureSpeechEndpointField: View {
                 #endif
                 .accessibilityIdentifier("azure-speech-resource-endpoint")
             Text("For live transcription, paste the HTTPS endpoint from your Speech resource’s Keys and Endpoint page. "
-                + "Recorded audio uses your region when this is empty. Models depend on region and tier.")
+                + "Recorded audio and live transcription also accept http://127.0.0.1:PORT for a local proxy. "
+                + "Save local-proxy/ followed by the proxy token in the Azure transcription key field. "
+                + "An empty endpoint uses your Azure region for recorded audio only.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            if !endpoint.isEmpty, (try? AzureSpeechConfiguration.resourceURL(endpoint)) == nil {
-                Text("Use a resource address ending in cognitiveservices.azure.com or services.ai.azure.com.")
+            if !endpoint.isEmpty, (try? AzureSpeechConfiguration.batchResourceURL(endpoint)) == nil {
+                Text("Use an Azure HTTPS resource address or http://127.0.0.1:PORT, with no path.")
                     .font(.caption).foregroundStyle(.orange)
             }
         }

@@ -44,7 +44,7 @@ enum AzureVoiceLiveProtocol {
     /// only in the `api-key` header, never in the URL.
     static func webSocketRequest(origin: URL, apiKey: String) -> URLRequest? {
         guard var components = URLComponents(url: origin, resolvingAgainstBaseURL: false) else { return nil }
-        components.scheme = "wss"
+        components.scheme = origin.scheme == "http" ? "ws" : "wss"
         components.path = path
         components.queryItems = [
             URLQueryItem(name: "api-version", value: apiVersion),
@@ -209,9 +209,10 @@ extension AzureVoiceLiveClient {
     static let finalizationBarrier = #"{"type":"session.update","session":{"modalities":["text"]}}"#
 
     static func connectionRequest(credentials: String, endpoint: String) throws -> URLRequest {
-        let configuration = try AzureSpeechConfiguration(credentials: credentials)
-        let origin = try AzureSpeechConfiguration.resourceURL(endpoint)
-        guard let request = AzureVoiceLiveProtocol.webSocketRequest(origin: origin, apiKey: configuration.apiKey) else {
+        let connection = try AzureSpeechConfiguration.liveConnection(credentials: credentials, endpoint: endpoint)
+        guard let request = AzureVoiceLiveProtocol.webSocketRequest(
+            origin: connection.origin, apiKey: connection.apiKey
+        ) else {
             throw StreamingClientError.invalidURL
         }
         return request

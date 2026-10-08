@@ -112,3 +112,16 @@ final class CartesiaLiveSpuriousDisconnectTests: XCTestCase {
         XCTAssertEqual(fixture.socket.cancels, 1)
     }
 }
+
+private extension CartesiaLiveFixture {
+    /// Waits, within a bound, until `{"type":"close"}` is held by the socket.
+    /// A registered finish hands it over only after the client's lock is
+    /// released, so completing the send any earlier would complete nothing.
+    func waitForHeldClose(file: StaticString = #filePath, line: UInt = #line) async {
+        for _ in 0..<1_000 {
+            if socket.closeCommands >= 1, socket.pendingCompletions >= 1 { return }
+            try? await Task.sleep(for: .milliseconds(2))
+        }
+        XCTFail("The close command was never handed to the transport", file: file, line: line)
+    }
+}

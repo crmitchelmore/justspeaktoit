@@ -183,8 +183,7 @@ jobs:
     name: Core Dictation Journey (≤10m)
     # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
     runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-26-intel"]') }}
-    timeout-minutes: 15
-    # The script enforces the eight-minute test budget; this also covers hosted cache restore.
+    timeout-minutes: 10
     needs: release-paths
     if: needs.release-paths.outputs.core-journey == 'true'
     steps:

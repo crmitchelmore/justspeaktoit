@@ -68,6 +68,17 @@ final class CartesiaLiveFixture: @unchecked Sendable {
         XCTFail("Only \(client.pendingFinishes) of \(count) finishes registered", file: file, line: line)
     }
 
+    /// Waits, within a bound, until `{"type":"close"}` is held by the socket.
+    /// A registered finish hands it over only after the client's lock is
+    /// released, so completing the send any earlier would complete nothing.
+    func waitForHeldClose(file: StaticString = #filePath, line: UInt = #line) async {
+        for _ in 0..<1_000 {
+            if socket.closeCommands >= 1, socket.pendingCompletions >= 1 { return }
+            try? await Task.sleep(for: .milliseconds(2))
+        }
+        XCTFail("The close command was never handed to the transport", file: file, line: line)
+    }
+
     /// 100 ms of generated 16 kHz PCM16 mono with a recognisable fill byte.
     static func frame(_ fill: UInt8, count: Int = 3_200) -> Data { Data(repeating: fill, count: count) }
 }

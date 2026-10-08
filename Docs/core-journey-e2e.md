@@ -6,9 +6,9 @@ Run the required contract gate with the Apple Swift toolchain on macOS:
 scripts/run-core-journey-e2e.sh
 ```
 
-It has an eight-minute test-command budget and CI has a ten-minute wall-clock
-timeout. It uses in-memory HTTP/stream events, temporary history storage, and
-isolated defaults and pasteboards. Automation tests exchange real frames over
+It has an eight-minute test-command budget, enforced by the runner. CI has a
+fifteen-minute wall-clock timeout so hosted cache restore does not consume it.
+It uses in-memory HTTP/stream events, temporary history storage, and isolated defaults and pasteboards. Automation tests exchange real frames over
 an owner-only UNIX socket, with a stub command handler. No microphone, provider
 network, API key, or paid service is required.
 
@@ -152,8 +152,9 @@ attached to `xcresult`. This is a full batch **clipboard-route** journey; it doe
 not claim a physical microphone, permission-denial regression, direct AX
 insertion, or native editor delivery on a runner without posting permission.
 
-The native CI job selects all four UI suites under its thirty-minute timeout (cold Tuist resolution and an x86_64 Xcode
-build on hosted Intel exceed ten minutes).
+The native CI job selects all four UI suites under its thirty-minute timeout
+(cold Tuist resolution and an x86_64 Xcode build on hosted Intel exceed ten
+minutes).
 `scripts/verify-core-journey-ui.py` reuses the required gate's XCTest parser and
 fails missing, all-skipped, partially-skipped, or zero-test suites, even after a
 successful xcodebuild exit. Its `coverage.json` is uploaded with the native logs.

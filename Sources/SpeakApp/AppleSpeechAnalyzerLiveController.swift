@@ -125,9 +125,18 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
         guard let converted = converter.convert(buffer) else { return }
         session.send(converted)
       }
-      if let activePrimedInput {
-        activePrimedInput.startConsuming(preRollBuffers: preRollBuffers, using: sendAudio)
-      } else {
+      let retainedTap = activePrimedInput?.startConsuming(
+        preRollBuffers: preRollBuffers, inputFormat: inputFormat, using: sendAudio
+      ) == true
+      if !retainedTap {
+        if activePrimedInput != nil {
+          SpeakLogger.logger(category: "AudioInput").warning(
+            "Primer tap format changed; replacing it with the current analyzer input format"
+          )
+          activePrimedInput?.stopConsuming()
+          activePrimedInput = nil
+          inputNode.removeTap(onBus: 0)
+        }
         for buffer in preRollBuffers { sendAudio(buffer) }
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
           sendAudio(buffer)

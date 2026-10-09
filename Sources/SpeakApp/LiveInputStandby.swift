@@ -15,6 +15,7 @@ final class LiveInputStandby<Engine: AnyObject>: @unchecked Sendable {
 
   struct RefillToken: Sendable {
     fileprivate let generation: UInt64
+    fileprivate let preferredInputDeviceID: InputDeviceID?
   }
 
   private let lock = NSLock()
@@ -62,15 +63,18 @@ final class LiveInputStandby<Engine: AnyObject>: @unchecked Sendable {
 
   /// Reserve before dispatching the build, so cancellation also retires work
   /// that has been scheduled but has not entered Core Audio yet.
-  func beginRefill() -> RefillToken {
+  func beginRefill(preferredInputDeviceID: InputDeviceID? = nil) -> RefillToken {
     lock.lock()
     defer { lock.unlock() }
     generation &+= 1
-    return RefillToken(generation: generation)
+    return RefillToken(generation: generation, preferredInputDeviceID: preferredInputDeviceID)
   }
 
   func refill(_ token: RefillToken) {
     guard let deviceID = currentInputDeviceID() else { return }
+    // An idle engine follows the system default. Do not build one the next
+    // press must discard after selecting a different preferred microphone.
+    guard token.preferredInputDeviceID == nil || token.preferredInputDeviceID == deviceID else { return }
     lock.lock()
     let isCurrent = stocked?.inputDeviceID == deviceID
     let isCurrentBuild = generation == token.generation

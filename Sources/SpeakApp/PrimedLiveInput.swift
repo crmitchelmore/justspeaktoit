@@ -56,19 +56,30 @@ final class PrimerPreRollBuffer: @unchecked Sendable {
 
   /// Keeps the existing tap live through analyzer setup and replay. The lock
   /// serializes replay and tap delivery, including the stateful audio converter.
+  @discardableResult
   func startConsuming(
     preRollBuffers: [AVAudioPCMBuffer],
+    tapFormat: AVAudioFormat,
+    inputFormat: AVAudioFormat,
     using consume: @escaping (AVAudioPCMBuffer) -> Void
-  ) {
+  ) -> Bool {
     lock.lock()
     defer { lock.unlock() }
-    guard isCollecting else { return }
+    guard isCollecting else { return false }
+    guard tapFormat.isEqual(inputFormat) else {
+      isCollecting = false
+      consumer = nil
+      buffers = []
+      bufferedFrames = 0
+      return false
+    }
     for buffer in preRollBuffers + buffers {
       consume(buffer)
     }
     buffers = []
     bufferedFrames = 0
     consumer = consume
+    return true
   }
 
   func drain() -> [AVAudioPCMBuffer] {
@@ -156,6 +167,7 @@ final class PrimedLiveInput {
   let startedUptime: TimeInterval
   let inputDeviceID: AudioDeviceID
   private let engine: AVAudioEngine
+  private let tapFormat: AVAudioFormat
   private let preRoll: PrimerPreRollBuffer
   private let deviceManager: AudioInputDeviceManager
   private var inputSession: AudioInputDeviceManager.SessionContext?
@@ -164,6 +176,7 @@ final class PrimedLiveInput {
   private init(
     keyDownUptime: TimeInterval,
     engine: AVAudioEngine,
+    tapFormat: AVAudioFormat,
     inputDeviceID: AudioDeviceID,
     preRoll: PrimerPreRollBuffer,
     deviceManager: AudioInputDeviceManager,
@@ -172,6 +185,7 @@ final class PrimedLiveInput {
     self.keyDownUptime = keyDownUptime
     self.startedUptime = ProcessInfo.processInfo.systemUptime
     self.engine = engine
+    self.tapFormat = tapFormat
     self.inputDeviceID = inputDeviceID
     self.preRoll = preRoll
     self.deviceManager = deviceManager
@@ -193,11 +207,12 @@ final class PrimedLiveInput {
       return nil
     }
     let preRoll = PrimerPreRollBuffer(maximumDuration: preRollDuration)
-    let started = await Task.detached(priority: .userInitiated) { () -> AVAudioEngine? in
+    let started = await Task.detached(priority: .userInitiated) {
+      () -> (engine: AVAudioEngine, tapFormat: AVAudioFormat)? in
       let engine = standby.take(matching: deviceID) ?? standby.buildEngine()
       do {
-        try startCapturing(engine, into: preRoll)
-        return engine
+        let tapFormat = try startCapturing(engine, into: preRoll)
+        return (engine, tapFormat)
       } catch {
         preRoll.stopCollecting()
         engine.inputNode.removeTap(onBus: 0)
@@ -211,7 +226,8 @@ final class PrimedLiveInput {
     }
     return PrimedLiveInput(
       keyDownUptime: keyDownUptime,
-      engine: started,
+      engine: started.engine,
+      tapFormat: started.tapFormat,
       inputDeviceID: deviceID,
       preRoll: preRoll,
       deviceManager: deviceManager,
@@ -219,7 +235,9 @@ final class PrimedLiveInput {
     )
   }
 
-  private nonisolated static func startCapturing(_ engine: AVAudioEngine, into preRoll: PrimerPreRollBuffer) throws {
+  private nonisolated static func startCapturing(
+    _ engine: AVAudioEngine, into preRoll: PrimerPreRollBuffer
+  ) throws -> AVAudioFormat {
     let input = engine.inputNode
     let format = input.outputFormat(forBus: 0)
     guard audioInputFormatIsUsable(format) else { throw TranscriptionManagerError.noUsableAudioInput }
@@ -229,6 +247,7 @@ final class PrimedLiveInput {
     }
     engine.prepare()
     try engine.start()
+    return format
   }
 
   /// Gives the running engine and the input session to a starting session.
@@ -259,8 +278,14 @@ final class PrimedLiveInput {
 
   /// The analyzer retains the primer tap rather than replacing it, so setup
   /// and pre-roll conversion never leave the running input without a consumer.
-  func startConsuming(preRollBuffers: [AVAudioPCMBuffer], using consume: @escaping (AVAudioPCMBuffer) -> Void) {
-    preRoll.startConsuming(preRollBuffers: preRollBuffers, using: consume)
+  func startConsuming(
+    preRollBuffers: [AVAudioPCMBuffer],
+    inputFormat: AVAudioFormat,
+    using consume: @escaping (AVAudioPCMBuffer) -> Void
+  ) -> Bool {
+    preRoll.startConsuming(
+      preRollBuffers: preRollBuffers, tapFormat: tapFormat, inputFormat: inputFormat, using: consume
+    )
   }
 
   func stopConsuming() {

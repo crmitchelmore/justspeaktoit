@@ -60,10 +60,14 @@ final class KeyPressPrimerRuntime {
       }
       .store(in: &cancellables)
     owner.audioInputDeviceManager.$activeDeviceUID
-      .removeDuplicates()
+      .combineLatest(owner.audioInputDeviceManager.$selectedDeviceUID)
+      .removeDuplicates { $0.0 == $1.0 && $0.1 == $1.1 }
       .dropFirst()
       .receive(on: RunLoop.main)
-      .sink { [weak self] _ in self?.scheduleRefill(after: Self.refillDelay) }
+      .sink { [weak self] _ in
+        self?.standby.cancelRefill()
+        self?.scheduleRefill(after: Self.refillDelay)
+      }
       .store(in: &cancellables)
     owner.permissionsManager.$statuses
       .map { $0[.microphone]?.isGranted == true }
@@ -228,8 +232,10 @@ final class KeyPressPrimerRuntime {
     let standby = self.standby
     buildTask = Task { @MainActor [weak self] in
       await previous?.value
-      guard let self, !self.primer.isActive, self.isIdleForMicrophone() else { return }
-      let token = standby.beginRefill()
+      guard let self, let owner = self.owner, !self.primer.isActive, self.isIdleForMicrophone() else { return }
+      let token = standby.beginRefill(
+        preferredInputDeviceID: owner.audioInputDeviceManager.preferredInputDeviceID
+      )
       await Task.detached(priority: .utility) { standby.refill(token) }.value
     }
   }

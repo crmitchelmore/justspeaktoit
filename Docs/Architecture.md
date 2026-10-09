@@ -181,6 +181,9 @@ press sequences close the previous capture rather than inheriting its audio. Sta
 never delay foreground recording; a cancelled build cannot restock after capture starts. Speech Analyzer retains
 the primer's tap through setup and redirects its serialized consumer only after replaying the bounded pre-roll,
 so buffered and newly captured speech stay ordered without a tapless hand-over.
+If hardware startup changed the primer's installed tap format, the analyzer retires its stale pre-roll and replaces
+the tap using the current input format. Idle standby refill is skipped when the selected preferred microphone requires
+a default-device switch, rather than building an engine the next press will discard.
 
 [SwitchingLiveTranscriber.swift](../Sources/SpeakApp/SwitchingLiveTranscriber.swift) is deliberately mixed today:
 

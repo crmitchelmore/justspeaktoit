@@ -22,7 +22,7 @@ final class PrimerAudioHandoverTests: XCTestCase {
         preRoll.append(buffer(2), at: 2)
         var delivered: [Float] = []
 
-        preRoll.startConsuming(preRollBuffers: [buffer(0)]) {
+        preRoll.startConsuming(preRollBuffers: [buffer(0)], tapFormat: format, inputFormat: format) {
             delivered.append($0.floatChannelData![0][0])
         }
         preRoll.append(buffer(3), at: 3)
@@ -41,7 +41,7 @@ final class PrimerAudioHandoverTests: XCTestCase {
         let captured = expectation(description: "audio arriving during replay is delivered")
         var delivered: [Float] = []
 
-        preRoll.startConsuming(preRollBuffers: []) { buffer in
+        preRoll.startConsuming(preRollBuffers: [], tapFormat: format, inputFormat: format) { buffer in
             let value = buffer.floatChannelData![0][0]
             delivered.append(value)
             if value == 1 {
@@ -61,12 +61,49 @@ final class PrimerAudioHandoverTests: XCTestCase {
     func testStopConsuming_DoesNotForwardAnInFlightTapAfterTeardown() {
         let preRoll = PrimerPreRollBuffer(maximumDuration: 1.5)
         var delivered = 0
-        preRoll.startConsuming(preRollBuffers: []) { _ in delivered += 1 }
+        preRoll.startConsuming(preRollBuffers: [], tapFormat: format, inputFormat: format) { _ in delivered += 1 }
         preRoll.append(buffer(1), at: 1)
 
         preRoll.stopCollecting()
         preRoll.append(buffer(2), at: 2)
 
         XCTAssertEqual(delivered, 1)
+    }
+
+    func testHandover_ReconfiguredInput_RetiresStalePreRollAndRejectsLateTapAudio() {
+        let changedFormats = [
+            AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!,
+            AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 2)!,
+            AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16_000, channels: 1, interleaved: false)!
+        ]
+        for inputFormat in changedFormats {
+            let preRoll = PrimerPreRollBuffer(maximumDuration: 1.5)
+            preRoll.append(buffer(1), at: 1)
+            var delivered = 0
+
+            let retainedTap = preRoll.startConsuming(
+                preRollBuffers: [buffer(0)], tapFormat: format, inputFormat: inputFormat
+            ) { _ in delivered += 1 }
+            preRoll.append(buffer(2), at: 2)
+
+            XCTAssertFalse(retainedTap, "A changed input format must use the normal analyzer tap")
+            XCTAssertEqual(delivered, 0, "Neither stale pre-roll nor an in-flight tap may reach the new converter")
+            XCTAssertEqual(preRoll.bufferedDuration, 0)
+            XCTAssertTrue(preRoll.drain().isEmpty)
+        }
+    }
+
+    func testHandover_EquivalentFormat_RetainsTheContinuousTap() {
+        let equivalent = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1)!
+        let preRoll = PrimerPreRollBuffer(maximumDuration: 1.5)
+        preRoll.append(buffer(1), at: 1)
+        var delivered: [Float] = []
+
+        XCTAssertTrue(preRoll.startConsuming(preRollBuffers: [], tapFormat: format, inputFormat: equivalent) {
+            delivered.append($0.floatChannelData![0][0])
+        })
+        preRoll.append(buffer(2), at: 2)
+
+        XCTAssertEqual(delivered, [1, 2])
     }
 }

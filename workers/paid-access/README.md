@@ -80,6 +80,10 @@ npm run lint      # eslint src test
 
 Tests run inside the Workers runtime and apply the real migrations to an isolated D1 instance before each suite, so constraint and trigger behaviour is under test rather than a hand-written fixture schema. Test bindings live in `vitest.config.ts`; the placeholder secrets there are obviously fake and must stay that way.
 
+Keep Vitest on 3.2.x and `@cloudflare/vitest-pool-workers` on 0.12.x together.
+Pool 0.13+ requires a separate test-harness migration: it removes `defineWorkersConfig`,
+`singleWorker`, per-test storage isolation and `fetchMock`.
+
 ## Endpoints
 
 Every response is JSON and carries an `x-correlation-id` header. Quote that id when reporting a failure — it is enough to trace a request without any request content.

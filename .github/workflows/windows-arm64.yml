@@ -101,7 +101,7 @@ jobs:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -128,7 +128,7 @@ jobs:
       - name: Verify portable source boundary
         run: python scripts/verify-portable-core-boundary.py
 
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: windows-local-runtime-arm64
           path: local-runtime
@@ -341,14 +341,14 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: windows-arm64-app
           path: ${{ runner.temp }}/windows-arm64-app
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: windows-local-runtime-arm64
           path: ${{ runner.temp }}/windows-local-runtime-arm64
@@ -403,16 +403,16 @@ jobs:
     runs-on: windows-11-arm
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: windows-runtime-bundle-arm64
           path: bundle
       # Only the JFK sample is used from the runtime artifact: the DLLs under
       # test are the bundled copies.
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: windows-local-runtime-arm64
           path: local-runtime
@@ -453,10 +453,10 @@ jobs:
       BASE_VERSION: 0.0.${{ github.run_number }}.1
       UPGRADE_VERSION: 0.0.${{ github.run_number }}.2
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: windows-runtime-bundle-arm64
           path: bundle

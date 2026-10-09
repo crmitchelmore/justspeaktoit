@@ -91,7 +91,7 @@ jobs:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -107,7 +107,7 @@ jobs:
       - name: Verify portable source boundary
         run: python scripts/verify-portable-core-boundary.py
 
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: windows-local-runtime
           path: local-runtime
@@ -324,7 +324,7 @@ jobs:
     env:
       SPEAK_PORTABLE_CORE: '1'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
       - name: Verify portable source boundary
@@ -346,7 +346,7 @@ jobs:
       image: swift:6.2.3-jammy@sha256:33c73fc133767cdaafde26f0f9967c96ab25ff77618b7df1eabf46140bf2b6e6
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
       - name: Verify portable source boundary

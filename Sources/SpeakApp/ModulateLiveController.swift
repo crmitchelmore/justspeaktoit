@@ -63,7 +63,7 @@ final class ModulateLiveController: NSObject, LiveTranscriptionController {
 
     let apiKey = try await modulateAPIKey()
     activeInputSession = await audioDeviceManager.beginUsingPreferredInput()
-    audioEngine = AVAudioEngine()
+    audioEngine = LiveInputEngines.shared.makeEngine()
     resetStartState()
 
     do {

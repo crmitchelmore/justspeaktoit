@@ -22,7 +22,7 @@ jobs:
     if: github.actor == github.repository_owner && github.ref == 'refs/heads/main'
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
       - name: Approve frozen candidate and publish verified direct Mac artefacts
@@ -46,7 +46,7 @@ jobs:
       matrix:
         surface: [ios, mac-store]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
       - name: Download approved manifest

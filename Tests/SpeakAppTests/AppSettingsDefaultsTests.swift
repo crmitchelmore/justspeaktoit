@@ -307,6 +307,26 @@ final class AppSettingsDefaultsTests: XCTestCase {
     }
 
     @MainActor
+    func testCoreDefaults_appSwitchDeliveryIsOriginalApp() {
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertEqual(settings.appSwitchDelivery, .originalApp)
+    }
+
+    @MainActor
+    func testAppSwitchDelivery_persistsAcrossInstances() {
+        for option in AppSettings.AppSwitchDelivery.allCases {
+            AppSettings(defaults: defaults).appSwitchDelivery = option
+            XCTAssertEqual(AppSettings(defaults: defaults).appSwitchDelivery, option)
+        }
+    }
+
+    @MainActor
+    func testAppSwitchDelivery_unknownStoredValueFallsBackToOriginalApp() {
+        defaults.set("somewhereElse", forKey: "appSwitchDelivery")
+        XCTAssertEqual(AppSettings(defaults: defaults).appSwitchDelivery, .originalApp)
+    }
+
+    @MainActor
     func testCoreDefaults_showSidebarShortcutHintsIsTrue() {
         let settings = AppSettings(defaults: defaults)
         XCTAssertTrue(settings.showSidebarShortcutHints)

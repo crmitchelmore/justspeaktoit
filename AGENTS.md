@@ -93,6 +93,7 @@ of hand-maintained structure documentation.
 - `make build` – Debug compilation only
 - `make rebuild` – Clean and rebuild from scratch
 - `make test` – Execute XCTest suite
+- `python3 scripts/with-test-keychain.py <command>` – CI wrapper that runs tests against a disposable Keychain. Locally it is a plain passthrough unless `JSTI_TEST_KEYCHAIN=1`; all other explicit values disable swapping. Overlapping swap runs serialise on a per-user lock. Use `--repair` to recover a valid journal from an interrupted run; an unreadable journal fails closed without changing Keychain settings.
 - `swift build --target SpeakiOSLib` – Verify iOS library compiles
 
 ### iOS (Xcode)

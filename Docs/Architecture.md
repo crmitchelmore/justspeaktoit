@@ -211,6 +211,10 @@ with injectable seams for tests. `ForegroundRecordingOwnership` prevents a foreg
 claiming the process microphone concurrently. `SharedTranscriptionState` publishes bounded App Group state for widgets,
 extensions, Live Activity result actions and background completions.
 
+OpenRouter speech downloads use the shared `OpenRouterAudioClient` and own their transport from task creation.
+Stopping synthesis cancels even a request still waiting for response headers; partial response files are removed
+before cancellation completes, and playback never starts for a cancelled operation.
+
 [IOSTranscriptionSession.swift](../Sources/SpeakiOS/Services/IOSTranscriptionSession.swift) resolves four backend kinds:
 
 - batch records first, then `IOSBatchTranscriptionClient` selects Apple Speech Analyzer, provider-specific/shared batch

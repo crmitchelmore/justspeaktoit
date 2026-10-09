@@ -23,8 +23,8 @@ jobs:
     # The aggregate required-macos job owns the required branch-protection name.
     name: Build & Test (macOS Debug)
     # Route only the explicitly reviewed revision to the native pool.
-    # Both Macs must also admit this revision locally before the variable is set.
-    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && '["jsti-macos-build","macOS"]' || '["macos-latest"]') }}
+    # Every selected native runner must also admit this revision locally.
+    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-macos-build","macOS"]') || '["macos-26-intel"]') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
@@ -178,8 +178,8 @@ jobs:
 
   core-journey-e2e:
     name: Core Dictation Journey (≤10m)
-    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
-    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
+    # This non-UI contract gate may use an explicitly approved native runner.
+    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-macos-build","macOS"]') || '["macos-latest"]') }}
     timeout-minutes: 10
     needs: release-paths
     if: needs.release-paths.outputs.core-journey == 'true'
@@ -209,8 +209,8 @@ jobs:
 
   core-journey-fixture-ui:
     name: Core Journey Fixture UI
-    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
-    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
+    # Hosted ARM has the UI automation entitlement; the native pool does not.
+    runs-on: macos-latest
     timeout-minutes: 10
     needs: release-paths
     if: needs.release-paths.outputs.core-journey == 'true'
@@ -255,8 +255,7 @@ jobs:
 
   release-validation:
     name: Build & Test (Release)
-    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
-    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
+    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-macos-build","macOS"]') || '["macos-26-intel"]') }}
     timeout-minutes: 45
     needs: release-paths
     if: needs.release-paths.outputs.package == 'true'
@@ -274,36 +273,100 @@ jobs:
       - name: Test (Release)
         run: python3 scripts/with-test-keychain.py swift test -c release
 
-  build-ios:
-    name: Build iOS Library
-    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
-    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
+  build-ios-swiftpm:
+    name: Build iOS Library (SwiftPM)
+    runs-on: macos-26-intel
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-
-      - name: Install Tuist
-        run: brew install tuist
-
       - name: Build iOS Library
         run: swift build --disable-dependency-cache --target SpeakiOSLib
 
+  build-ios-test-products:
+    name: Build iOS XCTest Products
+    runs-on: macos-26-intel
+    timeout-minutes: 30
+    outputs:
+      artifact-id: ${{ steps.products.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Tuist
+        run: brew install tuist
+      - name: Build complete simulator test products without booting a simulator
+        run: |
+          set -o pipefail
+          TUIST_IOS_KEYBOARD=1 tuist generate --no-open
+          xcodebuild build-for-testing \
+            -workspace "Just Speak to It.xcworkspace" \
+            -scheme SpeakiOS \
+            -destination "generic/platform=iOS Simulator" \
+            -only-testing:SpeakiOSTests \
+            -only-testing:SpeakiOSUITests \
+            ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
+            -testProductsPath "$RUNNER_TEMP/SpeakiOS.xctestproducts" \
+            -skipPackagePluginValidation \
+            2>&1 | tee "$RUNNER_TEMP/ios-build-tests.log" | tail -50
+          python3 scripts/ios-test-products.py pack \
+            "$RUNNER_TEMP/SpeakiOS.xctestproducts" "$RUNNER_TEMP/ios-test-products.tar.gz"
+      - name: Upload immutable test products
+        id: products
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: ios-test-products-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ios-test-products.tar.gz
+          retention-days: 7
+          if-no-files-found: error
+      - name: Upload simulator compilation log
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: ios-build-tests-log-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ios-build-tests.log
+          retention-days: 7
+          if-no-files-found: error
+
+  build-ios:
+    name: Build iOS Library
+    # Simulator and UI execution remain on hosted ARM; native Macs are not
+    # configured for unattended UI automation and Intel execution was unstable.
+    runs-on: macos-latest
+    timeout-minutes: 30
+    needs: build-ios-test-products
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download exact-source test products
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ needs.build-ios-test-products.outputs.artifact-id }}
+          path: ${{ runner.temp }}/ios-test-products-download
+          merge-multiple: true
+
+      - name: Verify and restore iOS test products
+        run: |
+          python3 scripts/ios-test-products.py unpack \
+            "$RUNNER_TEMP/ios-test-products-download/ios-test-products.tar.gz" \
+            "$RUNNER_TEMP/ios-test-products"
+
       - name: Select iOS Simulator
         run: |
-          SIMULATOR_ID=$(xcrun simctl list devices available -j | jq -r \
-            '([.devices[][] | select(.name == "iPhone 17 Pro")][0].udid) //
-             ([.devices[][] | select(.name | startswith("iPhone"))][0].udid)')
-          test -n "$SIMULATOR_ID"
+          set -euo pipefail
+          if ! SIMULATOR_ID=$(xcrun simctl list devices available -j | jq -er \
+            '([.devices[][] | select(.isAvailable and .name == "iPhone 17 Pro")][0].udid) //
+             ([.devices[][] | select(.isAvailable and (.name | startswith("iPhone")))][0].udid)'); then
+            echo "::error::No available iPhone simulator could be selected."
+            exit 1
+          fi
           echo "SIMULATOR_ID=$SIMULATOR_ID" >> "$GITHUB_ENV"
 
-      - name: Generate iOS App Project
-        # CI includes the keyboard in its shipping handoff-only shape so the
-        # extension and its flow tests compile without enabling direct capture.
-        env:
-          TUIST_IOS_KEYBOARD: "1"
-        run: tuist generate --no-open
+      - name: Prepare iOS Simulator
+        run: python3 scripts/prepare-ios-ci.py "$SIMULATOR_ID"
 
       - name: Test iOS App and Action Button Settings
         id: ios-tests
@@ -311,9 +374,8 @@ jobs:
         # names a failed test without the assertion that failed (issue #793).
         run: |
           set -o pipefail
-          xcodebuild test \
-            -workspace "Just Speak to It.xcworkspace" \
-            -scheme SpeakiOS \
+          xcodebuild test-without-building \
+            -testProductsPath "$RUNNER_TEMP/ios-test-products/SpeakiOS.xctestproducts" \
             -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
             -only-testing:SpeakiOSTests \
             -only-testing:SpeakiOSUITests \
@@ -379,36 +441,14 @@ jobs:
             ${{ runner.temp }}/ios-tests.log
           if-no-files-found: ignore
 
-      - name: Build watchOS App (feature-flagged)
-        # The watch app target only exists when generated with
-        # TUIST_WATCH_APP=1 (it needs its own provisioning profile for release
-        # signing, so it is excluded from release builds). Build it unsigned
-        # here so the flagged target cannot rot. Cheap: eight small source
-        # files plus the dependency-free SpeakWatchCore package product. The
-        # watch-face complication extension is embedded in the app, so this
-        # step covers it too.
-        run: |
-          set -o pipefail
-          TUIST_WATCH_APP=1 TUIST_IOS_KEYBOARD=1 TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0 tuist generate --no-open
-          xcodebuild build \
-            -workspace "Just Speak to It.xcworkspace" \
-            -scheme JustSpeakWatchApp \
-            -destination generic/platform=watchOS \
-            CODE_SIGNING_ALLOWED=NO \
-            -skipPackagePluginValidation \
-            -quiet \
-            2>&1 | tail -30
-
-          # Compile the containing iOS app with WATCH_APP_FEATURE enabled to
-          # verify integration and embedding of the feature-flagged watch companion.
-          xcodebuild build \
-            -workspace "Just Speak to It.xcworkspace" \
-            -scheme SpeakiOS \
-            -destination generic/platform=iOS \
-            CODE_SIGNING_ALLOWED=NO \
-            -skipPackagePluginValidation \
-            -quiet \
-            2>&1 | tail -30
+      - name: Upload complete iOS XCTest log separately
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: ios-tests-log-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ios-tests.log
+          retention-days: 7
+          if-no-files-found: error
 
   build-ios-keyboard:
     # Renamed from "Build iOS Keyboard (direct capture)" (issue #991). It is
@@ -423,8 +463,7 @@ jobs:
     # that scheme at all — only the direct-capture one was — so the shape users
     # actually receive had the weaker check. Both are built here now.
     name: Build iOS Keyboard
-    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
-    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
+    runs-on: macos-26-intel
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
@@ -473,10 +512,33 @@ jobs:
             -quiet \
             2>&1 | tail -30
 
+      - name: Build watchOS App (feature-flagged)
+        # Keep unsigned device builds together, outside the simulator test budget.
+        # The containing iOS build also verifies watch companion embedding.
+        run: |
+          set -o pipefail
+          TUIST_WATCH_APP=1 TUIST_IOS_KEYBOARD=1 TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0 tuist generate --no-open
+          xcodebuild build \
+            -workspace "Just Speak to It.xcworkspace" \
+            -scheme JustSpeakWatchApp \
+            -destination generic/platform=watchOS \
+            CODE_SIGNING_ALLOWED=NO \
+            -skipPackagePluginValidation \
+            -quiet \
+            2>&1 | tail -30
+
+          xcodebuild build \
+            -workspace "Just Speak to It.xcworkspace" \
+            -scheme SpeakiOS \
+            -destination generic/platform=iOS \
+            CODE_SIGNING_ALLOWED=NO \
+            -skipPackagePluginValidation \
+            -quiet \
+            2>&1 | tail -30
+
   lint:
     name: Lint
-    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
-    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
+    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-macos-build","macOS"]') || '["macos-26-intel"]') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
@@ -485,7 +547,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: Tooling/.build
-          key: ${{ runner.os }}-tooling-${{ hashFiles('Tooling/Package.resolved') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-tooling-${{ hashFiles('Tooling/Package.resolved') }}
 
       # SwiftLint resolves through the isolated Tooling/ graph so app/test
       # dependency changes cannot downgrade the linter (issue #677).
@@ -531,8 +593,8 @@ jobs:
   api-compatibility:
     name: Public API compatibility
     # Route only the explicitly reviewed revision to the native pool.
-    # Both Macs must also admit this revision locally before the variable is set.
-    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && '["jsti-macos-build","macOS"]' || '["macos-latest"]') }}
+    # Every selected native runner must also admit this revision locally.
+    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-macos-build","macOS"]') || '["macos-26-intel"]') }}
     timeout-minutes: 30
     if: github.event_name == 'pull_request'
     steps:
@@ -560,6 +622,8 @@ jobs:
     needs:
       - build-macos
       - build-ios
+      - build-ios-swiftpm
+      - build-ios-test-products
       - build-ios-keyboard
       - lint
       - release-paths
@@ -576,6 +640,8 @@ jobs:
           always() && (
             needs.build-macos.result != 'success' ||
             needs.build-ios.result != 'success' ||
+            needs.build-ios-swiftpm.result != 'success' ||
+            needs.build-ios-test-products.result != 'success' ||
             needs.build-ios-keyboard.result != 'success' ||
             needs.lint.result != 'success' ||
             needs.release-paths.result != 'success' ||

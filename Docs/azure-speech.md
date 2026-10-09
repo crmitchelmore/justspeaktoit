@@ -37,7 +37,8 @@ silently reused for Azure.
 
 ## Settings
 
-1. Save the Azure Speech key and region in API Keys. Existing key-only values
+1. Save the Azure Speech key and region in **API Keys → Azure Speech API Key**.
+   This single card shares its credential between transcription and voice output. Existing key-only values
    retain their previous `eastus` fallback; explicit regions are recommended.
 2. For Voice Live, paste the HTTPS resource origin from **Keys and Endpoint**
    into **Azure resource endpoint** (on Windows, Settings → Azure Speech resource…).
@@ -168,14 +169,21 @@ limit, 256 MiB upload limit and 64 MiB download limit; four concurrent HTTP/live
 connections share the proxy's admission limit. A failed upgraded tunnel closes
 with WebSocket error 1011 rather than returning an HTTP-shaped success.
 
-**Builds containing the local-proxy changes can use it for batch and live transcription:**
+**The following in-app setup is macOS-only and requires a build containing both
+loopback endpoint support and proxy-aware credential validation.** iOS still
+validates its Azure credential through the regional TTS API and does not support
+this proxy-saving flow. An iOS loopback address also refers to the iOS device,
+not a proxy running on a Mac.
 
 1. Set **Azure resource endpoint** to `http://127.0.0.1:8765`.
-2. In **Azure Speech (Transcription)**, save `local-proxy/` followed by the value
+2. In **API Keys → Azure Speech API Key**, save `local-proxy/` followed by the value
    of the private token file. This is the local proxy credential, not an Entra
    token or Azure key; the existing Azure credential slot is used. It replaces
    that build's Azure credential, so retain your direct Azure key separately if
    you plan to switch back. Save the endpoint before validating the token.
+   Both saving and **Check Validity** use the local `/health` route for proxy
+   credentials, never the regional TTS route. A successful save confirms local
+   proxy compatibility for transcription only, not Azure model access or TTS support.
 3. Select **Remote → Batch → Azure MAI-Transcribe-2 (Preview)**, or Azure Fast
    Transcription, for recorded audio. For live transcription select
    **Remote → Streaming → Azure MAI Transcribe (Voice Live, Preview)** or Azure Speech.

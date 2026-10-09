@@ -9,6 +9,7 @@ import textwrap
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'with-test-keychain.py'
 spec = importlib.util.spec_from_file_location('with_test_keychain', SCRIPT)
@@ -92,6 +93,15 @@ class SwapPolicyTests(unittest.TestCase):
 
     def test_local_opt_in(self):
         self.assertTrue(keychain_script.swap_enabled({'JSTI_TEST_KEYCHAIN': '1'}))
+        self.assertFalse(keychain_script.swap_enabled({'JSTI_TEST_KEYCHAIN': 'enabled'}))
+        self.assertFalse(keychain_script.swap_enabled({'CI': 'true', 'JSTI_TEST_KEYCHAIN': 'typo'}))
+
+    def test_security_calls_have_a_bounded_timeout(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(
+            keychain_script.subprocess, 'check_output', return_value=''
+        ) as command:
+            keychain_script.security('list-keychains')
+        self.assertEqual(command.call_args.kwargs['timeout'], 30)
 
 
 class WithTestKeychainTests(unittest.TestCase):
@@ -213,6 +223,15 @@ class WithTestKeychainTests(unittest.TestCase):
         self.assertEqual(state['default'], self.extra)
         self.assertEqual(state['search'], [self.login, self.extra])
 
+    def test_legitimate_keychain_with_wrapper_prefix_is_preserved(self):
+        legitimate = str(Path(self.login).parent / 'jsti-ci-keychain-backup.keychain-db')
+        Path(legitimate).touch()
+        self.write_state(legitimate, [legitimate, self.login])
+        self.assertEqual(self.run_script(*self.child_command()), 0)
+        state = self.state()
+        self.assertEqual(state['default'], legitimate)
+        self.assertEqual(state['search'], [legitimate, self.login])
+
     def test_sigterm_forwards_to_command_and_restores(self):
         process = self.start_script(*self.child_command(sleep=30))
         self.wait_for_swap()
@@ -267,6 +286,71 @@ class WithTestKeychainTests(unittest.TestCase):
         process.wait(timeout=30)
         self.assertEqual(self.run_script('--repair'), 0)
         self.assert_restored()
+
+    def test_unreadable_journal_does_not_change_settings_or_delete_state(self):
+        self.state_dir.mkdir()
+        journal = self.state_dir / 'state.json'
+        journal.write_text('{not json')
+        before = self.state()
+        self.assertEqual(self.run_script('--repair'), 70)
+        self.assertEqual(self.state(), before)
+        self.assertTrue(journal.exists())
+
+    def test_recovery_does_not_signal_a_group_with_mismatched_identity(self):
+        unrelated = subprocess.Popen(
+            [sys.executable, '-c', 'import time; time.sleep(60)'],
+            start_new_session=True,
+        )
+        def stop_unrelated():
+            if unrelated.poll() is None:
+                unrelated.kill()
+            unrelated.wait()
+        self.addCleanup(stop_unrelated)
+        directory = Path(tempfile.mkdtemp(prefix=keychain_script.TEMP_PREFIX, dir=self.root / 'tmp'))
+        keychain = directory / 'tests.keychain-db'
+        keychain.touch()
+        (directory / keychain_script.OWNERSHIP_MARKER).write_text(str(keychain))
+        self.state_dir.mkdir()
+        (self.state_dir / 'state.json').write_text(json.dumps({
+            'version': keychain_script.JOURNAL_VERSION,
+            'default': self.login,
+            'search': [self.login, str(keychain)],
+            'keychain': str(keychain),
+            'pid': 123,
+            'boot': keychain_script.boot_identifier(),
+            'group': unrelated.pid,
+            'child_identity': 'definitely-not-the-live-process',
+            'child_token': 'not-the-live-process-token',
+        }))
+        self.write_state(str(keychain), [str(keychain)])
+        self.assertEqual(self.run_script('--repair'), 0)
+        self.assertIsNone(unrelated.poll())
+        state = self.state()
+        self.assertEqual(state['default'], self.login)
+        self.assertEqual(state['search'], [self.login])
+        self.assertFalse(keychain.exists())
+        self.assertFalse((self.state_dir / 'state.json').exists())
+
+    def test_launch_gate_cannot_exec_before_the_journal_release(self):
+        marker = self.root / 'launched'
+        child, gate_fd = keychain_script.launch_gated(
+            [sys.executable, '-c', f'from pathlib import Path; Path({str(marker)!r}).touch()'],
+            'gate-test-token',
+        )
+        try:
+            time.sleep(0.1)
+            self.assertFalse(marker.exists())
+            os.write(gate_fd, b'1')
+            os.close(gate_fd)
+            gate_fd = None
+            self.assertEqual(child.wait(timeout=10), 0)
+            self.assertTrue(marker.exists())
+        finally:
+            if gate_fd is not None:
+                os.close(gate_fd)
+            if child.poll() is None:
+                child.kill()
+                child.wait()
 
     def test_concurrent_runs_serialise_and_restore_originals(self):
         processes = [self.start_script(*self.child_command(sleep=0.3)) for _ in range(6)]

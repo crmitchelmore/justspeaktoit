@@ -6,22 +6,23 @@ Usage:
     with-test-keychain.py --repair
 
 The swap only happens in CI (``CI`` or ``GITHUB_ACTIONS`` set) or when
-``JSTI_TEST_KEYCHAIN=1``; ``JSTI_TEST_KEYCHAIN=0`` disables it. Otherwise the
-command runs unchanged, so local runs never touch the developer's Keychain.
+``JSTI_TEST_KEYCHAIN=1``. Any other explicit ``JSTI_TEST_KEYCHAIN`` value
+disables it. Otherwise the command runs unchanged, so local runs never touch
+the developer's Keychain.
 
 While swapping, the user default Keychain and search list point only at the
 temporary Keychain. Invariants that keep a developer machine safe:
 
 * Overlapping runs serialise on an exclusive per-user lock held for the whole
   run, so no run can snapshot another run's temporary Keychain as "original".
-* Originals are sanitised: temporary (``jsti-ci-keychain-``) or missing
-  Keychains are never restored, and ``login.keychain-db`` is always kept.
+* Originals are sanitised: the exact journal-owned temporary Keychain and
+  missing Keychains are never restored, and ``login.keychain-db`` is kept.
 * The originals are journalled before swapping; a run killed with SIGKILL is
   repaired by the next run (or ``--repair``) before anything else happens.
 * SIGTERM, SIGHUP and SIGINT are forwarded to the command's own process group,
-  which is waited on (SIGKILLed after a grace period) and swept for surviving
-  descendants before restoration; the temporary Keychain is deleted last. A
-  recovering run also stops any process group left by a SIGKILLed wrapper.
+  which is waited on and SIGKILLed after a grace period before restoration.
+  A recovering run stops a journalled group only when its boot and process
+  identity still match; it never signals an unverified reused process-group ID.
 """
 import errno
 import fcntl
@@ -38,6 +39,9 @@ import time
 from pathlib import Path
 
 TEMP_PREFIX = 'jsti-ci-keychain-'
+OWNERSHIP_MARKER = '.jsti-test-keychain'
+JOURNAL_VERSION = 2
+RUN_TOKEN_ENV = 'JSTI_TEST_KEYCHAIN_RUN_TOKEN'
 HANDLED_SIGNALS = (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)
 FALSE_VALUES = {'', '0', 'false', 'no', 'off'}
 
@@ -55,7 +59,12 @@ def security_binary():
 
 
 def security(*args):
-    return subprocess.check_output([security_binary(), *args], text=True).strip()
+    timeout = float(os.environ.get('JSTI_TEST_KEYCHAIN_SECURITY_TIMEOUT_SECONDS', '30'))
+    return subprocess.check_output(
+        [security_binary(), *args],
+        text=True,
+        timeout=timeout,
+    ).strip()
 
 
 def state_directory():
@@ -76,32 +85,32 @@ def truthy(value):
 def swap_enabled(environ=os.environ):
     explicit = environ.get('JSTI_TEST_KEYCHAIN')
     if explicit is not None:
-        return truthy(explicit)
+        return explicit.strip() == '1'
     return truthy(environ.get('CI')) or truthy(environ.get('GITHUB_ACTIONS'))
-
-
-def is_temporary(path):
-    return TEMP_PREFIX in path
-
-
-def usable(path):
-    return bool(path) and not is_temporary(path) and os.path.exists(path)
 
 
 def same_path(left, right):
     return os.path.realpath(left) == os.path.realpath(right)
 
 
-def sanitise(default, search):
-    """Return a (default, search list) pair that never references a temporary or missing Keychain."""
+def is_owned(path, owned):
+    return bool(path) and any(same_path(path, candidate) for candidate in owned if candidate)
+
+
+def usable(path, owned=()):
+    return bool(path) and not is_owned(path, owned) and os.path.exists(path)
+
+
+def sanitise(default, search, owned=()):
+    """Return settings without missing or exactly journal-owned Keychains."""
     login = login_keychain()
     cleaned = []
     for path in search:
-        if usable(path) and not any(same_path(path, kept) for kept in cleaned):
+        if usable(path, owned) and not any(same_path(path, kept) for kept in cleaned):
             cleaned.append(path)
     if os.path.exists(login) and not any(same_path(login, kept) for kept in cleaned):
         cleaned.insert(0, login)
-    if not usable(default):
+    if not usable(default, owned):
         default = login if os.path.exists(login) else (cleaned[0] if cleaned else None)
     return default, cleaned
 
@@ -113,53 +122,99 @@ def current_configuration():
     return default, search
 
 
-def apply_configuration(default, search):
-    """Set the user search list and default, then verify no temporary Keychain remains."""
+def apply_configuration(default, search, forbidden=()):
+    """Set the user search list and default, then verify forbidden Keychains are absent."""
     errors = []
     try:
         security('list-keychains', '-d', 'user', '-s', *search)
-    except (subprocess.CalledProcessError, OSError) as error:
+    except (subprocess.SubprocessError, OSError) as error:
         errors.append(f'list-keychains: {error}')
     if default:
         try:
             security('default-keychain', '-d', 'user', '-s', default)
-        except (subprocess.CalledProcessError, OSError) as error:
+        except (subprocess.SubprocessError, OSError) as error:
             errors.append(f'default-keychain: {error}')
     try:
         actual_default, actual_search = current_configuration()
-        if any(is_temporary(path) for path in actual_search):
-            errors.append(f'search list still references a temporary Keychain: {actual_search}')
-        if actual_default and is_temporary(actual_default):
-            errors.append(f'default Keychain is still temporary: {actual_default}')
+        if any(is_owned(path, forbidden) for path in actual_search):
+            errors.append(f'search list still references a forbidden Keychain: {actual_search}')
+        if actual_default and is_owned(actual_default, forbidden):
+            errors.append(f'default Keychain is still forbidden: {actual_default}')
         if default and actual_default and not same_path(actual_default, default):
             errors.append(f'default Keychain is {actual_default}, expected {default}')
-    except (subprocess.CalledProcessError, OSError) as error:
+    except (subprocess.SubprocessError, OSError) as error:
         errors.append(f'verification: {error}')
     if errors:
         raise RestoreFailed('; '.join(errors))
 
 
 def delete_temporary_keychain(keychain):
-    if not keychain or not is_temporary(keychain):
+    if not keychain:
+        return
+    directory = Path(keychain).parent
+    marker = directory / OWNERSHIP_MARKER
+    try:
+        owned = marker.read_text(encoding='utf-8').strip()
+    except OSError:
+        return
+    if not owned or not same_path(keychain, owned):
         return
     if os.path.exists(keychain):
         try:
             security('delete-keychain', keychain)
-        except (subprocess.CalledProcessError, OSError) as error:
+        except (subprocess.SubprocessError, OSError) as error:
             print(f'with-test-keychain: could not delete {keychain}: {error}', file=sys.stderr)
-    directory = os.path.dirname(keychain)
-    if TEMP_PREFIX in os.path.basename(directory):
-        shutil.rmtree(directory, ignore_errors=True)
+            return
+    shutil.rmtree(directory, ignore_errors=True)
 
 
 def journal_path():
     return state_directory() / 'state.json'
 
 
-def write_journal(default, search, keychain, child_group=None):
+def boot_identifier():
+    linux_id = Path('/proc/sys/kernel/random/boot_id')
+    if linux_id.exists():
+        return linux_id.read_text(encoding='utf-8').strip()
+    return subprocess.check_output(
+        ['/usr/sbin/sysctl', '-n', 'kern.boottime'],
+        text=True,
+        timeout=5,
+    ).strip()
+
+
+def process_identity(pid):
+    try:
+        return subprocess.check_output(
+            ['/bin/ps', '-o', 'lstart=', '-p', str(pid)],
+            text=True,
+            timeout=5,
+        ).strip() or None
+    except (subprocess.SubprocessError, OSError):
+        return None
+
+
+def write_journal(
+    default,
+    search,
+    keychain,
+    child_group=None,
+    child_identity=None,
+    child_token=None,
+):
     path = journal_path()
     temporary = path.with_suffix('.json.tmp')
-    state = {'default': default, 'search': search, 'keychain': keychain, 'pid': os.getpid(), 'group': child_group}
+    state = {
+        'version': JOURNAL_VERSION,
+        'default': default,
+        'search': search,
+        'keychain': keychain,
+        'pid': os.getpid(),
+        'boot': boot_identifier(),
+        'group': child_group,
+        'child_identity': child_identity,
+        'child_token': child_token,
+    }
     with open(temporary, 'w', encoding='utf-8') as handle:
         json.dump(state, handle)
         handle.flush()
@@ -174,24 +229,74 @@ def clear_journal():
         pass
 
 
+def read_journal(path):
+    try:
+        state = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError) as error:
+        raise RestoreFailed(
+            f'cannot read recovery journal {path}; settings were left unchanged: {error}'
+        ) from error
+    required = {
+        'version': int,
+        'default': (str, type(None)),
+        'search': list,
+        'keychain': str,
+        'boot': str,
+        'group': (int, type(None)),
+        'child_identity': (str, type(None)),
+        'child_token': (str, type(None)),
+    }
+    if state.get('version') != JOURNAL_VERSION or any(
+        not isinstance(state.get(key), expected) for key, expected in required.items()
+    ) or not all(isinstance(item, str) for item in state['search']):
+        raise RestoreFailed(
+            f'recovery journal {path} is incomplete; settings were left unchanged'
+        )
+    return state
+
+
+def verified_recovery_group(state):
+    group = state['group']
+    identity = state['child_identity']
+    token = state['child_token']
+    if (
+        not isinstance(group, int)
+        or group <= 1
+        or group == os.getpgrp()
+        or not identity
+        or not token
+    ):
+        return None
+    if state['boot'] != boot_identifier():
+        return None
+    if process_identity(group) != identity:
+        return None
+    try:
+        environment = subprocess.check_output(
+            ['/bin/ps', 'eww', '-p', str(group), '-o', 'command='],
+            text=True,
+            timeout=5,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return None
+    if f'{RUN_TOKEN_ENV}={token}' not in environment.split():
+        return None
+    return group
+
+
 def recover_from_journal():
     """Restore the configuration left behind by a run that died without cleaning up."""
     path = journal_path()
     if not path.exists():
         return False
-    try:
-        state = json.loads(path.read_text(encoding='utf-8'))
-    except (OSError, ValueError):
-        state = {}
+    state = read_journal(path)
     print('with-test-keychain: recovering Keychain configuration from an interrupted run', file=sys.stderr)
-    group = state.get('group')
-    # The previous wrapper is dead (it no longer holds the lock), so any survivor of its
-    # command's process group, such as an orphaned xctest, must not run on into this run.
-    if isinstance(group, int) and group > 1 and group != os.getpgrp():
+    group = verified_recovery_group(state)
+    if group is not None:
         terminate_group(group, signal.SIGTERM)
-    default, search = sanitise(state.get('default'), state.get('search') or [])
-    apply_configuration(default, search)
-    delete_temporary_keychain(state.get('keychain'))
+    default, search = sanitise(state['default'], state['search'], owned=[state['keychain']])
+    apply_configuration(default, search, forbidden=[state['keychain']])
+    delete_temporary_keychain(state['keychain'])
     clear_journal()
     return True
 
@@ -258,10 +363,33 @@ def supervise(child, signals):
         except subprocess.TimeoutExpired:
             if signals.received is not None:
                 terminate_group(child.pid, signals.received, leader=child)
-    # Never restore while a descendant (such as xctest) may still be using the test Keychain.
+    # Never restore while a process in the command's group may still use the test Keychain.
     if group_alive(child.pid):
         terminate_group(child.pid, signal.SIGTERM)
     return returncode
+
+
+def launch_gated(command, token):
+    """Launch a new process group that cannot exec the command before journalling."""
+    read_fd, write_fd = os.pipe()
+    gate = (
+        'import os,sys; '
+        'fd=int(sys.argv[1]); token=os.read(fd,1); os.close(fd); '
+        'token == b"1" or sys.exit(75); '
+        'os.execvp(sys.argv[2], sys.argv[2:])'
+    )
+    try:
+        environment = dict(os.environ)
+        environment[RUN_TOKEN_ENV] = token
+        child = subprocess.Popen(
+            [sys.executable, '-c', gate, str(read_fd), *command],
+            start_new_session=True,
+            pass_fds=(read_fd,),
+            env=environment,
+        )
+    finally:
+        os.close(read_fd)
+    return child, write_fd
 
 
 def exit_status(returncode):
@@ -302,8 +430,12 @@ def run_isolated(command):
         recover_from_journal()
         # Snapshot only while holding the lock, so another run's Keychain is never mistaken for ours.
         original_default, original_search = sanitise(*current_configuration())
-        keychain = str(Path(tempfile.mkdtemp(prefix=TEMP_PREFIX)) / 'tests.keychain-db')
+        directory = Path(tempfile.mkdtemp(prefix=TEMP_PREFIX))
+        keychain = str(directory / 'tests.keychain-db')
+        (directory / OWNERSHIP_MARKER).write_text(keychain, encoding='utf-8')
         write_journal(original_default, original_search, keychain)
+        child = None
+        gate_fd = None
         try:
             password = secrets.token_urlsafe(32)
             security('create-keychain', '-p', password, keychain)
@@ -312,13 +444,30 @@ def run_isolated(command):
             security('list-keychains', '-d', 'user', '-s', keychain)
             security('default-keychain', '-d', 'user', '-s', keychain)
             signals.raise_on_signal = False
-            # Own process group, so the whole tree can be stopped and swept before restoring.
-            child = subprocess.Popen(command, start_new_session=True)
-            write_journal(original_default, original_search, keychain, child_group=child.pid)
+            child_token = secrets.token_hex(32)
+            child, gate_fd = launch_gated(command, child_token)
+            identity = process_identity(child.pid)
+            if not identity:
+                raise RestoreFailed(f'could not identify launched command process {child.pid}')
+            write_journal(
+                original_default,
+                original_search,
+                keychain,
+                child_group=child.pid,
+                child_identity=identity,
+                child_token=child_token,
+            )
+            os.write(gate_fd, b'1')
+            os.close(gate_fd)
+            gate_fd = None
             return exit_status(supervise(child, signals))
         finally:
             signals.raise_on_signal = False
-            apply_configuration(original_default, original_search)
+            if gate_fd is not None:
+                os.close(gate_fd)
+            if child is not None and child.poll() is None:
+                terminate_group(child.pid, signal.SIGTERM, leader=child)
+            apply_configuration(original_default, original_search, forbidden=[keychain])
             delete_temporary_keychain(keychain)
             clear_journal()
     except Interrupted as interruption:

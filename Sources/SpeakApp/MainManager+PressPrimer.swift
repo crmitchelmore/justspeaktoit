@@ -1,6 +1,8 @@
 @preconcurrency import AVFoundation
+import AppKit
 import Combine
 import Foundation
+import SpeakCore
 import SpeakHotKeys
 
 /// Key-down microphone warm-up for the dictation hotkey (see `PrimedLiveInput`
@@ -124,10 +126,10 @@ final class KeyPressPrimerRuntime {
     await primer.settle()
   }
 
-  /// Waits for a standby build in flight. A start must not open the
-  /// microphone while an input node is still being built beside it.
-  func settleStandby() async {
-    await buildTask?.value
+  /// Foreground capture never waits for a speculative input-node build.
+  func sessionWillBegin() {
+    cancelPendingRefill()
+    standby.cancelRefill()
   }
 
   /// Called whenever the app returns to idle.
@@ -152,7 +154,7 @@ final class KeyPressPrimerRuntime {
       open: { [weak self] keyDownUptime in
         guard let self, let owner = self.owner else { return nil }
         self.cancelPendingRefill()
-        await self.settleStandby()
+        standby.cancelRefill()
         let capture = await PrimedLiveInput.open(
           keyDownUptime: keyDownUptime,
           deviceManager: owner.audioInputDeviceManager,
@@ -188,7 +190,10 @@ final class KeyPressPrimerRuntime {
   private func pressMayOpenMicrophone() -> Bool {
     guard isIdleForMicrophone() else { return false }
     guard let owner else { return false }
-    return owner.isStreamingTranscriptionMode && owner.transcriptionManager.liveRouteUsesLiveInputEngine
+    return owner.transcriptionManager.liveRouteUsesLiveInputEngine(
+      profiles: owner.profileStore.profiles,
+      frontmostBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+    )
   }
 
   private func isIdleForMicrophone() -> Bool {
@@ -224,7 +229,8 @@ final class KeyPressPrimerRuntime {
     buildTask = Task { @MainActor [weak self] in
       await previous?.value
       guard let self, !self.primer.isActive, self.isIdleForMicrophone() else { return }
-      await Task.detached(priority: .utility) { standby.refill() }.value
+      let token = standby.beginRefill()
+      await Task.detached(priority: .utility) { standby.refill(token) }.value
     }
   }
 

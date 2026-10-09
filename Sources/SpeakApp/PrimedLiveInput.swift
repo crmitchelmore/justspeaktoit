@@ -18,6 +18,7 @@ final class PrimerPreRollBuffer: @unchecked Sendable {
   private var bufferedFrames: AVAudioFramePosition = 0
   private var isCollecting = true
   private var firstSignal: TimeInterval?
+  private var consumer: ((AVAudioPCMBuffer) -> Void)?
 
   init(maximumDuration: TimeInterval) {
     self.maximumDuration = maximumDuration
@@ -31,6 +32,10 @@ final class PrimerPreRollBuffer: @unchecked Sendable {
     guard isCollecting else { return }
     if hasSignal, firstSignal == nil {
       firstSignal = uptime
+    }
+    if let consumer {
+      consumer(copy)
+      return
     }
     buffers.append(copy)
     bufferedFrames += AVAudioFramePosition(copy.frameLength)
@@ -46,6 +51,24 @@ final class PrimerPreRollBuffer: @unchecked Sendable {
     lock.lock()
     defer { lock.unlock() }
     isCollecting = false
+    consumer = nil
+  }
+
+  /// Keeps the existing tap live through analyzer setup and replay. The lock
+  /// serializes replay and tap delivery, including the stateful audio converter.
+  func startConsuming(
+    preRollBuffers: [AVAudioPCMBuffer],
+    using consume: @escaping (AVAudioPCMBuffer) -> Void
+  ) {
+    lock.lock()
+    defer { lock.unlock() }
+    guard isCollecting else { return }
+    for buffer in preRollBuffers + buffers {
+      consume(buffer)
+    }
+    buffers = []
+    bufferedFrames = 0
+    consumer = consume
   }
 
   func drain() -> [AVAudioPCMBuffer] {
@@ -230,13 +253,18 @@ final class PrimedLiveInput {
     return Handover(engine: engine, inputDeviceID: inputDeviceID, inputSession: session, hooks: hooks)
   }
 
-  /// Ends pre-roll capture and returns what it heard. Only a handed-over input
-  /// has a session to feed; anything else returns nothing.
-  func takePreRoll() -> [AVAudioPCMBuffer] {
-    guard state == .handedOver else { return [] }
+  func captures(using engine: AVAudioEngine) -> Bool {
+    state == .handedOver && self.engine === engine
+  }
+
+  /// The analyzer retains the primer tap rather than replacing it, so setup
+  /// and pre-roll conversion never leave the running input without a consumer.
+  func startConsuming(preRollBuffers: [AVAudioPCMBuffer], using consume: @escaping (AVAudioPCMBuffer) -> Void) {
+    preRoll.startConsuming(preRollBuffers: preRollBuffers, using: consume)
+  }
+
+  func stopConsuming() {
     preRoll.stopCollecting()
-    engine.inputNode.removeTap(onBus: 0)
-    return preRoll.drain()
   }
 
   /// Key-down → first non-silent audio, when any has arrived yet.

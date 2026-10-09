@@ -13,10 +13,15 @@ import Foundation
 final class LiveInputStandby<Engine: AnyObject>: @unchecked Sendable {
   typealias InputDeviceID = UInt32
 
+  struct RefillToken: Sendable {
+    fileprivate let generation: UInt64
+  }
+
   private let lock = NSLock()
   private let makeEngine: () -> Engine
   private let currentInputDeviceID: () -> InputDeviceID?
   private var stocked: (engine: Engine, inputDeviceID: InputDeviceID)?
+  private var generation: UInt64 = 0
 
   /// - Parameter makeEngine: builds an engine *and* its input node.
   init(makeEngine: @escaping () -> Engine, currentInputDeviceID: @escaping () -> InputDeviceID?) {
@@ -29,6 +34,7 @@ final class LiveInputStandby<Engine: AnyObject>: @unchecked Sendable {
   func take(matching inputDeviceID: InputDeviceID) -> Engine? {
     lock.lock()
     defer { lock.unlock() }
+    generation &+= 1
     let entry = stocked
     stocked = nil
     return entry?.inputDeviceID == inputDeviceID ? entry?.engine : nil
@@ -43,6 +49,7 @@ final class LiveInputStandby<Engine: AnyObject>: @unchecked Sendable {
   func stock(_ engine: Engine, inputDeviceID: InputDeviceID) {
     lock.lock()
     defer { lock.unlock() }
+    generation &+= 1
     stocked = (engine, inputDeviceID)
   }
 
@@ -50,21 +57,47 @@ final class LiveInputStandby<Engine: AnyObject>: @unchecked Sendable {
   /// matches it. Blocks for the build; call off the main thread, and only
   /// while nothing holds the microphone open.
   func refill() {
+    refill(beginRefill())
+  }
+
+  /// Reserve before dispatching the build, so cancellation also retires work
+  /// that has been scheduled but has not entered Core Audio yet.
+  func beginRefill() -> RefillToken {
+    lock.lock()
+    defer { lock.unlock() }
+    generation &+= 1
+    return RefillToken(generation: generation)
+  }
+
+  func refill(_ token: RefillToken) {
     guard let deviceID = currentInputDeviceID() else { return }
     lock.lock()
     let isCurrent = stocked?.inputDeviceID == deviceID
+    let isCurrentBuild = generation == token.generation
     lock.unlock()
-    guard !isCurrent else { return }
+    guard !isCurrent, isCurrentBuild else { return }
     let engine = makeEngine()
     // The default input can change during a slow build; such an engine would
     // never match the next press.
     guard currentInputDeviceID() == deviceID else { return }
-    stock(engine, inputDeviceID: deviceID)
+    lock.lock()
+    defer { lock.unlock() }
+    guard generation == token.generation else { return }
+    stocked = (engine, deviceID)
+  }
+
+  /// Retires an in-flight speculative build without waiting for Core Audio.
+  /// A ready standby remains available to the foreground press.
+  func cancelRefill() {
+    lock.lock()
+    defer { lock.unlock() }
+    generation &+= 1
   }
 
   func clear() {
     lock.lock()
     defer { lock.unlock() }
+    generation &+= 1
     stocked = nil
   }
 

@@ -75,11 +75,13 @@ final class HotKeyPressPrimer<Capture: AnyObject> {
   }
 
   func pressBegan(at uptime: TimeInterval) {
-    if let lastReleaseUptime, uptime - lastReleaseUptime <= dependencies.doubleTapWindow() {
-      // Second press of a possible double tap: same sequence.
-    } else {
+    let continuesSequence = dependencies.keepsAliveForDoubleTap()
+      && lastReleaseUptime.map { uptime >= $0 && uptime - $0 <= dependencies.doubleTapWindow() } == true
+    if !continuesSequence {
+      drop()
       sequenceKeyDownUptime = uptime
     }
+    lastReleaseUptime = nil
     dropTimer?.cancel()
     dropTimer = nil
     if isActive {
@@ -137,6 +139,8 @@ final class HotKeyPressPrimer<Capture: AnyObject> {
   /// session's to close.
   func cancel() {
     drop()
+    lastReleaseUptime = nil
+    sequenceKeyDownUptime = nil
   }
 
   /// Claims the press's capture for a starting session. Nil when the press

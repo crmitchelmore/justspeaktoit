@@ -175,6 +175,13 @@ delivery, HUD transitions and history finalisation. `SmartTextOutput` chooses ac
 fallback. Cancellation is scoped to the active session/run, and live-controller teardown waits for provider startup
 where necessary so a late start cannot capture for a replacement run.
 
+When microphone warm-up on key press is enabled, `KeyPressPrimerRuntime` resolves the frontmost app's
+profile-adjusted route without changing settings. Eligible presses start a stopped standby input engine; unrelated
+press sequences close the previous capture rather than inheriting its audio. Standby refills are speculative and
+never delay foreground recording; a cancelled build cannot restock after capture starts. Speech Analyzer retains
+the primer's tap through setup and redirects its serialized consumer only after replaying the bounded pre-roll,
+so buffered and newly captured speech stay ordered without a tapless hand-over.
+
 [SwitchingLiveTranscriber.swift](../Sources/SpeakApp/SwitchingLiveTranscriber.swift) is deliberately mixed today:
 
 - dedicated macOS controllers handle Deepgram, Modulate, AssemblyAI, ElevenLabs, Soniox, Cartesia, Gladia and OpenAI

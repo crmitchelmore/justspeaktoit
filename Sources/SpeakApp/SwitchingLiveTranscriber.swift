@@ -111,7 +111,8 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
 
   func start(
     preRollBuffers: [AVAudioPCMBuffer],
-    analyzerFallbackAllowed: Bool = true
+    analyzerFallbackAllowed: Bool = true,
+    primedInput: PrimedLiveInput? = nil
   ) async throws {
     if let activeRun {
       await stop(activeRun)
@@ -128,7 +129,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     let controller = controller(for: model)
     controller.delegate = delegate
     controller.configure(language: currentLanguage, model: model)
-    let run = activate(controller, preRollBuffers: preRollBuffers)
+    let run = activate(controller, preRollBuffers: preRollBuffers, primedInput: primedInput)
     do {
       try await awaitStartup(run)
       invalidateBeforeNextStart = false
@@ -269,12 +270,13 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   @discardableResult
   private func activate(
     _ controller: any LiveTranscriptionController,
-    preRollBuffers: [AVAudioPCMBuffer] = []
+    preRollBuffers: [AVAudioPCMBuffer] = [],
+    primedInput: PrimedLiveInput? = nil
   ) -> ActiveRun {
     let startTask = Task { @MainActor in
       try Task.checkCancellation()
       if let analyzer = controller as? AppleSpeechAnalyzerLiveController {
-        try await analyzer.start(preRollBuffers: preRollBuffers)
+        try await analyzer.start(preRollBuffers: preRollBuffers, primedInput: primedInput)
       } else {
         try await controller.start()
       }

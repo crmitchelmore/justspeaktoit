@@ -11,7 +11,7 @@ final class HotKeyPressPrimerTests: XCTestCase {
     private let doubleTapWindow: TimeInterval = 0.4
     private let safetyTimeout: TimeInterval = 10
 
-    private func makePrimer(_ environment: PrimerTestEnvironment) -> HotKeyPressPrimer<PrimerFakeCapture> {
+    func makePrimer(_ environment: PrimerTestEnvironment) -> HotKeyPressPrimer<PrimerFakeCapture> {
         HotKeyPressPrimer(dependencies: .init(
             isEligible: { environment.isEligible },
             keepsAliveForDoubleTap: { environment.keepsAlive },
@@ -37,7 +37,7 @@ final class HotKeyPressPrimerTests: XCTestCase {
     private var dropDelay: TimeInterval { doubleTapWindow + HotKeyPressPrimer<PrimerFakeCapture>.doubleTapGrace }
 
     /// Lets queued main-actor tasks run until `condition` holds.
-    private func waitUntil(_ condition: () -> Bool, file: StaticString = #filePath, line: UInt = #line) async {
+    func waitUntil(_ condition: () -> Bool, file: StaticString = #filePath, line: UInt = #line) async {
         for _ in 0..<200 where !condition() {
             await Task.yield()
         }

@@ -82,6 +82,22 @@ final class LiveInputEngineStoreAdoptionTests: XCTestCase {
         XCTAssertTrue(environment.released.isEmpty)
     }
 
+    func testMakeEngine_ForContinuousHandover_KeepsTheAdoptedTapRunning() {
+        let environment = Environment()
+        let store = makeStore(environment)
+        let token = store.beginPreparation()
+        let primed = FakeEngine()
+        store.adopt(primed, inputDeviceID: 42, token: token, hooks: environment.hooks)
+
+        let engine = store.makeEngine(preservingAdoptedTap: true)
+        store.discard(token, releasingClaimed: true)
+
+        XCTAssertTrue(engine === primed)
+        XCTAssertTrue(engine.hasPrimerTap)
+        XCTAssertFalse(engine.isRunning)
+        XCTAssertEqual(environment.log, ["release"])
+    }
+
     func testMakeEngine_ForAnotherDevice_StopsTheAdoptedEngineBeforeBuildingAFreshOne() {
         // Arrange
         let environment = Environment()

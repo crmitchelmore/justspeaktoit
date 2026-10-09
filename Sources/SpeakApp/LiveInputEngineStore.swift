@@ -133,8 +133,9 @@ final class LiveInputEngineStore<Engine: AnyObject>: @unchecked Sendable {
   }
 
   /// The prepared engine when it still matches the current input device;
-  /// otherwise a new engine. A prepared engine is handed out once.
-  func makeEngine() -> Engine {
+  /// otherwise a new engine. A prepared engine is handed out once. The analyzer
+  /// can retain the adopted tap and atomically redirect its pre-roll consumer.
+  func makeEngine(preservingAdoptedTap: Bool = false) -> Engine {
     let deviceID = currentInputDeviceID()
     lock.lock()
     let entry = prepared
@@ -145,7 +146,9 @@ final class LiveInputEngineStore<Engine: AnyObject>: @unchecked Sendable {
     claimed = usable
     lock.unlock()
     if let usable {
-      usable.hooks?.willHandOut(usable.engine)
+      if !preservingAdoptedTap {
+        usable.hooks?.willHandOut(usable.engine)
+      }
       return usable.engine
     }
     // Stopped before the fresh build: an adopted engine may still hold the

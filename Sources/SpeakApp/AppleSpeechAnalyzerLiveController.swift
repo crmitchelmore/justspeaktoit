@@ -18,6 +18,7 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
   /// session's initialiser, so it cannot capture the session it belongs to.
   private var activeRun: LiveTranscriptionRun.Token?
   private var audioConverter: Any?
+  private var activePrimedInput: PrimedLiveInput?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
   private var currentLanguage: String?
   private var currentModel: String = AppleLocalModels.speechTranscriberModelID
@@ -44,7 +45,7 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
     try await start(preRollBuffers: [])
   }
 
-  func start(preRollBuffers: [AVAudioPCMBuffer]) async throws {
+  func start(preRollBuffers: [AVAudioPCMBuffer], primedInput: PrimedLiveInput? = nil) async throws {
     guard await ensurePermissions() else {
       throw TranscriptionManagerError.permissionsMissing
     }
@@ -53,13 +54,16 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
     }
 
     let inputSession = await audioDeviceManager.beginUsingPreferredInput()
-    audioEngine = LiveInputEngines.shared.makeEngine()
+    audioEngine = LiveInputEngines.shared.makeEngine(preservingAdoptedTap: primedInput != nil)
+    activePrimedInput = primedInput?.captures(using: audioEngine) == true ? primedInput : nil
     do {
       try await startSpeechAnalyzer(preRollBuffers: preRollBuffers)
       activeInputSession = inputSession
       latestUpdate = LiveTranscriptionUpdate(text: "")
       isRunning = true
     } catch {
+      activePrimedInput?.stopConsuming()
+      activePrimedInput = nil
       audioEngine.stop()
       audioEngine.inputNode.removeTap(onBus: 0)
       // The legacy Apple Speech fallback starts beside the running recorder;
@@ -101,7 +105,9 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
     }
 
     let inputNode = audioEngine.inputNode
-    inputNode.removeTap(onBus: 0)
+    if activePrimedInput == nil {
+      inputNode.removeTap(onBus: 0)
+    }
     let inputFormat = inputNode.outputFormat(forBus: 0)
     guard audioInputFormatIsUsable(inputFormat) else {
       activeRun = nil
@@ -113,20 +119,19 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
         sourceFormat: inputFormat,
         targetFormat: session.audioFormat
       )
-      // Pre-roll goes first: a key-down primed engine is already running, so
-      // the tap delivers live audio as soon as it is installed.
-      // A fallback engine on another device can have another format; the
-      // converter only accepts its source format.
-      for buffer in preRollBuffers
-      where buffer.format.sampleRate == inputFormat.sampleRate
-        && buffer.format.channelCount == inputFormat.channelCount {
-        if let converted = converter.convert(buffer) {
-          session.send(converted)
-        }
-      }
-      inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
+      let sendAudio: (AVAudioPCMBuffer) -> Void = { buffer in
+        guard buffer.format.sampleRate == inputFormat.sampleRate,
+          buffer.format.channelCount == inputFormat.channelCount else { return }
         guard let converted = converter.convert(buffer) else { return }
         session.send(converted)
+      }
+      if let activePrimedInput {
+        activePrimedInput.startConsuming(preRollBuffers: preRollBuffers, using: sendAudio)
+      } else {
+        for buffer in preRollBuffers { sendAudio(buffer) }
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
+          sendAudio(buffer)
+        }
       }
       try await startAudioEngineAfterInputDeviceSettles(audioEngine)
       analyzerSession = session
@@ -142,6 +147,8 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
 
   func stop() async {
     guard isRunning else { return }
+    activePrimedInput?.stopConsuming()
+    activePrimedInput = nil
     audioEngine.stop()
     audioEngine.inputNode.removeTap(onBus: 0)
     isRunning = false

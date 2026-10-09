@@ -630,6 +630,7 @@ final class MainManager: ObservableObject {
     guard !migrationInProgress, !captureStarting, activeSession == nil else { return .rejected(.captureFailed) }
     captureStarting = true
     defer { captureStarting = false }
+    keyPressPrimer.sessionWillBegin()
     captureWarmer?.sessionWillBegin()
 
     // Per-app dictation profile: resolve the frontmost app and apply its
@@ -757,11 +758,11 @@ final class MainManager: ObservableObject {
       // step — a claimed staged recorder still has to prove it is capturing.
       let startStream: RecordingStartSequencer.Step? = isStreamingTranscriptionMode
         ? { [transcriptionManager, preRollBuffers, trigger, primedInput] in
-          // Audio the key-down primer heard before the session claimed it.
-          let preRoll = preRollBuffers.isEmpty ? await primedInput?.value?.takePreRoll() ?? [] : preRollBuffers
+          let primedCapture = await primedInput?.value
           try await transcriptionManager.startLiveTranscription(
-            preRollBuffers: preRoll,
-            analyzerFallbackAllowed: trigger != .handsFree
+            preRollBuffers: preRollBuffers,
+            analyzerFallbackAllowed: trigger != .handsFree,
+            primedInput: primedCapture
           )
         }
         : nil
@@ -778,8 +779,6 @@ final class MainManager: ObservableObject {
         // beside the primer's open microphone.
         await keyPressPrimer.closeBeforeStart(primedInput)
       }
-      // A standby build must finish before the microphone opens beside it.
-      await keyPressPrimer.settleStandby()
       // A hands-free capture always moves the HUD to the recording pane, even
       // when the user hides the HUD for their own sessions: the armed pane
       // otherwise claims the app only listens while it in fact records.

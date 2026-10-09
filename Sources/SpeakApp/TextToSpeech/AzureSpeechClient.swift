@@ -83,6 +83,10 @@ actor AzureSpeechClient: TextToSpeechClient {
   }
 
   func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
+    if key.trimmingCharacters(in: .whitespacesAndNewlines)
+      .hasPrefix(AzureSpeechConfiguration.proxyCredentialPrefix) {
+      return await AzureTranscriptionProvider(session: session).validateAPIKey(key)
+    }
     do {
       _ = try await AzureSpeechVoiceAPI(session: session).listVoices(credentials: key)
       return .success(message: "Azure key and region are valid. Model access depends on your resource.")

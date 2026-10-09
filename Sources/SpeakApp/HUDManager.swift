@@ -73,6 +73,12 @@ final class HUDManager: ObservableObject {
   @Published private(set) var captureHealth: CaptureHealthSnapshot = .empty
   /// Normalized audio level (0.0 to 1.0) during recording phase
   @Published private(set) var audioLevel: Float = 0
+  /// The recording pane is up but the microphone has not yet delivered real
+  /// audio (a Bluetooth headset can take ~0.7 s to switch into call mode). The
+  /// clock stays at zero until `markAudioLive()`, so it never counts time in
+  /// which the user's words could not be heard.
+  @Published private(set) var isAwaitingAudio = false
+  private var awaitingAudioSubheadline: String?
 
   private let appSettings: AppSettings
   private let accessibilityAnnouncementPoster: ((String) -> Void)?
@@ -120,7 +126,11 @@ final class HUDManager: ObservableObject {
 
   /// Begins the recording phase. When a dictation profile is active for the
   /// session, its name is surfaced in the HUD subheadline.
-  func beginRecording(profileName: String? = nil) {
+  ///
+  /// - Parameter awaitingAudio: show the pane now, as "Getting ready" with the
+  ///   clock held at zero, and start the clock only when `markAudioLive()`
+  ///   reports the microphone is delivering audio.
+  func beginRecording(profileName: String? = nil, awaitingAudio: Bool = false) {
     // Set initial expansion state based on user preference
     switch appSettings.hudSizePreference {
     case .compact:
@@ -131,7 +141,19 @@ final class HUDManager: ObservableObject {
       isExpanded = false  // Will auto-expand when transcript exceeds threshold
     }
     let subheadline = profileName.map { "Profile: \($0)" } ?? "Capturing audio"
-    transition(.recording, headline: "Recording", subheadline: subheadline)
+    guard awaitingAudio else {
+      transition(.recording, headline: "Recording", subheadline: subheadline)
+      return
+    }
+    transition(
+      .recording,
+      headline: "Getting ready",
+      subheadline: "Opening microphone",
+      showsTimer: false,
+      announces: false
+    )
+    isAwaitingAudio = true
+    awaitingAudioSubheadline = subheadline
   }
 
   /// Shows the armed indicator for hands-free dictation. The HUD stays up
@@ -251,6 +273,8 @@ final class HUDManager: ObservableObject {
     invalidateTimers()
     audioLevel = 0
     sessionStart = nil
+    isAwaitingAudio = false
+    awaitingAudioSubheadline = nil
     snapshot = .hidden
     postAccessibilityAnnouncement("HUD dismissed")
   }
@@ -264,16 +288,19 @@ final class HUDManager: ObservableObject {
     headline: String,
     subheadline: String?,
     showsTimer: Bool = true,
-    showRetryHint: Bool = false
+    showRetryHint: Bool = false,
+    announces: Bool = true
   ) {
     invalidateTimers()
     sessionStart = showsTimer ? Date() : nil
+    isAwaitingAudio = false
+    awaitingAudioSubheadline = nil
     snapshot = Snapshot(
       phase: phase, headline: headline, subheadline: subheadline, showRetryHint: showRetryHint,
       liveText: nil, liveTextIsFinal: true, liveTextConfidence: nil, streamingText: nil,
       finalTranscript: "", interimTranscript: ""
     )
-    if let announcement = Self.accessibilityAnnouncement(for: phase, subheadline: subheadline) {
+    if announces, let announcement = Self.accessibilityAnnouncement(for: phase, subheadline: subheadline) {
       postAccessibilityAnnouncement(announcement)
     }
   }
@@ -318,3 +345,31 @@ final class HUDManager: ObservableObject {
   }
 }
 // @Implement: This file is the state manager for the Heads-Up display. It exposes lifecycle functions so that another class can notify it when recording has started, transcribing has started, post-processing has started, etc. It has an enum for all the states it can be in and is a state machine. It also has the ability to surface errors in any of those things and it has an internal timer that shows the duration of each step.
+
+// MARK: - Waiting for audio
+
+extension HUDManager {
+  /// The microphone is delivering audio: switch "Getting ready" to "Recording"
+  /// and start the clock. Returns false (changing nothing) unless the recording
+  /// pane is still waiting for audio.
+  @discardableResult
+  func markAudioLive() -> Bool {
+    guard isAwaitingAudio, snapshot.phase == .recording else { return false }
+    isAwaitingAudio = false
+    sessionStart = Date()
+    snapshot.headline = "Recording"
+    snapshot.subheadline = awaitingAudioSubheadline
+    awaitingAudioSubheadline = nil
+    if let announcement = Self.accessibilityAnnouncement(for: .recording, subheadline: snapshot.subheadline) {
+      postAccessibilityAnnouncement(announcement)
+    }
+    return true
+  }
+
+  /// Hides the pane if it is still waiting for audio — a start abandoned
+  /// before capture came up must not leave "Getting ready" on screen.
+  func cancelAwaitingAudio() {
+    guard isAwaitingAudio else { return }
+    hide()
+  }
+}

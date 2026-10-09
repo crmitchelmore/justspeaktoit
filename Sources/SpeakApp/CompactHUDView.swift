@@ -90,7 +90,9 @@ struct CompactHUDContent: View {
 
   @ViewBuilder
   private var timerLabel: some View {
-    if phaseHasTimer {
+    if manager.isAwaitingAudio {
+      HUDAwaitingAudioIndicator()
+    } else if phaseHasTimer {
       // The compact clock shows whole seconds, so it redraws once a second -
       // and only this label redraws, rather than the whole card.
       HUDElapsedClock(start: manager.sessionStart, interval: 1) { elapsed in

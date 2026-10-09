@@ -31,17 +31,18 @@ enum OpenRouterAudioDownload {
         limit: Int,
         speech: Bool
     ) async throws {
-        try Task.checkCancellation()
-        let (bytes, response) = try await session.bytes(for: request, delegate: OpenRouterAudioRedirectPolicy())
-        let task = bytes.task
-        defer { task.cancel() }
-        try validate(response, limit: limit, speech: speech)
-        guard FileManager.default.createFile(
-            atPath: destination.path, contents: nil, attributes: [.posixPermissions: 0o600]
-        ) else { throw OpenRouterAudioError.transportFailure }
-        let handle = try FileHandle(forWritingTo: destination)
-        defer { try? handle.close() }
+        let policy = OpenRouterAudioRedirectPolicy()
+        defer { policy.cancel() }
         try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            let (bytes, response) = try await session.bytes(for: request, delegate: policy)
+            try Task.checkCancellation()
+            try validate(response, limit: limit, speech: speech)
+            guard FileManager.default.createFile(
+                atPath: destination.path, contents: nil, attributes: [.posixPermissions: 0o600]
+            ) else { throw OpenRouterAudioError.transportFailure }
+            let handle = try FileHandle(forWritingTo: destination)
+            defer { try? handle.close() }
             var buffer = Data()
             var count = 0
             for try await byte in bytes {
@@ -58,7 +59,7 @@ enum OpenRouterAudioDownload {
             guard count > 0 else { throw OpenRouterAudioError.invalidResponse }
             if !buffer.isEmpty { try handle.write(contentsOf: buffer) }
         } onCancel: {
-            task.cancel()
+            policy.cancel()
         }
     }
 
@@ -76,8 +77,29 @@ enum OpenRouterAudioDownload {
     }
 }
 
+/// Owns cancellation from task creation, not just after response headers arrive.
 /// Audio payloads and bearer keys must not be forwarded through redirects.
-final class OpenRouterAudioRedirectPolicy: NSObject, URLSessionDataDelegate {
+final class OpenRouterAudioRedirectPolicy: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private let lock = NSLock()
+    private weak var task: URLSessionTask?
+    private var isCancelled = false
+
+    func urlSession(_ session: URLSession, didCreateTask task: URLSessionTask) {
+        let cancelled = lock.withLock {
+            self.task = task
+            return isCancelled
+        }
+        if cancelled { task.cancel() }
+    }
+
+    func cancel() {
+        let pending = lock.withLock {
+            isCancelled = true
+            return task
+        }
+        pending?.cancel()
+    }
+
     func urlSession(
         _ session: URLSession,
         task: URLSessionTask,

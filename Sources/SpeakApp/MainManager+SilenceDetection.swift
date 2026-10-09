@@ -48,7 +48,11 @@ extension MainManager {
   @objc private func audioLevelTimerFired() {
     // This runs on main thread via RunLoop.main. No Swift concurrency checks.
     guard state == .recording else { return }
-    let level = audioFileManager.getCurrentAudioLevel()
+    let reading = audioFileManager.getCurrentMeterReading()
+    let level = reading?.level ?? 0
+    if audioArrivalGate != nil {
+      observeAudioArrival(peakDecibels: reading?.peakDecibels)
+    }
     // Only push UI updates when the HUD is likely visible
     if !isHUDOccluded {
       hudManager.updateAudioLevel(level)
@@ -107,6 +111,7 @@ extension MainManager {
     audioLevelTimer?.invalidate()
     audioLevelTimer = nil
     silenceStartTime = nil
+    endAwaitingAudio()
     isHUDOccluded = false
     if let observer = occlusionObserver {
       NotificationCenter.default.removeObserver(observer)

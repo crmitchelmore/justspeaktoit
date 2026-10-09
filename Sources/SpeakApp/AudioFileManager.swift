@@ -142,9 +142,16 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
   /// Call this periodically (~30fps) to get updated levels.
   /// Note: nonisolated because it only reads from AVAudioRecorder which is thread-safe for metering
   nonisolated func getCurrentAudioLevel() -> Float {
+    getCurrentMeterReading()?.level ?? 0
+  }
+
+  /// One meter update: the normalized level (0.0 to 1.0) and the peak input
+  /// power in dBFS since the previous update (digital silence reads -160 dB).
+  /// Nil when no recorder is running.
+  nonisolated func getCurrentMeterReading() -> (level: Float, peakDecibels: Float)? {
     // AVAudioRecorder metering methods are documented as thread-safe
     // We access recorder directly without actor isolation for 30fps polling performance
-    guard let recorder = self.recorder, recorder.isRecording else { return 0 }
+    guard let recorder = self.recorder, recorder.isRecording else { return nil }
     recorder.updateMeters()
 
     let averagePower = recorder.averagePower(forChannel: 0)
@@ -156,7 +163,8 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
     // Convert decibels to normalized linear scale (0.0 to 1.0)
     // -60 dB = silence threshold, 0 dB = maximum
     let minDb: Float = -60
-    return max(0, min(1, (combinedPower - minDb) / (-minDb)))
+    let level = max(0, min(1, (combinedPower - minDb) / (-minDb)))
+    return (level, peakPower)
   }
 
   // MARK: - Pre-warming (issue #663)

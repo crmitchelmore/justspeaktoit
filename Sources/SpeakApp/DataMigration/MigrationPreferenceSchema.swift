@@ -38,7 +38,8 @@ enum MigrationPreferenceSchema {
         "ttsAutoPlay",
         "ttsSaveToDirectory",
         "ttsUseSSML",
-        "voiceCommandsEnabled"
+        "voiceCommandsEnabled",
+        "warmMicrophoneOnKeyPress"
     ]
     static let numbers: Set<String> = [
         "autoCorrectionsPromotionThreshold",

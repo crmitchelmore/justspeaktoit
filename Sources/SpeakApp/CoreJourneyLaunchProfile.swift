@@ -86,7 +86,7 @@ final class CoreJourneyLaunchProfile {
         // launch arguments do not satisfy AppSettings' NSNumber/Bool casts.
         for key in [
             "audioPreWarmingEnabled", "connectionPreWarmingEnabled", "handsFreeDictationEnabled",
-            "enableSendToMac", "enableAutomationServer", "analyticsEnabled"
+            "enableSendToMac", "enableAutomationServer", "analyticsEnabled", "warmMicrophoneOnKeyPress"
         ] {
             defaults.set(false, forKey: key)
         }

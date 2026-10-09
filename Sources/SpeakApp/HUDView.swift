@@ -83,7 +83,9 @@ struct HUDOverlay: View {
           .accessibilityValue("\(Int(manager.audioLevel * 100)) percent")
           .accessibilityAddTraits(.updatesFrequently)
       }
-      if manager.snapshot.phase.isTerminal == false, manager.snapshot.phase != .armed {
+      if manager.isAwaitingAudio {
+        HUDAwaitingAudioIndicator()
+      } else if manager.snapshot.phase.isTerminal == false, manager.snapshot.phase != .armed {
         // Only this label redraws on the clock's schedule: it reads the phase's
         // start instant off the manager and ticks itself, so the rest of the HUD
         // is invalidated by phase transitions alone.
@@ -482,6 +484,16 @@ struct HUDElapsedClock<Content: View>: View {
     } else {
       content(0)
     }
+  }
+}
+
+/// Stands in for the elapsed clock while the microphone is still coming up:
+/// showing "0s" would read as a clock that has started.
+struct HUDAwaitingAudioIndicator: View {
+  var body: some View {
+    ProgressView()
+      .controlSize(.mini)
+      .accessibilityLabel("Getting ready")
   }
 }
 // swiftlint:enable type_body_length file_length

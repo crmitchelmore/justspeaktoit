@@ -87,6 +87,23 @@ extension SettingsView {
             Slider(value: settingsBinding(\AppSettings.doubleTapWindow), in: 0.2...1.0, step: 0.05)
             .speakTooltip("Set the gap allowed between taps when you double-press to trigger Speak.")
           }
+
+          VStack(alignment: .leading, spacing: 6) {
+            settingsToggle(
+              "Open the microphone on key press",
+              isOn: settingsBinding(\AppSettings.warmMicrophoneOnKeyPress),
+              tint: .orange
+            )
+            Text(
+              "Starts the microphone as soon as the key goes down, so recording is ready when the hold "
+                + "is recognised. A tap that doesn't start a recording briefly turns on the microphone "
+                + "indicator, and AirPods may switch to call mode for a moment. Nothing is recorded or sent."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+          }
+          .speakTooltip("Hides microphone and Bluetooth start-up delay inside the key press.")
         }
       }
       .speakTooltip("Fine-tune how long you hold or double-tap the shortcut before Speak responds.")

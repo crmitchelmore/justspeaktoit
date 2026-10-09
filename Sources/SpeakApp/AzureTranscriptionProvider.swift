@@ -36,7 +36,8 @@ struct AzureTranscriptionProvider: TranscriptionProvider {
                     return .failure(message: "The local proxy is unavailable or does not support batch transcription.")
                 }
                 return .success(
-                    message: "Local proxy connected. Azure sign-in and model access are checked when recording."
+                    message: "Local proxy connected for transcription only. "
+                        + "Azure sign-in and model access are checked when recording."
                 )
             }
             _ = try await AzureSpeechVoiceAPI(session: session).listVoices(credentials: key)

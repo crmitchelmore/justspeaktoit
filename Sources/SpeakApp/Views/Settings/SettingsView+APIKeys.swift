@@ -292,7 +292,9 @@ extension SettingsView {
     let descriptionText: String = {
       switch provider {
       case .azure:
-        return "For Azure transcription and voice output, enter your key and region as key:region."
+        return "For direct Azure transcription and voice output, enter key:region. "
+          + "For local-proxy transcription, set the resource endpoint above and enter local-proxy/ "
+          + "followed by the proxy token. Proxy credentials do not enable voice output."
       case .soniox:
         return "Stored securely in your macOS Keychain. Used for Soniox transcription and for "
           + "Soniox TTS v2 voice output in 60+ languages."
@@ -385,9 +387,15 @@ extension SettingsView {
       // has a transcription card on the same Keychain item, and that card
       // owns the account balance.
       presentsAccountBalance: provider.sharesTranscriptionCredential,
-      tooltip: "Manage your \(provider.displayName) API key for text-to-speech synthesis.",
+      tooltip: provider == .azure
+        ? "Manage your Azure Speech credential. Local proxy credentials support transcription only."
+        : provider.sharesTranscriptionCredential
+          ? "Manage your \(provider.displayName) credential for transcription and voice output."
+          : "Manage your \(provider.displayName) API key for text-to-speech synthesis.",
       saveButtonTitle: isStored ? "Replace Key" : "Save Key",
-      saveTooltip: "Securely store your \(provider.displayName) key for voice synthesis.",
+      saveTooltip: provider.sharesTranscriptionCredential
+        ? "Securely store the shared \(provider.displayName) credential."
+        : "Securely store your \(provider.displayName) key for voice synthesis.",
       validateButtonTitle: "Check Validity",
       validateTooltip: "Confirm that your \(provider.displayName) key is still valid.",
       removeButtonTitle: "Remove Key",
@@ -958,7 +966,7 @@ extension SettingsView {
       let validation = await client.validateAPIKey(value)
 
       switch validation.outcome {
-      case .success:
+      case .success(let message):
         do {
           try await environment.secureStorage.storeSecret(
             value,
@@ -969,7 +977,7 @@ extension SettingsView {
           )
 
           let result = validation.updatingOutcome(
-            .success(message: "API key saved and validated successfully")
+            .success(message: "API key saved. \(message)")
           )
 
           await MainActor.run {

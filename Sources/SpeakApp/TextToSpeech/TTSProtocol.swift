@@ -26,7 +26,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     case .elevenlabs: return "ElevenLabs"
     case .openai: return "OpenAI"
     case .openrouter: return "OpenRouter"
-    case .azure: return "Azure Cognitive Services"
+    case .azure: return "Azure Speech"
     case .deepgram: return "Deepgram"
     case .soniox: return "Soniox"
     case .cartesia: return "Cartesia Sonic"

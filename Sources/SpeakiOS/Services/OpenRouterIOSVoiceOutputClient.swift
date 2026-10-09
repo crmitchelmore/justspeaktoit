@@ -33,14 +33,14 @@ public final class OpenRouterIOSVoiceOutputClient: ObservableObject {
         defer {
             if operationID == identifier { stop() }
         }
+        let client = OpenRouterAudioClient(apiKeyProvider: { apiKey }, session: session)
+        let task = Task {
+            try await client.synthesize(
+                text: text, model: selection.modelID, voice: selection.voice
+            )
+        }
+        synthesisTask = task
         try await withTaskCancellationHandler {
-            let client = OpenRouterAudioClient(apiKeyProvider: { apiKey }, session: session)
-            let task = Task {
-                try await client.synthesize(
-                    text: text, model: selection.modelID, voice: selection.voice
-                )
-            }
-            synthesisTask = task
             let result = try await task.value
             defer { try? FileManager.default.removeItem(at: result.audioURL) }
             try Task.checkCancellation()
@@ -48,10 +48,8 @@ public final class OpenRouterIOSVoiceOutputClient: ObservableObject {
             synthesisTask = nil
             try await playAudio(at: result.audioURL, operation: identifier, speed: speed)
         } onCancel: {
-            Task { @MainActor [weak self] in
-                guard self?.operationID == identifier else { return }
-                self?.stop()
-            }
+            // Cancel this run's network work without waiting for a UI actor hop.
+            task.cancel()
         }
     }
 

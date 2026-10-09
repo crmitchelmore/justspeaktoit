@@ -169,7 +169,11 @@ limit, 256 MiB upload limit and 64 MiB download limit; four concurrent HTTP/live
 connections share the proxy's admission limit. A failed upgraded tunnel closes
 with WebSocket error 1011 rather than returning an HTTP-shaped success.
 
-**Builds containing the local-proxy changes can use it for batch and live transcription:**
+**The following in-app setup is macOS-only and requires a build containing both
+loopback endpoint support and proxy-aware credential validation.** iOS still
+validates its Azure credential through the regional TTS API and does not support
+this proxy-saving flow. An iOS loopback address also refers to the iOS device,
+not a proxy running on a Mac.
 
 1. Set **Azure resource endpoint** to `http://127.0.0.1:8765`.
 2. In **API Keys → Azure Speech API Key**, save `local-proxy/` followed by the value

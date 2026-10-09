@@ -387,9 +387,11 @@ extension SettingsView {
       // has a transcription card on the same Keychain item, and that card
       // owns the account balance.
       presentsAccountBalance: provider.sharesTranscriptionCredential,
-      tooltip: provider.sharesTranscriptionCredential
-        ? "Manage your \(provider.displayName) credential for transcription and voice output."
-        : "Manage your \(provider.displayName) API key for text-to-speech synthesis.",
+      tooltip: provider == .azure
+        ? "Manage your Azure Speech credential. Local proxy credentials support transcription only."
+        : provider.sharesTranscriptionCredential
+          ? "Manage your \(provider.displayName) credential for transcription and voice output."
+          : "Manage your \(provider.displayName) API key for text-to-speech synthesis.",
       saveButtonTitle: isStored ? "Replace Key" : "Save Key",
       saveTooltip: provider.sharesTranscriptionCredential
         ? "Securely store the shared \(provider.displayName) credential."

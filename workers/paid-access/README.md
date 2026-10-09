@@ -50,14 +50,14 @@ workers/paid-access/
 │   │   └── live-session.ts      `LiveSessionDurableObject` — live WebSocket proxy, alarm-bounded
 │   ├── providers/index.ts       Upstream proxies; receive a credential and nothing else
 │   └── routes/                  auth.ts, billing.ts, paid.ts, webhooks.ts
-└── test/                        Vitest on `@cloudflare/vitest-pool-workers`
+└── test/                        Vitest on `@cloudflare/vitest-plugin`
 ```
 
 ## Local development
 
 ```bash
 cd workers/paid-access
-npm install
+npm ci                      # uses the CFS proxy configured in .npmrc
 npm run migrations:local     # wrangler d1 migrations apply paid-access --local
 npm run dev                  # wrangler dev
 ```
@@ -80,9 +80,15 @@ npm run lint      # eslint src test
 
 Tests run inside the Workers runtime and apply the real migrations to an isolated D1 instance before each suite, so constraint and trigger behaviour is under test rather than a hand-written fixture schema. Test bindings live in `vitest.config.ts`; the placeholder secrets there are obviously fake and must stay that way.
 
-Keep Vitest on 3.2.x and `@cloudflare/vitest-pool-workers` on 0.12.x together.
-Pool 0.13+ requires a separate test-harness migration: it removes `defineWorkersConfig`,
-`singleWorker`, per-test storage isolation and `fetchMock`.
+Keep Vitest on 4.1.x with `@cloudflare/vitest-plugin` 1.0.x (the supported successor
+to the deprecated `@cloudflare/vitest-pool-workers`). Vitest 5 is not compatible
+with this plugin's peer requirements. The harness uses `cloudflareTest`, runs
+files serially, explicitly resets D1 and Durable Object storage between tests,
+and stubs upstream fetches with one-shot responses. Unmatched, repeated and unused
+upstream responses fail tests; no real provider requests are allowed.
+The test runtime enables `unhandled_rejection_after_microtask_checkpoint` so
+already-caught async rejections are not misreported under the older deployment
+compatibility date. Genuine unhandled rejections still fail the suite.
 
 ## Endpoints
 

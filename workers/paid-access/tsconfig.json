@@ -4,7 +4,7 @@
     "lib": ["ES2022"],
     "module": "ES2022",
     "moduleResolution": "bundler",
-    "types": ["node", "@cloudflare/workers-types/experimental", "@cloudflare/vitest-pool-workers"],
+    "types": ["node", "@cloudflare/workers-types/experimental", "@cloudflare/vitest-plugin/types"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,

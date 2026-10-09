@@ -1,17 +1,11 @@
-import { env, fetchMock, SELF } from 'cloudflare:test';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { env, SELF } from 'cloudflare:test';
+import { describe, expect, it } from 'vitest';
 import { Repository } from '../src/data/repository.js';
 import { issueAccessToken } from '../src/auth/session.js';
+import { mockOpenRouterResponse } from './upstream.js';
 
 const SIGNING_KEY = 'test-session-signing-key-that-is-long-enough';
 const IDEMPOTENCY_KEY = 'client-request-key-0000000001';
-
-beforeAll(() => {
-  fetchMock.activate();
-  fetchMock.disableNetConnect();
-});
-
-afterEach(() => fetchMock.assertNoPendingInterceptors());
 
 async function seedEntitledUser(status = 'active'): Promise<string> {
   const userId = crypto.randomUUID();
@@ -70,13 +64,10 @@ async function tokenFor(userId: string): Promise<string> {
 }
 
 function mockOpenRouterCompletion(text: string): void {
-  fetchMock
-    .get('https://openrouter.ai')
-    .intercept({ path: '/api/v1/chat/completions', method: 'POST' })
-    .reply(200, {
-      choices: [{ message: { content: text } }],
-      usage: { prompt_tokens: 40, completion_tokens: 20 },
-    });
+  mockOpenRouterResponse({
+    choices: [{ message: { content: text } }],
+    usage: { prompt_tokens: 40, completion_tokens: 20 },
+  });
 }
 
 async function postProcess(
@@ -492,10 +483,7 @@ describe('paid routing usage accounting', () => {
 
   it('retains an unmeasured allowance hold when the provider outcome is uncertain', async () => {
     const userId = await seedEntitledUser();
-    fetchMock
-      .get('https://openrouter.ai')
-      .intercept({ path: '/api/v1/chat/completions', method: 'POST' })
-      .reply(500, 'upstream exploded');
+    mockOpenRouterResponse('upstream exploded', 500);
 
     const response = await postProcess(await tokenFor(userId), {
       operation: 'post_processing',
@@ -545,10 +533,10 @@ describe('paid routing usage accounting', () => {
 describe('post-processing spending bounds', () => {
   it('caps upstream output and keeps reported usage above the former estimate', async () => {
     const userId = await seedEntitledUser();
-    fetchMock.get('https://openrouter.ai').intercept({ path: '/api/v1/chat/completions', method: 'POST',
-      body: (body) => JSON.parse(body as string).max_tokens === 4096,
-    }).reply(200, { choices: [{ message: { content: 'Cleaned.' } }],
-      usage: { prompt_tokens: 1500, completion_tokens: 2500 } });
+    mockOpenRouterResponse({ choices: [{ message: { content: 'Cleaned.' } }],
+      usage: { prompt_tokens: 1500, completion_tokens: 2500 } }, 200, async (request) => {
+      expect(await request.json()).toMatchObject({ max_tokens: 4096 });
+    });
     const response = await postProcess(await tokenFor(userId), { operation: 'post_processing', text: 'hello' });
     expect(response.status).toBe(200);
     const row = await env.DB.prepare('SELECT units FROM usage_ledger WHERE user_id = ?1')
@@ -572,7 +560,7 @@ describe('metering boundary regressions', () => {
     const view = new DataView(audio.buffer);
     if (bits === 16) view.setUint16(offset, value, true);
     else view.setUint32(offset, value, true);
-    // No upstream interceptor: any network dispatch is refused by fetchMock.
+    // No upstream response: any network dispatch is refused by the fetch mock.
     expect((await transcribeBatch(await tokenFor(userId), audio)).status).toBe(400);
     for (const table of ['request_claims', 'usage_ledger']) {
       const row = await env.DB.prepare(`SELECT COUNT(*) AS total FROM ${table} WHERE user_id = ?1`)
@@ -600,13 +588,11 @@ describe('metering boundary regressions', () => {
       const userId = await seedEntitledUser();
       const token = await tokenFor(userId);
       let calls = 0;
-      fetchMock.get('https://openrouter.ai')
-        .intercept({ path: '/api/v1/chat/completions', method: 'POST' })
-        .reply(() => {
-          calls += 1;
-          return { statusCode: 200, data: JSON.stringify({ choices: [{ message: { content: 'Synthetic.' } }],
-            usage: { prompt_tokens: 40, completion_tokens: 20 } }) };
-        });
+      mockOpenRouterResponse(() => {
+        calls += 1;
+        return { choices: [{ message: { content: 'Synthetic.' } }],
+          usage: { prompt_tokens: 40, completion_tokens: 20 } };
+      });
       expect((await postProcess(token, { operation: 'post_processing', text: 'same' })).status).toBe(200);
       if (condition === 'completion-ack-missing') {
         // The permanent metering row survived, but the operational claim did not.

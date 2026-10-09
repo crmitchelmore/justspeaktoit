@@ -217,6 +217,8 @@ extensions, Live Activity result actions and background completions.
 OpenRouter speech downloads use the shared `OpenRouterAudioClient` and own their transport from task creation.
 Stopping synthesis cancels even a request still waiting for response headers; partial response files are removed
 before cancellation completes, and playback never starts for a cancelled operation.
+Caller cancellation directly cancels that run's synthesis task without a MainActor hop; actor-isolated playback
+cleanup follows when the caller unwinds, so busy UI work cannot keep a cancelled HTTP request alive.
 
 [IOSTranscriptionSession.swift](../Sources/SpeakiOS/Services/IOSTranscriptionSession.swift) resolves four backend kinds:
 

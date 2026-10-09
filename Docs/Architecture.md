@@ -175,6 +175,16 @@ delivery, HUD transitions and history finalisation. `SmartTextOutput` chooses ac
 fallback. Cancellation is scoped to the active session/run, and live-controller teardown waits for provider startup
 where necessary so a late start cannot capture for a replacement run.
 
+When microphone warm-up on key press is enabled, `KeyPressPrimerRuntime` resolves the frontmost app's
+profile-adjusted route without changing settings. Eligible presses start a stopped standby input engine; unrelated
+press sequences close the previous capture rather than inheriting its audio. Standby refills are speculative and
+never delay foreground recording; a cancelled build cannot restock after capture starts. Speech Analyzer retains
+the primer's tap through setup and redirects its serialized consumer only after replaying the bounded pre-roll,
+so buffered and newly captured speech stay ordered without a tapless hand-over.
+If hardware startup changed the primer's installed tap format, the analyzer retires its stale pre-roll and replaces
+the tap using the current input format. Idle standby refill is skipped when the selected preferred microphone requires
+a default-device switch, rather than building an engine the next press will discard.
+
 [SwitchingLiveTranscriber.swift](../Sources/SpeakApp/SwitchingLiveTranscriber.swift) is deliberately mixed today:
 
 - dedicated macOS controllers handle Deepgram, Modulate, AssemblyAI, ElevenLabs, Soniox, Cartesia, Gladia and OpenAI
@@ -203,6 +213,10 @@ the `@MainActor` singleton [TranscriptionRecordingService](../Sources/SpeakiOS/S
 with injectable seams for tests. `ForegroundRecordingOwnership` prevents a foreground capture and an App Intent from
 claiming the process microphone concurrently. `SharedTranscriptionState` publishes bounded App Group state for widgets,
 extensions, Live Activity result actions and background completions.
+
+OpenRouter speech downloads use the shared `OpenRouterAudioClient` and own their transport from task creation.
+Stopping synthesis cancels even a request still waiting for response headers; partial response files are removed
+before cancellation completes, and playback never starts for a cancelled operation.
 
 [IOSTranscriptionSession.swift](../Sources/SpeakiOS/Services/IOSTranscriptionSession.swift) resolves four backend kinds:
 

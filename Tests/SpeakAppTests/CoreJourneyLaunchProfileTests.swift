@@ -35,12 +35,13 @@ final class CoreJourneyLaunchProfileTests: XCTestCase {
 
         for key in [
             "audioPreWarmingEnabled", "connectionPreWarmingEnabled", "handsFreeDictationEnabled",
-            "enableSendToMac", "enableAutomationServer", "analyticsEnabled"
+            "enableSendToMac", "enableAutomationServer", "analyticsEnabled", "warmMicrophoneOnKeyPress"
         ] {
             XCTAssertEqual(profile.defaults.object(forKey: key) as? Bool, false, key)
         }
         XCTAssertFalse(profile.probesHotKey)
         XCTAssertFalse(profile.settings.audioPreWarmingEnabled)
+        XCTAssertFalse(profile.settings.warmMicrophoneOnKeyPress)
         XCTAssertFalse(profile.settings.connectionPreWarmingEnabled)
         XCTAssertFalse(profile.settings.handsFreeDictationEnabled)
         XCTAssertFalse(profile.settings.enableSendToMac)

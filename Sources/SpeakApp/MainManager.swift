@@ -101,9 +101,13 @@ final class MainManager: ObservableObject {
         profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
         captureWarmer?.sessionDidEnd()
         captureOwnership.release(.dictation)
+        keyPressPrimer.sessionDidEnd()
       }
     }
   }
+
+  /// Opens the microphone on hotkey key-down (see `KeyPressPrimerRuntime`).
+  private(set) lazy var keyPressPrimer = KeyPressPrimerRuntime(owner: self)
 
   /// Hands-free ("armed") dictation. Created eagerly but inert until the user
   /// arms it, which only the hands-free setting allows.
@@ -135,6 +139,10 @@ final class MainManager: ObservableObject {
   /// Tracks whether the HUD window is visible to skip unnecessary UI updates
   var isHUDOccluded: Bool = false
   var occlusionObserver: NSObjectProtocol?
+  /// Holds the HUD clock and start cue until real audio arrives (see
+  /// `MainManager+AudioArrival`).
+  var audioArrivalGate: RecordingAudioArrivalGate?
+  weak var audioArrivalSession: ActiveSession?
 
   struct RetryData {
     let transcriptionResult: TranscriptionResult
@@ -275,6 +283,7 @@ final class MainManager: ObservableObject {
 
     recordingSoundPlayer.preload()
     configureHotKeys()
+    keyPressPrimer.start()
     setupCaptureHealthBindings()
 
     Publishers.CombineLatest(
@@ -433,10 +442,15 @@ final class MainManager: ObservableObject {
   }
 
   /// Hands-free replaces press-to-talk with press-to-arm.
-  private func handleHoldStartGesture(triggerTiming: SessionTriggerTiming) async {
-    guard appSettings.hotKeyActivationStyle.allowsHold else { return }
-    if await handleHandsFreeHotKey() { return }
-    await startSession(trigger: .hold, triggerTiming: triggerTiming)
+  private func handleHoldStartGesture(
+    triggerTiming: SessionTriggerTiming,
+    primedInput: PrimedLiveInputReservation?
+  ) async {
+    guard appSettings.hotKeyActivationStyle.allowsHold, !(await handleHandsFreeHotKey()) else {
+      keyPressPrimer.release(primedInput)
+      return
+    }
+    await startSession(trigger: .hold, triggerTiming: triggerTiming, primedInput: primedInput)
   }
 
   /// The arming press already consumed the gesture, so releasing the key must
@@ -456,19 +470,28 @@ final class MainManager: ObservableObject {
 
   /// Double-tap toggles: it arms hands-free dictation when that mode is on,
   /// otherwise it starts a session or ends the one it started.
-  private func handleDoubleTapGesture(triggerTiming: SessionTriggerTiming) async {
-    guard appSettings.hotKeyActivationStyle.allowsDoubleTap else { return }
+  private func handleDoubleTapGesture(
+    triggerTiming: SessionTriggerTiming,
+    primedInput: PrimedLiveInputReservation?
+  ) async {
     let now = ProcessInfo.processInfo.systemUptime
-    guard now - lastDoubleTapEventUptime >= 0.25 else { return }
+    guard appSettings.hotKeyActivationStyle.allowsDoubleTap, now - lastDoubleTapEventUptime >= 0.25 else {
+      keyPressPrimer.release(primedInput)
+      return
+    }
     lastDoubleTapEventUptime = now
 
-    if await handleHandsFreeHotKey() { return }
+    if await handleHandsFreeHotKey() {
+      keyPressPrimer.release(primedInput)
+      return
+    }
 
     if let session = activeSession {
+      keyPressPrimer.release(primedInput)
       guard session.gesture == .doubleTap else { return }
       await endSession(trigger: .doubleTap)
     } else {
-      await startSession(trigger: .doubleTap, triggerTiming: triggerTiming)
+      await startSession(trigger: .doubleTap, triggerTiming: triggerTiming, primedInput: primedInput)
     }
   }
   // swiftlint:disable:next function_body_length
@@ -480,9 +503,14 @@ final class MainManager: ObservableObject {
       hotKeyManager.register(gesture: .holdStart) { [weak self] in
         // Stamped here, before the actor hop, so the latency dashboard measures
         // from the key press rather than from where `startSession` gets to run.
-        let triggerTiming = SessionTriggerTiming.recognisedHotKey()
+        // The key-down primer's microphone is claimed here too, synchronously,
+        // so its release timers cannot close it while the session starts.
+        let (triggerTiming, primedInput) = MainActor.assumeIsolated {
+          self?.recognisedSessionGesture(.holdStart) ?? (.recognisedHotKey(), nil)
+        }
         Task { @MainActor in
-          await self?.handleHoldStartGesture(triggerTiming: triggerTiming)
+          guard let self else { return }
+          await self.handleHoldStartGesture(triggerTiming: triggerTiming, primedInput: primedInput)
         }
       }
     )
@@ -497,9 +525,12 @@ final class MainManager: ObservableObject {
 
     hotKeyTokens.append(
       hotKeyManager.register(gesture: .doubleTap) { [weak self] in
-        let triggerTiming = SessionTriggerTiming.recognisedHotKey()
+        let (triggerTiming, primedInput) = MainActor.assumeIsolated {
+          self?.recognisedSessionGesture(.doubleTap) ?? (.recognisedHotKey(), nil)
+        }
         Task { @MainActor in
-          await self?.handleDoubleTapGesture(triggerTiming: triggerTiming)
+          guard let self else { return }
+          await self.handleDoubleTapGesture(triggerTiming: triggerTiming, primedInput: primedInput)
         }
       }
     )
@@ -591,11 +622,15 @@ final class MainManager: ObservableObject {
   func startSession(
     trigger: SessionTriggerSource,
     preRollBuffers: [AVAudioPCMBuffer] = [],
-    triggerTiming: SessionTriggerTiming = .nonHotKey()
+    triggerTiming: SessionTriggerTiming = .nonHotKey(),
+    primedInput: PrimedLiveInputReservation? = nil
   ) async -> HandsFreeCaptureStartOutcome {
+    // Every exit closes a primed microphone this start did not take over.
+    defer { keyPressPrimer.release(primedInput) }
     guard !migrationInProgress, !captureStarting, activeSession == nil else { return .rejected(.captureFailed) }
     captureStarting = true
     defer { captureStarting = false }
+    keyPressPrimer.sessionWillBegin()
     captureWarmer?.sessionWillBegin()
 
     // Per-app dictation profile: resolve the frontmost app and apply its
@@ -711,7 +746,8 @@ final class MainManager: ObservableObject {
     let warmContext = captureWarmer?.claimWarmContext()
     let liveInputPreparation = LiveInputPreparation(
       deviceManager: audioInputDeviceManager,
-      engines: LiveInputEngines.shared
+      engines: LiveInputEngines.shared,
+      primed: primedInput
     )
 
     do {
@@ -721,10 +757,12 @@ final class MainManager: ObservableObject {
       // listening yet. The pre-warm path (issue #663) runs inside the same
       // step — a claimed staged recorder still has to prove it is capturing.
       let startStream: RecordingStartSequencer.Step? = isStreamingTranscriptionMode
-        ? { [transcriptionManager, preRollBuffers, trigger] in
+        ? { [transcriptionManager, preRollBuffers, trigger, primedInput] in
+          let primedCapture = await primedInput?.value
           try await transcriptionManager.startLiveTranscription(
             preRollBuffers: preRollBuffers,
-            analyzerFallbackAllowed: trigger != .handsFree
+            analyzerFallbackAllowed: trigger != .handsFree,
+            primedInput: primedCapture
           )
         }
         : nil
@@ -736,10 +774,27 @@ final class MainManager: ObservableObject {
         && transcriptionManager.liveRouteUsesLiveInputEngine
         ? { await liveInputPreparation.prepare() }
         : nil
+      if let primedInput, prepareStream == nil {
+        // This route builds its own input node (or none); it must not do so
+        // beside the primer's open microphone.
+        await keyPressPrimer.closeBeforeStart(primedInput)
+      }
+      // A hands-free capture always moves the HUD to the recording pane, even
+      // when the user hides the HUD for their own sessions: the armed pane
+      // otherwise claims the app only listens while it in fact records.
+      // Showing that the microphone captures is a privacy duty, not a taste.
+      let showsHUD = appSettings.showHUDDuringSessions || trigger == .handsFree
+      if showsHUD {
+        // Up straight away as "Getting ready"; its clock starts only when the
+        // microphone delivers real audio, never while words can't be heard.
+        permissionsManager.refresh(.microphone)
+        hudManager.updateCaptureHealth(buildCaptureHealthSnapshot())
+        hudManager.beginRecording(profileName: profileApplier.activeProfileName, awaitingAudio: true)
+      }
       let sequencer = RecordingStartSequencer(
         isSessionCurrent: { [weak self] in self?.activeSession === session },
         prepareStream: prepareStream,
-        discardPreparedStream: { await liveInputPreparation.finish() },
+        discardPreparedStream: { await liveInputPreparation.finish(startFailed: true) },
         startCapture: { [weak self] in
           guard let self else { return }
           let recording = try await self.audioFileManager.startRecording(
@@ -761,36 +816,32 @@ final class MainManager: ObservableObject {
               description: "Recording started via \(gesture.rawValue)"
             )
           )
-          // A hands-free capture always moves the HUD to the recording pane,
-          // even when the user hides the HUD for their own sessions: the armed
-          // pane otherwise claims the app only listens while it in fact
-          // records. Showing that the microphone captures is a privacy duty,
-          // not a taste.
-          if self.appSettings.showHUDDuringSessions || trigger == .handsFree {
-            self.permissionsManager.refresh(.microphone)
+          if showsHUD {
             self.hudManager.updateCaptureHealth(self.buildCaptureHealthSnapshot())
-            self.hudManager.beginRecording(profileName: self.profileApplier.activeProfileName)
           }
+          self.beginAwaitingAudio(for: session)
           self.startAudioLevelMonitoring()
         },
         discardCapture: { [weak self] in await self?.discardStartedCapture() },
         startStream: startStream,
         discardStream: { [weak self] in self?.transcriptionManager.cancelLiveTranscription() },
-        playCue: { [weak self] in self?.playRecordingStartCue(for: session) }
+        playCue: { [weak self] in self?.requestRecordingStartCue(for: session) }
       )
       let timeline = try await sequencer.run()
       await liveInputPreparation.finish()
       recordStartTimeline(for: session, timeline: timeline)
+      await recordKeyDownLatency(for: session, primedInput: primedInput)
       return .started
     } catch is RecordingStartAbort {
-      await liveInputPreparation.finish()
+      await liveInputPreparation.finish(startFailed: true)
+      hudManager.cancelAwaitingAudio()
       // Not a failure: the session ended while startup was suspended, and the
       // sequencer has already torn down whatever it brought up. Touching the
       // shared failure path here would clobber the session that replaced it.
       logger.info("Recording start abandoned: the session ended before capture was ready")
       return .rejected(.captureFailed)
     } catch {
-      await liveInputPreparation.finish()
+      await liveInputPreparation.finish(startFailed: true)
       session.errors.append(
         HistoryError(
           phase: .recording,
@@ -806,7 +857,7 @@ final class MainManager: ObservableObject {
   /// Plays the "recording started" cue, unless the user already stopped (or a
   /// newer session replaced this one) while capture was coming up — a late cue
   /// after the stop cue would be worse than no cue at all.
-  private func playRecordingStartCue(for session: ActiveSession) {
+  func playRecordingStartCue(for session: ActiveSession) {
     guard self.activeSession === session, self.state == .recording else {
       self.logger.info("Skipping start cue: session ended before capture was ready")
       return
@@ -828,6 +879,9 @@ final class MainManager: ObservableObject {
     if let coldStartMs = session.captureStartMilliseconds {
       let path = wasWarm ? "pre-warmed" : "cold"
       self.logger.info("Latency: capture started \(coldStartMs)ms after trigger (\(path, privacy: .public))")
+    }
+    if let keyDownMs = session.keyDownToCaptureMilliseconds {
+      self.logger.info("Latency: capture started \(keyDownMs)ms after key-down")
     }
   }
 

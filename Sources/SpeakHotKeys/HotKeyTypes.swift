@@ -122,6 +122,39 @@ public struct HotKeyListenerToken: Hashable, Sendable {
   let gesture: HotKeyGesture
 }
 
+/// A raw edge of the monitored key, delivered before any gesture is known.
+///
+/// `pressed` fires on every accepted press, `released` on every accepted release and
+/// `reset` when the detector abandons its state without a release (teardown or
+/// a hotkey change). Gestures are still reported separately and unchanged.
+public enum HotKeyPressPhase: String, Sendable {
+  case pressed
+  case released
+  case reset
+}
+
+/// A raw press edge with its monotonic time.
+public struct HotKeyPressEvent: Sendable, Equatable {
+  public let phase: HotKeyPressPhase
+  public let uptime: TimeInterval
+  public let source: String
+
+  public init(
+    phase: HotKeyPressPhase,
+    uptime: TimeInterval = ProcessInfo.processInfo.systemUptime,
+    source: String = ""
+  ) {
+    self.phase = phase
+    self.uptime = uptime
+    self.source = source
+  }
+}
+
+/// Opaque token returned from press-edge registration; used to unregister.
+public struct HotKeyPressListenerToken: Hashable, Sendable {
+  let id: UUID
+}
+
 /// Timing configuration for gesture detection.
 public struct HotKeyConfiguration: Sendable {
   public var holdThreshold: TimeInterval

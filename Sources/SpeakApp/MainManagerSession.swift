@@ -37,16 +37,29 @@ enum SessionTriggerSource: Equatable {
 struct SessionTriggerTiming: Equatable {
   let occurredAt: Date
   let hotKeyUptime: TimeInterval?
+  /// Key-down of the press that became the gesture (a double tap's first
+  /// press). Reported alongside, never instead of, the recognition-based
+  /// `hotKeyUptime` cohort.
+  var keyDownUptime: TimeInterval?
 
   static func recognisedHotKey(
     occurredAt: Date = Date(),
-    uptime: TimeInterval = ProcessInfo.processInfo.systemUptime
+    uptime: TimeInterval = ProcessInfo.processInfo.systemUptime,
+    keyDownUptime: TimeInterval? = nil
   ) -> SessionTriggerTiming {
-    SessionTriggerTiming(occurredAt: occurredAt, hotKeyUptime: uptime)
+    SessionTriggerTiming(occurredAt: occurredAt, hotKeyUptime: uptime, keyDownUptime: keyDownUptime)
   }
 
   static func nonHotKey(occurredAt: Date = Date()) -> SessionTriggerTiming {
     SessionTriggerTiming(occurredAt: occurredAt, hotKeyUptime: nil)
+  }
+
+  /// Key-down → `uptime`, when the trigger was a hotkey press.
+  func keyDownMilliseconds(to uptime: TimeInterval?) -> Int? {
+    guard let start = keyDownUptime, let uptime else { return nil }
+    let interval = uptime - start
+    guard interval >= 0 else { return nil }
+    return Int((interval * 1000).rounded())
   }
 
   func milliseconds(to uptime: TimeInterval?) -> Int? {
@@ -101,6 +114,16 @@ final class ActiveSession {
 
   var captureStartMilliseconds: Int? {
     self.triggerTiming.milliseconds(to: self.captureStartedUptime)
+  }
+
+  /// Key-down → capture start; nil unless a hotkey press started the session.
+  var keyDownToCaptureMilliseconds: Int? {
+    self.triggerTiming.keyDownMilliseconds(to: self.captureStartedUptime)
+  }
+
+  /// Key-down → `uptime`; nil unless a hotkey press started the session.
+  func millisecondsSinceKeyDown(to uptime: TimeInterval) -> Int? {
+    self.triggerTiming.keyDownMilliseconds(to: uptime)
   }
 
   /// - Parameter triggerTiming: wall time for history plus a monotonic uptime

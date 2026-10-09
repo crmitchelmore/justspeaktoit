@@ -50,16 +50,23 @@ final class FluidAudioEngineCapture: FluidAudioAudioCapturing {
   func start(onBuffer: @escaping @Sendable (AVAudioPCMBuffer) -> Void) async throws {
     let audioEngine = LiveInputEngines.shared.makeEngine()
     self.audioEngine = audioEngine
-    let inputNode = audioEngine.inputNode
-    inputNode.removeTap(onBus: 0)
-    let inputFormat = inputNode.outputFormat(forBus: 0)
-    guard audioInputFormatIsUsable(inputFormat) else {
-      throw TranscriptionManagerError.noUsableAudioInput
+    do {
+      let inputNode = audioEngine.inputNode
+      inputNode.removeTap(onBus: 0)
+      let inputFormat = inputNode.outputFormat(forBus: 0)
+      guard audioInputFormatIsUsable(inputFormat) else {
+        throw TranscriptionManagerError.noUsableAudioInput
+      }
+      inputNode.installTap(onBus: 0, bufferSize: 2048, format: inputFormat) { buffer, _ in
+        onBuffer(buffer)
+      }
+      try await startAudioEngineAfterInputDeviceSettles(audioEngine)
+    } catch {
+      // The claimed engine may already be running (the key-down primer's);
+      // a failed start must not leave the microphone open behind it.
+      stop()
+      throw error
     }
-    inputNode.installTap(onBus: 0, bufferSize: 2048, format: inputFormat) { buffer, _ in
-      onBuffer(buffer)
-    }
-    try await startAudioEngineAfterInputDeviceSettles(audioEngine)
   }
 
   func stop() {

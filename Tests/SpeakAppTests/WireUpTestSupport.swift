@@ -50,7 +50,8 @@ final class WireUpTestHost {
         // app without a menu bar icon keeps EnvironmentHolder from adding one.
         let disabled: [AppSettings.DefaultsKey] = [
             .audioPreWarmingEnabled, .connectionPreWarmingEnabled, .handsFreeDictationEnabled,
-            .enableSendToMac, .enableAutomationServer, .analyticsEnabled, .showStatusBarIconInDockOnly
+            .enableSendToMac, .enableAutomationServer, .analyticsEnabled, .showStatusBarIconInDockOnly,
+            .warmMicrophoneOnKeyPress
         ]
         for key in disabled {
             defaults.set(false, forKey: key.rawValue)

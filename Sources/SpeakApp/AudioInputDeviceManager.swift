@@ -167,7 +167,7 @@ final class AudioInputDeviceManager: ObservableObject {
     let preferredUID = selectedDeviceUID ?? appSettings.preferredAudioInputUID
     guard
       let uid = preferredUID,
-      let targetDeviceID = deviceID(forUID: uid),
+      let targetDeviceID = preferredInputDeviceID,
       let currentDefaultID = currentDefaultInputDeviceID(),
       targetDeviceID != currentDefaultID
     else {
@@ -475,4 +475,11 @@ final class AudioInputDeviceManager: ObservableObject {
     let status = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &value)
     return status == noErr ? value : nil
   }
-} // swiftlint:disable:this file_length
+}
+
+extension AudioInputDeviceManager {
+  var preferredInputDeviceID: AudioDeviceID? {
+    guard let uid = selectedDeviceUID ?? appSettings.preferredAudioInputUID else { return nil }
+    return deviceID(forUID: uid)
+  } // swiftlint:disable file_length
+}

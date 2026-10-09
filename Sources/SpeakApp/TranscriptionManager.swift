@@ -190,7 +190,8 @@ final class TranscriptionManager: ObservableObject {
 
   func startLiveTranscription(
     preRollBuffers: [AVAudioPCMBuffer],
-    analyzerFallbackAllowed: Bool = true
+    analyzerFallbackAllowed: Bool = true,
+    primedInput: PrimedLiveInput? = nil
   ) async throws {
         guard !isLiveTranscribing, startupGeneration == nil else {
             throw TranscriptionManagerError.liveSessionAlreadyRunning
@@ -217,7 +218,8 @@ final class TranscriptionManager: ObservableObject {
       try Task.checkCancellation()
       try await self.liveController.start(
         preRollBuffers: preRollBuffers,
-        analyzerFallbackAllowed: analyzerFallbackAllowed
+        analyzerFallbackAllowed: analyzerFallbackAllowed,
+        primedInput: primedInput
       )
     }
     self.startupTask = startupTask
@@ -400,8 +402,19 @@ extension TranscriptionManager {
   /// Whether the live route for the current mode captures through
   /// `LiveInputEngines.shared`; record-start prepares an engine only then.
   var liveRouteUsesLiveInputEngine: Bool {
+    guard appSettings.transcriptionMode == .liveNative
+      || (appSettings.transcriptionMode == .localModel && appSettings.localTranscriptionMode == .streaming)
+    else { return false }
     guard let model = try? liveTranscriptionModelForCurrentMode() else { return false }
     return liveController.usesLiveInputEngine(for: model)
+  }
+
+  /// Read-only projection of the same per-app override applied at session start.
+  func liveRouteUsesLiveInputEngine(profiles: [DictationProfile], frontmostBundleID: String?) -> Bool {
+    let profile = ProfileResolver(profiles: profiles).profile(forBundleID: frontmostBundleID)
+    guard let override = profile?.resolvedTranscriptionOverride else { return liveRouteUsesLiveInputEngine }
+    guard override.routing == .remoteStreaming else { return false }
+    return liveController.usesLiveInputEngine(for: override.modelID)
   }
 
   private func liveTranscriptionModelForCurrentMode() throws -> String {

@@ -1,10 +1,16 @@
-import { applyD1Migrations, env } from 'cloudflare:test';
-import { beforeEach } from 'vitest';
-import type { Env } from '../src/env.js';
+import { applyD1Migrations, reset } from 'cloudflare:test';
+import type { D1Migration } from 'cloudflare:test';
+import { env } from 'cloudflare:workers';
+import { afterEach, beforeEach, vi } from 'vitest';
+import type { Env as WorkerEnv } from '../src/env.js';
+import { installUpstreamMock, verifyUpstreamMock } from './upstream.js';
 
-declare module 'cloudflare:test' {
-  interface ProvidedEnv extends Env {
-    TEST_MIGRATIONS: D1Migration[];
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace -- Workers bindings augment Cloudflare.Env.
+  namespace Cloudflare {
+    interface Env extends WorkerEnv {
+      TEST_MIGRATIONS: D1Migration[];
+    }
   }
 }
 
@@ -12,19 +18,17 @@ declare module 'cloudflare:test' {
 // migrations (rather than a hand-written fixture schema) means constraint and
 // trigger behaviour is under test too.
 beforeEach(async () => {
-  for (const table of [
-    'audit_events',
-    'entitlement_events',
-    'usage_ledger',
-    'webhook_events',
-    'billing_customers',
-    'subscription_states',
-    'entitlements',
-    'auth_sessions',
-    'users',
-  ]) {
-    await env.DB.prepare(`DROP TABLE IF EXISTS ${table}`).run();
-  }
-  await env.DB.prepare('DELETE FROM d1_migrations').run().catch(() => undefined);
+  await reset();
   await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
+  installUpstreamMock();
+});
+
+afterEach(async () => {
+  try {
+    verifyUpstreamMock();
+  } finally {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    await reset();
+  }
 });

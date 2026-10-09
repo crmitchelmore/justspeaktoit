@@ -1,5 +1,5 @@
-import { env, fetchMock, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import worker from '../src/index.js';
 import { issueAccessToken } from '../src/auth/session.js';
 import { Repository } from '../src/data/repository.js';
@@ -7,16 +7,15 @@ import { QuotaClient } from '../src/quota.js';
 import { QuotaDurableObject } from '../src/do/quota.js';
 import { pendingKey, receiptKey, type SettlementReceipt, type SettlementRequest,
   type SettlementResponse } from '../src/do/settlement.js';
+import { mockOpenRouterResponse } from './upstream.js';
 
 const KEY = 'settlement-operation-0001';
 const TEXT = 'Synthetic request, never persisted.';
 const LIMITS = { monthlyAudioSeconds: 100, monthlyTokens: 100_000, maxConcurrentSessions: 2, leaseSeconds: 60 };
 const now = (): number => Math.floor(Date.now() / 1000);
-beforeAll(() => { fetchMock.activate(); fetchMock.disableNetConnect(); });
 afterEach(async () => {
   vi.restoreAllMocks();
   await env.DB.prepare('DROP TRIGGER IF EXISTS settlement_fail_ledger').run();
-  fetchMock.assertNoPendingInterceptors();
 });
 
 async function account(): Promise<{ userId: string; token: string }> {
@@ -42,9 +41,10 @@ function request(token: string, key = KEY, version: string | null = '1'): Reques
 }
 function provider(usage: unknown = { prompt_tokens: 40, completion_tokens: 20 }): { calls: number } {
   const count = { calls: 0 };
-  fetchMock.get('https://openrouter.ai').intercept({ path: '/api/v1/chat/completions', method: 'POST' })
-    .reply(() => { count.calls += 1; return { statusCode: 200,
-      data: JSON.stringify({ choices: [{ message: { content: 'Synthetic result.' } }], usage }) }; });
+  mockOpenRouterResponse(() => {
+    count.calls += 1;
+    return { choices: [{ message: { content: 'Synthetic result.' } }], usage };
+  });
   return count;
 }
 function stub(user: string): DurableObjectStub { return env.QUOTA.get(env.QUOTA.idFromName(`user:${user}`)); }

@@ -112,7 +112,10 @@ public enum TranscriptionPricing {
         // (checked 2026-10-01). The offer ends on 31 December 2026 and no later
         // rate is published yet; like every rate here this is maintained by
         // hand, so replace it when Microsoft publishes the standard price.
-        AzureTranscriptionModels.mai2: perHour("0.10")
+        AzureTranscriptionModels.mai2: perHour("0.10"),
+        // https://microsoft.ai/news/our-first-streaming-transcription-model/
+        // Introductory audio rate checked 2026-10-12; expires at the end of 2026.
+        AzureTranscriptionModels.mai2Streaming: perHour("0.54")
     ]
 
     private static let prefixRates: [(prefix: String, rate: Decimal)] = [

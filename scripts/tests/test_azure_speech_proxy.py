@@ -44,7 +44,8 @@ class FakeTransport:
         self.content_type = content_type
         return 200, "audio/wav", b"RIFFtestWAVE"
 
-    def open_streaming(self, key):
+    def open_streaming(self, key, path=proxy.STREAMING_PATH):
+        self.streaming_path = path
         client, self.upstream_peer = socket.socketpair()
         return TLSLikeSocket(client)
 
@@ -183,30 +184,37 @@ class ProxyTests(unittest.TestCase):
         self.assertIn("az login", json.loads(data)["error"])
 
     def test_streaming_requires_its_own_header_and_real_upgrade(self):
-        self.assertEqual(self.request(proxy.STREAMING_PATH, body=None)[0], 401)
-        self.assertEqual(self.request(proxy.STREAMING_PATH, body=None, extra={
-            "api-key": self.token,
-        })[0], 400)
-        self.assertEqual(self.request(proxy.STREAMING_PATH + "&api-key=secret", body=None)[0], 404)
+        for path in proxy.STREAMING_PATHS:
+            with self.subTest(path=path):
+                self.assertEqual(self.request(path, body=None)[0], 401)
+                self.assertEqual(self.request(path, body=None, extra={"api-key": self.token})[0], 400)
+                self.assertEqual(self.request(path + "&api-key=secret", body=None)[0], 404)
+        self.assertEqual(self.request("/mai/v1/realtime?intent=conversation", body=None)[0], 404)
 
     def test_websocket_upgrade_and_bidirectional_frame_relay(self):
+        for path in proxy.STREAMING_PATHS:
+            self.assert_websocket_relay(path)
+
+    def assert_websocket_relay(self, path):
         key = base64.b64encode(b"synthetic-key-12").decode()
         client = socket.create_connection(self.server.server_address, timeout=5)
         client.settimeout(5)
         self.addCleanup(client.close)
         client.sendall((
-            "GET " + proxy.STREAMING_PATH + " HTTP/1.1\r\nHost: 127.0.0.1:"
+            "GET " + path + " HTTP/1.1\r\nHost: 127.0.0.1:"
             + str(self.server.server_port) + "\r\napi-key: " + self.token
             + "\r\nUpgrade: websocket\r\nConnection: keep-alive, Upgrade"
             + "\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: " + key + "\r\n\r\n"
         ).encode())
         status, headers = proxy.read_upgrade(client)
         self.assertEqual(status, 101)
+        self.assertEqual(self.transport.streaming_path, path)
         self.assertEqual(headers["Sec-WebSocket-Accept"], proxy.websocket_accept(key))
         # The relay leaves masking and fragmentation intact for Azure to validate.
         masked_frame = b"\x81\x82abcd" + bytes([ord("H") ^ ord("a"), ord("i") ^ ord("b")])
         client.sendall(masked_frame)
         peer = self.transport.upstream_peer
+        self.addCleanup(peer.close)
         peer.settimeout(5)
         self.assertEqual(peer.recv(100), masked_frame)
         peer.sendall(b"\x81\x02Hi")
@@ -413,6 +421,35 @@ class TransportTests(unittest.TestCase):
                 self.transport.open_streaming(key)
         self.assertEqual(caught.exception.status, 502)
         upstream.close.assert_called_once()
+
+    def test_mai_resource_is_fixed_and_does_not_replace_batch_or_voice_live_origin(self):
+        transport = proxy.AzureTransport(
+            "https://test.cognitiveservices.azure.com", self.tokens,
+            mai_streaming_origin="https://streaming.cognitiveservices.azure.com",
+        )
+        self.assertEqual(transport.origin, "https://test.cognitiveservices.azure.com")
+        key = base64.b64encode(b"synthetic-key-12").decode()
+        for path, host in ((proxy.STREAMING_PATH, "test.services.ai.azure.com"),
+                           (proxy.MAI_STREAMING_PATH, "streaming.services.ai.azure.com")):
+            upstream = Mock()
+            header = ("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
+                      "Connection: Upgrade\r\nSec-WebSocket-Accept: " + proxy.websocket_accept(key)
+                      + "\r\n\r\n").encode()
+            upstream.recv.side_effect = [bytes([byte]) for byte in header]
+            transport.ssl_context = Mock()
+            transport.ssl_context.wrap_socket.return_value = upstream
+            with patch.object(proxy.socket, "create_connection") as connect:
+                self.assertIs(transport.open_streaming(key, path), upstream)
+            connect.assert_called_once_with((host, 443), timeout=10)
+            self.assertTrue(upstream.sendall.call_args.args[0].startswith(("GET " + path + " ").encode()))
+        with self.assertRaises(ValueError):
+            proxy.AzureTransport(
+                "https://test.cognitiveservices.azure.com", self.tokens,
+                mai_streaming_origin="https://example.com",
+            )
+        with self.assertRaises(proxy.ProxyError), patch.object(proxy.socket, "create_connection") as connect:
+            transport.open_streaming(key, "https://example.com/mai/v1/realtime?intent=transcription")
+        connect.assert_not_called()
 
     def test_streaming_is_bounded_by_duration_and_bytes(self):
         for limit in ("MAX_STREAM_SECONDS", "MAX_STREAM_UPLOAD"):

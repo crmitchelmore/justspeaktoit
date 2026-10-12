@@ -193,6 +193,16 @@ a default-device switch, rather than building an engine the next press will disc
   Azure, Meta, Speechmatics, Rev.ai and Mistral;
 - Apple legacy/analyzer, FluidAudio Parakeet, WhisperKit and the non-App-Store sherpa-onnx runtime have local controllers.
 
+Azure's shared catalogue distinguishes the legacy turn-based `mai-transcribe` alias
+from the explicit `mai-transcribe-2-streaming` model. Both use `AzureVoiceLiveClient`
+on Apple and native desktop transports, with the same credential and resource endpoint.
+The alias uses Voice Live; the incremental model uses `/mai/v1/realtime` and a
+deployment named `mai-transcribe-2-streaming`. Its settings freeze before audio,
+and shutdown drains, commits and requires the actual completed transcript, not
+a Voice Live configuration barrier or merely a commit acknowledgement.
+MAI provisional suffixes replace rather than append; finals replace the item's draft.
+Resource-region rejection is surfaced without silently falling back to another model.
+
 Batch transcription first asks the concrete macOS `TranscriptionProviderRegistry`, then uses the OpenRouter batch
 fallback for legacy models. Apple Speech Analyzer and downloaded local models take local paths before that registry.
 This is not a guarantee that all providers share transport or identical result metadata.

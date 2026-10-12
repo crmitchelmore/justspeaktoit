@@ -146,12 +146,65 @@ final class AzureLocalProxyTests: XCTestCase {
                 client.sendAudio(pcm.subdata(in: offset..<min(offset + 3_200, pcm.count)))
                 try await Task.sleep(for: .milliseconds(100))
             }
-            XCTAssertFalse(events.transcripts.isEmpty, "Live text must arrive before finish: \(model)")
+            if model == "azure-speech" {
+                XCTAssertFalse(events.transcripts.isEmpty, "Azure Speech must deliver live text before finish")
+            }
             let final = await client.finishAndWait()
             XCTAssertTrue(final?.lowercased().contains("quick brown fox") == true, model)
             XCTAssertTrue(final?.lowercased().contains("lazy dog") == true, model)
             XCTAssertTrue(events.errors.isEmpty, events.errors.joined(separator: "; "))
         }
+    }
+
+    func testConfiguredProxy_dedicatedMAIEmitsTextDuringContinuousSpeech() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard env["JSTI_AZURE_PROXY_MAI_STREAMING"] == "1",
+              let tokenFile = env["JSTI_AZURE_PROXY_TOKEN_FILE"],
+              let fixture = env["JSTI_AZURE_TEST_WAV"],
+              let endpoint = env["JSTI_AZURE_TEST_ENDPOINT"] else {
+            throw XCTSkip("Requires a MAI streaming resource and canonical 24 kHz synthetic WAV.")
+        }
+        let localToken = try String(contentsOfFile: tokenFile, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let wav = try Data(contentsOf: URL(fileURLWithPath: fixture))
+        guard wav.count > 44 else { XCTFail("The synthetic WAV must contain a PCM payload"); return }
+        XCTAssertEqual(wav.subdata(in: 36..<40), Data("data".utf8), "Requires a canonical 44-byte WAV header")
+        XCTAssertEqual(wav.subdata(in: 24..<28), Data([0xC0, 0x5D, 0, 0]), "Requires 24 kHz PCM")
+        XCTAssertEqual(wav.subdata(in: 22..<24), Data([1, 0]), "Requires mono PCM")
+        XCTAssertEqual(wav.subdata(in: 34..<36), Data([16, 0]), "Requires PCM16")
+        let pcm = Data(wav.dropFirst(44))
+        let duration = Double(pcm.count) / 48_000
+        XCTAssertGreaterThan(duration, 6, "Use continuous speech long enough to distinguish incremental output")
+        let events = AzureProxyStreamingEvents()
+        let client = AzureVoiceLiveClient(
+            credentials: "local-proxy/" + localToken, endpoint: endpoint,
+            model: "mai-transcribe-2-streaming", language: "en-GB", sampleRate: 24_000
+        )
+        defer { client.stop() }
+        client.start(onTranscript: { text, _ in events.transcript(text) },
+                     onError: { events.fail($0.localizedDescription) })
+        let deadline = Date().addingTimeInterval(12)
+        while !client.isSessionReady && events.errors.isEmpty && Date() < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertTrue(client.isSessionReady, events.errors.joined(separator: "; "))
+        guard client.isSessionReady else { return }
+        events.startAudio()
+        for offset in stride(from: 0, to: pcm.count, by: 4_800) {
+            let end = min(offset + 4_800, pcm.count)
+            client.sendAudio(pcm.subdata(in: offset..<end))
+            if end < pcm.count { try await Task.sleep(for: .milliseconds(100)) }
+        }
+        events.endAudio()
+        let firstUpdate = try XCTUnwrap(events.firstLiveOffset, "Text must arrive before all speech is sent")
+        XCTAssertLessThan(firstUpdate, duration - 0.5, "Text must not depend on silence, Stop or commit")
+        XCTAssertGreaterThan(events.transcripts.count, 1, "The display must update incrementally")
+        let final = await client.finishAndWait()
+        XCTAssertTrue(final?.lowercased().contains("quick brown fox") == true)
+        XCTAssertTrue(final?.lowercased().contains("lazy dog") == true)
+        XCTAssertTrue(events.errors.isEmpty, events.errors.joined(separator: "; "))
+        print("MAI streaming acceptance: first text \(firstUpdate)s into \(duration)s continuous speech; "
+              + "\(events.transcripts.count) display updates")
     }
 }
 
@@ -159,8 +212,26 @@ private final class AzureProxyStreamingEvents: @unchecked Sendable {
     private let lock = NSLock()
     private var texts: [String] = []
     private var failures: [String] = []
+    private var audioStartedAt: TimeInterval?
+    private var sendingAudio = false
+    private var firstUpdateOffset: TimeInterval?
     var transcripts: [String] { self.lock.withLock { self.texts } }
     var errors: [String] { self.lock.withLock { self.failures } }
-    func transcript(_ text: String) { self.lock.withLock { self.texts.append(text) } }
+    var firstLiveOffset: TimeInterval? { self.lock.withLock { self.firstUpdateOffset } }
+    func startAudio() {
+        self.lock.withLock {
+            self.audioStartedAt = ProcessInfo.processInfo.systemUptime
+            self.sendingAudio = true
+        }
+    }
+    func endAudio() { self.lock.withLock { self.sendingAudio = false } }
+    func transcript(_ text: String) {
+        self.lock.withLock {
+            self.texts.append(text)
+            if self.sendingAudio, !text.isEmpty, self.firstUpdateOffset == nil, let start = self.audioStartedAt {
+                self.firstUpdateOffset = ProcessInfo.processInfo.systemUptime - start
+            }
+        }
+    }
     func fail(_ error: String) { self.lock.withLock { self.failures.append(error) } }
 }

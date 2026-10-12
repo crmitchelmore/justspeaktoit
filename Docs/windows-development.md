@@ -46,7 +46,7 @@ shared catalogue owns their identifiers, metadata and routes. OpenRouter model
 discovery uses the same cache and refresh policy as Apple; native model controls
 refresh without changing an active recording or reusing an earlier model index.
 Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox, ElevenLabs,
-Mistral Voxtral, Gladia, Cartesia Ink-2, Rev.ai, two Azure Voice Live and xAI's
+Mistral Voxtral, Gladia, Cartesia Ink-2, Rev.ai, three Azure Voice Live and xAI's
 dedicated speech-to-text live models use shared Swift clients with the native
 WinHTTP transport. The xAI stream (`xai/speech-to-text-streaming`, 24 kHz PCM) is
 source-wired with fake-transport tests only and still needs a Windows provider
@@ -71,13 +71,17 @@ service on 2026-09-23 through the Apple URLSession transport, by the opt-in
 the integrator with an existing key held in memory only). That probe streams
 one second of generated silence, so it is not a Windows receipt: the WinHTTP
 path against the real service and transcription accuracy remain unproven, and
-none of the three has a Windows provider receipt yet. Azure Voice Live
-(`azure/azure-speech-streaming` and `azure/mai-transcribe-streaming`, 24 kHz PCM)
+none of the three has a Windows provider receipt yet. Azure live input
+(`azure/azure-speech-streaming`, legacy turn-based `azure/mai-transcribe-streaming`
+and incremental `azure/mai-transcribe-2-streaming`, 24 kHz PCM)
 connects only to the resource endpoint saved in Settings → Azure Speech
 resource…, with no regional fallback, and leaves the language to Azure's
-multilingual detection. A finish ends only once Azure acknowledges its commit
-and finalisation barrier and every turn has settled; any other server error,
-including one naming the barrier, is a failure. It has fake-transport tests and
+multilingual detection. Voice Live serves the first two routes: a finish requires
+its commit, finalisation barrier and all turn finals. Dedicated MAI uses
+`/mai/v1/realtime`, requires a deployment named `mai-transcribe-2-streaming`, and
+finishes only after the commit acknowledgement and real completed transcript;
+it sends no post-audio configuration barrier. Other server errors are failures.
+It has fake-transport tests and
 synthetic loopback tests over WinHTTP in the probe step, and no Windows provider
 receipt yet. A WinHTTP socket whose native
 destruction cannot yet complete keeps its handles and callback context owned by

@@ -188,6 +188,19 @@ final class SharedClientLiveControllerRecoveryTests: XCTestCase {
         XCTAssertEqual(snapshot.confirmedText, "Hello, revised.")
         XCTAssertFalse(snapshot.isFinal)
     }
+
+    func testAuthoritativeEmptyProjectionRetractsProvisionalTextWithoutChangingOtherProviders() throws {
+        let run = SharedClientControllerRun(shape: .cumulativeTranscript, modelIdentifier: "azure")
+        _ = run.receive("provisional", isFinal: false)
+        XCTAssertNil(run.receive("", isFinal: false), "Unprojected empty updates retain existing behavior")
+        XCTAssertEqual(run.snapshot.text, "provisional")
+        let retracted = try XCTUnwrap(run.receive(
+            "", isFinal: false, projection: StreamingTranscriptSnapshot(confirmedText: "", displayText: "")
+        ))
+        XCTAssertEqual(retracted.text, "")
+        XCTAssertEqual(retracted.confirmedText, "")
+        XCTAssertFalse(retracted.isFinal)
+    }
 }
 
 @MainActor

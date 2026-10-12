@@ -95,7 +95,13 @@ extension AzureVoiceLiveClient {
         } else {
             active.commitAcknowledged = true
         }
-        active.outgoing.append(.barrier)
+        if isMAIStreaming {
+            // MAI freezes session settings after audio starts. Its single
+            // commit and completed event cover all drained audio, with no update.
+            active.barrierAcknowledged = true
+        } else {
+            active.outgoing.append(.barrier)
+        }
         after(finishBudget, active) { client, active in
             guard active.phase == .finishing else { return }
             client.fail(client.finishTimeoutError(active), active)

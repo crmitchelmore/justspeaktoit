@@ -52,7 +52,10 @@ extension AzureVoiceLiveClient {
     /// failure. Event types this client does not use are ignored.
     func handle(_ data: Data, _ active: AzureVoiceLiveRun) {
         guard isCurrent(active) else { return }
-        guard let event = AzureVoiceLiveServerEvent.parse(data) else {
+        // MAI has one manually committed interval per recording; terminal
+        // frames may omit item_id. Use the same identity for every frame.
+        let interval = isMAIStreaming ? AzureMAIStreamingProtocol.intervalID : nil
+        guard let event = AzureVoiceLiveServerEvent.parse(data, singleIntervalID: interval) else {
             fail(AzureSpeechError.invalidResponse, active)
             return
         }
@@ -61,6 +64,7 @@ extension AzureVoiceLiveClient {
         case .sessionUpdated: handleSessionUpdated(active)
         case .committed(let item): handleCommitted(item, active)
         case .transcriptionDelta(let item, let delta): handleDelta(delta, item: item, active)
+        case .transcriptionIntermediate(let item, let suffix): handleIntermediate(suffix, item: item, active)
         case .transcriptionCompleted(let item, let text): handleCompleted(text, item: item, active)
         case .transcriptionFailed(let item): handleItemFailed(item, active)
         case .error(let code, let eventID): handleServerError(code, eventID: eventID, active)
@@ -79,7 +83,18 @@ extension AzureVoiceLiveClient {
         if active.transcript.append(delta: delta, item: item) { deliverDisplay(active) }
     }
 
+    private func handleIntermediate(_ suffix: String, item: String, _ active: AzureVoiceLiveRun) {
+        if active.transcript.replaceIntermediate(suffix, item: item) { deliverDisplay(active) }
+    }
+
     private func handleCompleted(_ text: String, item: String, _ active: AzureVoiceLiveRun) {
+        if isMAIStreaming {
+            guard active.phase == .finishing, active.commitSent else {
+                fail(AzureSpeechError.invalidResponse, active)
+                return
+            }
+            active.finalCommitCompleted = true
+        }
         if active.transcript.complete(text, item: item) { deliverConfirmed(active) }
         settleIfDone(active)
     }
@@ -87,6 +102,10 @@ extension AzureVoiceLiveClient {
     /// Per item: an unintelligible turn must not discard later ones. A finish
     /// in which every turn failed is reported by `complete`.
     private func handleItemFailed(_ item: String, _ active: AzureVoiceLiveRun) {
+        if isMAIStreaming {
+            fail(AzureSpeechError.transcriptionFailed, active)
+            return
+        }
         if active.transcript.fail(item: item) {
             log("Item transcription failed")
             deliverDisplay(active)
@@ -118,7 +137,8 @@ extension AzureVoiceLiveClient {
     /// that names the barrier, the configuration or the commit with any other
     /// code is a failure, never a completion.
     private func handleServerError(_ code: String, eventID: String?, _ active: AzureVoiceLiveRun) {
-        if code == AzureVoiceLiveProtocol.commitEmptyCode, active.phase == .finishing, active.commitSent,
+        if !isMAIStreaming, code == AzureVoiceLiveProtocol.commitEmptyCode,
+           active.phase == .finishing, active.commitSent,
            eventID == nil || eventID == active.commitEventID {
             log("Final commit found no uncommitted audio")
             active.commitAcknowledged = true
@@ -137,6 +157,7 @@ extension AzureVoiceLiveClient {
     /// announced items have all settled.
     func settleIfDone(_ active: AzureVoiceLiveRun) {
         guard isCurrent(active), active.phase == .finishing, active.finishIsSettled else { return }
+        guard !isMAIStreaming || active.finalCommitCompleted else { return }
         complete(active)
     }
 
@@ -160,7 +181,7 @@ extension AzureVoiceLiveClient {
     private func deliverDisplay(_ active: AzureVoiceLiveRun) {
         guard active.phase != .finishing else { return }
         let display = active.transcript.display
-        guard !display.isEmpty, display != active.deliveredDisplay else { return }
+        guard display != active.deliveredDisplay else { return }
         active.deliveredDisplay = display
         active.onTranscript?(display, false)
     }

@@ -6,13 +6,13 @@ import XCTest
 @testable import SpeakCore
 import SpeakDesktop
 
-/// The desktop projection admits both canonical Azure Voice Live routes only
+/// The desktop projection admits all canonical Azure Voice Live routes only
 /// through the shared client, and only with the resource endpoint the host
 /// stores. Synthetic key and resource only.
 final class AzureVoiceLiveDesktopFactoryTests: XCTestCase {
     private let endpoint = "https://synthetic.cognitiveservices.azure.com"
 
-    func testBothCanonicalRoutesAreProjectedWithTheSharedCredentialAndClient() throws {
+    func testAllCanonicalRoutesAreProjectedWithTheSharedCredentialAndClient() throws {
         for option in AzureTranscriptionModels.liveOptions {
             XCTAssertTrue(DesktopLiveTranscription.liveModels.contains { $0.id == option.id }, option.id)
             let route = try XCTUnwrap(DesktopLiveTranscription.route(forID: option.id))
@@ -66,7 +66,15 @@ final class AzureVoiceLiveDesktopFactoryTests: XCTestCase {
             let socket = try XCTUnwrap(sockets.sockets.first)
             socket.open()
             let session = try XCTUnwrap(socket.sessionUpdate?["session"] as? [String: Any])
-            let transcription = try XCTUnwrap(session["input_audio_transcription"] as? [String: Any])
+            let transcription: [String: Any]
+            if option.id == AzureTranscriptionModels.mai2Streaming {
+                let input = try XCTUnwrap((session["audio"] as? [String: Any])?["input"] as? [String: Any])
+                transcription = try XCTUnwrap(input["transcription"] as? [String: Any])
+                XCTAssertEqual(sockets.requests.first?.url?.path, "/mai/v1/realtime")
+            } else {
+                transcription = try XCTUnwrap(session["input_audio_transcription"] as? [String: Any])
+                XCTAssertEqual(sockets.requests.first?.url?.path, "/voice-live/realtime")
+            }
             let apiModel = LiveTranscriptionRouting.route(for: option.id)?.apiModelName
             XCTAssertEqual(transcription["model"] as? String, apiModel)
             XCTAssertNil(transcription["language"], "The canonical capability takes no hint; Azure detects it")

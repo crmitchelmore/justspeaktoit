@@ -4,6 +4,7 @@ import CryptoKit
 import Foundation
 import Security
 import os.log
+import zlib
 
 // MARK: - Settings Sync using iCloud Key-Value Store
 
@@ -170,6 +171,12 @@ public struct ConfigTransferEnvelope: Codable, Equatable, Sendable {
     /// Current envelope version. v0 is the legacy XOR-obfuscated format, which
     /// has no envelope at all and is only accepted on import.
     public static let currentVersion = 1
+    /// Oversized transfers compress the plaintext before authenticated encryption.
+    public static let compressedVersion = 2
+
+    static func supports(version: Int) -> Bool {
+        version == currentVersion || version == compressedVersion
+    }
 
     public let version: Int
     public let createdAt: Date
@@ -404,7 +411,7 @@ public final class ConfigTransferManager: Sendable {
         return ConfigTransfer(payload: payload, code: code)
     }
 
-    /// Encrypts a payload under `code` and returns the base64 QR string.
+    /// Encrypts a payload under `code` and returns a QR-compatible envelope string.
     ///
     /// `createdAt` is truncated to whole seconds so it survives the envelope's
     /// ISO-8601 encoding unchanged — it is authenticated, and a value that
@@ -418,48 +425,53 @@ public final class ConfigTransferManager: Sendable {
         let normalizedCode = try ConfigTransferCode.normalize(code)
         let payload = ConfigTransferPayload(secrets: secrets, settings: settings)
         let plaintext = try encoder.encode(payload)
+        guard plaintext.count <= Self.maximumPlaintextBytes else {
+            throw ConfigTransferError.payloadTooLarge
+        }
 
         guard let salt = KeyDerivation.randomBytes(count: Self.saltByteCount) else {
             throw ConfigTransferError.randomGenerationFailed
         }
         let timestamp = Date(timeIntervalSince1970: (createdAt.timeIntervalSince1970).rounded(.down))
         let key = deriveKey(code: normalizedCode, salt: salt)
-        let nonce = AES.GCM.Nonce()
-        let authenticatedData = Self.authenticatedData(
-            version: ConfigTransferEnvelope.currentVersion,
-            createdAt: timestamp,
-            salt: salt
-        )
-
-        let sealedBox: AES.GCM.SealedBox
-        do {
-            sealedBox = try AES.GCM.seal(
-                plaintext,
-                using: key,
-                nonce: nonce,
-                authenticating: authenticatedData
-            )
-        } catch {
-            throw ConfigTransferError.encryptionFailed
-        }
-
-        let envelope = ConfigTransferEnvelope(
+        let envelope = try Self.sealEnvelope(
+            plaintext,
             version: ConfigTransferEnvelope.currentVersion,
             createdAt: timestamp,
             salt: salt,
-            nonce: Data(nonce),
-            ciphertext: sealedBox.ciphertext + sealedBox.tag
+            key: key
         )
-        let encoded = try Self.encodeEnvelope(envelope)
+        var encoded = try Self.encodeEnvelope(envelope)
+        if encoded.count > Self.maximumQRCodePayloadBytes {
+            let compressed: Data
+            do {
+                compressed = try (plaintext as NSData).compressed(using: .zlib) as Data
+            } catch {
+                throw ConfigTransferError.compressionFailed
+            }
+            let compactEnvelope = try Self.sealEnvelope(
+                compressed,
+                version: ConfigTransferEnvelope.compressedVersion,
+                createdAt: timestamp,
+                salt: salt,
+                key: key
+            )
+            encoded = try Self.encodeEnvelope(compactEnvelope)
+            guard encoded.count <= Self.maximumQRCodePayloadBytes else {
+                throw ConfigTransferError.payloadTooLarge
+            }
+            guard let json = String(bytes: encoded, encoding: .utf8) else {
+                throw ConfigTransferError.encryptionFailed
+            }
+            return json
+        }
         let base64 = encoded.base64EncodedString()
-        // The doubly-encoded form stays the default so older importers keep
-        // working, but it cannot fit a full credential set in one QR code
-        // (issue #699). An oversized payload is emitted as the envelope JSON
-        // itself — QR byte mode carries it directly, authentication is
-        // unchanged, and current importers accept both shapes.
-        if base64.utf8.count > Self.maximumCompatiblePayloadLength,
-           let envelopeJSON = String(bytes: encoded, encoding: .utf8) {
-            return envelopeJSON
+        // Keep v1 and its older base64 wrapper whenever they fit.
+        if base64.utf8.count > Self.maximumCompatiblePayloadLength {
+            guard let json = String(bytes: encoded, encoding: .utf8) else {
+                throw ConfigTransferError.encryptionFailed
+            }
+            return json
         }
         return base64
     }
@@ -467,19 +479,8 @@ public final class ConfigTransferManager: Sendable {
     /// QR byte capacity at correction level M. Above this the doubly-encoded
     /// payload cannot be drawn, so export falls back to the raw envelope JSON.
     static let maximumCompatiblePayloadLength = 2_331
-
-    /// Accepts both payload shapes: the base64-wrapped envelope every version
-    /// understands, and the raw envelope JSON used when a full credential set
-    /// would not fit a QR code otherwise (issue #699).
-    private static func envelopeCandidateData(from encoded: String) -> Data? {
-        if let data = Data(base64Encoded: encoded), !data.isEmpty {
-            return data
-        }
-        if encoded.hasPrefix("{") {
-            return Data(encoded.utf8)
-        }
-        return nil
-    }
+    static let maximumQRCodePayloadBytes = 2_953
+    static let maximumPlaintextBytes = 64 * 1_024
 
     // MARK: - Import
 
@@ -492,7 +493,7 @@ public final class ConfigTransferManager: Sendable {
         }
 
         if let probe = try? envelopeDecoder.decode(EnvelopeVersionProbe.self, from: data) {
-            guard probe.version == ConfigTransferEnvelope.currentVersion else {
+            guard ConfigTransferEnvelope.supports(version: probe.version) else {
                 throw ConfigTransferError.unsupportedVersion(probe.version)
             }
             return .encrypted
@@ -550,8 +551,10 @@ public final class ConfigTransferManager: Sendable {
             throw ConfigTransferError.authenticationFailed
         }
 
+        let payloadData = envelope.version == ConfigTransferEnvelope.compressedVersion
+            ? try Self.decompressPayload(plaintext) : plaintext
         do {
-            return try decoder.decode(ConfigTransferPayload.self, from: plaintext)
+            return try decoder.decode(ConfigTransferPayload.self, from: payloadData)
         } catch {
             throw ConfigTransferError.decodingFailed
         }
@@ -565,7 +568,7 @@ public final class ConfigTransferManager: Sendable {
         guard let envelope = try? envelopeDecoder.decode(ConfigTransferEnvelope.self, from: data) else {
             throw ConfigTransferError.decodingFailed
         }
-        guard envelope.version == ConfigTransferEnvelope.currentVersion else {
+        guard ConfigTransferEnvelope.supports(version: envelope.version) else {
             throw ConfigTransferError.unsupportedVersion(envelope.version)
         }
         return envelope
@@ -651,6 +654,81 @@ public final class ConfigTransferManager: Sendable {
             result[index] = byte ^ obfuscationKey[index % obfuscationKey.count]
         }
         return result
+    }
+}
+
+extension ConfigTransferManager {
+    /// Accepts the original base64-wrapped envelope and the raw-envelope JSON
+    /// used when a full credential set would not fit a QR code (issue #699).
+    private static func envelopeCandidateData(from encoded: String) -> Data? {
+        if let data = Data(base64Encoded: encoded), !data.isEmpty {
+            return data
+        }
+        if encoded.hasPrefix("{") {
+            return Data(encoded.utf8)
+        }
+        return nil
+    }
+
+    private static func sealEnvelope(
+        _ plaintext: Data,
+        version: Int,
+        createdAt: Date,
+        salt: Data,
+        key: SymmetricKey
+    ) throws -> ConfigTransferEnvelope {
+        let nonce = AES.GCM.Nonce()
+        let sealedBox: AES.GCM.SealedBox
+        do {
+            sealedBox = try AES.GCM.seal(
+                plaintext,
+                using: key,
+                nonce: nonce,
+                authenticating: authenticatedData(version: version, createdAt: createdAt, salt: salt)
+            )
+        } catch {
+            throw ConfigTransferError.encryptionFailed
+        }
+        return ConfigTransferEnvelope(
+            version: version,
+            createdAt: createdAt,
+            salt: salt,
+            nonce: Data(nonce),
+            ciphertext: sealedBox.ciphertext + sealedBox.tag
+        )
+    }
+
+    /// A fixed output buffer bounds decompression before any payload is decoded.
+    static func decompressPayload(_ data: Data) throws -> Data {
+        guard !data.isEmpty, data.count <= maximumPlaintextBytes else {
+            throw ConfigTransferError.decodingFailed
+        }
+        var stream = z_stream()
+        // Apple's .zlib compression produces raw DEFLATE. Native zlib reports
+        // exact stream consumption, unlike Compression's buffered read-ahead.
+        guard inflateInit2_(&stream, -MAX_WBITS, ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size)) == Z_OK else {
+            throw ConfigTransferError.decodingFailed
+        }
+        defer { inflateEnd(&stream) }
+        var output = Data(count: maximumPlaintextBytes + 1)
+        let count = output.withUnsafeMutableBytes { (destination: UnsafeMutableRawBufferPointer) -> Int? in
+            data.withUnsafeBytes { (source: UnsafeRawBufferPointer) -> Int? in
+                guard let sourcePointer = source.bindMemory(to: UInt8.self).baseAddress,
+                      let destinationPointer = destination.bindMemory(to: UInt8.self).baseAddress else { return nil }
+                stream.next_in = UnsafeMutablePointer(mutating: sourcePointer)
+                stream.avail_in = uInt(source.count)
+                stream.next_out = destinationPointer
+                stream.avail_out = uInt(destination.count)
+                guard inflate(&stream, Z_FINISH) == Z_STREAM_END,
+                      stream.avail_in == 0, stream.total_out <= maximumPlaintextBytes else {
+                    return nil
+                }
+                return Int(stream.total_out)
+            }
+        }
+        guard let count, count > 0 else { throw ConfigTransferError.decodingFailed }
+        output.count = count
+        return output
     }
 }
 
@@ -788,6 +866,8 @@ public enum ConfigTransferError: LocalizedError, Equatable {
     case authenticationFailed
     case unsupportedVersion(Int)
     case encryptionFailed
+    case compressionFailed
+    case payloadTooLarge
     case randomGenerationFailed
     case qrGenerationFailed
     case unknownSecretIdentifier(String)
@@ -813,6 +893,11 @@ public enum ConfigTransferError: LocalizedError, Equatable {
                 + "Update this device, then try again."
         case .encryptionFailed:
             return "Failed to encrypt the configuration for transfer."
+        case .compressionFailed:
+            return "Failed to compress the configuration for transfer. Please try again."
+        case .payloadTooLarge:
+            return "This configuration is too large for one QR code. "
+                + "Use iCloud key sync or enter the API keys on the other device."
         case .randomGenerationFailed:
             return "Failed to generate a secure transfer code. Please try again."
         case .qrGenerationFailed:

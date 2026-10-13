@@ -1,6 +1,7 @@
 import Foundation
 import Security
 import SpeakCore
+import SpeakDesktop
 import XCTest
 @testable import SpeakApp
 
@@ -157,6 +158,16 @@ final class DataMigrationTests: XCTestCase {
         XCTAssertEqual(restored.records[.recordings], [record])
         XCTAssertEqual(try Data(contentsOf: XCTUnwrap(restored.files[record.file!])), bytes)
         XCTAssertTrue(restored.notices.isEmpty)
+        let digests = try XCTUnwrap(LocalModelDigestProvider.platformDefault)
+        let portable = try DesktopMigrationArchive.read(archive, digests: digests, stagingRoot: root)
+        defer {
+            if let directory = portable.directory {
+                try? FileManager.default.removeItem(at: directory)
+            }
+        }
+        XCTAssertEqual(portable.records[.recordings], [record])
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(portable.files[record.file!])), bytes)
+        XCTAssertTrue(portable.notices.isEmpty)
     }
     func testArchive_RepeatedRecordingPathDoesNotMaterialiseExtraFiles() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

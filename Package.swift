@@ -169,6 +169,16 @@ let appleSyncTestSources: [String] = [
     "NativeRecordParityTests.swift"
 ]
 
+let migrationArchiveTarget = Target.target(
+    name: "CMigrationArchive",
+    exclude: ["miniz/LICENSE", "miniz/dependency.json"],
+    publicHeadersPath: "include",
+    cSettings: [
+        .define("MINIZ_NO_STDIO"), .define("MINIZ_NO_DEFLATE_APIS"), .define("MINIZ_NO_TIME"),
+        .define("MINIZ_NO_ZLIB_COMPATIBLE_NAMES")
+    ]
+)
+
 let portablePackage = Package(
     name: "SpeakApp",
     defaultLocalization: "en",
@@ -192,7 +202,8 @@ let portablePackage = Package(
             resources: [.process("Resources")],
             swiftSettings: [.define("SPEAK_PORTABLE_CORE")]
         ),
-        .target(name: "SpeakDesktop", dependencies: ["SpeakCore"]),
+        migrationArchiveTarget,
+        .target(name: "SpeakDesktop", dependencies: ["SpeakCore", "CMigrationArchive"]),
         // Recording, History, output, settings and iCloud sync orchestration
         // shared by the Windows and Linux hosts behind DesktopHostPlatform.
         .target(
@@ -208,7 +219,10 @@ let portablePackage = Package(
         // Desktop History and API-key sync over CloudKit Web Services. Portable
         // only: Apple apps keep their native CloudKit engines.
         .target(name: "SpeakDesktopSync", dependencies: ["SpeakDesktop", "SpeakSync", "SpeakCore"]),
-        .target(name: "SpeakTestSupport", path: "Tests/SpeakTestSupport"),
+        .target(
+            name: "SpeakTestSupport", path: "Tests/SpeakTestSupport",
+            resources: [.copy("MigrationArchiveFixtures")]
+        ),
         .testTarget(name: "SpeakDesktopTests", dependencies: ["SpeakDesktop", "SpeakCore", "SpeakTestSupport"]),
         .testTarget(
             name: "SpeakDesktopHostTests",
@@ -309,7 +323,7 @@ if windowsTargetBuild {
         .testTarget(
             name: "SpeakWindowsPlatformTests",
             dependencies: [
-                "SpeakCore", "SpeakSync", "SpeakWindowsPlatform", "CWindowsSupport", "SpeakTestSupport",
+                "SpeakCore", "SpeakSync", "SpeakDesktop", "SpeakWindowsPlatform", "CWindowsSupport", "SpeakTestSupport",
                 "SpeakAutomationKit"
             ],
             resources: [.copy("Fixtures")]
@@ -443,7 +457,8 @@ let package = portableCoreBuild ? portablePackage : Package(
         )
     ],
     targets: [
-        .target(name: "SpeakDesktop", dependencies: ["SpeakCore"]),
+        migrationArchiveTarget,
+        .target(name: "SpeakDesktop", dependencies: ["SpeakCore", "CMigrationArchive"]),
         .testTarget(name: "SpeakDesktopTests", dependencies: ["SpeakDesktop", "SpeakCore", "SpeakTestSupport"]),
         .target(
             name: "SpeakHotKeys",
@@ -520,7 +535,8 @@ let package = portableCoreBuild ? portablePackage : Package(
         // sources through its own glob.
         .target(
             name: "SpeakTestSupport",
-            path: "Tests/SpeakTestSupport"
+            path: "Tests/SpeakTestSupport",
+            resources: [.copy("MigrationArchiveFixtures")]
         ),
         .testTarget(
             name: "SpeakCoreTests",
@@ -542,6 +558,7 @@ let package = portableCoreBuild ? portablePackage : Package(
             name: "SpeakAppTests",
             dependencies: [
                 "SpeakApp",
+                "SpeakDesktop",
                 "SpeakAutomationKit",
                 "SpeakHotKeys",
                 "SpeakTestSupport",

@@ -611,7 +611,7 @@ def notices_text(app_license_name, swift_files, microsoft_files, microsoft, lock
         lines += ["_FoundationICU.dll additionally contains " + icu["covers"].split(" compiled")[0] + ":",
                   "  Licence: " + icu["license"] + " (licenses/LICENSE-icu.txt)", ""]
     for entry in licenses:
-        if entry["name"] in ("LICENSE-curl.txt", "LICENSE-zlib.txt"):
+        if entry["name"] in ("LICENSE-curl.txt", "LICENSE-zlib.txt", "LICENSE-miniz.txt"):
             lines += [entry["covers"], "  Licence: " + entry["license"] + " (licenses/" + entry["name"] + ")", ""]
     lines += [microsoft["displayName"] + ": " + ", ".join(microsoft_files),
               "  Files are unmodified copies from Microsoft's official " + lock["name"] + " (" + microsoft["productName"] + ").",
@@ -843,6 +843,12 @@ def main():
     for entry in lock["licenses"]:
         path = download(entry, downloads)
         licenses.append(dict(entry, data=path.read_bytes()))
+    sys.path.insert(0, str(HERE.parent / "migration"))
+    from migration_dependency import license_entry
+    try:
+        licenses.append(license_entry(args.source_root))
+    except (ValueError, OSError, KeyError) as error:
+        raise BundleError("Cannot verify the native migration dependency: " + str(error)) from error
     app_license_path = args.source_root / "LICENSE"
     app_license = app_license_path.read_bytes()
     if b"MIT License" not in app_license:

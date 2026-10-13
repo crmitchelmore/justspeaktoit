@@ -545,15 +545,28 @@ The existing Mac migration wire contract now lives in `SpeakCore`:
 `DataMigrationFormat` retains the `JustSpeakToIt` version-1 manifest, eight
 categories, explicit credential opt-in, record identities and date/selection
 scopes. The Mac uses aliases to those types without changing its archive JSON.
-This is format groundwork, not desktop migration UI or archive acceptance;
-ZIP validation, conflict previews, transactional apply/recovery and native
-credential handling remain separate unfinished work.
+Native migration UI, conflict previews, transactional apply/recovery and
+credential installation remain separate unfinished work.
 
 `DataMigrationArchivePolicy` also centralizes the existing Mac archive path,
 entry/total/JSON-size, duplicate-path, manifest and staging-capacity rules.
 Mac ZIP reads use this policy; portable tests exercise exact limits without
-allocating multi-gigabyte fixtures. Native desktop ZIP decoding, checksum
-verification and materialization still require platform adapters.
+allocating multi-gigabyte fixtures.
+
+`DesktopMigrationArchive` reads stored, DEFLATE and ZIP64 Mac-format exports
+in process with miniz 3.1.2, pinned to commit
+`77d0dce8627735138c51770d1799a1ef48f2117d`. The vendored MIT reader is compiled
+with the app, with no runtime download, external archive process or handwritten
+ZIP parser. `scripts/migration/verify-miniz.py` verifies LF-normalized source and
+licence hashes; Windows bundles and Flatpak include its licence.
+Native index allocations are capped at 128 MiB. The reader rejects duplicate
+paths, unsupported manifests and malformed names, never truncates Unicode paths,
+and streams only declared regular audio to generated UUID staging files.
+CRC and the existing platform SHA-256 provider both verify extracted audio.
+Malformed categories/items produce explicit preservation notices; cancellation
+removes private staging, and failed cleanup or an unavailable digest provider
+aborts explicitly. These are archive-read guarantees, not an implemented native
+preview, lossless data application or recovery transaction.
 
 The filter editor scrolls vertically when the available work area is too short;
 keyboard traversal reveals the focused control. Long model names have native

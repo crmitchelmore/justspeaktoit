@@ -28,6 +28,21 @@ enum LinuxHostPlatform: DesktopHostPlatform {
 
     package static let displayName = "Linux"
     package static let credentialStoreName = "the desktop keyring (Secret Service)"
+    package static func makeRecordingFeedbackLoader() -> (any DesktopRecordingFeedbackLoader)? {
+        LinuxRecordingFeedbackLoader()
+    }
+
+    package static var voiceConfigurationKeys: Set<String> { DesktopConfiguration.voiceGenerationTransferKeys }
+    package static func exportVoiceConfiguration(
+        _ voiceOutput: VoiceOutputSettings?, over configuration: DesktopConfiguration
+    ) throws -> DesktopConfiguration {
+        try VoiceOutputSettings.exportConfiguration(voiceOutput, over: configuration)
+    }
+    package static func importVoiceConfiguration(
+        from configuration: DesktopConfiguration, into voiceOutput: inout VoiceOutputSettings?
+    ) throws -> DesktopConfiguration {
+        try VoiceOutputSettings.importConfiguration(from: configuration, into: &voiceOutput)
+    }
 
     /// Facts discovered at startup that output planning needs.
     private final class Runtime: @unchecked Sendable {
@@ -83,7 +98,10 @@ enum LinuxHostPlatform: DesktopHostPlatform {
     }
 
     package static func hud(_ state: DesktopHUDState) {
-        _ = jsti_window_set_hud(state.phase.rawValue, state.headline, state.subheadline, state.liveText)
+        _ = jsti_window_set_hud_layout(
+            state.phase.rawValue, state.headline, state.subheadline, state.liveText,
+            Int32(((state.displayDuration ?? 0) * 1000).rounded()), state.compact ? 1 : 0, state.expanded ? 1 : 0
+        )
     }
 
     package static func historyPresentation(

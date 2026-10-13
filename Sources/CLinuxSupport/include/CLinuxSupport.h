@@ -76,6 +76,23 @@ enum {
 enum { JSTI_STATE_IDLE = 0, JSTI_STATE_RECORDING = 1, JSTI_STATE_WORKING = 2 };
 
 typedef void (*jsti_window_event_fn)(int32_t event, const char *text, int32_t index, void *context);
+typedef struct JSTIConfigurationField {
+    const char *title;
+    const char *value;
+    const char *group;
+    int32_t is_boolean;
+    int32_t requires_hud_overlay;
+    /* Optional newline-separated choices: raw value, tab, display title. */
+    const char *choices;
+} JSTIConfigurationField;
+typedef int32_t (*JSTIConfigurationCallback)(int32_t action, const char *const *values, size_t count,
+                                            void *context, char *error, size_t capacity);
+/* Recovery action 3 carries all fields followed by the exact selected edit,
+ * which the host verifies is still recoverable before persisting.
+ * Actions 4/5 carry all fields for save-and-preview start/stop sound. */
+int32_t jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t count,
+                                      const char *const *recovered_keywords, size_t recovered_count,
+                                      JSTIConfigurationCallback callback, void *context);
 
 typedef struct JSTIModelRow {
     const char *id;
@@ -166,7 +183,10 @@ int32_t jsti_window_set_login_item(int32_t state, const char *detail);
  * windows at the bottom centre of the active monitor that never takes focus;
  * on Wayland the result only, as a notification while the window is inactive.
  * Thread safe; -1 for an invalid phase or UTF-8. */
-int32_t jsti_window_set_hud(int32_t phase, const char *headline, const char *subheadline, const char *live_text);
+int32_t jsti_window_set_hud(int32_t phase, const char *headline, const char *subheadline, const char *live_text,
+                            int32_t display_milliseconds, int32_t compact);
+int32_t jsti_window_set_hud_layout(int32_t phase, const char *headline, const char *subheadline, const char *live_text,
+                                   int32_t display_milliseconds, int32_t compact, int32_t expanded);
 /* Shows a JSTI_PAGE_* page, as choosing it in the sidebar does. */
 int32_t jsti_window_show_page(int32_t page);
 /* variant: 0 processed, 1 original, -1 none. */
@@ -174,7 +194,8 @@ int32_t jsti_window_set_history_presentation(
     const char *record_id, int32_t variant, int32_t switchable, const char *text, const char *status);
 int32_t jsti_window_set_transcript_variant(const char *record_id, int32_t variant, int32_t switchable);
 /* method: 0 paste into the focused app, 1 clipboard only. */
-int32_t jsti_window_set_text_output(int32_t method, int32_t restore_clipboard, const char *shortcut_hint);
+int32_t jsti_window_set_text_output(int32_t method, int32_t restore_clipboard,
+                                   int32_t can_restore_clipboard, const char *shortcut_hint);
 /* The Post-processing group: shared remote model names and saved choices. */
 int32_t jsti_window_set_post_processing(
     const char *const *models, size_t count, int32_t enabled, int32_t selected, const char *prompt);
@@ -208,6 +229,11 @@ int32_t jsti_window_screenshot_tour(const char *directory, char *error, size_t e
  * on the GTK main thread and the caller waits (bounded). Wayland compositors
  * only accept a selection from the focused client; see jsti_portal_*. */
 int32_t jsti_clipboard_write(const char *text, char *error, size_t error_capacity);
+/* X11-only owned selection and atomic restore. Restore returns 2 when another
+ * copy superseded the receipt, even if its text is identical. */
+int32_t jsti_clipboard_write_owned(const char *text, uint64_t *ownership, char *error, size_t error_capacity);
+int32_t jsti_clipboard_restore(const char *text, uint64_t ownership, char *error, size_t error_capacity);
+int32_t jsti_clipboard_ownership_self_test(char *error, size_t error_capacity);
 /* Returns 1 when the clipboard holds no text. `*text` is malloc'ed. */
 int32_t jsti_clipboard_read(char **text, char *error, size_t error_capacity);
 void jsti_free(void *pointer);
@@ -338,6 +364,28 @@ int32_t jsti_audio_decode(
     char *error, size_t error_capacity);
 
 /* ---------------------------------------------------------------- playback */
+
+int32_t jsti_audio_decode_bounded(
+    const char *path, uint32_t sample_rate, jsti_capture_audio_fn chunk, void *context,
+    const volatile int32_t *cancelled, char *error, size_t error_capacity);
+
+typedef struct jsti_recording_feedback jsti_recording_feedback;
+typedef void (*jsti_recording_feedback_failure_fn)(const char *message, void *context);
+jsti_recording_feedback *jsti_recording_feedback_create(
+    jsti_recording_feedback_failure_fn failure, void *context);
+/* Preparation runs on a worker; cancellation may be requested concurrently. */
+int32_t jsti_recording_feedback_prepare(
+    jsti_recording_feedback *feedback, const char *start, const char *stop, char *error, size_t capacity);
+void jsti_recording_feedback_cancel_preparation(jsti_recording_feedback *feedback);
+int32_t jsti_recording_feedback_play(
+    jsti_recording_feedback *feedback, int32_t sound, float gain, char *error, size_t capacity);
+void jsti_recording_feedback_stop(jsti_recording_feedback *feedback);
+/* Call only after preparation returns. No callback runs after destroy returns. */
+void jsti_recording_feedback_destroy(jsti_recording_feedback *feedback);
+/* Device-free check: decodes and bounds the asset using the production decoder. */
+int32_t jsti_recording_feedback_check_asset(const char *path, char *error, size_t capacity);
+/* Self-test measurement: seconds from play to first queued native samples, 0 while pending, -1 on failure. */
+double jsti_recording_feedback_queued_latency(jsti_recording_feedback *feedback);
 
 /* Plays mono PCM16 through the sound server. The samples are copied. */
 typedef struct jsti_player jsti_player;

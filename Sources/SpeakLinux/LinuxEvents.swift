@@ -328,6 +328,10 @@ private func linuxReady(_ holder: LinuxEventContext) {
         Task {
             await controller.ready()
             await controller.refreshLoginItem()
+            LinuxWindow.textOutput(
+                await controller.textOutputOptions(),
+                hint: LinuxHostPlatform.session.shortcutAdvice(command: "justspeaktoit")
+            )
             do {
                 try directory.withCString { path in
                     try LinuxNative.call { jsti_window_screenshot_tour(path, $0, $1) }
@@ -352,6 +356,7 @@ private func linuxReady(_ holder: LinuxEventContext) {
         return
     }
     do {
+        LinuxWindow.textOutput(.init(), hint: LinuxHostPlatform.session.shortcutAdvice(command: "justspeaktoit"))
         // Capture the laid-out startup window before the self-test changes it.
         if let path = ProcessInfo.processInfo.environment["JSTI_UI_SNAPSHOT_PATH"] {
             try path.withCString { path in try LinuxNative.call { jsti_window_save_snapshot(path, $0, $1) } }

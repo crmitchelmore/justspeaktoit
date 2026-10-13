@@ -24,7 +24,7 @@ public enum DesktopPostProcessing {
             modelIdentifier: String = ModelCatalog.defaultPostProcessingModel,
             customPrompt: String? = nil,
             outputLanguage: String? = nil,
-            temperature: Double = 0.2
+            temperature: Double = SpeechDefaults.temperature
         ) {
             self.mode = mode
             self.modelIdentifier = modelIdentifier

@@ -8,6 +8,20 @@ public enum LinuxClipboard {
         try text.withCString { text in try LinuxNative.call { jsti_clipboard_write(text, $0, $1) } }
     }
 
+    public static func writeOwned(_ text: String) throws -> UInt64 {
+        var ownership: UInt64 = 0
+        try text.withCString { text in
+            try LinuxNative.call { jsti_clipboard_write_owned(text, &ownership, $0, $1) }
+        }
+        return ownership
+    }
+
+    public static func restore(_ text: String, ownership: UInt64) throws -> Bool {
+        try text.withCString { text in
+            try LinuxNative.checked(accepting: [2]) { jsti_clipboard_restore(text, ownership, $0, $1) } == 0
+        }
+    }
+
     /// The clipboard text, or nil when it holds something other than text.
     public static func read() throws -> String? {
         var pointer: UnsafeMutablePointer<CChar>?
@@ -118,6 +132,10 @@ public struct LinuxOutputNativeAdapter: LinuxOutputNative {
 
     public func readClipboard() throws -> String? { try LinuxClipboard.read() }
     public func writeClipboard(_ text: String) throws { try LinuxClipboard.write(text) }
+    public func writeOwnedClipboard(_ text: String) throws -> UInt64 { try LinuxClipboard.writeOwned(text) }
+    public func restoreClipboard(_ text: String, ownership: UInt64) throws -> Bool {
+        try LinuxClipboard.restore(text, ownership: ownership)
+    }
     public func x11Paste(window: UInt64, shift: Bool) throws -> Bool {
         // Let the clipboard owner settle before the target asks for it.
         Thread.sleep(forTimeInterval: 0.05)

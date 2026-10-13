@@ -39,6 +39,13 @@ package protocol DesktopHostPlatform: Sendable {
     associatedtype HotKeySettings: Codable & Sendable
     /// The persisted Read aloud voice.
     associatedtype VoiceOutputSettings: Codable & Sendable
+    static var voiceConfigurationKeys: Set<String> { get }
+    static func exportVoiceConfiguration(
+        _ voiceOutput: VoiceOutputSettings?, over configuration: DesktopConfiguration
+    ) throws -> DesktopConfiguration
+    static func importVoiceConfiguration(
+        from configuration: DesktopConfiguration, into voiceOutput: inout VoiceOutputSettings?
+    ) throws -> DesktopConfiguration
     /// The controller-owned Read aloud task and engine, if the host has one.
     associatedtype ReadAloudState
     /// The field captured when a recording starts, if the host can capture one.
@@ -93,6 +100,7 @@ package protocol DesktopHostPlatform: Sendable {
     /// (no captured field, or the clipboard is unavailable).
     static func makeOutputJob(options: TextOutputOptions, target: InsertionTarget?) -> OutputJob?
     static func makePlayback() -> Playback
+    static func makeRecordingFeedbackLoader() -> (any DesktopRecordingFeedbackLoader)?
     /// Nonblocking. A native operation already committed completes and is
     /// reported; nothing starts afterwards.
     static func cancel(_ job: OutputJob)
@@ -151,6 +159,7 @@ package extension DesktopHostPlatform {
     static func confirmAudioCleanup(id: UUID, count: Int) throws {
         throw DesktopHostError(message: "Recording audio cleanup is unavailable on this host.")
     }
+    static func makeRecordingFeedbackLoader() -> (any DesktopRecordingFeedbackLoader)? { nil }
     static func update(_ status: String) { update(status, transcript: nil, state: -1) }
     /// Hosts without a dashboard or History header show no totals.
     static func historyInsights(all: DesktopHistoryInsights, visible: DesktopHistoryInsights) {}

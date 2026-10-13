@@ -33,9 +33,9 @@ func voiceOutputEvent(_ index: Int32, _ context: UnsafeMutableRawPointer?) {
     let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
     let voices = WindowsVoiceOutputSettings.voices
     guard voices.indices.contains(Int(index)) else { return }
-    let settings = WindowsVoiceOutputSettings(voice: voices[Int(index)])
+    let voice = voices[Int(index)]
     holder.enqueueSettings {
-        await holder.controller.saveVoiceOutput(settings)
+        await holder.controller.selectVoiceOutput(voice)
         let saved = await holder.controller.voiceOutputSettings()
         if !WindowsNative.configureVoiceOutput(saved, context: Unmanaged.passUnretained(holder).toOpaque()) {
             WindowsNative.update("The saved voice could not be shown. Reopen Voice and try again.")

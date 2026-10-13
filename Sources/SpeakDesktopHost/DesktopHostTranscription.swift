@@ -106,6 +106,7 @@ extension DesktopHostController {
         cancelOutput()
         guard busy else { return }
         cancellationRequested = true
+        recordingTail?.task.cancel()
         transcriptionTask?.cancel()
         postProcessingTask?.cancel()
         liveFinalisation?.cancel()

@@ -42,6 +42,9 @@ package protocol DesktopHostEffects<Platform>: Sendable {
     func makeLiveClient(
         model: String, key: String, language: String?, azureEndpoint: String
     ) -> (any FinalizingStreamingTranscriptionClient)?
+    func makeLiveClient(
+        model: String, key: String, language: String?, azureEndpoint: String, options: LiveClientOptions
+    ) -> (any FinalizingStreamingTranscriptionClient)?
     func transcribe(
         _ request: DesktopHostTranscriptionRequest, with controller: DesktopHostController<Platform>
     ) async throws -> TranscriptionResult
@@ -49,6 +52,14 @@ package protocol DesktopHostEffects<Platform>: Sendable {
     func perform(_ job: Platform.OutputJob, text: String) -> String
     /// Replaces the settings file atomically.
     func writeSettings(_ data: Data, to url: URL) throws
+}
+
+package extension DesktopHostEffects {
+    func makeLiveClient(
+        model: String, key: String, language: String?, azureEndpoint: String, options: LiveClientOptions
+    ) -> (any FinalizingStreamingTranscriptionClient)? {
+        makeLiveClient(model: model, key: key, language: language, azureEndpoint: azureEndpoint)
+    }
 }
 
 /// Owned until native capture stop has joined its worker, so no callback sees

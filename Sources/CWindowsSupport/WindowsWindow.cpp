@@ -41,8 +41,10 @@ bool jsti_voice_output_available();
 void jsti_show_voice_settings(HWND owner);
 bool jsti_voice_settings_self_test(HWND owner, std::string &error);
 bool jsti_azure_resource_available();
+void jsti_show_configuration(HWND owner, const wchar_t *group);
 void jsti_show_azure_resource_settings(HWND owner);
 bool jsti_azure_resource_settings_self_test(HWND owner, std::string &error);
+bool jsti_configuration_self_test(HWND owner, std::string &error);
 bool jsti_local_models_available();
 std::wstring jsti_local_models_summary();
 void jsti_show_local_models(HWND owner);
@@ -126,7 +128,8 @@ constexpr int setupMicrophoneID = 431, setupModelID = 432, setupShortcutID = 433
 // Settings that were menu commands: the automation switch emits
 // AUTOMATION_TOGGLED; the others open the same dialogs as before.
 constexpr int appearanceLabelID = 440, appearanceID = 441, automationID = 442, azureID = 443, cloudSyncID = 444,
-    shortcutValueID = 445, githubID = 446, issueID = 447, privacyID = 448, loginItemID = 449;
+    shortcutValueID = 445, githubID = 446, issueID = 447, privacyID = 448, loginItemID = 449,
+    configurationID = 450;
 constexpr UINT tourMessage = WM_APP + 18, appearanceMessage = WM_APP + 19, pageMessage = WM_APP + 20;
 constexpr UINT hudMessage = WM_APP + 21;
 constexpr UINT_PTR tourTimerID = 90;
@@ -568,6 +571,8 @@ unsigned pagesOf(int identifier) {
         return page(historyPage);
     case readAloudID: case stopPlaybackID: return page(historyPage) | page(voicePage);
     case voiceSettingsID: return page(voicePage);
+    case configurationID:
+        return page(generalPage) | page(transcriptionPage) | page(postProcessingPage) | page(keyboardPage);
     case 94: case microphoneID: case textOutputID: case appearanceLabelID: case appearanceID: case automationID:
     case loginItemID: case recordingsFolderLabelID: case recordingsFolderID: case audioCleanupID:
         return page(generalPage);
@@ -855,10 +860,14 @@ void layoutSettings(HWND window, const RECT &content) {
             L"Finished text goes back into the app you were in when dictation started, or to the clipboard.",
             2 * row + scale(window, 12));
         label(94, y); control(microphoneID, y);
-        place(window, textOutputID, box(left, y + row + scale(window, 12), scale(window, 170), row));
-        top = y + 2 * row + scale(window, 32) + gap;
-        // Combining the input/output controls leaves room for housekeeping at
-        // the native minimum size without shrinking the controls.
+        top = y + row + scale(window, 20) + gap;
+        y = layoutSettingsCard(window, top, content, 0xE8C8, L"Output",
+            L"Finished text goes back into the app you were in when dictation started, or to the clipboard.", row);
+        place(window, textOutputID, box(left, y, scale(window, 170), row));
+        place(window, configurationID, box(left + scale(window, 182), y, scale(window, 220), row));
+        top = y + row + scale(window, 20) + gap;
+        // The Mac's App Behaviour card. The note appears only when the system
+        // decides Launch at login, so the page still fits the minimum height.
         y = layoutSettingsCard(window, top, content, 0xE713, L"App behaviour", state.loginItemNote,
                                3 * row + scale(window, 24));
         label(appearanceLabelID, y); control(appearanceID, y, scale(window, 220));
@@ -890,6 +899,7 @@ void layoutSettings(HWND window, const RECT &content) {
         button(saveID, y, scale(window, 112));
         y += row + scale(window, 12);
         place(window, azureID, box(left + scale(window, 188), y, scale(window, 240), row));
+        place(window, configurationID, box(right - scale(window, 220), y, scale(window, 220), row));
         break;
     }
     case postProcessingPage: {
@@ -897,6 +907,7 @@ void layoutSettings(HWND window, const RECT &content) {
             L"Send finished transcripts to an OpenRouter model to fix punctuation and filler, or follow your own "
             L"instructions. Empty recordings stay empty, and History keeps the original beside the result.", row);
         place(window, processingID, box(left, y, scale(window, 230), row));
+        place(window, configurationID, box(left + scale(window, 242), y, scale(window, 220), row));
         break;
     }
     case profilesPage: {
@@ -912,6 +923,7 @@ void layoutSettings(HWND window, const RECT &content) {
             row + scale(window, 40));
         place(window, shortcutValueID, RECT{left, y, right, y + scale(window, 28)});
         place(window, shortcutID, box(left, y + scale(window, 40), scale(window, 200), row));
+        place(window, configurationID, box(left + scale(window, 212), y + scale(window, 40), scale(window, 220), row));
         break;
     }
     case cloudSyncPage: {
@@ -1525,6 +1537,7 @@ bool createControls(HWND window) {
         add(L"STATIC", L"&Microphone", 0, 94) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, microphoneID) &&
         add(L"BUTTON", L"Text o&utput…", BS_PUSHBUTTON | WS_TABSTOP, textOutputID) &&
+        add(L"BUTTON", L"Dictation &preferences...", BS_PUSHBUTTON | WS_TABSTOP, configurationID) &&
         add(L"STATIC", L"&Theme", 0, appearanceLabelID) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP, appearanceID) &&
         add(L"BUTTON", L"Launch at &login", BS_PUSHBUTTON | WS_TABSTOP, loginItemID) &&
@@ -1640,6 +1653,7 @@ bool applyMicrophones(HWND window, std::vector<MicrophoneRow> rows) {
 // Settings that were menu commands follow their dialogs' idle rules; the
 // automation switch shows the state the host reported.
 void updateSettingsButtons(HWND window, int recording) {
+    EnableWindow(GetDlgItem(window, configurationID), recording == 0);
     EnableWindow(GetDlgItem(window, voiceSettingsID), recording == 0 && jsti_voice_output_available());
     EnableWindow(GetDlgItem(window, localModelsID), recording == 0 && jsti_local_models_available());
     EnableWindow(GetDlgItem(window, cloudSyncID), recording == 0 && jsti_cloud_sync_available());
@@ -1888,28 +1902,32 @@ void importAudio(HWND window) {
 }
 
 // The screenshot tour: every page, then the dashboard and History in dark
-// mode, then recording/HUD states and the light/dark filter editors. Each
-// step is saved as NN-name.bmp; the window closes afterwards.
-constexpr int tourSteps = pageCount + 7;
+// mode, then recording/HUD states, the light/dark filter editors, and the
+// expanded/compact HUD variants. Each step is saved as NN-name.bmp; the
+// window closes afterwards.
+enum TourStep { tourDarkDashboard = pageCount, tourDarkHistory, tourDashboardRecording, tourHUDRecording,
+                tourHUDCompleted, tourHistoryFilters, tourDarkHistoryFilters, tourExpandedRecording,
+                tourCompactRecording, tourCompactCompleted, tourSteps };
 
 std::string tourName(int step) {
     if (step < pageCount) return pageInfo[step].name;
     const char *const extra[] = {"dashboard-dark", "history-dark", "dashboard-recording", "hud-recording",
-                                 "hud-completed", "history-filters", "history-filters-dark"};
+                                 "hud-completed", "history-filters", "history-filters-dark",
+                                 "hud-expanded-recording", "hud-compact-recording", "hud-compact-completed"};
     return extra[step - pageCount];
 }
 
 void tourShow(HWND window, int step) {
     if (step < pageCount) {
         showPage(window, step);
-    } else if (step == pageCount) {
+    } else if (step == tourDarkDashboard) {
         jsti::chrome::setAppearance(2);
         SendDlgItemMessageW(window, appearanceID, CB_SETCURSEL, 2, 0);
         applyTheme(window);
         showPage(window, dashboardPage);
-    } else if (step == pageCount + 1) {
+    } else if (step == tourDarkHistory) {
         showPage(window, historyPage);
-    } else if (step >= pageCount + 5) {
+    } else if (step == tourHistoryFilters || step == tourDarkHistoryFilters) {
         const JSTIHistoryFilterModel models[] = {
             {"model/sample", "Sample transcription model", 0},
             {"model/long", "An imported transcription model with a long descriptive name and vocabulary context", 0}
@@ -1920,16 +1938,28 @@ void tourShow(HWND window, int step) {
             return;
         }
         state.displayedRecording = 0;
-        jsti::chrome::setAppearance(step == pageCount + 5 ? 1 : 2);
+        jsti::chrome::setAppearance(step == tourHistoryFilters ? 1 : 2);
         applyTheme(window);
         showPage(window, historyPage);
         jsti_show_history_filters(window, [](const std::string &) {});
-    } else if (step == pageCount + 3) {
+    } else if (step == tourHUDRecording) {
         jsti::hud::stage(1, L"Recording", L"Capturing audio",
                          L"Could we move the catch-up to Friday? That gives us a little more time");
         jsti::hud::apply();
-    } else if (step == pageCount + 4) {
+    } else if (step == tourHUDCompleted) {
         jsti::hud::stage(5, L"Completed", L"Saved. Inserted into the original text field.", L"");
+        jsti::hud::apply();
+    } else if (step == tourExpandedRecording) {
+        jsti::hud::stage(1, L"Recording", L"Capturing audio",
+                         L"Could we move the catch-up to Friday? That gives us a little more time to finish "
+                         L"the proposal and review the notes together before sending them to the team.", 0, false, true);
+        jsti::hud::apply();
+    } else if (step == tourCompactRecording) {
+        jsti::hud::stage(1, L"Recording", L"Capturing audio",
+                         L"Could we move the catch-up to Friday? That gives us a little more time", 0, true);
+        jsti::hud::apply();
+    } else if (step == tourCompactCompleted) {
+        jsti::hud::stage(5, L"Completed", L"Saved. Inserted into the original text field.", L"", 2400, true);
         jsti::hud::apply();
     } else {
         // Late, because it replaces the displayed transcript.
@@ -1950,13 +1980,13 @@ void tourStep(HWND window) {
     char error[512] = {};
     std::string hudError;
     std::wstring widePath;
-    if (state.tourStep >= pageCount + 5) {
+    if (state.tourStep == tourHistoryFilters || state.tourStep == tourDarkHistoryFilters) {
         HWND filters = jsti_history_filters_window();
         if (saveNativeSnapshot(filters, path.c_str(), error, sizeof error) != 0) {
             emit(window, JSTI_EVENT_ERROR, error);
         }
         if (filters) DestroyWindow(filters);
-    } else if (state.tourStep >= pageCount + 3) {
+    } else if (state.tourStep >= tourHUDRecording && state.tourStep <= tourCompactCompleted) {
         // The HUD is its own layered window; it is drawn straight to the file.
         if (!jsti::wide(path.c_str(), widePath) || !jsti::hud::saveSnapshot(widePath, hudError)) {
             emit(window, JSTI_EVENT_ERROR, hudError.empty() ? "The HUD snapshot path is invalid." : hudError.c_str());
@@ -2114,6 +2144,12 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             return 0;
         }
         case processingID: jsti_show_postprocessing(window); return 0;
+        case configurationID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, configurationID) && IsWindowEnabled(window))
+                jsti_show_configuration(window, state.page == transcriptionPage ? L"Transcription" :
+                    state.page == postProcessingPage ? L"Post-processing" :
+                    state.page == keyboardPage ? L"Keyboard" : L"General");
+            return 0;
         case azureID:
             if (HIWORD(wparam) == BN_CLICKED && idleControl(window, azureID) && IsWindowEnabled(window)) {
                 jsti_show_azure_resource_settings(window);
@@ -2922,12 +2958,20 @@ int jsti_window_set_insights(const JSTIInsights *all, const JSTIInsights *visibl
     } catch (const std::exception &) { return -1; }
 }
 
-int jsti_window_set_hud(int phase, const char *headline, const char *subheadline, const char *live_text) {
+int jsti_window_set_hud(int phase, const char *headline, const char *subheadline, const char *live_text,
+                        int display_milliseconds, int compact) {
+    return jsti_window_set_hud_layout(phase, headline, subheadline, live_text, display_milliseconds, compact, 0);
+}
+
+int jsti_window_set_hud_layout(int phase, const char *headline, const char *subheadline, const char *live_text,
+                               int display_milliseconds, int compact, int expanded) {
     try {
+        if ((compact != 0 && compact != 1) || (expanded != 0 && expanded != 1)) return -1;
         std::wstring title, detail, live;
         if (!jsti::wide(headline ? headline : "", title) || !jsti::wide(subheadline ? subheadline : "", detail) ||
             !jsti::wide(live_text ? live_text : "", live) ||
-            !jsti::hud::stage(phase, std::move(title), std::move(detail), std::move(live))) {
+            !jsti::hud::stage(phase, std::move(title), std::move(detail), std::move(live),
+                              display_milliseconds, compact != 0, expanded != 0)) {
             return -1;
         }
         std::lock_guard<std::mutex> lock(state.mutex);
@@ -3950,7 +3994,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             jsti_text_output_settings_self_test(window, textOutputID, setRecording, recordingBlocked, &observed, failure) &&
             jsti_hotkey_self_test(window, observe, &observed, failure) && jsti_voice_settings_self_test(window, failure) &&
             jsti_local_models_self_test(window, failure) && jsti_cloud_sync_settings_self_test(window, failure) &&
-            jsti_azure_resource_settings_self_test(window, failure);
+            jsti_azure_resource_settings_self_test(window, failure) && jsti_configuration_self_test(window, failure);
     };
     bool passed = false;
     try { passed = check(); }

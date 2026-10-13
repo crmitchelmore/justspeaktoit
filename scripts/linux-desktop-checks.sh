@@ -35,10 +35,14 @@ if [ -n "${JSTI_UI_SCREENSHOT_DIR:-}" ]; then
     echo "== screenshot tour (sample History, every page)"
     DISPLAY="$display" GDK_BACKEND=x11 GSK_RENDERER=cairo GTK_A11Y=none NO_AT_BRIDGE=1 \
         timeout 180 dbus-run-session -- "$binary" --ui-screenshots "$JSTI_UI_SCREENSHOT_DIR"
-    expected=(01-dashboard 02-history 03-voice-output 04-general 05-transcription 06-post-processing
-              07-keyboard 08-icloud-sync 09-about 10-dashboard-dark 11-history-dark 12-dashboard-recording
-              13-hud-recording 14-hud-completed 15-history-filters 16-history-filters-dark)
+    expected=(dashboard history voice-output general transcription post-processing
+              keyboard icloud-sync about general-portal-output dashboard-dark history-dark dashboard-recording
+              hud-recording hud-completed history-filters history-filters-dark
+              hud-expanded-recording hud-compact-recording hud-compact-completed)
+    index=1
     for name in "${expected[@]}"; do
-        [ -s "$JSTI_UI_SCREENSHOT_DIR/$name.png" ] || { echo "Missing screenshot $name.png" >&2; exit 1; }
+        printf -v file '%02d-%s.png' "$index" "$name"
+        [ -s "$JSTI_UI_SCREENSHOT_DIR/$file" ] || { echo "Missing screenshot $file" >&2; exit 1; }
+        index=$((index + 1))
     done
 fi

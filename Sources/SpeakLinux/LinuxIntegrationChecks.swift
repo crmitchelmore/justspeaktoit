@@ -187,7 +187,9 @@ enum LinuxIntegrationChecks {
             native: LinuxOutputNativeAdapter()
         ).perform("must not paste")
         try require(moved.contains("focused window changed"), "a stale target was pasted into: \(moved)")
-        print("X11: pasted into the captured window, restored the clipboard and refused a stale target.")
+        try LinuxNative.call { jsti_clipboard_ownership_self_test($0, $1) }
+        print("X11: pasted and restored owned text; refused stale targets, "
+            + "same-text copies and another client's selection.")
     }
 
     /// The X11 Ctrl+Alt+Space grab: the script presses the key with XTest once

@@ -155,3 +155,4 @@ foreach ($case in $cases) {
 
 if ($script:failed) { throw "$($script:failed) lifecycle ownership checks failed." }
 Write-Host 'Lifecycle ownership rules passed: a refused run changes nothing and cleanup removes only owned state.'
+& (Join-Path $PSScriptRoot 'test-recording-feedback-readiness.ps1')

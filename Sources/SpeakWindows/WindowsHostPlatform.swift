@@ -26,6 +26,21 @@ enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPla
 
     package static let displayName = "Windows"
     package static let credentialStoreName = "Windows Credential Manager"
+    package static func makeRecordingFeedbackLoader() -> (any DesktopRecordingFeedbackLoader)? {
+        WindowsRecordingFeedbackLoader()
+    }
+
+    package static var voiceConfigurationKeys: Set<String> { DesktopConfiguration.voiceGenerationTransferKeys }
+    package static func exportVoiceConfiguration(
+        _ voiceOutput: VoiceOutputSettings?, over configuration: DesktopConfiguration
+    ) throws -> DesktopConfiguration {
+        try VoiceOutputSettings.exportConfiguration(voiceOutput, over: configuration)
+    }
+    package static func importVoiceConfiguration(
+        from configuration: DesktopConfiguration, into voiceOutput: inout VoiceOutputSettings?
+    ) throws -> DesktopConfiguration {
+        try VoiceOutputSettings.importConfiguration(from: configuration, into: &voiceOutput)
+    }
 
     package static func update(_ status: String, transcript: String?, state: Int32) {
         WindowsNative.update(status, transcript: transcript, state: state)
@@ -49,7 +64,10 @@ enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPla
     }
 
     package static func hud(_ state: DesktopHUDState) {
-        _ = jsti_window_set_hud(state.phase.rawValue, state.headline, state.subheadline, state.liveText)
+        _ = jsti_window_set_hud_layout(
+            state.phase.rawValue, state.headline, state.subheadline, state.liveText,
+            Int32(((state.displayDuration ?? 0) * 1000).rounded()), state.compact ? 1 : 0, state.expanded ? 1 : 0
+        )
     }
 
     package static func historyPresentation(

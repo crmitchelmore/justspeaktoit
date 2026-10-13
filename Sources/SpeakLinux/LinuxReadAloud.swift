@@ -68,10 +68,10 @@ extension LinuxEventContext {
     func selectVoice(_ index: Int) {
         let voices = LinuxVoiceOutputSettings.voices
         guard voices.indices.contains(index) else { return }
-        let settings = LinuxVoiceOutputSettings(voice: voices[index])
+        let voice = voices[index]
         let controller = controller
         enqueueSettings {
-            await controller.saveVoiceOutput(settings)
+            await controller.selectVoiceOutput(voice)
             LinuxWindow.voiceOutput(await controller.voiceOutputSettings())
         }
     }

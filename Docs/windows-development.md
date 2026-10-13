@@ -6,6 +6,11 @@ acceptance criterion. The current implementation does not meet that criterion.
 Do not describe a successful build, test run or artifact upload as parity or
 shipment.
 
+See [Desktop settings coverage](desktop-settings-parity.md) for the exhaustive
+macOS preference inventory, the native portable-preferences editors and
+versioned JSON transfer, and the remaining settings/engine gaps. Portable
+preferences JSON is not a macOS Data & Migration backup archive.
+
 The implementation keeps Swift for shared behaviour and uses a narrow C ABI to
 Windows APIs for the desktop shell, microphone, hotkey, credentials and text
 output. Apple audio, UI, local inference and security integrations retain their
@@ -37,6 +42,15 @@ $bin = swift build --configuration release --show-bin-path
 & (Join-Path $bin.Trim() 'SpeakWindows.exe') --ui-smoke-test
 & (Join-Path $bin.Trim() 'SpeakWindows.exe')
 ```
+
+Recording feedback uses its own warmed WASAPI channel, independent of History
+and Voice playback. `--self-test` and the extracted developer bundle's
+`--bundle-self-test` require production Media Foundation decoding of all eight
+bundled AAC cues. `--recording-feedback-self-test` requires an actual output
+endpoint, exercises both cues for every profile, reusable stop and joined close,
+and reports first-buffer queue admission bounded at 100 ms. This is not an
+audible-latency or device-loss certification. A source-level typecheck cannot
+substitute for native codec, endpoint or installed-package evidence.
 
 The current source offers microphone recording, audio-file import and static
 remote batch models across these provider families: OpenAI, Groq,

@@ -3,33 +3,57 @@ import SpeakCore
 import SpeakDesktop
 
 package actor DesktopHostController<Platform: DesktopHostPlatform> {
-    package struct Settings: Codable {
+    package struct SettingsValues: Codable, Sendable {
         package var model = ModelCatalog.defaultBatchTranscriptionModel
         package var postProcessing: DesktopPostProcessing.Options?
         package var microphoneDeviceID: String?
         package var batchModel: String?
         package var liveModel: String?
-        // Edited in the Text output dialog. Absent or unknown keys keep the
-        // smart insert-at-cursor default with clipboard restoration.
+        // Absent keys keep the native smart insert-at-cursor default.
         package var textOutput: Platform.TextOutputOptions?
-        // Keyboard shortcut dialog; absent keeps Ctrl+Alt+Space, press-to-toggle.
         package var hotKey: Platform.HotKeySettings?
-        // The Voice dialog; absent uses the catalogue default.
         package var voiceOutput: Platform.VoiceOutputSettings?
-        // Settings menu; `speak` is refused until allowed.
         package var automationEnabled: Bool?
-        // The last on-device model chosen under Source: Local.
         package var localModel: String?
-        // Local models dialog; absent lets whisper.cpp use a GPU when available.
         package var localUseGPU: Bool?
-        /// The Azure Speech resource dialog, under the Apple apps' key for the same
-        /// device-local value; absent means none, and recorded audio uses the region.
+        /// Device-local Azure resource, under the Apple apps' key.
         package var azureSpeechResourceEndpoint: String?
-        /// General › Appearance; absent follows the system.
         package var appearance: DesktopAppearance?
-        /// General › Launch at login as last reached, under the Mac's key. Only
-        /// hosts that cannot read the system's registration back use it.
+        /// Last reached registration for hosts that cannot read it back.
         package var runAtLogin: Bool?
+        package var configuration: DesktopConfiguration?
+    }
+
+    @dynamicMemberLookup
+    package struct Settings: Codable, Sendable {
+        private var values = SettingsValues()
+        private var preserved: [String: AnyCodable] = [:]
+        package init() {}
+
+        package subscript<Value>(dynamicMember keyPath: WritableKeyPath<SettingsValues, Value>) -> Value {
+            get { values[keyPath: keyPath] }
+            set { values[keyPath: keyPath] = newValue }
+        }
+
+        package init(from decoder: Decoder) throws {
+            values = try SettingsValues(from: decoder)
+            let container = try decoder.singleValueContainer()
+            let all = try container.decode([String: AnyCodable].self)
+            let known: Set<String> = [
+                "model", "postProcessing", "microphoneDeviceID", "batchModel", "liveModel", "textOutput",
+                "hotKey", "voiceOutput", "automationEnabled", "localModel", "localUseGPU",
+                "azureSpeechResourceEndpoint", "appearance", "runAtLogin", "configuration"
+            ]
+            preserved = all.filter { !known.contains($0.key) }
+        }
+
+        package func encode(to encoder: Encoder) throws {
+            let known = try JSONDecoder().decode(
+                [String: AnyCodable].self, from: JSONEncoder().encode(values)
+            )
+            var container = encoder.singleValueContainer()
+            try container.encode(preserved.merging(known) { _, current in current })
+        }
     }
 
     /// Target, profile and text output are fixed when recording starts; a
@@ -68,8 +92,10 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var profileWarning: String?
     package var settings: Settings
     package var recording: Recording?
+    package var recordingTail: (recordID: UUID, task: Task<Void, Never>)?
     private var isReady = false
     package var busy = false
+    private var busyOperations = 0
     package var closed = false
     /// Set once `close()` stops waiting; later calls return it.
     var shutdownReport: DesktopHostShutdownReport?
@@ -105,6 +131,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var liveFinalisation: DesktopLiveSession?
     /// The recording the HUD follows, from Record until its result.
     var hudRecording: UUID?
+    var hudExpanded = false
     package var outputSlot = DesktopHostOutputState<Platform>()
     // Installed once iCloud sync is configured.
     package var cloudSync = DesktopHostSyncHooks()
@@ -113,6 +140,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     /// At most one audible native History playback; its status presenter is
     /// installed by preparePlayback once this actor exists.
     package let playback = Platform.makePlayback()
+    var recordingFeedback: DesktopRecordingFeedback?
+    var recordingFeedbackPreview: Task<Void, Never>?
 
     package init(
         directory: URL, effects: any DesktopHostEffects<Platform>, shutdownGrace: Duration = DesktopHostShutdown.grace
@@ -152,9 +181,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
         cancelOutput()
         let selected = selectModel(modelIndex)
         selectMicrophone(deviceID)
-        busy = true
-        activeOperations += 1
-        defer { busy = false; finishOperation() }
+        beginBusyOperation()
+        defer { finishBusyOperation() }
         if recording != nil { await stopAndTranscribe(); return }
         // Never record with a model other than the one chosen; why it could
         // not be saved stays shown.
@@ -181,55 +209,24 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
 }
 
 extension DesktopHostController {
-    private func stopAndTranscribe() async {
-        let pending = recording?.record
-        let live = recording?.live
-        do {
-            guard let stopped = try stopCapture() else { return }
-            guard stopped.duration > 0 else {
-                stopped.live?.cancel()
-                var empty = stopped.record
-                empty.failure = "No audio was captured."
-                try await saveRecord(empty)
-                reportFailure("No audio was captured.", for: empty.id, headline: "Nothing was recorded")
-                return
-            }
-            if let live = stopped.live {
-                await finishLive(stopped, session: live)
-            } else {
-                await transcribe(
-                    stopped.record, duration: stopped.duration, output: stopped.output, profile: stopped.profile
-                )
-            }
-        } catch {
-            if var pending {
-                pending.failure = error.localizedDescription
-                if let live { pending.result = liveResult(live.cancel().text, record: pending, duration: 0) }
-                do { try await saveRecord(pending) } catch {
-                    update("Recording and history error: \(error.localizedDescription)", state: 0)
-                    return
-                }
-                present(pending, output: nil)
-                return
-            }
-            update("Recording retained: \(error.localizedDescription)", state: 0)
-        }
-    }
-
     func captureFailed(_ message: String, recordingID: UUID) async {
         guard !closed, recording?.record.id == recordingID else { return }
-        busy = true
-        activeOperations += 1
-        defer { busy = false; finishOperation() }
+        await recordingFeedback?.cancelRecording(recordingID)
+        beginBusyOperation()
+        defer { finishBusyOperation() }
         var record = recording?.record
         let live = recording?.live
-        let stopped = try? stopCapture()
+        var stopped: StoppedRecording?
+        var failure = message
+        do { stopped = try stopCapture() } catch {
+            failure += " Capture cleanup failed: \(error.localizedDescription)"
+        }
         if let live, var partial = record {
             let snapshot = live.cancel()
             partial.result = liveResult(snapshot.text, record: partial, duration: stopped?.duration ?? 0)
             record = partial
         }
-        record?.failure = message
+        record?.failure = failure
         do { if let record { try await saveRecord(record) } } catch {
             update("\(message) History error: \(error.localizedDescription)", state: 0)
             return
@@ -260,7 +257,8 @@ extension DesktopHostController {
             let filename = id.uuidString + "." + source.pathExtension
             let destination = directory.appendingPathComponent("History").appendingPathComponent(filename)
             try FileManager.default.copyItem(at: source, to: destination)
-            let record = DesktopRecordingStore.Record(id: id, audioFilename: filename, modelIdentifier: settings.model)
+            var record = DesktopRecordingStore.Record(id: id, audioFilename: filename, modelIdentifier: settings.model)
+            record.languageIdentifier = settings.configuration?.language
             try await saveRecord(record)
             if closed {
                 var cancelled = record
@@ -291,6 +289,18 @@ extension DesktopHostController {
         waiters.forEach { $0.resume() }
     }
 
+    private func finishBusyOperation() {
+        busyOperations -= 1
+        busy = busyOperations > 0
+        finishOperation()
+    }
+
+    private func beginBusyOperation() {
+        busyOperations += 1
+        busy = true
+        activeOperations += 1
+    }
+
     package func update(_ status: String, transcript: String? = nil, state: Int32 = -1) {
         guard !closed else { return }
         Platform.update(status, transcript: transcript, state: state)
@@ -312,6 +322,7 @@ extension DesktopHostController {
         defer { isReady = true }
         guard !closed else { return }
         preparePlayback()
+        await prepareRecordingFeedback()
         refreshModels(force: false)
         activeOperations += 1
         defer { finishOperation() }

@@ -69,7 +69,7 @@ extension DesktopHostController {
         case 100: await openComparison()
         case 101: await selectComparison(text)
         case 102, 103: await startComparison(text, live: event == 103)
-        case 104: await stopComparison()
+        case 104: requestComparisonStop()
         case 105: await cancelComparison()
         case 106: await judgeComparison(text)
         case 107: await exportComparisons(path: text, markdown: index == 1)
@@ -101,7 +101,8 @@ extension DesktopHostController {
     }
 
     private func startComparison(_ payload: String, live: Bool) async {
-        guard !closed, !busy, recording == nil, comparisonCapture == nil, comparisonTask == nil else {
+        guard !closed, !busy, recording == nil, comparisonCapture == nil,
+              comparisonTask == nil, comparisonFinalization == nil else {
             comparisonStatus("Finish or cancel the current recording or comparison first.")
             return
         }
@@ -243,40 +244,6 @@ extension DesktopHostController {
         await refreshComparison()
     }
 
-    package func stopComparison() async {
-        guard let active = comparisonCapture, let fanOut = comparisonLive, let comparisons else { return }
-        comparisonCapture = nil
-        comparisonUpdates?.cancel()
-        comparisonUpdates = nil
-        activeOperations += 1
-        defer { finishOperation() }
-        do {
-            let duration = try await DesktopHostComparisonClosingCapture(active).finish()
-            let entries = await fanOut.finish()
-            guard let digest = Platform.comparisonDigest else {
-                throw DesktopHostError(message: "Comparison SHA-256 is unavailable.")
-            }
-            let sample = ModelComparisonSample(
-                name: active.file.url.lastPathComponent, contentHash: try digest.sha256(ofFileAt: active.file.url),
-                durationSeconds: duration
-            )
-            guard let pending = comparisonPending else {
-                throw DesktopHostError(message: "The saved microphone comparison snapshot is missing.")
-            }
-            let round = try DesktopComparisonRunner.completing(pending, entries: entries, sample: sample)
-            try await comparisons.upsert(round)
-            comparisonSelection = round.id
-            comparisonStatus("Comparison saved. Rank every blind result to reveal models.")
-        } catch {
-            fanOut.cancel()
-            comparisonStatus("Comparison recording retained: \(error.localizedDescription)")
-        }
-        busy = false
-        comparisonLive = nil
-        comparisonPending = nil
-        await refreshComparison()
-    }
-
     func interruptedRound(
         id: UUID, sample: ModelComparisonSample, mode: ModelComparisonInputMode,
         selected: [DesktopComparisonCandidate]
@@ -309,6 +276,7 @@ extension DesktopHostController {
     package func cancelComparison() async {
         playback.stop(announcing: false)
         comparisonTask?.cancel()
+        comparisonFinalization?.cancel()
         comparisonLive?.cancel()
         if comparisonCapture != nil { await stopComparison() }
     }

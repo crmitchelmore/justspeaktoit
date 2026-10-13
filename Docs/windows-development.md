@@ -26,7 +26,9 @@ each lane must expose synchronized audio readiness, with a 12-second handshake
 budget. All ready lanes receive the common 24 kHz PCM, or the same streaming
 16 kHz projection, in 100 ms capture frames. Failed lanes do not cancel healthy
 lanes. Stop flushes native capture and bounds each lane's finalization to 30
-seconds; cancellation retains recovery text and the app-owned sample.
+seconds; cancellation retains recovery text and the app-owned sample. Finalization
+is an owned task, so serialized native events do not leave Cancel queued behind
+Stop; shutdown also cancels that task within the existing host grace period.
 
 Comparison uses raw results only and never inserts text, post-processes, changes
 dictation settings, or writes normal History. Saved rounds and their blind order

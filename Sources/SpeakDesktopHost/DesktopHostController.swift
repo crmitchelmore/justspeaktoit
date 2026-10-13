@@ -108,6 +108,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package let playback = Platform.makePlayback()
     package var comparisons: DesktopComparisonStore?
     package var comparisonTask: Task<Void, Never>?
+    package var comparisonFinalization: Task<Void, Never>?
     var comparisonUpdates: Task<Void, Never>?
     package var comparisonCapture: DesktopHostComparisonCapture?
     package var comparisonLive: DesktopComparisonLive?

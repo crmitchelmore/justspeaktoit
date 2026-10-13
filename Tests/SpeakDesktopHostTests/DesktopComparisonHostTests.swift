@@ -183,7 +183,7 @@ private final class ComparisonHostEffects: DesktopHostEffects, @unchecked Sendab
         model: String, key: String, language: String?, azureEndpoint: String
     ) -> (any FinalizingStreamingTranscriptionClient)? {
         guard liveEnabled else { return nil }
-        let client = HostComparisonClient()
+        let client = HostComparisonClient(gate: gate)
         lock.withLock { clients.append(client) }
         return client
     }
@@ -216,9 +216,58 @@ private final class HostComparisonClient: FinalizingStreamingTranscriptionClient
     let finalShape = TranscriptFinalShape.cumulativeTranscript
     private let lock = NSLock()
     private var frames: [Data] = []
+    private var finishing = false
+    let gate: Gate?
+    init(gate: Gate? = nil) { self.gate = gate }
     var audio: [Data] { lock.withLock { frames } }
+    var hasBegunFinish: Bool { lock.withLock { finishing } }
     func start(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {}
     func sendAudio(_ audioData: Data) { lock.withLock { frames.append(audioData) } }
     func stop() {}
-    func finishAndWait() async -> String? { "Raw live" }
+    func finishAndWait() async -> String? {
+        lock.withLock { finishing = true }
+        await gate?.pass()
+        return "Raw live"
+    }
+}
+
+extension DesktopComparisonHostTests {
+    func testSerializedStopEventReturnsBeforeFinalizationSoCancelCanRun() async throws {
+        DesktopHostModels.configure(streamingQualified: true)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let gate = Gate(open: false)
+        defer { gate.release() }
+        let effects = ComparisonHostEffects(sourceToMutate: root, gate: gate, liveEnabled: true)
+        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        await controller.markReadyForSelfTest()
+        let selected = Array(DesktopHostModels.visible.filter {
+            DesktopHostModels.isLive($0.id) && LiveTranscriptionRouting.route(for: $0.id)?.sampleRate == 24_000
+        }.prefix(2)).map(\.id)
+        await controller.comparisonEvent(103, text: "\n" + selected.joined(separator: "\t"), index: 0)
+        let preparation = await controller.comparisonTask
+        await preparation?.value
+        let started = ContinuousClock.now
+        await controller.comparisonEvent(104, text: "", index: 0)
+        XCTAssertLessThan(started.duration(to: .now), .seconds(1))
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while !effects.liveClients.allSatisfy(\.hasBegunFinish), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertEqual(effects.liveClients.count, 2)
+        XCTAssertTrue(effects.liveClients.allSatisfy(\.hasBegunFinish))
+        let finalization = await controller.comparisonFinalization
+        XCTAssertNotNil(finalization)
+        await controller.comparisonEvent(105, text: "", index: 0)
+        await finalization?.value
+        XCTAssertLessThan(started.duration(to: .now), .seconds(3))
+        let persistence = await controller.comparisons
+        let rounds = await persistence?.rounds()
+        XCTAssertEqual(rounds?.count, 1)
+        XCTAssertTrue(try XCTUnwrap(rounds).flatMap(\.entries).allSatisfy(\.didFail))
+        let stillBusy = await controller.busy
+        XCTAssertFalse(stillBusy)
+        await controller.close()
+    }
 }

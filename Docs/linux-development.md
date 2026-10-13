@@ -21,6 +21,18 @@ The Linux targets are opt-in with `SPEAK_LINUX_TARGET=1`, like
 `SPEAK_WINDOWS_TARGET=1`, so the `portable-linux` job (which has no GTK
 packages) is unchanged.
 
+Gemini Transcribe Live, Meta Muse realtime ASR and Modulate Velma now use the
+shared injected provider clients through Linux's NIO WebSocket adapter, with
+the same canonical route/options projection as Windows. Audio is bounded and
+single-flight, readiness is provider-specific, and a finish without the
+documented terminal event is an error, not a successful recovered transcript.
+The native NIO loopback probe suite checks generated PCM, production request
+shapes, completion and early closure for these clients and the portable Grok
+Voice client. Grok Voice remains unavailable for selection until a live
+transcription-only/no-assistant service acceptance receipt exists. Synthetic
+transport evidence does not establish provider-account or hardware parity;
+see [Windows shared streaming details](windows-development.md).
+
 ## Build and run
 
 Ubuntu 24.04 (or any distribution with GTK 4.14+, libadwaita 1.5+) and Swift 6.2.3:

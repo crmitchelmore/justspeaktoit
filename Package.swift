@@ -59,8 +59,6 @@ let appleCoreSources: [String] = [
     "DeviceIdentityStore.swift",
     "ElevenLabsBalanceClient.swift",
     "FileProductAnalyticsStateStore.swift",
-    "GeminiLiveClient.swift",
-    "GeminiLiveProtocol.swift",
     "GeminiTTSAPI.swift",
     "GroqTTSAPI.swift",
     "HandsFreeAudioPreRollBuffer.swift",
@@ -84,9 +82,7 @@ let appleCoreSources: [String] = [
     "LiveTranscriptionClientFactory.swift",
     "Logging.swift",
     "MacConnection.swift",
-    "MetaMuseLiveClient.swift",
     "MistralTTSAPI.swift",
-    "ModulateLiveClient.swift",
     "OpenClawClient.swift",
     "OpenClawClientReceive.swift",
     "OpenRouterAPIClient.swift",
@@ -134,9 +130,6 @@ let appleCoreSources: [String] = [
     "TransportChannel.swift",
     "TransportProtocol.swift",
     "WatchCaptureImportJournal.swift",
-    "XAILiveClient.swift",
-    "XAILiveFinalisation.swift",
-    "XAILiveProtocol.swift",
     "XAITTSAPI.swift",
     "XAITTSRealtime.swift"
 ]
@@ -425,7 +418,7 @@ if linuxTargetBuild {
         ),
         .testTarget(
             name: "SpeakLinuxWebSocketTests",
-            dependencies: ["SpeakCore", "SpeakDesktop", "SpeakLinuxWebSocket"]
+            dependencies: ["SpeakCore", "SpeakDesktop", "SpeakLinuxWebSocket", "SpeakTestSupport"]
         )
     ])
 }
@@ -562,6 +555,8 @@ let package = portableCoreBuild ? portablePackage : Package(
         // Shared test doubles (issue #1124). A plain target, not a test
         // target, so the Tuist-built iOS test bundle can compile the same
         // sources through its own glob.
+        .target(
+            name: "SpeakTestSupport",
         .target(
             name: "SpeakTestSupport",
             path: "Tests/SpeakTestSupport",

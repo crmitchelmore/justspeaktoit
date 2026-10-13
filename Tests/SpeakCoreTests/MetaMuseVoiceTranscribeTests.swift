@@ -26,8 +26,9 @@ final class MetaMuseVoiceTranscribeTests: XCTestCase { // swiftlint:disable:this
     }
 
     func testHandshake_usesDedicatedSpeechContractAndBiasOptions() throws {
+        let apiKey = "synthetic-meta-token"
         let data = try MetaMuseLiveClient.handshakeData(
-            apiKey: "secret",
+            apiKey: apiKey,
             model: MetaMuseVoiceTranscribe.modelID,
             sampleRate: 24_000,
             language: "fr-FR",
@@ -36,7 +37,7 @@ final class MetaMuseVoiceTranscribeTests: XCTestCase { // swiftlint:disable:this
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
         let authorization = try XCTUnwrap(json["authorization"] as? [String: String])
 
-        XCTAssertEqual(authorization["accessToken"], "Bearer secret")
+        XCTAssertEqual(authorization["accessToken"], apiKey)
         XCTAssertEqual(json["audioEncoding"] as? String, "PCM_24KHZ")
         XCTAssertEqual(json["model"] as? String, MetaMuseVoiceTranscribe.modelID)
         XCTAssertEqual(json["mode"] as? String, "ENDPOINTING")

@@ -79,8 +79,8 @@ final class DesktopLiveLanguageParityTests: XCTestCase {
 
 private extension DesktopLiveLanguageParityTests {
     /// Every string the route's client sends before any audio: its socket
-    /// query values, the JSON of frames sent once the socket opens and the
-    /// JSON of Gladia's session request, which is held unanswered.
+    /// query values (excluding generated session identities), the JSON of frames
+    /// sent once the socket opens and Gladia's held session request.
     func upstream(_ model: String, language: String?) throws -> Set<String> {
         let sockets = AssemblyAISocketFactory()
         let sessions = LanguageParitySessions()
@@ -104,7 +104,7 @@ private extension DesktopLiveLanguageParityTests {
         var sent = Set<String>()
         for request in sockets.requests {
             let url = request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }
-            sent.formUnion(url?.queryItems?.compactMap(\.value) ?? [])
+            sent.formUnion(url?.queryItems?.filter { $0.name != "sessionId" }.compactMap(\.value) ?? [])
         }
         let payloads = sockets.sockets.flatMap(\.controls).map { Data($0.utf8) } + sessions.bodies
         for payload in payloads {

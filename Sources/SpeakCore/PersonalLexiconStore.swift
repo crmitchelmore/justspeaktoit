@@ -5,6 +5,7 @@ public actor PersonalLexiconStore {
   private let encoder: JSONEncoder
   private let decoder: JSONDecoder
   private let fileManager: FileManager
+  private var directory: VocabularyStoreDirectory
 
   public init(fileManager: FileManager = .default, baseDirectory: URL? = nil) {
     let supportURL: URL
@@ -23,6 +24,7 @@ public actor PersonalLexiconStore {
   public init(fileManager: FileManager = .default, appDirectory: URL) {
     self.fileManager = fileManager
     let lexiconFolder = appDirectory.appendingPathComponent("PersonalLexicon", isDirectory: true)
+    directory = VocabularyStoreDirectory(fileManager: fileManager, url: lexiconFolder)
     fileURL = lexiconFolder.appendingPathComponent("lexicon.json")
 
     encoder = JSONEncoder()
@@ -32,6 +34,7 @@ public actor PersonalLexiconStore {
   }
 
   public func load() throws -> [PersonalLexiconRule] {
+    try directory.prepare()
     guard fileManager.fileExists(atPath: fileURL.path) else {
       return []
     }
@@ -41,6 +44,7 @@ public actor PersonalLexiconStore {
   }
 
   public func save(_ rules: [PersonalLexiconRule]) throws {
+    try directory.prepare()
     if rules.isEmpty {
       if fileManager.fileExists(atPath: fileURL.path) {
         try fileManager.removeItem(at: fileURL)
@@ -49,7 +53,6 @@ public actor PersonalLexiconStore {
     }
 
     let data = try encoder.encode(rules)
-    try fileManager.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
     try data.write(to: fileURL, options: [.atomic])
   }
 }

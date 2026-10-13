@@ -493,6 +493,9 @@ roll back after persistence failure; corrupt files fail closed.
 `VocabularyActor` preserves MainActor isolation on Apple and uses the cooperative
 executor on Windows/Linux, whose native UI loops own and block the main thread.
 Native UI updates still marshal through the existing C adapter queues.
+Legacy store initializers still prepare their directories synchronously. Failed
+preparation is reported by the first operation, and a subsequent operation can
+retry after the storage obstruction is repaired.
 
 Recording, imported audio, retry and successful live completion apply these
 rules before optional post-processing. History retains the provider transcript,

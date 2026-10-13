@@ -245,6 +245,15 @@ class ManifestTests(unittest.TestCase):
         with self.assertRaisesRegex(windows_msix.PackageError, "does not allow the arm64"):
             windows_msix.render_manifest(x64_only, "0.0.7.1", "CN=Just Speak to It Developer", architecture="arm64")
 
+    def test_qualified_logo_families_require_generated_unqualified_assets(self):
+        for root in ("Assets/StoreLogo.png", "Assets/Square44x44Logo.png", "Assets/Square150x150Logo.png"):
+            with self.subTest(root=root):
+                identity = copy.deepcopy(self.identity)
+                del identity["assets"]["images"][root]
+                self.assertTrue(any(path.startswith(root[:-4] + ".") for path in identity["assets"]["images"]))
+                with self.assertRaisesRegex(windows_msix.PackageError, "generated unqualified assets"):
+                    windows_msix.render_manifest(identity, "0.0.7.1", "CN=Just Speak to It Developer")
+
     def test_text_values_are_escaped(self):
         identity = copy.deepcopy(self.identity)
         identity["presentation"]["displayName"] = 'Speak <It> & "Quote"'

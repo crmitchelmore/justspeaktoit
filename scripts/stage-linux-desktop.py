@@ -28,6 +28,8 @@ def stage(binary, output, prefix="/usr/local"):
         raise ValueError("the built SpeakLinux executable must be a regular file")
     if not prefix.startswith("/") or any(value in prefix for value in ("\n", "\r", "\0")):
         raise ValueError("the install prefix must be an absolute Linux path without controls")
+    if any(value in prefix for value in ("%", "=")):
+        raise ValueError("the install prefix cannot contain percent or equal signs in a desktop executable path")
     theme = binary.parent / "SpeakApp_SpeakLinux.resources/hicolor"
     core = binary.parent / "SpeakApp_SpeakCore.resources"
     bundles = resource_bundles(binary.parent)
@@ -49,7 +51,6 @@ def stage(binary, output, prefix="/usr/local"):
     # Desktop Entry escaping: quoted Exec values need two levels of backslashes.
     executable = prefix.rstrip("/") + "/bin/justspeaktoit"
     quoted = executable.replace("\\", "\\\\\\\\").replace('"', '\\\\"').replace("`", "\\\\`").replace("$", "\\\\$")
-    quoted = quoted.replace("%", "%%")
     desktop = desktop.replace("Exec=justspeaktoit", f'Exec="{quoted}"')
     applications = output / "share/applications"
     applications.mkdir(parents=True)

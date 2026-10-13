@@ -85,6 +85,9 @@ production modules, while still requiring the core and Linux icon bundles.
 Linked bundles, linked entries and non-regular resource content are refused
 before creating output. Flatpak uses this same stager with `/app` as its prefix
 instead of maintaining a separate resource list.
+Spaces, quotes, backslashes, dollar signs and backticks in prefixes use the two
+Desktop Entry escaping layers. Percent/equal-sign prefixes are refused before
+writing because they are not portable executable paths for desktop launchers.
 
 `python3 scripts/generate-desktop-icons.py --check` verifies exact exports;
 `python3 -B -m unittest discover -s scripts/tests -p test_desktop_icons.py`

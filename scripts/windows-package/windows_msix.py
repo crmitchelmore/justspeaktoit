@@ -442,6 +442,8 @@ def check_manifest(data, identity, version, publisher, architecture="x64"):
     # MRT resolves qualifier siblings automatically; only the unqualified
     # roots belong in VisualElements. Every generated variant must have a root.
     declared = {path.split(".", 1)[0] + ".png" for path in identity["assets"]["images"]}
+    if not declared.issubset(identity["assets"]["images"]):
+        raise PackageError("qualified logo families must include their generated unqualified assets")
     declared = {path.replace("/", "\\") for path in declared}
     if logos != declared:
         raise PackageError("manifest logos differ from the generated assets")

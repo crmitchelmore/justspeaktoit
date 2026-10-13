@@ -152,6 +152,18 @@ class DesktopIconTests(unittest.TestCase):
         self.assertIn("HICON smallHandle()", source)
         self.assertIn("jsti::appIcon::smallHandle()", window)
 
+    def test_asset_attributes_trigger_resource_and_native_workflows(self):
+        for workflow in ("desktop-icons.yml", "windows.yml", "windows-arm64.yml",
+                         "windows-cross-proof.yml", "linux.yml"):
+            lines = (ROOT / ".github/workflows" / workflow).read_text().splitlines()
+            for event in ("push", "pull_request"):
+                with self.subTest(workflow=workflow, event=event):
+                    start = lines.index(f"  {event}:") + 1
+                    end = next((index for index in range(start, len(lines))
+                                if lines[index].strip() and not lines[index].startswith("    ")
+                                and not lines[index].lstrip().startswith("#")), len(lines))
+                    self.assertIn("      - .gitattributes", lines[start:end])
+
     def test_linux_integration_assertion_includes_high_dpi_tray_pixmaps(self):
         integration = (ROOT / "scripts/linux-integration-checks.sh").read_text()
         self.assertIn("[22, 22], [32, 32], [48, 48], [64, 64], [96, 96]", integration)
@@ -220,6 +232,70 @@ class DesktopIconTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "resource bundles"):
                 STAGE.stage(binary, output)
             self.assertFalse(output.exists())
+
+    def test_linux_staging_refuses_nonportable_exec_prefixes_before_writing(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            root = pathlib.Path(scratch)
+            binary = root / "SpeakLinux"
+            binary.write_bytes(b"synthetic executable")
+            output = root / "layout"
+            for prefix in ("/opt/100%ready", "/opt/equal=name"):
+                with self.subTest(prefix=prefix), self.assertRaisesRegex(ValueError, "percent or equal signs"):
+                    STAGE.stage(binary, output, prefix)
+                self.assertFalse(output.exists())
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "GLib launcher acceptance requires Linux")
+    def test_linux_staged_exec_round_trips_accepted_prefixes_through_glib_launch(self):
+        import ctypes
+        import ctypes.util
+        import json
+        import shutil
+        import time
+        library = ctypes.util.find_library("gio-2.0")
+        if library is None:
+            self.skipTest("GLib is unavailable")
+        gio = ctypes.CDLL(library)
+        gio.g_desktop_app_info_new_from_filename.argtypes = [ctypes.c_char_p]
+        gio.g_desktop_app_info_new_from_filename.restype = ctypes.c_void_p
+        gio.g_app_info_launch.argtypes = [
+            ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+        gio.g_app_info_launch.restype = ctypes.c_int
+        gobject = ctypes.CDLL("libgobject-2.0.so.0")
+        gobject.g_object_unref.argtypes = [ctypes.c_void_p]
+        gobject.g_object_unref.restype = None
+        with tempfile.TemporaryDirectory() as scratch:
+            root = pathlib.Path(scratch)
+            build = root / "build"
+            build.mkdir()
+            binary = build / "SpeakLinux"
+            (build / "SpeakApp_SpeakCore.resources").mkdir()
+            shutil.copytree(ROOT / "Sources/SpeakLinux/Resources/hicolor",
+                            build / "SpeakApp_SpeakLinux.resources/hicolor")
+            for number, name in enumerate(("plain", "space path", "backslash\\path", 'quote"path',
+                                           "dollar$path", "tick`path", "single'path")):
+                with self.subTest(prefix=name):
+                    output = root / name
+                    receipt = root / f"receipt-{number}.json"
+                    pending = receipt.with_suffix(".tmp")
+                    binary.write_text(
+                        "#!/usr/bin/env python3\nimport json,sys\nfrom pathlib import Path\n"
+                        f"pending=Path({str(pending)!r})\npending.write_text(json.dumps(sys.argv))\n"
+                        f"pending.replace({str(receipt)!r})\n", encoding="utf-8")
+                    STAGE.stage(binary, output, str(output))
+                    desktop = output / f"share/applications/{ICONS.APP_ID}.desktop"
+                    info = gio.g_desktop_app_info_new_from_filename(str(desktop).encode())
+                    self.assertTrue(info, "GLib rejected the staged desktop entry")
+                    try:
+                        error = ctypes.c_void_p()
+                        self.assertTrue(gio.g_app_info_launch(info, None, None, ctypes.byref(error)),
+                                        "GLib could not launch the synthetic executable")
+                        deadline = time.monotonic() + 5
+                        while not receipt.exists() and time.monotonic() < deadline:
+                            time.sleep(.01)
+                        self.assertTrue(receipt.exists(), "Synthetic launcher did not write its receipt")
+                        self.assertEqual(json.loads(receipt.read_text()), [str(output / "bin/justspeaktoit")])
+                    finally:
+                        gobject.g_object_unref(info)
 
     def test_linux_staging_still_requires_core_and_icon_bundles_with_future_resources(self):
         for missing in ("core", "icons"):

@@ -9,6 +9,7 @@ on:
   push:
     branches: [main]
     paths:
+      - .gitattributes
       - Package.swift
       - Resources/Desktop/**
       - scripts/generate-desktop-icons.py
@@ -44,6 +45,7 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - .gitattributes
       - Package.swift
       - Resources/Desktop/**
       - scripts/generate-desktop-icons.py

@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths:
+      - .gitattributes
       - Package.swift
       - Resources/Desktop/**
       - Resources/AppIcon.iconset/**
@@ -39,6 +40,7 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - .gitattributes
       - Package.swift
       - Resources/Desktop/**
       - Resources/AppIcon.iconset/**

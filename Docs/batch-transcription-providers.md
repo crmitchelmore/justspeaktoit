@@ -48,10 +48,10 @@ Source recordings are never deleted by these clients.
 - **StepAudio 3**: `POST https://api.stepfun.com/v1/audio/asr/sse`,
   Bearer authorization, JSON containing one base64-encoded recording and
   `audio.input.transcription.model=stepaudio-3-asr-max`. Supports WAV, M4A,
-  MP3 and OGG containers. The SSE `transcript.text.done` text is authoritative;
+  MP3 and OGG containers. The SSE `transcript.text.done` text is authoritative.
   The optional `[DONE]` transport sentinel is ignored; it cannot replace the
-  authoritative transcript event. EOF without done or an `error` event fails instead of returning partial text
-  as success. Corrected final text discards stale delta timings. This is
+  authoritative transcript event. EOF without done or an `error` event fails
+  instead of returning partial text as success. Corrected final text discards stale delta timings. This is
   **recorded audio**, not live microphone streaming, so no StepAudio entry is
   added to the live picker. Published pricing is **2.8 CNY/hour**; history keeps
   CNY and the USD comparison deliberately leaves it unknown.

@@ -1,5 +1,6 @@
 #include "LinuxSupportInternal.h"
 #include <gtk/gtk.h>
+void jsti_show_voice_controls(GtkWindow *owner, JSTIVoiceSourceCallback callback, void *context);
 
 typedef struct {
     gchar **names;
@@ -88,9 +89,9 @@ static void select_source(GObject *object, GParamSpec *spec, gpointer data) {
     gtk_text_buffer_set_text(gtk_text_view_get_buffer(dialog->editor), value, -1);
     gtk_label_set_text(dialog->notice, dialog->selected == 0 && dialog->record[0] == '\0'
         ? "Choose a recording in History, then reopen this editor. History is captured when the editor opens."
-        : "Read, Generate and Export text send this snapshot to Deepgram with your saved key. "
+        : "Read, Generate and Export text send this snapshot to the selected voice provider with your saved key. "
           "Generate retains a 24 kHz mono PCM16 WAV; Play/Export result reuse it without a provider request. "
-          "Speed is the engine default. Stop cancels active voice work.");
+          "Voice controls show the selected route's actual capabilities. Stop cancels active voice work.");
     refresh(dialog);
 }
 typedef struct { Dialog *dialog; guint64 revision; } ImportChoice;
@@ -274,6 +275,11 @@ static void preferences_changed(GtkCheckButton *button, gpointer data) {
         (gtk_check_button_get_active(dialog->save) ? 2 : 0);
     dialog->callback(118, (gint32)dialog->generation_flags, "", "", "", dialog->context);
 }
+static void synthesis_controls(GtkButton *button, gpointer data) {
+    (void)button;
+    Dialog *dialog = data;
+    jsti_show_voice_controls(dialog->window, dialog->callback, dialog->context);
+}
 static void apply_generation_options(gpointer data) {
     generation_flags = *(guint *)data;
     if (active == NULL || active->window == NULL) return;
@@ -384,6 +390,9 @@ static Dialog *make_dialog(GtkWindow *owner, const char *record, const char *his
     gtk_widget_set_hexpand(GTK_WIDGET(dialog->auto_play), TRUE);
     gtk_box_append(GTK_BOX(options), GTK_WIDGET(dialog->auto_play));
     gtk_box_append(GTK_BOX(options), GTK_WIDGET(dialog->save)); gtk_box_append(GTK_BOX(box), options);
+    GtkWidget *controls = gtk_button_new_with_label("Voice controls...");
+    gtk_box_append(GTK_BOX(options), controls);
+    g_signal_connect(controls, "clicked", G_CALLBACK(synthesis_controls), dialog);
     GtkWidget *results = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     dialog->generate = GTK_BUTTON(gtk_button_new_with_label("Generate"));
     dialog->play_result = GTK_BUTTON(gtk_button_new_with_label("Play result"));
@@ -440,9 +449,14 @@ void jsti_voice_sources_show_fixture(GtkWindow *owner) {
         apply_import_result(active, "synthetic-tour-file", "Synthetic imported UTF-8 text for voice output.", "");
     }
 }
+int32_t jsti_voice_controls_save_snapshot(GtkWindow *owner, const char *path);
 int32_t jsti_voice_sources_save_snapshot(const char *path) {
-    return active != NULL && active->window != NULL
-        ? jsti_window_save_widget_png(GTK_WIDGET(active->window), path, TRUE) : -1;
+    if (active == NULL || active->window == NULL) return -1;
+    const int32_t source = jsti_window_save_widget_png(GTK_WIDGET(active->window), path, TRUE);
+    gchar *controls_path = g_strconcat(path, ".voice-controls.png", NULL);
+    const int32_t controls = jsti_voice_controls_save_snapshot(active->window, controls_path);
+    g_free(controls_path);
+    return source == 0 && controls == 0 ? 0 : -1;
 }
 typedef struct { gchar **names; JSTIVoiceSourceCallback callback; void *context; } SetSources;
 static void apply_sources(gpointer data) {
@@ -478,6 +492,7 @@ static void receive_fixture(int32_t action, int32_t source, const char *value,
     g_free(received->text); g_free(received->record);
     received->text = g_strdup(value); received->record = g_strdup(record);
 }
+int32_t jsti_voice_controls_self_test(GtkWindow *owner, char *error, size_t capacity);
 int32_t jsti_voice_sources_self_test(GtkWindow *owner, char *error, size_t capacity) {
     Dialog *dialog = make_dialog(owner, "synthetic-record", "Synthetic History snapshot");
     if (dialog == NULL) { jsti_set_error(error, capacity, "Voice sources fixture could not open."); return -1; }
@@ -544,5 +559,5 @@ int32_t jsti_voice_sources_self_test(GtkWindow *owner, char *error, size_t capac
         clipboard_snapshot && file_snapshot && stale_import && failed_import && edited_import &&
         generated_snapshot && busy_result && retained_result;
     if (!passed) jsti_set_error(error, capacity, "Voice sources state/snapshot checks failed.");
-    return passed ? 0 : -1;
+    return passed ? jsti_voice_controls_self_test(owner, error, capacity) : -1;
 }

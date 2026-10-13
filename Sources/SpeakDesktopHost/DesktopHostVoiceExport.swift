@@ -8,9 +8,11 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     package func exportVoiceSource(
         _ snapshot: VoiceOutputSourceSnapshot, path: String, retainedAudio: Data? = nil,
         synthesize: @escaping @Sendable (
-            VoiceOutputSourceSnapshot, DeepgramSpeechCatalog.Voice, @Sendable () async throws -> String
-        ) async throws -> Data = { snapshot, voice, credential in
-            try await DeepgramSpeechExport().synthesize(snapshot, voice: voice, credential: credential)
+            VoiceOutputSourceSnapshot, DesktopSpeechSelection, @Sendable () async throws -> String
+        ) async throws -> Data = { snapshot, selection, credential in
+            try await DesktopSpeechSynthesis().synthesize(
+                snapshot, voice: selection.voice, options: selection.options, credential: credential
+            )
         }
     ) {
         guard !closed, canUseHistory else { return }
@@ -18,12 +20,15 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         do {
             destination = try voiceExportDestination(path)
         } catch { update(error.localizedDescription); return }
+        let selection: DesktopSpeechSelection?
+        do { selection = retainedAudio == nil ? try voiceOutputSettings().synthesisSelection() : nil } catch {
+            update(error.localizedDescription); return
+        }
         stopReadAloud()
         playback.stop(announcing: false)
         let ticket = playbackRequests.begin()
-        let voice = voiceOutputSettings().voice
         let effects = effects
-        update(retainedAudio == nil ? "Synthesizing WAV with \(voice.name). Stop cancels export…" :
+        update(selection.map { "Synthesizing WAV with \($0.voice.name). Stop cancels export…" } ??
             "Exporting retained voice audio. No synthesis request is sent. Stop cancels export…")
         voiceOutputRecordID = snapshot.recordID
         activeOperations += 1
@@ -31,10 +36,12 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             defer { self.finishOperation() }
             do {
                 let wav: Data
-                if let retainedAudio { wav = retainedAudio } else {
-                    wav = try await synthesize(snapshot, voice) {
-                        try effects.apiKey(name: VoiceOutputProvider.deepgram.apiKeyIdentifier)
+                if let retainedAudio { wav = retainedAudio } else if let selection {
+                    wav = try await synthesize(snapshot, selection) {
+                        try effects.apiKey(name: selection.voice.apiKeyIdentifier)
                     }
+                } else {
+                    throw VoiceSynthesisConfigurationError.unsupportedVoice
                 }
 
                 try Task.checkCancellation()

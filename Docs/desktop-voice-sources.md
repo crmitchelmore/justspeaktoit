@@ -1,9 +1,11 @@
 # Desktop Voice Output sources and WAV export
 
 Windows and Linux remain developer previews, not macOS-parity releases.
-Voice Output uses the existing shared Deepgram speech contracts, canonical
-`DeepgramSpeechCatalog` voice projection and native playback. It does not add
-providers merely because they appear in the macOS voice catalogue.
+Voice Output uses shared Deepgram and Azure neural speech contracts, canonical
+catalogue projections and native playback. `DesktopSpeechVoice` exposes only
+routes the host executes, not every provider in the macOS catalogue. The seven
+offline Azure neural voices now have one `AzureNeuralVoiceCatalog` definition
+shared with macOS; native hosts do not copy voice entries.
 
 ## Journey
 
@@ -28,10 +30,12 @@ shutdown. A stalled filesystem cannot admit an unbounded set of further reads.
 **Read aloud** explicitly speaks the snapshot through the existing native
 player, regardless of the Generate auto-play preference. **Export text WAV**
 asks for a local destination before synthesis and does not play the audio.
-Both use the saved Deepgram key and voice and send text to Deepgram. Text export
-requests speech again.
+Both use the selected executable voice and its saved provider credential and
+send text to that provider. Azure uses the existing Azure Speech credential
+(`key:region`), saved through the normal provider
+settings, not a second Voice credential store. Text export requests speech again.
 
-**Generate** captures the text, voice and both generation preferences, produces
+**Generate** captures the text, voice, synthesis controls and both generation preferences, produces
 one complete validated WAV and retains it independently of later editor or
 preference changes. **Auto-play generated audio** defaults on; with it off,
 generation completes without speaking and **Play result** is still available.
@@ -60,7 +64,29 @@ The shared desktop voice model persists optional `ttsAutoPlay` and
 `SpeechGenerationDefaults`; changing voice preserves these choices. This PR
 does not add a second generic configuration authority.
 Empty/whitespace-only text, nulls and more than 100,000 Unicode scalars are refused
-before provider work. Only the engine's default speed is supported.
+before provider work.
+
+**Voice controls** opens native synthesis settings without adding a window page.
+The sole voice model persists optional `ttsSpeed`, `ttsPitch` and `ttsUseSSML`;
+absent values mean speed 1, pitch 0 and plain text. Shared `VoiceSynthesisOptions`
+validates finite speed 0.5-2 and whole-number pitch -12 to 12 semitones.
+Azure neural voices execute speed, pitch and SSML through the existing shared
+Azure request builder. Deepgram supports only normal controls: unsupported
+controls are disabled but their stored values remain visible and unchanged.
+Read/Generate/text export explicitly refuse incompatible choices before reading
+a credential, rather than silently ignoring them or changing provider.
+**Normal controls** is an explicit reset; selecting another voice preserves
+all controls. Unknown provider choices appear as unavailable, not Deepgram.
+Save waits for persistence acknowledgement before closing, reports write
+failures without changing previous settings, and ignores acknowledgements for
+closed/replaced requests. Cancel remains available while saving.
+
+Plain text uses the canonical segmenter; SSML is never split across XML tags.
+SSML input and complete request bodies are limited to 64 KiB. A full `<speak>`
+document defines its own prosody, so non-normal sliders are refused rather than
+silently bypassed; use normal sliders or an SSML fragment. Azure Read prepares
+one bounded validated WAV before native playback; Deepgram Read retains its
+existing segmented playback. No independent playback engine or IPC is added.
 
 Long text uses the canonical segmenter. Export validates each provider response,
 joins decoded mono PCM16 at 24 kHz, and writes exactly one RIFF/WAVE header, with
@@ -91,9 +117,14 @@ History and text-file import; it copies `TextToSpeechManager.lastResult.audioURL
 through `NSSavePanel` for export. It does not offer an external-selection source
 in that workspace. Windows/Linux now implement all four text sources and
 user-chosen lossless WAV export, including editable UTF-8 text-file snapshots.
-macOS's wider providers, pitch/SSML controls and configurable speed are not
-claimed here. Native generation supports the actual engine's default speed,
-auto-play, managed audio archival and replay/export of a completed result.
+Native generation additionally supports auto-play, managed audio archival and
+replay/export of a completed result. Azure neural speed/pitch/SSML are executable
+here; macOS's Deepgram path currently ignores those same controls, and native
+hosts deliberately refuse them for Deepgram instead. MAI/system and wider
+providers, selectable export format/quality, provider cost/usage UI and broader
+Voice workspace parity remain gaps. Advanced configuration transfer is a
+separately coordinated settings integration; this PR does not create another
+configuration authority.
 
 External selected text is unavailable, and is not advertised as a source row.
 Windows insertion targeting can capture an external field for *writing*, but
@@ -113,7 +144,13 @@ self-tests cover the History-default editor, editable typed text, empty
 clipboard state, imported text, failed imports that preserve text, discarded
 results after editing and the four-source projection without reading the real
 clipboard or sending text to a provider. The normal screenshot tours include
-the extended Voice Output page; dialog captures are synthetic.
+the extended Voice Output page; dialog captures are synthetic. Synthesis tests
+use synthetic Azure responses to verify exact prosody, SSML boundaries,
+credential admission, transport/status/cancellation failures and refusal of
+partial audio. Host tests preserve immutable settings snapshots, failed-write
+state, unsupported stored choices and actual History ownership through Azure
+Read cancellation. Native controls fixtures check capability gating, numeric
+round trips, explicit reset and stale/failure/success save acknowledgements.
 
 Windows Swift type-checks and MinGW/GTK syntax checks are supplementary only:
 they do not prove native linking/execution. Final-head Windows and Linux CI

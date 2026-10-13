@@ -102,6 +102,14 @@ struct FakeVoiceOutput: DesktopHostVoiceOutput {
 extension FakePlatform: DesktopHostReadAloudPlatform {
     typealias ReadAloudState = DesktopHostReadAloudState<FakePlayback.Speech, FakeVoiceOutput>
     static func makeVoiceOutput(stagingDirectory directory: URL) throws -> FakeVoiceOutput { FakeVoiceOutput() }
+    static func synthesizeVoiceOutput(
+        _ source: VoiceOutputSourceSnapshot, selection: DesktopSpeechSelection,
+        credential: @Sendable () async throws -> String
+    ) async throws -> Data {
+        _ = try await credential()
+        try Task.checkCancellation()
+        return try XCTUnwrap(PCMWaveWriter.wavData(pcm: Data([1, 0, 2, 0]), sampleRate: 24_000))
+    }
     static let deepgramKeyHint = "save it in the test"
 }
 
@@ -151,6 +159,28 @@ final class DesktopHostReadAloudTests: XCTestCase {
     }
 
     private var statuses: [String] { FakeLog.shared.allStatuses }
+
+    func testAzureRead_UsesNativePlaybackWithRealHistoryOwnershipAndCleansTemporaryAudioOnStop() async throws {
+        FakeSpeech.shared.reset(holdingSegments: true)
+        FakeLog.shared.setKey("synthetic-key:eastus", name: AzureSpeechConfiguration.credentialIdentifier)
+        await controller.selectVoiceOutput(DesktopSpeechVoice.azureNeural(AzureNeuralVoiceCatalog.voices[0]))
+        let saved = await controller.saveVoiceSynthesisOptions(try VoiceSynthesisOptions(speed: 1.25, pitch: -2))
+        XCTAssertTrue(saved)
+        await controller.readAloud(record.uuidString, text: "Synthetic neural speech.")
+        try await waitFor("native synthetic playback") { FakeSpeech.shared.events.contains("play") }
+        let owner = await controller.voiceOutputRecordID
+        XCTAssertEqual(owner, record)
+        let task = await controller.readAloudState.task
+        await controller.playbackStop()
+        FakeSpeech.shared.releaseSegments()
+        await task?.value
+        let stoppedOwner = await controller.voiceOutputRecordID
+        XCTAssertNil(stoppedOwner)
+        XCTAssertEqual(FakeSpeech.shared.events, ["begin", "play", "end"])
+        let files = try FileManager.default.contentsOfDirectory(atPath:
+            directory.appendingPathComponent("VoiceGeneratedPlayback").path)
+        XCTAssertTrue(files.isEmpty)
+    }
 
     func testReadAloud_SpeaksEachSegmentWithTheSavedVoiceThenFinishes() async throws {
         FakeLog.shared.setKey("deepgram-key", name: deepgramKey)

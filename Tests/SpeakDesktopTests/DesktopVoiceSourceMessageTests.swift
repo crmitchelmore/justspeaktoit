@@ -43,4 +43,25 @@ final class DesktopVoiceSourceMessageTests: XCTestCase {
         let text: String
         let path: String
     }
+
+    func testSynthesisPreferences_ValidateControlsAndKeepOpaqueAcknowledgementSeparateFromHistory() throws {
+        let options = try VoiceSynthesisOptions(speed: 1.25, pitch: -2, useSSML: true)
+        let payload = #"{"speed":1.25,"pitch":-2,"useSSML":true}"#
+        XCTAssertEqual(try DesktopVoiceSourceMessage(action: 119, source: 0, text: payload,
+            record: "opaque-preferences-request", path: ""),
+            .synthesisPreferences(options, requestID: "opaque-preferences-request"))
+        for record in ["", String(repeating: "x", count: 65), "request\n"] {
+            XCTAssertThrowsError(try DesktopVoiceSourceMessage(action: 119, source: 0,
+                text: payload, record: record, path: ""))
+        }
+        for payload in [
+            #"{"speed":4,"pitch":0,"useSSML":false}"#,
+            #"{"speed":1,"pitch":1.5,"useSSML":false}"#,
+            #"{"speed":1,"pitch":0,"useSSML":"true"}"#,
+            String(repeating: " ", count: 1_025)
+        ] {
+            XCTAssertThrowsError(try DesktopVoiceSourceMessage(action: 119, source: 0,
+                text: payload, record: "request", path: ""))
+        }
+    }
 }

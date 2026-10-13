@@ -156,7 +156,7 @@ final class DesktopHostVoiceGenerationTests: XCTestCase {
         await finish()
         let result = try await retainedResult()
         XCTAssertEqual(result.source.recordID, source.recordID)
-        XCTAssertEqual(result.voice, defaults.voice)
+        XCTAssertEqual(result.voice, .deepgram(defaults.voice))
         XCTAssertTrue(FakeSpeech.shared.events.isEmpty)
         let root = await controller.store.directory
         XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: root.path).isEmpty)
@@ -175,7 +175,72 @@ final class DesktopHostVoiceGenerationTests: XCTestCase {
         XCTAssertFalse(saved)
         let current = await controller.voiceOutputSettings()
         XCTAssertEqual(current, original)
+        let synthesisSaved = await controller.saveVoiceSynthesisOptions(
+            try VoiceSynthesisOptions(speed: 1.25, pitch: -2, useSSML: true)
+        )
+        XCTAssertFalse(synthesisSaved)
+        let synthesisCurrent = await controller.voiceOutputSettings()
+        XCTAssertEqual(synthesisCurrent, original)
         XCTAssertTrue(FakeLog.shared.allStatuses.last?.contains("Could not save Voice Output settings") == true)
+    }
+
+    func testSynthesisControls_GenerationKeepsImmutableOptionsAndRetainedExportIgnoresIncompatibleCurrentVoice()
+        async throws {
+        let voice = DesktopSpeechVoice.azureNeural(AzureNeuralVoiceCatalog.voices[0])
+        let options = try VoiceSynthesisOptions(speed: 1.25, pitch: -2, useSSML: true)
+        await controller.selectVoiceOutput(voice)
+        let saved = await controller.saveVoiceSynthesisOptions(options)
+        XCTAssertTrue(saved)
+        let source = try VoiceOutputSourceSnapshot(source: .typedText, text: "<emphasis>Synthetic text.</emphasis>")
+        let wav = try audio()
+        let gate = VoiceGenerationGate()
+        await controller.generateVoiceSource(
+            source, options: .init(autoPlay: false, saveToRecordings: false)
+        ) { _, selection, _ in
+            XCTAssertEqual(selection.voice, voice)
+            XCTAssertEqual(selection.options, options)
+            await gate.wait()
+            return wav
+        }
+        await controller.selectVoiceOutput(DesktopSpeechVoice.deepgram(DeepgramSpeechCatalog.voices[0]))
+        let incompatible = await controller.voiceOutputSettings()
+        XCTAssertEqual(incompatible.speed, options.speed)
+        XCTAssertEqual(incompatible.pitch, options.pitch)
+        XCTAssertEqual(incompatible.useSSML, options.useSSML)
+        XCTAssertThrowsError(try incompatible.synthesisSelection())
+        let encoded = try JSONEncoder().encode(incompatible)
+        let decoded = try JSONDecoder().decode(DesktopVoiceOutputSettings.self, from: encoded)
+        XCTAssertEqual(decoded, incompatible)
+        let fields = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertEqual(fields["ttsSpeed"] as? Double, options.speed)
+        XCTAssertEqual(fields["ttsPitch"] as? Double, options.pitch)
+        XCTAssertEqual(fields["ttsUseSSML"] as? Bool, options.useSSML)
+        await gate.release()
+        await finish()
+        let result = try await retainedResult()
+        XCTAssertEqual(result.voice, voice)
+        XCTAssertEqual(result.options, options)
+        let destination = directory.deletingLastPathComponent().appendingPathComponent("synthetic-\(UUID()).wav")
+        defer { try? FileManager.default.removeItem(at: destination) }
+        await controller.exportGeneratedVoice(result.id.uuidString, path: destination.path)
+        let task = await controller.readAloudState.exportTask
+        await task?.value
+        XCTAssertEqual(try Data(contentsOf: destination), wav)
+        let owner = await controller.voiceOutputRecordID
+        XCTAssertNil(owner)
+    }
+
+    func testUnavailableStoredVoiceAndControls_AreRetainedWithoutPickerOrProviderFallback() throws {
+        let stored = try JSONDecoder().decode(DesktopVoiceOutputSettings.self, from: Data(
+            #"{"modelID":"system/voice","voiceID":"system/Alex","ttsSpeed":3,"ttsPitch":20,"ttsUseSSML":true}"#.utf8
+        ))
+        XCTAssertThrowsError(try stored.synthesisSelection())
+        XCTAssertEqual(stored.controlsPresentation.capabilities, 0)
+        XCTAssertEqual(stored.controlsPresentation.speed, 3)
+        XCTAssertEqual(stored.controlsPresentation.pitch, 20)
+        XCTAssertEqual(stored.pickerPresentation.selected, DesktopSpeechVoice.voices.count)
+        XCTAssertEqual(try JSONDecoder().decode(DesktopVoiceOutputSettings.self,
+            from: JSONEncoder().encode(stored)), stored)
     }
 
     private func retained() async -> DesktopGeneratedVoiceResult? { await controller.generatedVoice }

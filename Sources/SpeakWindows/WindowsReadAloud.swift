@@ -11,9 +11,9 @@ typealias WindowsVoiceOutputSettings = DesktopVoiceOutputSettings
 
 extension WindowsNative {
     static func configureVoiceOutput(_ settings: WindowsVoiceOutputSettings, context: UnsafeMutableRawPointer) -> Bool {
-        let voices = WindowsVoiceOutputSettings.voices
-        guard let selected = voices.firstIndex(of: settings.voice) ?? voices.indices.first else { return false }
-        let labels = voices.map(WindowsVoiceOutputSettings.label).map { Array($0.utf8CString) }
+        let presentation = settings.pickerPresentation
+        let selected = presentation.selected
+        let labels = presentation.labels.map { Array($0.utf8CString) }
         let pointers = labels.map { chars -> UnsafeMutablePointer<CChar> in
             let pointer = UnsafeMutablePointer<CChar>.allocate(capacity: chars.count)
             pointer.initialize(from: chars, count: chars.count)
@@ -25,7 +25,15 @@ extension WindowsNative {
             jsti_window_set_voice_output($0.baseAddress, $0.count, Int32(selected), voiceOutputEvent, context) == 0
         }
         return configured && configureVoiceSources(context: context) &&
-            jsti_window_set_voice_generation_options(settings.generationOptions.nativeFlags) == 0
+            jsti_window_set_voice_generation_options(settings.generationOptions.nativeFlags) == 0 &&
+            configureVoiceControls(settings)
+    }
+
+    static func configureVoiceControls(_ settings: WindowsVoiceOutputSettings) -> Bool {
+        let shown = settings.controlsPresentation
+        return shown.label.withCString {
+            jsti_window_set_voice_synthesis_options(shown.speed, shown.pitch, shown.ssml, shown.capabilities, $0) == 0
+        }
     }
 
     static func configureVoiceSources(context: UnsafeMutableRawPointer) -> Bool {
@@ -102,6 +110,16 @@ func windowsVoiceSourceEvent(
                     WindowsNative.update("The saved Voice Output preferences could not be shown.")
                 }
             }
+        case .synthesisPreferences(let options, let requestID):
+            holder.enqueueSettings {
+                let saved = await holder.controller.saveVoiceSynthesisOptions(options)
+                if !WindowsNative.configureVoiceControls(await holder.controller.voiceOutputSettings()) {
+                    WindowsNative.update("The saved Voice synthesis controls could not be shown.")
+                }
+                if requestID.withCString({ jsti_window_finish_voice_synthesis_options($0, saved ? 1 : 0) }) != 0 {
+                    WindowsNative.update("The Voice controls save result could not be shown.")
+                }
+            }
         }
     } catch { WindowsNative.update(error.localizedDescription) }
 }
@@ -110,7 +128,7 @@ func windowsVoiceSourceEvent(
 func voiceOutputEvent(_ index: Int32, _ context: UnsafeMutableRawPointer?) {
     guard let context else { return }
     let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
-    let voices = WindowsVoiceOutputSettings.voices
+    let voices = DesktopSpeechVoice.voices
     guard voices.indices.contains(Int(index)) else { return }
     holder.enqueueSettings {
         await holder.controller.selectVoiceOutput(voices[Int(index)])

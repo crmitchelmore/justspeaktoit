@@ -6,10 +6,11 @@
 #include <vector>
 
 int jsti_save_owned_window_snapshot(HWND window, const char *path, char *error, size_t capacity);
+void jsti_show_voice_controls(HWND owner, JSTIVoiceSourceCallback callback, void *context);
 
 namespace {
 enum { sourceLabel = 920, sourceID, textLabel, textID, loadID, noticeID, readID, exportID, stopID };
-enum { autoPlayID = 940, saveID, generateID, playResultID, exportResultID };
+enum { autoPlayID = 940, saveID, generateID, playResultID, exportResultID, controlsID };
 struct Configuration {
     std::vector<std::wstring> names;
     JSTIVoiceSourceCallback callback = nullptr;
@@ -90,9 +91,9 @@ void select(HWND window, Dialog &dialog) {
     SetDlgItemTextW(window, textID, value.c_str());
     SetDlgItemTextW(window, noticeID, dialog.source == 0 && dialog.record.empty()
         ? L"Choose a recording in History, then reopen this editor. History text is captured when this editor opens."
-        : L"Read, Generate and Export text send this snapshot to Deepgram with your saved key. "
+        : L"Read, Generate and Export text send this snapshot to the selected voice provider with your saved key. "
           L"Generate retains a 24 kHz mono PCM16 WAV; Play/Export result reuse it without a provider request. "
-          L"Speed is the engine default. Stop cancels active voice work.");
+          L"Voice controls show the selected route's actual capabilities. Stop cancels active voice work.");
     refresh(window, dialog);
 }
 void importFile(HWND window, Dialog &dialog) {
@@ -205,8 +206,10 @@ void layout(HWND window) {
     const int top = margin + scale(window, 96), note = optionsRow - gap - scale(window, 90);
     move(textID, margin, top, width, std::max(scale(window, 110), note - gap - top));
     move(noticeID, margin, note, width, scale(window, 90));
-    move(autoPlayID, margin, optionsRow, (width - gap) / 2, scale(window, 44));
-    move(saveID, margin + (width + gap) / 2, optionsRow, (width - gap) / 2, scale(window, 44));
+    const int optionWidth = (width - 2 * gap) / 3;
+    move(autoPlayID, margin, optionsRow, optionWidth, scale(window, 44));
+    move(saveID, margin + optionWidth + gap, optionsRow, optionWidth, scale(window, 44));
+    move(controlsID, margin + 2 * (optionWidth + gap), optionsRow, optionWidth, scale(window, 44));
     const int resultButton = (width - 2 * gap) / 3;
     const int results[] = {generateID, playResultID, exportResultID};
     for (int index = 0; index < 3; ++index) {
@@ -232,6 +235,7 @@ bool create(HWND window, Dialog &dialog) {
         !add(L"STATIC", L"", SS_LEFT, noticeID) ||
         !add(L"BUTTON", L"&Auto-play generated audio", BS_AUTOCHECKBOX | BS_MULTILINE | WS_TABSTOP, autoPlayID) ||
         !add(L"BUTTON", L"Save audio to recordings", BS_AUTOCHECKBOX | BS_MULTILINE | WS_TABSTOP, saveID) ||
+        !add(L"BUTTON", L"Voice &controls...", BS_PUSHBUTTON | WS_TABSTOP, controlsID) ||
         !add(L"BUTTON", L"&Generate", BS_DEFPUSHBUTTON | WS_TABSTOP, generateID) ||
         !add(L"BUTTON", L"&Play result", BS_PUSHBUTTON | WS_TABSTOP, playResultID) ||
         !add(L"BUTTON", L"Export result...", BS_PUSHBUTTON | WS_TABSTOP, exportResultID) ||
@@ -325,6 +329,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         }
         if (HIWORD(wparam) != BN_CLICKED) break;
         switch (LOWORD(wparam)) {
+        case controlsID: jsti_show_voice_controls(window, dialog->config.callback, dialog->config.context); break;
         case autoPlayID: case saveID:
             dialog->generation.flags = (SendDlgItemMessageW(window, autoPlayID, BM_GETCHECK, 0, 0) == BST_CHECKED ? 1 : 0) |
                 (SendDlgItemMessageW(window, saveID, BM_GETCHECK, 0, 0) == BST_CHECKED ? 2 : 0);
@@ -442,6 +447,7 @@ void jsti_voice_sources_stop() {
     if (config.callback) config.callback(112, 0, "", "", "", config.context);
 }
 
+bool jsti_voice_controls_self_test(HWND owner, std::string &error);
 bool jsti_voice_sources_self_test(HWND owner, std::string &error) {
     struct Received {
         int calls = 0, source = -1, generated = 0, flags = -1;
@@ -568,5 +574,5 @@ bool jsti_voice_sources_self_test(HWND owner, std::string &error) {
             ", retainedResult=" + std::to_string(retainedResult) +
             ", boundedControls=" + std::to_string(boundedControls) + ".";
     }
-    return passed && captured;
+    return passed && captured && jsti_voice_controls_self_test(owner, error);
 }

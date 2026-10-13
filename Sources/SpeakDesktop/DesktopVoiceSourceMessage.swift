@@ -5,6 +5,7 @@ import SpeakCore
 public enum DesktopVoiceSourceMessage: Equatable, Sendable {
     case event(DesktopHistoryEvent)
     case preferences(VoiceGenerationOptions)
+    case synthesisPreferences(VoiceSynthesisOptions, requestID: String)
 
     public init(action: Int32, source: Int32, text: String, record: String, path: String) throws {
         switch action {
@@ -14,6 +15,12 @@ public enum DesktopVoiceSourceMessage: Equatable, Sendable {
         case 116: self = .event(.voiceGeneratedPlay(record))
         case 117: self = .event(.voiceGeneratedExport(record, path: path))
         case 118: self = .preferences(try Self.options(source))
+        case 119:
+            guard text.utf8.count <= 1_024, !record.isEmpty, record.utf8.count <= 64,
+                  record.utf8.allSatisfy({ (0x20...0x7E).contains($0) }) else { throw Failure.invalidPreferences }
+            self = .synthesisPreferences(
+                try JSONDecoder().decode(VoiceSynthesisOptions.self, from: Data(text.utf8)), requestID: record
+            )
         case 110, 111, 115:
             self = .event(try Self.textEvent(action: action, source: source, text: text, record: record, path: path))
         default: throw Failure.invalidAction

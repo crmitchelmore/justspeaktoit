@@ -9,9 +9,9 @@ import CLinuxSupport
 typealias LinuxVoiceOutputSettings = DesktopVoiceOutputSettings
 
 /// Read aloud uses the controller implementation shared with Windows: the
-/// displayed transcript is spoken with Deepgram, in segments, through the
-/// History player. Synthesized audio is staged in the app's private data
-/// folder (`VoiceOutput`, 0700) only while it plays.
+/// immutable snapshot is spoken with the selected executable provider through
+/// the History player. Synthesized audio remains in private staging only while
+/// it plays; shared route capabilities govern the stored synthesis controls.
 extension LinuxHostPlatform: DesktopHostReadAloudPlatform {
     typealias ReadAloudState = DesktopHostReadAloudState<LinuxAudioPlayback.Speech, LinuxVoiceOutput>
 
@@ -79,10 +79,10 @@ extension LinuxWindow {
     /// Fills the voice picker from the canonical catalogue and selects the
     /// saved voice, or the catalogue default for a retired one.
     static func voiceOutput(_ settings: LinuxVoiceOutputSettings) {
-        let voices = LinuxVoiceOutputSettings.voices
+        let presentation = settings.pickerPresentation
         let strings = Strings()
-        let names: [UnsafePointer<CChar>?] = voices.map { strings.add(LinuxVoiceOutputSettings.label($0)) }
-        let selected = voices.firstIndex(of: settings.voice) ?? 0
+        let names: [UnsafePointer<CChar>?] = presentation.labels.map { strings.add($0) }
+        let selected = presentation.selected
         let result = withExtendedLifetime(strings) {
             names.withUnsafeBufferPointer { jsti_window_set_voices($0.baseAddress, $0.count, Int32(selected)) }
         }
@@ -91,6 +91,15 @@ extension LinuxWindow {
         if jsti_window_set_voice_generation_options(settings.generationOptions.nativeFlags) != 0 {
             LinuxHostPlatform.update("The generated voice preferences could not be shown.")
         }
+        voiceControls(settings)
+    }
+
+    static func voiceControls(_ settings: LinuxVoiceOutputSettings) {
+        let shown = settings.controlsPresentation
+        let result = shown.label.withCString {
+            jsti_window_set_voice_synthesis_options(shown.speed, shown.pitch, shown.ssml, shown.capabilities, $0)
+        }
+        if result != 0 { LinuxHostPlatform.update("The saved Voice synthesis controls could not be shown.") }
     }
 }
 
@@ -114,6 +123,14 @@ func linuxVoiceSourceEvent(
                 let saved = await holder.controller.voiceOutputSettings()
                 if jsti_window_set_voice_generation_options(saved.generationOptions.nativeFlags) != 0 {
                     LinuxHostPlatform.update("The saved Voice Output preferences could not be shown.")
+                }
+            }
+        case .synthesisPreferences(let options, let requestID):
+            holder.enqueueSettings {
+                let saved = await holder.controller.saveVoiceSynthesisOptions(options)
+                LinuxWindow.voiceControls(await holder.controller.voiceOutputSettings())
+                if requestID.withCString({ jsti_window_finish_voice_synthesis_options($0, saved ? 1 : 0) }) != 0 {
+                    LinuxHostPlatform.update("The Voice controls save result could not be shown.")
                 }
             }
         }
@@ -142,7 +159,7 @@ extension LinuxEventContext {
 
     /// Saves the chosen voice in settings order, then shows what was saved.
     func selectVoice(_ index: Int) {
-        let voices = LinuxVoiceOutputSettings.voices
+        let voices = DesktopSpeechVoice.voices
         guard voices.indices.contains(index) else { return }
         let controller = controller
         enqueueSettings {

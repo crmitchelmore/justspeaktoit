@@ -5,7 +5,8 @@ import SpeakDesktop
 package struct DesktopGeneratedVoiceResult: Sendable {
     package let id = UUID()
     package let source: VoiceOutputSourceSnapshot
-    package let voice: DeepgramSpeechCatalog.Voice
+    package let voice: DesktopSpeechVoice
+    package let options: VoiceSynthesisOptions
     package let audio: VoiceGeneratedAudio
 }
 
@@ -19,9 +20,11 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     package func generateVoiceSource(
         _ snapshot: VoiceOutputSourceSnapshot, options: VoiceGenerationOptions,
         synthesize: @escaping @Sendable (
-            VoiceOutputSourceSnapshot, DeepgramSpeechCatalog.Voice, @Sendable () async throws -> String
-        ) async throws -> Data = { snapshot, voice, credential in
-            try await DeepgramSpeechExport().synthesize(snapshot, voice: voice, credential: credential)
+            VoiceOutputSourceSnapshot, DesktopSpeechSelection, @Sendable () async throws -> String
+        ) async throws -> Data = { snapshot, selection, credential in
+            try await DesktopSpeechSynthesis().synthesize(
+                snapshot, voice: selection.voice, options: selection.options, credential: credential
+            )
         }
     ) {
         guard !closed else { return }
@@ -35,10 +38,14 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 "The previous generated-audio operation is still closing. Try Generate again when it finishes.")
             return
         }
+        let selection: DesktopSpeechSelection
+        do { selection = try voiceOutputSettings().synthesisSelection() } catch {
+            presentVoiceResult(working: false, message: error.localizedDescription); return
+        }
         stopReadAloud()
         playback.stop(announcing: false)
         let ticket = playbackRequests.begin()
-        let voice = voiceOutputSettings().voice
+        let voice = selection.voice
         voiceOutputRecordID = snapshot.recordID
         presentVoiceResult(working: true, message: "Generating voice audio with \(voice.name)…")
         activeOperations += 1
@@ -48,29 +55,30 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 self.finishOperation()
             }
             await self.runVoiceGeneration(
-                snapshot, voice: voice, options: options, ticket: ticket, synthesize: synthesize
+                snapshot, selection: selection, options: options, ticket: ticket, synthesize: synthesize
             )
         }
     }
 
     private func runVoiceGeneration(
-        _ snapshot: VoiceOutputSourceSnapshot, voice: DeepgramSpeechCatalog.Voice,
+        _ snapshot: VoiceOutputSourceSnapshot, selection: DesktopSpeechSelection,
         options: VoiceGenerationOptions, ticket: DesktopPlaybackRequests.Ticket,
         synthesize: @Sendable (
-            VoiceOutputSourceSnapshot, DeepgramSpeechCatalog.Voice, @Sendable () async throws -> String
+            VoiceOutputSourceSnapshot, DesktopSpeechSelection, @Sendable () async throws -> String
         ) async throws -> Data
     ) async {
         let effects = effects
         var saveWarning: String?
         var published = false
         do {
-            let wav = try await synthesize(snapshot, voice) {
-                try effects.apiKey(name: VoiceOutputProvider.deepgram.apiKeyIdentifier)
+            let wav = try await synthesize(snapshot, selection) {
+                try effects.apiKey(name: selection.voice.apiKeyIdentifier)
             }
             try Task.checkCancellation()
             guard voiceTicketIsCurrent(ticket) else { return }
             let result = try DesktopGeneratedVoiceResult(
-                source: snapshot, voice: voice, audio: VoiceGeneratedAudio(validating: wav)
+                source: snapshot, voice: selection.voice, options: selection.options,
+                audio: VoiceGeneratedAudio(validating: wav)
             )
             saveWarning = try await archiveGeneratedAudio(result.audio, enabled: options.saveToRecordings)
             try Task.checkCancellation()
@@ -192,7 +200,8 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         let playback = playback
         try await DesktopVoicePlaybackFile.play(
             result.audio, directory: directory.appendingPathComponent("VoiceGeneratedPlayback"),
-            prepare: Platform.preparePrivateDirectory
-        ) { try await playback.playToCompletion(speech, path: $0.path) }
+            prepare: { try Platform.preparePrivateDirectory($0) },
+            through: { try await playback.playToCompletion(speech, path: $0.path) }
+        )
     }
 }

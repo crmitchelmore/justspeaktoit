@@ -9,11 +9,17 @@ package struct DesktopVoiceOutputSettings: Codable, Equatable, Sendable {
     package var voiceID: String?
     package var autoPlay: Bool?
     package var saveToRecordings: Bool?
+    package var speed: Double?
+    package var pitch: Double?
+    package var useSSML: Bool?
 
     private enum CodingKeys: String, CodingKey {
         case modelID, voiceID
         case autoPlay = "ttsAutoPlay"
         case saveToRecordings = "ttsSaveToDirectory"
+        case speed = "ttsSpeed"
+        case pitch = "ttsPitch"
+        case useSSML = "ttsUseSSML"
     }
 
     package var generationOptions: VoiceGenerationOptions {
@@ -25,6 +31,44 @@ package struct DesktopVoiceOutputSettings: Codable, Equatable, Sendable {
         DeepgramSpeechCatalog.resolvedSelection(modelID: modelID, voiceID: voiceID).voice
     }
 
+    package func synthesisSelection() throws -> DesktopSpeechSelection {
+        try .init(
+            voice: DesktopSpeechVoice.resolved(modelID: modelID, voiceID: voiceID),
+            options: VoiceSynthesisOptions(
+                speed: speed ?? VoiceSynthesisOptions.defaultSpeed,
+                pitch: pitch ?? VoiceSynthesisOptions.defaultPitch,
+                useSSML: useSSML ?? VoiceSynthesisOptions.defaultUseSSML
+            )
+        )
+    }
+
+    package var pickerPresentation: (labels: [String], selected: Int) {
+        var labels = DesktopSpeechVoice.voices.map(\.label)
+        do {
+            let voice = try DesktopSpeechVoice.resolved(modelID: modelID, voiceID: voiceID)
+            if let selected = DesktopSpeechVoice.voices.firstIndex(of: voice) { return (labels, selected) }
+        } catch {
+            labels.append("Unavailable stored voice — choose an executable voice")
+            return (labels, labels.count - 1)
+        }
+        labels.append("Unavailable stored voice — choose an executable voice")
+        return (labels, labels.count - 1)
+    }
+
+    package var controlsPresentation: DesktopVoiceControlsPresentation {
+        do {
+            let voice = try DesktopSpeechVoice.resolved(modelID: modelID, voiceID: voiceID)
+            return .init(speed: speed ?? VoiceSynthesisOptions.defaultSpeed,
+                         pitch: pitch ?? VoiceSynthesisOptions.defaultPitch, ssml: useSSML == true ? 1 : 0,
+                         capabilities: voice.capabilities.nativeFlags, label: voice.label)
+        } catch {
+            return .init(speed: speed ?? VoiceSynthesisOptions.defaultSpeed,
+                         pitch: pitch ?? VoiceSynthesisOptions.defaultPitch,
+                         ssml: useSSML == true ? 1 : 0, capabilities: 0,
+                         label: "Stored voice unavailable. Choices are retained; select a compatible voice.")
+        }
+    }
+
     package init(modelID: String? = nil, voiceID: String? = nil) {
         self.modelID = modelID
         self.voiceID = voiceID
@@ -34,11 +78,23 @@ package struct DesktopVoiceOutputSettings: Codable, Equatable, Sendable {
         self.init(modelID: voice.model.id, voiceID: voice.id)
     }
 
+    package init(voice: DesktopSpeechVoice) {
+        self.init(modelID: voice.modelID, voiceID: voice.id)
+    }
+
     /// Picker order: the canonical catalogue, never a host-owned copy.
     package static var voices: [DeepgramSpeechCatalog.Voice] { DeepgramSpeechCatalog.voices }
     package static func label(_ voice: DeepgramSpeechCatalog.Voice) -> String {
         "\(voice.displayName) — \(voice.model.displayName)"
     }
+}
+
+package struct DesktopVoiceControlsPresentation: Sendable {
+    package let speed: Double
+    package let pitch: Double
+    package let ssml: Int32
+    package let capabilities: Int32
+    package let label: String
 }
 
 /// History playback that can also speak a record's Read aloud as consecutive
@@ -100,6 +156,10 @@ where Playback: DesktopHostSpeechPlayback, VoiceOutputSettings == DesktopVoiceOu
     /// The engine, staging synthesized audio in `directory`, which it creates
     /// readable only by the current user.
     static func makeVoiceOutput(stagingDirectory directory: URL) throws -> VoiceOutput
+    static func synthesizeVoiceOutput(
+        _ source: VoiceOutputSourceSnapshot, selection: DesktopSpeechSelection,
+        credential: @Sendable () async throws -> String
+    ) async throws -> Data
     /// Where this window saves the Deepgram key, e.g. "choose a Deepgram
     /// model, then Save key", for the missing-key status line.
     static var deepgramKeyHint: String { get }
@@ -107,6 +167,15 @@ where Playback: DesktopHostSpeechPlayback, VoiceOutputSettings == DesktopVoiceOu
 
 package extension DesktopHostReadAloudPlatform {
     static func makeReadAloudState() -> ReadAloudState { ReadAloudState() }
+
+    static func synthesizeVoiceOutput(
+        _ source: VoiceOutputSourceSnapshot, selection: DesktopSpeechSelection,
+        credential: @Sendable () async throws -> String
+    ) async throws -> Data {
+        try await DesktopSpeechSynthesis().synthesize(
+            source, voice: selection.voice, options: selection.options, credential: credential
+        )
+    }
 
     /// Cancels the segment being synthesized, so no later one is admitted, and
     /// returns the record's controls to idle once nothing more will be spoken.
@@ -130,15 +199,31 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     package func voiceOutputSettings() -> DesktopVoiceOutputSettings { settings.voiceOutput ?? .init() }
 
     package func saveVoiceOutput(_ voiceOutput: DesktopVoiceOutputSettings) {
-        _ = persistVoiceOutput(voiceOutput, message:
-            "Read aloud voice saved: \(DesktopVoiceOutputSettings.label(voiceOutput.voice)).")
+        let label = (try? DesktopSpeechVoice.resolved(
+            modelID: voiceOutput.modelID, voiceID: voiceOutput.voiceID
+        ))?.label
+        _ = persistVoiceOutput(voiceOutput, message: label.map { "Read aloud voice saved: \($0)." } ??
+            "Voice Output settings saved. The stored voice is unavailable on this host.")
     }
 
     package func selectVoiceOutput(_ voice: DeepgramSpeechCatalog.Voice) {
+        selectVoiceOutput(.deepgram(voice))
+    }
+
+    package func selectVoiceOutput(_ voice: DesktopSpeechVoice) {
         var changed = voiceOutputSettings()
-        changed.modelID = voice.model.id
+        changed.modelID = voice.modelID
         changed.voiceID = voice.id
         saveVoiceOutput(changed)
+    }
+
+    @discardableResult
+    package func saveVoiceSynthesisOptions(_ options: VoiceSynthesisOptions) -> Bool {
+        var changed = voiceOutputSettings()
+        changed.speed = options.speed
+        changed.pitch = options.pitch
+        changed.useSSML = options.useSSML
+        return persistVoiceOutput(changed, message: "Voice synthesis controls saved.")
     }
 
     @discardableResult
@@ -179,12 +264,20 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     }
 
     private func startVoiceRead(text: String, owner: UUID, recordID: UUID?) {
-        let segments = SpeechTextSegmenter.segments(text)
+        let selection: DesktopSpeechSelection
+        do { selection = try voiceOutputSettings().synthesisSelection() } catch {
+            update(error.localizedDescription); return
+        }
         let staging = directory.appendingPathComponent("VoiceOutput")
-        guard let voiceOutput = readAloudState.output({ try Platform.makeVoiceOutput(stagingDirectory: staging) })
-        else {
-            update("Read aloud is unavailable: its private audio folder could not be prepared.")
-            return
+        let voiceOutput: Platform.VoiceOutput?
+        if case .deepgram = selection.voice {
+            guard let output = readAloudState.output({ try Platform.makeVoiceOutput(stagingDirectory: staging) }) else {
+                update("Read aloud is unavailable: its private audio folder could not be prepared.")
+                return
+            }
+            voiceOutput = output
+        } else {
+            voiceOutput = nil
         }
         stopReadAloud()
         let speech: Platform.Playback.Speech
@@ -195,9 +288,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             update("Read aloud failed: \(error.localizedDescription)")
             return
         }
-        let voice = voiceOutputSettings().voice
-        let effects = effects
-        let playback = playback
+        let voice = selection.voice
         let ticket = playbackRequests.begin()
         readAloudState.speech = speech
         voiceOutputRecordID = recordID
@@ -207,15 +298,9 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             defer { self.finishOperation() }
             var outcome: String?
             do {
-                for segment in segments {
-                    try Task.checkCancellation()
-                    let request = try DeepgramSpeechRequest(text: segment, voice: voice)
-                    _ = try await voiceOutput.speak(request, credential: {
-                        try effects.apiKey(name: VoiceOutputProvider.deepgram.apiKeyIdentifier)
-                    }, through: { file in
-                        try await playback.playToCompletion(speech, path: file.path)
-                    })
-                }
+                try await self.executeVoiceRead(
+                    text: text, recordID: recordID, selection: selection, output: voiceOutput, speech: speech
+                )
                 outcome = "Finished reading aloud."
             } catch is CancellationError {
                 outcome = "Reading aloud stopped."
@@ -225,6 +310,38 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 outcome = "Read aloud failed: \(error.localizedDescription)"
             }
             self.finishReadAloud(ticket, status: outcome)
+        }
+    }
+
+    private func executeVoiceRead(
+        text: String, recordID: UUID?, selection: DesktopSpeechSelection,
+        output: Platform.VoiceOutput?, speech: Platform.Playback.Speech
+    ) async throws {
+        let effects = effects
+        let playback = playback
+        if case .deepgram(let voice) = selection.voice, let output {
+            for segment in SpeechTextSegmenter.segments(text) {
+                try Task.checkCancellation()
+                let request = try DeepgramSpeechRequest(text: segment, voice: voice, speed: selection.options.speed)
+                _ = try await output.speak(request, credential: {
+                    try effects.apiKey(name: selection.voice.apiKeyIdentifier)
+                }, through: { file in
+                    try await playback.playToCompletion(speech, path: file.path)
+                })
+            }
+        } else {
+            let source = try VoiceOutputSourceSnapshot(
+                source: recordID == nil ? .typedText : .history, text: text, recordID: recordID
+            )
+            let wav = try await Platform.synthesizeVoiceOutput(source, selection: selection) {
+                try effects.apiKey(name: selection.voice.apiKeyIdentifier)
+            }
+            try await DesktopVoicePlaybackFile.play(
+                VoiceGeneratedAudio(validating: wav),
+                directory: directory.appendingPathComponent("VoiceGeneratedPlayback"),
+                prepare: { try Platform.preparePrivateDirectory($0) },
+                through: { try await playback.playToCompletion(speech, path: $0.path) }
+            )
         }
     }
 

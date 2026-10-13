@@ -23,6 +23,15 @@ int32_t jsti_window_set_voice_text_import(const char *token, const char *text, c
  * Setters copy borrowed strings and dispatch to the native editor. */
 int32_t jsti_window_set_voice_generation_options(int32_t flags);
 int32_t jsti_window_set_voice_generated_result(const char *result_id, int32_t working, const char *message);
+/* 119 saves {"speed":number,"pitch":number,"useSSML":bool} through text;
+ * record carries an opaque acknowledgement token, never a History owner.
+ * Capabilities: bit 0 speed, bit 1 pitch, bit 2 SSML. Unsupported stored values
+ * remain visible; only explicit Normal controls resets them. */
+int32_t jsti_window_set_voice_synthesis_options(double speed, double pitch, int32_t ssml,
+                                               int32_t capabilities, const char *voice);
+/* Completes the pending Save only after persistence; 0 keeps the editor open
+ * with an error, 1 closes it. Closed/replaced request tokens are ignored. */
+int32_t jsti_window_finish_voice_synthesis_options(const char *request_id, int32_t success);
 #ifdef __cplusplus
 }
 #endif

@@ -58,7 +58,7 @@ final class AppSettingsDefaultsTests: XCTestCase {
     func testLiveClientOptionsProjectRecognitionSignalsAndSelectedTiming() {
         let settings = AppSettings(defaults: defaults)
         settings.transcriptionMode = .liveNative
-        settings.liveTranscriptionModel = AssemblyAIModels.universal35ProStreamingID
+        settings.liveTranscriptionModel = AssemblyAIModels.universal36ProStreamingID
         settings.transcriptionKeywords = " AssemblyAI, Universal 3.5 "
         settings.modulateSpeakerDiarizationEnabled = true
         settings.modulateEmotionSignalEnabled = true

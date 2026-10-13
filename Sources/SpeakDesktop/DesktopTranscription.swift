@@ -310,6 +310,7 @@ extension DesktopTranscription {
     /// clients run. Other providers retain their encoded-container upload path.
     public static func requiresCanonicalPCM16WAV(model: String) -> Bool {
         let identifier = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        if OpenRouterInlineAudioTranscriptionClient.requiresCanonicalPCM16WAV(model: identifier) { return true }
         guard case .prepared(let provider) = backend(for: identifier) else { return false }
         switch provider {
         case .meta, .azure: return true

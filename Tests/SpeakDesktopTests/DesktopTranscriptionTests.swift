@@ -42,7 +42,7 @@ final class DesktopTranscriptionTests: XCTestCase {
         }
         XCTAssertNil(DesktopTranscription.provider(for: "apple/local/SFSpeechRecognizer"))
         XCTAssertNil(DesktopTranscription.provider(for: "cartesia/ink-2-streaming"))
-        let audioPreview = DesktopTranscription.provider(for: "openai/gpt-4o-audio-preview-2024-12-17")
+        let audioPreview = DesktopTranscription.provider(for: "openai/gpt-audio")
         XCTAssertEqual(audioPreview?.id, OpenRouterService.providerID)
         XCTAssertNotEqual(audioPreview?.apiKeyIdentifier, OpenAIBatchClient().metadata.apiKeyIdentifier)
     }

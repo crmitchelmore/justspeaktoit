@@ -22,7 +22,7 @@ final class DesktopModulateTests: XCTestCase {
             speakerDiarization: true, emotionSignal: true, accentSignal: true, piiPhiTagging: true
         )
         StubURLProtocol.handler = { request in
-            XCTAssertEqual(request.url?.absoluteString, "https://modulate-developer-apis.com/api/velma-2-stt-batch")
+            XCTAssertEqual(request.url?.absoluteString, "https://platform.modulate.ai/api/velma-2-stt-batch")
             XCTAssertEqual(request.httpMethod, "POST")
             XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "fixture-key")
             XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))

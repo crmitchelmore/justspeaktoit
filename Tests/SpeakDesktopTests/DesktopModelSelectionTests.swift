@@ -33,7 +33,7 @@ final class DesktopModelSelectionTests: XCTestCase {
     }
 
     func testRetiredLiveSelectionsMoveToTheSameSuccessorAsApple() throws {
-        let successor = AssemblyAIModels.universal35ProStreamingID
+        let successor = AssemblyAIModels.universal36ProStreamingID
         try XCTSkipUnless(liveIDs.contains(successor), "AssemblyAI live is not in the desktop projection")
         let batch = try XCTUnwrap(DesktopTranscription.batchModels.first?.id)
         let active = migrate("assemblyai/u3-rt-pro-streaming", batch: batch, live: "u3-rt-pro-streaming")

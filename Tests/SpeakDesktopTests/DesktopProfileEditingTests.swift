@@ -64,7 +64,7 @@ final class DesktopProfileEditingTests: XCTestCase {
 
     func testLiveOverrideReopensAsLive() throws {
         let profile = DictationProfile(
-            name: "Live", transcriptionModelID: AssemblyAIModels.universal35ProStreamingID,
+            name: "Live", transcriptionModelID: AssemblyAIModels.universal36ProStreamingID,
             transcriptionRouting: .remoteStreaming
         )
         let draft = DesktopProfileEditing.draft(for: profile, catalogue: catalogue)

@@ -5,7 +5,7 @@ import XCTest
 
 final class DesktopLiveLanguageTests: XCTestCase {
     private let supported = "deepgram/nova-3-streaming"
-    private let unsupported = AssemblyAIModels.universal35ProStreamingID
+    private let unsupported = AssemblyAIModels.universal36ProStreamingID
     private let options = DesktopPostProcessing.Options(mode: .disabled)
 
     func testOriginalCapabilityInitializerRetainsItsExactFunctionSignature() {

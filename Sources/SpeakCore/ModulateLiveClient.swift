@@ -14,8 +14,6 @@ public final class ModulateLiveClient: StreamingTranscriptionClient, @unchecked 
     /// Final shape: the done emit joins every utterance seen in the session.
     public let finalShape: TranscriptFinalShape = .cumulativeTranscript
 
-    private static let endpoint = "wss://modulate-developer-apis.com/api/velma-2-stt-streaming"
-
     private let apiKey: String
     private let sampleRate: Int
     private let session: URLSession
@@ -69,7 +67,7 @@ public final class ModulateLiveClient: StreamingTranscriptionClient, @unchecked 
     }
 
     func makeRequest() -> URLRequest? {
-        var components = URLComponents(string: Self.endpoint)!
+        var components = URLComponents(url: ModulateTranscriptionService.streamingURL, resolvingAgainstBaseURL: false)!
         components.queryItems = [
             URLQueryItem(name: "api_key", value: apiKey),
             URLQueryItem(name: "speaker_diarization", value: String(options.speakerDiarization)),

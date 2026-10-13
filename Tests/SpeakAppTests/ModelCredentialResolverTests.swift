@@ -60,7 +60,7 @@ final class ModelCredentialResolverTests: XCTestCase {
         )
         XCTAssertEqual(
             ModelCredentialResolver.requirement(
-                for: "openai/gpt-4o-audio-preview-2024-12-17",
+                for: "openai/gpt-audio",
                 purpose: .batchTranscription
             ),
             .apiKey(identifier: "openrouter.apiKey", providerName: "OpenRouter")

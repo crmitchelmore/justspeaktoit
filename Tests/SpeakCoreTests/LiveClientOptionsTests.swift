@@ -59,6 +59,8 @@ final class LiveClientOptionsTests: XCTestCase {
             piiPhiTagging: true
         )
         let request = try XCTUnwrap(ModulateLiveClient(apiKey: "test-key", options: options).makeRequest())
+        XCTAssertEqual(request.url?.host, "platform.modulate.ai")
+        XCTAssertEqual(request.url?.path, "/api/velma-2-stt-streaming")
         let items = try XCTUnwrap(
             URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems
         )
@@ -66,6 +68,7 @@ final class LiveClientOptionsTests: XCTestCase {
         XCTAssertEqual(items.filter { $0.name == "emotion_signal" }.map(\.value), ["false"])
         XCTAssertEqual(items.filter { $0.name == "accent_signal" }.map(\.value), ["true"])
         XCTAssertEqual(items.filter { $0.name == "pii_phi_tagging" }.map(\.value), ["true"])
+        XCTAssertEqual(items.filter { $0.name == "api_key" }.map(\.value), ["test-key"])
         XCTAssertEqual(request.timeoutInterval, 30)
     }
 

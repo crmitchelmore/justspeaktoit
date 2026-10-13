@@ -218,7 +218,7 @@ final class ModulateLiveTranscriber: @unchecked Sendable {
   }
 
   private func makeWebSocketURL() -> URL {
-    var components = URLComponents(string: "wss://modulate-developer-apis.com/api/velma-2-stt-streaming")!
+    var components = URLComponents(url: ModulateTranscriptionService.streamingURL, resolvingAgainstBaseURL: false)!
     components.queryItems = [URLQueryItem(name: "api_key", value: apiKey)] + featureConfiguration.queryItems
     return components.url!
   }

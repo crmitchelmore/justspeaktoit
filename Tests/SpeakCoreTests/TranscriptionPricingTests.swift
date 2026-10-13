@@ -40,13 +40,15 @@ final class TranscriptionPricingTests: XCTestCase {
         XCTAssertEqual(TranscriptionPricing.pricePerMinuteUSD(modelID: AzureTranscriptionModels.fast),
                        Decimal(string: "1.00")! / 60)
         XCTAssertEqual(
-            TranscriptionPricing.pricePerMinuteUSD(modelID: AssemblyAIModels.universal35ProStreamingID),
-            Decimal(string: "0.15")! / 60
+            TranscriptionPricing.pricePerMinuteUSD(modelID: AssemblyAIModels.universal36ProStreamingID),
+            Decimal(string: "0.45")! / 60
         )
         XCTAssertEqual(
             TranscriptionPricing.pricePerMinuteUSD(modelID: AssemblyAIModels.universal35ProBatchID),
-            Decimal(string: "0.27")! / 60
+            Decimal(string: "0.21")! / 60
         )
+        XCTAssertEqual(TranscriptionPricing.pricePerMinuteUSD(modelID: AssemblyAIModels.universal2BatchID),
+                       Decimal(string: "0.15")! / 60)
     }
 
     func testUnknownModels_haveNoPrice() {
@@ -82,7 +84,13 @@ final class TranscriptionPricingTests: XCTestCase {
             "openai/gpt-live-transcribe-streaming",
             "openai/gpt-transcribe",
             "openai/gpt-4o-transcribe-diarize",
-            "openai/gpt-4o-audio-preview-2024-12-17",
+            "openai/gpt-audio",
+            "thinkingmachines/inkling",
+            "thinkingmachines/inkling-small",
+            "google/gemini-3.1-pro-preview",
+            "mistralai/voxtral-small-24b-2507",
+            "google/gemini-3.8-flash",
+            "google/gemini-3.5-flash-lite",
             "google/gemini-3.5-transcribe",
             "google/gemini-3.5-transcribe-live",
             "mistral/voxtral-mini-transcribe-realtime-2602-streaming",

@@ -1,9 +1,13 @@
 # Batch transcription providers
 
+For current model generations, hosted audio-chat additions and deliberately
+preserved tiers, see the [October 2026 transcription audit](transcription-model-audit-2026-10.md).
+
 File (batch) transcription for Cartesia, Gladia, Speechmatics, Smallest AI,
-Reson8 and StepFun. Existing streaming identifiers and saved live selections
-are untouched. Reson8 also adds a genuine live route; Pulse Pro and StepAudio 3
-remain batch-only. Nothing here changes Text-to-Speech.
+Reson8 and StepFun. Supported saved live selections are preserved; retired
+identifiers migrate through the shared catalogue. Reson8 also adds a genuine
+live route; Pulse Pro and StepAudio 3 remain batch-only. Nothing here changes
+Text-to-Speech.
 
 | Catalogue ID | Picker name | Credential | macOS | iOS |
 | --- | --- | --- | --- | --- |

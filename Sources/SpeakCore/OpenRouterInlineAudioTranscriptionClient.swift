@@ -17,14 +17,25 @@ public struct OpenRouterInlineAudioTranscriptionClient: Sendable {
 
     public enum InputError: LocalizedError, Equatable {
         case unsupportedFormat
+        case inklingAudioLimit
         public var errorDescription: String? {
-            "This audio format is unsupported by OpenRouter audio-chat transcription. Use WAV, MP3 or M4A."
+            switch self {
+            case .unsupportedFormat:
+                return "This audio format is unsupported by OpenRouter audio-chat transcription. Use WAV, MP3 or M4A."
+            case .inklingAudioLimit:
+                return "Inkling transcription accepts recordings up to 20 minutes within the inline audio size limit."
+            }
         }
     }
 
     public typealias DurationResolver = @Sendable (URL) async -> TimeInterval
 
     public static let defaultMaximumInlineAudioBytes: Int64 = 50 * 1024 * 1024
+
+    public static func requiresCanonicalPCM16WAV(model: String) -> Bool {
+        let identifier = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        return batchCatalogIDs.contains(identifier) && identifier.hasPrefix("thinkingmachines/inkling")
+    }
 
     /// The static batch catalogue entries this route serves: every remote entry whose
     /// canonical credential is the OpenRouter key. The `google/` and `openai/` prefixes are
@@ -65,7 +76,7 @@ public struct OpenRouterInlineAudioTranscriptionClient: Sendable {
         let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { throw OpenRouterClientError.apiKeyMissing }
         let identifier = model.trimmingCharacters(in: .whitespacesAndNewlines)
-        let request = try makeRequest(apiKey: key, audioURL: url, model: identifier, language: language)
+        let request = try await makeRequest(apiKey: key, audioURL: url, model: identifier, language: language)
         try Task.checkCancellation()
 
         let data: Data
@@ -95,7 +106,7 @@ public struct OpenRouterInlineAudioTranscriptionClient: Sendable {
 
     // MARK: - Request shaping
 
-    private func makeRequest(apiKey key: String, audioURL url: URL, model: String, language: String?) throws
+    private func makeRequest(apiKey key: String, audioURL url: URL, model: String, language: String?) async throws
         -> URLRequest {
         var request = URLRequest(url: OpenRouterService.baseURL.appendingPathComponent("chat/completions"))
         request.httpMethod = "POST"
@@ -103,12 +114,26 @@ public struct OpenRouterInlineAudioTranscriptionClient: Sendable {
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         branding.apply(to: &request)
 
-        let format = try inputFormat(for: url)
+        let sourceFormat = try inputFormat(for: url)
         try enforceInlineAudioSizeLimit(for: url)
-        // Read in bounded chunks even when a file grows after the metadata check.
-        let handle = try FileHandle(forReadingFrom: url)
-        defer { try? handle.close() }
-        let audioData = try Self.readAudio(from: handle, limit: maximumInlineAudioBytes)
+        let format: String
+        let audioData: Data
+        if Self.requiresCanonicalPCM16WAV(model: model) {
+            format = "wav"
+            do {
+                audioData = try await NativePCM16WAVReader.prepareWAV(
+                    at: url, maximumDuration: 20 * 60, maximumBytes: Int(clamping: maximumInlineAudioBytes)
+                ).data
+            } catch NativePCM16WAVReader.PreparationError.limitExceeded {
+                throw InputError.inklingAudioLimit
+            }
+        } else {
+            format = sourceFormat
+            // Read in bounded chunks even when a file grows after the metadata check.
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            audioData = try Self.readAudio(from: handle, limit: maximumInlineAudioBytes)
+        }
         try Task.checkCancellation()
         request.httpBody = try JSONEncoder().encode(
             OpenRouterAudioTranscriptionRequest(

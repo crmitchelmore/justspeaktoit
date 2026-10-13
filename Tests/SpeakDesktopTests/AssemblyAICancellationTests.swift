@@ -88,7 +88,7 @@ final class AssemblyAICancellationTests: XCTestCase {
         XCTAssertTrue(socket.binary.isEmpty, "No fictitious audio is sent")
         XCTAssertEqual(socket.controls, [#"{"type":"ForceEndpoint"}"#])
         socket.completeSend()
-        fixture.clock.fire(ModelCatalog.liveCapabilities(for: AssemblyAIModels.universal35ProStreamingID)
+        fixture.clock.fire(ModelCatalog.liveCapabilities(for: AssemblyAIModels.universal36ProStreamingID)
             .postStopFinalizeBudget)
         XCTAssertEqual(socket.controls, [#"{"type":"ForceEndpoint"}"#, #"{"type":"Terminate"}"#])
         socket.completeSend()

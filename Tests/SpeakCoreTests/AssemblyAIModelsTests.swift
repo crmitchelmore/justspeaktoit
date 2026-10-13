@@ -3,12 +3,12 @@ import Foundation
 import XCTest
 
 final class AssemblyAIModelsTests: XCTestCase {
-    func testStreamingURL_usesUniversal35ProWithoutRetiredParameters() throws {
+    func testStreamingURL_usesUniversal36ProWithoutRetiredParameters() throws {
         let url = try XCTUnwrap(AssemblyAIStreamingRequest.url(
             endpoint: .europe,
             apiKey: "test-key",
             sampleRate: 16_000,
-            keyterms: ["AssemblyAI", "Universal-3.5 Pro"]
+            keyterms: ["AssemblyAI", "Universal-3.6 Pro"]
         ))
         let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
         let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).compactMap { item in
@@ -16,7 +16,7 @@ final class AssemblyAIModelsTests: XCTestCase {
         })
 
         XCTAssertEqual(url.host, AssemblyAIStreamingEndpoint.europe.rawValue)
-        XCTAssertEqual(query["speech_model"], AssemblyAIModels.universal35ProAPIName)
+        XCTAssertEqual(query["speech_model"], AssemblyAIModels.universal36ProAPIName)
         XCTAssertEqual(query["sample_rate"], "16000")
         XCTAssertEqual(query["min_turn_silence"], "560")
         XCTAssertNil(query["format_turns"])
@@ -26,7 +26,7 @@ final class AssemblyAIModelsTests: XCTestCase {
 
         let keyterms = try XCTUnwrap(query["keyterms_prompt"])
         let data = Data(keyterms.utf8)
-        XCTAssertEqual(try JSONDecoder().decode([String].self, from: data), ["AssemblyAI", "Universal-3.5 Pro"])
+        XCTAssertEqual(try JSONDecoder().decode([String].self, from: data), ["AssemblyAI", "Universal-3.6 Pro"])
     }
 
     func testStreamingURL_filtersInvalidKeytermsAndCapsAtOneHundred() throws {

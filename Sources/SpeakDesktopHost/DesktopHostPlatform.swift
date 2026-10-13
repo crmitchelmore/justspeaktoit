@@ -83,6 +83,7 @@ package protocol DesktopHostPlatform: Sendable {
     static func convertAudio(input: URL, output: URL) async throws -> TimeInterval
     /// Opens a saved recording in the user's default application.
     static func openFile(_ url: URL) throws
+    static func revealDirectory(_ url: URL) throws
     static func copyToClipboard(_ text: String) throws
 
     // Automatic output and playback.
@@ -142,6 +143,9 @@ package protocol DesktopHostPlatform: Sendable {
 }
 
 package extension DesktopHostPlatform {
+    static func revealDirectory(_ url: URL) throws {
+        throw DesktopHostError(message: "Opening recording folders is unavailable on this host.")
+    }
     static func update(_ status: String) { update(status, transcript: nil, state: -1) }
     /// Hosts without a dashboard or History header show no totals.
     static func historyInsights(all: DesktopHistoryInsights, visible: DesktopHistoryInsights) {}

@@ -49,7 +49,8 @@ enum {
     /* Apply in Azure Speech resource. text: the endpoint as typed ("" clears). */
     JSTI_EVENT_AZURE_RESOURCE = 34,
     JSTI_EVENT_HISTORY_FILTERS = 90, /* text: DesktopHistoryFilter JSON */
-    JSTI_EVENT_HISTORY_DELETE = 91 /* text: frozen newline-separated UUIDs; index: 1 removes owned audio */
+    JSTI_EVENT_HISTORY_DELETE = 91, /* text: frozen newline-separated UUIDs; index: 1 removes owned audio */
+    JSTI_EVENT_RECORDINGS_FOLDER = 93
 };
 
 /* Read aloud, Appearance and Launch at login. Linux-only numbers 40-46. */

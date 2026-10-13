@@ -130,6 +130,7 @@ enum LinuxHostPlatform: DesktopHostPlatform {
     }
 
     package static func openFile(_ url: URL) throws { try LinuxFiles.open(url) }
+    package static func revealDirectory(_ url: URL) throws { try LinuxFiles.open(url) }
 
     package static func copyToClipboard(_ text: String) throws { try LinuxClipboard.write(text) }
 

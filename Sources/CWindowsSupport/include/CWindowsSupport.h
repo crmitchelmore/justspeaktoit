@@ -49,7 +49,8 @@ enum JSTIWindowEvent {
      * disabled until jsti_window_set_login_item reports the state reached. */
     JSTI_EVENT_LOGIN_ITEM = 27,
     JSTI_EVENT_HISTORY_FILTERS = 90, /* text: DesktopHistoryFilter JSON */
-    JSTI_EVENT_HISTORY_DELETE = 91 /* text: frozen newline-separated UUIDs; index: 1 removes owned audio */
+    JSTI_EVENT_HISTORY_DELETE = 91, /* text: frozen newline-separated UUIDs; index: 1 removes owned audio */
+    JSTI_EVENT_RECORDINGS_FOLDER = 93
 };
 
 /* Runs on the UI thread. text is borrowed until callback returns. model_index
@@ -248,6 +249,8 @@ int jsti_window_choose_export_path(const char *suggested_filename, char *path, s
  * Only recognised audio filename extensions are accepted; never executes an
  * arbitrary imported file. Shell activation errors are returned. */
 int jsti_shell_open_file(const char *path, char *error, size_t error_capacity);
+/* Reveals an existing directory in Explorer; never opens a file association. */
+int jsti_shell_open_directory(const char *path, char *error, size_t error_capacity);
 
 /* Atomic Apply callback from the native settings dialog, on the UI thread.
  * prompt/new_key are borrowed until return. Empty new_key means keep the saved

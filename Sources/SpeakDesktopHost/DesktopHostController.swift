@@ -98,6 +98,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var cancellationRequested = false
     var historyDeletionInProgress = false
     var historyDeletionTask: Task<Void, Never>?
+    var folderRevealTask: Task<Void, Error>?
     var liveUpdates: Task<Void, Never>?
     var liveFinalisation: DesktopLiveSession?
     /// The recording the HUD follows, from Record until its result.

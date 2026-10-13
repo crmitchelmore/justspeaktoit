@@ -11,6 +11,7 @@ func windowsHistoryManagementEvent(
     case 91:
         let controller = holder.controller
         holder.enqueueSettings { await controller.beginHistoryDeletion(value, deleteAudio: index == 1) }
+    case 93: Task { await holder.controller.revealRecordingsDirectory() }
     default: return false
     }
     return true

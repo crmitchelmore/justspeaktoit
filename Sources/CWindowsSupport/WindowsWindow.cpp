@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <objbase.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <dwmapi.h>
 #include <uxtheme.h>
 #include <mutex>
@@ -86,6 +87,7 @@ constexpr int sourceLabelID = 89;
 constexpr int localModelsID = 174;
 constexpr int historyFiltersID = 460;
 constexpr int historyDeleteID = 461, historyClearID = 462;
+constexpr int recordingsFolderLabelID = 463, recordingsFolderID = 464;
 constexpr int sourceID = 175;
 // Model modes: bit 0 is live, bit 1 is local (on-device).
 constexpr int modeCount = 4;
@@ -562,7 +564,7 @@ unsigned pagesOf(int identifier) {
     case readAloudID: case stopPlaybackID: return page(historyPage) | page(voicePage);
     case voiceSettingsID: return page(voicePage);
     case 94: case microphoneID: case textOutputID: case appearanceLabelID: case appearanceID: case automationID:
-    case loginItemID:
+    case loginItemID: case recordingsFolderLabelID: case recordingsFolderID:
         return page(generalPage);
     case processingID: return page(postProcessingPage);
     case profilesID: return page(profilesPage);
@@ -854,10 +856,12 @@ void layoutSettings(HWND window, const RECT &content) {
         // The Mac's App Behaviour card. The note appears only when the system
         // decides Launch at login, so the page still fits the minimum height.
         y = layoutSettingsCard(window, top, content, 0xE713, L"App behaviour", state.loginItemNote,
-                               2 * row + scale(window, 12));
+                               3 * row + scale(window, 24));
         label(appearanceLabelID, y); control(appearanceID, y, scale(window, 220));
         place(window, loginItemID, RECT{left + scale(window, 188 + 220 + 24), y, right, y + row});
         place(window, automationID, RECT{left, y + row + scale(window, 12), right, y + 2 * row + scale(window, 12)});
+        label(recordingsFolderLabelID, y + 2 * row + scale(window, 24));
+        control(recordingsFolderID, y + 2 * row + scale(window, 24), scale(window, 220));
         break;
     }
     case transcriptionPage: {
@@ -1518,6 +1522,8 @@ bool createControls(HWND window) {
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP, appearanceID) &&
         add(L"BUTTON", L"Launch at &login", BS_PUSHBUTTON | WS_TABSTOP, loginItemID) &&
         add(L"BUTTON", L"Allow &automation (speak command and MCP)", BS_PUSHBUTTON | WS_TABSTOP, automationID) &&
+        add(L"STATIC", L"Recording storage", 0, recordingsFolderLabelID) &&
+        add(L"BUTTON", L"Open recordings &folder", BS_PUSHBUTTON | WS_TABSTOP, recordingsFolderID) &&
         add(L"BUTTON", L"i&Cloud sync settings…", BS_PUSHBUTTON | WS_TABSTOP, cloudSyncID) &&
         add(L"BUTTON", L"View on &GitHub", BS_PUSHBUTTON | WS_TABSTOP, githubID) &&
         add(L"BUTTON", L"Report an iss&ue", BS_PUSHBUTTON | WS_TABSTOP, issueID) &&
@@ -2112,6 +2118,9 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             emit(window, JSTI_EVENT_LOGIN_ITEM, requested ? "1" : "0");
             return 0;
         }
+        case recordingsFolderID:
+            if (HIWORD(wparam) == BN_CLICKED) emit(window, JSTI_EVENT_RECORDINGS_FOLDER, "");
+            return 0;
         case githubID: case issueID: case privacyID: {
             if (HIWORD(wparam) != BN_CLICKED) return 0;
             const wchar_t *address = LOWORD(wparam) == githubID ? L"https://github.com/crmitchelmore/justspeaktoit"
@@ -3055,11 +3064,37 @@ int jsti_shell_open_file(const char *path, char *error, size_t errorCapacity) {
     return 0;
 }
 
+int jsti_shell_open_directory(const char *path, char *error, size_t errorCapacity) {
+    std::wstring folder;
+    if (!jsti::wide(path, folder) || folder.empty()) {
+        return jsti::fail("No valid recording folder supplied.", error, errorCapacity);
+    }
+    const DWORD attributes = GetFileAttributesW(folder.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES || !(attributes & FILE_ATTRIBUTE_DIRECTORY)) {
+        return jsti::fail("The recording folder does not exist or is not a directory.", error, errorCapacity);
+    }
+    const HRESULT apartment = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    if (FAILED(apartment) && apartment != RPC_E_CHANGED_MODE) {
+        return jsti::fail("Windows could not initialize the folder launcher.", error, errorCapacity);
+    }
+    PIDLIST_ABSOLUTE item = ILCreateFromPathW(folder.c_str());
+    const HRESULT opened = item ? SHOpenFolderAndSelectItems(item, 0, nullptr, 0) : E_INVALIDARG;
+    CoTaskMemFree(item);
+    if (SUCCEEDED(apartment)) CoUninitialize();
+    if (FAILED(opened)) return jsti::fail("Windows could not reveal the recording folder.", error, errorCapacity);
+    return 0;
+}
+
 int jsti_window_self_test(char *error, size_t errorCapacity) {
     HWND window;
     { std::lock_guard<std::mutex> lock(state.mutex); window = state.window; }
     if (!window || GetWindowThreadProcessId(window, nullptr) != GetCurrentThreadId()) {
         return jsti::fail("Window checks must run on the UI thread after READY.", error, errorCapacity);
+    }
+    char folderError[256] = {};
+    if (!GetDlgItem(window, recordingsFolderID) ||
+        jsti_shell_open_directory(nullptr, folderError, sizeof(folderError)) == 0) {
+        return jsti::fail("Recording folder control or invalid-path refusal failed.", error, errorCapacity);
     }
     const std::vector<MicrophoneRow> originalMicrophones = state.microphones;
     const std::string originalMicrophoneID = state.microphoneSelection;

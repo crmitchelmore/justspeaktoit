@@ -74,6 +74,7 @@ typedef struct UI {
     GtkButton *retry;
     GtkButton *export_button;
     GtkButton *open_audio;
+    GtkButton *recordings_folder;
     GtkButton *import_button;
     GtkButton *play;
     GtkButton *stop_play;
@@ -441,6 +442,11 @@ static void on_voice(GObject *object, GParamSpec *spec, gpointer data) {
 static void on_open_audio(GtkButton *button, gpointer data) {
     (void)button; (void)data;
     if (ui.selected_id != NULL) emit(JSTI_EVENT_OPEN_AUDIO, ui.selected_id, 0);
+}
+
+static void on_recordings_folder(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    emit(JSTI_EVENT_RECORDINGS_FOLDER, "", 0);
 }
 
 static void export_chosen(GObject *source, GAsyncResult *result, gpointer data) {
@@ -969,6 +975,16 @@ static GtkWidget *build_general(void) {
     g_signal_connect(ui.appearance_row, "notify::selected", G_CALLBACK(on_appearance), NULL);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(appearance), GTK_WIDGET(ui.appearance_row));
     gtk_box_append(GTK_BOX(column), appearance);
+    GtkWidget *housekeeping = group("Housekeeping");
+    GtkWidget *folder = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(folder), "Recording storage");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(folder), "Open the folder containing saved audio and History data.");
+    ui.recordings_folder = GTK_BUTTON(gtk_button_new_with_mnemonic("_Open folder"));
+    gtk_widget_set_valign(GTK_WIDGET(ui.recordings_folder), GTK_ALIGN_CENTER);
+    g_signal_connect(ui.recordings_folder, "clicked", G_CALLBACK(on_recordings_folder), NULL);
+    adw_action_row_add_suffix(ADW_ACTION_ROW(folder), GTK_WIDGET(ui.recordings_folder));
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(housekeeping), folder);
+    gtk_box_append(GTK_BOX(column), housekeeping);
     return page;
 }
 
@@ -2218,6 +2234,10 @@ static int32_t login_item_self_test(char *error, size_t capacity) {
 
 int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (ui.window == NULL) return fail(error, capacity, "the window was not created");
+    if (ui.recordings_folder == NULL ||
+        g_strcmp0(gtk_button_get_label(ui.recordings_folder), "_Open folder") != 0) {
+        return fail(error, capacity, "the recording folder control was not created");
+    }
     if (login_item_self_test(error, capacity) != 0) return -1;
     if (g_list_model_get_n_items(G_LIST_MODEL(ui.model_names)) == 0) {
         return fail(error, capacity, "no models are offered");

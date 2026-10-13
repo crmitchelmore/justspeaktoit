@@ -90,6 +90,12 @@ enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPla
         }
     }
 
+    package static func revealDirectory(_ url: URL) throws {
+        try url.path.withCString { path in
+            try WindowsNative.checked { jsti_shell_open_directory(path, $0, $1) }
+        }
+    }
+
     package static func copyToClipboard(_ text: String) throws {
         try text.withCString { text in
             try WindowsNative.checked { jsti_clipboard_write(text, $0, $1) }

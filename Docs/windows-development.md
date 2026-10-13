@@ -515,6 +515,13 @@ Native dialog,
 keyboard, accessibility, DPI and live CloudKit acceptance still require
 target-platform evidence; portable tests and syntax checks alone are insufficient.
 
+General now opens the actual recording storage folder through Explorer or the
+desktop file manager. This read-only action does not alter History, expose a
+different folder as a fallback, or drain a blocking shell request on the native
+settings queue. Launch errors are displayed and closing bounds outstanding work.
+The desktop folder contains both audio and metadata; audio-only housekeeping and
+changing the recording location remain separate outstanding workflows.
+
 The filter editor scrolls vertically when the available work area is too short;
 keyboard traversal reveals the focused control. Long model names have native
 horizontal scrolling, and an open editor follows application appearance changes.

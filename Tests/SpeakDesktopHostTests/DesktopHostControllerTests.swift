@@ -38,9 +38,28 @@ final class FakeLog: @unchecked Sendable {
     private var statuses: [String] = []
     private var clipboard: [String] = []
     private var hudStates: [DesktopHUDState] = []
+    private var folders: [URL] = []
+    private var directoryLauncher: (@Sendable (URL) throws -> Void)?
     var keys: [String: String] = [:]
 
-    func reset() { lock.withLock { statuses = []; clipboard = []; hudStates = []; keys = [:] } }
+    func reset() {
+        lock.withLock {
+            statuses = []
+            clipboard = []
+            hudStates = []
+            folders = []
+            directoryLauncher = nil
+            keys = [:]
+        }
+    }
+    func setDirectoryLauncher(_ launcher: (@Sendable (URL) throws -> Void)?) {
+        lock.withLock { directoryLauncher = launcher }
+    }
+    func reveal(_ folder: URL) throws {
+        let launcher = lock.withLock { folders.append(folder); return directoryLauncher }
+        try launcher?(folder)
+    }
+    var revealedFolders: [URL] { lock.withLock { folders } }
     func hud(_ state: DesktopHUDState) { lock.withLock { hudStates.append(state) } }
     var huds: [DesktopHUDState] { lock.withLock { hudStates } }
     func status(_ text: String) { lock.withLock { statuses.append(text) } }
@@ -83,6 +102,7 @@ enum FakePlatform: DesktopHostPlatform {
         throw DesktopHostError(message: "No converter in tests.")
     }
     static func openFile(_ url: URL) throws {}
+    static func revealDirectory(_ url: URL) throws { try FakeLog.shared.reveal(url) }
     static func copyToClipboard(_ text: String) throws { FakeLog.shared.copy(text) }
     static func makeOutputJob(options: FakeTextOutput, target: String?) -> FakeJob? {
         options.label == "copy" || target != nil ? FakeJob(label: options.label, target: target) : nil

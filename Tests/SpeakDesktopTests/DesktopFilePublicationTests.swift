@@ -45,6 +45,20 @@ final class DesktopFilePublicationTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: file), bytes)
     }
 
+    func testCommit_NonSiblingDestinationPreservesStagingWithoutCrossDeviceCopy() throws {
+        let root = try directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let other = root.appendingPathComponent("other")
+        try FileManager.default.createDirectory(at: other, withIntermediateDirectories: false)
+        let staging = root.appendingPathComponent("owned.partial")
+        let destination = other.appendingPathComponent("published.bin")
+        let bytes = Data("Synthetic sibling-only publication".utf8)
+        try bytes.write(to: staging)
+        XCTAssertThrowsError(try DesktopFilePublication.commit(staging: staging, destination: destination))
+        XCTAssertEqual(try Data(contentsOf: staging), bytes)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+    }
+
     private func directory() throws -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "file publication-\(UUID())-\u{00E9}-\u{1F600}"

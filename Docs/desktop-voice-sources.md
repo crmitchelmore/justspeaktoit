@@ -51,7 +51,8 @@ generated result. Cache/playback staging stays separate; a saved copy is
 user-owned output and is not removed when the cache changes or the app closes.
 The imported macOS `recordingsDirectory` never controls native filesystem writes.
 Publication uses reusable `DesktopFilePublication`: Windows commits with a
-native exclusive same-filesystem move, not Foundation links; other hosts link
+native exclusive sibling rename through the standard C runtime, not Foundation
+links or a host SDK in the shared domain; other hosts link
 exclusively and remove staging only after publication succeeds. Post-commit
 cleanup failures explicitly keep and name the published copy.
 The shared desktop voice model persists optional `ttsAutoPlay` and

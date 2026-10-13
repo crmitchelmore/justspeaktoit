@@ -38,17 +38,24 @@ $bin = swift build --configuration release --show-bin-path
 & (Join-Path $bin.Trim() 'SpeakWindows.exe')
 ```
 
-The current source offers microphone recording, audio-file import and **all 31
-static remote batch models across seventeen provider families**: OpenAI, Groq,
+The current source offers microphone recording, audio-file import and static
+remote batch models across these provider families: OpenAI, Groq,
 Deepgram, ElevenLabs, Google Gemini, xAI, Cartesia, Gladia, Speechmatics, Meta,
-Azure, Mistral, Soniox, Rev.ai, Modulate, AssemblyAI and OpenRouter. The canonical
+Azure, Mistral, Soniox, Rev.ai, Modulate, AssemblyAI, OpenRouter, Smallest AI,
+Reson8 and StepFun. The canonical
 shared catalogue owns their identifiers, metadata and routes. OpenRouter model
 discovery uses the same cache and refresh policy as Apple; native model controls
 refresh without changing an active recording or reusing an earlier model index.
 Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox, ElevenLabs,
 Mistral Voxtral, Gladia, Cartesia Ink-2, Rev.ai, two Azure Voice Live and xAI's
 dedicated speech-to-text live models use shared Swift clients with the native
-WinHTTP transport. The xAI stream (`xai/speech-to-text-streaming`, 24 kHz PCM) is
+WinHTTP transport. Reson8 (`reson8/resonant-1-streaming`, 16 kHz PCM) also uses
+the shared native transport with handshake-gated audio and a bounded,
+correlated flush confirmation; Smallest AI Pulse Pro and StepAudio 3 ASR Max
+are file-only routes. These new routes have fake-transport evidence only and
+no native Windows provider receipt; see
+[batch transcription contracts](batch-transcription-providers.md).
+The xAI stream (`xai/speech-to-text-streaming`, 24 kHz PCM) is
 source-wired with fake-transport tests only and still needs a Windows provider
 receipt; the Grok Voice conversation route stays unavailable. Gladia
 (`gladia/solaria-1-streaming`) creates its single-use session with an HTTPS

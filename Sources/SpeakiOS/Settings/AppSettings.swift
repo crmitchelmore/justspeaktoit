@@ -252,6 +252,18 @@ public final class AppSettings: ObservableObject {
         didSet { persistSecret(xAIAPIKey, identifier: Self.xAIKeyID) }
     }
 
+    @Published public var smallestAPIKey: String {
+        didSet { persistSecret(smallestAPIKey, identifier: "smallest.apiKey") }
+    }
+
+    @Published public var reson8APIKey: String {
+        didSet { persistSecret(reson8APIKey, identifier: "reson8.apiKey") }
+    }
+
+    @Published public var stepfunAPIKey: String {
+        didSet { persistSecret(stepfunAPIKey, identifier: "stepfun.apiKey") }
+    }
+
     @Published public var speechmaticsAPIKey: String {
         didSet { persistSecret(speechmaticsAPIKey, identifier: Self.speechmaticsKeyID) }
     }
@@ -644,6 +656,9 @@ public final class AppSettings: ObservableObject {
         self.gladiaAPIKey = ""
         self.googleAPIKey = ""
         self.xAIAPIKey = ""
+        self.smallestAPIKey = ""
+        self.reson8APIKey = ""
+        self.stepfunAPIKey = ""
         self.azureAPIKey = ""
         self.metaAPIKey = ""
         self.speechmaticsAPIKey = ""
@@ -829,6 +844,12 @@ public final class AppSettings: ObservableObject {
         if hasGladiaKey { identifiers.insert(Self.gladiaKeyID) }
         if hasGoogleKey { identifiers.insert(Self.googleKeyID) }
         if hasXAIKey { identifiers.insert(Self.xAIKeyID) }
+        for provider in FileSpeechProvider.allCases {
+            if let key = apiKeysByIdentifier[provider.metadata.apiKeyIdentifier],
+               !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                identifiers.insert(provider.metadata.apiKeyIdentifier)
+            }
+        }
         if hasAzureKey { identifiers.insert(Self.azureKeyID) }
         if hasMetaKey { identifiers.insert(Self.metaKeyID) }
         if hasSpeechmaticsKey { identifiers.insert(Self.speechmaticsKeyID) }
@@ -862,6 +883,9 @@ public final class AppSettings: ObservableObject {
 
     private func reloadStreamingProviderAPIKeys() async {
         await reloadSyncedAPIKey(\.xAIAPIKey, identifier: Self.xAIKeyID)
+        await reloadSyncedAPIKey(\.smallestAPIKey, identifier: "smallest.apiKey")
+        await reloadSyncedAPIKey(\.reson8APIKey, identifier: "reson8.apiKey")
+        await reloadSyncedAPIKey(\.stepfunAPIKey, identifier: "stepfun.apiKey")
         await reloadSyncedAPIKey(\.azureAPIKey, identifier: Self.azureKeyID)
         await reloadSyncedAPIKey(\.metaAPIKey, identifier: Self.metaKeyID)
         await reloadSyncedAPIKey(\.speechmaticsAPIKey, identifier: Self.speechmaticsKeyID)
@@ -950,6 +974,7 @@ public final class AppSettings: ObservableObject {
             Self.gladiaKeyID: gladiaAPIKey,
             Self.googleKeyID: googleAPIKey,
             Self.xAIKeyID: xAIAPIKey,
+            "reson8.apiKey": reson8APIKey,
             Self.metaKeyID: metaAPIKey,
             Self.speechmaticsKeyID: speechmaticsAPIKey,
             Self.revAIKeyID: revAIAPIKey,
@@ -983,6 +1008,8 @@ public final class AppSettings: ObservableObject {
     private var apiKeysByIdentifier: [String: String] {
         var keys = liveAPIKeysByIdentifier
         keys[Self.openRouterKeyID] = openRouterAPIKey
+        keys["smallest.apiKey"] = smallestAPIKey
+        keys["stepfun.apiKey"] = stepfunAPIKey
         return keys
     }
 
@@ -1016,6 +1043,7 @@ public final class AppSettings: ObservableObject {
                 // xAI's dedicated speech-to-text endpoint uploads through the
                 // shared `XAIBatchTranscriptionClient` with the xAI key.
                 || option.id == XAISpeechToText.batchCatalogID
+                || FileSpeechProvider.provider(for: option.id) != nil
                 // Gladia's pre-recorded job API uploads through the shared
                 // `GladiaBatchClient` with the `gladia.apiKey` this app already
                 // stores for live Solaria. Speechmatics batch stays macOS-only

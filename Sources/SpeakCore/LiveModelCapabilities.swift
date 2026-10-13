@@ -82,6 +82,11 @@ extension ModelCatalog {
     /// silently rewrites the user's speed mode to `.instant` whenever that
     /// model is selected. `LiveModelCapabilitiesTests` asserts that parity.
     static let liveCapabilityRegistry: [String: LiveModelCapabilities] = [
+        FileSpeechProvider.reson8LiveID: LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish],
+            postStopFinalizeBudget: FileSpeechProvider.reson8FinishBudget,
+            supportsLanguageHint: true
+        ),
         AzureTranscriptionModels.speechLive: LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish], postStopFinalizeBudget: 5
         ),

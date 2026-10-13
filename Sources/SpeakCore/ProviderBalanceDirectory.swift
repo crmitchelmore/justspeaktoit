@@ -205,7 +205,14 @@ public enum ProviderBalanceDirectory {
             support: .billingLinkOnly(reason: Self.noDocumentedContract),
             billingURL: "https://modulate.ai"
         )
-    ]).compactMap { $0 }
+    ]).compactMap { $0 } + FileSpeechProvider.allCases.compactMap { provider in
+        ProviderBalanceAccount(
+            id: provider.rawValue, displayName: provider.metadata.displayName,
+            credentialIdentifiers: [provider.metadata.apiKeyIdentifier],
+            support: .billingLinkOnly(reason: Self.noDocumentedContract),
+            billingURL: provider.metadata.website
+        )
+    }
 
     private static let noDocumentedContract =
         "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead."

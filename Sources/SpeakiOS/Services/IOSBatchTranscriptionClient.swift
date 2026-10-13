@@ -13,13 +13,20 @@ struct IOSBatchTranscriptionClient {
 
     // A flat routing table: one `case` per upload path, each delegating to a
     // named method. Its length grows with the provider list rather than with
-    // any logic, so it passes the default limit.
-    // swiftlint:disable:next function_body_length
+    // any logic.
+    // swiftlint:disable:next function_body_length cyclomatic_complexity
     func transcribeFile(at url: URL, model: String, language: String?) async throws -> TranscriptionResult {
         // Credential resolution uses the trimmed ID. Use the same ID for both
         // route selection and the provider request, including file-only callers.
         let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
         switch IOSBatchTranscriptionRoute.route(for: model) {
+        case .fileSpeech(let provider):
+            return try await FileSpeechBatchClient(
+                provider: provider, session: session,
+                durationResolver: { url in
+                    await resolvedTranscriptionDuration(reported: nil, lastSegmentEnd: nil, audioURL: url)
+                }
+            ).transcribeFile(at: url, apiKey: try requireAPIKey(), model: model, language: language)
         case .appleSpeechAnalyzer:
             if #available(iOS 26.0, *) {
                 return try await AppleSpeechAnalyzerTranscriber.transcribeFile(

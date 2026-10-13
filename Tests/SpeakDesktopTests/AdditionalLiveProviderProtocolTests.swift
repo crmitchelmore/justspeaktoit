@@ -3,6 +3,25 @@ import Foundation
 import XCTest
 
 final class AdditionalLiveProviderProtocolTests: XCTestCase {
+    func testMetaHandshakeUsesTheSuppliedCredentialForEachClient() throws {
+        for apiKey in ["synthetic-meta-one", "synthetic-meta-two"] {
+            let factory = AssemblyAISocketFactory()
+            let clock = AssemblyAITestClock()
+            let client = MetaMuseLiveClient(
+                apiKey: " \(apiKey)\n", makeConnection: { factory.make($0) },
+                schedule: { clock.schedule($0, action: $1) }
+            )
+            client.start(onTranscript: { _, _ in }, onError: { XCTFail("\($0)") })
+            let socket = try XCTUnwrap(factory.sockets.last)
+            socket.open()
+            let setup = try XCTUnwrap(socket.controls.first)
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(setup.utf8)) as? [String: Any])
+            let authorization = try XCTUnwrap(json["authorization"] as? [String: String])
+            XCTAssertEqual(authorization["accessToken"], apiKey)
+            client.stop()
+        }
+    }
+
     func testExistingMetaOfflineHandshakeSeamKeepsItsConfiguredState() {
         let client = MetaMuseLiveClient(apiKey: "synthetic")
         client.beginSession(onTranscript: { _, _ in }, onError: { XCTFail("\($0)") })

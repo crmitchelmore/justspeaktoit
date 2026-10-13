@@ -541,6 +541,14 @@ audio ownership/availability before entering transcription, so unavailable audio
 does not replace a saved transcript with a new failure. Changing the
 recording location and lossless migration remain outstanding.
 
+The existing Mac migration wire contract now lives in `SpeakCore`:
+`DataMigrationFormat` retains the `JustSpeakToIt` version-1 manifest, eight
+categories, explicit credential opt-in, record identities and date/selection
+scopes. The Mac uses aliases to those types without changing its archive JSON.
+This is format groundwork, not desktop migration UI or archive acceptance;
+ZIP validation, conflict previews, transactional apply/recovery and native
+credential handling remain separate unfinished work.
+
 The filter editor scrolls vertically when the available work area is too short;
 keyboard traversal reveals the focused control. Long model names have native
 horizontal scrolling, and an open editor follows application appearance changes.

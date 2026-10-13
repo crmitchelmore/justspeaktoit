@@ -2,74 +2,13 @@ import CryptoKit
 import Foundation
 import SpeakCore
 
-enum MigrationCategory: String, Codable, CaseIterable, Identifiable, Sendable {
-    case settings, history, recordings, credentials, profiles, vocabulary, connections, models
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .settings: return "Settings & shortcuts"
-        case .history: return "History text & speech usage"
-        case .recordings: return "Recordings"
-        case .credentials: return "API keys & credentials"
-        case .profiles: return "Dictation profiles"
-        case .vocabulary: return "Vocabulary, pronunciation & corrections"
-        case .connections: return "Connections"
-        case .models: return "Model references"
-        }
-    }
-    static var defaults: Set<Self> { Set(allCases).subtracting([.credentials]) }
-}
-
-enum MigrationMode: String, CaseIterable, Identifiable, Sendable {
-    case skip, merge, replace
-    var id: String { rawValue }
-}
-
-struct MigrationScope: Codable, Equatable, Sendable {
-    var start: Date?
-    var end: Date?
-    var selectedIDs: Set<String>?
-    func contains(id: String, date: Date?) -> Bool {
-        if let selectedIDs, !selectedIDs.contains(id) {
-            return false
-        }
-        if let start, date == nil || date! < start {
-            return false
-        }
-        if let end, date == nil || date! >= end {
-            return false
-        }
-        return true
-    }
-    var isComplete: Bool { start == nil && end == nil && selectedIDs == nil }
-}
-
-struct MigrationRecord: Codable, Equatable, Identifiable, Sendable {
-    var id: String
-    var kind: String
-    var value: AnyCodable
-    var date: Date?
-    var file: String?
-    var digest: String?
-    var revision: String?
-    var identity: String { kind + ":" + id }
-}
-
-struct MigrationManifest: Codable, Sendable {
-    var format = "JustSpeakToIt"
-    var version = 1
-    var createdAt = Date()
-    var categories: [MigrationCategory]
-    var scopes: [String: MigrationScope]
-}
-
-struct MigrationSnapshot: Sendable {
-    var manifest: MigrationManifest
-    var records: [MigrationCategory: [MigrationRecord]]
-    var files: [String: URL] = [:]
-    var notices: [String] = []
-    var directory: URL?
-}
+typealias MigrationCategory = DataMigrationCategory
+typealias MigrationMode = DataMigrationMode
+typealias MigrationScope = DataMigrationScope
+typealias MigrationRecord = DataMigrationRecord
+typealias MigrationManifest = DataMigrationManifest
+typealias MigrationSnapshot = DataMigrationSnapshot
+typealias MigrationError = DataMigrationError
 
 struct MigrationConflict: Identifiable {
     let category: MigrationCategory
@@ -83,15 +22,6 @@ struct MigrationConflict: Identifiable {
         }
         return String((String(data: (try? MigrationCoding.encoder.encode(record.value)) ?? Data(),
                               encoding: .utf8) ?? "Value").prefix(350))
-    }
-}
-
-enum MigrationError: LocalizedError {
-    case invalid(String)
-    var errorDescription: String? {
-        switch self {
-        case .invalid(let message): return message
-        }
     }
 }
 

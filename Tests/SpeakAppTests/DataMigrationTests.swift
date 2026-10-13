@@ -6,6 +6,30 @@ import XCTest
 
 @MainActor
 final class DataMigrationTests: XCTestCase {
+    func testSharedWireAliases_PreserveMacCodecAndCredentialDefault() throws {
+        let record: DataMigrationRecord = MigrationRecord(
+            id: "fixture", kind: "default", value: AnyCodable(.bool(true)), date: Date(timeIntervalSince1970: 0)
+        )
+        let scope: DataMigrationScope = MigrationScope(selectedIDs: ["fixture"])
+        let manifest: DataMigrationManifest = MigrationManifest(
+            createdAt: Date(timeIntervalSince1970: 0), categories: [.settings], scopes: ["settings": scope]
+        )
+        let snapshot: DataMigrationSnapshot = MigrationSnapshot(
+            manifest: manifest, records: [.settings: [record]]
+        )
+        let encoded = try MigrationCoding.encoder.encode(snapshot.manifest)
+        let restored = try MigrationCoding.decoder.decode(DataMigrationManifest.self, from: encoded)
+        XCTAssertEqual(restored.format, DataMigrationFormat.identifier)
+        XCTAssertEqual(restored.version, DataMigrationFormat.version)
+        XCTAssertEqual(restored.scopes["settings"], scope)
+        XCTAssertEqual(
+            try MigrationCoding.decoder.decode(DataMigrationRecord.self, from: MigrationCoding.encoder.encode(record)),
+            record
+        )
+        XCTAssertFalse(MigrationCategory.defaults.contains(.credentials))
+        XCTAssertEqual(MigrationError.invalid("fixture").localizedDescription, "fixture")
+    }
+
     private func snapshot(_ category: MigrationCategory, _ records: [MigrationRecord],
                           scope: MigrationScope = .init()) -> MigrationSnapshot {
         .init(

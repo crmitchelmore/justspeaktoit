@@ -48,7 +48,7 @@ enum MigrationArchive {
             MigrationManifest.self,
             from: data(entry, in: archive)
         )
-        guard manifest.format == "JustSpeakToIt", manifest.version == 1,
+        guard manifest.format == DataMigrationFormat.identifier, manifest.version == DataMigrationFormat.version,
               Set(manifest.categories).count == manifest.categories.count else {
             throw MigrationError
                 .invalid("This export format is unsupported. Update the app before importing it.")

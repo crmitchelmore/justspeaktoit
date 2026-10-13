@@ -1,5 +1,14 @@
 import Foundation
 
+/// Scalar dictation defaults shared by Apple and portable preference stores.
+public enum SpeechDefaults {
+    public static let temperature = 0.2
+    public static let outputLanguage = "English"
+    public static let liveStopGracePeriod = 0.0
+    public static let showHUD = true
+    public static let liveTranscriptHUD = true
+}
+
 /// Portable preferences use the Mac's keys. Unknown entries survive edits and
 /// exports, but are never treated as implemented capabilities.
 public struct DesktopConfiguration: Codable, Equatable, Sendable {
@@ -25,11 +34,14 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
         .init(key: "assemblyAIKeyterms", title: "AssemblyAI keyterms (comma-separated)",
               group: "Transcription", kind: .text, defaultValue: AnyCodable(.string(""))),
         .init(key: "liveStopGracePeriod", title: "Live stop grace (seconds; AssemblyAI and Cartesia)",
-              group: "Transcription", kind: .number(0...2), defaultValue: AnyCodable(.double(0))),
+              group: "Transcription", kind: .number(0...2),
+              defaultValue: AnyCodable(.double(SpeechDefaults.liveStopGracePeriod))),
         .init(key: "postProcessingTemperature", title: "Temperature (0 to 1)",
-              group: "Post-processing", kind: .number(0...1), defaultValue: AnyCodable(.double(0.2))),
+              group: "Post-processing", kind: .number(0...1),
+              defaultValue: AnyCodable(.double(SpeechDefaults.temperature))),
         .init(key: "postProcessingOutputLanguage", title: "Output language (blank keeps the transcript language)",
-              group: "Post-processing", kind: .text, defaultValue: AnyCodable(.string("English"))),
+              group: "Post-processing", kind: .text,
+              defaultValue: AnyCodable(.string(SpeechDefaults.outputLanguage))),
         .init(key: "holdThreshold", title: "Hold threshold (seconds)",
               group: "Keyboard", kind: .number(0.2...1.5),
               defaultValue: AnyCodable(.double(HotKeyGestureTiming.defaultHoldThreshold))),
@@ -37,9 +49,10 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
               group: "Keyboard", kind: .number(0.2...1),
               defaultValue: AnyCodable(.double(HotKeyGestureTiming.defaultDoubleTapWindow))),
         .init(key: "showHUD", title: "Show recording HUD",
-              group: "General", kind: .boolean, defaultValue: AnyCodable(.bool(true))),
+              group: "General", kind: .boolean, defaultValue: AnyCodable(.bool(SpeechDefaults.showHUD))),
         .init(key: "showLiveTranscriptInHUD", title: "Show live transcript in HUD",
-              group: "General", kind: .boolean, defaultValue: AnyCodable(.bool(true)))
+              group: "General", kind: .boolean,
+              defaultValue: AnyCodable(.bool(SpeechDefaults.liveTranscriptHUD)))
     ]
 
     public private(set) var values: [String: AnyCodable]

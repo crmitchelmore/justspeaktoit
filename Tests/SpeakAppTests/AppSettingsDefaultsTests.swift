@@ -25,6 +25,22 @@ final class AppSettingsDefaultsTests: XCTestCase {
         super.tearDown()
     }
 
+    @MainActor
+    func testPortablePreferenceDefaultsMatchCanonicalMacSettings() throws {
+        let settings = AppSettings(defaults: defaults)
+        let portable = try DesktopConfiguration()
+        XCTAssertEqual(settings.postProcessingTemperature, portable.number("postProcessingTemperature"))
+        XCTAssertEqual(settings.postProcessingOutputLanguage, portable.text("postProcessingOutputLanguage"))
+        XCTAssertEqual(settings.showHUDDuringSessions, portable.enabled("showHUD"))
+        XCTAssertEqual(settings.showLiveTranscriptInHUD, portable.enabled("showLiveTranscriptInHUD"))
+        XCTAssertEqual(settings.liveStopGracePeriod, portable.number("liveStopGracePeriod"))
+        XCTAssertEqual(settings.holdThreshold, portable.number("holdThreshold"))
+        XCTAssertEqual(settings.doubleTapWindow, portable.number("doubleTapWindow"))
+        XCTAssertEqual(settings.preferredLocaleIdentifier, portable.text("preferredLocale"))
+        XCTAssertEqual(settings.transcriptionKeywords, portable.text("transcriptionKeywords"))
+        XCTAssertEqual(settings.assemblyAIKeyterms, portable.text("assemblyAIKeyterms"))
+    }
+
     // MARK: - Transcription keywords
 
     /// Issue #849: macOS stored the keyword list under `assemblyAIKeyterms`

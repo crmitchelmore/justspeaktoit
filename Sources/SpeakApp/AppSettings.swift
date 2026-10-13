@@ -1248,7 +1248,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       defaults.string(forKey: DefaultsKey.postProcessingModel.rawValue)
     )
     postProcessingTemperature =
-      defaults.object(forKey: DefaultsKey.postProcessingTemperature.rawValue) as? Double ?? 0.2
+      defaults.object(forKey: DefaultsKey.postProcessingTemperature.rawValue) as? Double ?? SpeechDefaults.temperature
     // Without timestamps, preserve competing nonempty edits. A deliberate clear
     // after migration wins over a conflicting edit, which remains recoverable.
     let storedKeywords = defaults.string(forKey: DefaultsKey.transcriptionKeywords.rawValue) ?? ""
@@ -1289,7 +1289,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     modulatePIIPhiTaggingEnabled =
       defaults.object(forKey: DefaultsKey.modulatePIIPhiTagging.rawValue) as? Bool ?? false
     postProcessingOutputLanguage =
-      defaults.string(forKey: DefaultsKey.postProcessingOutputLanguage.rawValue) ?? "English"
+      defaults.string(forKey: DefaultsKey.postProcessingOutputLanguage.rawValue) ?? SpeechDefaults.outputLanguage
     postProcessingIncludeLexiconDirectives =
       defaults.object(forKey: DefaultsKey.postProcessingIncludeLexiconDirectives.rawValue) as? Bool ?? true
     postProcessingIncludeContextTags =
@@ -1309,9 +1309,9 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     appSwitchDelivery =
       defaults.string(forKey: DefaultsKey.appSwitchDelivery.rawValue)
         .flatMap(AppSwitchDelivery.init(rawValue:)) ?? .originalApp
-    showHUDDuringSessions = defaults.object(forKey: DefaultsKey.showHUD.rawValue) as? Bool ?? true
+    showHUDDuringSessions = defaults.object(forKey: DefaultsKey.showHUD.rawValue) as? Bool ?? SpeechDefaults.showHUD
     showLiveTranscriptInHUD =
-      defaults.object(forKey: DefaultsKey.showLiveTranscriptInHUD.rawValue) as? Bool ?? true
+      defaults.object(forKey: DefaultsKey.showLiveTranscriptInHUD.rawValue) as? Bool ?? SpeechDefaults.liveTranscriptHUD
     showCompactHUD =
       defaults.object(forKey: DefaultsKey.showCompactHUD.rawValue) as? Bool ?? false
     shortenErrorDisplay =
@@ -1360,7 +1360,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       liveStopGracePeriod = stored
     } else {
       let legacy = defaults.object(forKey: DefaultsKey.deepgramStopGracePeriod.rawValue) as? Double
-      let migrated = legacy ?? 0
+      let migrated = legacy ?? SpeechDefaults.liveStopGracePeriod
       liveStopGracePeriod = migrated
       // `didSet` does not fire during init, so persist the migrated value
       // explicitly — otherwise the next launch would re-read the legacy key

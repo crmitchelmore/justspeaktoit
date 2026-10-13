@@ -98,6 +98,42 @@ final class DesktopHostConfigurationTests: XCTestCase {
         XCTAssertEqual(FakeLog.shared.huds.last, .hidden)
     }
 
+    func testWriteFailureLeavesAppliedAndImportedSettingsUnchanged() async throws {
+        await controller.close()
+        let effects = SettingsWriteEffects()
+        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        let before = try await controller.configuration()
+        try await controller.saveConfiguration(before.entries)
+        let settingsURL = directory.appendingPathComponent("settings.json")
+        let saved = try Data(contentsOf: settingsURL)
+        effects.refusesWrites = true
+        var entries = before.entries
+        entries[0] = "de_DE"
+        do { try await controller.saveConfiguration(entries); XCTFail("Failed save accepted") }
+        catch { XCTAssertEqual((error as NSError).code, CocoaError.fileWriteOutOfSpace.rawValue) }
+        let file = directory.appendingPathComponent("import.json")
+        try Data(#"{"version":1,"preferences":{"preferredLocale":"fr_FR"}}"#.utf8).write(to: file)
+        do { try await controller.importConfiguration(path: file.path); XCTFail("Failed import accepted") }
+        catch { XCTAssertEqual((error as NSError).code, CocoaError.fileWriteOutOfSpace.rawValue) }
+        let after = try await controller.configuration()
+        XCTAssertEqual(after.entries, before.entries)
+        XCTAssertEqual(try Data(contentsOf: settingsURL), saved)
+        XCTAssertEqual(effects.writes, 1)
+    }
+
+    func testOversizedAndUnsupportedImportsLeaveSettingsUnchanged() async throws {
+        let before = try await controller.configuration()
+        let file = directory.appendingPathComponent("invalid.json")
+        try Data(repeating: 32, count: 1_048_577).write(to: file)
+        do { try await controller.importConfiguration(path: file.path); XCTFail("Oversized import accepted") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("1 MB")) }
+        try Data(#"{"version":2,"preferences":{}}"#.utf8).write(to: file)
+        do { try await controller.importConfiguration(path: file.path); XCTFail("Unsupported version accepted") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("version")) }
+        let after = try await controller.configuration()
+        XCTAssertEqual(after, before)
+    }
+
     func testChangingPostProcessingDoesNotResetAdvancedPreferences() async throws {
         var entries = try await controller.configuration().entries
         entries[4] = "0.7"

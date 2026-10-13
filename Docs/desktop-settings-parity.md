@@ -11,7 +11,10 @@ Windows uses **Dictation preferences...** from General, Transcription,
 Post-processing and Keyboard. Linux uses native libadwaita preference groups
 in those same destinations. Fields are defined once in
 `Sources/SpeakCore/DesktopConfiguration.swift`; native controls receive that
-schema rather than maintaining copies of defaults. All fields are validated
+schema rather than maintaining copies of defaults. Scalar defaults now use
+`SpeechDefaults` in the shared schema and canonical Mac `AppSettings` initializer;
+an Apple test compares all ten preferences to a fresh Mac settings store.
+All fields are validated
 before one atomic settings write; a failed write leaves the controller unchanged.
 Changes apply to subsequent recordings. Spoken-language profile overrides still
 win, including an explicit Automatic overriding a global language selection.

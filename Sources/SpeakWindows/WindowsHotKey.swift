@@ -164,7 +164,7 @@ final class WindowsHotKeyGestures: @unchecked Sendable {
         target: WindowsInsertionTarget?, textOutput: Task<WindowsTextOutputOptions, Never>,
         modelIndex: Int, deviceID: String
     ) {
-        let timing = lock.withLock { timing }
+        let timing = lock.withLock { self.timing }
         if !machine.isKeyDown {
             machine.holdThreshold = timing.0
             machine.doubleTapWindow = timing.1

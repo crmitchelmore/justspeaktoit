@@ -89,7 +89,7 @@ final class DesktopHostModelSelectionTests: XCTestCase {
 
 /// Counts settings writes and can refuse them, as a read-only profile or a
 /// full disk would.
-private final class SettingsWriteEffects: DesktopHostEffects, @unchecked Sendable {
+final class SettingsWriteEffects: DesktopHostEffects, @unchecked Sendable {
     typealias Platform = FakePlatform
     private let lock = NSLock()
     private var count = 0

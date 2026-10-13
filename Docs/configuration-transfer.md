@@ -12,7 +12,8 @@ wrapper. Larger version-1 transfers use the existing raw-envelope JSON shape
 when that still fits the 2,953-byte, correction-level-L QR limit.
 
 If the version-1 envelope exceeds that physical limit, the exporter compresses
-the plaintext with zlib, then encrypts it in a version-2 AES-GCM envelope.
+the plaintext with Apple's `zlib` codec (raw DEFLATE), then encrypts it in a
+version-2 AES-GCM envelope.
 Compression is never applied to the ciphertext. Version, creation time and salt
 remain authenticated, and each encryption uses a fresh nonce. The one-time code
 is still absent from the QR and appears only after the source hides the QR.

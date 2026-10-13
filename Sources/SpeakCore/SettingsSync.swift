@@ -168,8 +168,8 @@ public struct ConfigTransferPayload: Codable {
 /// tampered version or back-dated `createdAt` fails decryption rather than
 /// silently changing how the payload is interpreted.
 public struct ConfigTransferEnvelope: Codable, Equatable, Sendable {
-    /// Current envelope version. v0 is the legacy XOR-obfuscated format, which
-    /// has no envelope at all and is only accepted on import.
+    /// Backward-compatible default envelope version. v0 is the legacy XOR
+    /// format, which has no envelope and is only accepted on import.
     public static let currentVersion = 1
     /// Oversized transfers compress the plaintext before authenticated encryption.
     public static let compressedVersion = 2

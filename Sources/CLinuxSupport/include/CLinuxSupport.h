@@ -80,7 +80,10 @@ typedef struct JSTIConfigurationField {
 } JSTIConfigurationField;
 typedef int32_t (*JSTIConfigurationCallback)(int32_t action, const char *const *values, size_t count,
                                             void *context, char *error, size_t capacity);
+/* Recovery action 3 carries all fields followed by the exact selected edit,
+ * which the host verifies is still recoverable before persisting. */
 int32_t jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t count,
+                                      const char *const *recovered_keywords, size_t recovered_count,
                                       JSTIConfigurationCallback callback, void *context);
 
 typedef struct JSTIModelRow {

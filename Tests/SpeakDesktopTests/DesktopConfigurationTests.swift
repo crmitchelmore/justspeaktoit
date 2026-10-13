@@ -77,8 +77,8 @@ final class DesktopConfigurationTests: XCTestCase {
             "liveStopGracePeriod": AnyCodable(.double(0.5))
         ])
         XCTAssertEqual(preferences.language, "en_GB")
-        XCTAssertEqual(preferences.liveOptions.keywords, ["Swift", "Speak"])
-        XCTAssertEqual(preferences.liveOptions.assemblyAIKeyterms, ["Ada", "Grace"])
+        XCTAssertEqual(preferences.liveOptions.keywords, ["Swift", "Speak", "Ada", "Grace"])
+        XCTAssertEqual(preferences.liveOptions.assemblyAIKeyterms, ["Swift", "Speak", "Ada", "Grace"])
         XCTAssertEqual(preferences.liveOptions.stopGracePeriod, 0.5)
     }
 

@@ -14,6 +14,8 @@ in those same destinations. Fields are defined once in
 schema rather than maintaining copies of defaults. Scalar defaults now use
 `SpeechDefaults` in the shared schema and canonical Mac `AppSettings` initializer;
 an Apple test compares all thirteen preferences to a fresh Mac settings store.
+Keyword reconciliation also maintains two migration/recovery metadata keys;
+these are not two additional independent preference switches.
 All fields are validated
 before one atomic settings write; a failed write leaves the controller unchanged.
 Changes apply to subsequent recordings. Spoken-language profile overrides still
@@ -23,10 +25,26 @@ Imports capture the language and retries keep the original recording's language.
 Language accepts Automatic or a provider locale, including existing custom locale
 identifiers not listed in the shared catalogue. Model capability gates still
 apply. Keyword bias is currently wired to xAI dedicated STT streaming; AssemblyAI
-uses its separate keyterms preference. Stop grace is wired to AssemblyAI and
+projects the same shared list into its keyterms option. Stop grace is wired to AssemblyAI and
 Cartesia. Other live routes and batch providers do **not** gain keyword/grace
 support merely because these fields exist. Additional provider wiring belongs
 in the canonical streaming factory, not a platform-specific list.
+
+The keyword and legacy AssemblyAI fields are mirrors of one shared list, as on
+Mac. `TranscriptionKeywordPolicy` is the canonical pure reconciliation policy
+used by both Mac and desktop stores. Initial competing nonempty lists are merged;
+after reconciliation, an unchanged mirror cannot override a deliberate edit or
+clear. Independent clear/edit conflicts keep the clear active and retain the
+other edit for explicit recovery. Native Transcription preferences offer a
+recovered-edit picker and Restore action; it adds only the selected words to the
+current list, removes only that recovery item and writes atomically. Recovery
+carries the selected text, not a stale row index, and refuses an edit that no
+longer exists. Recovery metadata is validated (up to 1000 lists, 65535 UTF-8
+bytes per text); merged active lists must also fit the existing field bound.
+Relaunch, Apply and configuration transfer preserve clears and pending recovery.
+Native editor validation checks scalar bounds without inventing merge history;
+the controller reconciles against the actual saved mirror before persistence.
+This does not implement lexicon matching or expand provider support.
 
 Temperature and output language reach OpenRouter cleanup, and changing its
 enabled/model/prompt controls no longer resets those advanced preferences.
@@ -183,8 +201,8 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | recordingSoundVolume | Missing / Missing | No recording sound volume |
 | assemblyAIKeyterms | Wired / Wired | Config + options-bearing live factory; provider enforces vocabulary bounds |
 | transcriptionKeywords | Partial / Partial | Config; xAI STT live only here, other provider/batch forwarding remains |
-| transcriptionKeywordsLastReconciled | Missing migration / Missing migration | No Mac/iOS keyword conflict reconciliation; opaque entry preserved |
-| recoveredTranscriptionKeywords | Missing / Missing | No recovery chooser |
+| transcriptionKeywordsLastReconciled | Wired / Wired | Shared `TranscriptionKeywordPolicy` + Config; unchanged-mirror/deliberate-clear reconciliation, durable last mirror |
+| recoveredTranscriptionKeywords | Wired / Wired | Config; native selected-edit recovery with stale-selection and atomic-write guards |
 | assemblyAIIgnoredPronunciationTerms | Missing / Missing | No pronunciation keyword-suppression editor |
 | modulateSpeakerDiarization | Missing / Missing | Modulate live route/options not admitted by baseline desktop factory |
 | modulateEmotionSignal | Missing / Missing | Same provider qualification gap |

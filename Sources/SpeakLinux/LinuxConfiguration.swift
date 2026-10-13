@@ -16,12 +16,15 @@ extension LinuxWindow {
                 requires_hud_overlay: field.requiresHUDOverlay ? 1 : 0
             )
         }
+        let recovered: [UnsafePointer<CChar>?] = preferences.recoveredKeywords.map { strings.add($0) }
         let result = withExtendedLifetime(strings) {
-            rows.withUnsafeBufferPointer {
-                jsti_window_set_configuration(
-                    $0.baseAddress, $0.count, linuxConfigurationEvent,
-                    Unmanaged.passUnretained(holder).toOpaque()
-                )
+            rows.withUnsafeBufferPointer { fields in
+                recovered.withUnsafeBufferPointer { recovery in
+                    jsti_window_set_configuration(
+                        fields.baseAddress, fields.count, recovery.baseAddress, recovery.count,
+                        linuxConfigurationEvent, Unmanaged.passUnretained(holder).toOpaque()
+                    )
+                }
             }
         }
         guard result == 0 else { throw DesktopConfigurationError.invalidField("Native preferences") }
@@ -34,6 +37,11 @@ extension LinuxWindow {
         case 0: try await holder.controller.saveConfiguration(values)
         case 1: try await holder.controller.importConfiguration(path: values[0])
         case 2: try await holder.controller.exportConfiguration(path: values[0])
+        case 3:
+            guard let selected = values.last else {
+                throw DesktopConfigurationError.invalidField("Recovered keyword selection")
+            }
+            try await holder.controller.recoverConfigurationKeywords(Array(values.dropLast()), selected: selected)
         default: throw DesktopConfigurationError.invalidField("Configuration action")
         }
         try await configureConfiguration(holder)
@@ -50,7 +58,12 @@ func linuxConfigurationEvent(
     let holder = Unmanaged<LinuxEventContext>.fromOpaque(context).takeUnretainedValue()
     let values = UnsafeBufferPointer(start: entries, count: count).map { $0.map(String.init(cString:)) ?? "" }
     do {
-        if action == 0 { _ = try DesktopConfiguration().applying(values) } else if
+        if action == 0 { try DesktopConfiguration.validateEntries(values) } else if action == 3 {
+            guard values.count == DesktopConfiguration.fields.count + 1 else {
+                throw DesktopConfigurationError.invalidField("Recovered keyword selection")
+            }
+            try DesktopConfiguration.validateEntries(Array(values.dropLast()))
+        } else if
             !(action == 1 || action == 2) || values.count != 1 {
             throw DesktopConfigurationError.invalidField("Configuration action")
         }

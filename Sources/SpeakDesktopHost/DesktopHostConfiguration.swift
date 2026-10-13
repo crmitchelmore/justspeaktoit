@@ -18,6 +18,18 @@ extension DesktopHostController {
             throw DesktopHostError(message: "Finish dictation before changing configuration.")
         }
         let configuration = try configuration().applying(entries)
+        try persistConfiguration(configuration, status: "Configuration saved. New recordings use these preferences.")
+    }
+
+    package func recoverConfigurationKeywords(_ entries: [String], selected: String) throws {
+        guard !closed, !busy, recording == nil else {
+            throw DesktopHostError(message: "Finish dictation before recovering keywords.")
+        }
+        let recovered = try configuration().applying(entries).recoveringKeywords(selected)
+        try persistConfiguration(recovered, status: "Recovered keywords restored. New recordings use this shared list.")
+    }
+
+    private func persistConfiguration(_ configuration: DesktopConfiguration, status: String) throws {
         var changed = settings
         changed.configuration = configuration
         var polish = changed.postProcessing ?? .init()
@@ -27,7 +39,7 @@ extension DesktopHostController {
         try effects.writeSettings(JSONEncoder().encode(changed), to: directory.appendingPathComponent("settings.json"))
         settings = changed
         Platform.hud(.hidden)
-        update("Configuration saved. New recordings use these preferences.")
+        update(status)
     }
 
     /// Export only portable preferences, never keys, device paths, native hotkeys
@@ -75,7 +87,7 @@ extension DesktopHostController {
         settings = changed
         Platform.hud(.hidden)
         let unknown = document.preferences.values.keys.filter { key in
-            !DesktopConfiguration.fields.contains { $0.key == key }
+            !DesktopConfiguration.supportedKeys.contains(key)
         }.sorted()
         update("Configuration imported. Provider/model choices and service permissions are unchanged."
             + (unknown.isEmpty ? "" : " Preserved but not applied: \(unknown.joined(separator: ", "))."))

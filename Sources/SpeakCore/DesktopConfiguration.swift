@@ -36,9 +36,9 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
     public static let fields: [Field] = [
         .init(key: "preferredLocale", title: "Spoken language (automatic or locale, e.g. en_GB)",
               group: "Transcription", kind: .text, defaultValue: AnyCodable(.string("automatic"))),
-        .init(key: "transcriptionKeywords", title: "Keywords (comma-separated; supported providers only)",
+        .init(key: "transcriptionKeywords", title: "Shared keywords (comma-separated; supported providers only)",
               group: "Transcription", kind: .text, defaultValue: AnyCodable(.string(""))),
-        .init(key: "assemblyAIKeyterms", title: "AssemblyAI keyterms (comma-separated)",
+        .init(key: "assemblyAIKeyterms", title: "AssemblyAI keyterms (same shared keyword list)",
               group: "Transcription", kind: .text, defaultValue: AnyCodable(.string(""))),
         .init(key: "liveStopGracePeriod", title: "Live stop grace (seconds; AssemblyAI and Cartesia)",
               group: "Transcription", kind: .number(0...2),
@@ -74,6 +74,11 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
     public private(set) var values: [String: AnyCodable]
 
     public init(values: [String: AnyCodable] = [:]) throws {
+        try Self.validateFields(in: values)
+        self.values = try Self.reconciledKeywords(in: values)
+    }
+
+    private static func validateFields(in values: [String: AnyCodable]) throws {
         for field in Self.fields {
             guard let value = values[field.key] else { continue }
             let valid: Bool
@@ -87,7 +92,6 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
             }
             guard valid else { throw DesktopConfigurationError.invalidField(field.title) }
         }
-        self.values = values
     }
 
     public init(from decoder: Decoder) throws {
@@ -113,9 +117,14 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
         }
     }
 
-    public func applying(_ entries: [String]) throws -> Self {
+    /// Checks editor scalars without guessing the saved keyword reconciliation history.
+    public static func validateEntries(_ entries: [String]) throws {
+        try validateFields(in: parsedEntries(entries))
+    }
+
+    private static func parsedEntries(_ entries: [String]) throws -> [String: AnyCodable] {
         guard entries.count == Self.fields.count else { throw DesktopConfigurationError.invalidField("Field count") }
-        var changed = values
+        var changed: [String: AnyCodable] = [:]
         for (field, entry) in zip(Self.fields, entries) {
             switch field.kind {
             case .text: changed[field.key] = AnyCodable(.string(entry))
@@ -131,6 +140,11 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
                 changed[field.key] = AnyCodable(.double(number))
             }
         }
+        return changed
+    }
+
+    public func applying(_ entries: [String]) throws -> Self {
+        let changed = values.merging(try Self.parsedEntries(entries)) { _, edited in edited }
         return try Self(values: changed)
     }
 

@@ -8,9 +8,11 @@
 namespace {
 constexpr int groupLabelID = 598, groupID = 599, fieldBase = 600, labelBase = 700;
 constexpr int problemID = 800, importID = 801, exportID = 802;
+constexpr int recoveryLabelID = 803, recoveryID = 804, restoreID = 805;
 struct Field { std::wstring title, value, group; bool boolean = false; };
 struct Configuration {
     std::vector<Field> fields;
+    std::vector<std::wstring> recovered;
     JSTIConfigurationCallback callback = nullptr;
     void *context = nullptr;
 };
@@ -53,6 +55,17 @@ void layout(HWND window, Dialog &dialog) {
         MoveWindow(GetDlgItem(window, fieldBase + static_cast<int>(i)), margin, y, width, scale(window, 28), TRUE);
         y += scale(window, boolean ? 34 : 38);
     }
+    const bool recovery = dialog.group == L"Transcription" && !dialog.config.recovered.empty();
+    for (int id : {recoveryLabelID, recoveryID, restoreID})
+        ShowWindow(GetDlgItem(window, id), recovery ? SW_SHOW : SW_HIDE);
+    if (recovery) {
+        MoveWindow(GetDlgItem(window, recoveryLabelID), margin, y, width, scale(window, 20), TRUE);
+        y += scale(window, 24);
+        MoveWindow(GetDlgItem(window, recoveryID), margin, y, width, scale(window, 200), TRUE);
+        y += scale(window, 36);
+        MoveWindow(GetDlgItem(window, restoreID), margin, y, scale(window, 220), scale(window, 32), TRUE);
+        y += scale(window, 40);
+    }
     MoveWindow(GetDlgItem(window, problemID), margin, y, width, scale(window, 44), TRUE);
     const int bottom = bounds.bottom - scale(window, 48), button = scale(window, 100), gap = scale(window, 8);
     const int ids[] = {importID, exportID, IDOK, IDCANCEL};
@@ -94,6 +107,14 @@ bool controls(HWND window, Dialog &dialog) {
         }
         if (!control) return false;
     }
+    if (!add(L"STATIC", L"&Recovered keyword edit (restoring adds to the current list):", SS_LEFT, recoveryLabelID) ||
+        !add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, recoveryID) ||
+        !add(L"BUTTON", L"&Restore selected keywords", BS_PUSHBUTTON | WS_TABSTOP, restoreID)) return false;
+    for (const auto &recovered : dialog.config.recovered) {
+        if (SendDlgItemMessageW(window, recoveryID, CB_ADDSTRING, 0,
+            reinterpret_cast<LPARAM>(recovered.c_str())) < 0) return false;
+    }
+    if (!dialog.config.recovered.empty()) SendDlgItemMessageW(window, recoveryID, CB_SETCURSEL, 0, 0);
     if (!add(L"STATIC", L"Import/export transfers portable preferences only, not keys or device settings.",
              SS_LEFT, problemID) ||
         !add(L"BUTTON", L"&Import...", BS_PUSHBUTTON | WS_TABSTOP, importID) ||
@@ -110,11 +131,19 @@ bool controls(HWND window, Dialog &dialog) {
 
 void apply(HWND window, Dialog &dialog, int action) {
     std::vector<std::string> entries;
-    if (action == 0) {
+    if (action == 0 || action == 3) {
         for (size_t i = 0; i < dialog.config.fields.size(); ++i) {
             entries.push_back(dialog.config.fields[i].boolean
                 ? (SendDlgItemMessageW(window, fieldBase + static_cast<int>(i), BM_GETCHECK, 0, 0) == BST_CHECKED ? "1" : "0")
                 : jsti::utf8(text(window, fieldBase + static_cast<int>(i))));
+        }
+        if (action == 3) {
+            const LRESULT selected = SendDlgItemMessageW(window, recoveryID, CB_GETCURSEL, 0, 0);
+            if (selected < 0 || static_cast<size_t>(selected) >= dialog.config.recovered.size()) {
+                SetDlgItemTextW(window, problemID, L"Choose a recovered keyword edit first.");
+                return;
+            }
+            entries.push_back(jsti::utf8(dialog.config.recovered[static_cast<size_t>(selected)]));
         }
     } else {
         wchar_t path[32768] = {};
@@ -169,7 +198,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         return 0;
     }
     case WM_GETMINMAXINFO:
-        reinterpret_cast<MINMAXINFO *>(lparam)->ptMinTrackSize = {scale(window, 660), scale(window, 500)};
+        reinterpret_cast<MINMAXINFO *>(lparam)->ptMinTrackSize = {scale(window, 660), scale(window, 640)};
         return 0;
     case WM_COMMAND:
         if (LOWORD(wparam) == groupID && HIWORD(wparam) == CBN_SELCHANGE) {
@@ -185,6 +214,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         if (LOWORD(wparam) == IDOK) { apply(window, *dialog, 0); return 0; }
         if (LOWORD(wparam) == importID) { apply(window, *dialog, 1); return 0; }
         if (LOWORD(wparam) == exportID) { apply(window, *dialog, 2); return 0; }
+        if (LOWORD(wparam) == restoreID) { apply(window, *dialog, 3); return 0; }
         break;
     case WM_CLOSE: DestroyWindow(window); return 0;
     case WM_DESTROY:
@@ -205,7 +235,7 @@ HWND createDialog(HWND owner, Dialog &dialog) {
     }
     return CreateWindowExW(WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT, type.lpszClassName,
         L"Dictation preferences - Just Speak to It", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME,
-        CW_USEDEFAULT, CW_USEDEFAULT, scale(owner, 700), scale(owner, 520), owner, nullptr, type.hInstance, &dialog);
+        CW_USEDEFAULT, CW_USEDEFAULT, scale(owner, 700), scale(owner, 660), owner, nullptr, type.hInstance, &dialog);
 }
 } // namespace
 
@@ -234,8 +264,10 @@ void jsti_show_configuration(HWND owner, const wchar_t *group) {
 }
 
 int jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t count,
+                                  const char *const *recovered_keywords, size_t recovered_count,
                                   JSTIConfigurationCallback callback, void *context) {
-    if (!fields || !count || count > 32 || !callback) return -1;
+    if (!fields || !count || count > 32 || !callback || recovered_count > 1000 ||
+        (recovered_count && !recovered_keywords)) return -1;
     Configuration updated;
     try {
         for (size_t i = 0; i < count; ++i) {
@@ -245,6 +277,11 @@ int jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t c
                 field.value.size() > 65535 || (fields[i].is_boolean != 0 && fields[i].is_boolean != 1)) return -1;
             field.boolean = fields[i].is_boolean != 0;
             updated.fields.push_back(std::move(field));
+        }
+        for (size_t i = 0; i < recovered_count; ++i) {
+            std::wstring recovered;
+            if (!jsti::wide(recovered_keywords[i], recovered) || recovered.size() > 65535) return -1;
+            updated.recovered.push_back(std::move(recovered));
         }
         updated.callback = callback;
         updated.context = context;
@@ -298,6 +335,31 @@ bool jsti_configuration_self_test(HWND owner, std::string &error) {
     const bool quiet = second && !IsWindow(second) && applied.calls == 2;
     if (!initiallyGrouped || !switchedGroup || !refused || !accepted || !quiet) {
         error = "Configuration editor did not group, validate, apply or cancel its native fields correctly.";
+        return false;
+    }
+    Dialog recovery;
+    recovery.config = dialog.config;
+    recovery.group = L"Transcription";
+    recovery.config.recovered = {L"First recoverable edit", L"Second recoverable edit"};
+    recovery.config.callback = [](int action, const char *const *values, size_t count, void *context,
+                                   char *error, size_t capacity) {
+        auto &result = *static_cast<Applied *>(context);
+        if (action != 3 || count != 3 || std::string(values[0]) != "en_GB" ||
+            std::string(values[2]) != "Second recoverable edit")
+            return jsti::fail("Recovery selected the wrong edit.", error, capacity);
+        ++result.calls;
+        return 0;
+    };
+    HWND recoveryWindow = createDialog(owner, recovery);
+    if (!recoveryWindow) { error = "Could not create the keyword recovery fixture."; return false; }
+    const bool offered = (GetWindowLongW(GetDlgItem(recoveryWindow, recoveryID), GWL_STYLE) & WS_VISIBLE) &&
+        SendDlgItemMessageW(recoveryWindow, recoveryID, CB_GETCOUNT, 0, 0) == 2;
+    SendDlgItemMessageW(recoveryWindow, recoveryID, CB_SETCURSEL, 1, 0);
+    SendMessageW(recoveryWindow, WM_COMMAND, MAKEWPARAM(restoreID, BN_CLICKED), 0);
+    const bool restored = !IsWindow(recoveryWindow) && applied.calls == 3;
+    if (IsWindow(recoveryWindow)) DestroyWindow(recoveryWindow);
+    if (!offered || !restored) {
+        error = "Recovered keyword picker did not emit the selected edit with current preference fields.";
         return false;
     }
     return true;

@@ -112,6 +112,9 @@ static struct {
     GPtrArray *rows;
     GArray *booleans;
     GArray *overlay_settings;
+    GtkWidget *recovery_group;
+    AdwComboRow *recovery_row;
+    guint recovery_count;
     JSTIConfigurationCallback callback;
     void *context;
 } configuration;
@@ -1264,6 +1267,9 @@ int32_t jsti_window_run(
     g_clear_pointer(&configuration.rows, g_ptr_array_unref);
     g_clear_pointer(&configuration.booleans, g_array_unref);
     g_clear_pointer(&configuration.overlay_settings, g_array_unref);
+    configuration.recovery_group = NULL;
+    configuration.recovery_row = NULL;
+    configuration.recovery_count = 0;
     g_clear_object(&ui.application);
     ui.window = NULL;
     if (status != 0) {
@@ -1979,7 +1985,7 @@ int32_t jsti_window_set_azure_resource(const char *endpoint) {
 }
 
 typedef struct ConfigurationUpdate {
-    GPtrArray *titles, *values, *groups;
+    GPtrArray *titles, *values, *groups, *recovered;
     GArray *booleans;
     GArray *overlay_settings;
     JSTIConfigurationCallback callback;
@@ -2000,12 +2006,13 @@ static void configuration_submit(gint32 action, const char *const *values, gsize
 }
 
 static void on_configuration_apply(GtkButton *button, gpointer data) {
-    (void)button; (void)data;
+    (void)button;
     if (ui.state != JSTI_STATE_IDLE) {
         configuration_problem("Finish dictation before changing configuration.");
         return;
     }
     GPtrArray *values = g_ptr_array_new_with_free_func(g_free);
+    gint32 action = GPOINTER_TO_INT(data);
     for (guint i = 0; i < configuration.rows->len; ++i) {
         GtkWidget *row = g_ptr_array_index(configuration.rows, i);
         gboolean boolean = g_array_index(configuration.booleans, gboolean, i);
@@ -2013,7 +2020,17 @@ static void on_configuration_apply(GtkButton *button, gpointer data) {
             ? (adw_switch_row_get_active(ADW_SWITCH_ROW(row)) ? "1" : "0")
             : gtk_editable_get_text(GTK_EDITABLE(row))));
     }
-    configuration_submit(0, (const char *const *)values->pdata, values->len);
+    if (action == 3) {
+        guint selected = adw_combo_row_get_selected(configuration.recovery_row);
+        if (selected >= configuration.recovery_count) {
+            configuration_problem("Choose a recovered keyword edit first.");
+            g_ptr_array_unref(values);
+            return;
+        }
+        GtkStringList *model = GTK_STRING_LIST(adw_combo_row_get_model(configuration.recovery_row));
+        g_ptr_array_add(values, g_strdup(gtk_string_list_get_string(model, selected)));
+    }
+    configuration_submit(action, (const char *const *)values->pdata, values->len);
     g_ptr_array_unref(values);
 }
 
@@ -2052,6 +2069,7 @@ static void configuration_update_free(gpointer data) {
     g_ptr_array_unref(update->titles);
     g_ptr_array_unref(update->values);
     g_ptr_array_unref(update->groups);
+    g_ptr_array_unref(update->recovered);
     g_array_unref(update->booleans);
     g_array_unref(update->overlay_settings);
     g_free(update);
@@ -2094,6 +2112,18 @@ static void configuration_apply(gpointer data) {
             g_signal_connect(apply, "clicked", G_CALLBACK(on_configuration_apply), NULL);
             adw_preferences_group_add(ADW_PREFERENCES_GROUP(groups[i]), apply);
         }
+        configuration.recovery_group = group("Recovered keyword edits");
+        adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(configuration.recovery_group),
+            "A deliberate clear remains active. Restore only the edit you choose; it is added to your current list.");
+        configuration.recovery_row = ADW_COMBO_ROW(adw_combo_row_new());
+        adw_preferences_row_set_title(ADW_PREFERENCES_ROW(configuration.recovery_row), "Recovered keyword edit");
+        adw_preferences_group_add(ADW_PREFERENCES_GROUP(configuration.recovery_group),
+            GTK_WIDGET(configuration.recovery_row));
+        GtkWidget *restore = gtk_button_new_with_label("Restore selected keywords");
+        gtk_widget_set_halign(restore, GTK_ALIGN_END);
+        g_signal_connect(restore, "clicked", G_CALLBACK(on_configuration_apply), GINT_TO_POINTER(3));
+        adw_preferences_group_add(ADW_PREFERENCES_GROUP(configuration.recovery_group), restore);
+        gtk_box_append(GTK_BOX(ui.configuration_columns[1]), configuration.recovery_group);
         GtkWidget *transfer = group("Portable configuration");
         adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(transfer),
             "Transfers portable preferences, not keys, models, device paths or service permissions. "
@@ -2115,19 +2145,37 @@ static void configuration_apply(gpointer data) {
             adw_switch_row_set_active(ADW_SWITCH_ROW(row), g_strcmp0(value, "1") == 0);
         else gtk_editable_set_text(GTK_EDITABLE(row), value);
     }
+    GtkStringList *recovered = gtk_string_list_new(NULL);
+    for (guint i = 0; i < update->recovered->len; ++i)
+        gtk_string_list_append(recovered, g_ptr_array_index(update->recovered, i));
+    adw_combo_row_set_model(configuration.recovery_row, G_LIST_MODEL(recovered));
+    g_object_unref(recovered);
+    configuration.recovery_count = update->recovered->len;
+    gtk_widget_set_visible(configuration.recovery_group, configuration.recovery_count > 0);
 }
 
 int32_t jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t count,
+                                      const char *const *recovered_keywords, size_t recovered_count,
                                       JSTIConfigurationCallback callback, void *context) {
-    if (fields == NULL || count == 0 || count > 32 || callback == NULL) return -1;
+    if (fields == NULL || count == 0 || count > 32 || callback == NULL || recovered_count > 1000 ||
+        (recovered_count > 0 && recovered_keywords == NULL)) return -1;
     ConfigurationUpdate *update = g_new0(ConfigurationUpdate, 1);
     update->titles = g_ptr_array_new_with_free_func(g_free);
     update->values = g_ptr_array_new_with_free_func(g_free);
     update->groups = g_ptr_array_new_with_free_func(g_free);
+    update->recovered = g_ptr_array_new_with_free_func(g_free);
     update->booleans = g_array_new(FALSE, FALSE, sizeof(gboolean));
     update->overlay_settings = g_array_new(FALSE, FALSE, sizeof(gboolean));
     update->callback = callback;
     update->context = context;
+    for (size_t i = 0; i < recovered_count; ++i) {
+        if (recovered_keywords[i] == NULL || !g_utf8_validate(recovered_keywords[i], -1, NULL) ||
+            strlen(recovered_keywords[i]) > 65535) {
+            configuration_update_free(update);
+            return -1;
+        }
+        g_ptr_array_add(update->recovered, g_strdup(recovered_keywords[i]));
+    }
     for (size_t i = 0; i < count; ++i) {
         if (!fields[i].title || !fields[i].value || !fields[i].group ||
             !g_utf8_validate(fields[i].value, -1, NULL) || strlen(fields[i].value) > 65535 ||
@@ -2150,7 +2198,11 @@ static int32_t configuration_test_callback(int32_t action, const char *const *va
                                           void *context, char *error, size_t capacity) {
     (void)error; (void)capacity;
     gint *calls = context;
-    if (action != 0 || count != configuration.rows->len || g_strcmp0(values[0], "fr_FR") != 0) return -1;
+    if (g_strcmp0(values[0], "fr_FR") != 0) return -1;
+    if (action == 0 && count != configuration.rows->len) return -1;
+    if (action == 3 && (count != configuration.rows->len + 1 ||
+        g_strcmp0(values[count - 1], "Second recoverable edit") != 0)) return -1;
+    if (action != 0 && action != 3) return -1;
     ++*calls;
     return 0;
 }
@@ -2173,11 +2225,26 @@ static gboolean configuration_self_test(void) {
     configuration.context = &calls;
     gtk_editable_set_text(GTK_EDITABLE(language), "fr_FR");
     on_configuration_apply(NULL, NULL);
+    GListModel *saved_model = adw_combo_row_get_model(configuration.recovery_row);
+    g_object_ref(saved_model);
+    guint saved_count = configuration.recovery_count;
+    guint saved_selection = adw_combo_row_get_selected(configuration.recovery_row);
+    const char *edits[] = {"First recoverable edit", "Second recoverable edit", NULL};
+    GtkStringList *recovered = gtk_string_list_new(edits);
+    adw_combo_row_set_model(configuration.recovery_row, G_LIST_MODEL(recovered));
+    g_object_unref(recovered);
+    configuration.recovery_count = 2;
+    adw_combo_row_set_selected(configuration.recovery_row, 1);
+    on_configuration_apply(NULL, GINT_TO_POINTER(3));
+    adw_combo_row_set_model(configuration.recovery_row, saved_model);
+    adw_combo_row_set_selected(configuration.recovery_row, saved_selection);
+    configuration.recovery_count = saved_count;
+    g_object_unref(saved_model);
     gtk_editable_set_text(GTK_EDITABLE(language), saved);
     g_free(saved);
     configuration.callback = callback;
     configuration.context = context;
-    return calls == 1;
+    return calls == 2;
 }
 
 static void style_apply(gpointer data) {

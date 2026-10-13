@@ -68,10 +68,13 @@ typedef struct JSTIConfigurationField {
     int requires_hud_overlay;
 } JSTIConfigurationField;
 /* action 0 applies fields; 1 imports and 2 exports a path in values[0].
+ * action 3 applies fields plus the selected recovered-keyword text in the final
+ * value; the host verifies that exact edit still exists before restoring it.
  * The callback validates synchronously; persistence is ordered by Swift. */
 typedef int (*JSTIConfigurationCallback)(int action, const char *const *values, size_t count,
                                         void *context, char *error, size_t capacity);
 int jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t count,
+                                  const char *const *recovered_keywords, size_t recovered_count,
                                   JSTIConfigurationCallback callback, void *context);
 void jsti_window_clear_configuration(void);
 int jsti_window_run(const char *const *model_names, size_t model_count, int selected_index,

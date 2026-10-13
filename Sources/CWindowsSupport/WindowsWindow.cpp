@@ -2466,7 +2466,7 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
         ShowWindow(window, jsti::login::launchedAtLogin() ? SW_SHOWMINNOACTIVE : SW_SHOWDEFAULT);
         UpdateWindow(window);
         // Optional: without a notification area the app works the same.
-        jsti::tray::add(window, jsti::appIcon::small(), jsti::appIcon::recording());
+        jsti::tray::add(window, jsti::appIcon::smallHandle(), jsti::appIcon::recordingHandle());
         emit(window, JSTI_EVENT_READY);
         std::string shortcutFailure;
         if (IsWindow(window) && !jsti_hotkey_start(window, shortcutFailure)) showFailure(window, shortcutFailure);

@@ -35,9 +35,9 @@ bool refresh(HWND window, UINT dpi, std::string &failure) {
     return true;
 }
 
-HICON large() { return largeIcon; }
-HICON small() { return smallIcon; }
-HICON recording() { return recordingIcon; }
+HICON largeHandle() { return largeIcon; }
+HICON smallHandle() { return smallIcon; }
+HICON recordingHandle() { return recordingIcon; }
 
 void destroy() {
     if (largeIcon) DestroyIcon(largeIcon);

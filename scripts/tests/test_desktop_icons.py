@@ -142,6 +142,19 @@ class DesktopIconTests(unittest.TestCase):
         self.assertIn("gtk_icon_theme_add_search_path", linux)
         self.assertIn("gdk_cairo_set_source_pixbuf", linux)
 
+    def test_windows_accessors_do_not_collide_with_rpc_small_macro(self):
+        header = (ROOT / "Sources/CWindowsSupport/WindowsAppIcon.hpp").read_text()
+        source = (ROOT / "Sources/CWindowsSupport/WindowsAppIcon.cpp").read_text()
+        window = (ROOT / "Sources/CWindowsSupport/WindowsWindow.cpp").read_text()
+        self.assertNotRegex(header + source + window, r"\bsmall\s*\(")
+        self.assertIn("HICON smallHandle();", header)
+        self.assertIn("HICON smallHandle()", source)
+        self.assertIn("jsti::appIcon::smallHandle()", window)
+
+    def test_linux_integration_assertion_includes_high_dpi_tray_pixmaps(self):
+        integration = (ROOT / "scripts/linux-integration-checks.sh").read_text()
+        self.assertIn("[22, 22], [32, 32], [48, 48], [64, 64], [96, 96]", integration)
+
     def test_msix_includes_high_dpi_and_light_dark_unplated_start_menu_icons(self):
         identity = ICONS.IMAGES.load_identity()
         sizes = identity["assets"]["images"]

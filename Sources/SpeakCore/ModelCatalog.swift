@@ -134,7 +134,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
                 + "accuracy on noisy or accented audio with keyterm prompt support. Reuses your "
                 + "OpenAI API key.",
             estimatedLatencyMs: 280, latencyTier: .fast)
-    ] + AzureTranscriptionModels.liveOptions
+    ] + AzureTranscriptionModels.liveOptions + [FileSpeechProvider.reson8LiveOption]
 
     public static let batchTranscription: [Option] =
         appleBatchTranscriptionOptions + [
@@ -279,7 +279,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "Scribe v2 fine-tuned for clinical audio: fewer errors on medical terminology, "
                 + "with the same languages, pricing and word-level timestamps as Scribe v2.",
             estimatedLatencyMs: 800, latencyTier: .fast)
-    ] + AzureTranscriptionModels.batchOptions
+    ] + AzureTranscriptionModels.batchOptions + FileSpeechProvider.batchOptions
 
     /// Current ElevenLabs batch speech-to-text model. ElevenLabs removed
     /// `scribe_v1` (and its experimental variant) on 2026-07-09.

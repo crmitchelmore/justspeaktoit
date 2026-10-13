@@ -149,6 +149,8 @@ public enum LiveTranscriptionClientFactory {
                 model: route.apiModelName,
                 sampleRate: route.sampleRate
             )
+        case .reson8:
+            return Reson8LiveClient(apiKey: apiKey, language: language, sampleRate: route.sampleRate)
         case .apple, .openai:
             return nil
         }

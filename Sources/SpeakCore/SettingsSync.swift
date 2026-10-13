@@ -1074,9 +1074,12 @@ extension ConfigTransferManager {
         "openai.apiKey",
         "openai.tts.apiKey",
         "openrouter.apiKey",
+        "reson8.apiKey",
         "revai.apiKey",
+        "smallest.apiKey",
         "soniox.apiKey",
         "speechmatics.apiKey",
+        "stepfun.apiKey",
         "xai.apiKey"
     ]
 }

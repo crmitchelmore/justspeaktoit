@@ -234,7 +234,8 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       // SpeakCore clients, which is what makes them work on iPhone too.
       ("speechmatics/", controllers.sharedClient),
       ("revai/", controllers.sharedClient),
-      ("mistral/", controllers.sharedClient)
+      ("mistral/", controllers.sharedClient),
+      ("reson8/", controllers.sharedClient)
     ]
   }
 

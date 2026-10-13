@@ -29,6 +29,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
     case meta
     case revai
     case mistral
+    case reson8
 
     /// Keychain identifier for this provider's API key, or `nil` for on-device
     /// providers that need no credential. Matches the identifiers used by both
@@ -71,7 +72,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
     public var isSupportedOnIOS: Bool {
         switch self {
         case .apple, .deepgram, .elevenlabs, .openai, .cartesia, .soniox, .modulate, .assemblyai,
-             .gladia, .google, .xai, .meta, .speechmatics, .revai, .mistral, .azure:
+             .gladia, .google, .xai, .meta, .speechmatics, .revai, .mistral, .azure, .reson8:
             return true
         }
     }
@@ -96,6 +97,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
         case .meta: return "Meta"
         case .revai: return "Rev.ai"
         case .mistral: return "Mistral"
+        case .reson8: return FileSpeechProvider.reson8.metadata.displayName
         }
     }
 
@@ -122,6 +124,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
         case .meta: website = "https://llama.developer.meta.com"
         case .revai: website = "https://www.rev.ai"
         case .mistral: website = "https://console.mistral.ai"
+        case .reson8: website = FileSpeechProvider.reson8.metadata.website
         }
         return URL(string: website)
     }
@@ -168,6 +171,7 @@ public enum LiveTranscriptionRouting {
         guard let slash = trimmed.firstIndex(of: "/") else { return nil }
         let prefix = String(trimmed[trimmed.startIndex..<slash]).lowercased()
         guard let provider = LiveTranscriptionProviderID(rawValue: prefix) else { return nil }
+        if provider == .reson8, trimmed != FileSpeechProvider.reson8LiveID { return nil }
 
         return LiveTranscriptionRoute(
             modelID: trimmed,

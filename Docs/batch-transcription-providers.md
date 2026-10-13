@@ -1,9 +1,9 @@
-# Batch transcription providers: Cartesia, Gladia, Speechmatics
+# Batch transcription providers
 
-File (batch) transcription for three providers that previously only had a live
-streaming path. Each is a **Batch** picker entry only — nothing here changes the
-Streaming or Text-to-Speech pickers, and the existing streaming identifiers are
-untouched, so a user's saved live selection is preserved.
+File (batch) transcription for Cartesia, Gladia, Speechmatics, Smallest AI,
+Reson8 and StepFun. Existing streaming identifiers and saved live selections
+are untouched. Reson8 also adds a genuine live route; Pulse Pro and StepAudio 3
+remain batch-only. Nothing here changes Text-to-Speech.
 
 | Catalogue ID | Picker name | Credential | macOS | iOS |
 | --- | --- | --- | --- | --- |
@@ -11,9 +11,76 @@ untouched, so a user's saved live selection is preserved.
 | `gladia/solaria-1` | Gladia Solaria-1 (Batch) | `gladia.apiKey` | yes | yes |
 | `speechmatics/enhanced` | Speechmatics Enhanced (Batch) | `speechmatics.apiKey` | yes | no |
 | `speechmatics/standard` | Speechmatics Standard (Batch) | `speechmatics.apiKey` | yes | no |
+| `smallest/pulse-pro` | Smallest AI Pulse Pro | `smallest.apiKey` | yes | yes |
+| `reson8/resonant-1` | Reson8 Resonant-1 | `reson8.apiKey` | yes | yes |
+| `stepfun/stepaudio-3-asr-max` | StepFun StepAudio 3 ASR Max | `stepfun.apiKey` | yes | yes |
 
-Every provider issues **one account key** covering realtime and batch, so each
-batch entry reuses the Keychain item the live provider already stores. No extra
+## Pulse Pro, Reson8 and StepAudio 3
+
+The three direct file routes share `FileSpeechBatchClient` in SpeakCore and are
+also wired into the portable desktop host. Their separate credentials appear in
+API Keys and explicit encrypted configuration transfer; existing model choices
+and defaults are unchanged. Requests use fixed official origins and refuse all
+redirects, cap the response at 8 MiB, time out after 120 seconds, and cancel
+the transport when the calling task is cancelled. The app caps these
+in-memory file uploads at **25 MiB** (an app safety bound, not a claimed vendor
+limit). Source recordings are never deleted by these clients.
+
+- **Pulse Pro**: `POST https://api.smallest.ai/waves/v1/stt/?model=pulse-pro`,
+  Bearer authorization, raw recording bytes, word timestamps. English only:
+  Automatic sends `en`; an explicitly selected non-English language fails
+  before upload. The official Standard plan is $0.004/minute. Successful empty
+  transcripts stay empty. Supported encoded containers include the app's WAV
+  and M4A recordings; headerless PCM requires metadata and is not accepted here.
+- **Reson8**: `POST https://api.reson8.dev/v1/speech-to-text/prerecorded`,
+  `Authorization: ApiKey`, raw recording bytes, word timings in milliseconds.
+  Automatic omits the language hint; supported explicit codes are `de`, `en`,
+  `es`, `fr`, `fy`, `it`, `nl`, `pl`, `pt`, `sv`. Unsupported hints fail before
+  upload. The public API currently exposes **no base-model selector**:
+  `reson8/resonant-1` is the app's stable selection identifier for the
+  provider-served engine, not an on-wire guarantee of a pinned model version.
+  No guessed `model` query is sent and no unverified price is displayed.
+- **StepAudio 3**: `POST https://api.stepfun.com/v1/audio/asr/sse`,
+  Bearer authorization, JSON containing one base64-encoded recording and
+  `audio.input.transcription.model=stepaudio-3-asr-max`. Supports WAV, M4A,
+  MP3 and OGG containers. The SSE `transcript.text.done` text is authoritative;
+  EOF without done or an `error` event fails instead of returning partial text
+  as success. Corrected final text discards stale delta timings. This is
+  **recorded audio**, not live microphone streaming, so no StepAudio entry is
+  added to the live picker. Published pricing is **2.8 CNY/hour**; history keeps
+  CNY and the USD comparison deliberately leaves it unknown.
+
+Reson8 also has a genuine live route, `reson8/resonant-1-streaming`, on macOS,
+iOS and shared native desktop hosts. `Reson8LiveClient` opens
+`wss://api.reson8.dev/v1/speech-to-text/realtime` with PCM16 mono configuration
+and header-only ApiKey authorization. Audio waits for the real handshake; at
+most five seconds/256 frames are admitted, with one send in flight. Interims
+replace the current hypothesis (including retractions), while timestamped
+finals retain genuine repeated utterances. Stop drains admitted PCM, sends one
+correlated `flush_request`, and requires its `flush_confirmation` within a
+five-second whole-finish budget. Timeout, stalled sends or early closure report
+an error before releasing confirmed text as recovery material. Cancellation,
+replacement sessions and late callbacks cannot affect a new run.
+
+Official contracts checked 2026-10-13:
+[Pulse Pro quickstart](https://docs.smallest.ai/models/speech-to-text/pre-recorded/quickstart),
+[model card](https://docs.smallest.ai/model-cards/speech-to-text/pulse-pro),
+[audio formats](https://docs.smallest.ai/models/speech-to-text/pre-recorded/audio-formats),
+[Reson8 prerecorded](https://docs.reson8.dev/api/speech-to-text/prerecorded.md),
+[realtime](https://docs.reson8.dev/api/speech-to-text/realtime.md),
+[languages](https://docs.reson8.dev/speech-to-text/features/languages/),
+[Resonant-1 announcement](https://www.reson8.dev/blog/benchmarks),
+[StepFun SSE](https://platform.stepfun.com/docs/zh/api-reference/audio/asr-sse.md),
+[pricing](https://platform.stepfun.com/docs/zh/guides/pricing/details.md).
+
+**No billable provider calls were made.** Request/parsing/lifecycle tests use
+synthetic credentials and fake HTTP/WebSocket transports. Real account access,
+vendor engine selection, accuracy, and Windows/Linux native microphone/provider
+receipts remain release acceptance checks, not claims established by unit tests.
+
+Cartesia, Gladia and Speechmatics issue **one account key** covering realtime
+and batch, so their batch entries reuse the Keychain item the live provider
+already stores. No extra
 endpoint, region, deployment or scope field is introduced. A saved key is never
 treated as proof of entitlement: the batch call is what establishes access, and
 an account without batch access surfaces the provider's own rejection.

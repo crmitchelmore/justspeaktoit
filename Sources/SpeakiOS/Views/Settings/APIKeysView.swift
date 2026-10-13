@@ -65,7 +65,12 @@ struct APIKeysView: View {
     }
 
     static func entries(for settings: AppSettings) -> [APIKeyListEntry] {
-        coreEntries(for: settings) + streamingProviderEntries(for: settings)
+        coreEntries(for: settings) + streamingProviderEntries(for: settings) + FileSpeechProvider.allCases.map {
+            APIKeyListEntry(
+                id: $0.rawValue, title: $0.metadata.displayName, category: "Transcription",
+                isStored: settings.storedAPIKeyIdentifiers.contains($0.metadata.apiKeyIdentifier)
+            )
+        }
     }
 
     private static func coreEntries(for settings: AppSettings) -> [APIKeyListEntry] {
@@ -247,6 +252,12 @@ struct APIKeysView: View {
 
     // swiftlint:disable:next cyclomatic_complexity function_body_length
     private func presentation(for id: String) -> KeyPresentation {
+        if let provider = FileSpeechProvider(rawValue: id) {
+            return KeyPresentation(
+                title: provider.metadata.displayName, systemImage: provider.metadata.systemImage,
+                help: "Get your key from \(provider.metadata.website). Access is checked when transcribing."
+            )
+        }
         switch id {
         case "deepgram":
             return KeyPresentation(
@@ -372,6 +383,9 @@ struct APIKeysView: View {
         case "assemblyai": settings.assemblyAIAPIKey = key
         case "google": settings.googleAPIKey = key
         case "xai": settings.xAIAPIKey = key
+        case "smallest": settings.smallestAPIKey = key
+        case "reson8": settings.reson8APIKey = key
+        case "stepfun": settings.stepfunAPIKey = key
         case "azure": settings.azureAPIKey = key
         case "meta": settings.metaAPIKey = key
         case "speechmatics": settings.speechmaticsAPIKey = key

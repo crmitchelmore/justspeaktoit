@@ -4,17 +4,25 @@ import SpeakCore
 import SpeakDesktop
 import SpeakDesktopHost
 
-private final class TailCapture: DesktopRecordingCapture, @unchecked Sendable {
+final class TailCapture: DesktopRecordingCapture, @unchecked Sendable {
     let context: DesktopCaptureContext
     private let lock = NSLock()
     private var stops = 0
     private var destroys = 0
+    var failStart = false
+    var failStop = false
     var stopCount: Int { lock.withLock { stops } }
     var destroyCount: Int { lock.withLock { destroys } }
 
     init(context: DesktopCaptureContext) { self.context = context }
-    func start() throws { appendFrame() }
-    func stop() throws { lock.withLock { stops += 1 } }
+    func start() throws {
+        if failStart { throw DesktopHostError(message: "Synthetic capture start failed.") }
+        appendFrame()
+    }
+    func stop() throws {
+        lock.withLock { stops += 1 }
+        if failStop { throw DesktopHostError(message: "Synthetic capture stop failed.") }
+    }
     func destroy() { lock.withLock { destroys += 1 } }
     func appendFrame() {
         let samples: [Int16] = (0..<1_600).map { Int16(($0 % 32) * 256 - 4_000) }
@@ -22,7 +30,7 @@ private final class TailCapture: DesktopRecordingCapture, @unchecked Sendable {
     }
 }
 
-private final class TailLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
+final class TailLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
     let finalShape = TranscriptFinalShape.standaloneSegments
     let finalisationBudget: TimeInterval? = nil
     private let lock = NSLock()
@@ -45,13 +53,14 @@ private final class TailLiveClient: FinalizingStreamingTranscriptionClient, @unc
     }
 }
 
-private final class TailEffects: DesktopHostEffects, @unchecked Sendable {
+final class TailEffects: DesktopHostEffects, @unchecked Sendable {
     typealias Platform = FakePlatform
     let live = TailLiveClient()
     private let lock = NSLock()
     private var storedCapture: TailCapture?
     private var requests: [DesktopHostTranscriptionRequest] = []
     private var performed = 0
+    var failStart = false
     var capture: TailCapture? { lock.withLock { storedCapture } }
     var transcriptions: [DesktopHostTranscriptionRequest] { lock.withLock { requests } }
     var outputCount: Int { lock.withLock { performed } }
@@ -60,6 +69,7 @@ private final class TailEffects: DesktopHostEffects, @unchecked Sendable {
         context: DesktopCaptureContext, deviceID: String, sampleRate: Int, frameMilliseconds: Int
     ) throws -> any DesktopRecordingCapture {
         let capture = TailCapture(context: context)
+        capture.failStart = failStart
         lock.withLock { storedCapture = capture }
         return capture
     }

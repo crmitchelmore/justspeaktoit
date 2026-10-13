@@ -10,6 +10,7 @@ namespace {
 constexpr int groupLabelID = 598, groupID = 599, fieldBase = 600, labelBase = 700;
 constexpr int problemID = 800, importID = 801, exportID = 802;
 constexpr int recoveryLabelID = 803, recoveryID = 804, restoreID = 805;
+constexpr int previewStartID = 806, previewStopID = 807;
 struct Field {
     std::wstring title, value, group;
     bool boolean = false;
@@ -62,6 +63,14 @@ void layout(HWND window, Dialog &dialog) {
         y += scale(window, boolean ? 34 : 38);
     }
     const bool recovery = dialog.group == L"Transcription" && !dialog.config.recovered.empty();
+    const bool sounds = dialog.group == L"General";
+    for (int id : {previewStartID, previewStopID}) ShowWindow(GetDlgItem(window, id), sounds ? SW_SHOW : SW_HIDE);
+    if (sounds) {
+        const int half = (width - scale(window, 8)) / 2;
+        MoveWindow(GetDlgItem(window, previewStartID), margin, y, half, scale(window, 32), TRUE);
+        MoveWindow(GetDlgItem(window, previewStopID), margin + half + scale(window, 8), y, half, scale(window, 32), TRUE);
+        y += scale(window, 44);
+    }
     for (int id : {recoveryLabelID, recoveryID, restoreID})
         ShowWindow(GetDlgItem(window, id), recovery ? SW_SHOW : SW_HIDE);
     if (recovery) {
@@ -132,6 +141,8 @@ bool controls(HWND window, Dialog &dialog) {
             reinterpret_cast<LPARAM>(recovered.c_str())) < 0) return false;
     }
     if (!dialog.config.recovered.empty()) SendDlgItemMessageW(window, recoveryID, CB_SETCURSEL, 0, 0);
+    if (!add(L"BUTTON", L"Save and preview sta&rt", BS_PUSHBUTTON | WS_TABSTOP, previewStartID) ||
+        !add(L"BUTTON", L"Save and preview sto&p", BS_PUSHBUTTON | WS_TABSTOP, previewStopID)) return false;
     if (!add(L"STATIC", L"Import/export transfers portable preferences only, not keys or device settings.",
              SS_LEFT, problemID) ||
         !add(L"BUTTON", L"&Import...", BS_PUSHBUTTON | WS_TABSTOP, importID) ||
@@ -148,7 +159,7 @@ bool controls(HWND window, Dialog &dialog) {
 
 void apply(HWND window, Dialog &dialog, int action) {
     std::vector<std::string> entries;
-    if (action == 0 || action == 3) {
+    if (action == 0 || action == 3 || action == 4 || action == 5) {
         for (size_t i = 0; i < dialog.config.fields.size(); ++i) {
             const auto &field = dialog.config.fields[i];
             if (!field.choices.empty()) {
@@ -199,7 +210,9 @@ void apply(HWND window, Dialog &dialog, int action) {
         SetDlgItemTextW(window, problemID, reason.c_str());
         return;
     }
-    DestroyWindow(window);
+    if (action == 4 || action == 5) {
+        SetDlgItemTextW(window, problemID, L"Preview request queued. Progress and errors appear on the main window.");
+    } else DestroyWindow(window);
 }
 
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
@@ -242,6 +255,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         if (LOWORD(wparam) == importID) { apply(window, *dialog, 1); return 0; }
         if (LOWORD(wparam) == exportID) { apply(window, *dialog, 2); return 0; }
         if (LOWORD(wparam) == restoreID) { apply(window, *dialog, 3); return 0; }
+        if (LOWORD(wparam) == previewStartID) { apply(window, *dialog, 4); return 0; }
+        if (LOWORD(wparam) == previewStopID) { apply(window, *dialog, 5); return 0; }
         break;
     case WM_CLOSE: DestroyWindow(window); return 0;
     case WM_DESTROY:
@@ -408,6 +423,35 @@ bool jsti_configuration_self_test(HWND owner, std::string &error) {
     if (IsWindow(recoveryWindow)) DestroyWindow(recoveryWindow);
     if (!offered || !restored) {
         error = "Recovered keyword picker did not emit the selected edit with current preference fields.";
+        return false;
+    }
+    Dialog sounds;
+    sounds.config.fields = {
+        {L"Recording sounds", L"0", L"General", true},
+        {L"Sound profile", L"classic", L"General", false,
+            {{L"classic", L"Classic"}, {L"bubbly", L"Bubbly"}, {L"futuristic", L"Futuristic"}, {L"soft", L"Soft"}}},
+        {L"Volume", L"0.7", L"General", false}
+    };
+    sounds.config.context = &applied;
+    sounds.config.callback = [](int action, const char *const *values, size_t count, void *context,
+                                  char *error, size_t capacity) {
+        if ((action != 4 && action != 5) || count != 3 || std::string(values[0]) != "0" ||
+            std::string(values[1]) != "soft" || std::string(values[2]) != "0.25")
+            return jsti::fail("Recording sound preview did not snapshot the edited preferences.", error, capacity);
+        ++static_cast<Applied *>(context)->calls;
+        return 0;
+    };
+    HWND soundWindow = createDialog(owner, sounds);
+    if (!soundWindow) { error = "Could not create recording sound preferences fixture."; return false; }
+    const bool profiles = SendDlgItemMessageW(soundWindow, fieldBase + 1, CB_GETCOUNT, 0, 0) == 4;
+    SendDlgItemMessageW(soundWindow, fieldBase + 1, CB_SETCURSEL, 3, 0);
+    SetDlgItemTextW(soundWindow, fieldBase + 2, L"0.25");
+    SendMessageW(soundWindow, WM_COMMAND, MAKEWPARAM(previewStartID, BN_CLICKED), 0);
+    SendMessageW(soundWindow, WM_COMMAND, MAKEWPARAM(previewStopID, BN_CLICKED), 0);
+    const bool previewed = IsWindow(soundWindow) && applied.calls == 5;
+    if (IsWindow(soundWindow)) DestroyWindow(soundWindow);
+    if (!profiles || !previewed) {
+        error = "Recording sound preferences did not offer all profiles or emit both previews.";
         return false;
     }
     return true;

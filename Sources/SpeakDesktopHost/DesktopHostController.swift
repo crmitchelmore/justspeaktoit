@@ -133,6 +133,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     /// At most one audible native History playback; its status presenter is
     /// installed by preparePlayback once this actor exists.
     package let playback = Platform.makePlayback()
+    var recordingFeedback: DesktopRecordingFeedback?
+    var recordingFeedbackPreview: Task<Void, Never>?
 
     package init(
         directory: URL, effects: any DesktopHostEffects<Platform>, shutdownGrace: Duration = DesktopHostShutdown.grace
@@ -202,6 +204,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
 extension DesktopHostController {
     func captureFailed(_ message: String, recordingID: UUID) async {
         guard !closed, recording?.record.id == recordingID else { return }
+        await recordingFeedback?.cancelRecording(recordingID)
         beginBusyOperation()
         defer { finishBusyOperation() }
         var record = recording?.record
@@ -312,6 +315,7 @@ extension DesktopHostController {
         defer { isReady = true }
         guard !closed else { return }
         preparePlayback()
+        await prepareRecordingFeedback()
         refreshModels(force: false)
         activeOperations += 1
         defer { finishOperation() }

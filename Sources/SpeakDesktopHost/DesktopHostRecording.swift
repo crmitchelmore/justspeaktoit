@@ -14,11 +14,17 @@ extension DesktopHostController {
         let localModel = beginLocalUse(profile.modelIdentifier)
         defer { endLocalUse(localModel) }
         let id = UUID()
+        await recordingFeedback?.recordingRequested(id)
+        guard !closed else { throw CancellationError() }
         let filename = id.uuidString + ".wav"
         let audio = directory.appendingPathComponent("History").appendingPathComponent(filename)
         let rate = DesktopLiveTranscription.route(forID: profile.modelIdentifier)?.sampleRate
             ?? PCMRecordingFile.sampleRate
-        let file = try PCMRecordingFile(url: audio, sampleRate: rate)
+        let file: PCMRecordingFile
+        do { file = try PCMRecordingFile(url: audio, sampleRate: rate) } catch {
+            await recordingFeedback?.cancelRecording(id)
+            throw error
+        }
         let record = profileRecord(id: id, filename: filename, profile: profile)
         var live: DesktopLiveSession?
         do {
@@ -44,24 +50,31 @@ extension DesktopHostController {
                 textOutput: textOutput, trigger: trigger
             )
             if let live { monitorLive(live) }
+            await recordingFeedback?.captureReady(id)
         } catch {
+            await recordingFeedback?.cancelRecording(id)
             live?.cancel()
-            // Always close the WAV, including failure before native allocation.
-            var failed = record
-            let startupFailure = error
-            failed.failure = closed ? "Recording cancelled when the app closed. Audio retained."
-                : startupFailure.localizedDescription
-            do { _ = try file.finish() } catch {
-                failed.failure = "\(failed.failure ?? "Recording failed.") "
-                    + "Audio finalization failed: \(error.localizedDescription)"
-            }
-            do { try await saveRecord(failed) } catch {
-                throw DesktopHostError(message: "\(failed.failure ?? "Recording failed.") "
-                    + "History could not be saved: \(error.localizedDescription)")
-            }
-            throw startupFailure
+            try await saveFailedRecordingStartup(record, file: file, failure: error)
+            throw error
         }
+        guard !closed, recording?.record.id == id else { return }
         announceRecording(id, profile: profile, trigger: trigger)
+    }
+
+    private func saveFailedRecordingStartup(
+        _ record: DesktopRecordingStore.Record, file: PCMRecordingFile, failure: Error
+    ) async throws {
+        var failed = record
+        failed.failure = closed ? "Recording cancelled when the app closed. Audio retained."
+            : failure.localizedDescription
+        do { _ = try file.finish() } catch {
+            failed.failure = "\(failed.failure ?? "Recording failed.") "
+                + "Audio finalization failed: \(error.localizedDescription)"
+        }
+        do { try await saveRecord(failed) } catch {
+            throw DesktopHostError(message: "\(failed.failure ?? "Recording failed.") "
+                + "History could not be saved: \(error.localizedDescription)")
+        }
     }
 
     func stopCapture() throws -> StoppedRecording? {

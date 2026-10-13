@@ -4,6 +4,45 @@ import SpeakDesktop
 import XCTest
 
 final class DesktopRecordingFeedbackTests: XCTestCase {
+    func testPendingPreview_DoesNotReplayAfterAnInterveningRecordingEnds() async throws {
+        let fixture = FeedbackFixture()
+        try await fixture.feedback.configure(DesktopRecordingFeedbackPreferences(enabled: false))
+        let preview = Task { await fixture.feedback.preview(.start) }
+        try await eventually { await fixture.loader.count == 1 }
+        let id = UUID()
+        await fixture.feedback.recordingRequested(id)
+        await fixture.feedback.captureReady(id)
+        await fixture.feedback.recordingFinished(id)
+        let output = await fixture.loader.release(0)
+        await preview.value
+        XCTAssertTrue(output.events.isEmpty)
+        await fixture.feedback.close()
+        XCTAssertEqual(output.closes, 1)
+    }
+    func testAsynchronousDeviceFailure_IsReportedAndRetiresItsChannel() async throws {
+        let fixture = FeedbackFixture()
+        let output = try await fixture.warm()
+        output.failOutput("Synthetic device disconnected.")
+        try await eventually { output.closes == 1 }
+        XCTAssertTrue(fixture.messages.values.contains { $0.contains("Synthetic device disconnected.") })
+        await fixture.feedback.close()
+        XCTAssertEqual(output.closes, 1)
+    }
+
+    func testLateFailureFromRetiredOutput_CannotRetireReplacement() async throws {
+        let fixture = FeedbackFixture()
+        let previous = try await fixture.warm()
+        try await fixture.feedback.configure(DesktopRecordingFeedbackPreferences(profile: .soft))
+        try await eventually { await fixture.loader.count == 2 }
+        let replacement = await fixture.loader.release(1)
+        await fixture.feedback.preview(.stop)
+        previous.failOutput("Stale failure.")
+        await fixture.feedback.recordingRequested(UUID())
+        XCTAssertFalse(fixture.messages.values.contains { $0.contains("Stale failure.") })
+        XCTAssertEqual(replacement.closes, 0)
+        await fixture.feedback.close()
+        XCTAssertEqual(replacement.closes, 1)
+    }
     func testPreferences_RejectNonfiniteAndOutOfRangeVolume() throws {
         for volume: Float in [.nan, .infinity, -.infinity, -0.01, 1.01] {
             XCTAssertThrowsError(try DesktopRecordingFeedbackPreferences(volume: volume))
@@ -233,10 +272,15 @@ private final class FeedbackTestOutput: DesktopRecordingFeedbackOutput, @uncheck
     private var played: [Event] = []
     private var stopCount = 0
     private var closeCount = 0
+    private var failureHandler: (@Sendable (String) -> Void)?
     init(failing: Bool) { self.failing = failing }
     var events: [Event] { lock.withLock { played } }
     var stops: Int { lock.withLock { stopCount } }
     var closes: Int { lock.withLock { closeCount } }
+    func setFailureHandler(_ handler: @escaping @Sendable (String) -> Void) {
+        lock.withLock { failureHandler = handler }
+    }
+    func failOutput(_ message: String) { lock.withLock { failureHandler }?(message) }
     func play(_ sound: RecordingFeedbackSound, gain: Float) throws {
         if failing { throw FeedbackTestError.failed }
         lock.withLock { played.append(Event(sound: sound, gain: gain)) }

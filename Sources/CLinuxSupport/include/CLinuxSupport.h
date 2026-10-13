@@ -83,7 +83,8 @@ typedef struct JSTIConfigurationField {
 typedef int32_t (*JSTIConfigurationCallback)(int32_t action, const char *const *values, size_t count,
                                             void *context, char *error, size_t capacity);
 /* Recovery action 3 carries all fields followed by the exact selected edit,
- * which the host verifies is still recoverable before persisting. */
+ * which the host verifies is still recoverable before persisting.
+ * Actions 4/5 carry all fields for save-and-preview start/stop sound. */
 int32_t jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t count,
                                       const char *const *recovered_keywords, size_t recovered_count,
                                       JSTIConfigurationCallback callback, void *context);
@@ -347,6 +348,28 @@ int32_t jsti_audio_decode(
     char *error, size_t error_capacity);
 
 /* ---------------------------------------------------------------- playback */
+
+int32_t jsti_audio_decode_bounded(
+    const char *path, uint32_t sample_rate, jsti_capture_audio_fn chunk, void *context,
+    const volatile int32_t *cancelled, char *error, size_t error_capacity);
+
+typedef struct jsti_recording_feedback jsti_recording_feedback;
+typedef void (*jsti_recording_feedback_failure_fn)(const char *message, void *context);
+jsti_recording_feedback *jsti_recording_feedback_create(
+    jsti_recording_feedback_failure_fn failure, void *context);
+/* Preparation runs on a worker; cancellation may be requested concurrently. */
+int32_t jsti_recording_feedback_prepare(
+    jsti_recording_feedback *feedback, const char *start, const char *stop, char *error, size_t capacity);
+void jsti_recording_feedback_cancel_preparation(jsti_recording_feedback *feedback);
+int32_t jsti_recording_feedback_play(
+    jsti_recording_feedback *feedback, int32_t sound, float gain, char *error, size_t capacity);
+void jsti_recording_feedback_stop(jsti_recording_feedback *feedback);
+/* Call only after preparation returns. No callback runs after destroy returns. */
+void jsti_recording_feedback_destroy(jsti_recording_feedback *feedback);
+/* Device-free check: decodes and bounds the asset using the production decoder. */
+int32_t jsti_recording_feedback_check_asset(const char *path, char *error, size_t capacity);
+/* Self-test measurement: seconds from play to first queued native samples, 0 while pending, -1 on failure. */
+double jsti_recording_feedback_queued_latency(jsti_recording_feedback *feedback);
 
 /* Plays mono PCM16 through the sound server. The samples are copied. */
 typedef struct jsti_player jsti_player;

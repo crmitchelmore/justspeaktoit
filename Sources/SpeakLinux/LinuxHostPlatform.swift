@@ -28,6 +28,9 @@ enum LinuxHostPlatform: DesktopHostPlatform {
 
     package static let displayName = "Linux"
     package static let credentialStoreName = "the desktop keyring (Secret Service)"
+    package static func makeRecordingFeedbackLoader() -> (any DesktopRecordingFeedbackLoader)? {
+        LinuxRecordingFeedbackLoader()
+    }
 
     /// Facts discovered at startup that output planning needs.
     private final class Runtime: @unchecked Sendable {

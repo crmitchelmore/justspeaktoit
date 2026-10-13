@@ -371,7 +371,7 @@ if linuxTargetBuild {
             cSettings: [.define("_GNU_SOURCE")],
             // xtst.pc links only libXtst; the core Xlib calls need libX11.
             // libdl opens the whisper.cpp runtime (part of libc since glibc 2.34).
-            linkerSettings: [.linkedLibrary("X11"), .linkedLibrary("dl")]
+            linkerSettings: [.linkedLibrary("X11"), .linkedLibrary("dl"), .linkedLibrary("m")]
         ),
         .target(
             name: "SpeakLinuxPlatform",

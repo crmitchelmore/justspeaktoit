@@ -28,7 +28,7 @@ Ubuntu 24.04 (or any distribution with GTK 4.14+, libadwaita 1.5+) and Swift 6.2
 ```sh
 sudo apt install libgtk-4-dev libadwaita-1-dev libpulse-dev libsecret-1-dev \
   libx11-dev libxtst-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-  gstreamer1.0-plugins-good libssl-dev pkg-config
+  gstreamer1.0-plugins-good gstreamer1.0-libav libssl-dev pkg-config
 export SPEAK_LINUX_TARGET=1
 swift build --product SpeakLinux
 swift test                                  # portable, host and Linux tests
@@ -50,6 +50,16 @@ window and as the whole scrolled page (`NN-name.png`, `NN-name-full.png`),
 then the dashboard and History in dark mode and the dashboard while recording.
 `scripts/linux-desktop-checks.sh` runs it when `JSTI_UI_SCREENSHOT_DIR` is set,
 and CI uploads the pictures as `linux-ui-screenshots`.
+
+Recording feedback uses a dedicated, warmed libpulse channel and the bundled
+AAC cues. `SpeakLinux --self-test` decodes all eight cues with the production
+GStreamer path; missing codecs or resource bundles fail explicitly.
+`SpeakLinux --recording-feedback-self-test` requires a real Pulse endpoint and
+checks both cues for every profile, reusable stop and joined close. It reports
+first-buffer queue admission (at most 100 ms), not audible hardware latency.
+The integration script runs this against its private PipeWire null sink.
+An installed package must pass `--self-test` as well; a source-tree pass does
+not establish resource placement or codec availability in a Flatpak runtime.
 
 ## Window
 

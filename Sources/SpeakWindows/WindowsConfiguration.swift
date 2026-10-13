@@ -55,6 +55,9 @@ extension WindowsNative {
                 throw DesktopConfigurationError.invalidField("Recovered keyword selection")
             }
             try await holder.controller.recoverConfigurationKeywords(Array(values.dropLast()), selected: selected)
+        case 4, 5:
+            try await holder.controller.saveConfiguration(values)
+            try await holder.controller.previewRecordingFeedback(action == 4 ? .start : .stop)
         default: throw DesktopConfigurationError.invalidField("Configuration action")
         }
         try await configureConfiguration(holder)
@@ -71,7 +74,9 @@ func windowsConfigurationEvent(
     let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
     let values = UnsafeBufferPointer(start: entries, count: count).map { $0.map(String.init(cString:)) ?? "" }
     do {
-        if action == 0 { try DesktopConfiguration.validateEntries(values) } else if action == 3 {
+        if action == 0 || action == 4 || action == 5 {
+            try DesktopConfiguration.validateEntries(values)
+        } else if action == 3 {
             guard values.count == DesktopConfiguration.fields.count + 1 else {
                 throw DesktopConfigurationError.invalidField("Recovered keyword selection")
             }

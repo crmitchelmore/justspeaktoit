@@ -34,7 +34,30 @@ final class DesktopConfigurationTests: XCTestCase {
         XCTAssertEqual(restored.number("postRecordingTailDuration"), SpeechDefaults.recordingTailDuration)
         XCTAssertTrue(restored.enabled("showHUD"))
         XCTAssertFalse(restored.enabled("showCompactHUD"))
+        XCTAssertEqual(restored.enabled("recordingSoundsEnabled"), RecordingFeedbackDefaults.enabled)
+        XCTAssertEqual(restored.text("recordingSoundProfile"), RecordingFeedbackDefaults.profile.rawValue)
+        XCTAssertEqual(restored.number("recordingSoundVolume"), RecordingFeedbackDefaults.volume)
         XCTAssertEqual(Set(DesktopConfiguration.fields.map(\.key)).count, DesktopConfiguration.fields.count)
+    }
+
+    func testRecordingSoundMetadata_UsesCanonicalProfilesAndSurvivesTransfer() throws {
+        let field = try XCTUnwrap(DesktopConfiguration.fields.first { $0.key == "recordingSoundProfile" })
+        guard case .choice(let choices) = field.kind else { return XCTFail("Missing recording profile choices.") }
+        XCTAssertEqual(choices.map(\.value), RecordingFeedbackProfile.allCases.map(\.rawValue))
+        XCTAssertEqual(choices.map(\.title), RecordingFeedbackProfile.allCases.map(\.displayName))
+        for profile in RecordingFeedbackProfile.allCases {
+            let preferences = try DesktopConfiguration(values: [
+                "recordingSoundsEnabled": AnyCodable(.bool(false)),
+                "recordingSoundProfile": AnyCodable(.string(profile.rawValue)),
+                "recordingSoundVolume": AnyCodable(.double(0.25))
+            ])
+            let restored = try JSONDecoder().decode(
+                DesktopConfiguration.self, from: JSONEncoder().encode(preferences.applying(preferences.entries))
+            )
+            XCTAssertFalse(restored.enabled("recordingSoundsEnabled"))
+            XCTAssertEqual(restored.text("recordingSoundProfile"), profile.rawValue)
+            XCTAssertEqual(restored.number("recordingSoundVolume"), 0.25)
+        }
     }
 
     func testOverlayCapabilityMetadataAndCompactValueSurviveTransfer() throws {

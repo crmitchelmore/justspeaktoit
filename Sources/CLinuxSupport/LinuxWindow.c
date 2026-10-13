@@ -2165,6 +2165,14 @@ static void configuration_apply(gpointer data) {
             g_signal_connect(apply, "clicked", G_CALLBACK(on_configuration_apply), NULL);
             adw_preferences_group_add(ADW_PREFERENCES_GROUP(groups[i]), apply);
         }
+        GtkWidget *sound_previews = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+        GtkWidget *preview_start = gtk_button_new_with_label("Save & preview start");
+        GtkWidget *preview_stop = gtk_button_new_with_label("Save & preview stop");
+        g_signal_connect(preview_start, "clicked", G_CALLBACK(on_configuration_apply), GINT_TO_POINTER(4));
+        g_signal_connect(preview_stop, "clicked", G_CALLBACK(on_configuration_apply), GINT_TO_POINTER(5));
+        gtk_box_append(GTK_BOX(sound_previews), preview_start);
+        gtk_box_append(GTK_BOX(sound_previews), preview_stop);
+        adw_preferences_group_add(ADW_PREFERENCES_GROUP(groups[0]), sound_previews);
         configuration.recovery_group = group("Recovered keyword edits");
         adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(configuration.recovery_group),
             "A deliberate clear remains active. Restore only the edit you choose; it is added to your current list.");
@@ -2286,13 +2294,13 @@ static int32_t configuration_test_callback(int32_t action, const char *const *va
     (void)error; (void)capacity;
     gint *calls = context;
     if (g_strcmp0(values[0], "fr_FR") != 0) return -1;
-    if (action == 0 && count != configuration.rows->len) return -1;
+    if ((action == 0 || action == 4 || action == 5) && count != configuration.rows->len) return -1;
     if (action == 3 && (count != configuration.rows->len + 1 ||
         g_strcmp0(values[count - 1], "Second recoverable edit") != 0)) return -1;
-    if (action != 0 && action != 3) return -1;
+    if (action != 0 && action != 3 && action != 4 && action != 5) return -1;
     for (guint i = 0; i < configuration.rows->len; ++i)
         if (((const char *)g_ptr_array_index(configuration.choices, i))[0] != '\0' &&
-            g_strcmp0(values[i], "expanded") != 0) return -1;
+            g_strcmp0(values[i], "expanded") != 0 && g_strcmp0(values[i], "bubbly") != 0) return -1;
     ++*calls;
     return 0;
 }
@@ -2312,19 +2320,23 @@ static gboolean configuration_self_test(void) {
     gchar *saved = g_strdup(gtk_editable_get_text(GTK_EDITABLE(language)));
     gint calls = 0;
     AdwComboRow *choice_row = NULL;
-    guint original_choice = 0;
+    GArray *original_choices = g_array_new(FALSE, FALSE, sizeof(guint));
     for (guint i = 0; i < configuration.rows->len; ++i) {
         if (((const char *)g_ptr_array_index(configuration.choices, i))[0] == '\0') continue;
         choice_row = ADW_COMBO_ROW(g_ptr_array_index(configuration.rows, i));
-        if (g_list_model_get_n_items(adw_combo_row_get_model(choice_row)) != 3) return FALSE;
-        original_choice = adw_combo_row_get_selected(choice_row);
+        guint count = g_list_model_get_n_items(adw_combo_row_get_model(choice_row));
+        if (count != 3 && count != 4) { g_array_unref(original_choices); return FALSE; }
+        guint original_choice = adw_combo_row_get_selected(choice_row);
+        g_array_append_val(original_choices, original_choice);
         adw_combo_row_set_selected(choice_row, 1);
     }
-    if (choice_row == NULL) return FALSE;
+    if (choice_row == NULL) { g_array_unref(original_choices); return FALSE; }
     configuration.callback = configuration_test_callback;
     configuration.context = &calls;
     gtk_editable_set_text(GTK_EDITABLE(language), "fr_FR");
     on_configuration_apply(NULL, NULL);
+    on_configuration_apply(NULL, GINT_TO_POINTER(4));
+    on_configuration_apply(NULL, GINT_TO_POINTER(5));
     GListModel *saved_model = adw_combo_row_get_model(configuration.recovery_row);
     g_object_ref(saved_model);
     guint saved_count = configuration.recovery_count;
@@ -2339,13 +2351,19 @@ static gboolean configuration_self_test(void) {
     adw_combo_row_set_model(configuration.recovery_row, saved_model);
     adw_combo_row_set_selected(configuration.recovery_row, saved_selection);
     configuration.recovery_count = saved_count;
-    adw_combo_row_set_selected(choice_row, original_choice);
+    guint choice_index = 0;
+    for (guint i = 0; i < configuration.rows->len; ++i) {
+        if (((const char *)g_ptr_array_index(configuration.choices, i))[0] == '\0') continue;
+        adw_combo_row_set_selected(ADW_COMBO_ROW(g_ptr_array_index(configuration.rows, i)),
+            g_array_index(original_choices, guint, choice_index++));
+    }
+    g_array_unref(original_choices);
     g_object_unref(saved_model);
     gtk_editable_set_text(GTK_EDITABLE(language), saved);
     g_free(saved);
     configuration.callback = callback;
     configuration.context = context;
-    return calls == 2;
+    return calls == 4;
 }
 
 static void style_apply(gpointer data) {

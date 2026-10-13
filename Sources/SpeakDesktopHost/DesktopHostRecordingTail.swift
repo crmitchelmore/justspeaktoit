@@ -17,25 +17,15 @@ extension DesktopHostController {
             guard !closed, recording?.record.id == id else { return }
             guard let stopped = try stopCapture() else { return }
             if cancellationRequested || Task.isCancelled {
+                await recordingFeedback?.cancelRecording(id)
                 try await saveCancelledRecording(stopped)
                 return
             }
-            guard stopped.duration > 0 else {
-                stopped.live?.cancel()
-                var empty = stopped.record
-                empty.failure = "No audio was captured."
-                try await saveRecord(empty)
-                reportFailure("No audio was captured.", for: empty.id, headline: "Nothing was recorded")
-                return
-            }
-            if let live = stopped.live {
-                await finishLive(stopped, session: live)
-            } else {
-                await transcribe(
-                    stopped.record, duration: stopped.duration, output: stopped.output, profile: stopped.profile
-                )
-            }
+            await recordingFeedback?.recordingFinished(id)
+            guard !closed else { return }
+            try await processStoppedRecording(stopped)
         } catch {
+            if let id = pending?.id { await recordingFeedback?.cancelRecording(id) }
             if var pending {
                 pending.failure = error.localizedDescription
                 if let live { pending.result = liveResult(live.cancel().text, record: pending, duration: 0) }
@@ -47,6 +37,24 @@ extension DesktopHostController {
                 return
             }
             update("Recording retained: \(error.localizedDescription)", state: 0)
+        }
+    }
+
+    private func processStoppedRecording(_ stopped: StoppedRecording) async throws {
+        guard stopped.duration > 0 else {
+            stopped.live?.cancel()
+            var empty = stopped.record
+            empty.failure = "No audio was captured."
+            try await saveRecord(empty)
+            reportFailure("No audio was captured.", for: empty.id, headline: "Nothing was recorded")
+            return
+        }
+        if let live = stopped.live {
+            await finishLive(stopped, session: live)
+        } else {
+            await transcribe(
+                stopped.record, duration: stopped.duration, output: stopped.output, profile: stopped.profile
+            )
         }
     }
 

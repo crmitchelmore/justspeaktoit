@@ -50,6 +50,8 @@ wireplumber >"$work/wireplumber.log" 2>&1 & pids+=($!)
 pipewire-pulse >"$work/pipewire-pulse.log" 2>&1 & pids+=($!)
 for _ in $(seq 1 100); do pactl info >/dev/null 2>&1 && break; sleep 0.1; done
 pactl load-module module-null-sink sink_name=jsti_test >/dev/null
+step "recording feedback (all profiles, dedicated warmed libpulse channel)"
+PULSE_SINK=jsti_test "$binary" --recording-feedback-self-test
 "$python" - "$work/tone.raw" <<'PY'
 import math, struct, sys
 with open(sys.argv[1], "wb") as tone:

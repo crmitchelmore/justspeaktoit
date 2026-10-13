@@ -88,6 +88,7 @@ package protocol DesktopHostPlatform: Sendable {
     /// (no captured field, or the clipboard is unavailable).
     static func makeOutputJob(options: TextOutputOptions, target: InsertionTarget?) -> OutputJob?
     static func makePlayback() -> Playback
+    static func makeRecordingFeedbackLoader() -> (any DesktopRecordingFeedbackLoader)?
     /// Nonblocking. A native operation already committed completes and is
     /// reported; nothing starts afterwards.
     static func cancel(_ job: OutputJob)
@@ -140,6 +141,7 @@ package protocol DesktopHostPlatform: Sendable {
 }
 
 package extension DesktopHostPlatform {
+    static func makeRecordingFeedbackLoader() -> (any DesktopRecordingFeedbackLoader)? { nil }
     static func update(_ status: String) { update(status, transcript: nil, state: -1) }
     /// Hosts without a dashboard or History header show no totals.
     static func historyInsights(all: DesktopHistoryInsights, visible: DesktopHistoryInsights) {}

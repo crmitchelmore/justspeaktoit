@@ -37,6 +37,14 @@ func runSelfTest() throws {
         throw DesktopHostError(message: "Live models are offered without a qualified transport.")
     }
     print("Native Linux adapter and canonical model self-test passed.")
+    try blocking {
+        for profile in RecordingFeedbackProfile.allCases {
+            guard try await LinuxRecordingFeedbackLoader.checkAssets(profile: profile) == 2 else {
+                throw DesktopHostError(message: "Recording sound asset self-test did not decode both cues.")
+            }
+        }
+    }
+    print("All eight bundled Linux recording sounds decoded with the production decoder and bounds.")
     try blocking { try await LinuxShortcutGestures.checkTimingForSelfTest() }
     print("Native Linux shortcut timing self-test passed.")
     try blocking { try await LinuxLocalSelfTest.run() }
@@ -107,6 +115,17 @@ if arguments.contains("--version") {
 }
 if arguments.contains("--self-test") {
     do { try runSelfTest() } catch { fail(error) }
+    exit(0)
+}
+if arguments.contains("--recording-feedback-self-test") {
+    do {
+        try blocking {
+            for profile in RecordingFeedbackProfile.allCases {
+                let latencies = try await LinuxRecordingFeedbackLoader.checkNativeOutput(profile: profile)
+                print("\(profile.rawValue) prepared recording sound queue latencies (seconds): \(latencies)")
+            }
+        }
+    } catch { fail(error) }
     exit(0)
 }
 if arguments.contains("--local-transcription-self-test") {

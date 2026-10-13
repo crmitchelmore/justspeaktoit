@@ -281,10 +281,12 @@ class Decoder {
     uint64_t bound = maximumSampleBound;
     unsigned emptySamples = 0;
     uint64_t decoded = 0;
+    const DWORD readTimeout;
 
     void checkCancellation() const { if (cancelled.load()) throw Cancelled{}; }
 public:
-    Decoder(const std::atomic<bool> &cancelled, std::shared_ptr<ReadState> state);
+    Decoder(const std::atomic<bool> &cancelled, std::shared_ptr<ReadState> state,
+            DWORD readTimeout = decodeTimeoutSeconds);
     ~Decoder();
     uint64_t bytesDecoded() const noexcept { return decoded; }
     const FormatSpec &format() const noexcept { return target; }
@@ -323,7 +325,7 @@ public:
             { std::lock_guard<std::mutex> lock(state->mutex); state->pending = false; }
             require(read, "Read decoded audio sample");
         }
-        switch (awaitSample(*state, cancelled, std::chrono::seconds(decodeTimeoutSeconds))) {
+        switch (awaitSample(*state, cancelled, std::chrono::seconds(readTimeout))) {
         case Wake::ready: break;
         case Wake::timeout: throw Failure{HRESULT_FROM_WIN32(ERROR_TIMEOUT), "Read decoded audio sample"};
         case Wake::renderEnded: throw RenderStopped{}; // The owner reports the render thread's own outcome.
@@ -383,6 +385,7 @@ public:
     virtual UINT32 bufferFrames() const noexcept = 0;
     virtual HRESULT start() noexcept = 0;
     virtual HRESULT stop() noexcept = 0;
+    virtual HRESULT reset() noexcept { return E_NOTIMPL; }
     virtual HRESULT padding(UINT32 &frames) noexcept = 0;
     virtual HRESULT acquire(UINT32 frames, BYTE **data) noexcept = 0;
     virtual HRESULT release(UINT32 frames) noexcept = 0;
@@ -403,6 +406,10 @@ public:
     virtual ~OutputFactory() = default;
     virtual std::unique_ptr<RenderOutput> open(Decoder &decoder, FormatSpec &format) = 0;
 };
+
+// Dedicated feedback streams negotiate float with OS endpoint conversion;
+// History keeps its existing mix-format negotiation and 500 ms default.
+std::unique_ptr<RenderOutput> openFeedbackOutput(Decoder &decoder, FormatSpec &format);
 
 struct EngineOptions {
     DWORD eventTimeout = defaultEventTimeout;

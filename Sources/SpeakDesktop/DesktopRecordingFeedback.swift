@@ -22,6 +22,7 @@ public struct DesktopRecordingFeedbackPreferences: Equatable, Sendable {
 
 /// A dedicated predecoded feedback channel, never a History/Read aloud player.
 public protocol DesktopRecordingFeedbackOutput: Sendable {
+    func setFailureHandler(_ handler: @escaping @Sendable (String) -> Void)
     func play(_ sound: RecordingFeedbackSound, gain: Float) throws
     /// Stops this channel's queued sound only; the prepared channel remains reusable.
     func stop()
@@ -43,6 +44,7 @@ public actor DesktopRecordingFeedback {
     private var retirements: [UUID: Task<Void, Never>] = [:]
     private var closing: Task<Void, Never>?
     private var generation = UUID()
+    private var previewRevision = UUID()
     private var recordingID: UUID?
     private var started = false
     private var closed = false
@@ -54,6 +56,7 @@ public actor DesktopRecordingFeedback {
 
     public func configure(_ preferences: DesktopRecordingFeedbackPreferences) {
         guard !closed else { return }
+        previewRevision = UUID()
         let replace = self.preferences?.profile != preferences.profile || !preferences.enabled
         self.preferences = preferences
         if replace { discardPreparationAndOutput() }
@@ -63,6 +66,7 @@ public actor DesktopRecordingFeedback {
     /// Reserves the identity before startup suspends; readiness alone cannot reserve it.
     public func recordingRequested(_ id: UUID) {
         guard !closed, recordingID != id else { return }
+        previewRevision = UUID()
         output?.stop()
         recordingID = id
         started = false
@@ -95,8 +99,11 @@ public actor DesktopRecordingFeedback {
         guard !closed, !Task.isCancelled, recordingID == nil, preferences != nil else { return }
         prepareIfNeeded()
         let expected = generation
+        previewRevision = UUID()
+        let expectedPreview = previewRevision
         await preparation?.value
-        guard !closed, !Task.isCancelled, recordingID == nil, generation == expected else { return }
+        guard !closed, !Task.isCancelled, recordingID == nil,
+              generation == expected, previewRevision == expectedPreview else { return }
         guard let preferences else { return }
         play(sound, volume: preferences.volume)
     }
@@ -150,6 +157,9 @@ public actor DesktopRecordingFeedback {
                     prepared.stop()
                     await closeOutput(prepared)
                 } else {
+                    prepared.setFailureHandler { [weak self] message in
+                        Task { await self?.outputFailed(message, expected: expected) }
+                    }
                     output = prepared
                     preparation = nil
                 }
@@ -184,6 +194,12 @@ public actor DesktopRecordingFeedback {
         do { try await output.close() } catch {
             report("Recording sound cleanup failed: \(error.localizedDescription)")
         }
+    }
+
+    private func outputFailed(_ message: String, expected: UUID) {
+        guard !closed, generation == expected else { return }
+        report("Recording sound output failed: \(message)")
+        discardPreparationAndOutput()
     }
 }
 

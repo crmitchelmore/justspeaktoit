@@ -88,7 +88,16 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
               group: "General", kind: .choice(HUDExpansionPreference.allCases.map {
                   Choice(value: $0.rawValue, title: $0.displayName)
               }), defaultValue: AnyCodable(.string(HUDExpansionPreference.defaultValue.rawValue)),
-              requiresHUDOverlay: true)
+              requiresHUDOverlay: true),
+        .init(key: "recordingSoundsEnabled", title: "Play recording start and stop sounds",
+              group: "General", kind: .boolean, defaultValue: AnyCodable(.bool(RecordingFeedbackDefaults.enabled))),
+        .init(key: "recordingSoundProfile", title: "Recording sound profile",
+              group: "General", kind: .choice(RecordingFeedbackProfile.allCases.map {
+                  Choice(value: $0.rawValue, title: $0.displayName)
+              }), defaultValue: AnyCodable(.string(RecordingFeedbackDefaults.profile.rawValue))),
+        .init(key: "recordingSoundVolume", title: "Recording sound volume (0 to 1)",
+              group: "General", kind: .number(0...1),
+              defaultValue: AnyCodable(.double(RecordingFeedbackDefaults.volume)))
     ]
 
     public private(set) var values: [String: AnyCodable]

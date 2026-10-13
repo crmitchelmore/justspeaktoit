@@ -15,7 +15,9 @@ controls; the shared model must be the sole persisted desktop boolean authority,
 not an independent copy in each platform or in the configuration dictionary.
 Canonical configuration transfer/metadata projections need the executable
 workflow's final model contract before these keys can be called supported.
-The current editable preference count therefore stays fourteen.
+Voice flags do not increase this slice's preference count. There are fourteen
+previously accepted preferences plus three recording-sound preferences now wired
+below; native sound acceptance is still pending.
 
 Generated audio archival follows the parent's app-owned destination: the actual
 `DesktopRecordingStore.directory`, as a flat canonical `UUID.wav` without a
@@ -25,7 +27,7 @@ separate generated-result cache/playback staging does not. Foreign imported
 Mac's colon-containing timestamps on Windows. Native archival and Voice
 acceptance belong to the Voice/parent workstreams, not this defaults extraction.
 
-## Recording feedback foundation (not native parity yet)
+## Recording feedback (native acceptance pending)
 
 `SpeakCore/RecordingFeedback.swift` now owns the four existing profiles, eight
 M4A names, enabled/classic/0.7 defaults and the Mac player's volume-squared curve.
@@ -42,10 +44,34 @@ Linux production staging also needs the sibling-resource collector in #1212.
 ownership, cancellable preparation, reserved recording IDs, capture-ready/normal
 finish cues, duplicate/stale rejection, explicit disabled previews, volume-only
 reuse and awaited cleanup. Fake-output lifecycle tests do **not** prove native
-decoding, sound output or warm-path latency. Dedicated Windows/Linux preloaded
-output adapters, host wiring, native controls and packaged codec/latency evidence
-remain outstanding. These three preferences stay **Unimplemented** in the
-matrix and do not increase the fourteen editable preference count.
+decoding, sound output or warm-path latency. Dedicated Windows WASAPI/Media Foundation and Linux
+libpulse/GStreamer outputs now preload both cues off the controller and retain
+an independently owned native channel. Warm play does not reopen assets or
+decode audio. Read aloud and History output are not reused or stopped.
+
+The shared host reserves feedback before suspended capture startup, plays Start
+only after capture starts and Stop only after the owned tail/capture stops
+normally, including an empty recording. Failed startup, capture errors,
+cancellation and shutdown do not play Stop. Preparation/play/device/cleanup
+errors are explicitly reported without failing dictation. Shutdown independently
+waits for feedback within its existing five-second aggregate grace period.
+
+General now exposes the Mac's `recordingSoundsEnabled`, `recordingSoundProfile`
+and `recordingSoundVolume` with canonical defaults and strict validation.
+Save-and-preview actions persist all current fields atomically and run native
+preparation independently of the settings queue. Explicit previews work while
+automatic sounds are disabled and cannot replay after an intervening recording.
+Volume edits while enabled reuse the channel; profile edits retire it without affecting other
+audio. Native tests and executable self-tests require production decoding of all
+eight assets; Linux additionally exercises the warmed channel on its private
+PipeWire sink with a 100 ms first-buffer admission bound. This measures native
+queue admission, **not audible hardware latency**.
+
+These three preferences are **wired, awaiting native acceptance**. Actual
+Windows/Linux native builds, codec and endpoint execution on this new code and
+installed-package resource/codec evidence must be recorded before calling the
+sound journey accepted. Linux deployment composes the sibling collector in
+#1212 and needs AAC decoding (Ubuntu: `gstreamer1.0-libav`).
 
 ## Implemented preference journey
 
@@ -261,9 +287,9 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | pasteRemoteTranscriptsAtCursor | Missing / Missing | No remote transcript delivery preference |
 | autoCorrectionsEnabled | Missing / Missing | No correction capture/promotion/preview pipeline in baseline |
 | autoCorrectionsPromotionThreshold | Missing / Missing | No correction promotion policy/editor |
-| recordingSoundsEnabled | Missing / Missing | No native recording sound preference/player |
-| recordingSoundProfile | Missing / Missing | No sound profile picker |
-| recordingSoundVolume | Missing / Missing | No recording sound volume |
+| recordingSoundsEnabled | Wired, unverified / Wired, unverified | General + owned native channel; normal readiness/finish cues only; exact-head native acceptance pending |
+| recordingSoundProfile | Wired, unverified / Wired, unverified | Canonical four profiles + owned preload replacement and explicit previews; codec acceptance pending |
+| recordingSoundVolume | Wired, unverified / Wired, unverified | Strict 0...1 field + Mac volume-squared gain; native/installed-package acceptance pending |
 | assemblyAIKeyterms | Wired / Wired | Config + options-bearing live factory; provider enforces vocabulary bounds |
 | transcriptionKeywords | Partial / Partial | Config; xAI STT live only here, other provider/batch forwarding remains |
 | transcriptionKeywordsLastReconciled | Wired / Wired | Shared `TranscriptionKeywordPolicy` + Config; unchanged-mirror/deliberate-clear reconciliation, durable last mirror |

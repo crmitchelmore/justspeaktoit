@@ -13,23 +13,27 @@ extension DesktopHostController {
         return try DesktopConfiguration(values: values)
     }
 
-    package func saveConfiguration(_ entries: [String]) throws {
+    package func saveConfiguration(_ entries: [String]) async throws {
         guard !closed, !busy, recording == nil else {
             throw DesktopHostError(message: "Finish dictation before changing configuration.")
         }
         let configuration = try configuration().applying(entries)
-        try persistConfiguration(configuration, status: "Configuration saved. New recordings use these preferences.")
+        try await persistConfiguration(
+            configuration, status: "Configuration saved. New recordings use these preferences."
+        )
     }
 
-    package func recoverConfigurationKeywords(_ entries: [String], selected: String) throws {
+    package func recoverConfigurationKeywords(_ entries: [String], selected: String) async throws {
         guard !closed, !busy, recording == nil else {
             throw DesktopHostError(message: "Finish dictation before recovering keywords.")
         }
         let recovered = try configuration().applying(entries).recoveringKeywords(selected)
-        try persistConfiguration(recovered, status: "Recovered keywords restored. New recordings use this shared list.")
+        try await persistConfiguration(
+            recovered, status: "Recovered keywords restored. New recordings use this shared list."
+        )
     }
 
-    private func persistConfiguration(_ configuration: DesktopConfiguration, status: String) throws {
+    private func persistConfiguration(_ configuration: DesktopConfiguration, status: String) async throws {
         var changed = settings
         changed.configuration = configuration
         var polish = changed.postProcessing ?? .init()
@@ -38,6 +42,7 @@ extension DesktopHostController {
         changed.postProcessing = polish
         try effects.writeSettings(JSONEncoder().encode(changed), to: directory.appendingPathComponent("settings.json"))
         settings = changed
+        try await configureRecordingFeedback(configuration)
         Platform.hud(.hidden)
         update(status)
     }
@@ -55,7 +60,7 @@ extension DesktopHostController {
         update("Portable preferences exported, including preserved imported values. Credential stores were not read.")
     }
 
-    package func importConfiguration(path: String) throws {
+    package func importConfiguration(path: String) async throws {
         guard !closed, !busy, recording == nil else {
             throw DesktopHostError(message: "Finish dictation before importing configuration.")
         }
@@ -85,6 +90,7 @@ extension DesktopHostController {
         changed.postProcessing = polish
         try effects.writeSettings(JSONEncoder().encode(changed), to: directory.appendingPathComponent("settings.json"))
         settings = changed
+        try await configureRecordingFeedback(document.preferences)
         Platform.hud(.hidden)
         let unknown = document.preferences.values.keys.filter { key in
             !DesktopConfiguration.supportedKeys.contains(key)

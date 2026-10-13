@@ -253,27 +253,7 @@ enum SpeakWindowsMain {
     static func main() async {
         WindowsModels.configureForWindows()
         do {
-            if CommandLine.arguments.contains("--bundle-self-test") {
-                try await WindowsBundleSelfTest.run()
-                return
-            }
-            if try await WindowsLocalSelfTest.handle(CommandLine.arguments) { return }
-            if CommandLine.arguments.contains("--self-test") {
-                try WindowsNative.checked { jsti_native_self_test($0, $1) }
-                try WindowsNative.checked { jsti_text_output_self_test($0, $1) }
-                try WindowsNative.checked { jsti_clipboard_output_self_test($0, $1) }
-                try await WindowsTextOutputSelfTest.run()
-                try await WindowsHotKeySelfTest.run()
-                try await WindowsHistoryRetrySelfTest.run()
-                try await WindowsPostProcessingSelfTest.run()
-                try WindowsNative.storageMediaAndAutomationSelfTests()
-                try await WindowsLocalSelfTest.run()
-                guard !DesktopTranscription.batchModels.isEmpty else {
-                    throw WindowsNativeError(message: "No canonical desktop models available.")
-                }
-                print("Native Windows adapter and canonical model self-test passed.")
-                return
-            }
+            if try await WindowsCommandLineSelfTests.handle(CommandLine.arguments) { return }
             let screenshots = WindowsPresentation.screenshotDirectory(CommandLine.arguments)
             let smokeTest = CommandLine.arguments.contains("--ui-smoke-test") || screenshots != nil
             let directory: URL

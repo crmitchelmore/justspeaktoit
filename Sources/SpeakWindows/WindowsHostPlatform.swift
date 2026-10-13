@@ -26,6 +26,9 @@ enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPla
 
     package static let displayName = "Windows"
     package static let credentialStoreName = "Windows Credential Manager"
+    package static func makeRecordingFeedbackLoader() -> (any DesktopRecordingFeedbackLoader)? {
+        WindowsRecordingFeedbackLoader()
+    }
 
     package static func update(_ status: String, transcript: String?, state: Int32) {
         WindowsNative.update(status, transcript: transcript, state: state)

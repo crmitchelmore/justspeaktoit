@@ -169,6 +169,17 @@ let appleSyncTestSources: [String] = [
     "NativeRecordParityTests.swift"
 ]
 
+// Keep the existing root assets in one resource target, without collecting
+// unrelated branding or platform icon directories added by other targets.
+let feedbackResourceDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+    .appendingPathComponent("Resources")
+let feedbackResourceExclusions = try FileManager.default.contentsOfDirectory(atPath: feedbackResourceDirectory.path)
+    .filter { $0 != "Sounds" && $0 != "RecordingFeedbackResources.swift" }.sorted()
+let feedbackResourcesTarget = Target.target(
+    name: "SpeakFeedbackResources", dependencies: ["SpeakCore"], path: "Resources",
+    exclude: feedbackResourceExclusions, sources: ["RecordingFeedbackResources.swift"], resources: [.copy("Sounds")]
+)
+
 let portablePackage = Package(
     name: "SpeakApp",
     defaultLocalization: "en",
@@ -178,6 +189,7 @@ let portablePackage = Package(
         .library(name: "SpeakDesktop", targets: ["SpeakDesktop"])
     ],
     targets: [
+        feedbackResourcesTarget,
         // Release-train identity moved with WatchCore. Keep the native Watch
         // surfaces excluded from the portable graph as they were before the move.
         .target(name: "SpeakWatchCore", path: "Sources/SpeakWatchCore", exclude: [
@@ -209,7 +221,10 @@ let portablePackage = Package(
         // only: Apple apps keep their native CloudKit engines.
         .target(name: "SpeakDesktopSync", dependencies: ["SpeakDesktop", "SpeakSync", "SpeakCore"]),
         .target(name: "SpeakTestSupport", path: "Tests/SpeakTestSupport"),
-        .testTarget(name: "SpeakDesktopTests", dependencies: ["SpeakDesktop", "SpeakCore", "SpeakTestSupport"]),
+        .testTarget(
+            name: "SpeakDesktopTests",
+            dependencies: ["SpeakDesktop", "SpeakCore", "SpeakTestSupport", "SpeakFeedbackResources"]
+        ),
         .testTarget(
             name: "SpeakDesktopHostTests",
             dependencies: [
@@ -293,7 +308,10 @@ if windowsTargetBuild {
         ),
         .target(
             name: "SpeakWindowsPlatform",
-            dependencies: ["SpeakCore", "SpeakDesktop", "SpeakSync", "CWindowsSupport", "CWindowsAutomation"]
+            dependencies: [
+                "SpeakCore", "SpeakDesktop", "SpeakSync", "SpeakFeedbackResources", "CWindowsSupport",
+                "CWindowsAutomation"
+            ]
         ),
         .executableTarget(
             name: "SpeakWindows", dependencies: [
@@ -357,7 +375,9 @@ if linuxTargetBuild {
         ),
         .target(
             name: "SpeakLinuxPlatform",
-            dependencies: ["SpeakCore", "SpeakDesktop", "SpeakSync", "SpeakDesktopSync", "CLinuxSupport"]
+            dependencies: [
+                "SpeakCore", "SpeakDesktop", "SpeakSync", "SpeakDesktopSync", "SpeakFeedbackResources", "CLinuxSupport"
+            ]
         ),
         .target(
             name: "SpeakLinuxWebSocket",
@@ -443,8 +463,12 @@ let package = portableCoreBuild ? portablePackage : Package(
         )
     ],
     targets: [
+        feedbackResourcesTarget,
         .target(name: "SpeakDesktop", dependencies: ["SpeakCore"]),
-        .testTarget(name: "SpeakDesktopTests", dependencies: ["SpeakDesktop", "SpeakCore", "SpeakTestSupport"]),
+        .testTarget(
+            name: "SpeakDesktopTests",
+            dependencies: ["SpeakDesktop", "SpeakCore", "SpeakTestSupport", "SpeakFeedbackResources"]
+        ),
         .target(
             name: "SpeakHotKeys",
             path: "Sources/SpeakHotKeys"

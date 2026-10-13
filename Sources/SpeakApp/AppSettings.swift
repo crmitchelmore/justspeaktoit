@@ -1459,14 +1459,15 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       defaults.object(forKey: DefaultsKey.autoCorrectionsPromotionThreshold.rawValue) as? Int ?? 2
 
     recordingSoundsEnabled =
-      defaults.object(forKey: DefaultsKey.recordingSoundsEnabled.rawValue) as? Bool ?? true
+      defaults.object(forKey: DefaultsKey.recordingSoundsEnabled.rawValue) as? Bool ?? RecordingFeedbackDefaults.enabled
     recordingSoundProfile =
       RecordingSoundPlayer.SoundProfile(
         rawValue: defaults.string(forKey: DefaultsKey.recordingSoundProfile.rawValue)
-          ?? RecordingSoundPlayer.SoundProfile.classic.rawValue
-      ) ?? .classic
+          ?? RecordingFeedbackDefaults.profile.rawValue
+      ) ?? RecordingFeedbackDefaults.profile
     recordingSoundVolume =
-      Float(defaults.object(forKey: DefaultsKey.recordingSoundVolume.rawValue) as? Double ?? 0.7)
+      Float(defaults.object(forKey: DefaultsKey.recordingSoundVolume.rawValue) as? Double
+        ?? RecordingFeedbackDefaults.volume)
 
     ensureRecordingsDirectoryExists()
     applyAppVisibility()

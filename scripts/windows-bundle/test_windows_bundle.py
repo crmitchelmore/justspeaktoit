@@ -529,6 +529,29 @@ class ApplicationInputTests(unittest.TestCase):
         self.assertEqual(application["executable"], self.executable)
         self.assertEqual(list(application["resources"]), ["SpeakApp_SpeakCore.resources/Info.plist"])
 
+    def test_all_eight_recording_feedback_assets_are_collected_byte_exact(self):
+        sounds = HERE.parent.parent / "Resources" / "Sounds"
+        expected_names = {
+            "recording_start.m4a", "recording_stop.m4a",
+            "recording_start_bubbly.m4a", "recording_stop_bubbly.m4a",
+            "recording_start_futuristic.m4a", "recording_stop_futuristic.m4a",
+            "recording_start_soft.m4a", "recording_stop_soft.m4a",
+        }
+        self.assertEqual({path.name for path in sounds.iterdir()}, expected_names)
+        directory = self.app / "SpeakApp_SpeakFeedbackResources.resources" / "Sounds"
+        directory.mkdir(parents=True)
+        expected = {}
+        for name in sorted(expected_names):
+            body = (sounds / name).read_bytes()
+            self.assertEqual(body[4:8], b"ftyp")
+            self.assertGreater(len(body), 12)
+            self.assertLessEqual(len(body), 1_048_576)
+            (directory / name).write_bytes(body)
+            expected["SpeakApp_SpeakFeedbackResources.resources/Sounds/" + name] = body
+        resources = BUILD.load_application(self.app, self.policy)["resources"]
+        expected["SpeakApp_SpeakCore.resources/Info.plist"] = b"<plist/>"
+        self.assertEqual(resources, expected)
+
     def test_debug_or_test_enabled_metadata_is_refused(self):
         for key, value in [("configuration", "debug"), ("appBuiltForTesting", True), ("host", "Windows")]:
             metadata = dict(self.metadata)

@@ -45,6 +45,30 @@ final class AppSettingsDefaultsTests: XCTestCase {
         XCTAssertEqual(settings.assemblyAIKeyterms, portable.text("assemblyAIKeyterms"))
     }
 
+    @MainActor
+    func testRecordingFeedbackDefaultsAndAliases_MatchTheCanonicalPortableCatalogue() {
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertEqual(settings.recordingSoundsEnabled, RecordingFeedbackDefaults.enabled)
+        XCTAssertEqual(settings.recordingSoundProfile, RecordingFeedbackDefaults.profile)
+        XCTAssertEqual(settings.recordingSoundVolume, Float(RecordingFeedbackDefaults.volume))
+        XCTAssertEqual(RecordingSoundPlayer.SoundProfile.allCases, RecordingFeedbackProfile.allCases)
+        XCTAssertEqual(RecordingSoundPlayer.RecordingSound.start, RecordingFeedbackSound.start)
+        XCTAssertEqual(RecordingSoundPlayer.RecordingSound.stop, RecordingFeedbackSound.stop)
+    }
+
+    @MainActor
+    func testRecordingFeedbackStoredPreferences_SurviveCatalogueExtraction() {
+        defaults.set(false, forKey: "recordingSoundsEnabled")
+        defaults.set("futuristic", forKey: "recordingSoundProfile")
+        defaults.set(0.34, forKey: "recordingSoundVolume")
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertFalse(settings.recordingSoundsEnabled)
+        XCTAssertEqual(settings.recordingSoundProfile, .futuristic)
+        XCTAssertEqual(settings.recordingSoundVolume, Float(0.34))
+        settings.recordingSoundProfile = .soft
+        XCTAssertEqual(AppSettings(defaults: defaults).recordingSoundProfile, .soft)
+    }
+
     // MARK: - Transcription keywords
 
     /// Issue #849: macOS stored the keyword list under `assemblyAIKeyterms`

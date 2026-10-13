@@ -5,6 +5,28 @@ macOS `AppSettings.DefaultsKey` has 91 keys
 (`Sources/SpeakApp/AppSettings.swift:289-381`), plus preferences and collections
 outside that enum. Track remaining product acceptance in #1157.
 
+## Recording feedback foundation (not native parity yet)
+
+`SpeakCore/RecordingFeedback.swift` now owns the four existing profiles, eight
+M4A names, enabled/classic/0.7 defaults and the Mac player's volume-squared curve.
+The Apple player keeps its nested API names as aliases to this catalogue and
+still reads its established main-bundle resources. `SpeakFeedbackResources`
+owns the existing root `Resources/Sounds` directory with `.copy("Sounds")`;
+Windows/Linux platform targets depend on it without copying or changing assets.
+Its resolver refuses links, non-regular files and empty or over-1-MB assets.
+Resource tests assert all eight names and M4A headers in the actual SwiftPM
+bundle; a Windows production-collector test asserts all eight byte-exact files.
+Linux production staging also needs the sibling-resource collector in #1212.
+
+`SpeakDesktop/DesktopRecordingFeedback.swift` provides isolated feedback output
+ownership, cancellable preparation, reserved recording IDs, capture-ready/normal
+finish cues, duplicate/stale rejection, explicit disabled previews, volume-only
+reuse and awaited cleanup. Fake-output lifecycle tests do **not** prove native
+decoding, sound output or warm-path latency. Dedicated Windows/Linux preloaded
+output adapters, host wiring, native controls and packaged codec/latency evidence
+remain outstanding. These three preferences stay **Unimplemented** in the
+matrix and do not increase the fourteen editable preference count.
+
 ## Implemented preference journey
 
 Windows uses **Dictation preferences...** from General, Transcription,

@@ -154,8 +154,15 @@ public final class CloudKitWebComparisonSyncTransport: ComparisonSyncTransport, 
     private let session: CloudKitWebSession?
     private let beforeRequest: @Sendable () async throws -> Void
 
+    public init(client: CloudKitWebServicesClient, consent: CloudKitWebSyncConsent) throws {
+        try consent.require(.comparisonRounds)
+        self.client = client
+        session = nil
+        beforeRequest = {}
+    }
+
     public init(
-        client: CloudKitWebServicesClient, consent: CloudKitWebSyncConsent, session: CloudKitWebSession? = nil,
+        client: CloudKitWebServicesClient, consent: CloudKitWebSyncConsent, session: CloudKitWebSession?,
         beforeRequest: @escaping @Sendable () async throws -> Void = {}
     ) throws {
         try consent.require(.comparisonRounds)

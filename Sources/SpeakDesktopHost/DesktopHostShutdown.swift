@@ -112,6 +112,8 @@ extension DesktopHostController {
         transcriptionTask?.cancel()
         historyDeletionTask?.cancel()
         folderRevealTask?.cancel()
+        audioCleanupTask?.cancel()
+        audioCleanupConfirmation = nil
         postProcessingTask?.cancel()
         liveFinalisation?.cancel()
         var report = DesktopHostShutdownReport()

@@ -24,6 +24,7 @@ package protocol DesktopHostPlayback: AnyObject, Sendable {
     func stop(unless recordID: UUID)
     /// Returns once output is acknowledged silent.
     func stopAndWait() async throws
+    func stopSavedAudioAndWait() async throws
     func close() async throws
 }
 
@@ -84,6 +85,7 @@ package protocol DesktopHostPlatform: Sendable {
     /// Opens a saved recording in the user's default application.
     static func openFile(_ url: URL) throws
     static func revealDirectory(_ url: URL) throws
+    static func confirmAudioCleanup(id: UUID, count: Int) throws
     static func copyToClipboard(_ text: String) throws
 
     // Automatic output and playback.
@@ -145,6 +147,9 @@ package protocol DesktopHostPlatform: Sendable {
 package extension DesktopHostPlatform {
     static func revealDirectory(_ url: URL) throws {
         throw DesktopHostError(message: "Opening recording folders is unavailable on this host.")
+    }
+    static func confirmAudioCleanup(id: UUID, count: Int) throws {
+        throw DesktopHostError(message: "Recording audio cleanup is unavailable on this host.")
     }
     static func update(_ status: String) { update(status, transcript: nil, state: -1) }
     /// Hosts without a dashboard or History header show no totals.

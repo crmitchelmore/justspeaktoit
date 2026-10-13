@@ -96,6 +96,10 @@ enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPla
         }
     }
 
+    package static func confirmAudioCleanup(id: UUID, count: Int) throws {
+        try WindowsNative.checked { jsti_window_confirm_audio_cleanup(id.uuidString, count, $0, $1) }
+    }
+
     package static func copyToClipboard(_ text: String) throws {
         try text.withCString { text in
             try WindowsNative.checked { jsti_clipboard_write(text, $0, $1) }

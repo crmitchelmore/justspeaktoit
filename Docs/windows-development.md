@@ -519,8 +519,25 @@ General now opens the actual recording storage folder through Explorer or the
 desktop file manager. This read-only action does not alter History, expose a
 different folder as a fallback, or drain a blocking shell request on the native
 settings queue. Launch errors are displayed and closing bounds outstanding work.
-The desktop folder contains both audio and metadata; audio-only housekeeping and
-changing the recording location remain separate outstanding workflows.
+The desktop folder contains both audio and metadata. General also confirms
+deletion of saved recording audio without changing History entries, transcripts
+or the History deletion journal. The confirmation freezes flat app-owned
+captured/imported audio, including canonical orphan files and audio kept after a
+History deletion; synthesis/conversion/comparison staging and unrelated files
+are excluded. Later arrivals cannot expand its authority. Starting another
+operation invalidates an outstanding confirmation.
+
+Cleanup checks regular-file/link status and the captured size, timestamps and
+available filesystem identifiers again before each removal. Detectably replaced
+files are kept and individual failures are reported; cancellation leaves
+unadmitted files. These are path-based checks, not an atomic native-handle
+conditional deletion guarantee: identical replacements and changes between the
+final check and removal remain outside that boundary. There is no automatic
+cleanup retry or expiry policy; retry requires a new explicit confirmation.
+Raw History playback is stopped independently of spoken/typed Voice output.
+History metadata stays byte-for-byte intact; intentionally removed audio is no
+longer available for playback, opening or transcription retry. Changing the
+recording location and lossless migration remain outstanding.
 
 The filter editor scrolls vertically when the available work area is too short;
 keyboard traversal reveals the focused control. Long model names have native

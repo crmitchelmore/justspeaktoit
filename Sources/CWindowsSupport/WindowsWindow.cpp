@@ -57,6 +57,7 @@ static int saveNativeSnapshot(HWND window, const char *path, char *error, size_t
 namespace {
 constexpr UINT updateMessage = WM_APP + 1;
 constexpr UINT profilesMessage = WM_APP + 17;
+constexpr UINT audioCleanupMessage = WM_APP + 23;
 constexpr int hotkeyID = 1;
 constexpr int modelRefreshID = 140;
 constexpr int modelStatusID = 141;
@@ -88,6 +89,7 @@ constexpr int localModelsID = 174;
 constexpr int historyFiltersID = 460;
 constexpr int historyDeleteID = 461, historyClearID = 462;
 constexpr int recordingsFolderLabelID = 463, recordingsFolderID = 464;
+constexpr int audioCleanupID = 465;
 constexpr int sourceID = 175;
 // Model modes: bit 0 is live, bit 1 is local (on-device).
 constexpr int modeCount = 4;
@@ -197,6 +199,8 @@ struct WindowState {
     std::string pendingHistorySelection;
     std::string selectedHistoryID;
     std::string allHistoryIDs;
+    std::string audioCleanupToken;
+    size_t audioCleanupCount = 0;
     JSTIWindowCallback callback = nullptr;
     void *context = nullptr;
     HFONT font = nullptr;
@@ -475,6 +479,7 @@ void updateHistoryControls(HWND window, int recording) {
     EnableWindow(GetDlgItem(window, historyFiltersID), recording == 0);
     EnableWindow(GetDlgItem(window, historyDeleteID), recording == 0 && selected);
     EnableWindow(GetDlgItem(window, historyClearID), recording == 0 && !historyManagementIDs().empty());
+    EnableWindow(GetDlgItem(window, audioCleanupID), recording == 0);
     jsti_history_filters_enabled(recording == 0);
     SetDlgItemTextW(window, historyFiltersID, jsti_history_filters_label().c_str());
     EnableWindow(GetDlgItem(window, clearSearchID), recording == 0 && searching(window));
@@ -564,7 +569,7 @@ unsigned pagesOf(int identifier) {
     case readAloudID: case stopPlaybackID: return page(historyPage) | page(voicePage);
     case voiceSettingsID: return page(voicePage);
     case 94: case microphoneID: case textOutputID: case appearanceLabelID: case appearanceID: case automationID:
-    case loginItemID: case recordingsFolderLabelID: case recordingsFolderID:
+    case loginItemID: case recordingsFolderLabelID: case recordingsFolderID: case audioCleanupID:
         return page(generalPage);
     case processingID: return page(postProcessingPage);
     case profilesID: return page(profilesPage);
@@ -846,22 +851,24 @@ void layoutSettings(HWND window, const RECT &content) {
         break;
     }
     case generalPage: {
-        int y = layoutSettingsCard(window, top, content, 0xE720, L"Microphone", L"", row);
+        int y = layoutSettingsCard(window, top, content, 0xE720, L"Audio and output",
+            L"Finished text goes back into the app you were in when dictation started, or to the clipboard.",
+            2 * row + scale(window, 12));
         label(94, y); control(microphoneID, y);
-        top = y + row + scale(window, 20) + gap;
-        y = layoutSettingsCard(window, top, content, 0xE8C8, L"Output",
-            L"Finished text goes back into the app you were in when dictation started, or to the clipboard.", row);
-        place(window, textOutputID, box(left, y, scale(window, 170), row));
-        top = y + row + scale(window, 20) + gap;
-        // The Mac's App Behaviour card. The note appears only when the system
-        // decides Launch at login, so the page still fits the minimum height.
+        place(window, textOutputID, box(left, y + row + scale(window, 12), scale(window, 170), row));
+        top = y + 2 * row + scale(window, 32) + gap;
+        // Combining the input/output controls leaves room for housekeeping at
+        // the native minimum size without shrinking the controls.
         y = layoutSettingsCard(window, top, content, 0xE713, L"App behaviour", state.loginItemNote,
                                3 * row + scale(window, 24));
         label(appearanceLabelID, y); control(appearanceID, y, scale(window, 220));
         place(window, loginItemID, RECT{left + scale(window, 188 + 220 + 24), y, right, y + row});
         place(window, automationID, RECT{left, y + row + scale(window, 12), right, y + 2 * row + scale(window, 12)});
         label(recordingsFolderLabelID, y + 2 * row + scale(window, 24));
-        control(recordingsFolderID, y + 2 * row + scale(window, 24), scale(window, 220));
+        control(recordingsFolderID, y + 2 * row + scale(window, 24), scale(window, 140));
+        place(window, audioCleanupID, RECT{
+            left + scale(window, 188 + 140 + 12), y + 2 * row + scale(window, 24),
+            right, y + 3 * row + scale(window, 24)});
         break;
     }
     case transcriptionPage: {
@@ -1523,7 +1530,8 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"Launch at &login", BS_PUSHBUTTON | WS_TABSTOP, loginItemID) &&
         add(L"BUTTON", L"Allow &automation (speak command and MCP)", BS_PUSHBUTTON | WS_TABSTOP, automationID) &&
         add(L"STATIC", L"Recording storage", 0, recordingsFolderLabelID) &&
-        add(L"BUTTON", L"Open recordings &folder", BS_PUSHBUTTON | WS_TABSTOP, recordingsFolderID) &&
+        add(L"BUTTON", L"Open &folder", BS_PUSHBUTTON | WS_TABSTOP, recordingsFolderID) &&
+        add(L"BUTTON", L"Delete all a&udio...", BS_PUSHBUTTON | WS_TABSTOP, audioCleanupID) &&
         add(L"BUTTON", L"i&Cloud sync settings…", BS_PUSHBUTTON | WS_TABSTOP, cloudSyncID) &&
         add(L"BUTTON", L"View on &GitHub", BS_PUSHBUTTON | WS_TABSTOP, githubID) &&
         add(L"BUTTON", L"Report an iss&ue", BS_PUSHBUTTON | WS_TABSTOP, issueID) &&
@@ -2036,6 +2044,28 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         return 0;
     case updateMessage:
         applyUpdate(window); return 0;
+    case audioCleanupMessage: {
+        std::string token;
+        size_t count;
+        {
+            std::lock_guard<std::mutex> lock(state.mutex);
+            token.swap(state.audioCleanupToken);
+            count = state.audioCleanupCount;
+        }
+        if (token.empty()) return 0;
+        bool confirmed = false;
+        if (idleControl(window, audioCleanupID) && IsWindowEnabled(window)) {
+            const std::wstring body = L"Permanently delete " + std::to_wstring(count) +
+                L" saved audio file(s), including audio kept after deleting History entries?\n\n"
+                L"History entries and transcripts will be kept. Recordings saved after this "
+                L"confirmation will not be deleted. This cannot be undone.";
+            confirmed = MessageBoxW(window, body.c_str(), L"Delete saved recordings?",
+                MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) == IDYES;
+        }
+        if (state.callback) state.callback(JSTI_EVENT_AUDIO_CLEANUP_RESPONSE, token.c_str(),
+            confirmed ? 1 : 0, state.context);
+        return 0;
+    }
     case WM_HOTKEY:
         jsti_hotkey_message(window, message, wparam);
         return 0;
@@ -2120,6 +2150,11 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         }
         case recordingsFolderID:
             if (HIWORD(wparam) == BN_CLICKED) emit(window, JSTI_EVENT_RECORDINGS_FOLDER, "");
+            return 0;
+        case audioCleanupID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, audioCleanupID)) {
+                emit(window, JSTI_EVENT_AUDIO_CLEANUP, "");
+            }
             return 0;
         case githubID: case issueID: case privacyID: {
             if (HIWORD(wparam) != BN_CLICKED) return 0;
@@ -2356,7 +2391,10 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         jsti::tray::remove();
         backdrop.release();
         jsti_hotkey_stop(window);
-        { std::lock_guard<std::mutex> lock(state.mutex); state.window = nullptr; state.posted = false; }
+        {
+            std::lock_guard<std::mutex> lock(state.mutex);
+            state.window = nullptr; state.posted = false; state.audioCleanupToken.clear();
+        }
         PostQuitMessage(0); return 0;
     }
     return DefWindowProcW(window, message, wparam, lparam);
@@ -2390,6 +2428,24 @@ int jsti_window_set_history_management(const char *identifiers) {
     if (state.window && !state.posted) {
         state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
         if (!state.posted) return -1;
+    }
+    return 0;
+}
+
+int jsti_window_confirm_audio_cleanup(const char *token, size_t count, char *error, size_t capacity) {
+    std::wstring checked;
+    if (!token || !jsti::wide(token, checked) || checked.empty() || count == 0) {
+        return jsti::fail("The recording audio confirmation is invalid.", error, capacity);
+    }
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (!state.window || !state.audioCleanupToken.empty()) {
+        return jsti::fail("The recording audio confirmation is unavailable.", error, capacity);
+    }
+    state.audioCleanupToken = token;
+    state.audioCleanupCount = count;
+    if (!PostMessageW(state.window, audioCleanupMessage, 0, 0)) {
+        state.audioCleanupToken.clear();
+        return jsti::fail("Could not show the recording audio confirmation.", error, capacity);
     }
     return 0;
 }
@@ -3092,7 +3148,8 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         return jsti::fail("Window checks must run on the UI thread after READY.", error, errorCapacity);
     }
     char folderError[256] = {};
-    if (!GetDlgItem(window, recordingsFolderID) ||
+    if (!GetDlgItem(window, recordingsFolderID) || !GetDlgItem(window, audioCleanupID) ||
+        jsti_window_confirm_audio_cleanup(nullptr, 1, folderError, sizeof(folderError)) == 0 ||
         jsti_shell_open_directory(nullptr, folderError, sizeof(folderError)) == 0) {
         return jsti::fail("Recording folder control or invalid-path refusal failed.", error, errorCapacity);
     }
@@ -3147,7 +3204,10 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             MapWindowPoints(nullptr, window, reinterpret_cast<POINT *>(&bounds), 2);
             if (bounds.left < 0 || bounds.top < 0 || bounds.right > client.right || bounds.bottom > client.bottom ||
                 bounds.right <= bounds.left || bounds.bottom <= bounds.top) {
-                failure = "A native control falls outside the minimum desktop window bounds.";
+                failure = "Native control " + std::to_string(GetDlgCtrlID(control)) +
+                    " falls outside the minimum desktop window bounds (" +
+                    std::to_string(bounds.left) + "," + std::to_string(bounds.top) + "-" +
+                    std::to_string(bounds.right) + "," + std::to_string(bounds.bottom) + ").";
                 return false;
             }
         }

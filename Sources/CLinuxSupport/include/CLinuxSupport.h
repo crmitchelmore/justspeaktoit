@@ -50,7 +50,9 @@ enum {
     JSTI_EVENT_AZURE_RESOURCE = 34,
     JSTI_EVENT_HISTORY_FILTERS = 90, /* text: DesktopHistoryFilter JSON */
     JSTI_EVENT_HISTORY_DELETE = 91, /* text: frozen newline-separated UUIDs; index: 1 removes owned audio */
-    JSTI_EVENT_RECORDINGS_FOLDER = 93
+    JSTI_EVENT_RECORDINGS_FOLDER = 93,
+    JSTI_EVENT_AUDIO_CLEANUP = 94,
+    JSTI_EVENT_AUDIO_CLEANUP_RESPONSE = 95 /* text: confirmation UUID; index: 1 confirms, 0 cancels */
 };
 
 /* Read aloud, Appearance and Launch at login. Linux-only numbers 40-46. */
@@ -148,6 +150,7 @@ int32_t jsti_window_set_microphones(
 int32_t jsti_window_set_history(const JSTIHistoryRow *rows, size_t count, const char *selected_id);
 /* Complete retained IDs, including filtered-out rows. Copied for Clear confirmation. */
 int32_t jsti_window_set_history_management(const char *identifiers);
+int32_t jsti_window_confirm_audio_cleanup(const char *token, size_t count);
 /* The dashboard totals (`all` saved records) and the History header totals
  * (`visible`, the records the search shows). */
 int32_t jsti_window_set_insights(const JSTIInsights *all, const JSTIInsights *visible);

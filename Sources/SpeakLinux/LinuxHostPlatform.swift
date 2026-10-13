@@ -76,6 +76,12 @@ enum LinuxHostPlatform: DesktopHostPlatform {
         }
     }
 
+    package static func confirmAudioCleanup(id: UUID, count: Int) throws {
+        guard jsti_window_confirm_audio_cleanup(id.uuidString, count) == 0 else {
+            throw DesktopHostError(message: "Could not show the recording audio confirmation.")
+        }
+    }
+
     package static func hud(_ state: DesktopHUDState) {
         _ = jsti_window_set_hud(state.phase.rawValue, state.headline, state.subheadline, state.liveText)
     }

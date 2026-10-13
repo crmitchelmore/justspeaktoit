@@ -28,6 +28,7 @@ final class FakePlayback: DesktopHostPlayback, @unchecked Sendable {
     func stop(announcing: Bool) {}
     func stop(unless recordID: UUID) {}
     func stopAndWait() async throws {}
+    func stopSavedAudioAndWait() async throws { await FakeLog.shared.stopSavedAudio() }
     func close() async throws {}
 }
 
@@ -40,6 +41,7 @@ final class FakeLog: @unchecked Sendable {
     private var hudStates: [DesktopHUDState] = []
     private var folders: [URL] = []
     private var directoryLauncher: (@Sendable (URL) throws -> Void)?
+    private var savedAudioStopper: (@Sendable () async -> Void)?
     var keys: [String: String] = [:]
 
     func reset() {
@@ -49,6 +51,7 @@ final class FakeLog: @unchecked Sendable {
             hudStates = []
             folders = []
             directoryLauncher = nil
+            savedAudioStopper = nil
             keys = [:]
         }
     }
@@ -60,6 +63,13 @@ final class FakeLog: @unchecked Sendable {
         try launcher?(folder)
     }
     var revealedFolders: [URL] { lock.withLock { folders } }
+    func setSavedAudioStopper(_ stopper: (@Sendable () async -> Void)?) {
+        lock.withLock { savedAudioStopper = stopper }
+    }
+    func stopSavedAudio() async {
+        let stopper = lock.withLock { savedAudioStopper }
+        await stopper?()
+    }
     func hud(_ state: DesktopHUDState) { lock.withLock { hudStates.append(state) } }
     var huds: [DesktopHUDState] { lock.withLock { hudStates } }
     func status(_ text: String) { lock.withLock { statuses.append(text) } }
@@ -103,6 +113,9 @@ enum FakePlatform: DesktopHostPlatform {
     }
     static func openFile(_ url: URL) throws {}
     static func revealDirectory(_ url: URL) throws { try FakeLog.shared.reveal(url) }
+    static func confirmAudioCleanup(id: UUID, count: Int) throws {
+        FakeLog.shared.status("Audio confirmation \(id.uuidString): \(count)")
+    }
     static func copyToClipboard(_ text: String) throws { FakeLog.shared.copy(text) }
     static func makeOutputJob(options: FakeTextOutput, target: String?) -> FakeJob? {
         options.label == "copy" || target != nil ? FakeJob(label: options.label, target: target) : nil
@@ -367,29 +380,4 @@ final class DesktopHostControllerTests: XCTestCase {
         try Data().write(to: empty)
         XCTAssertThrowsError(try DesktopHostImport.validate(empty))
     }
-}
-
-/// Transcription blocks until cancelled or released.
-final class GatedEffects: DesktopHostEffects, @unchecked Sendable {
-    typealias Platform = FakePlatform
-    let gate: Gate
-    init(gate: Gate) { self.gate = gate }
-    func apiKey(name: String) throws -> String { FakeLog.shared.key(name) }
-    func makeCapture(
-        context: DesktopCaptureContext, deviceID: String, sampleRate: Int, frameMilliseconds: Int
-    ) throws -> any DesktopRecordingCapture { SyntheticCapture(context: context) }
-    func makeLiveClient(
-        model: String, key: String, language: String?, azureEndpoint: String
-    ) -> (any FinalizingStreamingTranscriptionClient)? {
-        nil
-    }
-    func transcribe(
-        _ request: DesktopHostTranscriptionRequest, with controller: DesktopHostController<FakePlatform>
-    ) async throws -> TranscriptionResult {
-        await gate.pass()
-        try Task.checkCancellation()
-        throw CancellationError()
-    }
-    func perform(_ job: FakeJob, text: String) -> String { "Delivered." }
-    func writeSettings(_ data: Data, to url: URL) throws { try data.write(to: url, options: .atomic) }
 }

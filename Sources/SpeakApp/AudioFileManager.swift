@@ -722,7 +722,7 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
       return []
     }
 
-    let allowedExtensions: Set<String> = ["m4a", "wav", "mp3", "aac", "m4b", "caf"]
+    let allowedExtensions = RecordingAudioFormats.macArchiveExtensions
     let activeRecording = activeRecordingURL?.resolvingSymlinksInPath().standardizedFileURL
 
     var summaries: [RecordingSummary] = []

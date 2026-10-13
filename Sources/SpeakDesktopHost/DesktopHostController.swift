@@ -99,6 +99,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var historyDeletionInProgress = false
     var historyDeletionTask: Task<Void, Never>?
     var folderRevealTask: Task<Void, Error>?
+    var audioCleanupTask: Task<Void, Never>?
+    var audioCleanupConfirmation: (id: UUID, snapshot: DesktopRecordingAudioSnapshot)?
     var liveUpdates: Task<Void, Never>?
     var liveFinalisation: DesktopLiveSession?
     /// The recording the HUD follows, from Record until its result.

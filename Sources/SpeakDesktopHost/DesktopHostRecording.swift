@@ -26,7 +26,10 @@ extension DesktopHostController {
             // so shutdown cannot return while startup is suspended here.
             try await saveRecord(record)
             guard !closed else { throw CancellationError() }
-            live = makeLiveSession(model: profile.modelIdentifier, key: key, id: id, language: profile.language)
+            live = try await makeLiveSession(
+                model: profile.modelIdentifier, key: key, id: id, language: profile.language
+            )
+            guard !closed else { throw CancellationError() }
             live?.start()
             let context = DesktopCaptureContext(file: file, live: live) { message in
                 Task { await self.captureFailed(message, recordingID: id) }
@@ -46,22 +49,27 @@ extension DesktopHostController {
             if let live { monitorLive(live) }
         } catch {
             live?.cancel()
-            // Always close the WAV, including failure before native allocation.
-            var failed = record
-            let startupFailure = error
-            failed.failure = closed ? "Recording cancelled when the app closed. Audio retained."
-                : startupFailure.localizedDescription
-            do { _ = try file.finish() } catch {
-                failed.failure = "\(failed.failure ?? "Recording failed.") "
-                    + "Audio finalization failed: \(error.localizedDescription)"
-            }
-            do { try await saveRecord(failed) } catch {
-                throw DesktopHostError(message: "\(failed.failure ?? "Recording failed.") "
-                    + "History could not be saved: \(error.localizedDescription)")
-            }
-            throw startupFailure
+            try await saveStartupFailure(error, record: record, file: file)
+            throw error
         }
         announceRecording(id, profile: profile, trigger: trigger)
+    }
+
+    private func saveStartupFailure(
+        _ startupFailure: Error, record: DesktopRecordingStore.Record, file: PCMRecordingFile
+    ) async throws {
+        // Always close the WAV, including failure before native allocation.
+        var failed = record
+        failed.failure = closed ? "Recording cancelled when the app closed. Audio retained."
+            : startupFailure.localizedDescription
+        do { _ = try file.finish() } catch {
+            failed.failure = "\(failed.failure ?? "Recording failed.") "
+                + "Audio finalization failed: \(error.localizedDescription)"
+        }
+        do { try await saveRecord(failed) } catch {
+            throw DesktopHostError(message: "\(failed.failure ?? "Recording failed.") "
+                + "History could not be saved: \(error.localizedDescription)")
+        }
     }
 
     func stopCapture() throws -> StoppedRecording? {

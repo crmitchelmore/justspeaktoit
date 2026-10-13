@@ -111,6 +111,8 @@ enum {
     JSTI_PAGE_GENERAL,
     JSTI_PAGE_TRANSCRIPTION,
     JSTI_PAGE_POST_PROCESSING,
+    JSTI_PAGE_CORRECTIONS,
+    JSTI_PAGE_PRONUNCIATION,
     JSTI_PAGE_KEYBOARD,
     JSTI_PAGE_CLOUD_SYNC,
     JSTI_PAGE_ABOUT,
@@ -130,6 +132,9 @@ int32_t jsti_window_run(
 /* Safe from any thread; applied on the GTK main thread. No-ops before the
  * window exists or after it closes. `status` or `transcript` may be NULL. */
 int32_t jsti_window_update(const char *status, const char *transcript, int32_t state);
+/* Events 70 (action), 71 (load), index 0 corrections / 1 pronunciation;
+ * event 72 reads a selected recording's correction snapshot (kind 2). */
+int32_t jsti_vocabulary_set(int32_t kind, const char *payload, int32_t refresh);
 int32_t jsti_window_set_model_catalog(
     const JSTIModelRow *rows, size_t count, int32_t selected, const char *status, int32_t refreshing);
 int32_t jsti_window_set_microphones(

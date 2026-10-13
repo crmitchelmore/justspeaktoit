@@ -49,6 +49,9 @@ bool jsti_cloud_sync_available();
 void jsti_show_cloud_sync_settings(HWND owner);
 bool jsti_cloud_sync_settings_self_test(HWND owner, std::string &error);
 int jsti_window_recording_state();
+void jsti_show_vocabulary(HWND owner, int kind, void (*emit)(int, const char *, int));
+void jsti_show_vocabulary_result(HWND owner, const char *record, void (*emit)(int, const char *, int));
+bool jsti_vocabulary_self_test(HWND owner, std::string &error);
 
 namespace {
 constexpr UINT updateMessage = WM_APP + 1;
@@ -77,6 +80,8 @@ constexpr int transcriptLabelID = 92;
 // Read aloud emits an event; Voice… opens the native Voice output dialog.
 constexpr int readAloudID = 172;
 constexpr int voiceSettingsID = 173;
+constexpr int correctionsID = 180, pronunciationID = 181;
+constexpr int historyCorrectionsID = 182;
 // The Source picker (Remote/Local) and the Local models dialog button, which
 // takes the place of Refresh models while the Local source is selected.
 constexpr int sourceLabelID = 89;
@@ -88,7 +93,7 @@ constexpr int playbackIdle = 0, playbackPreparing = 1, playbackPlaying = 2, play
 const wchar_t *const playbackIdleText = L"00:00.00 / --:--";
 // Pages, in sidebar order, as on the Mac: Speak, then Settings.
 enum Page { dashboardPage, historyPage, voicePage, generalPage, transcriptionPage, postProcessingPage,
-            profilesPage, keyboardPage, cloudSyncPage, aboutPage, pageCount };
+            correctionsPage, pronunciationPage, profilesPage, keyboardPage, cloudSyncPage, aboutPage, pageCount };
 struct PageInfo { const wchar_t *title; const wchar_t *subtitle; wchar_t glyph; const char *name; };
 const PageInfo pageInfo[pageCount] = {
     {L"Dashboard", L"Ready to capture ideas instantly. Check your setup, follow your usage, and pick up your latest "
@@ -102,6 +107,8 @@ const PageInfo pageInfo[pageCount] = {
      "transcription"},
     {L"Post-processing", L"Optionally polish transcripts with an OpenRouter model. The original is always kept.", 0xE734,
      "post-processing"},
+    {L"Corrections", L"Your preferred spellings, applied before optional post-processing.", 0xE8D2, "corrections"},
+    {L"Pronunciation", L"Your dictionary for Read aloud. Entries stay on this device.", 0xE82D, "pronunciation"},
     {L"Profiles", L"Give specific apps their own model, language and clean-up prompt.", 0xE77B, "profiles"},
     {L"Keyboard", L"Start and stop dictation from anywhere with a global shortcut.", 0xE765, "keyboard"},
     {L"iCloud Sync", L"Keep History in step with your Mac, through your own iCloud account.", 0xE753, "icloud-sync"},
@@ -461,6 +468,7 @@ void updateHistoryControls(HWND window, int recording) {
     EnableWindow(GetDlgItem(window, searchID), recording == 0);
     EnableWindow(GetDlgItem(window, clearSearchID), recording == 0 && filtering);
     for (int id : {retryID, openAudioID}) EnableWindow(GetDlgItem(window, id), selected && recording == 0);
+    EnableWindow(GetDlgItem(window, historyCorrectionsID), selected && recording == 0 && state.historyPresentationReady);
     EnableWindow(GetDlgItem(window, exportID), selected && recording == 0 && state.historyPresentationReady);
     EnableWindow(GetDlgItem(window, readAloudID), selected && recording == 0 && state.historyPresentationReady &&
         jsti_voice_output_available());
@@ -540,7 +548,7 @@ unsigned pagesOf(int identifier) {
     case searchLabelID: case searchID: case clearSearchID: case 93: case historyID: case historyDetailID:
     case variantLabelID: case variantID: case retryID: case exportID: case openAudioID: case playbackLabelID:
     case playbackTimeID: case playPauseID: case historySessionsID: case historyErrorsID: case historyAverageID:
-    case historySpendID:
+    case historySpendID: case historyCorrectionsID:
         return page(historyPage);
     case readAloudID: case stopPlaybackID: return page(historyPage) | page(voicePage);
     case voiceSettingsID: return page(voicePage);
@@ -549,6 +557,8 @@ unsigned pagesOf(int identifier) {
         return page(generalPage);
     case processingID: return page(postProcessingPage);
     case profilesID: return page(profilesPage);
+    case correctionsID: return page(correctionsPage);
+    case pronunciationID: return page(pronunciationPage);
     case shortcutValueID: case shortcutID: return page(keyboardPage);
     case cloudSyncID: return page(cloudSyncPage);
     case githubID: case issueID: case privacyID: return page(aboutPage);
@@ -756,7 +766,7 @@ void layoutHistory(HWND window, const RECT &content) {
     place(window, variantLabelID, box(left, y + scale(window, 7), scale(window, 128), scale(window, 20)));
     place(window, variantID, RECT{left + scale(window, 132), y, right, y + scale(window, 200)});
     y += row + scale(window, 10);
-    const int actionsHeight = 3 * row + 2 * scale(window, 8) + scale(window, 26);
+    const int actionsHeight = 4 * row + 3 * scale(window, 8) + scale(window, 26);
     placeField(window, transcriptID, RECT{left, y, right, detail.bottom - inset - actionsHeight - scale(window, 10)}, true);
     int actions = detail.bottom - inset - actionsHeight;
     place(window, playbackLabelID, box(left, actions, scale(window, 80), scale(window, 20)));
@@ -777,6 +787,8 @@ void layoutHistory(HWND window, const RECT &content) {
     actions += row + scale(window, 8);
     place(window, exportID, cell(0, actions, 2));
     place(window, openAudioID, cell(1, actions, 2));
+    actions += row + scale(window, 8);
+    place(window, historyCorrectionsID, cell(0, actions, 1));
 }
 
 // A settings card: `rows` controls, top to bottom, with a description.
@@ -864,6 +876,19 @@ void layoutSettings(HWND window, const RECT &content) {
             L"Send finished transcripts to an OpenRouter model to fix punctuation and filler, or follow your own "
             L"instructions. Empty recordings stay empty, and History keeps the original beside the result.", row);
         place(window, processingID, box(left, y, scale(window, 230), row));
+        break;
+    }
+    case correctionsPage: case pronunciationPage: {
+        const bool corrections = state.page == correctionsPage;
+        const int y = layoutSettingsCard(window, top, content, 0xE8D2,
+            corrections ? L"Personal corrections" : L"Pronunciation dictionary",
+            corrections
+                ? L"Add canonical spellings and spoken variants, choose automatic, context or manual rules, "
+                  L"and preview applied corrections and suggestions. Original provider text stays in History. "
+                  L"Automatic observation of edits in other apps is not available on this platform."
+                : L"Edit words, phonetic pronunciations and text replacements. Regular expressions, case sensitivity "
+                  L"and entry order use the same matching as the Mac. Deepgram uses text replacements, not IPA tags.", row);
+        place(window, corrections ? correctionsID : pronunciationID, box(left, y, scale(window, 230), row));
         break;
     }
     case profilesPage: {
@@ -1461,6 +1486,7 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"&Export text", BS_PUSHBUTTON | WS_TABSTOP, exportID) &&
         add(L"BUTTON", L"&Open audio", BS_PUSHBUTTON | WS_TABSTOP, openAudioID) &&
         add(L"BUTTON", L"Rea&d aloud", BS_PUSHBUTTON | WS_TABSTOP, readAloudID) &&
+        add(L"BUTTON", L"Correction &results", BS_PUSHBUTTON | WS_TABSTOP, historyCorrectionsID) &&
         // The label carries the mnemonic and precedes Play/Pause, so Alt+B
         // and assistive technology reach the playback controls.
         add(L"STATIC", L"Play&back", 0, playbackLabelID) &&
@@ -1469,6 +1495,8 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"Stop", BS_PUSHBUTTON | WS_TABSTOP, stopPlaybackID) &&
         add(L"BUTTON", L"Choose &voice…", BS_PUSHBUTTON | WS_TABSTOP, voiceSettingsID) &&
         add(L"BUTTON", L"Edit app &profiles…", BS_PUSHBUTTON | WS_TABSTOP, profilesID) &&
+        add(L"BUTTON", L"Edit &corrections...", BS_PUSHBUTTON | WS_TABSTOP, correctionsID) &&
+        add(L"BUTTON", L"Edit &pronunciations...", BS_PUSHBUTTON | WS_TABSTOP, pronunciationID) &&
         add(L"STATIC", L"&Source", 0, sourceLabelID) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP, sourceID) &&
         add(L"STATIC", L"&Mode", 0, 95) &&
@@ -2017,6 +2045,23 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             return 0;
         }
         switch (LOWORD(wparam)) {
+        case historyCorrectionsID:
+            if (HIWORD(wparam) == BN_CLICKED && IsWindowEnabled(GetDlgItem(window, historyCorrectionsID))) {
+                const std::string record = selectedHistory(window);
+                if (!record.empty()) jsti_show_vocabulary_result(window, record.c_str(),
+                    [](int event, const char *payload, int kind) {
+                        if (state.callback) state.callback(event, payload, kind, state.context);
+                    });
+            }
+            return 0;
+        case correctionsID: case pronunciationID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, LOWORD(wparam))) {
+                jsti_show_vocabulary(window, LOWORD(wparam) == correctionsID ? 0 : 1,
+                    [](int event, const char *payload, int kind) {
+                        if (state.callback) state.callback(event, payload, kind, state.context);
+                    });
+            }
+            return 0;
         case profilesID:
             if (idleControl(window, profilesID)) emit(window, 17);
             return 0;
@@ -3740,6 +3785,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         };
         auto observe = [](void *context) { return static_cast<Event *>(context)->event; };
         return jsti_settings_self_test(window, failure) && jsti_profiles_self_test(window, failure) &&
+            jsti_vocabulary_self_test(window, failure) &&
             jsti_text_output_settings_self_test(window, textOutputID, setRecording, recordingBlocked, &observed, failure) &&
             jsti_hotkey_self_test(window, observe, &observed, failure) && jsti_voice_settings_self_test(window, failure) &&
             jsti_local_models_self_test(window, failure) && jsti_cloud_sync_settings_self_test(window, failure) &&

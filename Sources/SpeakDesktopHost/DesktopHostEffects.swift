@@ -18,13 +18,17 @@ package struct DesktopHostTranscriptionRequest: Sendable {
     package let key: String
     package let duration: TimeInterval
     package let language: String?
+    package let keywords: [String]
 
-    package init(audio: URL, model: String, key: String, duration: TimeInterval, language: String?) {
+    package init(
+        audio: URL, model: String, key: String, duration: TimeInterval, language: String?, keywords: [String] = []
+    ) {
         self.audio = audio
         self.model = model
         self.key = key
         self.duration = duration
         self.language = language
+        self.keywords = keywords
     }
 }
 
@@ -42,6 +46,9 @@ package protocol DesktopHostEffects<Platform>: Sendable {
     func makeLiveClient(
         model: String, key: String, language: String?, azureEndpoint: String
     ) -> (any FinalizingStreamingTranscriptionClient)?
+    func makeLiveClient(
+        model: String, key: String, language: String?, azureEndpoint: String, options: LiveClientOptions
+    ) -> (any FinalizingStreamingTranscriptionClient)?
     func transcribe(
         _ request: DesktopHostTranscriptionRequest, with controller: DesktopHostController<Platform>
     ) async throws -> TranscriptionResult
@@ -49,6 +56,14 @@ package protocol DesktopHostEffects<Platform>: Sendable {
     func perform(_ job: Platform.OutputJob, text: String) -> String
     /// Replaces the settings file atomically.
     func writeSettings(_ data: Data, to url: URL) throws
+}
+
+package extension DesktopHostEffects {
+    func makeLiveClient(
+        model: String, key: String, language: String?, azureEndpoint: String, options: LiveClientOptions
+    ) -> (any FinalizingStreamingTranscriptionClient)? {
+        makeLiveClient(model: model, key: key, language: language, azureEndpoint: azureEndpoint)
+    }
 }
 
 /// Owned until native capture stop has joined its worker, so no callback sees

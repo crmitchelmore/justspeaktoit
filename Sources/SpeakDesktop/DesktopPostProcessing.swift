@@ -67,6 +67,8 @@ public enum DesktopPostProcessing {
         rawText: String,
         options: Options,
         apiKey: String,
+        lexiconDirectives: [String] = [],
+        lexiconContextTags: [String] = [],
         session: URLSession = .shared
     ) async throws -> Outcome {
         try Task.checkCancellation()
@@ -83,7 +85,9 @@ public enum DesktopPostProcessing {
         }
         let systemPrompt = TranscriptCleanupPolicy.systemPrompt(
             customBasePrompt: options.customPrompt,
-            outputLanguage: options.outputLanguage
+            outputLanguage: options.outputLanguage,
+            lexiconDirectives: lexiconDirectives,
+            lexiconContextTags: lexiconContextTags
         )
         let userPrompt = TranscriptCleanupPolicy.userMessage(transcript: rawText)
         let response = try await OpenRouterChatClient(apiKey: apiKey, session: session).sendChat(

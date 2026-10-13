@@ -67,6 +67,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package var profiles: [DictationProfile]
     var profileWarning: String?
     package var settings: Settings
+    var vocabularyLoad: Task<DesktopVocabulary, Error>?
     package var recording: Recording?
     private var isReady = false
     package var busy = false

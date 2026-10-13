@@ -342,7 +342,7 @@ window is 980 × 760 at 96 DPI and scales with the monitor's DPI.
   and the Mac's App Behaviour card with Appearance, Launch at login and the
   local automation toggle), Transcription (source, mode, model,
   refresh, local models, keys), Post-processing, Profiles, Keyboard (the
-  shortcut), iCloud Sync and About.
+  shortcut), Corrections, Pronunciation, iCloud Sync and About.
 - Totals and row wording come from the shared `DesktopHistoryInsights` and
   `DesktopHistoryRowSummary` (SpeakDesktop), counted and formatted as the Mac
   counts them, so Windows, Linux and the Mac show the same figures.
@@ -473,6 +473,58 @@ before closing the recording file. Overflow stops recording with an explicit
 error instead of silently dropping frames. These bounds are source guarantees,
 not measured latency or microphone-device acceptance.
 
+## Vocabulary and pronunciation journey
+
+**Corrections** opens a native Win32 editor; Linux exposes the same fields in
+its GTK page. Both support saved-entry search, add/edit/delete, durable
+Up/Down ordering, canonical spellings, newline-separated spoken variants,
+automatic/context/manual activation, confidence, context tags, notes and a
+saved-rule preview. Context tags are explicit user input, not inferred from
+an unimplemented foreground-app observer. Include-rules and include-context
+preferences default to the Mac's enabled values.
+
+`PersonalLexiconDomain` and `AutoCorrectionDomain` are the portable authorities
+behind the existing Apple observation adapters. Matching is still the Mac's
+case-insensitive whole-word, ordered replacement algorithm; context-ineligible
+and manual rules remain suggestions rather than direct replacements. Explicit
+rule order now survives save/reload on Apple as well as desktop, instead of
+being alphabetised on reload. Mutations serialize with initial loading and
+roll back after persistence failure; corrupt files fail closed.
+
+Recording, imported audio, retry and successful live completion apply these
+rules before optional post-processing. History retains the provider transcript,
+the corrected transcript, the processed result, and separate applied/suggested
+records plus frozen context/directive snapshots. **Correction results** opens a
+native read-only, scrollable per-record projection; it does not change text.
+Original/processed version selection, Copy and Export keep their existing
+displayed-version contract. Empty/silent input remains empty.
+
+**Pronunciation** offers native add/edit/delete/order/search, word or regex,
+pronunciation, optional replacement/category, regex/case flags, saved-entry
+preview, canonical defaults, and JSON merge/replace/import/export. Validation
+rejects duplicates, empty required values and invalid regexes before saving.
+Export cannot overwrite application-state files. Read aloud takes a committed
+dictionary snapshot and runs the canonical renderer once before request
+segmentation, so expanded replacements also respect Deepgram's text limit.
+Deepgram supports text replacements, not IPA phoneme tags; the UI says so.
+
+Device-local state uses `PersonalLexicon/lexicon.json`,
+`AutoCorrections/candidates.json`, `pronunciation.json` and `vocabulary.json`
+under the existing private desktop application directory. Shared
+post-processing directives preserve canonical confidence and suggestion/context
+semantics. Lexicon keywords are forwarded through the existing xAI/Azure batch
+contracts and the xAI/AssemblyAI live options contracts; unsupported routes are not given
+invented hint fields.
+
+Automatic candidate detection in other apps is **not implemented** on either
+desktop host. Candidate learning/promotion/rollback machinery is shared and
+tested, but there is no fabricated edit observation, new OS-wide permission
+request, or desktop candidate-management UI. Native form event self-tests cover
+synthetic edits and previews. Native runtime, screen-reader/high-DPI use,
+real microphone/import/retry, provider receipts and physical speech acceptance
+must still be evidenced on the target platforms; syntax/type checks alone do
+not establish full parity.
+
 ## Feature parity matrix
 
 “Implemented” below describes source wiring, not completed device acceptance.
@@ -491,11 +543,11 @@ but must not be presented as the identical Apple-only engine or service.
 | Text output | Captured-field insertion: native Edit/RichEdit caret/selection replacement, UI Automation Value pattern for empty or fully selected fields, guarded history-excluded paste with clipboard restore and read-back verification, field-identity and password/read-only/elevation refusal; native Text output dialog for Smart, direct-only and clipboard-only output, replace-field and clipboard restoration; each recording keeps the choice read at its Record event; clipboard-only output also copies in-app recordings as an ordinary copy | Windows CI and physical keyboard/screen reader/DPI acceptance of the dialog, physical browser/Electron/Office/XAML acceptance, undo, streaming insertion and voice edit |
 | On-device transcription | Local batch recording and file import through a run-time loaded whisper.cpp 1.9.4 (best CPU variant, or Vulkan on any vendor's GPU when a driver is present). Four canonical Whisper entries (tiny, base, small, large-v3-turbo) are projected from the shared catalogue with pinned GGML files, sizes and SHA-256; the native Local models dialog downloads (resumable, atomic, verified), cancels, removes and sets the GPU choice. Source picker: Remote or Local, then Batch or Live; Local offers Batch only, so the Mode picker hides for it. Runtime DLLs are built from the pinned commit in CI and shipped in the bundle and MSIX with licence and provenance; the native job and the self-contained bundle transcribe the JFK sample with the tiny model | Windows CI receipt for this revision, local streaming, Hugging Face import, real Vulkan hardware (the runners have no GPU), CPU/GPU throughput and memory on physical PCs, and local post-processing |
 | Post-processing | Opt-in shared OpenRouter execution, canonical model selection and custom prompt; original and processed text retained separately; empty transcripts stay empty | Final-head Windows/Linux CI, real OpenRouter receipts, local execution, live polish and full Apple settings parity |
-| Personal vocabulary | Shared correction/lexicon data models compile | Editing UI, correction learning and provider bias integration |
+| Personal vocabulary | Native Corrections/Pronunciation editors; shared durable CRUD, order, validation and preview; canonical correction matching before post-processing in recording/import/retry/live completion; separately retained provider/corrected/processed text and applied/suggested snapshots; native History correction results; xAI/Azure batch and xAI/AssemblyAI live keyword hints | Final-head native/Apple CI and physical editing/recording/speech acceptance; OS-wide safe edit observation and candidate-learning UI |
 | Profiles and settings | Native ordered per-app editor and shared validation; immutable recording overrides, model-specific live language hints and preserved unknown values | Final-head native UI, physical executable matching, remaining settings and lexicon overrides |
 | History | Native record selection, case/diacritic-insensitive search over original/processed text and friendly model names, original/processed transcript selection for copy and export, retry, text export, external audio opening and in-app playback with Play/Pause, Stop and elapsed/remaining through Media Foundation and WASAPI; durable original/processed results and interrupted-recording recovery | Final-head UI smoke and device acceptance, physical speaker/Bluetooth/USB playback, history import and retention controls |
 | Model comparison | Shared rounds, scoring and transcript differences compile | Native comparison UI, parallel execution and audio/provider isolation |
-| Voice output | Read aloud speaks the displayed History transcript (the version shown) with a canonical Deepgram Aura or Flux voice chosen in a native Voice dialog. Transcripts longer than Deepgram's 2,000-character request limit are spoken as consecutive sentence-bounded segments (shared `SpeechTextSegmenter`). Speech plays through the same `WindowsAudioPlaybackController` as History playback, so only one is ever audible; Play/Pause and Stop act on it, and recording, import, selecting another row, History playback and close stop it, including a segment still being synthesized. The shared Deepgram engine keeps its bounded WAV validation, exclusive private staging and owned-file cleanup, and the Read aloud controller (`DesktopHostReadAloud`, SpeakDesktopHost) is shared with Linux; Windows supplies its player, engine staging and Voice dialog. Normal speed only. Cross-compiled locally; awaited-playback controller tests pass under a local Windows ABI runner | Windows CI for this revision, a real Deepgram receipt (including Flux linear16/WAV), physical speaker acceptance, speed control, system voices, other providers, pronunciation editing, clipboard and selected-text sources, and removal of staged files left by an earlier launch |
+| Voice output | Read aloud speaks the displayed History transcript (the version shown) with a canonical Deepgram Aura or Flux voice chosen in a native Voice dialog. Native pronunciation entries render through the canonical renderer exactly once before segmentation. Transcripts longer than Deepgram's 2,000-character request limit are spoken as consecutive sentence-bounded segments (shared `SpeechTextSegmenter`). Speech plays through the same `WindowsAudioPlaybackController` as History playback, so only one is ever audible; Play/Pause and Stop act on it, and recording, import, selecting another row, History playback and close stop it, including a segment still being synthesized. The shared Deepgram engine keeps its bounded WAV validation, exclusive private staging and owned-file cleanup, and the Read aloud controller (`DesktopHostReadAloud`, SpeakDesktopHost) is shared with Linux; Windows supplies its player, engine staging and Voice dialog. Normal speed only. Cross-compiled locally; awaited-playback controller tests pass under a local Windows ABI runner | Windows CI for this revision, a real Deepgram receipt (including Flux linear16/WAV), physical speaker acceptance, speed control, system voices, other providers, clipboard and selected-text sources, and removal of staged files left by an earlier launch |
 | Hands-free dictation | Domain seams exist; no Windows workflow | Native VAD, pre-roll, endpointing and recovery |
 | Credentials | Windows Credential Manager uses canonical identifiers for the seventeen transcription provider families | Physical credential lifecycle acceptance, credential removal UI and remaining providers |
 | Sync and Apple companion flows | History syncs with the Mac App Store build's CloudKit container (`iCloud.com.justspeaktoit`) through CloudKit Web Services: Settings, iCloud sync signs in with an Apple ID in the browser (loopback callback), shows Mac History as audio-less synced copies and uploads Windows History in the Mac's record format. Opt-in, read-only import of the API keys the Mac syncs, unlocked with the Mac's key-sync passphrase. Native WinHTTP transport, CNG envelope, Credential Manager for the rotating token. Portable tests and Windows loopback tests run against a fake CloudKit server; see [iCloud sync](#icloud-sync) | The CloudKit Console steps below, then a live receipt: Mac to Windows and Windows to Mac History create, edit and delete, key import, account switch and token expiry. Settings do not sync (the Mac uses the iCloud key-value store, which has no web API); Compare Models rounds, iPhone History (a separate container) and Handoff are not wired |

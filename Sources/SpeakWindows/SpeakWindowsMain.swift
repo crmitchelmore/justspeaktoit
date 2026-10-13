@@ -213,6 +213,9 @@ func postProcessingEvent(
 }
 
 private func secondaryWindowEvent(_ event: Int32, value: String, index: Int, holder: WindowsEventContext) {
+    if (70...72).contains(event) {
+        return windowsVocabularyEvent(event, payload: value, kind: index, holder: holder)
+    }
     if (21...23).contains(event) { return hotKeyWindowEvent(event, value: value, index: index, holder: holder) }
     if event == 24 { return readAloudEvent(value, holder: holder) }
     if event == 25 { return automationEvent(requested: value == "1", holder: holder) }

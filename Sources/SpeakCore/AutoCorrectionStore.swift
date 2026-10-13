@@ -1,5 +1,4 @@
 import Foundation
-import os.log
 
 /// Persists auto-correction candidates to disk.
 public actor AutoCorrectionStore {
@@ -10,9 +9,8 @@ public actor AutoCorrectionStore {
   private let encoder: JSONEncoder
   private let decoder: JSONDecoder
   private let fileManager: FileManager
-  private let log = SpeakLogger.logger(category: "AutoCorrectionStore")
 
-  public init(fileManager: FileManager = .default, baseDirectory: URL? = nil) {
+  public init(fileManager: FileManager = .default, baseDirectory: URL? = nil, appDirectory: URL? = nil) {
     self.fileManager = fileManager
     let supportURL: URL
     if let baseDirectory {
@@ -21,12 +19,9 @@ public actor AutoCorrectionStore {
       supportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
         ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
     }
-    let appFolder = supportURL.appendingPathComponent(ReleaseTrain.current.supportDirectory, isDirectory: true)
+    let appFolder = appDirectory
+      ?? supportURL.appendingPathComponent(ReleaseTrain.current.supportDirectory, isDirectory: true)
     let autoCorrectionFolder = appFolder.appendingPathComponent("AutoCorrections", isDirectory: true)
-
-    if !fileManager.fileExists(atPath: autoCorrectionFolder.path) {
-      try? fileManager.createDirectory(at: autoCorrectionFolder, withIntermediateDirectories: true)
-    }
 
     fileURL = autoCorrectionFolder.appendingPathComponent("candidates.json")
 
@@ -60,6 +55,7 @@ public actor AutoCorrectionStore {
     }
 
     let data = try encoder.encode(candidates)
+    try fileManager.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
     try data.write(to: fileURL, options: [.atomic])
   }
 

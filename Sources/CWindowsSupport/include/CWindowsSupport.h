@@ -8,6 +8,11 @@
 extern "C" {
 #endif
 
+/* Corrections/pronunciation editor; events 70 (action), 71 (load), index 0/1;
+ * event 72 reads a selected recording's correction snapshot (kind 2).
+ * Escaped UTF-8 field contract lives in DesktopVocabularyWire. */
+int32_t jsti_vocabulary_set(int32_t kind, const char *payload, int32_t refresh);
+
 /* UTF-8 strings throughout. Zero is success; -1 is failure with a caller-owned
  * error buffer. No API logs credential or transcript contents. Windows only. */
 enum JSTIWindowEvent {

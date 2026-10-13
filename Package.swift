@@ -29,6 +29,7 @@ let portableCoreBuild = true
 // New SpeakCore files are portable by default. An Apple adapter must be
 // explicitly classified here, so future domain work reaches every platform.
 let appleCoreSources: [String] = [
+    "AlibabaSpeechConfigurationFields.swift",
     "AppGroupAvailability.swift",
     "AppVisualDensity.swift",
     "AppleSpeechAnalyzerLiveSession.swift",

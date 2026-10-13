@@ -69,6 +69,7 @@ public enum SyncSchema {
         /// and applies only these, and a desktop client imports only these.
         /// Other credentials never leave the device they were entered on.
         public static let syncableIdentifiers: Set<String> = [
+            "alibaba.apiKey",
             "deepgram.apiKey",
             "openai.apiKey",
             "openrouter.apiKey",

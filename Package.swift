@@ -59,8 +59,6 @@ let appleCoreSources: [String] = [
     "DeviceIdentityStore.swift",
     "ElevenLabsBalanceClient.swift",
     "FileProductAnalyticsStateStore.swift",
-    "GeminiLiveClient.swift",
-    "GeminiLiveProtocol.swift",
     "GeminiTTSAPI.swift",
     "GroqTTSAPI.swift",
     "HandsFreeAudioPreRollBuffer.swift",
@@ -84,9 +82,7 @@ let appleCoreSources: [String] = [
     "LiveTranscriptionClientFactory.swift",
     "Logging.swift",
     "MacConnection.swift",
-    "MetaMuseLiveClient.swift",
     "MistralTTSAPI.swift",
-    "ModulateLiveClient.swift",
     "OpenClawClient.swift",
     "OpenClawClientReceive.swift",
     "OpenRouterAPIClient.swift",
@@ -134,9 +130,6 @@ let appleCoreSources: [String] = [
     "TransportChannel.swift",
     "TransportProtocol.swift",
     "WatchCaptureImportJournal.swift",
-    "XAILiveClient.swift",
-    "XAILiveFinalisation.swift",
-    "XAILiveProtocol.swift",
     "XAITTSAPI.swift",
     "XAITTSRealtime.swift"
 ]
@@ -208,7 +201,7 @@ let portablePackage = Package(
         // Desktop History and API-key sync over CloudKit Web Services. Portable
         // only: Apple apps keep their native CloudKit engines.
         .target(name: "SpeakDesktopSync", dependencies: ["SpeakDesktop", "SpeakSync", "SpeakCore"]),
-        .target(name: "SpeakTestSupport", path: "Tests/SpeakTestSupport"),
+        .target(name: "SpeakTestSupport", dependencies: ["SpeakCore"], path: "Tests/SpeakTestSupport"),
         .testTarget(name: "SpeakDesktopTests", dependencies: ["SpeakDesktop", "SpeakCore", "SpeakTestSupport"]),
         .testTarget(
             name: "SpeakDesktopHostTests",
@@ -386,7 +379,7 @@ if linuxTargetBuild {
         ),
         .testTarget(
             name: "SpeakLinuxWebSocketTests",
-            dependencies: ["SpeakCore", "SpeakDesktop", "SpeakLinuxWebSocket"]
+            dependencies: ["SpeakCore", "SpeakDesktop", "SpeakLinuxWebSocket", "SpeakTestSupport"]
         )
     ])
 }
@@ -520,6 +513,7 @@ let package = portableCoreBuild ? portablePackage : Package(
         // sources through its own glob.
         .target(
             name: "SpeakTestSupport",
+            dependencies: ["SpeakCore"],
             path: "Tests/SpeakTestSupport"
         ),
         .testTarget(

@@ -52,9 +52,42 @@ dedicated speech-to-text live models use shared Swift clients with the native
 WinHTTP transport. Reson8 (`reson8/resonant-1-streaming`, 16 kHz PCM) also uses
 the shared native transport with handshake-gated audio and a bounded,
 correlated flush confirmation; Smallest AI Pulse Pro and StepAudio 3 ASR Max
-are file-only routes. These new routes have fake-transport evidence only and
-no native Windows provider receipt; see
+are file-only routes. These additional Reson8/Smallest AI/StepFun routes have
+fake-transport evidence only and no native Windows provider receipt; see
 [batch transcription contracts](batch-transcription-providers.md).
+
+Gemini Transcribe Live (16 kHz), Meta Muse realtime ASR
+(24 kHz), and Modulate Velma streaming (16 kHz) now use the same injected
+native transport and are projected from the canonical catalogue. Their shared
+session gates audio on readiness, bounds queued plus in-flight PCM to five
+seconds/256 frames, sends one frame at a time, isolates retired runs and
+reports errors before returning recovery text. Gemini sends `audioStreamEnd`
+and waits for trailing transcription/turn completion; Meta sends `endStream`
+and waits for a new `speechComplete`; Modulate sends one WAV header per run,
+drains audio, sends an empty text frame, and requires `done` before closing.
+Modulate now uses the documented `platform.modulate.ai` WebSocket origin,
+without relying on an HTTP redirect during the upgrade.
+
+`DesktopLiveTranscription.makeClient(model:apiKey:language:azureEndpoint:options:makeConnection:)`
+is the canonical desktop options seam. It forwards `LiveClientOptions.keywords`
+to Gemini custom vocabulary, Meta keywords and dedicated xAI STT keyterms;
+AssemblyAI gets its separate keyterms and stop budget/grace, Cartesia gets its
+stop budget/grace, and Modulate gets its four feature flags. The existing
+factory overloads and Apple `session: URLSession` constructors remain supported.
+Synthetic lifecycle tests cover readiness, single-flight admission, drain,
+restart, cancellation and missing completion. The loopback peer checks exact
+PCM and protocol frames over Apple URLSession, WinHTTP and Linux NIO in their
+native probe suites. These are not real-service, accuracy, microphone-device
+or Bluetooth acceptance receipts.
+
+Grok Voice also has an injected portable client, preserving manual turns,
+input-only captions and the absence of `response.create`, but remains hidden
+from desktop route selection. A synthetic conversation peer cannot establish
+that the live service accepts the transcription-only configuration without
+assistant generation or billing. Enabling it requires an opt-in native
+service acceptance receipt for setup, input captions, commit completion and
+no assistant output; no credentials or provider calls are used by these tests.
+
 The xAI stream (`xai/speech-to-text-streaming`, 24 kHz PCM) is
 source-wired with fake-transport tests only and still needs a Windows provider
 receipt; the Grok Voice conversation route stays unavailable. Gladia

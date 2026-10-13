@@ -45,6 +45,7 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
         var expectedProviders: Set<String> = [
             "azure", "cartesia", "gladia", "google", "meta", "openai", "xai"
         ]
+        expectedProviders.formUnion(FileSpeechProvider.allCases.map(\.rawValue))
         if AppleLocalModels.supportsSpeechTranscriber || AppleLocalModels.supportsDictationTranscriber {
             expectedProviders.insert("apple")
         }

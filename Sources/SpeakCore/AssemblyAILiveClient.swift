@@ -3,7 +3,7 @@ import Foundation
 import FoundationNetworking
 #endif
 
-/// Universal-3.5 Pro's shared streaming client. The transport is replaceable;
+/// Universal-3.6 Pro's shared streaming client. The transport is replaceable;
 /// request construction, turn assembly, PCM framing and shutdown remain shared.
 ///
 /// Settings-derived options reach it through ``LiveClientOptions``: keyterms
@@ -23,7 +23,7 @@ public final class AssemblyAILiveClient: FinalizingStreamingTranscriptionClient,
     /// fit in this bound (plus any stop grace).
     static let finishDeadline: TimeInterval = 8
     static var defaultPostStopFinalizeBudget: TimeInterval {
-        ModelCatalog.liveCapabilities(for: AssemblyAIModels.universal35ProStreamingID).postStopFinalizeBudget
+        ModelCatalog.liveCapabilities(for: AssemblyAIModels.universal36ProStreamingID).postStopFinalizeBudget
     }
 
     let apiKey: String
@@ -51,14 +51,14 @@ public final class AssemblyAILiveClient: FinalizingStreamingTranscriptionClient,
     }
 
     public convenience init(
-        apiKey: String, speechModel: String = AssemblyAIModels.universal35ProAPIName,
+        apiKey: String, speechModel: String = AssemblyAIModels.universal36ProAPIName,
         sampleRate: Int = 16_000, session: URLSession? = nil
     ) {
         self.init(apiKey: apiKey, speechModel: speechModel, sampleRate: sampleRate, session: session, keyterms: [])
     }
 
     public convenience init(
-        apiKey: String, speechModel: String = AssemblyAIModels.universal35ProAPIName,
+        apiKey: String, speechModel: String = AssemblyAIModels.universal36ProAPIName,
         sampleRate: Int = 16_000, session: URLSession? = nil, keyterms: [String]
     ) {
         self.init(
@@ -68,7 +68,7 @@ public final class AssemblyAILiveClient: FinalizingStreamingTranscriptionClient,
     }
 
     public convenience init(
-        apiKey: String, speechModel: String = AssemblyAIModels.universal35ProAPIName,
+        apiKey: String, speechModel: String = AssemblyAIModels.universal36ProAPIName,
         sampleRate: Int = 16_000, session: URLSession? = nil, keyterms: [String],
         postStopFinalizeBudget: TimeInterval, stopGracePeriod: TimeInterval
     ) {
@@ -81,7 +81,7 @@ public final class AssemblyAILiveClient: FinalizingStreamingTranscriptionClient,
     }
 
     public init(
-        apiKey: String, speechModel: String = AssemblyAIModels.universal35ProAPIName,
+        apiKey: String, speechModel: String = AssemblyAIModels.universal36ProAPIName,
         sampleRate: Int = 16_000, keyterms: [String] = [],
         postStopFinalizeBudget: TimeInterval? = nil, stopGracePeriod: TimeInterval = 0,
         makeConnection: @escaping ConnectionFactory,
@@ -104,7 +104,7 @@ public final class AssemblyAILiveClient: FinalizingStreamingTranscriptionClient,
     /// Test seam: real-time scheduling with short, explicit stop options.
     convenience init(
         apiKey: String = "test-key",
-        speechModel: String = AssemblyAIModels.universal35ProAPIName,
+        speechModel: String = AssemblyAIModels.universal36ProAPIName,
         sampleRate: Int = 16_000,
         keyterms: [String] = [],
         postStopFinalizeBudget: TimeInterval = 0.1,

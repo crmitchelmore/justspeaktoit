@@ -112,7 +112,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
         case .cartesia: website = "https://cartesia.ai"
         case .gladia: website = "https://www.gladia.io"
         case .google: website = "https://aistudio.google.com/apikey"
-        case .modulate: website = "https://www.modulate-developer-apis.com/web/docs.html"
+        case .modulate: website = ModulateTranscriptionService.apiKeysURL.absoluteString
         case .assemblyai: website = "https://assemblyai.com"
         case .soniox: website = "https://soniox.com"
         case .elevenlabs: website = "https://elevenlabs.io"

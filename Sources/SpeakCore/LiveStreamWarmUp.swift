@@ -67,7 +67,7 @@ extension LiveTranscriptionProviderID {
         case .google:
             return GeminiTranscribeModels.apiHost
         case .modulate:
-            return "modulate-developer-apis.com"
+            return ModulateTranscriptionService.baseURL.host
         case .assemblyai:
             // The app prefers the EU endpoint and falls back to global; warming
             // the preferred one is what matters for the common path.

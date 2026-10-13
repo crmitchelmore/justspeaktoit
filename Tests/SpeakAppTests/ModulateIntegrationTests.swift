@@ -153,6 +153,7 @@ final class ModulateIntegrationTests: XCTestCase {
     let request = try XCTUnwrap(capturedRequest)
     let body = try XCTUnwrap(requestBodyData(from: request))
 
+    XCTAssertEqual(request.url?.host, "platform.modulate.ai")
     XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "definitely-invalid-key")
     XCTAssertNotNil(body.range(of: Data("name=\"upload_file\"".utf8)))
     XCTAssertNotNil(body.range(of: Data("filename=\"validation.wav\"".utf8)))

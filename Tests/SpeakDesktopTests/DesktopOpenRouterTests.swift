@@ -22,12 +22,15 @@ final class DesktopOpenRouterProjectionTests: XCTestCase {
                 == .apiKey(identifier: "openrouter.apiKey", providerName: "OpenRouter")
         }
         XCTAssertEqual(OpenRouterInlineAudioTranscriptionClient.batchCatalogIDs, Set(openRouterOwned))
-        XCTAssertEqual(openRouterOwned.count, 3)
+        XCTAssertEqual(openRouterOwned.count, 11)
         for identifier in openRouterOwned {
             XCTAssertFalse(OpenAITranscriptionModels.directBatchModelIDs.contains(identifier), identifier)
             XCTAssertFalse(GeminiTranscribeModels.directBatchModelIDs.contains(identifier), identifier)
             XCTAssertTrue(DesktopTranscription.batchModels.contains { $0.id == identifier }, identifier)
-            XCTAssertFalse(DesktopTranscription.requiresCanonicalPCM16WAV(model: identifier), identifier)
+            XCTAssertEqual(
+                DesktopTranscription.requiresCanonicalPCM16WAV(model: identifier),
+                identifier.hasPrefix("thinkingmachines/inkling"), identifier
+            )
         }
         // Every remote entry of the canonical batch catalogue now has a desktop route.
         let remote = ModelCatalog.batchTranscription.filter { !$0.id.hasPrefix("apple/") }
@@ -174,6 +177,23 @@ final class DesktopOpenRouterRouteTests: XCTestCase {
     }
 
     // MARK: - Dynamic dedicated speech-to-text route
+
+    func testInklingRejectsMalformedAudioBeforeUploadAndKeepsTheFile() async throws {
+        let source = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".m4a")
+        let bytes = Data("not an audio container".utf8)
+        try bytes.write(to: source)
+        defer { try? FileManager.default.removeItem(at: source) }
+        for model in OpenRouterInlineAudioTranscriptionClient.batchCatalogIDs
+            where OpenRouterInlineAudioTranscriptionClient.requiresCanonicalPCM16WAV(model: model) {
+            do {
+                _ = try await DesktopOpenRouterFixture.transcribe(source, model: model)
+                XCTFail("Invalid audio must not be sent")
+            } catch {
+                XCTAssertTrue(StubURLProtocol.recordedRequests.isEmpty)
+            }
+        }
+        XCTAssertEqual(try Data(contentsOf: source), bytes)
+    }
 
     func testDynamicSelectionUsesTheDedicatedEndpointAndKeepsThePrefixedIdentifier() async throws {
         let audio = try DesktopOpenRouterFixture.audio()

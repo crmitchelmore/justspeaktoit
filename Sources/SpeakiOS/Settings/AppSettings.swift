@@ -1009,8 +1009,8 @@ public final class AppSettings: ObservableObject {
                 // shared `GeminiInteractionsClient` with the Google key
                 // (issue #862). Both are listed, and `batchAPIKey(for:)` and
                 // `IOSBatchTranscriptionRoute` keep them on separate paths.
-                || option.id.hasPrefix("google/")
-                || option.id == "openai/gpt-4o-audio-preview-2024-12-17"
+                || GeminiTranscribeModels.directBatchModelIDs.contains(option.id)
+                || OpenRouterInlineAudioTranscriptionClient.batchCatalogIDs.contains(option.id)
                 || option.id == MetaMuseVoiceTranscribe.batchCatalogID
                 || option.id == CartesiaBatchClient.catalogID
                 // xAI's dedicated speech-to-text endpoint uploads through the

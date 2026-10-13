@@ -97,7 +97,7 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
       }
       targetFormat = outputFormat
 
-      // Keep style/format instructions in PostProcessingManager. Universal-3.5
+      // Keep style/format instructions in PostProcessingManager. Universal-3.6
       // supports contextual prompting, while this app currently sends only the
       // user's explicit recognition keyterms to the streaming request.
       let keyterms = appSettings.assemblyAIKeyterms
@@ -177,7 +177,7 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
     }
 
     if turn.end_of_turn && turn.turn_is_formatted {
-      // Universal-3.5 Pro returns one formatted final for each end-of-turn.
+      // Universal-3.6 Pro returns one formatted final for each end-of-turn.
       let segment = TranscriptionSegment(startTime: 0, endTime: 0, text: turn.transcript)
 
       if let existingIndex = finalSegmentIndexByTurnOrder[turn.turn_order],
@@ -481,7 +481,7 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
       segments: finalSegments,
       confidence: nil,
       duration: streamingDuration,
-      modelIdentifier: currentModel ?? AssemblyAIModels.universal35ProStreamingID,
+      modelIdentifier: currentModel ?? AssemblyAIModels.universal36ProStreamingID,
       cost: nil,
       rawPayload: nil,
       debugInfo: nil

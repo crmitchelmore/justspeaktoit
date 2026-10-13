@@ -276,77 +276,9 @@ enum MetaMuseAudioPreparer {
         sampleRate: sampleRate
     ) ?? Data()
 
-    #if canImport(AVFoundation) && !SPEAK_PORTABLE_CORE
-    // Conversion is one bounded pipeline so cancellation always stops before upload.
-    // swiftlint:disable:next function_body_length
-    static func prepareWAV(at url: URL) async throws -> PreparedAudio {
-        let inputFile: AVAudioFile
-        do {
-            inputFile = try AVAudioFile(forReading: url)
-        } catch {
-            throw MetaMuseError.invalidAudio(error.localizedDescription)
-        }
-        let inputFormat = inputFile.processingFormat
-        let duration = Double(inputFile.length) / inputFormat.sampleRate
-        guard duration.isFinite, duration <= MetaMuseVoiceTranscribe.maximumAudioDuration else {
-            throw MetaMuseError.requestTooLarge
-        }
-        guard let outputFormat = AVAudioFormat(
-            commonFormat: .pcmFormatInt16,
-            sampleRate: Double(sampleRate),
-            channels: 1,
-            interleaved: true
-        ), let converter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
-            throw MetaMuseError.invalidAudio("The file's audio format could not be converted.")
-        }
-
-        var pcm = Data()
-        let inputCapacity: AVAudioFrameCount = 8_192
-        while inputFile.framePosition < inputFile.length {
-            try Task.checkCancellation()
-            guard let input = AVAudioPCMBuffer(
-                pcmFormat: inputFormat,
-                frameCapacity: inputCapacity
-            ) else {
-                throw MetaMuseError.invalidAudio("An input conversion buffer could not be created.")
-            }
-            try inputFile.read(into: input)
-            guard input.frameLength > 0 else { break }
-            let ratio = outputFormat.sampleRate / inputFormat.sampleRate
-            let outputCapacity = AVAudioFrameCount(ceil(Double(input.frameLength) * ratio)) + 32
-            guard let output = AVAudioPCMBuffer(
-                pcmFormat: outputFormat,
-                frameCapacity: outputCapacity
-            ) else {
-                throw MetaMuseError.invalidAudio("An output conversion buffer could not be created.")
-            }
-            var providedInput = false
-            var conversionError: NSError?
-            let status = converter.convert(to: output, error: &conversionError) { _, inputStatus in
-                guard !providedInput else {
-                    inputStatus.pointee = .noDataNow
-                    return nil
-                }
-                providedInput = true
-                inputStatus.pointee = .haveData
-                return input
-            }
-            guard status != .error, conversionError == nil else {
-                throw MetaMuseError.invalidAudio(conversionError?.localizedDescription ?? "Audio conversion failed.")
-            }
-            let buffer = output.audioBufferList.pointee.mBuffers
-            guard let bytes = buffer.mData, buffer.mDataByteSize > 0 else { continue }
-            pcm.append(bytes.assumingMemoryBound(to: UInt8.self), count: Int(buffer.mDataByteSize))
-        }
-        return try prepared(pcm: pcm, duration: duration)
-    }
-
-    #else
-    /// Native Windows recordings already match the provider's PCM format.
-    /// Validate the complete container; unsupported imports never reach upload.
     static func prepareWAV(at url: URL) async throws -> PreparedAudio {
         do {
-            let audio = try NativePCM16WAVReader.prepare(
+            let audio = try await NativePCM16WAVReader.prepareWAV(
                 at: url, maximumDuration: MetaMuseVoiceTranscribe.maximumAudioDuration,
                 maximumBytes: MetaMuseVoiceTranscribe.maximumRequestBytes
             )
@@ -358,16 +290,6 @@ enum MetaMuseAudioPreparer {
         } catch {
             throw MetaMuseError.invalidAudio(error.localizedDescription)
         }
-    }
-    #endif
-
-    /// Wraps the converted samples, turning a format the RIFF header cannot
-    /// describe into an error rather than a trap.
-    private static func prepared(pcm: Data, duration: TimeInterval) throws -> PreparedAudio {
-        guard let wav = wavData(pcm: pcm, sampleRate: sampleRate) else {
-            throw MetaMuseError.invalidAudio("The converted audio could not be written as WAV.")
-        }
-        return PreparedAudio(data: wav, duration: duration)
     }
 
     static func wavData(pcm: Data, sampleRate: Int) -> Data? {

@@ -183,6 +183,17 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
         )
     }
 
+    func testEveryCuratedAudioChatModelIsVisibleAndUsesOpenRouter() {
+        for identifier in OpenRouterInlineAudioTranscriptionClient.batchCatalogIDs {
+            XCTAssertTrue(AppSettings.supportedBatchModels.contains { $0.id == identifier }, identifier)
+            XCTAssertEqual(IOSBatchTranscriptionRoute.route(for: identifier), .openRouter, identifier)
+            XCTAssertEqual(
+                ModelCredentialResolver.requirement(for: identifier, purpose: .batchTranscription),
+                .apiKey(identifier: "openrouter.apiKey", providerName: "OpenRouter")
+            )
+        }
+    }
+
     /// `batchAPIKey(for:)` reads the canonical credential mapping, so the
     /// Gemini branch is handed the Google key rather than the OpenRouter one.
     func testBatchCredentials_splitDirectProvidersFromOpenRouter() {

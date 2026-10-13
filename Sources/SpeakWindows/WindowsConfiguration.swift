@@ -24,7 +24,8 @@ extension WindowsNative {
         let rows = zip(DesktopConfiguration.fields, preferences.entries).map { field, value in
             JSTIConfigurationField(
                 title: strings.add(field.title), value: strings.add(value), group: strings.add(field.group),
-                is_boolean: { if case .boolean = field.kind { return 1 }; return 0 }()
+                is_boolean: { if case .boolean = field.kind { return 1 }; return 0 }(),
+                requires_hud_overlay: field.requiresHUDOverlay ? 1 : 0
             )
         }
         let result = withExtendedLifetime(strings) {
@@ -38,7 +39,9 @@ extension WindowsNative {
         guard result == 0 else { throw WindowsNativeError(message: "Could not display dictation preferences.") }
     }
 
-    static func performConfigurationAction(_ action: Int32, values: [String], holder: WindowsEventContext) async throws {
+    static func performConfigurationAction(
+        _ action: Int32, values: [String], holder: WindowsEventContext
+    ) async throws {
         switch action {
         case 0: try await holder.controller.saveConfiguration(values)
         case 1: try await holder.controller.importConfiguration(path: values[0])

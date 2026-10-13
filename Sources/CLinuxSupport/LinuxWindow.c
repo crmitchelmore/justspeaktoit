@@ -111,6 +111,7 @@ static UI ui;
 static struct {
     GPtrArray *rows;
     GArray *booleans;
+    GArray *overlay_settings;
     JSTIConfigurationCallback callback;
     void *context;
 } configuration;
@@ -1262,6 +1263,7 @@ int32_t jsti_window_run(
     configuration.context = NULL;
     g_clear_pointer(&configuration.rows, g_ptr_array_unref);
     g_clear_pointer(&configuration.booleans, g_array_unref);
+    g_clear_pointer(&configuration.overlay_settings, g_array_unref);
     g_clear_object(&ui.application);
     ui.window = NULL;
     if (status != 0) {
@@ -1750,6 +1752,7 @@ int32_t jsti_window_set_login_item(int32_t state, const char *detail) {
 typedef struct HUD {
     gint32 phase;
     gint32 display_milliseconds;
+    gboolean compact;
     gchar *headline, *subheadline, *live;
 } HUD;
 
@@ -1763,13 +1766,14 @@ static void hud_free(gpointer pointer) {
 
 static void hud_apply(gpointer pointer) {
     HUD *state = pointer;
-    jsti_hud_show_duration(state->phase, state->headline, state->subheadline, state->live,
-                            state->display_milliseconds);
+    jsti_hud_show_presentation(state->phase, state->headline, state->subheadline, state->live,
+                                state->display_milliseconds, state->compact);
 }
 
 int32_t jsti_window_set_hud(int32_t phase, const char *headline, const char *subheadline, const char *live_text,
-                            int32_t display_milliseconds) {
-    if (phase < 0 || phase > 6 || display_milliseconds < 0 || display_milliseconds > 60000) return -1;
+                            int32_t display_milliseconds, int32_t compact) {
+    if (phase < 0 || phase > 6 || display_milliseconds < 0 || display_milliseconds > 60000 ||
+        (compact != 0 && compact != 1)) return -1;
     const char *texts[] = { headline, subheadline, live_text };
     for (size_t index = 0; index < G_N_ELEMENTS(texts); ++index) {
         if (texts[index] != NULL && !g_utf8_validate(texts[index], -1, NULL)) return -1;
@@ -1777,6 +1781,7 @@ int32_t jsti_window_set_hud(int32_t phase, const char *headline, const char *sub
     HUD *state = g_new0(HUD, 1);
     state->phase = phase;
     state->display_milliseconds = display_milliseconds;
+    state->compact = compact != 0;
     state->headline = g_strdup(headline != NULL ? headline : "");
     state->subheadline = g_strdup(subheadline != NULL ? subheadline : "");
     state->live = g_strdup(live_text != NULL ? live_text : "");
@@ -1976,6 +1981,7 @@ int32_t jsti_window_set_azure_resource(const char *endpoint) {
 typedef struct ConfigurationUpdate {
     GPtrArray *titles, *values, *groups;
     GArray *booleans;
+    GArray *overlay_settings;
     JSTIConfigurationCallback callback;
     void *context;
 } ConfigurationUpdate;
@@ -2047,6 +2053,7 @@ static void configuration_update_free(gpointer data) {
     g_ptr_array_unref(update->values);
     g_ptr_array_unref(update->groups);
     g_array_unref(update->booleans);
+    g_array_unref(update->overlay_settings);
     g_free(update);
 }
 
@@ -2057,6 +2064,7 @@ static void configuration_apply(gpointer data) {
     if (configuration.rows == NULL) {
         configuration.rows = g_ptr_array_new();
         configuration.booleans = g_array_ref(update->booleans);
+        configuration.overlay_settings = g_array_ref(update->overlay_settings);
         GtkWidget *groups[4];
         for (guint i = 0; i < 4; ++i) {
             groups[i] = group("Dictation preferences");
@@ -2064,6 +2072,10 @@ static void configuration_apply(gpointer data) {
                 "Apply saves all preference fields. Provider-specific options only affect supported routes.");
             gtk_box_append(GTK_BOX(ui.configuration_columns[i]), groups[i]);
         }
+        if (!jsti_hud_overlay_supported())
+            adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(groups[0]),
+                "Wayland uses desktop notifications, not a positioned recording overlay. "
+                "Overlay-only preferences are retained for X11 but hidden here; your desktop controls notification expiry.");
         for (guint i = 0; i < update->titles->len; ++i) {
             const char *section = g_ptr_array_index(update->groups, i);
             guint slot = g_strcmp0(section, "Transcription") == 0 ? 1 :
@@ -2072,6 +2084,8 @@ static void configuration_apply(gpointer data) {
             GtkWidget *row = boolean ? adw_switch_row_new() : adw_entry_row_new();
             adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), g_ptr_array_index(update->titles, i));
             adw_preferences_group_add(ADW_PREFERENCES_GROUP(groups[slot]), row);
+            if (g_array_index(update->overlay_settings, gboolean, i) && !jsti_hud_overlay_supported())
+                gtk_widget_set_visible(row, FALSE);
             g_ptr_array_add(configuration.rows, row);
         }
         for (guint i = 0; i < 4; ++i) {
@@ -2111,11 +2125,13 @@ int32_t jsti_window_set_configuration(const JSTIConfigurationField *fields, size
     update->values = g_ptr_array_new_with_free_func(g_free);
     update->groups = g_ptr_array_new_with_free_func(g_free);
     update->booleans = g_array_new(FALSE, FALSE, sizeof(gboolean));
+    update->overlay_settings = g_array_new(FALSE, FALSE, sizeof(gboolean));
     update->callback = callback;
     update->context = context;
     for (size_t i = 0; i < count; ++i) {
         if (!fields[i].title || !fields[i].value || !fields[i].group ||
-            !g_utf8_validate(fields[i].value, -1, NULL) || strlen(fields[i].value) > 65535) {
+            !g_utf8_validate(fields[i].value, -1, NULL) || strlen(fields[i].value) > 65535 ||
+            (fields[i].requires_hud_overlay != 0 && fields[i].requires_hud_overlay != 1)) {
             configuration_update_free(update);
             return -1;
         }
@@ -2124,6 +2140,8 @@ int32_t jsti_window_set_configuration(const JSTIConfigurationField *fields, size
         g_ptr_array_add(update->groups, g_strdup(fields[i].group));
         gboolean boolean = fields[i].is_boolean != 0;
         g_array_append_val(update->booleans, boolean);
+        gboolean overlay_setting = fields[i].requires_hud_overlay != 0;
+        g_array_append_val(update->overlay_settings, overlay_setting);
     }
     return post(configuration_apply, update, configuration_update_free);
 }
@@ -2139,7 +2157,13 @@ static int32_t configuration_test_callback(int32_t action, const char *const *va
 
 static gboolean configuration_self_test(void) {
     if (configuration.rows == NULL || configuration.rows->len < 10 ||
-        configuration.rows->len != configuration.booleans->len) return FALSE;
+        configuration.rows->len != configuration.booleans->len ||
+        configuration.rows->len != configuration.overlay_settings->len) return FALSE;
+    for (guint i = 0; i < configuration.rows->len; ++i) {
+        if (g_array_index(configuration.overlay_settings, gboolean, i) &&
+            gtk_widget_get_visible(g_ptr_array_index(configuration.rows, i)) != jsti_hud_overlay_supported())
+            return FALSE;
+    }
     JSTIConfigurationCallback callback = configuration.callback;
     void *context = configuration.context;
     AdwEntryRow *language = ADW_ENTRY_ROW(g_ptr_array_index(configuration.rows, 0));
@@ -2484,7 +2508,7 @@ typedef struct Tour {
 } Tour;
 
 enum { TOUR_DARK_DASHBOARD = JSTI_PAGE_COUNT, TOUR_DARK_HISTORY, TOUR_RECORDING, TOUR_HUD_RECORDING,
-       TOUR_HUD_COMPLETED, TOUR_DONE };
+       TOUR_HUD_COMPLETED, TOUR_COMPACT_RECORDING, TOUR_COMPACT_COMPLETED, TOUR_DONE };
 
 static gboolean tour_capture(gpointer data);
 
@@ -2501,6 +2525,11 @@ static void tour_show(Tour *tour) {
                       "Could we move the catch-up to Friday? That gives us a little more time");
     } else if (tour->step == TOUR_HUD_COMPLETED) {
         jsti_hud_show(5, "Completed", "Saved. Pasted into the original window.", "");
+    } else if (tour->step == TOUR_COMPACT_RECORDING) {
+        jsti_hud_show_presentation(1, "Recording", "Capturing audio",
+                                    "Could we move the catch-up to Friday? That gives us a little more time", 0, TRUE);
+    } else if (tour->step == TOUR_COMPACT_COMPLETED) {
+        jsti_hud_show_presentation(5, "Completed", "Saved. Pasted into the original window.", "", 2400, TRUE);
     } else {
         /* Late, because it replaces the displayed transcript. */
         Update recording = { .transcript = (gchar *)"Could we move the catch-up to Friday? That gives us a little",
@@ -2517,6 +2546,8 @@ static const char *tour_name(gint32 step) {
     case TOUR_RECORDING: return "dashboard-recording";
     case TOUR_HUD_RECORDING: return "hud-recording";
     case TOUR_HUD_COMPLETED: return "hud-completed";
+    case TOUR_COMPACT_RECORDING: return "hud-compact-recording";
+    case TOUR_COMPACT_COMPLETED: return "hud-compact-completed";
     case TOUR_DARK_DASHBOARD: return "dashboard-dark";
     case TOUR_DARK_HISTORY: return "history-dark";
     default: return page_info[step].name;
@@ -2533,7 +2564,7 @@ static gboolean tour_capture(gpointer data) {
     gchar *file = g_strdup_printf("%02d-%s.png", tour->step + 1, tour_name(tour->step));
     gchar *path = g_build_filename(tour->directory, file, NULL);
     char message[256] = { 0 };
-    if (tour->step == TOUR_HUD_RECORDING || tour->step == TOUR_HUD_COMPLETED) {
+    if (tour->step >= TOUR_HUD_RECORDING && tour->step <= TOUR_COMPACT_COMPLETED) {
         /* The HUD is its own window; X11 only. */
         GtkWidget *card = jsti_hud_card();
         if (card != NULL && save_widget_png(card, path, TRUE) != 0) g_printerr("The HUD %s could not be saved.\n", file);

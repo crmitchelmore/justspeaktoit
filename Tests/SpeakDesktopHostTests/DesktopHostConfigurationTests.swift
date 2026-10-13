@@ -133,7 +133,10 @@ final class DesktopHostConfigurationTests: XCTestCase {
             XCTAssertTrue(error.localizedDescription.contains("1 MB"))
         }
         try Data(#"{"version":2,"preferences":{}}"#.utf8).write(to: file)
-        do { try await controller.importConfiguration(path: file.path); XCTFail("Unsupported version accepted") } catch {
+        do {
+            try await controller.importConfiguration(path: file.path)
+            XCTFail("Unsupported version accepted")
+        } catch {
             XCTAssertTrue(error.localizedDescription.contains("version"))
         }
         let after = try await controller.configuration()
@@ -192,5 +195,46 @@ final class DesktopHostConfigurationTests: XCTestCase {
             XCTAssertTrue(error.localizedDescription.contains("1 MB"))
         }
         XCTAssertEqual(try Data(contentsOf: file), original)
+    }
+
+    func testCompactHUDPolicyPreservesTimersRetractionsAndReplacementIdentity() async throws {
+        var entries = try await controller.configuration().entries
+        let compactIndex = try XCTUnwrap(DesktopConfiguration.fields.firstIndex { $0.key == "showCompactHUD" })
+        entries[compactIndex] = "1"
+        entries[9] = "0"
+        entries[10] = "1"
+        try await controller.saveConfiguration(entries)
+        let first = UUID()
+        await controller.beginHUD(first, .recording(profile: nil, liveText: "Synthetic speech"))
+        XCTAssertEqual(FakeLog.shared.huds.last?.compact, true)
+        XCTAssertEqual(FakeLog.shared.huds.last?.liveText, "")
+        XCTAssertNil(FakeLog.shared.huds.last?.displayDuration)
+        await controller.finishHUD(first, .failure("Synthetic error"))
+        XCTAssertEqual(FakeLog.shared.huds.last?.compact, true)
+        XCTAssertEqual(FakeLog.shared.huds.last?.displayDuration, 3.6)
+
+        entries[9] = "1"
+        try await controller.saveConfiguration(entries)
+        let second = UUID()
+        await controller.beginHUD(second, .recording(profile: nil, liveText: "Latest words"))
+        await controller.hud(second, .recording(profile: nil, liveText: ""))
+        XCTAssertEqual(FakeLog.shared.huds.last?.compact, true)
+        XCTAssertNil(FakeLog.shared.huds.last?.liveText)
+        await controller.finishHUD(first, .failure("Obsolete error"))
+        XCTAssertEqual(FakeLog.shared.huds.last?.phase, .recording)
+        await controller.finishHUD(second, .success("Completed"))
+        XCTAssertEqual(FakeLog.shared.huds.last?.displayDuration, 2.4)
+
+        entries[compactIndex] = "0"
+        try await controller.saveConfiguration(entries)
+        await controller.beginHUD(first, .recording(profile: nil, liveText: "Full card"))
+        XCTAssertEqual(FakeLog.shared.huds.last?.compact, false)
+        XCTAssertEqual(FakeLog.shared.huds.last?.liveText, "Full card")
+        await controller.finishHUD(first, .success("Completed"))
+        entries[8] = "0"
+        entries[compactIndex] = "1"
+        try await controller.saveConfiguration(entries)
+        await controller.beginHUD(UUID(), .recording(profile: nil))
+        XCTAssertEqual(FakeLog.shared.huds.last, .hidden)
     }
 }

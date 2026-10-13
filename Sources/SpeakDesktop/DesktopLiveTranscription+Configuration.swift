@@ -6,8 +6,7 @@ import SpeakCore
 
 extension DesktopLiveTranscription {
     /// Native transports stay injected, including when provider options change.
-    // swiftlint:disable:next function_parameter_count
-    public static func makeClient(
+    public static func makeClient( // swiftlint:disable:this function_parameter_count
         model: String, apiKey: String, language: String?, azureEndpoint: String,
         options: LiveClientOptions,
         makeConnection: @escaping @Sendable (URLRequest) -> any StreamingWebSocketConnection

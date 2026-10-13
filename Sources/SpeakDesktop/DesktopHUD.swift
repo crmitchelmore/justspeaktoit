@@ -26,6 +26,7 @@ public struct DesktopHUDState: Equatable, Sendable {
     /// Words arriving from a live model while recording.
     public var liveText: String?
     public var shortenErrorDisplay: Bool
+    public var compact = SpeechDefaults.compactHUD
 
     /// How long a finished dictation stays up, as on the Mac.
     public static let successDisplayDuration: TimeInterval = SpeechDefaults.successHUDDuration

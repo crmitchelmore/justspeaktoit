@@ -1861,31 +1861,39 @@ void importAudio(HWND window) {
 // The screenshot tour: every page, then the dashboard and History in dark
 // mode, then the dashboard while recording. Each step is shown, drawn, then
 // saved as NN-name.bmp beside the others; the window closes afterwards.
-constexpr int tourSteps = pageCount + 5;
+enum TourStep { tourDarkDashboard = pageCount, tourDarkHistory, tourDashboardRecording, tourHUDRecording,
+                tourHUDCompleted, tourCompactRecording, tourCompactCompleted, tourSteps };
 
 std::string tourName(int step) {
     if (step < pageCount) return pageInfo[step].name;
     const char *const extra[] = {"dashboard-dark", "history-dark", "dashboard-recording", "hud-recording",
-                                 "hud-completed"};
+                                 "hud-completed", "hud-compact-recording", "hud-compact-completed"};
     return extra[step - pageCount];
 }
 
 void tourShow(HWND window, int step) {
     if (step < pageCount) {
         showPage(window, step);
-    } else if (step == pageCount) {
+    } else if (step == tourDarkDashboard) {
         jsti::chrome::setAppearance(2);
         SendDlgItemMessageW(window, appearanceID, CB_SETCURSEL, 2, 0);
         applyTheme(window);
         showPage(window, dashboardPage);
-    } else if (step == pageCount + 1) {
+    } else if (step == tourDarkHistory) {
         showPage(window, historyPage);
-    } else if (step == pageCount + 3) {
+    } else if (step == tourHUDRecording) {
         jsti::hud::stage(1, L"Recording", L"Capturing audio",
                          L"Could we move the catch-up to Friday? That gives us a little more time");
         jsti::hud::apply();
-    } else if (step == pageCount + 4) {
+    } else if (step == tourHUDCompleted) {
         jsti::hud::stage(5, L"Completed", L"Saved. Inserted into the original text field.", L"");
+        jsti::hud::apply();
+    } else if (step == tourCompactRecording) {
+        jsti::hud::stage(1, L"Recording", L"Capturing audio",
+                         L"Could we move the catch-up to Friday? That gives us a little more time", 0, true);
+        jsti::hud::apply();
+    } else if (step == tourCompactCompleted) {
+        jsti::hud::stage(5, L"Completed", L"Saved. Inserted into the original text field.", L"", 2400, true);
         jsti::hud::apply();
     } else {
         // Late, because it replaces the displayed transcript.
@@ -1906,7 +1914,7 @@ void tourStep(HWND window) {
     char error[512] = {};
     std::string hudError;
     std::wstring widePath;
-    if (state.tourStep >= pageCount + 3) {
+    if (state.tourStep >= tourHUDRecording && state.tourStep <= tourCompactCompleted) {
         // The HUD is its own layered window; it is drawn straight to the file.
         if (!jsti::wide(path.c_str(), widePath) || !jsti::hud::saveSnapshot(widePath, hudError)) {
             emit(window, JSTI_EVENT_ERROR, hudError.empty() ? "The HUD snapshot path is invalid." : hudError.c_str());
@@ -2775,12 +2783,14 @@ int jsti_window_set_insights(const JSTIInsights *all, const JSTIInsights *visibl
 }
 
 int jsti_window_set_hud(int phase, const char *headline, const char *subheadline, const char *live_text,
-                        int display_milliseconds) {
+                        int display_milliseconds, int compact) {
     try {
+        if (compact != 0 && compact != 1) return -1;
         std::wstring title, detail, live;
         if (!jsti::wide(headline ? headline : "", title) || !jsti::wide(subheadline ? subheadline : "", detail) ||
             !jsti::wide(live_text ? live_text : "", live) ||
-            !jsti::hud::stage(phase, std::move(title), std::move(detail), std::move(live), display_milliseconds)) {
+            !jsti::hud::stage(phase, std::move(title), std::move(detail), std::move(live),
+                              display_milliseconds, compact != 0)) {
             return -1;
         }
         std::lock_guard<std::mutex> lock(state.mutex);

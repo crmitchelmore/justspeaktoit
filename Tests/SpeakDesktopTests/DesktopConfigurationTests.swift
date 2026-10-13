@@ -13,7 +13,25 @@ final class DesktopConfigurationTests: XCTestCase {
         XCTAssertEqual(restored.number("doubleTapWindow"), HotKeyGestureTiming.defaultDoubleTapWindow)
         XCTAssertEqual(restored.number("postProcessingTemperature"), 0.2)
         XCTAssertTrue(restored.enabled("showHUD"))
+        XCTAssertFalse(restored.enabled("showCompactHUD"))
         XCTAssertEqual(Set(DesktopConfiguration.fields.map(\.key)).count, DesktopConfiguration.fields.count)
+    }
+
+    func testOverlayCapabilityMetadataAndCompactValueSurviveTransfer() throws {
+        let overlayKeys = Set(DesktopConfiguration.fields.filter(\.requiresHUDOverlay).map(\.key))
+        XCTAssertEqual(overlayKeys, ["showLiveTranscriptInHUD", "shortenErrorDisplay", "showCompactHUD"])
+        let preferences = try DesktopConfiguration(values: [
+            "showCompactHUD": AnyCodable(.bool(true)),
+            "shortenErrorDisplay": AnyCodable(.bool(true)),
+            "showLiveTranscriptInHUD": AnyCodable(.bool(false))
+        ])
+        let restored = try JSONDecoder().decode(
+            DesktopConfiguration.self, from: JSONEncoder().encode(preferences.applying(preferences.entries))
+        )
+        for (key, value) in preferences.values {
+            XCTAssertEqual(restored.values[key], value)
+        }
+        XCTAssertTrue(restored.enabled("showCompactHUD"))
     }
 
     func testUnknownValuesSurviveEditingAndEncodingWithoutBeingApplied() throws {

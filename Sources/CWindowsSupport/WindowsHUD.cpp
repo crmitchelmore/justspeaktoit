@@ -25,9 +25,10 @@ struct Content {
     int phase = hidden;
     std::wstring headline, subheadline, live;
     int displayMilliseconds = 0;
+    bool compact = false;
     bool operator==(const Content &other) const {
         return phase == other.phase && headline == other.headline && subheadline == other.subheadline &&
-               live == other.live && displayMilliseconds == other.displayMilliseconds;
+               live == other.live && displayMilliseconds == other.displayMilliseconds && compact == other.compact;
     }
 };
 
@@ -91,7 +92,14 @@ void roundedPath(Gdiplus::GraphicsPath &path, Gdiplus::RectF rect, float radius)
     path.CloseFigure();
 }
 
-std::wstring clockText(ULONGLONG milliseconds) {
+std::wstring clockText(ULONGLONG milliseconds, bool compact = false) {
+    if (compact) {
+        const unsigned long long seconds = milliseconds / 1000;
+        wchar_t text[32];
+        if (seconds >= 60) swprintf(text, 32, L"%llu:%02llus", seconds / 60, seconds % 60);
+        else swprintf(text, 32, L"%llus", seconds);
+        return text;
+    }
     const unsigned long long hundredthsTotal = (milliseconds + 5) / 10;
     const unsigned minutes = static_cast<unsigned>(hundredthsTotal / 6000);
     const unsigned seconds = static_cast<unsigned>((hundredthsTotal / 100) % 60);
@@ -100,6 +108,10 @@ std::wstring clockText(ULONGLONG milliseconds) {
     if (minutes > 0) swprintf(text, 32, L"%02u:%02u.%02u", minutes, seconds, hundredths);
     else swprintf(text, 32, L"%02u.%02us", seconds, hundredths);
     return text;
+}
+
+const std::wstring &compactStatus(const Content &content) {
+    return terminal(content.phase) && !content.subheadline.empty() ? content.subheadline : content.headline;
 }
 
 // GDI+ draws nothing with a missing family, so each falls back: Segoe UI to
@@ -138,8 +150,8 @@ Layout layoutFor(const Content &content, UINT dpi) {
     layout.showsLive = content.phase == recording && !content.live.empty();
     layout.showsMeter = content.phase == recording;
     layout.showsClock = !terminal(content.phase);
-    const float cardWidth = (layout.showsLive ? 460.0f : 340.0f) * s;
-    const float inner = cardWidth - 48.0f * s;
+    const float cardWidth = (content.compact ? 244.0f : layout.showsLive ? 460.0f : 340.0f) * s;
+    const float inner = cardWidth - (content.compact ? 36.0f : 48.0f) * s;
     Fonts fonts;
     const Gdiplus::Font headline(&fonts.strong(), 15.0f * s, fonts.strongStyle(), Gdiplus::UnitPixel);
     const Gdiplus::Font detail(&fonts.regular(), 12.5f * s, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
@@ -149,52 +161,67 @@ Layout layoutFor(const Content &content, UINT dpi) {
     Gdiplus::StringFormat centred;
     centred.SetAlignment(Gdiplus::StringAlignmentCenter);
     const float left = margin * s, top = (margin - 6.0f) * s;
-    float y = top + 16.0f * s;
-    layout.glyph = Gdiplus::RectF(left + (cardWidth - 40.0f * s) / 2, y, 40.0f * s, 40.0f * s);
-    y += 40.0f * s + 12.0f * s;
-    const float headlineHeight = measure(graphics, content.headline.empty() ? L" " : content.headline, headline,
-                                         inner, centred);
-    layout.headline = Gdiplus::RectF(left + 24.0f * s, y, inner, headlineHeight);
-    y += headlineHeight;
-    if (!content.subheadline.empty()) {
-        const float lineHeight = measure(graphics, L" ", detail, inner, centred);
-        const float height = std::min(measure(graphics, content.subheadline, detail, inner, centred), 3 * lineHeight);
-        y += 4.0f * s;
-        layout.subheadline = Gdiplus::RectF(left + 24.0f * s, y, inner, height);
-        y += height;
-    }
-    if (layout.showsMeter) {
-        y += 10.0f * s;
-        layout.meter = Gdiplus::RectF(left + (cardWidth - 100.0f * s) / 2, y, 100.0f * s, 4.0f * s);
-        y += 4.0f * s;
-    }
-    if (layout.showsClock) {
-        y += 8.0f * s;
-        const float height = measure(graphics, L"00.00s", detail, inner, centred);
-        layout.clock = Gdiplus::RectF(left + 24.0f * s, y, inner, height);
-        y += height;
+    float y = top + (content.compact ? 12.0f : 16.0f) * s;
+    if (content.compact) {
+        layout.glyph = Gdiplus::RectF(left + 18.0f * s, y + 4.5f * s, 15.0f * s, 15.0f * s);
+        layout.meter = Gdiplus::RectF(left + 82.0f * s, y + 10.0f * s, 80.0f * s, 4.0f * s);
+        layout.clock = Gdiplus::RectF(left + 164.0f * s, y, 62.0f * s, 24.0f * s);
+        y += 24.0f * s;
+        if (content.phase != recording && !compactStatus(content).empty()) {
+            y += 7.0f * s;
+            const float height = measure(graphics, L" ", detail, inner, centred);
+            layout.subheadline = Gdiplus::RectF(left + 18.0f * s, y, inner, height);
+            y += height;
+        }
+    } else {
+        layout.glyph = Gdiplus::RectF(left + (cardWidth - 40.0f * s) / 2, y, 40.0f * s, 40.0f * s);
+        y += 40.0f * s + 12.0f * s;
+        const float headlineHeight = measure(graphics, content.headline.empty() ? L" " : content.headline, headline,
+                                             inner, centred);
+        layout.headline = Gdiplus::RectF(left + 24.0f * s, y, inner, headlineHeight);
+        y += headlineHeight;
+        if (!content.subheadline.empty()) {
+            const float lineHeight = measure(graphics, L" ", detail, inner, centred);
+            const float height = std::min(measure(graphics, content.subheadline, detail, inner, centred), 3 * lineHeight);
+            y += 4.0f * s;
+            layout.subheadline = Gdiplus::RectF(left + 24.0f * s, y, inner, height);
+            y += height;
+        }
+        if (layout.showsMeter) {
+            y += 10.0f * s;
+            layout.meter = Gdiplus::RectF(left + (cardWidth - 100.0f * s) / 2, y, 100.0f * s, 4.0f * s);
+            y += 4.0f * s;
+        }
+        if (layout.showsClock) {
+            y += 8.0f * s;
+            const float height = measure(graphics, L"00.00s", detail, inner, centred);
+            layout.clock = Gdiplus::RectF(left + 24.0f * s, y, inner, height);
+            y += height;
+        }
     }
     if (layout.showsLive) {
-        // Two lines of the latest words, dropping earlier ones from the front.
+        // Keep the newest words: one compact line, two lines in the full card.
         Gdiplus::StringFormat leading;
-        const float boxInner = inner - 20.0f * s;
-        const float twoLines = 2 * measure(graphics, L" ", live, boxInner, leading) + 1;
+        const float boxInner = inner - (content.compact ? 0.0f : 20.0f) * s;
+        const float lineLimit = (content.compact ? 1 : 2) * measure(graphics, L" ", live, boxInner, leading) + 1;
         std::wstring text = content.live;
         bool trimmed = false;
-        while (text.size() > 1 && measure(graphics, (trimmed ? L"…" : L"") + text, live, boxInner, leading) > twoLines) {
+        while (text.size() > 1 && measure(graphics, (trimmed ? L"…" : L"") + text, live, boxInner, leading) > lineLimit) {
             const size_t space = text.find(L' ', 1);
-            text = space == std::wstring::npos || space + 1 >= text.size() ? text.substr(text.size() / 2)
-                                                                          : text.substr(space + 1);
+            size_t offset = space == std::wstring::npos || space + 1 >= text.size() ? text.size() / 2 : space + 1;
+            if (offset < text.size() && text[offset] >= 0xDC00 && text[offset] <= 0xDFFF) ++offset;
+            text = text.substr(offset);
             trimmed = true;
         }
         layout.liveShown = (trimmed ? L"…" : L"") + text;
-        y += 12.0f * s;
+        y += (content.compact ? 7.0f : 12.0f) * s;
         const float height = measure(graphics, layout.liveShown, live, boxInner, leading);
-        layout.liveBox = Gdiplus::RectF(left + 24.0f * s, y, inner, height + 20.0f * s);
-        layout.live = Gdiplus::RectF(left + 34.0f * s, y + 10.0f * s, boxInner, height);
-        y += height + 20.0f * s;
+        const float padding = content.compact ? 0.0f : 10.0f * s;
+        layout.liveBox = Gdiplus::RectF(left + (content.compact ? 18.0f : 24.0f) * s, y, inner, height + 2 * padding);
+        layout.live = Gdiplus::RectF(layout.liveBox.X + padding, y + padding, boxInner, height);
+        y += height + 2 * padding;
     }
-    y += 16.0f * s;
+    y += (content.compact ? 12.0f : 16.0f) * s;
     layout.card = Gdiplus::RectF(left, top, cardWidth, y - top);
     layout.width = static_cast<int>(std::ceil(cardWidth + 2 * margin * s));
     layout.height = static_cast<int>(std::ceil(y + margin * s));
@@ -286,19 +313,22 @@ void draw(Surface &surface, const Layout &layout, const Content &content, ULONGL
     centred.SetLineAlignment(Gdiplus::StringAlignmentCenter);
     Gdiplus::SolidBrush white(color(RGB(0xFF, 0xFF, 0xFF)));
     const wchar_t glyph = phaseGlyph(content.phase);
-    graphics.DrawString(&glyph, 1, &icon, layout.glyph, &centred, &white);
+    if (!content.compact) graphics.DrawString(&glyph, 1, &icon, layout.glyph, &centred, &white);
 
     Gdiplus::StringFormat top;
     top.SetAlignment(Gdiplus::StringAlignmentCenter);
     top.SetTrimming(Gdiplus::StringTrimmingEllipsisWord);
+    if (content.compact) top.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
     const Gdiplus::Font headline(&fonts.strong(), 15.0f * s, fonts.strongStyle(), Gdiplus::UnitPixel);
     const Gdiplus::Font detail(&fonts.regular(), 12.5f * s, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
     Gdiplus::SolidBrush primary(color(content.phase == failure ? tint : palette.text));
     Gdiplus::SolidBrush secondary(color(palette.secondary));
-    graphics.DrawString(content.headline.c_str(), static_cast<INT>(content.headline.size()), &headline,
-                        layout.headline, &top, &primary);
-    if (!content.subheadline.empty()) {
-        graphics.DrawString(content.subheadline.c_str(), static_cast<INT>(content.subheadline.size()), &detail,
+    if (!content.compact)
+        graphics.DrawString(content.headline.c_str(), static_cast<INT>(content.headline.size()), &headline,
+                            layout.headline, &top, &primary);
+    const std::wstring &status = content.compact ? compactStatus(content) : content.subheadline;
+    if (layout.subheadline.Width > 0) {
+        graphics.DrawString(status.c_str(), static_cast<INT>(status.size()), &detail,
                             layout.subheadline, &top, &secondary);
     }
     if (layout.showsMeter) {
@@ -314,16 +344,27 @@ void draw(Surface &surface, const Layout &layout, const Content &content, ULONGL
         graphics.FillPath(&barBrush, &bar);
     }
     if (layout.showsClock) {
-        const std::wstring text = clockText(elapsed);
-        graphics.DrawString(text.c_str(), static_cast<INT>(text.size()), &detail, layout.clock, &top, &secondary);
+        const std::wstring text = clockText(elapsed, content.compact);
+        const Gdiplus::Font clock(&fonts.regular(), (content.compact ? 16.0f : 12.5f) * s,
+                                  Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+        Gdiplus::StringFormat clockFormat(&top);
+        if (content.compact) {
+            clockFormat.SetAlignment(Gdiplus::StringAlignmentFar);
+            clockFormat.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+        }
+        graphics.DrawString(text.c_str(), static_cast<INT>(text.size()), &clock, layout.clock, &clockFormat, &secondary);
     }
     if (layout.showsLive) {
         Gdiplus::GraphicsPath box;
         roundedPath(box, layout.liveBox, 10.0f * s);
         Gdiplus::SolidBrush field(color(palette.text, dark ? 20 : 12));
-        graphics.FillPath(&field, &box);
+        if (!content.compact) graphics.FillPath(&field, &box);
         const Gdiplus::Font live(&fonts.regular(), 13.0f * s, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
         Gdiplus::StringFormat leading;
+        if (content.compact) {
+            leading.SetAlignment(Gdiplus::StringAlignmentFar);
+            leading.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
+        }
         Gdiplus::SolidBrush text(color(palette.text));
         graphics.DrawString(layout.liveShown.c_str(), static_cast<INT>(layout.liveShown.size()), &live, layout.live,
                             &leading, &text);
@@ -413,13 +454,14 @@ bool ensureWindow() {
 
 } // namespace
 
-bool stage(int phase, std::wstring headline, std::wstring subheadline, std::wstring live, int displayMilliseconds) {
+bool stage(int phase, std::wstring headline, std::wstring subheadline, std::wstring live, int displayMilliseconds,
+            bool compact) {
     if (phase < hidden || phase >= phaseCount || headline.size() > 256 || subheadline.size() > 1024 ||
         live.size() > 2048 || displayMilliseconds < 0 || displayMilliseconds > 60000) {
         return false;
     }
     std::lock_guard<std::mutex> lock(stagedLock);
-    staged = Content{phase, std::move(headline), std::move(subheadline), std::move(live), displayMilliseconds};
+    staged = Content{phase, std::move(headline), std::move(subheadline), std::move(live), displayMilliseconds, compact};
     return true;
 }
 
@@ -544,12 +586,35 @@ bool selfTest(std::string &error) {
                                  std::abs(centre - workCentre) <= 1 && info.rcWork.bottom - bounds.bottom < 64,
                                  "the HUD is not at the bottom centre of the work area.");
     }
+    const Layout full = layoutFor(shown, 96);
+    const ULONGLONG started = phaseStarted;
+    stage(recording, L"Recording", L"Capturing audio",
+          L"Could we move the catch-up to Friday? That gives us a little more time", 0, true);
+    apply();
+    const Layout compact = layoutFor(shown, 96);
+    passed = passed && check(compact.width < full.width && compact.height < full.height &&
+                             compact.card.Width == 244 && compact.headline.Width == 0 && compact.showsMeter &&
+                             compact.showsClock && compact.showsLive && phaseStarted == started &&
+                             compact.liveShown.find(L"time") != std::wstring::npos,
+                             "the compact card lost its layout, newest transcript or session clock.");
+    passed = passed && check(clockText(59999, true) == L"59s" && clockText(83999, true) == L"1:23s",
+                             "the compact clock did not use whole seconds.");
+    stage(recording, L"Recording", L"Capturing audio", L"", 0, true);
+    apply();
+    passed = passed && check(!layoutFor(shown, 96).showsLive && layoutFor(shown, 96).subheadline.Width == 0,
+                             "a disabled compact transcript showed placeholder status text.");
+    stage(recording, L"Recording", L"Capturing audio", L"");
+    apply();
+    passed = passed && check(!shown.compact && phaseStarted == started && GetForegroundWindow() == foreground,
+                             "switching back to the full card reset the clock or took focus.");
     stage(success, L"Completed", L"Transcript copied to the clipboard and saved to History.", L"");
     apply();
     passed = passed && check(IsWindowVisible(window), "the completed phase did not stay up.");
-    stage(failure, L"Something went wrong", L"Synthetic failure.", L"", 3600);
+    stage(failure, L"Something went wrong", L"Synthetic failure.", L"", 3600, true);
     apply();
     passed = passed && check(terminalDuration(shown) == 3600, "the shortened error timer was not used.");
+    passed = passed && check(!layoutFor(shown, 96).showsClock && compactStatus(shown) == L"Synthetic failure.",
+                             "the compact error card lost its status or retained a clock.");
     passed = passed && check(!stage(failure, L"Error", L"", L"", -1), "an invalid error duration was accepted.");
     stage(failure, L"Something went wrong", L"Synthetic failure.", L"", 6000);
     apply();

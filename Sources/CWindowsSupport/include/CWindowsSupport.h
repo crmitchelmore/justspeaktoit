@@ -65,6 +65,7 @@ typedef struct JSTIConfigurationField {
     const char *value;
     const char *group;
     int is_boolean;
+    int requires_hud_overlay;
 } JSTIConfigurationField;
 /* action 0 applies fields; 1 imports and 2 exports a path in values[0].
  * The callback validates synchronously; persistence is ordered by Swift. */
@@ -191,7 +192,7 @@ int jsti_window_set_appearance(int appearance);
  * 2.4 s), 6 failure (hides after 6 s). Each new phase restarts its clock.
  * Thread safe and latest-only; -1 for invalid UTF-8, phase or length. */
 int jsti_window_set_hud(int phase, const char *headline, const char *subheadline, const char *live_text,
-                        int display_milliseconds);
+                        int display_milliseconds, int compact);
 /* Shows every page, then the dashboard and History in dark mode, then the
  * dashboard while recording, saving each as `directory`\NN-name.bmp once
  * drawn, then closes the window. Thread safe. */

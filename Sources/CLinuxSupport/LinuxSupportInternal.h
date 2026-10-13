@@ -75,6 +75,9 @@ double jsti_capture_level(void);
 void jsti_hud_show(int phase, const char *headline, const char *subheadline, const char *live);
 void jsti_hud_show_duration(int phase, const char *headline, const char *subheadline, const char *live,
                             int display_milliseconds);
+void jsti_hud_show_presentation(int phase, const char *headline, const char *subheadline, const char *live,
+                                int display_milliseconds, gboolean compact);
+gboolean jsti_hud_overlay_supported(void);
 /* Redraws after a light or dark change; destroys the HUD with the window. */
 void jsti_hud_destroy(void);
 /* The HUD's card and shadow, when on screen, for snapshots; NULL otherwise. */

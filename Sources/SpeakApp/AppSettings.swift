@@ -1313,7 +1313,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     showLiveTranscriptInHUD =
       defaults.object(forKey: DefaultsKey.showLiveTranscriptInHUD.rawValue) as? Bool ?? SpeechDefaults.liveTranscriptHUD
     showCompactHUD =
-      defaults.object(forKey: DefaultsKey.showCompactHUD.rawValue) as? Bool ?? false
+      defaults.object(forKey: DefaultsKey.showCompactHUD.rawValue) as? Bool ?? SpeechDefaults.compactHUD
     shortenErrorDisplay =
       defaults.object(forKey: DefaultsKey.shortenErrorDisplay.rawValue) as? Bool ?? SpeechDefaults.shortErrors
     showSidebarShortcutHints =

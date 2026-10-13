@@ -50,6 +50,7 @@ extension DesktopHostController {
         guard configuration.enabled("showHUD") else { return .hidden }
         var presentation = state
         presentation.shortenErrorDisplay = configuration.enabled("shortenErrorDisplay")
+        presentation.compact = configuration.enabled("showCompactHUD")
         if !configuration.enabled("showLiveTranscriptInHUD") { presentation.liveText = "" }
         return presentation
     }

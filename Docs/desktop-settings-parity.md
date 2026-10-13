@@ -13,7 +13,7 @@ in those same destinations. Fields are defined once in
 `Sources/SpeakCore/DesktopConfiguration.swift`; native controls receive that
 schema rather than maintaining copies of defaults. Scalar defaults now use
 `SpeechDefaults` in the shared schema and canonical Mac `AppSettings` initializer;
-an Apple test compares all eleven preferences to a fresh Mac settings store.
+an Apple test compares all twelve preferences to a fresh Mac settings store.
 All fields are validated
 before one atomic settings write; a failed write leaves the controller unchanged.
 Changes apply to subsequent recordings. Spoken-language profile overrides still
@@ -34,6 +34,14 @@ Shortened error display uses the Mac's 3.6-second failure interval instead of
 6 seconds, forwarded to the actual Windows and X11 native HUD hide timers.
 Wayland preserves its non-activating desktop notification replacement; the
 desktop notification server, not the app, controls notification expiration.
+Compact HUD matches the Mac's small dot/level-meter/whole-second-clock layout,
+with one trailing transcript line and terminal status instead of the full card.
+It preserves session clocks, visibility/retraction policy and terminal timers.
+The default remains the full card. On Wayland, overlay-only rows are hidden with
+an explanation; their values are retained when applying or transferring preferences.
+The shared field schema marks these capabilities rather than duplicating labels
+or catalogue entries in the native UI. Native capture-health footer details and
+full-HUD expansion controls remain separate gaps.
 Cleanup remains opt-in; changing preferences does not enable it. HUD visibility
 and live-preview visibility gate the real native HUD. Shortcut timing reaches
 the existing shared gesture machine on both platforms, not fixed platform timers.
@@ -144,8 +152,8 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | warmMicrophoneOnKeyPress | Missing / Missing | No speculative microphone-open preference |
 | postProcessingStreamingEnabled | Missing / Missing | Finished-text remote cleanup only |
 | hudSizePreference | Missing / Missing | Fixed native HUD layout |
-| showLiveTranscriptInHUD | Wired / Wired | Config + HUD; transcript remains in main window |
-| showCompactHUD | Missing / Missing | No compact HUD selector |
+| showLiveTranscriptInHUD | Wired / Partial | Config + Windows/X11 HUD; Wayland has no live overlay, so the control is hidden; transcript remains in main window |
+| showCompactHUD | Wired / Partial | Config + native compact Windows/X11 renderer; hidden on Wayland, where notifications are compositor-owned |
 | shortenErrorDisplay | Wired / Partial | Config + HUD; native Windows/X11 timer; Wayland notification lifetime is desktop-owned |
 | showSidebarShortcutHints | Missing / Missing | Native sidebar has no hint visibility preference |
 | speedMode | Missing / Missing | No Instant/Live Polish setting; no live-polish engine |
@@ -215,6 +223,10 @@ Portable tests: `Tests/SpeakDesktopTests/DesktopConfigurationTests.swift` and
 `Tests/SpeakDesktopHostTests/DesktopHostConfigurationTests.swift`. Native smoke
 tests include Windows field validation/apply/cancel and Linux schema population.
 HUD assertions cover standard/short error durations, replacement errors,
-obsolete hide callbacks during recording and timer cleanup at shutdown.
+obsolete hide callbacks during recording and timer cleanup at shutdown, plus
+compact layout, clock continuity, whole seconds, transcript visibility and focus.
+X11/Wayland configuration smoke checks verify capability-filtered row visibility;
+all stored values still participate in Apply. Screenshot tours include full and
+compact recording/completion cards.
 These synthetic checks do not establish physical microphone/shortcut/display
 acceptance, provider accuracy or macOS feature parity.

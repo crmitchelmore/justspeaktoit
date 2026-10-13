@@ -37,6 +37,7 @@ final class WindowsEventContext {
             case .playPause(let identifier): await controller.playbackToggle(identifier)
             case .stop: await controller.playbackStop()
             case .readAloud(let identifier, let text): await controller.readAloud(identifier, text: text)
+            case .filter(let payload): await controller.applyHistoryFilters(payload)
             }
         }
     }
@@ -78,6 +79,7 @@ func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, 
     let controller = holder.controller
     let value = text.map(String.init(cString:)) ?? ""
     switch event {
+    case 90: holder.submitHistoryPlayback(.filter(value))
     case 1:
         // Capture synchronously before an actor hop or another app gains focus.
         // No external field focused is not an error here: the transcript is

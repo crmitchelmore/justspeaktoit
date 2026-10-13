@@ -475,6 +475,16 @@ not measured latency or microphone-device acceptance.
 
 ## Feature parity matrix
 
+History's Filters button opens a modeless native editor with multi-selection
+of the models used in saved transcription and post-processing, errors only,
+and optional From/Through date pickers. The dates use the shared
+`HistorySearchQuery` day policy in the local time zone; model/error/date
+constraints compose with existing Unicode/profile search. Apply and Reset
+change visibility, never recordings or transcripts. Hiding the selected row
+clears its actions and stops playback and Read aloud. Native UI/device
+acceptance remains required; filtering does not implement deletion, retention,
+or migration.
+
 “Implemented” below describes source wiring, not completed device acceptance.
 The exact CI run and target-device evidence must accompany any promotion in
 status. A platform-specific replacement may provide the same user capability,

@@ -88,6 +88,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     /// each keystroke filters cached strings instead of re-normalising transcripts.
     package var historySearchText: [UUID: String] = [:]
     var historyQuery = ""
+    var historyFilter = HistorySearchQuery.none
+    var historyFilterDraft = DesktopHistoryFilter.none
     package var selectedHistoryID: UUID?
     package var transcriptVariant: DesktopTranscriptVariant = .processed
     var transcriptionTask: Task<TranscriptionResult, Error>?

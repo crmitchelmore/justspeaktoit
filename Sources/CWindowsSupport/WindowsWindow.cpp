@@ -17,6 +17,7 @@
 #include "WindowsTray.hpp"
 #include "WindowsLoginItem.hpp"
 #include "WindowsWindowChrome.hpp"
+#include "WindowsHistoryFilters.hpp"
 
 bool jsti_postprocessing_available();
 void jsti_show_postprocessing(HWND owner);
@@ -81,6 +82,7 @@ constexpr int voiceSettingsID = 173;
 // takes the place of Refresh models while the Local source is selected.
 constexpr int sourceLabelID = 89;
 constexpr int localModelsID = 174;
+constexpr int historyFiltersID = 460;
 constexpr int sourceID = 175;
 // Model modes: bit 0 is live, bit 1 is local (on-device).
 constexpr int modeCount = 4;
@@ -450,16 +452,19 @@ void applyPlayback(HWND window, int playback, const std::wstring &text, bool sel
 void updateHistoryControls(HWND window, int recording) {
     const LRESULT index = SendDlgItemMessageW(window, historyID, LB_GETCURSEL, 0, 0);
     const bool selected = index != LB_ERR && static_cast<size_t>(index) < state.displayedHistory.size();
-    const bool filtering = searching(window);
+    const bool filtering = searching(window) || jsti_history_filters_active();
     if (!selected && state.displayedPlayback != playbackIdle) applyPlayback(window, playbackIdle, L"", false, recording);
     else updatePlaybackControls(window, selected, recording);
     SetDlgItemTextW(window, historyDetailID, selected ? state.displayedHistory[static_cast<size_t>(index)].detail.c_str()
         : (state.displayedHistory.empty()
-            ? (filtering ? L"No saved recordings match this search." : L"Your saved recordings will appear here.")
+            ? (filtering ? L"No saved recordings match this search or filter." : L"Your saved recordings will appear here.")
             : L"Select a saved recording."));
     EnableWindow(GetDlgItem(window, historyID), recording == 0);
     EnableWindow(GetDlgItem(window, searchID), recording == 0);
-    EnableWindow(GetDlgItem(window, clearSearchID), recording == 0 && filtering);
+    EnableWindow(GetDlgItem(window, historyFiltersID), recording == 0);
+    jsti_history_filters_enabled(recording == 0);
+    SetDlgItemTextW(window, historyFiltersID, jsti_history_filters_label().c_str());
+    EnableWindow(GetDlgItem(window, clearSearchID), recording == 0 && searching(window));
     for (int id : {retryID, openAudioID}) EnableWindow(GetDlgItem(window, id), selected && recording == 0);
     EnableWindow(GetDlgItem(window, exportID), selected && recording == 0 && state.historyPresentationReady);
     EnableWindow(GetDlgItem(window, readAloudID), selected && recording == 0 && state.historyPresentationReady &&
@@ -537,7 +542,7 @@ unsigned pagesOf(int identifier) {
     case insightSessionsID: case insightTimeID: case insightAverageID: case insightSpendID:
     case setupMicrophoneID: case setupModelID: case setupShortcutID: case setupOutputID:
         return page(dashboardPage);
-    case searchLabelID: case searchID: case clearSearchID: case 93: case historyID: case historyDetailID:
+    case searchLabelID: case searchID: case clearSearchID: case historyFiltersID: case 93: case historyID: case historyDetailID:
     case variantLabelID: case variantID: case retryID: case exportID: case openAudioID: case playbackLabelID:
     case playbackTimeID: case playPauseID: case historySessionsID: case historyErrorsID: case historyAverageID:
     case historySpendID:
@@ -740,7 +745,8 @@ void layoutHistory(HWND window, const RECT &content) {
     const int searchTop = heroBottom + scale(window, 14);
     place(window, searchLabelID, box(content.left, searchTop + scale(window, 8), scale(window, 112), scale(window, 20)));
     placeField(window, searchID, RECT{content.left + scale(window, 116), searchTop,
-                                      content.right - scale(window, 88), searchTop + row});
+                                      content.right - scale(window, 216), searchTop + row});
+    place(window, historyFiltersID, box(content.right - scale(window, 208), searchTop, scale(window, 120), row));
     place(window, clearSearchID, box(content.right - scale(window, 80), searchTop, scale(window, 80), row));
     const int top = searchTop + row + scale(window, 14);
     const int listWidth = (widthOf(content) - gap) * 13 / 25;
@@ -1451,6 +1457,7 @@ bool createControls(HWND window) {
         add(L"STATIC", L"&Find in history", 0, searchLabelID) &&
         add(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, searchID) &&
         add(L"BUTTON", L"C&lear", BS_PUSHBUTTON | WS_TABSTOP, clearSearchID) &&
+        add(L"BUTTON", L"Fil&ters...", BS_PUSHBUTTON | WS_TABSTOP, historyFiltersID) &&
         add(L"STATIC", L"&History", 0, 93) &&
         add(L"LISTBOX", L"", LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP,
             historyID) &&
@@ -2146,6 +2153,13 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case clearSearchID:
             if (idleControl(window, clearSearchID)) clearSearch(window);
             return 0;
+        case historyFiltersID:
+            if (idleControl(window, historyFiltersID)) {
+                jsti_show_history_filters(window, [window](const std::string &value) {
+                    emit(window, JSTI_EVENT_HISTORY_FILTERS, value.c_str());
+                });
+            }
+            return 0;
         case IDCANCEL:
             // Escape inside the search box is a keyboard clear affordance.
             if (GetFocus() == GetDlgItem(window, searchID) && idleControl(window, searchID)) clearSearch(window);
@@ -2511,7 +2525,9 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
                 showPage(window, digit == 0 ? pageCount - 1 : digit - 1);
                 continue;
             }
-            if (!IsDialogMessageW(window, &message)) { TranslateMessage(&message); DispatchMessageW(&message); }
+            if (!jsti_history_filters_message(&message) && !IsDialogMessageW(window, &message)) {
+                TranslateMessage(&message); DispatchMessageW(&message);
+            }
         }
         if (result < 0) {
             outcome = jsti::fail(jsti::systemError("Reading desktop messages"), error, capacity);
@@ -3423,7 +3439,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         applyUpdate(window);
         wchar_t detail[64] = {};
         GetDlgItemTextW(window, historyDetailID, detail, 64);
-        if (std::wstring(detail) != L"No saved recordings match this search.") {
+        if (std::wstring(detail) != L"No saved recordings match this search or filter.") {
             failure = "An empty search result did not explain the missing rows."; return false;
         }
         // A fresh launch sends its empty History and Ready status together; the
@@ -3740,6 +3756,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         };
         auto observe = [](void *context) { return static_cast<Event *>(context)->event; };
         return jsti_settings_self_test(window, failure) && jsti_profiles_self_test(window, failure) &&
+            jsti_history_filters_self_test(window, failure) &&
             jsti_text_output_settings_self_test(window, textOutputID, setRecording, recordingBlocked, &observed, failure) &&
             jsti_hotkey_self_test(window, observe, &observed, failure) && jsti_voice_settings_self_test(window, failure) &&
             jsti_local_models_self_test(window, failure) && jsti_cloud_sync_settings_self_test(window, failure) &&

@@ -1,4 +1,5 @@
 import Foundation
+import SpeakCore
 import SpeakDesktop
 
 extension DesktopHostController {
@@ -10,13 +11,16 @@ extension DesktopHostController {
     /// Records matching the current search, newest first. Filtering changes
     /// only which rows are shown; records and transcripts are never modified.
     func visibleHistory() -> [DesktopRecordingStore.Record] {
-        DesktopHistorySearch.filter(Array(history.values), query: historyQuery) { record in
+        DesktopHistorySearch.filter(Array(history.values), query: historyQuery, constraints: historyFilter) { record in
             historySearchText[record.id] ?? DesktopHistorySearch.searchText(for: record)
         }
     }
 
     package func refreshHistory(selectRecord: Bool = false) {
         guard !closed else { return }
+        Platform.historyFilters(
+            models: historyFilterModels(), selection: historyFilterDraft
+        )
         let visible = visibleHistory()
         Platform.historyInsights(
             all: DesktopHistoryInsights(records: history.values), visible: DesktopHistoryInsights(records: visible)
@@ -32,7 +36,7 @@ extension DesktopHostController {
             Platform.history(visible, selected: nil, selectRecord: selectRecord)
             Platform.transcriptVariant(nil, for: nil, switchable: false)
             update(
-                "The selected recording is hidden by this search. Clear the search or choose a matching recording.",
+                "The selected recording is hidden by this search or filter. Clear it or choose a matching recording.",
                 transcript: ""
             )
             return
@@ -74,6 +78,41 @@ extension DesktopHostController {
         guard let record = history[id] else { return false }
         let searchText = historySearchText[id] ?? DesktopHistorySearch.searchText(for: record)
         return DesktopHistorySearch.matches(query: historyQuery, searchText: searchText)
+            && DesktopHistorySearch.matches(record, constraints: historyFilter)
+    }
+
+    package func filterHistory(_ filter: HistorySearchQuery) {
+        guard !closed else { return }
+        var criteria = filter
+        criteria.searchText = nil
+        guard criteria != historyFilter else { return }
+        historyFilter = criteria
+        refreshHistory()
+    }
+
+    package func applyHistoryFilters(_ payload: String) {
+        guard !closed else { return }
+        do {
+            let draft = try JSONDecoder().decode(DesktopHistoryFilter.self, from: Data(payload.utf8))
+            let available = Set(historyFilterModels())
+            guard draft.models.isSubset(of: available) else {
+                throw DesktopHistoryFilter.ValidationError(
+                    message: "A selected model is no longer in History. Reopen Filters and choose a current model."
+                )
+            }
+            let query = try draft.query()
+            historyFilterDraft = draft
+            filterHistory(query)
+        } catch {
+            Platform.historyFilters(
+                models: historyFilterModels(), selection: historyFilterDraft
+            )
+            update("Could not filter History: \(error.localizedDescription)")
+        }
+    }
+
+    private func historyFilterModels() -> [String] {
+        DesktopHistorySearch.availableModels(in: Array(history.values), including: historyFilterDraft.models)
     }
 
     package func searchHistory(_ query: String) {

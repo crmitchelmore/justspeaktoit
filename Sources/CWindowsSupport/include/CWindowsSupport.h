@@ -47,7 +47,8 @@ enum JSTIWindowEvent {
     JSTI_EVENT_APPEARANCE = 26,
     /* General's Launch at login switch: text "1" on, "0" off. The switch stays
      * disabled until jsti_window_set_login_item reports the state reached. */
-    JSTI_EVENT_LOGIN_ITEM = 27
+    JSTI_EVENT_LOGIN_ITEM = 27,
+    JSTI_EVENT_HISTORY_FILTERS = 90 /* text: DesktopHistoryFilter JSON */
 };
 
 /* Runs on the UI thread. text is borrowed until callback returns. model_index
@@ -147,6 +148,16 @@ typedef struct JSTIHistoryRow {
     const char *context;
     int tone;
 } JSTIHistoryRow;
+
+typedef struct JSTIHistoryFilterModel {
+    const char *id;
+    const char *name;
+    int selected;
+} JSTIHistoryFilterModel;
+/* Copies the complete used-model catalogue and current filter. Dates are
+ * Gregorian YYYY-MM-DD, or empty for no boundary. Safe from any thread. */
+int jsti_window_set_history_filters(const JSTIHistoryFilterModel *models, size_t count,
+                                    int errors_only, const char *from_day, const char *through_day);
 
 /* Preformatted History totals, as the Mac dashboard shows them. */
 typedef struct JSTIInsights {

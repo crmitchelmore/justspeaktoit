@@ -47,7 +47,8 @@ enum {
      * disabled; text: prompt, U+001F, then a new OpenRouter key or nothing. */
     JSTI_EVENT_POST_PROCESSING = 33,
     /* Apply in Azure Speech resource. text: the endpoint as typed ("" clears). */
-    JSTI_EVENT_AZURE_RESOURCE = 34
+    JSTI_EVENT_AZURE_RESOURCE = 34,
+    JSTI_EVENT_HISTORY_FILTERS = 90 /* text: DesktopHistoryFilter JSON */
 };
 
 /* Read aloud, Appearance and Launch at login. Linux-only numbers 40-46. */
@@ -93,6 +94,14 @@ typedef struct JSTIHistoryRow {
     const char *context;
     int32_t tone;
 } JSTIHistoryRow;
+
+typedef struct JSTIHistoryFilterModel {
+    const char *id;
+    const char *name;
+    int32_t selected;
+} JSTIHistoryFilterModel;
+int32_t jsti_window_set_history_filters(const JSTIHistoryFilterModel *models, size_t count,
+                                        int32_t errors_only, const char *from_day, const char *through_day);
 
 /* Preformatted History totals, as the Mac dashboard shows them. */
 typedef struct JSTIInsights {

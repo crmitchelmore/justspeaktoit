@@ -61,6 +61,7 @@ typedef struct UI {
     gchar *tray_summary; /* Sessions, Recording Time and Spend for the status notifier */
     /* History */
     GtkSearchEntry *search;
+    GtkWidget *history_filters;
     GtkListBox *history;
     GPtrArray *history_ids;
     gchar *selected_id;
@@ -221,6 +222,7 @@ static void refresh_actions(void) {
     gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.voice_row), idle);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.import_button), idle);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.history_import), idle);
+    gtk_widget_set_sensitive(ui.history_filters, idle);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.model_row), idle);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.microphone_row), idle);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.version), presented && ui.presented_switchable && idle);
@@ -748,6 +750,8 @@ static GtkWidget *build_history(GtkTextBuffer *buffer) {
     gtk_widget_add_css_class(GTK_WIDGET(ui.history_import), "jsti-hero-button");
     g_signal_connect(ui.history_import, "clicked", G_CALLBACK(on_import), NULL);
     gtk_box_append(GTK_BOX(trailing), GTK_WIDGET(ui.history_import));
+    ui.history_filters = jsti_history_filters_button_new();
+    gtk_box_prepend(GTK_BOX(trailing), ui.history_filters);
     ui.search = GTK_SEARCH_ENTRY(gtk_search_entry_new());
     gtk_search_entry_set_placeholder_text(ui.search, "Search transcripts, models and profiles");
     g_signal_connect(ui.search, "search-changed", G_CALLBACK(on_search), NULL);
@@ -1593,6 +1597,10 @@ static void history_apply(gpointer pointer) {
         if (g_strcmp0(keep, entry->id) == 0) selected = GTK_LIST_BOX_ROW(row);
     }
     gtk_widget_set_visible(ui.history_empty, history->entries->len == 0);
+    const char *query = gtk_editable_get_text(GTK_EDITABLE(ui.search));
+    gtk_label_set_text(GTK_LABEL(ui.history_empty), query[0] || jsti_history_filters_active()
+        ? "No saved recordings match this search or filter."
+        : "No history yet. Press Record to capture your first session.");
     if (history->select) {
         g_free(ui.selected_id);
         ui.selected_id = g_strdup(history->selected != NULL && history->selected[0] != '\0' ? history->selected : NULL);
@@ -2176,6 +2184,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     }
     if (jsti_local_models_self_test(error, capacity) != 0) return -1;
     if (jsti_cloud_sync_self_test(error, capacity) != 0) return -1;
+    if (jsti_history_filters_self_test(error, capacity) != 0) return -1;
     const char *first = "00000000-0000-0000-0000-000000000001";
     const char *second = "00000000-0000-0000-0000-000000000002";
     JSTIHistoryRow rows[] = {

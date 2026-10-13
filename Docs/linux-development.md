@@ -64,11 +64,17 @@ and Record; the status line sits at the bottom of every page.
   displayed transcript with Copy (and Cancel while transcribing); Insights
   (Sessions, Recording Time, Average Length, Spend) and a Setup card echoing the
   microphone, model, shortcut and text output.
-- **History**: search and Import in the hero with Sessions, Errors, Average
+- **History**: search, Filters and Import in the hero with Sessions, Errors, Average
   Length and Spend for the recordings the search shows; each recording is a card
   with Created, Audio, Cost and Context badges, the transcript preview and the
   models used. The selected card expands with its transcript, version, Play,
   Stop, Copy, Read aloud, Retry, Export and Open audio.
+- **History filters**: the native GTK popover combines any recorded transcription
+  or post-processing models, errors only, and optional From/Through calendar
+  dates with the existing Unicode/profile search. Apply and Reset change only
+  visibility; hidden selections stop playback and Read aloud. Dates use the
+  shared `HistorySearchQuery` day policy in the local time zone. This does not
+  add History deletion, retention, or migration.
 - Totals and row wording come from the shared `DesktopHistoryInsights` and
   `DesktopHistoryRowSummary` (SpeakDesktop), counted and formatted as the Mac
   counts them, so Windows shows the same figures.

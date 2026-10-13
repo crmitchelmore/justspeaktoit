@@ -44,10 +44,44 @@ public enum DesktopHistorySearch {
     /// Folded text a host can cache per record and reuse for every keystroke.
     /// Field boundaries are separated so a query cannot span two fields.
     public static func searchText(for record: DesktopRecordingStore.Record) -> String {
-        [record.originalText, record.processedText, record.profileName, modelDisplayName(for: record.modelIdentifier)]
+        ([record.originalText, record.processedText, record.profileName]
+            + modelIdentifiers(for: record).map { modelDisplayName(for: $0) })
             .compactMap { $0 }
             .map(fold)
             .joined(separator: "\u{1F}")
+    }
+
+    public static func modelIdentifiers(for record: DesktopRecordingStore.Record) -> [String] {
+        Array(Set([record.modelIdentifier, record.result?.modelIdentifier, record.postProcessingModelIdentifier]
+            .compactMap { $0 }.filter { !$0.isEmpty })).sorted()
+    }
+
+    public static func availableModels(
+        in records: [DesktopRecordingStore.Record], including identifiers: Set<String> = []
+    ) -> [String] {
+        Set(records.flatMap { modelIdentifiers(for: $0) }).union(identifiers).sorted {
+            let left = fold(modelDisplayName(for: $0)), right = fold(modelDisplayName(for: $1))
+            return left == right ? $0 < $1 : left < right
+        }
+    }
+
+    /// Search retains desktop Unicode/profile matching; the remaining criteria
+    /// use the same policy as macOS and iOS.
+    public static func matches(
+        _ record: DesktopRecordingStore.Record, constraints: HistorySearchQuery
+    ) -> Bool {
+        if constraints.modelIdentifiers.isEmpty, !constraints.includeErrorsOnly, constraints.dateRange == nil {
+            return true
+        }
+        var criteria = constraints
+        criteria.searchText = nil
+        return criteria.matches(HistoryPresentationItem(
+            id: record.id, createdAt: record.createdAt,
+            rawTranscription: record.originalText, processedTranscription: record.processedText,
+            modelIdentifiers: modelIdentifiers(for: record), recordingDuration: record.result?.duration ?? 0,
+            errorCount: (record.failure == nil ? 0 : 1) + (record.postProcessingFailure == nil ? 0 : 1),
+            originPlatform: record.originPlatform ?? ""
+        ))
     }
 
     /// Whether a query is active after folding; blank queries show everything.
@@ -72,10 +106,13 @@ public enum DesktopHistorySearch {
     public static func filter(
         _ records: [DesktopRecordingStore.Record],
         query: String,
+        constraints: HistorySearchQuery = .none,
         searchText: (DesktopRecordingStore.Record) -> String = searchText(for:)
     ) -> [DesktopRecordingStore.Record] {
         let folded = fold(query)
-        let visible = folded.isEmpty ? records : records.filter { searchText($0).contains(folded) }
+        let visible = records.filter {
+            (folded.isEmpty || searchText($0).contains(folded)) && matches($0, constraints: constraints)
+        }
         return ordered(visible)
     }
 }

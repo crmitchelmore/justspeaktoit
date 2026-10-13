@@ -59,6 +59,7 @@ final class LinuxEventContext: @unchecked Sendable {
             case .playPause(let identifier): await controller.playbackToggle(identifier)
             case .stop: await controller.playbackStop()
             case .readAloud(let identifier, let text): await controller.readAloud(identifier, text: text)
+            case .filter(let payload): await controller.applyHistoryFilters(payload)
             }
         }
     }
@@ -213,6 +214,7 @@ private func linuxHistoryEvent(_ event: Int, value: String, slot: Int, holder: L
     let controller = holder.controller
     switch event {
     case Int(JSTI_EVENT_SELECT_HISTORY): holder.selectHistory(value)
+    case Int(JSTI_EVENT_HISTORY_FILTERS): holder.submitHistoryPlayback(.filter(value))
     case Int(JSTI_EVENT_RETRY_HISTORY): Task { await controller.retryHistory(value) }
     case Int(JSTI_EVENT_EXPORT_HISTORY):
         // The window captured the text and version at the Export click; the

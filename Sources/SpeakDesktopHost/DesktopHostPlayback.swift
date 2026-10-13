@@ -53,9 +53,11 @@ extension DesktopHostController {
     package func playbackStop() {
         guard !closed else { return }
         let reading = Platform.isReadingAloud(readAloudState)
+        let generating = voiceGenerationTask != nil
         stopReadAloud()
         playback.stop(announcing: true)
-        guard reading, !busy, recording == nil else { return }
-        update("Reading aloud stopped.")
+        guard reading || generating, !busy, recording == nil else { return }
+        update(generating ? "Generated voice audio stopped. Completed audio remains available." :
+            "Reading aloud stopped.")
     }
 }

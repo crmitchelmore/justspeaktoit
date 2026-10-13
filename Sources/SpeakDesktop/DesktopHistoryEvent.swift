@@ -20,6 +20,9 @@ public enum DesktopHistoryEvent: Equatable, Sendable {
     case voiceExport(VoiceOutputSourceSnapshot, path: String)
     case voiceImport(path: String, requestID: String)
     case voiceImportCancel(requestID: String)
+    case voiceGenerate(VoiceOutputSourceSnapshot, options: VoiceGenerationOptions)
+    case voiceGeneratedPlay(String)
+    case voiceGeneratedExport(String, path: String)
 
     /// Play/Pause and Read aloud clicks kept while the host catches up.
     /// Further clicks are ignored until it does, like clicks on a busy button;
@@ -67,7 +70,8 @@ public enum DesktopHistoryEvent: Equatable, Sendable {
         switch self {
         case .selection: return .row
         case .version: return .version
-        case .playPause, .readAloud, .voiceRead, .voiceExport, .voiceImport: return .action
+        case .playPause, .readAloud, .voiceRead, .voiceExport, .voiceImport,
+             .voiceGenerate, .voiceGeneratedPlay, .voiceGeneratedExport: return .action
         case .voiceImportCancel: return .importCancellation
         case .stop: return .stop
         }

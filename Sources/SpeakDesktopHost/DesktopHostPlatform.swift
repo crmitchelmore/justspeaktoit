@@ -54,6 +54,8 @@ package protocol DesktopHostPlatform: Sendable {
     // Window presenter. Safe from any thread.
     static func update(_ status: String, transcript: String?, state: Int32)
     static func recordingState(_ state: Int32)
+    static func voiceGenerated(_ presentation: DesktopVoiceResultPresentation)
+    static func voiceTextImportCancelled(_ requestID: String)
     static func history(_ records: [DesktopRecordingStore.Record], selected: UUID?, selectRecord: Bool)
     /// Totals for the dashboard (`all` saved records) and the History header
     /// (`visible`, the records the search shows). Sent with every History list.
@@ -140,6 +142,8 @@ package protocol DesktopHostPlatform: Sendable {
 }
 
 package extension DesktopHostPlatform {
+    static func voiceGenerated(_ presentation: DesktopVoiceResultPresentation) {}
+    static func voiceTextImportCancelled(_ requestID: String) {}
     static func update(_ status: String) { update(status, transcript: nil, state: -1) }
     /// Hosts without a dashboard or History header show no totals.
     static func historyInsights(all: DesktopHistoryInsights, visible: DesktopHistoryInsights) {}

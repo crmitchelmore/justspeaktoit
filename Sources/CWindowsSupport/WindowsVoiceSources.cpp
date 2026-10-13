@@ -9,6 +9,7 @@ int jsti_save_owned_window_snapshot(HWND window, const char *path, char *error, 
 
 namespace {
 enum { sourceLabel = 920, sourceID, textLabel, textID, loadID, noticeID, readID, exportID, stopID };
+enum { autoPlayID = 940, saveID, generateID, playResultID, exportResultID };
 struct Configuration {
     std::vector<std::wstring> names;
     JSTIVoiceSourceCallback callback = nullptr;
@@ -16,6 +17,15 @@ struct Configuration {
 };
 std::mutex mutex;
 Configuration configuration;
+struct GenerationState {
+    int flags = 0;
+    bool working = false;
+    std::string resultID;
+    std::wstring message;
+};
+GenerationState generationState;
+HWND generationWindow = nullptr;
+constexpr UINT generationMessage = WM_APP + 25;
 constexpr UINT importResultMessage = WM_APP + 24;
 struct ImportResult {
     HWND window = nullptr;
@@ -29,6 +39,7 @@ struct Dialog {
     std::string record;
     std::wstring history, typed, clipboard, file;
     std::string importToken;
+    GenerationState generation;
     int source = 0;
     HFONT font = nullptr;
     std::vector<HWND> controls;
@@ -47,10 +58,14 @@ bool hasText(const std::wstring &value) {
     return value.find_first_not_of(L" \r\n\t") != std::wstring::npos;
 }
 void refresh(HWND window, Dialog &dialog) {
-    const bool ready = dialog.importToken.empty() && hasText(text(window)) &&
+    const bool ready = !dialog.generation.working && dialog.importToken.empty() && hasText(text(window)) &&
         (dialog.source != 0 || !dialog.record.empty());
     EnableWindow(GetDlgItem(window, readID), ready);
     EnableWindow(GetDlgItem(window, exportID), ready);
+    EnableWindow(GetDlgItem(window, generateID), ready);
+    const bool resultReady = !dialog.generation.working && !dialog.generation.resultID.empty();
+    EnableWindow(GetDlgItem(window, playResultID), resultReady);
+    EnableWindow(GetDlgItem(window, exportResultID), resultReady);
     EnableWindow(GetDlgItem(window, loadID), dialog.importToken.empty() && dialog.source >= 2);
     SetDlgItemTextW(window, loadID, dialog.source == 3 ? L"&Choose file..." : L"&Load clipboard");
     SendDlgItemMessageW(window, textID, EM_SETREADONLY, dialog.source != 1 && dialog.source != 3, 0);
@@ -75,8 +90,9 @@ void select(HWND window, Dialog &dialog) {
     SetDlgItemTextW(window, textID, value.c_str());
     SetDlgItemTextW(window, noticeID, dialog.source == 0 && dialog.record.empty()
         ? L"Choose a recording in History, then reopen this editor. History text is captured when this editor opens."
-        : L"Read and Export send this text to Deepgram using your saved key. Export creates a 24 kHz mono PCM16 WAV "
-          L"without playback. Speed is the engine default. Stop cancels synthesis, playback or export.");
+        : L"Read, Generate and Export text send this snapshot to Deepgram with your saved key. "
+          L"Generate retains a 24 kHz mono PCM16 WAV; Play/Export result reuse it without a provider request. "
+          L"Speed is the engine default. Stop cancels active voice work.");
     refresh(window, dialog);
 }
 void importFile(HWND window, Dialog &dialog) {
@@ -148,10 +164,10 @@ void emit(HWND window, Dialog &dialog, int action, const std::string &path = "")
             snapshot.c_str(), record.c_str(), path.c_str(), dialog.config.context);
     }
 }
-void exportAudio(HWND window, Dialog &dialog) {
+void exportAudio(HWND window, Dialog &dialog, bool retained = false) {
     // The nested save loop may process editor messages: freeze the entire job first.
     const std::string snapshot = jsti::utf8(text(window));
-    const std::string record = dialog.source == 0 ? dialog.record : "";
+    const std::string record = retained ? dialog.generation.resultID : dialog.source == 0 ? dialog.record : "";
     const int source = dialog.source == 3 ? 4 : dialog.source;
     std::vector<wchar_t> path(32768, 0);
     wcscpy_s(path.data(), path.size(), L"voice-output.wav");
@@ -169,7 +185,9 @@ void exportAudio(HWND window, Dialog &dialog) {
     }
     const std::string destination = jsti::utf8(path.data());
     if (dialog.config.callback) {
-        dialog.config.callback(111, source, snapshot.c_str(), record.c_str(), destination.c_str(), dialog.config.context);
+        cancelImport(window, dialog);
+        dialog.config.callback(retained ? 117 : 111, source, snapshot.c_str(), record.c_str(),
+            destination.c_str(), dialog.config.context);
     }
     SetDlgItemTextW(window, noticeID, L"Export started. Check the main window status for its result. Stop cancels it.");
 }
@@ -182,9 +200,18 @@ void layout(HWND window) {
     move(sourceID, margin, margin + scale(window, 26), width - scale(window, 170), scale(window, 240));
     move(loadID, bounds.right - margin - scale(window, 160), margin + scale(window, 26), scale(window, 160), height);
     move(textLabel, margin, margin + scale(window, 70), width, scale(window, 22));
-    const int top = margin + scale(window, 96), note = bottom - gap - scale(window, 90);
+    const int resultRow = bottom - height - gap;
+    const int optionsRow = resultRow - scale(window, 44) - gap;
+    const int top = margin + scale(window, 96), note = optionsRow - gap - scale(window, 90);
     move(textID, margin, top, width, std::max(scale(window, 110), note - gap - top));
     move(noticeID, margin, note, width, scale(window, 90));
+    move(autoPlayID, margin, optionsRow, (width - gap) / 2, scale(window, 44));
+    move(saveID, margin + (width + gap) / 2, optionsRow, (width - gap) / 2, scale(window, 44));
+    const int resultButton = (width - 2 * gap) / 3;
+    const int results[] = {generateID, playResultID, exportResultID};
+    for (int index = 0; index < 3; ++index) {
+        move(results[index], margin + index * (resultButton + gap), resultRow, resultButton, height);
+    }
     const int button = (width - 3 * gap) / 4;
     const int ids[] = {readID, exportID, stopID, IDCANCEL};
     for (int index = 0; index < 4; ++index) move(ids[index], margin + index * (button + gap), bottom, button, height);
@@ -203,8 +230,13 @@ bool create(HWND window, Dialog &dialog) {
         !add(L"EDIT", L"", ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL | WS_TABSTOP,
              textID, WS_EX_CLIENTEDGE) ||
         !add(L"STATIC", L"", SS_LEFT, noticeID) ||
-        !add(L"BUTTON", L"&Read aloud", BS_DEFPUSHBUTTON | WS_TABSTOP, readID) ||
-        !add(L"BUTTON", L"&Export WAV...", BS_PUSHBUTTON | WS_TABSTOP, exportID) ||
+        !add(L"BUTTON", L"&Auto-play generated audio", BS_AUTOCHECKBOX | BS_MULTILINE | WS_TABSTOP, autoPlayID) ||
+        !add(L"BUTTON", L"Save audio to recordings", BS_AUTOCHECKBOX | BS_MULTILINE | WS_TABSTOP, saveID) ||
+        !add(L"BUTTON", L"&Generate", BS_DEFPUSHBUTTON | WS_TABSTOP, generateID) ||
+        !add(L"BUTTON", L"&Play result", BS_PUSHBUTTON | WS_TABSTOP, playResultID) ||
+        !add(L"BUTTON", L"Export result...", BS_PUSHBUTTON | WS_TABSTOP, exportResultID) ||
+        !add(L"BUTTON", L"&Read aloud", BS_PUSHBUTTON | WS_TABSTOP, readID) ||
+        !add(L"BUTTON", L"&Export text WAV...", BS_PUSHBUTTON | WS_TABSTOP, exportID) ||
         !add(L"BUTTON", L"&Stop", BS_PUSHBUTTON | WS_TABSTOP, stopID) ||
         !add(L"BUTTON", L"Close", BS_PUSHBUTTON | WS_TABSTOP, IDCANCEL)) return false;
     dialog.font = CreateFontW(-MulDiv(10, GetDpiForWindow(window), 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
@@ -215,6 +247,9 @@ bool create(HWND window, Dialog &dialog) {
         if (SendDlgItemMessageW(window, sourceID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(name.c_str())) < 0) return false;
     }
     SendDlgItemMessageW(window, sourceID, CB_SETCURSEL, 0, 0);
+    { std::lock_guard<std::mutex> lock(mutex); dialog.generation = generationState; generationWindow = window; }
+    SendDlgItemMessageW(window, autoPlayID, BM_SETCHECK, dialog.generation.flags & 1 ? BST_CHECKED : BST_UNCHECKED, 0);
+    SendDlgItemMessageW(window, saveID, BM_SETCHECK, dialog.generation.flags & 2 ? BST_CHECKED : BST_UNCHECKED, 0);
     select(window, dialog); layout(window);
     return true;
 }
@@ -226,6 +261,21 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     }
     if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
     switch (message) {
+    case generationMessage: {
+        GenerationState current;
+        { std::lock_guard<std::mutex> lock(mutex); current = generationState; }
+        if (wparam & 1) {
+            dialog->generation.flags = current.flags;
+            SendDlgItemMessageW(window, autoPlayID, BM_SETCHECK, current.flags & 1 ? BST_CHECKED : BST_UNCHECKED, 0);
+            SendDlgItemMessageW(window, saveID, BM_SETCHECK, current.flags & 2 ? BST_CHECKED : BST_UNCHECKED, 0);
+        }
+        if (wparam & 2) {
+            dialog->generation.resultID = std::move(current.resultID);
+            dialog->generation.working = current.working;
+            SetDlgItemTextW(window, noticeID, current.message.c_str());
+        }
+        refresh(window, *dialog); return 0;
+    }
     case importResultMessage: {
         ImportResult result;
         {
@@ -275,6 +325,24 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         }
         if (HIWORD(wparam) != BN_CLICKED) break;
         switch (LOWORD(wparam)) {
+        case autoPlayID: case saveID:
+            dialog->generation.flags = (SendDlgItemMessageW(window, autoPlayID, BM_GETCHECK, 0, 0) == BST_CHECKED ? 1 : 0) |
+                (SendDlgItemMessageW(window, saveID, BM_GETCHECK, 0, 0) == BST_CHECKED ? 2 : 0);
+            dialog->config.callback(118, dialog->generation.flags, "", "", "", dialog->config.context); break;
+        case generateID:
+            if (IsWindowEnabled(GetDlgItem(window, generateID))) {
+                emit(window, *dialog, 115, std::to_string(dialog->generation.flags));
+            }
+            break;
+        case playResultID:
+            if (IsWindowEnabled(GetDlgItem(window, playResultID))) {
+                cancelImport(window, *dialog);
+                dialog->config.callback(116, 0, "", dialog->generation.resultID.c_str(), "", dialog->config.context);
+            }
+            break;
+        case exportResultID:
+            if (IsWindowEnabled(GetDlgItem(window, exportResultID))) exportAudio(window, *dialog, true);
+            break;
         case loadID: if (dialog->source == 3) importFile(window, *dialog); else loadClipboard(window, *dialog); break;
         case readID: if (IsWindowEnabled(GetDlgItem(window, readID))) emit(window, *dialog, 110); break;
         case exportID: if (IsWindowEnabled(GetDlgItem(window, exportID))) exportAudio(window, *dialog); break;
@@ -288,6 +356,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     case WM_CLOSE: DestroyWindow(window); return 0;
     case WM_DESTROY:
         cancelImport(window, *dialog);
+        { std::lock_guard<std::mutex> lock(mutex); if (generationWindow == window) generationWindow = nullptr; }
         if (dialog->font) DeleteObject(dialog->font);
         dialog->font = nullptr; return 0;
     }
@@ -330,6 +399,23 @@ int32_t jsti_window_set_voice_text_import(const char *token, const char *text, c
     return 0;
 }
 
+int32_t jsti_window_set_voice_generation_options(int32_t flags) {
+    if (flags < 0 || flags > 3) return -1;
+    std::lock_guard<std::mutex> lock(mutex);
+    generationState.flags = flags;
+    return generationWindow && !PostMessageW(generationWindow, generationMessage, 1, 0) ? -1 : 0;
+}
+
+int32_t jsti_window_set_voice_generated_result(const char *resultID, int32_t working, const char *message) {
+    std::wstring value;
+    if (!resultID || std::strlen(resultID) > 64 || (working != 0 && working != 1) ||
+        !jsti::wide(message ? message : "", value)) return -1;
+    std::lock_guard<std::mutex> lock(mutex);
+    generationState.resultID = resultID; generationState.working = working != 0;
+    generationState.message = std::move(value);
+    return generationWindow && !PostMessageW(generationWindow, generationMessage, 2, 0) ? -1 : 0;
+}
+
 void jsti_show_voice_sources(HWND owner, const char *record, const char *history) {
     Dialog dialog;
     { std::lock_guard<std::mutex> lock(mutex); dialog.config = configuration; }
@@ -357,13 +443,21 @@ void jsti_voice_sources_stop() {
 }
 
 bool jsti_voice_sources_self_test(HWND owner, std::string &error) {
-    struct Received { int calls = 0, source = -1; std::string text, record; } received;
+    struct Received {
+        int calls = 0, source = -1, generated = 0, flags = -1;
+        std::string text, record, generateFlags, playedResult;
+    } received;
+    GenerationState originalGeneration;
+    { std::lock_guard<std::mutex> lock(mutex); originalGeneration = generationState; }
     Dialog dialog;
     { std::lock_guard<std::mutex> lock(mutex); dialog.config = configuration; }
     dialog.config.callback = [](int32_t action, int32_t source, const char *value,
-                                const char *record, const char *, void *context) {
+                                const char *record, const char *path, void *context) {
         auto &result = *static_cast<Received *>(context);
         if (action == 110) { ++result.calls; result.source = source; result.text = value; result.record = record; }
+        if (action == 115) { ++result.generated; result.generateFlags = path; }
+        if (action == 116) result.playedResult = record;
+        if (action == 118) result.flags = source;
     };
     dialog.config.context = &received;
     dialog.record = "synthetic-record"; dialog.history = L"Synthetic History snapshot";
@@ -431,9 +525,37 @@ bool jsti_voice_sources_self_test(HWND owner, std::string &error) {
     SendMessageW(window, WM_COMMAND, MAKEWPARAM(textID, EN_CHANGE), 0);
     const bool editedImport = jsti_window_set_voice_text_import("synthetic-edit", "Late text", "") == 1 &&
         text(window) == L"Synthetic user edit";
+    jsti_window_set_voice_generation_options(2);
+    SendMessageW(window, generationMessage, 1, 0);
+    SendMessageW(window, WM_COMMAND, MAKEWPARAM(saveID, BN_CLICKED), 0);
+    SendMessageW(window, WM_COMMAND, MAKEWPARAM(generateID, BN_CLICKED), 0);
+    const bool generatedSnapshot = received.generated == 1 && received.generateFlags == "2" && received.flags == 2;
+    jsti_window_set_voice_generated_result("synthetic-result", 1, "Synthetic generating state");
+    SendMessageW(window, generationMessage, 2, 0);
+    const bool busyResult = !IsWindowEnabled(GetDlgItem(window, generateID)) &&
+        !IsWindowEnabled(GetDlgItem(window, playResultID));
+    jsti_window_set_voice_generated_result("synthetic-result", 0, "Synthetic retained result");
+    SendMessageW(window, generationMessage, 2, 0);
+    SendMessageW(window, WM_COMMAND, MAKEWPARAM(playResultID, BN_CLICKED), 0);
+    const bool retainedResult = received.playedResult == "synthetic-result" &&
+        IsWindowEnabled(GetDlgItem(window, exportResultID));
+    RECT minimum{0, 0, scale(window, 620), scale(window, 540)};
+    AdjustWindowRectExForDpi(&minimum, WS_OVERLAPPEDWINDOW, FALSE, WS_EX_CONTROLPARENT, GetDpiForWindow(window));
+    SetWindowPos(window, nullptr, 0, 0, minimum.right - minimum.left, minimum.bottom - minimum.top,
+        SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    RECT client{}; GetClientRect(window, &client);
+    bool boundedControls = true;
+    for (HWND control : dialog.controls) {
+        RECT bounds{}; GetWindowRect(control, &bounds);
+        MapWindowPoints(nullptr, window, reinterpret_cast<POINT *>(&bounds), 2);
+        boundedControls = boundedControls && bounds.left >= 0 && bounds.top >= 0 &&
+            bounds.right <= client.right && bounds.bottom <= client.bottom;
+    }
     DestroyWindow(window);
+    { std::lock_guard<std::mutex> lock(mutex); generationState = std::move(originalGeneration); }
     const bool passed = history && typed && unavailable && historySnapshot && typedSnapshot &&
-        clipboardSnapshot && fileSnapshot && staleImport && failedImport && editedImport;
+        clipboardSnapshot && fileSnapshot && staleImport && failedImport && editedImport &&
+        generatedSnapshot && busyResult && retainedResult && boundedControls;
     if (!passed) {
         error = "Voice sources fixture failed: history=" + std::to_string(history) +
             ", typed=" + std::to_string(typed) + ", unloadedClipboard=" + std::to_string(unavailable) +
@@ -441,7 +563,10 @@ bool jsti_voice_sources_self_test(HWND owner, std::string &error) {
             ", typedSnapshot=" + std::to_string(typedSnapshot) +
             ", clipboardSnapshot=" + std::to_string(clipboardSnapshot) +
             ", fileSnapshot=" + std::to_string(fileSnapshot) + ", staleImport=" + std::to_string(staleImport) +
-            ", failedImport=" + std::to_string(failedImport) + ", editedImport=" + std::to_string(editedImport) + ".";
+            ", failedImport=" + std::to_string(failedImport) + ", editedImport=" + std::to_string(editedImport) +
+            ", generatedSnapshot=" + std::to_string(generatedSnapshot) + ", busyResult=" + std::to_string(busyResult) +
+            ", retainedResult=" + std::to_string(retainedResult) +
+            ", boundedControls=" + std::to_string(boundedControls) + ".";
     }
     return passed && captured;
 }

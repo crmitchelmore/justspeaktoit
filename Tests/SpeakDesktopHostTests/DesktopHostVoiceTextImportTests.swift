@@ -8,6 +8,7 @@ final class DesktopHostVoiceTextImportTests: XCTestCase {
     private var controller: DesktopHostController<FakePlatform>!
 
     override func setUp() async throws {
+        FakeLog.shared.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-import-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         controller = try DesktopHostController<FakePlatform>(
@@ -41,6 +42,7 @@ final class DesktopHostVoiceTextImportTests: XCTestCase {
             return "Late result"
         } completion: { replies.append($0) }
         await controller.cancelVoiceTextImport(requestID: "other")
+        XCTAssertFalse(FakeLog.shared.allStatuses.contains("Import stopped: other"))
         let firstCancelled = await controller.voiceTextImportTask?.isCancelled
         XCTAssertEqual(firstCancelled, false)
         await controller.importVoiceText(path: "/second.txt", requestID: "second") { _ in
@@ -51,6 +53,7 @@ final class DesktopHostVoiceTextImportTests: XCTestCase {
         XCTAssertEqual(active, 1)
         XCTAssertEqual(replies.values.count, 1)
         await controller.cancelVoiceTextImport(requestID: "active")
+        XCTAssertTrue(FakeLog.shared.allStatuses.contains("Import stopped: active"))
         gate.release()
         try await waitForFinish()
         XCTAssertFalse(replies.values.contains("Late result"))
@@ -67,6 +70,7 @@ final class DesktopHostVoiceTextImportTests: XCTestCase {
         } completion: { replies.append($0) }
         await fulfillment(of: [entered], timeout: 2)
         await controller.playbackStop()
+        XCTAssertTrue(FakeLog.shared.allStatuses.contains("Import stopped: active"))
         let start = ContinuousClock.now
         let report = await controller.close()
         XCTAssertFalse(report.isComplete)

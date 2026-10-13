@@ -40,6 +40,7 @@ extension DesktopHostController {
     package func cancelVoiceTextImport(requestID: String) {
         guard voiceTextImportRequestID == requestID else { return }
         voiceTextImportTask?.cancel()
+        Platform.voiceTextImportCancelled(requestID)
     }
 }
 

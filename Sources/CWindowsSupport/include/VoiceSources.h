@@ -17,6 +17,12 @@ int32_t jsti_window_set_voice_sources(const char *const *names, size_t count,
 /* Thread safe, borrowed strings copied. Empty error means success. Stale
  * request tokens cannot replace text or revive a closed editor. */
 int32_t jsti_window_set_voice_text_import(const char *token, const char *text, const char *error);
+/* 115 Generate: path is snapshotted flags (bit 0 auto-play, bit 1 save).
+ * 116 Play result / 117 Export result: record is an opaque result ID, not a
+ * History owner. 118 saves both preference flags atomically via source.
+ * Setters copy borrowed strings and dispatch to the native editor. */
+int32_t jsti_window_set_voice_generation_options(int32_t flags);
+int32_t jsti_window_set_voice_generated_result(const char *result_id, int32_t working, const char *message);
 #ifdef __cplusplus
 }
 #endif

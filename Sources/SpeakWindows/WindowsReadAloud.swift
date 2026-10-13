@@ -24,7 +24,8 @@ extension WindowsNative {
         let configured = borrowed.withUnsafeBufferPointer {
             jsti_window_set_voice_output($0.baseAddress, $0.count, Int32(selected), voiceOutputEvent, context) == 0
         }
-        return configured && configureVoiceSources(context: context)
+        return configured && configureVoiceSources(context: context) &&
+            jsti_window_set_voice_generation_options(settings.generationOptions.nativeFlags) == 0
     }
 
     static func configureVoiceSources(context: UnsafeMutableRawPointer) -> Bool {
@@ -57,10 +58,25 @@ extension WindowsNative {
         if status < 0 { WindowsNative.update("The text import result could not be shown.") }
     }
 
-    static func importVoiceText(path: String, requestID: String, controller: WindowsAppController) async {
-        await controller.importVoiceText(path: path, requestID: requestID) {
-            voiceTextImported($0, requestID: requestID)
+}
+
+extension WindowsHostPlatform {
+    package static func voiceTextImportCancelled(_ requestID: String) {
+        let result = requestID.withCString { token in
+            "".withCString { empty in
+                "Text import stopped.".withCString { jsti_window_set_voice_text_import(token, empty, $0) }
+            }
         }
+        if result < 0 { WindowsNative.update("The stopped text import could not be shown.") }
+    }
+
+    package static func voiceGenerated(_ presentation: DesktopVoiceResultPresentation) {
+        let result = presentation.resultID.withCString { identifier in
+            presentation.message.withCString {
+                jsti_window_set_voice_generated_result(identifier, presentation.working ? 1 : 0, $0)
+            }
+        }
+        if result < 0 { WindowsNative.update("The generated voice result could not be shown.") }
     }
 }
 
@@ -71,28 +87,21 @@ func windowsVoiceSourceEvent(
 ) {
     guard let context else { return }
     let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
-    if action == 112 { holder.submitHistoryPlayback(.stop); return }
-    if action == 113 {
-        holder.submitHistoryPlayback(.voiceImport(
-            path: path.map(String.init(cString:)) ?? "", requestID: record.map(String.init(cString:)) ?? ""
-        ))
-        return
-    }
-    if action == 114 {
-        holder.submitHistoryPlayback(.voiceImportCancel(requestID: record.map(String.init(cString:)) ?? ""))
-        return
-    }
     do {
-        guard let source = VoiceOutputSource(rawValue: source) else {
-            throw VoiceOutputSourceSnapshot.Failure.invalidText
-        }
-        let snapshot = try VoiceOutputSourceSnapshot(
-            source: source, text: text.map(String.init(cString:)) ?? "",
-            recordID: record.flatMap { UUID(uuidString: String(cString: $0)) }
+        let message = try DesktopVoiceSourceMessage(
+            action: action, source: source, text: text.map(String.init(cString:)) ?? "",
+            record: record.map(String.init(cString:)) ?? "", path: path.map(String.init(cString:)) ?? ""
         )
-        if action == 110 { holder.submitHistoryPlayback(.voiceRead(snapshot)) }
-        if action == 111 {
-            holder.submitHistoryPlayback(.voiceExport(snapshot, path: path.map(String.init(cString:)) ?? ""))
+        switch message {
+        case .event(let event): holder.submitHistoryPlayback(event)
+        case .preferences(let options):
+            holder.enqueueSettings {
+                await holder.controller.saveVoiceGenerationOptions(options)
+                let saved = await holder.controller.voiceOutputSettings()
+                if jsti_window_set_voice_generation_options(saved.generationOptions.nativeFlags) != 0 {
+                    WindowsNative.update("The saved Voice Output preferences could not be shown.")
+                }
+            }
         }
     } catch { WindowsNative.update(error.localizedDescription) }
 }
@@ -103,9 +112,8 @@ func voiceOutputEvent(_ index: Int32, _ context: UnsafeMutableRawPointer?) {
     let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
     let voices = WindowsVoiceOutputSettings.voices
     guard voices.indices.contains(Int(index)) else { return }
-    let settings = WindowsVoiceOutputSettings(voice: voices[Int(index)])
     holder.enqueueSettings {
-        await holder.controller.saveVoiceOutput(settings)
+        await holder.controller.selectVoiceOutput(voices[Int(index)])
         let saved = await holder.controller.voiceOutputSettings()
         if !WindowsNative.configureVoiceOutput(saved, context: Unmanaged.passUnretained(holder).toOpaque()) {
             WindowsNative.update("The saved voice could not be shown. Reopen Voice and try again.")

@@ -46,8 +46,10 @@ final class VoiceTextFileImportTests: XCTestCase {
                 XCTAssertTrue(error is VoiceTextFileImport.Failure)
             }
         }
-        let cancelled = Task { try await VoiceTextFileImport.read(missing) }
-        cancelled.cancel()
+        let cancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await VoiceTextFileImport.read(missing)
+        }
         do {
             _ = try await cancelled.value
             XCTFail("Cancelled input was read")

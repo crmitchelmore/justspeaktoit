@@ -47,6 +47,9 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
             "alibaba", "azure", "cartesia", "gladia", "google", "meta", "openai", "xai"
         ]
         expectedProviders.formUnion(FileSpeechProvider.allCases.map(\.rawValue))
+        expectedProviders.formUnion(OpenRouterInlineAudioTranscriptionClient.batchCatalogIDs.map {
+            String($0.prefix { $0 != "/" })
+        })
         if AppleLocalModels.supportsSpeechTranscriber || AppleLocalModels.supportsDictationTranscriber {
             expectedProviders.insert("apple")
         }

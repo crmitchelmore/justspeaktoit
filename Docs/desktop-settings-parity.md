@@ -2,7 +2,7 @@
 
 This is a settings slice, **not full Windows/Linux feature parity**. Baseline:
 macOS `AppSettings.DefaultsKey` has 91 keys
-(`Sources/SpeakApp/AppSettings.swift:306-398`), plus preferences and collections
+(`Sources/SpeakApp/AppSettings.swift:289-381`), plus preferences and collections
 outside that enum. Track remaining product acceptance in #1157.
 
 ## Implemented preference journey
@@ -62,7 +62,8 @@ expanded through retractions and later phases until the next recording. Expanded
 Windows/X11 cards are wider and show up to six transcript lines; the minimal
 `showCompactHUD` presentation still takes precedence. Hidden live previews cannot
 trigger automatic expansion. Size changes preserve the phase clock and never
-activate the HUD. On Wayland, overlay-only rows are hidden with
+activate the HUD. The existing desktop latest-280-character projection remains
+bounded; this is not the Mac's full transcript-scrolling journey. On Wayland, overlay-only rows are hidden with
 an explanation; their values are retained when applying or transferring preferences.
 The shared field schema marks these capabilities rather than duplicating labels
 or catalogue entries in the native UI. Native capture-health footer details and
@@ -78,6 +79,17 @@ cannot create another buffer. Cancel ends it immediately and retains the audio
 without transcription or insertion; capture failure and shutdown take the
 capture away before cancelling the timer, so a stale stop cannot touch a new
 recording. Provider stop grace begins after this capture buffer, not instead of it.
+
+Linux clipboard restoration is **partial**, not an equivalent all-format backup.
+X11 restores previous plain text only while the exact owned selection remains:
+native receipts, provider identity and a server-side selection-owner transaction
+prevent overwriting a later copy, including identical text or another output run.
+Cancellation stops delayed restoration, and read/restore failures are reported.
+Wayland's portal cannot acknowledge paste consumption, so it never reads or
+restores previous contents after guessed delays. General hides the unsupported
+restore switch, explains why pasted text remains on the clipboard and retains
+the saved X11 choice; dashboard/save messages follow the actual session capability,
+including Wayland sessions with an XWayland `DISPLAY`. Windows behavior is unchanged.
 
 ## Configuration transfer is not the Mac backup format
 
@@ -146,7 +158,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | postProcessingIncludeLexiconDirectives | Missing / Missing | No desktop lexicon pipeline in this baseline |
 | postProcessingIncludeContextTags | Missing / Missing | No desktop lexicon context pipeline |
 | textOutputMethod | Equivalent / Partial | Output; Windows Smart/direct/clipboard; Linux paste/clipboard, no direct accessibility insertion |
-| restoreClipboard | Equivalent / Equivalent | Output; platform clipboard restoration |
+| restoreClipboard | Equivalent / Partial | Output; Windows restoration; Linux X11 owned plain-text restoration only. Wayland capability-gates the control, retains its saved X11 choice and leaves pasted text on the clipboard |
 | appSwitchDelivery | Missing / Missing | Windows captured-target safety; Linux X11 captured/Wayland current-focus rules, no three-way selector |
 | showHUD | Wired / Wired | Config + HUD |
 | appVisibility | Missing / Missing | Native window/tray behaviour; no Mac Dock/menu-bar mode selector |

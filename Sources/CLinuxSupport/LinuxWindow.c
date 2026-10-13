@@ -42,6 +42,7 @@ typedef struct UI {
     /* Text output */
     AdwComboRow *output_row;
     AdwSwitchRow *restore_row;
+    gboolean can_restore_clipboard;
     AdwActionRow *shortcut_row;
     AdwComboRow *style_row;
     /* Post-processing */
@@ -180,7 +181,8 @@ static void refresh_setup(void) {
     gtk_label_set_text(ui.setup_model, model != NULL ? model : "No model selected");
     adw_window_title_set_subtitle(ui.title, model != NULL ? model : "");
     const char *output = combo_text(ui.output_row);
-    gboolean restores = adw_combo_row_get_selected(ui.output_row) == 0 && adw_switch_row_get_active(ui.restore_row);
+    gboolean restores = ui.can_restore_clipboard && adw_combo_row_get_selected(ui.output_row) == 0 &&
+                        adw_switch_row_get_active(ui.restore_row);
     gchar *text = g_strdup_printf("%s%s", output != NULL ? output : "", restores ? " · clipboard restored" : "");
     gtk_label_set_text(ui.setup_output, text);
     g_free(text);
@@ -316,7 +318,7 @@ static void on_text_output(GObject *object, GParamSpec *spec, gpointer data) {
     (void)object; (void)spec; (void)data;
     guint method = adw_combo_row_get_selected(ui.output_row);
     gboolean restore = adw_switch_row_get_active(ui.restore_row);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.restore_row), method == 0);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.restore_row), method == 0 && ui.can_restore_clipboard);
     refresh_setup();
     emit(JSTI_EVENT_TEXT_OUTPUT, restore ? "restore" : "", (gint32)method);
 }
@@ -898,6 +900,9 @@ static GtkWidget *build_general(void) {
     ui.restore_row = ADW_SWITCH_ROW(adw_switch_row_new());
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.restore_row), "Restore the clipboard after pasting");
     adw_switch_row_set_active(ui.restore_row, TRUE);
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(ui.restore_row),
+                               "Previous text only, while Just Speak to It still owns the X11 selection.");
+    gtk_widget_set_visible(GTK_WIDGET(ui.restore_row), FALSE);
     g_signal_connect(ui.restore_row, "notify::active", G_CALLBACK(on_text_output), NULL);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(output), GTK_WIDGET(ui.restore_row));
     gtk_box_append(GTK_BOX(column), output);
@@ -1872,6 +1877,7 @@ int32_t jsti_window_set_transcript_variant(const char *record_id, int32_t varian
 typedef struct TextOutput {
     gint32 method;
     gboolean restore;
+    gboolean can_restore;
     gchar *hint;
 } TextOutput;
 
@@ -1884,18 +1890,25 @@ static void text_output_free(gpointer pointer) {
 static void text_output_apply(gpointer pointer) {
     TextOutput *output = pointer;
     ui.suppress = TRUE;
+    ui.can_restore_clipboard = output->can_restore;
     adw_combo_row_set_selected(ui.output_row, output->method == 1 ? 1 : 0);
     adw_switch_row_set_active(ui.restore_row, output->restore);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.restore_row), output->method != 1);
+    gtk_widget_set_visible(GTK_WIDGET(ui.restore_row), output->can_restore);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.restore_row), output->method != 1 && output->can_restore);
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(ui.output_row), output->can_restore ? NULL :
+        "Wayland cannot confirm when an app consumes a paste, so the transcript stays on the clipboard. "
+        "Your X11 restoration preference is retained.");
     if (output->hint != NULL) adw_action_row_set_subtitle(ui.shortcut_row, output->hint);
     ui.suppress = FALSE;
     refresh_setup();
 }
 
-int32_t jsti_window_set_text_output(int32_t method, int32_t restore_clipboard, const char *shortcut_hint) {
+int32_t jsti_window_set_text_output(int32_t method, int32_t restore_clipboard,
+                                   int32_t can_restore_clipboard, const char *shortcut_hint) {
     TextOutput *output = g_new0(TextOutput, 1);
     output->method = method;
     output->restore = restore_clipboard != 0;
+    output->can_restore = can_restore_clipboard != 0;
     output->hint = g_strdup(shortcut_hint);
     return post(text_output_apply, output, text_output_free);
 }
@@ -2515,10 +2528,53 @@ static int32_t login_item_self_test(char *error, size_t capacity) {
     return 0;
 }
 
+static void text_output_capture(int32_t event, const char *text, int32_t index, void *context) {
+    if (event == JSTI_EVENT_TEXT_OUTPUT && index == 1 && g_strcmp0(text, "restore") == 0)
+        ++*(guint *)context;
+}
+
+static gboolean text_output_self_test(void) {
+    TextOutput original = {
+        .method = (gint32)adw_combo_row_get_selected(ui.output_row),
+        .restore = adw_switch_row_get_active(ui.restore_row),
+        .can_restore = ui.can_restore_clipboard,
+        .hint = g_strdup(adw_action_row_get_subtitle(ui.shortcut_row))
+    };
+    TextOutput unsupported = { .method = 0, .restore = TRUE, .can_restore = FALSE };
+    text_output_apply(&unsupported);
+    gboolean valid = !gtk_widget_get_visible(GTK_WIDGET(ui.restore_row)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.restore_row)) && adw_switch_row_get_active(ui.restore_row) &&
+        strstr(adw_action_row_get_subtitle(ADW_ACTION_ROW(ui.output_row)), "Wayland") != NULL &&
+        strstr(gtk_label_get_text(ui.setup_output), "restored") == NULL;
+    guint calls = 0;
+    jsti_window_event_fn callback = ui.callback;
+    void *context = ui.context;
+    ui.callback = text_output_capture;
+    ui.context = &calls;
+    adw_combo_row_set_selected(ui.output_row, 1);
+    valid = valid && calls == 1 && adw_switch_row_get_active(ui.restore_row);
+    ui.callback = callback;
+    ui.context = context;
+    TextOutput supported = { .method = 0, .restore = TRUE, .can_restore = TRUE };
+    text_output_apply(&supported);
+    valid = valid && gtk_widget_get_visible(GTK_WIDGET(ui.restore_row)) &&
+        gtk_widget_get_sensitive(GTK_WIDGET(ui.restore_row)) &&
+        strstr(gtk_label_get_text(ui.setup_output), "restored") != NULL;
+    supported.method = 1;
+    text_output_apply(&supported);
+    valid = valid && !gtk_widget_get_sensitive(GTK_WIDGET(ui.restore_row)) &&
+        adw_switch_row_get_active(ui.restore_row) && strstr(gtk_label_get_text(ui.setup_output), "restored") == NULL;
+    text_output_apply(&original);
+    g_free(original.hint);
+    return valid;
+}
+
 int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (ui.window == NULL) return fail(error, capacity, "the window was not created");
     if (!configuration_self_test())
         return fail(error, capacity, "configuration rows did not populate and emit a complete Apply");
+    if (!text_output_self_test())
+        return fail(error, capacity, "clipboard restoration did not follow the session capability and saved choice");
     if (login_item_self_test(error, capacity) != 0) return -1;
     if (g_list_model_get_n_items(G_LIST_MODEL(ui.model_names)) == 0) {
         return fail(error, capacity, "no models are offered");

@@ -12,8 +12,8 @@ public struct LinuxTextOutputOptions: Codable, Equatable, Sendable {
     }
 
     public var method: Method
-    /// Put the previous clipboard text back after a paste (X11 only; Wayland
-    /// does not let a background app read the clipboard).
+    /// Restore previous plain text while this output still owns the X11 selection.
+    /// Wayland retains this choice but cannot confirm paste consumption.
     public var restoreClipboard: Bool
 
     public init(method: Method = .paste, restoreClipboard: Bool = true) {
@@ -30,12 +30,16 @@ public struct LinuxTextOutputOptions: Codable, Equatable, Sendable {
         restoreClipboard = (try? container.decodeIfPresent(Bool.self, forKey: .restoreClipboard)) ?? true
     }
 
-    public var savedStatus: String {
+    public func savedStatus(canRestoreClipboard: Bool) -> String {
         switch method {
         case .paste:
+            guard canRestoreClipboard else {
+                return "Text output saved: finished dictation is pasted into the app focused at delivery. "
+                    + "Wayland keeps the transcript on the clipboard; the X11 restoration preference is retained."
+            }
             return restoreClipboard
                 ? "Text output saved: finished dictation is pasted into the app you were using, "
-                    + "then the clipboard is restored."
+                    + "then previous clipboard text is restored if the app still owns the selection."
                 : "Text output saved: finished dictation is pasted into the app you were using."
         case .clipboardOnly:
             return "Text output saved: finished recordings are copied to the clipboard."
@@ -129,6 +133,9 @@ public enum LinuxOutputPlan: Equatable, Sendable {
 public protocol LinuxOutputNative: Sendable {
     func readClipboard() throws -> String?
     func writeClipboard(_ text: String) throws
+    func writeOwnedClipboard(_ text: String) throws -> UInt64
+    /// Atomically restores only the selection created by this receipt.
+    func restoreClipboard(_ text: String, ownership: UInt64) throws -> Bool
     /// Returns false when the target window is no longer focused.
     func x11Paste(window: UInt64, shift: Bool) throws -> Bool
     /// Starts the consented keyboard session if needed; true when the portal
@@ -185,9 +192,18 @@ public final class LinuxOutputJob: @unchecked Sendable {
     }
 
     private func x11Paste(_ text: String, window: UInt64, shift: Bool, restore: Bool) -> String {
-        let previous = restore ? (try? native.readClipboard()) : nil
+        var previous: String?
+        var readFailure: String?
+        if restore {
+            do { previous = try native.readClipboard() } catch { readFailure = error.localizedDescription }
+        }
+        var ownership: UInt64?
         do {
-            try native.writeClipboard(text)
+            if previous != nil {
+                ownership = try native.writeOwnedClipboard(text)
+            } else {
+                try native.writeClipboard(text)
+            }
             guard !isCancelled else { return "Output cancelled. The transcript is on the clipboard." }
             guard try native.x11Paste(window: window, shift: shift) else {
                 native.notify(title: "Transcript copied", body: "The focused window changed. Press Ctrl+V to paste.")
@@ -196,14 +212,22 @@ public final class LinuxOutputJob: @unchecked Sendable {
         } catch {
             return "Saved. Automatic paste unavailable; select Copy. \(error.localizedDescription)"
         }
-        guard restore, let previous else { return "Transcript pasted and saved to History." }
-        native.sleep(milliseconds: Self.restoreDelayMilliseconds)
-        // Never overwrite something the user copied in the meantime.
-        guard (try? native.readClipboard()) == text else {
-            return "Transcript pasted and saved to History."
+        if let readFailure {
+            return "Transcript pasted and saved to History. Previous clipboard text could not be read: \(readFailure)"
         }
-        do { try native.writeClipboard(previous) } catch {
-            return "Transcript pasted. The previous clipboard could not be restored."
+        guard restore, let previous, let ownership else { return "Transcript pasted and saved to History." }
+        return restorePreviousClipboard(previous, ownership: ownership)
+    }
+
+    private func restorePreviousClipboard(_ previous: String, ownership: UInt64) -> String {
+        native.sleep(milliseconds: Self.restoreDelayMilliseconds)
+        guard !isCancelled else { return "Transcript pasted and saved to History." }
+        do {
+            guard try native.restoreClipboard(previous, ownership: ownership) else {
+                return "Transcript pasted and saved to History."
+            }
+        } catch {
+            return "Transcript pasted. Previous clipboard text could not be restored: \(error.localizedDescription)"
         }
         return "Transcript pasted and saved to History. The clipboard was restored."
     }

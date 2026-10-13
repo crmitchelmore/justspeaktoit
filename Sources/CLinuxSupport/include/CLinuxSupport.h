@@ -177,7 +177,8 @@ int32_t jsti_window_set_history_presentation(
     const char *record_id, int32_t variant, int32_t switchable, const char *text, const char *status);
 int32_t jsti_window_set_transcript_variant(const char *record_id, int32_t variant, int32_t switchable);
 /* method: 0 paste into the focused app, 1 clipboard only. */
-int32_t jsti_window_set_text_output(int32_t method, int32_t restore_clipboard, const char *shortcut_hint);
+int32_t jsti_window_set_text_output(int32_t method, int32_t restore_clipboard,
+                                   int32_t can_restore_clipboard, const char *shortcut_hint);
 /* The Post-processing group: shared remote model names and saved choices. */
 int32_t jsti_window_set_post_processing(
     const char *const *models, size_t count, int32_t enabled, int32_t selected, const char *prompt);
@@ -211,6 +212,11 @@ int32_t jsti_window_screenshot_tour(const char *directory, char *error, size_t e
  * on the GTK main thread and the caller waits (bounded). Wayland compositors
  * only accept a selection from the focused client; see jsti_portal_*. */
 int32_t jsti_clipboard_write(const char *text, char *error, size_t error_capacity);
+/* X11-only owned selection and atomic restore. Restore returns 2 when another
+ * copy superseded the receipt, even if its text is identical. */
+int32_t jsti_clipboard_write_owned(const char *text, uint64_t *ownership, char *error, size_t error_capacity);
+int32_t jsti_clipboard_restore(const char *text, uint64_t ownership, char *error, size_t error_capacity);
+int32_t jsti_clipboard_ownership_self_test(char *error, size_t error_capacity);
 /* Returns 1 when the clipboard holds no text. `*text` is malloc'ed. */
 int32_t jsti_clipboard_read(char **text, char *error, size_t error_capacity);
 void jsti_free(void *pointer);

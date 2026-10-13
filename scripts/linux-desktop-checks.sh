@@ -36,7 +36,8 @@ if [ -n "${JSTI_UI_SCREENSHOT_DIR:-}" ]; then
     DISPLAY="$display" GDK_BACKEND=x11 GSK_RENDERER=cairo GTK_A11Y=none NO_AT_BRIDGE=1 \
         timeout 180 dbus-run-session -- "$binary" --ui-screenshots "$JSTI_UI_SCREENSHOT_DIR"
     expected=(dashboard history voice-output general transcription post-processing
-              keyboard icloud-sync about general-portal-output dashboard-dark history-dark dashboard-recording
+              corrections pronunciation keyboard icloud-sync about general-portal-output
+              dashboard-dark history-dark dashboard-recording
               hud-recording hud-completed history-filters history-filters-dark
               hud-expanded-recording hud-compact-recording hud-compact-completed)
     index=1

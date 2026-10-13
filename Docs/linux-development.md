@@ -122,7 +122,7 @@ those remain native CI and desktop validation gates.
 
 The window follows the Mac app's layout and look. A sidebar lists **Speak**
 (Dashboard, History, Voice Output) and **Settings** (General, Transcription,
-Post-processing, Keyboard, iCloud Sync, About), and collapses to one pane below
+Post-processing, Keyboard, Corrections, Pronunciation, iCloud Sync, About), and collapses to one pane below
 640 px. The header carries Import audio, the page title with the selected model,
 and Record; the status line sits at the bottom of every page.
 
@@ -202,6 +202,31 @@ Flatpak: `~/.var/app/com.justspeaktoit.JustSpeakToIt/data/JustSpeakToIt`):
 private to the user (0700/0600). API keys are in the Secret Service keyring
 under the same canonical identifiers as Windows Credential Manager. iCloud
 sync keeps its state in `CloudSync/state.json` there (see below).
+
+### Vocabulary and pronunciation
+
+The **Corrections** and **Pronunciation** pages use real GTK entries, multiline
+variant/preview fields, dropdowns, check buttons and filtered saved-entry lists.
+Both support durable editing, deletion confirmation, explicit ordering,
+validation and saved-entry preview; pronunciation also supports canonical
+defaults and local JSON merge/replace/import/export. **History > Correction
+results** shows the retained applied corrections, unapplied suggestions,
+confidence, reasons and context in a native read-only scrolling dialog.
+
+Windows and Linux use the same portable domain/store machinery and apply
+corrections at recording/import/retry/live-finalisation before post-processing,
+without replacing the original provider transcript. Read aloud runs the
+canonical pronunciation replacement renderer once before segmenting expanded
+text to Deepgram's request limit. IPA-only entries are retained but not claimed
+as supported by Deepgram. Context tags are explicit input; there is no OS-wide
+edit observation, permission request or fabricated learning. Candidate
+management logic is shared, but a desktop candidate-management UI is not yet
+implemented. Data remains in the existing private XDG application directory.
+
+See [the shared desktop journey](windows-development.md#vocabulary-and-pronunciation-journey)
+for rule semantics, storage files, supported provider hints and remaining
+physical/native acceptance. Native syntax checks and synthetic form-event
+self-tests do not replace target-platform runtime evidence.
 
 ### Flatpak
 

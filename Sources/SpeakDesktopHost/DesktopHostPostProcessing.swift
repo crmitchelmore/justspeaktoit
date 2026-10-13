@@ -49,6 +49,9 @@ extension DesktopHostController {
             return record
         }
         guard !closed, !cancellationRequested, options.mode == .remote else { return record }
+        let input = record.correctedText ?? result.text
+        let directives = record.lexiconDirectives ?? []
+        let tags = record.lexiconContextTags ?? []
         do {
             let key = try Platform.apiKey(
                 name: postProcessingCredential(for: options.modelIdentifier)
@@ -57,7 +60,10 @@ extension DesktopHostController {
             hud(record.id, .postProcessing)
             let task = Task {
                 try Task.checkCancellation()
-                return try await DesktopPostProcessing.process(rawText: result.text, options: options, apiKey: key)
+                return try await DesktopPostProcessing.process(
+                    rawText: input, options: options, apiKey: key,
+                    lexiconDirectives: directives, lexiconContextTags: tags
+                )
             }
             postProcessingTask = task
             defer { postProcessingTask = nil }

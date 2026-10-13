@@ -26,7 +26,8 @@ extension DesktopHostController {
             update(transcribingStatus(for: record.modelIdentifier), state: 2)
             hud(record.id, .transcribing())
             let request = DesktopHostTranscriptionRequest(
-                audio: audio, model: record.modelIdentifier, key: key, duration: duration, language: session.language
+                audio: audio, model: record.modelIdentifier, key: key, duration: duration, language: session.language,
+                keywords: try await vocabularyKeywords()
             )
             let effects = self.effects
             let task = Task {
@@ -38,12 +39,9 @@ extension DesktopHostController {
             // A Cancel while the audio was being found had no request to cancel yet.
             if cancellationRequested { task.cancel() }
             let result = try await task.value
-            record.result = result
-            record.failure = nil
-            record.processedText = nil
-            record.postProcessingModelIdentifier = nil
-            record.postProcessingFailure = session.skippedPolishReason
+            record = recordWithResult(result, replacing: record, skippedPolishReason: session.skippedPolishReason)
             try await saveRecord(record)
+            record = try await applyVocabulary(record)
             record = await postProcess(record, options: session.postProcessing)
             if cancellationRequested { record.failure = "Cancelled. Completed transcription and audio retained." }
             try await saveRecord(record)
@@ -61,6 +59,22 @@ extension DesktopHostController {
             let failure = record.failure ?? "Audio retained in History."
             reportFailure(failure, for: record.id, headline: "Transcription failed")
         }
+    }
+
+    private func recordWithResult(
+        _ result: TranscriptionResult, replacing original: DesktopRecordingStore.Record, skippedPolishReason: String?
+    ) -> DesktopRecordingStore.Record {
+        var record = original
+        record.result = result
+        record.failure = nil
+        record.processedText = nil
+        record.correctedText = nil
+        record.lexiconSummary = nil
+        record.lexiconDirectives = nil
+        record.lexiconContextTags = nil
+        record.postProcessingModelIdentifier = nil
+        record.postProcessingFailure = skippedPolishReason
+        return record
     }
 
     /// Shows a saved record. Work finishing after `close()` never reaches the

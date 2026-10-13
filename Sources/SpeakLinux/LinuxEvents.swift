@@ -169,6 +169,10 @@ func linuxWindowEvent(
     let value = text.map(String.init(cString:)) ?? ""
     let slot = Int(index)
     let event = Int(event)
+    if event == 70 || event == 71 || event == 72 {
+        linuxVocabularyEvent(Int32(event), payload: value, kind: slot, holder: holder)
+        return
+    }
     if linuxSessionEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxHistoryManagementEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxHistoryEvent(event, value: value, slot: slot, holder: holder) { return }

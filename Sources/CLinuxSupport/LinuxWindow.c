@@ -74,6 +74,7 @@ typedef struct UI {
     gint32 presented_variant;
     gboolean presented_switchable;
     GtkButton *retry;
+    GtkButton *correction_results;
     GtkButton *export_button;
     GtkButton *open_audio;
     GtkButton *recordings_folder;
@@ -115,6 +116,8 @@ typedef struct UI {
 } UI;
 
 static UI ui;
+GtkWidget *jsti_vocabulary_page_new(int kind);
+int32_t jsti_vocabulary_self_test(char *error, size_t capacity);
 
 static struct {
     GPtrArray *rows;
@@ -230,6 +233,7 @@ static void refresh_actions(void) {
     gtk_widget_set_visible(GTK_WIDGET(ui.live_preview), recording);
     g_free(preview);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.retry), idle && has_record);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.correction_results), idle && presented);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.export_button), idle && presented && has_text);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.open_audio), has_record);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.play), has_record && (idle || ui.playback_state != 0));
@@ -433,6 +437,12 @@ static void on_retry(GtkButton *button, gpointer data) {
     if (ui.selected_id != NULL) emit(JSTI_EVENT_RETRY_HISTORY, ui.selected_id, 0);
 }
 
+static void on_correction_results(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    if (ui.selected_id != NULL && g_strcmp0(ui.presented_id, ui.selected_id) == 0)
+        emit(72, ui.selected_id, 2);
+}
+
 static void on_play(GtkButton *button, gpointer data) {
     (void)button; (void)data;
     if (ui.selected_id != NULL) emit(JSTI_EVENT_PLAYBACK_TOGGLE, ui.selected_id, 0);
@@ -600,6 +610,8 @@ static const struct {
     [JSTI_PAGE_TRANSCRIPTION] = { "transcription", "Transcription", "audio-input-microphone-symbolic",
                                   "jsti-tint-warm" },
     [JSTI_PAGE_POST_PROCESSING] = { "post-processing", "Post-processing", "starred-symbolic", "jsti-tint-warm" },
+    [JSTI_PAGE_CORRECTIONS] = { "corrections", "Corrections", "document-edit-symbolic", "jsti-tint-warm" },
+    [JSTI_PAGE_PRONUNCIATION] = { "pronunciation", "Pronunciation", "accessories-dictionary-symbolic", "jsti-tint-warm" },
     [JSTI_PAGE_KEYBOARD] = { "keyboard", "Keyboard", "input-keyboard-symbolic", "jsti-tint-warm" },
     [JSTI_PAGE_CLOUD_SYNC] = { "icloud-sync", "iCloud Sync", "emblem-synchronizing-symbolic", "jsti-tint-warm" },
     [JSTI_PAGE_ABOUT] = { "about", "About", "help-about-symbolic", "jsti-tint-warm" },
@@ -608,6 +620,8 @@ static const struct {
 static void show_page(gint32 page) {
     if (page < 0 || page >= JSTI_PAGE_COUNT) return;
     ui.page = page;
+    if (page == JSTI_PAGE_CORRECTIONS || page == JSTI_PAGE_PRONUNCIATION)
+        emit(71, "", page == JSTI_PAGE_CORRECTIONS ? 0 : 1);
     gtk_stack_set_visible_child_name(ui.pages, page_info[page].name);
     adw_window_title_set_title(ui.title, page_info[page].title);
     GtkListBoxRow *row = gtk_list_box_get_row_at_index(ui.sidebar, page);
@@ -936,8 +950,11 @@ static GtkWidget *build_history(GtkTextBuffer *buffer) {
     gtk_box_append(GTK_BOX(ui.detail), actions);
     GtkWidget *management = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
     gtk_widget_set_halign(management, GTK_ALIGN_END);
+    ui.correction_results = GTK_BUTTON(gtk_button_new_with_label("Correction results"));
+    g_signal_connect(ui.correction_results, "clicked", G_CALLBACK(on_correction_results), NULL);
     ui.history_delete = GTK_BUTTON(gtk_button_new_with_label("Delete…"));
     g_signal_connect(ui.history_delete, "clicked", G_CALLBACK(on_history_delete), NULL);
+    gtk_box_append(GTK_BOX(management), GTK_WIDGET(ui.correction_results));
     gtk_box_append(GTK_BOX(management), GTK_WIDGET(ui.history_delete));
     gtk_box_append(GTK_BOX(ui.detail), management);
     return page;
@@ -1227,6 +1244,8 @@ static void build_window(void) {
     add_page(JSTI_PAGE_GENERAL, build_general());
     add_page(JSTI_PAGE_TRANSCRIPTION, build_transcription());
     add_page(JSTI_PAGE_POST_PROCESSING, build_post_processing());
+    add_page(JSTI_PAGE_CORRECTIONS, jsti_vocabulary_page_new(0));
+    add_page(JSTI_PAGE_PRONUNCIATION, jsti_vocabulary_page_new(1));
     add_page(JSTI_PAGE_KEYBOARD, build_keyboard());
     add_page(JSTI_PAGE_CLOUD_SYNC, build_cloud_sync());
     add_page(JSTI_PAGE_ABOUT, build_about());
@@ -2828,6 +2847,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (jsti_local_models_self_test(error, capacity) != 0) return -1;
     if (jsti_cloud_sync_self_test(error, capacity) != 0) return -1;
     if (jsti_history_filters_self_test(error, capacity) != 0) return -1;
+    if (jsti_vocabulary_self_test(error, capacity) != 0) return -1;
     const char *first = "00000000-0000-0000-0000-000000000001";
     const char *second = "00000000-0000-0000-0000-000000000002";
     JSTIHistoryRow rows[] = {

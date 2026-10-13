@@ -179,6 +179,25 @@ final class DesktopHostReadAloudTests: XCTestCase {
         XCTAssertTrue(FakeSpeech.shared.spoken.isEmpty)
     }
 
+    func testPronunciationRendersOnceBeforeDeepgramRequestSegmentation() async throws {
+        FakeLog.shared.setKey("deepgram-key", name: deepgramKey)
+        let replacement = "LongToken " + String(repeating: "expanded ", count: 200)
+        _ = try await controller.vocabularyEvent(kind: 1, payload: DesktopVocabularyWire.encode([
+            "save", "", "LongToken", "fixture pronunciation", replacement, "Custom", "false", "true", ""
+        ]))
+        let input = "LongToken LongToken LongToken."
+        let entries = [PronunciationEntry(
+            word: "LongToken", pronunciation: "fixture pronunciation", replacement: replacement, caseSensitive: true
+        )]
+        let rendered = PronunciationRenderer().applyReplacements(to: input, entries: entries)
+        let expected = SpeechTextSegmenter.segments(rendered)
+        XCTAssertGreaterThan(expected.count, 1)
+        await controller.readAloud(record.uuidString, text: input)
+        try await waitFor("the pronunciation finish") { self.statuses.last == "Finished reading aloud." }
+        XCTAssertEqual(FakeSpeech.shared.spoken.map(\.text), expected)
+        XCTAssertTrue(FakeSpeech.shared.spoken.allSatisfy { $0.text.count <= 2_000 })
+    }
+
     /// Stop ends the speech while a segment plays: nothing more is spoken and
     /// the stop is reported once, by Stop, never overwritten by the reader.
     func testStop_WhileASegmentPlays_ReportsOneStopAndSpeaksNothingMore() async throws {

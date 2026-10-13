@@ -38,6 +38,9 @@ extension DesktopHostController {
     func profileContext(_ record: DesktopRecordingStore.Record) -> String {
         var details = record.profileName.map { " App profile: \($0)." } ?? ""
         for note in record.profileNotes ?? [] { details += " " + note }
+        if let summary = record.lexiconSummary, !summary.applied.isEmpty || !summary.suggestions.isEmpty {
+            details += " Corrections: \(summary.applied.count) applied, \(summary.suggestions.count) suggested."
+        }
         return details
     }
 

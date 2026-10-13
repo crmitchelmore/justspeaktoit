@@ -19,8 +19,14 @@ struct WindowsNativeEffects: WindowsControllerEffects {
     func makeLiveClient(
         model: String, key: String, language: String?, azureEndpoint: String
     ) -> (any FinalizingStreamingTranscriptionClient)? {
+        makeLiveClient(model: model, key: key, language: language, azureEndpoint: azureEndpoint, options: .init())
+    }
+
+    func makeLiveClient(
+        model: String, key: String, language: String?, azureEndpoint: String, options: LiveClientOptions
+    ) -> (any FinalizingStreamingTranscriptionClient)? {
         DesktopLiveTranscription.makeClient(
-            model: model, apiKey: key, language: language, azureEndpoint: azureEndpoint,
+            model: model, apiKey: key, language: language, azureEndpoint: azureEndpoint, options: options,
             makeConnection: { WinHTTPStreamingConnection(request: $0) }
         )
     }
@@ -30,7 +36,7 @@ struct WindowsNativeEffects: WindowsControllerEffects {
     ) async throws -> TranscriptionResult {
         try await controller.transcribePreparedAudio(
             request.audio, model: request.model, key: request.key, duration: request.duration,
-            language: request.language
+            language: request.language, keywords: request.keywords
         )
     }
 

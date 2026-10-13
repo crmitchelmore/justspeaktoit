@@ -161,18 +161,40 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     }
 
     /// `text` is the transcript displayed for `identifier` when Read aloud was clicked.
-    package func readAloud(_ identifier: String, text: String) {
+    package func readAloud(_ identifier: String, text: String) async {
         guard !closed, canUseHistory, let id = UUID(uuidString: identifier), history[id] != nil,
               selectedHistoryID == id, isVisible(id) else { return }
-        let segments = SpeechTextSegmenter.segments(text)
+        guard !SpeechTextSegmenter.segments(text).isEmpty else {
+            update("There is no transcript to read aloud."); return
+        }
+        stopReadAloud()
+        let ticket = playbackRequests.begin()
+        let pronunciations: [PronunciationEntry]
+        do {
+            let vocabulary = try await vocabularyStore()
+            pronunciations = await vocabulary.entries
+        } catch {
+            guard playbackRequests.isCurrent(ticket), !closed else { return }
+            update("Pronunciation dictionary could not be loaded: \(error.localizedDescription)")
+            return
+        }
+        guard playbackRequests.isCurrent(ticket), !closed, canUseHistory, selectedHistoryID == id,
+              isVisible(id) else { return }
+        let rendered = PronunciationRenderer().applyReplacements(to: text, entries: pronunciations)
+        let segments = SpeechTextSegmenter.segments(rendered)
         guard !segments.isEmpty else { update("There is no transcript to read aloud."); return }
+        startReadAloud(segments, recordID: id, ticket: ticket)
+    }
+
+    private func startReadAloud(
+        _ segments: [String], recordID id: UUID, ticket: DesktopPlaybackRequests.Ticket
+    ) {
         let staging = directory.appendingPathComponent("VoiceOutput")
         guard let voiceOutput = readAloudState.output({ try Platform.makeVoiceOutput(stagingDirectory: staging) })
         else {
             update("Read aloud is unavailable: its private audio folder could not be prepared.")
             return
         }
-        stopReadAloud()
         let speech: Platform.Playback.Speech
         do {
             // Playback stops now, and the record's controls stay active until the speech ends.
@@ -184,7 +206,6 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         let voice = voiceOutputSettings().voice
         let effects = effects
         let playback = playback
-        let ticket = playbackRequests.begin()
         readAloudState.speech = speech
         update("Reading aloud with \(voice.name)…")
         readAloudState.task = Task {

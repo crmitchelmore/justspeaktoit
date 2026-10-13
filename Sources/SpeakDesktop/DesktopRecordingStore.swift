@@ -12,6 +12,10 @@ public actor DesktopRecordingStore {
         public var result: TranscriptionResult?
         public var failure: String?
         public var processedText: String?
+        public var correctedText: String?
+        public var lexiconSummary: PersonalLexiconHistorySummary?
+        public var lexiconDirectives: [String]?
+        public var lexiconContextTags: [String]?
         public var postProcessingModelIdentifier: String?
         public var postProcessingFailure: String?
         /// Provider language the recording was transcribed with (`nil` means
@@ -29,14 +33,14 @@ public actor DesktopRecordingStore {
         /// True for a transcript that arrived through History sync.
         public var isSyncedCopy: Bool { originPlatform != nil }
 
-        public var displayText: String? { processedText ?? result?.text }
+        public var displayText: String? { processedText ?? correctedText ?? result?.text }
 
         /// The provider transcript exactly as transcribed, before post-processing.
         public var originalText: String? { result?.text }
 
         /// True when both transcripts are retained, so a host can offer an
         /// explicit original/processed choice instead of only `displayText`.
-        public var hasTranscriptVariants: Bool { processedText != nil && result != nil }
+        public var hasTranscriptVariants: Bool { (processedText != nil || correctedText != nil) && result != nil }
 
         /// `.processed` keeps the historical `displayText` fallback to the
         /// original; `.original` never substitutes processed text.

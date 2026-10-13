@@ -145,4 +145,21 @@ final class DesktopHostConfigurationTests: XCTestCase {
         XCTAssertEqual(saved.outputLanguage, "German")
         XCTAssertEqual(saved.customPrompt, "Custom")
     }
+
+    func testOversizedExportDoesNotReplaceExistingFile() async throws {
+        let file = directory.appendingPathComponent("large.json")
+        let preferences = try DesktopConfiguration(values: [
+            "opaque": AnyCodable(.string(String(repeating: "a", count: 1_000_000)))
+        ])
+        try JSONEncoder().encode(DesktopConfigurationDocument(preferences: preferences)).write(to: file)
+        try await controller.importConfiguration(path: file.path)
+        var entries = try await controller.configuration().entries
+        entries[1] = String(repeating: "a", count: 65_535)
+        try await controller.saveConfiguration(entries)
+        let original = Data("Existing export".utf8)
+        try original.write(to: file)
+        do { try await controller.exportConfiguration(path: file.path); XCTFail("Oversized export accepted") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("1 MB")) }
+        XCTAssertEqual(try Data(contentsOf: file), original)
+    }
 }

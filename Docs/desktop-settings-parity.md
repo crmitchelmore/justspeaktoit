@@ -42,6 +42,9 @@ General's Import/Export preferences actions use a bounded, versioned JSON object
 {"version":1,"preferences":{"preferredLocale":"en_GB","holdThreshold":0.35}}
 ```
 
+Both transfers enforce a 1 MB limit. An oversized export is refused before
+replacing its destination, rather than producing a file the importer cannot read.
+
 This transfers the portable preferences above. It does not read credential stores
 or transfer native model selections, hotkey codes, microphone IDs, device paths,
 startup registration or automation permission. Imported unknown/unsupported

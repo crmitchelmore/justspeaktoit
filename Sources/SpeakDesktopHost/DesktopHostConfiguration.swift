@@ -37,7 +37,9 @@ extension DesktopHostController {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let document = DesktopConfigurationDocument(preferences: try configuration())
-        try encoder.encode(document).write(to: URL(fileURLWithPath: path), options: .atomic)
+        let data = try encoder.encode(document)
+        guard data.count <= DesktopConfigurationDocument.maximumBytes else { throw DesktopConfigurationError.tooLarge }
+        try data.write(to: URL(fileURLWithPath: path), options: .atomic)
         update("Portable preferences exported, including preserved imported values. Credential stores were not read.")
     }
 
@@ -46,20 +48,21 @@ extension DesktopHostController {
             throw DesktopHostError(message: "Finish dictation before importing configuration.")
         }
         let source = URL(fileURLWithPath: path)
+        let maximumBytes = DesktopConfigurationDocument.maximumBytes
         let attributes = try FileManager.default.attributesOfItem(atPath: source.path)
         guard attributes[.type] as? FileAttributeType == .typeRegular,
-              let size = attributes[.size] as? NSNumber, size.intValue <= 1_048_576 else {
+              let size = attributes[.size] as? NSNumber, size.intValue <= maximumBytes else {
             throw DesktopConfigurationError.tooLarge
         }
         let file = try FileHandle(forReadingFrom: source)
         defer { try? file.close() }
         var data = Data()
-        while data.count < 1_048_577 {
-            guard let chunk = try file.read(upToCount: min(65_536, 1_048_577 - data.count)),
+        while data.count <= maximumBytes {
+            guard let chunk = try file.read(upToCount: min(65_536, maximumBytes + 1 - data.count)),
                   !chunk.isEmpty else { break }
             data.append(chunk)
         }
-        guard data.count <= 1_048_576 else { throw DesktopConfigurationError.tooLarge }
+        guard data.count <= maximumBytes else { throw DesktopConfigurationError.tooLarge }
         let document = try JSONDecoder().decode(DesktopConfigurationDocument.self, from: data)
         guard document.version == 1 else { throw DesktopConfigurationError.unsupportedVersion }
         var changed = settings
@@ -80,6 +83,7 @@ extension DesktopHostController {
 }
 
 package struct DesktopConfigurationDocument: Codable {
+    package static let maximumBytes = 1_048_576
     package var version = 1
     package let preferences: DesktopConfiguration
 }

@@ -139,11 +139,12 @@ bool revealControl(HWND window, HWND control) {
     top = {child.left, child.top}; bottom = {child.right, child.bottom};
     if (!ScreenToClient(window, &top) || !ScreenToClient(window, &bottom)) return false;
     const int margin = scale(window, 16);
+    const int previousOffset = panel->scrollOffset;
     if (bottom.y > bounds.bottom - margin) panel->scrollOffset += bottom.y - bounds.bottom + margin;
     else if (top.y < margin) {
         panel->scrollOffset = std::max(0, panel->scrollOffset + static_cast<int>(top.y) - margin);
     }
-    return layout(window);
+    return panel->scrollOffset == previousOffset || layout(window);
 }
 void layoutFailure(HWND window) {
     MessageBoxW(window, L"Could not lay out History filter controls.", L"History filters", MB_OK | MB_ICONERROR);
@@ -297,8 +298,11 @@ void jsti_history_filters_enabled(bool enabled) {
 
 bool jsti_history_filters_message(MSG *message) {
     if (!panelWindow) return false;
+    const HWND previousFocus = GetFocus();
     const bool handled = IsDialogMessageW(panelWindow, message);
-    if (handled && panelWindow && !revealControl(panelWindow, GetFocus())) layoutFailure(panelWindow);
+    if (handled && panelWindow && GetFocus() != previousFocus && !revealControl(panelWindow, GetFocus())) {
+        layoutFailure(panelWindow);
+    }
     return handled;
 }
 
@@ -431,8 +435,21 @@ bool jsti_history_filters_self_test(HWND owner, std::string &error) {
         GetClientRect(panelWindow, &client); GetWindowRect(GetDlgItem(panelWindow, applyID), &action);
         actionBottom = {action.right, action.bottom};
         passed = passed && ScreenToClient(panelWindow, &actionBottom) && actionBottom.y <= client.bottom;
+        const HWND previousFocus = GetFocus();
+        ShowWindow(panelWindow, SW_SHOWNOACTIVATE);
+        HWND actionControl = GetDlgItem(panelWindow, applyID);
+        SetFocus(actionControl);
+        InvalidateRect(actionControl, nullptr, FALSE);
+        MSG paint{};
+        paint.hwnd = actionControl;
+        paint.message = WM_PAINT;
+        if (!jsti_history_filters_message(&paint)) DispatchMessageW(&paint);
+        passed = passed && GetFocus() == actionControl && !GetUpdateRect(actionControl, nullptr, FALSE);
         DestroyWindow(panelWindow);
-        if (!passed) error = "History filter controls lost identities, dates, escaping, scrolling or busy-state gating.";
+        if (previousFocus && IsWindow(previousFocus)) SetFocus(previousFocus);
+        if (!passed) {
+            error = "History filter controls lost identities, dates, escaping, scrolling, paint or busy-state gating.";
+        }
     }
     { std::lock_guard<std::mutex> lock(mutex); configuration = std::move(original); }
     return passed;

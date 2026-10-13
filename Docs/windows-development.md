@@ -488,7 +488,9 @@ or migration.
 The filter editor scrolls vertically when the available work area is too short;
 keyboard traversal reveals the focused control. Long model names have native
 horizontal scrolling, and an open editor follows application appearance changes.
-Native self-tests cover these paths, and the CI screenshot tour
+Focus reveal does not relayout already-visible controls or ordinary paint
+messages, so painting cannot starve timers. Native self-tests cover these paths
+and verify that handling a child paint leaves its update region clean. The CI screenshot tour
 requires separate light/dark filter-editor snapshots; those artifacts still need
 visual review before claiming UI acceptance.
 

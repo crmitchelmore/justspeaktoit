@@ -22,6 +22,7 @@ extension DesktopHostController {
                 try Task.checkCancellation()
                 guard !self.closed, self.comparisonGeneration == generation else { throw CancellationError() }
                 try await comparisons.remove(id: id)
+                self.comparisonSync?.changed()
                 if self.comparisonSelection == id { self.comparisonSelection = nil }
                 self.comparisonStatus("Comparison deleted. Original imported files were not changed.")
             } catch {

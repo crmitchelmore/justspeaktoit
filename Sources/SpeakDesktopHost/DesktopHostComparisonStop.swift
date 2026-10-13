@@ -53,11 +53,14 @@ extension DesktopHostController {
             let round = try DesktopComparisonRunner.completing(pending, entries: entries, sample: sample)
             try await comparisons.upsert(round)
             comparisonSelection = round.id
-            comparisonStatus("Comparison saved. Rank every blind result to reveal models.")
+            comparisonStatus("Comparison saved. Review or rank the results below.")
         } catch {
             fanOut.cancel()
             comparisonStatus("Comparison recording retained: \(error.localizedDescription)")
         }
+        await comparisons.endExecution(ids: comparisonOwnedRoundIDs)
+        comparisonOwnedRoundIDs.removeAll()
+        comparisonSync?.changed()
         busy = false
         comparisonLive = nil
         comparisonPending = nil

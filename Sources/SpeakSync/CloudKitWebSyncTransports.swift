@@ -151,16 +151,25 @@ public final class CloudKitWebHistorySyncTransport: HistorySyncTransport, Sendab
 /// tombstone and version rules of `CloudKitComparisonSyncTransport`.
 public final class CloudKitWebComparisonSyncTransport: ComparisonSyncTransport, Sendable {
     private let client: CloudKitWebServicesClient
+    private let session: CloudKitWebSession?
+    private let beforeRequest: @Sendable () async throws -> Void
 
-    public init(client: CloudKitWebServicesClient, consent: CloudKitWebSyncConsent) throws {
+    public init(
+        client: CloudKitWebServicesClient, consent: CloudKitWebSyncConsent, session: CloudKitWebSession? = nil,
+        beforeRequest: @escaping @Sendable () async throws -> Void = {}
+    ) throws {
         try consent.require(.comparisonRounds)
         self.client = client
+        self.session = session
+        self.beforeRequest = beforeRequest
     }
 
     public func fetchChanges(after tokenData: Data?) async throws -> ComparisonChangePage {
+        try await beforeRequest()
         let page = try await client.fetchZoneChanges(
             zoneName: SyncSchema.zoneName,
-            syncToken: try CloudKitWebSyncToken.string(from: tokenData)
+            syncToken: try CloudKitWebSyncToken.string(from: tokenData),
+            in: session
         )
         var changes: [ComparisonRemoteChange] = []
         for result in page.records {
@@ -191,7 +200,7 @@ public final class CloudKitWebComparisonSyncTransport: ComparisonSyncTransport, 
 
     public func upload(revisions: [ModelComparisonRevision]) async -> ComparisonUploadResult {
         var result = ComparisonUploadResult()
-        let session = await client.session()
+        let session = await client.session(or: self.session)
         let names = revisions.map { SyncSchema.ComparisonRound.recordName(for: $0.id) }
         let existing: [String: CloudKitWebLookupOutcome]
         do {
@@ -199,7 +208,8 @@ public final class CloudKitWebComparisonSyncTransport: ComparisonSyncTransport, 
                 names,
                 zoneName: SyncSchema.zoneName,
                 client: client,
-                session: session
+                session: session,
+                beforeRequest: beforeRequest
             )
         } catch {
             for revision in revisions { result.failures[revision.id] = error }
@@ -221,7 +231,8 @@ public final class CloudKitWebComparisonSyncTransport: ComparisonSyncTransport, 
             writes.map { ($0.revision.id, $0.operation) },
             zoneName: SyncSchema.zoneName,
             client: client,
-            session: session
+            session: session,
+            beforeRequest: beforeRequest
         )
         for (index, outcome) in outcomes.enumerated() {
             switch outcome.result {

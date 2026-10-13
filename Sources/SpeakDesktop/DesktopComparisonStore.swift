@@ -8,6 +8,7 @@ public actor DesktopComparisonStore {
         var acknowledgements: [UUID: Date] = [:]
     }
     private var document: Document
+    private var executing: Set<UUID> = []
     public nonisolated let directory: URL
     private let storageURL: URL
     private let write: @Sendable (Data, URL) throws -> Void
@@ -37,20 +38,34 @@ public actor DesktopComparisonStore {
         }
     }
 
-    public func upsert(_ round: ModelComparisonRound) throws {
+    public func upsert(_ round: ModelComparisonRound, isExecuting: Bool = false) throws {
         guard round.isValid else { throw DesktopComparisonError.message("Invalid comparison round.") }
         var next = document
         next.revisions[round.id] = ModelComparisonRevision(round: round)
         next.acknowledgements[round.id] = nil
         try commit(next)
+        if isExecuting { executing.insert(round.id) } else { executing.remove(round.id) }
     }
 
     public func pendingRevisions() -> [ModelComparisonRevision] {
-        document.revisions.values.filter { document.acknowledgements[$0.id] != $0.updatedAt }
+        document.revisions.values.filter {
+            !executing.contains($0.id) && document.acknowledgements[$0.id] != $0.updatedAt
+        }
             .sorted { $0.updatedAt < $1.updatedAt }
     }
 
+    public func revisions() -> [ModelComparisonRevision] {
+        document.revisions.values.filter { !executing.contains($0.id) }.sorted { $0.updatedAt < $1.updatedAt }
+    }
+
+    public func endExecution(ids: Set<UUID>) {
+        executing.subtract(ids)
+    }
+
     public func remove(id: UUID, at date: Date = Date()) throws {
+        guard !executing.contains(id) else {
+            throw DesktopComparisonError.message("Finish or cancel the active comparison before deleting it.")
+        }
         guard let round = document.revisions[id]?.round else {
             throw DesktopComparisonError.message("This comparison is no longer available.")
         }
@@ -64,6 +79,9 @@ public actor DesktopComparisonStore {
     }
 
     public func applyRemoteRevision(_ revision: ModelComparisonRevision) throws {
+        guard !executing.contains(revision.id) else {
+            throw DesktopComparisonError.message("An active comparison cannot be changed by sync.")
+        }
         guard revision.isValid else { throw DesktopComparisonError.message("Invalid comparison revision.") }
         if let local = document.revisions[revision.id] {
             if local.updatedAt > revision.updatedAt { return }
@@ -131,16 +149,18 @@ public actor DesktopComparisonStore {
     }
 
     public func judge(id: UUID, ranksInBlindOrder: [Int]) throws {
-        guard var round = document.revisions[id]?.round, !round.isJudged,
+        guard !executing.contains(id), var round = document.revisions[id]?.round, !round.isJudged,
               ranksInBlindOrder.count == round.blindOrder.count else {
             throw DesktopComparisonError.message("Select an unjudged round and rank every result.")
         }
         let ranking = zip(round.blindOrder, ranksInBlindOrder).map {
             ModelComparisonRanking(entryID: $0.0, rank: $0.1)
         }
+        let previousUpdate = round.updatedAt
         guard round.judge(rankings: ranking) else {
             throw DesktopComparisonError.message("Use each rank from 1 to \(round.entries.count) exactly once.")
         }
+        round.updatedAt = max(round.updatedAt, previousUpdate.addingTimeInterval(0.001))
         try upsert(round)
     }
 }

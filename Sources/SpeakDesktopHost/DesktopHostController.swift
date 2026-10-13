@@ -107,6 +107,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     /// installed by preparePlayback once this actor exists.
     package let playback = Platform.makePlayback()
     package var comparisons: DesktopComparisonStore?
+    var comparisonSync: DesktopHostComparisonSyncHooks?
+    var comparisonVisible = false
     var comparisonInitialization: DesktopComparisonStoreLoading?
     package var comparisonTask: Task<Void, Never>?
     package var comparisonFinalization: Task<Void, Never>?
@@ -115,6 +117,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package var comparisonLive: DesktopComparisonLive?
     package var comparisonSelection: UUID?
     package var comparisonGeneration = UUID()
+    var comparisonOwnedRoundIDs: Set<UUID> = []
     package var comparisonLanguage: String?
     package var comparisonPending: ModelComparisonRound?
     package var comparisonNotice = "Select models and an input to begin."

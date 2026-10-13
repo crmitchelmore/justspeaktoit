@@ -74,6 +74,7 @@ package final class DesktopHostCloudSync<Platform: DesktopHostPlatform>: @unchec
     private let timing: DesktopHostCloudSyncTiming
     private let lock = NSLock()
     private var signIn: Task<Void, Never>?
+    private weak var comparisonController: DesktopHostController<Platform>?
 
     /// Where a host's sync state lives: cursors, the bound iCloud user,
     /// acknowledgements and imported-key bookkeeping. No credentials.
@@ -119,6 +120,17 @@ package final class DesktopHostCloudSync<Platform: DesktopHostPlatform>: @unchec
     /// state and starts the periodic pass, the first one at once.
     package func start(controller: DesktopHostController<Platform>) async {
         await service.prepare()
+        do {
+            let store = try await controller.loadComparisonStore()
+            guard !work.isStopped else { return }
+            await service.installComparisonStore(store)
+            comparisonController = controller
+            await controller.installComparisonSync(.init(
+                status: { [service] in await service.status() },
+                setEnabled: { [service] enabled in try await service.setComparisonEnabled(enabled) },
+                changed: { [weak self] in self?.requestSync() }
+            ))
+        } catch { notify("Comparison sync storage: \(error.localizedDescription)") }
         await controller.installCloudSync(DesktopHostSyncHooks(
             historyChanged: { [weak self] in self?.requestSync() },
             saveKeyByHand: { [service] value, identifier in
@@ -272,6 +284,8 @@ package final class DesktopHostCloudSync<Platform: DesktopHostPlatform>: @unchec
     private func publish() async {
         let status = await service.status()
         work.ifRunning { native.present(status) }
+        guard !work.isStopped else { return }
+        await comparisonController?.refreshComparison()
     }
 
     /// Names the providers whose keys were imported, for the status line.

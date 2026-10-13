@@ -212,8 +212,16 @@ the initially persisted blind identities/order. `SpeakDesktopHost/DesktopHostCom
 owns admission, cancellation, capture, raw provider execution, judging and
 exports without using normal History, post-processing or insertion.
 `WindowsComparison.cpp` and `LinuxComparison.c` own their native editors and
-file/save pickers, connected by small host adapters. Comparison sync is not yet
-connected on these hosts; the existing Mac sync adapter is unchanged.
+file/save pickers, connected by small host adapters. Separate comparison hooks
+connect the store to the existing owned desktop iCloud service and its explicit
+native consent/retry controls. `DesktopComparisonSyncPass` wraps the canonical
+`ComparisonSyncCoordinator` and web transport with frozen-session requests
+outside the non-reentrant gate and conditional local commits inside it.
+Independent comparison cursors/acknowledgements and retained account provenance
+prevent stale commits and original-account tombstone transfer. In-memory
+execution leases keep active captures/queued batch snapshots out of sync and
+protect their audio from remote deletion. Sync never transfers audio; the
+existing Mac sync adapter and native History/key-import journeys are unchanged.
 Confirmed delete/discard commits canonical tombstones before removing owned
 samples. Startup shares one owned comparison-store initialization and prunes
 orphan samples; original imports and normal History are never deleted. The

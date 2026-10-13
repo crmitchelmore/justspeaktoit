@@ -11,6 +11,8 @@ typedef struct {
     GtkTextView *detail;
     GtkWidget *column;
     GtkButton *run, *stop, *cancel, *judge, *json, *markdown, *play, *stop_audio, *delete_round;
+    GtkCheckButton *sync;
+    GtkButton *sync_now;
     GPtrArray *model_ids, *round_ids;
     gchar *selected, *model_rows, *round_rows;
     gboolean suppress;
@@ -29,11 +31,13 @@ static void free_request(PickerRequest *request) {
 }
 static gboolean testing = FALSE;
 static gint32 test_event = 0;
+static gint32 test_index = 0;
 static gchar *test_payload = NULL;
 
 static void comparison_emit(gint32 event, const char *text, gint32 index) {
     if (!testing) { jsti_window_emit(event, text, index); return; }
     test_event = event;
+    test_index = index;
     g_free(test_payload); test_payload = g_strdup(text);
 }
 
@@ -146,11 +150,16 @@ static void action_clicked(GtkButton *button, gpointer data) {
     if (button == ui.cancel) comparison_emit(105, "", 0);
     if (button == ui.play) comparison_emit(108, ui.selected != NULL ? ui.selected : "", 0);
     if (button == ui.stop_audio) comparison_emit(109, "", 0);
+    if (button == ui.sync_now) comparison_emit(122, "", 0);
     if (button == ui.judge) {
         gchar *payload = g_strdup_printf("%s\n%s", ui.selected != NULL ? ui.selected : "",
                                         gtk_editable_get_text(GTK_EDITABLE(ui.ranks)));
         comparison_emit(106, payload, 0); g_free(payload);
     }
+}
+static void sync_changed(GtkCheckButton *button, gpointer data) {
+    (void)data;
+    if (!ui.suppress) comparison_emit(121, "", gtk_check_button_get_active(button));
 }
 static void confirm_deletion(PickerRequest *request, const char *response) {
     if (strcmp(response, "delete") == 0 && ui.window == request->window
@@ -170,7 +179,8 @@ static void delete_clicked(GtkButton *button, gpointer data) {
     if (ui.selected == NULL || *ui.selected == '\0') return;
     GtkWidget *dialog = adw_message_dialog_new(ui.window, "Delete comparison?",
         "Delete this saved comparison and its app-owned audio? Original imports are not changed.\n\n"
-        "If comparison sync is enabled now or later, the deletion is synced to your other devices.");
+        "A previously synced comparison is also deleted on its other devices when sync is enabled "
+        "for its original iCloud account.");
     adw_message_dialog_add_responses(ADW_MESSAGE_DIALOG(dialog), "cancel", "Cancel", "delete", "Delete", NULL);
     adw_message_dialog_set_response_appearance(ADW_MESSAGE_DIALOG(dialog), "delete", ADW_RESPONSE_DESTRUCTIVE);
     adw_message_dialog_set_default_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
@@ -204,7 +214,7 @@ static void export_clicked(GtkButton *button, gpointer data) {
 }
 static gboolean closing(GtkWindow *window, gpointer data) {
     (void)window; (void)data;
-    comparison_emit(105, "", 0);
+    comparison_emit(123, "", 0);
     ui.window = NULL;
     g_clear_pointer(&ui.selected, g_free);
     g_clear_pointer(&ui.model_rows, g_free);
@@ -299,6 +309,15 @@ void jsti_comparison_open(GtkWindow *parent) {
     ui.delete_round = GTK_BUTTON(button_new("Delete / discard saved round…", G_CALLBACK(delete_clicked)));
     gtk_widget_add_css_class(GTK_WIDGET(ui.delete_round), "destructive-action");
     gtk_box_append(GTK_BOX(column), GTK_WIDGET(ui.delete_round));
+    ui.sync = GTK_CHECK_BUTTON(gtk_check_button_new());
+    GtkWidget *sync_label = gtk_label_new("Sync comparison transcripts and rankings with iCloud");
+    gtk_label_set_wrap(GTK_LABEL(sync_label), TRUE); gtk_label_set_xalign(GTK_LABEL(sync_label), 0);
+    gtk_check_button_set_child(ui.sync, sync_label);
+    named(GTK_WIDGET(ui.sync), "Sync comparison transcripts and rankings with iCloud");
+    g_signal_connect(ui.sync, "toggled", G_CALLBACK(sync_changed), NULL);
+    gtk_box_append(GTK_BOX(column), GTK_WIDGET(ui.sync));
+    ui.sync_now = GTK_BUTTON(button_new("Sync now / retry", G_CALLBACK(action_clicked)));
+    gtk_box_append(GTK_BOX(column), GTK_WIDGET(ui.sync_now));
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), column);
     adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar), scrolled);
     adw_window_set_content(ADW_WINDOW(ui.window), toolbar);
@@ -307,7 +326,7 @@ void jsti_comparison_open(GtkWindow *parent) {
 }
 typedef struct {
     gchar *models, *rounds, *detail, *selected;
-    gboolean busy, recording, judgeable;
+    gboolean busy, recording, judgeable, sync_enabled, sync_available;
 } Presentation;
 static void free_presentation(gpointer value) {
     Presentation *p = value;
@@ -351,14 +370,19 @@ static void present(gpointer value) {
     gtk_widget_set_sensitive(GTK_WIDGET(ui.json), !p->busy && ui.round_ids->len > 0);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.markdown), !p->busy && ui.round_ids->len > 0);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.delete_round), !p->busy && p->selected[0] != '\0');
+    gtk_check_button_set_active(ui.sync, p->sync_enabled);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.sync), p->sync_available);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.sync_now), p->sync_available && p->sync_enabled);
     ui.suppress = FALSE;
 }
 int32_t jsti_comparison_present(const char *models, const char *rounds, const char *detail,
-                               const char *selected, int32_t busy, int32_t recording, int32_t judgeable) {
+                               const char *selected, int32_t busy, int32_t recording, int32_t judgeable,
+                               int32_t sync_enabled, int32_t sync_available) {
     if (models == NULL || rounds == NULL || detail == NULL || selected == NULL) return -1;
     Presentation *p = g_new0(Presentation, 1);
     p->models = g_strdup(models); p->rounds = g_strdup(rounds); p->detail = g_strdup(detail);
     p->selected = g_strdup(selected); p->busy = busy != 0; p->recording = recording != 0; p->judgeable = judgeable != 0;
+    p->sync_enabled = sync_enabled != 0; p->sync_available = sync_available != 0;
     return jsti_window_post(present, p, free_presentation);
 }
 
@@ -371,7 +395,7 @@ static Presentation fixture(gboolean revealed) {
               "\nResult B - File B (rank 1)\nCould we meet on Friday?\n\nScoreboard\nFile B: 1 win\nFile A: 0 wins"
             : "Synthetic sample.wav\n\nResult A\nCould we meet Friday?\n\nResult B\nCould we meet on Friday?\n"
               "\nRank every blind result to reveal models.",
-        .judgeable = !revealed
+        .judgeable = !revealed, .sync_available = TRUE
     };
     return p;
 }
@@ -389,6 +413,15 @@ int32_t jsti_comparison_self_test(GtkWindow *parent, char *error, size_t capacit
     present(&p);
     gboolean valid = ui.model_ids->len == 2 && ui.round_ids->len == 1
         && gtk_widget_get_sensitive(GTK_WIDGET(ui.judge));
+    valid = valid && gtk_widget_get_sensitive(GTK_WIDGET(ui.sync))
+        && !gtk_widget_get_sensitive(GTK_WIDGET(ui.sync_now))
+        && gtk_label_get_wrap(GTK_LABEL(gtk_check_button_get_child(ui.sync)));
+    gtk_check_button_set_active(ui.sync, TRUE);
+    valid = valid && test_event == 121 && test_index == 1;
+    p.sync_enabled = TRUE; present(&p);
+    valid = valid && gtk_widget_get_sensitive(GTK_WIDGET(ui.sync_now));
+    g_signal_emit_by_name(ui.sync_now, "clicked");
+    valid = valid && test_event == 122;
     gtk_drop_down_set_selected(ui.mode, 1);
     for (guint i = 0; i < ui.model_ids->len; ++i) {
         GtkListBoxRow *row = gtk_list_box_get_row_at_index(ui.models, (int)i);
@@ -418,7 +451,7 @@ int32_t jsti_comparison_self_test(GtkWindow *parent, char *error, size_t capacit
     valid = valid && !gtk_widget_get_sensitive(GTK_WIDGET(ui.run))
         && gtk_widget_get_sensitive(GTK_WIDGET(ui.stop)) && !gtk_widget_get_sensitive(GTK_WIDGET(ui.judge));
     finish_fixture();
-    valid = valid && test_event == 105;
+    valid = valid && test_event == 123;
     if (!valid) jsti_set_error(error, capacity, "Comparison selection, judging, playback or capture controls failed.");
     return valid ? 0 : -1;
 }

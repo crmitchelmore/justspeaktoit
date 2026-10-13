@@ -10,6 +10,7 @@ package struct DesktopComparisonPresentation: Sendable {
     package let recording: Bool
     package let selected: String
     package let judgeable: Bool
+    package var sync = DesktopComparisonSyncControls()
 }
 
 package struct DesktopHostComparisonCapture {
@@ -43,6 +44,7 @@ final class DesktopHostComparisonClosingCapture: @unchecked Sendable {
 
 extension DesktopHostController {
     package func openComparison() async {
+        comparisonVisible = true
         do {
             _ = try await loadComparisonStore()
             await refreshComparison()
@@ -62,6 +64,10 @@ extension DesktopHostController {
     }
 
     package func comparisonEvent(_ event: Int32, text: String, index: Int32) async {
+        if await comparisonSupplementEvent(event, text: text, index: index) {
+            await refreshComparison()
+            return
+        }
         switch event {
         case 100: await openComparison()
         case 101: await selectComparison(text)
@@ -71,7 +77,6 @@ extension DesktopHostController {
         case 106: await judgeComparison(text)
         case 107: await exportComparisons(path: text, markdown: index == 1)
         case 108: await playComparison(text)
-        case 109, 120: comparisonMaintenanceEvent(event, text: text)
         default: break
         }
         await refreshComparison()
@@ -152,6 +157,11 @@ extension DesktopHostController {
                 }
             }
             if self.comparisonGeneration == configuration.generation {
+                if self.comparisonCapture == nil {
+                    await self.comparisons?.endExecution(ids: self.comparisonOwnedRoundIDs)
+                    self.comparisonOwnedRoundIDs.removeAll()
+                    self.comparisonSync?.changed()
+                }
                 self.comparisonTask = nil
                 if self.comparisonCapture == nil { self.busy = false }
                 self.finishOperation()
@@ -188,7 +198,8 @@ extension DesktopHostController {
             id: roundID, sample: .init(name: file.url.lastPathComponent, contentHash: nil, durationSeconds: 0),
             mode: .streaming, selected: configuration.selected
         )
-        try await comparisons.upsert(pending)
+        try await comparisons.upsert(pending, isExecuting: true)
+        comparisonOwnedRoundIDs.insert(pending.id)
         comparisonPending = pending
         let context = DesktopCaptureContext(file: file, comparison: fanOut) { [weak self] message in
             Task { await self?.comparisonCaptureFailed(message, generation: generation) }
@@ -286,6 +297,7 @@ extension DesktopHostController {
             let ranks = values.compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
             guard ranks.count == values.count else { throw DesktopHostError(message: "Enter comma-separated ranks.") }
             try await comparisons.judge(id: id, ranksInBlindOrder: ranks)
+            comparisonSync?.changed()
             comparisonSelection = id
             await refreshComparison()
         } catch { comparisonStatus("Ranking was not saved: \(error.localizedDescription)") }
@@ -303,16 +315,10 @@ extension DesktopHostController {
     }
 
     package func refreshComparison() async {
-        guard !closed, let comparisons else { return }
+        guard !closed, comparisonVisible, let comparisons else { return }
         let rounds = await comparisons.rounds()
-        var round = rounds.first { $0.id == comparisonSelection } ?? rounds.first
-        if comparisonCapture != nil, let pending = comparisonPending, let live = comparisonLive {
-            do {
-                round = try DesktopComparisonRunner.completing(
-                    pending, entries: live.snapshot(), sample: pending.sample
-                )
-            } catch { comparisonStatus("Comparison preview failed: \(error.localizedDescription)") }
-        }
+        let round = comparisonPreview(rounds.first { $0.id == comparisonSelection } ?? rounds.first)
+        let state = DesktopComparisonRoundPresentation(round: round, busy: busy)
         comparisonSelection = round?.id
         playback.stop(unless: round?.id ?? UUID())
         let models = DesktopHostModels.visible.filter {
@@ -327,17 +333,17 @@ extension DesktopHostController {
             + "Raw transcripts only. No insertion, post-processing or History changes.\n"
         if let round {
             detail += "\n\(round.sample.name) - \(round.inputMode.displayName)\n"
+            detail += state.instruction
             for entry in round.entriesInBlindOrder {
                 let label = round.blindLabel(for: entry.id)
-                let rank = round.rank(for: entry.id) ?? 0
-                let reveal = round.isJudged ? " - \(entry.modelDisplayName) (rank \(rank))" : ""
+                let reveal = state.suffix(for: entry, in: round)
                 // Provider errors may name the model, so blind failures must not expose their raw messages.
                 detail += "\nResult \(label)\(reveal)\n"
                 if entry.didFail {
-                    detail += (round.isJudged ? entry.errorDescription ?? "Failed" : "Model failed.") + "\n"
+                    detail += (state.revealed ? entry.errorDescription ?? "Failed" : "Model failed.") + "\n"
                 }
                 detail += entry.transcript + "\n"
-                if round.isJudged {
+                if state.revealed {
                     if let partial = entry.timeToFirstPartialMs { detail += "First partial: \(partial) ms. " }
                     if let final = entry.timeToFinalMs { detail += "Finalization: \(final) ms. " }
                     if let cost = entry.estimatedCostUSD { detail += "Estimated cost: USD \(cost)." }
@@ -346,14 +352,28 @@ extension DesktopHostController {
             }
         }
         detail += "\n" + ModelComparisonExport.scoreboardMarkdown(rounds: rounds)
+        let sync = await comparisonSyncPresentation()
+        guard !closed, comparisonVisible else { return }
+        detail += "\n" + sync.status
         Platform.comparisonPresentation(.init(
             models: models, rounds: rows, detail: detail, busy: busy, recording: comparisonCapture != nil,
-            selected: round?.id.uuidString ?? "", judgeable: round != nil && round?.isJudged == false && !busy
+            selected: round?.id.uuidString ?? "", judgeable: state.judgeable,
+            sync: sync.controls
         ))
     }
 
     func comparisonStatus(_ message: String) {
         comparisonNotice = message
         update(message)
+    }
+
+    private func comparisonPreview(_ saved: ModelComparisonRound?) -> ModelComparisonRound? {
+        guard comparisonCapture != nil, let pending = comparisonPending, let live = comparisonLive else { return saved }
+        do {
+            return try DesktopComparisonRunner.completing(pending, entries: live.snapshot(), sample: pending.sample)
+        } catch {
+            comparisonStatus("Comparison preview failed: \(error.localizedDescription)")
+            return saved
+        }
     }
 }

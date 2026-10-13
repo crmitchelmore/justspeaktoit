@@ -9,6 +9,7 @@ public struct DesktopCloudSyncStatus: Equatable, Sendable {
     public var isSignedIn: Bool
     public var historyEnabled: Bool
     public var apiKeyImportEnabled: Bool
+    public var comparisonEnabled: Bool = false
     public var isSyncing: Bool
     public var lastSuccessfulSync: Date?
     public var lastError: String?
@@ -18,7 +19,9 @@ public struct DesktopCloudSyncStatus: Equatable, Sendable {
         if !isSignedIn { return "iCloud sync is off. Sign in with your Apple ID to sync History with your Mac." }
         if isSyncing { return "Syncing with iCloud…" }
         if let lastError { return "iCloud sync: \(lastError)" }
-        if !historyEnabled && !apiKeyImportEnabled { return "Signed in to iCloud. Nothing is selected to sync." }
+        if !historyEnabled && !apiKeyImportEnabled && !comparisonEnabled {
+            return "Signed in to iCloud. Nothing is selected to sync."
+        }
         if let lastSuccessfulSync {
             let formatter = DateFormatter()
             formatter.dateStyle = .none
@@ -92,6 +95,7 @@ public actor DesktopCloudSyncService {
     let client: CloudKitWebServicesClient?
     let state: DesktopCloudSyncStateStore
     private let historyStore: DesktopHistorySyncStore
+    var comparisonStore: DesktopComparisonStore?
     let vault: any DesktopCredentialVault
     let envelope: EncryptedSecretEnvelope?
     private var signedIn = false
@@ -137,7 +141,7 @@ public actor DesktopCloudSyncService {
         let current = await state.current
         var reason: String?
         if case .unavailable(let why) = resolution { reason = why }
-        return DesktopCloudSyncStatus(
+        var status = DesktopCloudSyncStatus(
             unavailableReason: reason,
             isSignedIn: signedIn,
             historyEnabled: current.enabledFeatures.contains(.history),
@@ -146,6 +150,8 @@ public actor DesktopCloudSyncService {
             lastSuccessfulSync: current.lastSuccessfulSync,
             lastError: lastError
         )
+        status.comparisonEnabled = current.enabledFeatures.contains(.comparisonRounds)
+        return status
     }
 
     // MARK: - Sign-in
@@ -241,6 +247,9 @@ public actor DesktopCloudSyncService {
             if features.contains(.history) {
                 let consent = CloudKitWebSyncConsent(enabledFeatures: features)
                 try await syncHistory(client: client, fence: fence, consent: consent)
+            }
+            if features.contains(.comparisonRounds) {
+                try await syncComparisons(client: client, fence: fence, features: features)
             }
             if features.contains(.apiKeys), let envelope {
                 try await importKeys(client: client, fence: fence, revision: nil, envelope: envelope, report: &report)

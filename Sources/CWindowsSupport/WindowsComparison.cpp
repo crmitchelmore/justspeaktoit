@@ -14,10 +14,12 @@ enum Control { modelsID = 700, modeID, languageID, runID, stopID, cancelID, roun
                roundLabelID, ranksLabelID, playID, stopAudioID };
 constexpr UINT presentMessage = WM_APP + 70;
 constexpr int deleteID = 740;
+constexpr int syncID = 741, syncNowID = 742;
 struct Row { std::string id; std::wstring name; bool live = false; };
 struct Presentation {
     std::string models, rounds, detail, selected;
     bool busy = false, recording = false, judgeable = false;
+    bool syncEnabled = false, syncAvailable = false;
 };
 std::mutex mutex;
 Presentation pending;
@@ -108,12 +110,15 @@ void present(HWND window, Dialog &dialog) {
     EnableWindow(GetDlgItem(window, jsonID), !next.busy && !dialog.rounds.empty());
     EnableWindow(GetDlgItem(window, markdownID), !next.busy && !dialog.rounds.empty());
     EnableWindow(GetDlgItem(window, deleteID), !next.busy && !next.selected.empty());
+    SendDlgItemMessageW(window, syncID, BM_SETCHECK, next.syncEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
+    EnableWindow(GetDlgItem(window, syncID), next.syncAvailable);
+    EnableWindow(GetDlgItem(window, syncNowID), next.syncAvailable && next.syncEnabled);
     dialog.shown = std::move(next);
     dialog.suppress = false;
 }
 void layout(HWND window, Dialog &dialog) {
     RECT client{}; GetClientRect(window, &client);
-    const int height = std::max(static_cast<int>(client.bottom), scale(window, 640));
+    const int height = std::max(static_cast<int>(client.bottom), scale(window, 690));
     const int width = std::max(static_cast<int>(client.right), scale(window, 640));
     dialog.scroll = std::clamp(dialog.scroll, 0, height - static_cast<int>(client.bottom));
     SCROLLINFO info{}; info.cbSize = sizeof(info); info.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
@@ -138,6 +143,7 @@ void layout(HWND window, Dialog &dialog) {
     move(judgeID, 420, 516, 190, 30);
     move(jsonID, 270, 557, 140, 30); move(markdownID, 420, 557, 190, 30);
     move(deleteID, 16, 585, 240, 32);
+    move(syncID, 16, 633, 420, 32); move(syncNowID, 450, 633, 160, 32);
     const HFONT font = jsti::chrome::font(jsti::chrome::Font::body, GetDpiForWindow(window));
     for (HWND control : dialog.controls) SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
 }
@@ -230,7 +236,10 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             && add(judgeID, L"BUTTON", L"&Save ranking and reveal", BS_PUSHBUTTON | WS_TABSTOP)
             && add(jsonID, L"BUTTON", L"Export &JSON", BS_PUSHBUTTON | WS_TABSTOP)
             && add(markdownID, L"BUTTON", L"Export &Markdown", BS_PUSHBUTTON | WS_TABSTOP)
-            && add(deleteID, L"BUTTON", L"&Delete / discard saved round...", BS_PUSHBUTTON | WS_TABSTOP);
+            && add(deleteID, L"BUTTON", L"&Delete / discard saved round...", BS_PUSHBUTTON | WS_TABSTOP)
+            && add(syncID, L"BUTTON", L"Sync comparison transcripts and rankings with &iCloud",
+                   BS_AUTOCHECKBOX | BS_MULTILINE | WS_TABSTOP)
+            && add(syncNowID, L"BUTTON", L"S&ync now / retry", BS_PUSHBUTTON | WS_TABSTOP);
         if (!okay) return -1;
         SendDlgItemMessageW(window, detailID, EM_SETLIMITTEXT, 0x7ffffffe, 0);
         SendDlgItemMessageW(window, modeID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"File / multi-sample Batch"));
@@ -288,11 +297,14 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case markdownID: exportFile(window, *dialog, true); break;
         case playID: emit(*dialog, 108, dialog->shown.selected); break;
         case stopAudioID: emit(*dialog, 109); break;
+        case syncID: emit(*dialog, 121, {}, SendDlgItemMessageW(window, syncID, BM_GETCHECK, 0, 0) == BST_CHECKED); break;
+        case syncNowID: emit(*dialog, 122); break;
         case deleteID: {
             const auto selected = dialog->shown.selected;
             if (!selected.empty() && MessageBoxW(window,
                 L"Delete this saved comparison and its app-owned audio? Original imports are not changed.\n\n"
-                L"If comparison sync is enabled now or later, the deletion is synced to your other devices.",
+                L"A previously synced comparison is also deleted on its other devices when sync is enabled "
+                L"for its original iCloud account.",
                 L"Delete comparison?", MB_YESNO | MB_DEFBUTTON2 | MB_ICONWARNING) == IDYES
                 ) confirmDeletion(*dialog, selected);
             break;
@@ -313,17 +325,19 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         HBRUSH brush = CreateSolidBrush(jsti::chrome::palette().window);
         FillRect(reinterpret_cast<HDC>(wparam), &client, brush); DeleteObject(brush); return 1;
     }
-    case WM_CLOSE: emit(*dialog, 105); DestroyWindow(window); return 0;
+    case WM_CLOSE: emit(*dialog, 123); DestroyWindow(window); return 0;
     }
     return DefWindowProcW(window, message, wparam, lparam);
 }
 }
 
 extern "C" int jsti_comparison_present(const char *models, const char *rounds, const char *detail,
-                                      const char *selected, int busy, int recording, int judgeable) {
+                                      const char *selected, int busy, int recording, int judgeable,
+                                      int sync_enabled, int sync_available) {
     if (!models || !rounds || !detail || !selected) return -1;
     std::lock_guard<std::mutex> lock(mutex);
-    pending = {models, rounds, detail, selected, busy != 0, recording != 0, judgeable != 0};
+    pending = {models, rounds, detail, selected, busy != 0, recording != 0, judgeable != 0,
+               sync_enabled != 0, sync_available != 0};
     return activeWindow && PostMessageW(activeWindow, presentMessage, 0, 0) ? 0 : -1;
 }
 
@@ -335,7 +349,7 @@ void jsti_show_comparison(HWND owner, JSTIWindowCallback callback, void *context
     if (!RegisterClassW(&type) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return;
     RECT work{}; SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
     const int width = std::min(scale(owner, 900), static_cast<int>(work.right - work.left));
-    const int height = std::min(scale(owner, 700), static_cast<int>(work.bottom - work.top));
+    const int height = std::min(scale(owner, 760), static_cast<int>(work.bottom - work.top));
     HWND window = CreateWindowExW(WS_EX_CONTROLPARENT, type.lpszClassName, L"Compare Models",
         WS_OVERLAPPEDWINDOW | WS_VSCROLL | WS_HSCROLL, work.left + (work.right - work.left - width) / 2,
         work.top + (work.bottom - work.top - height) / 2, width, height, owner, nullptr, type.hInstance, &dialog);
@@ -367,24 +381,34 @@ void jsti_show_comparison(HWND owner, JSTIWindowCallback callback, void *context
 }
 
 bool jsti_comparison_self_test(HWND owner, std::string &error, const std::string &directory) {
-    struct Check { std::string directory, payload, failure; int event = 0; };
-    Check check{directory, {}, {}, 0};
+    struct Check { std::string directory, payload, failure; int event = 0, index = 0; };
+    Check check{directory, {}, {}, 0, 0};
     const int appearance = jsti::chrome::appearance();
     Presentation original;
     { std::lock_guard<std::mutex> lock(mutex); original = pending;
       pending = {"test/file-a\tFile A\t0\ntest/file-b\tFile B\t0\ntest/live-a\tLive A\t1\ntest/live-b\tLive B\t1",
                  "synthetic-round\tSynthetic sample.wav",
                  "Synthetic sample.wav\n\nResult A\nCould we meet Friday?\n\nResult B\nCould we meet on Friday?\n"
-                 "\nRank every blind result to reveal models.", "synthetic-round", false, false, true}; }
-    auto callback = [](int action, const char *payload, int, void *context) {
+                 "\nRank every blind result to reveal models.", "synthetic-round", false, false, true, false, true}; }
+    auto callback = [](int action, const char *payload, int index, void *context) {
         auto &check = *static_cast<Check *>(context);
-        if (action != 100) { check.event = action; check.payload = payload; return; }
+        if (action != 100) { check.event = action; check.payload = payload; check.index = index; return; }
         HWND window = activeWindow;
         auto *dialog = reinterpret_cast<Dialog *>(GetWindowLongPtrW(window, GWLP_USERDATA));
         auto require = [&](bool value, const char *message) { if (!value && check.failure.empty()) check.failure = message; };
         require(SendDlgItemMessageW(window, modelsID, LB_GETCOUNT, 0, 0) == 2, "Comparison file routes are missing.");
         require(IsWindowEnabled(GetDlgItem(window, judgeID)), "Unjudged comparison cannot be ranked.");
         require(IsWindowEnabled(GetDlgItem(window, deleteID)), "Saved comparison cannot be discarded.");
+        require(IsWindowEnabled(GetDlgItem(window, syncID)), "Comparison sync consent is unavailable.");
+        require(!IsWindowEnabled(GetDlgItem(window, syncNowID)), "Sync retry is enabled before consent.");
+        SendDlgItemMessageW(window, syncID, BM_SETCHECK, BST_CHECKED, 0);
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(syncID, BN_CLICKED), 0);
+        require(check.event == 121 && check.index == 1, "Comparison sync consent was not explicitly admitted.");
+        { std::lock_guard<std::mutex> lock(mutex); pending.syncEnabled = true; }
+        present(window, *dialog);
+        require(IsWindowEnabled(GetDlgItem(window, syncNowID)), "Comparison sync retry remains disabled.");
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(syncNowID, BN_CLICKED), 0);
+        require(check.event == 122, "Comparison sync retry lost its action.");
         confirmDeletion(*dialog, "a-stale-round");
         require(check.event != 120, "A stale delete confirmation was admitted.");
         confirmDeletion(*dialog, dialog->shown.selected);
@@ -429,5 +453,5 @@ bool jsti_comparison_self_test(HWND owner, std::string &error, const std::string
     jsti::chrome::setAppearance(appearance);
     { std::lock_guard<std::mutex> lock(mutex); pending = std::move(original); }
     error = check.failure;
-    return check.event == 105 && error.empty();
+    return check.event == 123 && error.empty();
 }

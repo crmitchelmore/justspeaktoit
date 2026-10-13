@@ -17,7 +17,8 @@ extension DesktopHostController {
         for path in paths {
             try Task.checkCancellation()
             let snapshot = try await prepareComparisonSample(path, mode: mode, configuration: configuration)
-            try await comparisons.upsert(snapshot.round)
+            try await comparisons.upsert(snapshot.round, isExecuting: true)
+            comparisonOwnedRoundIDs.insert(snapshot.round.id)
             prepared.append(snapshot)
         }
         for snapshot in prepared {
@@ -42,7 +43,7 @@ extension DesktopHostController {
             comparisonSelection = round.id
             await refreshComparison()
         }
-        comparisonStatus("Comparison results saved. Rank every blind result to reveal models.")
+        comparisonStatus("Comparison results saved. Review or rank the results below.")
     }
 
     private func prepareComparisonSample(

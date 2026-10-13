@@ -160,6 +160,14 @@ extension DesktopHostController {
         busy = true
         activeOperations += 1
         defer { busy = false; finishOperation() }
+        do {
+            _ = try await store.audioURL(for: record)
+        } catch {
+            guard !closed else { return }
+            update("Could not retry recording: \(error.localizedDescription) History and transcripts were kept.")
+            return
+        }
+        guard !closed else { return }
         selectedHistoryID = id
         // A retry has no recording hotkey, so it never outputs automatically.
         await transcribe(record, duration: record.result?.duration ?? 0, output: nil)

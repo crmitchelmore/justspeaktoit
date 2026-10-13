@@ -1,9 +1,49 @@
 import Foundation
 import XCTest
+import SpeakCore
 import SpeakDesktop
 @testable import SpeakDesktopHost
 
 final class DesktopHostAudioCleanupTests: XCTestCase {
+    func testRetryAfterAudioCleanup_PreservesSavedTranscriptAndMetadata() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("host-audio-retry-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        await controller.markReadyForSelfTest()
+        let id = UUID()
+        var record = DesktopRecordingStore.Record(
+            id: id, audioFilename: id.uuidString + ".wav",
+            modelIdentifier: ModelCatalog.defaultBatchTranscriptionModel
+        )
+        record.result = TranscriptionResult(
+            text: "Saved original.", segments: [], confidence: nil, duration: 1,
+            modelIdentifier: record.modelIdentifier, cost: nil, rawPayload: nil, debugInfo: nil
+        )
+        record.processedText = "Saved processed."
+        let folder = await controller.store.directory
+        try Data([1]).write(to: folder.appendingPathComponent(record.audioFilename))
+        try await controller.store.save(record)
+        await controller.indexHistory(record)
+        let metadata = folder.appendingPathComponent(id.uuidString + ".json")
+        let before = try Data(contentsOf: metadata)
+        await controller.beginAudioCleanupConfirmation()
+        await finish(controller)
+        let pending = await controller.audioCleanupConfirmation
+        let token = try XCTUnwrap(pending?.id)
+        await controller.answerAudioCleanup(token.uuidString, delete: true)
+        await finish(controller)
+        let refusal = await controller.retryRefusal(for: record.modelIdentifier)
+        XCTAssertNil(refusal)
+        await controller.retryHistory(id.uuidString)
+        XCTAssertEqual(try Data(contentsOf: metadata), before)
+        let saved = try await controller.store.record(id: id)
+        XCTAssertEqual(saved.result?.text, "Saved original.")
+        XCTAssertEqual(saved.processedText, "Saved processed.")
+        XCTAssertNil(saved.failure)
+        XCTAssertTrue(FakeLog.shared.allStatuses.last?.contains("Could not retry recording:") == true)
+        await controller.close()
+    }
+
     func testHeldPlaybackStop_CloseIsBoundedAndLateCompletionCannotDelete() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("host-audio-held-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }

@@ -536,7 +536,9 @@ final check and removal remain outside that boundary. There is no automatic
 cleanup retry or expiry policy; retry requires a new explicit confirmation.
 Raw History playback is stopped independently of spoken/typed Voice output.
 History metadata stays byte-for-byte intact; intentionally removed audio is no
-longer available for playback, opening or transcription retry. Changing the
+longer available for playback, opening or transcription retry. A retry checks
+audio ownership/availability before entering transcription, so unavailable audio
+does not replace a saved transcript with a new failure. Changing the
 recording location and lossless migration remain outstanding.
 
 The filter editor scrolls vertically when the available work area is too short;

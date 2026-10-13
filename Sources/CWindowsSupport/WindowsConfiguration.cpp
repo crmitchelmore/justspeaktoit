@@ -1,12 +1,14 @@
 #include "include/CWindowsSupport.h"
 #include "WindowsSupportInternal.hpp"
+#include <algorithm>
 #include <commdlg.h>
 #include <mutex>
 #include <vector>
 
 namespace {
-constexpr int fieldBase = 600, labelBase = 700, problemID = 800, importID = 801, exportID = 802;
-struct Field { std::wstring title, value; bool boolean = false; };
+constexpr int groupLabelID = 598, groupID = 599, fieldBase = 600, labelBase = 700;
+constexpr int problemID = 800, importID = 801, exportID = 802;
+struct Field { std::wstring title, value, group; bool boolean = false; };
 struct Configuration {
     std::vector<Field> fields;
     JSTIConfigurationCallback callback = nullptr;
@@ -14,7 +16,13 @@ struct Configuration {
 };
 Configuration configuration;
 std::mutex configurationMutex;
-struct Dialog { Configuration config; HFONT font = nullptr; std::vector<HWND> controls; };
+struct Dialog {
+    Configuration config;
+    HFONT font = nullptr;
+    std::vector<HWND> controls;
+    std::vector<std::wstring> groups;
+    std::wstring group = L"General";
+};
 int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
 
 std::wstring text(HWND window, int id) {
@@ -28,8 +36,15 @@ std::wstring text(HWND window, int id) {
 void layout(HWND window, Dialog &dialog) {
     RECT bounds{};
     GetClientRect(window, &bounds);
-    int y = scale(window, 16), margin = scale(window, 20), width = bounds.right - 2 * margin;
+    int y = scale(window, 62), margin = scale(window, 20), width = bounds.right - 2 * margin;
+    MoveWindow(GetDlgItem(window, groupLabelID), margin, scale(window, 20), scale(window, 90), scale(window, 24), TRUE);
+    MoveWindow(GetDlgItem(window, groupID), margin + scale(window, 90), scale(window, 16),
+        width - scale(window, 90), scale(window, 200), TRUE);
     for (size_t i = 0; i < dialog.config.fields.size(); ++i) {
+        const bool visible = dialog.config.fields[i].group == dialog.group;
+        ShowWindow(GetDlgItem(window, fieldBase + static_cast<int>(i)), visible ? SW_SHOW : SW_HIDE);
+        ShowWindow(GetDlgItem(window, labelBase + static_cast<int>(i)), visible ? SW_SHOW : SW_HIDE);
+        if (!visible) continue;
         const bool boolean = dialog.config.fields[i].boolean;
         if (!boolean) {
             MoveWindow(GetDlgItem(window, labelBase + static_cast<int>(i)), margin, y, width, scale(window, 20), TRUE);
@@ -53,6 +68,19 @@ bool controls(HWND window, Dialog &dialog) {
         if (control) dialog.controls.push_back(control);
         return control;
     };
+    if (!add(L"STATIC", L"&Section:", SS_LEFT, groupLabelID) ||
+        !add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, groupID)) return false;
+    for (const auto &field : dialog.config.fields)
+        if (std::find(dialog.groups.begin(), dialog.groups.end(), field.group) == dialog.groups.end())
+            dialog.groups.push_back(field.group);
+    int selected = 0;
+    for (size_t i = 0; i < dialog.groups.size(); ++i) {
+        if (SendDlgItemMessageW(window, groupID, CB_ADDSTRING, 0,
+            reinterpret_cast<LPARAM>(dialog.groups[i].c_str())) < 0) return false;
+        if (dialog.groups[i] == dialog.group) selected = static_cast<int>(i);
+    }
+    dialog.group = dialog.groups[static_cast<size_t>(selected)];
+    SendDlgItemMessageW(window, groupID, CB_SETCURSEL, selected, 0);
     for (size_t i = 0; i < dialog.config.fields.size(); ++i) {
         const auto &field = dialog.config.fields[i];
         HWND control;
@@ -141,9 +169,17 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         return 0;
     }
     case WM_GETMINMAXINFO:
-        reinterpret_cast<MINMAXINFO *>(lparam)->ptMinTrackSize = {scale(window, 660), scale(window, 720)};
+        reinterpret_cast<MINMAXINFO *>(lparam)->ptMinTrackSize = {scale(window, 660), scale(window, 500)};
         return 0;
     case WM_COMMAND:
+        if (LOWORD(wparam) == groupID && HIWORD(wparam) == CBN_SELCHANGE) {
+            LRESULT selected = SendDlgItemMessageW(window, groupID, CB_GETCURSEL, 0, 0);
+            if (selected >= 0 && static_cast<size_t>(selected) < dialog->groups.size()) {
+                dialog->group = dialog->groups[static_cast<size_t>(selected)];
+                layout(window, *dialog);
+            }
+            return 0;
+        }
         if (HIWORD(wparam) != BN_CLICKED) break;
         if (LOWORD(wparam) == IDCANCEL) { DestroyWindow(window); return 0; }
         if (LOWORD(wparam) == IDOK) { apply(window, *dialog, 0); return 0; }
@@ -169,13 +205,14 @@ HWND createDialog(HWND owner, Dialog &dialog) {
     }
     return CreateWindowExW(WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT, type.lpszClassName,
         L"Dictation preferences - Just Speak to It", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME,
-        CW_USEDEFAULT, CW_USEDEFAULT, scale(owner, 700), scale(owner, 740), owner, nullptr, type.hInstance, &dialog);
+        CW_USEDEFAULT, CW_USEDEFAULT, scale(owner, 700), scale(owner, 520), owner, nullptr, type.hInstance, &dialog);
 }
 } // namespace
 
-void jsti_show_configuration(HWND owner) {
+void jsti_show_configuration(HWND owner, const wchar_t *group) {
     Dialog dialog;
     { std::lock_guard<std::mutex> lock(configurationMutex); dialog.config = configuration; }
+    dialog.group = group;
     if (!dialog.config.callback) return;
     HWND window = createDialog(owner, dialog);
     if (!window) {
@@ -184,7 +221,7 @@ void jsti_show_configuration(HWND owner) {
     }
     EnableWindow(owner, FALSE);
     ShowWindow(window, SW_SHOW);
-    SetFocus(GetDlgItem(window, fieldBase));
+    SetFocus(GetDlgItem(window, groupID));
     MSG message{};
     BOOL result = 1;
     while (IsWindow(window) && (result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
@@ -204,6 +241,7 @@ int jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t c
         for (size_t i = 0; i < count; ++i) {
             Field field;
             if (!jsti::wide(fields[i].title, field.title) || !jsti::wide(fields[i].value, field.value) ||
+                !jsti::wide(fields[i].group, field.group) ||
                 field.value.size() > 65535 || (fields[i].is_boolean != 0 && fields[i].is_boolean != 1)) return -1;
             field.boolean = fields[i].is_boolean != 0;
             updated.fields.push_back(std::move(field));
@@ -224,7 +262,7 @@ void jsti_window_clear_configuration(void) {
 bool jsti_configuration_self_test(HWND owner, std::string &error) {
     struct Applied { int calls = 0; bool correct = false; } applied;
     Dialog dialog;
-    dialog.config.fields = {{L"Language", L"en_GB", false}, {L"HUD", L"1", true}};
+    dialog.config.fields = {{L"Language", L"en_GB", L"Transcription", false}, {L"HUD", L"1", L"General", true}};
     dialog.config.context = &applied;
     dialog.config.callback = [](int action, const char *const *values, size_t count, void *context,
                                  char *error, size_t capacity) {
@@ -238,6 +276,14 @@ bool jsti_configuration_self_test(HWND owner, std::string &error) {
     };
     HWND window = createDialog(owner, dialog);
     if (!window) { error = "Could not create the configuration fixture."; return false; }
+    const bool initiallyGrouped = dialog.group == L"General" &&
+        !(GetWindowLongW(GetDlgItem(window, fieldBase), GWL_STYLE) & WS_VISIBLE) &&
+        (GetWindowLongW(GetDlgItem(window, fieldBase + 1), GWL_STYLE) & WS_VISIBLE);
+    SendDlgItemMessageW(window, groupID, CB_SETCURSEL, 0, 0);
+    SendMessageW(window, WM_COMMAND, MAKEWPARAM(groupID, CBN_SELCHANGE), 0);
+    const bool switchedGroup = dialog.group == L"Transcription" &&
+        (GetWindowLongW(GetDlgItem(window, fieldBase), GWL_STYLE) & WS_VISIBLE) &&
+        !(GetWindowLongW(GetDlgItem(window, fieldBase + 1), GWL_STYLE) & WS_VISIBLE);
     SendMessageW(window, WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
     const bool refused = IsWindow(window) && applied.calls == 1 && text(window, problemID) == L"Synthetic invalid language.";
     SetDlgItemTextW(window, fieldBase, L"fr_FR");
@@ -250,8 +296,8 @@ bool jsti_configuration_self_test(HWND owner, std::string &error) {
     HWND second = createDialog(owner, cancelled);
     if (second) SendMessageW(second, WM_COMMAND, MAKEWPARAM(IDCANCEL, BN_CLICKED), 0);
     const bool quiet = second && !IsWindow(second) && applied.calls == 2;
-    if (!refused || !accepted || !quiet) {
-        error = "Configuration editor did not validate, apply or cancel its native fields correctly.";
+    if (!initiallyGrouped || !switchedGroup || !refused || !accepted || !quiet) {
+        error = "Configuration editor did not group, validate, apply or cancel its native fields correctly.";
         return false;
     }
     return true;

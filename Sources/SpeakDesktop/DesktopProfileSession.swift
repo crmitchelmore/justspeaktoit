@@ -230,12 +230,6 @@ public enum DesktopProfileSessionResolver {
                 language = identifier
             }
 
-            private static func effectiveLanguage(
-                _ language: String?, model: String, capabilities: DesktopProfileCapabilities
-            ) -> String? {
-                guard !capabilities.isLive(model) || capabilities.supportsLiveLanguage(for: model) else { return nil }
-                return TranscriptionLanguageCatalog.providerLanguage(for: language ?? "")
-            }
         }
 
         let polish = resolvePolish(
@@ -249,6 +243,13 @@ public enum DesktopProfileSessionResolver {
             limitations: limitations,
             skippedPolishReason: polish.skippedReason
         )
+    }
+
+    private static func effectiveLanguage(
+        _ language: String?, model: String, capabilities: DesktopProfileCapabilities
+    ) -> String? {
+        guard !capabilities.isLive(model) || capabilities.supportsLiveLanguage(for: model) else { return nil }
+        return TranscriptionLanguageCatalog.providerLanguage(for: language ?? "")
     }
 
     private static func resolvePolish(

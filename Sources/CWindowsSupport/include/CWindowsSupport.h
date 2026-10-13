@@ -63,6 +63,7 @@ typedef void (*JSTIWindowCallback)(int event, const char *text, int model_index,
 typedef struct JSTIConfigurationField {
     const char *title;
     const char *value;
+    const char *group;
     int is_boolean;
 } JSTIConfigurationField;
 /* action 0 applies fields; 1 imports and 2 exports a path in values[0].

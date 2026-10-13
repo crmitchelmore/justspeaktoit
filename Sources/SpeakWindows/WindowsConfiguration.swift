@@ -23,7 +23,7 @@ extension WindowsNative {
         let strings = ConfigurationStrings()
         let rows = zip(DesktopConfiguration.fields, preferences.entries).map { field, value in
             JSTIConfigurationField(
-                title: strings.add(field.group + " - " + field.title), value: strings.add(value),
+                title: strings.add(field.title), value: strings.add(value), group: strings.add(field.group),
                 is_boolean: { if case .boolean = field.kind { return 1 }; return 0 }()
             )
         }

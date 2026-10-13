@@ -39,7 +39,7 @@ bool jsti_voice_output_available();
 void jsti_show_voice_settings(HWND owner);
 bool jsti_voice_settings_self_test(HWND owner, std::string &error);
 bool jsti_azure_resource_available();
-void jsti_show_configuration(HWND owner);
+void jsti_show_configuration(HWND owner, const wchar_t *group);
 void jsti_show_azure_resource_settings(HWND owner);
 bool jsti_azure_resource_settings_self_test(HWND owner, std::string &error);
 bool jsti_configuration_self_test(HWND owner, std::string &error);
@@ -2044,7 +2044,9 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case processingID: jsti_show_postprocessing(window); return 0;
         case configurationID:
             if (HIWORD(wparam) == BN_CLICKED && idleControl(window, configurationID) && IsWindowEnabled(window))
-                jsti_show_configuration(window);
+                jsti_show_configuration(window, state.page == transcriptionPage ? L"Transcription" :
+                    state.page == postProcessingPage ? L"Post-processing" :
+                    state.page == keyboardPage ? L"Keyboard" : L"General");
             return 0;
         case azureID:
             if (HIWORD(wparam) == BN_CLICKED && idleControl(window, azureID) && IsWindowEnabled(window)) {

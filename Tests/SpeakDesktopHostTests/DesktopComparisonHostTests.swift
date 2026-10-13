@@ -118,7 +118,16 @@ final class DesktopComparisonHostTests: XCTestCase {
         XCTAssertEqual(effects.liveClients.count, 2)
         XCTAssertEqual(effects.liveClients[0].audio, effects.liveClients[1].audio)
         XCTAssertEqual(effects.liveClients[0].audio.count, 1)
-        await controller.stopComparison()
+        let generation = await controller.comparisonGeneration
+        await controller.startComparisonUpdates(generation: generation, deadline: .now)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while await controller.comparisonCapture != nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        let finalization = await controller.comparisonFinalization
+        await finalization?.value
+        let capture = await controller.comparisonCapture
+        XCTAssertNil(capture, "The comparison safety deadline must stop the one native capture.")
         let rounds = await store.rounds()
         XCTAssertEqual(rounds[0].blindOrder, pending[0].blindOrder)
         XCTAssertEqual(rounds[0].entries.map(\.id), pending[0].entries.map(\.id))
@@ -232,6 +241,44 @@ private final class HostComparisonClient: FinalizingStreamingTranscriptionClient
 }
 
 extension DesktopComparisonHostTests {
+    func testPersistedRoundDeletionUsesOwnedAdmissionAndKeepsOriginalImportAndHistory() async throws {
+        DesktopHostModels.configure(streamingQualified: false)
+        defer { DesktopHostModels.configure(streamingQualified: true) }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("original.wav")
+        let bytes = try XCTUnwrap(PCMWaveWriter.wavData(pcm: Data(repeating: 4, count: 3200), sampleRate: 16000))
+        try bytes.write(to: source)
+        let effects = ComparisonHostEffects(sourceToMutate: root.appendingPathComponent("mutable-fixture"))
+        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        await controller.markReadyForSelfTest()
+        let existing = try await seedComparisonHistory(controller)
+        let selected = Array(DesktopHostModels.visible.prefix(2)).map(\.id)
+        let payload = "\n" + selected.joined(separator: "\t") + "\n" + source.path
+        await controller.comparisonEvent(102, text: payload, index: 0)
+        let running = await controller.comparisonTask
+        await running?.value
+        let persistence = await controller.comparisons
+        let store = try XCTUnwrap(persistence)
+        let rounds = await store.rounds()
+        let round = try XCTUnwrap(rounds.first)
+        await controller.comparisonEvent(120, text: round.id.uuidString, index: 0)
+        let deletion = await controller.comparisonTask
+        await deletion?.value
+        let remaining = await store.rounds()
+        let pending = await store.pendingRevisions()
+        XCTAssertTrue(remaining.isEmpty)
+        XCTAssertEqual(pending.count, 1)
+        XCTAssertNil(pending.first?.round)
+        XCTAssertEqual(try Data(contentsOf: source), bytes)
+        let history = try await controller.store.recoverInterruptedRecordings()
+        XCTAssertEqual(history.records.map(\.id), [existing.id])
+        let busy = await controller.busy
+        XCTAssertFalse(busy)
+        await controller.close()
+    }
+
     func testSerializedStopEventReturnsBeforeFinalizationSoCancelCanRun() async throws {
         DesktopHostModels.configure(streamingQualified: true)
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

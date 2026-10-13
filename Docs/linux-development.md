@@ -74,8 +74,12 @@ shared 120-second file, 12-second readiness and 30-second finalization budgets.
 
 `Comparisons/rounds.json` and app-owned `Comparisons/Samples/` live in the private
 data directory. Interrupted rounds retain their audio; interrupted live metadata
-can remain unknown until normal finalization. Comparison sync, audio retention/
-deletion controls and automatic interrupted-run retry remain unwired.
+can remain unknown until normal finalization. Native confirmed delete/discard
+persists a canonical tombstone before cleaning up its app-owned sample, while
+startup prunes orphan samples. Original imports and normal History are untouched.
+The shared comparison capture safety limit is 600 seconds, not an age/count
+retention policy. Comparison sync remains unwired; automatic interrupted/failed
+retry is not a Mac comparison feature and is not added here.
 The GTK window self-test checks wrapped labels, model and language payloads,
 ranking, playback and busy/recording controls with synthetic fixtures only.
 The screenshot tour adds `comparison-blind-light.png` and

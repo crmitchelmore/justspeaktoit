@@ -19,7 +19,7 @@ extension WindowsHostPlatform {
 func comparisonWindowEvent(
     _ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, _ context: UnsafeMutableRawPointer?
 ) {
-    guard (100...109).contains(event), let context else {
+    guard (100...109).contains(event) || (120...129).contains(event), let context else {
         windowEvent(event, text, index, context)
         return
     }

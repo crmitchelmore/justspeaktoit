@@ -107,6 +107,7 @@ extension DesktopHostController {
         closed = true
         let deadline = ContinuousClock.now.advanced(by: shutdownGrace)
         comparisonTask?.cancel()
+        comparisonInitialization?.task.cancel()
         comparisonFinalization?.cancel()
         comparisonUpdates?.cancel()
         comparisonLive?.cancel()

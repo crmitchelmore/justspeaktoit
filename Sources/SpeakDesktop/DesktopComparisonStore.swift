@@ -42,6 +42,87 @@ public actor DesktopComparisonStore {
         var next = document
         next.revisions[round.id] = ModelComparisonRevision(round: round)
         next.acknowledgements[round.id] = nil
+        try commit(next)
+    }
+
+    public func pendingRevisions() -> [ModelComparisonRevision] {
+        document.revisions.values.filter { document.acknowledgements[$0.id] != $0.updatedAt }
+            .sorted { $0.updatedAt < $1.updatedAt }
+    }
+
+    public func remove(id: UUID, at date: Date = Date()) throws {
+        guard let round = document.revisions[id]?.round else {
+            throw DesktopComparisonError.message("This comparison is no longer available.")
+        }
+        var next = document
+        next.revisions[id] = ModelComparisonRevision(
+            deleting: id, at: max(date, round.updatedAt.addingTimeInterval(0.001))
+        )
+        next.acknowledgements[id] = nil
+        try commit(next)
+        try discardSample(id: id)
+    }
+
+    public func applyRemoteRevision(_ revision: ModelComparisonRevision) throws {
+        guard revision.isValid else { throw DesktopComparisonError.message("Invalid comparison revision.") }
+        if let local = document.revisions[revision.id] {
+            if local.updatedAt > revision.updatedAt { return }
+            if local.updatedAt == revision.updatedAt, local.round == nil, revision.round != nil { return }
+        }
+        var next = document
+        next.revisions[revision.id] = revision
+        next.acknowledgements[revision.id] = revision.updatedAt
+        try commit(next)
+        if revision.round == nil { try discardSample(id: revision.id) }
+    }
+
+    public func acknowledgeRevisions(_ revisions: [ModelComparisonRevision]) throws {
+        var next = document
+        for revision in revisions where next.revisions[revision.id] == revision {
+            next.acknowledgements[revision.id] = revision.updatedAt
+        }
+        try commit(next)
+    }
+
+    public func applyLegacyDeletion(id: UUID) throws {
+        guard !pendingRevisions().contains(where: { $0.id == id }),
+              let round = document.revisions[id]?.round else { return }
+        try applyRemoteRevision(ModelComparisonRevision(deleting: id, at: round.updatedAt))
+    }
+
+    public func pruneOrphanSamples() throws {
+        let samples = directory.appendingPathComponent("Samples", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: samples.path) else { return }
+        let retained = Set(rounds().map { $0.id.uuidString + ".wav" })
+        let files = try FileManager.default.contentsOfDirectory(
+            at: samples, includingPropertiesForKeys: [.isRegularFileKey]
+        )
+        for file in files where !retained.contains(file.lastPathComponent)
+            && UUID(uuidString: file.deletingPathExtension().lastPathComponent) != nil {
+            try Task.checkCancellation()
+            if try file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true {
+                try FileManager.default.removeItem(at: file)
+            }
+        }
+    }
+
+    private func discardSample(id: UUID) throws {
+        let sample = directory.appendingPathComponent("Samples").appendingPathComponent(id.uuidString + ".wav")
+        do {
+            if FileManager.default.fileExists(atPath: sample.path) {
+                guard try sample.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else {
+                    throw DesktopComparisonError.message("The saved sample is not a regular audio file.")
+                }
+                try FileManager.default.removeItem(at: sample)
+            }
+        } catch {
+            throw DesktopComparisonError.message(
+                "The comparison was deleted, but its saved audio could not be removed: \(error.localizedDescription)"
+            )
+        }
+    }
+
+    private func commit(_ next: Document) throws {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .secondsSince1970
         encoder.outputFormatting = [.sortedKeys]

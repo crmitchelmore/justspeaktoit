@@ -3,8 +3,24 @@ import SpeakCore
 import SpeakDesktop
 
 extension DesktopHostController {
-    func requestComparisonStop() {
-        guard comparisonCapture != nil, comparisonFinalization == nil else { return }
+    package func startComparisonUpdates(generation: UUID, deadline: ContinuousClock.Instant) {
+        comparisonUpdates?.cancel()
+        comparisonUpdates = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+                guard let self, await self.isComparisonCapturing(generation) else { return }
+                if ContinuousClock.now >= deadline {
+                    await self.requestComparisonStop(generation: generation)
+                    return
+                }
+                await self.refreshComparison()
+            }
+        }
+    }
+
+    package func requestComparisonStop(generation: UUID? = nil) {
+        guard generation == nil || generation == comparisonGeneration,
+              comparisonCapture != nil, comparisonFinalization == nil else { return }
         // Native events are serialized; finalization must not keep Cancel queued behind Stop.
         comparisonFinalization = Task {
             await self.stopComparison()

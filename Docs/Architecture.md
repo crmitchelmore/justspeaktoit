@@ -214,6 +214,11 @@ exports without using normal History, post-processing or insertion.
 `WindowsComparison.cpp` and `LinuxComparison.c` own their native editors and
 file/save pickers, connected by small host adapters. Comparison sync is not yet
 connected on these hosts; the existing Mac sync adapter is unchanged.
+Confirmed delete/discard commits canonical tombstones before removing owned
+samples. Startup shares one owned comparison-store initialization and prunes
+orphan samples; original imports and normal History are never deleted. The
+shared capture safety limit matches Mac's 600 seconds, without adding an
+age/count retention policy or automatic failed-run retry.
 
 ## iOS runtime
 

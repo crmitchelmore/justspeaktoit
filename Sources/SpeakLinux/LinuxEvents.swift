@@ -168,7 +168,7 @@ func linuxWindowEvent(
     let value = text.map(String.init(cString:)) ?? ""
     let slot = Int(index)
     let event = Int(event)
-    if (100...109).contains(event) {
+    if (100...109).contains(event) || (120...129).contains(event) {
         holder.enqueueSettings { await holder.controller.comparisonEvent(Int32(event), text: value, index: index) }
         return
     }

@@ -4,6 +4,7 @@ import SpeakCore
 /// One-shot fan-out. A common capture starts only after every usable lane's handshake.
 /// Capture frames are delivered synchronously, with no unbounded host audio queue.
 public final class DesktopComparisonLive: @unchecked Sendable {
+    public static let maximumCaptureDuration: Duration = .seconds(600)
     public struct Lane {
         public let candidate: DesktopComparisonCandidate
         public let client: any FinalizingStreamingTranscriptionClient

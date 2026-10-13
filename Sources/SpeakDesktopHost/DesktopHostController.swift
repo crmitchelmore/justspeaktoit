@@ -107,6 +107,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     /// installed by preparePlayback once this actor exists.
     package let playback = Platform.makePlayback()
     package var comparisons: DesktopComparisonStore?
+    var comparisonInitialization: DesktopComparisonStoreLoading?
     package var comparisonTask: Task<Void, Never>?
     package var comparisonFinalization: Task<Void, Never>?
     var comparisonUpdates: Task<Void, Never>?
@@ -331,6 +332,10 @@ extension DesktopHostController {
             transcriptVariant = .processed
             refreshHistory(selectRecord: true)
             var status = try readyStatus(savedRecordings: records.count)
+            do { _ = try await loadComparisonStore() } catch {
+                status += " Saved comparisons could not be opened: \(error.localizedDescription)"
+            }
+            guard !closed else { return }
             if !recovery.unreadableFiles.isEmpty {
                 status += " \(recovery.unreadableFiles.count) history records could not be read."
             }

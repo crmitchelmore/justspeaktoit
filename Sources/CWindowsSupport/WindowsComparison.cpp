@@ -13,6 +13,7 @@ enum Control { modelsID = 700, modeID, languageID, runID, stopID, cancelID, roun
                ranksID, judgeID, jsonID, markdownID, noticeID, modelLabelID, languageLabelID,
                roundLabelID, ranksLabelID, playID, stopAudioID };
 constexpr UINT presentMessage = WM_APP + 70;
+constexpr int deleteID = 740;
 struct Row { std::string id; std::wstring name; bool live = false; };
 struct Presentation {
     std::string models, rounds, detail, selected;
@@ -55,6 +56,10 @@ std::string text(HWND window, int id) {
 }
 void emit(Dialog &dialog, int action, const std::string &value = {}, int index = 0) {
     if (dialog.callback) dialog.callback(action, value.c_str(), index, dialog.context);
+}
+void confirmDeletion(Dialog &dialog, const std::string &selected) {
+    if (!dialog.shown.busy && !selected.empty() && dialog.shown.selected == selected)
+        emit(dialog, 120, selected);
 }
 void populateModels(HWND window, Dialog &dialog) {
     SendDlgItemMessageW(window, modelsID, LB_RESETCONTENT, 0, 0);
@@ -102,12 +107,13 @@ void present(HWND window, Dialog &dialog) {
     EnableWindow(GetDlgItem(window, playID), !next.busy && !dialog.rounds.empty());
     EnableWindow(GetDlgItem(window, jsonID), !next.busy && !dialog.rounds.empty());
     EnableWindow(GetDlgItem(window, markdownID), !next.busy && !dialog.rounds.empty());
+    EnableWindow(GetDlgItem(window, deleteID), !next.busy && !next.selected.empty());
     dialog.shown = std::move(next);
     dialog.suppress = false;
 }
 void layout(HWND window, Dialog &dialog) {
     RECT client{}; GetClientRect(window, &client);
-    const int height = std::max(static_cast<int>(client.bottom), scale(window, 600));
+    const int height = std::max(static_cast<int>(client.bottom), scale(window, 640));
     const int width = std::max(static_cast<int>(client.right), scale(window, 640));
     dialog.scroll = std::clamp(dialog.scroll, 0, height - static_cast<int>(client.bottom));
     SCROLLINFO info{}; info.cbSize = sizeof(info); info.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
@@ -131,6 +137,7 @@ void layout(HWND window, Dialog &dialog) {
     move(ranksLabelID, 270, 490, 340, 24); move(ranksID, 270, 516, 140, 30);
     move(judgeID, 420, 516, 190, 30);
     move(jsonID, 270, 557, 140, 30); move(markdownID, 420, 557, 190, 30);
+    move(deleteID, 16, 585, 240, 32);
     const HFONT font = jsti::chrome::font(jsti::chrome::Font::body, GetDpiForWindow(window));
     for (HWND control : dialog.controls) SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
 }
@@ -222,7 +229,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             && add(ranksID, L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP)
             && add(judgeID, L"BUTTON", L"&Save ranking and reveal", BS_PUSHBUTTON | WS_TABSTOP)
             && add(jsonID, L"BUTTON", L"Export &JSON", BS_PUSHBUTTON | WS_TABSTOP)
-            && add(markdownID, L"BUTTON", L"Export &Markdown", BS_PUSHBUTTON | WS_TABSTOP);
+            && add(markdownID, L"BUTTON", L"Export &Markdown", BS_PUSHBUTTON | WS_TABSTOP)
+            && add(deleteID, L"BUTTON", L"&Delete / discard saved round...", BS_PUSHBUTTON | WS_TABSTOP);
         if (!okay) return -1;
         SendDlgItemMessageW(window, detailID, EM_SETLIMITTEXT, 0x7ffffffe, 0);
         SendDlgItemMessageW(window, modeID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"File / multi-sample Batch"));
@@ -280,6 +288,15 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case markdownID: exportFile(window, *dialog, true); break;
         case playID: emit(*dialog, 108, dialog->shown.selected); break;
         case stopAudioID: emit(*dialog, 109); break;
+        case deleteID: {
+            const auto selected = dialog->shown.selected;
+            if (!selected.empty() && MessageBoxW(window,
+                L"Delete this saved comparison and its app-owned audio? Original imports are not changed.\n\n"
+                L"If comparison sync is enabled now or later, the deletion is synced to your other devices.",
+                L"Delete comparison?", MB_YESNO | MB_DEFBUTTON2 | MB_ICONWARNING) == IDYES
+                ) confirmDeletion(*dialog, selected);
+            break;
+        }
         default: break;
         }
         return 0;
@@ -367,6 +384,11 @@ bool jsti_comparison_self_test(HWND owner, std::string &error, const std::string
         auto require = [&](bool value, const char *message) { if (!value && check.failure.empty()) check.failure = message; };
         require(SendDlgItemMessageW(window, modelsID, LB_GETCOUNT, 0, 0) == 2, "Comparison file routes are missing.");
         require(IsWindowEnabled(GetDlgItem(window, judgeID)), "Unjudged comparison cannot be ranked.");
+        require(IsWindowEnabled(GetDlgItem(window, deleteID)), "Saved comparison cannot be discarded.");
+        confirmDeletion(*dialog, "a-stale-round");
+        require(check.event != 120, "A stale delete confirmation was admitted.");
+        confirmDeletion(*dialog, dialog->shown.selected);
+        require(check.event == 120 && check.payload == "synthetic-round", "Confirmed deletion lost its round identity.");
         require(text(window, detailID).find("test/") == std::string::npos, "Blind result reveals model identities.");
         auto snapshot = [&](const char *name) {
             if (check.directory.empty()) return;

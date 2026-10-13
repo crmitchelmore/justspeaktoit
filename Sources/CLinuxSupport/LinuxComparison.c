@@ -10,7 +10,7 @@ typedef struct {
     GtkDropDown *rounds;
     GtkTextView *detail;
     GtkWidget *column;
-    GtkButton *run, *stop, *cancel, *judge, *json, *markdown, *play, *stop_audio;
+    GtkButton *run, *stop, *cancel, *judge, *json, *markdown, *play, *stop_audio, *delete_round;
     GPtrArray *model_ids, *round_ids;
     gchar *selected, *model_rows, *round_rows;
     gboolean suppress;
@@ -152,6 +152,34 @@ static void action_clicked(GtkButton *button, gpointer data) {
         comparison_emit(106, payload, 0); g_free(payload);
     }
 }
+static void confirm_deletion(PickerRequest *request, const char *response) {
+    if (strcmp(response, "delete") == 0 && ui.window == request->window
+        && gtk_widget_get_sensitive(GTK_WIDGET(ui.delete_round))
+        && g_strcmp0(ui.selected, request->payload->str) == 0)
+        comparison_emit(120, request->payload->str, 0);
+}
+static void deletion_response(AdwMessageDialog *dialog, const char *response, gpointer data) {
+    confirm_deletion(data, response);
+    gtk_window_destroy(GTK_WINDOW(dialog));
+}
+static void free_deletion_request(gpointer data, GClosure *closure) {
+    (void)closure; free_request(data);
+}
+static void delete_clicked(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    if (ui.selected == NULL || *ui.selected == '\0') return;
+    GtkWidget *dialog = adw_message_dialog_new(ui.window, "Delete comparison?",
+        "Delete this saved comparison and its app-owned audio? Original imports are not changed.\n\n"
+        "If comparison sync is enabled now or later, the deletion is synced to your other devices.");
+    adw_message_dialog_add_responses(ADW_MESSAGE_DIALOG(dialog), "cancel", "Cancel", "delete", "Delete", NULL);
+    adw_message_dialog_set_response_appearance(ADW_MESSAGE_DIALOG(dialog), "delete", ADW_RESPONSE_DESTRUCTIVE);
+    adw_message_dialog_set_default_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
+    adw_message_dialog_set_close_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
+    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+    g_signal_connect_data(dialog, "response", G_CALLBACK(deletion_response),
+        picker_request(g_string_new(ui.selected), FALSE), free_deletion_request, 0);
+    gtk_window_present(GTK_WINDOW(dialog));
+}
 static void export_chosen(GObject *source, GAsyncResult *result, gpointer data) {
     PickerRequest *request = data;
     GError *error = NULL;
@@ -268,6 +296,9 @@ void jsti_comparison_open(GtkWindow *parent) {
     ui.markdown = GTK_BUTTON(button_new("Export Markdown", G_CALLBACK(export_clicked)));
     gtk_box_append(GTK_BOX(exports), GTK_WIDGET(ui.json)); gtk_box_append(GTK_BOX(exports), GTK_WIDGET(ui.markdown));
     gtk_box_append(GTK_BOX(column), exports);
+    ui.delete_round = GTK_BUTTON(button_new("Delete / discard saved round…", G_CALLBACK(delete_clicked)));
+    gtk_widget_add_css_class(GTK_WIDGET(ui.delete_round), "destructive-action");
+    gtk_box_append(GTK_BOX(column), GTK_WIDGET(ui.delete_round));
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), column);
     adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar), scrolled);
     adw_window_set_content(ADW_WINDOW(ui.window), toolbar);
@@ -319,6 +350,7 @@ static void present(gpointer value) {
     gtk_widget_set_sensitive(GTK_WIDGET(ui.play), !p->busy && ui.round_ids->len > 0);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.json), !p->busy && ui.round_ids->len > 0);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.markdown), !p->busy && ui.round_ids->len > 0);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.delete_round), !p->busy && p->selected[0] != '\0');
     ui.suppress = FALSE;
 }
 int32_t jsti_comparison_present(const char *models, const char *rounds, const char *detail,
@@ -373,6 +405,15 @@ int32_t jsti_comparison_self_test(GtkWindow *parent, char *error, size_t capacit
     valid = valid && test_event == 106 && g_strcmp0(test_payload, "synthetic-round\n2,1") == 0;
     g_signal_emit_by_name(ui.play, "clicked");
     valid = valid && test_event == 108 && g_strcmp0(test_payload, "synthetic-round") == 0;
+    PickerRequest *deletion = picker_request(g_string_new(ui.selected), FALSE);
+    confirm_deletion(deletion, "cancel");
+    valid = valid && test_event == 108;
+    confirm_deletion(deletion, "delete");
+    valid = valid && test_event == 120 && g_strcmp0(test_payload, "synthetic-round") == 0;
+    g_string_assign(deletion->payload, "a-stale-round");
+    test_event = 0; confirm_deletion(deletion, "delete");
+    valid = valid && test_event == 0;
+    free_request(deletion);
     p.busy = TRUE; p.recording = TRUE; p.judgeable = FALSE; present(&p);
     valid = valid && !gtk_widget_get_sensitive(GTK_WIDGET(ui.run))
         && gtk_widget_get_sensitive(GTK_WIDGET(ui.stop)) && !gtk_widget_get_sensitive(GTK_WIDGET(ui.judge));

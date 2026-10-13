@@ -56,6 +56,13 @@ extension DesktopHostController {
         let snapshot = sampleDirectory.appendingPathComponent(UUID().uuidString)
             .appendingPathExtension(source.pathExtension)
         try FileManager.default.copyItem(at: source, to: snapshot)
+        defer {
+            do { try FileManager.default.removeItem(at: snapshot) } catch {
+                let message = "An unused comparison import snapshot could not be removed: \(error.localizedDescription)"
+                FileHandle.standardError.write(Data((message + "\n").utf8))
+                comparisonStatus(message)
+            }
+        }
         try DesktopHostImport.validate(snapshot)
         let roundID = UUID()
         let audio = sampleDirectory.appendingPathComponent(roundID.uuidString + ".wav")

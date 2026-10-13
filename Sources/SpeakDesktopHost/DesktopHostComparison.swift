@@ -44,13 +44,10 @@ final class DesktopHostComparisonClosingCapture: @unchecked Sendable {
 extension DesktopHostController {
     package func openComparison() async {
         do {
-            if comparisons == nil {
-                let root = directory.appendingPathComponent("Comparisons")
-                try Platform.preparePrivateDirectory(root)
-                comparisons = try DesktopComparisonStore(directory: root)
-            }
+            _ = try await loadComparisonStore()
             await refreshComparison()
         } catch {
+            guard !closed else { return }
             comparisonStatus("Could not open comparisons: \(error.localizedDescription)")
             Platform.comparisonPresentation(.init(
                 models: "", rounds: "", detail: comparisonNotice, busy: false, recording: false,
@@ -74,7 +71,7 @@ extension DesktopHostController {
         case 106: await judgeComparison(text)
         case 107: await exportComparisons(path: text, markdown: index == 1)
         case 108: await playComparison(text)
-        case 109: playback.stop(announcing: true)
+        case 109, 120: comparisonMaintenanceEvent(event, text: text)
         default: break
         }
         await refreshComparison()
@@ -200,20 +197,15 @@ extension DesktopHostController {
             context: context, deviceID: configuration.deviceID,
             sampleRate: fanOut.captureSampleRate, frameMilliseconds: 100
         )
+        let deadline = ContinuousClock.now.advanced(by: DesktopComparisonLive.maximumCaptureDuration)
         do { try fanOut.beginCapture(); try capture.start() } catch { capture.destroy(); throw error }
         comparisonCapture = DesktopHostComparisonCapture(capture: capture, file: file)
         comparisonSelection = pending.id
-        comparisonUpdates = Task { [weak self] in
-            while !Task.isCancelled {
-                do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
-                guard let self, await self.isComparisonCapturing(generation) else { return }
-                await self.refreshComparison()
-            }
-        }
+        startComparisonUpdates(generation: generation, deadline: deadline)
         comparisonStatus("Comparing one microphone capture. Stop to judge the raw results.")
     }
 
-    private func isComparisonCapturing(_ generation: UUID) -> Bool {
+    func isComparisonCapturing(_ generation: UUID) -> Bool {
         !closed && comparisonGeneration == generation && comparisonCapture != nil
     }
 

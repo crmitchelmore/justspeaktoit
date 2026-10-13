@@ -1485,7 +1485,7 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"&Export text", BS_PUSHBUTTON | WS_TABSTOP, exportID) &&
         add(L"BUTTON", L"&Open audio", BS_PUSHBUTTON | WS_TABSTOP, openAudioID) &&
         add(L"BUTTON", L"Rea&d aloud", BS_PUSHBUTTON | WS_TABSTOP, readAloudID) &&
-        add(L"BUTTON", L"Corrections...", BS_PUSHBUTTON | WS_TABSTOP, historyCorrectionsID) &&
+        add(L"BUTTON", L"Co&rrections...", BS_PUSHBUTTON | WS_TABSTOP, historyCorrectionsID) &&
         // The label carries the mnemonic and precedes Play/Pause, so Alt+B
         // and assistive technology reach the playback controls.
         add(L"STATIC", L"Play&back", 0, playbackLabelID) &&

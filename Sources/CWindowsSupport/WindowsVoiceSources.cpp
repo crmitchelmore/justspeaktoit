@@ -1,6 +1,7 @@
 #include "include/CWindowsSupport.h"
 #include "WindowsSupportInternal.hpp"
 #include <commdlg.h>
+#include <objbase.h>
 #include <mutex>
 #include <vector>
 
@@ -15,10 +16,19 @@ struct Configuration {
 };
 std::mutex mutex;
 Configuration configuration;
+constexpr UINT importResultMessage = WM_APP + 24;
+struct ImportResult {
+    HWND window = nullptr;
+    std::string token;
+    std::wstring text, error;
+    bool ready = false;
+};
+ImportResult importResult;
 struct Dialog {
     Configuration config;
     std::string record;
-    std::wstring history, typed, clipboard;
+    std::wstring history, typed, clipboard, file;
+    std::string importToken;
     int source = 0;
     HFONT font = nullptr;
     std::vector<HWND> controls;
@@ -37,26 +47,66 @@ bool hasText(const std::wstring &value) {
     return value.find_first_not_of(L" \r\n\t") != std::wstring::npos;
 }
 void refresh(HWND window, Dialog &dialog) {
-    const bool ready = dialog.source != 3 && hasText(text(window)) &&
+    const bool ready = dialog.importToken.empty() && hasText(text(window)) &&
         (dialog.source != 0 || !dialog.record.empty());
     EnableWindow(GetDlgItem(window, readID), ready);
     EnableWindow(GetDlgItem(window, exportID), ready);
-    EnableWindow(GetDlgItem(window, loadID), dialog.source == 2);
-    SendDlgItemMessageW(window, textID, EM_SETREADONLY, dialog.source != 1, 0);
+    EnableWindow(GetDlgItem(window, loadID), dialog.importToken.empty() && dialog.source >= 2);
+    SetDlgItemTextW(window, loadID, dialog.source == 3 ? L"&Choose file..." : L"&Load clipboard");
+    SendDlgItemMessageW(window, textID, EM_SETREADONLY, dialog.source != 1 && dialog.source != 3, 0);
+}
+void cancelImport(HWND window, Dialog &dialog) {
+    if (dialog.importToken.empty()) return;
+    const std::string token = std::move(dialog.importToken);
+    dialog.importToken.clear();
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (importResult.window == window && importResult.token == token) importResult = {};
+    }
+    if (dialog.config.callback) dialog.config.callback(114, 4, "", token.c_str(), "", dialog.config.context);
 }
 void select(HWND window, Dialog &dialog) {
+    cancelImport(window, dialog);
     if (dialog.source == 1) dialog.typed = text(window);
+    if (dialog.source == 3) dialog.file = text(window);
     dialog.source = static_cast<int>(SendDlgItemMessageW(window, sourceID, CB_GETCURSEL, 0, 0));
-    const auto &value = dialog.source == 0 ? dialog.history : dialog.source == 1 ? dialog.typed : dialog.clipboard;
-    SetDlgItemTextW(window, textID, dialog.source == 3 ? L"" : value.c_str());
-    SetDlgItemTextW(window, noticeID, dialog.source == 3
-        ? L"Unavailable: this app has no captured external selection target. It will never read its own focused "
-          L"control or silently use the clipboard. Copy explicitly, then choose Clipboard snapshot."
-        : dialog.source == 0 && dialog.record.empty()
+    const auto &value = dialog.source == 0 ? dialog.history : dialog.source == 1 ? dialog.typed :
+        dialog.source == 2 ? dialog.clipboard : dialog.file;
+    SetDlgItemTextW(window, textID, value.c_str());
+    SetDlgItemTextW(window, noticeID, dialog.source == 0 && dialog.record.empty()
         ? L"Choose a recording in History, then reopen this editor. History text is captured when this editor opens."
         : L"Read and Export send this text to Deepgram using your saved key. Export creates a 24 kHz mono PCM16 WAV "
           L"without playback. Speed is the engine default. Stop cancels synthesis, playback or export.");
     refresh(window, dialog);
+}
+void importFile(HWND window, Dialog &dialog) {
+    std::vector<wchar_t> path(32768, 0);
+    OPENFILENAMEW choice{};
+    choice.lStructSize = sizeof(choice); choice.hwndOwner = window;
+    choice.lpstrFilter = L"Text files\0*.txt;*.md;*.csv;*.log\0All files\0*.*\0";
+    choice.lpstrFile = path.data(); choice.nMaxFile = static_cast<DWORD>(path.size());
+    choice.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+    if (!GetOpenFileNameW(&choice)) {
+        if (CommDlgExtendedError()) SetDlgItemTextW(window, noticeID, L"The text file chooser could not be opened.");
+        return;
+    }
+    if (!IsWindow(window) || dialog.source != 3) return;
+    GUID identifier{};
+    wchar_t token[40]{};
+    if (FAILED(CoCreateGuid(&identifier)) || !StringFromGUID2(identifier, token, 40)) {
+        SetDlgItemTextW(window, noticeID, L"A text import request could not be created.");
+        return;
+    }
+    cancelImport(window, dialog);
+    dialog.importToken = jsti::utf8(token);
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        importResult = {window, dialog.importToken, {}, {}, false};
+    }
+    SetDlgItemTextW(window, noticeID, L"Reading UTF-8 text... Stop cancels. Editing or changing source discards the result.");
+    refresh(window, dialog);
+    const std::string destination = jsti::utf8(path.data());
+    dialog.config.callback(113, 4, "", dialog.importToken.c_str(), destination.c_str(), dialog.config.context);
 }
 void loadClipboard(HWND window, Dialog &dialog) {
     dialog.clipboard.clear();
@@ -94,14 +144,15 @@ void emit(HWND window, Dialog &dialog, int action, const std::string &path = "")
     const std::string snapshot = jsti::utf8(text(window));
     const std::string record = dialog.source == 0 ? dialog.record : "";
     if (dialog.config.callback) {
-        dialog.config.callback(action, dialog.source, snapshot.c_str(), record.c_str(), path.c_str(), dialog.config.context);
+        dialog.config.callback(action, dialog.source == 3 ? 4 : dialog.source,
+            snapshot.c_str(), record.c_str(), path.c_str(), dialog.config.context);
     }
 }
 void exportAudio(HWND window, Dialog &dialog) {
     // The nested save loop may process editor messages: freeze the entire job first.
     const std::string snapshot = jsti::utf8(text(window));
     const std::string record = dialog.source == 0 ? dialog.record : "";
-    const int source = dialog.source;
+    const int source = dialog.source == 3 ? 4 : dialog.source;
     std::vector<wchar_t> path(32768, 0);
     wcscpy_s(path.data(), path.size(), L"voice-output.wav");
     OPENFILENAMEW choice{};
@@ -175,6 +226,24 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     }
     if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
     switch (message) {
+    case importResultMessage: {
+        ImportResult result;
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            if (importResult.window != window || importResult.token != dialog->importToken || !importResult.ready) return 0;
+            result = std::move(importResult); importResult = {};
+        }
+        dialog->importToken.clear();
+        if (result.error.empty()) {
+            dialog->file = std::move(result.text);
+            SetDlgItemTextW(window, textID, dialog->file.c_str());
+            SetDlgItemTextW(window, noticeID, L"Text file captured. You can edit it; later file changes do not change this snapshot.");
+        } else {
+            const std::wstring notice = result.error + L" Existing text is unchanged.";
+            SetDlgItemTextW(window, noticeID, notice.c_str());
+        }
+        refresh(window, *dialog); return 0;
+    }
     case WM_CREATE: return create(window, *dialog) ? 0 : -1;
     case WM_SIZE: layout(window); return 0;
     case WM_GETMINMAXINFO: {
@@ -198,18 +267,29 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     }
     case WM_COMMAND:
         if (LOWORD(wparam) == sourceID && HIWORD(wparam) == CBN_SELCHANGE) { select(window, *dialog); return 0; }
-        if (LOWORD(wparam) == textID && HIWORD(wparam) == EN_CHANGE) { refresh(window, *dialog); return 0; }
+        if (LOWORD(wparam) == textID && HIWORD(wparam) == EN_CHANGE) {
+            const bool importing = !dialog->importToken.empty();
+            cancelImport(window, *dialog);
+            if (importing) SetDlgItemTextW(window, noticeID, L"Text import discarded. Your edits are preserved.");
+            refresh(window, *dialog); return 0;
+        }
         if (HIWORD(wparam) != BN_CLICKED) break;
         switch (LOWORD(wparam)) {
-        case loadID: loadClipboard(window, *dialog); break;
+        case loadID: if (dialog->source == 3) importFile(window, *dialog); else loadClipboard(window, *dialog); break;
         case readID: if (IsWindowEnabled(GetDlgItem(window, readID))) emit(window, *dialog, 110); break;
         case exportID: if (IsWindowEnabled(GetDlgItem(window, exportID))) exportAudio(window, *dialog); break;
-        case stopID: emit(window, *dialog, 112); break;
+        case stopID:
+            cancelImport(window, *dialog); refresh(window, *dialog);
+            SetDlgItemTextW(window, noticeID, L"Stopped. The captured text is unchanged.");
+            emit(window, *dialog, 112); break;
         case IDCANCEL: DestroyWindow(window); break;
         }
         return 0;
     case WM_CLOSE: DestroyWindow(window); return 0;
-    case WM_DESTROY: if (dialog->font) DeleteObject(dialog->font); dialog->font = nullptr; return 0;
+    case WM_DESTROY:
+        cancelImport(window, *dialog);
+        if (dialog->font) DeleteObject(dialog->font);
+        dialog->font = nullptr; return 0;
     }
     return DefWindowProcW(window, message, wparam, lparam);
 }
@@ -227,7 +307,7 @@ HWND makeDialog(HWND owner, Dialog &dialog) {
 
 int32_t jsti_window_set_voice_sources(const char *const *names, size_t count,
                                      JSTIVoiceSourceCallback callback, void *context) {
-    if (!names || count != 3 || !callback) return -1;
+    if (!names || count != 4 || !callback) return -1;
     Configuration changed;
     for (size_t index = 0; index < count; ++index) {
         std::wstring name;
@@ -236,6 +316,17 @@ int32_t jsti_window_set_voice_sources(const char *const *names, size_t count,
     }
     changed.callback = callback; changed.context = context;
     std::lock_guard<std::mutex> lock(mutex); configuration = std::move(changed);
+    return 0;
+}
+
+int32_t jsti_window_set_voice_text_import(const char *token, const char *text, const char *error) {
+    std::wstring value, failure;
+    if (!token || !token[0] || std::strlen(token) > 64 ||
+        !jsti::wide(text ? text : "", value) || !jsti::wide(error ? error : "", failure)) return -1;
+    std::lock_guard<std::mutex> lock(mutex);
+    if (!importResult.window || importResult.token != token) return 1;
+    importResult.text = std::move(value); importResult.error = std::move(failure); importResult.ready = true;
+    if (!PostMessageW(importResult.window, importResultMessage, 0, 0)) { importResult = {}; return -1; }
     return 0;
 }
 
@@ -305,21 +396,52 @@ bool jsti_voice_sources_self_test(HWND owner, std::string &error) {
     SendDlgItemMessageW(window, sourceID, CB_SETCURSEL, 2, 0); select(window, dialog);
     const bool unavailable = !IsWindowEnabled(GetDlgItem(window, readID)) &&
         !IsWindowEnabled(GetDlgItem(window, exportID)) && text(window).empty() &&
-        SendDlgItemMessageW(window, sourceID, CB_GETCOUNT, 0, 0) == 3;
+        SendDlgItemMessageW(window, sourceID, CB_GETCOUNT, 0, 0) == 4;
     dialog.clipboard = L"Synthetic clipboard snapshot";
     SetDlgItemTextW(window, textID, dialog.clipboard.c_str());
     refresh(window, dialog);
     SendMessageW(window, WM_COMMAND, MAKEWPARAM(readID, BN_CLICKED), 0);
     const bool clipboardSnapshot = received.calls == 3 && received.source == 2 &&
         received.record.empty() && received.text == "Synthetic clipboard snapshot";
+    SendDlgItemMessageW(window, sourceID, CB_SETCURSEL, 3, 0); select(window, dialog);
+    dialog.importToken = "synthetic-import";
+    { std::lock_guard<std::mutex> lock(mutex); importResult = {window, dialog.importToken, {}, {}, false}; }
+    const bool queuedImport = jsti_window_set_voice_text_import("synthetic-import", "Synthetic file text", "") == 0;
+    SendMessageW(window, importResultMessage, 0, 0);
+    SendMessageW(window, WM_COMMAND, MAKEWPARAM(readID, BN_CLICKED), 0);
+    const bool fileSnapshot = queuedImport && received.calls == 4 && received.source == 4 &&
+        received.record.empty() && received.text == "Synthetic file text" &&
+        !(GetWindowLongW(GetDlgItem(window, textID), GWL_STYLE) & ES_READONLY);
+    const bool staleImport = jsti_window_set_voice_text_import("synthetic-import", "Stale text", "") == 1 &&
+        text(window) == L"Synthetic file text";
+    if (length && length < snapshotPath.size()) {
+        const std::string path = jsti::utf8(snapshotPath.data()) + ".file-source.bmp";
+        char failure[1024]{};
+        captured = jsti_save_owned_window_snapshot(window, path.c_str(), failure, sizeof(failure)) == 0 && captured;
+        if (!captured && failure[0]) error = failure;
+    }
+    dialog.importToken = "synthetic-failure";
+    { std::lock_guard<std::mutex> lock(mutex); importResult = {window, dialog.importToken, {}, {}, false}; }
+    jsti_window_set_voice_text_import("synthetic-failure", "", "Synthetic read error.");
+    SendMessageW(window, importResultMessage, 0, 0);
+    const bool failedImport = text(window) == L"Synthetic file text" && IsWindowEnabled(GetDlgItem(window, readID));
+    dialog.importToken = "synthetic-edit";
+    { std::lock_guard<std::mutex> lock(mutex); importResult = {window, dialog.importToken, {}, {}, false}; }
+    SetDlgItemTextW(window, textID, L"Synthetic user edit");
+    SendMessageW(window, WM_COMMAND, MAKEWPARAM(textID, EN_CHANGE), 0);
+    const bool editedImport = jsti_window_set_voice_text_import("synthetic-edit", "Late text", "") == 1 &&
+        text(window) == L"Synthetic user edit";
     DestroyWindow(window);
-    const bool passed = history && typed && unavailable && historySnapshot && typedSnapshot && clipboardSnapshot;
+    const bool passed = history && typed && unavailable && historySnapshot && typedSnapshot &&
+        clipboardSnapshot && fileSnapshot && staleImport && failedImport && editedImport;
     if (!passed) {
         error = "Voice sources fixture failed: history=" + std::to_string(history) +
             ", typed=" + std::to_string(typed) + ", unloadedClipboard=" + std::to_string(unavailable) +
             ", historySnapshot=" + std::to_string(historySnapshot) +
             ", typedSnapshot=" + std::to_string(typedSnapshot) +
-            ", clipboardSnapshot=" + std::to_string(clipboardSnapshot) + ".";
+            ", clipboardSnapshot=" + std::to_string(clipboardSnapshot) +
+            ", fileSnapshot=" + std::to_string(fileSnapshot) + ", staleImport=" + std::to_string(staleImport) +
+            ", failedImport=" + std::to_string(failedImport) + ", editedImport=" + std::to_string(editedImport) + ".";
     }
     return passed && captured;
 }

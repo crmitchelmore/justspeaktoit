@@ -208,6 +208,7 @@ private actor HistoryHostProbe {
         case .voiceRead(let snapshot):
             audible = .reading(snapshot.recordID?.uuidString ?? "text-source", snapshot.text)
         case .voiceExport: audible = nil
+        case .voiceImport, .voiceImportCancel: break
         }
     }
 

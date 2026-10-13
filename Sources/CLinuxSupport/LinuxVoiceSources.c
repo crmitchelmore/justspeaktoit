@@ -15,7 +15,7 @@ typedef struct {
     GtkTextView *editor;
     GtkLabel *notice;
     GtkButton *read, *export_button, *load;
-    gchar *record, *history, *typed, *clipboard;
+    gchar *record, *history, *typed, *clipboard, *file, *import_token;
     guint selected;
     guint64 revision;
     GCancellable *clipboard_cancel;
@@ -28,6 +28,7 @@ static void release(gpointer data) {
     Dialog *dialog = data;
     if (--dialog->refs != 0) return;
     g_free(dialog->record); g_free(dialog->history); g_free(dialog->typed); g_free(dialog->clipboard);
+    g_free(dialog->file); g_free(dialog->import_token);
     g_clear_object(&dialog->clipboard_cancel);
     g_free(dialog);
 }
@@ -38,34 +39,116 @@ static gchar *text(Dialog *dialog) {
 }
 static void refresh(Dialog *dialog) {
     gchar *value = text(dialog);
-    gboolean ready = dialog->selected != 3 && g_strstrip(value)[0] != '\0' &&
+    gboolean ready = dialog->import_token == NULL && g_strstrip(value)[0] != '\0' &&
         (dialog->selected != 0 || dialog->record[0] != '\0');
     gtk_widget_set_sensitive(GTK_WIDGET(dialog->read), ready);
     gtk_widget_set_sensitive(GTK_WIDGET(dialog->export_button), ready);
-    gtk_widget_set_sensitive(GTK_WIDGET(dialog->load), dialog->selected == 2);
-    gtk_text_view_set_editable(dialog->editor, dialog->selected == 1);
+    gtk_widget_set_sensitive(GTK_WIDGET(dialog->load), dialog->import_token == NULL && dialog->selected >= 2);
+    gtk_button_set_label(dialog->load, dialog->selected == 3 ? "Choose file..." : "Load clipboard");
+    gtk_text_view_set_editable(dialog->editor, dialog->selected == 1 || dialog->selected == 3);
     g_free(value);
 }
-static void changed(GtkTextBuffer *buffer, gpointer data) { (void)buffer; refresh(data); }
+static void cancel_import(Dialog *dialog) {
+    if (dialog->import_token == NULL) return;
+    gchar *token = g_steal_pointer(&dialog->import_token);
+    dialog->callback(114, 4, "", token, "", dialog->context);
+    g_free(token);
+}
+static void changed(GtkTextBuffer *buffer, gpointer data) {
+    (void)buffer;
+    Dialog *dialog = data;
+    gboolean importing = dialog->import_token != NULL;
+    ++dialog->revision; cancel_import(dialog); refresh(dialog);
+    if (importing) gtk_label_set_text(dialog->notice, "Text import discarded. Your edits are preserved.");
+}
 static void select_source(GObject *object, GParamSpec *spec, gpointer data) {
     (void)object; (void)spec;
     Dialog *dialog = data;
+    cancel_import(dialog);
     if (dialog->clipboard_cancel != NULL) g_cancellable_cancel(dialog->clipboard_cancel);
     if (dialog->selected == 1) { g_free(dialog->typed); dialog->typed = text(dialog); }
+    if (dialog->selected == 3) { g_free(dialog->file); dialog->file = text(dialog); }
     dialog->selected = gtk_drop_down_get_selected(dialog->source);
     ++dialog->revision;
     const gchar *value = dialog->selected == 0 ? dialog->history :
-        dialog->selected == 1 ? dialog->typed : dialog->selected == 2 ? dialog->clipboard : "";
+        dialog->selected == 1 ? dialog->typed : dialog->selected == 2 ? dialog->clipboard : dialog->file;
     gtk_text_buffer_set_text(gtk_text_view_get_buffer(dialog->editor), value, -1);
-    gtk_label_set_text(dialog->notice, dialog->selected == 3
-        ? "Unavailable: no external selection target was captured. Wayland does not expose a reliable external "
-          "selection; X11 insertion targeting is not selection reading. Clipboard is never substituted. "
-          "Copy explicitly, then choose Clipboard snapshot."
-        : dialog->selected == 0 && dialog->record[0] == '\0'
+    gtk_label_set_text(dialog->notice, dialog->selected == 0 && dialog->record[0] == '\0'
         ? "Choose a recording in History, then reopen this editor. History is captured when the editor opens."
         : "Read and Export send this text to Deepgram with your saved key. Export writes a 24 kHz mono PCM16 WAV "
           "without playback. Speed is the engine default. Stop cancels synthesis, playback or export.");
     refresh(dialog);
+}
+typedef struct { Dialog *dialog; guint64 revision; } ImportChoice;
+static void import_response(GtkNativeDialog *chooser, int response, gpointer data) {
+    ImportChoice *choice = data;
+    Dialog *dialog = choice->dialog;
+    if (response == GTK_RESPONSE_ACCEPT && dialog->window != NULL &&
+        dialog->selected == 3 && dialog->revision == choice->revision) {
+        GFile *file = gtk_file_chooser_get_file(GTK_FILE_CHOOSER(chooser));
+        gchar *path = file != NULL ? g_file_get_path(file) : NULL;
+        if (path != NULL && g_utf8_validate(path, -1, NULL)) {
+            cancel_import(dialog);
+            dialog->import_token = g_uuid_string_random();
+            gtk_label_set_text(dialog->notice,
+                "Reading UTF-8 text... Stop cancels. Editing or changing source discards the result.");
+            refresh(dialog);
+            dialog->callback(113, 4, "", dialog->import_token, path, dialog->context);
+        } else gtk_label_set_text(dialog->notice, "Choose a local text file with a UTF-8 path.");
+        g_free(path); g_clear_object(&file);
+    }
+    gtk_native_dialog_destroy(chooser); g_object_unref(chooser);
+    release(dialog); g_free(choice);
+}
+static void import_file(Dialog *dialog) {
+    ImportChoice *choice = g_new0(ImportChoice, 1);
+    choice->dialog = retain(dialog); choice->revision = ++dialog->revision;
+    GtkFileChooserNative *chooser = gtk_file_chooser_native_new(
+        "Import UTF-8 text", dialog->window, GTK_FILE_CHOOSER_ACTION_OPEN, "Import", "Cancel");
+    GtkFileFilter *filter = gtk_file_filter_new();
+    gtk_file_filter_set_name(filter, "Text files");
+    gtk_file_filter_add_mime_type(filter, "text/plain");
+    gtk_file_filter_add_pattern(filter, "*.txt"); gtk_file_filter_add_pattern(filter, "*.md");
+    gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(chooser), filter); g_object_unref(filter);
+    filter = gtk_file_filter_new();
+    gtk_file_filter_set_name(filter, "All files"); gtk_file_filter_add_pattern(filter, "*");
+    gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(chooser), filter); g_object_unref(filter);
+    g_signal_connect(chooser, "response", G_CALLBACK(import_response), choice);
+    gtk_native_dialog_show(GTK_NATIVE_DIALOG(chooser));
+}
+static gboolean apply_import_result(Dialog *dialog, const char *token, const char *value, const char *error) {
+    if (dialog == NULL || dialog->window == NULL || dialog->selected != 3 ||
+        g_strcmp0(dialog->import_token, token) != 0) return FALSE;
+    g_clear_pointer(&dialog->import_token, g_free);
+    if (error[0] == '\0') {
+        g_free(dialog->file); dialog->file = g_strdup(value);
+        gtk_text_buffer_set_text(gtk_text_view_get_buffer(dialog->editor), value, -1);
+        gtk_label_set_text(dialog->notice,
+            "Text file captured. You can edit it; later file changes do not change this snapshot.");
+    } else {
+        gchar *notice = g_strdup_printf("%s Existing text is unchanged.", error);
+        gtk_label_set_text(dialog->notice, notice); g_free(notice);
+    }
+    refresh(dialog);
+    return TRUE;
+}
+typedef struct { gchar *token, *text, *error; } ImportResult;
+static void apply_import(gpointer data) {
+    ImportResult *result = data;
+    apply_import_result(active, result->token, result->text, result->error);
+}
+static void free_import(gpointer data) {
+    ImportResult *result = data;
+    g_free(result->token); g_free(result->text); g_free(result->error); g_free(result);
+}
+int32_t jsti_window_set_voice_text_import(const char *token, const char *value, const char *error) {
+    if (token == NULL || token[0] == '\0' || strlen(token) > 64 ||
+        !g_utf8_validate(value != NULL ? value : "", -1, NULL) ||
+        !g_utf8_validate(error != NULL ? error : "", -1, NULL)) return -1;
+    ImportResult *result = g_new0(ImportResult, 1);
+    result->token = g_strdup(token); result->text = g_strdup(value != NULL ? value : "");
+    result->error = g_strdup(error != NULL ? error : "");
+    return jsti_window_post(apply_import, result, free_import);
 }
 typedef struct { Dialog *dialog; guint64 revision; } ClipboardRead;
 static void clipboard_finished(GObject *object, GAsyncResult *result, gpointer data) {
@@ -90,6 +173,7 @@ static void clipboard_finished(GObject *object, GAsyncResult *result, gpointer d
 static void load_clipboard(GtkButton *button, gpointer data) {
     (void)button;
     Dialog *dialog = data;
+    if (dialog->selected == 3) { import_file(dialog); return; }
     if (dialog->clipboard_cancel != NULL) g_cancellable_cancel(dialog->clipboard_cancel);
     g_clear_object(&dialog->clipboard_cancel);
     dialog->clipboard_cancel = g_cancellable_new();
@@ -107,13 +191,16 @@ static void read_aloud(GtkButton *button, gpointer data) {
     Dialog *dialog = data;
     if (dialog->clipboard_cancel != NULL) g_cancellable_cancel(dialog->clipboard_cancel);
     gchar *snapshot = text(dialog);
-    dialog->callback(110, (gint32)dialog->selected, snapshot, dialog->selected == 0 ? dialog->record : "",
+    dialog->callback(110, dialog->selected == 3 ? 4 : (gint32)dialog->selected,
+                     snapshot, dialog->selected == 0 ? dialog->record : "",
                      "", dialog->context);
     g_free(snapshot);
 }
 static void stop(GtkButton *button, gpointer data) {
     (void)button;
     Dialog *dialog = data;
+    ++dialog->revision; cancel_import(dialog); refresh(dialog);
+    gtk_label_set_text(dialog->notice, "Stopped. The captured text is unchanged.");
     dialog->callback(112, 0, "", "", "", dialog->context);
 }
 typedef struct { Dialog *dialog; gchar *text, *record; guint source; } Export;
@@ -136,7 +223,8 @@ static void export_audio(GtkButton *button, gpointer data) {
     (void)button;
     Dialog *dialog = data;
     Export *job = g_new0(Export, 1);
-    job->dialog = retain(dialog); job->text = text(dialog); job->source = dialog->selected;
+    job->dialog = retain(dialog); job->text = text(dialog);
+    job->source = dialog->selected == 3 ? 4 : dialog->selected;
     job->record = g_strdup(dialog->selected == 0 ? dialog->record : "");
     GtkFileChooserNative *chooser = gtk_file_chooser_native_new(
         "Export voice audio", dialog->window, GTK_FILE_CHOOSER_ACTION_SAVE, "Export", "Cancel");
@@ -150,12 +238,14 @@ static void export_audio(GtkButton *button, gpointer data) {
 }
 static void destroyed(gpointer data) {
     Dialog *dialog = data;
+    cancel_import(dialog);
     if (active == dialog) active = NULL;
     dialog->window = NULL; ++dialog->revision; release(dialog);
 }
 static void close_dialog(GtkButton *button, gpointer data) {
     (void)button;
     Dialog *dialog = data;
+    cancel_import(dialog);
     if (dialog->clipboard_cancel != NULL) g_cancellable_cancel(dialog->clipboard_cancel);
     GtkWindow *window = dialog->window;
     dialog->window = NULL;
@@ -164,6 +254,7 @@ static void close_dialog(GtkButton *button, gpointer data) {
 static gboolean close_request(GtkWindow *window, gpointer data) {
     (void)window;
     Dialog *dialog = data; dialog->window = NULL; ++dialog->revision;
+    cancel_import(dialog);
     if (dialog->clipboard_cancel != NULL) g_cancellable_cancel(dialog->clipboard_cancel);
     return FALSE;
 }
@@ -177,7 +268,7 @@ static Dialog *make_dialog(GtkWindow *owner, const char *record, const char *his
     Dialog *dialog = g_new0(Dialog, 1);
     dialog->refs = 1; dialog->record = g_strdup(record != NULL ? record : "");
     dialog->history = g_strdup(history != NULL ? history : "");
-    dialog->typed = g_strdup(""); dialog->clipboard = g_strdup("");
+    dialog->typed = g_strdup(""); dialog->clipboard = g_strdup(""); dialog->file = g_strdup("");
     dialog->callback = configuration.callback; dialog->context = configuration.context;
     dialog->window = GTK_WINDOW(gtk_window_new());
     g_object_set_data_full(G_OBJECT(dialog->window), "voice-sources", dialog, destroyed);
@@ -232,6 +323,7 @@ void jsti_show_voice_sources(GtkWindow *owner, const char *record, const char *h
 void jsti_voice_sources_close(void) {
     if (active != NULL && active->window != NULL) {
         GtkWindow *window = active->window;
+        cancel_import(active);
         if (active->clipboard_cancel != NULL) g_cancellable_cancel(active->clipboard_cancel);
         active->window = NULL; ++active->revision;
         gtk_window_destroy(window);
@@ -242,8 +334,9 @@ void jsti_voice_sources_close(void) {
 void jsti_voice_sources_show_fixture(GtkWindow *owner) {
     jsti_show_voice_sources(owner, "", "");
     if (active != NULL) {
-        gtk_drop_down_set_selected(active->source, 1);
-        gtk_text_buffer_set_text(gtk_text_view_get_buffer(active->editor), "Synthetic typed text for voice output.", -1);
+        gtk_drop_down_set_selected(active->source, 3);
+        active->import_token = g_strdup("synthetic-tour-file");
+        apply_import_result(active, "synthetic-tour-file", "Synthetic imported UTF-8 text for voice output.", "");
     }
 }
 int32_t jsti_voice_sources_save_snapshot(const char *path) {
@@ -260,7 +353,7 @@ static void apply_sources(gpointer data) {
 static void free_sources(gpointer data) { SetSources *set = data; g_strfreev(set->names); g_free(set); }
 int32_t jsti_window_set_voice_sources(const char *const *names, size_t count,
                                       JSTIVoiceSourceCallback callback, void *context) {
-    if (names == NULL || count != 3 || callback == NULL) return -1;
+    if (names == NULL || count != 4 || callback == NULL) return -1;
     SetSources *set = g_new0(SetSources, 1);
     set->names = g_new0(gchar *, count + 1); set->callback = callback; set->context = context;
     for (size_t index = 0; index < count; ++index) {
@@ -302,14 +395,32 @@ int32_t jsti_voice_sources_self_test(GtkWindow *owner, char *error, size_t capac
     gtk_drop_down_set_selected(dialog->source, 2);
     gboolean unavailable = !gtk_widget_get_sensitive(GTK_WIDGET(dialog->read)) &&
         !gtk_widget_get_sensitive(GTK_WIDGET(dialog->export_button)) &&
-        g_list_model_get_n_items(gtk_drop_down_get_model(dialog->source)) == 3;
+        g_list_model_get_n_items(gtk_drop_down_get_model(dialog->source)) == 4;
     gtk_text_buffer_set_text(gtk_text_view_get_buffer(dialog->editor), "Synthetic clipboard snapshot", -1);
     read_aloud(NULL, dialog);
     gboolean clipboard_snapshot = received.calls == 3 && received.source == 2 &&
         received.record[0] == '\0' && g_strcmp0(received.text, "Synthetic clipboard snapshot") == 0;
+    gtk_drop_down_set_selected(dialog->source, 3);
+    dialog->import_token = g_strdup("synthetic-import");
+    gboolean imported = apply_import_result(dialog, "synthetic-import", "Synthetic file text", "");
+    read_aloud(NULL, dialog);
+    gboolean file_snapshot = imported && received.calls == 4 && received.source == 4 &&
+        received.record[0] == '\0' && g_strcmp0(received.text, "Synthetic file text") == 0 &&
+        gtk_text_view_get_editable(dialog->editor);
+    gboolean stale_import = !apply_import_result(dialog, "synthetic-import", "Stale text", "");
+    dialog->import_token = g_strdup("synthetic-failure");
+    apply_import_result(dialog, "synthetic-failure", "", "Synthetic read error.");
+    gchar *unchanged = text(dialog);
+    gboolean failed_import = g_strcmp0(unchanged, "Synthetic file text") == 0 &&
+        gtk_widget_get_sensitive(GTK_WIDGET(dialog->read));
+    g_free(unchanged);
+    dialog->import_token = g_strdup("synthetic-edit");
+    gtk_text_buffer_set_text(gtk_text_view_get_buffer(dialog->editor), "Synthetic user edit", -1);
+    gboolean edited_import = !apply_import_result(dialog, "synthetic-edit", "Late text", "");
     gtk_window_destroy(dialog->window);
     g_free(received.text); g_free(received.record);
-    gboolean passed = history && typed && unavailable && history_snapshot && typed_snapshot && clipboard_snapshot;
+    gboolean passed = history && typed && unavailable && history_snapshot && typed_snapshot &&
+        clipboard_snapshot && file_snapshot && stale_import && failed_import && edited_import;
     if (!passed) jsti_set_error(error, capacity, "Voice sources state/snapshot checks failed.");
     return passed ? 0 : -1;
 }

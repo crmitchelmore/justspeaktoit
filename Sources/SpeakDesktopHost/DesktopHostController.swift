@@ -83,6 +83,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package var readAloudState = Platform.makeReadAloudState()
     /// Actual History ownership of voice read/export; nil for typed or clipboard jobs.
     package var voiceOutputRecordID: UUID?
+    package var voiceTextImportTask: Task<Void, Never>?
+    package var voiceTextImportRequestID: String?
     /// The one History Play or Read aloud request that may still start audio or report.
     package var playbackRequests = DesktopPlaybackRequests()
     package var history: [UUID: DesktopRecordingStore.Record] = [:]

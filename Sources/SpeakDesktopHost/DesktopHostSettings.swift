@@ -107,6 +107,7 @@ extension DesktopHostController {
     /// resolving its audio never starts. The ended request reports nothing,
     /// because whatever ended it owns the status.
     package func stopReadAloud() {
+        voiceTextImportTask?.cancel()
         voiceOutputRecordID = nil
         playbackRequests.end()
         Platform.stopReadAloud(&readAloudState, playback: playback)

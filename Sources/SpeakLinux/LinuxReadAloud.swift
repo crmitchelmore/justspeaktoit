@@ -30,6 +30,21 @@ extension LinuxAudioPlayback: DesktopHostPlayback, DesktopHostSpeechPlayback {}
 extension LinuxVoiceOutput: DesktopHostVoiceOutput {}
 
 extension LinuxWindow {
+    static func voiceTextImported(_ result: Result<String, Error>, requestID: String) {
+        let text: String
+        let error: String
+        switch result {
+        case .success(let value): text = value; error = ""
+        case .failure(let failure): text = ""; error = failure.localizedDescription
+        }
+        let status = requestID.withCString { token in
+            text.withCString { value in
+                error.withCString { jsti_window_set_voice_text_import(token, value, $0) }
+            }
+        }
+        if status < 0 { LinuxHostPlatform.update("The text import result could not be shown.") }
+    }
+
     static func voiceSources(context: UnsafeMutableRawPointer) {
         let strings = Strings()
         let sources = VoiceOutputSource.allCases.filter { $0 != .externalSelection }
@@ -64,6 +79,16 @@ func linuxVoiceSourceEvent(
     guard let context else { return }
     let holder = Unmanaged<LinuxEventContext>.fromOpaque(context).takeUnretainedValue()
     if action == 112 { holder.submitHistoryPlayback(.stop); return }
+    if action == 113 {
+        holder.submitHistoryPlayback(.voiceImport(
+            path: path.map(String.init(cString:)) ?? "", requestID: record.map(String.init(cString:)) ?? ""
+        ))
+        return
+    }
+    if action == 114 {
+        holder.submitHistoryPlayback(.voiceImportCancel(requestID: record.map(String.init(cString:)) ?? ""))
+        return
+    }
     do {
         guard let source = VoiceOutputSource(rawValue: source) else {
             throw VoiceOutputSourceSnapshot.Failure.invalidText

@@ -6,6 +6,7 @@ public enum VoiceOutputSource: Int32, CaseIterable, Sendable {
     case typedText
     case clipboard
     case externalSelection
+    case textFile
 
     public var displayName: String {
         switch self {
@@ -13,6 +14,7 @@ public enum VoiceOutputSource: Int32, CaseIterable, Sendable {
         case .typedText: "Type or paste text"
         case .clipboard: "Clipboard snapshot"
         case .externalSelection: "External selected text (unavailable)"
+        case .textFile: "Import text file"
         }
     }
 }

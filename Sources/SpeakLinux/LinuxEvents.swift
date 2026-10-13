@@ -61,6 +61,11 @@ final class LinuxEventContext: @unchecked Sendable {
             case .readAloud(let identifier, let text): await controller.readAloud(identifier, text: text)
             case .voiceRead(let snapshot): await controller.readVoiceSource(snapshot)
             case .voiceExport(let snapshot, let path): await controller.exportVoiceSource(snapshot, path: path)
+            case .voiceImport(let path, let requestID):
+                await controller.importVoiceText(path: path, requestID: requestID) {
+                    LinuxWindow.voiceTextImported($0, requestID: requestID)
+                }
+            case .voiceImportCancel(let requestID): await controller.cancelVoiceTextImport(requestID: requestID)
             }
         }
     }

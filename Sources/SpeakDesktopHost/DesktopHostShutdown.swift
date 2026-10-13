@@ -108,6 +108,7 @@ extension DesktopHostController {
         let deadline = ContinuousClock.now.advanced(by: shutdownGrace)
         modelDiscoveryTask?.cancel()
         cancelOutput()
+        voiceTextImportTask?.cancel()
         cancellationRequested = true
         transcriptionTask?.cancel()
         postProcessingTask?.cancel()

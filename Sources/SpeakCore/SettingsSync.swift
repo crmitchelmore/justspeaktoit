@@ -1060,6 +1060,7 @@ extension ConfigTransferManager {
     /// provider to any catalogue fails the test until its transfer capability
     /// is defined here. Dynamically registered identifiers are never exported.
     public static let transferableSecretIdentifiers: [String] = [
+        "alibaba.apiKey",
         "assemblyai.apiKey",
         "azure.speech.apiKey",
         "cartesia.apiKey",

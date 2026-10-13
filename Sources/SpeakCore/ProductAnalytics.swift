@@ -38,7 +38,7 @@ public enum AnalyticsOnboardingStep: String, Codable, Sendable {
 }
 
 public enum AnalyticsProviderType: String, Codable, Sendable {
-    case apple, azure, cartesia, deepgram, gladia, google, groq, local, meta, mistral, modulate, soniox
+    case alibaba, apple, azure, cartesia, deepgram, gladia, google, groq, local, meta, mistral, modulate, soniox
     case speechmatics, smallest, reson8, stepfun, other
     case assemblyAI = "assembly_ai"
     case elevenLabs = "eleven_labs"
@@ -48,6 +48,7 @@ public enum AnalyticsProviderType: String, Codable, Sendable {
     case xAI = "xai"
 
     private static let liveProviderMapping: [LiveTranscriptionProviderID: AnalyticsProviderType] = [
+        .alibaba: .alibaba,
         .apple: .apple,
         .azure: .azure,
         .deepgram: .deepgram,

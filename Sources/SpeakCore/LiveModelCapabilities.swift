@@ -87,6 +87,9 @@ extension ModelCatalog {
             postStopFinalizeBudget: FileSpeechProvider.reson8FinishBudget,
             supportsLanguageHint: true
         ),
+        AlibabaSpeechModels.funLive: LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish], postStopFinalizeBudget: 5
+        ),
         AzureTranscriptionModels.speechLive: LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish], postStopFinalizeBudget: 5
         ),

@@ -30,6 +30,7 @@ Speak is designed with privacy in mind. This document explains what data is coll
 | OpenAI | Cloud | Audio streamed to OpenAI for transcription |
 | xAI | Cloud | Audio streamed to xAI for transcription |
 | Meta Model API | Cloud | Audio streamed or uploaded to Meta for Muse Voice Transcribe |
+| Alibaba Model Studio | Selected workspace region; inference deployment range is set in Alibaba's console | Fun-ASR microphone audio or inline recorded audio sent directly to the saved workspace endpoint |
 
 This table covers live providers available in the iOS app. macOS also supports Speechmatics streaming. Selectable iOS
 batch models upload recorded audio to OpenAI for supported OpenAI models or through OpenRouter for other remote models.
@@ -108,6 +109,19 @@ When using Meta Muse Voice Transcribe:
 - A generated session identifier used to correlate API logs
 - Meta's API limits file requests to 10 minutes and 32 MB; its handling and
   retention are governed by the Meta Model API account policy
+
+When using Alibaba Model Studio:
+- Fun-ASR-Realtime sends mono 16 kHz PCM16 microphone audio to the workspace's WebSocket endpoint.
+- Fun-ASR-Flash and Qwen Omni send the selected recording as inline Base64 audio to the workspace's HTTPS endpoint.
+  Speak does not upload these recordings to public object storage or make them available at public URLs.
+- The API key, region and workspace ID are stored together in the encrypted Keychain credential. Explicit QR transfer
+  and optional passphrase-encrypted key sync carry the same bound configuration.
+- Region selection determines the access endpoint and Alibaba's data-storage region, **not necessarily the inference
+  location**. The workspace's deployment range in Alibaba's console determines the inference boundary.
+- Speak never retries in another region. Provider errors and unavailable model access are shown rather than
+  silently sending audio to another provider.
+- Qwen Omni is an audio-understanding model prompted for transcription, not dedicated ASR, and can make generative
+  mistakes. Review important transcripts. See [Alibaba speech integrations](alibaba-speech.md) for limits and sources.
 
 ## Local Network (Send to Mac)
 

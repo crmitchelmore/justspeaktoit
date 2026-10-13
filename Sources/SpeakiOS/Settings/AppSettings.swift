@@ -280,6 +280,10 @@ public final class AppSettings: ObservableObject {
         didSet { persistSecret(azureAPIKey, identifier: Self.azureKeyID) }
     }
 
+    @Published public var alibabaAPIKey: String {
+        didSet { persistSecret(alibabaAPIKey, identifier: Self.alibabaKeyID) }
+    }
+
     @Published public var metaAPIKey: String {
         didSet { persistSecret(metaAPIKey, identifier: Self.metaKeyID) }
     }
@@ -306,6 +310,7 @@ public final class AppSettings: ObservableObject {
     static let googleKeyID = "google.apiKey"
     static let xAIKeyID = "xai.apiKey"
     static let azureKeyID = AzureSpeechConfiguration.credentialIdentifier
+    static let alibabaKeyID = AlibabaSpeechConfiguration.credentialIdentifier
     static let metaKeyID = "meta.apiKey"
     static let speechmaticsKeyID = "speechmatics.apiKey"
     static let revAIKeyID = "revai.apiKey"
@@ -660,6 +665,7 @@ public final class AppSettings: ObservableObject {
         self.reson8APIKey = ""
         self.stepfunAPIKey = ""
         self.azureAPIKey = ""
+        self.alibabaAPIKey = ""
         self.metaAPIKey = ""
         self.speechmaticsAPIKey = ""
         self.revAIAPIKey = ""
@@ -821,6 +827,7 @@ public final class AppSettings: ObservableObject {
     public var hasGoogleKey: Bool { !googleAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasXAIKey: Bool { !xAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasAzureKey: Bool { !azureAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    public var hasAlibabaKey: Bool { !alibabaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasMetaKey: Bool { !metaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasSpeechmaticsKey: Bool {
         !speechmaticsAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -851,6 +858,7 @@ public final class AppSettings: ObservableObject {
             }
         }
         if hasAzureKey { identifiers.insert(Self.azureKeyID) }
+        if hasAlibabaKey { identifiers.insert(Self.alibabaKeyID) }
         if hasMetaKey { identifiers.insert(Self.metaKeyID) }
         if hasSpeechmaticsKey { identifiers.insert(Self.speechmaticsKeyID) }
         if hasRevAIKey { identifiers.insert(Self.revAIKeyID) }
@@ -887,6 +895,7 @@ public final class AppSettings: ObservableObject {
         await reloadSyncedAPIKey(\.reson8APIKey, identifier: "reson8.apiKey")
         await reloadSyncedAPIKey(\.stepfunAPIKey, identifier: "stepfun.apiKey")
         await reloadSyncedAPIKey(\.azureAPIKey, identifier: Self.azureKeyID)
+        await reloadSyncedAPIKey(\.alibabaAPIKey, identifier: Self.alibabaKeyID)
         await reloadSyncedAPIKey(\.metaAPIKey, identifier: Self.metaKeyID)
         await reloadSyncedAPIKey(\.speechmaticsAPIKey, identifier: Self.speechmaticsKeyID)
         await reloadSyncedAPIKey(\.revAIAPIKey, identifier: Self.revAIKeyID)
@@ -979,7 +988,8 @@ public final class AppSettings: ObservableObject {
             Self.speechmaticsKeyID: speechmaticsAPIKey,
             Self.revAIKeyID: revAIAPIKey,
             Self.mistralKeyID: mistralAPIKey,
-            Self.azureKeyID: azureAPIKey
+            Self.azureKeyID: azureAPIKey,
+            Self.alibabaKeyID: alibabaAPIKey
         ]
     }
 
@@ -1031,6 +1041,7 @@ public final class AppSettings: ObservableObject {
             AppleLocalModels.isSpeechAnalyzerModel(option.id)
                 || openAIBatchModelIDs.contains(option.id)
                 || AzureTranscriptionModels.batchIDs.contains(option.id)
+                || AlibabaSpeechModels.batchIDs.contains(option.id)
                 // OpenRouter-routed Gemini batch models upload through the
                 // OpenRouter client; Gemini 3.5 Transcribe uploads through the
                 // shared `GeminiInteractionsClient` with the Google key

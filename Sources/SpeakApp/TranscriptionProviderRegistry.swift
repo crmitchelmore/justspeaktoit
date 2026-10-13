@@ -10,6 +10,7 @@ actor TranscriptionProviderRegistry {
 
     private init() {
         // Register all providers here - adding a new provider automatically makes it available
+        providers["alibaba"] = AlibabaTranscriptionProvider()
         providers["azure"] = AzureTranscriptionProvider()
         providers["openai"] = OpenAITranscriptionProvider()
         providers["revai"] = RevAITranscriptionProvider()
@@ -50,6 +51,9 @@ actor TranscriptionProviderRegistry {
         let components = trimmedModel.split(separator: "/")
         guard let providerID = components.first else { return nil }
         guard let provider = providers[String(providerID)] else { return nil }
+        // Alibaba owns the prefix, including invalid/retired selections. Its
+        // client rejects those explicitly rather than uploading to OpenRouter.
+        if providerID == "alibaba" { return provider }
 
         let supportedIDs = provider.supportedModels().map(\.id)
         // Live-only providers (e.g. Soniox) intentionally expose an empty batch

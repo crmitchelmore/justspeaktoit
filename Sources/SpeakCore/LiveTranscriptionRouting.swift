@@ -14,6 +14,7 @@ import Foundation
 /// of these providers.
 public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashable {
     case apple
+    case alibaba
     case azure
     case deepgram
     case cartesia
@@ -72,7 +73,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
     public var isSupportedOnIOS: Bool {
         switch self {
         case .apple, .deepgram, .elevenlabs, .openai, .cartesia, .soniox, .modulate, .assemblyai,
-             .gladia, .google, .xai, .meta, .speechmatics, .revai, .mistral, .azure, .reson8:
+             .gladia, .google, .xai, .meta, .speechmatics, .revai, .mistral, .azure, .alibaba, .reson8:
             return true
         }
     }
@@ -81,6 +82,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
     /// model picker so the UI scales cleanly as models are added.
     public var displayName: String {
         switch self {
+        case .alibaba: return "Alibaba Model Studio"
         case .azure: return "Azure Speech"
         case .apple: return "Apple"
         case .deepgram: return "Deepgram"
@@ -108,6 +110,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
     public var apiKeyURL: URL? {
         let website: String
         switch self {
+        case .alibaba: website = "https://bailian.console.aliyun.com"
         case .azure: website = "https://portal.azure.com"
         case .apple: return nil
         case .deepgram: website = "https://deepgram.com"
@@ -172,6 +175,7 @@ public enum LiveTranscriptionRouting {
         let prefix = String(trimmed[trimmed.startIndex..<slash]).lowercased()
         guard let provider = LiveTranscriptionProviderID(rawValue: prefix) else { return nil }
         if provider == .reson8, trimmed != FileSpeechProvider.reson8LiveID { return nil }
+        if provider == .alibaba, trimmed != AlibabaSpeechModels.funLive { return nil }
 
         return LiveTranscriptionRoute(
             modelID: trimmed,

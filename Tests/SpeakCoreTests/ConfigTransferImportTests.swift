@@ -137,6 +137,22 @@ final class ConfigTransferImportTests: XCTestCase { // swiftlint:disable:this ty
 
     // MARK: - Transactional apply
 
+    func testAlibabaCredentialImport_PreservesTheBoundRegionWorkspaceAndKey() async throws {
+        let credential = try AlibabaSpeechConfiguration(
+            region: .singapore, workspace: "llm-example", apiKey: "synthetic"
+        ).encodedCredentials()
+        let storage = makeStorage()
+        try await manager.applyImport(
+            payload: ConfigTransferPayload(secrets: ["alibaba.apiKey": credential], settings: [:]),
+            storage: storage, defaults: defaults
+        )
+        let restored = try await storage.secret(identifier: "alibaba.apiKey")
+        XCTAssertEqual(restored, credential)
+        let config = try AlibabaSpeechConfiguration(credentials: XCTUnwrap(restored))
+        XCTAssertEqual(config.region, .singapore)
+        XCTAssertEqual(config.workspace, "llm-example")
+    }
+
     func testApplyImport_appliesSecretsAndSettings() async throws {
         let storage = makeStorage()
         let payload = ConfigTransferPayload(

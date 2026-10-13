@@ -115,6 +115,10 @@ struct APIKeysView: View {
     private static func streamingProviderEntries(for settings: AppSettings) -> [APIKeyListEntry] {
         [
             APIKeyListEntry(
+                id: "alibaba", title: "Alibaba Model Studio", category: "Transcription",
+                isStored: settings.hasAlibabaKey
+            ),
+            APIKeyListEntry(
                 id: "xai", title: "xAI", category: "Transcription", isStored: settings.hasXAIKey
             ),
             APIKeyListEntry(
@@ -148,6 +152,7 @@ struct APIKeysView: View {
 
     var body: some View {
         Form {
+            Section("Alibaba workspace for new keys") { AlibabaSpeechConfigurationFields() }
             Section("Azure Speech resource") { AzureSpeechEndpointField() }
             if visibleEntries.isEmpty {
                 ContentUnavailableView(
@@ -307,6 +312,12 @@ struct APIKeysView: View {
         case "azure":
             return KeyPresentation(title: "Azure Speech", systemImage: "cloud",
                                    help: "Enter your Azure key and region as key:region.")
+        case "alibaba":
+            return KeyPresentation(
+                title: "Alibaba Model Studio", systemImage: "waveform",
+                help: "Choose the matching region and workspace above, then enter its Model Studio API key. "
+                    + "Access is checked when transcribing; no cross-region retry."
+            )
         case "meta":
             return KeyPresentation(
                 title: "Meta", systemImage: "waveform.badge.mic",
@@ -387,6 +398,7 @@ struct APIKeysView: View {
         case "reson8": settings.reson8APIKey = key
         case "stepfun": settings.stepfunAPIKey = key
         case "azure": settings.azureAPIKey = key
+        case "alibaba": settings.alibabaAPIKey = key
         case "meta": settings.metaAPIKey = key
         case "speechmatics": settings.speechmaticsAPIKey = key
         case "revai": settings.revAIAPIKey = key
@@ -404,12 +416,24 @@ struct APIKeysView: View {
     private func saveKeys() {
         let submission = self.drafts.submission()
         let order = self.allEntries.map(\.id)
+        let alibabaCredential = submission["alibaba"].map { key in
+            Result { try AlibabaSpeechConfiguration.credentialsForSaving(key) }
+        }
         Task {
             isValidating = true
             var messages: [String] = []
             for id in order {
                 guard let key = submission[id] else { continue }
-                let message = await self.save(key, for: id)
+                let credential: String?
+                if id == "alibaba", let alibabaCredential {
+                    switch alibabaCredential {
+                    case .success(let value): credential = value
+                    case .failure(let error):
+                        messages.append(error.localizedDescription)
+                        continue
+                    }
+                } else { credential = nil }
+                let message = await self.save(key, for: id, credential: credential)
                 messages.append(message)
             }
             isValidating = false
@@ -421,11 +445,12 @@ struct APIKeysView: View {
 
     /// Validates `key` where the provider has a cheap probe, stores it, and
     /// returns its line for the Validation alert.
-    private func save(_ key: String, for id: String) async -> String {
-        if let failure = await self.validationFailure(of: key, for: id) {
+    private func save(_ key: String, for id: String, credential: String? = nil) async -> String {
+        let savedValue = credential ?? key
+        if let failure = await self.validationFailure(of: savedValue, for: id) {
             return failure
         }
-        self.store(key, for: id)
+        self.store(savedValue, for: id)
         self.drafts.clear(id, ifStill: key)
         if id == "deepgram" {
             // Auto-select Deepgram as the provider now that there is a key.
@@ -445,6 +470,11 @@ struct APIKeysView: View {
         let title = self.presentation(for: id).title
         let outcome: APIKeyValidationResult.Outcome
         switch id {
+        case "alibaba":
+            do {
+                _ = try AlibabaSpeechConfiguration(credentials: key)
+                return nil
+            } catch { return error.localizedDescription }
         case "azure":
             do {
                 _ = try await AzureSpeechVoiceAPI().listVoices(credentials: key)
@@ -471,6 +501,8 @@ struct APIKeysView: View {
 
     private static func savedMessage(for id: String, title: String) -> String {
         switch id {
+        case "alibaba":
+            return "✓ Alibaba key, region and workspace saved. Access is checked when transcribing."
         case "azure":
             return "✓ Azure key and region saved; transcription access depends on your resource."
         case "deepgram", "elevenlabs":

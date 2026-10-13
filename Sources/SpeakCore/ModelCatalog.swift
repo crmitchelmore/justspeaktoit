@@ -135,10 +135,11 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
                 + "accuracy on noisy or accented audio with keyterm prompt support. Reuses your "
                 + "OpenAI API key.",
             estimatedLatencyMs: 280, latencyTier: .fast)
-    ] + AzureTranscriptionModels.liveOptions + [FileSpeechProvider.reson8LiveOption]
+    ] + AzureTranscriptionModels.liveOptions + AlibabaSpeechModels.liveOptions
+        + [FileSpeechProvider.reson8LiveOption]
 
     public static let batchTranscription: [Option] =
-        appleBatchTranscriptionOptions + [
+        appleBatchTranscriptionOptions + AlibabaSpeechModels.batchOptions + [
         Option(
             id: BatchTranscriptionModelIdentifiers.cartesiaInkWhisper, displayName: "Cartesia Ink Whisper (Batch)",
             description: "Multilingual file transcription. Choose the recording language; Automatic uses English.",

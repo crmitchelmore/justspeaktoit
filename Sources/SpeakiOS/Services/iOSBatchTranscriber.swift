@@ -230,6 +230,7 @@ enum IOSBatchTranscriptionRoute: Equatable, Sendable {
     case openAI
     case metaMuse
     case azure
+    case alibaba
     case cartesia
     /// Gladia's asynchronous pre-recorded job API, through the shared
     /// `GladiaBatchClient` with the `gladia.apiKey` this app already stores for
@@ -255,6 +256,7 @@ enum IOSBatchTranscriptionRoute: Equatable, Sendable {
         if model == CartesiaBatchClient.catalogID { return .cartesia }
         if model == GladiaBatchClient.catalogID { return .gladia }
         if AzureTranscriptionModels.batchIDs.contains(model) { return .azure }
+        if model.hasPrefix("alibaba/") { return .alibaba }
         if model == MetaMuseVoiceTranscribe.batchCatalogID { return .metaMuse }
         if GeminiTranscribeModels.directBatchModelIDs.contains(model) { return .gemini }
         if model == XAISpeechToText.batchCatalogID { return .xai }

@@ -7,6 +7,19 @@ import SpeakDesktop
 package struct DesktopVoiceOutputSettings: Codable, Equatable, Sendable {
     package var modelID: String?
     package var voiceID: String?
+    package var autoPlay: Bool?
+    package var saveToRecordings: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case modelID, voiceID
+        case autoPlay = "ttsAutoPlay"
+        case saveToRecordings = "ttsSaveToDirectory"
+    }
+
+    package var generationOptions: VoiceGenerationOptions {
+        .init(autoPlay: autoPlay ?? SpeechGenerationDefaults.autoPlay,
+              saveToRecordings: saveToRecordings ?? SpeechGenerationDefaults.saveToRecordings)
+    }
 
     package var voice: DeepgramSpeechCatalog.Voice {
         DeepgramSpeechCatalog.resolvedSelection(modelID: modelID, voiceID: voiceID).voice
@@ -117,7 +130,27 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     package func voiceOutputSettings() -> DesktopVoiceOutputSettings { settings.voiceOutput ?? .init() }
 
     package func saveVoiceOutput(_ voiceOutput: DesktopVoiceOutputSettings) {
-        guard !closed else { return }
+        _ = persistVoiceOutput(voiceOutput, message:
+            "Read aloud voice saved: \(DesktopVoiceOutputSettings.label(voiceOutput.voice)).")
+    }
+
+    package func selectVoiceOutput(_ voice: DeepgramSpeechCatalog.Voice) {
+        var changed = voiceOutputSettings()
+        changed.modelID = voice.model.id
+        changed.voiceID = voice.id
+        saveVoiceOutput(changed)
+    }
+
+    @discardableResult
+    package func saveVoiceGenerationOptions(_ options: VoiceGenerationOptions) -> Bool {
+        var changed = voiceOutputSettings()
+        changed.autoPlay = options.autoPlay
+        changed.saveToRecordings = options.saveToRecordings
+        return persistVoiceOutput(changed, message: "Generated voice playback and save preferences saved.")
+    }
+
+    private func persistVoiceOutput(_ voiceOutput: DesktopVoiceOutputSettings, message: String) -> Bool {
+        guard !closed else { return false }
         var changed = settings
         changed.voiceOutput = voiceOutput
         do {
@@ -125,9 +158,9 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 JSONEncoder().encode(changed), to: directory.appendingPathComponent("settings.json")
             )
             settings = changed
-            guard !busy, recording == nil else { return }
-            update("Read aloud voice saved: \(DesktopVoiceOutputSettings.label(voiceOutput.voice)).")
-        } catch { update("Could not save the voice: \(error.localizedDescription)") }
+            if !busy, recording == nil { update(message) }
+            return true
+        } catch { update("Could not save Voice Output settings: \(error.localizedDescription)"); return false }
     }
 
     /// `text` is the transcript displayed for `identifier` when Read aloud was clicked.

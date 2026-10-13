@@ -135,6 +135,24 @@ final class DesktopHostRecordingFeedbackTests: XCTestCase {
         XCTAssertTrue(report.recordingSaved)
         XCTAssertFalse(report.recordingFeedbackClosed)
     }
+
+    func testFeedback_DeviceFailureUsesBoundedActionableStatusWithoutDisablingDictation() async throws {
+        await controller.prepareRecordingFeedback(loader: FailedFeedbackLoader())
+        for _ in 0..<1_000 {
+            if FakeLog.shared.allStatuses.last?.hasPrefix("Recording sounds unavailable.") == true { break }
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        XCTAssertEqual(FakeLog.shared.allStatuses.last,
+                       "Recording sounds unavailable. Check audio output; dictation still works.")
+        await toggle()
+        XCTAssertNotNil(effects.capture)
+    }
+}
+
+private struct FailedFeedbackLoader: DesktopRecordingFeedbackLoader {
+    func prepare(profile: RecordingFeedbackProfile) async throws -> any DesktopRecordingFeedbackOutput {
+        throw DesktopHostError(message: "No active audio output device is available (HRESULT 0x80070490).")
+    }
 }
 
 private struct TailFeedbackLoader: DesktopRecordingFeedbackLoader {

@@ -7,8 +7,11 @@ extension DesktopHostController {
         guard !closed else { return }
         if recordingFeedback == nil, let loader = loader ?? Platform.makeRecordingFeedbackLoader() {
             recordingFeedback = DesktopRecordingFeedback(loader: loader) { [weak self] message in
-                FileHandle.standardError.write(Data("\(message)\n".utf8))
-                Task { await self?.recordingFeedbackFailed(message) }
+                Task {
+                    if let self { await self.recordingFeedbackFailed(message) } else {
+                        FileHandle.standardError.write(Data("\(message)\n".utf8))
+                    }
+                }
             }
         }
         do { try await configureRecordingFeedback(configuration()) } catch {
@@ -40,6 +43,8 @@ extension DesktopHostController {
     }
 
     private func recordingFeedbackFailed(_ message: String) {
-        update("\(message) Dictation and its saved audio are unaffected.")
+        FileHandle.standardError.write(Data("\(message)\n".utf8))
+        guard !closed else { return }
+        update("Recording sounds unavailable. Check audio output; dictation still works.")
     }
 }

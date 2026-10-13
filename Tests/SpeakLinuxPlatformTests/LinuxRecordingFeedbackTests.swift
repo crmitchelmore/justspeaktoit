@@ -41,8 +41,8 @@ final class LinuxRecordingFeedbackTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let path = directory.appendingPathComponent("long.wav")
-        let file = try PCMRecordingFile(url: path, sampleRate: 8_000)
-        try file.append(Data(repeating: 1, count: 8_000 * 11 * 2))
+        let file = try PCMRecordingFile(url: path)
+        try file.append(Data(repeating: 1, count: PCMRecordingFile.sampleRate * 11 * 2))
         _ = try file.finish()
         var error = [CChar](repeating: 0, count: 512)
         XCTAssertEqual(jsti_recording_feedback_check_asset(path.path, &error, error.count), -1)

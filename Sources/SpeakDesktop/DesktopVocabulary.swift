@@ -45,6 +45,7 @@ public enum DesktopVocabularyError: LocalizedError, Equatable {
 /// One shared coordinator behind both native editors. No OS-wide text observation is performed.
 @VocabularyActor
 public final class DesktopVocabulary {
+    private static let editorKinds: Set<Int> = [0, 1, 3]
     public let lexicon: PersonalLexiconDomain
     public let candidates: AutoCorrectionDomain
     public private(set) var entries: [PronunciationEntry] = []
@@ -129,7 +130,9 @@ public final class DesktopVocabulary {
             notice, String(preferences.includeLexiconDirectives), String(preferences.includeContextTags),
             preferences.contextTags.sorted().joined(separator: ", ")
         ])]
-        if kind == 0 {
+        if kind == 3 {
+            rows += candidateRows()
+        } else if kind == 0 {
             rows += lexicon.rules.map { rule in
                 DesktopVocabularyWire.encode([
                     rule.id.uuidString, rule.displayName, rule.canonical, rule.aliases.joined(separator: "\n"),
@@ -162,7 +165,14 @@ public final class DesktopVocabulary {
     private func performImmediately(kind: Int, payload: String) async throws -> String {
         if let loadError { throw loadError }
         let fields = try DesktopVocabularyWire.decode(payload)
-        guard let action = fields.first, (0...1).contains(kind) else { throw DesktopVocabularyError.invalidEvent }
+        guard let action = fields.first, Self.editorKinds.contains(kind) else {
+            throw DesktopVocabularyError.invalidEvent
+        }
+        if kind == 3 { return try await performCandidateAction(fields) }
+        return try await performEditorAction(kind: kind, action: action, fields: fields)
+    }
+
+    private func performEditorAction(kind: Int, action: String, fields: [String]) async throws -> String {
         if action == "preview" { return try preview(kind: kind, fields: fields) }
         if action == "preferences" { return try savePreferences(fields) }
         if action == "defaults", kind == 1 {

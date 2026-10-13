@@ -6,11 +6,14 @@
 #include <mutex>
 #include <vector>
 
+void jsti_show_vocabulary(HWND owner, int kind, void (*emit)(int, const char *, int));
+
 namespace {
 constexpr UINT update = WM_APP + 93;
 enum { list = 900, add, save, remove, up, down, field = 910, preview = 920,
        previewTags, previewButton, notice, includeRules, includeTags, tags, preferences, defaults,
-       search = 930, importMerge = 934, importReplace, exportJSON };
+       search = 930, importMerge = 934, importReplace, exportJSON,
+       reviewCandidates = 960, promoteCandidate, dismissCandidate, clearCandidates };
 using Row = std::array<std::string, 8>;
 struct Dialog {
     int kind = 0, selected = -1, scroll = 0;
@@ -101,6 +104,13 @@ std::string value(Dialog &d, int index) {
     return get(d.window, field + index - 1);
 }
 void fill(Dialog &d, const Row &row) {
+    if (d.kind == 3) {
+        set(d.window, notice, row[0].empty()
+            ? "Review stored candidates only. Automatic observation of edits in other apps is not available."
+            : row[1] + " -> " + row[2] + "\r\nSeen: " + row[3] + "\r\nSource apps: " + row[4]
+                + "\r\nFirst seen: " + row[5] + "\r\nLast seen: " + row[6] + "\r\nState: " + row[7]);
+        return;
+    }
     for (int i = 1; i < 8; ++i) {
         if (d.kind == 1 && i == 7) continue;
         if (combo(d, i)) {
@@ -131,7 +141,8 @@ void rebuild(Dialog &d) {
     }
 }
 void pending(Dialog &d, bool busy) {
-    for (int id : {save, remove, up, down, add, previewButton, preferences, defaults, list, importMerge, importReplace, exportJSON})
+    for (int id : {save, remove, up, down, add, previewButton, preferences, defaults, list, importMerge,
+         importReplace, exportJSON, reviewCandidates, promoteCandidate, dismissCandidate, clearCandidates})
         EnableWindow(GetDlgItem(d.window, id), !busy);
 }
 void transfer(Dialog &d, const char *action) {
@@ -153,7 +164,12 @@ void transfer(Dialog &d, const char *action) {
 }
 void action(Dialog &d, const char *name) {
     std::string payload = name;
-    if (std::strcmp(name, "preview") == 0) {
+    if (d.kind == 3) {
+        if (std::strcmp(name, "clear") != 0) {
+            if (d.selected < 0) { set(d.window, notice, "Select a stored candidate first."); return; }
+            payload += "\t" + escaped(d.rows[static_cast<size_t>(d.selected)][0]);
+        }
+    } else if (std::strcmp(name, "preview") == 0) {
         payload += "\t" + escaped(get(d.window, preview)) + "\t" + escaped(get(d.window, previewTags));
     } else if (std::strcmp(name, "preferences") == 0) {
         payload += IsDlgButtonChecked(d.window, includeRules) == BST_CHECKED ? "\ttrue" : "\tfalse";
@@ -175,6 +191,22 @@ void layout(Dialog &d) {
         const int inset = scale(d.window, 16);
         MoveWindow(GetDlgItem(d.window, notice), inset, inset, static_cast<int>(r.right) - 2 * inset,
             static_cast<int>(r.bottom) - 2 * inset, TRUE);
+        return;
+    }
+    if (d.kind == 3) {
+        const int inset = scale(d.window, 16), width = static_cast<int>(r.right) - 2 * inset;
+        const int row = scale(d.window, 32), footer = static_cast<int>(r.bottom) - scale(d.window, 180);
+        MoveWindow(GetDlgItem(d.window, 951), inset, inset, width, scale(d.window, 20), TRUE);
+        MoveWindow(GetDlgItem(d.window, search), inset, scale(d.window, 42), width, row, TRUE);
+        MoveWindow(GetDlgItem(d.window, list), inset, scale(d.window, 82), width,
+            footer - scale(d.window, 92), TRUE);
+        const int ids[] = {promoteCandidate, dismissCandidate, remove, clearCandidates, reviewCandidates};
+        for (int i = 0; i < 5; ++i)
+            MoveWindow(GetDlgItem(d.window, ids[i]), inset + i * width / 5, footer,
+                width / 5 - scale(d.window, 8), row, TRUE);
+        MoveWindow(GetDlgItem(d.window, notice), inset, footer + row + scale(d.window, 8), width,
+            static_cast<int>(r.bottom) - footer - row - 2 * inset, TRUE);
+        ShowScrollBar(d.window, SB_VERT, FALSE);
         return;
     }
     const int height = std::max(static_cast<int>(r.bottom), scale(d.window, 920));
@@ -199,6 +231,7 @@ void layout(Dialog &d) {
     move(save, 250, 485, 130, 30); move(defaults, 390, 485, 170, 30);
     move(importMerge, 16, 615, 210, 30); move(importReplace, 16, 655, 210, 30);
     move(exportJSON, 16, 695, 210, 30);
+    move(reviewCandidates, 16, 615, 210, 40);
     move(948, 250, 532, -1, 20); move(preview, 250, 558, -1, 65);
     move(949, 250, 630, -1, 20); move(previewTags, 250, 655, -1, 28);
     move(previewButton, 250, 695, 130, 30);
@@ -236,6 +269,18 @@ bool createControls(Dialog &d) {
     if (!control(L"STATIC", L"Searc&h saved entries", 0, 951)
         || !control(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, search)
         || !control(L"LISTBOX", L"", LBS_NOTIFY | WS_TABSTOP | WS_VSCROLL | WS_BORDER, list)) return false;
+    if (d.kind == 3) {
+        for (const auto &item : std::vector<std::pair<int, const wchar_t *>>{
+             {promoteCandidate, L"&Approve"}, {dismissCandidate, L"&Dismiss"}, {remove, L"&Remove"},
+             {clearCandidates, L"&Clear all"}, {reviewCandidates, L"Re&load"}})
+            if (!control(L"BUTTON", item.second, button, item.first)) return false;
+        if (!control(L"EDIT", L"Loading stored candidates...", ES_MULTILINE | ES_READONLY
+            | ES_AUTOVSCROLL | WS_VSCROLL | WS_TABSTOP, notice)) return false;
+        ShowScrollBar(d.window, SB_VERT, FALSE);
+        pending(d, true);
+        return updateFont(d);
+    }
+    if (d.kind == 0 && !control(L"BUTTON", L"Review stored &candidates...", button, reviewCandidates)) return false;
     for (const auto &item : std::vector<std::pair<int, const wchar_t *>>{
          {add, L"&New"}, {save, L"&Save entry"}, {remove, L"&Delete"}, {up, L"Move &up"}, {down, L"Move &down"},
          {previewButton, L"&Preview"}, {preferences, L"Save &context settings"}, {defaults, L"Add default &entries"}})
@@ -295,7 +340,7 @@ LRESULT CALLBACK procedure(HWND w, UINT message, WPARAM wp, LPARAM lp) {
     case WM_CREATE: return createControls(*d) ? 0 : -1;
     case WM_SIZE: layout(*d); return 0;
     case WM_MOUSEWHEEL:
-        if (d->kind != 2) {
+        if (d->kind < 2) {
             d->scroll -= scale(w, 72) * GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA;
             layout(*d); return 0;
         }
@@ -329,7 +374,7 @@ LRESULT CALLBACK procedure(HWND w, UINT message, WPARAM wp, LPARAM lp) {
         if (lines.empty()) return 0;
         auto header = split(lines[0], '\t');
         set(w, notice, decoded(header[0]));
-        if (header.size() == 4) {
+        if (d->kind == 0 && header.size() == 4) {
             CheckDlgButton(w, includeRules, header[1] == "true" ? BST_CHECKED : BST_UNCHECKED);
             CheckDlgButton(w, includeTags, header[2] == "true" ? BST_CHECKED : BST_UNCHECKED);
             set(w, tags, decoded(header[3]));
@@ -368,6 +413,30 @@ LRESULT CALLBACK procedure(HWND w, UINT message, WPARAM wp, LPARAM lp) {
             return 0;
         }
         if (HIWORD(wp) != BN_CLICKED) break;
+        if (id == reviewCandidates && d->kind == 0) {
+            jsti_show_vocabulary(w, 3, d->emit);
+            if (IsWindow(w)) {
+                { std::lock_guard<std::mutex> lock(mutex); active = w; activeKind = d->kind; }
+                pending(*d, true); d->emit(71, "", d->kind);
+            }
+            return 0;
+        }
+        if (d->kind == 3) {
+            if (id == reviewCandidates) { pending(*d, true); d->emit(71, "", 3); return 0; }
+            if (id == clearCandidates || id == remove || id == dismissCandidate) {
+                if (id != clearCandidates && d->selected < 0) {
+                    set(w, notice, "Select a stored candidate first."); return 0;
+                }
+                const wchar_t *question = id == clearCandidates ? L"Clear all stored candidates? Saved rules stay unchanged."
+                    : id == remove ? L"Remove this stored candidate?" : L"Dismiss this stored candidate?";
+                if (MessageBoxW(w, question, L"Confirm candidate change", MB_YESNO | MB_ICONQUESTION) != IDYES) return 0;
+            }
+            if (id == promoteCandidate) action(*d, "promote");
+            else if (id == dismissCandidate) action(*d, "dismiss");
+            else if (id == remove) action(*d, "remove");
+            else if (id == clearCandidates) action(*d, "clear");
+            return 0;
+        }
         if (id == add) {
             d->selected = -1; Row row{};
             row[4] = d->kind == 0 ? "automatic" : "";
@@ -394,7 +463,8 @@ LRESULT CALLBACK procedure(HWND w, UINT message, WPARAM wp, LPARAM lp) {
     }
     case WM_CLOSE: DestroyWindow(w); return 0;
     case WM_DESTROY: {
-        { std::lock_guard<std::mutex> lock(mutex); active = nullptr; activeKind = -1; }
+        { std::lock_guard<std::mutex> lock(mutex);
+          if (active == w) { active = nullptr; activeKind = -1; } }
         MSG queued{};
         while (PeekMessageW(&queued, w, update, update, PM_REMOVE)) delete reinterpret_cast<Update *>(queued.lParam);
         if (d->font) DeleteObject(d->font);
@@ -410,7 +480,8 @@ HWND createWindow(HWND owner, Dialog &dialog) {
     if (!RegisterClassW(&type) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return nullptr;
     return CreateWindowExW(WS_EX_CONTROLPARENT, type.lpszClassName,
         dialog.kind == 0 ? L"Corrections - Just Speak to It" : dialog.kind == 1
-            ? L"Pronunciation - Just Speak to It" : L"Recording corrections - Just Speak to It",
+            ? L"Pronunciation - Just Speak to It" : dialog.kind == 2
+                ? L"Recording corrections - Just Speak to It" : L"Stored correction candidates - Just Speak to It",
         WS_OVERLAPPEDWINDOW | WS_VSCROLL, CW_USEDEFAULT, CW_USEDEFAULT, scale(owner, 850), scale(owner, 740),
         owner, nullptr, type.hInstance, &dialog);
 }
@@ -440,7 +511,7 @@ void jsti_show_vocabulary_result(HWND owner, const char *record, void (*emit)(in
 }
 
 int32_t jsti_vocabulary_set(int32_t kind, const char *payload, int32_t refresh) {
-    if (kind < 0 || kind > 2 || !payload || std::strlen(payload) > 4 * 1024 * 1024) return -1;
+    if (kind < 0 || kind > 3 || !payload || std::strlen(payload) > 4 * 1024 * 1024) return -1;
     auto data = std::make_unique<Update>(); data->payload = payload; data->refresh = refresh != 0;
     std::lock_guard<std::mutex> lock(mutex);
     if (!active || activeKind != kind) return 0;
@@ -450,7 +521,7 @@ int32_t jsti_vocabulary_set(int32_t kind, const char *payload, int32_t refresh) 
 
 bool jsti_vocabulary_self_test(HWND owner, std::string &error) {
     static std::string captured;
-    for (int kind = 0; kind < 3; ++kind) {
+    for (int kind = 0; kind < 4; ++kind) {
         Dialog dialog; dialog.kind = kind;
         dialog.emit = [](int event, const char *payload, int) { if (event == 70) captured = payload; };
         HWND window = createWindow(owner, dialog);
@@ -460,6 +531,17 @@ bool jsti_vocabulary_self_test(HWND owner, std::string &error) {
             const bool valid = get(window, notice) == "Applied\nSynthetic -> Canonical\nSuggestions\nmanual\t%";
             DestroyWindow(window);
             if (!valid) { error = "Correction results did not preserve readable multiline text."; return false; }
+            continue;
+        }
+        if (kind == 3) {
+            Row row{}; row[0] = "synthetic\t%"; row[1] = "Synthetic"; row[2] = "Canonical"; row[3] = "2";
+            dialog.rows.push_back(row); dialog.selected = 0;
+            fill(dialog, row); action(dialog, "promote");
+            auto fields = split(captured, '\t');
+            bool valid = fields.size() == 2 && decoded(fields[1]) == row[0] && fields[0] == "promote";
+            action(dialog, "clear"); valid = valid && captured == "clear";
+            DestroyWindow(window);
+            if (!valid) { error = "Stored candidate events were not preserved."; return false; }
             continue;
         }
         Row row{}; row[1] = "Synthetic"; row[2] = "Canonical"; row[3] = "spoken\nvariant\t%";

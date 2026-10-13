@@ -2,6 +2,8 @@
 #include <adwaita.h>
 #include <string.h>
 
+GtkWidget *jsti_vocabulary_page_new(int kind);
+
 typedef struct {
     int kind;
     GtkWidget *root, *fields[8], *preview, *preview_tags, *status, *search;
@@ -13,7 +15,7 @@ typedef struct {
     GtkCheckButton *include_rules, *include_tags;
     GtkEntry *tags;
 } Editor;
-static Editor *editors[2];
+static Editor *editors[4];
 static const char *activations[] = { "automatic", "requireContextMatch", "manual", NULL };
 static const char *confidences[] = { "high", "medium", "low", NULL };
 
@@ -45,6 +47,12 @@ static void set_text(GtkWidget *widget, const char *value) {
 static gboolean combo(Editor *e, int i) { return e->kind == 0 && (i == 4 || i == 6); }
 static gboolean check(Editor *e, int i) { return e->kind == 1 && (i == 5 || i == 6); }
 static void fill(Editor *e, gchar **row) {
+    if (e->kind == 3) {
+        gchar *details = row == NULL ? g_strdup("Select a stored candidate. No edits in other apps are observed.")
+            : g_strdup_printf("%s -> %s\nSeen: %s\nSource apps: %s\nFirst seen: %s\nLast seen: %s\nState: %s",
+                row[1], row[2], row[3], row[4], row[5], row[6], row[7]);
+        gtk_label_set_text(GTK_LABEL(e->fields[1]), details); g_free(details); return;
+    }
     for (int i = 1; i < 8; ++i) {
         if (e->kind == 1 && i == 7) continue;
         const char *value = row != NULL ? row[i] : "";
@@ -75,7 +83,12 @@ static void selected(GtkListBox *list, GtkListBoxRow *row, gpointer data) {
 }
 static gchar *action_payload(Editor *e, const char *action) {
     GString *payload = g_string_new(action);
-    if (g_strcmp0(action, "preview") == 0) {
+    if (e->kind == 3) {
+        if (g_strcmp0(action, "clear") != 0) {
+            gchar **row = e->selected >= 0 ? g_ptr_array_index(e->rows, (guint)e->selected) : NULL;
+            append_field(payload, row != NULL ? row[0] : "");
+        }
+    } else if (g_strcmp0(action, "preview") == 0) {
         gchar *sample = text(e->preview), *tags = text(e->preview_tags);
         append_field(payload, sample); append_field(payload, tags); g_free(sample); g_free(tags);
     } else if (g_strcmp0(action, "preferences") == 0) {
@@ -158,13 +171,56 @@ static void replace_response(AdwMessageDialog *dialog, const char *response, gpo
     Editor *e = g_object_get_data(G_OBJECT(data), "vocabulary-editor");
     if (e != NULL && g_strcmp0(response, "replace") == 0) transfer(e, 1);
 }
+static void candidate_response(AdwMessageDialog *dialog, const char *response, gpointer data) {
+    Editor *e = g_object_get_data(G_OBJECT(data), "vocabulary-editor");
+    if (e != NULL && g_strcmp0(response, "apply") == 0) {
+        const char *payload = g_object_get_data(G_OBJECT(dialog), "candidate-payload");
+        pending(e, TRUE); jsti_window_emit(70, payload, 3);
+    }
+}
 static void clicked(GtkButton *button, gpointer data) {
     Editor *e = data;
     const char *action = g_object_get_data(G_OBJECT(button), "vocabulary-action");
+    if (g_strcmp0(action, "candidates") == 0) {
+        if (editors[3] != NULL) {
+            GtkRoot *existing = gtk_widget_get_root(editors[3]->root);
+            if (GTK_IS_WINDOW(existing)) gtk_window_present(GTK_WINDOW(existing));
+            return;
+        }
+        GtkRoot *root = gtk_widget_get_root(e->root);
+        GtkWidget *window = gtk_window_new();
+        gtk_window_set_title(GTK_WINDOW(window), "Stored correction candidates");
+        gtk_window_set_default_size(GTK_WINDOW(window), 800, 640);
+        if (GTK_IS_WINDOW(root)) gtk_window_set_transient_for(GTK_WINDOW(window), GTK_WINDOW(root));
+        gtk_window_set_destroy_with_parent(GTK_WINDOW(window), TRUE);
+        gtk_window_set_modal(GTK_WINDOW(window), TRUE);
+        gtk_window_set_child(GTK_WINDOW(window), jsti_vocabulary_page_new(3));
+        gtk_window_present(GTK_WINDOW(window)); jsti_window_emit(71, "", 3); return;
+    }
+    if (e->kind == 3 && g_strcmp0(action, "refresh") != 0) {
+        if (g_strcmp0(action, "clear") != 0 && e->selected < 0) {
+            gtk_label_set_text(GTK_LABEL(e->status), "Select a stored candidate first."); return;
+        }
+        if (g_strcmp0(action, "promote") == 0) { send_action(e, action); return; }
+        GtkRoot *root = gtk_widget_get_root(e->root);
+        GtkWidget *dialog = adw_message_dialog_new(GTK_IS_WINDOW(root) ? GTK_WINDOW(root) : NULL,
+            "Change stored candidates?", g_strcmp0(action, "clear") == 0
+                ? "Clear all stored candidates? Saved correction rules stay unchanged."
+                : g_strcmp0(action, "dismiss") == 0 ? "Dismiss this stored candidate?" : "Remove this stored candidate?");
+        g_object_set_data_full(G_OBJECT(dialog), "candidate-payload", action_payload(e, action), g_free);
+        adw_message_dialog_add_responses(ADW_MESSAGE_DIALOG(dialog), "cancel", "Cancel", "apply", "Confirm", NULL);
+        adw_message_dialog_set_response_appearance(ADW_MESSAGE_DIALOG(dialog), "apply", ADW_RESPONSE_DESTRUCTIVE);
+        adw_message_dialog_set_default_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
+        adw_message_dialog_set_close_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
+        g_signal_connect_object(dialog, "response", G_CALLBACK(candidate_response), e->root, 0);
+        gtk_window_present(GTK_WINDOW(dialog)); return;
+    }
     if (g_strcmp0(action, "new") == 0) {
         e->selected = -1; gtk_list_box_unselect_all(e->list); fill(e, NULL); return;
     }
-    if (g_strcmp0(action, "refresh") == 0) { jsti_window_emit(71, "", e->kind); return; }
+    if (g_strcmp0(action, "refresh") == 0) {
+        pending(e, TRUE); jsti_window_emit(71, "", e->kind); return;
+    }
     if (g_strcmp0(action, "importMerge") == 0) { transfer(e, 0); return; }
     if (g_strcmp0(action, "export") == 0) { transfer(e, 2); return; }
     if (g_strcmp0(action, "importReplace") == 0) {
@@ -218,7 +274,8 @@ static GtkWidget *multiline(GtkWidget **view) {
     return scroll;
 }
 static void destroy_editor(gpointer data) {
-    Editor *e = data; editors[e->kind] = NULL;
+    Editor *e = data;
+    if (editors[e->kind] == e) editors[e->kind] = NULL;
     g_ptr_array_unref(e->rows); g_ptr_array_unref(e->buttons); g_free(e);
 }
 GtkWidget *jsti_vocabulary_page_new(int kind) {
@@ -227,8 +284,10 @@ GtkWidget *jsti_vocabulary_page_new(int kind) {
     e->buttons = g_ptr_array_new();
     GtkWidget *column, *page = jsti_page_new(&column); e->root = page; editors[kind] = e;
     g_object_set_data_full(G_OBJECT(page), "vocabulary-editor", e, destroy_editor);
-    GtkWidget *hero = jsti_hero_new("settings", kind == 0 ? "Corrections" : "Pronunciation Dictionary",
+    GtkWidget *hero = jsti_hero_new("settings", kind == 0 ? "Corrections"
+        : kind == 3 ? "Stored correction candidates" : "Pronunciation Dictionary",
         kind == 0 ? "Preferred spellings before post-processing. The original provider transcript stays in History."
+        : kind == 3 ? "Review real stored candidates. Automatic observation of edits in other apps is not available."
         : "Your Read aloud dictionary. Deepgram uses text replacements, not IPA phoneme tags.", NULL, NULL);
     gtk_box_append(GTK_BOX(column), hero);
     e->search = gtk_search_entry_new();
@@ -245,6 +304,22 @@ GtkWidget *jsti_vocabulary_page_new(int kind) {
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), GTK_WIDGET(e->list));
     gtk_box_append(GTK_BOX(column), scroll);
     GtkWidget *actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    if (kind == 3) {
+        const char *titles[] = {"_Approve", "_Dismiss", "_Remove", "_Clear all", "Re_load"};
+        const char *commands[] = {"promote", "dismiss", "remove", "clear", "refresh"};
+        for (int i = 0; i < 5; ++i) gtk_box_append(GTK_BOX(actions), button(e, titles[i], commands[i]));
+        gtk_box_append(GTK_BOX(column), actions);
+        e->fields[1] = gtk_label_new("");
+        gtk_label_set_xalign(GTK_LABEL(e->fields[1]), 0);
+        gtk_label_set_wrap(GTK_LABEL(e->fields[1]), TRUE);
+        gtk_label_set_selectable(GTK_LABEL(e->fields[1]), TRUE);
+        gtk_box_append(GTK_BOX(column), e->fields[1]);
+        e->status = gtk_label_new("Reload to inspect stored candidates.");
+        gtk_label_set_wrap(GTK_LABEL(e->status), TRUE);
+        gtk_label_set_xalign(GTK_LABEL(e->status), 0);
+        gtk_box_append(GTK_BOX(column), e->status);
+        fill(e, NULL); pending(e, TRUE); return page;
+    }
     const char *names[] = {"_New", "_Delete", "Move _up", "Move _down", "_Reload"};
     const char *values[] = {"new", "delete", "up", "down", "refresh"};
     for (int i = 0; i < 5; ++i) gtk_box_append(GTK_BOX(actions), button(e, names[i], values[i]));
@@ -301,6 +376,7 @@ GtkWidget *jsti_vocabulary_page_new(int kind) {
         gtk_box_append(GTK_BOX(column), GTK_WIDGET(e->include_tags));
         gtk_box_append(GTK_BOX(column), GTK_WIDGET(e->tags));
         gtk_box_append(GTK_BOX(column), button(e, "Save _context settings", "preferences"));
+        gtk_box_append(GTK_BOX(column), button(e, "Review stored _candidates", "candidates"));
         label = gtk_label_new("Automatic observation of edits in other apps is not available on this platform.");
         gtk_label_set_wrap(GTK_LABEL(label), TRUE); gtk_box_append(GTK_BOX(column), label);
     }
@@ -367,7 +443,8 @@ static void present(gpointer data) {
         }
         if (!valid) { g_strfreev(row); continue; }
         if (g_strcmp0(row[0], selected_id) == 0) e->selected = (gint)e->rows->len;
-        gchar *title = e->kind == 1 ? g_strdup_printf("%s -> %s [%s]", row[1], row[2], row[4])
+        gchar *title = e->kind == 3 ? g_strdup_printf("%s -> %s (seen %s; %s)", row[1], row[2], row[3], row[7])
+            : e->kind == 1 ? g_strdup_printf("%s -> %s [%s]", row[1], row[2], row[4])
             : g_strdup_printf("%s -> %s", row[1], row[2]);
         GtkWidget *label = gtk_label_new(title); gtk_label_set_xalign(GTK_LABEL(label), 0);
         gtk_label_set_wrap(GTK_LABEL(label), TRUE); gtk_list_box_append(e->list, label);
@@ -379,9 +456,10 @@ static void present(gpointer data) {
         fill(e, g_ptr_array_index(e->rows, (guint)e->selected));
     }
     pending(e, FALSE);
+    if (e->kind == 3 && editors[0] != NULL) jsti_window_emit(71, "", 0);
 }
 int32_t jsti_vocabulary_set(int32_t kind, const char *payload, int32_t refresh) {
-    if (kind < 0 || kind > 2 || payload == NULL || strlen(payload) > 4 * 1024 * 1024
+    if (kind < 0 || kind > 3 || payload == NULL || strlen(payload) > 4 * 1024 * 1024
         || !g_utf8_validate(payload, -1, NULL)) return -1;
     Presentation *p = g_new0(Presentation, 1);
     p->kind = kind; p->payload = g_strdup(payload); p->refresh = refresh != 0;
@@ -409,5 +487,22 @@ int32_t jsti_vocabulary_self_test(char *error, size_t capacity) {
         fill(e, NULL); set_text(e->preview, ""); set_text(e->preview_tags, "");
         if (!valid) { jsti_set_error(error, capacity, "Vocabulary field and preview events were not preserved."); return -1; }
     }
+    Editor *existing_candidates = editors[3];
+    GtkWidget *candidate_page = jsti_vocabulary_page_new(3);
+    g_object_ref_sink(candidate_page);
+    Editor *candidate = editors[3];
+    const gchar *fixture[] = {"synthetic\t%", "Synthetic", "Canonical", "2", "Synthetic", "", "", "Pending", NULL};
+    g_ptr_array_add(candidate->rows, g_strdupv((gchar **)fixture)); candidate->selected = 0;
+    gchar *candidate_payload = action_payload(candidate, "promote");
+    gchar **candidate_fields = g_strsplit(candidate_payload, "\t", -1);
+    gchar *candidate_id = g_strv_length(candidate_fields) == 2
+        ? g_uri_unescape_string(candidate_fields[1], NULL) : NULL;
+    gboolean candidate_valid = g_strcmp0(candidate_id, fixture[0]) == 0
+        && g_strcmp0(candidate_fields[0], "promote") == 0;
+    g_free(candidate_id); g_strfreev(candidate_fields); g_free(candidate_payload);
+    candidate_payload = action_payload(candidate, "clear");
+    candidate_valid = candidate_valid && g_strcmp0(candidate_payload, "clear") == 0;
+    g_free(candidate_payload); g_object_unref(candidate_page); editors[3] = existing_candidates;
+    if (!candidate_valid) { jsti_set_error(error, capacity, "Stored candidate events were not preserved."); return -1; }
     return 0;
 }

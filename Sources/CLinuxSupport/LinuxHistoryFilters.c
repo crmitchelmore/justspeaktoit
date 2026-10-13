@@ -11,8 +11,36 @@ typedef struct Panel {
     GtkCheckButton *errors, *from_enabled, *through_enabled;
     GtkCalendar *from_calendar, *through_calendar;
 } Panel;
+typedef struct DeferredClose {
+    GWeakRef menu, popover;
+    guint source;
+} DeferredClose;
 static Configuration *configuration;
 static GtkMenuButton *button;
+static GPtrArray *pending_closes;
+static void closed(GtkPopover *popover, gpointer pointer);
+
+static void close_free(gpointer pointer) {
+    DeferredClose *close = pointer;
+    if (pending_closes) g_ptr_array_remove_fast(pending_closes, close);
+    g_weak_ref_clear(&close->menu); g_weak_ref_clear(&close->popover);
+    g_free(close);
+}
+static gboolean detach_closed(gpointer pointer) {
+    DeferredClose *close = pointer;
+    if (pending_closes) g_ptr_array_remove_fast(pending_closes, close);
+    close->source = 0;
+    GtkMenuButton *menu = g_weak_ref_get(&close->menu);
+    GtkPopover *popover = g_weak_ref_get(&close->popover);
+    if (menu && popover && gtk_menu_button_get_popover(menu) == popover &&
+        !gtk_widget_get_visible(GTK_WIDGET(popover))) {
+        g_signal_handlers_disconnect_by_func(popover, G_CALLBACK(closed), menu);
+        gtk_menu_button_set_popover(menu, NULL);
+    }
+    if (popover) g_object_unref(popover);
+    if (menu) g_object_unref(menu);
+    return G_SOURCE_REMOVE;
+}
 
 static void model_free(gpointer pointer) {
     Model *model = pointer;
@@ -94,8 +122,13 @@ static void date_enabled(GtkCheckButton *check, gpointer pointer) {
     gtk_widget_set_sensitive(GTK_WIDGET(pointer), gtk_check_button_get_active(check));
 }
 static void closed(GtkPopover *popover, gpointer pointer) {
-    GtkMenuButton *menu = pointer;
-    if (gtk_menu_button_get_popover(menu) == popover) gtk_menu_button_set_popover(menu, NULL);
+    /* Detaching during "closed" re-enters GtkMenuButton's own teardown. */
+    DeferredClose *close = g_new0(DeferredClose, 1);
+    g_weak_ref_init(&close->menu, pointer);
+    g_weak_ref_init(&close->popover, popover);
+    if (!pending_closes) pending_closes = g_ptr_array_new();
+    close->source = g_idle_add_full(G_PRIORITY_DEFAULT_IDLE, detach_closed, close, close_free);
+    g_ptr_array_add(pending_closes, close);
 }
 static GtkWidget *date_row(const gchar *label, const gchar *selected,
                            GtkCheckButton **enabled, GtkCalendar **calendar) {
@@ -130,7 +163,7 @@ static void create_popup(GtkMenuButton *menu, gpointer data) {
     panel->checks = g_ptr_array_new();
     panel->ids = g_ptr_array_new_with_free_func(g_free);
     panel->popover = GTK_POPOVER(gtk_popover_new());
-    g_signal_connect(panel->popover, "closed", G_CALLBACK(closed), menu);
+    g_signal_connect_object(panel->popover, "closed", G_CALLBACK(closed), menu, 0);
     g_object_set_data_full(G_OBJECT(panel->popover), "history-filter-panel", panel, panel_free);
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
     gtk_widget_set_size_request(box, 320, -1);
@@ -219,6 +252,13 @@ static void replace(gpointer pointer) {
 }
 static void button_finalized(gpointer data, GObject *object) {
     (void)data; (void)object;
+    while (pending_closes && pending_closes->len) {
+        DeferredClose *close = g_ptr_array_index(pending_closes, pending_closes->len - 1);
+        const guint source = close->source;
+        g_ptr_array_remove_index_fast(pending_closes, pending_closes->len - 1);
+        g_source_remove(source);
+    }
+    g_clear_pointer(&pending_closes, g_ptr_array_unref);
     configuration_free(configuration);
     configuration = NULL;
 }
@@ -279,9 +319,20 @@ int32_t jsti_history_filters_self_test(char *error, size_t capacity) {
     gchar *through = day(panel->through_enabled, panel->through_calendar);
     passed = passed && from[0] == '\0' && through[0] == '\0';
     g_free(from); g_free(through); g_free(payload);
+    g_signal_emit_by_name(popover, "closed");
+    DeferredClose *close = g_ptr_array_index(pending_closes, pending_closes->len - 1);
+    const guint source = close->source;
+    gtk_menu_button_set_popover(button, NULL);
+    create_popup(button, NULL);
+    GtkPopover *replacement = gtk_menu_button_get_popover(button);
+    passed = passed && detach_closed(close) == G_SOURCE_REMOVE &&
+        gtk_menu_button_get_popover(button) == replacement;
+    g_source_remove(source);
     gtk_menu_button_set_popover(button, NULL);
     configuration_free(test); configuration = original;
     update_label();
-    if (!passed) jsti_set_error(error, capacity, "History filter controls lost model identities, dates or escaping.");
+    if (!passed) {
+        jsti_set_error(error, capacity, "History filter controls lost identities, dates, escaping or popup ownership.");
+    }
     return passed ? 0 : -1;
 }

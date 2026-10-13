@@ -43,10 +43,7 @@ func runSelfTest() throws {
 /// Configures the window from saved settings, runs GTK on this (main) thread
 /// until the window closes, then drains every queue and closes the controller.
 func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws {
-    guard let theme = Bundle.module.url(forResource: "hicolor", withExtension: nil) else {
-        throw DesktopHostError(message: "The bundled application icon theme is missing.")
-    }
-    try LinuxNative.call { jsti_app_icon_configure(theme.deletingLastPathComponent().path, $0, $1) }
+    try configureApplicationIcon()
     let selected = try blocking { () -> Int in
         let microphone = await controller.selectedMicrophone()
         let warning = LinuxWindow.configureMicrophones(selected: microphone, synthetic: holder.smokeTest)
@@ -96,6 +93,13 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
     withExtendedLifetime(holder) {}
     if let windowFailure { throw windowFailure }
     if let smokeFailure = holder.smokeTestFailure { throw smokeFailure }
+}
+
+func configureApplicationIcon() throws {
+    guard let theme = Bundle.module.url(forResource: "hicolor", withExtension: nil) else {
+        throw DesktopHostError(message: "The bundled application icon theme is missing.")
+    }
+    try LinuxNative.call { jsti_app_icon_configure(theme.deletingLastPathComponent().path, $0, $1) }
 }
 
 let arguments = CommandLine.arguments

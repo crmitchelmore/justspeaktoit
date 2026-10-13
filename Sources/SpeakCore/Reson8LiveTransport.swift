@@ -125,7 +125,10 @@ extension Reson8LiveClient {
         guard active.phase != .finishing else { return }
         let callback = active.onTranscript
         effects.async { [weak self] in
-            guard let self, self.state.sync(execute: { self.isCurrent(active) }) else { return }
+            guard let self else { return }
+            self.lifecycle.lock()
+            defer { self.lifecycle.unlock() }
+            guard self.state.sync(execute: { self.isCurrent(active) }) else { return }
             callback?(value, final)
         }
     }

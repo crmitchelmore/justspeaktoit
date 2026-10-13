@@ -202,6 +202,46 @@ final class FileSpeechBatchTests: XCTestCase {
         )) { XCTAssertEqual($0 as? FileSpeechError, .fileTooLarge) }
     }
 
+}
+
+extension FileSpeechBatchTests {
+    func testBoundedRead_RejectsFileGrowthAndAcceptsExactLimit() throws {
+        let audio = try fixture()
+        defer { try? FileManager.default.removeItem(at: audio) }
+        let reader = try FileHandle(forReadingFrom: audio)
+        defer { try? reader.close() }
+        let writer = try FileHandle(forWritingTo: audio)
+        defer { try? writer.close() }
+        let initialSize = try FileManager.default.attributesOfItem(atPath: audio.path)[.size] as? NSNumber
+        XCTAssertEqual(initialSize?.intValue, 4)
+        try writer.seekToEnd()
+        try writer.write(contentsOf: Data([4, 5, 6, 7, 8]))
+        XCTAssertThrowsError(try FileSpeechBatchClient.readAudio(from: reader, limit: 8)) {
+            XCTAssertEqual($0 as? FileSpeechError, .fileTooLarge)
+        }
+        XCTAssertEqual(try reader.offset(), 9, "Read only the allowed bytes plus one overflow probe")
+        try writer.truncate(atOffset: 8)
+        try reader.seek(toOffset: 0)
+        XCTAssertEqual(try FileSpeechBatchClient.readAudio(from: reader, limit: 8), Data(0..<8))
+    }
+
+    func testStepAudio3Sentinel_DoesNotDiscardFinalOrReplaceRequiredCompletion() throws {
+        let sentinel = "data: [DONE]\n\n"
+        XCTAssertEqual(
+            try StepAudio3Response.decode(Data((Self.correctedSSE + sentinel).utf8), captureDuration: 1).text,
+            "Corrected final."
+        )
+        let empty = #"data: {"type":"transcript.text.done","text":""}"# + "\n\n" + sentinel
+        XCTAssertEqual(try StepAudio3Response.decode(Data(empty.utf8), captureDuration: 1).text, "")
+        XCTAssertThrowsError(try StepAudio3Response.decode(Data(sentinel.utf8), captureDuration: 1)) {
+            XCTAssertEqual($0 as? FileSpeechError, .missingCompletion("StepFun"))
+        }
+        let error = Self.correctedSSE + sentinel + #"data: {"type":"error","message":"quota"}"# + "\n\n"
+        XCTAssertThrowsError(try StepAudio3Response.decode(Data(error.utf8), captureDuration: 1)) {
+            XCTAssertEqual($0 as? FileSpeechError, .service("quota"))
+        }
+    }
+
     func testStepAudio3MissingCompletionAndErrorNeverReturnDeltasAsSuccess() throws {
         let delta = #"data: {"type":"transcript.text.delta","delta":"draft","start_time":0,"end_time":1000}"# + "\n\n"
         XCTAssertThrowsError(try StepAudio3Response.decode(Data(delta.utf8), captureDuration: 1)) {

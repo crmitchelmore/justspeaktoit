@@ -6,9 +6,18 @@ import FoundationNetworking
 /// Inline uploads only: no public object-storage upload or provider job polling.
 public struct AlibabaBatchTranscriptionClient: Sendable {
     public static let maximumAudioBytes = 7_499_997
+    static let maximumResponseBytes = 8 * 1_024 * 1_024
     private let session: URLSession
+    private let responseDeadline: Duration
 
-    public init(session: URLSession = .shared) { self.session = session }
+    public init(session: URLSession = .shared) {
+        self.init(session: session, responseDeadline: .seconds(180))
+    }
+
+    init(session: URLSession, responseDeadline: Duration) {
+        self.session = session
+        self.responseDeadline = responseDeadline
+    }
 
     public func transcribeFile(
         at url: URL, credentials: String, model: String, duration: TimeInterval, language: String? = nil
@@ -41,9 +50,9 @@ public struct AlibabaBatchTranscriptionClient: Sendable {
         try Task.checkCancellation()
         let data: Data
         do {
-            let response: URLResponse
-            (data, response) = try await session.data(
-                for: request, delegate: BatchTranscriptionJob.OriginBoundRedirects(origin: config.origin)
+            let response: HTTPURLResponse
+            (response, data) = try await BoundedHTTPExchange.perform(
+                request, session: session, limit: Self.maximumResponseBytes, deadline: responseDeadline
             )
             try BatchTranscriptionJob.validate(response, data: data, provider: "Alibaba")
         } catch { throw BatchTranscriptionJob.mapCancellation(error) }

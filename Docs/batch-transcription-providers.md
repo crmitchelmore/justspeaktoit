@@ -28,7 +28,8 @@ and defaults are unchanged. Requests use fixed official origins and refuse all
 redirects, cap the response at 8 MiB, time out after 120 seconds, and cancel
 the transport when the calling task is cancelled. The app caps these
 in-memory file uploads at **25 MiB** (an app safety bound, not a claimed vendor
-limit). Source recordings are never deleted by these clients.
+limit). Reads stay bounded even if a source file grows after its size check.
+Source recordings are never deleted by these clients.
 
 - **Pulse Pro**: `POST https://api.smallest.ai/waves/v1/stt/?model=pulse-pro`,
   Bearer authorization, raw recording bytes, word timestamps. English only:
@@ -48,7 +49,8 @@ limit). Source recordings are never deleted by these clients.
   Bearer authorization, JSON containing one base64-encoded recording and
   `audio.input.transcription.model=stepaudio-3-asr-max`. Supports WAV, M4A,
   MP3 and OGG containers. The SSE `transcript.text.done` text is authoritative;
-  EOF without done or an `error` event fails instead of returning partial text
+  The optional `[DONE]` transport sentinel is ignored; it cannot replace the
+  authoritative transcript event. EOF without done or an `error` event fails instead of returning partial text
   as success. Corrected final text discards stale delta timings. This is
   **recorded audio**, not live microphone streaming, so no StepAudio entry is
   added to the live picker. Published pricing is **2.8 CNY/hour**; history keeps

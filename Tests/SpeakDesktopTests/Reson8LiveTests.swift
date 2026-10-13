@@ -193,6 +193,49 @@ final class Reson8LiveTests: XCTestCase {
         fixture.client.cancel()
     }
 
+}
+
+extension Reson8LiveTests {
+    func testQueuedTranscriptAndErrorCannotReachReplacementCallbacks() {
+        for failure in [false, true] {
+            let fixture = Fixture()
+            fixture.start()
+            fixture.open()
+            fixture.client.lifecycle.lock()
+            if failure { fixture.socket.fail(URLError(.networkConnectionLost)) } else {
+                fixture.socket.emit(#"{"type":"transcript","text":"stale","is_final":true,"start_ms":0}"#)
+            }
+            fixture.client.state.sync {}
+            fixture.client.start(onTranscript: { _, _ in XCTFail("Unexpected replacement transcript") },
+                                 onError: { _ in XCTFail("Unexpected replacement error") })
+            fixture.client.lifecycle.unlock()
+            fixture.settle()
+            XCTAssertTrue(fixture.events.isEmpty, "Queued old callbacks must be dropped at delivery")
+            XCTAssertTrue(fixture.errors.isEmpty)
+            XCTAssertEqual(fixture.snapshot.confirmedText, "")
+            fixture.client.cancel()
+            fixture.settle()
+        }
+    }
+
+    func testTranscriptCallbackCanReenterLifecycleAndSnapshotWithoutDeadlocking() {
+        let fixture = Fixture()
+        let delivered = expectation(description: "Callback can replace its own session")
+        fixture.client.start(onTranscript: { _, _ in
+            fixture.client.cancel()
+            fixture.client.start(onTranscript: { _, _ in }, onError: { _ in })
+            XCTAssertEqual(fixture.snapshot.confirmedText, "")
+            delivered.fulfill()
+        }, onError: { _ in XCTFail("Unexpected error") })
+        fixture.settle()
+        fixture.open()
+        fixture.socket.emit(#"{"type":"transcript","text":"first","is_final":true,"start_ms":0}"#)
+        wait(for: [delivered], timeout: 5)
+        fixture.settle()
+        fixture.client.cancel()
+        fixture.settle()
+    }
+
     func testBufferOverflowMisalignmentHandshakeAndSendDeadlinesAreVisible() {
         for beforeStart in [false, true] {
             let fixture = Fixture()

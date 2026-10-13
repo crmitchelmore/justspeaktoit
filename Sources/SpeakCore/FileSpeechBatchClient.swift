@@ -82,8 +82,9 @@ public struct FileSpeechBatchClient: TranscriptionProvider {
         guard let size = attributes[.size] as? NSNumber else { throw TranscriptionProviderError.invalidResponse }
         guard size.int64Value <= Self.maximumAudioBytes else { throw FileSpeechError.fileTooLarge }
         try Task.checkCancellation()
-        let audio = try Data(contentsOf: audioURL, options: .mappedIfSafe)
-        guard audio.count <= Self.maximumAudioBytes else { throw FileSpeechError.fileTooLarge }
+        let file = try FileHandle(forReadingFrom: audioURL)
+        defer { try? file.close() }
+        let audio = try Self.readAudio(from: file)
         let (endpoint, body) = try makePayload(audio: audio, format: format, language: language)
         var request = URLRequest(url: endpoint, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 120)
         request.httpMethod = "POST"
@@ -97,6 +98,14 @@ public struct FileSpeechBatchClient: TranscriptionProvider {
         request.setValue(provider == .stepfun ? "text/event-stream" : "application/json", forHTTPHeaderField: "Accept")
         request.httpBody = body
         return request
+    }
+
+    static func readAudio(from file: FileHandle, limit: Int = maximumAudioBytes) throws -> Data {
+        do {
+            return try OpenRouterInlineAudioTranscriptionClient.readAudio(from: file, limit: Int64(limit))
+        } catch OpenRouterClientError.audioFileTooLarge {
+            throw FileSpeechError.fileTooLarge
+        }
     }
 
     private func makePayload(audio: Data, format: String, language: String?) throws -> (URL, Data) {

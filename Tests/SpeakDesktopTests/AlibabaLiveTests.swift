@@ -130,6 +130,27 @@ final class AlibabaLiveTests: XCTestCase {
         XCTAssertEqual(fixture.socket.cancels, 1)
     }
 
+    func testInboundFrames_AcceptExactLimitAndRejectOversizeTextAndBinaryBeforeDecoding() throws {
+        let limit = AlibabaFunASRLiveClient.maximumResponseBytes
+        for binary in [false, true] {
+            let fixture = try AlibabaLiveFixture()
+            try fixture.ready()
+            let taskID = try fixture.taskID()
+            let event = "{\"header\":{\"event\":\"unrecognized\",\"task_id\":\"\(taskID)\"}}"
+            let padded = event + String(repeating: " ", count: limit - event.utf8.count)
+            if binary { fixture.socket.emitBinary(Data(padded.utf8)) } else { fixture.socket.emit(padded) }
+            XCTAssertTrue(fixture.events.errors.isEmpty)
+            XCTAssertEqual(fixture.socket.cancels, 0)
+            if binary {
+                fixture.socket.emitBinary(Data((padded + " ").utf8))
+            } else { fixture.socket.emit(padded + " ") }
+            XCTAssertEqual(fixture.events.errors.last as? AlibabaSpeechError, .invalidResponse)
+            XCTAssertEqual(fixture.socket.cancels, 1)
+            XCTAssertTrue(fixture.events.texts.isEmpty)
+            XCTAssertTrue(fixture.client.transcriptSnapshot(captureDuration: 1).isTerminal)
+        }
+    }
+
     func testTaskFinishedWithUnfinishedSentence_FailsAndReturnsOnlyConfirmedRecovery() async throws {
         let fixture = try AlibabaLiveFixture()
         try fixture.ready()

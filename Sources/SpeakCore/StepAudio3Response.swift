@@ -43,7 +43,7 @@ enum StepAudio3Response {
         for block in normalized.components(separatedBy: "\n\n") {
             try Task.checkCancellation()
             let payload = payload(in: block)
-            guard !payload.isEmpty else { continue }
+            guard !payload.isEmpty, payload.trimmingCharacters(in: .whitespaces) != "[DONE]" else { continue }
             try transcript.consume(decoder.decode(Event.self, from: Data(payload.utf8)))
         }
         guard let text = transcript.text else { throw FileSpeechError.missingCompletion("StepFun") }

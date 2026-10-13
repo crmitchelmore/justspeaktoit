@@ -21,6 +21,7 @@ public final class AlibabaFunASRLiveClient: FinalizingStreamingTranscriptionClie
     private var run = AlibabaFunASRLiveRun()
     private static let maximumBytes = 16_000 * 2 * 5
     private static let maximumFrames = 256
+    static let maximumResponseBytes = 1_024 * 1_024
 
     public convenience init(credentials: String, session: URLSession = .shared) {
         self.init(credentials: credentials, makeConnection: {
@@ -188,8 +189,16 @@ public final class AlibabaFunASRLiveClient: FinalizingStreamingTranscriptionClie
                     do {
                         let data: Data
                         switch message {
-                        case .text(let text): data = Data(text.utf8)
-                        case .binary(let binary): data = binary
+                        case .text(let text):
+                            guard text.utf8.count <= Self.maximumResponseBytes else {
+                                throw AlibabaSpeechError.invalidResponse
+                            }
+                            data = Data(text.utf8)
+                        case .binary(let binary):
+                            guard binary.count <= Self.maximumResponseBytes else {
+                                throw AlibabaSpeechError.invalidResponse
+                            }
+                            data = binary
                         }
                         try self.handle(data, active)
                         self.receive(active, connection)

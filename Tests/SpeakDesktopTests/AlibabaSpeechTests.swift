@@ -191,6 +191,96 @@ final class AlibabaSpeechTests: XCTestCase {
         } catch { XCTAssertTrue(error is CancellationError) }
     }
 
+}
+
+extension AlibabaSpeechTests {
+    func testBatch_RejectsDeclaredAndStreamedOversizeForSuccessAndErrorBodies() async throws {
+        let file = try audioFile()
+        defer { try? FileManager.default.removeItem(at: file) }
+        let limit = AlibabaBatchTranscriptionClient.maximumResponseBytes
+        for model in [AlibabaSpeechModels.funFlash, AlibabaSpeechModels.qwen38] {
+            for status in [200, 500] {
+                for declared in [false, true] {
+                    let stopped = expectation(description: "Oversized response cancelled")
+                    StubURLProtocol.onStopLoading = { stopped.fulfill() }
+                    StubURLProtocol.handler = { request in
+                        var headers = ["Content-Type": "application/octet-stream"]
+                        if declared { headers["Content-Length"] = String(limit + 1) }
+                        let response = HTTPURLResponse(
+                            url: request.url!, statusCode: status, httpVersion: nil, headerFields: headers
+                        )!
+                        return .respondWithoutFinishing(
+                            response, declared ? Data() : Data(repeating: 32, count: limit + 1)
+                        )
+                    }
+                    do {
+                        _ = try await AlibabaBatchTranscriptionClient(session: StubURLProtocol.makeSession())
+                            .transcribeFile(at: file, credentials: credentials(), model: model, duration: 1)
+                        XCTFail("Oversized response accepted")
+                    } catch { XCTAssertEqual(error as? BoundedHTTPExchange.Failure, .responseTooLarge) }
+                    await fulfillment(of: [stopped], timeout: 5)
+                }
+            }
+        }
+    }
+
+    func testBatch_DeadlineStopsIncompleteResponseAndCallerCancellationStopsTransport() async throws {
+        let file = try audioFile()
+        defer { try? FileManager.default.removeItem(at: file) }
+        let stopped = expectation(description: "Incomplete stream cancelled at deadline")
+        StubURLProtocol.onStopLoading = { stopped.fulfill() }
+        StubURLProtocol.handler = { request in
+            .respondWithoutFinishing(
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                                headerFields: ["Content-Type": "text/event-stream"])!,
+                Self.omniResponse
+            )
+        }
+        do {
+            _ = try await AlibabaBatchTranscriptionClient(
+                session: StubURLProtocol.makeSession(), responseDeadline: .milliseconds(200)
+            ).transcribeFile(at: file, credentials: credentials(), model: AlibabaSpeechModels.qwen38, duration: 1)
+            XCTFail("Incomplete HTTP exchange accepted")
+        } catch { XCTAssertEqual(error as? BoundedHTTPExchange.Failure, .timedOut) }
+        await fulfillment(of: [stopped], timeout: 5)
+
+        let started = expectation(description: "Request starts")
+        let cancelled = expectation(description: "Caller cancellation reaches transport")
+        StubURLProtocol.onStopLoading = { cancelled.fulfill() }
+        StubURLProtocol.handler = { _ in started.fulfill(); return .hang }
+        let task = Task {
+            try await AlibabaBatchTranscriptionClient(session: StubURLProtocol.makeSession())
+                .transcribeFile(at: file, credentials: self.credentials(),
+                                model: AlibabaSpeechModels.qwen38, duration: 1)
+        }
+        await fulfillment(of: [started], timeout: 5)
+        task.cancel()
+        do { _ = try await task.value; XCTFail("Cancellation accepted")
+        } catch { XCTAssertTrue(error is CancellationError) }
+        await fulfillment(of: [cancelled], timeout: 5)
+    }
+
+    func testBatch_RefusesRedirectWithoutForwardingCredentialOrAudio() async throws {
+        let file = try audioFile()
+        defer { try? FileManager.default.removeItem(at: file) }
+        StubURLProtocol.handler = { request in
+            .respond(
+                HTTPURLResponse(url: request.url!, statusCode: 302, httpVersion: nil,
+                                headerFields: ["Location": "https://elsewhere.invalid/"])!, Data()
+            )
+        }
+        do {
+            _ = try await AlibabaBatchTranscriptionClient(session: StubURLProtocol.makeSession())
+                .transcribeFile(at: file, credentials: credentials(), model: AlibabaSpeechModels.qwen38, duration: 1)
+            XCTFail("Redirect accepted")
+        } catch {
+            guard case TranscriptionProviderError.httpError(302, _) = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+        }
+        XCTAssertEqual(StubURLProtocol.recordedRequests.count, 1)
+    }
+
     private func audioFile() throws -> URL {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".wav")
         try Data([1, 2, 3, 4]).write(to: file)

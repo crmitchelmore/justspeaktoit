@@ -15,6 +15,9 @@ public final class Reson8LiveClient: FinalizingStreamingTranscriptionClient,
 
     let state = DispatchQueue(label: "com.speak.reson8.state")
     let effects = DispatchQueue(label: "com.speak.reson8.effects")
+    // Serialize replacement/cancellation with callback invocation, allowing
+    // callbacks to reenter lifecycle methods without running on the state queue.
+    let lifecycle = NSRecursiveLock()
     var run = Reson8LiveRun()
     let apiKey: String
     let language: String?
@@ -49,6 +52,8 @@ public final class Reson8LiveClient: FinalizingStreamingTranscriptionClient,
     deinit { run.connection?.cancel() }
 
     public func start(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {
+        lifecycle.lock()
+        defer { lifecycle.unlock() }
         state.sync {
             let previous = run
             let active = Reson8LiveRun()
@@ -108,7 +113,15 @@ public final class Reson8LiveClient: FinalizingStreamingTranscriptionClient,
         }
     }
 
-    public func stop() { state.sync { close(run) } }
+    public func stop() {
+        lifecycle.lock()
+        defer { lifecycle.unlock() }
+        state.sync {
+            close(run)
+            run.onTranscript = nil
+            run.onError = nil
+        }
+    }
     public func cancel() { stop() }
 
     public func finishAndWait() async -> String? {
@@ -135,7 +148,15 @@ public final class Reson8LiveClient: FinalizingStreamingTranscriptionClient,
                 }
             }
         } onCancel: {
-            self.state.async { if active === self.run { self.close(active) } }
+            self.lifecycle.lock()
+            defer { self.lifecycle.unlock() }
+            self.state.sync {
+                if active === self.run {
+                    self.close(active)
+                    active.onTranscript = nil
+                    active.onError = nil
+                }
+            }
         }
     }
 
@@ -185,7 +206,13 @@ public final class Reson8LiveClient: FinalizingStreamingTranscriptionClient,
         guard isCurrent(active) else { return }
         let callback = active.onError
         // Enqueue the error before retiring the run releases its finish waiters.
-        effects.async { callback?(error) }
+        effects.async { [weak self] in
+            guard let self else { return }
+            self.lifecycle.lock()
+            defer { self.lifecycle.unlock() }
+            guard self.state.sync(execute: { active === self.run && active.onError != nil }) else { return }
+            callback?(error)
+        }
         close(active)
     }
 

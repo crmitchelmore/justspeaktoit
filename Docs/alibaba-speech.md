@@ -29,6 +29,8 @@ only content deltas are inserted, never reasoning or generated speech. A `stop`
 finish reason is required; truncated, filtered or length-limited output fails
 instead of presenting a partial result as complete. Digitally silent recordings
 are handled locally without sending audio or generating placeholder text.
+Recorded responses, including error bodies, are capped at 8 MiB with a
+180-second whole-exchange deadline. Cancellation stops the underlying request.
 
 ## Configuration and credential boundary
 
@@ -53,7 +55,7 @@ for compatibility, the physical QR limit and explicit oversized-transfer errors.
 Only `https://{workspace}.{region}.maas.aliyuncs.com` and its corresponding `wss`
 origin are constructed. Workspace IDs must be a single DNS label; URLs, paths,
 ports, userinfo, `trial` and host substitution are rejected. HTTPS redirects
-must remain on the exact origin. DashScope legacy domains and trial domains
+are refused, including same-origin redirects. DashScope legacy domains and trial domains
 are intentionally unsupported; the provider recommends workspace domains and
 stopped adding new features to legacy DashScope domains on September 30, 2026.
 Keys are region-specific; the client does not attempt to infer a key's region
@@ -74,6 +76,7 @@ recording. Existing post-transcription processing remains separate.
 The shared client sends `run-task`, waits for `task-started`, then sends binary
 16 kHz mono PCM16. A five-second/256-frame admission bound reports stalled
 transport rather than dropping audio. Sends are single-flight and ordered.
+Incoming text and binary protocol frames are capped at 1 MiB before JSON decoding.
 Partials replace the sentence identified by `sentence_id` (or documented
 `begin_time` when no sentence ID is supplied), including empty retractions.
 Final sentence corrections replace that identity; genuine repeated utterances

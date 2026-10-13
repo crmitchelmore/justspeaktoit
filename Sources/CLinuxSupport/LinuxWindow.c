@@ -2288,7 +2288,7 @@ typedef struct Tour {
 } Tour;
 
 enum { TOUR_DARK_DASHBOARD = JSTI_PAGE_COUNT, TOUR_DARK_HISTORY, TOUR_RECORDING, TOUR_HUD_RECORDING,
-       TOUR_HUD_COMPLETED, TOUR_DONE };
+       TOUR_HUD_COMPLETED, TOUR_HISTORY_FILTERS, TOUR_DARK_HISTORY_FILTERS, TOUR_DONE };
 
 static gboolean tour_capture(gpointer data);
 
@@ -2300,6 +2300,13 @@ static void tour_show(Tour *tour) {
         show_page(JSTI_PAGE_DASHBOARD);
     } else if (tour->step == TOUR_DARK_HISTORY) {
         show_page(JSTI_PAGE_HISTORY);
+    } else if (tour->step == TOUR_HISTORY_FILTERS || tour->step == TOUR_DARK_HISTORY_FILTERS) {
+        Update idle = { .state = JSTI_STATE_IDLE };
+        update_apply(&idle);
+        adw_style_manager_set_color_scheme(adw_style_manager_get_default(),
+            tour->step == TOUR_HISTORY_FILTERS ? ADW_COLOR_SCHEME_FORCE_LIGHT : ADW_COLOR_SCHEME_FORCE_DARK);
+        show_page(JSTI_PAGE_HISTORY);
+        gtk_menu_button_popup(GTK_MENU_BUTTON(ui.history_filters));
     } else if (tour->step == TOUR_HUD_RECORDING) {
         jsti_hud_show(1, "Recording", "Capturing audio",
                       "Could we move the catch-up to Friday? That gives us a little more time");
@@ -2323,6 +2330,8 @@ static const char *tour_name(gint32 step) {
     case TOUR_HUD_COMPLETED: return "hud-completed";
     case TOUR_DARK_DASHBOARD: return "dashboard-dark";
     case TOUR_DARK_HISTORY: return "history-dark";
+    case TOUR_HISTORY_FILTERS: return "history-filters";
+    case TOUR_DARK_HISTORY_FILTERS: return "history-filters-dark";
     default: return page_info[step].name;
     }
 }
@@ -2337,6 +2346,21 @@ static gboolean tour_capture(gpointer data) {
     gchar *file = g_strdup_printf("%02d-%s.png", tour->step + 1, tour_name(tour->step));
     gchar *path = g_build_filename(tour->directory, file, NULL);
     char message[256] = { 0 };
+    if (tour->step == TOUR_HISTORY_FILTERS || tour->step == TOUR_DARK_HISTORY_FILTERS) {
+        GtkPopover *popover = gtk_menu_button_get_popover(GTK_MENU_BUTTON(ui.history_filters));
+        if (!popover || save_widget_png(GTK_WIDGET(popover), path, TRUE) != 0) {
+            g_printerr("The History filter editor %s could not be saved.\n", file);
+        }
+        gtk_menu_button_set_popover(GTK_MENU_BUTTON(ui.history_filters), NULL);
+        g_free(path); g_free(file);
+        tour->step++;
+        if (tour->step < TOUR_DONE) tour_show(tour);
+        else {
+            g_free(tour->directory); g_free(tour);
+            gtk_window_close(ui.window);
+        }
+        return G_SOURCE_REMOVE;
+    }
     if (tour->step == TOUR_HUD_RECORDING || tour->step == TOUR_HUD_COMPLETED) {
         /* The HUD is its own window; X11 only. */
         GtkWidget *card = jsti_hud_card();
@@ -2379,7 +2403,20 @@ static gboolean tour_capture(gpointer data) {
     return G_SOURCE_REMOVE;
 }
 
-static void tour_start(gpointer data) { tour_show(data); }
+static void tour_start(gpointer data) {
+    const JSTIHistoryFilterModel models[] = {
+        {"model/sample", "Sample transcription model", 0},
+        {"model/long", "An imported transcription model with a long descriptive name and vocabulary context", 0}
+    };
+    if (jsti_window_set_history_filters(models, 2, 0, "", "") != 0) {
+        g_printerr("Could not prepare the sample History filter editor.\n");
+        Tour *tour = data;
+        g_free(tour->directory); g_free(tour);
+        gtk_window_close(ui.window);
+        return;
+    }
+    tour_show(data);
+}
 
 int32_t jsti_window_screenshot_tour(const char *directory, char *error, size_t capacity) {
     if (directory == NULL || g_mkdir_with_parents(directory, 0700) != 0) {

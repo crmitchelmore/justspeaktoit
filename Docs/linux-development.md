@@ -74,7 +74,11 @@ and Record; the status line sits at the bottom of every page.
   dates with the existing Unicode/profile search. Apply and Reset change only
   visibility; hidden selections stop playback and Read aloud. Dates use the
   shared `HistorySearchQuery` day policy in the local time zone. This does not
-  add History deletion, retention, or migration.
+  add History deletion, retention, or migration. Long model names wrap without
+  losing their full labels, and date buttons distinguish From/Through in their
+  accessible names. The screenshot tour requires light/dark filter-popover
+  artifacts; source assertions and snapshots do not replace physical accessibility
+  acceptance.
 - Totals and row wording come from the shared `DesktopHistoryInsights` and
   `DesktopHistoryRowSummary` (SpeakDesktop), counted and formatted as the Mac
   counts them, so Windows shows the same figures.

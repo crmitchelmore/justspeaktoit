@@ -485,6 +485,13 @@ clears its actions and stops playback and Read aloud. Native UI/device
 acceptance remains required; filtering does not implement deletion, retention,
 or migration.
 
+The filter editor scrolls vertically when the available work area is too short;
+keyboard traversal reveals the focused control. Long model names have native
+horizontal scrolling, and an open editor follows application appearance changes.
+Native self-tests cover these paths, and the CI screenshot tour
+requires separate light/dark filter-editor snapshots; those artifacts still need
+visual review before claiming UI acceptance.
+
 “Implemented” below describes source wiring, not completed device acceptance.
 The exact CI run and target-device evidence must accompany any promotion in
 status. A platform-specific replacement may provide the same user capability,

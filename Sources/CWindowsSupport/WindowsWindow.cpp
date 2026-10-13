@@ -51,6 +51,8 @@ void jsti_show_cloud_sync_settings(HWND owner);
 bool jsti_cloud_sync_settings_self_test(HWND owner, std::string &error);
 int jsti_window_recording_state();
 
+static int saveNativeSnapshot(HWND window, const char *path, char *error, size_t errorCapacity);
+
 namespace {
 constexpr UINT updateMessage = WM_APP + 1;
 constexpr UINT profilesMessage = WM_APP + 17;
@@ -1363,6 +1365,7 @@ void applyTheme(HWND window) {
     backdrop.dirty = true;
     RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME);
     jsti::hud::refresh();
+    jsti_history_filters_refresh_theme();
 }
 
 void refreshFont(HWND window) {
@@ -1855,14 +1858,14 @@ void importAudio(HWND window) {
 }
 
 // The screenshot tour: every page, then the dashboard and History in dark
-// mode, then the dashboard while recording. Each step is shown, drawn, then
-// saved as NN-name.bmp beside the others; the window closes afterwards.
-constexpr int tourSteps = pageCount + 5;
+// mode, then recording/HUD states and the light/dark filter editors. Each
+// step is saved as NN-name.bmp; the window closes afterwards.
+constexpr int tourSteps = pageCount + 7;
 
 std::string tourName(int step) {
     if (step < pageCount) return pageInfo[step].name;
     const char *const extra[] = {"dashboard-dark", "history-dark", "dashboard-recording", "hud-recording",
-                                 "hud-completed"};
+                                 "hud-completed", "history-filters", "history-filters-dark"};
     return extra[step - pageCount];
 }
 
@@ -1876,6 +1879,21 @@ void tourShow(HWND window, int step) {
         showPage(window, dashboardPage);
     } else if (step == pageCount + 1) {
         showPage(window, historyPage);
+    } else if (step >= pageCount + 5) {
+        const JSTIHistoryFilterModel models[] = {
+            {"model/sample", "Sample transcription model", 0},
+            {"model/long", "An imported transcription model with a long descriptive name and vocabulary context", 0}
+        };
+        if (jsti_window_set_history_filters(models, 2, 0, "", "") != 0) {
+            emit(window, JSTI_EVENT_ERROR, "Could not prepare the sample History filter editor.");
+            PostMessageW(window, WM_CLOSE, 0, 0);
+            return;
+        }
+        state.displayedRecording = 0;
+        jsti::chrome::setAppearance(step == pageCount + 5 ? 1 : 2);
+        applyTheme(window);
+        showPage(window, historyPage);
+        jsti_show_history_filters(window, [](const std::string &) {});
     } else if (step == pageCount + 3) {
         jsti::hud::stage(1, L"Recording", L"Capturing audio",
                          L"Could we move the catch-up to Friday? That gives us a little more time");
@@ -1902,7 +1920,13 @@ void tourStep(HWND window) {
     char error[512] = {};
     std::string hudError;
     std::wstring widePath;
-    if (state.tourStep >= pageCount + 3) {
+    if (state.tourStep >= pageCount + 5) {
+        HWND filters = jsti_history_filters_window();
+        if (saveNativeSnapshot(filters, path.c_str(), error, sizeof error) != 0) {
+            emit(window, JSTI_EVENT_ERROR, error);
+        }
+        if (filters) DestroyWindow(filters);
+    } else if (state.tourStep >= pageCount + 3) {
         // The HUD is its own layered window; it is drawn straight to the file.
         if (!jsti::wide(path.c_str(), widePath) || !jsti::hud::saveSnapshot(widePath, hudError)) {
             emit(window, JSTI_EVENT_ERROR, hudError.empty() ? "The HUD snapshot path is invalid." : hudError.c_str());
@@ -3823,6 +3847,10 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
 int jsti_window_save_snapshot(const char *path, char *error, size_t errorCapacity) {
     HWND window;
     { std::lock_guard<std::mutex> lock(state.mutex); window = state.window; }
+    return saveNativeSnapshot(window, path, error, errorCapacity);
+}
+
+static int saveNativeSnapshot(HWND window, const char *path, char *error, size_t errorCapacity) {
     if (!window || GetWindowThreadProcessId(window, nullptr) != GetCurrentThreadId()) {
         return jsti::fail("The native snapshot must run on the UI thread after READY.", error, errorCapacity);
     }

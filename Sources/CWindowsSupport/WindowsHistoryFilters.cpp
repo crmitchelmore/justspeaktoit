@@ -2,7 +2,9 @@
 #include "WindowsHistoryFilters.hpp"
 #include "WindowsWindowChrome.hpp"
 #include <commctrl.h>
+#include <uxtheme.h>
 #include <cstdio>
+#include <limits>
 #include <mutex>
 #include <vector>
 
@@ -21,6 +23,7 @@ struct Panel {
     Configuration config;
     std::function<void(const std::string &)> apply;
     HBRUSH background = nullptr;
+    int scrollOffset = 0;
     ~Panel() { if (background) DeleteObject(background); }
 };
 int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
@@ -68,14 +71,28 @@ std::string payload(HWND window, const Panel &panel) {
     return "{\"models\":" + models + "],\"errorsOnly\":" + (errors ? "true" : "false")
         + ",\"fromDay\":" + json(day(window, fromID)) + ",\"throughDay\":" + json(day(window, throughID)) + "}";
 }
-void layout(HWND window) {
+bool layout(HWND window) {
+    auto *panel = reinterpret_cast<Panel *>(GetWindowLongPtrW(window, GWLP_USERDATA));
+    if (!panel) return false;
     RECT bounds{}; GetClientRect(window, &bounds);
-    const int margin = scale(window, 16), width = bounds.right - 2 * margin;
-    auto place = [&](int id, int top, int height) {
-        MoveWindow(GetDlgItem(window, id), margin, top, width, height, TRUE);
-    };
+    const int margin = scale(window, 16);
     const int listHeight = std::max(scale(window, 48),
         std::min(scale(window, 152), static_cast<int>(bounds.bottom) - scale(window, 284)));
+    const int contentHeight = scale(window, 44) + listHeight + scale(window, 12) + scale(window, 40) +
+        scale(window, 26) + scale(window, 40) + scale(window, 26) + scale(window, 48) + scale(window, 32) + margin;
+    SCROLLINFO scroll{};
+    scroll.cbSize = sizeof(scroll);
+    scroll.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+    scroll.nMax = contentHeight - 1;
+    scroll.nPage = static_cast<UINT>(bounds.bottom);
+    scroll.nPos = panel->scrollOffset;
+    SetScrollInfo(window, SB_VERT, &scroll, TRUE);
+    panel->scrollOffset = GetScrollPos(window, SB_VERT);
+    GetClientRect(window, &bounds);
+    const int width = bounds.right - 2 * margin;
+    auto place = [&](int id, int top, int height) {
+        MoveWindow(GetDlgItem(window, id), margin, top - panel->scrollOffset, width, height, TRUE);
+    };
     place(601, scale(window, 16), scale(window, 24));
     place(modelsID, scale(window, 44), listHeight);
     int top = scale(window, 44) + listHeight + scale(window, 12);
@@ -85,12 +102,52 @@ void layout(HWND window) {
     place(603, top, scale(window, 22)); top += scale(window, 26);
     place(throughID, top, scale(window, 30)); top += scale(window, 48);
     const int gap = scale(window, 8), half = (width - gap) / 2;
-    MoveWindow(GetDlgItem(window, resetID), margin, top, half, scale(window, 32), TRUE);
-    MoveWindow(GetDlgItem(window, applyID), margin + half + gap, top, half, scale(window, 32), TRUE);
+    MoveWindow(GetDlgItem(window, resetID), margin, top - panel->scrollOffset, half, scale(window, 32), TRUE);
+    MoveWindow(GetDlgItem(window, applyID), margin + half + gap, top - panel->scrollOffset,
+        half, scale(window, 32), TRUE);
     for (HWND child = GetWindow(window, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT)) {
         SendMessageW(child, WM_SETFONT,
             reinterpret_cast<WPARAM>(jsti::chrome::font(jsti::chrome::Font::body, GetDpiForWindow(window))), TRUE);
     }
+    HWND list = GetDlgItem(window, modelsID);
+    HDC dc = GetDC(list);
+    if (!dc) return false;
+    const HGDIOBJ previous = SelectObject(dc, jsti::chrome::font(jsti::chrome::Font::body, GetDpiForWindow(window)));
+    bool measured = previous && previous != HGDI_ERROR;
+    LONG extent = 0;
+    for (const auto &model : panel->config.models) {
+        SIZE size{};
+        if (!measured || model.name.size() > static_cast<size_t>(std::numeric_limits<int>::max()) ||
+            !GetTextExtentPoint32W(dc, model.name.c_str(), static_cast<int>(model.name.size()), &size)) {
+            measured = false;
+            break;
+        }
+        extent = std::max(extent, size.cx);
+    }
+    if (previous && previous != HGDI_ERROR) SelectObject(dc, previous);
+    ReleaseDC(list, dc);
+    if (!measured) return false;
+    SendMessageW(list, LB_SETHORIZONTALEXTENT, extent + scale(window, 8), 0);
+    return true;
+}
+bool revealControl(HWND window, HWND control) {
+    if (!control || !IsChild(window, control)) return true;
+    auto *panel = reinterpret_cast<Panel *>(GetWindowLongPtrW(window, GWLP_USERDATA));
+    RECT bounds{}, child{};
+    POINT top{}, bottom{};
+    if (!panel || !GetClientRect(window, &bounds) || !GetWindowRect(control, &child)) return false;
+    top = {child.left, child.top}; bottom = {child.right, child.bottom};
+    if (!ScreenToClient(window, &top) || !ScreenToClient(window, &bottom)) return false;
+    const int margin = scale(window, 16);
+    if (bottom.y > bounds.bottom - margin) panel->scrollOffset += bottom.y - bounds.bottom + margin;
+    else if (top.y < margin) {
+        panel->scrollOffset = std::max(0, panel->scrollOffset + static_cast<int>(top.y) - margin);
+    }
+    return layout(window);
+}
+void layoutFailure(HWND window) {
+    MessageBoxW(window, L"Could not lay out History filter controls.", L"History filters", MB_OK | MB_ICONERROR);
+    DestroyWindow(window);
 }
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     auto *panel = reinterpret_cast<Panel *>(GetWindowLongPtrW(window, GWLP_USERDATA));
@@ -111,7 +168,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
                 window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), GetModuleHandleW(nullptr), nullptr);
         };
         if (!add(L"STATIC", L"&Models (none selected means all)", 0, 601) ||
-            !add(L"LISTBOX", L"", LBS_MULTIPLESEL | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_BORDER | WS_TABSTOP, modelsID) ||
+            !add(L"LISTBOX", L"", LBS_MULTIPLESEL | LBS_NOINTEGRALHEIGHT |
+                WS_VSCROLL | WS_HSCROLL | WS_BORDER | WS_TABSTOP, modelsID) ||
             !add(L"BUTTON", L"Only recordings with &errors", BS_AUTOCHECKBOX | WS_TABSTOP, errorsID) ||
             !add(L"STATIC", L"&From (unchecked means no start date)", 0, 602) ||
             !add(DATETIMEPICK_CLASSW, L"", DTS_SHOWNONE | WS_TABSTOP, fromID) ||
@@ -126,10 +184,36 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         }
         SendDlgItemMessageW(window, errorsID, BM_SETCHECK, panel->config.errors ? BST_CHECKED : BST_UNCHECKED, 0);
         date(window, fromID, panel->config.from); date(window, throughID, panel->config.through);
-        layout(window);
+        return layout(window) ? 0 : -1;
+    }
+    case WM_SIZE:
+        if (!layout(window)) layoutFailure(window);
+        return 0;
+    case WM_VSCROLL: {
+        if (lparam) break;
+        SCROLLINFO scroll{};
+        scroll.cbSize = sizeof(scroll);
+        scroll.fMask = SIF_ALL;
+        if (!GetScrollInfo(window, SB_VERT, &scroll)) return 0;
+        switch (LOWORD(wparam)) {
+        case SB_LINEUP: panel->scrollOffset -= scale(window, 24); break;
+        case SB_LINEDOWN: panel->scrollOffset += scale(window, 24); break;
+        case SB_PAGEUP: panel->scrollOffset -= static_cast<int>(scroll.nPage); break;
+        case SB_PAGEDOWN: panel->scrollOffset += static_cast<int>(scroll.nPage); break;
+        case SB_THUMBTRACK: panel->scrollOffset = scroll.nTrackPos; break;
+        case SB_TOP: panel->scrollOffset = 0; break;
+        case SB_BOTTOM: panel->scrollOffset = scroll.nMax; break;
+        default: return 0;
+        }
+        panel->scrollOffset = std::max(0, panel->scrollOffset);
+        if (!layout(window)) layoutFailure(window);
         return 0;
     }
-    case WM_SIZE: layout(window); return 0;
+    case WM_MOUSEWHEEL:
+        panel->scrollOffset = std::max(0, panel->scrollOffset -
+            MulDiv(GET_WHEEL_DELTA_WPARAM(wparam), scale(window, 72), WHEEL_DELTA));
+        if (!layout(window)) layoutFailure(window);
+        return 0;
     case WM_ERASEBKGND: {
         RECT bounds{}; GetClientRect(window, &bounds);
         FillRect(reinterpret_cast<HDC>(wparam), &bounds, panel->background);
@@ -139,7 +223,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         const auto *bounds = reinterpret_cast<RECT *>(lparam);
         SetWindowPos(window, nullptr, bounds->left, bounds->top, bounds->right - bounds->left,
             bounds->bottom - bounds->top, SWP_NOZORDER | SWP_NOACTIVATE);
-        layout(window);
+        if (IsWindow(window) && !revealControl(window, GetFocus())) layoutFailure(window);
         return 0;
     }
     case WM_CTLCOLORSTATIC:
@@ -212,7 +296,28 @@ void jsti_history_filters_enabled(bool enabled) {
 }
 
 bool jsti_history_filters_message(MSG *message) {
-    return panelWindow && IsDialogMessageW(panelWindow, message);
+    if (!panelWindow) return false;
+    const bool handled = IsDialogMessageW(panelWindow, message);
+    if (handled && panelWindow && !revealControl(panelWindow, GetFocus())) layoutFailure(panelWindow);
+    return handled;
+}
+
+HWND jsti_history_filters_window() { return panelWindow; }
+
+void jsti_history_filters_refresh_theme() {
+    if (!panelWindow) return;
+    auto *panel = reinterpret_cast<Panel *>(GetWindowLongPtrW(panelWindow, GWLP_USERDATA));
+    HBRUSH replacement = CreateSolidBrush(jsti::chrome::palette().card);
+    if (!panel || !replacement) {
+        if (replacement) DeleteObject(replacement);
+        layoutFailure(panelWindow);
+        return;
+    }
+    DeleteObject(panel->background);
+    panel->background = replacement;
+    SetWindowTheme(GetDlgItem(panelWindow, modelsID),
+        jsti::chrome::dark() ? L"DarkMode_Explorer" : L"Explorer", nullptr);
+    RedrawWindow(panelWindow, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
 }
 
 static bool openHistoryFilters(
@@ -250,12 +355,15 @@ static bool openHistoryFilters(
     const int left = std::max(work.left, std::min(ownerBounds.right - width, work.right - width));
     const int top = std::max(work.top, std::min(ownerBounds.top + scale(owner, 80), work.bottom - height));
     panelWindow = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_CONTROLPARENT, type.lpszClassName, L"Filter History",
-        WS_POPUP | WS_CAPTION | WS_SYSMENU, left, top, width, height, owner, nullptr, type.hInstance, &input);
+        WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VSCROLL,
+        left, top, width, height, owner, nullptr, type.hInstance, &input);
     if (!panelWindow) {
         error = "Could not open History filters.";
         return false;
     }
     if (visible) {
+        jsti_history_filters_refresh_theme();
+        if (!panelWindow) { error = "Could not prepare History filter appearance."; return false; }
         ShowWindow(panelWindow, SW_SHOWNORMAL);
         SetFocus(GetDlgItem(panelWindow, modelsID));
     }
@@ -276,13 +384,17 @@ bool jsti_history_filters_self_test(HWND owner, std::string &error) {
         std::lock_guard<std::mutex> lock(mutex);
         original = configuration;
         configuration = {};
-        configuration.models = {{"model/a", L"Model A", false}, {"model/\"quoted\"\n", L"Model B", false}};
+        configuration.models = {{"model/a", L"Model A", false}, {"model/\"quoted\"\n", L"Model B", false},
+            {"model/long", L"An imported transcription model with a long descriptive name and vocabulary context", false}};
     }
     bool passed = openHistoryFilters(owner, [](const std::string &) {}, false, error);
     if (passed) {
         auto *panel = reinterpret_cast<Panel *>(GetWindowLongPtrW(panelWindow, GWLP_USERDATA));
         SYSTEMTIME value{};
-        passed = SendDlgItemMessageW(panelWindow, modelsID, LB_GETCOUNT, 0, 0) == 2 &&
+        RECT listBounds{};
+        GetClientRect(GetDlgItem(panelWindow, modelsID), &listBounds);
+        passed = SendDlgItemMessageW(panelWindow, modelsID, LB_GETCOUNT, 0, 0) == 3 &&
+            SendDlgItemMessageW(panelWindow, modelsID, LB_GETHORIZONTALEXTENT, 0, 0) > listBounds.right &&
             DateTime_GetSystemtime(GetDlgItem(panelWindow, fromID), &value) == GDT_NONE &&
             DateTime_GetSystemtime(GetDlgItem(panelWindow, throughID), &value) == GDT_NONE;
         SendDlgItemMessageW(panelWindow, modelsID, LB_SETSEL, TRUE, 1);
@@ -294,8 +406,33 @@ bool jsti_history_filters_self_test(HWND owner, std::string &error) {
         jsti_history_filters_enabled(false);
         passed = passed && !IsWindowEnabled(GetDlgItem(panelWindow, applyID)) &&
             !IsWindowEnabled(GetDlgItem(panelWindow, modelsID));
+        const int originalAppearance = jsti::chrome::appearance();
+        for (int appearance : {1, 2}) {
+            jsti::chrome::setAppearance(appearance);
+            jsti_history_filters_refresh_theme();
+            auto *current = reinterpret_cast<Panel *>(GetWindowLongPtrW(panelWindow, GWLP_USERDATA));
+            LOGBRUSH brush{};
+            passed = passed && current && GetObjectW(current->background, sizeof(brush), &brush) &&
+                brush.lbColor == jsti::chrome::palette().card;
+        }
+        jsti::chrome::setAppearance(originalAppearance);
+        jsti_history_filters_refresh_theme();
+        jsti_history_filters_enabled(true);
+        SetWindowPos(panelWindow, nullptr, 0, 0, scale(owner, 340), scale(owner, 260),
+            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        SCROLLINFO scroll{};
+        scroll.cbSize = sizeof(scroll);
+        scroll.fMask = SIF_RANGE | SIF_PAGE;
+        passed = passed && GetScrollInfo(panelWindow, SB_VERT, &scroll) &&
+            scroll.nMax + 1 > static_cast<int>(scroll.nPage) &&
+            revealControl(panelWindow, GetDlgItem(panelWindow, applyID));
+        RECT client{}, action{};
+        POINT actionBottom{};
+        GetClientRect(panelWindow, &client); GetWindowRect(GetDlgItem(panelWindow, applyID), &action);
+        actionBottom = {action.right, action.bottom};
+        passed = passed && ScreenToClient(panelWindow, &actionBottom) && actionBottom.y <= client.bottom;
         DestroyWindow(panelWindow);
-        if (!passed) error = "History filter controls lost model identities, dates, escaping or busy-state gating.";
+        if (!passed) error = "History filter controls lost identities, dates, escaping, scrolling or busy-state gating.";
     }
     { std::lock_guard<std::mutex> lock(mutex); configuration = std::move(original); }
     return passed;

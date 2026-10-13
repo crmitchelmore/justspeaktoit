@@ -84,6 +84,10 @@ static void calendar_changed(GtkCalendar *calendar, gpointer pointer) {
     GDateTime *date = gtk_calendar_get_date(calendar);
     gchar *label = g_date_time_format(date, "%x");
     gtk_menu_button_set_label(date_button, label);
+    const gchar *name = g_object_get_data(G_OBJECT(date_button), "history-date-label");
+    gchar *accessible = g_strdup_printf("%s date: %s", name, label);
+    gtk_accessible_update_property(GTK_ACCESSIBLE(date_button), GTK_ACCESSIBLE_PROPERTY_LABEL, accessible, -1);
+    g_free(accessible);
     g_free(label); g_date_time_unref(date);
 }
 static void date_enabled(GtkCheckButton *check, gpointer pointer) {
@@ -99,6 +103,7 @@ static GtkWidget *date_row(const gchar *label, const gchar *selected,
     *enabled = GTK_CHECK_BUTTON(gtk_check_button_new_with_label(label));
     gtk_widget_set_hexpand(GTK_WIDGET(*enabled), TRUE);
     GtkWidget *date_button = gtk_menu_button_new();
+    g_object_set_data_full(G_OBJECT(date_button), "history-date-label", g_strdup(label), g_free);
     *calendar = GTK_CALENDAR(gtk_calendar_new());
     if (selected && *selected) {
         gchar *iso = g_strconcat(selected, "T12:00:00", NULL);
@@ -142,6 +147,11 @@ static void create_popup(GtkMenuButton *menu, gpointer data) {
     for (guint index = 0; configuration && index < configuration->models->len; ++index) {
         Model *model = g_ptr_array_index(configuration->models, index);
         GtkCheckButton *check = GTK_CHECK_BUTTON(gtk_check_button_new_with_label(model->name));
+        GtkWidget *text = gtk_check_button_get_child(check);
+        gtk_label_set_wrap(GTK_LABEL(text), TRUE);
+        gtk_label_set_wrap_mode(GTK_LABEL(text), PANGO_WRAP_WORD_CHAR);
+        gtk_label_set_max_width_chars(GTK_LABEL(text), 36);
+        gtk_widget_set_tooltip_text(GTK_WIDGET(check), model->name);
         gtk_check_button_set_active(check, model->selected);
         gtk_box_append(GTK_BOX(models), GTK_WIDGET(check));
         g_ptr_array_add(panel->checks, check);
@@ -245,14 +255,19 @@ int32_t jsti_history_filters_self_test(char *error, size_t capacity) {
     test->models = g_ptr_array_new_with_free_func(model_free);
     test->from = g_strdup("2026-03-08"); test->through = g_strdup("2026-03-08"); test->errors = TRUE;
     Model *model = g_new0(Model, 1);
-    model->id = g_strdup("model/\"quoted\"\n"); model->name = g_strdup("Synthetic model"); model->selected = TRUE;
+    model->id = g_strdup("model/\"quoted\"\n");
+    model->name = g_strdup("An imported transcription model with a long descriptive name and vocabulary context");
+    model->selected = TRUE;
     g_ptr_array_add(test->models, model);
     configuration = test;
     create_popup(button, NULL);
     GtkPopover *popover = gtk_menu_button_get_popover(button);
     Panel *panel = g_object_get_data(G_OBJECT(popover), "history-filter-panel");
     gchar *payload = serialize(panel);
-    gboolean passed = panel->checks->len == 1 &&
+    GtkLabel *text = GTK_LABEL(gtk_check_button_get_child(g_ptr_array_index(panel->checks, 0)));
+    gboolean passed = panel->checks->len == 1 && gtk_label_get_wrap(text) &&
+        gtk_label_get_wrap_mode(text) == PANGO_WRAP_WORD_CHAR && gtk_label_get_max_width_chars(text) == 36 &&
+        g_strcmp0(gtk_label_get_text(text), model->name) == 0 &&
         g_strcmp0(payload, "{\"models\":[\"model/\\\"quoted\\\"\\u000a\"],\"errorsOnly\":true,"
             "\"fromDay\":\"2026-03-08\",\"throughDay\":\"2026-03-08\"}") == 0;
     gtk_check_button_set_active(panel->from_enabled, FALSE);

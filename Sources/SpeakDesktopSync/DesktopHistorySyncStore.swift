@@ -162,6 +162,17 @@ public actor DesktopHistorySyncStore: HistorySyncStore {
     }
 
     public func didReceiveRemoteEntry(_ entry: SyncableHistoryEntry) async {
+        guard await !records.isDeleted(id: entry.id) else {
+            offered[entry.id] = nil
+            if let account = await state.current.boundAccount {
+                do {
+                    try await records.requeueCloudDeletion(id: entry.id, account: account)
+                } catch {
+                    unapplied += 1
+                }
+            }
+            return
+        }
         let current = await state.current.history[entry.id]
         if let current, current.updatedAt > entry.updatedAt, current.acknowledged != current.observed {
             // A newer local edit is waiting to upload; it wins.
@@ -185,6 +196,8 @@ public actor DesktopHistorySyncStore: HistorySyncStore {
                 )
             }
             unreported.append(.saved(entry.id))
+        } catch DesktopHistoryDeletionError.recordDeleted(_) {
+            offered[entry.id] = nil
         } catch {
             // Not saved and nothing acknowledged: the commit fails, so the
             // cursor stays before this change and the next pass replays it.
@@ -193,6 +206,7 @@ public actor DesktopHistorySyncStore: HistorySyncStore {
     }
 
     public func didDeleteRemoteEntry(id: UUID) async {
+        guard await !records.isDeleted(id: id) else { return }
         do {
             let removed: Bool
             do {
@@ -228,7 +242,14 @@ public actor DesktopHistorySyncStore: HistorySyncStore {
     }
 
     public func didAcknowledgeSyncedEntries(ids: Set<UUID>) async {
-        let confirmed = ids.compactMap { id in offered[id].map { (id, $0) } }
+        var confirmed: [(UUID, String)] = []
+        for id in ids {
+            guard await !records.isDeleted(id: id), let fingerprint = offered[id] else {
+                offered[id] = nil
+                continue
+            }
+            confirmed.append((id, fingerprint))
+        }
         for (id, _) in confirmed { offered[id] = nil }
         try? await state.update { state in
             for (id, fingerprint) in confirmed {
@@ -267,6 +288,30 @@ public actor DesktopHistorySyncStore: HistorySyncStore {
     /// may belong to another account. Passes over one store never overlap.
     func beginPass() {
         unapplied = 0
+    }
+
+    func deleteLocal(id: UUID, cloudAccount: String?) async throws {
+        try await records.delete(id: id, cloudAccount: cloudAccount)
+        offered[id] = nil
+    }
+
+    func synchronizeDeletions(
+        account: String,
+        transport: any HistorySyncTransport,
+        fence: any HistorySyncPassFence
+    ) async throws {
+        let attempts = try await fence.admit(isolation: self) {
+            await records.pendingCloudDeletions(account: account)
+        }
+        for attempt in attempts {
+            try await fence.admit(isolation: self) {}
+            // Requests take the client's gate themselves; never send one while
+            // holding the local-work fence's non-reentrant gate.
+            try await transport.delete(entryID: attempt.id)
+            try await fence.admit(isolation: self) {
+                try await records.acknowledgeCloudDeletion(attempt)
+            }
+        }
     }
 
     /// A record file that exists but can never be read as a record: not a

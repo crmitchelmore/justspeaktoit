@@ -485,6 +485,19 @@ clears its actions and stops playback and Read aloud. Native UI/device
 acceptance remains required; filtering does not implement deletion, retention,
 or migration.
 
+The shared History store now has a deletion foundation, not a native Delete or
+Clear workflow. An atomic `.history-deletions` journal is persisted before
+owned audio and metadata are removed. Permanent local tombstones reject late
+transcription results and synced snapshots after relaunch. Cleanup refuses
+linked, shared, ambiguous or changed audio ownership; interrupted cleanup is
+retried at startup, with explicit warnings while unaffected History stays visible.
+Cloud deletion tickets retain their original verified account and attempt
+revision. Opted-in sync drains them before reconciliation and after uploads;
+failed, cancelled or consent-disabled attempts remain pending. Deleting while
+History sync is disabled is local-only, even after a later opt-in. Account
+rebinding never transfers an old deletion ticket to a new account.
+Native management controls, retention and migration remain outstanding.
+
 The filter editor scrolls vertically when the available work area is too short;
 keyboard traversal reveals the focused control. Long model names have native
 horizontal scrolling, and an open editor follows application appearance changes.

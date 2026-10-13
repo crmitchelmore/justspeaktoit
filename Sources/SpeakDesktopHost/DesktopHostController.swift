@@ -311,6 +311,12 @@ extension DesktopHostController {
         activeOperations += 1
         defer { finishOperation() }
         do {
+            var deletionWarning: String?
+            do {
+                try await store.resumePendingDeletions()
+            } catch {
+                deletionWarning = "History deletion cleanup needs attention: \(error.localizedDescription)"
+            }
             let recovery = try await store.recoverInterruptedRecordings()
             guard !closed, !busy, recording == nil else { return }
             let records = recovery.records
@@ -325,6 +331,7 @@ extension DesktopHostController {
             if !recovery.unreadableFiles.isEmpty {
                 status += " \(recovery.unreadableFiles.count) history records could not be read."
             }
+            if let deletionWarning { status += " \(deletionWarning)" }
             if let microphoneWarning { status += " \(microphoneWarning)" }
             if let profileWarning { status += " \(profileWarning)" }
             showSelectedHistory(status: status, state: 0)

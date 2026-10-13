@@ -6,7 +6,7 @@ import SpeakCore
 
 /// A projection of the canonical catalogue, limited to transports wired into
 /// the desktop host. Adding a catalogue entry does not claim OS/runtime support.
-public enum DesktopTranscription {
+public enum DesktopTranscription { // swiftlint:disable:this type_body_length
     public static var batchModels: [ModelCatalog.Option] {
         ModelCatalog.batchTranscription.filter { backend(for: $0.id) != nil }
     }
@@ -55,7 +55,9 @@ public enum DesktopTranscription {
         }
         guard let providerID = ModelRouting.family(for: identifier).providerID else { return nil }
         let website: String
-        if case .groq = backend {
+        if case .fileSpeech(let provider) = backend {
+            website = provider.metadata.website
+        } else if case .groq = backend {
             website = GroqBatchClient().metadata.website
         } else {
             website = LiveTranscriptionProviderID(rawValue: providerID)?.apiKeyURL?.absoluteString ?? ""
@@ -132,10 +134,14 @@ public enum DesktopTranscription {
         let staging: SharedMultipartUploadStaging?
     }
 
-    private static func transcribe( // swiftlint:disable:this cyclomatic_complexity
+    private static func transcribe( // swiftlint:disable:this cyclomatic_complexity function_body_length
         _ input: Request, using backend: Backend, session: URLSession
     ) async throws -> TranscriptionResult {
         switch backend {
+        case .fileSpeech(let provider):
+            return try await FileSpeechBatchClient(
+                provider: provider, session: session, durationResolver: { _ in input.duration }
+            ).transcribeFile(at: input.audioURL, apiKey: input.apiKey, model: input.model, language: input.language)
         case .prepared(let provider):
             return try await transcribePrepared(input, using: provider, session: session)
         case .openai:
@@ -237,6 +243,7 @@ public enum DesktopTranscription {
     }
 
     private enum Backend: Sendable {
+        case fileSpeech(FileSpeechProvider)
         case prepared(PreparedProvider)
         case openai
         case groq
@@ -285,6 +292,7 @@ public enum DesktopTranscription {
             CartesiaBatchClient.catalogID: .cartesia,
             GladiaBatchClient.catalogID: .gladia
         ]
+        for provider in FileSpeechProvider.allCases { mappings[provider.modelID] = .fileSpeech(provider) }
         for model in AzureTranscriptionModels.batchIDs { mappings[model] = .prepared(.azure) }
         for model in GeminiTranscribeModels.directBatchModelIDs { mappings[model] = .google }
         for model in OpenAITranscriptionModels.directBatchModelIDs { mappings[model] = .openai }

@@ -26,6 +26,14 @@ actor TranscriptionProviderRegistry {
         providers["google"] = GeminiTranscriptionProvider()
         providers["xai"] = XAITranscriptionProvider()
         providers["meta"] = MetaMuseTranscriptionProvider()
+        for provider in FileSpeechProvider.allCases {
+            providers[provider.rawValue] = FileSpeechBatchClient(
+                provider: provider,
+                durationResolver: { url in
+                    await resolvedTranscriptionDuration(reported: nil, lastSegmentEnd: nil, audioURL: url)
+                }
+            )
+        }
     }
 
     func allProviders() -> [TranscriptionProviderMetadata] {

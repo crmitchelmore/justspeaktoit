@@ -56,6 +56,8 @@ public enum TranscriptionPricing {
     // provider's default (a "mini" or "turbo" tier) is not swallowed by the
     // prefix table below.
     private static let exactRates: [String: Decimal] = [
+        // Pulse Pro Standard plan, checked 2026-10-13 on its official model card.
+        FileSpeechProvider.smallest.modelID: rate("0.004"),
         // OpenAI: $0.006/min for Whisper and gpt-4o-transcribe, $0.003/min for
         // the mini tier. The realtime transcription sessions are billed on
         // audio input tokens, which the same per-minute figures approximate.

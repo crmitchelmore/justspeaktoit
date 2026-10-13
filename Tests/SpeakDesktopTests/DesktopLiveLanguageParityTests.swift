@@ -18,7 +18,7 @@ final class DesktopLiveLanguageParityTests: XCTestCase {
     /// resolves Automatic to the system language, by design.
     private let selection: String = {
         let system = Locale.current.identifier.localeLanguageCode
-        return ["ja_JP", "de_DE", "fr_FR"].first { $0.localeLanguageCode != system } ?? "ja_JP"
+        return ["de_DE", "fr_FR"].first { $0.localeLanguageCode != system } ?? "de_DE"
     }()
 
     func testSelectedLanguageReachesExactlyTheRoutesWhoseCapabilityAcceptsIt() throws {
@@ -84,14 +84,22 @@ private extension DesktopLiveLanguageParityTests {
     func upstream(_ model: String, language: String?) throws -> Set<String> {
         let sockets = AssemblyAISocketFactory()
         let sessions = LanguageParitySessions()
+        let connected = XCTestExpectation(description: "Connection request recorded")
         // A host supplies its saved Azure resource; every other route ignores it.
         let client = try XCTUnwrap(DesktopLiveTranscription.makeClient(
             model: model, apiKey: "synthetic", language: language,
             azureEndpoint: "https://synthetic.services.ai.azure.com", initiateGladiaSession: sessions.initiator,
-            makeConnection: { sockets.make($0) }
+            makeConnection: {
+                let socket = sockets.make($0)
+                connected.fulfill()
+                return socket
+            }
         ), model)
         client.start(onTranscript: { _, _ in }, onError: { XCTFail("\(model) reported \($0)") })
         defer { client.cancel() }
+        if client is Reson8LiveClient {
+            XCTAssertEqual(XCTWaiter.wait(for: [connected], timeout: 5), .completed)
+        }
         sockets.sockets.first?.open()
         var sent = Set<String>()
         for request in sockets.requests {

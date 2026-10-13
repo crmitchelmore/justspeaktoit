@@ -245,6 +245,7 @@ enum IOSBatchTranscriptionRoute: Equatable, Sendable {
     /// shares the `xai/` prefix but has no file mode, so this matches on the
     /// batch identifier alone.
     case xai
+    case fileSpeech(FileSpeechProvider)
     case openRouter
 
     static func route(for model: String) -> IOSBatchTranscriptionRoute {
@@ -257,6 +258,7 @@ enum IOSBatchTranscriptionRoute: Equatable, Sendable {
         if model == MetaMuseVoiceTranscribe.batchCatalogID { return .metaMuse }
         if GeminiTranscribeModels.directBatchModelIDs.contains(model) { return .gemini }
         if model == XAISpeechToText.batchCatalogID { return .xai }
+        if let provider = FileSpeechProvider.provider(for: model) { return .fileSpeech(provider) }
         return .openRouter
     }
 }

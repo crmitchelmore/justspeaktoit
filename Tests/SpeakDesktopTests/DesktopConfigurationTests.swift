@@ -4,6 +4,25 @@ import SpeakCore
 import SpeakDesktop
 
 final class DesktopConfigurationTests: XCTestCase {
+    func testChoiceMetadataIsUnambiguousBoundedAndIncludesItsDefault() {
+        for field in DesktopConfiguration.fields {
+            guard case .choice(let choices) = field.kind else { continue }
+            XCTAssertFalse(choices.isEmpty)
+            XCTAssertLessThanOrEqual(choices.count, 32)
+            XCTAssertEqual(Set(choices.map(\.value)).count, choices.count)
+            for choice in choices {
+                for text in [choice.value, choice.title] {
+                    XCTAssertFalse(text.isEmpty)
+                    XCTAssertFalse(
+                        text.contains("\t") || text.contains("\n") || text.contains("\r") || text.contains("\0")
+                    )
+                }
+            }
+            XCTAssertLessThanOrEqual(field.serializedChoices?.utf8.count ?? 0, 65_535)
+            XCTAssertTrue(choices.contains { AnyCodable(.string($0.value)) == field.defaultValue })
+        }
+    }
+
     func testDefaultsAndEveryFieldRoundTrip() throws {
         let defaults = try DesktopConfiguration()
         let restored = try defaults.applying(defaults.entries)
@@ -20,7 +39,9 @@ final class DesktopConfigurationTests: XCTestCase {
 
     func testOverlayCapabilityMetadataAndCompactValueSurviveTransfer() throws {
         let overlayKeys = Set(DesktopConfiguration.fields.filter(\.requiresHUDOverlay).map(\.key))
-        XCTAssertEqual(overlayKeys, ["showLiveTranscriptInHUD", "shortenErrorDisplay", "showCompactHUD"])
+        XCTAssertEqual(overlayKeys, [
+            "showLiveTranscriptInHUD", "shortenErrorDisplay", "showCompactHUD", "hudSizePreference"
+        ])
         let preferences = try DesktopConfiguration(values: [
             "showCompactHUD": AnyCodable(.bool(true)),
             "shortenErrorDisplay": AnyCodable(.bool(true)),
@@ -61,6 +82,12 @@ final class DesktopConfigurationTests: XCTestCase {
             case .text:
                 XCTAssertThrowsError(try DesktopConfiguration(values: [field.key: AnyCodable(.int(1))]))
                 XCTAssertThrowsError(try DesktopConfiguration(values: [field.key: AnyCodable(.string("bad\0text"))]))
+            case .choice(let choices):
+                for choice in choices {
+                    XCTAssertNoThrow(try DesktopConfiguration(values: [field.key: AnyCodable(.string(choice.value))]))
+                }
+                XCTAssertThrowsError(try DesktopConfiguration(values: [field.key: AnyCodable(.string("invalid"))]))
+                XCTAssertThrowsError(try DesktopConfiguration(values: [field.key: AnyCodable(.int(1))]))
             }
         }
         var entries = try DesktopConfiguration().entries

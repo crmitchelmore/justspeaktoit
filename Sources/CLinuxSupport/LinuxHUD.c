@@ -75,6 +75,7 @@ static struct {
     guint tick, hide;
     guint64 generation;
     gboolean compact;
+    gboolean expanded;
     GtkCssProvider *css;
     gchar *headline, *subheadline, *live_text;
 } hud;
@@ -104,7 +105,7 @@ static gchar *clock_text(gint64 microseconds) {
 
 /* Two lines of the latest words: earlier words drop off the front. */
 static gchar *live_tail(const char *text) {
-    const glong limit = 120;
+    const glong limit = hud.expanded ? 280 : 120;
     const glong length = g_utf8_strlen(text, -1);
     if (length <= limit) return g_strdup(text);
     const char *start = g_utf8_offset_to_pointer(text, length - limit);
@@ -370,6 +371,11 @@ void jsti_hud_show_duration(int phase, const char *headline, const char *subhead
 
 void jsti_hud_show_presentation(int phase, const char *headline, const char *subheadline, const char *live,
                                 int display_milliseconds, gboolean compact) {
+    jsti_hud_show_layout(phase, headline, subheadline, live, display_milliseconds, compact, FALSE);
+}
+
+void jsti_hud_show_layout(int phase, const char *headline, const char *subheadline, const char *live,
+                          int display_milliseconds, gboolean compact, gboolean expanded) {
     if (phase < HUD_HIDDEN || phase >= HUD_PHASES) return;
     if (phase == HUD_HIDDEN) { hud_hide(); return; }
     if (!hud_is_x11()) { hud_notify(phase, headline, subheadline); return; }
@@ -380,7 +386,10 @@ void jsti_hud_show_presentation(int phase, const char *headline, const char *sub
         hud.styled = HUD_HIDDEN;
     }
     hud.compact = compact;
+    hud.expanded = expanded && !compact;
     if (hud.window == NULL) hud_build();
+    gtk_label_set_lines(GTK_LABEL(hud.live), compact ? 1 : hud.expanded ? 6 : 2);
+    gtk_label_set_max_width_chars(GTK_LABEL(hud.live), compact ? 23 : hud.expanded ? 64 : 34);
     const gboolean new_phase = phase != hud.phase;
     if (new_phase || hud.styled != phase) {
         if (hud.styled != HUD_HIDDEN) gtk_widget_remove_css_class(hud.card, phase_class[hud.styled]);
@@ -404,8 +413,7 @@ void jsti_hud_show_presentation(int phase, const char *headline, const char *sub
     gchar *tail = live_tail(live != NULL ? live : "");
     gtk_label_set_text(GTK_LABEL(hud.live), tail);
     gtk_widget_set_visible(hud.live, recording && tail[0] != '\0');
-    /* As on the Mac: 320 px wide, 460 with live text, plus the 36 px margin. */
-    gtk_widget_set_size_request(hud.root, (compact ? 244 : recording && tail[0] != '\0' ? 460 : 320) + 36, -1);
+    gtk_widget_set_size_request(hud.root, (compact ? 244 : hud.expanded ? 500 : 320) + 36, -1);
     g_free(tail);
     /* Screen readers announce each new phase. */
     if (new_phase) {
@@ -506,6 +514,13 @@ int32_t jsti_hud_self_test(char *error, size_t capacity) {
     hud_wait();
     const int full_width = gtk_widget_get_width(hud.root);
     const gint64 started = hud.phase_started;
+    jsti_hud_show_layout(HUD_RECORDING, "Recording", "Capturing audio",
+                          "Could we move the catch-up to Friday? That gives us a little more time", 0, FALSE, TRUE);
+    hud_wait();
+    if (problem == NULL && (gtk_widget_get_width(hud.root) <= full_width ||
+                            gtk_label_get_lines(GTK_LABEL(hud.live)) != 6 || hud.phase_started != started ||
+                            gtk_window_is_active(hud.window)))
+        problem = "expanded presentation lost its wider transcript, session clock or focus safety.";
     jsti_hud_show_presentation(HUD_RECORDING, "Recording", "Capturing audio",
                                 "Could we move the catch-up to Friday? That gives us a little more time", 0, TRUE);
     hud_wait();

@@ -26,9 +26,11 @@ struct Content {
     std::wstring headline, subheadline, live;
     int displayMilliseconds = 0;
     bool compact = false;
+    bool expanded = false;
     bool operator==(const Content &other) const {
         return phase == other.phase && headline == other.headline && subheadline == other.subheadline &&
-               live == other.live && displayMilliseconds == other.displayMilliseconds && compact == other.compact;
+               live == other.live && displayMilliseconds == other.displayMilliseconds && compact == other.compact &&
+               expanded == other.expanded;
     }
 };
 
@@ -150,7 +152,7 @@ Layout layoutFor(const Content &content, UINT dpi) {
     layout.showsLive = content.phase == recording && !content.live.empty();
     layout.showsMeter = content.phase == recording;
     layout.showsClock = !terminal(content.phase);
-    const float cardWidth = (content.compact ? 244.0f : layout.showsLive ? 460.0f : 340.0f) * s;
+    const float cardWidth = (content.compact ? 244.0f : content.expanded ? 500.0f : 340.0f) * s;
     const float inner = cardWidth - (content.compact ? 36.0f : 48.0f) * s;
     Fonts fonts;
     const Gdiplus::Font headline(&fonts.strong(), 15.0f * s, fonts.strongStyle(), Gdiplus::UnitPixel);
@@ -200,10 +202,11 @@ Layout layoutFor(const Content &content, UINT dpi) {
         }
     }
     if (layout.showsLive) {
-        // Keep the newest words: one compact line, two lines in the full card.
+        // Keep the newest words within the selected presentation.
         Gdiplus::StringFormat leading;
         const float boxInner = inner - (content.compact ? 0.0f : 20.0f) * s;
-        const float lineLimit = (content.compact ? 1 : 2) * measure(graphics, L" ", live, boxInner, leading) + 1;
+        const float lineLimit = (content.compact ? 1 : content.expanded ? 6 : 2) *
+            measure(graphics, L" ", live, boxInner, leading) + 1;
         std::wstring text = content.live;
         bool trimmed = false;
         while (text.size() > 1 && measure(graphics, (trimmed ? L"…" : L"") + text, live, boxInner, leading) > lineLimit) {
@@ -455,13 +458,14 @@ bool ensureWindow() {
 } // namespace
 
 bool stage(int phase, std::wstring headline, std::wstring subheadline, std::wstring live, int displayMilliseconds,
-            bool compact) {
+            bool compact, bool expanded) {
     if (phase < hidden || phase >= phaseCount || headline.size() > 256 || subheadline.size() > 1024 ||
         live.size() > 2048 || displayMilliseconds < 0 || displayMilliseconds > 60000) {
         return false;
     }
     std::lock_guard<std::mutex> lock(stagedLock);
-    staged = Content{phase, std::move(headline), std::move(subheadline), std::move(live), displayMilliseconds, compact};
+    staged = Content{phase, std::move(headline), std::move(subheadline), std::move(live), displayMilliseconds,
+        compact, expanded && !compact};
     return true;
 }
 
@@ -588,6 +592,13 @@ bool selfTest(std::string &error) {
     }
     const Layout full = layoutFor(shown, 96);
     const ULONGLONG started = phaseStarted;
+    stage(recording, L"Recording", L"Capturing audio",
+          L"Could we move the catch-up to Friday? That gives us a little more time", 0, false, true);
+    apply();
+    const Layout expanded = layoutFor(shown, 96);
+    passed = passed && check(expanded.card.Width == 500 && expanded.width > full.width &&
+                             expanded.showsLive && phaseStarted == started && GetForegroundWindow() == foreground,
+                             "expanded presentation did not widen the live card without resetting its clock or focus.");
     stage(recording, L"Recording", L"Capturing audio",
           L"Could we move the catch-up to Friday? That gives us a little more time", 0, true);
     apply();

@@ -66,6 +66,8 @@ typedef struct JSTIConfigurationField {
     const char *group;
     int is_boolean;
     int requires_hud_overlay;
+    /* Optional newline-separated choices: raw value, tab, display title. */
+    const char *choices;
 } JSTIConfigurationField;
 /* action 0 applies fields; 1 imports and 2 exports a path in values[0].
  * action 3 applies fields plus the selected recovered-keyword text in the final
@@ -196,6 +198,8 @@ int jsti_window_set_appearance(int appearance);
  * Thread safe and latest-only; -1 for invalid UTF-8, phase or length. */
 int jsti_window_set_hud(int phase, const char *headline, const char *subheadline, const char *live_text,
                         int display_milliseconds, int compact);
+int jsti_window_set_hud_layout(int phase, const char *headline, const char *subheadline, const char *live_text,
+                               int display_milliseconds, int compact, int expanded);
 /* Shows every page, then the dashboard and History in dark mode, then the
  * dashboard while recording, saving each as `directory`\NN-name.bmp once
  * drawn, then closes the window. Thread safe. */

@@ -240,24 +240,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     }
   }
 
-  enum HUDSizePreference: String, CaseIterable, Identifiable {
-    case compact
-    case expanded
-    case autoExpand
-
-    var id: String { rawValue }
-
-    var displayName: String {
-      switch self {
-      case .compact:
-        return "Compact"
-      case .expanded:
-        return "Always Expanded"
-      case .autoExpand:
-        return "Auto-Expand"
-      }
-    }
-  }
+  typealias HUDSizePreference = HUDExpansionPreference
 
   enum SpeedMode: String, CaseIterable, Identifiable {
     case instant       // Mode A: Raw, no LLM
@@ -1412,7 +1395,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     hudSizePreference =
       HUDSizePreference(
         rawValue: defaults.string(forKey: DefaultsKey.hudSizePreference.rawValue)
-          ?? HUDSizePreference.autoExpand.rawValue) ?? .autoExpand
+          ?? HUDSizePreference.defaultValue.rawValue) ?? .defaultValue
 
     // Speed Mode Settings (Live Polish)
     speedMode =

@@ -1862,12 +1862,12 @@ void importAudio(HWND window) {
 // mode, then the dashboard while recording. Each step is shown, drawn, then
 // saved as NN-name.bmp beside the others; the window closes afterwards.
 enum TourStep { tourDarkDashboard = pageCount, tourDarkHistory, tourDashboardRecording, tourHUDRecording,
-                tourHUDCompleted, tourCompactRecording, tourCompactCompleted, tourSteps };
+                tourHUDCompleted, tourExpandedRecording, tourCompactRecording, tourCompactCompleted, tourSteps };
 
 std::string tourName(int step) {
     if (step < pageCount) return pageInfo[step].name;
     const char *const extra[] = {"dashboard-dark", "history-dark", "dashboard-recording", "hud-recording",
-                                 "hud-completed", "hud-compact-recording", "hud-compact-completed"};
+                                 "hud-completed", "hud-expanded-recording", "hud-compact-recording", "hud-compact-completed"};
     return extra[step - pageCount];
 }
 
@@ -1887,6 +1887,11 @@ void tourShow(HWND window, int step) {
         jsti::hud::apply();
     } else if (step == tourHUDCompleted) {
         jsti::hud::stage(5, L"Completed", L"Saved. Inserted into the original text field.", L"");
+        jsti::hud::apply();
+    } else if (step == tourExpandedRecording) {
+        jsti::hud::stage(1, L"Recording", L"Capturing audio",
+                         L"Could we move the catch-up to Friday? That gives us a little more time to finish "
+                         L"the proposal and review the notes together before sending them to the team.", 0, false, true);
         jsti::hud::apply();
     } else if (step == tourCompactRecording) {
         jsti::hud::stage(1, L"Recording", L"Capturing audio",
@@ -2784,13 +2789,18 @@ int jsti_window_set_insights(const JSTIInsights *all, const JSTIInsights *visibl
 
 int jsti_window_set_hud(int phase, const char *headline, const char *subheadline, const char *live_text,
                         int display_milliseconds, int compact) {
+    return jsti_window_set_hud_layout(phase, headline, subheadline, live_text, display_milliseconds, compact, 0);
+}
+
+int jsti_window_set_hud_layout(int phase, const char *headline, const char *subheadline, const char *live_text,
+                               int display_milliseconds, int compact, int expanded) {
     try {
-        if (compact != 0 && compact != 1) return -1;
+        if ((compact != 0 && compact != 1) || (expanded != 0 && expanded != 1)) return -1;
         std::wstring title, detail, live;
         if (!jsti::wide(headline ? headline : "", title) || !jsti::wide(subheadline ? subheadline : "", detail) ||
             !jsti::wide(live_text ? live_text : "", live) ||
             !jsti::hud::stage(phase, std::move(title), std::move(detail), std::move(live),
-                              display_milliseconds, compact != 0)) {
+                              display_milliseconds, compact != 0, expanded != 0)) {
             return -1;
         }
         std::lock_guard<std::mutex> lock(state.mutex);

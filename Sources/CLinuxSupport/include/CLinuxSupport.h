@@ -77,6 +77,8 @@ typedef struct JSTIConfigurationField {
     const char *group;
     int32_t is_boolean;
     int32_t requires_hud_overlay;
+    /* Optional newline-separated choices: raw value, tab, display title. */
+    const char *choices;
 } JSTIConfigurationField;
 typedef int32_t (*JSTIConfigurationCallback)(int32_t action, const char *const *values, size_t count,
                                             void *context, char *error, size_t capacity);
@@ -166,6 +168,8 @@ int32_t jsti_window_set_login_item(int32_t state, const char *detail);
  * Thread safe; -1 for an invalid phase or UTF-8. */
 int32_t jsti_window_set_hud(int32_t phase, const char *headline, const char *subheadline, const char *live_text,
                             int32_t display_milliseconds, int32_t compact);
+int32_t jsti_window_set_hud_layout(int32_t phase, const char *headline, const char *subheadline, const char *live_text,
+                                   int32_t display_milliseconds, int32_t compact, int32_t expanded);
 /* Shows a JSTI_PAGE_* page, as choosing it in the sidebar does. */
 int32_t jsti_window_show_page(int32_t page);
 /* variant: 0 processed, 1 original, -1 none. */

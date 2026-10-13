@@ -22,6 +22,16 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
         case text
         case boolean
         case number(ClosedRange<Double>)
+        case choice([Choice])
+    }
+
+    public struct Choice: Sendable {
+        public let value: String
+        public let title: String
+        public init(value: String, title: String) {
+            self.value = value
+            self.title = title
+        }
     }
 
     public struct Field: Sendable {
@@ -31,6 +41,11 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
         public let kind: Kind
         public let defaultValue: AnyCodable
         public internal(set) var requiresHUDOverlay = false
+
+        public var serializedChoices: String? {
+            guard case .choice(let choices) = kind else { return nil }
+            return choices.map { "\($0.value)\t\($0.title)" }.joined(separator: "\n")
+        }
     }
 
     public static let fields: [Field] = [
@@ -68,7 +83,12 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
               requiresHUDOverlay: true),
         .init(key: "postRecordingTailDuration", title: "Recording buffer (seconds after finishing)",
               group: "Transcription", kind: .number(0...2),
-              defaultValue: AnyCodable(.double(SpeechDefaults.recordingTailDuration)))
+              defaultValue: AnyCodable(.double(SpeechDefaults.recordingTailDuration))),
+        .init(key: "hudSizePreference", title: "Full HUD size",
+              group: "General", kind: .choice(HUDExpansionPreference.allCases.map {
+                  Choice(value: $0.rawValue, title: $0.displayName)
+              }), defaultValue: AnyCodable(.string(HUDExpansionPreference.defaultValue.rawValue)),
+              requiresHUDOverlay: true)
     ]
 
     public private(set) var values: [String: AnyCodable]
@@ -85,6 +105,8 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
             switch (field.kind, value.storage) {
             case (.text, .string(let text)):
                 valid = text.utf8.count <= 65_535 && !text.contains("\0")
+            case (.choice(let choices), .string(let text)):
+                valid = choices.contains { $0.value == text }
             case (.boolean, .bool): valid = true
             case (.number(let range), .double(let number)): valid = number.isFinite && range.contains(number)
             case (.number(let range), .int(let number)): valid = range.contains(Double(number))
@@ -127,7 +149,7 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
         var changed: [String: AnyCodable] = [:]
         for (field, entry) in zip(Self.fields, entries) {
             switch field.kind {
-            case .text: changed[field.key] = AnyCodable(.string(entry))
+            case .text, .choice: changed[field.key] = AnyCodable(.string(entry))
             case .boolean:
                 guard entry == "0" || entry == "1" else {
                     throw DesktopConfigurationError.invalidField(field.title)
@@ -175,6 +197,13 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
 
     public var language: String? {
         TranscriptionLanguageCatalog.providerLanguage(for: text("preferredLocale"))
+    }
+
+    public var hudExpansion: HUDExpansionPreference {
+        guard let preference = HUDExpansionPreference(rawValue: text("hudSizePreference")) else {
+            preconditionFailure("Invalid validated HUD expansion preference.")
+        }
+        return preference
     }
 
     public var liveOptions: LiveClientOptions {

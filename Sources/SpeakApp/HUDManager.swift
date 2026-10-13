@@ -53,7 +53,7 @@ final class HUDManager: ObservableObject {
   }
 
   /// Threshold for auto-expanding HUD when transcript exceeds this character count
-  static let autoExpandThreshold = 100
+  static let autoExpandThreshold = HUDExpansionPreference.autoExpandThreshold
 
   /// Whether the HUD is in expanded mode showing full transcript
   @Published var isExpanded: Bool = false

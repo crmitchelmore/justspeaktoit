@@ -124,6 +124,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var liveFinalisation: DesktopLiveSession?
     /// The recording the HUD follows, from Record until its result.
     var hudRecording: UUID?
+    var hudExpanded = false
     package var outputSlot = DesktopHostOutputState<Platform>()
     // Installed once iCloud sync is configured.
     package var cloudSync = DesktopHostSyncHooks()

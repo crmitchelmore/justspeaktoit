@@ -42,9 +42,9 @@ enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPla
     }
 
     package static func hud(_ state: DesktopHUDState) {
-        _ = jsti_window_set_hud(
+        _ = jsti_window_set_hud_layout(
             state.phase.rawValue, state.headline, state.subheadline, state.liveText,
-            Int32(((state.displayDuration ?? 0) * 1000).rounded()), state.compact ? 1 : 0
+            Int32(((state.displayDuration ?? 0) * 1000).rounded()), state.compact ? 1 : 0, state.expanded ? 1 : 0
         )
     }
 

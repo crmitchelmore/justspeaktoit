@@ -13,7 +13,7 @@ in those same destinations. Fields are defined once in
 `Sources/SpeakCore/DesktopConfiguration.swift`; native controls receive that
 schema rather than maintaining copies of defaults. Scalar defaults now use
 `SpeechDefaults` in the shared schema and canonical Mac `AppSettings` initializer;
-an Apple test compares all thirteen preferences to a fresh Mac settings store.
+an Apple test compares all fourteen preferences to a fresh Mac settings store.
 Keyword reconciliation also maintains two migration/recovery metadata keys;
 these are not two additional independent preference switches.
 All fields are validated
@@ -55,11 +55,18 @@ desktop notification server, not the app, controls notification expiration.
 Compact HUD matches the Mac's small dot/level-meter/whole-second-clock layout,
 with one trailing transcript line and terminal status instead of the full card.
 It preserves session clocks, visibility/retraction policy and terminal timers.
-The default remains the full card. On Wayland, overlay-only rows are hidden with
+The default remains the full card. Its native size chooser uses the canonical
+Compact / Always Expanded / Auto-Expand identifiers and policy shared with Mac.
+Auto-Expand triggers strictly after 100 visible transcript characters and remains
+expanded through retractions and later phases until the next recording. Expanded
+Windows/X11 cards are wider and show up to six transcript lines; the minimal
+`showCompactHUD` presentation still takes precedence. Hidden live previews cannot
+trigger automatic expansion. Size changes preserve the phase clock and never
+activate the HUD. On Wayland, overlay-only rows are hidden with
 an explanation; their values are retained when applying or transferring preferences.
 The shared field schema marks these capabilities rather than duplicating labels
 or catalogue entries in the native UI. Native capture-health footer details and
-full-HUD expansion controls remain separate gaps.
+the Mac's interactive expansion chevron remain separate gaps.
 Cleanup remains opt-in; changing preferences does not enable it. HUD visibility
 and live-preview visibility gate the real native HUD. Shortcut timing reaches
 the existing shared gesture machine on both platforms, not fixed platform timers.
@@ -177,7 +184,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | audioPreWarmingEnabled | Missing / Missing | Native capture opened on demand, no capture prewarming preference |
 | warmMicrophoneOnKeyPress | Missing / Missing | No speculative microphone-open preference |
 | postProcessingStreamingEnabled | Missing / Missing | Finished-text remote cleanup only |
-| hudSizePreference | Missing / Missing | Fixed native HUD layout |
+| hudSizePreference | Wired / Partial | Config + shared `HUDExpansionPreference`; native chooser and full-card expansion on Windows/X11; retained but hidden on Wayland |
 | showLiveTranscriptInHUD | Wired / Partial | Config + Windows/X11 HUD; Wayland has no live overlay, so the control is hidden; transcript remains in main window |
 | showCompactHUD | Wired / Partial | Config + native compact Windows/X11 renderer; hidden on Wayland, where notifications are compositor-owned |
 | shortenErrorDisplay | Wired / Partial | Config + HUD; native Windows/X11 timer; Wayland notification lifetime is desktop-owned |
@@ -239,11 +246,18 @@ destinations outside `SettingsTab` likewise remain unimplemented. No placeholder
 destination or inert switch is added for those gaps.
 
 Local model discovery/import/preparation, lexicon/corrections/pronunciation,
-TTS usage/history, history retention/import, profile archive merge, paid access,
+TTS usage/history, audio-only housekeeping/text-file import, profile archive merge, paid access,
 diagnostics, automation and hands-free work need their own qualified native
 engine journeys. Apple Speech, WhisperKit, FluidAudio, MLX, Dock/Fn, Keychain,
 CloudKit native and App Store/StoreKit capabilities need explicit native
 replacements, not engine-ID renaming.
+
+Mac does not expose an automatic History/audio retention limit. Its General
+Housekeeping actions reveal the recordings directory and delete recordings
+without deleting History metadata, including orphan audio kept by earlier row
+deletions (`Sources/SpeakApp/Views/Settings/SettingsView+General.swift:578-614`).
+Those distinct actions and recording-directory configuration belong to the
+parent History workstream; an invented expiry policy is not a parity requirement.
 
 Portable tests: `Tests/SpeakDesktopTests/DesktopConfigurationTests.swift` and
 `Tests/SpeakDesktopHostTests/DesktopHostConfigurationTests.swift`. Native smoke

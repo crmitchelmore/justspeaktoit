@@ -55,7 +55,7 @@ final class DesktopHostKeywordConfigurationTests: XCTestCase {
         let reloaded = try await controller.configuration()
         for field in DesktopConfiguration.fields {
             switch field.kind {
-            case .text: XCTAssertEqual(reloaded.text(field.key), after.text(field.key))
+            case .text, .choice: XCTAssertEqual(reloaded.text(field.key), after.text(field.key))
             case .boolean: XCTAssertEqual(reloaded.enabled(field.key), after.enabled(field.key))
             case .number: XCTAssertEqual(reloaded.number(field.key), after.number(field.key))
             }

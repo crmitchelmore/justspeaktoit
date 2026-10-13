@@ -110,6 +110,7 @@ static UI ui;
 
 static struct {
     GPtrArray *rows;
+    GPtrArray *choices;
     GArray *booleans;
     GArray *overlay_settings;
     GtkWidget *recovery_group;
@@ -1265,6 +1266,7 @@ int32_t jsti_window_run(
     configuration.callback = NULL;
     configuration.context = NULL;
     g_clear_pointer(&configuration.rows, g_ptr_array_unref);
+    g_clear_pointer(&configuration.choices, g_ptr_array_unref);
     g_clear_pointer(&configuration.booleans, g_array_unref);
     g_clear_pointer(&configuration.overlay_settings, g_array_unref);
     configuration.recovery_group = NULL;
@@ -1759,6 +1761,7 @@ typedef struct HUD {
     gint32 phase;
     gint32 display_milliseconds;
     gboolean compact;
+    gboolean expanded;
     gchar *headline, *subheadline, *live;
 } HUD;
 
@@ -1772,14 +1775,19 @@ static void hud_free(gpointer pointer) {
 
 static void hud_apply(gpointer pointer) {
     HUD *state = pointer;
-    jsti_hud_show_presentation(state->phase, state->headline, state->subheadline, state->live,
-                                state->display_milliseconds, state->compact);
+    jsti_hud_show_layout(state->phase, state->headline, state->subheadline, state->live,
+                          state->display_milliseconds, state->compact, state->expanded);
 }
 
 int32_t jsti_window_set_hud(int32_t phase, const char *headline, const char *subheadline, const char *live_text,
                             int32_t display_milliseconds, int32_t compact) {
+    return jsti_window_set_hud_layout(phase, headline, subheadline, live_text, display_milliseconds, compact, 0);
+}
+
+int32_t jsti_window_set_hud_layout(int32_t phase, const char *headline, const char *subheadline, const char *live_text,
+                                   int32_t display_milliseconds, int32_t compact, int32_t expanded) {
     if (phase < 0 || phase > 6 || display_milliseconds < 0 || display_milliseconds > 60000 ||
-        (compact != 0 && compact != 1)) return -1;
+        (compact != 0 && compact != 1) || (expanded != 0 && expanded != 1)) return -1;
     const char *texts[] = { headline, subheadline, live_text };
     for (size_t index = 0; index < G_N_ELEMENTS(texts); ++index) {
         if (texts[index] != NULL && !g_utf8_validate(texts[index], -1, NULL)) return -1;
@@ -1788,6 +1796,7 @@ int32_t jsti_window_set_hud(int32_t phase, const char *headline, const char *sub
     state->phase = phase;
     state->display_milliseconds = display_milliseconds;
     state->compact = compact != 0;
+    state->expanded = expanded != 0 && compact == 0;
     state->headline = g_strdup(headline != NULL ? headline : "");
     state->subheadline = g_strdup(subheadline != NULL ? subheadline : "");
     state->live = g_strdup(live_text != NULL ? live_text : "");
@@ -1985,7 +1994,7 @@ int32_t jsti_window_set_azure_resource(const char *endpoint) {
 }
 
 typedef struct ConfigurationUpdate {
-    GPtrArray *titles, *values, *groups, *recovered;
+    GPtrArray *titles, *values, *groups, *recovered, *choices;
     GArray *booleans;
     GArray *overlay_settings;
     JSTIConfigurationCallback callback;
@@ -2016,6 +2025,20 @@ static void on_configuration_apply(GtkButton *button, gpointer data) {
     for (guint i = 0; i < configuration.rows->len; ++i) {
         GtkWidget *row = g_ptr_array_index(configuration.rows, i);
         gboolean boolean = g_array_index(configuration.booleans, gboolean, i);
+        const char *choices = g_ptr_array_index(configuration.choices, i);
+        if (choices[0] != '\0') {
+            gchar **lines = g_strsplit(choices, "\n", -1);
+            guint selected = adw_combo_row_get_selected(ADW_COMBO_ROW(row));
+            if (selected >= g_strv_length(lines)) {
+                g_strfreev(lines);
+                g_ptr_array_unref(values);
+                configuration_problem("Choose a value for each preference first.");
+                return;
+            }
+            g_ptr_array_add(values, g_strndup(lines[selected], strchr(lines[selected], '\t') - lines[selected]));
+            g_strfreev(lines);
+            continue;
+        }
         g_ptr_array_add(values, g_strdup(boolean
             ? (adw_switch_row_get_active(ADW_SWITCH_ROW(row)) ? "1" : "0")
             : gtk_editable_get_text(GTK_EDITABLE(row))));
@@ -2070,6 +2093,7 @@ static void configuration_update_free(gpointer data) {
     g_ptr_array_unref(update->values);
     g_ptr_array_unref(update->groups);
     g_ptr_array_unref(update->recovered);
+    g_ptr_array_unref(update->choices);
     g_array_unref(update->booleans);
     g_array_unref(update->overlay_settings);
     g_free(update);
@@ -2081,6 +2105,7 @@ static void configuration_apply(gpointer data) {
     configuration.context = update->context;
     if (configuration.rows == NULL) {
         configuration.rows = g_ptr_array_new();
+        configuration.choices = g_ptr_array_ref(update->choices);
         configuration.booleans = g_array_ref(update->booleans);
         configuration.overlay_settings = g_array_ref(update->overlay_settings);
         GtkWidget *groups[4];
@@ -2099,7 +2124,18 @@ static void configuration_apply(gpointer data) {
             guint slot = g_strcmp0(section, "Transcription") == 0 ? 1 :
                 g_strcmp0(section, "Post-processing") == 0 ? 2 : g_strcmp0(section, "Keyboard") == 0 ? 3 : 0;
             gboolean boolean = g_array_index(update->booleans, gboolean, i);
-            GtkWidget *row = boolean ? adw_switch_row_new() : adw_entry_row_new();
+            const char *choices = g_ptr_array_index(update->choices, i);
+            GtkWidget *row = boolean ? adw_switch_row_new() :
+                choices[0] != '\0' ? adw_combo_row_new() : adw_entry_row_new();
+            if (choices[0] != '\0') {
+                gchar **lines = g_strsplit(choices, "\n", -1);
+                GtkStringList *model = gtk_string_list_new(NULL);
+                for (guint choice = 0; lines[choice] != NULL; ++choice)
+                    gtk_string_list_append(model, strchr(lines[choice], '\t') + 1);
+                adw_combo_row_set_model(ADW_COMBO_ROW(row), G_LIST_MODEL(model));
+                g_object_unref(model);
+                g_strfreev(lines);
+            }
             adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), g_ptr_array_index(update->titles, i));
             adw_preferences_group_add(ADW_PREFERENCES_GROUP(groups[slot]), row);
             if (g_array_index(update->overlay_settings, gboolean, i) && !jsti_hud_overlay_supported())
@@ -2143,7 +2179,15 @@ static void configuration_apply(gpointer data) {
         const char *value = g_ptr_array_index(update->values, i);
         if (g_array_index(configuration.booleans, gboolean, i))
             adw_switch_row_set_active(ADW_SWITCH_ROW(row), g_strcmp0(value, "1") == 0);
-        else gtk_editable_set_text(GTK_EDITABLE(row), value);
+        else if (ADW_IS_COMBO_ROW(row)) {
+            gchar **lines = g_strsplit(g_ptr_array_index(configuration.choices, i), "\n", -1);
+            for (guint choice = 0; lines[choice] != NULL; ++choice) {
+                const char *tab = strchr(lines[choice], '\t');
+                if (strlen(value) == (size_t)(tab - lines[choice]) && strncmp(value, lines[choice], tab - lines[choice]) == 0)
+                    adw_combo_row_set_selected(ADW_COMBO_ROW(row), choice);
+            }
+            g_strfreev(lines);
+        } else gtk_editable_set_text(GTK_EDITABLE(row), value);
     }
     GtkStringList *recovered = gtk_string_list_new(NULL);
     for (guint i = 0; i < update->recovered->len; ++i)
@@ -2164,6 +2208,7 @@ int32_t jsti_window_set_configuration(const JSTIConfigurationField *fields, size
     update->values = g_ptr_array_new_with_free_func(g_free);
     update->groups = g_ptr_array_new_with_free_func(g_free);
     update->recovered = g_ptr_array_new_with_free_func(g_free);
+    update->choices = g_ptr_array_new_with_free_func(g_free);
     update->booleans = g_array_new(FALSE, FALSE, sizeof(gboolean));
     update->overlay_settings = g_array_new(FALSE, FALSE, sizeof(gboolean));
     update->callback = callback;
@@ -2183,6 +2228,31 @@ int32_t jsti_window_set_configuration(const JSTIConfigurationField *fields, size
             configuration_update_free(update);
             return -1;
         }
+        const char *choices = fields[i].choices != NULL ? fields[i].choices : "";
+        if (!g_utf8_validate(choices, -1, NULL) || strlen(choices) > 65535 ||
+            (choices[0] != '\0' && fields[i].is_boolean != 0)) {
+            configuration_update_free(update);
+            return -1;
+        }
+        if (choices[0] != '\0') {
+            gchar **lines = g_strsplit(choices, "\n", -1);
+            gboolean valid = g_strv_length(lines) <= 32, found = FALSE;
+            for (guint choice = 0; lines[choice] != NULL; ++choice) {
+                const char *tab = strchr(lines[choice], '\t');
+                if (tab == NULL || tab == lines[choice] || tab[1] == '\0' || strchr(tab + 1, '\t') != NULL) {
+                    valid = FALSE;
+                    break;
+                }
+                found |= strlen(fields[i].value) == (size_t)(tab - lines[choice]) &&
+                    strncmp(fields[i].value, lines[choice], tab - lines[choice]) == 0;
+            }
+            g_strfreev(lines);
+            if (!valid || !found) {
+                configuration_update_free(update);
+                return -1;
+            }
+        }
+        g_ptr_array_add(update->choices, g_strdup(choices));
         g_ptr_array_add(update->titles, g_strdup(fields[i].title));
         g_ptr_array_add(update->values, g_strdup(fields[i].value));
         g_ptr_array_add(update->groups, g_strdup(fields[i].group));
@@ -2203,6 +2273,9 @@ static int32_t configuration_test_callback(int32_t action, const char *const *va
     if (action == 3 && (count != configuration.rows->len + 1 ||
         g_strcmp0(values[count - 1], "Second recoverable edit") != 0)) return -1;
     if (action != 0 && action != 3) return -1;
+    for (guint i = 0; i < configuration.rows->len; ++i)
+        if (((const char *)g_ptr_array_index(configuration.choices, i))[0] != '\0' &&
+            g_strcmp0(values[i], "expanded") != 0) return -1;
     ++*calls;
     return 0;
 }
@@ -2221,6 +2294,16 @@ static gboolean configuration_self_test(void) {
     AdwEntryRow *language = ADW_ENTRY_ROW(g_ptr_array_index(configuration.rows, 0));
     gchar *saved = g_strdup(gtk_editable_get_text(GTK_EDITABLE(language)));
     gint calls = 0;
+    AdwComboRow *choice_row = NULL;
+    guint original_choice = 0;
+    for (guint i = 0; i < configuration.rows->len; ++i) {
+        if (((const char *)g_ptr_array_index(configuration.choices, i))[0] == '\0') continue;
+        choice_row = ADW_COMBO_ROW(g_ptr_array_index(configuration.rows, i));
+        if (g_list_model_get_n_items(adw_combo_row_get_model(choice_row)) != 3) return FALSE;
+        original_choice = adw_combo_row_get_selected(choice_row);
+        adw_combo_row_set_selected(choice_row, 1);
+    }
+    if (choice_row == NULL) return FALSE;
     configuration.callback = configuration_test_callback;
     configuration.context = &calls;
     gtk_editable_set_text(GTK_EDITABLE(language), "fr_FR");
@@ -2239,6 +2322,7 @@ static gboolean configuration_self_test(void) {
     adw_combo_row_set_model(configuration.recovery_row, saved_model);
     adw_combo_row_set_selected(configuration.recovery_row, saved_selection);
     configuration.recovery_count = saved_count;
+    adw_combo_row_set_selected(choice_row, original_choice);
     g_object_unref(saved_model);
     gtk_editable_set_text(GTK_EDITABLE(language), saved);
     g_free(saved);
@@ -2575,7 +2659,7 @@ typedef struct Tour {
 } Tour;
 
 enum { TOUR_DARK_DASHBOARD = JSTI_PAGE_COUNT, TOUR_DARK_HISTORY, TOUR_RECORDING, TOUR_HUD_RECORDING,
-       TOUR_HUD_COMPLETED, TOUR_COMPACT_RECORDING, TOUR_COMPACT_COMPLETED, TOUR_DONE };
+       TOUR_HUD_COMPLETED, TOUR_EXPANDED_RECORDING, TOUR_COMPACT_RECORDING, TOUR_COMPACT_COMPLETED, TOUR_DONE };
 
 static gboolean tour_capture(gpointer data);
 
@@ -2592,6 +2676,10 @@ static void tour_show(Tour *tour) {
                       "Could we move the catch-up to Friday? That gives us a little more time");
     } else if (tour->step == TOUR_HUD_COMPLETED) {
         jsti_hud_show(5, "Completed", "Saved. Pasted into the original window.", "");
+    } else if (tour->step == TOUR_EXPANDED_RECORDING) {
+        jsti_hud_show_layout(1, "Recording", "Capturing audio",
+                              "Could we move the catch-up to Friday? That gives us a little more time to finish "
+                              "the proposal and review the notes together before sending them to the team.", 0, FALSE, TRUE);
     } else if (tour->step == TOUR_COMPACT_RECORDING) {
         jsti_hud_show_presentation(1, "Recording", "Capturing audio",
                                     "Could we move the catch-up to Friday? That gives us a little more time", 0, TRUE);
@@ -2613,6 +2701,7 @@ static const char *tour_name(gint32 step) {
     case TOUR_RECORDING: return "dashboard-recording";
     case TOUR_HUD_RECORDING: return "hud-recording";
     case TOUR_HUD_COMPLETED: return "hud-completed";
+    case TOUR_EXPANDED_RECORDING: return "hud-expanded-recording";
     case TOUR_COMPACT_RECORDING: return "hud-compact-recording";
     case TOUR_COMPACT_COMPLETED: return "hud-compact-completed";
     case TOUR_DARK_DASHBOARD: return "dashboard-dark";

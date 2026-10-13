@@ -35,6 +35,7 @@ final class AppSettingsDefaultsTests: XCTestCase {
         XCTAssertEqual(settings.showLiveTranscriptInHUD, portable.enabled("showLiveTranscriptInHUD"))
         XCTAssertEqual(settings.shortenErrorDisplay, portable.enabled("shortenErrorDisplay"))
         XCTAssertEqual(settings.showCompactHUD, portable.enabled("showCompactHUD"))
+        XCTAssertEqual(settings.hudSizePreference, portable.hudExpansion)
         XCTAssertEqual(settings.liveStopGracePeriod, portable.number("liveStopGracePeriod"))
         XCTAssertEqual(settings.postRecordingTailDuration, portable.number("postRecordingTailDuration"))
         XCTAssertEqual(settings.holdThreshold, portable.number("holdThreshold"))

@@ -3,13 +3,18 @@
 #include <algorithm>
 #include <commdlg.h>
 #include <mutex>
+#include <sstream>
 #include <vector>
 
 namespace {
 constexpr int groupLabelID = 598, groupID = 599, fieldBase = 600, labelBase = 700;
 constexpr int problemID = 800, importID = 801, exportID = 802;
 constexpr int recoveryLabelID = 803, recoveryID = 804, restoreID = 805;
-struct Field { std::wstring title, value, group; bool boolean = false; };
+struct Field {
+    std::wstring title, value, group;
+    bool boolean = false;
+    std::vector<std::pair<std::wstring, std::wstring>> choices;
+};
 struct Configuration {
     std::vector<Field> fields;
     std::vector<std::wstring> recovered;
@@ -52,7 +57,8 @@ void layout(HWND window, Dialog &dialog) {
             MoveWindow(GetDlgItem(window, labelBase + static_cast<int>(i)), margin, y, width, scale(window, 20), TRUE);
             y += scale(window, 22);
         }
-        MoveWindow(GetDlgItem(window, fieldBase + static_cast<int>(i)), margin, y, width, scale(window, 28), TRUE);
+        MoveWindow(GetDlgItem(window, fieldBase + static_cast<int>(i)), margin, y, width,
+            scale(window, dialog.config.fields[i].choices.empty() ? 28 : 200), TRUE);
         y += scale(window, boolean ? 34 : 38);
     }
     const bool recovery = dialog.group == L"Transcription" && !dialog.config.recovered.empty();
@@ -102,8 +108,19 @@ bool controls(HWND window, Dialog &dialog) {
             if (control) SendMessageW(control, BM_SETCHECK, field.value == L"1" ? BST_CHECKED : BST_UNCHECKED, 0);
         } else {
             if (!add(L"STATIC", field.title.c_str(), SS_LEFT, labelBase + static_cast<int>(i))) return false;
-            control = add(L"EDIT", field.value.c_str(), ES_AUTOHSCROLL | WS_TABSTOP, fieldBase + static_cast<int>(i));
-            if (control) SendMessageW(control, EM_LIMITTEXT, 65535, 0);
+            if (field.choices.empty()) {
+                control = add(L"EDIT", field.value.c_str(), ES_AUTOHSCROLL | WS_TABSTOP, fieldBase + static_cast<int>(i));
+                if (control) SendMessageW(control, EM_LIMITTEXT, 65535, 0);
+            } else {
+                control = add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, fieldBase + static_cast<int>(i));
+                if (control) {
+                    for (size_t choice = 0; choice < field.choices.size(); ++choice) {
+                        if (SendMessageW(control, CB_ADDSTRING, 0,
+                            reinterpret_cast<LPARAM>(field.choices[choice].second.c_str())) < 0) return false;
+                        if (field.choices[choice].first == field.value) SendMessageW(control, CB_SETCURSEL, choice, 0);
+                    }
+                }
+            }
         }
         if (!control) return false;
     }
@@ -133,7 +150,17 @@ void apply(HWND window, Dialog &dialog, int action) {
     std::vector<std::string> entries;
     if (action == 0 || action == 3) {
         for (size_t i = 0; i < dialog.config.fields.size(); ++i) {
-            entries.push_back(dialog.config.fields[i].boolean
+            const auto &field = dialog.config.fields[i];
+            if (!field.choices.empty()) {
+                const LRESULT selected = SendDlgItemMessageW(window, fieldBase + static_cast<int>(i), CB_GETCURSEL, 0, 0);
+                if (selected < 0 || static_cast<size_t>(selected) >= field.choices.size()) {
+                    SetDlgItemTextW(window, problemID, L"Choose a value for each preference first.");
+                    return;
+                }
+                entries.push_back(jsti::utf8(field.choices[static_cast<size_t>(selected)].first));
+                continue;
+            }
+            entries.push_back(field.boolean
                 ? (SendDlgItemMessageW(window, fieldBase + static_cast<int>(i), BM_GETCHECK, 0, 0) == BST_CHECKED ? "1" : "0")
                 : jsti::utf8(text(window, fieldBase + static_cast<int>(i))));
         }
@@ -276,6 +303,22 @@ int jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t c
                 !jsti::wide(fields[i].group, field.group) ||
                 field.value.size() > 65535 || (fields[i].is_boolean != 0 && fields[i].is_boolean != 1)) return -1;
             field.boolean = fields[i].is_boolean != 0;
+            if (fields[i].choices && fields[i].choices[0]) {
+                std::wstring choices;
+                if (field.boolean || !jsti::wide(fields[i].choices, choices) || choices.size() > 65535) return -1;
+                std::wistringstream stream(choices);
+                std::wstring line;
+                bool found = false;
+                while (std::getline(stream, line)) {
+                    const size_t tab = line.find(L'\t');
+                    if (tab == std::wstring::npos || tab == 0 || tab + 1 == line.size() ||
+                        line.find(L'\t', tab + 1) != std::wstring::npos || field.choices.size() >= 32) return -1;
+                    const auto value = line.substr(0, tab);
+                    found = found || value == field.value;
+                    field.choices.emplace_back(value, line.substr(tab + 1));
+                }
+                if (!found) return -1;
+            }
             updated.fields.push_back(std::move(field));
         }
         for (size_t i = 0; i < recovered_count; ++i) {
@@ -300,15 +343,17 @@ bool jsti_configuration_self_test(HWND owner, std::string &error) {
     struct Applied { int calls = 0; bool correct = false; } applied;
     Dialog dialog;
     dialog.config.fields = {{L"Language", L"en_GB", L"Transcription", false}, {L"HUD", L"1", L"General", true}};
+    dialog.config.fields.push_back({L"Full HUD size", L"expanded", L"General", false,
+        {{L"compact", L"Compact"}, {L"expanded", L"Always Expanded"}, {L"autoExpand", L"Auto-Expand"}}});
     dialog.config.context = &applied;
     dialog.config.callback = [](int action, const char *const *values, size_t count, void *context,
                                  char *error, size_t capacity) {
         auto &result = *static_cast<Applied *>(context);
         ++result.calls;
-        if (action != 0 || count != 2 || std::string(values[0]) != "fr_FR") {
+        if (action != 0 || count != 3 || std::string(values[0]) != "fr_FR") {
             return jsti::fail("Synthetic invalid language.", error, capacity);
         }
-        result.correct = std::string(values[1]) == "0";
+        result.correct = std::string(values[1]) == "0" && std::string(values[2]) == "autoExpand";
         return 0;
     };
     HWND window = createDialog(owner, dialog);
@@ -325,6 +370,9 @@ bool jsti_configuration_self_test(HWND owner, std::string &error) {
     const bool refused = IsWindow(window) && applied.calls == 1 && text(window, problemID) == L"Synthetic invalid language.";
     SetDlgItemTextW(window, fieldBase, L"fr_FR");
     SendDlgItemMessageW(window, fieldBase + 1, BM_SETCHECK, BST_UNCHECKED, 0);
+    const bool choicePopulated = SendDlgItemMessageW(window, fieldBase + 2, CB_GETCOUNT, 0, 0) == 3 &&
+        SendDlgItemMessageW(window, fieldBase + 2, CB_GETCURSEL, 0, 0) == 1;
+    SendDlgItemMessageW(window, fieldBase + 2, CB_SETCURSEL, 2, 0);
     SendMessageW(window, WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
     const bool accepted = !IsWindow(window) && applied.calls == 2 && applied.correct;
     if (IsWindow(window)) DestroyWindow(window);
@@ -333,7 +381,7 @@ bool jsti_configuration_self_test(HWND owner, std::string &error) {
     HWND second = createDialog(owner, cancelled);
     if (second) SendMessageW(second, WM_COMMAND, MAKEWPARAM(IDCANCEL, BN_CLICKED), 0);
     const bool quiet = second && !IsWindow(second) && applied.calls == 2;
-    if (!initiallyGrouped || !switchedGroup || !refused || !accepted || !quiet) {
+    if (!initiallyGrouped || !switchedGroup || !refused || !accepted || !quiet || !choicePopulated) {
         error = "Configuration editor did not group, validate, apply or cancel its native fields correctly.";
         return false;
     }
@@ -344,8 +392,8 @@ bool jsti_configuration_self_test(HWND owner, std::string &error) {
     recovery.config.callback = [](int action, const char *const *values, size_t count, void *context,
                                    char *error, size_t capacity) {
         auto &result = *static_cast<Applied *>(context);
-        if (action != 3 || count != 3 || std::string(values[0]) != "en_GB" ||
-            std::string(values[2]) != "Second recoverable edit")
+        if (action != 3 || count != 4 || std::string(values[0]) != "en_GB" ||
+            std::string(values[2]) != "expanded" || std::string(values[3]) != "Second recoverable edit")
             return jsti::fail("Recovery selected the wrong edit.", error, capacity);
         ++result.calls;
         return 0;

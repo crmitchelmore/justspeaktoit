@@ -23,6 +23,7 @@ extension DesktopHostController {
     func beginHUD(_ recordID: UUID, _ state: DesktopHUDState) {
         guard !closed else { return }
         hudRecording = recordID
+        hudExpanded = false
         Platform.hud(hudPresentation(state))
     }
 
@@ -42,16 +43,20 @@ extension DesktopHostController {
     func failHUDStart(_ message: String) {
         guard !closed else { return }
         hudRecording = nil
+        hudExpanded = false
         Platform.hud(hudPresentation(.failure(message, headline: "Recording could not start")))
     }
 
     private func hudPresentation(_ state: DesktopHUDState) -> DesktopHUDState {
-        guard let configuration = settings.configuration else { return state }
-        guard configuration.enabled("showHUD") else { return .hidden }
+        let configuration = settings.configuration
+        guard configuration?.enabled("showHUD") != false else { return .hidden }
         var presentation = state
-        presentation.shortenErrorDisplay = configuration.enabled("shortenErrorDisplay")
-        presentation.compact = configuration.enabled("showCompactHUD")
-        if !configuration.enabled("showLiveTranscriptInHUD") { presentation.liveText = "" }
+        presentation.shortenErrorDisplay = configuration?.enabled("shortenErrorDisplay") ?? SpeechDefaults.shortErrors
+        presentation.compact = configuration?.enabled("showCompactHUD") ?? SpeechDefaults.compactHUD
+        if configuration?.enabled("showLiveTranscriptInHUD") == false { presentation.liveText = "" }
+        let policy = configuration?.hudExpansion ?? HUDExpansionPreference.defaultValue
+        hudExpanded = policy.expanded(previous: hudExpanded, transcriptCount: presentation.liveText?.count ?? 0)
+        presentation.expanded = !presentation.compact && hudExpanded
         return presentation
     }
 

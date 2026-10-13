@@ -2,7 +2,10 @@ import Foundation
 
 extension DesktopConfiguration {
     public static var supportedKeys: Set<String> {
-        Set(fields.map(\.key)).union(["transcriptionKeywordsLastReconciled", "recoveredTranscriptionKeywords"])
+        Set(fields.map(\.key)).union([
+            ApplicationPreferenceKey.transcriptionKeywordsLastReconciled.rawValue,
+            ApplicationPreferenceKey.recoveredTranscriptionKeywords.rawValue
+        ])
     }
 
     public var recoveredKeywords: [String] {

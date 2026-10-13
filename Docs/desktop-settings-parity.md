@@ -1,8 +1,9 @@
 # Desktop settings coverage
 
 This is a settings slice, **not full Windows/Linux feature parity**. Baseline:
-macOS `AppSettings.DefaultsKey` has 91 keys
-(`Sources/SpeakApp/AppSettings.swift:289-381`), plus preferences and collections
+macOS `AppSettings.DefaultsKey` aliases the shared 91-key
+`ApplicationPreferenceKey` (`Sources/SpeakCore/ApplicationPreferenceKey.swift`),
+plus preferences and collections
 outside that enum. Track remaining product acceptance in #1157.
 
 ## Generated-speech coordination
@@ -20,6 +21,9 @@ transferred flags from the dictation configuration dictionary. Export derives
 them from that model, not a second persisted authority. Shared transfer-only
 metadata does not add duplicate Voice switches to the dictation editor. Native
 voice selection preserves both flags.
+Dictation and Voice transfer key projections now reuse the parent's exact
+canonical application-key definition; this does not import its migration
+catalogue or make all 91 preferences executable.
 This is **transfer support, not executable Voice acceptance**: Generate,
 retained results and the native Voice controls remain in #1217.
 Voice flags do not increase this slice's editable preference count. There are fourteen

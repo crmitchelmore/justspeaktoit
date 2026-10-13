@@ -49,6 +49,7 @@ final class HotKeyManager: ObservableObject {
 	private var permissionRequestTask: Task<Void, Never>?
 	private var globalEscapeReasons: Set<GlobalEscapeReason> = []
 	private var recordingStateCancellable: AnyCancellable?
+	private var isRecording = false
 
 	init(
 		permissionsManager: PermissionsManager,
@@ -225,13 +226,19 @@ final class HotKeyManager: ObservableObject {
 	/// Only the newest request may rearm. A manual reconnect or a binding change
 	/// cancels a pending recovery, so a stale lifecycle event cannot reset a newer
 	/// detector.
-	private func scheduleRecovery(reason: String) {
+	private func scheduleRecovery(reason: String, preservesActiveCapture: Bool = false) {
 		guard monitoringRequested else { return }
 		recoveryTask?.cancel()
 		recoveryTask = Task { @MainActor [weak self] in
 			try? await Task.sleep(for: .milliseconds(500))
 			guard !Task.isCancelled, let self, self.monitoringRequested else { return }
 			self.recoveryTask = nil
+			// App activation is not a capture disruption. Reconnecting resets the
+			// gesture detector and emits holdEnd, even if the key is still held.
+			if preservesActiveCapture,
+				self.isRecording || self.engine.isKeyDown || self.globalEscapeReasons.contains(.voiceEdit) {
+				return
+			}
 			self.log.info("Rearming global hotkey after \(reason, privacy: .public)")
 			self.reconnectMonitoring()
 		}
@@ -320,7 +327,7 @@ extension HotKeyManager {
 				queue: .main
 			) { [weak self] _ in
 				Task { @MainActor in
-					self?.scheduleRecovery(reason: "app activation")
+					self?.scheduleRecovery(reason: "app activation", preservesActiveCapture: true)
 				}
 			}
 		]
@@ -347,24 +354,20 @@ extension HotKeyManager {
 
 // MARK: - System-wide Escape
 
-/// The system-wide monitor's lifecycle.
-///
-/// It is installed only while something has a live reason to cancel, so an idle Speak reads
-/// no key presses in other apps at all.
+/// An idle Speak reads no key presses in other apps.
 extension HotKeyManager {
-	/// Follows a recording-state publisher so the system-wide Escape listener exists for
-	/// exactly as long as there is a recording to cancel.
-	///
-	/// The sink lives here rather than at the call site so the monitor's lifetime cannot
-	/// drift away from the state that justifies it.
+	/// Keeps recording state and the Escape listener in sync with the cancellation preference.
 	func trackRecordingState(_ publisher: some Publisher<Bool, Never>) {
 		recordingStateCancellable = publisher
 			.removeDuplicates()
-			.sink { [weak self] isRecording in
+			.combineLatest(appSettings.$cancelRecordingOnEscape.removeDuplicates())
+			.sink { [weak self] isRecording, cancelOnEscape in
 				// `@Published` fires synchronously on the actor that mutated it, and every
 				// mutation of the recording state is already on the main actor.
 				MainActor.assumeIsolated {
-					self?.setGlobalEscapeNeeded(isRecording, for: .recording)
+					guard let self else { return }
+					self.isRecording = isRecording
+					self.setGlobalEscapeNeeded(isRecording && cancelOnEscape, for: .recording)
 				}
 			}
 	}
@@ -379,12 +382,7 @@ extension HotKeyManager {
 		updateGlobalEscapeMonitor()
 	}
 
-	/// Installs the system-wide key-down monitor while something needs Escape and removes it
-	/// as soon as nothing does.
-	///
-	/// Idempotent in both directions, so a burst of transitions cannot stack monitors: a
-	/// second `NSEvent` monitor would deliver every key press twice and leak, because only
-	/// one token is remembered.
+	/// Installs exactly one system-wide Escape monitor while needed, removing it when idle.
 	private func updateGlobalEscapeMonitor() {
 		let shouldListen = monitoringRequested && !globalEscapeReasons.isEmpty
 		if shouldListen {

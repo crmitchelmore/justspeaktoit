@@ -433,7 +433,7 @@ final class MainManager: ObservableObject {
   }
 
   func cancelRecordingWithEscape() {
-    guard state == .recording, activeSession != nil else { return }
+    guard appSettings.cancelRecordingOnEscape, state == .recording, activeSession != nil else { return }
     logger.info("Cancelling recording via Escape key")
     activeSession?.errors.append(
       HistoryError(phase: .recording, message: "Cancelled by user (Escape)", debugDescription: nil)

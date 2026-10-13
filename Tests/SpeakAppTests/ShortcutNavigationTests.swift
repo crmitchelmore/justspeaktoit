@@ -29,6 +29,8 @@ final class ShortcutNavigationTests: XCTestCase {
             .openAPIKeysSettings,
             .openKeyboardSettings,
             .openPermissionsSettings,
+            .openCompareModelsSettings,
+            .openDataMigrationSettings,
             .openAboutSettings
         ]
 
@@ -54,8 +56,10 @@ final class ShortcutNavigationTests: XCTestCase {
         XCTAssertEqual(ShortcutAction.openAPIKeysSettings.defaultKeyBinding.displayString, "⌘6")
         XCTAssertEqual(ShortcutAction.openKeyboardSettings.defaultKeyBinding.displayString, "⌘7")
         XCTAssertEqual(ShortcutAction.openPermissionsSettings.defaultKeyBinding.displayString, "⌘8")
-        XCTAssertEqual(ShortcutAction.openAboutSettings.defaultKeyBinding.displayString, "⌘9")
-        XCTAssertEqual(ShortcutAction.openProfilesSettings.defaultKeyBinding.displayString, "⌘0")
+        XCTAssertEqual(ShortcutAction.openCompareModelsSettings.defaultKeyBinding.displayString, "⌘9")
+        XCTAssertEqual(ShortcutAction.openDataMigrationSettings.defaultKeyBinding.displayString, "⌘0")
+        XCTAssertEqual(ShortcutAction.openAboutSettings.defaultKeyBinding.displayString, "⌘-")
+        XCTAssertEqual(ShortcutAction.openProfilesSettings.defaultKeyBinding.displayString, "⌘+")
 
         XCTAssertEqual(ShortcutAction.quickVoice1.defaultKeyBinding.displayString, "⌥⌘1")
         XCTAssertEqual(ShortcutAction.quickVoice2.defaultKeyBinding.displayString, "⌥⌘2")
@@ -68,6 +72,18 @@ final class ShortcutNavigationTests: XCTestCase {
         XCTAssertTrue(binding.isGlobal, "Paste Last History Item should be a global shortcut")
         XCTAssertTrue(binding.isEnabled, "Paste Last History Item should be enabled by default")
         XCTAssertTrue(ShortcutAction.pasteLastHistoryItem.isGlobalByDefault)
+    }
+
+    func testEverySettingsDestination_hasADistinctEnabledShortcut() throws {
+        var bindings: [KeyBinding] = []
+        for tab in SettingsTab.allCases {
+            let action = try XCTUnwrap(SidebarItem.settings(tab).shortcutAction)
+            let binding = action.defaultKeyBinding
+            XCTAssertTrue(binding.isEnabled, "\(tab.title) needs a shortcut")
+            XCTAssertFalse(binding.isGlobal)
+            XCTAssertFalse(bindings.contains(binding), "\(tab.title) shares another settings shortcut")
+            bindings.append(binding)
+        }
     }
 
     func testEditSelectionByVoiceDefault_isGlobalOptionCommandE() {

@@ -6,7 +6,7 @@ import SpeakCore
 
 /// A projection of the canonical catalogue, limited to transports wired into
 /// the desktop host. Adding a catalogue entry does not claim OS/runtime support.
-public enum DesktopTranscription { // swiftlint:disable:this type_body_length
+public enum DesktopTranscription {
     public static var batchModels: [ModelCatalog.Option] {
         ModelCatalog.batchTranscription.filter { backend(for: $0.id) != nil }
     }

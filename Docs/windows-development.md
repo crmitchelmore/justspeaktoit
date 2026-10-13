@@ -548,6 +548,17 @@ scopes. The Mac uses aliases to those types without changing its archive JSON.
 Native migration UI, conflict previews, transactional apply/recovery and
 credential installation remain separate unfinished work.
 
+`DataMigrationCoding` and `DataMigrationPlanner` now also share the Mac codec,
+conflict identities, scoped replacement, text-over-audio-only preference,
+partial-category preservation and deterministic linked History/audio variants.
+Mac import and `DesktopMigrationPlanner` execute this single policy; native hosts
+inject the existing CNG/GLib/CryptoKit SHA-256 provider. Planning is cancellable
+and fails explicitly on malformed digest output or unencodable variant values,
+instead of deriving an identifier from empty-data fallback. The internal Mac
+planner now throws; the import controller surfaces that error before recovery
+creation or data application. A shared plan is not a native preview UI, category
+validation, credential installer or durable rollback transaction.
+
 `DataMigrationArchivePolicy` also centralizes the existing Mac archive path,
 entry/total/JSON-size, duplicate-path, manifest and staging-capacity rules.
 Mac ZIP reads use this policy; portable tests exercise exact limits without

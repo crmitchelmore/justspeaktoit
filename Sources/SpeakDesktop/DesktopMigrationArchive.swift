@@ -48,9 +48,7 @@ public enum DesktopMigrationArchive {
     }
 
     private static var decoder: JSONDecoder {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return decoder
+        DataMigrationCoding.decoder
     }
 
     private static func read(

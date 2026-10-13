@@ -27,21 +27,16 @@ struct MigrationConflict: Identifiable {
 
 enum MigrationCoding {
     static var encoder: JSONEncoder {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        encoder.dateEncodingStrategy = .iso8601
-        return encoder
+        DataMigrationCoding.encoder
     }
     static var decoder: JSONDecoder {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return decoder
+        DataMigrationCoding.decoder
     }
     static func value<T: Encodable>(_ item: T) throws -> AnyCodable {
-        try decoder.decode(AnyCodable.self, from: encoder.encode(item))
+        try DataMigrationCoding.value(item)
     }
     static func decode<T: Decodable>(_ type: T.Type, _ value: AnyCodable) throws -> T {
-        try decoder.decode(type, from: encoder.encode(value))
+        try DataMigrationCoding.decode(type, value)
     }
     static func digest(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()

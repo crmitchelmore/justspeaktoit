@@ -279,14 +279,16 @@ bool jsti_voice_sources_self_test(HWND owner, std::string &error) {
     HWND window = makeDialog(owner, dialog);
     if (!window) { error = "Voice sources fixture could not open."; return false; }
     const bool history = text(window) == dialog.history && IsWindowEnabled(GetDlgItem(window, readID));
-    emit(window, dialog, 110);
+    SendMessageW(window, WM_COMMAND, MAKEWPARAM(readID, BN_CLICKED), 0);
     const bool historySnapshot = received.calls == 1 && received.source == 0 &&
         received.record == "synthetic-record" && received.text == "Synthetic History snapshot";
     SendDlgItemMessageW(window, sourceID, CB_SETCURSEL, 1, 0); select(window, dialog);
     SetDlgItemTextW(window, textID, L"Synthetic typed text");
+    // Multiline WM_SETTEXT does not emit EN_CHANGE; simulate the user edit notification.
+    SendMessageW(window, WM_COMMAND, MAKEWPARAM(textID, EN_CHANGE), 0);
     const bool typed = IsWindowEnabled(GetDlgItem(window, exportID)) &&
         !(GetWindowLongW(GetDlgItem(window, textID), GWL_STYLE) & ES_READONLY);
-    emit(window, dialog, 110);
+    SendMessageW(window, WM_COMMAND, MAKEWPARAM(readID, BN_CLICKED), 0);
     const bool typedSnapshot = received.calls == 2 && received.source == 1 &&
         received.record.empty() && received.text == "Synthetic typed text";
     bool captured = true;
@@ -306,11 +308,18 @@ bool jsti_voice_sources_self_test(HWND owner, std::string &error) {
         SendDlgItemMessageW(window, sourceID, CB_GETCOUNT, 0, 0) == 3;
     dialog.clipboard = L"Synthetic clipboard snapshot";
     SetDlgItemTextW(window, textID, dialog.clipboard.c_str());
-    emit(window, dialog, 110);
+    refresh(window, dialog);
+    SendMessageW(window, WM_COMMAND, MAKEWPARAM(readID, BN_CLICKED), 0);
     const bool clipboardSnapshot = received.calls == 3 && received.source == 2 &&
         received.record.empty() && received.text == "Synthetic clipboard snapshot";
     DestroyWindow(window);
     const bool passed = history && typed && unavailable && historySnapshot && typedSnapshot && clipboardSnapshot;
-    if (!passed) error = "Voice sources did not preserve source states and immutable callback snapshots.";
+    if (!passed) {
+        error = "Voice sources fixture failed: history=" + std::to_string(history) +
+            ", typed=" + std::to_string(typed) + ", unloadedClipboard=" + std::to_string(unavailable) +
+            ", historySnapshot=" + std::to_string(historySnapshot) +
+            ", typedSnapshot=" + std::to_string(typedSnapshot) +
+            ", clipboardSnapshot=" + std::to_string(clipboardSnapshot) + ".";
+    }
     return passed && captured;
 }

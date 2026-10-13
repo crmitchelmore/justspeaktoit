@@ -134,6 +134,19 @@ final class DesktopCloudSyncDeletionTests: DesktopCloudSyncTestCase {
         try await interruptedDeletion(cancel: false)
     }
 
+    func testMetadataOnlyDelete_RemovesSyncedTextButRetainsLocalAudio() async throws {
+        let recording = try await localRecording(text: "keep the owned audio")
+        let audio = directory.appendingPathComponent("History").appendingPathComponent(recording.audioFilename)
+        try Data([5]).write(to: audio)
+        let (service, _) = try await signedInService()
+        _ = await service.sync()
+        try await service.deleteHistory(id: recording.id, deleteAudio: false)
+        let result = await service.sync()
+        XCTAssertNil(result.error)
+        XCTAssertNil(server.recordFields(zone: syncZone, recordName: recording.id.uuidString))
+        XCTAssertEqual(try Data(contentsOf: audio), Data([5]))
+    }
+
     func testCancelledDelete_DoesNotAcknowledgeItsLateResponse() async throws {
         try await interruptedDeletion(cancel: true)
     }

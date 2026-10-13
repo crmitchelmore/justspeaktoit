@@ -93,6 +93,11 @@ extension DesktopHostController {
 
     package func cancelTranscription() {
         guard !closed else { return }
+        if historyDeletionInProgress {
+            cancellationRequested = true
+            update("Stopping History deletion… Remaining recordings will be kept.", state: 2)
+            return
+        }
         cancelOutput()
         guard busy else { return }
         cancellationRequested = true

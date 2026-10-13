@@ -79,7 +79,6 @@ func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, 
     let controller = holder.controller
     let value = text.map(String.init(cString:)) ?? ""
     switch event {
-    case 90: holder.submitHistoryPlayback(.filter(value))
     case 1:
         // Capture synchronously before an actor hop or another app gains focus.
         // No external field focused is not an error here: the transcript is
@@ -215,6 +214,7 @@ func postProcessingEvent(
 }
 
 private func secondaryWindowEvent(_ event: Int32, value: String, index: Int, holder: WindowsEventContext) {
+    if windowsHistoryManagementEvent(event, value: value, index: index, holder: holder) { return }
     if (21...23).contains(event) { return hotKeyWindowEvent(event, value: value, index: index, holder: holder) }
     if event == 24 { return readAloudEvent(value, holder: holder) }
     if event == 25 { return automationEvent(requested: value == "1", holder: holder) }

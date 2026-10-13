@@ -38,6 +38,7 @@ struct DesktopHistoryDeletionLedger: Codable {
         let id: UUID
         var revision: UUID
         let audioFilename: String
+        let deleteAudio: Bool?
         let account: String?
         var localCleanupPending: Bool
         var cloudPending: Bool
@@ -100,7 +101,7 @@ extension DesktopRecordingStore {
 
     /// Journals intent before removing anything. An interrupted cleanup remains
     /// hidden, rejects late saves, and can be retried after relaunch.
-    public func delete(id: UUID, cloudAccount: String? = nil) throws {
+    public func delete(id: UUID, deleteAudio: Bool = true, cloudAccount: String? = nil) throws {
         guard cloudAccount?.isEmpty != true else { throw DesktopHistoryDeletionError.invalidCloudAccount }
         if deletionLedger.intents[id] == nil {
             let files = try deletionMetadata(id: id)
@@ -111,12 +112,13 @@ extension DesktopRecordingStore {
                     throw DesktopHistoryDeletionError.changedAudioOwnership
                 }
             }
-            try validateDeletionAudio(id: id, audioFilename: audioFilename)
+            if deleteAudio { try validateDeletionAudio(id: id, audioFilename: audioFilename) }
             var next = deletionLedger
             next.intents[id] = DesktopHistoryDeletionLedger.Intent(
                 id: id,
                 revision: UUID(),
                 audioFilename: audioFilename,
+                deleteAudio: deleteAudio,
                 account: cloudAccount,
                 localCleanupPending: true,
                 cloudPending: cloudAccount != nil
@@ -208,8 +210,10 @@ extension DesktopRecordingStore {
                 throw DesktopHistoryDeletionError.changedAudioOwnership
             }
         }
-        try validateDeletionAudio(id: id, audioFilename: intent.audioFilename)
-        if !intent.audioFilename.isEmpty {
+        if intent.deleteAudio != false {
+            try validateDeletionAudio(id: id, audioFilename: intent.audioFilename)
+        }
+        if intent.deleteAudio != false, !intent.audioFilename.isEmpty {
             let record = Record(id: id, audioFilename: intent.audioFilename, modelIdentifier: "")
             let audio: URL?
             do {

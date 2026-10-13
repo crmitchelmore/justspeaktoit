@@ -110,6 +110,7 @@ extension DesktopHostController {
         cancelOutput()
         cancellationRequested = true
         transcriptionTask?.cancel()
+        historyDeletionTask?.cancel()
         postProcessingTask?.cancel()
         liveFinalisation?.cancel()
         var report = DesktopHostShutdownReport()

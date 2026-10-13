@@ -69,7 +69,7 @@ final class DesktopHistoryDeletionTests: XCTestCase {
         try Data([9]).write(to: audio)
         var ledger = DesktopHistoryDeletionLedger()
         ledger.intents[recording.id] = .init(
-            id: recording.id, revision: UUID(), audioFilename: recording.audioFilename,
+            id: recording.id, revision: UUID(), audioFilename: recording.audioFilename, deleteAudio: nil,
             account: "account-A", localCleanupPending: true, cloudPending: true
         )
         try ledger.save(in: root)
@@ -181,7 +181,7 @@ final class DesktopHistoryDeletionTests: XCTestCase {
         try await store.save(recording)
         var ledger = DesktopHistoryDeletionLedger()
         ledger.intents[recording.id] = .init(
-            id: recording.id, revision: UUID(), audioFilename: recording.audioFilename,
+            id: recording.id, revision: UUID(), audioFilename: recording.audioFilename, deleteAudio: nil,
             account: nil, localCleanupPending: true, cloudPending: false
         )
         try ledger.save(in: root)
@@ -222,6 +222,41 @@ final class DesktopHistoryDeletionTests: XCTestCase {
 }
 
 extension DesktopHistoryDeletionTests {
+    func testMetadataOnlyDeletion_KeepsAudioAndDoesNotGrantLaterRemovalAuthority() async throws {
+        let (root, store) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let recording = record()
+        try await store.save(recording)
+        let audio = root.appendingPathComponent(recording.audioFilename)
+        try Data([6]).write(to: audio)
+        try await store.delete(id: recording.id, deleteAudio: false)
+        let reopened = try DesktopRecordingStore(directory: root)
+        try await reopened.resumePendingDeletions()
+        try await reopened.delete(id: recording.id, deleteAudio: true)
+        XCTAssertEqual(try Data(contentsOf: audio), Data([6]))
+        let visible = try await reopened.records()
+        XCTAssertTrue(visible.isEmpty)
+        let ledger = try DesktopHistoryDeletionLedger.load(from: root)
+        XCTAssertEqual(ledger.intents[recording.id]?.deleteAudio, false)
+    }
+
+    func testMetadataOnlyDeletion_DoesNotNeedExclusiveAudioOwnership() async throws {
+        let (root, store) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let first = record()
+        let second = DesktopRecordingStore.Record(
+            id: UUID(), audioFilename: first.audioFilename, modelIdentifier: "test"
+        )
+        try await store.save(first)
+        try await store.save(second)
+        let audio = root.appendingPathComponent(first.audioFilename)
+        try Data([8]).write(to: audio)
+        try await store.delete(id: first.id, deleteAudio: false)
+        XCTAssertEqual(try Data(contentsOf: audio), Data([8]))
+        let visible = try await store.records()
+        XCTAssertEqual(visible.map(\.id), [second.id])
+    }
+
     func testLinkedAudioAndJournal_AreRefusedWithoutTouchingTheirTargets() async throws {
         #if os(Windows)
         throw XCTSkip("Creating symbolic links requires a separately authorized Windows capability.")
@@ -287,7 +322,7 @@ extension DesktopHistoryDeletionTests {
         var ledger = DesktopHistoryDeletionLedger()
         for recording in [first, second] {
             ledger.intents[recording.id] = .init(
-                id: recording.id, revision: UUID(), audioFilename: recording.audioFilename,
+                id: recording.id, revision: UUID(), audioFilename: recording.audioFilename, deleteAudio: nil,
                 account: nil, localCleanupPending: true, cloudPending: false
             )
         }

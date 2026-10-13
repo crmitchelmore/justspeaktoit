@@ -48,7 +48,8 @@ enum {
     JSTI_EVENT_POST_PROCESSING = 33,
     /* Apply in Azure Speech resource. text: the endpoint as typed ("" clears). */
     JSTI_EVENT_AZURE_RESOURCE = 34,
-    JSTI_EVENT_HISTORY_FILTERS = 90 /* text: DesktopHistoryFilter JSON */
+    JSTI_EVENT_HISTORY_FILTERS = 90, /* text: DesktopHistoryFilter JSON */
+    JSTI_EVENT_HISTORY_DELETE = 91 /* text: frozen newline-separated UUIDs; index: 1 removes owned audio */
 };
 
 /* Read aloud, Appearance and Launch at login. Linux-only numbers 40-46. */
@@ -144,6 +145,8 @@ int32_t jsti_window_set_model_catalog(
 int32_t jsti_window_set_microphones(
     const char *const *ids, const char *const *names, size_t count, const char *selected);
 int32_t jsti_window_set_history(const JSTIHistoryRow *rows, size_t count, const char *selected_id);
+/* Complete retained IDs, including filtered-out rows. Copied for Clear confirmation. */
+int32_t jsti_window_set_history_management(const char *identifiers);
 /* The dashboard totals (`all` saved records) and the History header totals
  * (`visible`, the records the search shows). */
 int32_t jsti_window_set_insights(const JSTIInsights *all, const JSTIInsights *visible);

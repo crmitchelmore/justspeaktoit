@@ -96,6 +96,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var postProcessingTask: Task<DesktopPostProcessing.Outcome, Error>?
     package var microphoneWarning: String?
     var cancellationRequested = false
+    var historyDeletionInProgress = false
+    var historyDeletionTask: Task<Void, Never>?
     var liveUpdates: Task<Void, Never>?
     var liveFinalisation: DesktopLiveSession?
     /// The recording the HUD follows, from Record until its result.

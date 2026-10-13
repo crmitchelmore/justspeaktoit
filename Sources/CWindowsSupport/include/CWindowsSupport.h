@@ -48,7 +48,8 @@ enum JSTIWindowEvent {
     /* General's Launch at login switch: text "1" on, "0" off. The switch stays
      * disabled until jsti_window_set_login_item reports the state reached. */
     JSTI_EVENT_LOGIN_ITEM = 27,
-    JSTI_EVENT_HISTORY_FILTERS = 90 /* text: DesktopHistoryFilter JSON */
+    JSTI_EVENT_HISTORY_FILTERS = 90, /* text: DesktopHistoryFilter JSON */
+    JSTI_EVENT_HISTORY_DELETE = 91 /* text: frozen newline-separated UUIDs; index: 1 removes owned audio */
 };
 
 /* Runs on the UI thread. text is borrowed until callback returns. model_index
@@ -203,6 +204,8 @@ int jsti_window_screenshot_tour(const char *directory, char *error, size_t error
  * or changing the selected row also resets the displayed transcript variant
  * until the host reports one. */
 int jsti_window_set_history(const JSTIHistoryRow *rows, size_t count, const char *selected_id);
+/* Complete retained IDs, including filtered-out rows. Copied for Clear confirmation. */
+int jsti_window_set_history_management(const char *identifiers);
 /* Which retained transcript the window shows for record_id. It is applied only
  * while that record is still the selected row, so a late report can never
  * describe a different record; null/empty record_id clears the control.

@@ -135,10 +135,10 @@ public actor DesktopCloudSyncService {
 
     /// Deletes locally first. A previously validated account receives a
     /// durable cloud-delete ticket only while History sync is opted in.
-    public func deleteHistory(id: UUID) async throws {
+    public func deleteHistory(id: UUID, deleteAudio: Bool = true) async throws {
         let current = await state.current
         let account = current.enabledFeatures.contains(.history) ? current.boundAccount : nil
-        try await historyStore.deleteLocal(id: id, cloudAccount: account)
+        try await historyStore.deleteLocal(id: id, deleteAudio: deleteAudio, cloudAccount: account)
     }
 
     public func status() async -> DesktopCloudSyncStatus {

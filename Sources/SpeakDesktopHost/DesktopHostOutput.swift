@@ -17,11 +17,15 @@ package struct DesktopHostOutputState<Platform: DesktopHostPlatform>: Sendable {
     package var task: Task<Void, Never>?
     package var job: Platform.OutputJob?
     package var id: UUID?
+    package var recordID: UUID?
 
-    package init(task: Task<Void, Never>? = nil, job: Platform.OutputJob? = nil, id: UUID? = nil) {
+    package init(
+        task: Task<Void, Never>? = nil, job: Platform.OutputJob? = nil, id: UUID? = nil, recordID: UUID? = nil
+    ) {
         self.task = task
         self.job = job
         self.id = id
+        self.recordID = recordID
     }
 }
 
@@ -53,7 +57,7 @@ extension DesktopHostController {
         }
         guard outputSlot.task == nil, !closed else { Platform.cancel(job); return .busy }
         let identifier = UUID()
-        outputSlot = DesktopHostOutputState<Platform>(task: nil, job: job, id: identifier)
+        outputSlot = DesktopHostOutputState<Platform>(task: nil, job: job, id: identifier, recordID: recordID)
         activeOperations += 1
         let effects = self.effects
         let worker = Task.detached(priority: .userInitiated) {

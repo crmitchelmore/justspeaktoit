@@ -59,6 +59,7 @@ package protocol DesktopHostPlatform: Sendable {
     /// (`visible`, the records the search shows). Sent with every History list.
     static func historyInsights(all: DesktopHistoryInsights, visible: DesktopHistoryInsights)
     static func historyFilters(models: [String], selection: DesktopHistoryFilter)
+    static func historyManagement(identifiers: [UUID])
     /// The recording HUD's phase for the dictation it follows; `.hidden` hides it.
     static func hud(_ state: DesktopHUDState)
     static func historyPresentation(
@@ -145,6 +146,7 @@ package extension DesktopHostPlatform {
     /// Hosts without a dashboard or History header show no totals.
     static func historyInsights(all: DesktopHistoryInsights, visible: DesktopHistoryInsights) {}
     static func historyFilters(models: [String], selection: DesktopHistoryFilter) {}
+    static func historyManagement(identifiers: [UUID]) {}
     /// Hosts without a HUD show dictation progress on the status line only.
     static func hud(_ state: DesktopHUDState) {}
     static var loginItemSettingsName: String { "the system's startup settings" }

@@ -85,6 +85,7 @@ constexpr int voiceSettingsID = 173;
 constexpr int sourceLabelID = 89;
 constexpr int localModelsID = 174;
 constexpr int historyFiltersID = 460;
+constexpr int historyDeleteID = 461, historyClearID = 462;
 constexpr int sourceID = 175;
 // Model modes: bit 0 is live, bit 1 is local (on-device).
 constexpr int modeCount = 4;
@@ -193,6 +194,7 @@ struct WindowState {
     std::vector<HistoryRow> pendingHistory;
     std::string pendingHistorySelection;
     std::string selectedHistoryID;
+    std::string allHistoryIDs;
     JSTIWindowCallback callback = nullptr;
     void *context = nullptr;
     HFONT font = nullptr;
@@ -225,6 +227,11 @@ struct WindowState {
     std::wstring tourDirectory;
     int tourStep = -1;
 } state;
+
+std::string historyManagementIDs() {
+    std::lock_guard<std::mutex> lock(state.mutex);
+    return state.allHistoryIDs;
+}
 
 int selection(HWND window) {
     const LRESULT index = SendDlgItemMessageW(window, modelID, CB_GETCURSEL, 0, 0);
@@ -464,6 +471,8 @@ void updateHistoryControls(HWND window, int recording) {
     EnableWindow(GetDlgItem(window, historyID), recording == 0);
     EnableWindow(GetDlgItem(window, searchID), recording == 0);
     EnableWindow(GetDlgItem(window, historyFiltersID), recording == 0);
+    EnableWindow(GetDlgItem(window, historyDeleteID), recording == 0 && selected);
+    EnableWindow(GetDlgItem(window, historyClearID), recording == 0 && !historyManagementIDs().empty());
     jsti_history_filters_enabled(recording == 0);
     SetDlgItemTextW(window, historyFiltersID, jsti_history_filters_label().c_str());
     EnableWindow(GetDlgItem(window, clearSearchID), recording == 0 && searching(window));
@@ -544,7 +553,8 @@ unsigned pagesOf(int identifier) {
     case insightSessionsID: case insightTimeID: case insightAverageID: case insightSpendID:
     case setupMicrophoneID: case setupModelID: case setupShortcutID: case setupOutputID:
         return page(dashboardPage);
-    case searchLabelID: case searchID: case clearSearchID: case historyFiltersID: case 93: case historyID: case historyDetailID:
+    case searchLabelID: case searchID: case clearSearchID: case historyFiltersID:
+    case historyDeleteID: case historyClearID: case 93: case historyID: case historyDetailID:
     case variantLabelID: case variantID: case retryID: case exportID: case openAudioID: case playbackLabelID:
     case playbackTimeID: case playPauseID: case historySessionsID: case historyErrorsID: case historyAverageID:
     case historySpendID:
@@ -742,6 +752,8 @@ void layoutHistory(HWND window, const RECT &content) {
     const int heroBottom = layoutHero(window, content, scale(window, 168), jsti::chrome::Gradient::brand);
     place(window, importID, box(frame.hero.right - scale(window, 26) - scale(window, 124), frame.hero.top + scale(window, 24),
                                 scale(window, 124), row));
+    place(window, historyClearID, box(frame.hero.right - scale(window, 294), frame.hero.top + scale(window, 24),
+                                     scale(window, 136), row));
     layoutChips(window, {{historySessionsID, L"Sessions"}, {historyErrorsID, L"Errors"},
                          {historyAverageID, L"Average Length"}, {historySpendID, L"Spend"}});
     const int searchTop = heroBottom + scale(window, 14);
@@ -783,8 +795,10 @@ void layoutHistory(HWND window, const RECT &content) {
     place(window, readAloudID, cell(0, actions, 2));
     place(window, retryID, cell(1, actions, 2));
     actions += row + scale(window, 8);
-    place(window, exportID, cell(0, actions, 2));
-    place(window, openAudioID, cell(1, actions, 2));
+    place(window, exportID, cell(0, actions, 3));
+    place(window, openAudioID, cell(1, actions, 3));
+    place(window, historyDeleteID, cell(2, actions, 3));
+    setLabel(window, exportID, L"&Export...");
 }
 
 // A settings card: `rows` controls, top to bottom, with a description.
@@ -1197,7 +1211,7 @@ void drawControl(HWND window, const DRAWITEMSTRUCT &item) {
         if (pressed) chrome::fillRound(dc, rect, heightOf(rect) / 2, RGB(0, 0, 0), 30);
         const bool large = heightOf(rect) > s(44);
         const std::wstring shown = recording == 1 ? (large ? L"Stop Recording" : L"Stop")
-            : recording == 2 ? (large ? L"Cancel Transcription" : L"Cancel") : (large ? L"Start Recording" : L"Record");
+            : recording == 2 ? (large ? L"Cancel operation" : L"Cancel") : (large ? L"Start Recording" : L"Record");
         HGDIOBJ previous = SelectObject(dc, chrome::font(chrome::Font::bodySemibold, dpi));
         SIZE extent{};
         GetTextExtentPoint32W(dc, shown.c_str(), static_cast<int>(shown.size()), &extent);
@@ -1461,6 +1475,8 @@ bool createControls(HWND window) {
         add(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, searchID) &&
         add(L"BUTTON", L"C&lear", BS_PUSHBUTTON | WS_TABSTOP, clearSearchID) &&
         add(L"BUTTON", L"Fil&ters...", BS_PUSHBUTTON | WS_TABSTOP, historyFiltersID) &&
+        add(L"BUTTON", L"Delete...", BS_PUSHBUTTON | WS_TABSTOP, historyDeleteID) &&
+        add(L"BUTTON", L"Clear history...", BS_PUSHBUTTON | WS_TABSTOP, historyClearID) &&
         add(L"STATIC", L"&History", 0, 93) &&
         add(L"LISTBOX", L"", LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP,
             historyID) &&
@@ -1741,7 +1757,7 @@ void applyUpdate(HWND window) {
     if (statusChanged) SetDlgItemTextW(window, statusID, status.c_str());
     applyInsights(window);
 
-    SetDlgItemTextW(window, recordID, recording == 1 ? L"&Stop recording" : (recording == 2 ? L"&Cancel transcription" : L"&Record"));
+    SetDlgItemTextW(window, recordID, recording == 1 ? L"&Stop recording" : (recording == 2 ? L"&Cancel" : L"&Record"));
     EnableWindow(GetDlgItem(window, recordID), TRUE);
     if (state.displayedRecording != recording) {
         state.displayedRecording = recording;
@@ -2184,6 +2200,37 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
                 });
             }
             return 0;
+        case historyDeleteID: {
+            if (!idleControl(window, historyDeleteID)) return 0;
+            const LRESULT selected = SendDlgItemMessageW(window, historyID, LB_GETCURSEL, 0, 0);
+            if (selected == LB_ERR || static_cast<size_t>(selected) >= state.displayedHistory.size()) return 0;
+            const std::string id = state.displayedHistory[static_cast<size_t>(selected)].id;
+            const int answer = MessageBoxW(window,
+                L"Delete this History entry? Its saved recording file will be kept.\n\n"
+                L"This cannot be undone. If History sync is enabled, its synced text will also be deleted.",
+                L"Delete History entry", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
+            if (answer == IDYES && state.callback) {
+                state.callback(JSTI_EVENT_HISTORY_DELETE, id.c_str(), 0, state.context);
+            }
+            return 0;
+        }
+        case historyClearID: {
+            if (!idleControl(window, historyClearID)) return 0;
+            const std::string ids = historyManagementIDs();
+            if (ids.empty()) return 0;
+            const size_t count = 1 + static_cast<size_t>(std::count(ids.begin(), ids.end(), '\n'));
+            const std::wstring prompt = L"Clear all " + std::to_wstring(count)
+                + L" History entries, including hidden and filtered entries?\n\n"
+                L"Yes: delete History and its owned recording files.\n"
+                L"No: delete History but keep recording files.\nCancel: keep everything.\n\n"
+                L"This cannot be undone. If History sync is enabled, synced text will also be deleted.";
+            const int answer = MessageBoxW(window, prompt.c_str(), L"Clear History",
+                MB_YESNOCANCEL | MB_ICONWARNING | MB_DEFBUTTON3);
+            if ((answer == IDYES || answer == IDNO) && state.callback) {
+                state.callback(JSTI_EVENT_HISTORY_DELETE, ids.c_str(), answer == IDYES ? 1 : 0, state.context);
+            }
+            return 0;
+        }
         case IDCANCEL:
             // Escape inside the search box is a keyboard clear affordance.
             if (GetFocus() == GetDlgItem(window, searchID) && idleControl(window, searchID)) clearSearch(window);
@@ -2324,6 +2371,18 @@ void jsti_window_hotkey_event(HWND window, int event) {
     case JSTI_EVENT_HOTKEY_DEADLINE: emit(window, event); break;
     default: break;
     }
+}
+
+int jsti_window_set_history_management(const char *identifiers) {
+    std::wstring checked;
+    if (!identifiers || !jsti::wide(identifiers, checked)) return -1;
+    std::lock_guard<std::mutex> lock(state.mutex);
+    state.allHistoryIDs = identifiers;
+    if (state.window && !state.posted) {
+        state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
+        if (!state.posted) return -1;
+    }
+    return 0;
 }
 
 int jsti_window_set_automation(int enabled) {
@@ -2495,6 +2554,7 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
         state.pendingPlaybackState = playbackIdle;
         state.pendingPlaybackText.clear();
         state.pendingHistory.clear(); state.pendingHistorySelection.clear(); state.selectedHistoryID.clear();
+        state.allHistoryIDs.clear();
         state.status.clear(); state.transcript.clear();
     }
     state.callback = callback; state.context = context;
@@ -3289,10 +3349,21 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             failure = "No active microphones did not retain the dynamic default without emitting a user change."; return false;
         }
         const JSTIHistoryRow first[] = {{"one", "First recording", "Completed"}, {"two", "Second recording", "Failed"}};
+        if (jsti_window_set_history_management(nullptr) != -1 ||
+            jsti_window_set_history_management("\xff") != -1) {
+            failure = "Invalid History management input was accepted."; return false;
+        }
+        if (jsti_window_set_history_management("one\ntwo") != 0) {
+            failure = "Complete History management snapshot was refused."; return false;
+        }
         if (jsti_window_set_history(first, 2, "two") != 0) { failure = "Initial history update failed."; return false; }
         applyUpdate(window);
         if (SendDlgItemMessageW(window, historyID, LB_GETCOUNT, 0, 0) != 2 || selectedHistory(window) != "two") {
             failure = "History rows or explicit selection were not rendered."; return false;
+        }
+        if (!IsWindowEnabled(GetDlgItem(window, historyDeleteID)) ||
+            !IsWindowEnabled(GetDlgItem(window, historyClearID)) || historyManagementIDs() != "one\ntwo") {
+            failure = "History deletion controls did not use the retained snapshot."; return false;
         }
         const JSTIHistoryRow reordered[] = {first[1], first[0]};
         if (jsti_window_set_history(reordered, 2, nullptr) != 0) { failure = "History replacement failed."; return false; }

@@ -482,11 +482,21 @@ and optional From/Through date pickers. The dates use the shared
 constraints compose with existing Unicode/profile search. Apply and Reset
 change visibility, never recordings or transcripts. Hiding the selected row
 clears its actions and stops playback and Read aloud. Native UI/device
-acceptance remains required; filtering does not implement deletion, retention,
-or migration.
+acceptance remains required. Filtering changes no stored data; History
+migration remains outstanding.
 
-The shared History store now has a deletion foundation, not a native Delete or
-Clear workflow. An atomic `.history-deletions` journal is persisted before
+Native Delete removes the selected History entry while keeping its saved audio,
+as on the Mac. Clear History confirms the complete retained-ID snapshot,
+including filtered-out rows, and offers keeping audio or removing owned recording
+files. Cancel is the safe default; entries arriving after confirmation are not
+added to that snapshot. Delete and Clear are disabled during recording/work.
+Cancelling a clear finishes the already-admitted journalled deletion and keeps
+the remaining entries. Native event queues admit deletion without awaiting its
+cloud request; shutdown cancels the separately owned task and uses the existing
+bounded operation deadline. Selected playback, Read aloud and record-bound automatic
+output are cancelled before deletion; late results cannot recreate the row.
+
+An atomic `.history-deletions` journal is persisted before
 owned audio and metadata are removed. Permanent local tombstones reject late
 transcription results and synced snapshots after relaunch. Cleanup refuses
 linked, shared, ambiguous or changed audio ownership; interrupted cleanup is
@@ -496,7 +506,14 @@ revision. Opted-in sync drains them before reconciliation and after uploads;
 failed, cancelled or consent-disabled attempts remain pending. Deleting while
 History sync is disabled is local-only, even after a later opt-in. Account
 rebinding never transfers an old deletion ticket to a new account.
-Native management controls, retention and migration remain outstanding.
+The original keep/remove-audio choice survives cleanup retries; a later retry
+cannot gain authority to remove files the user chose to keep. Audio-only
+housekeeping (including previously kept files), migration/import and
+custom-directory controls remain outstanding. No automatic History expiry is
+introduced: the Mac has explicit audio housekeeping, not a retention limit.
+Native dialog,
+keyboard, accessibility, DPI and live CloudKit acceptance still require
+target-platform evidence; portable tests and syntax checks alone are insufficient.
 
 The filter editor scrolls vertically when the available work area is too short;
 keyboard traversal reveals the focused control. Long model names have native

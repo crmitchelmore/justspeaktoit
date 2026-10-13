@@ -170,6 +170,7 @@ func linuxWindowEvent(
     let slot = Int(index)
     let event = Int(event)
     if linuxSessionEvent(event, value: value, slot: slot, holder: holder) { return }
+    if linuxHistoryManagementEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxHistoryEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxReadAloudEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxLocalModelEvent(event, slot: slot, holder: holder) { return }
@@ -210,11 +211,21 @@ private func linuxSessionEvent(_ event: Int, value: String, slot: Int, holder: L
 }
 
 /// History list, export and playback events. Returns false for others.
+private func linuxHistoryManagementEvent(_ event: Int, value: String, slot: Int, holder: LinuxEventContext) -> Bool {
+    switch event {
+    case Int(JSTI_EVENT_HISTORY_FILTERS): holder.submitHistoryPlayback(.filter(value))
+    case Int(JSTI_EVENT_HISTORY_DELETE):
+        let controller = holder.controller
+        holder.enqueueSettings { await controller.beginHistoryDeletion(value, deleteAudio: slot == 1) }
+    default: return false
+    }
+    return true
+}
+
 private func linuxHistoryEvent(_ event: Int, value: String, slot: Int, holder: LinuxEventContext) -> Bool {
     let controller = holder.controller
     switch event {
     case Int(JSTI_EVENT_SELECT_HISTORY): holder.selectHistory(value)
-    case Int(JSTI_EVENT_HISTORY_FILTERS): holder.submitHistoryPlayback(.filter(value))
     case Int(JSTI_EVENT_RETRY_HISTORY): Task { await controller.retryHistory(value) }
     case Int(JSTI_EVENT_EXPORT_HISTORY):
         // The window captured the text and version at the Export click; the

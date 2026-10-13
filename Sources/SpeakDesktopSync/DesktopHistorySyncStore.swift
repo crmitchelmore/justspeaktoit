@@ -290,8 +290,8 @@ public actor DesktopHistorySyncStore: HistorySyncStore {
         unapplied = 0
     }
 
-    func deleteLocal(id: UUID, cloudAccount: String?) async throws {
-        try await records.delete(id: id, cloudAccount: cloudAccount)
+    func deleteLocal(id: UUID, deleteAudio: Bool, cloudAccount: String?) async throws {
+        try await records.delete(id: id, deleteAudio: deleteAudio, cloudAccount: cloudAccount)
         offered[id] = nil
     }
 

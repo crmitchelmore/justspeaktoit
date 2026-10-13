@@ -69,6 +69,13 @@ enum LinuxHostPlatform: DesktopHostPlatform {
         LinuxWindow.insights(all: all, visible: visible)
     }
 
+    package static func historyManagement(identifiers: [UUID]) {
+        let value = identifiers.map(\.uuidString).joined(separator: "\n")
+        if jsti_window_set_history_management(value) != 0 {
+            update("History management could not be refreshed. Saved recordings remain on disk.")
+        }
+    }
+
     package static func hud(_ state: DesktopHUDState) {
         _ = jsti_window_set_hud(state.phase.rawValue, state.headline, state.subheadline, state.liveText)
     }

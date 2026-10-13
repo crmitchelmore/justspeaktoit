@@ -18,6 +18,7 @@ extension DesktopHostController {
 
     package func refreshHistory(selectRecord: Bool = false) {
         guard !closed else { return }
+        Platform.historyManagement(identifiers: history.keys.sorted { $0.uuidString < $1.uuidString })
         Platform.historyFilters(
             models: historyFilterModels(), selection: historyFilterDraft
         )

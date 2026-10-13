@@ -54,6 +54,16 @@ extension SettingsView {
           }
           .settingsSegmentedPicker()
           .speakTooltip("Decide whether you press, hold, or double-tap the hotkey to start a session.")
+
+          settingsToggle(
+            "Cancel recording with Escape",
+            isOn: settingsBinding(\AppSettings.cancelRecordingOnEscape),
+            tint: .yellow
+          )
+          .speakTooltip(
+            "When on, Escape discards the active dictation recording, even in another app. "
+              + "When off, Escape leaves recording running; stop it with your recording hotkey or the Stop button."
+          )
         }
       }
       .speakTooltip("Choose how the hotkey behaves when you start and stop recordings.")

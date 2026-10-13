@@ -100,9 +100,9 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .openPostProcessingSettings:
             return KeyBinding(keyCode: 20, modifiers: [.command], isGlobal: false)  // ⌘3
         case .openDataMigrationSettings:
-            return KeyBinding(keyCode: 0, modifiers: [], isGlobal: false, isEnabled: false)
-        case .openProfilesSettings:
             return KeyBinding(keyCode: 29, modifiers: [.command], isGlobal: false)  // ⌘0
+        case .openProfilesSettings:
+            return KeyBinding(keyCode: 24, modifiers: [.command, .shift], isGlobal: false)  // ⌘+
         case .openVoiceOutputSettings:
             return KeyBinding(keyCode: 21, modifiers: [.command], isGlobal: false)  // ⌘4
         case .openPronunciationSettings:
@@ -114,10 +114,9 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .openPermissionsSettings:
             return KeyBinding(keyCode: 28, modifiers: [.command], isGlobal: false)  // ⌘8
         case .openCompareModelsSettings:
-            // Unbound by default, like Data & Migration: the ⌘-digit row is full.
-            return KeyBinding(keyCode: 0, modifiers: [], isGlobal: false, isEnabled: false)
-        case .openAboutSettings:
             return KeyBinding(keyCode: 25, modifiers: [.command], isGlobal: false)  // ⌘9
+        case .openAboutSettings:
+            return KeyBinding(keyCode: 27, modifiers: [.command], isGlobal: false)  // ⌘-
         case .quickVoice1:
             return KeyBinding(keyCode: 18, modifiers: [.command, .option], isGlobal: false)  // ⌘⌥1
         case .quickVoice2:
@@ -154,6 +153,10 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
             return [KeyBinding(keyCode: 18, modifiers: [.command, .option, .shift], isGlobal: false)]
         case .openPostProcessingSettings:
             return [KeyBinding(keyCode: 19, modifiers: [.command, .option, .shift], isGlobal: false)]
+        case .openProfilesSettings:
+            return [KeyBinding(keyCode: 29, modifiers: [.command], isGlobal: false)]
+        case .openDataMigrationSettings, .openCompareModelsSettings:
+            return [KeyBinding(keyCode: 0, modifiers: [], isGlobal: false, isEnabled: false)]
         case .openVoiceOutputSettings:
             return [KeyBinding(keyCode: 20, modifiers: [.command, .option, .shift], isGlobal: false)]
         case .openPronunciationSettings:
@@ -165,7 +168,10 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .openPermissionsSettings:
             return [KeyBinding(keyCode: 26, modifiers: [.command, .option, .shift], isGlobal: false)]
         case .openAboutSettings:
-            return [KeyBinding(keyCode: 28, modifiers: [.command, .option, .shift], isGlobal: false)]
+            return [
+                KeyBinding(keyCode: 25, modifiers: [.command], isGlobal: false),
+                KeyBinding(keyCode: 28, modifiers: [.command, .option, .shift], isGlobal: false)
+            ]
         case .quickVoice1:
             return [KeyBinding(keyCode: 18, modifiers: [.command], isGlobal: false)]
         case .quickVoice2:
@@ -272,9 +278,10 @@ struct KeyBinding: Codable, Equatable {
         var parts: [String] = []
         if modifiers.contains(.control) { parts.append("⌃") }
         if modifiers.contains(.option) { parts.append("⌥") }
-        if modifiers.contains(.shift) { parts.append("⇧") }
+        let isPlus = keyCode == 24 && modifiers.contains(.shift)
+        if modifiers.contains(.shift), !isPlus { parts.append("⇧") }
         if modifiers.contains(.command) { parts.append("⌘") }
-        parts.append(keyCodeToString(keyCode))
+        parts.append(isPlus ? "+" : keyCodeToString(keyCode))
         return parts.joined()
     }
 

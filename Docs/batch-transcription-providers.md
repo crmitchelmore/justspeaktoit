@@ -1,5 +1,8 @@
 # Batch transcription providers: Cartesia, Gladia, Speechmatics
 
+For current model generations, hosted audio-chat additions and deliberately
+preserved tiers, see the [October 2026 transcription audit](transcription-model-audit-2026-10.md).
+
 File (batch) transcription for three providers that previously only had a live
 streaming path. Each is a **Batch** picker entry only — nothing here changes the
 Streaming or Text-to-Speech pickers, and the existing streaming identifiers are

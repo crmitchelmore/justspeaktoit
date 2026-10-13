@@ -378,7 +378,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     do {
       let envelope = try JSONDecoder().decode(AssemblyAIStreamEnvelope.self, from: data)
       // Keep accepting the typeless Turn frames returned by older v3 model
-      // snapshots while Universal-3.5 Pro returns the documented `type` field.
+      // snapshots while Universal-3.6 Pro returns the documented `type` field.
       let resolvedType = envelope.type ?? (envelope.turn_order != nil ? "Turn" : "")
       switch resolvedType {
       case "Turn":
@@ -502,7 +502,7 @@ struct AssemblyAITranscriptionProvider: TranscriptionProvider {
   func createLiveTranscriber(
     apiKey: String,
     sampleRate: Int = 16000,
-    model: String = AssemblyAIModels.universal35ProStreamingID,
+    model: String = AssemblyAIModels.universal36ProStreamingID,
     keyterms: [String] = [],
     language: String? = nil
   ) -> AssemblyAILiveTranscriber {

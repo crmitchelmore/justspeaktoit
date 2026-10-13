@@ -45,6 +45,9 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
         var expectedProviders: Set<String> = [
             "azure", "cartesia", "gladia", "google", "meta", "openai", "xai"
         ]
+        expectedProviders.formUnion(OpenRouterInlineAudioTranscriptionClient.batchCatalogIDs.map {
+            String($0.prefix { $0 != "/" })
+        })
         if AppleLocalModels.supportsSpeechTranscriber || AppleLocalModels.supportsDictationTranscriber {
             expectedProviders.insert("apple")
         }
@@ -181,6 +184,17 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
             IOSBatchTranscriptionRoute.route(for: AppleLocalModels.speechTranscriberModelID),
             .appleSpeechAnalyzer
         )
+    }
+
+    func testEveryCuratedAudioChatModelIsVisibleAndUsesOpenRouter() {
+        for identifier in OpenRouterInlineAudioTranscriptionClient.batchCatalogIDs {
+            XCTAssertTrue(AppSettings.supportedBatchModels.contains { $0.id == identifier }, identifier)
+            XCTAssertEqual(IOSBatchTranscriptionRoute.route(for: identifier), .openRouter, identifier)
+            XCTAssertEqual(
+                ModelCredentialResolver.requirement(for: identifier, purpose: .batchTranscription),
+                .apiKey(identifier: "openrouter.apiKey", providerName: "OpenRouter")
+            )
+        }
     }
 
     /// `batchAPIKey(for:)` reads the canonical credential mapping, so the

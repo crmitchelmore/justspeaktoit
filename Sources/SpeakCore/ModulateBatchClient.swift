@@ -9,10 +9,10 @@ public struct ModulateBatchClient: TranscriptionProvider {
     displayName: "Modulate",
     systemImage: "waveform.badge.magnifyingglass",
     tintColor: "teal",
-    website: "https://www.modulate-developer-apis.com/web/docs.html"
+    website: ModulateTranscriptionService.apiKeysURL.absoluteString
   )
 
-  let baseURL = URL(string: "https://modulate-developer-apis.com")!
+  let baseURL = ModulateTranscriptionService.baseURL
   let session: URLSession
   private let featureConfiguration: ModulateTranscriptionFeatures
   private let multipartStaging: SharedMultipartUploadStaging

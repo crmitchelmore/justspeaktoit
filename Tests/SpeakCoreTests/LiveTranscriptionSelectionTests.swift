@@ -82,7 +82,7 @@ final class LiveTranscriptionSelectionTests: XCTestCase {
 
         XCTAssertEqual(
             selection.rememberedModel(for: .remote),
-            AssemblyAIModels.universal35ProStreamingID
+            AssemblyAIModels.universal36ProStreamingID
         )
     }
 

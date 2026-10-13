@@ -93,6 +93,14 @@ final class ProviderCatalogInvariantTests: XCTestCase {
     private static let openRouterRoutedBatchModels: Set<String> = [
         "google/gemini-3.1-flash-lite",
         "google/gemini-2.5-flash",
-        "openai/gpt-4o-audio-preview-2024-12-17"
+        "openai/gpt-audio",
+        "thinkingmachines/inkling",
+        "thinkingmachines/inkling-small",
+        "thinkingmachines/inkling:free",
+        "thinkingmachines/inkling-small:free",
+        "google/gemini-3.1-pro-preview",
+        "mistralai/voxtral-small-24b-2507",
+        "google/gemini-3.8-flash",
+        "google/gemini-3.5-flash-lite"
     ]
 }

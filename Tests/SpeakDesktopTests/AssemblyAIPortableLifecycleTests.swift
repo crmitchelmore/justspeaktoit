@@ -11,7 +11,7 @@ final class AssemblyAIPortableLifecycleTests: XCTestCase {
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "synthetic")
         let components = try XCTUnwrap(URLComponents(url: XCTUnwrap(request.url), resolvingAgainstBaseURL: false))
         let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
-        XCTAssertEqual(query["speech_model"], AssemblyAIModels.universal35ProAPIName)
+        XCTAssertEqual(query["speech_model"], AssemblyAIModels.universal36ProAPIName)
         XCTAssertNil(query["format_turns"])
         let socket = fixture.factory.sockets[0]
         fixture.client.sendAudio(Data(repeating: 1, count: 3200))
@@ -90,7 +90,7 @@ final class AssemblyAIPortableLifecycleTests: XCTestCase {
         let finish = Task { await fixture.client.finishAndWait() }
         await settle { socket.controls == [#"{"type":"ForceEndpoint"}"#] }
         socket.completeSend()
-        fixture.clock.fire(ModelCatalog.liveCapabilities(for: AssemblyAIModels.universal35ProStreamingID)
+        fixture.clock.fire(ModelCatalog.liveCapabilities(for: AssemblyAIModels.universal36ProStreamingID)
             .postStopFinalizeBudget)
         XCTAssertEqual(socket.controls.last, #"{"type":"Terminate"}"#)
         socket.completeSend()

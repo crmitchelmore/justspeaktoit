@@ -11,7 +11,7 @@ import Foundation
 /// UI shows no cost rather than a guess. On-device models cost nothing.
 public enum TranscriptionPricing {
     /// When the table below was last checked against provider pricing pages.
-    public static let lastReviewed = "2026-09"
+    public static let lastReviewed = "2026-10"
 
     /// Estimated US-dollar cost of transcribing `durationSeconds` of audio
     /// with `modelID`, or `nil` when no rate is known.
@@ -83,15 +83,23 @@ public enum TranscriptionPricing {
         "modulate/velma-2-stt-batch": perHour("0.03"),
         "modulate/velma-2-stt-batch-english-vfast": perHour("0.025"),
         "modulate/velma-2-stt-streaming": perHour("0.06"),
-        // AssemblyAI: Universal $0.27/hr pre-recorded, $0.15/hr streaming.
-        AssemblyAIModels.universal35ProStreamingID: perHour("0.15"),
+        // https://www.assemblyai.com/pricing (checked 2026-10-13).
+        // Streaming bills session duration, so audio-duration estimates exclude idle time.
+        AssemblyAIModels.universal36ProStreamingID: perHour("0.45"),
+        AssemblyAIModels.universal35ProStreamingID: perHour("0.45"),
+        AssemblyAIModels.universal35ProBatchID: perHour("0.21"),
+        AssemblyAIModels.universal2BatchID: perHour("0.15"),
+        "thinkingmachines/inkling:free": .zero,
+        "thinkingmachines/inkling-small:free": .zero,
+        // Paid audio-chat routes are token-billed: no per-minute estimate without usage.
         // Soniox: $0.10/hr async, $0.12/hr real-time.
         "soniox/stt-async-v5": perHour("0.10"),
         "soniox/stt-rt-v5-streaming": perHour("0.12"),
         // Groq Whisper large-v3-turbo: $0.04 per audio hour.
         "groq/whisper-large-v3-turbo": perHour("0.04"),
-        // Mistral Voxtral Mini transcription: $0.001/min.
-        "mistral/voxtral-mini-latest": rate("0.001"),
+        // Voxtral Mini Transcribe 2 (`voxtral-mini-latest`): $0.003/min.
+        // https://docs.mistral.ai/models/voxtral-mini-transcribe-26-02
+        "mistral/voxtral-mini-latest": rate("0.003"),
         // Google Gemini audio input: $0.50 per 1M tokens for 3.1 Flash-Lite and
         // $1.00 for 2.5 Flash, at 32 audio tokens per second.
         "google/gemini-3.1-flash-lite": rate("0.00096"),
@@ -106,7 +114,6 @@ public enum TranscriptionPricing {
     ]
 
     private static let prefixRates: [(prefix: String, rate: Decimal)] = [
-        ("assemblyai/", perHour("0.27")),
         ("elevenlabs/", perHour("0.40")),
         ("gladia/", perHour("0.612")),
         ("revai/", rate("0.02")),

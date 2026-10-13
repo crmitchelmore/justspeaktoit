@@ -130,7 +130,9 @@ void rebuild(Dialog &d) {
     for (size_t i = 0; i < d.rows.size(); ++i) {
         const auto &row = d.rows[i];
         std::wstring label, folded;
-        jsti::wide((row[1] + " -> " + row[2] + (d.kind == 1 ? " [" + row[4] + "]" : "")).c_str(), label);
+        const std::string suffix = d.kind == 3 ? " (seen " + row[3] + "; " + row[7] + ")"
+            : d.kind == 1 ? " [" + row[4] + "]" : "";
+        jsti::wide((row[1] + " -> " + row[2] + suffix).c_str(), label);
         folded = label;
         std::transform(folded.begin(), folded.end(), folded.begin(), [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
         if (folded.find(query) == std::wstring::npos) continue;
@@ -373,7 +375,10 @@ LRESULT CALLBACK procedure(HWND w, UINT message, WPARAM wp, LPARAM lp) {
         auto lines = split(data->payload, '\n');
         if (lines.empty()) return 0;
         auto header = split(lines[0], '\t');
-        set(w, notice, decoded(header[0]));
+        const std::string responseNotice = decoded(header[0]);
+        set(w, notice, d->kind == 3 && responseNotice.empty()
+            ? "Only stored candidates are listed. Automatic observation of edits in other apps is not available."
+            : responseNotice);
         if (d->kind == 0 && header.size() == 4) {
             CheckDlgButton(w, includeRules, header[1] == "true" ? BST_CHECKED : BST_UNCHECKED);
             CheckDlgButton(w, includeTags, header[2] == "true" ? BST_CHECKED : BST_UNCHECKED);

@@ -269,7 +269,11 @@ if windowsTargetBuild {
                 .linkedLibrary("gdiplus"), .linkedLibrary("dwmapi"), .linkedLibrary("uxtheme"),
                 .linkedLibrary("shcore"),
                 // CNG SHA-256 for downloaded local models.
-                .linkedLibrary("bcrypt")
+                .linkedLibrary("bcrypt"),
+                // Architecture-neutral Win32 resources: Explorer/shortcuts and
+                // native window/tray icons use the same canonical Mac exports.
+                .unsafeFlags(["-Xlinker", URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+                    .appendingPathComponent("Resources/Desktop/AppIcon.res").path])
             ]
         ),
         // Same-user named pipes for `speak` and the app; kept apart so the CLI
@@ -375,7 +379,8 @@ if linuxTargetBuild {
             dependencies: [
                 "SpeakCore", "SpeakDesktop", "SpeakDesktopHost", "SpeakLinuxPlatform", "SpeakLinuxWebSocket",
                 "CLinuxSupport", "SpeakDesktopSync", "SpeakSync"
-            ]
+            ],
+            resources: [.copy("Resources/hicolor")]
         ),
         .testTarget(
             name: "SpeakLinuxPlatformTests",

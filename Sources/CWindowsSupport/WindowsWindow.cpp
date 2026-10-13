@@ -17,6 +17,7 @@
 #include "WindowsTray.hpp"
 #include "WindowsLoginItem.hpp"
 #include "WindowsWindowChrome.hpp"
+#include "WindowsAppIcon.hpp"
 
 bool jsti_postprocessing_available();
 void jsti_show_postprocessing(HWND owner);
@@ -1920,6 +1921,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     case WM_SIZE:
         layout(window); return 0;
     case WM_DPICHANGED: {
+        std::string iconFailure;
+        if (!jsti::appIcon::refresh(window, HIWORD(wparam), iconFailure)) showFailure(window, iconFailure);
         auto bounds = reinterpret_cast<RECT *>(lparam);
         SetWindowPos(window, nullptr, bounds->left, bounds->top, bounds->right - bounds->left,
             bounds->bottom - bounds->top, SWP_NOZORDER | SWP_NOACTIVATE);
@@ -2355,41 +2358,6 @@ ULONG_PTR activateVisualStyles() {
     return cookie;
 }
 
-// The app icon at `size` pixels, drawn from the brand geometry.
-// `recording` adds a red dot, as the Mac's menu bar icon shows while recording.
-HICON brandIcon(int size, bool recording = false) {
-    if (size <= 0 || !jsti::chrome::startup()) return nullptr;
-    BITMAPINFO info{};
-    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    info.bmiHeader.biWidth = size;
-    info.bmiHeader.biHeight = -size;
-    info.bmiHeader.biPlanes = 1;
-    info.bmiHeader.biBitCount = 32;
-    info.bmiHeader.biCompression = BI_RGB;
-    void *pixels = nullptr;
-    HDC screen = GetDC(nullptr);
-    HBITMAP colour = CreateDIBSection(screen, &info, DIB_RGB_COLORS, &pixels, nullptr, 0);
-    ReleaseDC(nullptr, screen);
-    if (!colour || !pixels) return nullptr;
-    std::memset(pixels, 0, static_cast<size_t>(size) * size * 4);
-    HDC dc = CreateCompatibleDC(nullptr);
-    HGDIOBJ previous = SelectObject(dc, colour);
-    jsti::chrome::brandIcon(dc, RECT{0, 0, size, size});
-    if (recording) {
-        const int dot = std::max(6, size * 7 / 16);
-        jsti::chrome::fillRound(dc, RECT{size - dot, size - dot, size, size}, dot / 2, RGB(0xFF, 0xFF, 0xFF));
-        jsti::chrome::fillRound(dc, RECT{size - dot + 1, size - dot + 1, size - 1, size - 1}, dot / 2 - 1,
-                                jsti::chrome::red);
-    }
-    SelectObject(dc, previous);
-    DeleteDC(dc);
-    HBITMAP mask = CreateBitmap(size, size, 1, 1, nullptr);
-    ICONINFO parts{TRUE, 0, 0, mask, colour};
-    HICON icon = CreateIconIndirect(&parts);
-    DeleteObject(mask);
-    DeleteObject(colour);
-    return icon;
-}
 } // namespace
 
 int jsti_window_run(const char *const *models, size_t count, int selected,
@@ -2479,23 +2447,26 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
     type.lpszClassName = L"JustSpeakToItWindows";
     type.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     type.hbrBackground = nullptr;
-    HICON icon = brandIcon(GetSystemMetrics(SM_CXICON)), smallIcon = brandIcon(GetSystemMetrics(SM_CXSMICON));
-    HICON recordingIcon = brandIcon(GetSystemMetrics(SM_CXSMICON), true);
-    type.hIcon = icon ? icon : LoadIconW(nullptr, IDI_APPLICATION);
     const ATOM registered = RegisterClassW(&type);
     HWND window = registered ? CreateWindowExW(WS_EX_CONTROLPARENT, type.lpszClassName,
         L"Just Speak to It", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT,
         1180, 820, nullptr, nullptr, instance, nullptr) : nullptr;
-    if (window && smallIcon) SendMessageW(window, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(smallIcon));
     int outcome = 0;
-    if (!window) outcome = jsti::fail(jsti::systemError("Creating native desktop window"), error, capacity);
-    else {
+    std::string iconFailure;
+    if (window && !jsti::appIcon::refresh(window, GetDpiForWindow(window), iconFailure)) {
+        outcome = jsti::fail(iconFailure, error, capacity);
+        DestroyWindow(window);
+        window = nullptr;
+    }
+    if (!window) {
+        if (!outcome) outcome = jsti::fail(jsti::systemError("Creating native desktop window"), error, capacity);
+    } else {
         { std::lock_guard<std::mutex> lock(state.mutex); state.window = window; }
         // A login launch starts minimised and leaves the focus where it is.
         ShowWindow(window, jsti::login::launchedAtLogin() ? SW_SHOWMINNOACTIVE : SW_SHOWDEFAULT);
         UpdateWindow(window);
         // Optional: without a notification area the app works the same.
-        jsti::tray::add(window, smallIcon ? smallIcon : type.hIcon, recordingIcon);
+        jsti::tray::add(window, jsti::appIcon::small(), jsti::appIcon::recording());
         emit(window, JSTI_EVENT_READY);
         std::string shortcutFailure;
         if (IsWindow(window) && !jsti_hotkey_start(window, shortcutFailure)) showFailure(window, shortcutFailure);
@@ -2521,9 +2492,7 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
     jsti::hud::destroy();
     state.font = nullptr;
     state.controls.clear(); state.callback = nullptr; state.context = nullptr;
-    if (icon) DestroyIcon(icon);
-    if (smallIcon) DestroyIcon(smallIcon);
-    if (recordingIcon) DestroyIcon(recordingIcon);
+    jsti::appIcon::destroy();
     if (visualStyles) DeactivateActCtx(0, visualStyles);
     state.displayedHistory.clear();
     if (registered) UnregisterClassW(type.lpszClassName, instance);
@@ -3799,6 +3768,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         SWP_NOZORDER | SWP_NOACTIVATE);
     showPage(window, originalPage);
     if (passed) passed = jsti::hud::selfTest(failure);
+    if (passed) passed = jsti::appIcon::selfTest(window, failure);
     if (passed) passed = jsti::tray::selfTest(failure);
     return passed ? 0 : jsti::fail(failure, error, errorCapacity);
 }

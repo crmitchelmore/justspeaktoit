@@ -51,6 +51,43 @@ then the dashboard and History in dark mode and the dashboard while recording.
 `scripts/linux-desktop-checks.sh` runs it when `JSTI_UI_SCREENSHOT_DIR` is set,
 and CI uploads the pictures as `linux-ui-screenshots`.
 
+### Canonical application icons
+
+The Linux application uses the canonical Mac icon exports, not a separately
+drawn approximation. `scripts/generate-icon.swift` invokes the dependency-free
+`scripts/generate-desktop-icons.py`, producing a private hicolor theme with
+16, 24, 32, 48, 64, 128, 256 and 512px PNGs and transparent corners. SwiftPM
+bundles that theme in `SpeakApp_SpeakLinux.resources`; it is loaded via
+`Bundle.module`, not the current working directory. GTK sets the window icon
+name to the desktop entry's `com.justspeaktoit.JustSpeakToIt`. The in-app brand
+marks and StatusNotifier pixmaps read the same artwork; panel exports include
+64/96px variants and preserve the recording dot. The coloured app icon is
+identical in light/dark themes, not a symbolic icon; Wayland compositors use
+the matching application/desktop identity rather than a client-supplied
+title-bar bitmap.
+
+Flatpak ships both the private runtime theme and installed hicolor PNGs.
+For a native developer layout, stage (do not install) the executable, resource
+bundles, desktop entry, metainfo and icons with:
+
+```sh
+python3 scripts/stage-linux-desktop.py --binary .build/release/SpeakLinux \
+  --output .build/linux-desktop-layout --prefix /usr/local
+```
+
+The output contains `bin/` and `share/`, intended for the stated prefix.
+It still requires the matching Swift/native libraries; this is not a
+self-contained Linux release. The stager never changes the running system and
+refuses an existing output directory. Installed icons do not overwrite the
+system hicolor `index.theme`; the private bundle retains its own index.
+
+`python3 scripts/generate-desktop-icons.py --check` verifies exact exports;
+`python3 -B -m unittest discover -s scripts/tests -p test_desktop_icons.py`
+checks native resource wiring and a synthetic staged layout. The GTK window
+self-test requires the canonical name to resolve in the theme. The Python
+checks are not proof of GTK/Wayland/panel rendering or an installed Flatpak;
+those remain native CI and desktop validation gates.
+
 ## Window
 
 The window follows the Mac app's layout and look. A sidebar lists **Speak**

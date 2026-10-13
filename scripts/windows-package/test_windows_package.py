@@ -345,10 +345,9 @@ class LayoutTests(unittest.TestCase):
                 self.assertEqual((layout / name).read_bytes(), archive.read(name), name)
                 self.assertEqual(hashes[name], sha256(archive.read(name)))
         generated = {row["path"]: row["origin"] for row in package_manifest["files"] if row["origin"] != "bundle"}
-        self.assertEqual(generated, {"AppxManifest.xml": "generated-manifest",
-                                     "Assets/Square150x150Logo.png": "generated-asset",
-                                     "Assets/Square44x44Logo.png": "generated-asset",
-                                     "Assets/StoreLogo.png": "generated-asset"})
+        expected = {path: "generated-asset" for path in windows_msix.load_identity()["assets"]["images"]}
+        expected["AppxManifest.xml"] = "generated-manifest"
+        self.assertEqual(generated, expected)
         self.assertEqual(package_manifest["package"]["packageFamilyName"],
                          "com.justspeaktoit.windows.developer_" + windows_msix.publisher_id(
                              "CN=Just Speak to It Developer"))

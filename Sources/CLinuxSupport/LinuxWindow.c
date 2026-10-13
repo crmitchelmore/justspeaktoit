@@ -1172,7 +1172,9 @@ static void on_activate(GApplication *application, gpointer data) {
         gtk_window_present(ui.window);
         return;
     }
+    jsti_app_icon_install();
     build_window();
+    gtk_window_set_icon_name(ui.window, "com.justspeaktoit.JustSpeakToIt");
     jsti_tray_start();
     ui.suppress = TRUE;
     apply_models(initial_models.rows, initial_models.count, initial_models.selected);
@@ -1248,6 +1250,7 @@ int32_t jsti_window_run(
     ui.callback = NULL;
     g_clear_object(&ui.application);
     ui.window = NULL;
+    jsti_app_icon_clear();
     if (status != 0) {
         jsti_set_error(error, capacity, "The window exited with status %d.", status);
         return -1;
@@ -2139,6 +2142,12 @@ static int32_t login_item_self_test(char *error, size_t capacity) {
 
 int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (ui.window == NULL) return fail(error, capacity, "the window was not created");
+    const char *icon_name = gtk_window_get_icon_name(ui.window);
+    GtkIconTheme *theme = gtk_icon_theme_get_for_display(gtk_widget_get_display(GTK_WIDGET(ui.window)));
+    if (g_strcmp0(icon_name, "com.justspeaktoit.JustSpeakToIt") != 0 ||
+        !gtk_icon_theme_has_icon(theme, "com.justspeaktoit.JustSpeakToIt")) {
+        return fail(error, capacity, "the canonical application icon is not available in the window's theme");
+    }
     if (login_item_self_test(error, capacity) != 0) return -1;
     if (g_list_model_get_n_items(G_LIST_MODEL(ui.model_names)) == 0) {
         return fail(error, capacity, "no models are offered");

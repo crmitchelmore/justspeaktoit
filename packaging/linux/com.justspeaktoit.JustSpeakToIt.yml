@@ -52,12 +52,13 @@ modules:
       - install -Dm755 .build/release/SpeakLinux /app/bin/justspeaktoit
       # Bundle.module looks for SwiftPM resource bundles beside the executable.
       - cp -r .build/release/SpeakApp_SpeakCore.resources /app/bin/
+      - cp -r .build/release/SpeakApp_SpeakLinux.resources /app/bin/
       - install -Dm644 packaging/linux/com.justspeaktoit.JustSpeakToIt.desktop
         /app/share/applications/com.justspeaktoit.JustSpeakToIt.desktop
       - install -Dm644 packaging/linux/com.justspeaktoit.JustSpeakToIt.metainfo.xml
         /app/share/metainfo/com.justspeaktoit.JustSpeakToIt.metainfo.xml
-      - install -Dm644 Resources/Brand/AppIcon.svg
-        /app/share/icons/hicolor/scalable/apps/com.justspeaktoit.JustSpeakToIt.svg
+      - mkdir -p /app/share/icons/hicolor
+      - cp -r Sources/SpeakLinux/Resources/hicolor/[0-9]* /app/share/icons/hicolor/
     sources:
       - type: dir
         path: ../..

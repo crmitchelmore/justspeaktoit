@@ -10,6 +10,9 @@ on:
     branches: [main]
     paths:
       - Package.swift
+      - Resources/Desktop/**
+      - scripts/generate-desktop-icons.py
+      - scripts/tests/test_desktop_icons.py
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
       - Sources/SpeakDesktopHost/**
@@ -42,6 +45,9 @@ on:
     branches: [main]
     paths:
       - Package.swift
+      - Resources/Desktop/**
+      - scripts/generate-desktop-icons.py
+      - scripts/tests/test_desktop_icons.py
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
       - Sources/SpeakDesktopHost/**

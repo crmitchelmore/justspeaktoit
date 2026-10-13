@@ -44,7 +44,9 @@ struct _GtkLabel;
  * the Mac app's brand tokens and switch with the desktop's light or dark
  * style. Each builder returns a new floating widget. */
 void jsti_style_install(void);
-/* The app icon, drawn rather than loaded so it needs no image loader. */
+/* Canonical Mac artwork loaded once from the bundled hicolor theme. */
+void jsti_app_icon_install(void);
+void jsti_app_icon_clear(void);
 struct _GtkWidget *jsti_brand_icon_new(int size);
 /* Paints the app icon into a size x size square at the origin. */
 struct _cairo;

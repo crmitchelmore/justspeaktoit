@@ -91,7 +91,7 @@ $virtualisedDataDirectory = Join-Path $packageDataDirectory ('LocalCache\Local\'
 $aliasPath = Join-Path $env:LOCALAPPDATA ('Microsoft\WindowsApps\' + $base.executionAlias)
 $systemRoot = $env:SystemRoot
 $isolatedPath = "$systemRoot\System32;$systemRoot;$systemRoot\System32\Wbem;$systemRoot\System32\WindowsPowerShell\v1.0"
-$readyPattern = '^(Enter and save the selected provider.s API key|Ready\. Ctrl\+Alt\+Space)'
+$readyPattern = '^(Enter and save the selected provider.s API key|Ready\. Ctrl\+Alt\+Space|Recording sounds unavailable\. Check audio output; dictation still works\.$)'
 $controls = @{ transcript = 106; status = 107; history = 108; historyDetail = 109 }
 
 $failures = New-Object System.Collections.Generic.List[string]

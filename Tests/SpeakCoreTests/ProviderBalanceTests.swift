@@ -81,7 +81,7 @@ final class ProviderBalanceTests: XCTestCase {
     }
 
     func testDirectory_neverLabelsUsageOnlyProvidersAsAWallet() {
-        for id in ["cartesia", "soniox", "openai", "azure"] {
+        for id in ["cartesia", "soniox", "openai", "azure", "alibaba"] {
             guard let account = ProviderBalanceDirectory.account(id: id) else {
                 return XCTFail("Missing account \(id)")
             }
@@ -90,6 +90,21 @@ final class ProviderBalanceTests: XCTestCase {
             }
             XCTAssertNotNil(account.billingURL, "\(id) needs a billing link")
         }
+    }
+
+    func testDirectory_alibabaOffersItsConsoleWithoutClaimingAReadableBalance() throws {
+        let account = try XCTUnwrap(ProviderBalanceDirectory.account(
+            forCredentialIdentifier: AlibabaSpeechConfiguration.credentialIdentifier
+        ))
+        XCTAssertEqual(account.id, "alibaba")
+        XCTAssertEqual(account.displayName, "Alibaba Model Studio")
+        XCTAssertEqual(account.primaryCredentialIdentifier, AlibabaSpeechConfiguration.credentialIdentifier)
+        guard case .billingLinkOnly(let reason) = account.support else {
+            return XCTFail("Alibaba must not claim a readable balance")
+        }
+        XCTAssertTrue(reason.contains("cannot read"))
+        XCTAssertTrue(reason.contains("billing"))
+        XCTAssertEqual(account.billingURL?.absoluteString, "https://bailian.console.aliyun.com")
     }
 
     func testDirectory_deduplicatesAnAccountAcrossItsCredentials() {
@@ -108,6 +123,21 @@ final class ProviderBalanceTests: XCTestCase {
     }
 
     // MARK: - Store
+
+    @MainActor
+    func testStore_alibabaNeverFetchesOrDisplaysAnInferenceKeyBalance() async {
+        let store = ProviderBalanceStore()
+        store.configure { _ in
+            XCTFail("A billing-link-only account must not request the bound inference credential")
+            return nil
+        }
+        store.refreshAll(storedCredentialIdentifiers: [AlibabaSpeechConfiguration.credentialIdentifier])
+        store.refresh(accountID: "alibaba")
+        await store.waitForIdle()
+        XCTAssertNil(store.entry(forCredentialIdentifier: AlibabaSpeechConfiguration.credentialIdentifier))
+        XCTAssertNil(store.entries["alibaba"])
+        XCTAssertFalse(ProviderBalanceStore.defaultSources().contains { $0.accountID == "alibaba" })
+    }
 
     @MainActor
     func testStore_showsAnAccountOnceAcrossItsSpeechAndVoiceCredentials() async {

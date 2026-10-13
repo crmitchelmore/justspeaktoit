@@ -5,6 +5,26 @@ macOS `AppSettings.DefaultsKey` has 91 keys
 (`Sources/SpeakApp/AppSettings.swift:289-381`), plus preferences and collections
 outside that enum. Track remaining product acceptance in #1157.
 
+## Generated-speech coordination
+
+`SpeechGenerationDefaults` defines the Mac's existing `ttsAutoPlay` (true) and
+`ttsSaveToDirectory` (false) defaults without changing saved values. Explicit
+Read aloud is independent from auto-play. The Voice workflow owner implements
+immutable Generate snapshots, retained results, cached Play/export and native
+controls; the shared model must be the sole persisted desktop boolean authority,
+not an independent copy in each platform or in the configuration dictionary.
+Canonical configuration transfer/metadata projections need the executable
+workflow's final model contract before these keys can be called supported.
+The current editable preference count therefore stays fourteen.
+
+Generated audio archival follows the parent's app-owned destination: the actual
+`DesktopRecordingStore.directory`, as a flat canonical `UUID.wav` without a
+transcript journal entry. This participates in the parent's audio-only cleanup;
+separate generated-result cache/playback staging does not. Foreign imported
+`recordingsDirectory` values are never executed. UUID filenames replace the
+Mac's colon-containing timestamps on Windows. Native archival and Voice
+acceptance belong to the Voice/parent workstreams, not this defaults extraction.
+
 ## Recording feedback foundation (not native parity yet)
 
 `SpeakCore/RecordingFeedback.swift` now owns the four existing profiles, eight

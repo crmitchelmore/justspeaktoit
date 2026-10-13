@@ -46,6 +46,18 @@ final class AppSettingsDefaultsTests: XCTestCase {
     }
 
     @MainActor
+    func testGeneratedSpeechDefaults_MatchSharedDefaultsWithoutChangingSavedValues() {
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertEqual(settings.ttsAutoPlay, SpeechGenerationDefaults.autoPlay)
+        XCTAssertEqual(settings.ttsSaveToDirectory, SpeechGenerationDefaults.saveToRecordings)
+        defaults.set(false, forKey: "ttsAutoPlay")
+        defaults.set(true, forKey: "ttsSaveToDirectory")
+        let reloaded = AppSettings(defaults: defaults)
+        XCTAssertFalse(reloaded.ttsAutoPlay)
+        XCTAssertTrue(reloaded.ttsSaveToDirectory)
+    }
+
+    @MainActor
     func testRecordingFeedbackDefaultsAndAliases_MatchTheCanonicalPortableCatalogue() {
         let settings = AppSettings(defaults: defaults)
         XCTAssertEqual(settings.recordingSoundsEnabled, RecordingFeedbackDefaults.enabled)

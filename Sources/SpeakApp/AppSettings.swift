@@ -1370,9 +1370,12 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     ttsOutputFormat =
       AudioFormat(rawValue: defaults.string(forKey: DefaultsKey.ttsOutputFormat.rawValue) ?? "")
       ?? .mp3
-    ttsAutoPlay = defaults.object(forKey: DefaultsKey.ttsAutoPlay.rawValue) as? Bool ?? true
+    ttsAutoPlay =
+      defaults.object(forKey: DefaultsKey.ttsAutoPlay.rawValue) as? Bool
+        ?? SpeechGenerationDefaults.autoPlay
     ttsSaveToDirectory =
-      defaults.object(forKey: DefaultsKey.ttsSaveToDirectory.rawValue) as? Bool ?? false
+      defaults.object(forKey: DefaultsKey.ttsSaveToDirectory.rawValue) as? Bool
+        ?? SpeechGenerationDefaults.saveToRecordings
     ttsUseSSML = defaults.object(forKey: DefaultsKey.ttsUseSSML.rawValue) as? Bool ?? false
     ttsFavoriteVoices =
       defaults.array(forKey: DefaultsKey.ttsFavoriteVoices.rawValue) as? [String] ?? []

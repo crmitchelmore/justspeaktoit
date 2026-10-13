@@ -90,6 +90,10 @@ restores previous contents after guessed delays. General hides the unsupported
 restore switch, explains why pasted text remains on the clipboard and retains
 the saved X11 choice; dashboard/save messages follow the actual session capability,
 including Wayland sessions with an XWayland `DISPLAY`. Windows behavior is unchanged.
+The explanation belongs to the visible Output group description, not the
+combobox's non-rendered subtitle. The isolated screenshot tour seeds actual session
+options and also captures the explicit `general-portal-output` capability fixture;
+it restores the original output options before subsequent stages.
 
 ## Configuration transfer is not the Mac backup format
 

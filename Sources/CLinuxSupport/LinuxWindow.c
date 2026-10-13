@@ -40,6 +40,7 @@ typedef struct UI {
     GPtrArray *microphone_ids;
     AdwComboRow *microphone_row;
     /* Text output */
+    AdwPreferencesGroup *output_group;
     AdwComboRow *output_row;
     AdwSwitchRow *restore_row;
     gboolean can_restore_clipboard;
@@ -887,10 +888,10 @@ static GtkWidget *build_general(void) {
     gtk_box_append(GTK_BOX(column), microphone);
 
     GtkWidget *output = group("Output");
+    ui.output_group = ADW_PREFERENCES_GROUP(output);
     adw_preferences_group_set_description(
         ADW_PREFERENCES_GROUP(output),
-        "Finished text goes to the app you were in when dictation started. Recording in this window offers "
-        "Copy instead.");
+        "Checking paste and clipboard support for this desktop.");
     const char *methods[] = { "Paste into the focused app", "Copy to the clipboard only", NULL };
     ui.output_row = ADW_COMBO_ROW(adw_combo_row_new());
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.output_row), "Text output");
@@ -1895,9 +1896,12 @@ static void text_output_apply(gpointer pointer) {
     adw_switch_row_set_active(ui.restore_row, output->restore);
     gtk_widget_set_visible(GTK_WIDGET(ui.restore_row), output->can_restore);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.restore_row), output->method != 1 && output->can_restore);
-    adw_action_row_set_subtitle(ADW_ACTION_ROW(ui.output_row), output->can_restore ? NULL :
-        "Wayland cannot confirm when an app consumes a paste, so the transcript stays on the clipboard. "
-        "Your X11 restoration preference is retained.");
+    adw_preferences_group_set_description(ui.output_group, output->can_restore ?
+        "Finished text goes to the app you were in when dictation started. Recording in this window offers "
+        "Copy instead." :
+        "Wayland pastes into the app focused at delivery and cannot confirm when it consumes the paste, "
+        "so the transcript stays on the clipboard. Your X11 restoration preference is retained. "
+        "Recording in this window offers Copy instead.");
     if (output->hint != NULL) adw_action_row_set_subtitle(ui.shortcut_row, output->hint);
     ui.suppress = FALSE;
     refresh_setup();
@@ -2544,7 +2548,8 @@ static gboolean text_output_self_test(void) {
     text_output_apply(&unsupported);
     gboolean valid = !gtk_widget_get_visible(GTK_WIDGET(ui.restore_row)) &&
         !gtk_widget_get_sensitive(GTK_WIDGET(ui.restore_row)) && adw_switch_row_get_active(ui.restore_row) &&
-        strstr(adw_action_row_get_subtitle(ADW_ACTION_ROW(ui.output_row)), "Wayland") != NULL &&
+        gtk_widget_get_visible(GTK_WIDGET(ui.output_group)) &&
+        strstr(adw_preferences_group_get_description(ui.output_group), "Wayland") != NULL &&
         strstr(gtk_label_get_text(ui.setup_output), "restored") == NULL;
     guint calls = 0;
     jsti_window_event_fn callback = ui.callback;
@@ -2712,9 +2717,10 @@ static int32_t save_widget_png(GtkWidget *widget, const char *path, gboolean opa
 typedef struct Tour {
     gchar *directory;
     gint32 step;
+    TextOutput output;
 } Tour;
 
-enum { TOUR_DARK_DASHBOARD = JSTI_PAGE_COUNT, TOUR_DARK_HISTORY, TOUR_RECORDING, TOUR_HUD_RECORDING,
+enum { TOUR_PORTAL_OUTPUT = JSTI_PAGE_COUNT, TOUR_DARK_DASHBOARD, TOUR_DARK_HISTORY, TOUR_RECORDING, TOUR_HUD_RECORDING,
        TOUR_HUD_COMPLETED, TOUR_EXPANDED_RECORDING, TOUR_COMPACT_RECORDING, TOUR_COMPACT_COMPLETED, TOUR_DONE };
 
 static gboolean tour_capture(gpointer data);
@@ -2722,7 +2728,12 @@ static gboolean tour_capture(gpointer data);
 static void tour_show(Tour *tour) {
     if (tour->step < JSTI_PAGE_COUNT) {
         show_page(tour->step);
+    } else if (tour->step == TOUR_PORTAL_OUTPUT) {
+        TextOutput portal = { .method = 0, .restore = TRUE, .can_restore = FALSE };
+        text_output_apply(&portal);
+        show_page(JSTI_PAGE_GENERAL);
     } else if (tour->step == TOUR_DARK_DASHBOARD) {
+        text_output_apply(&tour->output);
         adw_style_manager_set_color_scheme(adw_style_manager_get_default(), ADW_COLOR_SCHEME_FORCE_DARK);
         show_page(JSTI_PAGE_DASHBOARD);
     } else if (tour->step == TOUR_DARK_HISTORY) {
@@ -2754,6 +2765,7 @@ static void tour_show(Tour *tour) {
 
 static const char *tour_name(gint32 step) {
     switch (step) {
+    case TOUR_PORTAL_OUTPUT: return "general-portal-output";
     case TOUR_RECORDING: return "dashboard-recording";
     case TOUR_HUD_RECORDING: return "hud-recording";
     case TOUR_HUD_COMPLETED: return "hud-completed";
@@ -2818,7 +2830,15 @@ static gboolean tour_capture(gpointer data) {
     return G_SOURCE_REMOVE;
 }
 
-static void tour_start(gpointer data) { tour_show(data); }
+static void tour_start(gpointer data) {
+    Tour *tour = data;
+    tour->output = (TextOutput){
+        .method = (gint32)adw_combo_row_get_selected(ui.output_row),
+        .restore = adw_switch_row_get_active(ui.restore_row),
+        .can_restore = ui.can_restore_clipboard
+    };
+    tour_show(tour);
+}
 
 int32_t jsti_window_screenshot_tour(const char *directory, char *error, size_t capacity) {
     if (directory == NULL || g_mkdir_with_parents(directory, 0700) != 0) {

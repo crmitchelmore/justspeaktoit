@@ -82,15 +82,27 @@ public final class DesktopComparisonLive: @unchecked Sendable {
         }
         let ready = calls.withLock {
             guard !terminal else { return false }
-            startedAt = .now; capturing = true
+            capturing = true
             return true
         }
         guard ready else { throw CancellationError() }
     }
 
+    public func beginCapture() throws {
+        let started = calls.withLock {
+            guard capturing, !terminal, startedAt == nil else { return false }
+            startedAt = .now
+            return true
+        }
+        guard started else {
+            throw DesktopComparisonError.message("The comparison capture is not ready or has already started.")
+        }
+    }
+
     public func sendAudio(_ data: Data) {
         calls.withLock {
             guard capturing, !terminal, data.count % 2 == 0 else { return }
+            if startedAt == nil { startedAt = .now }
             // One common rate projection, so every 16 kHz lane gets identical bytes.
             let at16k = resample(data)
             for lane in lanes {

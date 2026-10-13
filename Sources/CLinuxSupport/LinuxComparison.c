@@ -9,6 +9,7 @@ typedef struct {
     GtkListBox *models;
     GtkDropDown *rounds;
     GtkTextView *detail;
+    GtkWidget *column;
     GtkButton *run, *stop, *cancel, *judge, *json, *markdown, *play, *stop_audio;
     GPtrArray *model_ids, *round_ids;
     gchar *selected, *model_rows, *round_rows;
@@ -210,6 +211,7 @@ void jsti_comparison_open(GtkWindow *parent) {
     GtkWidget *scrolled = gtk_scrolled_window_new();
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
     GtkWidget *column = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+    ui.column = column;
     gtk_widget_set_margin_start(column, 20); gtk_widget_set_margin_end(column, 20);
     gtk_widget_set_margin_top(column, 16); gtk_widget_set_margin_bottom(column, 20);
     GtkWidget *notice = gtk_label_new("One sample, raw results, blind judging. No insertion, post-processing "
@@ -387,6 +389,11 @@ static gboolean comparison_snapshot(gpointer value) {
     gchar *path = g_build_filename(tour->directory, name, NULL);
     if (ui.window == NULL || jsti_widget_save_snapshot(adw_window_get_content(ADW_WINDOW(ui.window)), path, TRUE) != 0)
         g_printerr("Comparison snapshot %s failed.\n", name);
+    g_free(path);
+    const char *full_name = tour->revealed ? "comparison-revealed-dark-full.png" : "comparison-blind-light-full.png";
+    path = g_build_filename(tour->directory, full_name, NULL);
+    if (ui.window == NULL || jsti_widget_save_snapshot(ui.column, path, TRUE) != 0)
+        g_printerr("Comparison snapshot %s failed.\n", full_name);
     g_free(path);
     if (!tour->revealed) {
         tour->revealed = TRUE;

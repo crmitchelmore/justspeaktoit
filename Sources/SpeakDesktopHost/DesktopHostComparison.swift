@@ -199,7 +199,7 @@ extension DesktopHostController {
             context: context, deviceID: configuration.deviceID,
             sampleRate: fanOut.captureSampleRate, frameMilliseconds: 100
         )
-        do { try capture.start() } catch { capture.destroy(); throw error }
+        do { try fanOut.beginCapture(); try capture.start() } catch { capture.destroy(); throw error }
         comparisonCapture = DesktopHostComparisonCapture(capture: capture, file: file)
         comparisonSelection = pending.id
         comparisonUpdates = Task { [weak self] in

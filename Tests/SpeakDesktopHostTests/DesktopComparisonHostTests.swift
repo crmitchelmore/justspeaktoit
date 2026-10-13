@@ -19,6 +19,10 @@ final class DesktopComparisonHostTests: XCTestCase {
         let effects = ComparisonHostEffects(sourceToMutate: second)
         let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
         await controller.markReadyForSelfTest()
+        let existing = try await seedComparisonHistory(controller)
+        let historyDirectory = await controller.store.directory
+        let historyMetadata = historyDirectory.appendingPathComponent(existing.id.uuidString + ".json")
+        let historyBeforeComparison = try Data(contentsOf: historyMetadata)
         let selected = Array(DesktopHostModels.visible.prefix(2)).map(\.id)
         XCTAssertEqual(selected.count, 2)
         let originalSettings = await controller.settings.model
@@ -32,12 +36,16 @@ final class DesktopComparisonHostTests: XCTestCase {
         let rounds = await store.rounds()
         XCTAssertEqual(rounds.count, 2)
         XCTAssertTrue(rounds.allSatisfy { $0.inputMode == .batch && $0.language == "en_GB" })
-        XCTAssertTrue(rounds.allSatisfy { $0.entries.allSatisfy { $0.transcript == "Raw only" } })
+        XCTAssertTrue(
+            rounds.allSatisfy { $0.entries.allSatisfy { $0.transcript == "Raw only" } },
+            rounds.flatMap(\.entries).compactMap(\.errorDescription).joined(separator: "\n")
+        )
         XCTAssertEqual(effects.bytes, [bytes, bytes, bytes, bytes])
         let settingsAfterRun = await controller.settings.model
         XCTAssertEqual(settingsAfterRun, originalSettings)
         let history = try await controller.store.recoverInterruptedRecordings()
-        XCTAssertTrue(history.records.isEmpty)
+        XCTAssertEqual(history.records.map(\.id), [existing.id])
+        XCTAssertEqual(try Data(contentsOf: historyMetadata), historyBeforeComparison)
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("settings.json").path))
         let exported = root.appendingPathComponent("export.json")
         await controller.comparisonEvent(107, text: exported.path, index: 0)
@@ -122,6 +130,21 @@ final class DesktopComparisonHostTests: XCTestCase {
     }
 }
 
+private func seedComparisonHistory(
+    _ controller: DesktopHostController<FakePlatform>
+) async throws -> DesktopRecordingStore.Record {
+    var record = DesktopRecordingStore.Record(
+        syncedID: UUID(), createdAt: Date(), modelIdentifier: "existing/model", originPlatform: "macos"
+    )
+    record.result = TranscriptionResult(
+        text: "Existing raw", segments: [], confidence: nil, duration: 1, modelIdentifier: "existing/model",
+        cost: nil, rawPayload: nil, debugInfo: nil
+    )
+    record.processedText = "Existing processed"
+    try await controller.store.save(record)
+    return record
+}
+
 extension FakePlatform {
     static var comparisonDigest: LocalModelDigestProvider? {
         LocalModelDigestProvider(name: "Synthetic test identity") { ComparisonTestHasher() }
@@ -172,10 +195,12 @@ private final class ComparisonHostEffects: DesktopHostEffects, @unchecked Sendab
         with controller: DesktopHostController<FakePlatform>
     ) async throws -> TranscriptionResult {
         let data = try Data(contentsOf: request.audio)
-        lock.withLock { observed.append(data) }
+        let mutateOriginal = lock.withLock { observed.append(data); return observed.count == 1 }
         await gate?.pass()
         try Task.checkCancellation()
-        try Data("Changed original during the first sample request".utf8).write(to: sourceToMutate)
+        if mutateOriginal {
+            try Data("Changed original during the first sample request".utf8).write(to: sourceToMutate)
+        }
         return TranscriptionResult(
             text: "Raw only", segments: [], confidence: nil, duration: request.duration, modelIdentifier: request.model,
             cost: nil, rawPayload: nil, debugInfo: nil

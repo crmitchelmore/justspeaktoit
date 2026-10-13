@@ -79,7 +79,8 @@ deletion controls and automatic interrupted-run retry remain unwired.
 The GTK window self-test checks wrapped labels, model and language payloads,
 ranking, playback and busy/recording controls with synthetic fixtures only.
 The screenshot tour adds `comparison-blind-light.png` and
-`comparison-revealed-dark.png` without changing page ordinals. Native execution
+`comparison-revealed-dark.png`, plus `-full.png` views including the below-fold
+ranking/export controls, without changing page ordinals. Native execution
 at the final head, physical PulseAudio/PipeWire devices, screen-reader/keyboard
 acceptance, small-screen behavior and live-provider receipts are separate gates;
 portable tests and syntax/type checks do not establish those gates.

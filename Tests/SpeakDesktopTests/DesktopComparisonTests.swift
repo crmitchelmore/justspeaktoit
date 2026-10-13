@@ -136,6 +136,8 @@ extension DesktopComparisonTests {
         let fanout = try live(ready, stalled)
         fanout.sendAudio(pcm([0, 100, 200]))
         try await fanout.prepare(timeout: .milliseconds(30))
+        try fanout.beginCapture()
+        XCTAssertThrowsError(try fanout.beginCapture())
         let capture = pcm([0, 100, 200, 300])
         fanout.sendAudio(capture)
         XCTAssertEqual(ready.audio, [capture])

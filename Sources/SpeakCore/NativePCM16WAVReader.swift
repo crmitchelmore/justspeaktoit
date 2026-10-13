@@ -1,8 +1,11 @@
 import Foundation
+#if canImport(AVFoundation) && !SPEAK_PORTABLE_CORE
+import AVFoundation
+#endif
 
-/// Reads the canonical WAV produced by native desktop capture without decoding
-/// or resampling. Other containers and WAV layouts need a platform converter.
-/// Bytes are bounded before allocation, then checked against the actual file.
+/// Shared mono 16 kHz PCM16 WAV preparation. Portable hosts validate native
+/// capture without decoding; Apple can convert other containers in process.
+/// Both paths bound decoded bytes before appending them.
 public enum NativePCM16WAVReader {
     static let sampleRate = 16_000
     private static let headerSize = 44
@@ -12,6 +15,88 @@ public enum NativePCM16WAVReader {
         let data: Data
         let duration: TimeInterval
     }
+
+    /// Apple decodes in process; portable hosts validate their native capture
+    /// format. Both paths enforce the same decoded-size and duration limits.
+    static func prepareWAV(
+        at url: URL, maximumDuration: TimeInterval, maximumBytes: Int
+    ) async throws -> PreparedAudio {
+        #if canImport(AVFoundation) && !SPEAK_PORTABLE_CORE
+        return try convertWAV(at: url, maximumDuration: maximumDuration, maximumBytes: maximumBytes)
+        #else
+        return try prepare(at: url, maximumDuration: maximumDuration, maximumBytes: maximumBytes)
+        #endif
+    }
+
+    #if canImport(AVFoundation) && !SPEAK_PORTABLE_CORE
+    private static func convertWAV(
+        at url: URL, maximumDuration: TimeInterval, maximumBytes: Int
+    ) throws -> PreparedAudio {
+        try Task.checkCancellation()
+        let file = try AVAudioFile(forReading: url)
+        let duration = Double(file.length) / file.processingFormat.sampleRate
+        guard duration.isFinite, duration > 0 else { throw PreparationError.emptyInput }
+        guard maximumDuration.isFinite, duration <= maximumDuration, maximumBytes > headerSize else {
+            throw PreparationError.limitExceeded
+        }
+        guard let format = AVAudioFormat(
+            commonFormat: .pcmFormatInt16, sampleRate: Double(sampleRate), channels: 1, interleaved: true
+        ), let converter = AVAudioConverter(from: file.processingFormat, to: format),
+        let input = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 8_192),
+        let output = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 8_192) else {
+            throw PreparationError.unsupportedFormat
+        }
+        let pcm = try convert(
+            file: file, converter: converter, input: input, output: output, maximumBytes: maximumBytes
+        )
+        try Task.checkCancellation()
+        guard !pcm.isEmpty, let wav = PCMWaveWriter.wavData(pcm: pcm, sampleRate: sampleRate) else {
+            throw PreparationError.emptyInput
+        }
+        return PreparedAudio(data: wav, duration: Double(pcm.count) / Double(bytesPerSecond))
+    }
+
+    private static func convert(
+        file: AVAudioFile, converter: AVAudioConverter, input: AVAudioPCMBuffer,
+        output: AVAudioPCMBuffer, maximumBytes: Int
+    ) throws -> Data {
+        var pcm = Data()
+        var finished = false
+        while !finished {
+            try Task.checkCancellation()
+            var readError: Error?
+            var conversionError: NSError?
+            let status = converter.convert(to: output, error: &conversionError) { _, inputStatus in
+                guard file.framePosition < file.length else {
+                    inputStatus.pointee = .endOfStream
+                    return nil
+                }
+                do {
+                    try file.read(into: input)
+                    inputStatus.pointee = input.frameLength == 0 ? .endOfStream : .haveData
+                    return input.frameLength == 0 ? nil : input
+                } catch {
+                    readError = error
+                    inputStatus.pointee = .endOfStream
+                    return nil
+                }
+            }
+            if let readError { throw readError }
+            if let conversionError { throw conversionError }
+            guard status != .error else { throw PreparationError.unsupportedFormat }
+            let buffer = output.audioBufferList.pointee.mBuffers
+            let count = Int(output.frameLength) * 2
+            guard pcm.count + count + headerSize < maximumBytes else { throw PreparationError.limitExceeded }
+            if count > 0 {
+                guard let bytes = buffer.mData else { throw PreparationError.invalidContainer }
+                pcm.append(bytes.assumingMemoryBound(to: UInt8.self), count: count)
+            }
+            finished = status == .endOfStream
+            guard finished || count > 0 else { throw PreparationError.invalidContainer }
+        }
+        return pcm
+    }
+    #endif
 
     /// Reads only the 44-byte header and file size. Platform adapters can skip
     /// decoding recordings that already match the shared provider input format.

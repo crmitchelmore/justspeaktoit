@@ -252,6 +252,18 @@ public final class AppSettings: ObservableObject {
         didSet { persistSecret(xAIAPIKey, identifier: Self.xAIKeyID) }
     }
 
+    @Published public var smallestAPIKey: String {
+        didSet { persistSecret(smallestAPIKey, identifier: "smallest.apiKey") }
+    }
+
+    @Published public var reson8APIKey: String {
+        didSet { persistSecret(reson8APIKey, identifier: "reson8.apiKey") }
+    }
+
+    @Published public var stepfunAPIKey: String {
+        didSet { persistSecret(stepfunAPIKey, identifier: "stepfun.apiKey") }
+    }
+
     @Published public var speechmaticsAPIKey: String {
         didSet { persistSecret(speechmaticsAPIKey, identifier: Self.speechmaticsKeyID) }
     }
@@ -266,6 +278,10 @@ public final class AppSettings: ObservableObject {
 
     @Published public var azureAPIKey: String {
         didSet { persistSecret(azureAPIKey, identifier: Self.azureKeyID) }
+    }
+
+    @Published public var alibabaAPIKey: String {
+        didSet { persistSecret(alibabaAPIKey, identifier: Self.alibabaKeyID) }
     }
 
     @Published public var metaAPIKey: String {
@@ -294,6 +310,7 @@ public final class AppSettings: ObservableObject {
     static let googleKeyID = "google.apiKey"
     static let xAIKeyID = "xai.apiKey"
     static let azureKeyID = AzureSpeechConfiguration.credentialIdentifier
+    static let alibabaKeyID = AlibabaSpeechConfiguration.credentialIdentifier
     static let metaKeyID = "meta.apiKey"
     static let speechmaticsKeyID = "speechmatics.apiKey"
     static let revAIKeyID = "revai.apiKey"
@@ -644,7 +661,11 @@ public final class AppSettings: ObservableObject {
         self.gladiaAPIKey = ""
         self.googleAPIKey = ""
         self.xAIAPIKey = ""
+        self.smallestAPIKey = ""
+        self.reson8APIKey = ""
+        self.stepfunAPIKey = ""
         self.azureAPIKey = ""
+        self.alibabaAPIKey = ""
         self.metaAPIKey = ""
         self.speechmaticsAPIKey = ""
         self.revAIAPIKey = ""
@@ -806,6 +827,7 @@ public final class AppSettings: ObservableObject {
     public var hasGoogleKey: Bool { !googleAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasXAIKey: Bool { !xAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasAzureKey: Bool { !azureAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    public var hasAlibabaKey: Bool { !alibabaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasMetaKey: Bool { !metaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasSpeechmaticsKey: Bool {
         !speechmaticsAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -829,7 +851,14 @@ public final class AppSettings: ObservableObject {
         if hasGladiaKey { identifiers.insert(Self.gladiaKeyID) }
         if hasGoogleKey { identifiers.insert(Self.googleKeyID) }
         if hasXAIKey { identifiers.insert(Self.xAIKeyID) }
+        for provider in FileSpeechProvider.allCases {
+            if let key = apiKeysByIdentifier[provider.metadata.apiKeyIdentifier],
+               !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                identifiers.insert(provider.metadata.apiKeyIdentifier)
+            }
+        }
         if hasAzureKey { identifiers.insert(Self.azureKeyID) }
+        if hasAlibabaKey { identifiers.insert(Self.alibabaKeyID) }
         if hasMetaKey { identifiers.insert(Self.metaKeyID) }
         if hasSpeechmaticsKey { identifiers.insert(Self.speechmaticsKeyID) }
         if hasRevAIKey { identifiers.insert(Self.revAIKeyID) }
@@ -862,7 +891,11 @@ public final class AppSettings: ObservableObject {
 
     private func reloadStreamingProviderAPIKeys() async {
         await reloadSyncedAPIKey(\.xAIAPIKey, identifier: Self.xAIKeyID)
+        await reloadSyncedAPIKey(\.smallestAPIKey, identifier: "smallest.apiKey")
+        await reloadSyncedAPIKey(\.reson8APIKey, identifier: "reson8.apiKey")
+        await reloadSyncedAPIKey(\.stepfunAPIKey, identifier: "stepfun.apiKey")
         await reloadSyncedAPIKey(\.azureAPIKey, identifier: Self.azureKeyID)
+        await reloadSyncedAPIKey(\.alibabaAPIKey, identifier: Self.alibabaKeyID)
         await reloadSyncedAPIKey(\.metaAPIKey, identifier: Self.metaKeyID)
         await reloadSyncedAPIKey(\.speechmaticsAPIKey, identifier: Self.speechmaticsKeyID)
         await reloadSyncedAPIKey(\.revAIAPIKey, identifier: Self.revAIKeyID)
@@ -950,11 +983,13 @@ public final class AppSettings: ObservableObject {
             Self.gladiaKeyID: gladiaAPIKey,
             Self.googleKeyID: googleAPIKey,
             Self.xAIKeyID: xAIAPIKey,
+            "reson8.apiKey": reson8APIKey,
             Self.metaKeyID: metaAPIKey,
             Self.speechmaticsKeyID: speechmaticsAPIKey,
             Self.revAIKeyID: revAIAPIKey,
             Self.mistralKeyID: mistralAPIKey,
-            Self.azureKeyID: azureAPIKey
+            Self.azureKeyID: azureAPIKey,
+            Self.alibabaKeyID: alibabaAPIKey
         ]
     }
 
@@ -983,6 +1018,8 @@ public final class AppSettings: ObservableObject {
     private var apiKeysByIdentifier: [String: String] {
         var keys = liveAPIKeysByIdentifier
         keys[Self.openRouterKeyID] = openRouterAPIKey
+        keys["smallest.apiKey"] = smallestAPIKey
+        keys["stepfun.apiKey"] = stepfunAPIKey
         return keys
     }
 
@@ -1004,18 +1041,20 @@ public final class AppSettings: ObservableObject {
             AppleLocalModels.isSpeechAnalyzerModel(option.id)
                 || openAIBatchModelIDs.contains(option.id)
                 || AzureTranscriptionModels.batchIDs.contains(option.id)
+                || AlibabaSpeechModels.batchIDs.contains(option.id)
                 // OpenRouter-routed Gemini batch models upload through the
                 // OpenRouter client; Gemini 3.5 Transcribe uploads through the
                 // shared `GeminiInteractionsClient` with the Google key
                 // (issue #862). Both are listed, and `batchAPIKey(for:)` and
                 // `IOSBatchTranscriptionRoute` keep them on separate paths.
-                || option.id.hasPrefix("google/")
-                || option.id == "openai/gpt-4o-audio-preview-2024-12-17"
+                || GeminiTranscribeModels.directBatchModelIDs.contains(option.id)
+                || OpenRouterInlineAudioTranscriptionClient.batchCatalogIDs.contains(option.id)
                 || option.id == MetaMuseVoiceTranscribe.batchCatalogID
                 || option.id == CartesiaBatchClient.catalogID
                 // xAI's dedicated speech-to-text endpoint uploads through the
                 // shared `XAIBatchTranscriptionClient` with the xAI key.
                 || option.id == XAISpeechToText.batchCatalogID
+                || FileSpeechProvider.provider(for: option.id) != nil
                 // Gladia's pre-recorded job API uploads through the shared
                 // `GladiaBatchClient` with the `gladia.apiKey` this app already
                 // stores for live Solaria. Speechmatics batch stays macOS-only

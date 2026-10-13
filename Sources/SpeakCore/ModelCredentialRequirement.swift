@@ -171,10 +171,12 @@ public enum ModelCredentialResolver {
     }
 
     private static func providerDisplayName(_ provider: String) -> String {
-        providerDisplayNames[provider] ?? provider.capitalized
+        if let speechProvider = FileSpeechProvider(rawValue: provider) { return speechProvider.metadata.displayName }
+        return providerDisplayNames[provider] ?? provider.capitalized
     }
 
     private static let providerDisplayNames = [
+        "alibaba": "Alibaba Model Studio",
         "assemblyai": "AssemblyAI",
         "cartesia": "Cartesia",
         "deepgram": "Deepgram",
@@ -201,7 +203,8 @@ public enum ModelCredentialResolver {
         providerName: "OpenRouter"
     )
 
-    private static let directBatchProviderIdentifiers: Set<String> = [
+    private static let directBatchProviderIdentifiers = Set([
+        "alibaba",
         "cartesia",
         "assemblyai",
         "deepgram",
@@ -215,7 +218,7 @@ public enum ModelCredentialResolver {
         "soniox",
         "speechmatics",
         "xai"
-    ]
+    ]).union(FileSpeechProvider.allCases.map(\.rawValue))
 
     /// Every API-key identifier the canonical catalogues can require, derived
     /// from the same definitions the pickers and routing use. This is the

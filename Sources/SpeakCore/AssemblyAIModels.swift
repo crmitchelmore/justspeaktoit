@@ -12,6 +12,10 @@ public enum AssemblyAIModels {
     public static let universal35ProBatchID = "assemblyai/\(universal35ProAPIName)"
     public static let universal35ProStreamingID = "assemblyai/\(universal35ProAPIName)-streaming"
 
+    /// Universal-3.6 Pro is a streaming upgrade, not a pre-recorded model.
+    public static let universal36ProAPIName = "universal-3-6-pro"
+    public static let universal36ProStreamingID = "assemblyai/\(universal36ProAPIName)-streaming"
+
     public static let universal2APIName = "universal-2"
     public static let universal2BatchID = "assemblyai/\(universal2APIName)"
 
@@ -21,8 +25,11 @@ public enum AssemblyAIModels {
         "universal-3-pro"
     ]
 
-    /// Includes every AssemblyAI live identifier shipped before Universal-3.5 Pro.
+    /// Saved flagship live selections follow the Universal-3.6 Pro upgrade.
     public static let legacyUniversal3StreamingIDs: Set<String> = [
+        universal35ProStreamingID,
+        "universal-3-5-pro-streaming",
+        "universal-3-5-pro",
         "assemblyai/u3-rt-pro-streaming",
         "assemblyai/u3-rt-pro",
         "u3-rt-pro-streaming",
@@ -45,16 +52,16 @@ public enum AssemblyAIStreamingRequest {
     /// Preserve the app's existing turn boundary while moving to the new model.
     public static let minimumTurnSilenceMilliseconds = 560
 
-    /// Builds a Universal-3.5 Pro Streaming v3 URL for both Apple platforms.
+    /// Builds a Universal-3.6 Pro Streaming v3 URL for every host.
     ///
     /// `format_turns` and `language_detection` are deliberately absent:
-    /// Universal-3.5 Pro always formats final turns and detects its supported
+    /// Universal-3.6 Pro always formats final turns and detects its supported
     /// languages natively. Keyterms remain a single JSON-array query parameter.
     public static func url(
         endpoint: AssemblyAIStreamingEndpoint,
         apiKey: String,
         sampleRate: Int,
-        speechModel: String = AssemblyAIModels.universal35ProAPIName,
+        speechModel: String = AssemblyAIModels.universal36ProAPIName,
         keyterms: [String] = []
     ) -> URL? {
         guard var components = URLComponents(string: "wss://\(endpoint.rawValue)/v3/ws") else {

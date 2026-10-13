@@ -18,7 +18,7 @@ final class DesktopProfileSessionTests: XCTestCase {
         DesktopTranscription.batchModels.first { $0.id != defaultModel }?.id ?? defaultModel
     }
 
-    private var liveModel: String { AssemblyAIModels.universal35ProStreamingID }
+    private var liveModel: String { AssemblyAIModels.universal36ProStreamingID }
 
     private var alternativePolishModel: String {
         DesktopPostProcessing.remoteModels.first { $0.id != ModelCatalog.defaultPostProcessingModel }?.id

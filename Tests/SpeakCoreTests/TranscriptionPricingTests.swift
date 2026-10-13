@@ -40,19 +40,29 @@ final class TranscriptionPricingTests: XCTestCase {
         XCTAssertEqual(TranscriptionPricing.pricePerMinuteUSD(modelID: AzureTranscriptionModels.fast),
                        Decimal(string: "1.00")! / 60)
         XCTAssertEqual(
-            TranscriptionPricing.pricePerMinuteUSD(modelID: AssemblyAIModels.universal35ProStreamingID),
-            Decimal(string: "0.15")! / 60
+            TranscriptionPricing.pricePerMinuteUSD(modelID: AssemblyAIModels.universal36ProStreamingID),
+            Decimal(string: "0.45")! / 60
         )
         XCTAssertEqual(
             TranscriptionPricing.pricePerMinuteUSD(modelID: AssemblyAIModels.universal35ProBatchID),
-            Decimal(string: "0.27")! / 60
+            Decimal(string: "0.21")! / 60
         )
+        XCTAssertEqual(TranscriptionPricing.pricePerMinuteUSD(modelID: AssemblyAIModels.universal2BatchID),
+                       Decimal(string: "0.15")! / 60)
     }
 
     func testUnknownModels_haveNoPrice() {
         XCTAssertNil(TranscriptionPricing.pricePerMinuteUSD(modelID: "xai/grok-stt-streaming"))
         XCTAssertNil(TranscriptionPricing.pricePerMinuteUSD(modelID: "nobody/model"))
         XCTAssertNil(TranscriptionPricing.estimatedCostUSD(modelID: "nobody/model", durationSeconds: 60))
+    }
+
+    func testAlibabaModels_haveNoRegionBlindOrTokenBlindMinuteEstimate() {
+        for id in AlibabaSpeechModels.allIDs {
+            XCTAssertNil(TranscriptionPricing.pricePerMinuteUSD(modelID: id), id)
+            XCTAssertNil(TranscriptionPricing.estimatedCostUSD(modelID: id, durationSeconds: 60), id)
+            XCTAssertFalse(TranscriptionPricing.isFree(id), id)
+        }
     }
 
     func testEstimate_scalesWithDurationAndIgnoresNonPositiveDurations() {
@@ -71,18 +81,33 @@ final class TranscriptionPricingTests: XCTestCase {
     }
 
     /// Every cloud transcription model in the catalogue either has a price or
-    /// is on the documented no-public-rate list, so a new catalogue entry
+    /// is on the documented no-fixed-estimate list, so a new catalogue entry
     /// prompts a pricing decision instead of silently showing no cost.
     func testEveryCatalogueTranscriptionModel_isEitherPricedOrKnownUnpriced() {
-        // No public per-minute list price at the last review: token-billed
-        // realtime sessions, previews, and providers that only quote per hour
+        // No reliable model-only per-minute estimate at the last review:
+        // token-billed sessions, regional prices, previews, and rates quoted
         // on request. Adding a rate for one of these must also remove it here.
         let knownUnpriced: Set<String> = [
+            // Fun-ASR has different published Beijing/Singapore USD rates;
+            // Omni is input/output-token billed. This model-only API cannot
+            // infer the workspace region or generated output token count.
+            // https://www.alibabacloud.com/help/en/model-studio/model-pricing
+            // Decision and exact regional rates: Docs/alibaba-speech.md.
+            AlibabaSpeechModels.funFlash,
+            AlibabaSpeechModels.funLive,
+            AlibabaSpeechModels.qwen35,
+            AlibabaSpeechModels.qwen38,
             "openai/gpt-realtime-whisper-streaming",
             "openai/gpt-live-transcribe-streaming",
             "openai/gpt-transcribe",
             "openai/gpt-4o-transcribe-diarize",
-            "openai/gpt-4o-audio-preview-2024-12-17",
+            "openai/gpt-audio",
+            "thinkingmachines/inkling",
+            "thinkingmachines/inkling-small",
+            "google/gemini-3.1-pro-preview",
+            "mistralai/voxtral-small-24b-2507",
+            "google/gemini-3.8-flash",
+            "google/gemini-3.5-flash-lite",
             "google/gemini-3.5-transcribe",
             "google/gemini-3.5-transcribe-live",
             "mistral/voxtral-mini-transcribe-realtime-2602-streaming",
@@ -91,6 +116,11 @@ final class TranscriptionPricingTests: XCTestCase {
             "speechmatics/enhanced-streaming",
             "speechmatics/enhanced",
             "speechmatics/standard",
+            // Reson8's engine is server-selected; no verified public USD quote.
+            FileSpeechProvider.reson8.modelID,
+            FileSpeechProvider.reson8LiveID,
+            // StepAudio 3 publishes 2.8 CNY/hour, not a USD conversion.
+            FileSpeechProvider.stepfun.modelID,
             "apple/local/Dictation"
         ]
         let catalogue = ModelCatalog.liveTranscription + ModelCatalog.batchTranscription

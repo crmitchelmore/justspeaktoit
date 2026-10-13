@@ -56,7 +56,7 @@ extension LiveTranscriptionProviderID {
     /// asserts every cloud provider declares one.
     public var streamingHost: String? {
         switch self {
-        case .apple, .azure:
+        case .apple, .azure, .alibaba:
             return nil
         case .deepgram:
             return "api.deepgram.com"
@@ -67,7 +67,7 @@ extension LiveTranscriptionProviderID {
         case .google:
             return GeminiTranscribeModels.apiHost
         case .modulate:
-            return "modulate-developer-apis.com"
+            return ModulateTranscriptionService.baseURL.host
         case .assemblyai:
             // The app prefers the EU endpoint and falls back to global; warming
             // the preferred one is what matters for the common path.
@@ -88,16 +88,18 @@ extension LiveTranscriptionProviderID {
             return "api.rev.ai"
         case .mistral:
             return "api.mistral.ai"
+        case .reson8:
+            return "api.reson8.dev"
         }
     }
 
     /// How far this provider's connection may be warmed ahead of a session.
     public var streamWarmUp: LiveStreamWarmUp {
         switch self {
-        case .apple, .assemblyai, .openai, .azure:
+        case .apple, .assemblyai, .openai, .azure, .alibaba:
             return .unsupported
         case .deepgram, .cartesia, .gladia, .google, .modulate, .soniox, .elevenlabs,
-             .speechmatics, .xai, .meta, .revai, .mistral:
+             .speechmatics, .xai, .meta, .revai, .mistral, .reson8:
             guard let host = self.streamingHost else { return .unsupported }
             return .endpointProbe(host: host)
         }

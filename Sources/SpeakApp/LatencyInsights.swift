@@ -94,6 +94,7 @@ extension Array where Element == HistoryItem {
   }
 
   private static func providerDisplayName(_ provider: String) -> String {
+    if let speechProvider = FileSpeechProvider(rawValue: provider) { return speechProvider.metadata.displayName }
     let known = [
       "assemblyai": "AssemblyAI",
       "apple": "Apple Speech",

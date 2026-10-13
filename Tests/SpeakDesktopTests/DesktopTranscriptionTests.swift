@@ -30,13 +30,19 @@ final class DesktopTranscriptionTests: XCTestCase {
                 continue
             }
             XCTAssertEqual(descriptor.id, ModelRouting.family(for: model.id).providerID)
-            let accountURL = descriptor.id == GroqBatchClient().metadata.id
-                ? GroqBatchClient().metadata.apiKeyURL : LiveTranscriptionProviderID(rawValue: descriptor.id)?.apiKeyURL
+            let accountURL: URL?
+            if let fileProvider = FileSpeechProvider(rawValue: descriptor.id) {
+                accountURL = fileProvider.metadata.apiKeyURL
+            } else {
+                accountURL = descriptor.id == GroqBatchClient().metadata.id
+                    ? GroqBatchClient().metadata.apiKeyURL
+                    : LiveTranscriptionProviderID(rawValue: descriptor.id)?.apiKeyURL
+            }
             XCTAssertEqual(descriptor.apiKeyURL, accountURL)
         }
         XCTAssertNil(DesktopTranscription.provider(for: "apple/local/SFSpeechRecognizer"))
         XCTAssertNil(DesktopTranscription.provider(for: "cartesia/ink-2-streaming"))
-        let audioPreview = DesktopTranscription.provider(for: "openai/gpt-4o-audio-preview-2024-12-17")
+        let audioPreview = DesktopTranscription.provider(for: "openai/gpt-audio")
         XCTAssertEqual(audioPreview?.id, OpenRouterService.providerID)
         XCTAssertNotEqual(audioPreview?.apiKeyIdentifier, OpenAIBatchClient().metadata.apiKeyIdentifier)
     }

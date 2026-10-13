@@ -30,3 +30,18 @@ API breakage: enumelement DictationProfileMatcher.Kind.windowsExecutablePath has
 # Record-start timelines gain a checkpoint proving the live input was built
 # before capture opened the microphone (the ~3 s Bluetooth stall, #1188).
 API breakage: enumelement RecordingStartStage.streamInputPrepared has been added as a new enum case
+# Speech integrations add canonical live routes and analytics classifications.
+# All existing cases/raw values remain; the in-repository Apple and portable
+# clients are rebuilt and their canonical route/provider projections are tested.
+API breakage: enumelement LiveTranscriptionProviderID.alibaba has been added as a new enum case
+API breakage: enumelement LiveTranscriptionProviderID.reson8 has been added as a new enum case
+API breakage: enumelement AnalyticsProviderType.alibaba has been added as a new enum case
+API breakage: enumelement AnalyticsProviderType.smallest has been added as a new enum case
+API breakage: enumelement AnalyticsProviderType.reson8 has been added as a new enum case
+API breakage: enumelement AnalyticsProviderType.stepfun has been added as a new enum case
+# Explicit upload and compressed-transfer failures preserve existing signatures
+# and cases. Native hosts render the new localised errors; bounded-input and
+# authenticated v1/v2 compatibility tests cover their handling.
+API breakage: enumelement OpenRouterInlineAudioTranscriptionClient.InputError.inklingAudioLimit has been added as a new enum case
+API breakage: enumelement ConfigTransferError.compressionFailed has been added as a new enum case
+API breakage: enumelement ConfigTransferError.payloadTooLarge has been added as a new enum case

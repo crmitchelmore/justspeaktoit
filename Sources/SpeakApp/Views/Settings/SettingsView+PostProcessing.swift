@@ -74,7 +74,7 @@ extension SettingsView {
       SettingsCard(title: "Pre-processing", systemImage: "bolt.fill", tint: Color.mint) {
         VStack(alignment: .leading, spacing: 12) {
           Label(
-            "Universal-3.5 Pro supports contextual prompting, but this app currently sends keyterms only."
+            "Universal-3.6 Pro supports contextual prompting, but this app currently sends keyterms only."
               + " Formatting and style instructions remain in post-processing.",
             systemImage: "bolt.fill"
           )
@@ -114,13 +114,13 @@ extension SettingsView {
             .font(.caption)
             .foregroundStyle(.secondary)
           TextField(
-            "AssemblyAI, Universal-3.5 Pro, Keanu Reeves",
+            "AssemblyAI, Universal-3.6 Pro, Keanu Reeves",
             text: settingsBinding(\AppSettings.assemblyAIKeyterms)
           )
           .textFieldStyle(.roundedBorder)
         }
       }
-      .speakTooltip("Add domain-specific terms to improve Universal-3.5 Pro recognition accuracy.")
+      .speakTooltip("Add domain-specific terms to improve Universal-3.6 Pro recognition accuracy.")
     }
   }
 

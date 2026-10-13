@@ -230,6 +230,7 @@ enum IOSBatchTranscriptionRoute: Equatable, Sendable {
     case openAI
     case metaMuse
     case azure
+    case alibaba
     case cartesia
     /// Gladia's asynchronous pre-recorded job API, through the shared
     /// `GladiaBatchClient` with the `gladia.apiKey` this app already stores for
@@ -245,6 +246,7 @@ enum IOSBatchTranscriptionRoute: Equatable, Sendable {
     /// shares the `xai/` prefix but has no file mode, so this matches on the
     /// batch identifier alone.
     case xai
+    case fileSpeech(FileSpeechProvider)
     case openRouter
 
     static func route(for model: String) -> IOSBatchTranscriptionRoute {
@@ -254,9 +256,11 @@ enum IOSBatchTranscriptionRoute: Equatable, Sendable {
         if model == CartesiaBatchClient.catalogID { return .cartesia }
         if model == GladiaBatchClient.catalogID { return .gladia }
         if AzureTranscriptionModels.batchIDs.contains(model) { return .azure }
+        if model.hasPrefix("alibaba/") { return .alibaba }
         if model == MetaMuseVoiceTranscribe.batchCatalogID { return .metaMuse }
         if GeminiTranscribeModels.directBatchModelIDs.contains(model) { return .gemini }
         if model == XAISpeechToText.batchCatalogID { return .xai }
+        if let provider = FileSpeechProvider.provider(for: model) { return .fileSpeech(provider) }
         return .openRouter
     }
 }

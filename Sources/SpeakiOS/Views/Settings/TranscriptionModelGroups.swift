@@ -51,6 +51,7 @@ struct BatchModelGroup: Identifiable {
     }
 
     private static func providerDisplayName(_ provider: String) -> String {
+        if let speechProvider = FileSpeechProvider(rawValue: provider) { return speechProvider.metadata.displayName }
         let names = [
             "openai": "OpenAI",
             "groq": "Groq",

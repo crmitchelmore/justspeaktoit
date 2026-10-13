@@ -24,7 +24,7 @@ public struct LiveModelCapabilities: Sendable, Hashable {
     /// recording, for the provider to deliver its final transcript.
     ///
     /// Most streaming providers (Deepgram, Soniox, ElevenLabs) finalise
-    /// during the session, so the budget is 0. AssemblyAI Universal-3.5 Pro
+    /// during the session, so the budget is 0. AssemblyAI Universal-3.6 Pro
     /// commits one formatted transcript at end-of-turn, so its budget remains
     /// non-zero to capture a ForceEndpoint response before teardown.
     public let postStopFinalizeBudget: TimeInterval
@@ -82,6 +82,14 @@ extension ModelCatalog {
     /// silently rewrites the user's speed mode to `.instant` whenever that
     /// model is selected. `LiveModelCapabilitiesTests` asserts that parity.
     static let liveCapabilityRegistry: [String: LiveModelCapabilities] = [
+        FileSpeechProvider.reson8LiveID: LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish],
+            postStopFinalizeBudget: FileSpeechProvider.reson8FinishBudget,
+            supportsLanguageHint: true
+        ),
+        AlibabaSpeechModels.funLive: LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish], postStopFinalizeBudget: 5
+        ),
         AzureTranscriptionModels.speechLive: LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish], postStopFinalizeBudget: 5
         ),
@@ -187,11 +195,11 @@ extension ModelCatalog {
             supportsLanguageHint: true
         ),
 
-        // AssemblyAI Universal-3.5 Pro Streaming emits incremental turns and
+        // AssemblyAI Universal-3.6 Pro Streaming emits incremental turns and
         // one formatted final turn. Keep a non-zero post-stop budget so the
         // controller can capture the ForceEndpoint response before teardown.
         // Its existing request has no supported spoken-language override.
-        AssemblyAIModels.universal35ProStreamingID: LiveModelCapabilities(
+        AssemblyAIModels.universal36ProStreamingID: LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish],
             postStopFinalizeBudget: 2.0
         ),

@@ -3,8 +3,10 @@ import SpeakDesktop
 import XCTest
 
 final class DesktopAudioPreparationPolicyTests: XCTestCase {
-    func testOnlyCanonicalMetaAndAzureBatchRoutesRequirePreparedPCM() {
+    func testOnlyCanonicalMetaAzureAndInklingBatchRoutesRequirePreparedPCM() {
         let expected = AzureTranscriptionModels.batchIDs.union([MetaMuseVoiceTranscribe.batchCatalogID])
+            .union(["thinkingmachines/inkling", "thinkingmachines/inkling-small",
+                    "thinkingmachines/inkling:free", "thinkingmachines/inkling-small:free"])
         let requiringPreparation = Set(DesktopTranscription.batchModels.filter {
             DesktopTranscription.requiresCanonicalPCM16WAV(model: $0.id)
         }.map(\.id))

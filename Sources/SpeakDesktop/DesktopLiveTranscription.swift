@@ -18,7 +18,7 @@ public enum DesktopLiveTranscription {
         guard let route = LiveTranscriptionRouting.route(for: $0.id) else { return false }
         switch route.provider {
         case .deepgram, .assemblyai, .openai, .speechmatics, .soniox, .elevenlabs, .mistral, .gladia, .cartesia,
-             .revai, .azure:
+             .revai, .azure, .reson8:
             return true
         case .xai: return route.modelID == XAISpeechToText.liveCatalogID
         default: return false
@@ -35,8 +35,9 @@ public enum DesktopLiveTranscription {
     /// shared so adding a route does not require another platform-owned list.
     ///
     /// `language` is the Speak selection as stored (`en_GB`, `Automatic`, nil);
-    /// a route that takes a language hint maps it to its own code and omits
-    /// it when the service cannot serve it, so a host never sends a raw locale.
+    /// a route that takes a language hint maps it to its own code. Routes without
+    /// hint support omit it; provider clients reject unsupported explicit choices
+    /// when required by their contract rather than silently substituting Automatic.
     public static func makeClient(
         model: String, apiKey: String, language: String? = nil,
         makeConnection: @escaping @Sendable (URLRequest) -> any StreamingWebSocketConnection
@@ -74,6 +75,10 @@ public enum DesktopLiveTranscription {
         let hint = ModelCatalog.liveCapabilities(for: identifier).supportsLanguageHint
             ? TranscriptionLanguageCatalog.providerLanguage(for: language ?? "") : nil
         switch route.provider {
+        case .reson8:
+            return Reson8LiveClient(
+                apiKey: apiKey, language: hint, sampleRate: route.sampleRate, makeConnection: makeConnection
+            )
         case .openai:
             return OpenAIRealtimeLiveClient(
                 apiKey: apiKey, model: route.apiModelName, language: hint?.localeLanguageCode,

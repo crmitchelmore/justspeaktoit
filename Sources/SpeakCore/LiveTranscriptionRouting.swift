@@ -14,6 +14,7 @@ import Foundation
 /// of these providers.
 public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashable {
     case apple
+    case alibaba
     case azure
     case deepgram
     case cartesia
@@ -29,6 +30,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
     case meta
     case revai
     case mistral
+    case reson8
 
     /// Keychain identifier for this provider's API key, or `nil` for on-device
     /// providers that need no credential. Matches the identifiers used by both
@@ -71,7 +73,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
     public var isSupportedOnIOS: Bool {
         switch self {
         case .apple, .deepgram, .elevenlabs, .openai, .cartesia, .soniox, .modulate, .assemblyai,
-             .gladia, .google, .xai, .meta, .speechmatics, .revai, .mistral, .azure:
+             .gladia, .google, .xai, .meta, .speechmatics, .revai, .mistral, .azure, .alibaba, .reson8:
             return true
         }
     }
@@ -80,6 +82,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
     /// model picker so the UI scales cleanly as models are added.
     public var displayName: String {
         switch self {
+        case .alibaba: return "Alibaba Model Studio"
         case .azure: return "Azure Speech"
         case .apple: return "Apple"
         case .deepgram: return "Deepgram"
@@ -96,6 +99,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
         case .meta: return "Meta"
         case .revai: return "Rev.ai"
         case .mistral: return "Mistral"
+        case .reson8: return FileSpeechProvider.reson8.metadata.displayName
         }
     }
 
@@ -106,13 +110,14 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
     public var apiKeyURL: URL? {
         let website: String
         switch self {
+        case .alibaba: website = "https://bailian.console.aliyun.com"
         case .azure: website = "https://portal.azure.com"
         case .apple: return nil
         case .deepgram: website = "https://deepgram.com"
         case .cartesia: website = "https://cartesia.ai"
         case .gladia: website = "https://www.gladia.io"
         case .google: website = "https://aistudio.google.com/apikey"
-        case .modulate: website = "https://www.modulate-developer-apis.com/web/docs.html"
+        case .modulate: website = ModulateTranscriptionService.apiKeysURL.absoluteString
         case .assemblyai: website = "https://assemblyai.com"
         case .soniox: website = "https://soniox.com"
         case .elevenlabs: website = "https://elevenlabs.io"
@@ -122,6 +127,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
         case .meta: website = "https://llama.developer.meta.com"
         case .revai: website = "https://www.rev.ai"
         case .mistral: website = "https://console.mistral.ai"
+        case .reson8: website = FileSpeechProvider.reson8.metadata.website
         }
         return URL(string: website)
     }
@@ -168,6 +174,8 @@ public enum LiveTranscriptionRouting {
         guard let slash = trimmed.firstIndex(of: "/") else { return nil }
         let prefix = String(trimmed[trimmed.startIndex..<slash]).lowercased()
         guard let provider = LiveTranscriptionProviderID(rawValue: prefix) else { return nil }
+        if provider == .reson8, trimmed != FileSpeechProvider.reson8LiveID { return nil }
+        if provider == .alibaba, trimmed != AlibabaSpeechModels.funLive { return nil }
 
         return LiveTranscriptionRoute(
             modelID: trimmed,

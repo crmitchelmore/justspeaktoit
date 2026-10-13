@@ -19,7 +19,7 @@ final class DesktopLiveLanguageRequestTests: XCTestCase {
     }
 
     func testUnsupportedModelsAndAutomaticNeverReceiveLanguageFields() throws {
-        for identifier in ["deepgram/flux-general-en-streaming", AssemblyAIModels.universal35ProStreamingID] {
+        for identifier in ["deepgram/flux-general-en-streaming", AssemblyAIModels.universal36ProStreamingID] {
             let factory = AssemblyAISocketFactory()
             let client = try makeClient(identifier, language: "fr_FR", factory: factory)
             defer { client.cancel() }

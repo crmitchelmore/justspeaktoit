@@ -31,7 +31,8 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         Option(
             id: "cartesia/ink-2-streaming",
             displayName: "Cartesia Ink-2 (Streaming)",
-            description: "English real-time STT with built-in turn detection and structured-data accuracy.",
+            description: "Real-time STT in English, French, Hindi, Japanese and Spanish, "
+                + "with built-in turn detection and structured-data accuracy.",
             estimatedLatencyMs: 180, latencyTier: .fast),
         Option(
             id: "gladia/solaria-1-streaming",
@@ -49,9 +50,9 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "Real-time multilingual WebSocket transcription with diarization and signal detection.",
             estimatedLatencyMs: 220, latencyTier: .fast),
         Option(
-            id: AssemblyAIModels.universal35ProStreamingID,
-            displayName: "AssemblyAI Universal-3.5 Pro (Streaming)",
-            description: "AssemblyAI's flagship real-time model with native code switching across 18 languages.",
+            id: AssemblyAIModels.universal36ProStreamingID,
+            displayName: "AssemblyAI Universal-3.6 Pro (Streaming)",
+            description: "AssemblyAI's flagship real-time model with native code switching across 32 languages.",
             estimatedLatencyMs: 250, latencyTier: .fast),
         Option(
             id: "soniox/stt-rt-v5-streaming",
@@ -134,10 +135,11 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
                 + "accuracy on noisy or accented audio with keyterm prompt support. Reuses your "
                 + "OpenAI API key.",
             estimatedLatencyMs: 280, latencyTier: .fast)
-    ] + AzureTranscriptionModels.liveOptions
+    ] + AzureTranscriptionModels.liveOptions + AlibabaSpeechModels.liveOptions
+        + [FileSpeechProvider.reson8LiveOption]
 
     public static let batchTranscription: [Option] =
-        appleBatchTranscriptionOptions + [
+        appleBatchTranscriptionOptions + AlibabaSpeechModels.batchOptions + [
         Option(
             id: BatchTranscriptionModelIdentifiers.cartesiaInkWhisper, displayName: "Cartesia Ink Whisper (Batch)",
             description: "Multilingual file transcription. Choose the recording language; Automatic uses English.",
@@ -188,8 +190,8 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             estimatedLatencyMs: 500, latencyTier: .fast),
         Option(
             id: "mistral/voxtral-mini-latest",
-            displayName: "Voxtral Mini Latest (Mistral)",
-            description: "Mistral Voxtral Mini batch transcription for long-form multilingual audio.",
+            displayName: "Voxtral Mini Transcribe 2 (Mistral)",
+            description: "Mistral's latest Voxtral Mini batch transcription alias for long-form multilingual audio.",
             estimatedLatencyMs: 900, latencyTier: .fast),
         Option(
             id: MetaMuseVoiceTranscribe.batchCatalogID,
@@ -223,17 +225,55 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
 
         // OpenRouter multimodal models
         Option(
+            id: "thinkingmachines/inkling", displayName: "Inkling (OpenRouter)",
+            description: "Thinking Machines' hosted multimodal model with audio input. "
+                + "Up to 20 minutes, prepared as 16 kHz WAV. Chat completions, not live speech.",
+            latencyTier: .medium, tags: [.quality]),
+        Option(
+            id: "thinkingmachines/inkling-small", displayName: "Inkling Small (OpenRouter)",
+            description: "Smaller hosted Inkling model for recorded audio, up to 20 minutes as 16 kHz WAV.",
+            latencyTier: .medium, tags: [.cheap]),
+        Option(
+            id: "thinkingmachines/inkling:free", displayName: "Inkling Free (OpenRouter)",
+            description: "Free hosted Inkling audio-chat route, up to 20 minutes. "
+                + "Subject to availability and rate limits.",
+            latencyTier: .medium, tags: [.cheap]),
+        Option(
+            id: "thinkingmachines/inkling-small:free", displayName: "Inkling Small Free (OpenRouter)",
+            description: "Free hosted Inkling Small audio-chat route, up to 20 minutes. "
+                + "Availability and rate limits apply.",
+            latencyTier: .medium, tags: [.cheap]),
+        Option(
+            id: "google/gemini-3.1-pro-preview", displayName: "Gemini 3.1 Pro Preview (OpenRouter)",
+            description: "Gemini Pro audio understanding for recorded-audio transcription. "
+                + "Uses OpenRouter, not Google's dedicated Transcribe API.",
+            latencyTier: .medium, tags: [.quality]),
+        Option(
+            id: "mistralai/voxtral-small-24b-2507", displayName: "Voxtral Small 24B (OpenRouter)",
+            description: "Mistral's audio-capable Voxtral Small for recorded-audio transcription through "
+                + "OpenRouter chat completions, not the direct Mistral transcription endpoint.",
+            latencyTier: .medium, tags: [.quality]),
+        Option(
+            id: "google/gemini-3.8-flash", displayName: "Gemini 3.8 Flash (OpenRouter)",
+            description: "Current Gemini Flash generation with audio input for recorded-audio transcription.",
+            latencyTier: .fast),
+        Option(
+            id: "google/gemini-3.5-flash-lite", displayName: "Gemini 3.5 Flash Lite (OpenRouter)",
+            description: "Current Gemini Flash Lite generation with audio input. Opt-in; keeps saved models unchanged.",
+            latencyTier: .fast, tags: [.cheap]),
+        Option(
             id: "google/gemini-3.1-flash-lite", displayName: "Gemini 3.1 Flash Lite (OpenRouter)",
-            description: "Current low-latency, budget-friendly Gemini multimodal option.",
+            description: "Budget-friendly Gemini multimodal option. Preserved for existing selections.",
             estimatedLatencyMs: 400, latencyTier: .fast),
         Option(
             id: "google/gemini-2.5-flash", displayName: "Gemini 2.5 Flash (OpenRouter)",
             description: "Fast multimodal model with strong shorthand transcription.",
             estimatedLatencyMs: 600, latencyTier: .fast),
         Option(
-            id: "openai/gpt-4o-audio-preview-2024-12-17",
-            displayName: "GPT-4o Audio Preview (OpenRouter)",
-            description: "Early-access GPT-4o variant optimised for audio understanding.",
+            id: "openai/gpt-audio",
+            displayName: "GPT Audio (OpenRouter)",
+            description: "OpenAI's available audio-chat model on OpenRouter. "
+                + "Recorded-audio transcription through chat completions, not OpenAI's transcription endpoint.",
             estimatedLatencyMs: 2000, latencyTier: .medium),
         Option(
             id: "deepgram/nova-3", displayName: "Deepgram Nova-3",
@@ -279,7 +319,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "Scribe v2 fine-tuned for clinical audio: fewer errors on medical terminology, "
                 + "with the same languages, pricing and word-level timestamps as Scribe v2.",
             estimatedLatencyMs: 800, latencyTier: .fast)
-    ] + AzureTranscriptionModels.batchOptions
+    ] + AzureTranscriptionModels.batchOptions + FileSpeechProvider.batchOptions
 
     /// Current ElevenLabs batch speech-to-text model. ElevenLabs removed
     /// `scribe_v1` (and its experimental variant) on 2026-07-09.
@@ -304,7 +344,10 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
     /// Retired batch identifiers and the current entry each one now selects.
     static let batchTranscriptionSuccessors: [String: String] = Dictionary(
         AssemblyAIModels.legacyUniversal3BatchIDs.map { ($0, AssemblyAIModels.universal35ProBatchID) }
-            + legacyElevenLabsBatchIDs.map { ($0, elevenLabsScribeV2BatchID) },
+            + legacyElevenLabsBatchIDs.map { ($0, elevenLabsScribeV2BatchID) }
+            + [("openai/gpt-4o-audio-preview-2024-12-17", "openai/gpt-audio"),
+               ("soniox/stt-async-v3", "soniox/stt-async-v5"),
+               ("soniox/stt-async-v4", "soniox/stt-async-v5")],
         uniquingKeysWith: { first, _ in first }
     )
 
@@ -312,8 +355,10 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
     /// Nova-2 is Deepgram's only retired stream (the Nova-3 upgrade in #64):
     /// Flux and any later `deepgram/` entry are current, so they never appear here.
     static let liveTranscriptionSuccessors: [String: String] = Dictionary(
-        AssemblyAIModels.legacyUniversal3StreamingIDs.map { ($0, AssemblyAIModels.universal35ProStreamingID) }
-            + [("deepgram/nova-2-streaming", "deepgram/nova-3-streaming")],
+        AssemblyAIModels.legacyUniversal3StreamingIDs.map { ($0, AssemblyAIModels.universal36ProStreamingID) }
+            + [("deepgram/nova-2-streaming", "deepgram/nova-3-streaming"),
+               ("soniox/stt-rt-v3-streaming", "soniox/stt-rt-v5-streaming"),
+               ("soniox/stt-rt-v4-streaming", "soniox/stt-rt-v5-streaming")],
         uniquingKeysWith: { first, _ in first }
     )
 

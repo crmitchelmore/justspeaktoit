@@ -10,7 +10,7 @@ import XCTest
 final class OpenRouterModelRoutingTests: XCTestCase {
   func testProviderRegistryWithOpenRouterOpenAIModel_DoesNotClaimDedicatedProvider() async {
     let provider = await TranscriptionProviderRegistry.shared.provider(
-      forModel: "openai/gpt-4o-audio-preview-2024-12-17"
+      forModel: "openai/gpt-audio"
     )
 
     XCTAssertNil(provider)

@@ -111,6 +111,16 @@ public enum ProviderBalanceDirectory {
             billingURL: "https://platform.openai.com/settings/organization/billing/overview"
         ),
         ProviderBalanceAccount(
+            id: "alibaba",
+            displayName: "Alibaba Model Studio",
+            credentialIdentifiers: [AlibabaSpeechConfiguration.credentialIdentifier],
+            support: .billingLinkOnly(
+                reason: "Speak cannot read an Alibaba balance with this Model Studio key. "
+                    + "Check billing in your account's console."
+            ),
+            billingURL: "https://bailian.console.aliyun.com"
+        ),
+        ProviderBalanceAccount(
             id: "azure",
             displayName: "Azure",
             credentialIdentifiers: ["azure.speech.apiKey"],
@@ -205,7 +215,14 @@ public enum ProviderBalanceDirectory {
             support: .billingLinkOnly(reason: Self.noDocumentedContract),
             billingURL: "https://modulate.ai"
         )
-    ]).compactMap { $0 }
+    ]).compactMap { $0 } + FileSpeechProvider.allCases.compactMap { provider in
+        ProviderBalanceAccount(
+            id: provider.rawValue, displayName: provider.metadata.displayName,
+            credentialIdentifiers: [provider.metadata.apiKeyIdentifier],
+            support: .billingLinkOnly(reason: Self.noDocumentedContract),
+            billingURL: provider.metadata.website
+        )
+    }
 
     private static let noDocumentedContract =
         "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead."

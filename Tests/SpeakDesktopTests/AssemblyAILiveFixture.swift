@@ -63,6 +63,7 @@ final class AssemblyAITestSocket: StreamingWebSocketConnection, @unchecked Senda
         callback(error)
     }
     func emit(_ text: String) { receiveResult(.success(.text(text))) }
+    func emitBinary(_ data: Data) { receiveResult(.success(.binary(data))) }
     func fail() { receiveResult(.failure(URLError(.networkConnectionLost))) }
     func fail(with error: Error) { receiveResult(.failure(error)) }
     private func receiveResult(_ result: Result<StreamingWebSocketMessage, Error>) {

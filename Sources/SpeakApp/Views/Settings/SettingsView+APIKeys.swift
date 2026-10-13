@@ -19,6 +19,9 @@ extension SettingsView {
           }
 
           apiKeyListControls
+          SettingsCard(title: "Alibaba workspace for new keys", systemImage: "waveform", tint: .brandAccent) {
+            AlibabaSpeechConfigurationFields()
+          }
           SettingsCard(title: "Azure Speech resource", systemImage: "cloud", tint: .brandAccent) {
             AzureSpeechEndpointField()
           }
@@ -865,11 +868,21 @@ extension SettingsView {
     }
   }
 
+  // Keep the configuration capture, validation and secure write in one save lifecycle.
+  // swiftlint:disable:next function_body_length
   private func saveProviderAPIKey(_ provider: TranscriptionProviderMetadata) {
-    guard let value = providerAPIKeys[provider.id]?.trimmingCharacters(in: .whitespacesAndNewlines),
-      !value.isEmpty
+    guard let enteredValue = providerAPIKeys[provider.id]?.trimmingCharacters(in: .whitespacesAndNewlines),
+      !enteredValue.isEmpty
     else { return }
 
+    let value: String
+    do {
+      value = provider.id == "alibaba"
+        ? try AlibabaSpeechConfiguration.credentialsForSaving(enteredValue) : enteredValue
+    } catch {
+      providerValidationStates[provider.id] = .finished(.failure(message: error.localizedDescription))
+      return
+    }
     providerValidationStates[provider.id] = .validating
 
     Task {
@@ -894,7 +907,9 @@ extension SettingsView {
           )
 
           let result = validation.updatingOutcome(
-            .success(message: "API key saved and validated successfully")
+            .success(message: provider.id == "alibaba"
+              ? "Alibaba key, region and workspace saved. Access is checked when transcribing."
+              : "API key saved and validated successfully")
           )
 
           await MainActor.run {

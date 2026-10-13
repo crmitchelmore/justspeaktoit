@@ -146,11 +146,14 @@ static void create_popup(GtkMenuButton *menu, gpointer data) {
     GtkWidget *models = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
     for (guint index = 0; configuration && index < configuration->models->len; ++index) {
         Model *model = g_ptr_array_index(configuration->models, index);
-        GtkCheckButton *check = GTK_CHECK_BUTTON(gtk_check_button_new_with_label(model->name));
-        GtkWidget *text = gtk_check_button_get_child(check);
+        GtkCheckButton *check = GTK_CHECK_BUTTON(gtk_check_button_new());
+        GtkWidget *text = gtk_label_new(model->name);
         gtk_label_set_wrap(GTK_LABEL(text), TRUE);
         gtk_label_set_wrap_mode(GTK_LABEL(text), PANGO_WRAP_WORD_CHAR);
         gtk_label_set_max_width_chars(GTK_LABEL(text), 36);
+        gtk_label_set_xalign(GTK_LABEL(text), 0);
+        gtk_check_button_set_child(check, text);
+        gtk_accessible_update_property(GTK_ACCESSIBLE(check), GTK_ACCESSIBLE_PROPERTY_LABEL, model->name, -1);
         gtk_widget_set_tooltip_text(GTK_WIDGET(check), model->name);
         gtk_check_button_set_active(check, model->selected);
         gtk_box_append(GTK_BOX(models), GTK_WIDGET(check));

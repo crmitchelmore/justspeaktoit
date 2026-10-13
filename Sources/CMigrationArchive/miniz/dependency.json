@@ -1,0 +1,18 @@
+{
+  "repository": "https://github.com/richgel999/miniz",
+  "version": "3.1.2",
+  "commit": "77d0dce8627735138c51770d1799a1ef48f2117d",
+  "license": "MIT",
+  "hashLineEndings": "LF",
+  "files": {
+    "LICENSE": "6f20fa7672b00e2e975c291df737cf227addf3ad32e36fef3fe0f416e4664d3d",
+    "miniz.c": "f23204efee2bfaffb72a974d2e28c64c3c1d9787144b5c5890f129c465e467bd",
+    "miniz.h": "f0b67217bdd8e45b74eb9b7c2c7ae20ed6760a1d76f3276b93617039ebd082df",
+    "miniz_common.h": "f1ba29821c8caef83585b328196aa346c5da7c82890a70a3d10d77c6cec0ed39",
+    "miniz_tdef.h": "d62da02953c3834dfcbde4db026c6d9345013ef9b0e53185131016a3a4e48c33",
+    "miniz_tinfl.c": "2296ebd21ef9af5ebbefd5b454d4bb67d8fb4af2d24945e7fb32114374f75a76",
+    "miniz_tinfl.h": "da4850920fdf09f8877d9affabe1ebba1852ce4b1ebbd121f2ba7a7ea8e57e5d",
+    "miniz_zip.c": "b70e502c425e2a31146178c1466dccaf1874390009950774be2be9bd4ec908a9",
+    "miniz_zip.h": "b062a5def545445c73fd1d664e35a89165dfb0d996ab848f507244e819cfcf04"
+  }
+}

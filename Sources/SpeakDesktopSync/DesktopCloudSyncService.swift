@@ -133,6 +133,14 @@ public actor DesktopCloudSyncService {
         signedIn = (try? await client.hasWebAuthToken()) ?? false
     }
 
+    /// Deletes locally first. A previously validated account receives a
+    /// durable cloud-delete ticket only while History sync is opted in.
+    public func deleteHistory(id: UUID, deleteAudio: Bool = true) async throws {
+        let current = await state.current
+        let account = current.enabledFeatures.contains(.history) ? current.boundAccount : nil
+        try await historyStore.deleteLocal(id: id, deleteAudio: deleteAudio, cloudAccount: account)
+    }
+
     public func status() async -> DesktopCloudSyncStatus {
         let current = await state.current
         var reason: String?
@@ -278,14 +286,21 @@ public actor DesktopCloudSyncService {
             for: .history, client: client, consent: consent, in: fence.session
         )
         let transport = try CloudKitWebHistorySyncTransport(client: client, consent: consent, session: fence.session)
+        let historyFence = DesktopHistoryPassFence(session: fence, state: state)
         let coordinator = HistorySyncCoordinator(
             transport: transport,
             tokenStore: state,
             cloudAvailable: true,
-            fence: DesktopHistoryPassFence(session: fence, state: state)
+            fence: historyFence
         )
+        let account = try await admitted(historyFence) { await state.current.boundAccount }
+        guard let account else { throw CloudKitWebServicesError.authenticationRequired(redirectURL: nil) }
+        try await historyStore.synchronizeDeletions(account: account, transport: transport, fence: historyFence)
         await historyStore.beginPass()
         await coordinator.sync(store: historyStore)
+        // A deletion admitted while a snapshot upload was in flight must win
+        // after that upload, not wait for a later launch to remove its server copy.
+        try await historyStore.synchronizeDeletions(account: account, transport: transport, fence: historyFence)
         if let error = coordinator.status.error {
             throw error
         }

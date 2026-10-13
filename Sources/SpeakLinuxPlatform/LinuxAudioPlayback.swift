@@ -201,6 +201,16 @@ public final class LinuxAudioPlayback: @unchecked Sendable {
     /// Destroying the player stops output before returning.
     public func stopAndWait() async throws { stop() }
 
+    public func stopSavedAudioAndWait() async throws {
+        let ended = lock.withLock { () -> Run? in
+            guard let run = current, !run.isSpeech else { return nil }
+            current = nil
+            backend.show(run.recordID, 0, "")
+            return run
+        }
+        ended?.end(.failure(CancellationError()))
+    }
+
     public func close() async throws {
         lock.withLock { closed = true }
         stop()

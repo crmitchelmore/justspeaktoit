@@ -37,6 +37,7 @@ final class WindowsEventContext {
             case .playPause(let identifier): await controller.playbackToggle(identifier)
             case .stop: await controller.playbackStop()
             case .readAloud(let identifier, let text): await controller.readAloud(identifier, text: text)
+            case .filter(let payload): await controller.applyHistoryFilters(payload)
             }
         }
     }
@@ -213,6 +214,7 @@ func postProcessingEvent(
 }
 
 private func secondaryWindowEvent(_ event: Int32, value: String, index: Int, holder: WindowsEventContext) {
+    if windowsHistoryManagementEvent(event, value: value, index: index, holder: holder) { return }
     if (21...23).contains(event) { return hotKeyWindowEvent(event, value: value, index: index, holder: holder) }
     if event == 24 { return readAloudEvent(value, holder: holder) }
     if event == 25 { return automationEvent(requested: value == "1", holder: holder) }

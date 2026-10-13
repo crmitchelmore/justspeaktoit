@@ -88,12 +88,19 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     /// each keystroke filters cached strings instead of re-normalising transcripts.
     package var historySearchText: [UUID: String] = [:]
     var historyQuery = ""
+    var historyFilter = HistorySearchQuery.none
+    var historyFilterDraft = DesktopHistoryFilter.none
     package var selectedHistoryID: UUID?
     package var transcriptVariant: DesktopTranscriptVariant = .processed
     var transcriptionTask: Task<TranscriptionResult, Error>?
     var postProcessingTask: Task<DesktopPostProcessing.Outcome, Error>?
     package var microphoneWarning: String?
     var cancellationRequested = false
+    var historyDeletionInProgress = false
+    var historyDeletionTask: Task<Void, Never>?
+    var folderRevealTask: Task<Void, Error>?
+    var audioCleanupTask: Task<Void, Never>?
+    var audioCleanupConfirmation: (id: UUID, snapshot: DesktopRecordingAudioSnapshot)?
     var liveUpdates: Task<Void, Never>?
     var liveFinalisation: DesktopLiveSession?
     /// The recording the HUD follows, from Record until its result.
@@ -309,6 +316,12 @@ extension DesktopHostController {
         activeOperations += 1
         defer { finishOperation() }
         do {
+            var deletionWarning: String?
+            do {
+                try await store.resumePendingDeletions()
+            } catch {
+                deletionWarning = "History deletion cleanup needs attention: \(error.localizedDescription)"
+            }
             let recovery = try await store.recoverInterruptedRecordings()
             guard !closed, !busy, recording == nil else { return }
             let records = recovery.records
@@ -323,6 +336,7 @@ extension DesktopHostController {
             if !recovery.unreadableFiles.isEmpty {
                 status += " \(recovery.unreadableFiles.count) history records could not be read."
             }
+            if let deletionWarning { status += " \(deletionWarning)" }
             if let microphoneWarning { status += " \(microphoneWarning)" }
             if let profileWarning { status += " \(profileWarning)" }
             showSelectedHistory(status: status, state: 0)

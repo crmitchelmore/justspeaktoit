@@ -475,6 +475,132 @@ not measured latency or microphone-device acceptance.
 
 ## Feature parity matrix
 
+History's Filters button opens a modeless native editor with multi-selection
+of the models used in saved transcription and post-processing, errors only,
+and optional From/Through date pickers. The dates use the shared
+`HistorySearchQuery` day policy in the local time zone; model/error/date
+constraints compose with existing Unicode/profile search. Apply and Reset
+change visibility, never recordings or transcripts. Hiding the selected row
+clears its actions and stops playback and Read aloud. Native UI/device
+acceptance remains required. Filtering changes no stored data; History
+migration remains outstanding.
+
+Native Delete removes the selected History entry while keeping its saved audio,
+as on the Mac. Clear History confirms the complete retained-ID snapshot,
+including filtered-out rows, and offers keeping audio or removing owned recording
+files. Cancel is the safe default; entries arriving after confirmation are not
+added to that snapshot. Delete and Clear are disabled during recording/work.
+Cancelling a clear finishes the already-admitted journalled deletion and keeps
+the remaining entries. Native event queues admit deletion without awaiting its
+cloud request; shutdown cancels the separately owned task and uses the existing
+bounded operation deadline. Selected playback, Read aloud and record-bound automatic
+output are cancelled before deletion; late results cannot recreate the row.
+
+An atomic `.history-deletions` journal is persisted before
+owned audio and metadata are removed. Permanent local tombstones reject late
+transcription results and synced snapshots after relaunch. Cleanup refuses
+linked, shared, ambiguous or changed audio ownership; interrupted cleanup is
+retried at startup, with explicit warnings while unaffected History stays visible.
+Cloud deletion tickets retain their original verified account and attempt
+revision. Opted-in sync drains them before reconciliation and after uploads;
+failed, cancelled or consent-disabled attempts remain pending. Deleting while
+History sync is disabled is local-only, even after a later opt-in. Account
+rebinding never transfers an old deletion ticket to a new account.
+The original keep/remove-audio choice survives cleanup retries; a later retry
+cannot gain authority to remove files the user chose to keep. Audio-only
+housekeeping (including previously kept files), migration/import and
+custom-directory controls remain outstanding. No automatic History expiry is
+introduced: the Mac has explicit audio housekeeping, not a retention limit.
+Native dialog,
+keyboard, accessibility, DPI and live CloudKit acceptance still require
+target-platform evidence; portable tests and syntax checks alone are insufficient.
+
+General now opens the actual recording storage folder through Explorer or the
+desktop file manager. This read-only action does not alter History, expose a
+different folder as a fallback, or drain a blocking shell request on the native
+settings queue. Launch errors are displayed and closing bounds outstanding work.
+The desktop folder contains both audio and metadata. General also confirms
+deletion of saved recording audio without changing History entries, transcripts
+or the History deletion journal. The confirmation freezes flat app-owned
+captured/imported audio, including canonical orphan files and audio kept after a
+History deletion; synthesis/conversion/comparison staging and unrelated files
+are excluded. Later arrivals cannot expand its authority. Starting another
+operation invalidates an outstanding confirmation.
+
+Cleanup checks regular-file/link status and the captured size, timestamps and
+available filesystem identifiers again before each removal. Detectably replaced
+files are kept and individual failures are reported; cancellation leaves
+unadmitted files. These are path-based checks, not an atomic native-handle
+conditional deletion guarantee: identical replacements and changes between the
+final check and removal remain outside that boundary. There is no automatic
+cleanup retry or expiry policy; retry requires a new explicit confirmation.
+Raw History playback is stopped independently of spoken/typed Voice output.
+History metadata stays byte-for-byte intact; intentionally removed audio is no
+longer available for playback, opening or transcription retry. A retry checks
+audio ownership/availability before entering transcription, so unavailable audio
+does not replace a saved transcript with a new failure. Changing the
+recording location and lossless migration remain outstanding.
+
+The existing Mac migration wire contract now lives in `SpeakCore`:
+`DataMigrationFormat` retains the `JustSpeakToIt` version-1 manifest, eight
+categories, explicit credential opt-in, record identities and date/selection
+scopes. The Mac uses aliases to those types without changing its archive JSON.
+Native migration UI, conflict previews, transactional apply/recovery and
+credential installation remain separate unfinished work.
+
+`DataMigrationCoding` and `DataMigrationPlanner` now also share the Mac codec,
+conflict identities, scoped replacement, text-over-audio-only preference,
+partial-category preservation and deterministic linked History/audio variants.
+Mac import and `DesktopMigrationPlanner` execute this single policy; native hosts
+inject the existing CNG/GLib/CryptoKit SHA-256 provider. Planning is cancellable
+and fails explicitly on malformed digest output or unencodable variant values,
+instead of deriving an identifier from empty-data fallback. The internal Mac
+planner now throws; the import controller surfaces that error before recovery
+creation or data application. A shared plan is not a native preview UI, category
+validation, credential installer or durable rollback transaction.
+
+`ApplicationPreferenceKey` is the canonical 91-key persisted application
+inventory; `AppSettings.DefaultsKey` remains a Mac alias. The exhaustive
+`DataMigrationPreferenceCatalog` assigns each portable key its archive value
+type and category, excludes key-tracking/reconciliation markers, and includes
+the existing consent, remembered-selection and credential-default auxiliaries.
+Its numeric bounds and strict Boolean/string collection rules are shared;
+platform shortcut/JSON validation is explicitly delegated, not silently skipped.
+This also fixes Mac migration rejecting valid Boolean values for
+`paidAccessRoutingEnabled`, `simpleModelChoices` and
+`pasteRemoteTranscriptsAtCursor`. Archive acceptance metadata is not host
+execution support: imported directories, credentials, hotkeys and unsupported
+preferences still need their native validators and application adapters.
+
+`DataMigrationArchivePolicy` also centralizes the existing Mac archive path,
+entry/total/JSON-size, duplicate-path, manifest and staging-capacity rules.
+Mac ZIP reads use this policy; portable tests exercise exact limits without
+allocating multi-gigabyte fixtures.
+
+`DesktopMigrationArchive` reads stored, DEFLATE and ZIP64 Mac-format exports
+in process with miniz 3.1.2, pinned to commit
+`77d0dce8627735138c51770d1799a1ef48f2117d`. The vendored MIT reader is compiled
+with the app, with no runtime download, external archive process or handwritten
+ZIP parser. `scripts/migration/verify-miniz.py` verifies LF-normalized source and
+licence hashes; Windows bundles and Flatpak include its licence.
+Native index allocations are capped at 128 MiB. The reader rejects duplicate
+paths, unsupported manifests and malformed names, never truncates Unicode paths,
+and streams only declared regular audio to generated UUID staging files.
+CRC and the existing platform SHA-256 provider both verify extracted audio.
+Malformed categories/items produce explicit preservation notices; cancellation
+removes private staging, and failed cleanup or an unavailable digest provider
+aborts explicitly. These are archive-read guarantees, not an implemented native
+preview, lossless data application or recovery transaction.
+
+The filter editor scrolls vertically when the available work area is too short;
+keyboard traversal reveals the focused control. Long model names have native
+horizontal scrolling, and an open editor follows application appearance changes.
+Focus reveal does not relayout already-visible controls or ordinary paint
+messages, so painting cannot starve timers. Native self-tests cover these paths
+and verify that handling a child paint leaves its update region clean. The CI screenshot tour
+requires separate light/dark filter-editor snapshots; those artifacts still need
+visual review before claiming UI acceptance.
+
 “Implemented” below describes source wiring, not completed device acceptance.
 The exact CI run and target-device evidence must accompany any promotion in
 status. A platform-specific replacement may provide the same user capability,

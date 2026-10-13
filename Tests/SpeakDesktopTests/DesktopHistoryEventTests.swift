@@ -3,6 +3,17 @@ import XCTest
 @testable import SpeakDesktop
 
 final class DesktopHistoryEventTests: XCTestCase {
+    func testFilterRemainsBeforeNewSelectionAndSupersedesEarlierPendingActions() {
+        var pending: [DesktopHistoryEvent] = [.selection("A"), .playPause("A"), .version("A", .original), .stop]
+        DesktopHistoryEvent.coalesce(&pending, .filter("first"))
+        XCTAssertEqual(pending, [.selection("A"), .stop, .filter("first")])
+        DesktopHistoryEvent.coalesce(&pending, .selection("B"))
+        XCTAssertEqual(pending, [.stop, .filter("first"), .selection("B")])
+        DesktopHistoryEvent.coalesce(&pending, .playPause("B"))
+        DesktopHistoryEvent.coalesce(&pending, .filter("latest"))
+        XCTAssertEqual(pending, [.stop, .selection("B"), .filter("latest")])
+    }
+
     /// Why History clicks share one ordered lane: the previous wiring started
     /// one Task per click, and independent Tasks may enter the host in either
     /// order. Under this legal schedule audio starts after Stop, and Play on
@@ -200,6 +211,7 @@ private actor HistoryHostProbe {
         case .stop: audible = nil
         case .readAloud(let id, let text):
             if id == selected { audible = .reading(id, text) }
+        case .filter: audible = nil
         }
     }
 }

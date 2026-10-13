@@ -36,6 +36,9 @@ int32_t jsti_local_models_self_test(char *error, size_t capacity);
  * iCloud sync page, and exercised by the window self-test. */
 struct _GtkWidget *jsti_cloud_sync_group_new(void);
 int32_t jsti_cloud_sync_self_test(char *error, size_t capacity);
+struct _GtkWidget *jsti_history_filters_button_new(void);
+int32_t jsti_history_filters_self_test(char *error, size_t capacity);
+gboolean jsti_history_filters_active(void);
 
 struct _GtkWidget;
 struct _GtkLabel;

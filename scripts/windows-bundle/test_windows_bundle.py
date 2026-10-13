@@ -25,6 +25,7 @@ def load(name, file_name):
 PE = load("windows_pe", "windows_pe.py")
 REDIST = load("redistributables", "redistributables.py")
 BUILD = load("build_windows_bundle", "build-windows-bundle.py")
+MIGRATION = load("migration_dependency", "../migration/migration_dependency.py")
 
 
 # --- synthetic PE images ----------------------------------------------------------
@@ -867,6 +868,16 @@ class AssemblyTests(unittest.TestCase):
                          cross_check=None, log=self.messages.append)
         arguments.update(overrides)
         return BUILD.assemble(**arguments)
+
+    def test_native_zip_license_and_provenance_are_bundled(self):
+        license_entry = MIGRATION.license_entry(HERE.parents[1])
+        entries, manifest = self.assemble(licenses=self.licenses + [license_entry])
+        self.assertEqual(entries["licenses/LICENSE-miniz.txt"], license_entry["data"])
+        self.assertIn("LICENSE-miniz.txt", entries["THIRD-PARTY-NOTICES.txt"].decode())
+        self.assertIn("miniz 3.1.2", entries["THIRD-PARTY-NOTICES.txt"].decode())
+        row = next(item for item in manifest["sources"]["licenses"] if item["name"] == "LICENSE-miniz.txt")
+        self.assertEqual(row["sha256"], hashlib.sha256(license_entry["data"]).hexdigest())
+        self.assertEqual(row["license"], "MIT")
 
     def test_bundle_contains_only_the_closure_resources_licences_and_notices(self):
         entries, manifest = self.assemble()

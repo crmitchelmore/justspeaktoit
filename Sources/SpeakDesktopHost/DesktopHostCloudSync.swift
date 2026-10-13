@@ -121,6 +121,9 @@ package final class DesktopHostCloudSync<Platform: DesktopHostPlatform>: @unchec
         await service.prepare()
         await controller.installCloudSync(DesktopHostSyncHooks(
             historyChanged: { [weak self] in self?.requestSync() },
+            deleteHistory: { [service] id, deleteAudio in
+                try await service.deleteHistory(id: id, deleteAudio: deleteAudio)
+            },
             saveKeyByHand: { [service] value, identifier in
                 try await service.saveKeyByHand(value, identifier: identifier)
             }

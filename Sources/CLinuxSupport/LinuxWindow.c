@@ -61,6 +61,10 @@ typedef struct UI {
     gchar *tray_summary; /* Sessions, Recording Time and Spend for the status notifier */
     /* History */
     GtkSearchEntry *search;
+    GtkWidget *history_filters;
+    GtkButton *history_delete;
+    GtkButton *history_clear;
+    gchar *all_history_ids;
     GtkListBox *history;
     GPtrArray *history_ids;
     gchar *selected_id;
@@ -70,6 +74,8 @@ typedef struct UI {
     GtkButton *retry;
     GtkButton *export_button;
     GtkButton *open_audio;
+    GtkButton *recordings_folder;
+    GtkButton *audio_cleanup;
     GtkButton *import_button;
     GtkButton *play;
     GtkButton *stop_play;
@@ -190,7 +196,7 @@ static void refresh_actions(void) {
     gtk_widget_set_sensitive(GTK_WIDGET(ui.record), ui.state != JSTI_STATE_WORKING);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.header_record), ui.state != JSTI_STATE_WORKING);
     gtk_button_set_label(ui.record, recording ? "Stop Recording"
-                                    : ui.state == JSTI_STATE_WORKING ? "Transcribing…" : "Start Recording");
+                                    : ui.state == JSTI_STATE_WORKING ? "Working…" : "Start Recording");
     adw_button_content_set_label(ADW_BUTTON_CONTENT(gtk_button_get_child(ui.header_record)),
                                  recording ? "Stop" : "Record");
     adw_button_content_set_icon_name(ADW_BUTTON_CONTENT(gtk_button_get_child(ui.header_record)),
@@ -221,6 +227,11 @@ static void refresh_actions(void) {
     gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.voice_row), idle);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.import_button), idle);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.history_import), idle);
+    gtk_widget_set_sensitive(ui.history_filters, idle);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.history_delete), idle && has_record);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.history_clear),
+        idle && ui.all_history_ids != NULL && ui.all_history_ids[0] != '\0');
+    if (ui.audio_cleanup != NULL) gtk_widget_set_sensitive(GTK_WIDGET(ui.audio_cleanup), idle);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.model_row), idle);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.microphone_row), idle);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.version), presented && ui.presented_switchable && idle);
@@ -435,6 +446,41 @@ static void on_open_audio(GtkButton *button, gpointer data) {
     if (ui.selected_id != NULL) emit(JSTI_EVENT_OPEN_AUDIO, ui.selected_id, 0);
 }
 
+static void on_recordings_folder(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    emit(JSTI_EVENT_RECORDINGS_FOLDER, "", 0);
+}
+
+static void on_audio_cleanup(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    emit(JSTI_EVENT_AUDIO_CLEANUP, "", 0);
+}
+
+static void audio_cleanup_response(AdwMessageDialog *dialog, const char *response, gpointer data) {
+    (void)data;
+    const char *token = g_object_get_data(G_OBJECT(dialog), "jsti-audio-cleanup-token");
+    emit(JSTI_EVENT_AUDIO_CLEANUP_RESPONSE, token, g_strcmp0(response, "delete") == 0 ? 1 : 0);
+    gtk_window_destroy(GTK_WINDOW(dialog));
+}
+
+static GtkWidget *audio_cleanup_dialog(const char *token, size_t count) {
+    gchar *body = g_strdup_printf(
+        "Permanently delete %zu saved audio file(s), including audio kept after deleting History entries? "
+        "History entries and transcripts will be kept. Recordings saved after this confirmation "
+        "will not be deleted. This cannot be undone.", count);
+    GtkWidget *dialog = adw_message_dialog_new(ui.window, "Delete saved recordings?", body);
+    g_free(body);
+    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+    gtk_window_set_destroy_with_parent(GTK_WINDOW(dialog), TRUE);
+    g_object_set_data_full(G_OBJECT(dialog), "jsti-audio-cleanup-token", g_strdup(token), g_free);
+    adw_message_dialog_add_responses(ADW_MESSAGE_DIALOG(dialog), "cancel", "Cancel", "delete", "Delete audio", NULL);
+    adw_message_dialog_set_response_appearance(ADW_MESSAGE_DIALOG(dialog), "delete", ADW_RESPONSE_DESTRUCTIVE);
+    adw_message_dialog_set_default_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
+    adw_message_dialog_set_close_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
+    g_signal_connect(dialog, "response", G_CALLBACK(audio_cleanup_response), NULL);
+    return dialog;
+}
+
 static void export_chosen(GObject *source, GAsyncResult *result, gpointer data) {
     gint32 variant = GPOINTER_TO_INT(data);
     GFile *file = gtk_file_dialog_save_finish(GTK_FILE_DIALOG(source), result, NULL);
@@ -495,6 +541,7 @@ static gboolean on_close_request(GtkWindow *window, gpointer data) {
     jsti_tray_stop();
     emit(JSTI_EVENT_CLOSING, "", 0);
     close_posts();
+    g_clear_pointer(&ui.all_history_ids, g_free);
     return FALSE;
 }
 
@@ -738,6 +785,50 @@ static GtkWidget *build_dashboard(GtkTextBuffer *buffer) {
     return page;
 }
 
+static void history_delete_response(AdwMessageDialog *dialog, const char *response, gpointer data) {
+    (void)data;
+    const char *identifiers = g_object_get_data(G_OBJECT(dialog), "jsti-history-delete-ids");
+    if (g_strcmp0(response, "keep-audio") == 0 || g_strcmp0(response, "delete-audio") == 0) {
+        emit(JSTI_EVENT_HISTORY_DELETE, identifiers, g_strcmp0(response, "delete-audio") == 0 ? 1 : 0);
+    }
+    gtk_window_destroy(GTK_WINDOW(dialog));
+}
+
+static GtkWidget *history_delete_dialog(const char *identifiers, gboolean clear) {
+    guint count = 1;
+    for (const char *cursor = identifiers; *cursor != '\0'; cursor++) if (*cursor == '\n') count++;
+    gchar *body = clear ? g_strdup_printf(
+        "Remove all %u History entries, including hidden and filtered entries? "
+        "You can keep their saved audio or delete owned recording files too. "
+        "This cannot be undone. If History sync is enabled, synced text will also be deleted.", count)
+        : g_strdup("Remove this History entry? Its saved audio will be kept. "
+                   "This cannot be undone. If History sync is enabled, its synced text will also be deleted.");
+    GtkWidget *dialog = adw_message_dialog_new(ui.window, clear ? "Clear History?" : "Delete History entry?", body);
+    g_free(body);
+    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+    gtk_window_set_destroy_with_parent(GTK_WINDOW(dialog), TRUE);
+    g_object_set_data_full(G_OBJECT(dialog), "jsti-history-delete-ids", g_strdup(identifiers), g_free);
+    adw_message_dialog_add_responses(ADW_MESSAGE_DIALOG(dialog),
+        "cancel", "Cancel", "keep-audio", clear ? "Clear History" : "Delete entry", NULL);
+    adw_message_dialog_set_response_appearance(ADW_MESSAGE_DIALOG(dialog), "keep-audio", ADW_RESPONSE_DESTRUCTIVE);
+    if (clear) {
+        adw_message_dialog_add_response(ADW_MESSAGE_DIALOG(dialog), "delete-audio", "Clear History and recordings");
+        adw_message_dialog_set_response_appearance(ADW_MESSAGE_DIALOG(dialog), "delete-audio", ADW_RESPONSE_DESTRUCTIVE);
+    }
+    adw_message_dialog_set_default_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
+    adw_message_dialog_set_close_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
+    g_signal_connect(dialog, "response", G_CALLBACK(history_delete_response), NULL);
+    return dialog;
+}
+
+static void on_history_delete(GtkButton *button, gpointer data) {
+    (void)data;
+    gboolean clear = button == ui.history_clear;
+    const char *identifiers = clear ? ui.all_history_ids : ui.selected_id;
+    if (ui.state != 0 || identifiers == NULL || identifiers[0] == '\0') return;
+    gtk_window_present(GTK_WINDOW(history_delete_dialog(identifiers, clear)));
+}
+
 static GtkWidget *build_history(GtkTextBuffer *buffer) {
     GtkWidget *column, *page = jsti_page_new(&column);
     GtkWidget *chips, *trailing;
@@ -748,6 +839,11 @@ static GtkWidget *build_history(GtkTextBuffer *buffer) {
     gtk_widget_add_css_class(GTK_WIDGET(ui.history_import), "jsti-hero-button");
     g_signal_connect(ui.history_import, "clicked", G_CALLBACK(on_import), NULL);
     gtk_box_append(GTK_BOX(trailing), GTK_WIDGET(ui.history_import));
+    ui.history_clear = GTK_BUTTON(gtk_button_new_with_label("Clear History…"));
+    g_signal_connect(ui.history_clear, "clicked", G_CALLBACK(on_history_delete), NULL);
+    gtk_box_prepend(GTK_BOX(trailing), GTK_WIDGET(ui.history_clear));
+    ui.history_filters = jsti_history_filters_button_new();
+    gtk_box_prepend(GTK_BOX(trailing), ui.history_filters);
     ui.search = GTK_SEARCH_ENTRY(gtk_search_entry_new());
     gtk_search_entry_set_placeholder_text(ui.search, "Search transcripts, models and profiles");
     g_signal_connect(ui.search, "search-changed", G_CALLBACK(on_search), NULL);
@@ -822,6 +918,12 @@ static GtkWidget *build_history(GtkTextBuffer *buffer) {
     gtk_box_append(GTK_BOX(actions), GTK_WIDGET(ui.export_button));
     gtk_box_append(GTK_BOX(actions), GTK_WIDGET(ui.open_audio));
     gtk_box_append(GTK_BOX(ui.detail), actions);
+    GtkWidget *management = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_widget_set_halign(management, GTK_ALIGN_END);
+    ui.history_delete = GTK_BUTTON(gtk_button_new_with_label("Delete…"));
+    g_signal_connect(ui.history_delete, "clicked", G_CALLBACK(on_history_delete), NULL);
+    gtk_box_append(GTK_BOX(management), GTK_WIDGET(ui.history_delete));
+    gtk_box_append(GTK_BOX(ui.detail), management);
     return page;
 }
 
@@ -905,6 +1007,25 @@ static GtkWidget *build_general(void) {
     g_signal_connect(ui.appearance_row, "notify::selected", G_CALLBACK(on_appearance), NULL);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(appearance), GTK_WIDGET(ui.appearance_row));
     gtk_box_append(GTK_BOX(column), appearance);
+    GtkWidget *housekeeping = group("Housekeeping");
+    GtkWidget *folder = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(folder), "Recording storage");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(folder), "Open the folder containing saved audio and History data.");
+    ui.recordings_folder = GTK_BUTTON(gtk_button_new_with_mnemonic("_Open folder"));
+    gtk_widget_set_valign(GTK_WIDGET(ui.recordings_folder), GTK_ALIGN_CENTER);
+    g_signal_connect(ui.recordings_folder, "clicked", G_CALLBACK(on_recordings_folder), NULL);
+    adw_action_row_add_suffix(ADW_ACTION_ROW(folder), GTK_WIDGET(ui.recordings_folder));
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(housekeeping), folder);
+    GtkWidget *cleanup = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(cleanup), "Saved recordings");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(cleanup), "Delete saved audio without removing History entries.");
+    ui.audio_cleanup = GTK_BUTTON(gtk_button_new_with_mnemonic("Delete _audio…"));
+    gtk_widget_add_css_class(GTK_WIDGET(ui.audio_cleanup), "destructive-action");
+    gtk_widget_set_valign(GTK_WIDGET(ui.audio_cleanup), GTK_ALIGN_CENTER);
+    g_signal_connect(ui.audio_cleanup, "clicked", G_CALLBACK(on_audio_cleanup), NULL);
+    adw_action_row_add_suffix(ADW_ACTION_ROW(cleanup), GTK_WIDGET(ui.audio_cleanup));
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(housekeeping), cleanup);
+    gtk_box_append(GTK_BOX(column), housekeeping);
     return page;
 }
 
@@ -1593,6 +1714,10 @@ static void history_apply(gpointer pointer) {
         if (g_strcmp0(keep, entry->id) == 0) selected = GTK_LIST_BOX_ROW(row);
     }
     gtk_widget_set_visible(ui.history_empty, history->entries->len == 0);
+    const char *query = gtk_editable_get_text(GTK_EDITABLE(ui.search));
+    gtk_label_set_text(GTK_LABEL(ui.history_empty), query[0] || jsti_history_filters_active()
+        ? "No saved recordings match this search or filter."
+        : "No history yet. Press Record to capture your first session.");
     if (history->select) {
         g_free(ui.selected_id);
         ui.selected_id = g_strdup(history->selected != NULL && history->selected[0] != '\0' ? history->selected : NULL);
@@ -1630,6 +1755,46 @@ static History *history_copy(const JSTIHistoryRow *rows, size_t count, const cha
 
 int32_t jsti_window_set_history(const JSTIHistoryRow *rows, size_t count, const char *selected_id) {
     return post(history_apply, history_copy(rows, count, selected_id), history_free);
+}
+
+static void history_management_apply(gpointer pointer) {
+    g_free(ui.all_history_ids);
+    ui.all_history_ids = g_strdup(pointer);
+    refresh_actions();
+}
+
+int32_t jsti_window_set_history_management(const char *identifiers) {
+    if (identifiers == NULL || !g_utf8_validate(identifiers, -1, NULL)) return -1;
+    return post(history_management_apply, g_strdup(identifiers), g_free);
+}
+
+typedef struct AudioCleanupConfirmation {
+    gchar *token;
+    size_t count;
+} AudioCleanupConfirmation;
+
+static void audio_cleanup_confirmation_free(gpointer pointer) {
+    AudioCleanupConfirmation *confirmation = pointer;
+    g_free(confirmation->token);
+    g_free(confirmation);
+}
+
+static void audio_cleanup_confirmation_apply(gpointer pointer) {
+    AudioCleanupConfirmation *confirmation = pointer;
+    if (ui.window == NULL) return;
+    if (!gtk_widget_get_sensitive(GTK_WIDGET(ui.audio_cleanup))) {
+        emit(JSTI_EVENT_AUDIO_CLEANUP_RESPONSE, confirmation->token, 0);
+        return;
+    }
+    gtk_window_present(GTK_WINDOW(audio_cleanup_dialog(confirmation->token, confirmation->count)));
+}
+
+int32_t jsti_window_confirm_audio_cleanup(const char *token, size_t count) {
+    if (token == NULL || !g_uuid_string_is_valid(token) || count == 0) return -1;
+    AudioCleanupConfirmation *confirmation = g_new0(AudioCleanupConfirmation, 1);
+    confirmation->token = g_strdup(token);
+    confirmation->count = count;
+    return post(audio_cleanup_confirmation_apply, confirmation, audio_cleanup_confirmation_free);
 }
 
 typedef struct Insights {
@@ -2139,6 +2304,24 @@ static int32_t login_item_self_test(char *error, size_t capacity) {
 
 int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (ui.window == NULL) return fail(error, capacity, "the window was not created");
+    if (ui.recordings_folder == NULL || ui.audio_cleanup == NULL ||
+        jsti_window_confirm_audio_cleanup(NULL, 1) != -1 ||
+        g_strcmp0(gtk_button_get_label(ui.recordings_folder), "_Open folder") != 0) {
+        return fail(error, capacity, "the recording folder control was not created");
+    }
+    gchar audio_token[] = "00000000-0000-0000-0000-000000000093";
+    GtkWidget *audio_confirmation = audio_cleanup_dialog(audio_token, 2);
+    g_object_ref_sink(audio_confirmation);
+    audio_token[0] = 'x';
+    gboolean audio_confirmation_ok =
+        g_strcmp0(adw_message_dialog_get_default_response(ADW_MESSAGE_DIALOG(audio_confirmation)), "cancel") == 0 &&
+        g_strcmp0(adw_message_dialog_get_close_response(ADW_MESSAGE_DIALOG(audio_confirmation)), "cancel") == 0 &&
+        g_strcmp0(g_object_get_data(G_OBJECT(audio_confirmation), "jsti-audio-cleanup-token"),
+                  "00000000-0000-0000-0000-000000000093") == 0;
+    g_signal_handlers_block_by_func(audio_confirmation, G_CALLBACK(audio_cleanup_response), NULL);
+    gtk_window_destroy(GTK_WINDOW(audio_confirmation));
+    g_object_unref(audio_confirmation);
+    if (!audio_confirmation_ok) return fail(error, capacity, "recording audio confirmation defaults or snapshot changed");
     if (login_item_self_test(error, capacity) != 0) return -1;
     if (g_list_model_get_n_items(G_LIST_MODEL(ui.model_names)) == 0) {
         return fail(error, capacity, "no models are offered");
@@ -2176,6 +2359,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     }
     if (jsti_local_models_self_test(error, capacity) != 0) return -1;
     if (jsti_cloud_sync_self_test(error, capacity) != 0) return -1;
+    if (jsti_history_filters_self_test(error, capacity) != 0) return -1;
     const char *first = "00000000-0000-0000-0000-000000000001";
     const char *second = "00000000-0000-0000-0000-000000000002";
     JSTIHistoryRow rows[] = {
@@ -2188,6 +2372,27 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (ui.history_ids->len != 2 || g_strcmp0(ui.selected_id, first) != 0) {
         return fail(error, capacity, "History rows or selection were not applied");
     }
+    gchar *all_ids = g_strdup_printf("%s\n%s", first, second);
+    if (jsti_window_set_history_management(NULL) != -1 || jsti_window_set_history_management("\xff") != -1) {
+        g_free(all_ids);
+        return fail(error, capacity, "invalid History management input was accepted");
+    }
+    history_management_apply(all_ids);
+    GtkWidget *confirmation = history_delete_dialog(all_ids, TRUE);
+    g_object_ref_sink(confirmation);
+    gboolean management_ok = gtk_widget_get_sensitive(GTK_WIDGET(ui.history_delete))
+        && gtk_widget_get_sensitive(GTK_WIDGET(ui.history_clear))
+        && adw_message_dialog_has_response(ADW_MESSAGE_DIALOG(confirmation), "keep-audio")
+        && adw_message_dialog_has_response(ADW_MESSAGE_DIALOG(confirmation), "delete-audio")
+        && g_strcmp0(adw_message_dialog_get_default_response(ADW_MESSAGE_DIALOG(confirmation)), "cancel") == 0;
+    history_management_apply((gpointer)first);
+    management_ok = management_ok && g_strcmp0(
+        g_object_get_data(G_OBJECT(confirmation), "jsti-history-delete-ids"), all_ids) == 0;
+    gtk_window_destroy(GTK_WINDOW(confirmation));
+    g_object_unref(confirmation);
+    history_management_apply(all_ids);
+    g_free(all_ids);
+    if (!management_ok) return fail(error, capacity, "History confirmation choices or frozen IDs were not retained");
     /* The selected card holds the transcript and its actions. */
     GtkListBoxRow *first_row = gtk_list_box_get_row_at_index(ui.history, 0);
     if (gtk_widget_get_parent(ui.detail) != gtk_list_box_row_get_child(first_row)) {
@@ -2279,7 +2484,7 @@ typedef struct Tour {
 } Tour;
 
 enum { TOUR_DARK_DASHBOARD = JSTI_PAGE_COUNT, TOUR_DARK_HISTORY, TOUR_RECORDING, TOUR_HUD_RECORDING,
-       TOUR_HUD_COMPLETED, TOUR_DONE };
+       TOUR_HUD_COMPLETED, TOUR_HISTORY_FILTERS, TOUR_DARK_HISTORY_FILTERS, TOUR_DONE };
 
 static gboolean tour_capture(gpointer data);
 
@@ -2291,6 +2496,13 @@ static void tour_show(Tour *tour) {
         show_page(JSTI_PAGE_DASHBOARD);
     } else if (tour->step == TOUR_DARK_HISTORY) {
         show_page(JSTI_PAGE_HISTORY);
+    } else if (tour->step == TOUR_HISTORY_FILTERS || tour->step == TOUR_DARK_HISTORY_FILTERS) {
+        Update idle = { .state = JSTI_STATE_IDLE };
+        update_apply(&idle);
+        adw_style_manager_set_color_scheme(adw_style_manager_get_default(),
+            tour->step == TOUR_HISTORY_FILTERS ? ADW_COLOR_SCHEME_FORCE_LIGHT : ADW_COLOR_SCHEME_FORCE_DARK);
+        show_page(JSTI_PAGE_HISTORY);
+        gtk_menu_button_popup(GTK_MENU_BUTTON(ui.history_filters));
     } else if (tour->step == TOUR_HUD_RECORDING) {
         jsti_hud_show(1, "Recording", "Capturing audio",
                       "Could we move the catch-up to Friday? That gives us a little more time");
@@ -2314,6 +2526,8 @@ static const char *tour_name(gint32 step) {
     case TOUR_HUD_COMPLETED: return "hud-completed";
     case TOUR_DARK_DASHBOARD: return "dashboard-dark";
     case TOUR_DARK_HISTORY: return "history-dark";
+    case TOUR_HISTORY_FILTERS: return "history-filters";
+    case TOUR_DARK_HISTORY_FILTERS: return "history-filters-dark";
     default: return page_info[step].name;
     }
 }
@@ -2328,6 +2542,21 @@ static gboolean tour_capture(gpointer data) {
     gchar *file = g_strdup_printf("%02d-%s.png", tour->step + 1, tour_name(tour->step));
     gchar *path = g_build_filename(tour->directory, file, NULL);
     char message[256] = { 0 };
+    if (tour->step == TOUR_HISTORY_FILTERS || tour->step == TOUR_DARK_HISTORY_FILTERS) {
+        GtkPopover *popover = gtk_menu_button_get_popover(GTK_MENU_BUTTON(ui.history_filters));
+        if (!popover || save_widget_png(GTK_WIDGET(popover), path, TRUE) != 0) {
+            g_printerr("The History filter editor %s could not be saved.\n", file);
+        }
+        gtk_menu_button_set_popover(GTK_MENU_BUTTON(ui.history_filters), NULL);
+        g_free(path); g_free(file);
+        tour->step++;
+        if (tour->step < TOUR_DONE) tour_show(tour);
+        else {
+            g_free(tour->directory); g_free(tour);
+            gtk_window_close(ui.window);
+        }
+        return G_SOURCE_REMOVE;
+    }
     if (tour->step == TOUR_HUD_RECORDING || tour->step == TOUR_HUD_COMPLETED) {
         /* The HUD is its own window; X11 only. */
         GtkWidget *card = jsti_hud_card();
@@ -2370,7 +2599,20 @@ static gboolean tour_capture(gpointer data) {
     return G_SOURCE_REMOVE;
 }
 
-static void tour_start(gpointer data) { tour_show(data); }
+static void tour_start(gpointer data) {
+    const JSTIHistoryFilterModel models[] = {
+        {"model/sample", "Sample transcription model", 0},
+        {"model/long", "An imported transcription model with a long descriptive name and vocabulary context", 0}
+    };
+    if (jsti_window_set_history_filters(models, 2, 0, "", "") != 0) {
+        g_printerr("Could not prepare the sample History filter editor.\n");
+        Tour *tour = data;
+        g_free(tour->directory); g_free(tour);
+        gtk_window_close(ui.window);
+        return;
+    }
+    tour_show(data);
+}
 
 int32_t jsti_window_screenshot_tour(const char *directory, char *error, size_t capacity) {
     if (directory == NULL || g_mkdir_with_parents(directory, 0700) != 0) {

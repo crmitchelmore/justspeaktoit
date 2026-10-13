@@ -93,6 +93,16 @@ extension DesktopHostController {
 
     package func cancelTranscription() {
         guard !closed else { return }
+        if let cleanup = audioCleanupTask {
+            cleanup.cancel()
+            update("Stopping audio cleanup... Remaining audio and History will be kept.", state: 2)
+            return
+        }
+        if historyDeletionInProgress {
+            cancellationRequested = true
+            update("Stopping History deletion… Remaining recordings will be kept.", state: 2)
+            return
+        }
         cancelOutput()
         guard busy else { return }
         cancellationRequested = true

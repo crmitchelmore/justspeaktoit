@@ -1,8 +1,19 @@
 import Foundation
+import SpeakCore
 import XCTest
 @testable import SpeakDesktop
 
 final class DesktopHistoryEventTests: XCTestCase {
+    func testVoiceSourceActions_ShareStopOrderingWithHistory() async throws {
+        let held = await heldLane()
+        let snapshot = try VoiceOutputSourceSnapshot(source: .typedText, text: "Synthetic source")
+        held.lane.submit(.voiceRead(snapshot))
+        held.lane.submit(.voiceExport(snapshot, path: "/synthetic.wav"))
+        held.lane.submit(.stop)
+        await held.finish()
+        let applied = await held.host.applied
+        XCTAssertEqual(applied, [.selection("A"), .stop])
+    }
     /// Why History clicks share one ordered lane: the previous wiring started
     /// one Task per click, and independent Tasks may enter the host in either
     /// order. Under this legal schedule audio starts after Stop, and Play on
@@ -190,16 +201,23 @@ private actor HistoryHostProbe {
             selected = id
         case .version: break
         case .playPause(let id):
-            if audible == .playing(id) {
-                audible = .paused(id)
-            } else if audible == .paused(id) {
-                audible = .playing(id)
-            } else if id == selected {
-                audible = .playing(id)
-            }
+            togglePlayback(id)
         case .stop: audible = nil
         case .readAloud(let id, let text):
             if id == selected { audible = .reading(id, text) }
+        case .voiceRead(let snapshot):
+            audible = .reading(snapshot.recordID?.uuidString ?? "text-source", snapshot.text)
+        case .voiceExport: audible = nil
+        }
+    }
+
+    private func togglePlayback(_ id: String) {
+        if audible == .playing(id) {
+            audible = .paused(id)
+        } else if audible == .paused(id) {
+            audible = .playing(id)
+        } else if id == selected {
+            audible = .playing(id)
         }
     }
 }

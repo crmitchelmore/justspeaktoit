@@ -245,4 +245,82 @@ final class DesktopHostReadAloudTests: XCTestCase {
         let retired = DesktopVoiceOutputSettings(modelID: "aura-0", voiceID: "deepgram/retired-voice")
         XCTAssertTrue(DesktopVoiceOutputSettings.voices.contains(retired.voice))
     }
+
+    func testTypedAndClipboardSources_KeepTextSnapshotAndNeverBorrowHistoryOwner() async throws {
+        FakeLog.shared.setKey("deepgram-key", name: deepgramKey)
+        let snapshot = try VoiceOutputSourceSnapshot(source: .typedText, text: "Synthetic typed source")
+        await controller.readVoiceSource(snapshot)
+        try await waitFor("typed finish") { self.statuses.last == "Finished reading aloud." }
+        XCTAssertEqual(FakeSpeech.shared.spoken.map(\.text), [snapshot.text])
+        let owner = await controller.voiceOutputRecordID
+        XCTAssertNil(owner)
+        let selected = await selectedRecord()
+        XCTAssertEqual(selected, record)
+        FakeSpeech.shared.reset()
+        let clipboard = try VoiceOutputSourceSnapshot(source: .clipboard, text: "Synthetic clipboard snapshot")
+        await controller.readVoiceSource(clipboard)
+        try await waitFor("clipboard finish") { FakeSpeech.shared.events.last == "end" }
+        XCTAssertEqual(FakeSpeech.shared.spoken.map(\.text), [clipboard.text])
+    }
+
+    private func selectedRecord() async -> UUID? { await controller.selectedHistoryID }
+
+    func testVoiceExport_WritesChosenWAVWithoutPlaybackOrChangingHistory() async throws {
+        let target = FileManager.default.temporaryDirectory.appendingPathComponent("voice-export-\(UUID()).wav")
+        defer { try? FileManager.default.removeItem(at: target) }
+        let snapshot = try VoiceOutputSourceSnapshot(source: .clipboard, text: "Synthetic export snapshot")
+        let wav = try XCTUnwrap(PCMWaveWriter.wavData(pcm: Data([1, 0, 2, 0]), sampleRate: 24_000))
+        await controller.exportVoiceSource(snapshot, path: target.path) { captured, _, _ in
+            XCTAssertEqual(captured, snapshot)
+            return wav
+        }
+        try await waitFor("export finish") { self.statuses.last == "Voice audio exported as WAV." }
+        XCTAssertEqual(try Data(contentsOf: target), wav)
+        XCTAssertTrue(FakeSpeech.shared.events.isEmpty)
+        let selected = await selectedRecord()
+        XCTAssertEqual(selected, record)
+    }
+
+    func testVoiceExport_StopAndNewerGenerationNeverPublishStaleFile() async throws {
+        let target = FileManager.default.temporaryDirectory.appendingPathComponent("voice-stale-\(UUID()).wav")
+        defer { try? FileManager.default.removeItem(at: target) }
+        let original = Data("existing destination".utf8)
+        try original.write(to: target)
+        let gate = Gate(open: false)
+        let snapshot = try VoiceOutputSourceSnapshot(source: .typedText, text: "Synthetic export")
+        await controller.exportVoiceSource(snapshot, path: target.path) { _, _, _ in
+            await gate.pass()
+            return Data("stale result".utf8)
+        }
+        await controller.playbackStop()
+        FakeLog.shared.setKey("deepgram-key", name: deepgramKey)
+        await controller.readVoiceSource(snapshot)
+        gate.release()
+        try await waitFor("current speech") { FakeSpeech.shared.events.last == "end" }
+        try await waitFor("operations ended") { await self.controller.activeOperations == 0 }
+        XCTAssertEqual(try Data(contentsOf: target), original)
+        XCTAssertFalse(statuses.contains("Voice audio exported as WAV."))
+    }
+
+    func testVoiceExport_CloseAndInvalidDestinationCannotPublish() async throws {
+        let protected = directory.appendingPathComponent("recording.wav")
+        let snapshot = try VoiceOutputSourceSnapshot(source: .typedText, text: "Synthetic export")
+        await controller.exportVoiceSource(snapshot, path: protected.path) { _, _, _ in
+            XCTFail("Protected path reached synthesis")
+            return Data()
+        }
+        XCTAssertEqual(statuses.last, "Choose an export location outside the app's data folder.")
+        let target = FileManager.default.temporaryDirectory.appendingPathComponent("voice-close-\(UUID()).wav")
+        defer { try? FileManager.default.removeItem(at: target) }
+        let gate = Gate(open: false)
+        await controller.exportVoiceSource(snapshot, path: target.path) { _, _, _ in
+            await gate.pass()
+            return Data("late result".utf8)
+        }
+        let closing = Task { await self.controller.close() }
+        try await waitFor("close admission") { await self.controller.closed }
+        gate.release()
+        _ = await closing.value
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
+    }
 }

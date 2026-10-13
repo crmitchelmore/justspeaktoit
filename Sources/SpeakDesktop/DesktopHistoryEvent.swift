@@ -1,4 +1,5 @@
 import Foundation
+import SpeakCore
 
 /// A History pane event, submitted on the UI thread in the order the user
 /// made it. Selection and version choose what is displayed; the others act on
@@ -15,6 +16,8 @@ public enum DesktopHistoryEvent: Equatable, Sendable {
     case stop
     /// Carries the transcript displayed at the click, which is spoken as is.
     case readAloud(String, text: String)
+    case voiceRead(VoiceOutputSourceSnapshot)
+    case voiceExport(VoiceOutputSourceSnapshot, path: String)
 
     /// Play/Pause and Read aloud clicks kept while the host catches up.
     /// Further clicks are ignored until it does, like clicks on a busy button;
@@ -48,7 +51,7 @@ public enum DesktopHistoryEvent: Equatable, Sendable {
         switch self {
         case .selection: return .row
         case .version: return .version
-        case .playPause, .readAloud: return .action
+        case .playPause, .readAloud, .voiceRead, .voiceExport: return .action
         case .stop: return .stop
         }
     }

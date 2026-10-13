@@ -63,6 +63,7 @@ package protocol DesktopHostVoiceOutput: Sendable {
 /// is decided by the controller's shared `playbackRequests`.
 package struct DesktopHostReadAloudState<Speech: Sendable, Engine: DesktopHostVoiceOutput>: Sendable {
     package var task: Task<Void, Never>?
+    package var exportTask: Task<Void, Never>?
     /// Keeps the record's playback controls active, so Pause and Stop work
     /// while segments are synthesized and between them.
     package var speech: Speech?
@@ -99,11 +100,13 @@ package extension DesktopHostReadAloudPlatform {
     static func stopReadAloud(_ state: inout ReadAloudState, playback: Playback) {
         state.task?.cancel()
         state.task = nil
+        state.exportTask?.cancel()
+        state.exportTask = nil
         if let speech = state.speech { playback.endSpeech(speech) }
         state.speech = nil
     }
 
-    static func isReadingAloud(_ state: ReadAloudState) -> Bool { state.task != nil }
+    static func isReadingAloud(_ state: ReadAloudState) -> Bool { state.task != nil || state.exportTask != nil }
 }
 
 /// Read aloud speaks the displayed transcript of the selected record through
@@ -133,6 +136,17 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
               selectedHistoryID == id, isVisible(id) else { return }
         let segments = SpeechTextSegmenter.segments(text)
         guard !segments.isEmpty else { update("There is no transcript to read aloud."); return }
+        startVoiceRead(text: text, owner: id, recordID: id)
+    }
+
+    package func readVoiceSource(_ snapshot: VoiceOutputSourceSnapshot) {
+        if let id = snapshot.recordID { readAloud(id.uuidString, text: snapshot.text); return }
+        guard !closed, canUseHistory else { return }
+        startVoiceRead(text: snapshot.text, owner: UUID(), recordID: nil)
+    }
+
+    private func startVoiceRead(text: String, owner: UUID, recordID: UUID?) {
+        let segments = SpeechTextSegmenter.segments(text)
         let staging = directory.appendingPathComponent("VoiceOutput")
         guard let voiceOutput = readAloudState.output({ try Platform.makeVoiceOutput(stagingDirectory: staging) })
         else {
@@ -143,7 +157,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         let speech: Platform.Playback.Speech
         do {
             // Playback stops now, and the record's controls stay active until the speech ends.
-            speech = try playback.beginSpeech(recordID: id)
+            speech = try playback.beginSpeech(recordID: owner)
         } catch {
             update("Read aloud failed: \(error.localizedDescription)")
             return
@@ -153,8 +167,11 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         let playback = playback
         let ticket = playbackRequests.begin()
         readAloudState.speech = speech
+        voiceOutputRecordID = recordID
         update("Reading aloud with \(voice.name)…")
+        activeOperations += 1
         readAloudState.task = Task {
+            defer { self.finishOperation() }
             var outcome: String?
             do {
                 for segment in segments {
@@ -182,6 +199,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         guard playbackRequests.isCurrent(ticket) else { return }
         // The finishing task is not cancelled; only its speech is ended.
         readAloudState.task = nil
+        voiceOutputRecordID = nil
         Platform.stopReadAloud(&readAloudState, playback: playback)
         guard !closed, !busy, recording == nil, let status else { return }
         update(status)

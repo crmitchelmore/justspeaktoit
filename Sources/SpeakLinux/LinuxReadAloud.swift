@@ -30,6 +30,17 @@ extension LinuxAudioPlayback: DesktopHostPlayback, DesktopHostSpeechPlayback {}
 extension LinuxVoiceOutput: DesktopHostVoiceOutput {}
 
 extension LinuxWindow {
+    static func voiceSources(context: UnsafeMutableRawPointer) {
+        let strings = Strings()
+        let sources = VoiceOutputSource.allCases.filter { $0 != .externalSelection }
+        let names: [UnsafePointer<CChar>?] = sources.map { strings.add($0.displayName) }
+        let result = withExtendedLifetime(strings) {
+            names.withUnsafeBufferPointer {
+                jsti_window_set_voice_sources($0.baseAddress, $0.count, linuxVoiceSourceEvent, context)
+            }
+        }
+        if result != 0 { LinuxHostPlatform.update("The Voice Output sources could not be shown.") }
+    }
     /// Fills the voice picker from the canonical catalogue and selects the
     /// saved voice, or the catalogue default for a retired one.
     static func voiceOutput(_ settings: LinuxVoiceOutputSettings) {
@@ -40,8 +51,32 @@ extension LinuxWindow {
         let result = withExtendedLifetime(strings) {
             names.withUnsafeBufferPointer { jsti_window_set_voices($0.baseAddress, $0.count, Int32(selected)) }
         }
+
         if result != 0 { LinuxHostPlatform.update("The Read aloud voices could not be shown.") }
     }
+}
+
+// swiftlint:disable:next function_parameter_count
+func linuxVoiceSourceEvent(
+    _ action: Int32, _ source: Int32, _ text: UnsafePointer<CChar>?,
+    _ record: UnsafePointer<CChar>?, _ path: UnsafePointer<CChar>?, _ context: UnsafeMutableRawPointer?
+) {
+    guard let context else { return }
+    let holder = Unmanaged<LinuxEventContext>.fromOpaque(context).takeUnretainedValue()
+    if action == 112 { holder.submitHistoryPlayback(.stop); return }
+    do {
+        guard let source = VoiceOutputSource(rawValue: source) else {
+            throw VoiceOutputSourceSnapshot.Failure.invalidText
+        }
+        let snapshot = try VoiceOutputSourceSnapshot(
+            source: source, text: text.map(String.init(cString:)) ?? "",
+            recordID: record.flatMap { UUID(uuidString: String(cString: $0)) }
+        )
+        if action == 110 { holder.submitHistoryPlayback(.voiceRead(snapshot)) }
+        if action == 111 {
+            holder.submitHistoryPlayback(.voiceExport(snapshot, path: path.map(String.init(cString:)) ?? ""))
+        }
+    } catch { LinuxHostPlatform.update(error.localizedDescription) }
 }
 
 /// Read aloud and voice picker events. Returns false for others.

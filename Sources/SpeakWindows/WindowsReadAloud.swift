@@ -21,10 +21,49 @@ extension WindowsNative {
         }
         defer { pointers.forEach { $0.deallocate() } }
         let borrowed: [UnsafePointer<CChar>?] = pointers.map { UnsafePointer($0) }
-        return borrowed.withUnsafeBufferPointer {
+        let configured = borrowed.withUnsafeBufferPointer {
             jsti_window_set_voice_output($0.baseAddress, $0.count, Int32(selected), voiceOutputEvent, context) == 0
         }
+        return configured && configureVoiceSources(context: context)
     }
+
+    static func configureVoiceSources(context: UnsafeMutableRawPointer) -> Bool {
+        let sources = VoiceOutputSource.allCases.filter { $0 != .externalSelection }
+        let names = sources.map { Array($0.displayName.utf8CString) }
+        let pointers = names.map { chars -> UnsafeMutablePointer<CChar> in
+            let pointer = UnsafeMutablePointer<CChar>.allocate(capacity: chars.count)
+            pointer.initialize(from: chars, count: chars.count)
+            return pointer
+        }
+        defer { pointers.forEach { $0.deallocate() } }
+        let borrowed: [UnsafePointer<CChar>?] = pointers.map { UnsafePointer($0) }
+        return borrowed.withUnsafeBufferPointer {
+            jsti_window_set_voice_sources($0.baseAddress, $0.count, windowsVoiceSourceEvent, context) == 0
+        }
+    }
+}
+
+// swiftlint:disable:next function_parameter_count
+func windowsVoiceSourceEvent(
+    _ action: Int32, _ source: Int32, _ text: UnsafePointer<CChar>?,
+    _ record: UnsafePointer<CChar>?, _ path: UnsafePointer<CChar>?, _ context: UnsafeMutableRawPointer?
+) {
+    guard let context else { return }
+    let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
+    if action == 112 { holder.submitHistoryPlayback(.stop); return }
+    do {
+        guard let source = VoiceOutputSource(rawValue: source) else {
+            throw VoiceOutputSourceSnapshot.Failure.invalidText
+        }
+        let snapshot = try VoiceOutputSourceSnapshot(
+            source: source, text: text.map(String.init(cString:)) ?? "",
+            recordID: record.flatMap { UUID(uuidString: String(cString: $0)) }
+        )
+        if action == 110 { holder.submitHistoryPlayback(.voiceRead(snapshot)) }
+        if action == 111 {
+            holder.submitHistoryPlayback(.voiceExport(snapshot, path: path.map(String.init(cString:)) ?? ""))
+        }
+    } catch { WindowsNative.update(error.localizedDescription) }
 }
 
 /// Apply from the native Voice output dialog, on the UI thread.

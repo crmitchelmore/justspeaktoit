@@ -14,6 +14,10 @@ Apple capture path.
 
 ## Build and run
 
+Voice Output also offers native typed/pasted text, explicit clipboard snapshots
+and user-chosen lossless WAV export. See [Desktop Voice Output sources](desktop-voice-sources.md)
+for the source ownership, cancellation, privacy rules and remaining macOS gaps.
+
 Windows CI uses **Swift 6.2.3, Windows Server 2022, x86_64**. Follow the official
 [Swift Windows installation guide](https://www.swift.org/install/windows/) for
 Visual Studio C++ tools, Windows SDK and Swift prerequisites. That page includes

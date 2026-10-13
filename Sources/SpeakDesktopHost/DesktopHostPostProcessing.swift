@@ -14,10 +14,10 @@ extension DesktopHostController {
         guard !closed, DesktopPostProcessing.remoteModels.indices.contains(modelIndex) else { return }
         do {
             let model = DesktopPostProcessing.remoteModels[modelIndex].id
-            let options = DesktopPostProcessing.Options(
-                mode: enabled ? .remote : .disabled, modelIdentifier: model,
-                customPrompt: prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : prompt
-            )
+            var options = settings.postProcessing ?? .init()
+            options.mode = enabled ? .remote : .disabled
+            options.modelIdentifier = model
+            options.customPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : prompt
             let typed = key.trimmingCharacters(in: .whitespacesAndNewlines)
             if !typed.isEmpty {
                 let identifier = try postProcessingCredential(for: model)

@@ -35,6 +35,15 @@ struct LinuxNativeEffects: DesktopHostEffects {
         )
     }
 
+    func makeLiveClient(
+        model: String, key: String, language: String?, azureEndpoint: String, options: LiveClientOptions
+    ) -> (any FinalizingStreamingTranscriptionClient)? {
+        DesktopLiveTranscription.makeClient(
+            model: model, apiKey: key, language: language, azureEndpoint: azureEndpoint, options: options,
+            makeConnection: { NIOStreamingConnection(request: $0) }
+        )
+    }
+
     func perform(_ job: LinuxOutputJob, text: String) -> String { job.perform(text) }
 
     func writeSettings(_ data: Data, to url: URL) throws { try data.write(to: url, options: .atomic) }

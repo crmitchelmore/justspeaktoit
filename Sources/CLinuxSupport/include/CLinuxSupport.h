@@ -71,6 +71,16 @@ enum {
 enum { JSTI_STATE_IDLE = 0, JSTI_STATE_RECORDING = 1, JSTI_STATE_WORKING = 2 };
 
 typedef void (*jsti_window_event_fn)(int32_t event, const char *text, int32_t index, void *context);
+typedef struct JSTIConfigurationField {
+    const char *title;
+    const char *value;
+    const char *group;
+    int32_t is_boolean;
+} JSTIConfigurationField;
+typedef int32_t (*JSTIConfigurationCallback)(int32_t action, const char *const *values, size_t count,
+                                            void *context, char *error, size_t capacity);
+int32_t jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t count,
+                                      JSTIConfigurationCallback callback, void *context);
 
 typedef struct JSTIModelRow {
     const char *id;

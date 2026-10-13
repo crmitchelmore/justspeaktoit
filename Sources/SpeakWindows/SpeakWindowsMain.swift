@@ -343,6 +343,7 @@ enum SpeakWindowsMain {
         let textOutput = await controller.textOutputOptions()
         try WindowsNative.configureTextOutput(textOutput, context: Unmanaged.passUnretained(holder).toOpaque())
         try await configureHotKey(holder)
+        try await WindowsNative.configureConfiguration(holder)
         try await configureAzureResource(holder)
         await restoreServices(holder)
         try await configureModelPickers(controller, holder: holder)
@@ -381,6 +382,7 @@ enum SpeakWindowsMain {
         jsti_window_clear_text_output()
         jsti_window_clear_hotkey()
         jsti_window_clear_azure_resource()
+        jsti_window_clear_configuration()
         await releaseServices(holder)
         await WindowsAutomationSwitch.shutDown(holder)
         // Closing first cancels a shortcut's transcription instead of waiting

@@ -133,6 +133,13 @@ final class WindowsHotKeyGestures: @unchecked Sendable {
     private let deliver: @Sendable (WindowsHotKeyRequest) async -> Void
     private let lock = NSLock()
     private var tail: Task<Void, Never>?
+    private var timing = (
+        HotKeyGestureTiming.defaultHoldThreshold, HotKeyGestureTiming.defaultDoubleTapWindow
+    )
+
+    func configureTiming(hold: Double, doubleTap: Double) {
+        lock.withLock { timing = (hold, doubleTap) }
+    }
 
     init(
         clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
@@ -157,6 +164,11 @@ final class WindowsHotKeyGestures: @unchecked Sendable {
         target: WindowsInsertionTarget?, textOutput: Task<WindowsTextOutputOptions, Never>,
         modelIndex: Int, deviceID: String
     ) {
+        let timing = lock.withLock { timing }
+        if !machine.isKeyDown {
+            machine.holdThreshold = timing.0
+            machine.doubleTapWindow = timing.1
+        }
         self.target = target
         self.textOutput = textOutput
         self.modelIndex = modelIndex

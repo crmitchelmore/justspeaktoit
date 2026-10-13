@@ -49,6 +49,7 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
         await controller.setMicrophoneWarning(warning)
         try await controller.configureModelCatalog()
         holder.applyShortcutStyle(await controller.hotKeySettings())
+        try await LinuxWindow.configureConfiguration(holder)
         LinuxWindow.postProcessing(await controller.postProcessingOptions())
         _ = jsti_window_set_azure_resource(await controller.azureResourceEndpoint())
         LinuxWindow.voiceOutput(await controller.voiceOutputSettings())

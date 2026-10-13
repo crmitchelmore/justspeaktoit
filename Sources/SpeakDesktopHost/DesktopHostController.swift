@@ -3,33 +3,57 @@ import SpeakCore
 import SpeakDesktop
 
 package actor DesktopHostController<Platform: DesktopHostPlatform> {
-    package struct Settings: Codable {
-        package var model = ModelCatalog.defaultBatchTranscriptionModel
-        package var postProcessing: DesktopPostProcessing.Options?
-        package var microphoneDeviceID: String?
-        package var batchModel: String?
-        package var liveModel: String?
-        // Edited in the Text output dialog. Absent or unknown keys keep the
-        // smart insert-at-cursor default with clipboard restoration.
-        package var textOutput: Platform.TextOutputOptions?
-        // Keyboard shortcut dialog; absent keeps Ctrl+Alt+Space, press-to-toggle.
-        package var hotKey: Platform.HotKeySettings?
-        // The Voice dialog; absent uses the catalogue default.
-        package var voiceOutput: Platform.VoiceOutputSettings?
-        // Settings menu; `speak` is refused until allowed.
-        package var automationEnabled: Bool?
-        // The last on-device model chosen under Source: Local.
-        package var localModel: String?
-        // Local models dialog; absent lets whisper.cpp use a GPU when available.
-        package var localUseGPU: Bool?
-        /// The Azure Speech resource dialog, under the Apple apps' key for the same
-        /// device-local value; absent means none, and recorded audio uses the region.
-        package var azureSpeechResourceEndpoint: String?
-        /// General › Appearance; absent follows the system.
-        package var appearance: DesktopAppearance?
-        /// General › Launch at login as last reached, under the Mac's key. Only
-        /// hosts that cannot read the system's registration back use it.
-        package var runAtLogin: Bool?
+    @dynamicMemberLookup
+    package struct Settings: Codable, Sendable {
+        package struct Values: Codable, Sendable {
+            package var model = ModelCatalog.defaultBatchTranscriptionModel
+            package var postProcessing: DesktopPostProcessing.Options?
+            package var microphoneDeviceID: String?
+            package var batchModel: String?
+            package var liveModel: String?
+            // Absent keys keep the native smart insert-at-cursor default.
+            package var textOutput: Platform.TextOutputOptions?
+            package var hotKey: Platform.HotKeySettings?
+            package var voiceOutput: Platform.VoiceOutputSettings?
+            package var automationEnabled: Bool?
+            package var localModel: String?
+            package var localUseGPU: Bool?
+            /// Device-local Azure resource, under the Apple apps' key.
+            package var azureSpeechResourceEndpoint: String?
+            package var appearance: DesktopAppearance?
+            /// Last reached registration for hosts that cannot read it back.
+            package var runAtLogin: Bool?
+            package var configuration: DesktopConfiguration?
+        }
+
+        private var values = Values()
+        private var preserved: [String: AnyCodable] = [:]
+        package init() {}
+
+        package subscript<Value>(dynamicMember keyPath: WritableKeyPath<Values, Value>) -> Value {
+            get { values[keyPath: keyPath] }
+            set { values[keyPath: keyPath] = newValue }
+        }
+
+        package init(from decoder: Decoder) throws {
+            values = try Values(from: decoder)
+            let container = try decoder.singleValueContainer()
+            let all = try container.decode([String: AnyCodable].self)
+            let known: Set<String> = [
+                "model", "postProcessing", "microphoneDeviceID", "batchModel", "liveModel", "textOutput",
+                "hotKey", "voiceOutput", "automationEnabled", "localModel", "localUseGPU",
+                "azureSpeechResourceEndpoint", "appearance", "runAtLogin", "configuration"
+            ]
+            preserved = all.filter { !known.contains($0.key) }
+        }
+
+        package func encode(to encoder: Encoder) throws {
+            let known = try JSONDecoder().decode(
+                [String: AnyCodable].self, from: JSONEncoder().encode(values)
+            )
+            var container = encoder.singleValueContainer()
+            try container.encode(preserved.merging(known) { _, current in current })
+        }
     }
 
     /// Target, profile and text output are fixed when recording starts; a
@@ -253,7 +277,8 @@ extension DesktopHostController {
             let filename = id.uuidString + "." + source.pathExtension
             let destination = directory.appendingPathComponent("History").appendingPathComponent(filename)
             try FileManager.default.copyItem(at: source, to: destination)
-            let record = DesktopRecordingStore.Record(id: id, audioFilename: filename, modelIdentifier: settings.model)
+            var record = DesktopRecordingStore.Record(id: id, audioFilename: filename, modelIdentifier: settings.model)
+            record.languageIdentifier = settings.configuration?.language
             try await saveRecord(record)
             if closed {
                 var cancelled = record

@@ -5,7 +5,8 @@ import SpeakDesktop
 extension DesktopHostController {
     func makeLiveSession(model: String, key: String, id: UUID, language: String? = nil) -> DesktopLiveSession? {
         guard DesktopHostModels.isLive(model), let client = effects.makeLiveClient(
-            model: model, key: key, language: language, azureEndpoint: azureResourceEndpoint()
+            model: model, key: key, language: language, azureEndpoint: azureResourceEndpoint(),
+            options: settings.configuration?.liveOptions ?? .init()
         ) else { return nil }
         return DesktopLiveSession(client: client, id: id)
     }

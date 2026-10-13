@@ -24,7 +24,7 @@ extension DesktopHostController {
         DesktopProfileSessionResolver.resolve(
             profile: ProfileResolver(profiles: profiles).profile(forWindowsExecutablePath: executablePath),
             defaultModel: settings.model, defaultPostProcessing: settings.postProcessing ?? .init(),
-            capabilities: profileCapabilities
+            capabilities: profileCapabilities, defaultLanguage: settings.configuration?.language
         )
     }
 

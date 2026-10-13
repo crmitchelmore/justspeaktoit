@@ -6,6 +6,11 @@ acceptance criterion. The current implementation does not meet that criterion.
 Do not describe a successful build, test run or artifact upload as parity or
 shipment.
 
+See [Desktop settings coverage](desktop-settings-parity.md) for the exhaustive
+macOS preference inventory, the native portable-preferences editors and
+versioned JSON transfer, and the remaining settings/engine gaps. Portable
+preferences JSON is not a macOS Data & Migration backup archive.
+
 The implementation keeps Swift for shared behaviour and uses a narrow C ABI to
 Windows APIs for the desktop shell, microphone, hotkey, credentials and text
 output. Apple audio, UI, local inference and security integrations retain their

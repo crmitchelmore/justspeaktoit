@@ -39,8 +39,10 @@ bool jsti_voice_output_available();
 void jsti_show_voice_settings(HWND owner);
 bool jsti_voice_settings_self_test(HWND owner, std::string &error);
 bool jsti_azure_resource_available();
+void jsti_show_configuration(HWND owner);
 void jsti_show_azure_resource_settings(HWND owner);
 bool jsti_azure_resource_settings_self_test(HWND owner, std::string &error);
+bool jsti_configuration_self_test(HWND owner, std::string &error);
 bool jsti_local_models_available();
 std::wstring jsti_local_models_summary();
 void jsti_show_local_models(HWND owner);
@@ -117,7 +119,8 @@ constexpr int setupMicrophoneID = 431, setupModelID = 432, setupShortcutID = 433
 // Settings that were menu commands: the automation switch emits
 // AUTOMATION_TOGGLED; the others open the same dialogs as before.
 constexpr int appearanceLabelID = 440, appearanceID = 441, automationID = 442, azureID = 443, cloudSyncID = 444,
-    shortcutValueID = 445, githubID = 446, issueID = 447, privacyID = 448, loginItemID = 449;
+    shortcutValueID = 445, githubID = 446, issueID = 447, privacyID = 448, loginItemID = 449,
+    configurationID = 450;
 constexpr UINT tourMessage = WM_APP + 18, appearanceMessage = WM_APP + 19, pageMessage = WM_APP + 20;
 constexpr UINT hudMessage = WM_APP + 21;
 constexpr UINT_PTR tourTimerID = 90;
@@ -544,6 +547,8 @@ unsigned pagesOf(int identifier) {
         return page(historyPage);
     case readAloudID: case stopPlaybackID: return page(historyPage) | page(voicePage);
     case voiceSettingsID: return page(voicePage);
+    case configurationID:
+        return page(generalPage) | page(transcriptionPage) | page(postProcessingPage) | page(keyboardPage);
     case 94: case microphoneID: case textOutputID: case appearanceLabelID: case appearanceID: case automationID:
     case loginItemID:
         return page(generalPage);
@@ -828,6 +833,7 @@ void layoutSettings(HWND window, const RECT &content) {
         y = layoutSettingsCard(window, top, content, 0xE8C8, L"Output",
             L"Finished text goes back into the app you were in when dictation started, or to the clipboard.", row);
         place(window, textOutputID, box(left, y, scale(window, 170), row));
+        place(window, configurationID, box(left + scale(window, 182), y, scale(window, 220), row));
         top = y + row + scale(window, 20) + gap;
         // The Mac's App Behaviour card. The note appears only when the system
         // decides Launch at login, so the page still fits the minimum height.
@@ -857,6 +863,7 @@ void layoutSettings(HWND window, const RECT &content) {
         button(saveID, y, scale(window, 112));
         y += row + scale(window, 12);
         place(window, azureID, box(left + scale(window, 188), y, scale(window, 240), row));
+        place(window, configurationID, box(right - scale(window, 220), y, scale(window, 220), row));
         break;
     }
     case postProcessingPage: {
@@ -864,6 +871,7 @@ void layoutSettings(HWND window, const RECT &content) {
             L"Send finished transcripts to an OpenRouter model to fix punctuation and filler, or follow your own "
             L"instructions. Empty recordings stay empty, and History keeps the original beside the result.", row);
         place(window, processingID, box(left, y, scale(window, 230), row));
+        place(window, configurationID, box(left + scale(window, 242), y, scale(window, 220), row));
         break;
     }
     case profilesPage: {
@@ -879,6 +887,7 @@ void layoutSettings(HWND window, const RECT &content) {
             row + scale(window, 40));
         place(window, shortcutValueID, RECT{left, y, right, y + scale(window, 28)});
         place(window, shortcutID, box(left, y + scale(window, 40), scale(window, 200), row));
+        place(window, configurationID, box(left + scale(window, 212), y + scale(window, 40), scale(window, 220), row));
         break;
     }
     case cloudSyncPage: {
@@ -1488,6 +1497,7 @@ bool createControls(HWND window) {
         add(L"STATIC", L"&Microphone", 0, 94) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, microphoneID) &&
         add(L"BUTTON", L"Text o&utput…", BS_PUSHBUTTON | WS_TABSTOP, textOutputID) &&
+        add(L"BUTTON", L"Dictation &preferences...", BS_PUSHBUTTON | WS_TABSTOP, configurationID) &&
         add(L"STATIC", L"&Theme", 0, appearanceLabelID) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP, appearanceID) &&
         add(L"BUTTON", L"Launch at &login", BS_PUSHBUTTON | WS_TABSTOP, loginItemID) &&
@@ -1600,6 +1610,7 @@ bool applyMicrophones(HWND window, std::vector<MicrophoneRow> rows) {
 // Settings that were menu commands follow their dialogs' idle rules; the
 // automation switch shows the state the host reported.
 void updateSettingsButtons(HWND window, int recording) {
+    EnableWindow(GetDlgItem(window, configurationID), recording == 0);
     EnableWindow(GetDlgItem(window, voiceSettingsID), recording == 0 && jsti_voice_output_available());
     EnableWindow(GetDlgItem(window, localModelsID), recording == 0 && jsti_local_models_available());
     EnableWindow(GetDlgItem(window, cloudSyncID), recording == 0 && jsti_cloud_sync_available());
@@ -2031,6 +2042,10 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             return 0;
         }
         case processingID: jsti_show_postprocessing(window); return 0;
+        case configurationID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, configurationID) && IsWindowEnabled(window))
+                jsti_show_configuration(window);
+            return 0;
         case azureID:
             if (HIWORD(wparam) == BN_CLICKED && idleControl(window, azureID) && IsWindowEnabled(window)) {
                 jsti_show_azure_resource_settings(window);
@@ -3743,7 +3758,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             jsti_text_output_settings_self_test(window, textOutputID, setRecording, recordingBlocked, &observed, failure) &&
             jsti_hotkey_self_test(window, observe, &observed, failure) && jsti_voice_settings_self_test(window, failure) &&
             jsti_local_models_self_test(window, failure) && jsti_cloud_sync_settings_self_test(window, failure) &&
-            jsti_azure_resource_settings_self_test(window, failure);
+            jsti_azure_resource_settings_self_test(window, failure) && jsti_configuration_self_test(window, failure);
     };
     bool passed = false;
     try { passed = check(); }

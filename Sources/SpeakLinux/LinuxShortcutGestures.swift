@@ -34,6 +34,14 @@ final class LinuxShortcutGestures: @unchecked Sendable {
 
     var currentStyle: HotKeyActivationStyle { queue.sync { style } }
 
+    func configureTiming(hold: Double, doubleTap: Double) {
+        queue.async { [self] in
+            submit(machine.reset())
+            machine.holdThreshold = hold
+            machine.doubleTapWindow = doubleTap
+        }
+    }
+
     /// A style change forgets partial gestures and ends a hold in progress,
     /// because its release will no longer be reported under the old style.
     func configure(style: HotKeyActivationStyle) {

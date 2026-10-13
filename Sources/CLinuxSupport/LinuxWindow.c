@@ -103,9 +103,17 @@ typedef struct UI {
     GtkButton *voice_stop;
     AdwComboRow *appearance_row;
     AdwSwitchRow *login_row;
+    GtkWidget *configuration_columns[4];
 } UI;
 
 static UI ui;
+
+static struct {
+    GPtrArray *rows;
+    GArray *booleans;
+    JSTIConfigurationCallback callback;
+    void *context;
+} configuration;
 
 /* Read aloud: its History action and the voice picker in its own group. */
 static struct {
@@ -857,6 +865,7 @@ static GtkWidget *build_voice_output(void) {
 
 static GtkWidget *build_general(void) {
     GtkWidget *column, *page = jsti_page_new(&column);
+    ui.configuration_columns[0] = column;
     gtk_box_append(GTK_BOX(column), settings_hero(
         "General", "Choose the microphone, where finished text goes, whether the app starts at login, and how "
         "it looks."));
@@ -910,6 +919,7 @@ static GtkWidget *build_general(void) {
 
 static GtkWidget *build_transcription(void) {
     GtkWidget *column, *page = jsti_page_new(&column);
+    ui.configuration_columns[1] = column;
     gtk_box_append(GTK_BOX(column), settings_hero(
         "Transcription", "Pick the speech model for new recordings, on this computer or with your own provider key."));
     GtkWidget *models = group("Model");
@@ -956,6 +966,7 @@ static GtkWidget *build_transcription(void) {
 
 static GtkWidget *build_post_processing(void) {
     GtkWidget *column, *page = jsti_page_new(&column);
+    ui.configuration_columns[2] = column;
     gtk_box_append(GTK_BOX(column), settings_hero(
         "Post-processing", "Optionally polish transcripts with an OpenRouter model. The original is always kept."));
     GtkWidget *polish = group("Clean-up");
@@ -985,6 +996,7 @@ static GtkWidget *build_post_processing(void) {
 
 static GtkWidget *build_keyboard(void) {
     GtkWidget *column, *page = jsti_page_new(&column);
+    ui.configuration_columns[3] = column;
     gtk_box_append(GTK_BOX(column), settings_hero(
         "Keyboard", "Start and stop dictation from anywhere with a global shortcut."));
     GtkWidget *shortcut = group("Shortcut");
@@ -1246,6 +1258,10 @@ int32_t jsti_window_run(
     int status = g_application_run(G_APPLICATION(ui.application), argc, argv);
     close_posts();
     ui.callback = NULL;
+    configuration.callback = NULL;
+    configuration.context = NULL;
+    g_clear_pointer(&configuration.rows, g_ptr_array_unref);
+    g_clear_pointer(&configuration.booleans, g_array_unref);
     g_clear_object(&ui.application);
     ui.window = NULL;
     if (status != 0) {
@@ -1953,6 +1969,188 @@ int32_t jsti_window_set_azure_resource(const char *endpoint) {
     return post(azure_apply, g_strdup(endpoint != NULL ? endpoint : ""), g_free);
 }
 
+typedef struct ConfigurationUpdate {
+    GPtrArray *titles, *values, *groups;
+    GArray *booleans;
+    JSTIConfigurationCallback callback;
+    void *context;
+} ConfigurationUpdate;
+
+static void configuration_problem(const char *message) {
+    gtk_label_set_text(ui.status, message);
+}
+
+static void configuration_submit(gint32 action, const char *const *values, gsize count) {
+    char error[1024] = {0};
+    if (configuration.callback == NULL) {
+        configuration_problem("Configuration controls are unavailable.");
+    } else if (configuration.callback(action, values, count, configuration.context, error, sizeof(error)) != 0) {
+        configuration_problem(error[0] ? error : "Configuration could not be applied.");
+    }
+}
+
+static void on_configuration_apply(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    if (ui.state != JSTI_STATE_IDLE) {
+        configuration_problem("Finish dictation before changing configuration.");
+        return;
+    }
+    GPtrArray *values = g_ptr_array_new_with_free_func(g_free);
+    for (guint i = 0; i < configuration.rows->len; ++i) {
+        GtkWidget *row = g_ptr_array_index(configuration.rows, i);
+        gboolean boolean = g_array_index(configuration.booleans, gboolean, i);
+        g_ptr_array_add(values, g_strdup(boolean
+            ? (adw_switch_row_get_active(ADW_SWITCH_ROW(row)) ? "1" : "0")
+            : gtk_editable_get_text(GTK_EDITABLE(row))));
+    }
+    configuration_submit(0, (const char *const *)values->pdata, values->len);
+    g_ptr_array_unref(values);
+}
+
+static void configuration_file_chosen(GObject *source, GAsyncResult *result, gpointer data) {
+    gint32 action = GPOINTER_TO_INT(data);
+    GError *error = NULL;
+    GFile *file = action == 1 ? gtk_file_dialog_open_finish(GTK_FILE_DIALOG(source), result, &error)
+                             : gtk_file_dialog_save_finish(GTK_FILE_DIALOG(source), result, &error);
+    if (file != NULL) {
+        gchar *path = g_file_get_path(file);
+        if (path != NULL) {
+            const char *values[] = {path};
+            configuration_submit(action, values, 1);
+        } else configuration_problem("Choose a local configuration file.");
+        g_free(path);
+        g_object_unref(file);
+    } else if (error != NULL && !g_error_matches(error, GTK_DIALOG_ERROR, GTK_DIALOG_ERROR_DISMISSED)) {
+        configuration_problem(error->message);
+    }
+    g_clear_error(&error);
+}
+
+static void on_configuration_file(GtkButton *button, gpointer data) {
+    (void)button;
+    gint32 action = GPOINTER_TO_INT(data);
+    GtkFileDialog *dialog = gtk_file_dialog_new();
+    gtk_file_dialog_set_title(dialog, action == 1 ? "Import portable preferences" : "Export portable preferences");
+    if (action == 2) gtk_file_dialog_set_initial_name(dialog, "Dictation-preferences.json");
+    if (action == 1) gtk_file_dialog_open(dialog, ui.window, NULL, configuration_file_chosen, data);
+    else gtk_file_dialog_save(dialog, ui.window, NULL, configuration_file_chosen, data);
+    g_object_unref(dialog);
+}
+
+static void configuration_update_free(gpointer data) {
+    ConfigurationUpdate *update = data;
+    g_ptr_array_unref(update->titles);
+    g_ptr_array_unref(update->values);
+    g_ptr_array_unref(update->groups);
+    g_array_unref(update->booleans);
+    g_free(update);
+}
+
+static void configuration_apply(gpointer data) {
+    ConfigurationUpdate *update = data;
+    configuration.callback = update->callback;
+    configuration.context = update->context;
+    if (configuration.rows == NULL) {
+        configuration.rows = g_ptr_array_new();
+        configuration.booleans = g_array_ref(update->booleans);
+        GtkWidget *groups[4];
+        for (guint i = 0; i < 4; ++i) {
+            groups[i] = group("Dictation preferences");
+            adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(groups[i]),
+                "Apply saves all preference fields. Provider-specific options only affect supported routes.");
+            gtk_box_append(GTK_BOX(ui.configuration_columns[i]), groups[i]);
+        }
+        for (guint i = 0; i < update->titles->len; ++i) {
+            const char *section = g_ptr_array_index(update->groups, i);
+            guint slot = g_strcmp0(section, "Transcription") == 0 ? 1 :
+                g_strcmp0(section, "Post-processing") == 0 ? 2 : g_strcmp0(section, "Keyboard") == 0 ? 3 : 0;
+            gboolean boolean = g_array_index(update->booleans, gboolean, i);
+            GtkWidget *row = boolean ? adw_switch_row_new() : adw_entry_row_new();
+            adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), g_ptr_array_index(update->titles, i));
+            adw_preferences_group_add(ADW_PREFERENCES_GROUP(groups[slot]), row);
+            g_ptr_array_add(configuration.rows, row);
+        }
+        for (guint i = 0; i < 4; ++i) {
+            GtkWidget *apply = gtk_button_new_with_label("Apply preferences");
+            gtk_widget_set_halign(apply, GTK_ALIGN_END);
+            g_signal_connect(apply, "clicked", G_CALLBACK(on_configuration_apply), NULL);
+            adw_preferences_group_add(ADW_PREFERENCES_GROUP(groups[i]), apply);
+        }
+        GtkWidget *transfer = group("Portable configuration");
+        adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(transfer),
+            "Transfers portable preferences, not keys, models, device paths or service permissions. "
+            "This JSON format is not a macOS backup archive. Unsupported entries are preserved, not applied.");
+        GtkWidget *buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+        GtkWidget *import = gtk_button_new_with_label("Import preferences...");
+        GtkWidget *export = gtk_button_new_with_label("Export preferences...");
+        g_signal_connect(import, "clicked", G_CALLBACK(on_configuration_file), GINT_TO_POINTER(1));
+        g_signal_connect(export, "clicked", G_CALLBACK(on_configuration_file), GINT_TO_POINTER(2));
+        gtk_box_append(GTK_BOX(buttons), import);
+        gtk_box_append(GTK_BOX(buttons), export);
+        adw_preferences_group_add(ADW_PREFERENCES_GROUP(transfer), buttons);
+        gtk_box_append(GTK_BOX(ui.configuration_columns[0]), transfer);
+    }
+    for (guint i = 0; i < update->values->len && i < configuration.rows->len; ++i) {
+        GtkWidget *row = g_ptr_array_index(configuration.rows, i);
+        const char *value = g_ptr_array_index(update->values, i);
+        if (g_array_index(configuration.booleans, gboolean, i))
+            adw_switch_row_set_active(ADW_SWITCH_ROW(row), g_strcmp0(value, "1") == 0);
+        else gtk_editable_set_text(GTK_EDITABLE(row), value);
+    }
+}
+
+int32_t jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t count,
+                                      JSTIConfigurationCallback callback, void *context) {
+    if (fields == NULL || count == 0 || count > 32 || callback == NULL) return -1;
+    ConfigurationUpdate *update = g_new0(ConfigurationUpdate, 1);
+    update->titles = g_ptr_array_new_with_free_func(g_free);
+    update->values = g_ptr_array_new_with_free_func(g_free);
+    update->groups = g_ptr_array_new_with_free_func(g_free);
+    update->booleans = g_array_new(FALSE, FALSE, sizeof(gboolean));
+    update->callback = callback;
+    update->context = context;
+    for (size_t i = 0; i < count; ++i) {
+        if (!fields[i].title || !fields[i].value || !fields[i].group ||
+            !g_utf8_validate(fields[i].value, -1, NULL) || strlen(fields[i].value) > 65535) {
+            configuration_update_free(update);
+            return -1;
+        }
+        g_ptr_array_add(update->titles, g_strdup(fields[i].title));
+        g_ptr_array_add(update->values, g_strdup(fields[i].value));
+        g_ptr_array_add(update->groups, g_strdup(fields[i].group));
+        gboolean boolean = fields[i].is_boolean != 0;
+        g_array_append_val(update->booleans, boolean);
+    }
+    return post(configuration_apply, update, configuration_update_free);
+}
+
+static int32_t configuration_test_callback(int32_t action, const char *const *values, size_t count,
+                                          void *context, char *error, size_t capacity) {
+    (void)error; (void)capacity;
+    gint *calls = context;
+    if (action != 0 || count != configuration.rows->len || g_strcmp0(values[0], "fr_FR") != 0) return -1;
+    ++*calls;
+    return 0;
+}
+
+static gboolean configuration_self_test(void) {
+    if (configuration.rows == NULL || configuration.rows->len < 10) return FALSE;
+    JSTIConfigurationCallback callback = configuration.callback;
+    void *context = configuration.context;
+    AdwEntryRow *language = ADW_ENTRY_ROW(g_ptr_array_index(configuration.rows, 0));
+    gchar *saved = g_strdup(gtk_editable_get_text(GTK_EDITABLE(language)));
+    gint calls = 0;
+    configuration.callback = configuration_test_callback;
+    configuration.context = &calls;
+    gtk_editable_set_text(GTK_EDITABLE(language), "fr_FR");
+    on_configuration_apply(NULL, NULL);
+    gtk_editable_set_text(GTK_EDITABLE(language), saved);
+    g_free(saved);
+    configuration.callback = callback;
+    configuration.context = context;
+    return calls == 1;
+}
+
 static void style_apply(gpointer data) {
     ui.suppress = TRUE;
     adw_combo_row_set_selected(ui.style_row, (guint)GPOINTER_TO_INT(data));
@@ -2139,6 +2337,8 @@ static int32_t login_item_self_test(char *error, size_t capacity) {
 
 int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (ui.window == NULL) return fail(error, capacity, "the window was not created");
+    if (!configuration_self_test())
+        return fail(error, capacity, "configuration rows did not populate and emit a complete Apply");
     if (login_item_self_test(error, capacity) != 0) return -1;
     if (g_list_model_get_n_items(G_LIST_MODEL(ui.model_names)) == 0) {
         return fail(error, capacity, "no models are offered");

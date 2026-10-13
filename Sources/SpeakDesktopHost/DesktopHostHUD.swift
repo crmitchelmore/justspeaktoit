@@ -23,18 +23,18 @@ extension DesktopHostController {
     func beginHUD(_ recordID: UUID, _ state: DesktopHUDState) {
         guard !closed else { return }
         hudRecording = recordID
-        Platform.hud(state)
+        Platform.hud(hudPresentation(state))
     }
 
     func hud(_ recordID: UUID, _ state: DesktopHUDState) {
         guard !closed, hudRecording == recordID else { return }
-        Platform.hud(state)
+        Platform.hud(hudPresentation(state))
     }
 
     func finishHUD(_ recordID: UUID, _ state: DesktopHUDState) {
         guard !closed, hudRecording == recordID else { return }
         hudRecording = nil
-        Platform.hud(state)
+        Platform.hud(hudPresentation(state))
     }
 
     /// A dictation that could not start has no record; it replaces whatever
@@ -42,7 +42,16 @@ extension DesktopHostController {
     func failHUDStart(_ message: String) {
         guard !closed else { return }
         hudRecording = nil
-        Platform.hud(.failure(message, headline: "Recording could not start"))
+        Platform.hud(hudPresentation(.failure(message, headline: "Recording could not start")))
+    }
+
+    private func hudPresentation(_ state: DesktopHUDState) -> DesktopHUDState {
+        guard let configuration = settings.configuration else { return state }
+        guard configuration.enabled("showHUD") else { return .hidden }
+        guard !configuration.enabled("showLiveTranscriptInHUD") else { return state }
+        return DesktopHUDState(
+            phase: state.phase, headline: state.headline, subheadline: state.subheadline, liveText: ""
+        )
     }
 
     /// The HUD's last word on a presented record: delivering while its output

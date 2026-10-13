@@ -60,6 +60,18 @@ enum JSTIWindowEvent {
  * selected record ID after the user chose a transcript version; pair it with
  * jsti_window_transcript_variant() synchronously inside the callback. */
 typedef void (*JSTIWindowCallback)(int event, const char *text, int model_index, void *context);
+typedef struct JSTIConfigurationField {
+    const char *title;
+    const char *value;
+    int is_boolean;
+} JSTIConfigurationField;
+/* action 0 applies fields; 1 imports and 2 exports a path in values[0].
+ * The callback validates synchronously; persistence is ordered by Swift. */
+typedef int (*JSTIConfigurationCallback)(int action, const char *const *values, size_t count,
+                                        void *context, char *error, size_t capacity);
+int jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t count,
+                                  JSTIConfigurationCallback callback, void *context);
+void jsti_window_clear_configuration(void);
 int jsti_window_run(const char *const *model_names, size_t model_count, int selected_index,
                     JSTIWindowCallback callback, void *context, char *error, size_t error_capacity);
 /* Optional pre-run mode catalogue with the same count/order as window_run's

@@ -1,0 +1,208 @@
+# Desktop settings coverage
+
+This is a settings slice, **not full Windows/Linux feature parity**. Baseline:
+macOS `AppSettings.DefaultsKey` has 91 keys
+(`Sources/SpeakApp/AppSettings.swift:306-398`), plus preferences and collections
+outside that enum. Track remaining product acceptance in #1157.
+
+## Implemented preference journey
+
+Windows uses **Dictation preferences...** from General, Transcription,
+Post-processing and Keyboard. Linux uses native libadwaita preference groups
+in those same destinations. Fields are defined once in
+`Sources/SpeakCore/DesktopConfiguration.swift`; native controls receive that
+schema rather than maintaining copies of defaults. All fields are validated
+before one atomic settings write; a failed write leaves the controller unchanged.
+Changes apply to subsequent recordings. Spoken-language profile overrides still
+win, including an explicit Automatic overriding a global language selection.
+Imports capture the language and retries keep the original recording's language.
+
+Language accepts Automatic or a provider locale, including existing custom locale
+identifiers not listed in the shared catalogue. Model capability gates still
+apply. Keyword bias is currently wired to xAI dedicated STT streaming; AssemblyAI
+uses its separate keyterms preference. Stop grace is wired to AssemblyAI and
+Cartesia. Other live routes and batch providers do **not** gain keyword/grace
+support merely because these fields exist. Additional provider wiring belongs
+in the canonical streaming factory, not a platform-specific list.
+
+Temperature and output language reach OpenRouter cleanup, and changing its
+enabled/model/prompt controls no longer resets those advanced preferences.
+Cleanup remains opt-in; changing preferences does not enable it. HUD visibility
+and live-preview visibility gate the real native HUD. Shortcut timing reaches
+the existing shared gesture machine on both platforms, not fixed platform timers.
+
+## Configuration transfer is not the Mac backup format
+
+General's Import/Export preferences actions use a bounded, versioned JSON object:
+
+```json
+{"version":1,"preferences":{"preferredLocale":"en_GB","holdThreshold":0.35}}
+```
+
+This transfers the portable preferences above. It does not read credential stores
+or transfer native model selections, hotkey codes, microphone IDs, device paths,
+startup registration or automation permission. Imported unknown/unsupported
+entries are retained exactly across edits/exports and named as **preserved but
+not applied**. Imported opaque values can themselves contain private data:
+inspect a file before sharing it. Unknown root entries already present in the
+desktop settings file also survive writes to other settings.
+
+This JSON is **not** the macOS Data & Migration ZIP. Mac backups use
+`manifest.json`, category records (`id`, `kind`, `value`), vocabulary/models/
+profiles/history/connections/credentials and optional audio
+(`Sources/SpeakApp/DataMigration/MigrationArchive.swift:7-59`,
+`MigrationCatalog.swift:13-77`, `MigrationPreferenceSchema.swift:6-70`).
+Importing that archive, mapping its categories safely, merge/replace previews,
+rollback and exporting a Mac-compatible archive remain gaps. No ZIP is
+misidentified or silently imported as portable preferences.
+
+## Evidence legend
+
+The table is exhaustive for the 91 enum keys. "Equivalent" denotes a working
+native replacement, not identical Apple APIs or identifiers; "Partial" is not
+parity. Evidence labels refer to executable surfaces:
+
+| Label | Files |
+|---|---|
+| Config | `SpeakCore/DesktopConfiguration.swift`, `SpeakDesktopHost/DesktopHostConfiguration.swift`, `SpeakWindows/WindowsConfiguration.swift`, `SpeakLinux/LinuxConfiguration.swift` (all under `Sources`) |
+| Models | `Sources/SpeakDesktopHost/DesktopHostModels.swift`, `DesktopHostModelDiscovery.swift`, `DesktopHostLocalModels.swift`, `SpeakDesktop/DesktopLiveTranscription.swift` |
+| Output | `Sources/SpeakWindows/WindowsTextOutputSettings.swift`, `SpeakLinux/LinuxControllerSettings.swift`, `SpeakLinuxPlatform/LinuxTextOutput.swift` |
+| HUD | `Sources/SpeakDesktopHost/DesktopHostHUD.swift`, `Sources/SpeakDesktop/DesktopHUD.swift` |
+| Keys | `Sources/SpeakDesktopHost/DesktopHostCredentials.swift`, `SpeakWindows/WindowsNative.swift`, `SpeakLinuxPlatform/LinuxCredentialStore.swift` |
+| Shortcuts | `Sources/SpeakWindows/WindowsHotKey.swift`, `Sources/SpeakLinux/LinuxShortcutGestures.swift`, `SpeakCore/HotKeyGestureMachine.swift` |
+| Voice | `Sources/SpeakDesktopHost/DesktopHostReadAloud.swift`, `SpeakWindows/WindowsReadAloud.swift`, `SpeakLinux/LinuxReadAloud.swift` |
+| General | `Sources/SpeakDesktopHost/DesktopHostSettings.swift`, `DesktopHostLoginItem.swift`, `SpeakWindows/WindowsLoginItemHost.swift`, `SpeakLinux/LinuxLoginItemHost.swift` |
+| Automation | `Sources/SpeakWindows/WindowsAutomation.swift`; Linux currently has `--toggle`, not the Mac automation server |
+
+Paths named relative to `Sources` in a cell inherit the preceding `Sources/`
+prefix. Missing rows cite the canonical Mac definition above and their native
+replacement/nearest implemented surface; they do not assert hidden support.
+
+| Mac key | Windows / Linux outcome | Evidence or remaining work |
+|---|---|---|
+| appearance | Equivalent / Equivalent | General; system/light/dark native schemes |
+| visualDensity | Missing / Missing | Fixed native layout, no density editor |
+| transcriptionMode | Equivalent / Equivalent | Models; Remote Batch/Live and Local batch |
+| liveTranscriptionModel | Partial / Partial | Models; implemented transport routes only; Apple Speech and unavailable providers are not substitutes |
+| batchTranscriptionModel | Equivalent / Equivalent | Models; independent remembered batch model |
+| localTranscriptionModel | Partial / Partial | Models; whisper.cpp catalogue, not all Mac inference runtimes/imports |
+| localTranscriptionMode | Partial / Partial | Local batch only; local streaming absent |
+| localStreamingModelSource | Missing / Missing | No native local streaming source editor/runtime |
+| postProcessingEnabled | Equivalent / Equivalent | `DesktopHostPostProcessing.swift`; remote opt-in differs deliberately from Mac's default-on |
+| postProcessingModel | Partial / Partial | Shared remote catalogue; local LLM/rules cleanup unavailable |
+| postProcessingTemperature | Wired / Wired | Config; range 0...1, OpenRouter request |
+| postProcessingOutputLanguage | Wired / Wired | Config; cleanup system prompt |
+| postProcessingIncludeLexiconDirectives | Missing / Missing | No desktop lexicon pipeline in this baseline |
+| postProcessingIncludeContextTags | Missing / Missing | No desktop lexicon context pipeline |
+| textOutputMethod | Equivalent / Partial | Output; Windows Smart/direct/clipboard; Linux paste/clipboard, no direct accessibility insertion |
+| restoreClipboard | Equivalent / Equivalent | Output; platform clipboard restoration |
+| appSwitchDelivery | Missing / Missing | Windows captured-target safety; Linux X11 captured/Wayland current-focus rules, no three-way selector |
+| showHUD | Wired / Wired | Config + HUD |
+| appVisibility | Missing / Missing | Native window/tray behaviour; no Mac Dock/menu-bar mode selector |
+| showStatusBarIconInDockOnly | Apple-specific / Apple-specific | Dock-only is not a native Windows/Linux mode; tray equivalents need explicit product policy |
+| compactStatusBarIcon | Missing / Missing | No tray compact-style preference |
+| runAtLogin | Equivalent / Equivalent | General; native startup task/login entry, OS status displayed |
+| recordingsDirectory | Missing / Missing | Fixed private per-user History directory, no relocation UI |
+| hotKeyActivation | Equivalent / Equivalent | Shortcuts; press/hold/double-tap/combined styles; Linux portal availability caveat |
+| holdThreshold | Wired / Wired | Config + shared gesture machine; 0.2...1.5 s |
+| doubleTapWindow | Wired / Wired | Config + shared gesture machine; 0.2...1 s |
+| trackedKeyIdentifiers | Equivalent / Equivalent | Keys; provider credential names, not values; no full API-key management destination |
+| preferredLocale | Wired / Wired | Config + `DesktopProfileSession.swift`; provider language capability gates; automation language remains a separate gap |
+| postRecordingTailDuration | Missing / Missing | Capture stops on request; no tail-duration preference |
+| deepgramStopGracePeriod | Missing legacy migration / Missing legacy migration | Portable JSON preserves this obsolete key but does not reinterpret it as new grace |
+| liveStopGracePeriod | Partial / Partial | Config; AssemblyAI/Cartesia only; range 0...2 s |
+| preferredAudioInputUID | Equivalent / Equivalent | Native device ID with missing-device warning, never Apple UID translation |
+| defaultTTSVoice | Partial / Partial | Voice; canonical Deepgram Read aloud voices only |
+| ttsLanguage | Missing / Missing | No independent TTS-language editor |
+| sonioxTTSRegion | Missing / Missing | Soniox TTS route unavailable |
+| ttsSpeed | Missing / Missing | No speech-rate editor |
+| ttsPitch | Missing / Missing | No pitch editor |
+| ttsQuality | Missing / Missing | No quality editor/provider options |
+| ttsOutputFormat | Missing / Missing | Read aloud uses native staging format |
+| ttsAutoPlay | Partial / Partial | Explicit Read aloud action plays; no synthesis-without-playback preference |
+| ttsSaveToDirectory | Missing / Missing | Temporary speech staging only, no save/export directory |
+| ttsUseSSML | Missing / Missing | No SSML input/editor/provider contract |
+| ttsFavoriteVoices | Missing / Missing | No voice favourites |
+| ttsPronunciationDictionary | Missing / Missing | No TTS pronunciation editor/pipeline |
+| historyFlushInterval | Missing selector / Missing selector | History is durable per operation, not configurable timed flush |
+| silenceDetectionEnabled | Missing / Missing | No configured silence stop pipeline |
+| handsFreeDictationEnabled | Missing / Missing | No hands-free session loop in this baseline |
+| silenceThreshold | Missing / Missing | No silence threshold editor/pipeline |
+| silenceDuration | Missing / Missing | No silence duration editor/pipeline |
+| connectionPreWarmingEnabled | Missing / Missing | No persistent provider prewarming preference |
+| audioPreWarmingEnabled | Missing / Missing | Native capture opened on demand, no capture prewarming preference |
+| warmMicrophoneOnKeyPress | Missing / Missing | No speculative microphone-open preference |
+| postProcessingStreamingEnabled | Missing / Missing | Finished-text remote cleanup only |
+| hudSizePreference | Missing / Missing | Fixed native HUD layout |
+| showLiveTranscriptInHUD | Wired / Wired | Config + HUD; transcript remains in main window |
+| showCompactHUD | Missing / Missing | No compact HUD selector |
+| shortenErrorDisplay | Missing / Missing | Native HUD keeps shared failure duration |
+| showSidebarShortcutHints | Missing / Missing | Native sidebar has no hint visibility preference |
+| speedMode | Missing / Missing | No Instant/Live Polish setting; no live-polish engine |
+| livePolishModel | Missing / Missing | No live-polish model execution |
+| livePolishDebounceMs | Missing / Missing | No live-polish scheduler |
+| livePolishMinDeltaChars | Missing / Missing | No live-polish delta threshold |
+| livePolishTailWindowChars | Missing / Missing | No live-polish tail rewriting |
+| skipPostProcessingWithLivePolish | Missing / Missing | No live-polish pipeline |
+| voiceCommandsEnabled | Missing / Missing | No voice-command processing |
+| streamingInsertionEnabled | Missing / Missing | Final transcript insertion only |
+| clipboardInsertionTriggers | Missing / Missing | No keyword-controlled clipboard insertion |
+| enableSendToMac | Partial / Partial | iCloud web History sync is not Send-to-Mac transport/pairing |
+| enableAutomationServer | Equivalent / Missing | Automation; Windows per-user named pipe, Linux toggle only |
+| pasteRemoteTranscriptsAtCursor | Missing / Missing | No remote transcript delivery preference |
+| autoCorrectionsEnabled | Missing / Missing | No correction capture/promotion/preview pipeline in baseline |
+| autoCorrectionsPromotionThreshold | Missing / Missing | No correction promotion policy/editor |
+| recordingSoundsEnabled | Missing / Missing | No native recording sound preference/player |
+| recordingSoundProfile | Missing / Missing | No sound profile picker |
+| recordingSoundVolume | Missing / Missing | No recording sound volume |
+| assemblyAIKeyterms | Wired / Wired | Config + options-bearing live factory; provider enforces vocabulary bounds |
+| transcriptionKeywords | Partial / Partial | Config; xAI STT live only here, other provider/batch forwarding remains |
+| transcriptionKeywordsLastReconciled | Missing migration / Missing migration | No Mac/iOS keyword conflict reconciliation; opaque entry preserved |
+| recoveredTranscriptionKeywords | Missing / Missing | No recovery chooser |
+| assemblyAIIgnoredPronunciationTerms | Missing / Missing | No pronunciation keyword-suppression editor |
+| modulateSpeakerDiarization | Missing / Missing | Modulate live route/options not admitted by baseline desktop factory |
+| modulateEmotionSignal | Missing / Missing | Same provider qualification gap |
+| modulateAccentSignal | Missing / Missing | Same provider qualification gap |
+| modulatePIIPhiTagging | Missing / Missing | Same provider qualification gap |
+| accessibilityInsertionMode | Equivalent / Missing | Output; Windows cursor/replace-field; Linux paste cannot claim AX replace-all equivalence |
+| selectedHotKey | Equivalent / Partial | Shortcuts; Windows Ctrl/Alt native key; Linux desktop/portal-owned binding, never Mac Fn key translation |
+| paidAccessRoutingEnabled | Missing / Missing | BYOK desktop providers; no paid-access entitlement/routing journey |
+| simpleModelChoices | Missing / Missing | Native catalogue picker without simplified paid-model chooser |
+| rememberedLocalTranscriptionSource | Partial / Partial | Models remembers Local selection; no Apple on-device source |
+| rememberedRemoteTranscriptionMode | Equivalent / Equivalent | Models; native source/mode preferences |
+| analyticsEnabled | Missing / Missing | No native analytics consent/pipeline; do not treat missing as enabled |
+
+## Beyond the enum and destinations
+
+`postProcessingSystemPrompt` is represented by the existing native custom prompt
+and reaches the shared cleanup policy. `customShortcutBindings`/individual action
+shortcuts, Shortcut presets/reset, Escape cancellation and conflict management
+beyond the global key remain gaps. Profiles have a Windows native editor with
+shared ordering/session snapshots; Linux lacks a profile editor, even though
+the host can load shared profiles. Apple bundle-ID matchers are preserved but
+not silently converted to executable paths.
+
+The Mac's 12 `SettingsTab` destinations are General, Transcription,
+Post-processing, Profiles, Voice Output, Pronunciation, API Keys, Keyboard,
+Permissions, Compare Models, Data & Migration and About
+(`Sources/SpeakApp/Views/Settings/SettingsTab.swift:3-15`). Native desktops expose
+General/Transcription/Post-processing/Voice Output/Keyboard/About and iCloud sync;
+Windows also exposes Profiles. Provider keys are embedded under Transcription,
+not a complete API Keys management page. Pronunciation, permission
+troubleshooting/remediation, comparison, full archive migration and Linux
+profile editing remain missing journeys. Corrections and Troubleshooting
+destinations outside `SettingsTab` likewise remain unimplemented. No placeholder
+destination or inert switch is added for those gaps.
+
+Local model discovery/import/preparation, lexicon/corrections/pronunciation,
+TTS usage/history, history retention/import, profile archive merge, paid access,
+diagnostics, automation and hands-free work need their own qualified native
+engine journeys. Apple Speech, WhisperKit, FluidAudio, MLX, Dock/Fn, Keychain,
+CloudKit native and App Store/StoreKit capabilities need explicit native
+replacements, not engine-ID renaming.
+
+Portable tests: `Tests/SpeakDesktopTests/DesktopConfigurationTests.swift` and
+`Tests/SpeakDesktopHostTests/DesktopHostConfigurationTests.swift`. Native smoke
+tests include Windows field validation/apply/cancel and Linux schema population.
+These synthetic checks do not establish physical microphone/shortcut/display
+acceptance, provider accuracy or macOS feature parity.

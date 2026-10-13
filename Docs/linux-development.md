@@ -80,6 +80,11 @@ It still requires the matching Swift/native libraries; this is not a
 self-contained Linux release. The stager never changes the running system and
 refuses an existing output directory. Installed icons do not overwrite the
 system hicolor `index.theme`; the private bundle retains its own index.
+The stager collects every non-test sibling `.resources` bundle, including future
+production modules, while still requiring the core and Linux icon bundles.
+Linked bundles, linked entries and non-regular resource content are refused
+before creating output. Flatpak uses this same stager with `/app` as its prefix
+instead of maintaining a separate resource list.
 
 `python3 scripts/generate-desktop-icons.py --check` verifies exact exports;
 `python3 -B -m unittest discover -s scripts/tests -p test_desktop_icons.py`

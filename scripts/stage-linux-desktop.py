@@ -8,6 +8,20 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP_ID = "com.justspeaktoit.JustSpeakToIt"
 
 
+def resource_bundles(directory):
+    bundles = []
+    for bundle in sorted(pathlib.Path(directory).glob("*.resources")):
+        if bundle.name.removesuffix(".resources").endswith("Tests"):
+            continue
+        if bundle.is_symlink() or not bundle.is_dir():
+            raise ValueError(f"the production resource bundle must be a regular directory: {bundle.name}")
+        for entry in bundle.rglob("*"):
+            if entry.is_symlink() or not (entry.is_file() or entry.is_dir()):
+                raise ValueError(f"unsupported resource entry: {bundle.name}/{entry.relative_to(bundle)}")
+        bundles.append(bundle)
+    return bundles
+
+
 def stage(binary, output, prefix="/usr/local"):
     binary, output = pathlib.Path(binary), pathlib.Path(output)
     if not binary.is_file() or binary.is_symlink():
@@ -16,7 +30,8 @@ def stage(binary, output, prefix="/usr/local"):
         raise ValueError("the install prefix must be an absolute Linux path without controls")
     theme = binary.parent / "SpeakApp_SpeakLinux.resources/hicolor"
     core = binary.parent / "SpeakApp_SpeakCore.resources"
-    if not theme.is_dir() or not core.is_dir():
+    bundles = resource_bundles(binary.parent)
+    if core not in bundles or theme.parent not in bundles or not theme.is_dir():
         raise ValueError("the built executable's Linux icon and core resource bundles must be present")
     if output.exists():
         raise ValueError("the staging output must be a new directory")
@@ -25,7 +40,7 @@ def stage(binary, output, prefix="/usr/local"):
     destination.mkdir()
     shutil.copy2(binary, destination / "justspeaktoit")
     (destination / "justspeaktoit").chmod(0o755)
-    for bundle in (core, theme.parent):
+    for bundle in bundles:
         shutil.copytree(bundle, destination / bundle.name)
     # Keep the host's standard hicolor index; the private runtime bundle owns
     # its minimal index, not the installed system theme.

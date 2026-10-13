@@ -136,8 +136,9 @@ class DesktopIconTests(unittest.TestCase):
         self.assertIn("jsti::appIcon::refresh(window, HIWORD(wparam)", window)
         self.assertNotIn("IDI_APPLICATION", window)
         flatpak = (ROOT / f"packaging/linux/{ICONS.APP_ID}.yml").read_text()
-        self.assertIn("SpeakApp_SpeakLinux.resources /app/bin/", flatpak)
-        self.assertIn("Sources/SpeakLinux/Resources/hicolor/[0-9]* /app/share/icons/hicolor/", flatpak)
+        self.assertIn("python3 scripts/stage-linux-desktop.py --binary .build/release/SpeakLinux", flatpak)
+        self.assertIn("--output .build/linux-desktop-layout --prefix /app", flatpak)
+        self.assertIn("cp -r .build/linux-desktop-layout/. /app/", flatpak)
         linux = (ROOT / "Sources/CLinuxSupport/LinuxAppIcon.c").read_text()
         self.assertIn("gtk_icon_theme_add_search_path", linux)
         self.assertIn("gdk_cairo_set_source_pixbuf", linux)
@@ -185,10 +186,21 @@ class DesktopIconTests(unittest.TestCase):
             import shutil
             shutil.copytree(ROOT / "Sources/SpeakLinux/Resources/hicolor",
                             build / "SpeakApp_SpeakLinux.resources/hicolor")
+            future = build / "SpeakApp_FutureFeature.resources/nested"
+            future.mkdir(parents=True)
+            (future / "fixture.bin").write_bytes(b"future production resource")
+            tests = build / "SpeakApp_FutureFeatureTests.resources"
+            tests.mkdir()
+            (tests / "fixture.bin").write_bytes(b"test-only resource")
+            (build / "unrelated").mkdir()
             output = root / "layout"
             STAGE.stage(binary, output, "/opt/Just Speak to It")
             self.assertEqual((output / "bin/justspeaktoit").read_bytes(), binary.read_bytes())
             self.assertEqual((output / "bin/SpeakApp_SpeakCore.resources/fixture.json").read_bytes(), b"{}")
+            self.assertEqual((output / "bin/SpeakApp_FutureFeature.resources/nested/fixture.bin").read_bytes(),
+                             b"future production resource")
+            self.assertFalse((output / "bin/SpeakApp_FutureFeatureTests.resources").exists())
+            self.assertFalse((output / "bin/unrelated").exists())
             self.assertFalse((output / "share/icons/hicolor/index.theme").exists())
             for png in (output / "share/icons/hicolor").rglob("*.png"):
                 relative = png.relative_to(output / "share/icons")
@@ -208,6 +220,51 @@ class DesktopIconTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "resource bundles"):
                 STAGE.stage(binary, output)
             self.assertFalse(output.exists())
+
+    def test_linux_staging_still_requires_core_and_icon_bundles_with_future_resources(self):
+        for missing in ("core", "icons"):
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as scratch:
+                root = pathlib.Path(scratch)
+                binary = root / "SpeakLinux"
+                binary.write_bytes(b"synthetic executable")
+                (root / "SpeakApp_FutureFeature.resources").mkdir()
+                if missing != "core":
+                    (root / "SpeakApp_SpeakCore.resources").mkdir()
+                if missing != "icons":
+                    (root / "SpeakApp_SpeakLinux.resources/hicolor").mkdir(parents=True)
+                output = root / "layout"
+                with self.assertRaisesRegex(ValueError, "resource bundles"):
+                    STAGE.stage(binary, output)
+                self.assertFalse(output.exists())
+
+    def test_linux_staging_refuses_non_directory_resource_bundles_before_writing(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            root = pathlib.Path(scratch)
+            binary = root / "SpeakLinux"
+            binary.write_bytes(b"synthetic executable")
+            (root / "SpeakApp_Invalid.resources").write_bytes(b"not a directory")
+            output = root / "layout"
+            with self.assertRaisesRegex(ValueError, "resource bundle must be a regular directory"):
+                STAGE.stage(binary, output)
+            self.assertFalse(output.exists())
+
+    def test_linux_staging_refuses_linked_resource_bundles_and_entries_before_writing(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as scratch:
+            root = pathlib.Path(scratch)
+            binary = root / "SpeakLinux"
+            binary.write_bytes(b"synthetic executable")
+            bundle = root / "SpeakApp_FutureFeature.resources"
+            bundle.mkdir()
+            entry = bundle / "fixture.bin"
+            entry.write_bytes(b"fixture")
+            output = root / "layout"
+            for linked in (bundle, entry):
+                with self.subTest(linked=linked), mock.patch.object(
+                        pathlib.Path, "is_symlink", lambda path: path == linked):
+                    with self.assertRaisesRegex(ValueError, "resource"):
+                        STAGE.stage(binary, output)
+                self.assertFalse(output.exists())
 
     def test_check_mode_refuses_a_stale_export(self):
         expected = self.exports["Resources/Desktop/AppIcon.ico"]

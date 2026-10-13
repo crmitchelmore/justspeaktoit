@@ -9,13 +9,13 @@ public protocol PersonalLexiconStoring: Sendable {
 
 extension PersonalLexiconStore: PersonalLexiconStoring {}
 
-@MainActor
+@VocabularyActor
 public final class PersonalLexiconDomain {
   public private(set) var rules: [PersonalLexiconRule] = [] {
     didSet { regexCache.removeAll(); onChange?(rules) }
   }
-  public var onChange: (@MainActor ([PersonalLexiconRule]) -> Void)?
-  public var onError: (@MainActor (Error) -> Void)?
+  public var onChange: (@VocabularyActor ([PersonalLexiconRule]) -> Void)?
+  public var onError: (@VocabularyActor (Error) -> Void)?
   public private(set) var loadError: Error?
 
   private let store: PersonalLexiconStoring
@@ -27,7 +27,7 @@ public final class PersonalLexiconDomain {
 
   public init(store: PersonalLexiconStoring) {
     self.store = store
-    operationTail = Task { @MainActor [weak self] in
+    operationTail = Task { @VocabularyActor [weak self] in
       await self?.loadInitialRules()
     }
   }
@@ -121,7 +121,7 @@ public final class PersonalLexiconDomain {
     try await enqueue {
       guard destination >= 0, destination <= self.rules.count,
             offsets.allSatisfy({ self.rules.indices.contains($0) }) else {
-        throw PersonalLexiconServiceError.invalidOrder
+        throw PersonalLexiconOrderingError()
       }
       try await self.mutateAndPersist(normalise: false) { current in
         current.lexiconMove(from: offsets, to: destination)
@@ -197,14 +197,14 @@ public final class PersonalLexiconDomain {
   /// initial load) has finished. Operations therefore never observe a
   /// half-loaded store and an older load can never replace newer changes.
   private func enqueue<T: Sendable>(
-    _ operation: @escaping @MainActor () async throws -> T
+    _ operation: @escaping @VocabularyActor () async throws -> T
   ) async throws -> T {
     let previous = operationTail
-    let task = Task { @MainActor () throws -> T in
+    let task = Task { @VocabularyActor () throws -> T in
       await previous?.value
       return try await operation()
     }
-    operationTail = Task { @MainActor in
+    operationTail = Task { @VocabularyActor in
       _ = try? await task.value
     }
     return try await task.value
@@ -291,7 +291,6 @@ public enum PersonalLexiconServiceError: LocalizedError {
   case invalidCanonical
   case missingAlias
   case unknownRule
-  case invalidOrder
 
   public var errorDescription: String? {
     switch self {
@@ -301,8 +300,10 @@ public enum PersonalLexiconServiceError: LocalizedError {
       return "Provide at least one spoken variant."
     case .unknownRule:
       return "Rule does not exist."
-    case .invalidOrder:
-      return "The rule order is invalid. Reload the editor."
     }
   }
+}
+
+struct PersonalLexiconOrderingError: LocalizedError {
+  var errorDescription: String? { "The rule order is invalid. Reload the editor." }
 }

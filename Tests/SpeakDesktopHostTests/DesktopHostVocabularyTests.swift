@@ -5,6 +5,27 @@ import SpeakDesktop
 @testable import SpeakDesktopHost
 
 final class DesktopHostVocabularyTests: XCTestCase {
+    #if os(Windows) || os(Linux)
+    func testVocabularyLoadCompletesWhileNativeMainThreadIsBlocked() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let task = await MainActor.run {
+            let done = DispatchSemaphore(value: 0)
+            let load = Task.detached {
+                defer { done.signal() }
+                return try await controller.vocabularyPresentation(kind: 0)
+            }
+            // Native loops and their synchronous shutdown waits cannot service MainActor jobs.
+            XCTAssertEqual(done.wait(timeout: .now() + 3), .success)
+            return load
+        }
+        let presentation = try await task.value
+        XCTAssertFalse(presentation.isEmpty)
+        await controller.close()
+    }
+    #endif
+
     func testRecordingImportAndRetryKeepProviderTextAndCorrectionSnapshots() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

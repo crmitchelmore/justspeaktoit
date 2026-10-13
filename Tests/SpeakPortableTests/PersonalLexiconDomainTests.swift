@@ -2,7 +2,7 @@ import Foundation
 import XCTest
 @testable import SpeakCore
 
-@MainActor
+@VocabularyActor
 final class PersonalLexiconDomainTests: XCTestCase {
     private func rule(_ canonical: String, alias: String, activation: PersonalLexiconRule.Activation = .automatic)
         -> PersonalLexiconRule {

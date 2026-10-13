@@ -16,13 +16,13 @@ extension AutoCorrectionStore: AutoCorrectionStoring {}
 ///
 /// Platform wrappers (e.g. the macOS Accessibility-based tracker) observe
 /// edited text and feed it in via `recordEdit(original:edited:app:)`.
-@MainActor
+@VocabularyActor
 public final class AutoCorrectionDomain {
   public private(set) var candidates: [AutoCorrectionCandidate] = [] {
     didSet { onChange?(candidates) }
   }
-  public var onChange: (@MainActor ([AutoCorrectionCandidate]) -> Void)?
-  public var onError: (@MainActor (Error) -> Void)?
+  public var onChange: (@VocabularyActor ([AutoCorrectionCandidate]) -> Void)?
+  public var onError: (@VocabularyActor (Error) -> Void)?
   public private(set) var loadError: Error?
 
   private let store: AutoCorrectionStoring
@@ -49,7 +49,7 @@ public final class AutoCorrectionDomain {
     self.lexiconService = lexiconService
     self.promotionThreshold = promotionThreshold
 
-    operationTail = Task { @MainActor [weak self] in
+    operationTail = Task { @VocabularyActor [weak self] in
       await self?.loadCandidates()
     }
   }
@@ -171,15 +171,15 @@ public final class AutoCorrectionDomain {
   /// Run `operation` after every previously queued operation (including the
   /// initial load) has finished, serialising load/mutate/save.
   private func enqueue<T: Sendable>(
-    _ operation: @escaping @MainActor () async throws -> T
+    _ operation: @escaping @VocabularyActor () async throws -> T
   ) async throws -> T {
     let previous = operationTail
-    let task = Task { @MainActor () throws -> T in
+    let task = Task { @VocabularyActor () throws -> T in
       await previous?.value
       if let loadError = self.loadError { throw loadError }
       return try await operation()
     }
-    operationTail = Task { @MainActor in
+    operationTail = Task { @VocabularyActor in
       _ = try? await task.value
     }
     return try await task.value
@@ -271,7 +271,7 @@ public final class AutoCorrectionDomain {
 extension AutoCorrectionDomain {
     public func reloadAfterMigration() async {
         let previous = operationTail
-        let reload = Task { @MainActor in
+        let reload = Task { @VocabularyActor in
             await previous?.value
             await self.loadCandidates()
         }

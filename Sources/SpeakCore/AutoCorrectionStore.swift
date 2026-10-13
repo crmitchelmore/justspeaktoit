@@ -10,8 +10,7 @@ public actor AutoCorrectionStore {
   private let decoder: JSONDecoder
   private let fileManager: FileManager
 
-  public init(fileManager: FileManager = .default, baseDirectory: URL? = nil, appDirectory: URL? = nil) {
-    self.fileManager = fileManager
+  public init(fileManager: FileManager = .default, baseDirectory: URL? = nil) {
     let supportURL: URL
     if let baseDirectory {
       supportURL = baseDirectory
@@ -19,10 +18,15 @@ public actor AutoCorrectionStore {
       supportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
         ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
     }
-    let appFolder = appDirectory
-      ?? supportURL.appendingPathComponent(ReleaseTrain.current.supportDirectory, isDirectory: true)
-    let autoCorrectionFolder = appFolder.appendingPathComponent("AutoCorrections", isDirectory: true)
+    self.init(
+      fileManager: fileManager,
+      appDirectory: supportURL.appendingPathComponent(ReleaseTrain.current.supportDirectory, isDirectory: true)
+    )
+  }
 
+  public init(fileManager: FileManager = .default, appDirectory: URL) {
+    self.fileManager = fileManager
+    let autoCorrectionFolder = appDirectory.appendingPathComponent("AutoCorrections", isDirectory: true)
     fileURL = autoCorrectionFolder.appendingPathComponent("candidates.json")
 
     encoder = JSONEncoder()

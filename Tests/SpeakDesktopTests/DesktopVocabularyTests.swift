@@ -3,7 +3,7 @@ import XCTest
 import SpeakCore
 @testable import SpeakDesktop
 
-@MainActor
+@VocabularyActor
 final class DesktopVocabularyTests: XCTestCase {
     func testNativeEventContractDurableCRUDOrderPreviewAndSettings() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -66,13 +66,13 @@ final class DesktopVocabularyTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("pronunciation.json")), corrupt)
     }
 
-    func testEscapingPreservesUserTextAndRejectsMalformedEvents() throws {
+    nonisolated func testEscapingPreservesUserTextAndRejectsMalformedEvents() throws {
         let values = ["%25", "tab\tvalue", "line\nvalue\r", "caf\u{00E9}", ""]
         XCTAssertEqual(try DesktopVocabularyWire.decode(DesktopVocabularyWire.encode(values)), values)
         XCTAssertThrowsError(try DesktopVocabularyWire.decode("%not-escaped"))
     }
 
-    func testProviderControlsArePreservedWhileAddingCanonicalKeywords() {
+    nonisolated func testProviderControlsArePreservedWhileAddingCanonicalKeywords() {
         let configured = LiveClientOptions(
             keywords: ["Configured"], assemblyAIKeyterms: ["AssemblyTerm"], modulate: .init(emotionSignal: true),
             postStopFinalizeBudget: 12, stopGracePeriod: 0.25

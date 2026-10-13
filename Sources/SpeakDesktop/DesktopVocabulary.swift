@@ -43,7 +43,7 @@ public enum DesktopVocabularyError: LocalizedError, Equatable {
 }
 
 /// One shared coordinator behind both native editors. No OS-wide text observation is performed.
-@MainActor
+@VocabularyActor
 public final class DesktopVocabulary {
     public let lexicon: PersonalLexiconDomain
     public let candidates: AutoCorrectionDomain
@@ -78,13 +78,13 @@ public final class DesktopVocabulary {
 
     public func reload() async throws {
         let previous = operationTail
-        let reload = Task { @MainActor in
+        let reload = Task { @VocabularyActor in
             await previous?.value
             await self.lexicon.refresh()
             await self.candidates.reloadAfterMigration()
             try await self.load()
         }
-        operationTail = Task { @MainActor in _ = try? await reload.value }
+        operationTail = Task { @VocabularyActor in _ = try? await reload.value }
         try await reload.value
     }
 
@@ -151,11 +151,11 @@ public final class DesktopVocabulary {
     /// An event is copied at the native callback, then awaited in event order.
     public func perform(kind: Int, payload: String) async throws -> String {
         let previous = operationTail
-        let operation = Task { @MainActor in
+        let operation = Task { @VocabularyActor in
             await previous?.value
             return try await self.performImmediately(kind: kind, payload: payload)
         }
-        operationTail = Task { @MainActor in _ = try? await operation.value }
+        operationTail = Task { @VocabularyActor in _ = try? await operation.value }
         return try await operation.value
     }
 

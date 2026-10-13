@@ -766,7 +766,7 @@ void layoutHistory(HWND window, const RECT &content) {
     place(window, variantLabelID, box(left, y + scale(window, 7), scale(window, 128), scale(window, 20)));
     place(window, variantID, RECT{left + scale(window, 132), y, right, y + scale(window, 200)});
     y += row + scale(window, 10);
-    const int actionsHeight = 4 * row + 3 * scale(window, 8) + scale(window, 26);
+    const int actionsHeight = 3 * row + 2 * scale(window, 8) + scale(window, 26);
     placeField(window, transcriptID, RECT{left, y, right, detail.bottom - inset - actionsHeight - scale(window, 10)}, true);
     int actions = detail.bottom - inset - actionsHeight;
     place(window, playbackLabelID, box(left, actions, scale(window, 80), scale(window, 20)));
@@ -785,10 +785,9 @@ void layoutHistory(HWND window, const RECT &content) {
     place(window, readAloudID, cell(0, actions, 2));
     place(window, retryID, cell(1, actions, 2));
     actions += row + scale(window, 8);
-    place(window, exportID, cell(0, actions, 2));
-    place(window, openAudioID, cell(1, actions, 2));
-    actions += row + scale(window, 8);
-    place(window, historyCorrectionsID, cell(0, actions, 1));
+    place(window, exportID, cell(0, actions, 3));
+    place(window, openAudioID, cell(1, actions, 3));
+    place(window, historyCorrectionsID, cell(2, actions, 3));
 }
 
 // A settings card: `rows` controls, top to bottom, with a description.
@@ -1486,7 +1485,7 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"&Export text", BS_PUSHBUTTON | WS_TABSTOP, exportID) &&
         add(L"BUTTON", L"&Open audio", BS_PUSHBUTTON | WS_TABSTOP, openAudioID) &&
         add(L"BUTTON", L"Rea&d aloud", BS_PUSHBUTTON | WS_TABSTOP, readAloudID) &&
-        add(L"BUTTON", L"Correction &results", BS_PUSHBUTTON | WS_TABSTOP, historyCorrectionsID) &&
+        add(L"BUTTON", L"Corrections...", BS_PUSHBUTTON | WS_TABSTOP, historyCorrectionsID) &&
         // The label carries the mnemonic and precedes Play/Pause, so Alt+B
         // and assistive technology reach the playback controls.
         add(L"STATIC", L"Play&back", 0, playbackLabelID) &&
@@ -3057,7 +3056,8 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             MapWindowPoints(nullptr, window, reinterpret_cast<POINT *>(&bounds), 2);
             if (bounds.left < 0 || bounds.top < 0 || bounds.right > client.right || bounds.bottom > client.bottom ||
                 bounds.right <= bounds.left || bounds.bottom <= bounds.top) {
-                failure = "A native control falls outside the minimum desktop window bounds.";
+                failure = "Native control " + std::to_string(GetDlgCtrlID(control))
+                    + " falls outside the minimum desktop window bounds.";
                 return false;
             }
         }

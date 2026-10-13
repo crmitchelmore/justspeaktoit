@@ -6,8 +6,7 @@ public actor PersonalLexiconStore {
   private let decoder: JSONDecoder
   private let fileManager: FileManager
 
-  public init(fileManager: FileManager = .default, baseDirectory: URL? = nil, appDirectory: URL? = nil) {
-    self.fileManager = fileManager
+  public init(fileManager: FileManager = .default, baseDirectory: URL? = nil) {
     let supportURL: URL
     if let baseDirectory {
       supportURL = baseDirectory
@@ -15,10 +14,15 @@ public actor PersonalLexiconStore {
       supportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
         ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
     }
-    let appFolder = appDirectory
-      ?? supportURL.appendingPathComponent(ReleaseTrain.current.supportDirectory, isDirectory: true)
-    let lexiconFolder = appFolder.appendingPathComponent("PersonalLexicon", isDirectory: true)
+    self.init(
+      fileManager: fileManager,
+      appDirectory: supportURL.appendingPathComponent(ReleaseTrain.current.supportDirectory, isDirectory: true)
+    )
+  }
 
+  public init(fileManager: FileManager = .default, appDirectory: URL) {
+    self.fileManager = fileManager
+    let lexiconFolder = appDirectory.appendingPathComponent("PersonalLexicon", isDirectory: true)
     fileURL = lexiconFolder.appendingPathComponent("lexicon.json")
 
     encoder = JSONEncoder()

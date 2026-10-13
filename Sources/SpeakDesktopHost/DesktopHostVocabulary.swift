@@ -6,7 +6,7 @@ extension DesktopHostController {
     package func vocabularyStore() async throws -> DesktopVocabulary {
         if let task = vocabularyLoad { return try await task.value }
         let directory = directory
-        let task = Task { @MainActor in
+        let task = Task { @VocabularyActor in
             let vocabulary = DesktopVocabulary(directory: directory)
             try await vocabulary.load()
             return vocabulary

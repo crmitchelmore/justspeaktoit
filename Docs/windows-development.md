@@ -490,6 +490,9 @@ and manual rules remain suggestions rather than direct replacements. Explicit
 rule order now survives save/reload on Apple as well as desktop, instead of
 being alphabetised on reload. Mutations serialize with initial loading and
 roll back after persistence failure; corrupt files fail closed.
+`VocabularyActor` preserves MainActor isolation on Apple and uses the cooperative
+executor on Windows/Linux, whose native UI loops own and block the main thread.
+Native UI updates still marshal through the existing C adapter queues.
 
 Recording, imported audio, retry and successful live completion apply these
 rules before optional post-processing. History retains the provider transcript,

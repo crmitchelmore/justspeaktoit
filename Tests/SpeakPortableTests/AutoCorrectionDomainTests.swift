@@ -2,7 +2,7 @@ import Foundation
 import XCTest
 @testable import SpeakCore
 
-@MainActor
+@VocabularyActor
 final class AutoCorrectionDomainTests: XCTestCase {
     func testCandidatePersistenceRollbackAndPromotionRetryDoesNotDuplicateRules() async throws {
         let lexicon = PersonalLexiconDomain(store: LexiconTestStore([]))

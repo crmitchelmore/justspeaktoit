@@ -908,6 +908,11 @@ static GtkWidget *build_general(void) {
     return page;
 }
 
+static void open_comparison(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    if (ui.state == JSTI_STATE_IDLE) jsti_comparison_open(ui.window);
+}
+
 static GtkWidget *build_transcription(void) {
     GtkWidget *column, *page = jsti_page_new(&column);
     gtk_box_append(GTK_BOX(column), settings_hero(
@@ -951,6 +956,11 @@ static GtkWidget *build_transcription(void) {
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(models), catalog);
     gtk_box_append(GTK_BOX(column), models);
     gtk_box_append(GTK_BOX(column), jsti_local_models_group_new());
+    GtkWidget *comparison = group("Compare Models");
+    GtkWidget *compare = gtk_button_new_with_label("Compare Models…");
+    g_signal_connect(compare, "clicked", G_CALLBACK(open_comparison), NULL);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(comparison), compare);
+    gtk_box_append(GTK_BOX(column), comparison);
     return page;
 }
 
@@ -2241,6 +2251,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
         return fail(error, capacity, "clearing History left record actions enabled");
     }
     if (jsti_hud_self_test(error, capacity) != 0) return -1;
+    if (jsti_comparison_self_test(ui.window, error, capacity) != 0) return -1;
     return jsti_tray_self_test(error, capacity);
 }
 
@@ -2248,7 +2259,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
 
 /* Renders `widget` at its allocated size into a PNG, over the window's
  * background colour when `opaque`. */
-static int32_t save_widget_png(GtkWidget *widget, const char *path, gboolean opaque) {
+int32_t jsti_widget_save_snapshot(GtkWidget *widget, const char *path, gboolean opaque) {
     int width = gtk_widget_get_width(widget), height = gtk_widget_get_height(widget);
     if (width <= 0 || height <= 0) return -1;
     GtkSnapshot *snapshot = gtk_snapshot_new();
@@ -2331,16 +2342,16 @@ static gboolean tour_capture(gpointer data) {
     if (tour->step == TOUR_HUD_RECORDING || tour->step == TOUR_HUD_COMPLETED) {
         /* The HUD is its own window; X11 only. */
         GtkWidget *card = jsti_hud_card();
-        if (card != NULL && save_widget_png(card, path, TRUE) != 0) g_printerr("The HUD %s could not be saved.\n", file);
+        if (card != NULL && jsti_widget_save_snapshot(card, path, TRUE) != 0) g_printerr("The HUD %s could not be saved.\n", file);
         g_free(path);
         g_free(file);
         tour->step++;
         if (tour->step < TOUR_DONE) {
             tour_show(tour);
         } else {
+            jsti_comparison_screenshot_tour(ui.window, tour->directory);
             g_free(tour->directory);
             g_free(tour);
-            gtk_window_close(ui.window);
         }
         return G_SOURCE_REMOVE;
     }
@@ -2355,7 +2366,7 @@ static gboolean tour_capture(gpointer data) {
     if (column != NULL) {
         file = g_strdup_printf("%02d-%s-full.png", tour->step + 1, tour_name(tour->step));
         path = g_build_filename(tour->directory, file, NULL);
-        if (save_widget_png(column, path, TRUE) != 0) g_printerr("The full page %s could not be saved.\n", file);
+        if (jsti_widget_save_snapshot(column, path, TRUE) != 0) g_printerr("The full page %s could not be saved.\n", file);
         g_free(path);
         g_free(file);
     }
@@ -2363,9 +2374,9 @@ static gboolean tour_capture(gpointer data) {
     if (tour->step < TOUR_DONE) {
         tour_show(tour);
     } else {
+        jsti_comparison_screenshot_tour(ui.window, tour->directory);
         g_free(tour->directory);
         g_free(tour);
-        gtk_window_close(ui.window);
     }
     return G_SOURCE_REMOVE;
 }

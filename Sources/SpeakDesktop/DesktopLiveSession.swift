@@ -29,6 +29,8 @@ public final class DesktopLiveSession: @unchecked Sendable {
     private var accumulator: TranscriptAccumulator
     private var text = ""
     private var error: String?
+    private var firstTranscript: ContinuousClock.Instant?
+    public var firstTranscriptAt: ContinuousClock.Instant? { stateLock.withLock { firstTranscript } }
     private var finishingTask: Task<Snapshot, Never>?
     /// Confined to calls. Clients may also close themselves during finalisation.
     private var stopped = false
@@ -138,6 +140,9 @@ public final class DesktopLiveSession: @unchecked Sendable {
     private func receive(_ transcript: String, isFinal: Bool) {
         stateLock.withLock {
             guard phase == .recording || phase == .finishing else { return }
+            if firstTranscript == nil, !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                firstTranscript = .now
+            }
             let next: String
             if isFinal {
                 next = accumulator.append(final: transcript)

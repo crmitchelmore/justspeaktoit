@@ -106,6 +106,16 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     /// At most one audible native History playback; its status presenter is
     /// installed by preparePlayback once this actor exists.
     package let playback = Platform.makePlayback()
+    package var comparisons: DesktopComparisonStore?
+    package var comparisonTask: Task<Void, Never>?
+    var comparisonUpdates: Task<Void, Never>?
+    package var comparisonCapture: DesktopHostComparisonCapture?
+    package var comparisonLive: DesktopComparisonLive?
+    package var comparisonSelection: UUID?
+    package var comparisonGeneration = UUID()
+    package var comparisonLanguage: String?
+    package var comparisonPending: ModelComparisonRound?
+    package var comparisonNotice = "Select models and an input to begin."
 
     package init(
         directory: URL, effects: any DesktopHostEffects<Platform>, shutdownGrace: Duration = DesktopHostShutdown.grace

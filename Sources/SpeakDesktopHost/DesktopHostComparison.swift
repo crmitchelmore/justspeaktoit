@@ -1,0 +1,399 @@
+import Foundation
+import SpeakCore
+import SpeakDesktop
+
+package struct DesktopComparisonPresentation: Sendable {
+    package let models: String
+    package let rounds: String
+    package let detail: String
+    package let busy: Bool
+    package let recording: Bool
+    package let selected: String
+    package let judgeable: Bool
+}
+
+package struct DesktopHostComparisonCapture {
+    let capture: any DesktopRecordingCapture
+    let file: PCMRecordingFile
+}
+
+struct DesktopComparisonConfiguration {
+    let selected: [DesktopComparisonCandidate]
+    let keys: [String: String]
+    let language: String?
+    let endpoint: String
+    let deviceID: String
+    let generation: UUID
+}
+
+final class DesktopHostComparisonClosingCapture: @unchecked Sendable {
+    let active: DesktopHostComparisonCapture
+    init(_ active: DesktopHostComparisonCapture) { self.active = active }
+    func finish() async throws -> TimeInterval {
+        try await Task.detached {
+            try DesktopHostRecordingStop.stop(self.active.capture, file: self.active.file)
+        }.value
+    }
+    func stop() {
+        do { _ = try DesktopHostRecordingStop.stop(active.capture, file: active.file) } catch {
+            FileHandle.standardError.write(Data("Comparison capture cleanup: \(error.localizedDescription)\n".utf8))
+        }
+    }
+}
+
+extension DesktopHostController {
+    package func openComparison() async {
+        do {
+            if comparisons == nil {
+                let root = directory.appendingPathComponent("Comparisons")
+                try Platform.preparePrivateDirectory(root)
+                comparisons = try DesktopComparisonStore(directory: root)
+            }
+            await refreshComparison()
+        } catch {
+            comparisonStatus("Could not open comparisons: \(error.localizedDescription)")
+            Platform.comparisonPresentation(.init(
+                models: "", rounds: "", detail: comparisonNotice, busy: false, recording: false,
+                selected: "", judgeable: false
+            ))
+        }
+    }
+
+    package func selectComparison(_ identifier: String) async {
+        comparisonSelection = UUID(uuidString: identifier)
+        await refreshComparison()
+    }
+
+    package func comparisonEvent(_ event: Int32, text: String, index: Int32) async {
+        switch event {
+        case 100: await openComparison()
+        case 101: await selectComparison(text)
+        case 102, 103: await startComparison(text, live: event == 103)
+        case 104: await stopComparison()
+        case 105: await cancelComparison()
+        case 106: await judgeComparison(text)
+        case 107: await exportComparisons(path: text, markdown: index == 1)
+        case 108: await playComparison(text)
+        case 109: playback.stop(announcing: true)
+        default: break
+        }
+        await refreshComparison()
+    }
+
+    private func candidates(_ identifiers: [String], live: Bool) throws -> [DesktopComparisonCandidate] {
+        let available = DesktopHostModels.visible
+        let result = try identifiers.map { identifier in
+            guard let option = available.first(where: { $0.id == identifier }),
+                  DesktopHostModels.isLive(identifier) == live else {
+                throw DesktopHostError(message: "A selected model is no longer available for this comparison mode.")
+            }
+            if DesktopHostModels.isLocal(identifier),
+               let reason = Platform.localReadiness(identifier, controller: self) {
+                throw DesktopHostError(message: reason)
+            }
+            return DesktopComparisonCandidate(
+                modelID: identifier, displayName: option.displayName,
+                providerName: DesktopHostModels.provider(for: identifier)?.displayName ?? "On-device"
+            )
+        }
+        try DesktopComparisonRunner.validate(result)
+        return result
+    }
+
+    private func startComparison(_ payload: String, live: Bool) async {
+        guard !closed, !busy, recording == nil, comparisonCapture == nil, comparisonTask == nil else {
+            comparisonStatus("Finish or cancel the current recording or comparison first.")
+            return
+        }
+        busy = true
+        activeOperations += 1
+        var transferred = false
+        defer { if !transferred { busy = false; finishOperation() } }
+        do {
+            await openComparison()
+            guard comparisons != nil else { return }
+            let lines = payload.components(separatedBy: "\n")
+            guard lines.count >= 2 else { throw DesktopHostError(message: "Invalid comparison request.") }
+            let language = lines[0].isEmpty ? nil : lines[0]
+            let selected = try candidates(lines[1].components(separatedBy: "\t"), live: live)
+            let keys = try Dictionary(uniqueKeysWithValues: selected.map {
+                ($0.modelID, try transcriptionKey(for: $0.modelID))
+            })
+            cancelOutput()
+            try await playback.stopAndWait()
+            guard !closed else { return }
+            let generation = UUID()
+            comparisonGeneration = generation
+            comparisonLanguage = language
+            let paths = Array(lines.dropFirst(2))
+            let endpoint = azureResourceEndpoint()
+            let microphone = settings.microphoneDeviceID ?? ""
+            let configuration = DesktopComparisonConfiguration(
+                selected: selected, keys: keys, language: language, endpoint: endpoint,
+                deviceID: microphone, generation: generation
+            )
+            launchComparison(configuration, live: live, paths: paths)
+            transferred = true
+            await refreshComparison()
+        } catch { comparisonStatus("Comparison could not start: \(error.localizedDescription)") }
+    }
+
+    private func launchComparison(_ configuration: DesktopComparisonConfiguration, live: Bool, paths: [String]) {
+        comparisonTask = Task {
+            do {
+                if live {
+                    try await self.startComparisonCapture(configuration)
+                } else {
+                    try await self.runComparisonFiles(paths, configuration: configuration)
+                }
+            } catch {
+                if self.comparisonGeneration == configuration.generation {
+                    self.comparisonStatus("Comparison stopped: \(error.localizedDescription)")
+                    self.comparisonLive?.cancel()
+                    self.comparisonLive = nil
+                }
+            }
+            if self.comparisonGeneration == configuration.generation {
+                self.comparisonTask = nil
+                if self.comparisonCapture == nil { self.busy = false }
+                self.finishOperation()
+                await self.refreshComparison()
+            }
+        }
+    }
+
+    private func startComparisonCapture(_ configuration: DesktopComparisonConfiguration) async throws {
+        let generation = configuration.generation
+        let lanes = try configuration.selected.map { candidate in
+            guard let route = LiveTranscriptionRouting.route(for: candidate.modelID),
+                  let client = effects.makeLiveClient(
+                    model: candidate.modelID, key: configuration.keys[candidate.modelID] ?? "",
+                    language: configuration.language, azureEndpoint: configuration.endpoint
+                  ) else { throw DesktopTranscriptionError.unsupportedModel }
+            return DesktopComparisonLive.Lane(candidate: candidate, client: client, sampleRate: route.sampleRate)
+        }
+
+        let fanOut = try DesktopComparisonLive(lanes: lanes)
+        comparisonLive = fanOut
+        comparisonStatus("Preparing comparison models… Microphone is not recording yet.")
+        await refreshComparison()
+        try await fanOut.prepare()
+        try Task.checkCancellation()
+        guard !closed, comparisonGeneration == generation, let comparisons else { throw CancellationError() }
+        let samples = comparisons.directory.appendingPathComponent("Samples")
+        try Platform.preparePrivateDirectory(samples)
+        let roundID = UUID()
+        let file = try PCMRecordingFile(
+            url: samples.appendingPathComponent(roundID.uuidString + ".wav"), sampleRate: fanOut.captureSampleRate
+        )
+        let pending = interruptedRound(
+            id: roundID, sample: .init(name: file.url.lastPathComponent, contentHash: nil, durationSeconds: 0),
+            mode: .streaming, selected: configuration.selected
+        )
+        try await comparisons.upsert(pending)
+        comparisonPending = pending
+        let context = DesktopCaptureContext(file: file, comparison: fanOut) { [weak self] message in
+            Task { await self?.comparisonCaptureFailed(message, generation: generation) }
+        }
+        let capture = try effects.makeCapture(
+            context: context, deviceID: configuration.deviceID,
+            sampleRate: fanOut.captureSampleRate, frameMilliseconds: 100
+        )
+        do { try capture.start() } catch { capture.destroy(); throw error }
+        comparisonCapture = DesktopHostComparisonCapture(capture: capture, file: file)
+        comparisonSelection = pending.id
+        comparisonUpdates = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+                guard let self, await self.isComparisonCapturing(generation) else { return }
+                await self.refreshComparison()
+            }
+        }
+        comparisonStatus("Comparing one microphone capture. Stop to judge the raw results.")
+    }
+
+    private func isComparisonCapturing(_ generation: UUID) -> Bool {
+        !closed && comparisonGeneration == generation && comparisonCapture != nil
+    }
+
+    package func transcribeComparison(
+        _ request: DesktopHostTranscriptionRequest, endpoint: String
+    ) async throws -> TranscriptionResult {
+        try Task.checkCancellation()
+        try checkUploadSize(request.audio, model: request.model)
+        if DesktopHostModels.isLocal(request.model) {
+            let held = beginLocalUse(request.model)
+            defer { endLocalUse(held) }
+            return try await Platform.transcribeLocally(
+                request.audio, model: request.model, language: request.language, controller: self
+            )
+        }
+        return try await DesktopTranscription.transcribe(
+            audioURL: request.audio, model: request.model, apiKey: request.key,
+            duration: request.duration, language: request.language,
+            azureEndpoint: endpoint, staging: uploadStaging
+        )
+    }
+
+    private func comparisonCaptureFailed(_ message: String, generation: UUID) async {
+        guard comparisonGeneration == generation else { return }
+        await cancelComparison()
+        guard comparisonGeneration == generation else { return }
+        comparisonStatus("Comparison microphone failed: \(message). Audio and recovery results were retained.")
+        await refreshComparison()
+    }
+
+    package func stopComparison() async {
+        guard let active = comparisonCapture, let fanOut = comparisonLive, let comparisons else { return }
+        comparisonCapture = nil
+        comparisonUpdates?.cancel()
+        comparisonUpdates = nil
+        activeOperations += 1
+        defer { finishOperation() }
+        do {
+            let duration = try await DesktopHostComparisonClosingCapture(active).finish()
+            let entries = await fanOut.finish()
+            guard let digest = Platform.comparisonDigest else {
+                throw DesktopHostError(message: "Comparison SHA-256 is unavailable.")
+            }
+            let sample = ModelComparisonSample(
+                name: active.file.url.lastPathComponent, contentHash: try digest.sha256(ofFileAt: active.file.url),
+                durationSeconds: duration
+            )
+            guard let pending = comparisonPending else {
+                throw DesktopHostError(message: "The saved microphone comparison snapshot is missing.")
+            }
+            let round = try DesktopComparisonRunner.completing(pending, entries: entries, sample: sample)
+            try await comparisons.upsert(round)
+            comparisonSelection = round.id
+            comparisonStatus("Comparison saved. Rank every blind result to reveal models.")
+        } catch {
+            fanOut.cancel()
+            comparisonStatus("Comparison recording retained: \(error.localizedDescription)")
+        }
+        busy = false
+        comparisonLive = nil
+        comparisonPending = nil
+        await refreshComparison()
+    }
+
+    func interruptedRound(
+        id: UUID, sample: ModelComparisonSample, mode: ModelComparisonInputMode,
+        selected: [DesktopComparisonCandidate]
+    ) -> ModelComparisonRound {
+        let entries = selected.map {
+            var entry = $0.entry()
+            entry.errorDescription = "Comparison interrupted before completion. Audio retained locally."
+            return entry
+        }
+        return ModelComparisonRound(
+            id: id, inputMode: mode, sample: sample, language: comparisonLanguage,
+            originPlatform: Platform.displayName.lowercased(), entries: entries,
+            blindOrder: ModelComparisonRound.makeBlindOrder(for: entries)
+        )
+    }
+
+    private func playComparison(_ identifier: String) async {
+        guard !closed, !busy, recording == nil, let id = UUID(uuidString: identifier), let comparisons else { return }
+        do {
+            let rounds = await comparisons.rounds()
+            guard let round = rounds.first(where: { $0.id == id }) else {
+                throw DesktopHostError(message: "This comparison is no longer available.")
+            }
+            let file = comparisons.directory.appendingPathComponent("Samples")
+                .appendingPathComponent(id.uuidString + ".wav")
+            try playback.play(recordID: id, path: file.path, knownDuration: round.sample.durationSeconds)
+        } catch { comparisonStatus("Comparison playback failed: \(error.localizedDescription)") }
+    }
+
+    package func cancelComparison() async {
+        playback.stop(announcing: false)
+        comparisonTask?.cancel()
+        comparisonLive?.cancel()
+        if comparisonCapture != nil { await stopComparison() }
+    }
+
+    private func judgeComparison(_ payload: String) async {
+        let lines = payload.components(separatedBy: "\n")
+        do {
+            guard !busy, !closed else {
+                throw DesktopHostError(message: "Finish or cancel the comparison before judging its results.")
+            }
+            guard lines.count == 2, let id = UUID(uuidString: lines[0]), let comparisons else {
+                throw DesktopHostError(message: "Select a saved comparison to judge.")
+            }
+            let values = lines[1].components(separatedBy: ",")
+            let ranks = values.compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+            guard ranks.count == values.count else { throw DesktopHostError(message: "Enter comma-separated ranks.") }
+            try await comparisons.judge(id: id, ranksInBlindOrder: ranks)
+            comparisonSelection = id
+            await refreshComparison()
+        } catch { comparisonStatus("Ranking was not saved: \(error.localizedDescription)") }
+    }
+
+    private func exportComparisons(path: String, markdown: Bool) async {
+        do {
+            guard let comparisons else { throw DesktopHostError(message: "No comparisons are open.") }
+            let rounds = await comparisons.rounds()
+            let data = try markdown ? Data(ModelComparisonExport.markdown(rounds: rounds).utf8)
+                : ModelComparisonExport.json(rounds: rounds)
+            try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+            comparisonStatus("Comparison export saved. It includes model identities and transcripts, never audio.")
+        } catch { comparisonStatus("Comparison export failed: \(error.localizedDescription)") }
+    }
+
+    package func refreshComparison() async {
+        guard !closed, let comparisons else { return }
+        let rounds = await comparisons.rounds()
+        var round = rounds.first { $0.id == comparisonSelection } ?? rounds.first
+        if comparisonCapture != nil, let pending = comparisonPending, let live = comparisonLive {
+            do {
+                round = try DesktopComparisonRunner.completing(
+                    pending, entries: live.snapshot(), sample: pending.sample
+                )
+            } catch { comparisonStatus("Comparison preview failed: \(error.localizedDescription)") }
+        }
+        comparisonSelection = round?.id
+        playback.stop(unless: round?.id ?? UUID())
+        let models = DesktopHostModels.visible.filter {
+            !DesktopHostModels.isLocal($0.id) || Platform.localReadiness($0.id, controller: self) == nil
+        }.map {
+            "\($0.id)\t\(DesktopHostModels.uiText($0.displayName))\t\(DesktopHostModels.isLive($0.id) ? 1 : 0)"
+        }.joined(separator: "\n")
+        let rows = rounds.map { "\($0.id.uuidString)\t\(DesktopHostModels.uiText($0.sample.name))" }
+            .joined(separator: "\n")
+        var detail = comparisonNotice + "\n\n"
+            + "Choose two to eight models. File/Batch uses copied samples; Live shares one microphone.\n"
+            + "Raw transcripts only. No insertion, post-processing or History changes.\n"
+        if let round {
+            detail += "\n\(round.sample.name) - \(round.inputMode.displayName)\n"
+            for entry in round.entriesInBlindOrder {
+                let label = round.blindLabel(for: entry.id)
+                let rank = round.rank(for: entry.id) ?? 0
+                let reveal = round.isJudged ? " - \(entry.modelDisplayName) (rank \(rank))" : ""
+                // Provider errors may name the model, so blind failures must not expose their raw messages.
+                detail += "\nResult \(label)\(reveal)\n"
+                if entry.didFail {
+                    detail += (round.isJudged ? entry.errorDescription ?? "Failed" : "Model failed.") + "\n"
+                }
+                detail += entry.transcript + "\n"
+                if round.isJudged {
+                    if let partial = entry.timeToFirstPartialMs { detail += "First partial: \(partial) ms. " }
+                    if let final = entry.timeToFinalMs { detail += "Finalization: \(final) ms. " }
+                    if let cost = entry.estimatedCostUSD { detail += "Estimated cost: USD \(cost)." }
+                    detail += "\n"
+                }
+            }
+        }
+        detail += "\n" + ModelComparisonExport.scoreboardMarkdown(rounds: rounds)
+        Platform.comparisonPresentation(.init(
+            models: models, rounds: rows, detail: detail, busy: busy, recording: comparisonCapture != nil,
+            selected: round?.id.uuidString ?? "", judgeable: round != nil && round?.isJudged == false && !busy
+        ))
+    }
+
+    func comparisonStatus(_ message: String) {
+        comparisonNotice = message
+        update(message)
+    }
+}

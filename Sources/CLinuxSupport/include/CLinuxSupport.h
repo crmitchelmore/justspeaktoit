@@ -4,6 +4,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+int32_t jsti_comparison_present(const char *models, const char *rounds, const char *detail,
+                               const char *selected, int32_t busy, int32_t recording, int32_t judgeable);
+
 #ifdef __cplusplus
 extern "C" {
 #endif

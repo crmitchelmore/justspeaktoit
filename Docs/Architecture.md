@@ -202,6 +202,19 @@ The existing Compare Models feature is another capture consumer. `CompareModelsC
 through per-candidate `ComparisonLiveLane` instances, retains the common PCM capture, and stores blinded rounds in
 `ComparisonRoundStore`. File comparison has its own runner, and `MacComparisonSyncAdapter` bridges rounds to `SpeakSync`.
 
+Windows/Linux comparison is another isolated capture consumer:
+`SpeakDesktop/DesktopComparisonRunner` runs immutable file snapshots through
+injected raw providers; `DesktopComparisonLive` gates one native capture on
+synchronized shared-client readiness and fans out bounded common PCM with a
+single rate projection. `DesktopComparisonStore` persists the canonical
+SpeakCore revision/round shape and derives its scoreboard; completion preserves
+the initially persisted blind identities/order. `SpeakDesktopHost/DesktopHostComparison`
+owns admission, cancellation, capture, raw provider execution, judging and
+exports without using normal History, post-processing or insertion.
+`WindowsComparison.cpp` and `LinuxComparison.c` own their native editors and
+file/save pickers, connected by small host adapters. Comparison sync is not yet
+connected on these hosts; the existing Mac sync adapter is unchanged.
+
 ## iOS runtime
 
 [SpeakiOSApp.swift](../SpeakiOSApp/SpeakiOSApp.swift) and `SpeakiOSAppDelegate` are the app/launch roots. The delegate

@@ -51,6 +51,39 @@ then the dashboard and History in dark mode and the dashboard while recording.
 `scripts/linux-desktop-checks.sh` runs it when `JSTI_UI_SCREENSHOT_DIR` is set,
 and CI uploads the pictures as `linux-ui-screenshots`.
 
+## Model comparison
+
+**Transcription > Compare Models** opens a native GTK/libadwaita editor with
+wrapped, accessibly named model checkboxes, File/Batch and Live input modes,
+language hint, saved rounds, raw blind results, ranking/reveal, scoreboard,
+sample playback and JSON/Markdown exports. File selection accepts one to 32
+local samples; save dialogs use the desktop's native file chooser. Picker errors
+appear in the comparison editor instead of being hidden behind its modal window.
+Closing a picker/editor invalidates that picker request, so a late selection
+cannot start a replacement editor's run.
+
+Windows and Linux share `DesktopComparisonRunner`, `DesktopComparisonLive`,
+`DesktopComparisonStore` and `DesktopHostComparison`: all file snapshots are
+prepared before provider work, one native microphone capture fans out to the
+qualified live routes, and raw results never reach insertion, post-processing,
+dictation settings or normal History. Failed candidates remain independently
+judgeable. Complete distinct ranks 1...N reveal models; canonical persisted
+rounds determine standings and exports. See the
+[Windows comparison workflow](windows-development.md#model-comparison) for the
+shared 120-second file, 12-second readiness and 30-second finalization budgets.
+
+`Comparisons/rounds.json` and app-owned `Comparisons/Samples/` live in the private
+data directory. Interrupted rounds retain their audio; interrupted live metadata
+can remain unknown until normal finalization. Comparison sync, audio retention/
+deletion controls and automatic interrupted-run retry remain unwired.
+The GTK window self-test checks wrapped labels, model and language payloads,
+ranking, playback and busy/recording controls with synthetic fixtures only.
+The screenshot tour adds `comparison-blind-light.png` and
+`comparison-revealed-dark.png` without changing page ordinals. Native execution
+at the final head, physical PulseAudio/PipeWire devices, screen-reader/keyboard
+acceptance, small-screen behavior and live-provider receipts are separate gates;
+portable tests and syntax/type checks do not establish those gates.
+
 ## Window
 
 The window follows the Mac app's layout and look. A sidebar lists **Speak**

@@ -106,6 +106,14 @@ extension DesktopHostController {
         }
         closed = true
         let deadline = ContinuousClock.now.advanced(by: shutdownGrace)
+        comparisonTask?.cancel()
+        comparisonUpdates?.cancel()
+        comparisonLive?.cancel()
+        if let active = comparisonCapture {
+            comparisonCapture = nil
+            let captured = DesktopHostComparisonClosingCapture(active)
+            await DesktopHostShutdown.wait(until: deadline) { captured.stop() }
+        }
         modelDiscoveryTask?.cancel()
         cancelOutput()
         cancellationRequested = true

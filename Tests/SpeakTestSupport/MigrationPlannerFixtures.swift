@@ -1,5 +1,8 @@
 import Foundation
-import SpeakCore
+
+private enum MigrationPlannerFixtureError: Error {
+    case missingDigest
+}
 
 public enum MigrationPlannerFixtures {
     public static let changedID = "463AC06A-C058-6ADE-2D86-9B62E63BBF4F"
@@ -22,8 +25,9 @@ public enum MigrationPlannerFixtures {
                 "ab0f00a2ae336a56026b30a493e819e825c1fd86d1d9a3bcd69b2aa356e3656e"
         ]
         guard let input = String(data: data, encoding: .utf8), let result = vectors[input] else {
-            throw DataMigrationError.invalid("Missing deterministic migration digest fixture.")
+            throw MigrationPlannerFixtureError.missingDigest
         }
+
         return result
     }
 }

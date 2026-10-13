@@ -7,6 +7,21 @@ import XCTest
 
 @MainActor
 final class DataMigrationPlannerInteropTests: XCTestCase {
+    func testCanonicalPreferenceKeys_PreserveMacAliasAndPreviouslyRejectedBooleanSettings() throws {
+        XCTAssertEqual(AppSettings.DefaultsKey.allCases, ApplicationPreferenceKey.allCases)
+        let constructor: (String) -> AppSettings.DefaultsKey? = AppSettings.DefaultsKey.init(rawValue:)
+        XCTAssertEqual(constructor("appearance"), ApplicationPreferenceKey.appearance)
+        XCTAssertNil(constructor("speakDeviceId"))
+        XCTAssertEqual(MigrationCatalog.settingKeys, DataMigrationPreferenceCatalog.keys(in: .settings))
+        XCTAssertEqual(MigrationCatalog.vocabularyKeys, DataMigrationPreferenceCatalog.keys(in: .vocabulary))
+        for key in ["paidAccessRoutingEnabled", "simpleModelChoices", "pasteRemoteTranscriptsAtCursor"] {
+            let valid = MigrationRecord(id: key, kind: "default", value: AnyCodable(.bool(true)))
+            XCTAssertNoThrow(try MigrationCatalog.validate(valid, category: .settings))
+            let invalid = MigrationRecord(id: key, kind: "default", value: AnyCodable(.string("true")))
+            XCTAssertThrowsError(try MigrationCatalog.validate(invalid, category: .settings))
+        }
+    }
+
     func testSharedPlanner_UsesExistingMacVariantIdentifiersAndFailsUnencodableValues() throws {
         let original = MigrationRecord(id: "session", kind: "history", value: AnyCodable(.string("Original")))
         let changed = MigrationRecord(

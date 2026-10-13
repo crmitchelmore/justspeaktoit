@@ -40,38 +40,14 @@ enum MigrationCatalog {
         .init(kind: "llmModel", category: .models, defaultsKey: nil,
               path: "LocalModels/LocalPostProcessing/imported-hugging-face-gguf-models.json")
     ]
-    static let vocabularyKeys: Set<String> = [
-        "transcriptionKeywords", "assemblyAIKeyterms", "recoveredTranscriptionKeywords",
-        "assemblyAIIgnoredPronunciationTerms", "ttsPronunciationDictionary"
-    ]
-    static let connectionKeys: Set<String> = ["enableSendToMac", "enableAutomationServer"]
-    static let credentialDefaults: Set<String> = ["speakTransportPairingCode", "speakTransportPairedDevices"]
+    static let vocabularyKeys = DataMigrationPreferenceCatalog.keys(in: .vocabulary)
+    static let connectionKeys = DataMigrationPreferenceCatalog.keys(in: .connections)
+    static let credentialDefaults = DataMigrationPreferenceCatalog.keys(in: .credentials)
     static var settingKeys: Set<String> {
-        Set(AppSettings.DefaultsKey.allCases.map(\.rawValue))
-            .subtracting([
-                "trackedKeyIdentifiers",
-                "transcriptionKeywordsLastReconciled",
-                "ttsPronunciationDictionary"
-            ])
-            .subtracting(vocabularyKeys).subtracting(connectionKeys)
-            .union(["customShortcutBindings", "rememberedOnDeviceLiveTranscriptionModel",
-                    "rememberedRemoteLiveTranscriptionModel", "hasCompletedOnboarding",
-                    "hasAnsweredAnalyticsConsent"])
+        DataMigrationPreferenceCatalog.keys(in: .settings)
     }
     static func category(for key: String) -> MigrationCategory? {
-        if settingKeys.contains(key) {
-            return .settings
-        }
-        if vocabularyKeys.contains(key) {
-            return .vocabulary
-        }
-        if connectionKeys.contains(key) {
-            return .connections
-        }
-        if credentialDefaults.contains(key) {
-            return .credentials
-        }
-        return nil
+        DataMigrationPreferenceCatalog.category(for: key)
     }
     static func defaultsRecord(key: String, value: Any) throws -> MigrationRecord {
         let payload: AnyCodable

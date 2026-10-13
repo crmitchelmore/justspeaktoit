@@ -559,6 +559,19 @@ planner now throws; the import controller surfaces that error before recovery
 creation or data application. A shared plan is not a native preview UI, category
 validation, credential installer or durable rollback transaction.
 
+`ApplicationPreferenceKey` is the canonical 91-key persisted application
+inventory; `AppSettings.DefaultsKey` remains a Mac alias. The exhaustive
+`DataMigrationPreferenceCatalog` assigns each portable key its archive value
+type and category, excludes key-tracking/reconciliation markers, and includes
+the existing consent, remembered-selection and credential-default auxiliaries.
+Its numeric bounds and strict Boolean/string collection rules are shared;
+platform shortcut/JSON validation is explicitly delegated, not silently skipped.
+This also fixes Mac migration rejecting valid Boolean values for
+`paidAccessRoutingEnabled`, `simpleModelChoices` and
+`pasteRemoteTranscriptsAtCursor`. Archive acceptance metadata is not host
+execution support: imported directories, credentials, hotkeys and unsupported
+preferences still need their native validators and application adapters.
+
 `DataMigrationArchivePolicy` also centralizes the existing Mac archive path,
 entry/total/JSON-size, duplicate-path, manifest and staging-capacity rules.
 Mac ZIP reads use this policy; portable tests exercise exact limits without

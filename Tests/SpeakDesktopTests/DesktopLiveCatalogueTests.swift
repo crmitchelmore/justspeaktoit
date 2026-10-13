@@ -12,7 +12,7 @@ final class DesktopLiveCatalogueTests: XCTestCase {
         let canonical = ModelCatalog.liveTranscription.filter {
             guard let route = LiveTranscriptionRouting.route(for: $0.id) else { return false }
             return [.deepgram, .assemblyai, .openai, .speechmatics, .soniox, .elevenlabs, .mistral, .gladia, .cartesia,
-                    .revai, .azure].contains(route.provider) || route.modelID == XAISpeechToText.liveCatalogID
+                    .revai, .azure, .reson8].contains(route.provider) || route.modelID == XAISpeechToText.liveCatalogID
         }
         XCTAssertFalse(canonical.isEmpty)
         XCTAssertTrue(canonical.contains { $0.id == XAISpeechToText.liveCatalogID })
@@ -38,6 +38,7 @@ final class DesktopLiveCatalogueTests: XCTestCase {
             if route.provider == .gladia { XCTAssertTrue(client is GladiaLiveClient) }
             if route.provider == .cartesia { XCTAssertTrue(client is CartesiaLiveClient) }
             if route.provider == .revai { XCTAssertTrue(client is RevAILiveClient) }
+            if route.provider == .reson8 { XCTAssertTrue(client is Reson8LiveClient) }
             if route.provider == .azure { XCTAssertTrue(client is AzureVoiceLiveClient) }
             if route.provider == .openai {
                 XCTAssertTrue(client is OpenAIRealtimeLiveClient)

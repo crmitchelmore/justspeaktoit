@@ -42,6 +42,7 @@ final class DesktopRecordingTests: XCTestCase {
             .union([CartesiaBatchClient.catalogID, GladiaBatchClient.catalogID])
             .union(SpeechmaticsBatchClient.catalogIDs)
             .union([XAISpeechToText.batchCatalogID])
+            .union(FileSpeechProvider.batchOptions.map(\.id))
             .union(GroqBatchClient().supportedModels().map(\.id))
             .union(DeepgramBatchClient().supportedModels().map(\.id))
             .union(ElevenLabsBatchClient().supportedModels().map(\.id))

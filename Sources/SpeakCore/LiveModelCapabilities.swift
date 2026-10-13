@@ -82,6 +82,9 @@ extension ModelCatalog {
     /// silently rewrites the user's speed mode to `.instant` whenever that
     /// model is selected. `LiveModelCapabilitiesTests` asserts that parity.
     static let liveCapabilityRegistry: [String: LiveModelCapabilities] = [
+        AlibabaSpeechModels.funLive: LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish], postStopFinalizeBudget: 5
+        ),
         AzureTranscriptionModels.speechLive: LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish], postStopFinalizeBudget: 5
         ),

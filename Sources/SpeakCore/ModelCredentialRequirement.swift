@@ -175,6 +175,7 @@ public enum ModelCredentialResolver {
     }
 
     private static let providerDisplayNames = [
+        "alibaba": "Alibaba Model Studio",
         "assemblyai": "AssemblyAI",
         "cartesia": "Cartesia",
         "deepgram": "Deepgram",
@@ -202,6 +203,7 @@ public enum ModelCredentialResolver {
     )
 
     private static let directBatchProviderIdentifiers: Set<String> = [
+        "alibaba",
         "cartesia",
         "assemblyai",
         "deepgram",

@@ -29,8 +29,10 @@ final class DesktopOpenRouterProjectionTests: XCTestCase {
             XCTAssertTrue(DesktopTranscription.batchModels.contains { $0.id == identifier }, identifier)
             XCTAssertFalse(DesktopTranscription.requiresCanonicalPCM16WAV(model: identifier), identifier)
         }
-        // Every remote entry of the canonical batch catalogue now has a desktop route.
-        let remote = ModelCatalog.batchTranscription.filter { !$0.id.hasPrefix("apple/") }
+        // Alibaba stays hidden until native region/workspace configuration UI is qualified.
+        let remote = ModelCatalog.batchTranscription.filter {
+            !$0.id.hasPrefix("apple/") && !$0.id.hasPrefix("alibaba/")
+        }
         XCTAssertEqual(DesktopTranscription.batchModels, remote)
     }
 

@@ -53,6 +53,8 @@ public enum LiveTranscriptionClientFactory {
         azureEndpoint: String = ""
     ) -> StreamingTranscriptionClient? {
         switch route.provider {
+        case .alibaba:
+            return AlibabaFunASRLiveClient(credentials: apiKey)
         case .azure:
             return AzureVoiceLiveClient(credentials: apiKey, endpoint: azureEndpoint,
                                         model: route.apiModelName, language: language,

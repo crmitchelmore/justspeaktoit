@@ -1,4 +1,5 @@
 #if os(iOS)
+import Security
 import SpeakCore
 import SwiftUI
 import XCTest
@@ -43,7 +44,7 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
         // (SpeechTranscriber needs Apple Intelligence; DictationTranscriber
         // needs OS 26), so the expected provider set depends on the runtime.
         var expectedProviders: Set<String> = [
-            "azure", "cartesia", "gladia", "google", "meta", "openai", "xai"
+            "alibaba", "azure", "cartesia", "gladia", "google", "meta", "openai", "xai"
         ]
         if AppleLocalModels.supportsSpeechTranscriber || AppleLocalModels.supportsDictationTranscriber {
             expectedProviders.insert("apple")
@@ -116,10 +117,48 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
                 .apiKey(identifier: AzureSpeechConfiguration.credentialIdentifier, providerName: "Azure Speech")
             )
         }
+
         XCTAssertEqual(
             SettingsView.batchAPIKeyPrompt(for: AzureTranscriptionModels.mai2),
             "Add your Azure Speech API key below to use this model."
         )
+    }
+
+    func testAlibabaBatchAndLive_UseTheirOwnRouteAndBoundCredential() async throws {
+        let service = "test.alibaba.\(UUID().uuidString)"
+        let suite = "test.alibaba.defaults.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            SecItemDelete([
+                kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service
+            ] as CFDictionary)
+        }
+        let storage = SecureStorage(
+            configuration: .init(service: service, accessibility: .afterFirstUnlock),
+            permissionsChecker: AlibabaTestPermissions()
+        )
+        let settings = AppSettings(defaults: defaults, loadsSecureStorage: false, credentialStorage: storage)
+        settings.openRouterAPIKey = "synthetic-openrouter"
+        XCTAssertEqual(settings.batchAPIKey(for: AlibabaSpeechModels.qwen38), "")
+        let credential = try AlibabaSpeechConfiguration(
+            region: .singapore, workspace: "llm-example", apiKey: "synthetic"
+        ).encodedCredentials()
+        settings.alibabaAPIKey = credential
+        for id in AlibabaSpeechModels.batchIDs {
+            XCTAssertTrue(AppSettings.supportedBatchModels.contains { $0.id == id })
+            XCTAssertEqual(IOSBatchTranscriptionRoute.route(for: " \(id) "), .alibaba)
+            XCTAssertEqual(settings.batchAPIKey(for: id), credential)
+        }
+        XCTAssertTrue(AppSettings.supportedLiveModels.contains { $0.id == AlibabaSpeechModels.funLive })
+        XCTAssertEqual(APIKeysView.entries(for: settings).first { $0.id == "alibaba" }?.isStored, true)
+        XCTAssertEqual(IOSBatchTranscriptionRoute.route(for: "alibaba/unknown"), .alibaba)
+        await settings.awaitPendingSecretWrites()
+        let restored = try await storage.secret(identifier: AppSettings.alibabaKeyID)
+        XCTAssertEqual(restored, credential)
+        let reloaded = await settings.reloadSyncedAPIKeys()
+        XCTAssertTrue(reloaded)
+        XCTAssertEqual(settings.alibabaAPIKey, credential)
     }
 
     /// Gladia batch reuses the `gladia.apiKey` this app already stores for live
@@ -235,5 +274,9 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
             Set(SonioxTTSCatalog.voices.map(\.providerVoiceID))
         )
     }
+}
+
+private actor AlibabaTestPermissions: KeychainPermissionsChecking {
+    func ensureKeychainAccess(forService _: String) async -> Bool { true }
 }
 #endif

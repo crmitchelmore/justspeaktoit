@@ -13,8 +13,8 @@ struct IOSBatchTranscriptionClient {
 
     // A flat routing table: one `case` per upload path, each delegating to a
     // named method. Its length grows with the provider list rather than with
-    // any logic, so it passes the default limit.
-    // swiftlint:disable:next function_body_length
+    // any provider-specific logic.
+    // swiftlint:disable:next function_body_length cyclomatic_complexity
     func transcribeFile(at url: URL, model: String, language: String?) async throws -> TranscriptionResult {
         // Credential resolution uses the trimmed ID. Use the same ID for both
         // route selection and the provider request, including file-only callers.
@@ -54,6 +54,10 @@ struct IOSBatchTranscriptionClient {
                 at: url, credentials: try requireAPIKey(),
                 endpoint: UserDefaults.standard.string(forKey: AzureSpeechConfiguration.endpointDefaultsKey) ?? "",
                 model: model, language: language, keywords: keywords
+            )
+        case .alibaba:
+            return try await AlibabaAppleBatchTranscription.transcribeFile(
+                at: url, credentials: try requireAPIKey(), model: model, language: language, session: session
             )
         case .metaMuse:
             return try await MetaMuseBatchClient(session: session).transcribeFile(

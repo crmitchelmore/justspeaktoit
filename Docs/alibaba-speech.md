@@ -46,6 +46,10 @@ Beijing preference. New-key form preferences are only input drafts: changing
 them does not change a saved credential. Save a replacement key to change
 workspaces or regions.
 
+Large QR transfers use a bounded authenticated compressed envelope and require
+updated software on both devices. See [configuration transfer](configuration-transfer.md)
+for compatibility, the physical QR limit and explicit oversized-transfer errors.
+
 Only `https://{workspace}.{region}.maas.aliyuncs.com` and its corresponding `wss`
 origin are constructed. Workspace IDs must be a single DNS label; URLs, paths,
 ports, userinfo, `trial` and host substitution are rejected. HTTPS redirects

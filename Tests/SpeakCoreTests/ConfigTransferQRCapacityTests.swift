@@ -10,14 +10,10 @@ final class ConfigTransferQRCapacityTests: XCTestCase {
         var secrets = Dictionary(uniqueKeysWithValues: identifiers.sorted().enumerated().map {
             ($1, syntheticKey(seed: $0, length: 90))
         })
-        let credential = [
-            "apiKey": syntheticKey(seed: 100, length: 90),
-            "region": "singapore",
-            "workspace": "123456789012345678901234"
-        ]
-        secrets["alibaba.apiKey"] = try XCTUnwrap(String(
-            bytes: try JSONEncoder().encode(credential), encoding: .utf8
-        ))
+        let configuration = try AlibabaSpeechConfiguration(
+            region: .singapore, workspace: "llm-12345678901234567890", apiKey: syntheticKey(seed: 100, length: 90)
+        )
+        secrets["alibaba.apiKey"] = try configuration.encodedCredentials()
         let manager = ConfigTransferManager(pbkdf2Iterations: 1_000)
         let transfer = try manager.makeTransfer(
             secrets: secrets,
@@ -26,7 +22,12 @@ final class ConfigTransferQRCapacityTests: XCTestCase {
 
         XCTAssertLessThanOrEqual(transfer.payload.utf8.count, 2_953)
         XCTAssertNotNil(manager.makeQRCodeImage(payload: transfer.payload))
-        XCTAssertEqual(try manager.decodePayload(transfer.payload, code: transfer.code).secrets, secrets)
+        let restored = try manager.decodePayload(transfer.payload, code: transfer.code).secrets
+        XCTAssertEqual(restored, secrets)
+        XCTAssertEqual(
+            try AlibabaSpeechConfiguration(credentials: XCTUnwrap(restored["alibaba.apiKey"])),
+            configuration
+        )
     }
 
     func testEnvelopeWithWorstCaseBase64SlashesStillFitsQRCode() throws {

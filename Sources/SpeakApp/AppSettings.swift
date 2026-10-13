@@ -1315,7 +1315,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     showCompactHUD =
       defaults.object(forKey: DefaultsKey.showCompactHUD.rawValue) as? Bool ?? false
     shortenErrorDisplay =
-      defaults.object(forKey: DefaultsKey.shortenErrorDisplay.rawValue) as? Bool ?? false
+      defaults.object(forKey: DefaultsKey.shortenErrorDisplay.rawValue) as? Bool ?? SpeechDefaults.shortErrors
     showSidebarShortcutHints =
       defaults.object(forKey: DefaultsKey.showSidebarShortcutHints.rawValue) as? Bool ?? true
     appVisibility =

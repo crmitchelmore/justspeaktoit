@@ -2774,12 +2774,13 @@ int jsti_window_set_insights(const JSTIInsights *all, const JSTIInsights *visibl
     } catch (const std::exception &) { return -1; }
 }
 
-int jsti_window_set_hud(int phase, const char *headline, const char *subheadline, const char *live_text) {
+int jsti_window_set_hud(int phase, const char *headline, const char *subheadline, const char *live_text,
+                        int display_milliseconds) {
     try {
         std::wstring title, detail, live;
         if (!jsti::wide(headline ? headline : "", title) || !jsti::wide(subheadline ? subheadline : "", detail) ||
             !jsti::wide(live_text ? live_text : "", live) ||
-            !jsti::hud::stage(phase, std::move(title), std::move(detail), std::move(live))) {
+            !jsti::hud::stage(phase, std::move(title), std::move(detail), std::move(live), display_milliseconds)) {
             return -1;
         }
         std::lock_guard<std::mutex> lock(state.mutex);

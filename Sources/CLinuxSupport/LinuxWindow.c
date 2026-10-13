@@ -1749,6 +1749,7 @@ int32_t jsti_window_set_login_item(int32_t state, const char *detail) {
 
 typedef struct HUD {
     gint32 phase;
+    gint32 display_milliseconds;
     gchar *headline, *subheadline, *live;
 } HUD;
 
@@ -1762,17 +1763,20 @@ static void hud_free(gpointer pointer) {
 
 static void hud_apply(gpointer pointer) {
     HUD *state = pointer;
-    jsti_hud_show(state->phase, state->headline, state->subheadline, state->live);
+    jsti_hud_show_duration(state->phase, state->headline, state->subheadline, state->live,
+                            state->display_milliseconds);
 }
 
-int32_t jsti_window_set_hud(int32_t phase, const char *headline, const char *subheadline, const char *live_text) {
-    if (phase < 0 || phase > 6) return -1;
+int32_t jsti_window_set_hud(int32_t phase, const char *headline, const char *subheadline, const char *live_text,
+                            int32_t display_milliseconds) {
+    if (phase < 0 || phase > 6 || display_milliseconds < 0 || display_milliseconds > 60000) return -1;
     const char *texts[] = { headline, subheadline, live_text };
     for (size_t index = 0; index < G_N_ELEMENTS(texts); ++index) {
         if (texts[index] != NULL && !g_utf8_validate(texts[index], -1, NULL)) return -1;
     }
     HUD *state = g_new0(HUD, 1);
     state->phase = phase;
+    state->display_milliseconds = display_milliseconds;
     state->headline = g_strdup(headline != NULL ? headline : "");
     state->subheadline = g_strdup(subheadline != NULL ? subheadline : "");
     state->live = g_strdup(live_text != NULL ? live_text : "");
@@ -2134,7 +2138,8 @@ static int32_t configuration_test_callback(int32_t action, const char *const *va
 }
 
 static gboolean configuration_self_test(void) {
-    if (configuration.rows == NULL || configuration.rows->len < 10) return FALSE;
+    if (configuration.rows == NULL || configuration.rows->len < 10 ||
+        configuration.rows->len != configuration.booleans->len) return FALSE;
     JSTIConfigurationCallback callback = configuration.callback;
     void *context = configuration.context;
     AdwEntryRow *language = ADW_ENTRY_ROW(g_ptr_array_index(configuration.rows, 0));

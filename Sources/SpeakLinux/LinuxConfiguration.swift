@@ -25,8 +25,20 @@ extension LinuxWindow {
         }
         guard result == 0 else { throw DesktopConfigurationError.invalidField("Native preferences") }
     }
+
+    static func performConfigurationAction(_ action: Int32, values: [String], holder: LinuxEventContext) async throws {
+        switch action {
+        case 0: try await holder.controller.saveConfiguration(values)
+        case 1: try await holder.controller.importConfiguration(path: values[0])
+        case 2: try await holder.controller.exportConfiguration(path: values[0])
+        default: throw DesktopConfigurationError.invalidField("Configuration action")
+        }
+        try await configureConfiguration(holder)
+    }
 }
 
+// The native callback's parameter list is fixed by the C ABI.
+// swiftlint:disable:next function_parameter_count
 func linuxConfigurationEvent(
     _ action: Int32, _ entries: UnsafePointer<UnsafePointer<CChar>?>?, _ count: Int,
     _ context: UnsafeMutableRawPointer?, _ errorBuffer: UnsafeMutablePointer<CChar>?, _ capacity: Int
@@ -35,23 +47,18 @@ func linuxConfigurationEvent(
     let holder = Unmanaged<LinuxEventContext>.fromOpaque(context).takeUnretainedValue()
     let values = UnsafeBufferPointer(start: entries, count: count).map { $0.map(String.init(cString:)) ?? "" }
     do {
-        if action == 0 { _ = try DesktopConfiguration().applying(values) }
-        else if !(action == 1 || action == 2) || values.count != 1 {
+        if action == 0 { _ = try DesktopConfiguration().applying(values) } else if
+            !(action == 1 || action == 2) || values.count != 1 {
             throw DesktopConfigurationError.invalidField("Configuration action")
         }
         holder.enqueueSettings {
             do {
-                switch action {
-                case 0: try await holder.controller.saveConfiguration(values)
-                case 1: try await holder.controller.importConfiguration(path: values[0])
-                case 2: try await holder.controller.exportConfiguration(path: values[0])
-                default: return
-                }
-                try await LinuxWindow.configureConfiguration(holder)
+                try await LinuxWindow.performConfigurationAction(action, values: values, holder: holder)
             } catch {
                 LinuxHostPlatform.update(error.localizedDescription)
-                do { try await LinuxWindow.configureConfiguration(holder) }
-                catch { LinuxHostPlatform.update(error.localizedDescription) }
+                do { try await LinuxWindow.configureConfiguration(holder) } catch {
+                    LinuxHostPlatform.update(error.localizedDescription)
+                }
             }
         }
         return 0

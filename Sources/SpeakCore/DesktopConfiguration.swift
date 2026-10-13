@@ -7,6 +7,10 @@ public enum SpeechDefaults {
     public static let liveStopGracePeriod = 0.0
     public static let showHUD = true
     public static let liveTranscriptHUD = true
+    public static let shortErrors = false
+    public static let successHUDDuration = 2.4
+    public static let failureHUDDuration = 6.0
+    public static let shortFailureHUDDuration = 3.6
 }
 
 /// Portable preferences use the Mac's keys. Unknown entries survive edits and
@@ -52,7 +56,9 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
               group: "General", kind: .boolean, defaultValue: AnyCodable(.bool(SpeechDefaults.showHUD))),
         .init(key: "showLiveTranscriptInHUD", title: "Show live transcript in HUD",
               group: "General", kind: .boolean,
-              defaultValue: AnyCodable(.bool(SpeechDefaults.liveTranscriptHUD)))
+              defaultValue: AnyCodable(.bool(SpeechDefaults.liveTranscriptHUD))),
+        .init(key: "shortenErrorDisplay", title: "Shorten HUD error display (3.6 seconds instead of 6)",
+              group: "General", kind: .boolean, defaultValue: AnyCodable(.bool(SpeechDefaults.shortErrors)))
     ]
 
     public private(set) var values: [String: AnyCodable]

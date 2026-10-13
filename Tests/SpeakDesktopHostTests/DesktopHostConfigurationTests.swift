@@ -73,12 +73,14 @@ final class DesktopHostConfigurationTests: XCTestCase {
         let before = try await controller.configuration()
         let file = directory.appendingPathComponent("invalid.json")
         try Data(#"{"version":1,"preferences":{"holdThreshold":-1}}"#.utf8).write(to: file)
-        do { try await controller.importConfiguration(path: file.path); XCTFail("Invalid import accepted") }
-        catch { XCTAssertTrue(error.localizedDescription.contains("Hold threshold")) }
+        do { try await controller.importConfiguration(path: file.path); XCTFail("Invalid import accepted") } catch {
+            XCTAssertTrue(error.localizedDescription.contains("Hold threshold"))
+        }
         var entries = before.entries
         entries[4] = "2"
-        do { try await controller.saveConfiguration(entries); XCTFail("Invalid temperature accepted") }
-        catch { XCTAssertTrue(error.localizedDescription.contains("Temperature")) }
+        do { try await controller.saveConfiguration(entries); XCTFail("Invalid temperature accepted") } catch {
+            XCTAssertTrue(error.localizedDescription.contains("Temperature"))
+        }
         let after = try await controller.configuration()
         XCTAssertEqual(after, before)
     }
@@ -109,12 +111,14 @@ final class DesktopHostConfigurationTests: XCTestCase {
         effects.refusesWrites = true
         var entries = before.entries
         entries[0] = "de_DE"
-        do { try await controller.saveConfiguration(entries); XCTFail("Failed save accepted") }
-        catch { XCTAssertEqual((error as NSError).code, CocoaError.fileWriteOutOfSpace.rawValue) }
+        do { try await controller.saveConfiguration(entries); XCTFail("Failed save accepted") } catch {
+            XCTAssertEqual((error as NSError).code, CocoaError.fileWriteOutOfSpace.rawValue)
+        }
         let file = directory.appendingPathComponent("import.json")
         try Data(#"{"version":1,"preferences":{"preferredLocale":"fr_FR"}}"#.utf8).write(to: file)
-        do { try await controller.importConfiguration(path: file.path); XCTFail("Failed import accepted") }
-        catch { XCTAssertEqual((error as NSError).code, CocoaError.fileWriteOutOfSpace.rawValue) }
+        do { try await controller.importConfiguration(path: file.path); XCTFail("Failed import accepted") } catch {
+            XCTAssertEqual((error as NSError).code, CocoaError.fileWriteOutOfSpace.rawValue)
+        }
         let after = try await controller.configuration()
         XCTAssertEqual(after.entries, before.entries)
         XCTAssertEqual(try Data(contentsOf: settingsURL), saved)
@@ -125,11 +129,13 @@ final class DesktopHostConfigurationTests: XCTestCase {
         let before = try await controller.configuration()
         let file = directory.appendingPathComponent("invalid.json")
         try Data(repeating: 32, count: 1_048_577).write(to: file)
-        do { try await controller.importConfiguration(path: file.path); XCTFail("Oversized import accepted") }
-        catch { XCTAssertTrue(error.localizedDescription.contains("1 MB")) }
+        do { try await controller.importConfiguration(path: file.path); XCTFail("Oversized import accepted") } catch {
+            XCTAssertTrue(error.localizedDescription.contains("1 MB"))
+        }
         try Data(#"{"version":2,"preferences":{}}"#.utf8).write(to: file)
-        do { try await controller.importConfiguration(path: file.path); XCTFail("Unsupported version accepted") }
-        catch { XCTAssertTrue(error.localizedDescription.contains("version")) }
+        do { try await controller.importConfiguration(path: file.path); XCTFail("Unsupported version accepted") } catch {
+            XCTAssertTrue(error.localizedDescription.contains("version"))
+        }
         let after = try await controller.configuration()
         XCTAssertEqual(after, before)
     }
@@ -146,6 +152,30 @@ final class DesktopHostConfigurationTests: XCTestCase {
         XCTAssertEqual(saved.customPrompt, "Custom")
     }
 
+    func testShortenedErrorDurationPreservesLiveTextPolicyAndSuccessTiming() async throws {
+        var entries = try await controller.configuration().entries
+        entries[9] = "0"
+        entries[10] = "1"
+        try await controller.saveConfiguration(entries)
+        let id = UUID()
+        await controller.beginHUD(id, .recording(profile: nil, liveText: "Synthetic speech"))
+        XCTAssertEqual(FakeLog.shared.huds.last?.liveText, "")
+        await controller.finishHUD(id, .failure("Synthetic error"))
+        XCTAssertEqual(FakeLog.shared.huds.last?.displayDuration, 3.6)
+        let replacement = UUID()
+        await controller.beginHUD(replacement, .recording(profile: nil))
+        await controller.finishHUD(id, .failure("Old error"))
+        XCTAssertEqual(FakeLog.shared.huds.last?.phase, .recording)
+        XCTAssertNil(FakeLog.shared.huds.last?.displayDuration)
+        await controller.finishHUD(replacement, .success("Completed"))
+        XCTAssertEqual(FakeLog.shared.huds.last?.displayDuration, 2.4)
+        entries[10] = "0"
+        try await controller.saveConfiguration(entries)
+        await controller.beginHUD(id, .recording(profile: nil))
+        await controller.finishHUD(id, .failure("Synthetic error"))
+        XCTAssertEqual(FakeLog.shared.huds.last?.displayDuration, 6.0)
+    }
+
     func testOversizedExportDoesNotReplaceExistingFile() async throws {
         let file = directory.appendingPathComponent("large.json")
         let preferences = try DesktopConfiguration(values: [
@@ -158,8 +188,9 @@ final class DesktopHostConfigurationTests: XCTestCase {
         try await controller.saveConfiguration(entries)
         let original = Data("Existing export".utf8)
         try original.write(to: file)
-        do { try await controller.exportConfiguration(path: file.path); XCTFail("Oversized export accepted") }
-        catch { XCTAssertTrue(error.localizedDescription.contains("1 MB")) }
+        do { try await controller.exportConfiguration(path: file.path); XCTFail("Oversized export accepted") } catch {
+            XCTAssertTrue(error.localizedDescription.contains("1 MB"))
+        }
         XCTAssertEqual(try Data(contentsOf: file), original)
     }
 }

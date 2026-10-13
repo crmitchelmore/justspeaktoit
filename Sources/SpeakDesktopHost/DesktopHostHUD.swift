@@ -48,10 +48,10 @@ extension DesktopHostController {
     private func hudPresentation(_ state: DesktopHUDState) -> DesktopHUDState {
         guard let configuration = settings.configuration else { return state }
         guard configuration.enabled("showHUD") else { return .hidden }
-        guard !configuration.enabled("showLiveTranscriptInHUD") else { return state }
-        return DesktopHUDState(
-            phase: state.phase, headline: state.headline, subheadline: state.subheadline, liveText: ""
-        )
+        var presentation = state
+        presentation.shortenErrorDisplay = configuration.enabled("shortenErrorDisplay")
+        if !configuration.enabled("showLiveTranscriptInHUD") { presentation.liveText = "" }
+        return presentation
     }
 
     /// The HUD's last word on a presented record: delivering while its output

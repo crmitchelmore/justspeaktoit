@@ -69,6 +69,7 @@ static struct {
     gint64 phase_started;
     double level;
     guint tick, hide;
+    guint64 generation;
     GtkCssProvider *css;
     gchar *headline, *subheadline, *live_text;
 } hud;
@@ -121,6 +122,7 @@ static gboolean hud_tick(gpointer data) {
 }
 
 static void hud_stop_timers(void) {
+    ++hud.generation;
     if (hud.tick != 0) g_source_remove(hud.tick);
     if (hud.hide != 0) g_source_remove(hud.hide);
     hud.tick = hud.hide = 0;
@@ -134,7 +136,9 @@ static void hud_hide(void) {
 }
 
 static gboolean hud_hide_later(gpointer data) {
-    (void)data;
+    const guint64 generation = *(const guint64 *)data;
+    if (generation != hud.generation || (hud.phase != HUD_SUCCESS && hud.phase != HUD_FAILURE))
+        return G_SOURCE_REMOVE;
     hud.hide = 0;
     hud_hide();
     return G_SOURCE_REMOVE;
@@ -319,6 +323,11 @@ static void hud_notify(int phase, const char *headline, const char *subheadline)
 }
 
 void jsti_hud_show(int phase, const char *headline, const char *subheadline, const char *live) {
+    jsti_hud_show_duration(phase, headline, subheadline, live, 0);
+}
+
+void jsti_hud_show_duration(int phase, const char *headline, const char *subheadline, const char *live,
+                            int display_milliseconds) {
     if (phase < HUD_HIDDEN || phase >= HUD_PHASES) return;
     if (phase == HUD_HIDDEN) { hud_hide(); return; }
     if (!hud_is_x11()) { hud_notify(phase, headline, subheadline); return; }
@@ -353,7 +362,13 @@ void jsti_hud_show(int phase, const char *headline, const char *subheadline, con
         g_free(announcement);
     }
     hud_stop_timers();
-    if (finished) hud.hide = g_timeout_add(phase == HUD_SUCCESS ? 2400 : 6000, hud_hide_later, NULL);
+    if (finished) {
+        const guint duration = display_milliseconds > 0 ? (guint)display_milliseconds :
+            (phase == HUD_SUCCESS ? 2400 : 6000);
+        guint64 *generation = g_new(guint64, 1);
+        *generation = hud.generation;
+        hud.hide = g_timeout_add_full(G_PRIORITY_DEFAULT, duration, hud_hide_later, generation, g_free);
+    }
     else hud.tick = g_timeout_add(33, hud_tick, NULL);
     hud_tick_apply();
     gtk_widget_set_visible(GTK_WIDGET(hud.window), TRUE);
@@ -433,8 +448,31 @@ int32_t jsti_hud_self_test(char *error, size_t capacity) {
     jsti_hud_show(HUD_SUCCESS, "Completed", "Transcript copied to the clipboard and saved to History.", "");
     hud_wait();
     if (problem == NULL && jsti_hud_card() == NULL) problem = "the completed phase did not stay up.";
+    jsti_hud_show_duration(HUD_FAILURE, "Something went wrong", "Synthetic failure.", "", 3600);
+    hud_wait();
+    GSource *hide_source = g_main_context_find_source_by_id(NULL, hud.hide);
+    const gint64 remaining = hide_source != NULL ? g_source_get_ready_time(hide_source) - g_get_monotonic_time() : -1;
+    if (problem == NULL && (remaining < 3000000 || remaining > 3600000))
+        problem = "the shortened error timer was not scheduled.";
+    guint64 previous_generation = hud.generation;
+    jsti_hud_show_duration(HUD_FAILURE, "Something went wrong", "Synthetic failure.", "", 6000);
+    hud_hide_later(&previous_generation);
+    hide_source = g_main_context_find_source_by_id(NULL, hud.hide);
+    const gint64 standard_remaining = hide_source != NULL
+        ? g_source_get_ready_time(hide_source) - g_get_monotonic_time() : -1;
+    if (problem == NULL && (jsti_hud_card() == NULL || standard_remaining < 5000000 ||
+                            standard_remaining > 6000000))
+        problem = "an old short error timer hid a replacement error or changed its duration.";
+    previous_generation = hud.generation;
+    jsti_hud_show(HUD_RECORDING, "Recording", "Capturing audio", "");
+    hud_hide_later(&previous_generation);
+    if (problem == NULL && (jsti_hud_card() == NULL || hud.phase != HUD_RECORDING || hud.hide != 0))
+        problem = "an old error timer hid an active recording.";
     jsti_hud_show(HUD_HIDDEN, "", "", "");
     if (problem == NULL && jsti_hud_card() != NULL) problem = "hiding the HUD left it on screen.";
+    jsti_hud_destroy();
+    if (problem == NULL && (hud.window != NULL || hud.tick != 0 || hud.hide != 0))
+        problem = "shutdown left the HUD or its timers alive.";
     if (problem != NULL) {
         jsti_set_error(error, capacity, "Recording HUD: %s", problem);
         result = -1;

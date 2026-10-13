@@ -1,7 +1,7 @@
 import AppKit
 import Combine
 import Foundation
-
+import SpeakCore
 // @Implement: This file is the state manager for the Heads-Up display. It exposes lifecycle functions so that another class can notify it when recording has started, transcribing has started, post-processing has started, etc. It has an enum for all the states it can be in and is a state machine. It also has the ability to surface errors in any of those things and it has an internal timer that shows the duration of each step.
 
 @MainActor
@@ -221,15 +221,15 @@ final class HUDManager: ObservableObject {
   }
 
   /// How long a success confirmation stays on screen before it auto-hides.
-  static let successDisplayDuration: TimeInterval = 2.4
+  static let successDisplayDuration: TimeInterval = SpeechDefaults.successHUDDuration
 
   /// The default interval a failure or cancellation message stays on screen.
-  static let standardFailureDisplayDuration: TimeInterval = 6.0
+  static let standardFailureDisplayDuration: TimeInterval = SpeechDefaults.failureHUDDuration
 
   /// The interval used when the "Shorten error display" preference is on -
   /// 50% longer than `successDisplayDuration`, so a failure still reads as
   /// slower than a success without lingering nearly 3x as long.
-  static let shortFailureDisplayDuration: TimeInterval = 3.6
+  static let shortFailureDisplayDuration: TimeInterval = SpeechDefaults.shortFailureHUDDuration
 
   /// Resolves the auto-hide interval for a failure/cancellation message from
   /// the "Shorten error display" preference. A caller-supplied

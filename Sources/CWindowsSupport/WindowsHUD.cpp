@@ -24,9 +24,10 @@ enum Phase { hidden = 0, recording, transcribing, postProcessing, delivering, su
 struct Content {
     int phase = hidden;
     std::wstring headline, subheadline, live;
+    int displayMilliseconds = 0;
     bool operator==(const Content &other) const {
         return phase == other.phase && headline == other.headline && subheadline == other.subheadline &&
-               live == other.live;
+               live == other.live && displayMilliseconds == other.displayMilliseconds;
     }
 };
 
@@ -46,9 +47,15 @@ HWND window = nullptr;
 bool registered = false;
 Content shown;
 ULONGLONG phaseStarted = 0;
+ULONGLONG hideDeadline = 0;
 float meter = 0;
 
 bool terminal(int phase) { return phase == success || phase == failure; }
+
+UINT terminalDuration(const Content &content) {
+    return content.displayMilliseconds > 0 ? static_cast<UINT>(content.displayMilliseconds) :
+        (content.phase == success ? successMilliseconds : failureMilliseconds);
+}
 
 COLORREF phaseColor(int phase) {
     switch (phase) {
@@ -352,6 +359,7 @@ void render() {
 }
 
 void hide() {
+    hideDeadline = 0;
     if (!window) return;
     KillTimer(window, tickTimer);
     KillTimer(window, hideTimer);
@@ -365,12 +373,20 @@ LRESULT CALLBACK procedure(HWND handle, UINT message, WPARAM wparam, LPARAM lpar
     case WM_NCHITTEST: return HTTRANSPARENT;
     case WM_TIMER:
         if (wparam == tickTimer) render();
-        if (wparam == hideTimer) {
+        if (wparam == hideTimer && terminal(shown.phase) && hideDeadline != 0) {
+            const ULONGLONG now = GetTickCount64();
+            if (now < hideDeadline) {
+                SetTimer(handle, hideTimer, static_cast<UINT>(hideDeadline - now), nullptr);
+                return 0;
+            }
             shown = Content{};
             hide();
         }
         return 0;
     case WM_DESTROY:
+        KillTimer(handle, tickTimer);
+        KillTimer(handle, hideTimer);
+        hideDeadline = 0;
         if (handle == window) window = nullptr;
         return 0;
     default: return DefWindowProcW(handle, message, wparam, lparam);
@@ -397,13 +413,13 @@ bool ensureWindow() {
 
 } // namespace
 
-bool stage(int phase, std::wstring headline, std::wstring subheadline, std::wstring live) {
+bool stage(int phase, std::wstring headline, std::wstring subheadline, std::wstring live, int displayMilliseconds) {
     if (phase < hidden || phase >= phaseCount || headline.size() > 256 || subheadline.size() > 1024 ||
-        live.size() > 2048) {
+        live.size() > 2048 || displayMilliseconds < 0 || displayMilliseconds > 60000) {
         return false;
     }
     std::lock_guard<std::mutex> lock(stagedLock);
-    staged = Content{phase, std::move(headline), std::move(subheadline), std::move(live)};
+    staged = Content{phase, std::move(headline), std::move(subheadline), std::move(live), displayMilliseconds};
     return true;
 }
 
@@ -413,16 +429,20 @@ void apply() {
         std::lock_guard<std::mutex> lock(stagedLock);
         next = staged;
     }
-    if (next == shown && (next.phase == hidden || (window && IsWindowVisible(window)))) return;
+    if (next == shown && !terminal(next.phase) &&
+        (next.phase == hidden || (window && IsWindowVisible(window)))) return;
     const bool newPhase = next.phase != shown.phase;
     shown = std::move(next);
     if (newPhase) phaseStarted = GetTickCount64();
     if (shown.phase == hidden) { hide(); return; }
     if (!ensureWindow()) return;
     KillTimer(window, hideTimer);
+    hideDeadline = 0;
     if (terminal(shown.phase)) {
         KillTimer(window, tickTimer);
-        SetTimer(window, hideTimer, shown.phase == success ? successMilliseconds : failureMilliseconds, nullptr);
+        const UINT duration = terminalDuration(shown);
+        hideDeadline = GetTickCount64() + duration;
+        SetTimer(window, hideTimer, duration, nullptr);
     } else {
         SetTimer(window, tickTimer, tickMilliseconds, nullptr);
     }
@@ -440,6 +460,7 @@ void refresh() {
 }
 
 void destroy() {
+    hide();
     if (window) DestroyWindow(window);
     window = nullptr;
     shown = Content{};
@@ -487,7 +508,7 @@ bool saveSnapshot(const std::wstring &path, std::string &error) {
     return ok;
 }
 
-bool selfTest(std::string &failure) {
+bool selfTest(std::string &error) {
     Content saved;
     {
         std::lock_guard<std::mutex> lock(stagedLock);
@@ -501,7 +522,7 @@ bool selfTest(std::string &failure) {
         apply();
     };
     auto check = [&](bool condition, const char *problem) {
-        if (!condition && failure.empty()) failure = std::string("Recording HUD: ") + problem;
+        if (!condition && error.empty()) error = std::string("Recording HUD: ") + problem;
         return condition;
     };
     const HWND foreground = GetForegroundWindow();
@@ -526,9 +547,31 @@ bool selfTest(std::string &failure) {
     stage(success, L"Completed", L"Transcript copied to the clipboard and saved to History.", L"");
     apply();
     passed = passed && check(IsWindowVisible(window), "the completed phase did not stay up.");
+    stage(failure, L"Something went wrong", L"Synthetic failure.", L"", 3600);
+    apply();
+    passed = passed && check(terminalDuration(shown) == 3600, "the shortened error timer was not used.");
+    passed = passed && check(!stage(failure, L"Error", L"", L"", -1), "an invalid error duration was accepted.");
+    stage(failure, L"Something went wrong", L"Synthetic failure.", L"", 6000);
+    apply();
+    SendMessageW(window, WM_TIMER, hideTimer, 0);
+    passed = passed && check(IsWindowVisible(window) && terminalDuration(shown) == 6000,
+                             "an old short error timer hid a replacement error.");
+    hideDeadline = GetTickCount64() - 1;
+    stage(failure, L"Something went wrong", L"Synthetic failure.", L"", 6000);
+    apply();
+    SendMessageW(window, WM_TIMER, hideTimer, 0);
+    passed = passed && check(IsWindowVisible(window) && hideDeadline > GetTickCount64(),
+                             "an identical replacement error did not restart its timer.");
+    stage(recording, L"Recording", L"Capturing audio", L"");
+    apply();
+    SendMessageW(window, WM_TIMER, hideTimer, 0);
+    passed = passed && check(IsWindowVisible(window) && shown.phase == recording && hideDeadline == 0,
+                             "an old error timer hid an active recording.");
     stage(hidden, L"", L"", L"");
     apply();
     passed = passed && check(!IsWindowVisible(window), "hiding the HUD left it on screen.");
+    destroy();
+    passed = passed && check(window == nullptr && hideDeadline == 0, "shutdown left the HUD or its timer alive.");
     restore();
     return passed;
 }

@@ -1,4 +1,5 @@
 import Foundation
+import SpeakCore
 
 /// The recording HUD a desktop host floats at the bottom of the screen during
 /// a dictation, modelled on the Mac's `HUDManager`: the same phases, wording,
@@ -24,18 +25,23 @@ public struct DesktopHUDState: Equatable, Sendable {
     public var subheadline: String?
     /// Words arriving from a live model while recording.
     public var liveText: String?
+    public var shortenErrorDisplay: Bool
 
     /// How long a finished dictation stays up, as on the Mac.
-    public static let successDisplayDuration: TimeInterval = 2.4
-    public static let failureDisplayDuration: TimeInterval = 6.0
+    public static let successDisplayDuration: TimeInterval = SpeechDefaults.successHUDDuration
+    public static let failureDisplayDuration: TimeInterval = SpeechDefaults.failureHUDDuration
 
     public static let hidden = DesktopHUDState(phase: .hidden, headline: "")
 
-    public init(phase: Phase, headline: String, subheadline: String? = nil, liveText: String? = nil) {
+    public init(
+        phase: Phase, headline: String, subheadline: String? = nil, liveText: String? = nil,
+        shortenErrorDisplay: Bool = SpeechDefaults.shortErrors
+    ) {
         self.phase = phase
         self.headline = headline
         self.subheadline = subheadline
         self.liveText = liveText
+        self.shortenErrorDisplay = shortenErrorDisplay
     }
 
     /// Whether the phase shows a running clock.
@@ -45,7 +51,7 @@ public struct DesktopHUDState: Equatable, Sendable {
     public var displayDuration: TimeInterval? {
         switch phase {
         case .success: return Self.successDisplayDuration
-        case .failure: return Self.failureDisplayDuration
+        case .failure: return shortenErrorDisplay ? SpeechDefaults.shortFailureHUDDuration : Self.failureDisplayDuration
         default: return nil
         }
     }

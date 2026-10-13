@@ -3,40 +3,40 @@ import SpeakCore
 import SpeakDesktop
 
 package actor DesktopHostController<Platform: DesktopHostPlatform> {
+    package struct SettingsValues: Codable, Sendable {
+        package var model = ModelCatalog.defaultBatchTranscriptionModel
+        package var postProcessing: DesktopPostProcessing.Options?
+        package var microphoneDeviceID: String?
+        package var batchModel: String?
+        package var liveModel: String?
+        // Absent keys keep the native smart insert-at-cursor default.
+        package var textOutput: Platform.TextOutputOptions?
+        package var hotKey: Platform.HotKeySettings?
+        package var voiceOutput: Platform.VoiceOutputSettings?
+        package var automationEnabled: Bool?
+        package var localModel: String?
+        package var localUseGPU: Bool?
+        /// Device-local Azure resource, under the Apple apps' key.
+        package var azureSpeechResourceEndpoint: String?
+        package var appearance: DesktopAppearance?
+        /// Last reached registration for hosts that cannot read it back.
+        package var runAtLogin: Bool?
+        package var configuration: DesktopConfiguration?
+    }
+
     @dynamicMemberLookup
     package struct Settings: Codable, Sendable {
-        package struct Values: Codable, Sendable {
-            package var model = ModelCatalog.defaultBatchTranscriptionModel
-            package var postProcessing: DesktopPostProcessing.Options?
-            package var microphoneDeviceID: String?
-            package var batchModel: String?
-            package var liveModel: String?
-            // Absent keys keep the native smart insert-at-cursor default.
-            package var textOutput: Platform.TextOutputOptions?
-            package var hotKey: Platform.HotKeySettings?
-            package var voiceOutput: Platform.VoiceOutputSettings?
-            package var automationEnabled: Bool?
-            package var localModel: String?
-            package var localUseGPU: Bool?
-            /// Device-local Azure resource, under the Apple apps' key.
-            package var azureSpeechResourceEndpoint: String?
-            package var appearance: DesktopAppearance?
-            /// Last reached registration for hosts that cannot read it back.
-            package var runAtLogin: Bool?
-            package var configuration: DesktopConfiguration?
-        }
-
-        private var values = Values()
+        private var values = SettingsValues()
         private var preserved: [String: AnyCodable] = [:]
         package init() {}
 
-        package subscript<Value>(dynamicMember keyPath: WritableKeyPath<Values, Value>) -> Value {
+        package subscript<Value>(dynamicMember keyPath: WritableKeyPath<SettingsValues, Value>) -> Value {
             get { values[keyPath: keyPath] }
             set { values[keyPath: keyPath] = newValue }
         }
 
         package init(from decoder: Decoder) throws {
-            values = try Values(from: decoder)
+            values = try SettingsValues(from: decoder)
             let container = try decoder.singleValueContainer()
             let all = try container.decode([String: AnyCodable].self)
             let known: Set<String> = [

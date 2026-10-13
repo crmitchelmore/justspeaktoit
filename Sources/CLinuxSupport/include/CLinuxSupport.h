@@ -160,7 +160,8 @@ int32_t jsti_window_set_login_item(int32_t state, const char *detail);
  * windows at the bottom centre of the active monitor that never takes focus;
  * on Wayland the result only, as a notification while the window is inactive.
  * Thread safe; -1 for an invalid phase or UTF-8. */
-int32_t jsti_window_set_hud(int32_t phase, const char *headline, const char *subheadline, const char *live_text);
+int32_t jsti_window_set_hud(int32_t phase, const char *headline, const char *subheadline, const char *live_text,
+                            int32_t display_milliseconds);
 /* Shows a JSTI_PAGE_* page, as choosing it in the sidebar does. */
 int32_t jsti_window_show_page(int32_t page);
 /* variant: 0 processed, 1 original, -1 none. */

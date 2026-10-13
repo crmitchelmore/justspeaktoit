@@ -11,7 +11,8 @@
 namespace jsti::hud {
 
 // Any thread. Keeps only the latest state; returns false for invalid input.
-bool stage(int phase, std::wstring headline, std::wstring subheadline, std::wstring live);
+bool stage(int phase, std::wstring headline, std::wstring subheadline, std::wstring live,
+           int displayMilliseconds = 0);
 // UI thread: shows the latest staged state, creating the window on first use.
 void apply();
 // UI thread: redraws after an appearance change.

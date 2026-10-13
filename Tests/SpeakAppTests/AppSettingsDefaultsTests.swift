@@ -33,6 +33,7 @@ final class AppSettingsDefaultsTests: XCTestCase {
         XCTAssertEqual(settings.postProcessingOutputLanguage, portable.text("postProcessingOutputLanguage"))
         XCTAssertEqual(settings.showHUDDuringSessions, portable.enabled("showHUD"))
         XCTAssertEqual(settings.showLiveTranscriptInHUD, portable.enabled("showLiveTranscriptInHUD"))
+        XCTAssertEqual(settings.shortenErrorDisplay, portable.enabled("shortenErrorDisplay"))
         XCTAssertEqual(settings.liveStopGracePeriod, portable.number("liveStopGracePeriod"))
         XCTAssertEqual(settings.holdThreshold, portable.number("holdThreshold"))
         XCTAssertEqual(settings.doubleTapWindow, portable.number("doubleTapWindow"))

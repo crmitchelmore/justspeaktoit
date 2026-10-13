@@ -5,6 +5,7 @@ public enum SpeechDefaults {
     public static let temperature = 0.2
     public static let outputLanguage = "English"
     public static let liveStopGracePeriod = 0.0
+    public static let recordingTailDuration = 0.5
     public static let showHUD = true
     public static let liveTranscriptHUD = true
     public static let shortErrors = false
@@ -64,7 +65,10 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
               requiresHUDOverlay: true),
         .init(key: "showCompactHUD", title: "Show compact HUD (dot, level meter and timer)",
               group: "General", kind: .boolean, defaultValue: AnyCodable(.bool(SpeechDefaults.compactHUD)),
-              requiresHUDOverlay: true)
+              requiresHUDOverlay: true),
+        .init(key: "postRecordingTailDuration", title: "Recording buffer (seconds after finishing)",
+              group: "Transcription", kind: .number(0...2),
+              defaultValue: AnyCodable(.double(SpeechDefaults.recordingTailDuration)))
     ]
 
     public private(set) var values: [String: AnyCodable]

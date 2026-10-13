@@ -38,15 +38,30 @@ final class FakeLog: @unchecked Sendable {
     private var statuses: [String] = []
     private var clipboard: [String] = []
     private var hudStates: [DesktopHUDState] = []
+    private var presentationStates: [Int32] = []
+    private var transcripts: [String] = []
     var keys: [String: String] = [:]
 
-    func reset() { lock.withLock { statuses = []; clipboard = []; hudStates = []; keys = [:] } }
+    func reset() {
+        lock.withLock {
+            statuses = []; clipboard = []; hudStates = []; keys = [:]
+            presentationStates = []; transcripts = []
+        }
+    }
     func hud(_ state: DesktopHUDState) { lock.withLock { hudStates.append(state) } }
     var huds: [DesktopHUDState] { lock.withLock { hudStates } }
-    func status(_ text: String) { lock.withLock { statuses.append(text) } }
+    func status(_ text: String, transcript: String? = nil, state: Int32? = nil) {
+        lock.withLock {
+            statuses.append(text)
+            if let transcript { transcripts.append(transcript) }
+            if let state { presentationStates.append(state) }
+        }
+    }
     func copy(_ text: String) { lock.withLock { clipboard.append(text) } }
     var allStatuses: [String] { lock.withLock { statuses } }
     var copies: [String] { lock.withLock { clipboard } }
+    var states: [Int32] { lock.withLock { presentationStates } }
+    var displayedTranscripts: [String] { lock.withLock { transcripts } }
     func key(_ name: String) -> String { lock.withLock { keys[name] ?? "" } }
     func setKey(_ key: String, name: String) { lock.withLock { keys[name] = key } }
 }
@@ -56,7 +71,9 @@ enum FakePlatform: DesktopHostPlatform {
     static let displayName = "Test"
     static let credentialStoreName = "the test keyring"
 
-    static func update(_ status: String, transcript: String?, state: Int32) { FakeLog.shared.status(status) }
+    static func update(_ status: String, transcript: String?, state: Int32) {
+        FakeLog.shared.status(status, transcript: transcript, state: state)
+    }
     static func recordingState(_ state: Int32) {}
     static func hud(_ state: DesktopHUDState) { FakeLog.shared.hud(state) }
     static func history(_ records: [DesktopRecordingStore.Record], selected: UUID?, selectRecord: Bool) {}
@@ -254,7 +271,7 @@ final class DesktopHostControllerTests: XCTestCase {
                 textOutput: FakeTextOutput()
             )
         }
-        try await waitFor("transcription to start") { await self.controller.busy }
+        try await waitFor("transcription to start") { FakeLog.shared.huds.last?.phase == .transcribing }
         await controller.cancelTranscription()
         await stopping.value
         let saved = try await records()

@@ -12,6 +12,7 @@ final class DesktopConfigurationTests: XCTestCase {
         XCTAssertEqual(restored.number("holdThreshold"), HotKeyGestureTiming.defaultHoldThreshold)
         XCTAssertEqual(restored.number("doubleTapWindow"), HotKeyGestureTiming.defaultDoubleTapWindow)
         XCTAssertEqual(restored.number("postProcessingTemperature"), 0.2)
+        XCTAssertEqual(restored.number("postRecordingTailDuration"), SpeechDefaults.recordingTailDuration)
         XCTAssertTrue(restored.enabled("showHUD"))
         XCTAssertFalse(restored.enabled("showCompactHUD"))
         XCTAssertEqual(Set(DesktopConfiguration.fields.map(\.key)).count, DesktopConfiguration.fields.count)

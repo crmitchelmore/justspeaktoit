@@ -1198,7 +1198,7 @@ void drawControl(HWND window, const DRAWITEMSTRUCT &item) {
         if (pressed) chrome::fillRound(dc, rect, heightOf(rect) / 2, RGB(0, 0, 0), 30);
         const bool large = heightOf(rect) > s(44);
         const std::wstring shown = recording == 1 ? (large ? L"Stop Recording" : L"Stop")
-            : recording == 2 ? (large ? L"Cancel Transcription" : L"Cancel") : (large ? L"Start Recording" : L"Record");
+            : recording == 2 ? L"Cancel" : (large ? L"Start Recording" : L"Record");
         HGDIOBJ previous = SelectObject(dc, chrome::font(chrome::Font::bodySemibold, dpi));
         SIZE extent{};
         GetTextExtentPoint32W(dc, shown.c_str(), static_cast<int>(shown.size()), &extent);
@@ -1742,7 +1742,7 @@ void applyUpdate(HWND window) {
     if (statusChanged) SetDlgItemTextW(window, statusID, status.c_str());
     applyInsights(window);
 
-    SetDlgItemTextW(window, recordID, recording == 1 ? L"&Stop recording" : (recording == 2 ? L"&Cancel transcription" : L"&Record"));
+    SetDlgItemTextW(window, recordID, recording == 1 ? L"&Stop recording" : (recording == 2 ? L"&Cancel" : L"&Record"));
     EnableWindow(GetDlgItem(window, recordID), TRUE);
     if (state.displayedRecording != recording) {
         state.displayedRecording = recording;

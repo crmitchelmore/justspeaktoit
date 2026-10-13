@@ -13,7 +13,7 @@ in those same destinations. Fields are defined once in
 `Sources/SpeakCore/DesktopConfiguration.swift`; native controls receive that
 schema rather than maintaining copies of defaults. Scalar defaults now use
 `SpeechDefaults` in the shared schema and canonical Mac `AppSettings` initializer;
-an Apple test compares all twelve preferences to a fresh Mac settings store.
+an Apple test compares all thirteen preferences to a fresh Mac settings store.
 All fields are validated
 before one atomic settings write; a failed write leaves the controller unchanged.
 Changes apply to subsequent recordings. Spoken-language profile overrides still
@@ -45,6 +45,14 @@ full-HUD expansion controls remain separate gaps.
 Cleanup remains opt-in; changing preferences does not enable it. HUD visibility
 and live-preview visibility gate the real native HUD. Shortcut timing reaches
 the existing shared gesture machine on both platforms, not fixed platform timers.
+
+The Recording buffer keeps native capture and live PCM delivery running for
+0...2 seconds after a finish request (Mac default: 0.5 seconds), before closing
+the WAV and starting transcription/finalisation. Duplicate finish requests
+cannot create another buffer. Cancel ends it immediately and retains the audio
+without transcription or insertion; capture failure and shutdown take the
+capture away before cancelling the timer, so a stale stop cannot touch a new
+recording. Provider stop grace begins after this capture buffer, not instead of it.
 
 ## Configuration transfer is not the Mac backup format
 
@@ -126,7 +134,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | doubleTapWindow | Wired / Wired | Config + shared gesture machine; 0.2...1 s |
 | trackedKeyIdentifiers | Equivalent / Equivalent | Keys; provider credential names, not values; no full API-key management destination |
 | preferredLocale | Wired / Wired | Config + `DesktopProfileSession.swift`; provider language capability gates; automation language remains a separate gap |
-| postRecordingTailDuration | Missing / Missing | Capture stops on request; a real delay needs cancellation, capture-failure and shutdown ownership, not an inert slider |
+| postRecordingTailDuration | Wired / Wired | Config + `DesktopHostRecordingTail.swift`; owned 0...2 s capture buffer, immediate cancel/failure/shutdown cleanup, no stale finalisation |
 | deepgramStopGracePeriod | Missing legacy migration / Missing legacy migration | Portable JSON preserves this obsolete key but does not reinterpret it as new grace |
 | liveStopGracePeriod | Partial / Partial | Config; AssemblyAI/Cartesia only; range 0...2 s |
 | preferredAudioInputUID | Equivalent / Equivalent | Native device ID with missing-device warning, never Apple UID translation |

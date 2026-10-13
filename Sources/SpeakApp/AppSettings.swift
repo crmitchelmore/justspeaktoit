@@ -1350,7 +1350,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       selectedHotKey = .fnKey
     }
     postRecordingTailDuration =
-      defaults.object(forKey: DefaultsKey.postRecordingTailDuration.rawValue) as? Double ?? 0.5
+      defaults.object(forKey: DefaultsKey.postRecordingTailDuration.rawValue) as? Double
+        ?? SpeechDefaults.recordingTailDuration
     // Migration: reuse the legacy `deepgramStopGracePeriod` value the first
     // time the user launches a build that has the generic
     // `liveStopGracePeriod`. After this, the legacy key is left intact (not

@@ -67,6 +67,7 @@ extension DesktopHostController {
     func stopCapture() throws -> StoppedRecording? {
         guard let active = recording else { return nil }
         recording = nil
+        cancelRecordingTail()
         liveUpdates?.cancel()
         liveUpdates = nil
         let duration: TimeInterval

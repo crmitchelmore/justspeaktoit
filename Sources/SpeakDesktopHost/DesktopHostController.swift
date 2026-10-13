@@ -92,8 +92,10 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var profileWarning: String?
     package var settings: Settings
     package var recording: Recording?
+    package var recordingTail: (recordID: UUID, task: Task<Void, Never>)?
     private var isReady = false
     package var busy = false
+    private var busyOperations = 0
     package var closed = false
     /// Set once `close()` stops waiting; later calls return it.
     var shutdownReport: DesktopHostShutdownReport?
@@ -169,9 +171,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
         cancelOutput()
         let selected = selectModel(modelIndex)
         selectMicrophone(deviceID)
-        busy = true
-        activeOperations += 1
-        defer { busy = false; finishOperation() }
+        beginBusyOperation()
+        defer { finishBusyOperation() }
         if recording != nil { await stopAndTranscribe(); return }
         // Never record with a model other than the one chosen; why it could
         // not be saved stays shown.
@@ -198,55 +199,23 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
 }
 
 extension DesktopHostController {
-    private func stopAndTranscribe() async {
-        let pending = recording?.record
-        let live = recording?.live
-        do {
-            guard let stopped = try stopCapture() else { return }
-            guard stopped.duration > 0 else {
-                stopped.live?.cancel()
-                var empty = stopped.record
-                empty.failure = "No audio was captured."
-                try await saveRecord(empty)
-                reportFailure("No audio was captured.", for: empty.id, headline: "Nothing was recorded")
-                return
-            }
-            if let live = stopped.live {
-                await finishLive(stopped, session: live)
-            } else {
-                await transcribe(
-                    stopped.record, duration: stopped.duration, output: stopped.output, profile: stopped.profile
-                )
-            }
-        } catch {
-            if var pending {
-                pending.failure = error.localizedDescription
-                if let live { pending.result = liveResult(live.cancel().text, record: pending, duration: 0) }
-                do { try await saveRecord(pending) } catch {
-                    update("Recording and history error: \(error.localizedDescription)", state: 0)
-                    return
-                }
-                present(pending, output: nil)
-                return
-            }
-            update("Recording retained: \(error.localizedDescription)", state: 0)
-        }
-    }
-
     func captureFailed(_ message: String, recordingID: UUID) async {
         guard !closed, recording?.record.id == recordingID else { return }
-        busy = true
-        activeOperations += 1
-        defer { busy = false; finishOperation() }
+        beginBusyOperation()
+        defer { finishBusyOperation() }
         var record = recording?.record
         let live = recording?.live
-        let stopped = try? stopCapture()
+        var stopped: StoppedRecording?
+        var failure = message
+        do { stopped = try stopCapture() } catch {
+            failure += " Capture cleanup failed: \(error.localizedDescription)"
+        }
         if let live, var partial = record {
             let snapshot = live.cancel()
             partial.result = liveResult(snapshot.text, record: partial, duration: stopped?.duration ?? 0)
             record = partial
         }
-        record?.failure = message
+        record?.failure = failure
         do { if let record { try await saveRecord(record) } } catch {
             update("\(message) History error: \(error.localizedDescription)", state: 0)
             return
@@ -307,6 +276,18 @@ extension DesktopHostController {
         let waiters = operationWaiters
         operationWaiters.removeAll()
         waiters.forEach { $0.resume() }
+    }
+
+    private func finishBusyOperation() {
+        busyOperations -= 1
+        busy = busyOperations > 0
+        finishOperation()
+    }
+
+    private func beginBusyOperation() {
+        busyOperations += 1
+        busy = true
+        activeOperations += 1
     }
 
     package func update(_ status: String, transcript: String? = nil, state: Int32 = -1) {

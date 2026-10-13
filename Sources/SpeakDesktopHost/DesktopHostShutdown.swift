@@ -146,6 +146,7 @@ extension DesktopHostController {
     private func takeRecordingOnClose() -> DesktopHostClosingRecording? {
         guard let active = recording else { return nil }
         recording = nil
+        cancelRecordingTail()
         liveUpdates?.cancel()
         liveUpdates = nil
         return DesktopHostClosingRecording(

@@ -57,6 +57,14 @@ final class TranscriptionPricingTests: XCTestCase {
         XCTAssertNil(TranscriptionPricing.estimatedCostUSD(modelID: "nobody/model", durationSeconds: 60))
     }
 
+    func testAlibabaModels_haveNoRegionBlindOrTokenBlindMinuteEstimate() {
+        for id in AlibabaSpeechModels.allIDs {
+            XCTAssertNil(TranscriptionPricing.pricePerMinuteUSD(modelID: id), id)
+            XCTAssertNil(TranscriptionPricing.estimatedCostUSD(modelID: id, durationSeconds: 60), id)
+            XCTAssertFalse(TranscriptionPricing.isFree(id), id)
+        }
+    }
+
     func testEstimate_scalesWithDurationAndIgnoresNonPositiveDurations() {
         XCTAssertEqual(
             TranscriptionPricing.estimatedCostUSD(modelID: "openai/whisper-1", durationSeconds: 30),
@@ -73,13 +81,22 @@ final class TranscriptionPricingTests: XCTestCase {
     }
 
     /// Every cloud transcription model in the catalogue either has a price or
-    /// is on the documented no-public-rate list, so a new catalogue entry
+    /// is on the documented no-fixed-estimate list, so a new catalogue entry
     /// prompts a pricing decision instead of silently showing no cost.
     func testEveryCatalogueTranscriptionModel_isEitherPricedOrKnownUnpriced() {
-        // No verified USD per-minute list price at the last review: token-billed
-        // realtime sessions, previews, and providers that only quote per hour
+        // No reliable model-only per-minute estimate at the last review:
+        // token-billed sessions, regional prices, previews, and rates quoted
         // on request. Adding a rate for one of these must also remove it here.
         let knownUnpriced: Set<String> = [
+            // Fun-ASR has different published Beijing/Singapore USD rates;
+            // Omni is input/output-token billed. This model-only API cannot
+            // infer the workspace region or generated output token count.
+            // https://www.alibabacloud.com/help/en/model-studio/model-pricing
+            // Decision and exact regional rates: Docs/alibaba-speech.md.
+            AlibabaSpeechModels.funFlash,
+            AlibabaSpeechModels.funLive,
+            AlibabaSpeechModels.qwen35,
+            AlibabaSpeechModels.qwen38,
             "openai/gpt-realtime-whisper-streaming",
             "openai/gpt-live-transcribe-streaming",
             "openai/gpt-transcribe",

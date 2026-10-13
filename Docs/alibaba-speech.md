@@ -85,6 +85,38 @@ an error; locked text is returned only for recovery. Cancellation tears down
 immediately, resumes waiting finish calls and does not reconnect. Late callbacks
 and deadlines are scoped to their original run.
 
+## Billing links and cost estimates
+
+The shared account directory offers a Model Studio console link for
+`alibaba.apiKey`, with an explicit explanation that Speak cannot read an account
+balance with that inference credential. It does not fetch a balance, label
+usage as spendable credit or request separate billing/admin credentials.
+Check charges in the console for the account that owns the saved workspace;
+international accounts can use the
+[international Model Studio console](https://modelstudio.console.alibabacloud.com/ap-southeast-1/model/market).
+
+All four Alibaba catalogue IDs deliberately return **no fixed USD/min estimate**
+in Compare Models. This does not mean free usage or unpublished prices.
+The [official pricing table](https://www.alibabacloud.com/help/en/model-studio/model-pricing),
+reviewed October 13, 2026, specifies:
+
+| Model | Beijing standard input price | Singapore standard input price | Billing basis |
+| --- | --- | --- | --- |
+| `fun-asr-flash-2026-06-15` | $0.00003/second | $0.000035/second | Input audio duration; output free |
+| `fun-asr-realtime` | $0.000047/second | $0.00009/second | Input audio duration; output free |
+| `qwen3.5-omni-plus` | Regional modality-specific token rates | Regional modality-specific token rates | Audio/text input and generated text tokens |
+| `qwen3.8-omni-flash` | Regional token rates | Regional token rates | Input and generated output tokens |
+
+The [mainland pricing table](https://help.aliyun.com/zh/model-studio/model-pricing)
+also quotes CNY, while international prices and quotas depend on region and
+deployment scope. `TranscriptionPricing` only receives a model ID and audio
+duration: it has no bound workspace region, billing currency, token usage or
+quota context. Picking one regional rate for every saved credential, converting
+CNY using an assumed exchange rate or guessing Omni output token counts would
+misstate the estimate. The exact four shared IDs are therefore recorded in the
+pricing tests' known-unpriced set, and neither batch results nor the UI invents
+a charge. Actual usage remains subject to the provider's account bill.
+
 ## Source evidence and migration decisions
 
 Primary documentation read October 13, 2026:

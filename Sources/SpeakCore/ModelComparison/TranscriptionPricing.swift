@@ -6,8 +6,8 @@ import Foundation
 /// These are estimates. Providers bill in different units (seconds, hours,
 /// audio tokens) and change list prices without notice, so every figure here
 /// is the public pay-as-you-go rate converted to US dollars per audio minute,
-/// last reviewed on `lastReviewed`. Models without a public per-minute rate
-/// (token-billed realtime sessions, private previews) return `nil` and the
+/// last reviewed on `lastReviewed`. Models without a reliable model-only
+/// per-minute estimate (token-billed sessions, regional prices, previews) return `nil` and the
 /// UI shows no cost rather than a guess. On-device models cost nothing.
 public enum TranscriptionPricing {
     /// When the table below was last checked against provider pricing pages.

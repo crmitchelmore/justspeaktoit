@@ -549,6 +549,12 @@ This is format groundwork, not desktop migration UI or archive acceptance;
 ZIP validation, conflict previews, transactional apply/recovery and native
 credential handling remain separate unfinished work.
 
+`DataMigrationArchivePolicy` also centralizes the existing Mac archive path,
+entry/total/JSON-size, duplicate-path, manifest and staging-capacity rules.
+Mac ZIP reads use this policy; portable tests exercise exact limits without
+allocating multi-gigabyte fixtures. Native desktop ZIP decoding, checksum
+verification and materialization still require platform adapters.
+
 The filter editor scrolls vertically when the available work area is too short;
 keyboard traversal reveals the focused control. Long model names have native
 horizontal scrolling, and an open editor follows application appearance changes.

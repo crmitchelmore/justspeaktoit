@@ -48,11 +48,7 @@ enum MigrationArchive {
             MigrationManifest.self,
             from: data(entry, in: archive)
         )
-        guard manifest.format == DataMigrationFormat.identifier, manifest.version == DataMigrationFormat.version,
-              Set(manifest.categories).count == manifest.categories.count else {
-            throw MigrationError
-                .invalid("This export format is unsupported. Update the app before importing it.")
-        }
+        try DataMigrationArchivePolicy.validateManifest(manifest)
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
                                                 attributes: [.posixPermissions: 0o700])
@@ -103,7 +99,7 @@ enum MigrationArchive {
     private static func extractRecording(_ record: MigrationRecord, archive: Archive, directory: URL,
                                          snapshot: inout MigrationSnapshot) throws {
         guard let path = record.file, safeAudioPath(path), let audio = archive[path],
-              audio.type == .file, audio.uncompressedSize <= 20_000_000_000 else {
+              audio.type == .file, audio.uncompressedSize <= DataMigrationArchivePolicy.maximumEntryBytes else {
             throw MigrationError.invalid("Recording missing or unsupported")
         }
         guard snapshot.files[path] == nil else {
@@ -126,52 +122,28 @@ enum MigrationArchive {
     }
 
     static func safeAudioPath(_ path: String) -> Bool {
-        let parts = path.split(separator: "/", omittingEmptySubsequences: false)
-        let extensions: Set<String> = [
-            "wav",
-            "m4a",
-            "mp3",
-            "flac",
-            "ogg",
-            "aiff",
-            "aif",
-            "aac",
-            "caf",
-            "audio"
-        ]
-        return parts.count == 2 && parts[0] == "recordings" && !parts[1].isEmpty
-            && extensions.contains((path as NSString).pathExtension.lowercased())
-            && !path.contains("..") && !path.contains("\\") && !path.contains("\0")
+        DataMigrationArchivePolicy.safeAudioPath(path)
     }
 
     private static func preflight(_ archive: Archive) throws {
-        var paths = Set<String>()
-        var bytes: UInt64 = 0
-        for entry in archive {
-            guard paths.insert(entry.path).inserted, paths.count <= 100_000,
-                  entry.uncompressedSize <= 20_000_000_000 else {
-                throw MigrationError.invalid("The archive contains duplicate paths or oversized entries.")
-            }
-            bytes += entry.uncompressedSize
-            guard bytes <= 50_000_000_000 else {
-                throw MigrationError.invalid("The archive exceeds 50 GB.")
-            }
-        }
+        let bytes = try DataMigrationArchivePolicy.preflight(archive.lazy.map {
+            DataMigrationArchivePolicy.Entry(path: $0.path, uncompressedBytes: $0.uncompressedSize)
+        })
         let space = try FileManager.default.temporaryDirectory.resourceValues(
             forKeys: [.volumeAvailableCapacityForImportantUsageKey]
         ).volumeAvailableCapacityForImportantUsage
-        if let space, bytes + 64_000_000 > UInt64(max(0, space)) {
-            throw MigrationError.invalid("There is not enough free space to read this export.")
-        }
+        try DataMigrationArchivePolicy.requireStagingCapacity(
+            archiveBytes: bytes, availableBytes: space.map { UInt64(max(0, $0)) }
+        )
     }
 
     private static func data(_ entry: Entry, in archive: Archive) throws -> Data {
-        guard entry.type == .file, entry.uncompressedSize <= 128_000_000 else {
+        guard entry.type == .file, entry.uncompressedSize <= DataMigrationArchivePolicy.maximumJSONBytes else {
             throw MigrationError.invalid("Invalid or oversized category file")
         }
         var result = Data()
         let checksum = try archive.extract(entry) { chunk in
-            guard result.count + chunk.count <= 128_000_000 else {
+            guard UInt64(result.count) + UInt64(chunk.count) <= DataMigrationArchivePolicy.maximumJSONBytes else {
                 throw MigrationError.invalid("Category exceeds size limit")
             }
             result.append(chunk)

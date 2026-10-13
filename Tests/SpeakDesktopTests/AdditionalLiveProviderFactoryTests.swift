@@ -16,7 +16,7 @@ final class AdditionalLiveProviderFactoryTests: XCTestCase {
         for model in [
             GeminiTranscribeModels.liveCatalogID, MetaMuseVoiceTranscribe.liveCatalogID,
             "modulate/velma-2-stt-streaming", XAISpeechToText.liveCatalogID,
-            AssemblyAIModels.universal35ProStreamingID, "cartesia/ink-2-streaming"
+            AssemblyAIModels.universal36ProStreamingID, "cartesia/ink-2-streaming"
         ] {
             let factory = AssemblyAISocketFactory()
             let client = try XCTUnwrap(DesktopLiveTranscription.makeClient(

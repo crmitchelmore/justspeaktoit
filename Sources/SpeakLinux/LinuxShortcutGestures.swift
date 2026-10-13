@@ -13,6 +13,9 @@ final class LinuxShortcutGestures: @unchecked Sendable {
 
     private let queue = DispatchQueue(label: "jsti.shortcut-gestures")
     private var machine = HotKeyGestureMachine()
+    private var timing = (
+        HotKeyGestureTiming.defaultHoldThreshold, HotKeyGestureTiming.defaultDoubleTapWindow
+    )
     private var style: HotKeyActivationStyle
     private var target: LinuxInsertionTarget?
     private var textOutput: Task<LinuxTextOutputOptions, Never>?
@@ -36,9 +39,7 @@ final class LinuxShortcutGestures: @unchecked Sendable {
 
     func configureTiming(hold: Double, doubleTap: Double) {
         queue.async { [self] in
-            submit(machine.reset())
-            machine.holdThreshold = hold
-            machine.doubleTapWindow = doubleTap
+            timing = (hold, doubleTap)
         }
     }
 
@@ -56,6 +57,11 @@ final class LinuxShortcutGestures: @unchecked Sendable {
     func keyDown(target: LinuxInsertionTarget?, textOutput: Task<LinuxTextOutputOptions, Never>) {
         let now = clock()
         queue.async { [self] in
+            if !machine.isKeyDown, machine.holdThreshold != timing.0 || machine.doubleTapWindow != timing.1 {
+                submit(machine.reset(), at: now)
+                machine.holdThreshold = timing.0
+                machine.doubleTapWindow = timing.1
+            }
             self.target = target
             self.textOutput = textOutput
             if style == .pressToToggle {
@@ -78,6 +84,32 @@ final class LinuxShortcutGestures: @unchecked Sendable {
     func drain() async {
         await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in queue.async { done.resume() } }
         await lock.withLock { tail }?.value
+    }
+
+    static func checkTimingForSelfTest() async throws {
+        let gestures = LinuxShortcutGestures(style: .holdToRecord, clock: { 100 }, deliver: { _ in })
+        let output = Task { LinuxTextOutputOptions() }
+        gestures.keyDown(target: nil, textOutput: output)
+        await gestures.drain()
+        gestures.configureTiming(hold: 0.8, doubleTap: 0.7)
+        await gestures.drain()
+        let preserved = gestures.queue.sync {
+            gestures.machine.isKeyDown &&
+                gestures.machine.holdThreshold == HotKeyGestureTiming.defaultHoldThreshold
+        }
+        gestures.keyUp()
+        await gestures.drain()
+        gestures.keyDown(target: nil, textOutput: output)
+        await gestures.drain()
+        let applied = gestures.queue.sync {
+            gestures.machine.isKeyDown && gestures.machine.holdThreshold == 0.8 &&
+                gestures.machine.doubleTapWindow == 0.7
+        }
+        gestures.configure(style: .pressToToggle)
+        await gestures.drain()
+        guard preserved, applied else {
+            throw DesktopHostError(message: "Shortcut timing interrupted an active gesture or was not applied.")
+        }
     }
 
     // Queue only.

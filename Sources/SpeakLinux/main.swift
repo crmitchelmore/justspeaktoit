@@ -37,6 +37,8 @@ func runSelfTest() throws {
         throw DesktopHostError(message: "Live models are offered without a qualified transport.")
     }
     print("Native Linux adapter and canonical model self-test passed.")
+    try blocking { try await LinuxShortcutGestures.checkTimingForSelfTest() }
+    print("Native Linux shortcut timing self-test passed.")
     try blocking { try await LinuxLocalSelfTest.run() }
 }
 

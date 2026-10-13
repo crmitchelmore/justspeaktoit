@@ -60,7 +60,7 @@ public enum DesktopLiveTranscription {
         )
     }
 
-    public static func makeClient(
+    public static func makeClient( // swiftlint:disable:this function_parameter_count
         model: String, apiKey: String, language: String?, azureEndpoint: String, options: LiveClientOptions,
         makeConnection: @escaping @Sendable (URLRequest) -> any StreamingWebSocketConnection
     ) -> (any FinalizingStreamingTranscriptionClient)? {

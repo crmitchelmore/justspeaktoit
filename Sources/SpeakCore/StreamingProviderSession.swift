@@ -43,36 +43,7 @@ final class StreamingProviderSession: @unchecked Sendable {
         var transportError: (Error) -> Error = { $0 }
     }
 
-    private final class Run: @unchecked Sendable {
-        var connection: (any StreamingWebSocketConnection)?
-        var closed = false
-        var didOpen = false
-        var setupSent = false
-        var ready = false
-        var finishing = false
-        var endSent = false
-        var firstAudio = true
-        var sending = false
-        var sendID = 0
-        var outgoing: [Data] = []
-        var reconnects = 0
-        var accumulated: TranscriptAccumulator
-        var seenFinalIDs = Set<String>()
-        var interim = ""
-        var hasFinal = false
-        var failed = false
-        var waiters: [CheckedContinuation<String?, Never>] = []
-        var onTranscript: ((String, Bool) -> Void)?
-        var onError: ((Error) -> Void)?
-        let budget: StreamingAudioSendBudget
-
-        init(_ configuration: Configuration) {
-            accumulated = TranscriptAccumulator(shape: configuration.shape)
-            budget = StreamingAudioSendBudget(
-                sampleRate: configuration.sampleRate, seconds: StreamingAudioPreroll.defaultBudgetSeconds
-            )
-        }
-    }
+    private typealias Run = StreamingProviderRun
 
     private let configuration: Configuration
     private let makeConnection: ConnectionFactory
@@ -295,7 +266,7 @@ extension StreamingProviderSession {
     }
 
     private func reconnect(_ active: Run) -> Bool {
-        guard current(active), !active.finishing, (!active.sending || !active.ready),
+        guard current(active), !active.finishing, !active.sending || !active.ready,
               active.reconnects < configuration.maximumReconnects else { return false }
         active.reconnects += 1
         let previous = active.connection
@@ -304,8 +275,11 @@ extension StreamingProviderSession {
         active.sending = false
         active.sendID += 1
         previous?.cancel()
-        do { connect(active, request: try configuration.request()) }
-        catch { fail(error, active) }
+        do {
+            connect(active, request: try configuration.request())
+        } catch {
+            fail(error, active)
+        }
         return true
     }
 

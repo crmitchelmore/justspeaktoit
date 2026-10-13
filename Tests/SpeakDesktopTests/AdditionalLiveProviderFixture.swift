@@ -39,7 +39,9 @@ enum AdditionalLiveProvider: CaseIterable, Sendable {
         self == .modulate ? #"{"type":"done","duration_ms":300}"# : final("Tail.", id: 2)
     }
 
-    func make(factory: AssemblyAISocketFactory, clock: AssemblyAITestClock) -> any FinalizingStreamingTranscriptionClient {
+    func make(
+        factory: AssemblyAISocketFactory, clock: AssemblyAITestClock
+    ) -> any FinalizingStreamingTranscriptionClient {
         switch self {
         case .gemini:
             return GeminiLiveClient(

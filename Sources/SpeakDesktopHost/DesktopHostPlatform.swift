@@ -38,6 +38,13 @@ package protocol DesktopHostPlatform: Sendable {
     associatedtype HotKeySettings: Codable & Sendable
     /// The persisted Read aloud voice.
     associatedtype VoiceOutputSettings: Codable & Sendable
+    static var voiceConfigurationKeys: Set<String> { get }
+    static func exportVoiceConfiguration(
+        _ voiceOutput: VoiceOutputSettings?, over configuration: DesktopConfiguration
+    ) throws -> DesktopConfiguration
+    static func importVoiceConfiguration(
+        from configuration: DesktopConfiguration, into voiceOutput: inout VoiceOutputSettings?
+    ) throws -> DesktopConfiguration
     /// The controller-owned Read aloud task and engine, if the host has one.
     associatedtype ReadAloudState
     /// The field captured when a recording starts, if the host can capture one.

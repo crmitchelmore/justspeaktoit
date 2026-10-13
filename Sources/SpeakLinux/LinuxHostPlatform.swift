@@ -32,6 +32,18 @@ enum LinuxHostPlatform: DesktopHostPlatform {
         LinuxRecordingFeedbackLoader()
     }
 
+    package static var voiceConfigurationKeys: Set<String> { DesktopConfiguration.voiceGenerationTransferKeys }
+    package static func exportVoiceConfiguration(
+        _ voiceOutput: VoiceOutputSettings?, over configuration: DesktopConfiguration
+    ) throws -> DesktopConfiguration {
+        try VoiceOutputSettings.exportConfiguration(voiceOutput, over: configuration)
+    }
+    package static func importVoiceConfiguration(
+        from configuration: DesktopConfiguration, into voiceOutput: inout VoiceOutputSettings?
+    ) throws -> DesktopConfiguration {
+        try VoiceOutputSettings.importConfiguration(from: configuration, into: &voiceOutput)
+    }
+
     /// Facts discovered at startup that output planning needs.
     private final class Runtime: @unchecked Sendable {
         let lock = NSLock()

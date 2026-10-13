@@ -53,7 +53,8 @@ extension DesktopHostController {
         guard !closed else { throw DesktopHostError(message: "The app is closing.") }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let document = DesktopConfigurationDocument(preferences: try configuration())
+        let preferences = try Platform.exportVoiceConfiguration(settings.voiceOutput, over: configuration())
+        let document = DesktopConfigurationDocument(preferences: preferences)
         let data = try encoder.encode(document)
         guard data.count <= DesktopConfigurationDocument.maximumBytes else { throw DesktopConfigurationError.tooLarge }
         try data.write(to: URL(fileURLWithPath: path), options: .atomic)
@@ -83,7 +84,9 @@ extension DesktopHostController {
         let document = try JSONDecoder().decode(DesktopConfigurationDocument.self, from: data)
         guard document.version == 1 else { throw DesktopConfigurationError.unsupportedVersion }
         var changed = settings
-        changed.configuration = document.preferences
+        var voice = changed.voiceOutput
+        changed.configuration = try Platform.importVoiceConfiguration(from: document.preferences, into: &voice)
+        changed.voiceOutput = voice
         var polish = changed.postProcessing ?? .init()
         polish.temperature = document.preferences.number("postProcessingTemperature")
         polish.outputLanguage = document.preferences.text("postProcessingOutputLanguage")
@@ -92,9 +95,8 @@ extension DesktopHostController {
         settings = changed
         try await configureRecordingFeedback(document.preferences)
         Platform.hud(.hidden)
-        let unknown = document.preferences.values.keys.filter { key in
-            !DesktopConfiguration.supportedKeys.contains(key)
-        }.sorted()
+        let supported = DesktopConfiguration.supportedKeys.union(Platform.voiceConfigurationKeys)
+        let unknown = document.preferences.values.keys.filter { !supported.contains($0) }.sorted()
         update("Configuration imported. Provider/model choices and service permissions are unchanged."
             + (unknown.isEmpty ? "" : " Preserved but not applied: \(unknown.joined(separator: ", "))."))
     }

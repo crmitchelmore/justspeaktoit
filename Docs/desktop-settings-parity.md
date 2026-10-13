@@ -13,9 +13,16 @@ Read aloud is independent from auto-play. The Voice workflow owner implements
 immutable Generate snapshots, retained results, cached Play/export and native
 controls; the shared model must be the sole persisted desktop boolean authority,
 not an independent copy in each platform or in the configuration dictionary.
-Canonical configuration transfer/metadata projections need the executable
-workflow's final model contract before these keys can be called supported.
-Voice flags do not increase this slice's preference count. There are fourteen
+Canonical portable transfer now projects those two flags into the shared
+`DesktopVoiceOutputSettings` model in one atomic settings write. Import validates
+strict booleans, preserves voice/model IDs and absent flags, and removes the
+transferred flags from the dictation configuration dictionary. Export derives
+them from that model, not a second persisted authority. Shared transfer-only
+metadata does not add duplicate Voice switches to the dictation editor. Native
+voice selection preserves both flags.
+This is **transfer support, not executable Voice acceptance**: Generate,
+retained results and the native Voice controls remain in #1217.
+Voice flags do not increase this slice's editable preference count. There are fourteen
 previously accepted preferences plus three recording-sound preferences now wired
 below; native sound acceptance is still pending.
 
@@ -68,9 +75,20 @@ PipeWire sink with a 100 ms first-buffer admission bound. This measures native
 queue admission, **not audible hardware latency**.
 
 These three preferences are **wired, awaiting native acceptance**. Actual
-Windows/Linux native builds, codec and endpoint execution on this new code and
-installed-package resource/codec evidence must be recorded before calling the
-sound journey accepted. Linux deployment composes the sibling collector in
+Windows x64 and ARM64 builds and all eight AAC decodes passed at `cf4779d1`.
+Its Windows developer bundle also decoded all eight production assets on the
+local host; the real default endpoint admitted both cues in every profile in
+2.394-6.934 ms and passed reusable stop/joined close. That local run used the
+existing installed Swift runtime, not a newly installed self-contained bundle.
+The CI MSIX bundle/native self-tests passed, but the lifecycle readiness probe
+rejected the nonfatal no-audio-device warning. The bounded actionable warning
+retains the full error in stderr and does not disable capture.
+Linux built and decoded all eight AACs, then failed a test fixture constructed
+at unsupported 8 kHz before reaching its intended decoded-duration check; the
+fixture now uses supported 16 kHz, with endpoint/package qualification pending
+the rerun. Final-head native controls, Linux endpoint and installed-package
+resource/codec evidence remain required before calling the sound journey
+accepted. Linux deployment composes the sibling collector in
 #1212 and needs AAC decoding (Ubuntu: `gstreamer1.0-libav`).
 
 ## Implemented preference journey
@@ -174,7 +192,12 @@ General's Import/Export preferences actions use a bounded, versioned JSON object
 Both transfers enforce a 1 MB limit. An oversized export is refused before
 replacing its destination, rather than producing a file the importer cannot read.
 
-This transfers the portable preferences above. It does not read credential stores
+This transfers the portable preferences above and projects the two supported
+generated-speech flags when a Voice model has been saved. A legacy document with
+no flags leaves the existing Voice options unchanged. Hosts without the executable
+Voice contract preserve those keys without applying them. Other Voice options,
+including speed/pitch/SSML, remain opaque until a real provider can execute them.
+It does not read credential stores
 or transfer native model selections, hotkey codes, microphone IDs, device paths,
 startup registration or automation permission. Imported unknown/unsupported
 entries are retained exactly across edits/exports and named as **preserved but
@@ -254,8 +277,8 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | ttsPitch | Missing / Missing | No pitch editor |
 | ttsQuality | Missing / Missing | No quality editor/provider options |
 | ttsOutputFormat | Missing / Missing | Read aloud uses native staging format |
-| ttsAutoPlay | Partial / Partial | Explicit Read aloud action plays; no synthesis-without-playback preference |
-| ttsSaveToDirectory | Missing / Missing | Temporary speech staging only, no save/export directory |
+| ttsAutoPlay | Transfer wired; workflow pending / Same | Strict canonical boolean projects to the sole Voice model; explicit Read aloud remains playback; Generate acceptance belongs to #1217 |
+| ttsSaveToDirectory | Transfer wired; workflow pending / Same | Strict boolean projects to sole Voice model; generated WAV archival uses actual owned recordings directory in #1217, never an imported foreign path |
 | ttsUseSSML | Missing / Missing | No SSML input/editor/provider contract |
 | ttsFavoriteVoices | Missing / Missing | No voice favourites |
 | ttsPronunciationDictionary | Missing / Missing | No TTS pronunciation editor/pipeline |

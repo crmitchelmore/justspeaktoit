@@ -5,7 +5,9 @@ import SpeakCore
 
 final class DesktopVoiceArchiveTests: XCTestCase {
     func testArchive_CommitsIndependentCanonicalAudioWithoutChangingHistory() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("voice-archive-\(UUID())")
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "voice archive-\(UUID())-\u{00E9}-\u{1F600}"
+        )
         defer { try? FileManager.default.removeItem(at: root) }
         let store = try DesktopRecordingStore(directory: root)
         var record = DesktopRecordingStore.Record(id: UUID(), audioFilename: "kept.wav", modelIdentifier: "synthetic")
@@ -19,6 +21,7 @@ final class DesktopVoiceArchiveTests: XCTestCase {
         XCTAssertEqual(archived.lastPathComponent, identifier.uuidString + ".wav")
         XCTAssertEqual(try Data(contentsOf: archived), audio.wav)
         let attributes = try FileManager.default.attributesOfItem(atPath: archived.path)
+        XCTAssertEqual(attributes[.type] as? FileAttributeType, .typeRegular)
         XCTAssertEqual((attributes[.referenceCount] as? NSNumber)?.intValue, 1)
         XCTAssertEqual(try Data(contentsOf: metadata), before)
         let records = try await store.records()

@@ -50,6 +50,10 @@ are never replaced. Save failure is explicit and does not discard a usable
 generated result. Cache/playback staging stays separate; a saved copy is
 user-owned output and is not removed when the cache changes or the app closes.
 The imported macOS `recordingsDirectory` never controls native filesystem writes.
+Publication uses reusable `DesktopFilePublication`: Windows commits with a
+native exclusive same-filesystem move, not Foundation links; other hosts link
+exclusively and remove staging only after publication succeeds. Post-commit
+cleanup failures explicitly keep and name the published copy.
 The shared desktop voice model persists optional `ttsAutoPlay` and
 `ttsSaveToDirectory` keys and resolves absent values through
 `SpeechGenerationDefaults`; changing voice preserves these choices. This PR

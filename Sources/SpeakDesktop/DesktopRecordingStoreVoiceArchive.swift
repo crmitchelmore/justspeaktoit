@@ -11,9 +11,11 @@ extension DesktopRecordingStore {
         do {
             try audio.wav.write(to: staging, options: .withoutOverwriting)
             try Task.checkCancellation()
-            // Linking this independent staging inode commits atomically and
-            // exclusively: an existing destination is never replaced.
-            try FileManager.default.linkItem(at: staging, to: destination)
+            try DesktopFilePublication.commit(staging: staging, destination: destination)
+        } catch let committed as DesktopFilePublicationCleanupFailure {
+            throw VoiceArchiveCommittedCleanupFailure(
+                filename: committed.destination.lastPathComponent, cleanup: committed.cleanup
+            )
         } catch {
             if FileManager.default.fileExists(atPath: staging.path) {
                 do { try FileManager.default.removeItem(at: staging) } catch let cleanup {
@@ -21,11 +23,6 @@ extension DesktopRecordingStore {
                 }
             }
             throw error
-        }
-        do {
-            try FileManager.default.removeItem(at: staging)
-        } catch {
-            throw VoiceArchiveCommittedCleanupFailure(filename: destination.lastPathComponent, cleanup: error)
         }
         return destination
     }

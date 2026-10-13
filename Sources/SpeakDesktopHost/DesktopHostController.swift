@@ -116,6 +116,9 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package var comparisonCapture: DesktopHostComparisonCapture?
     package var comparisonLive: DesktopComparisonLive?
     package var comparisonSelection: UUID?
+    var comparisonReference: UUID?
+    var comparisonPresentationRevision: UInt64 = 0
+    let comparisonWords = DesktopComparisonWordPresentation()
     package var comparisonGeneration = UUID()
     var comparisonOwnedRoundIDs: Set<UUID> = []
     package var comparisonLanguage: String?

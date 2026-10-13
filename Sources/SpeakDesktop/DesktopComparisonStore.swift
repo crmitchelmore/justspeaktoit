@@ -6,6 +6,7 @@ public actor DesktopComparisonStore {
     private struct Document: Codable {
         var revisions: [UUID: ModelComparisonRevision] = [:]
         var acknowledgements: [UUID: Date] = [:]
+        var selectedModelIDs: Set<String>?
     }
     private var document: Document
     private var executing: Set<UUID> = []
@@ -36,6 +37,17 @@ public actor DesktopComparisonStore {
         document.revisions.values.compactMap(\.round).sorted {
             $0.createdAt == $1.createdAt ? $0.id.uuidString < $1.id.uuidString : $0.createdAt > $1.createdAt
         }
+    }
+
+    public func selectedModelIDs() -> Set<String> { document.selectedModelIDs ?? [] }
+
+    public func selectModels(_ identifiers: Set<String>, replacing available: Set<String>) throws {
+        guard identifiers.isSubset(of: available) else {
+            throw DesktopComparisonError.message("A selected comparison model is not available.")
+        }
+        var next = document
+        next.selectedModelIDs = (next.selectedModelIDs ?? []).subtracting(available).union(identifiers)
+        try commit(next)
     }
 
     public func upsert(_ round: ModelComparisonRound, isExecuting: Bool = false) throws {

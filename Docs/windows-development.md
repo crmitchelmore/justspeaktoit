@@ -40,6 +40,12 @@ blind result with each rank from 1 to N exactly once (including failures) to
 reveal models; standings are derived from the persisted canonical rounds.
 As on Mac, fewer than two usable results reveal the evidence without fabricating
 a ranking or scoreboard credit.
+Candidate selection is remembered separately for File/Batch and Live, with
+native Select all/none controls. The blind **Diff against** picker reuses
+`TranscriptWordDiff`; signed `[+added]` / `[-removed]` annotations remain readable
+without colour and leave original transcript text untouched. Reference changes
+do not judge or alter saved rounds. Word alignment is cached and computed off the
+UI executor; superseded presentations cannot overwrite a newer view.
 Play sample reuses native playback. JSON/Markdown exports use the canonical
 SpeakCore documents through overwrite-confirming native save pickers. Exports
 include transcripts and model identities, even for unjudged rounds, but no audio.

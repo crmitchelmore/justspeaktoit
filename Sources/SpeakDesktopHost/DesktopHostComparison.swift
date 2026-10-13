@@ -11,6 +11,8 @@ package struct DesktopComparisonPresentation: Sendable {
     package let selected: String
     package let judgeable: Bool
     package var sync = DesktopComparisonSyncControls()
+    package var references = ""
+    package var reference = ""
 }
 
 package struct DesktopHostComparisonCapture {
@@ -60,6 +62,7 @@ extension DesktopHostController {
 
     package func selectComparison(_ identifier: String) async {
         comparisonSelection = UUID(uuidString: identifier)
+        comparisonReference = nil
         await refreshComparison()
     }
 
@@ -316,15 +319,25 @@ extension DesktopHostController {
 
     package func refreshComparison() async {
         guard !closed, comparisonVisible, let comparisons else { return }
+        comparisonPresentationRevision &+= 1
+        let presentationRevision = comparisonPresentationRevision
         let rounds = await comparisons.rounds()
         let round = comparisonPreview(rounds.first { $0.id == comparisonSelection } ?? rounds.first)
         let state = DesktopComparisonRoundPresentation(round: round, busy: busy)
         comparisonSelection = round?.id
+        let reference = round.flatMap { current in
+            current.entriesInBlindOrder.first { $0.id == comparisonReference }
+                ?? current.entriesInBlindOrder.first { !$0.didFail }
+                ?? current.entriesInBlindOrder.first
+        }
+        comparisonReference = reference?.id
+        let selectedModels = await comparisons.selectedModelIDs()
         playback.stop(unless: round?.id ?? UUID())
         let models = DesktopHostModels.visible.filter {
             !DesktopHostModels.isLocal($0.id) || Platform.localReadiness($0.id, controller: self) == nil
         }.map {
             "\($0.id)\t\(DesktopHostModels.uiText($0.displayName))\t\(DesktopHostModels.isLive($0.id) ? 1 : 0)"
+                + "\t\(selectedModels.contains($0.id) ? 1 : 0)"
         }.joined(separator: "\n")
         let rows = rounds.map { "\($0.id.uuidString)\t\(DesktopHostModels.uiText($0.sample.name))" }
             .joined(separator: "\n")
@@ -332,33 +345,20 @@ extension DesktopHostController {
             + "Choose two to eight models. File/Batch uses copied samples; Live shares one microphone.\n"
             + "Raw transcripts only. No insertion, post-processing or History changes.\n"
         if let round {
-            detail += "\n\(round.sample.name) - \(round.inputMode.displayName)\n"
-            detail += state.instruction
-            for entry in round.entriesInBlindOrder {
-                let label = round.blindLabel(for: entry.id)
-                let reveal = state.suffix(for: entry, in: round)
-                // Provider errors may name the model, so blind failures must not expose their raw messages.
-                detail += "\nResult \(label)\(reveal)\n"
-                if entry.didFail {
-                    detail += (state.revealed ? entry.errorDescription ?? "Failed" : "Model failed.") + "\n"
-                }
-                detail += entry.transcript + "\n"
-                if state.revealed {
-                    if let partial = entry.timeToFirstPartialMs { detail += "First partial: \(partial) ms. " }
-                    if let final = entry.timeToFinalMs { detail += "Finalization: \(final) ms. " }
-                    if let cost = entry.estimatedCostUSD { detail += "Estimated cost: USD \(cost)." }
-                    detail += "\n"
-                }
-            }
+            detail += await comparisonRoundDetail(round, state: state, reference: reference)
         }
         detail += "\n" + ModelComparisonExport.scoreboardMarkdown(rounds: rounds)
         let sync = await comparisonSyncPresentation()
-        guard !closed, comparisonVisible else { return }
+        guard !closed, comparisonVisible, presentationRevision == comparisonPresentationRevision else { return }
         detail += "\n" + sync.status
         Platform.comparisonPresentation(.init(
             models: models, rounds: rows, detail: detail, busy: busy, recording: comparisonCapture != nil,
             selected: round?.id.uuidString ?? "", judgeable: state.judgeable,
-            sync: sync.controls
+            sync: sync.controls,
+            references: round?.entriesInBlindOrder.map {
+                "\($0.id.uuidString)\tResult \(round?.blindLabel(for: $0.id) ?? "")"
+            }.joined(separator: "\n") ?? "",
+            reference: reference?.id.uuidString ?? ""
         ))
     }
 

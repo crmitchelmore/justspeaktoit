@@ -66,7 +66,7 @@ typedef void (*JSTIWindowCallback)(int event, const char *text, int model_index,
  * Rank payload: round id LF comma-separated ranks in persisted blind order. */
 int jsti_comparison_present(const char *models, const char *rounds, const char *detail,
                            const char *selected, int busy, int recording, int judgeable,
-                           int sync_enabled, int sync_available);
+                           int sync_enabled, int sync_available, const char *references, const char *reference);
 int jsti_window_run(const char *const *model_names, size_t model_count, int selected_index,
                     JSTIWindowCallback callback, void *context, char *error, size_t error_capacity);
 /* Optional pre-run mode catalogue with the same count/order as window_run's

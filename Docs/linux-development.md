@@ -73,6 +73,10 @@ Fewer than two usable results reveal unranked evidence, matching Mac, rather tha
 inventing rankings or scoreboard credit. See the
 [Windows comparison workflow](windows-development.md#model-comparison) for the
 shared 120-second file, 12-second readiness and 30-second finalization budgets.
+Native Select all/none and remembered per-mode candidate selection match the
+Mac selection workflow. A blind **Diff against** dropdown uses the shared
+`TranscriptWordDiff`, with accessible `[+added]` / `[-removed]` text annotations
+instead of colour-only edits; original transcripts and persisted ranks stay unchanged.
 
 `Comparisons/rounds.json` and app-owned `Comparisons/Samples/` live in the private
 data directory. Interrupted rounds retain their audio; interrupted live metadata

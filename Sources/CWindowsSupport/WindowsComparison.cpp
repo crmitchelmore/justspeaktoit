@@ -15,11 +15,13 @@ enum Control { modelsID = 700, modeID, languageID, runID, stopID, cancelID, roun
 constexpr UINT presentMessage = WM_APP + 70;
 constexpr int deleteID = 740;
 constexpr int syncID = 741, syncNowID = 742;
-struct Row { std::string id; std::wstring name; bool live = false; };
+constexpr int referenceID = 743, allID = 744, noneID = 745, referenceLabelID = 746;
+struct Row { std::string id; std::wstring name; bool live = false, selected = false; };
 struct Presentation {
     std::string models, rounds, detail, selected;
     bool busy = false, recording = false, judgeable = false;
     bool syncEnabled = false, syncAvailable = false;
+    std::string references, reference;
 };
 std::mutex mutex;
 Presentation pending;
@@ -44,7 +46,11 @@ std::vector<Row> rows(const std::string &value) {
         const auto last = line.find('\t', tab + 1);
         Row row; row.id = line.substr(0, tab);
         jsti::wide(line.substr(tab + 1, last == std::string::npos ? last : last - tab - 1).c_str(), row.name);
-        row.live = last != std::string::npos && line.substr(last + 1) == "1";
+        if (last != std::string::npos) {
+            const auto selection = line.find('\t', last + 1);
+            row.live = line.substr(last + 1, selection == std::string::npos ? selection : selection - last - 1) == "1";
+            row.selected = selection != std::string::npos && line.substr(selection + 1) == "1";
+        }
         result.push_back(std::move(row));
     }
     return result;
@@ -70,16 +76,38 @@ void populateModels(HWND window, Dialog &dialog) {
     for (const auto &row : dialog.models) if (row.live == live) {
         dialog.visible.push_back(row);
         SendDlgItemMessageW(window, modelsID, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(row.name.c_str()));
+        SendDlgItemMessageW(window, modelsID, LB_SETSEL, row.selected, dialog.visible.size() - 1);
     }
     SetDlgItemTextW(window, runID, live ? L"&Start microphone" : L"&Choose samples and run...");
+}
+void selectionChanged(HWND window, Dialog &dialog) {
+    std::string selected;
+    for (size_t i = 0; i < dialog.visible.size(); ++i)
+        if (SendDlgItemMessageW(window, modelsID, LB_GETSEL, i, 0) > 0) {
+            if (!selected.empty()) selected += "\t";
+            selected += dialog.visible[i].id;
+        }
+    emit(dialog, 125, selected, SendDlgItemMessageW(window, modeID, CB_GETCURSEL, 0, 0) == 1);
 }
 void present(HWND window, Dialog &dialog) {
     Presentation next;
     { std::lock_guard<std::mutex> lock(mutex); next = pending; }
     dialog.suppress = true;
     if (dialog.shown.models != next.models) {
-        dialog.models = rows(next.models);
-        populateModels(window, dialog);
+        auto updated = rows(next.models);
+        bool same = updated.size() == dialog.models.size();
+        for (size_t i = 0; same && i < updated.size(); ++i)
+            same = updated[i].id == dialog.models[i].id && updated[i].name == dialog.models[i].name
+                && updated[i].live == dialog.models[i].live;
+        dialog.models = std::move(updated);
+        if (!same) populateModels(window, dialog);
+        else for (size_t i = 0; i < dialog.visible.size(); ++i) {
+            for (const auto &row : dialog.models) if (row.id == dialog.visible[i].id) {
+                dialog.visible[i].selected = row.selected;
+                SendDlgItemMessageW(window, modelsID, LB_SETSEL, row.selected, i);
+                break;
+            }
+        }
     }
     if (dialog.shown.rounds != next.rounds) {
         dialog.rounds = rows(next.rounds);
@@ -101,7 +129,17 @@ void present(HWND window, Dialog &dialog) {
         SendDlgItemMessageW(window, detailID, EM_LINESCROLL, 0, firstLine);
     }
     if (dialog.shown.selected != next.selected) SetDlgItemTextW(window, ranksID, L"");
+    if (dialog.shown.references != next.references) {
+        SendDlgItemMessageW(window, referenceID, CB_RESETCONTENT, 0, 0);
+        for (const auto &row : rows(next.references))
+            SendDlgItemMessageW(window, referenceID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(row.name.c_str()));
+    }
+    const auto references = rows(next.references);
+    for (size_t i = 0; i < references.size(); ++i) if (references[i].id == next.reference)
+        SendDlgItemMessageW(window, referenceID, CB_SETCURSEL, i, 0);
+    EnableWindow(GetDlgItem(window, referenceID), !references.empty());
     for (int id : {modelsID, modeID, languageID, runID}) EnableWindow(GetDlgItem(window, id), !next.busy);
+    for (int id : {allID, noneID}) EnableWindow(GetDlgItem(window, id), !next.busy);
     EnableWindow(GetDlgItem(window, stopID), next.recording);
     EnableWindow(GetDlgItem(window, cancelID), next.busy);
     EnableWindow(GetDlgItem(window, judgeID), next.judgeable);
@@ -134,11 +172,13 @@ void layout(HWND window, Dialog &dialog) {
     move(noticeID, 16, 12, 610, 36);
     move(modeID, 16, 55, 240, 160);
     move(languageLabelID, 270, 55, 130, 24); move(languageID, 400, 55, 210, 28);
-    move(modelLabelID, 16, 92, 240, 22); move(modelsID, 16, 117, 240, 170);
+    move(modelLabelID, 16, 92, 90, 22); move(allID, 110, 90, 65, 25); move(noneID, 180, 90, 76, 25);
+    move(modelsID, 16, 117, 240, 170);
     move(runID, 16, 298, 240, 32); move(stopID, 16, 339, 112, 32); move(cancelID, 138, 339, 118, 32);
     move(roundLabelID, 16, 385, 240, 22); move(roundsID, 16, 410, 240, 112);
     move(playID, 16, 537, 112, 32); move(stopAudioID, 138, 537, 118, 32);
-    move(detailID, 270, 92, 340, 390);
+    move(referenceLabelID, 270, 92, 135, 24); move(referenceID, 410, 90, 200, 160);
+    move(detailID, 270, 126, 340, 356);
     move(ranksLabelID, 270, 490, 340, 24); move(ranksID, 270, 516, 140, 30);
     move(judgeID, 420, 516, 190, 30);
     move(jsonID, 270, 557, 140, 30); move(markdownID, 420, 557, 190, 30);
@@ -219,7 +259,9 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         bool okay = add(noticeID, L"STATIC", L"Compare Models: one sample, raw results, blind judging.\n"
                         L"Choose Batch/File or Live. No dictation settings or History are changed.", 0)
             && add(modeID, L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP)
-            && add(modelLabelID, L"STATIC", L"Models (select 2-8)", 0)
+            && add(modelLabelID, L"STATIC", L"Models (2-8)", 0)
+            && add(allID, L"BUTTON", L"Select all", BS_PUSHBUTTON | WS_TABSTOP)
+            && add(noneID, L"BUTTON", L"Select none", BS_PUSHBUTTON | WS_TABSTOP)
             && add(modelsID, L"LISTBOX", L"Comparison models", LBS_EXTENDEDSEL | LBS_NOTIFY | WS_VSCROLL | WS_TABSTOP)
             && add(languageLabelID, L"STATIC", L"Language hint", 0)
             && add(languageID, L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP)
@@ -230,6 +272,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             && add(roundsID, L"LISTBOX", L"Saved comparison rounds", LBS_NOTIFY | WS_VSCROLL | WS_TABSTOP)
             && add(playID, L"BUTTON", L"&Play sample", BS_PUSHBUTTON | WS_TABSTOP)
             && add(stopAudioID, L"BUTTON", L"Stop &audio", BS_PUSHBUTTON | WS_TABSTOP)
+            && add(referenceLabelID, L"STATIC", L"Diff against", 0)
+            && add(referenceID, L"COMBOBOX", L"Blind word-diff reference", CBS_DROPDOWNLIST | WS_TABSTOP)
             && add(detailID, L"EDIT", L"", ES_MULTILINE | ES_READONLY | WS_VSCROLL | WS_TABSTOP)
             && add(ranksLabelID, L"STATIC", L"Ranks for A, B, ... (e.g. 2,1,3; rank failures too)", 0)
             && add(ranksID, L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP)
@@ -283,6 +327,12 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     case WM_COMMAND:
         if (dialog->suppress) return 0;
         if (LOWORD(wparam) == modeID && HIWORD(wparam) == CBN_SELCHANGE) populateModels(window, *dialog);
+        if (LOWORD(wparam) == modelsID && HIWORD(wparam) == LBN_SELCHANGE) selectionChanged(window, *dialog);
+        if (LOWORD(wparam) == referenceID && HIWORD(wparam) == CBN_SELCHANGE) {
+            const auto references = rows(dialog->shown.references);
+            const LRESULT row = SendDlgItemMessageW(window, referenceID, CB_GETCURSEL, 0, 0);
+            if (row >= 0 && static_cast<size_t>(row) < references.size()) emit(*dialog, 124, references[row].id);
+        }
         if (LOWORD(wparam) == roundsID && HIWORD(wparam) == LBN_SELCHANGE) {
             const LRESULT row = SendDlgItemMessageW(window, roundsID, LB_GETCURSEL, 0, 0);
             if (row >= 0 && static_cast<size_t>(row) < dialog->rounds.size()) emit(*dialog, 101, dialog->rounds[row].id);
@@ -290,6 +340,9 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         if (HIWORD(wparam) == BN_CLICKED) switch (LOWORD(wparam)) {
         case IDCANCEL: SendMessageW(window, WM_CLOSE, 0, 0); break;
         case runID: run(window, *dialog); break;
+        case allID: case noneID:
+            SendDlgItemMessageW(window, modelsID, LB_SETSEL, LOWORD(wparam) == allID, -1);
+            selectionChanged(window, *dialog); break;
         case stopID: emit(*dialog, 104); break;
         case cancelID: emit(*dialog, 105); break;
         case judgeID: emit(*dialog, 106, dialog->shown.selected + "\n" + text(window, ranksID)); break;
@@ -333,11 +386,12 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
 
 extern "C" int jsti_comparison_present(const char *models, const char *rounds, const char *detail,
                                       const char *selected, int busy, int recording, int judgeable,
-                                      int sync_enabled, int sync_available) {
-    if (!models || !rounds || !detail || !selected) return -1;
+                                      int sync_enabled, int sync_available,
+                                      const char *references, const char *reference) {
+    if (!models || !rounds || !detail || !selected || !references || !reference) return -1;
     std::lock_guard<std::mutex> lock(mutex);
     pending = {models, rounds, detail, selected, busy != 0, recording != 0, judgeable != 0,
-               sync_enabled != 0, sync_available != 0};
+               sync_enabled != 0, sync_available != 0, references, reference};
     return activeWindow && PostMessageW(activeWindow, presentMessage, 0, 0) ? 0 : -1;
 }
 
@@ -386,10 +440,12 @@ bool jsti_comparison_self_test(HWND owner, std::string &error, const std::string
     const int appearance = jsti::chrome::appearance();
     Presentation original;
     { std::lock_guard<std::mutex> lock(mutex); original = pending;
-      pending = {"test/file-a\tFile A\t0\ntest/file-b\tFile B\t0\ntest/live-a\tLive A\t1\ntest/live-b\tLive B\t1",
+      pending = {"test/file-a\tFile A\t0\t1\ntest/file-b\tFile B\t0\t0\ntest/live-a\tLive A\t1\t0\ntest/live-b\tLive B\t1\t0",
                  "synthetic-round\tSynthetic sample.wav",
                  "Synthetic sample.wav\n\nResult A\nCould we meet Friday?\n\nResult B\nCould we meet on Friday?\n"
-                 "\nRank every blind result to reveal models.", "synthetic-round", false, false, true, false, true}; }
+                 "Could we meet [+on] Friday?\n\nDiff against Result A: [+added] / [-removed].\n"
+                 "Rank every blind result to reveal models.", "synthetic-round", false, false, true, false, true,
+                 "synthetic-a\tResult A\nsynthetic-b\tResult B", "synthetic-a"}; }
     auto callback = [](int action, const char *payload, int index, void *context) {
         auto &check = *static_cast<Check *>(context);
         if (action != 100) { check.event = action; check.payload = payload; check.index = index; return; }
@@ -397,7 +453,19 @@ bool jsti_comparison_self_test(HWND owner, std::string &error, const std::string
         auto *dialog = reinterpret_cast<Dialog *>(GetWindowLongPtrW(window, GWLP_USERDATA));
         auto require = [&](bool value, const char *message) { if (!value && check.failure.empty()) check.failure = message; };
         require(SendDlgItemMessageW(window, modelsID, LB_GETCOUNT, 0, 0) == 2, "Comparison file routes are missing.");
+        require(SendDlgItemMessageW(window, modelsID, LB_GETSEL, 0, 0) > 0,
+                "Remembered model selection was not restored.");
         require(IsWindowEnabled(GetDlgItem(window, judgeID)), "Unjudged comparison cannot be ranked.");
+        require(SendDlgItemMessageW(window, referenceID, CB_GETCOUNT, 0, 0) == 2,
+                "Blind reference choices are missing.");
+        SendDlgItemMessageW(window, referenceID, CB_SETCURSEL, 1, 0);
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(referenceID, CBN_SELCHANGE), 0);
+        require(check.event == 124 && check.payload == "synthetic-b", "Blind reference lost its entry identity.");
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(allID, BN_CLICKED), 0);
+        require(check.event == 125 && check.payload == "test/file-a\ttest/file-b" && check.index == 0,
+                "Select-all did not persist the qualified file selection.");
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(noneID, BN_CLICKED), 0);
+        require(check.event == 125 && check.payload.empty(), "Select-none did not persist an empty selection.");
         require(IsWindowEnabled(GetDlgItem(window, deleteID)), "Saved comparison cannot be discarded.");
         require(IsWindowEnabled(GetDlgItem(window, syncID)), "Comparison sync consent is unavailable.");
         require(!IsWindowEnabled(GetDlgItem(window, syncNowID)), "Sync retry is enabled before consent.");

@@ -76,7 +76,7 @@ final class TranscriptionPricingTests: XCTestCase {
     /// is on the documented no-public-rate list, so a new catalogue entry
     /// prompts a pricing decision instead of silently showing no cost.
     func testEveryCatalogueTranscriptionModel_isEitherPricedOrKnownUnpriced() {
-        // No public per-minute list price at the last review: token-billed
+        // No verified USD per-minute list price at the last review: token-billed
         // realtime sessions, previews, and providers that only quote per hour
         // on request. Adding a rate for one of these must also remove it here.
         let knownUnpriced: Set<String> = [
@@ -99,6 +99,11 @@ final class TranscriptionPricingTests: XCTestCase {
             "speechmatics/enhanced-streaming",
             "speechmatics/enhanced",
             "speechmatics/standard",
+            // Reson8's engine is server-selected; no verified public USD quote.
+            FileSpeechProvider.reson8.modelID,
+            FileSpeechProvider.reson8LiveID,
+            // StepAudio 3 publishes 2.8 CNY/hour, not a USD conversion.
+            FileSpeechProvider.stepfun.modelID,
             "apple/local/Dictation"
         ]
         let catalogue = ModelCatalog.liveTranscription + ModelCatalog.batchTranscription

@@ -4,3 +4,7 @@ Sources/CWindowsSupport/whisper-cpp/** -text
 Sources/CMigrationArchive/miniz/** -text
 # Preserve the pinned upstream header's whitespace rather than patching it.
 Sources/CMigrationArchive/miniz/miniz.h whitespace=-blank-at-eol
+# Native desktop exports are byte-verified on Windows and Linux.
+Resources/Desktop/*.ico -text
+Resources/Desktop/*.res -text
+Sources/SpeakLinux/Resources/hicolor/index.theme text eol=lf

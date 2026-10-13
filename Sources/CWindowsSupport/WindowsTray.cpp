@@ -132,6 +132,15 @@ void remove() {
     registered = false;
 }
 
+void setIcons(HICON idle, HICON recording) {
+    idleIcon = idle;
+    recordingIcon = recording;
+    if (!added) return;
+    NOTIFYICONDATAW data = iconData();
+    data.uFlags = NIF_ICON;
+    Shell_NotifyIconW(NIM_MODIFY, &data);
+}
+
 void setState(int recording, const std::wstring &summary) {
     shownSummary = summary;
     if (recording == shownRecording) return;

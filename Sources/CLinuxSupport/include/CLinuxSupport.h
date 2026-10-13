@@ -149,6 +149,9 @@ enum {
 
 enum { JSTI_WINDOW_SMOKE_TEST = 1 };
 
+/* Before running GTK: root contains the executable's bundled hicolor theme. */
+int32_t jsti_app_icon_configure(const char *root, char *error, size_t error_capacity);
+
 /* Runs the GTK application on the calling (main) thread until the window
  * closes. `app_id` is the reverse-DNS application ID. A second instance
  * started with --toggle forwards JSTI_EVENT_COMMAND_TOGGLE to this one. */

@@ -50,17 +50,12 @@ modules:
       - cp packaging/linux/Package.resolved Package.resolved
       - swift build --configuration release --product SpeakLinux --static-swift-stdlib --disable-sandbox
         --force-resolved-versions
-      - install -Dm755 .build/release/SpeakLinux /app/bin/justspeaktoit
       - install -Dm644 Sources/CMigrationArchive/miniz/LICENSE
         /app/share/licenses/justspeaktoit/LICENSE-miniz.txt
-      # Bundle.module looks for SwiftPM resource bundles beside the executable.
-      - cp -r .build/release/SpeakApp_SpeakCore.resources /app/bin/
-      - install -Dm644 packaging/linux/com.justspeaktoit.JustSpeakToIt.desktop
-        /app/share/applications/com.justspeaktoit.JustSpeakToIt.desktop
-      - install -Dm644 packaging/linux/com.justspeaktoit.JustSpeakToIt.metainfo.xml
-        /app/share/metainfo/com.justspeaktoit.JustSpeakToIt.metainfo.xml
-      - install -Dm644 Resources/Brand/AppIcon.svg
-        /app/share/icons/hicolor/scalable/apps/com.justspeaktoit.JustSpeakToIt.svg
+      # Share production resource collection and icon staging with native layouts.
+      - python3 scripts/stage-linux-desktop.py --binary .build/release/SpeakLinux
+        --output .build/linux-desktop-layout --prefix /app
+      - cp -r .build/linux-desktop-layout/. /app/
     sources:
       - type: dir
         path: ../..

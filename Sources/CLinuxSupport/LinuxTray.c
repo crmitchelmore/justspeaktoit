@@ -83,11 +83,11 @@ static const char *toggle_label(gint32 state) {
                                                                                          : "Start Recording";
 }
 
-/* ARGB32 in network byte order, not premultiplied, at 22, 32 and 48 px. */
+/* ARGB32 in network byte order, not premultiplied, including HiDPI panels. */
 static GVariant *icon_pixmaps(gboolean recording) {
     GVariantBuilder pixmaps;
     g_variant_builder_init(&pixmaps, G_VARIANT_TYPE("a(iiay)"));
-    static const int sizes[] = { 22, 32, 48 };
+    static const int sizes[] = { 22, 32, 48, 64, 96 };
     for (size_t index = 0; index < G_N_ELEMENTS(sizes); ++index) {
         const int size = sizes[index];
         cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, size, size);
@@ -373,7 +373,7 @@ int32_t jsti_tray_self_test(char *error, size_t capacity) {
         gint width = 0, height = 0;
         GVariant *bytes = NULL;
         g_variant_get(first, "(ii@ay)", &width, &height, &bytes);
-        if (g_variant_n_children(pixmaps) != 3 || width != 22 || height != 22 || g_variant_get_size(bytes) != 22 * 22 * 4) {
+        if (g_variant_n_children(pixmaps) != 5 || width != 22 || height != 22 || g_variant_get_size(bytes) != 22 * 22 * 4) {
             problem = "the icon pixmaps are malformed.";
         }
         g_variant_unref(bytes);

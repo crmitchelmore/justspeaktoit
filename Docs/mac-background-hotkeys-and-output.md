@@ -11,7 +11,9 @@ shortcut and delivering transcription while Speak is not the frontmost app.
   The tap is re-enabled when macOS disables it, and the app reconnects after
   idle activation, wake, and session unlock. Activation during a recording or
   held trigger does not reconnect the backend or end capture; a delayed
-  activation recovery also leaves a newly started recording alone.
+  activation recovery also leaves a newly started recording alone. Blocked
+  activation recovery resumes once dictation, the held trigger and Voice Edit
+  are all idle; manual reconnect, monitoring stop and binding changes retire it.
 - **Settings > Keyboard > Activation > Cancel recording with Escape** is on by
   default. Turn it off to keep dictating when you press Escape in any app.
   Changes apply immediately, including during a recording. The system-wide

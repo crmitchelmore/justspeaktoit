@@ -8,6 +8,7 @@ enum MigrationPreferenceSchema {
         "analyticsEnabled",
         "audioPreWarmingEnabled",
         "autoCorrectionsEnabled",
+        "cancelRecordingOnEscape",
         "compactStatusBarIcon",
         "connectionPreWarmingEnabled",
         "enableAutomationServer",

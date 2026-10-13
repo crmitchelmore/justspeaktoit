@@ -23,8 +23,8 @@ voice selection preserves both flags.
 This is **transfer support, not executable Voice acceptance**: Generate,
 retained results and the native Voice controls remain in #1217.
 Voice flags do not increase this slice's editable preference count. There are fourteen
-previously accepted preferences plus three recording-sound preferences now wired
-below; native sound acceptance is still pending.
+previously accepted preferences plus three recording-sound preferences now
+qualified natively below; installed-package sound acceptance is still pending.
 
 Generated audio archival follows the parent's app-owned destination: the actual
 `DesktopRecordingStore.directory`, as a flat canonical `UUID.wav` without a
@@ -34,7 +34,7 @@ separate generated-result cache/playback staging does not. Foreign imported
 Mac's colon-containing timestamps on Windows. Native archival and Voice
 acceptance belong to the Voice/parent workstreams, not this defaults extraction.
 
-## Recording feedback (native acceptance pending)
+## Recording feedback (native qualified; package acceptance pending)
 
 `SpeakCore/RecordingFeedback.swift` now owns the four existing profiles, eight
 M4A names, enabled/classic/0.7 defaults and the Mac player's volume-squared curve.
@@ -74,8 +74,15 @@ eight assets; Linux additionally exercises the warmed channel on its private
 PipeWire sink with a 100 ms first-buffer admission bound. This measures native
 queue admission, **not audible hardware latency**.
 
-These three preferences are **wired, awaiting native acceptance**. Actual
-Windows x64 and ARM64 builds and all eight AAC decodes passed at `cf4779d1`.
+These three preferences are **native qualified, not fully package accepted**.
+At `ec1dece9`, Windows x64 job `115579777652` and ARM64 job `115579734131`
+each passed 1625 tests (62 skipped), production decoding of all eight AACs,
+native executable/window self-tests and on-device transcription. Linux job
+`115580139101` passed 1505 tests (29 skipped), all eight AACs, GTK/Wayland
+checks, the private PipeWire integration and four Windows Swift projections.
+All three native jobs had zero failures.
+
+Windows x64 and ARM64 builds and all eight AAC decodes also passed at `cf4779d1`.
 Its Windows developer bundle also decoded all eight production assets on the
 local host; the real default endpoint admitted both cues in every profile in
 2.394-6.934 ms and passed reusable stop/joined close. That local run used the
@@ -83,13 +90,20 @@ existing installed Swift runtime, not a newly installed self-contained bundle.
 The CI MSIX bundle/native self-tests passed, but the lifecycle readiness probe
 rejected the nonfatal no-audio-device warning. The bounded actionable warning
 retains the full error in stderr and does not disable capture.
-Linux built and decoded all eight AACs, then failed a test fixture constructed
+The earlier Linux run built and decoded all eight AACs, then failed a fixture constructed
 at unsupported 8 kHz before reaching its intended decoded-duration check; the
-fixture now uses supported 16 kHz, with endpoint/package qualification pending
-the rerun. Final-head native controls, Linux endpoint and installed-package
-resource/codec evidence remain required before calling the sound journey
-accepted. Linux deployment composes the sibling collector in
+corrected 16 kHz fixture passed at `ec1dece9`. Its warmed dedicated libpulse
+channel admitted both cues for all four profiles in 0.078-0.135 ms on the
+private PipeWire sink, below the 100 ms bound. This is not audible latency.
+The bounded warning is fully visible in both native General captures;
+these captures do not show the preferences modal.
+Apple CI, the corrected MSIX lifecycle and installed Linux/Flatpak
+resource/codec qualification remain pending. Linux deployment composes the
+sibling collector in
 #1212 and needs AAC decoding (Ubuntu: `gstreamer1.0-libav`).
+That collector depends on the icon workstream's staging foundation; it is not
+a standalone settings patch. GNOME Flatpak runtime AAC support must be checked
+in the installed app, not inferred from Ubuntu CI.
 
 ## Implemented preference journey
 
@@ -310,9 +324,9 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | pasteRemoteTranscriptsAtCursor | Missing / Missing | No remote transcript delivery preference |
 | autoCorrectionsEnabled | Missing / Missing | No correction capture/promotion/preview pipeline in baseline |
 | autoCorrectionsPromotionThreshold | Missing / Missing | No correction promotion policy/editor |
-| recordingSoundsEnabled | Wired, unverified / Wired, unverified | General + owned native channel; normal readiness/finish cues only; exact-head native acceptance pending |
-| recordingSoundProfile | Wired, unverified / Wired, unverified | Canonical four profiles + owned preload replacement and explicit previews; codec acceptance pending |
-| recordingSoundVolume | Wired, unverified / Wired, unverified | Strict 0...1 field + Mac volume-squared gain; native/installed-package acceptance pending |
+| recordingSoundsEnabled | Native qualified / Native qualified | General + owned native channel; normal readiness/finish cues only; installed-package acceptance pending |
+| recordingSoundProfile | Native qualified / Native qualified | Canonical four profiles + owned preload replacement and explicit previews; all eight production AACs decoded on Windows/Linux |
+| recordingSoundVolume | Native qualified / Native qualified | Strict 0...1 field + Mac volume-squared gain; native tests and queue bounds passed; installed-package acceptance pending |
 | assemblyAIKeyterms | Wired / Wired | Config + options-bearing live factory; provider enforces vocabulary bounds |
 | transcriptionKeywords | Partial / Partial | Config; xAI STT live only here, other provider/batch forwarding remains |
 | transcriptionKeywordsLastReconciled | Wired / Wired | Shared `TranscriptionKeywordPolicy` + Config; unchanged-mirror/deliberate-clear reconciliation, durable last mirror |

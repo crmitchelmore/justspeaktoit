@@ -86,7 +86,10 @@ cloud-key imports and endpoint changes refresh readiness. Keys/settings are read
 again after the final admission suspension, before audio/provider work, and
 admitted runs keep immutable snapshots. Readiness does not validate a key with
 the real service. Cancel/editor close invalidates pending admission across
-editor reopen. A blind **Diff against** dropdown uses the shared
+editor reopen.
+`DesktopSettingsQueue` admits File/Live work without waiting for playback:
+separately owned admission tasks are cancelled on Cancel/editor close/shutdown.
+A blind **Diff against** dropdown uses the shared
 `TranscriptWordDiff`, with accessible `[+added]` / `[-removed]` text annotations
 instead of colour-only edits; original transcripts and persisted ranks stay unchanged.
 

@@ -102,6 +102,7 @@ final class Gate: @unchecked Sendable {
     private let lock = NSLock()
     private var open: Bool
     init(open: Bool) { self.open = open }
+    var isOpen: Bool { lock.withLock { open } }
     func release() { lock.withLock { open = true } }
     func pass() async {
         while !lock.withLock({ open }) {

@@ -86,6 +86,7 @@ extension DesktopHostController {
     }
 
     private func startComparison(_ payload: String, live: Bool) async {
+        guard !Task.isCancelled else { return }
         guard !closed, !busy, recording == nil, comparisonCapture == nil,
               comparisonTask == nil, comparisonFinalization == nil else {
             comparisonStatus("Finish or cancel the current recording or comparison first.")
@@ -105,13 +106,14 @@ extension DesktopHostController {
         }
         do {
             await openComparison()
-            guard !closed, comparisonVisible, comparisonGeneration == generation, comparisons != nil else { return }
+            guard !closed, !Task.isCancelled, comparisonVisible,
+                  comparisonGeneration == generation, comparisons != nil else { return }
             let lines = payload.components(separatedBy: "\n")
             guard lines.count >= 2 else { throw DesktopHostError(message: "Invalid comparison request.") }
             let language = lines[0].isEmpty ? nil : lines[0]
             cancelOutput()
             try await playback.stopAndWait()
-            guard !closed, comparisonVisible, comparisonGeneration == generation else { return }
+            guard !closed, !Task.isCancelled, comparisonVisible, comparisonGeneration == generation else { return }
             let configuration = try comparisonAdmission(
                 lines[1].components(separatedBy: "\t"), live: live, language: language, generation: generation
             )
@@ -260,6 +262,7 @@ extension DesktopHostController {
 
     package func cancelComparison() async {
         playback.stop(announcing: false)
+        comparisonAdmissionTask?.cancel()
         if comparisonTask == nil, comparisonCapture == nil, comparisonFinalization == nil {
             comparisonGeneration = UUID()
         }

@@ -205,7 +205,7 @@ final class DesktopComparisonReadinessTests: XCTestCase {
         let gate = Gate(open: false)
         let playback = await controller.suspendComparisonPlayback(gate)
         let start = Task {
-            await controller.comparisonEvent(
+            await controller.enqueueComparisonEvent(
                 102, text: "\n" + ids.joined(separator: "\t") + "\nsynthetic.wav", index: 0
             )
         }
@@ -224,6 +224,9 @@ final class DesktopComparisonReadinessTests: XCTestCase {
         XCTAssertNil(capture)
     }
 
+}
+
+extension DesktopComparisonReadinessTests {
     func testCancelOrEditorCloseAndReopenDuringAdmissionCannotReviveLateWork() async throws {
         for event: Int32 in [105, 123] {
             let root = temporaryRoot()
@@ -255,6 +258,42 @@ final class DesktopComparisonReadinessTests: XCTestCase {
             )
             let task = await controller.comparisonTask
             XCTAssertNil(task)
+            await controller.close()
+        }
+    }
+
+    func testNativeSettingsQueueDoesNotHoldCancelOrEditorCloseBehindComparisonAdmission() async throws {
+        for event: Int32 in [105, 123] {
+            let root = temporaryRoot()
+            defer { try? FileManager.default.removeItem(at: root) }
+            let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+            FakeLog.shared.setKey("synthetic-key", name: "openai.apiKey")
+            let ids = DesktopHostModels.visible.filter {
+                !DesktopHostModels.isLive($0.id)
+                    && DesktopHostModels.provider(for: $0.id)?.apiKeyIdentifier == "openai.apiKey"
+            }.prefix(2).map(\.id)
+            let gate = Gate(open: false)
+            let playback = await controller.suspendComparisonPlayback(gate)
+            let queue = DesktopSettingsQueue()
+            queue.submit {
+                await controller.enqueueComparisonEvent(
+                    102, text: "\n" + ids.joined(separator: "\t") + "\nsynthetic.wav", index: 0
+                )
+            }
+            await playback.stopping.pass()
+            let cancelled = Gate(open: false)
+            queue.submit {
+                await controller.enqueueComparisonEvent(event, text: "", index: 0)
+                cancelled.release()
+            }
+            let deadline = ContinuousClock.now.advanced(by: .seconds(1))
+            while !cancelled.isOpen, ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(2))
+            }
+            XCTAssertTrue(cancelled.isOpen, "Native Cancel/Close must run before the held admission resumes.")
+            gate.release()
+            await queue.drain()
+            await controller.comparisonAdmissionTask?.value
             await controller.close()
         }
     }

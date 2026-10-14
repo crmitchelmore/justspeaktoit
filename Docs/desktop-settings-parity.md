@@ -238,6 +238,82 @@ Apple frameworks/runtime and actual Windows native linking/runtime remain
 unqualified. Holding-branch publication does not select an integration source
 or widen target retention/import/apply acceptance.
 
+## Local immutable retained configuration capsule candidate
+
+`DesktopNativeRetentionMergePolicy.plan(existing:incoming:checkCancellation:)`
+validates both native record sets through the frozen codec and returns proposed
+records, additions, idempotent IDs and explicit conflicts. Equal entire
+envelopes are idempotent; differing presence/raw values conflict, while invalid
+provenance/schema/identities are refused before a candidate is returned.
+Foreign Windows/Linux identities remain separate. Empty incoming arrays never
+clear retained records; an absent selected value cannot replace a present one.
+`hasConflicts` is a report, not a permission to write or apply.
+
+`DesktopNativeRetainedCapsule.create(archive,in:identifier:storage:publication:checkCancellation:)`
+creates one **immutable** `native-retained-<UUID>` private leaf containing
+`records.json`. It validates strict encoded bytes before creating anything,
+uses the existing protected `DesktopMigrationArchive.Storage` creation seam,
+flushes owned staging, validates the reread staging bytes and delegates
+no-replace publication through required `DesktopFilePublication.Copy`.
+Native callers must supply their actual `WindowsMigrationArchive` or
+`LinuxMigrationArchive` storage/publication operations. There is no default
+public-permission Windows fallback, global Root retention pointer, update,
+replace, delete, settings write or automatic native importer.
+
+`reload` validates the file against the instance's held original bytes and
+strictly decodes it. `read(from:)` performs bounded strict restart inspection.
+Restart validation proves current codec validity, **not** historical
+authenticity if an external writer substituted different valid bytes; directory
+naming alone establishes neither ownership nor mutation authority.
+`exportProjection` returns only `.settings` native records with exact selected
+IDs (including an explicit empty set), never complete/replacement scope.
+Canonical/Mac automatic import continues to reject `nativeConfiguration`.
+
+Reusing an existing UUID leaf refuses before modifying it. Prepublication
+failure/cancellation removes only the invocation's named unpublished stage;
+empty-directory removal is nonrecursive, so unrelated children are not deleted.
+Once publication may have committed, an explicit published-effect failure keeps
+the capsule rather than deleting it, retrying or claiming success.
+Construction/reload/export run off the UI/settings-admission/PCM paths.
+
+The frozen `86a` IO primitives provide protected creation and exclusive
+publication, **not** identity-conditioned mutation CAS or owned transactional
+replacement journals. Read seals and process locks do not fill that gap.
+Mutable aggregate retention, conflict-resolution writes, transactional
+replacement and safe apply remain explicitly blocked on that separate
+authority contract. This local capsule is not selected for integration or
+connected to import/export UI.
+
+Vocabulary's `vocabulary.json` opaque-source carrier is a separate peer-owned
+contract, not field ten or this settings capsule. It may contain sensitive user
+content/unknown members; no noncredential classification, scanning, upload or
+automatic carrier admission is inferred. Frozen native-field definitions,
+settings codec/parser, catalogue and source acceptance remain unchanged here.
+
+Local qualification adds **18** merge/capsule regressions, including actual
+publication followed by child-task cancellation. That case reports
+`DesktopNativeRetentionPublishedFailure`, strictly reloads the complete original
+envelope after restart, proves one publication and preserves unrelated Root and
+capsule-side files. It neither retries nor deletes committed data.
+
+The cached WSL Swift toolchain ran these commands through the
+`validate-native-retention.sh` session wrapper, which restores `Package.resolved`:
+
+- `SPEAK_PORTABLE_CORE=1 swift test --scratch-path /tmp/jsti-settings-eacacdaf --jobs 4 --filter 'DesktopNativeRet|DesktopNativeConfiguration|DesktopHostConfigurationCapture|DataMigrationPreference|DesktopHostPreferenceArchive|DesktopHostHandsFree|DesktopHostRecordingTail|DesktopHostVoiceConfiguration|DesktopHostKeywordConfiguration'`:
+  **135 passed / 0 failures**.
+- `SPEAK_PORTABLE_CORE=1 swift test --scratch-path /tmp/jsti-settings-eacacdaf --jobs 4`:
+  **1924 tests / 30 skipped / 0 failures**.
+- `bash scripts/typecheck-windows-swift.sh --jobs 4` (CRLF-normalized script,
+  `SPEAK_WINDOWS_TYPECHECK_DIR=/tmp/jsti-feedback-windows-typecheck-eacacdaf`):
+  all four Windows Swift projections passed; these are compile-only stub graphs.
+- `swiftlint lint --strict --config .swiftlint.yml --baseline .swiftlint-baseline.json`
+  with the pinned 32-path Swift input set in an LF-normalized mirror:
+  **0 violations**.
+
+Native Windows/Apple runtime and installed-host durability remain unqualified.
+This is an isolated local candidate, not integration selection, a mutable
+retention transaction, a safe target importer or full settings parity.
+
 ## Generated-speech coordination
 
 `SpeechGenerationDefaults` defines the Mac's existing `ttsAutoPlay` (true) and

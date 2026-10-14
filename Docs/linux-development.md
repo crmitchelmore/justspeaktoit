@@ -155,8 +155,18 @@ Fewer than two usable results reveal unranked evidence, matching Mac, rather tha
 inventing rankings or scoreboard credit. See the
 [Windows comparison workflow](windows-development.md#model-comparison) for the
 shared 120-second file, 12-second readiness and 30-second finalization budgets.
-Native Select all/none and remembered per-mode candidate selection match the
-Mac selection workflow. A blind **Diff against** dropdown uses the shared
+Native **Select all ready / Select none** and remembered per-mode candidate
+selection use canonical credential readiness plus local-runtime/Azure endpoint
+checks. Unavailable qualified models have explicit reasons in the detail pane;
+their saved selections survive ready-only edits and relaunch. Credential writes,
+cloud-key imports and endpoint changes refresh readiness. Keys/settings are read
+again after the final admission suspension, before audio/provider work, and
+admitted runs keep immutable snapshots. Readiness does not validate a key with
+the real service. Cancel/editor close invalidates pending admission across
+editor reopen.
+`DesktopSettingsQueue` admits File/Live work without waiting for playback:
+separately owned admission tasks are cancelled on Cancel/editor close/shutdown.
+A blind **Diff against** dropdown uses the shared
 `TranscriptWordDiff`, with accessible `[+added]` / `[-removed]` text annotations
 instead of colour-only edits; original transcripts and persisted ranks stay unchanged.
 

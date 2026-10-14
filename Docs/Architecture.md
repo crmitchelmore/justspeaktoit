@@ -211,6 +211,13 @@ SpeakCore revision/round shape and derives its scoreboard; completion preserves
 the initially persisted blind identities/order. `SpeakDesktopHost/DesktopHostComparison`
 owns admission, cancellation, capture, raw provider execution, judging and
 exports without using normal History, post-processing or insertion.
+`DesktopHostComparisonReadiness` projects only qualified, credential/local-ready
+routes into native selection, retains unavailable saved choices and names their
+recovery reasons. Canonical credential resolution and fresh post-suspension
+admission prevent stale readiness from starting audio/provider work.
+`DesktopHostComparisonAdmission` keeps File/Live admission out of the native
+settings queue as separately owned cancellable work, so Cancel and shutdown do
+not wait behind pending playback admission.
 `WindowsComparison.cpp` and `LinuxComparison.c` own their native editors and
 file/save pickers, connected by small host adapters. `DesktopHostComparisonExports`
 uses canonical all-round/selected-round JSON/Markdown documents for saves and

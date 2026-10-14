@@ -27,6 +27,8 @@ extension DesktopHostController {
                 } else {
                     try Platform.saveAPIKey(typed, name: identifier)
                 }
+                await refreshComparison()
+                guard !closed else { return }
             }
             var changed = settings
             changed.postProcessing = options

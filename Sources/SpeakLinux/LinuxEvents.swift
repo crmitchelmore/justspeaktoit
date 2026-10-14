@@ -179,7 +179,9 @@ func linuxWindowEvent(
         return
     }
     if (100...109).contains(event) || (120...129).contains(event) {
-        holder.enqueueSettings { await holder.controller.comparisonEvent(Int32(event), text: value, index: index) }
+        holder.enqueueSettings {
+            await holder.controller.enqueueComparisonEvent(Int32(event), text: value, index: index)
+        }
         return
     }
     if linuxSessionEvent(event, value: value, slot: slot, holder: holder) { return }

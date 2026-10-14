@@ -80,6 +80,7 @@ void populateModels(HWND window, Dialog &dialog) {
         SendDlgItemMessageW(window, modelsID, LB_SETSEL, row.selected, dialog.visible.size() - 1);
     }
     SetDlgItemTextW(window, runID, live ? L"&Start microphone" : L"&Choose samples and run...");
+    EnableWindow(GetDlgItem(window, runID), !dialog.shown.busy && dialog.visible.size() >= 2);
 }
 void selectionChanged(HWND window, Dialog &dialog) {
     std::string selected;
@@ -139,7 +140,8 @@ void present(HWND window, Dialog &dialog) {
     for (size_t i = 0; i < references.size(); ++i) if (references[i].id == next.reference)
         SendDlgItemMessageW(window, referenceID, CB_SETCURSEL, i, 0);
     EnableWindow(GetDlgItem(window, referenceID), !references.empty());
-    for (int id : {modelsID, modeID, languageID, runID}) EnableWindow(GetDlgItem(window, id), !next.busy);
+    for (int id : {modelsID, modeID, languageID}) EnableWindow(GetDlgItem(window, id), !next.busy);
+    EnableWindow(GetDlgItem(window, runID), !next.busy && dialog.visible.size() >= 2);
     for (int id : {allID, noneID}) EnableWindow(GetDlgItem(window, id), !next.busy);
     EnableWindow(GetDlgItem(window, stopID), next.recording);
     EnableWindow(GetDlgItem(window, cancelID), next.busy);
@@ -175,7 +177,7 @@ void layout(HWND window, Dialog &dialog) {
     move(noticeID, 16, 12, 610, 36);
     move(modeID, 16, 55, 240, 160);
     move(languageLabelID, 270, 55, 130, 24); move(languageID, 400, 55, 210, 28);
-    move(modelLabelID, 16, 92, 90, 22); move(allID, 110, 90, 65, 25); move(noneID, 180, 90, 76, 25);
+    move(modelLabelID, 16, 92, 50, 22); move(allID, 70, 90, 106, 25); move(noneID, 180, 90, 76, 25);
     move(modelsID, 16, 117, 240, 170);
     move(runID, 16, 298, 240, 32); move(stopID, 16, 339, 112, 32); move(cancelID, 138, 339, 118, 32);
     move(roundLabelID, 16, 385, 240, 22); move(roundsID, 16, 410, 240, 112);
@@ -278,7 +280,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
                         L"Choose Batch/File or Live. No dictation settings or History are changed.", 0)
             && add(modeID, L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP)
             && add(modelLabelID, L"STATIC", L"Models (2-8)", 0)
-            && add(allID, L"BUTTON", L"Select all", BS_PUSHBUTTON | WS_TABSTOP)
+            && add(allID, L"BUTTON", L"Select all ready", BS_PUSHBUTTON | WS_TABSTOP)
             && add(noneID, L"BUTTON", L"Select none", BS_PUSHBUTTON | WS_TABSTOP)
             && add(modelsID, L"LISTBOX", L"Comparison models", LBS_EXTENDEDSEL | LBS_NOTIFY | WS_VSCROLL | WS_TABSTOP)
             && add(languageLabelID, L"STATIC", L"Language hint", 0)
@@ -497,6 +499,18 @@ bool jsti_comparison_self_test(HWND owner, std::string &error, const std::string
                 "Select-all did not persist the qualified file selection.");
         SendMessageW(window, WM_COMMAND, MAKEWPARAM(noneID, BN_CLICKED), 0);
         require(check.event == 125 && check.payload.empty(), "Select-none did not persist an empty selection.");
+        { std::lock_guard<std::mutex> lock(mutex);
+          pending.models = "test/file-b\tFile B\t0\t0\ntest/live-a\tLive A\t1\t0\ntest/live-b\tLive B\t1\t0"; }
+        present(window, *dialog);
+        require(SendDlgItemMessageW(window, modelsID, LB_GETCOUNT, 0, 0) == 1
+                && !IsWindowEnabled(GetDlgItem(window, runID)), "Unavailable routes remained runnable.");
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(allID, BN_CLICKED), 0);
+        require(check.event == 125 && check.payload == "test/file-b", "Select-all included an unavailable route.");
+        { std::lock_guard<std::mutex> lock(mutex);
+          pending.models = "test/file-a\tFile A\t0\t1\ntest/file-b\tFile B\t0\t0\n"
+                           "test/live-a\tLive A\t1\t0\ntest/live-b\tLive B\t1\t0"; }
+        present(window, *dialog);
+        require(IsWindowEnabled(GetDlgItem(window, runID)), "Fresh ready routes did not restore Run.");
         require(IsWindowEnabled(GetDlgItem(window, deleteID)), "Saved comparison cannot be discarded.");
         require(IsWindowEnabled(GetDlgItem(window, syncID)), "Comparison sync consent is unavailable.");
         require(!IsWindowEnabled(GetDlgItem(window, syncNowID)), "Sync retry is enabled before consent.");

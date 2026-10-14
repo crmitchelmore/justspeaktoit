@@ -22,13 +22,25 @@ struct FakeJob: Sendable {
 
 final class FakePlayback: DesktopHostPlayback, @unchecked Sendable {
     let stopping = Gate(open: true)
+    var stopGate: Gate?
     func setStatusHandler(_ handler: @escaping @Sendable (UInt64, String) -> Void) {}
     func isCurrent(revision: UInt64) -> Bool { false }
     func play(recordID: UUID, path: String, knownDuration: TimeInterval?) throws {}
     func togglePause(recordID: UUID) -> Bool { false }
     func stop(announcing: Bool) {}
     func stop(unless recordID: UUID) {}
-    func stopAndWait() async throws { await stopping.pass() }
+    // With no suspending `stopGate`, this preserves the pre-existing hold/release
+    // contract hands-free arming relies on. When a comparison suspends playback via
+    // `stopGate`, releasing `stopping` first signals suspension has begun (so callers
+    // can synchronize) before blocking on the externally controlled gate.
+    func stopAndWait() async throws {
+        if let stopGate {
+            stopping.release()
+            await stopGate.pass()
+        } else {
+            await stopping.pass()
+        }
+    }
     func stopSavedAudioAndWait() async throws { await FakeLog.shared.stopSavedAudio() }
     func close() async throws {}
 }

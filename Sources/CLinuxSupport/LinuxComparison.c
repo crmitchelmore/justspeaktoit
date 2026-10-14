@@ -110,6 +110,7 @@ static void populate_models(void) {
     }
     g_strfreev(lines);
     gtk_button_set_label(ui.run, live ? "Start microphone" : "Choose samples and run…");
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.run), ui.model_ids->len >= 2);
 }
 static void models_changed(GtkCheckButton *button, gpointer data) {
     (void)button; (void)data;
@@ -352,7 +353,7 @@ void jsti_comparison_open(GtkWindow *parent) {
     gtk_box_append(GTK_BOX(column), GTK_WIDGET(ui.language));
     heading(GTK_BOX(column), "Models (select two to eight)");
     GtkWidget *selection = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    ui.select_all = GTK_BUTTON(button_new("Select all", G_CALLBACK(select_models)));
+    ui.select_all = GTK_BUTTON(button_new("Select all ready", G_CALLBACK(select_models)));
     ui.select_none = GTK_BUTTON(button_new("Select none", G_CALLBACK(select_models)));
     gtk_box_append(GTK_BOX(selection), GTK_WIDGET(ui.select_all));
     gtk_box_append(GTK_BOX(selection), GTK_WIDGET(ui.select_none));
@@ -494,7 +495,7 @@ static void present(gpointer value) {
     if (g_strcmp0(ui.selected, p->selected) != 0) gtk_editable_set_text(GTK_EDITABLE(ui.ranks), "");
     g_free(ui.selected); ui.selected = g_strdup(p->selected);
     gtk_text_buffer_set_text(gtk_text_view_get_buffer(ui.detail), p->detail, -1);
-    GtkWidget *settings[] = {GTK_WIDGET(ui.mode), GTK_WIDGET(ui.models), GTK_WIDGET(ui.language), GTK_WIDGET(ui.run)};
+    GtkWidget *settings[] = {GTK_WIDGET(ui.mode), GTK_WIDGET(ui.models), GTK_WIDGET(ui.language)};
     for (guint i = 0; i < G_N_ELEMENTS(settings); ++i) gtk_widget_set_sensitive(settings[i], !p->busy);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.select_all), !p->busy);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.select_none), !p->busy);
@@ -509,6 +510,7 @@ static void present(gpointer value) {
     gtk_widget_set_sensitive(GTK_WIDGET(ui.copy_markdown), !p->busy && ui.round_ids->len > 0);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.export_scope), !p->busy && ui.round_ids->len > 0);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.delete_round), !p->busy && p->selected[0] != '\0');
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.run), !p->busy && ui.model_ids->len >= 2);
     gtk_check_button_set_active(ui.sync, p->sync_enabled);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.sync), p->sync_available);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.sync_now), p->sync_available && p->sync_enabled);
@@ -567,6 +569,14 @@ int32_t jsti_comparison_self_test(GtkWindow *parent, char *error, size_t capacit
         && g_strcmp0(test_payload, "test/file-a\ttest/file-b") == 0;
     g_signal_emit_by_name(ui.select_none, "clicked");
     valid = valid && test_event == 125 && g_strcmp0(test_payload, "") == 0;
+    gchar *all_models = p.models;
+    p.models = "test/file-b\tFile B\t0\t0\ntest/live-a\tLive A\t1\t0\ntest/live-b\tLive B\t1\t0";
+    present(&p);
+    valid = valid && ui.model_ids->len == 1 && !gtk_widget_get_sensitive(GTK_WIDGET(ui.run));
+    g_signal_emit_by_name(ui.select_all, "clicked");
+    valid = valid && test_event == 125 && g_strcmp0(test_payload, "test/file-b") == 0;
+    p.models = all_models; present(&p);
+    valid = valid && gtk_widget_get_sensitive(GTK_WIDGET(ui.run));
     valid = valid && gtk_widget_get_sensitive(GTK_WIDGET(ui.sync))
         && !gtk_widget_get_sensitive(GTK_WIDGET(ui.sync_now))
         && gtk_label_get_wrap(GTK_LABEL(gtk_check_button_get_child(ui.sync)));

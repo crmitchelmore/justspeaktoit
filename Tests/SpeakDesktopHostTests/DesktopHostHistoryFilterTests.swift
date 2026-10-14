@@ -59,7 +59,7 @@ final class DesktopHostHistoryFilterTests: XCTestCase {
     }
 
     private func payload(_ filter: DesktopHistoryFilter) throws -> String {
-        String(decoding: try JSONEncoder().encode(filter), as: UTF8.self)
+        try XCTUnwrap(String(bytes: JSONEncoder().encode(filter), encoding: .utf8))
     }
 
     private func record() -> DesktopRecordingStore.Record {

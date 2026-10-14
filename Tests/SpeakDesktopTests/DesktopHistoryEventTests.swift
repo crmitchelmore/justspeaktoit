@@ -201,17 +201,21 @@ private actor HistoryHostProbe {
             selected = id
         case .version: break
         case .playPause(let id):
-            if audible == .playing(id) {
-                audible = .paused(id)
-            } else if audible == .paused(id) {
-                audible = .playing(id)
-            } else if id == selected {
-                audible = .playing(id)
-            }
+            togglePlayback(id)
         case .stop: audible = nil
         case .readAloud(let id, let text):
             if id == selected { audible = .reading(id, text) }
         case .filter: audible = nil
+        }
+    }
+
+    private func togglePlayback(_ id: String) {
+        if audible == .playing(id) {
+            audible = .paused(id)
+        } else if audible == .paused(id) {
+            audible = .playing(id)
+        } else if id == selected {
+            audible = .playing(id)
         }
     }
 }

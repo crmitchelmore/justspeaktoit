@@ -942,20 +942,22 @@ void layoutSettings(HWND window, const RECT &content) {
         break;
     }
     case generalPage: {
-        int y = layoutSettingsCard(window, top, content, 0xE720, L"Audio and output",
+        // Output used to have its own card; it now shares this card's header
+        // (the configuration action) and backup row (the text-output button),
+        // so the page fits the minimum height without the App behaviour card
+        // falling outside the window bounds.
+        const int cardTop = top;
+        int y = layoutSettingsCard(window, top, content, 0xE720, L"Audio, output and backup",
             L"Finished text goes to the app where dictation started, or the clipboard. "
             L"Backups include History text and optional audio, not settings, profiles or credentials.",
             2 * row + scale(window, 12));
+        place(window, configurationID, box(right - scale(window, 220), cardTop + scale(window, 16), scale(window, 220), row));
         label(94, y); control(microphoneID, y);
         const int backupY = y + row + scale(window, 12);
+        place(window, textOutputID, box(left, backupY, scale(window, 170), row));
         place(window, backupAudioID, RECT{left + scale(window, 182), backupY, right - scale(window, 210), backupY + row});
         button(backupExportID, backupY, scale(window, 196));
         top = y + 2 * row + scale(window, 32) + gap;
-        y = layoutSettingsCard(window, top, content, 0xE8C8, L"Output",
-            L"Finished text goes back into the app you were in when dictation started, or to the clipboard.", row);
-        place(window, textOutputID, box(left, y, scale(window, 170), row));
-        place(window, configurationID, box(left + scale(window, 182), y, scale(window, 220), row));
-        top = y + row + scale(window, 20) + gap;
         // The Mac's App Behaviour card. The note appears only when the system
         // decides Launch at login, so the page still fits the minimum height.
         y = layoutSettingsCard(window, top, content, 0xE713, L"App behaviour", state.loginItemNote,

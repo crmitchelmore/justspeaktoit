@@ -228,7 +228,7 @@ private func linuxHistoryManagementEvent(_ event: Int, value: String, slot: Int,
         }
     case Int(JSTI_EVENT_MIGRATION_EXPORT):
         holder.enqueueSettings {
-            await holder.controller.beginMigrationExport(URL(fileURLWithPath: value), includeAudio: slot == 1)
+            await holder.controller.beginMigrationExport(URL(fileURLWithPath: value), nativeFlags: slot)
         }
     default: return false
     }

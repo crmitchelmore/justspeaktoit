@@ -77,6 +77,7 @@ typedef struct UI {
     GtkButton *recordings_folder;
     GtkButton *audio_cleanup;
     AdwSwitchRow *backup_audio;
+    AdwSwitchRow *backup_profiles;
     GtkButton *backup_export;
     GtkButton *backup_inspect;
     GCancellable *backup_chooser;
@@ -239,6 +240,7 @@ static void refresh_actions(void) {
     if (ui.audio_cleanup != NULL) gtk_widget_set_sensitive(GTK_WIDGET(ui.audio_cleanup), idle);
     if (ui.backup_audio != NULL) {
         gtk_widget_set_sensitive(GTK_WIDGET(ui.backup_audio), idle && ui.backup_chooser == NULL);
+        gtk_widget_set_sensitive(GTK_WIDGET(ui.backup_profiles), idle && ui.backup_chooser == NULL);
         gtk_widget_set_sensitive(GTK_WIDGET(ui.backup_export), idle && ui.backup_chooser == NULL);
         gtk_widget_set_sensitive(GTK_WIDGET(ui.backup_inspect), idle && ui.backup_chooser == NULL);
     }
@@ -470,6 +472,7 @@ typedef struct BackupChoice {
     GWeakRef parent;
     GCancellable *cancelled;
     gint32 include_audio;
+    gint32 include_profiles;
     gboolean inspect;
 } BackupChoice;
 
@@ -480,7 +483,7 @@ static gboolean backup_choice_active(const BackupChoice *choice, GObject *parent
 
 static void backup_emit_path(const BackupChoice *choice, const char *path) {
     emit(choice->inspect ? JSTI_EVENT_MIGRATION_INSPECT : JSTI_EVENT_MIGRATION_EXPORT,
-         path, choice->inspect ? 0 : choice->include_audio);
+         path, choice->inspect ? 0 : (choice->include_audio | choice->include_profiles));
 }
 
 static void backup_chosen(GObject *source, GAsyncResult *result, gpointer data) {
@@ -524,12 +527,13 @@ static void on_backup(GtkButton *button, gpointer data) {
     g_weak_ref_init(&choice->parent, G_OBJECT(ui.window));
     choice->cancelled = g_cancellable_new();
     choice->include_audio = adw_switch_row_get_active(ui.backup_audio) ? 1 : 0;
+    choice->include_profiles = adw_switch_row_get_active(ui.backup_profiles) ? 2 : 0;
     choice->inspect = GPOINTER_TO_INT(data) != 0;
     ui.backup_chooser = g_object_ref(choice->cancelled);
     refresh_actions();
     GtkFileDialog *dialog = gtk_file_dialog_new();
     gtk_file_dialog_set_title(dialog, choice->inspect ? "Inspect backup (no data will be imported)"
-                                                    : "Save History backup (existing files are never replaced)");
+                                                    : "Save ZIP backup (existing files are never replaced)");
     if (!choice->inspect) gtk_file_dialog_set_initial_name(dialog, "JustSpeakToIt-History.zip");
     GtkFileFilter *filter = gtk_file_filter_new();
     gtk_file_filter_set_name(filter, "ZIP backups");
@@ -1118,17 +1122,23 @@ static GtkWidget *build_general(void) {
     adw_action_row_add_suffix(ADW_ACTION_ROW(cleanup), GTK_WIDGET(ui.audio_cleanup));
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(housekeeping), cleanup);
     gtk_box_append(GTK_BOX(column), housekeeping);
-    GtkWidget *backup = group("History backup");
+    GtkWidget *backup = group("Data backup");
     adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(backup),
-        "Save History text and optional saved recording audio in a ZIP backup. "
-        "Settings, profiles and credentials are not included. Existing files are never replaced.");
+        "Save History text with optional saved audio and app profiles in a ZIP backup. "
+        "ZIPs are not encrypted. Settings and credentials are not included; existing files are never replaced.");
     ui.backup_audio = ADW_SWITCH_ROW(adw_switch_row_new());
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.backup_audio), "Include saved recording audio");
     adw_switch_row_set_active(ui.backup_audio, TRUE);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(backup), GTK_WIDGET(ui.backup_audio));
+    ui.backup_profiles = ADW_SWITCH_ROW(adw_switch_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.backup_profiles), "Include app profiles");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(ui.backup_profiles), "Includes per-app overrides and prompts.");
+    adw_switch_row_set_active(ui.backup_profiles, FALSE);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(backup), GTK_WIDGET(ui.backup_profiles));
     GtkWidget *backup_row = adw_action_row_new();
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(backup_row), "Save a ZIP backup");
-    adw_action_row_set_subtitle(ADW_ACTION_ROW(backup_row), "Turn off audio for a History-only backup.");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(backup_row),
+        "Turn off both optional categories for a History-only backup.");
     ui.backup_export = GTK_BUTTON(gtk_button_new_with_mnemonic("Save _backup…"));
     gtk_widget_set_valign(GTK_WIDGET(ui.backup_export), GTK_ALIGN_CENTER);
     g_signal_connect(ui.backup_export, "clicked", G_CALLBACK(on_backup), NULL);
@@ -2441,8 +2451,10 @@ static int32_t login_item_self_test(char *error, size_t capacity) {
 int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (ui.window == NULL) return fail(error, capacity, "the window was not created");
     if (ui.recordings_folder == NULL || ui.audio_cleanup == NULL ||
-        ui.backup_audio == NULL || ui.backup_export == NULL || ui.backup_inspect == NULL ||
+        ui.backup_audio == NULL || ui.backup_profiles == NULL ||
+        ui.backup_export == NULL || ui.backup_inspect == NULL ||
         !adw_switch_row_get_active(ui.backup_audio) ||
+        adw_switch_row_get_active(ui.backup_profiles) ||
         jsti_window_confirm_audio_cleanup(NULL, 1) != -1 ||
         g_strcmp0(gtk_button_get_label(ui.recordings_folder), "_Open folder") != 0) {
         return fail(error, capacity, "the recording folder control was not created");
@@ -2455,10 +2467,18 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     refresh_actions();
     gboolean backup_ok = backup_choice_active(&choice, choice_parent) &&
         !gtk_widget_get_sensitive(GTK_WIDGET(ui.backup_audio)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.backup_profiles)) &&
         !gtk_widget_get_sensitive(GTK_WIDGET(ui.backup_export)) &&
         !gtk_widget_get_sensitive(GTK_WIDGET(ui.backup_inspect));
     jsti_window_event_fn backup_callback = ui.callback;
     ui.callback = observe_event;
+    for (gint32 flags = 0; flags < 4; ++flags) {
+        choice.include_audio = flags & 1;
+        choice.include_profiles = flags & 2;
+        backup_emit_path(&choice, "synthetic-export.zip");
+        backup_ok = backup_ok && observed.event == JSTI_EVENT_MIGRATION_EXPORT && observed.index == flags &&
+            g_strcmp0(observed.text, "synthetic-export.zip") == 0;
+    }
     choice.inspect = TRUE;
     choice.include_audio = 1;
     backup_emit_path(&choice, "synthetic-review.zip");

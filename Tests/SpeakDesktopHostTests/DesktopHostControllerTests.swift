@@ -21,7 +21,7 @@ struct FakeJob: Sendable {
 }
 
 final class FakePlayback: DesktopHostPlayback, @unchecked Sendable {
-    let stopping = Gate(open: false)
+    var stopping = Gate(open: false)
     var stopGate: Gate?
     func setStatusHandler(_ handler: @escaping @Sendable (UInt64, String) -> Void) {}
     func isCurrent(revision: UInt64) -> Bool { false }

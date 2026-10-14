@@ -8,6 +8,11 @@ int32_t jsti_comparison_present(const char *models, const char *rounds, const ch
                                const char *selected, int32_t busy, int32_t recording, int32_t judgeable,
                                int32_t sync_enabled, int32_t sync_available,
                                const char *references, const char *reference);
+int32_t jsti_comparison_present_batch(const char *models, const char *rounds, const char *detail,
+                                     const char *selected, int32_t busy, int32_t recording, int32_t judgeable,
+                                     int32_t sync_enabled, int32_t sync_available,
+                                     const char *references, const char *reference,
+                                     const char *batch_round, int32_t batch_remaining, int32_t can_next);
 
 #ifdef __cplusplus
 extern "C" {

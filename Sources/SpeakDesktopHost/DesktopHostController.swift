@@ -111,6 +111,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var comparisonVisible = false
     var comparisonInitialization: DesktopComparisonStoreLoading?
     var comparisonAdmissionTask: Task<Void, Never>?
+    var comparisonBatch: DesktopComparisonBatch?
     package var comparisonTask: Task<Void, Never>?
     package var comparisonFinalization: Task<Void, Never>?
     var comparisonUpdates: Task<Void, Never>?

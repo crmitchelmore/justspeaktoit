@@ -53,6 +53,15 @@ Cancel or editor close invalidates pending admission, even if the editor reopens
 Native settings events queue only the admission request; its separately owned
 task is cancelled on Cancel/editor close/shutdown. Cancel is not queued behind
 pending playback admission.
+Batch snapshots every selected sample/model/language before the first request,
+then pauses for blind judging. Save ranking reveals the round but never starts
+another request; **Next file** is explicit (also after fewer than two usable
+results reveal unranked). Queued samples keep their sync/deletion execution leases.
+Cancel, discarding the current round, editor close and app shutdown cancel the
+queue, retain recovery audio/results and never auto-resume after relaunch.
+The native 2–8-model and 1–32-sample ceilings remain temporary resource limits:
+Mac's comparison controller/picker has no matching upper bounds. They are not
+platform-parity claims or hardware-validated limits.
 This is configuration readiness, not evidence that a service accepts the key.
 The blind **Diff against** picker reuses
 `TranscriptWordDiff`; signed `[+added]` / `[-removed]` annotations remain readable

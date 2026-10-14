@@ -2,7 +2,7 @@ import Foundation
 import SpeakCore
 import SpeakDesktop
 
-private struct ComparisonSampleSnapshot {
+struct ComparisonSampleSnapshot {
     let audio: URL
     let round: ModelComparisonRound
 }
@@ -21,29 +21,52 @@ extension DesktopHostController {
             comparisonOwnedRoundIDs.insert(snapshot.round.id)
             prepared.append(snapshot)
         }
-        for snapshot in prepared {
-            try Task.checkCancellation()
-            comparisonSelection = snapshot.round.id
-            comparisonStatus("Comparing \(snapshot.round.sample.name)… Raw requests only.")
-            await refreshComparison()
-            let round = try await DesktopComparisonRunner.file(
-                audio: snapshot.audio, pending: snapshot.round, candidates: configuration.selected
-            ) { audio, candidate, language in
-                guard let key = configuration.keys[candidate.modelID] else {
-                    throw DesktopHostError(message: "The comparison credential snapshot is missing.")
-                }
-                return try await self.effects.transcribeComparison(
-                    .init(audio: audio, model: candidate.modelID, key: key,
-                          duration: snapshot.round.sample.durationSeconds, language: language),
-                    azureEndpoint: configuration.endpoint, with: self
-                )
-            }
-            try await comparisons.upsert(round)
-            guard comparisonGeneration == configuration.generation else { return }
-            comparisonSelection = round.id
-            await refreshComparison()
+        try Task.checkCancellation()
+        guard !closed, comparisonGeneration == configuration.generation, let first = prepared.first else {
+            throw CancellationError()
         }
-        comparisonStatus("Comparison results saved. Review or rank the results below.")
+        if prepared.count > 1 {
+            comparisonBatch = DesktopComparisonBatch(
+                id: configuration.generation, configuration: configuration,
+                currentRoundID: first.round.id, remaining: Array(prepared.dropFirst())
+            )
+        }
+        try await runComparisonSample(first, configuration: configuration)
+    }
+
+    func runComparisonSample(
+        _ snapshot: ComparisonSampleSnapshot, configuration: DesktopComparisonConfiguration
+    ) async throws {
+        try Task.checkCancellation()
+        guard !closed, comparisonGeneration == configuration.generation, let comparisons else {
+            throw CancellationError()
+        }
+        comparisonSelection = snapshot.round.id
+        comparisonStatus("Comparing \(snapshot.round.sample.name)… Raw requests only.")
+        await refreshComparison()
+        try Task.checkCancellation()
+        guard !closed, comparisonGeneration == configuration.generation else { throw CancellationError() }
+        let round = try await DesktopComparisonRunner.file(
+            audio: snapshot.audio, pending: snapshot.round, candidates: configuration.selected
+        ) { audio, candidate, language in
+            guard let key = configuration.keys[candidate.modelID] else {
+                throw DesktopHostError(message: "The comparison credential snapshot is missing.")
+            }
+            return try await self.effects.transcribeComparison(
+                .init(audio: audio, model: candidate.modelID, key: key,
+                      duration: snapshot.round.sample.durationSeconds, language: language),
+                azureEndpoint: configuration.endpoint, with: self
+            )
+        }
+        try await comparisons.upsert(round)
+        guard comparisonGeneration == configuration.generation else { return }
+        comparisonSelection = round.id
+        if comparisonBatch?.remaining.isEmpty == true { comparisonBatch = nil }
+        comparisonStatus(
+            comparisonBatch == nil ? "Comparison results saved. Review or rank the results below."
+                : "Batch paused. Judge this round, then choose Next file. No further requests start automatically."
+        )
+        await refreshComparison()
     }
 
     private func prepareComparisonSample(

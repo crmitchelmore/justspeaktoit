@@ -15,6 +15,7 @@ extension DesktopHostController {
             comparisonVisible = false
             await cancelComparison()
         case 124, 125: await comparisonPreferenceEvent(event, text: text, live: index == 1)
+        case 128: await nextComparisonFile(text)
         default: return false
         }
         return true

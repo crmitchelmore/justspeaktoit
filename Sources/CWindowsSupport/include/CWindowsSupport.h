@@ -67,6 +67,11 @@ typedef void (*JSTIWindowCallback)(int event, const char *text, int model_index,
 int jsti_comparison_present(const char *models, const char *rounds, const char *detail,
                            const char *selected, int busy, int recording, int judgeable,
                            int sync_enabled, int sync_available, const char *references, const char *reference);
+/* Next-file action 128 carries the paused round ID; batch fields share the same presentation snapshot. */
+int jsti_comparison_present_batch(const char *models, const char *rounds, const char *detail,
+                                 const char *selected, int busy, int recording, int judgeable,
+                                 int sync_enabled, int sync_available, const char *references, const char *reference,
+                                 const char *batch_round, int batch_remaining, int can_next);
 int jsti_window_run(const char *const *model_names, size_t model_count, int selected_index,
                     JSTIWindowCallback callback, void *context, char *error, size_t error_capacity);
 /* Optional pre-run mode catalogue with the same count/order as window_run's

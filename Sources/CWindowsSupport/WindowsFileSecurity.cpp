@@ -519,10 +519,19 @@ int publishPrivateFile(const char *sourcePath, const char *destinationPath,
     if (publicationCancelled(cancelled, context)) return 2;
     // Preserve the held root all the way through rename. The Win32 wrapper
     // rejects this relative-name form on supported Windows hosts.
+    // The user-mode SDK omits this export and NT information class 10.
+    using SetInformation = NTSTATUS (NTAPI *)(HANDLE, PIO_STATUS_BLOCK, PVOID, ULONG, ULONG);
+    static const auto setInformation = [] {
+        const HMODULE module = GetModuleHandleW(L"ntdll.dll");
+        return module ? reinterpret_cast<SetInformation>(GetProcAddress(module, "NtSetInformationFile")) : nullptr;
+    }();
+    if (!setInformation) {
+        error = "Windows does not provide NtSetInformationFile required for protected backup publication.";
+        return -1;
+    }
     IO_STATUS_BLOCK status{};
-    // FileRenameInformation is NT class 10; the user-mode SDK omits its name.
-    constexpr auto renameInformation = static_cast<FILE_INFORMATION_CLASS>(10);
-    const NTSTATUS renamed = NtSetInformationFile(
+    constexpr ULONG renameInformation = 10;
+    const NTSTATUS renamed = setInformation(
         output.value, &status, rename, static_cast<ULONG>(storage.size()), renameInformation);
     if (renamed < 0) {
         error = jsti::systemError("Publish private export without replacing an existing file",

@@ -1104,6 +1104,28 @@ Missing referenced audio emits preservation notices that block destructive
 archive export. This collector owns only History/audio; it does not claim
 settings, vocabulary, profiles, Voice or credential collection/application.
 
+`DataMigrationVocabularyCatalog` defines the existing Mac pronunciation,
+lexicon and correction collection kinds, source locations, raw record projection
+and typed validation once in `SpeakCore`; Mac `MigrationCatalog` delegates to it.
+`DesktopVocabularyMigrationSnapshot.collect(appDirectory:digests:checkCancellation:)`
+reads the corresponding owned native JSON arrays without calling filtered stores,
+domain snapshots or UI serialization. It retains array order, exact payload
+identifiers/dates, unknown nested JSON members, dismissed candidates and aged
+single-occurrence candidates. Validation does not reencode typed models or
+sanitize/promote/reapprove rules. A result's `records == nil` means a missing
+source; `records == []` means a present empty array. Damage, unreadable/linked or
+changed sources, JSON-size violations and cancellation throw, never produce a
+successful empty replacement. Chunked reads and per-record work observe caller
+cancellation; JSON decoding/encoding itself is bounded but synchronous.
+
+The host must run this collector on its owned cancellable worker and suspend
+admission and mutation for all vocabulary stores throughout capture. Per-file
+identity checks and individual actor barriers **do not provide multi-store
+atomicity**. Host aggregation, archive wiring and transactional application are
+separate responsibilities. Native-only `vocabulary.json` remains explicitly
+unmapped/unapplied; it is not invented as a Mac collection kind. Raw payload
+preservation does not imply unknown record-envelope or manifest field retention.
+
 `DataMigrationArchivePolicy` also centralizes the existing Mac archive path,
 entry/total/JSON-size, duplicate-path, manifest and staging-capacity rules.
 Mac ZIP reads use this policy; portable tests exercise exact limits without

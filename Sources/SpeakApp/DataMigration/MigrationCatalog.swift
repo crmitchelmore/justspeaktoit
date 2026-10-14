@@ -19,20 +19,10 @@ enum MigrationCatalog {
             path: "LocalModels/migration-model-references.json"
         ),
         .init(kind: DataMigrationProfileCatalog.kind, category: DataMigrationProfileCatalog.category,
-              defaultsKey: DataMigrationProfileCatalog.defaultsKey, path: nil),
-        .init(
-            kind: "pronunciation",
-            category: .vocabulary,
-            defaultsKey: "pronunciationDictionary",
-            path: nil
-        ),
-        .init(kind: "lexicon", category: .vocabulary, defaultsKey: nil, path: "PersonalLexicon/lexicon.json"),
-        .init(
-            kind: "correction",
-            category: .vocabulary,
-            defaultsKey: nil,
-            path: "AutoCorrections/candidates.json"
-        ),
+              defaultsKey: DataMigrationProfileCatalog.defaultsKey, path: nil)
+    ] + DataMigrationVocabularyCatalog.collections.map {
+        Collection(kind: $0.kind, category: .vocabulary, defaultsKey: $0.defaultsKey, path: $0.path)
+    } + [
         .init(kind: "ttsUsage", category: .history, defaultsKey: "ttsUsageHistory", path: nil),
         .init(kind: "whisperModel", category: .models, defaultsKey: nil,
               path: "LocalModels/imported-hugging-face-models.json"),
@@ -63,7 +53,14 @@ enum MigrationCatalog {
         return MigrationRecord(id: key, kind: kind, value: payload)
     }
     static func collectionRecords(_ collection: Collection, data: Data) throws -> [MigrationRecord] {
-        try DataMigrationCollectionRecords.records(data: data, kind: collection.kind, digest: MigrationCoding.digest)
+        if collection.category == .vocabulary {
+            return try DataMigrationVocabularyCatalog.records(
+                data: data, kind: collection.kind, digest: MigrationCoding.digest
+            )
+        }
+        return try DataMigrationCollectionRecords.records(
+            data: data, kind: collection.kind, digest: MigrationCoding.digest
+        )
     }
     static func validate(_ record: MigrationRecord, category: MigrationCategory) throws {
         guard !record.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -98,15 +95,15 @@ enum MigrationCatalog {
            id != record.id {
             throw MigrationError.invalid("Mismatched item identifier")
         }
+        if category == .vocabulary {
+            try DataMigrationVocabularyCatalog.validate(record, category: category)
+            return
+        }
         if category == .models {
             try validateModel(record); return
         }
         switch record.kind {
         case DataMigrationProfileCatalog.kind: try DataMigrationProfileCatalog.validate(record, category: category)
-        case "pronunciation":
-            _ = try JSONDecoder().decode(PronunciationEntry.self, from: JSONEncoder().encode(record.value))
-        case "lexicon": _ = try MigrationCoding.decode(PersonalLexiconRule.self, record.value)
-        case "correction": _ = try MigrationCoding.decode(AutoCorrectionCandidate.self, record.value)
         case "ttsUsage": _ = try JSONDecoder().decode(
                 TTSUsageRecord.self,
                 from: JSONEncoder().encode(record.value)

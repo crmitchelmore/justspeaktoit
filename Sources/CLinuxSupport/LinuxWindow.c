@@ -115,6 +115,7 @@ static struct {
     GPtrArray *choices;
     GArray *booleans;
     GArray *overlay_settings;
+    GArray *hands_free_settings;
     GtkWidget *recovery_group;
     AdwComboRow *recovery_row;
     guint recovery_count;
@@ -1196,6 +1197,7 @@ static void on_activate(GApplication *application, gpointer data) {
         return;
     }
     build_window();
+    jsti_hands_free_guard_start();
     jsti_tray_start();
     ui.suppress = TRUE;
     apply_models(initial_models.rows, initial_models.count, initial_models.selected);
@@ -1267,6 +1269,7 @@ int32_t jsti_window_run(
     g_signal_connect(ui.application, "activate", G_CALLBACK(on_activate), NULL);
     g_signal_connect(ui.application, "command-line", G_CALLBACK(on_command_line), NULL);
     int status = g_application_run(G_APPLICATION(ui.application), argc, argv);
+    jsti_hands_free_guard_stop();
     close_posts();
     ui.callback = NULL;
     configuration.callback = NULL;
@@ -1275,6 +1278,7 @@ int32_t jsti_window_run(
     g_clear_pointer(&configuration.choices, g_ptr_array_unref);
     g_clear_pointer(&configuration.booleans, g_array_unref);
     g_clear_pointer(&configuration.overlay_settings, g_array_unref);
+    g_clear_pointer(&configuration.hands_free_settings, g_array_unref);
     configuration.recovery_group = NULL;
     configuration.recovery_row = NULL;
     configuration.recovery_count = 0;
@@ -2014,6 +2018,7 @@ typedef struct ConfigurationUpdate {
     GPtrArray *titles, *values, *groups, *recovered, *choices;
     GArray *booleans;
     GArray *overlay_settings;
+    GArray *hands_free_settings;
     JSTIConfigurationCallback callback;
     void *context;
 } ConfigurationUpdate;
@@ -2113,7 +2118,16 @@ static void configuration_update_free(gpointer data) {
     g_ptr_array_unref(update->choices);
     g_array_unref(update->booleans);
     g_array_unref(update->overlay_settings);
+    g_array_unref(update->hands_free_settings);
     g_free(update);
+}
+
+static void configuration_hands_free_availability(GtkWidget *row, gboolean enabled) {
+    gboolean ready = jsti_window_hands_free_guard_ready() != 0;
+    gtk_widget_set_sensitive(row, ready || enabled);
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(row), ready ? NULL : enabled ?
+        "Monitoring unavailable. Turn off saved hands-free mode to restore manual shortcuts." :
+        "Unavailable: native session lock/sleep monitoring is required. Manual recording still works.");
 }
 
 static void configuration_apply(gpointer data) {
@@ -2125,6 +2139,7 @@ static void configuration_apply(gpointer data) {
         configuration.choices = g_ptr_array_ref(update->choices);
         configuration.booleans = g_array_ref(update->booleans);
         configuration.overlay_settings = g_array_ref(update->overlay_settings);
+        configuration.hands_free_settings = g_array_ref(update->hands_free_settings);
         GtkWidget *groups[4];
         for (guint i = 0; i < 4; ++i) {
             groups[i] = group("Dictation preferences");
@@ -2213,6 +2228,8 @@ static void configuration_apply(gpointer data) {
             }
             g_strfreev(lines);
         } else gtk_editable_set_text(GTK_EDITABLE(row), value);
+        if (g_array_index(configuration.hands_free_settings, gboolean, i))
+            configuration_hands_free_availability(row, g_strcmp0(value, "1") == 0);
     }
     GtkStringList *recovered = gtk_string_list_new(NULL);
     for (guint i = 0; i < update->recovered->len; ++i)
@@ -2236,6 +2253,7 @@ int32_t jsti_window_set_configuration(const JSTIConfigurationField *fields, size
     update->choices = g_ptr_array_new_with_free_func(g_free);
     update->booleans = g_array_new(FALSE, FALSE, sizeof(gboolean));
     update->overlay_settings = g_array_new(FALSE, FALSE, sizeof(gboolean));
+    update->hands_free_settings = g_array_new(FALSE, FALSE, sizeof(gboolean));
     update->callback = callback;
     update->context = context;
     for (size_t i = 0; i < recovered_count; ++i) {
@@ -2249,7 +2267,9 @@ int32_t jsti_window_set_configuration(const JSTIConfigurationField *fields, size
     for (size_t i = 0; i < count; ++i) {
         if (!fields[i].title || !fields[i].value || !fields[i].group ||
             !g_utf8_validate(fields[i].value, -1, NULL) || strlen(fields[i].value) > 65535 ||
-            (fields[i].requires_hud_overlay != 0 && fields[i].requires_hud_overlay != 1)) {
+            (fields[i].requires_hud_overlay != 0 && fields[i].requires_hud_overlay != 1) ||
+            (fields[i].requires_hands_free_guard != 0 && fields[i].requires_hands_free_guard != 1) ||
+            (fields[i].requires_hands_free_guard && fields[i].is_boolean != 1)) {
             configuration_update_free(update);
             return -1;
         }
@@ -2285,6 +2305,8 @@ int32_t jsti_window_set_configuration(const JSTIConfigurationField *fields, size
         g_array_append_val(update->booleans, boolean);
         gboolean overlay_setting = fields[i].requires_hud_overlay != 0;
         g_array_append_val(update->overlay_settings, overlay_setting);
+        gboolean hands_free_setting = fields[i].requires_hands_free_guard != 0;
+        g_array_append_val(update->hands_free_settings, hands_free_setting);
     }
     return post(configuration_apply, update, configuration_update_free);
 }
@@ -2308,11 +2330,23 @@ static int32_t configuration_test_callback(int32_t action, const char *const *va
 static gboolean configuration_self_test(void) {
     if (configuration.rows == NULL || configuration.rows->len < 10 ||
         configuration.rows->len != configuration.booleans->len ||
-        configuration.rows->len != configuration.overlay_settings->len) return FALSE;
+        configuration.rows->len != configuration.overlay_settings->len ||
+        configuration.rows->len != configuration.hands_free_settings->len) return FALSE;
     for (guint i = 0; i < configuration.rows->len; ++i) {
         if (g_array_index(configuration.overlay_settings, gboolean, i) &&
             gtk_widget_get_visible(g_ptr_array_index(configuration.rows, i)) != jsti_hud_overlay_supported())
             return FALSE;
+        if (g_array_index(configuration.hands_free_settings, gboolean, i)) {
+            GtkWidget *row = g_ptr_array_index(configuration.rows, i);
+            gboolean enabled = adw_switch_row_get_active(ADW_SWITCH_ROW(row));
+            if (gtk_widget_get_sensitive(row) != (jsti_window_hands_free_guard_ready() != 0 || enabled))
+                return FALSE;
+            configuration_hands_free_availability(row, TRUE);
+            if (!gtk_widget_get_sensitive(row)) return FALSE;
+            configuration_hands_free_availability(row, FALSE);
+            if (gtk_widget_get_sensitive(row) != (jsti_window_hands_free_guard_ready() != 0)) return FALSE;
+            configuration_hands_free_availability(row, enabled);
+        }
     }
     JSTIConfigurationCallback callback = configuration.callback;
     void *context = configuration.context;
@@ -2593,6 +2627,7 @@ static gboolean text_output_self_test(void) {
 }
 
 int32_t jsti_window_self_test(char *error, size_t capacity) {
+    if (jsti_hands_free_guard_self_test(error, capacity) != 0) return -1;
     if (ui.window == NULL) return fail(error, capacity, "the window was not created");
     if (!configuration_self_test())
         return fail(error, capacity, "configuration rows did not populate and emit a complete Apply");

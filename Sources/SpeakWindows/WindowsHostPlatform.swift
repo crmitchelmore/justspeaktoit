@@ -18,6 +18,10 @@ typealias WindowsNativeError = DesktopHostError
 /// Win32 window, Credential Manager, WASAPI, Media Foundation and UI Automation
 /// behind the shared desktop host.
 enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPlatform {
+    static func handsFreeReadinessFailure() -> String? {
+        jsti_window_hands_free_guard_ready() != 0 ? nil
+            : "Session lock/sleep monitoring is unavailable. Hands-free stays off; manual recording still works."
+    }
     typealias VoiceOutputSettings = WindowsVoiceOutputSettings
     typealias VoiceOutput = WindowsVoiceOutput
     typealias ReadAloudState = DesktopHostReadAloudState<WindowsAudioPlaybackController.Speech, WindowsVoiceOutput>

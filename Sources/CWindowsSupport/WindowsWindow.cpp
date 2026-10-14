@@ -12,6 +12,8 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <atomic>
+#include <wtsapi32.h>
 
 #include "WindowsHUD.hpp"
 #include "WindowsTray.hpp"
@@ -53,6 +55,60 @@ bool jsti_cloud_sync_settings_self_test(HWND owner, std::string &error);
 int jsti_window_recording_state();
 
 namespace {
+HMODULE handsFreeWts = nullptr;
+using HandsFreeRegister = BOOL (WINAPI *)(HWND, DWORD);
+using HandsFreeUnregister = BOOL (WINAPI *)(HWND);
+HandsFreeUnregister handsFreeUnregister = nullptr;
+std::atomic<bool> handsFreeGuardRegistered{false};
+std::atomic<unsigned> handsFreeAbsence{0};
+
+void startHandsFreeGuard(HWND window) {
+    handsFreeAbsence = 0;
+    handsFreeWts = LoadLibraryExW(L"Wtsapi32.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (!handsFreeWts) {
+        std::fprintf(stderr, "Hands-free unavailable: native session monitoring could not load.\n");
+        return;
+    }
+    auto subscribe = reinterpret_cast<HandsFreeRegister>(GetProcAddress(handsFreeWts, "WTSRegisterSessionNotification"));
+    handsFreeUnregister = reinterpret_cast<HandsFreeUnregister>(GetProcAddress(handsFreeWts, "WTSUnRegisterSessionNotification"));
+    handsFreeGuardRegistered = subscribe && handsFreeUnregister && subscribe(window, NOTIFY_FOR_THIS_SESSION);
+    if (handsFreeGuardRegistered) {
+        using Query = BOOL (WINAPI *)(HANDLE, DWORD, WTS_INFO_CLASS, LPWSTR *, DWORD *);
+        using Release = void (WINAPI *)(PVOID);
+        auto query = reinterpret_cast<Query>(GetProcAddress(handsFreeWts, "WTSQuerySessionInformationW"));
+        auto release = reinterpret_cast<Release>(GetProcAddress(handsFreeWts, "WTSFreeMemory"));
+        LPWSTR buffer = nullptr;
+        DWORD bytes = 0;
+        bool known = query && release &&
+            query(WTS_CURRENT_SERVER_HANDLE, WTS_CURRENT_SESSION, WTSConnectState, &buffer, &bytes);
+        if (known && buffer && bytes >= sizeof(WTS_CONNECTSTATE_CLASS)) {
+            if (*reinterpret_cast<WTS_CONNECTSTATE_CLASS *>(buffer) != WTSActive) handsFreeAbsence.fetch_or(4u);
+        } else known = false;
+        if (buffer && release) release(buffer);
+        HDESK desktop = OpenInputDesktop(0, FALSE, DESKTOP_READOBJECTS);
+        if (desktop) {
+            wchar_t name[128]{};
+            DWORD length = 0;
+            known = known && GetUserObjectInformationW(desktop, UOI_NAME, name, sizeof(name), &length);
+            if (known && wcscmp(name, L"Default") != 0) handsFreeAbsence.fetch_or(1u);
+            CloseDesktop(desktop);
+        } else known = false;
+        if (!known) {
+            handsFreeUnregister(window);
+            handsFreeGuardRegistered = false;
+        }
+    }
+    if (!handsFreeGuardRegistered)
+        std::fprintf(stderr, "Hands-free unavailable: session notification registration failed. Manual recording is unaffected.\n");
+}
+
+void stopHandsFreeGuard(HWND window) {
+    if (handsFreeGuardRegistered && handsFreeUnregister) handsFreeUnregister(window);
+    handsFreeGuardRegistered = false;
+    handsFreeUnregister = nullptr;
+    if (handsFreeWts) { FreeLibrary(handsFreeWts); handsFreeWts = nullptr; }
+}
+
 constexpr UINT updateMessage = WM_APP + 1;
 constexpr UINT profilesMessage = WM_APP + 17;
 constexpr int hotkeyID = 1;
@@ -1935,7 +1991,26 @@ void tourStep(HWND window) {
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     switch (message) {
     case WM_CREATE:
-        return createControls(window) ? 0 : -1;
+        if (!createControls(window)) return -1;
+        startHandsFreeGuard(window);
+        return 0;
+    case WM_WTSSESSION_CHANGE:
+        if (wparam == WTS_SESSION_LOCK || wparam == WTS_SESSION_LOGOFF ||
+            wparam == WTS_CONSOLE_DISCONNECT || wparam == WTS_REMOTE_DISCONNECT) {
+            handsFreeAbsence.fetch_or(wparam == WTS_SESSION_LOCK ? 1u : 4u);
+            emit(window, JSTI_EVENT_USER_ABSENT, "session locked or disconnected");
+        } else if (wparam == WTS_SESSION_UNLOCK || wparam == WTS_CONSOLE_CONNECT || wparam == WTS_REMOTE_CONNECT) {
+            handsFreeAbsence.fetch_and(wparam == WTS_SESSION_UNLOCK ? ~1u : ~4u);
+        }
+        return 0;
+    case WM_POWERBROADCAST:
+        if (wparam == PBT_APMSUSPEND) {
+            handsFreeAbsence.fetch_or(2u);
+            emit(window, JSTI_EVENT_USER_ABSENT, "computer suspended");
+        } else if (wparam == PBT_APMRESUMEAUTOMATIC || wparam == PBT_APMRESUMESUSPEND) {
+            handsFreeAbsence.fetch_and(~2u);
+        }
+        return TRUE;
     case WM_GETMINMAXINFO: {
         auto info = reinterpret_cast<MINMAXINFO *>(lparam);
         info->ptMinTrackSize = {minimumWindowWidth(window), minimumWindowHeight(window)};
@@ -2289,6 +2364,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         emit(window, JSTI_EVENT_CLOSING);
         DestroyWindow(window); return 0;
     case WM_DESTROY:
+        stopHandsFreeGuard(window);
         jsti::tray::remove();
         backdrop.release();
         jsti_hotkey_stop(window);
@@ -2297,6 +2373,10 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     }
     return DefWindowProcW(window, message, wparam, lparam);
 }
+}
+
+int jsti_window_hands_free_guard_ready(void) {
+    return handsFreeGuardRegistered && handsFreeAbsence == 0 ? 1 : 0;
 }
 
 // Shortcut events from WindowsHotKey.cpp, on the UI thread. A press-to-toggle
@@ -3036,6 +3116,20 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         observed.event = event; observed.id = id ? id : ""; observed.model = model;
     };
     state.context = &observed;
+    const unsigned originalAbsence = handsFreeAbsence.exchange(0);
+    SendMessageW(window, WM_WTSSESSION_CHANGE, WTS_SESSION_LOCK, 0);
+    SendMessageW(window, WM_POWERBROADCAST, PBT_APMSUSPEND, 0);
+    SendMessageW(window, WM_WTSSESSION_CHANGE, WTS_SESSION_UNLOCK, 0);
+    const bool stayedSuspended = handsFreeAbsence == 2u && !jsti_window_hands_free_guard_ready();
+    SendMessageW(window, WM_POWERBROADCAST, PBT_APMRESUMEAUTOMATIC, 0);
+    const bool guardCleared = handsFreeAbsence == 0;
+    handsFreeAbsence = originalAbsence;
+    observed = {};
+    if (!stayedSuspended || !guardCleared) {
+        state.callback = originalCallback;
+        state.context = originalContext;
+        return jsti::fail("Session unlock incorrectly cleared the hands-free suspend guard.", error, errorCapacity);
+    }
     std::string failure;
     auto checkBounds = [&]() -> bool {
         SetWindowPos(window, nullptr, 0, 0, minimumWindowWidth(window), minimumWindowHeight(window),

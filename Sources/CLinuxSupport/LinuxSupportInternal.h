@@ -26,6 +26,9 @@ gboolean jsti_window_loop_running(void);
 typedef void (*jsti_window_apply_fn)(gpointer data);
 int32_t jsti_window_post(jsti_window_apply_fn apply, gpointer data, GDestroyNotify destroy);
 void jsti_window_emit(gint32 event, const char *text, gint32 index);
+void jsti_hands_free_guard_start(void);
+void jsti_hands_free_guard_stop(void);
+int32_t jsti_hands_free_guard_self_test(char *error, size_t capacity);
 
 /* LinuxLocalModels.c: the Local models group, built once with the window,
  * and its part of the window self-test. */

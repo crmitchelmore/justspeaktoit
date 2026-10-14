@@ -24,6 +24,10 @@ struct LinuxHotKeySettings: Codable, Equatable, Sendable {
 /// GTK 4/libadwaita, the Secret Service, libpulse and the X11 or portal
 /// output paths behind the shared desktop host.
 enum LinuxHostPlatform: DesktopHostPlatform {
+    static func handsFreeReadinessFailure() -> String? {
+        jsti_window_hands_free_guard_ready() != 0 ? nil
+            : "Session lock/sleep monitoring is unavailable. Hands-free stays off; manual recording still works."
+    }
     typealias VoiceOutputSettings = LinuxVoiceOutputSettings
 
     package static let displayName = "Linux"

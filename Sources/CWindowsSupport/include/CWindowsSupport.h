@@ -47,7 +47,8 @@ enum JSTIWindowEvent {
     JSTI_EVENT_APPEARANCE = 26,
     /* General's Launch at login switch: text "1" on, "0" off. The switch stays
      * disabled until jsti_window_set_login_item reports the state reached. */
-    JSTI_EVENT_LOGIN_ITEM = 27
+    JSTI_EVENT_LOGIN_ITEM = 27,
+    JSTI_EVENT_USER_ABSENT = 120
 };
 
 /* Runs on the UI thread. text is borrowed until callback returns. model_index
@@ -68,6 +69,7 @@ typedef struct JSTIConfigurationField {
     int requires_hud_overlay;
     /* Optional newline-separated choices: raw value, tab, display title. */
     const char *choices;
+    int requires_hands_free_guard;
 } JSTIConfigurationField;
 /* action 0 applies fields; 1 imports and 2 exports a path in values[0].
  * action 3 applies fields plus the selected recovered-keyword text in the final
@@ -79,6 +81,8 @@ int jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t c
                                   const char *const *recovered_keywords, size_t recovered_count,
                                   JSTIConfigurationCallback callback, void *context);
 void jsti_window_clear_configuration(void);
+/* Thread-safe; false refuses hands-free if native lock/sleep observation failed. */
+int jsti_window_hands_free_guard_ready(void);
 int jsti_window_run(const char *const *model_names, size_t model_count, int selected_index,
                     JSTIWindowCallback callback, void *context, char *error, size_t error_capacity);
 /* Optional pre-run mode catalogue with the same count/order as window_run's

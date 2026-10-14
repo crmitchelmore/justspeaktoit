@@ -35,16 +35,18 @@ final class TailLiveClient: FinalizingStreamingTranscriptionClient, @unchecked S
     let finalisationBudget: TimeInterval? = nil
     private let lock = NSLock()
     private var frames = 0
+    private var sizes: [Int] = []
     private var finishes = 0
     private var transcriptHandler: ((String, Bool) -> Void)?
     var frameCount: Int { lock.withLock { frames } }
+    var frameSizes: [Int] { lock.withLock { sizes } }
     var finishCount: Int { lock.withLock { finishes } }
     func start(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {
         lock.withLock { transcriptHandler = onTranscript }
         onTranscript("Live tail transcript", true)
     }
     func interim(_ text: String) { lock.withLock { transcriptHandler }?(text, false) }
-    func sendAudio(_ audioData: Data) { lock.withLock { frames += 1 } }
+    func sendAudio(_ audioData: Data) { lock.withLock { frames += 1; sizes.append(audioData.count) } }
     func stop() {}
     func cancel() {}
     func finishAndWait() async -> String? {
@@ -61,6 +63,8 @@ final class TailEffects: DesktopHostEffects, @unchecked Sendable {
     private var requests: [DesktopHostTranscriptionRequest] = []
     private var performed = 0
     var failStart = false
+    var failTranscription = false
+    var failSettingsWrite = false
     var capture: TailCapture? { lock.withLock { storedCapture } }
     var transcriptions: [DesktopHostTranscriptionRequest] { lock.withLock { requests } }
     var outputCount: Int { lock.withLock { performed } }
@@ -80,6 +84,7 @@ final class TailEffects: DesktopHostEffects, @unchecked Sendable {
         _ request: DesktopHostTranscriptionRequest, with controller: DesktopHostController<FakePlatform>
     ) async throws -> TranscriptionResult {
         lock.withLock { requests.append(request) }
+        if failTranscription { throw DesktopHostError(message: "Synthetic transcription failure.") }
         return TranscriptionResult(
             text: "Batch tail transcript", segments: [], confidence: nil, duration: request.duration,
             modelIdentifier: request.model, cost: nil, rawPayload: nil, debugInfo: nil
@@ -89,7 +94,10 @@ final class TailEffects: DesktopHostEffects, @unchecked Sendable {
         lock.withLock { performed += 1 }
         return "Delivered."
     }
-    func writeSettings(_ data: Data, to url: URL) throws { try data.write(to: url, options: .atomic) }
+    func writeSettings(_ data: Data, to url: URL) throws {
+        if failSettingsWrite { throw DesktopHostError(message: "Synthetic settings write failure.") }
+        try data.write(to: url, options: .atomic)
+    }
 }
 
 final class DesktopHostRecordingTailTests: XCTestCase {

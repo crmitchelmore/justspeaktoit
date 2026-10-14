@@ -64,7 +64,7 @@ let appleCoreSources: [String] = [
     "GeminiTTSAPI.swift",
     "GroqTTSAPI.swift",
     "HandsFreeAudioPreRollBuffer.swift",
-    "HandsFreeDictation.swift",
+    "HandsFreeDictationApple.swift",
     "KeyDerivation.swift",
     "KeyboardDelivery.swift",
     "KeyboardDeliveryPolicies.swift",

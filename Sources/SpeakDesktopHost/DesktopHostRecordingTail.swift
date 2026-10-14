@@ -10,6 +10,7 @@ extension DesktopHostController {
     func stopAndTranscribe() async {
         let pending = recording?.record
         let live = recording?.live
+        let handsFree = recording?.handsFree == true
         do {
             guard let id = pending?.id else { return }
             cancellationRequested = false
@@ -21,7 +22,7 @@ extension DesktopHostController {
                 try await saveCancelledRecording(stopped)
                 return
             }
-            await recordingFeedback?.recordingFinished(id)
+            await notifyRecordingFeedback(id, handsFree: handsFree)
             guard !closed else { return }
             try await processStoppedRecording(stopped)
         } catch {
@@ -37,6 +38,15 @@ extension DesktopHostController {
                 return
             }
             update("Recording retained: \(error.localizedDescription)", state: 0)
+        }
+    }
+
+    func notifyRecordingFeedback(_ id: UUID, handsFree: Bool, captureReady: Bool = false) async {
+        // Sound activation must not hear our own automatic cues.
+        if handsFree { await recordingFeedback?.cancelRecording(id) } else if captureReady {
+            await recordingFeedback?.captureReady(id)
+        } else {
+            await recordingFeedback?.recordingFinished(id)
         }
     }
 
@@ -85,12 +95,14 @@ extension DesktopHostController {
         recordingTail = nil
     }
 
-    func saveCancelledRecording(_ stopped: StoppedRecording) async throws {
+    func saveCancelledRecording(
+        _ stopped: StoppedRecording, reason: String = "Recording cancelled. Audio retained."
+    ) async throws {
         var record = stopped.record
         if let live = stopped.live {
             record.result = liveResult(live.cancel().text, record: record, duration: stopped.duration)
         }
-        record.failure = "Recording cancelled. Audio retained."
+        record.failure = reason
         try await saveRecord(record)
         present(record, output: nil)
     }

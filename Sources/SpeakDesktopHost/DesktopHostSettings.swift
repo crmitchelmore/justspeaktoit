@@ -71,6 +71,11 @@ extension DesktopHostController {
             guard interval >= HotKeyGestureTiming.doubleTapCommandInterval else { return }
             hotKeySession.lastDoubleTap = request.recognisedAt
         }
+        if await handsFreeShortcut(request) { return }
+        await manualShortcut(request)
+    }
+
+    private func manualShortcut(_ request: DesktopHostShortcutRequest<Platform>) async {
         guard let command = HotKeySessionPolicy.command(
             for: request.input, style: request.style, active: recording?.trigger
         ) else { return }

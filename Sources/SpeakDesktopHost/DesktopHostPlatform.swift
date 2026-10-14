@@ -96,6 +96,8 @@ package protocol DesktopHostPlatform: Sendable {
     static func makeOutputJob(options: TextOutputOptions, target: InsertionTarget?) -> OutputJob?
     static func makePlayback() -> Playback
     static func makeRecordingFeedbackLoader() -> (any DesktopRecordingFeedbackLoader)?
+    /// Why native session lock/sleep monitoring cannot protect an armed microphone.
+    static func handsFreeReadinessFailure() -> String?
     /// Nonblocking. A native operation already committed completes and is
     /// reported; nothing starts afterwards.
     static func cancel(_ job: OutputJob)
@@ -149,6 +151,7 @@ package protocol DesktopHostPlatform: Sendable {
 
 package extension DesktopHostPlatform {
     static func makeRecordingFeedbackLoader() -> (any DesktopRecordingFeedbackLoader)? { nil }
+    static func handsFreeReadinessFailure() -> String? { "Hands-free is unavailable on this host." }
     static func update(_ status: String) { update(status, transcript: nil, state: -1) }
     /// Hosts without a dashboard or History header show no totals.
     static func historyInsights(all: DesktopHistoryInsights, visible: DesktopHistoryInsights) {}

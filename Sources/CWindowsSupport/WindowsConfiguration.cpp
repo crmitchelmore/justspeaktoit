@@ -14,7 +14,8 @@ constexpr int previewStartID = 806, previewStopID = 807;
 struct Field {
     std::wstring title, value, group;
     bool boolean = false;
-    std::vector<std::pair<std::wstring, std::wstring>> choices;
+    std::vector<std::pair<std::wstring, std::wstring>> choices{};
+    bool requiresHandsFreeGuard = false;
 };
 struct Configuration {
     std::vector<Field> fields;
@@ -30,6 +31,7 @@ struct Dialog {
     std::vector<HWND> controls;
     std::vector<std::wstring> groups;
     std::wstring group = L"General";
+    int scrollOffset = 0;
 };
 int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
 
@@ -44,15 +46,35 @@ std::wstring text(HWND window, int id) {
 void layout(HWND window, Dialog &dialog) {
     RECT bounds{};
     GetClientRect(window, &bounds);
-    int y = scale(window, 62), margin = scale(window, 20), width = bounds.right - 2 * margin;
+    const int top = scale(window, 62), contentBottom = bounds.bottom - scale(window, 112);
+    int contentHeight = 0;
+    for (const auto &field : dialog.config.fields)
+        if (field.group == dialog.group) contentHeight += scale(window, field.boolean ? 34 : 60);
+    const bool recovery = dialog.group == L"Transcription" && !dialog.config.recovered.empty();
+    const bool sounds = dialog.group == L"General";
+    if (recovery) contentHeight += scale(window, 100);
+    if (sounds) contentHeight += scale(window, 44);
+    SCROLLINFO scroll{};
+    scroll.cbSize = sizeof(scroll);
+    scroll.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+    scroll.nMin = 0; scroll.nMax = std::max(0, contentHeight - 1);
+    scroll.nPage = static_cast<UINT>(std::max(1, contentBottom - top));
+    scroll.nPos = dialog.scrollOffset;
+    SetScrollInfo(window, SB_VERT, &scroll, TRUE);
+    dialog.scrollOffset = GetScrollPos(window, SB_VERT);
+    int y = top - dialog.scrollOffset, margin = scale(window, 20), width = bounds.right - 2 * margin;
     MoveWindow(GetDlgItem(window, groupLabelID), margin, scale(window, 20), scale(window, 90), scale(window, 24), TRUE);
     MoveWindow(GetDlgItem(window, groupID), margin + scale(window, 90), scale(window, 16),
         width - scale(window, 90), scale(window, 200), TRUE);
     for (size_t i = 0; i < dialog.config.fields.size(); ++i) {
-        const bool visible = dialog.config.fields[i].group == dialog.group;
+        const auto &field = dialog.config.fields[i];
+        const int rowHeight = scale(window, field.boolean ? 34 : 60);
+        const bool inGroup = field.group == dialog.group;
+        const bool visible = inGroup && y >= top && y + rowHeight <= contentBottom;
         ShowWindow(GetDlgItem(window, fieldBase + static_cast<int>(i)), visible ? SW_SHOW : SW_HIDE);
         ShowWindow(GetDlgItem(window, labelBase + static_cast<int>(i)), visible ? SW_SHOW : SW_HIDE);
-        if (!visible) continue;
+        if (!inGroup) continue;
+        if (!visible) { y += rowHeight; continue; }
         const bool boolean = dialog.config.fields[i].boolean;
         if (!boolean) {
             MoveWindow(GetDlgItem(window, labelBase + static_cast<int>(i)), margin, y, width, scale(window, 20), TRUE);
@@ -62,9 +84,8 @@ void layout(HWND window, Dialog &dialog) {
             scale(window, dialog.config.fields[i].choices.empty() ? 28 : 200), TRUE);
         y += scale(window, boolean ? 34 : 38);
     }
-    const bool recovery = dialog.group == L"Transcription" && !dialog.config.recovered.empty();
-    const bool sounds = dialog.group == L"General";
-    for (int id : {previewStartID, previewStopID}) ShowWindow(GetDlgItem(window, id), sounds ? SW_SHOW : SW_HIDE);
+    const bool showSounds = sounds && y >= top && y + scale(window, 44) <= contentBottom;
+    for (int id : {previewStartID, previewStopID}) ShowWindow(GetDlgItem(window, id), showSounds ? SW_SHOW : SW_HIDE);
     if (sounds) {
         const int half = (width - scale(window, 8)) / 2;
         MoveWindow(GetDlgItem(window, previewStartID), margin, y, half, scale(window, 32), TRUE);
@@ -72,7 +93,8 @@ void layout(HWND window, Dialog &dialog) {
         y += scale(window, 44);
     }
     for (int id : {recoveryLabelID, recoveryID, restoreID})
-        ShowWindow(GetDlgItem(window, id), recovery ? SW_SHOW : SW_HIDE);
+        ShowWindow(GetDlgItem(window, id),
+            recovery && y >= top && y + scale(window, 100) <= contentBottom ? SW_SHOW : SW_HIDE);
     if (recovery) {
         MoveWindow(GetDlgItem(window, recoveryLabelID), margin, y, width, scale(window, 20), TRUE);
         y += scale(window, 24);
@@ -81,7 +103,7 @@ void layout(HWND window, Dialog &dialog) {
         MoveWindow(GetDlgItem(window, restoreID), margin, y, scale(window, 220), scale(window, 32), TRUE);
         y += scale(window, 40);
     }
-    MoveWindow(GetDlgItem(window, problemID), margin, y, width, scale(window, 44), TRUE);
+    MoveWindow(GetDlgItem(window, problemID), margin, contentBottom + scale(window, 8), width, scale(window, 44), TRUE);
     const int bottom = bounds.bottom - scale(window, 48), button = scale(window, 100), gap = scale(window, 8);
     const int ids[] = {importID, exportID, IDOK, IDCANCEL};
     for (int i = 0; i < 4; ++i)
@@ -132,6 +154,10 @@ bool controls(HWND window, Dialog &dialog) {
             }
         }
         if (!control) return false;
+        if (field.requiresHandsFreeGuard && !jsti_window_hands_free_guard_ready()) {
+            EnableWindow(control, field.value == L"1");
+            SetWindowTextW(control, L"Hands-free unavailable: session lock/sleep monitoring required");
+        }
     }
     if (!add(L"STATIC", L"&Recovered keyword edit (restoring adds to the current list):", SS_LEFT, recoveryLabelID) ||
         !add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, recoveryID) ||
@@ -225,6 +251,28 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     switch (message) {
     case WM_CREATE: return controls(window, *dialog) ? 0 : -1;
     case WM_SIZE: layout(window, *dialog); return 0;
+    case WM_VSCROLL: {
+        SCROLLINFO scroll{};
+        scroll.cbSize = sizeof(scroll);
+        scroll.fMask = SIF_ALL;
+        GetScrollInfo(window, SB_VERT, &scroll);
+        switch (LOWORD(wparam)) {
+        case SB_LINEUP: dialog->scrollOffset -= scale(window, 34); break;
+        case SB_LINEDOWN: dialog->scrollOffset += scale(window, 34); break;
+        case SB_PAGEUP: dialog->scrollOffset -= static_cast<int>(scroll.nPage); break;
+        case SB_PAGEDOWN: dialog->scrollOffset += static_cast<int>(scroll.nPage); break;
+        case SB_THUMBTRACK: dialog->scrollOffset = scroll.nTrackPos; break;
+        case SB_TOP: dialog->scrollOffset = 0; break;
+        case SB_BOTTOM: dialog->scrollOffset = scroll.nMax; break;
+        default: return 0;
+        }
+        layout(window, *dialog);
+        return 0;
+    }
+    case WM_MOUSEWHEEL:
+        dialog->scrollOffset -= GET_WHEEL_DELTA_WPARAM(wparam) / WHEEL_DELTA * scale(window, 60);
+        layout(window, *dialog);
+        return 0;
     case WM_DPICHANGED: {
         const RECT *bounds = reinterpret_cast<RECT *>(lparam);
         SetWindowPos(window, nullptr, bounds->left, bounds->top, bounds->right - bounds->left,
@@ -245,6 +293,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             LRESULT selected = SendDlgItemMessageW(window, groupID, CB_GETCURSEL, 0, 0);
             if (selected >= 0 && static_cast<size_t>(selected) < dialog->groups.size()) {
                 dialog->group = dialog->groups[static_cast<size_t>(selected)];
+                dialog->scrollOffset = 0;
                 layout(window, *dialog);
             }
             return 0;
@@ -276,7 +325,7 @@ HWND createDialog(HWND owner, Dialog &dialog) {
         return nullptr;
     }
     return CreateWindowExW(WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT, type.lpszClassName,
-        L"Dictation preferences - Just Speak to It", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME,
+        L"Dictation preferences - Just Speak to It", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_VSCROLL,
         CW_USEDEFAULT, CW_USEDEFAULT, scale(owner, 700), scale(owner, 660), owner, nullptr, type.hInstance, &dialog);
 }
 } // namespace
@@ -297,6 +346,14 @@ void jsti_show_configuration(HWND owner, const wchar_t *group) {
     MSG message{};
     BOOL result = 1;
     while (IsWindow(window) && (result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
+        if (message.message == WM_KEYDOWN && (message.wParam == VK_NEXT || message.wParam == VK_PRIOR)) {
+            wchar_t kind[32]{};
+            GetClassNameW(GetFocus(), kind, 32);
+            if (wcscmp(kind, L"ComboBox") != 0) {
+                SendMessageW(window, WM_VSCROLL, message.wParam == VK_NEXT ? SB_PAGEDOWN : SB_PAGEUP, 0);
+                continue;
+            }
+        }
         if (!IsDialogMessageW(window, &message)) { TranslateMessage(&message); DispatchMessageW(&message); }
     }
     if (IsWindow(window)) DestroyWindow(window);
@@ -318,6 +375,9 @@ int jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t c
                 !jsti::wide(fields[i].group, field.group) ||
                 field.value.size() > 65535 || (fields[i].is_boolean != 0 && fields[i].is_boolean != 1)) return -1;
             field.boolean = fields[i].is_boolean != 0;
+            if (fields[i].requires_hands_free_guard != 0 && fields[i].requires_hands_free_guard != 1) return -1;
+            field.requiresHandsFreeGuard = fields[i].requires_hands_free_guard != 0;
+            if (field.requiresHandsFreeGuard && !field.boolean) return -1;
             if (fields[i].choices && fields[i].choices[0]) {
                 std::wstring choices;
                 if (field.boolean || !jsti::wide(fields[i].choices, choices) || choices.size() > 65535) return -1;
@@ -452,6 +512,44 @@ bool jsti_configuration_self_test(HWND owner, std::string &error) {
     if (IsWindow(soundWindow)) DestroyWindow(soundWindow);
     if (!profiles || !previewed) {
         error = "Recording sound preferences did not offer all profiles or emit both previews.";
+        return false;
+    }
+    Dialog overflow;
+    overflow.group = L"Transcription";
+    for (int i = 0; i < 12; ++i)
+        overflow.config.fields.push_back({L"Preference", L"0.05", L"Transcription", false});
+    overflow.config.fields.push_back({L"Hands-free sound activation", L"1", L"Transcription", true, {}, true});
+    overflow.config.recovered = {L"Recoverable edit"};
+    HWND overflowWindow = createDialog(owner, overflow);
+    if (!overflowWindow) { error = "Could not create scrolling preferences fixture."; return false; }
+    RECT before{}, after{}, recoveryBounds{}, client{};
+    GetWindowRect(GetDlgItem(overflowWindow, IDOK), &before);
+    SendMessageW(overflowWindow, WM_VSCROLL, SB_BOTTOM, 0);
+    GetWindowRect(GetDlgItem(overflowWindow, IDOK), &after);
+    GetWindowRect(GetDlgItem(overflowWindow, restoreID), &recoveryBounds);
+    MapWindowPoints(nullptr, overflowWindow, reinterpret_cast<POINT *>(&recoveryBounds), 2);
+    GetClientRect(overflowWindow, &client);
+    const bool reached = (GetWindowLongW(GetDlgItem(overflowWindow, restoreID), GWL_STYLE) & WS_VISIBLE) &&
+        (GetWindowLongW(GetDlgItem(overflowWindow, fieldBase + 12), GWL_STYLE) & WS_VISIBLE) &&
+        recoveryBounds.bottom <= client.bottom - scale(overflowWindow, 112) &&
+        EqualRect(&before, &after) &&
+        IsWindowEnabled(GetDlgItem(overflowWindow, fieldBase + 12));
+    SendMessageW(overflowWindow, WM_VSCROLL, SB_TOP, 0);
+    const bool returned = (GetWindowLongW(GetDlgItem(overflowWindow, fieldBase), GWL_STYLE) & WS_VISIBLE) &&
+        !(GetWindowLongW(GetDlgItem(overflowWindow, restoreID), GWL_STYLE) & WS_VISIBLE);
+    DestroyWindow(overflowWindow);
+    if (!reached || !returned) {
+        error = "Preferences scrolling did not expose the last field and recovery controls above the fixed footer.";
+        return false;
+    }
+    overflow.config.fields[12].value = L"0";
+    overflowWindow = createDialog(owner, overflow);
+    if (!overflowWindow) { error = "Could not create disabled hands-free preferences fixture."; return false; }
+    const bool disabled = IsWindowEnabled(GetDlgItem(overflowWindow, fieldBase + 12)) ==
+        (jsti_window_hands_free_guard_ready() != 0);
+    DestroyWindow(overflowWindow);
+    if (!disabled) {
+        error = "Unavailable hands-free preferences allowed enabling a new unmonitored mode.";
         return false;
     }
     return true;

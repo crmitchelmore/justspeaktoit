@@ -155,12 +155,12 @@ private struct FailedFeedbackLoader: DesktopRecordingFeedbackLoader {
     }
 }
 
-private struct TailFeedbackLoader: DesktopRecordingFeedbackLoader {
+struct TailFeedbackLoader: DesktopRecordingFeedbackLoader {
     let output: TailFeedbackOutput
     func prepare(profile: RecordingFeedbackProfile) async throws -> any DesktopRecordingFeedbackOutput { output }
 }
 
-private final class TailFeedbackOutput: DesktopRecordingFeedbackOutput, @unchecked Sendable {
+final class TailFeedbackOutput: DesktopRecordingFeedbackOutput, @unchecked Sendable {
     struct Event {
         let sound: RecordingFeedbackSound
         let gain: Float
@@ -172,9 +172,11 @@ private final class TailFeedbackOutput: DesktopRecordingFeedbackOutput, @uncheck
     private var prepared = false
     private var played: [Event] = []
     private var closes = 0
+    private var stops = 0
     var ready: Bool { lock.withLock { prepared } }
     var events: [Event] { lock.withLock { played } }
     var closeCount: Int { lock.withLock { closes } }
+    var stopCount: Int { lock.withLock { stops } }
 
     init(captureStops: @escaping @Sendable () -> Int, finishClose: @escaping @Sendable () async -> Void) {
         self.captureStops = captureStops
@@ -185,7 +187,7 @@ private final class TailFeedbackOutput: DesktopRecordingFeedbackOutput, @uncheck
         let stops = captureStops()
         lock.withLock { played.append(Event(sound: sound, gain: gain, captureStops: stops)) }
     }
-    func stop() {}
+    func stop() { lock.withLock { stops += 1 } }
     func close() async throws {
         lock.withLock { closes += 1 }
         await finishClose()

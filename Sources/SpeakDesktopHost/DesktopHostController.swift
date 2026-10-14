@@ -61,6 +61,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package struct Recording {
         package let capture: any DesktopRecordingCapture
         package let context: DesktopCaptureContext
+        package let file: PCMRecordingFile
+        package let handsFree: Bool
         package var record: DesktopRecordingStore.Record
         package let target: Platform.InsertionTarget?
         package let live: DesktopLiveSession?
@@ -135,6 +137,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package let playback = Platform.makePlayback()
     var recordingFeedback: DesktopRecordingFeedback?
     var recordingFeedbackPreview: Task<Void, Never>?
+    var handsFreeMachine = HandsFreeDictationMachine()
+    var handsFreeRun: DesktopHandsFreeRun<Platform>?
 
     package init(
         directory: URL, effects: any DesktopHostEffects<Platform>, shutdownGrace: Duration = DesktopHostShutdown.grace
@@ -170,6 +174,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
         targetExecutablePath: String?, textOutput: Platform.TextOutputOptions,
         trigger: HotKeySessionTrigger = .other
     ) async {
+        if handsFreeMachine.isArmed { await disarmHandsFree(); return }
         guard isReady, !busy, !closed, DesktopHostModels.all.indices.contains(modelIndex) else { return }
         cancelOutput()
         let selected = selectModel(modelIndex)
@@ -204,6 +209,10 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
 extension DesktopHostController {
     func captureFailed(_ message: String, recordingID: UUID) async {
         guard !closed, recording?.record.id == recordingID else { return }
+        if recording?.handsFree == true, let runID = handsFreeRun?.id {
+            await failHandsFree(message, runID: runID)
+            return
+        }
         await recordingFeedback?.cancelRecording(recordingID)
         beginBusyOperation()
         defer { finishBusyOperation() }
@@ -282,13 +291,13 @@ extension DesktopHostController {
         waiters.forEach { $0.resume() }
     }
 
-    private func finishBusyOperation() {
+    func finishBusyOperation() {
         busyOperations -= 1
         busy = busyOperations > 0
         finishOperation()
     }
 
-    private func beginBusyOperation() {
+    func beginBusyOperation() {
         busyOperations += 1
         busy = true
         activeOperations += 1
@@ -305,7 +314,7 @@ extension DesktopHostController {
         }
         return provider.apiKeyIdentifier
     }
-    package var canUseHistory: Bool { isReady && !closed && !busy && recording == nil }
+    package var canUseHistory: Bool { isReady && !closed && !busy && recording == nil && handsFreeRun == nil }
 
     package func selectedIndex() -> Int {
         DesktopHostModels.all.firstIndex { $0.id == settings.model } ?? 0

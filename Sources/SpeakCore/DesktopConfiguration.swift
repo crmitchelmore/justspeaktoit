@@ -41,6 +41,7 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
         public let kind: Kind
         public let defaultValue: AnyCodable
         public internal(set) var requiresHUDOverlay = false
+        public internal(set) var requiresHandsFreeGuard = false
 
         public var serializedChoices: String? {
             guard case .choice(let choices) = kind else { return nil }
@@ -62,6 +63,21 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
               title: "Live stop grace (seconds; AssemblyAI and Cartesia)",
               group: "Transcription", kind: .number(0...2),
               defaultValue: AnyCodable(.double(SpeechDefaults.liveStopGracePeriod))),
+        .init(key: ApplicationPreferenceKey.handsFreeDictationEnabled.rawValue,
+              title: "Hands-free: hotkey arms sound activation (noise can trigger)",
+              group: "Transcription", kind: .boolean, defaultValue: AnyCodable(.bool(false)),
+              requiresHandsFreeGuard: true),
+        .init(key: ApplicationPreferenceKey.silenceDetectionEnabled.rawValue,
+              title: "Auto-stop manual recording on silence",
+              group: "Transcription", kind: .boolean, defaultValue: AnyCodable(.bool(false))),
+        .init(key: ApplicationPreferenceKey.silenceThreshold.rawValue,
+              title: "Silence threshold (0.01 to 0.2; lower is more sensitive)",
+              group: "Transcription", kind: .number(DictationSilencePolicy.thresholdRange),
+              defaultValue: AnyCodable(.double(DictationSilencePolicy.defaultThreshold))),
+        .init(key: ApplicationPreferenceKey.silenceDuration.rawValue,
+              title: "Silence duration (seconds; manual and hands-free)",
+              group: "Transcription", kind: .number(DictationSilencePolicy.durationRange),
+              defaultValue: AnyCodable(.double(DictationSilencePolicy.defaultDuration))),
         .init(key: ApplicationPreferenceKey.postProcessingTemperature.rawValue, title: "Temperature (0 to 1)",
               group: "Post-processing", kind: .number(0...1),
               defaultValue: AnyCodable(.double(SpeechDefaults.temperature))),

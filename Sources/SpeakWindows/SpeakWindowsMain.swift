@@ -230,22 +230,25 @@ private func otherWindowEvent(_ event: Int32, value: String, holder: WindowsEven
     case 17: holder.openProfiles()
     case 9: holder.selectHistory(value)
     case 10: Task { await controller.retryHistory(value) }
-    case 11:
-        // The dialog runs on the UI thread. Capture the record ID and displayed
-        // version and text before opening it. Its nested message loop may
-        // receive a replacement for the same record while the dialog is open.
-        let variant = WindowsNative.displayedTranscriptVariant() ?? .processed
-        do {
-            let text = try WindowsNative.displayedTranscript()
-            if let path = try WindowsNative.chooseExportPath(identifier: value) {
-                Task { await controller.exportHistory(text: text, variant: variant, path: path) }
-            }
-        } catch { WindowsNative.update(error.localizedDescription) }
+    case 11: exportHistoryWindowEvent(value, holder: holder)
     case 12: Task { await controller.openHistoryAudio(value) }
     case 14: Task { await controller.cancelTranscription() }
+    case 120: Task { await controller.handsFreeUserAbsent(value) }
     case 20: Task { await controller.refreshModels(force: true) }
     default: break
     }
+}
+
+private func exportHistoryWindowEvent(_ value: String, holder: WindowsEventContext) {
+    // Snapshot before the dialog's nested loop can replace the displayed record.
+    let controller = holder.controller
+    let variant = WindowsNative.displayedTranscriptVariant() ?? .processed
+    do {
+        let text = try WindowsNative.displayedTranscript()
+        if let path = try WindowsNative.chooseExportPath(identifier: value) {
+            Task { await controller.exportHistory(text: text, variant: variant, path: path) }
+        }
+    } catch { WindowsNative.update(error.localizedDescription) }
 }
 
 @main

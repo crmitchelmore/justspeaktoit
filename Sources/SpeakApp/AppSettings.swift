@@ -1359,9 +1359,10 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     handsFreeDictationEnabled =
       defaults.object(forKey: DefaultsKey.handsFreeDictationEnabled.rawValue) as? Bool ?? false
     silenceThreshold =
-      Float(defaults.object(forKey: DefaultsKey.silenceThreshold.rawValue) as? Double ?? 0.05)
+      Float(defaults.object(forKey: DefaultsKey.silenceThreshold.rawValue) as? Double
+        ?? DictationSilencePolicy.defaultThreshold)
     silenceDuration =
-      defaults.object(forKey: DefaultsKey.silenceDuration.rawValue) as? Double ?? 2.0
+      defaults.object(forKey: DefaultsKey.silenceDuration.rawValue) as? Double ?? DictationSilencePolicy.defaultDuration
 
     // Auto-Corrections Settings
     autoCorrectionsEnabled =

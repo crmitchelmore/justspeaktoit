@@ -5,7 +5,8 @@ import SpeakWindowsPlatform
 
 extension WindowsHostPlatform {
     package static var migrationInspector: DesktopHostMigrationInspector? {
-        .init(reader: .init { try WindowsMigrationArchive.read($0) }, present: { report in
+        .init(reader: .init { try WindowsMigrationArchive.read($0) }, digests: WindowsSHA256Hasher.provider,
+              present: { report in
             try WindowsNative.checked { error, capacity in
                 jsti_window_show_migration_report(report.text, error, capacity)
             }

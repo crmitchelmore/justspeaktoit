@@ -16,10 +16,17 @@ final class DesktopHostMigrationInspectionTests: XCTestCase {
             try DesktopMigrationArchive.read(
                 $0, digests: BackupHostFixture.digests, stagingRoot: fixture.root, storage: BackupHostFixture.storage
             )
-        }, present: { report in
+        }, digests: BackupHostFixture.digests, present: { report in
             XCTAssertEqual(report.categories.map(\.category), [.history, .recordings])
             XCTAssertEqual(report.categories.map(\.items), [1, 1])
             XCTAssertEqual(report.noticeCount, 0)
+            XCTAssertEqual(report.mergePreview.map(\.category), [.history, .recordings])
+            XCTAssertEqual(report.mergePreview.map { $0.changes?.existing }, [1, 1])
+            XCTAssertEqual(report.mergePreview.map { $0.changes?.added }, [0, 0])
+            XCTAssertEqual(report.mergePreview.map { $0.changes?.updated }, [0, 0])
+            XCTAssertEqual(report.mergePreview.map { $0.changes?.retained }, [1, 1])
+            XCTAssertTrue(report.text.contains("Read-only merge preview"))
+            XCTAssertFalse(report.text.contains(record.id.uuidString))
         })
         await fixture.controller.beginMigrationInspection(fixture.destination, using: inspector)
         let task = await fixture.controller.migrationInspectionTask

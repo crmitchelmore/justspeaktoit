@@ -19,11 +19,38 @@ public enum DesktopMigrationInspection {
         public let items: Int?
     }
 
+    public struct Comparison: Sendable {
+        let digests: LocalModelDigestProvider
+        let current: @Sendable (Set<DataMigrationCategory>) async throws -> DataMigrationSnapshot
+
+        public init(
+            digests: LocalModelDigestProvider,
+            current: @escaping @Sendable (Set<DataMigrationCategory>) async throws -> DataMigrationSnapshot
+        ) {
+            self.digests = digests
+            self.current = current
+        }
+    }
+
+    public struct MergeCategory: Equatable, Sendable {
+        public let category: DataMigrationCategory
+        /// Nil means the imported category could not be read, not an empty merge.
+        public let changes: MergeChanges?
+    }
+
+    public struct MergeChanges: Equatable, Sendable {
+        public let existing: Int
+        public let added: Int
+        public let updated: Int
+        public let retained: Int
+    }
+
     public struct Report: Equatable, Sendable {
         public let categories: [Category]
         public let noticeCount: Int
         public let historyChecks: [Category]
         public let invalidHistoryItems: Int
+        public let mergePreview: [MergeCategory]
 
         public var text: String {
             let rows = categories.map { row in
@@ -47,6 +74,22 @@ public enum DesktopMigrationInspection {
                     sections.append("\(invalidHistoryItems) History/audio items failed record validation.")
                 }
             }
+            if !mergePreview.isEmpty {
+                let rows = mergePreview.map { row in
+                    guard let changes = row.changes else {
+                        return "\(row.category.title): merge could not be previewed"
+                    }
+                    return "\(row.category.title): \(changes.existing) existing; "
+                        + "\(changes.added) added, \(changes.updated) updated; \(changes.retained) retained."
+                }
+                sections.append(
+                    "Read-only merge preview (History/audio only):\n" + rows.joined(separator: "\n")
+                        + "\nDifferent History/audio versions are retained using the canonical merge rules. "
+                        + "Invalid items are excluded. "
+                        + "Application eligibility and deletion tombstones are not checked. "
+                        + "These counts are not import approval or a reserved transaction."
+                )
+            }
             sections.append(
                 "Inspection checks the archive envelope and extracted audio checksums. "
                     + "History/audio record structure is checked; other record values are not validated. "
@@ -58,7 +101,9 @@ public enum DesktopMigrationInspection {
             return sections.joined(separator: "\n\n")
         }
 
-        init(_ snapshot: DataMigrationSnapshot, checked: DataMigrationSnapshot) {
+        init(
+            _ snapshot: DataMigrationSnapshot, checked: DataMigrationSnapshot, mergePreview: [MergeCategory] = []
+        ) {
             categories = DataMigrationCategory.allCases.filter(snapshot.manifest.categories.contains).map {
                 .init(category: $0, items: snapshot.records[$0]?.count)
             }
@@ -70,6 +115,7 @@ public enum DesktopMigrationInspection {
                 guard let read = snapshot.records[row.category]?.count, let valid = row.items else { return count }
                 return count + read - valid
             }
+            self.mergePreview = mergePreview
         }
     }
 
@@ -80,7 +126,7 @@ public enum DesktopMigrationInspection {
     }
 
     /// Run on an owned cancellable off-actor worker, not a settings queue.
-    public static func inspect(_ source: URL, reader: Reader) async -> Outcome {
+    public static func inspect(_ source: URL, reader: Reader, comparison: Comparison? = nil) async -> Outcome {
         var staging: URL?
         var outcome: Outcome
         do {
@@ -108,7 +154,8 @@ public enum DesktopMigrationInspection {
                     }
                 }
             )
-            outcome = .inspected(Report(snapshot, checked: checked))
+            let preview = try await mergePreview(checked, comparison: comparison)
+            outcome = .inspected(Report(snapshot, checked: checked, mergePreview: preview))
         } catch is CancellationError {
             outcome = .cancelled
         } catch {

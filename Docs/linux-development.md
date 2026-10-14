@@ -216,6 +216,14 @@ the real service. Cancel/editor close invalidates pending admission across
 editor reopen.
 `DesktopSettingsQueue` admits File/Live work without waiting for playback:
 separately owned admission tasks are cancelled on Cancel/editor close/shutdown.
+Batch freezes all sample/model/language snapshots before its first request and
+pauses after each round for judging. Saving ranks only reveals: **Next file** must
+explicitly start the next sample, including after an unranked failure reveal.
+Queued rounds retain sync/deletion leases. Cancel, discarding the current round,
+editor close and shutdown retain recovery evidence but never resume requests on
+relaunch. The native 2–8-model / 1–32-sample ceilings are temporary resource limits,
+not Mac parity or physical-hardware acceptance: Mac has no corresponding upper
+bounds in its comparison controller/file picker.
 A blind **Diff against** dropdown uses the shared
 `TranscriptWordDiff`, with accessible `[+added]` / `[-removed]` text annotations
 instead of colour-only edits; original transcripts and persisted ranks stay unchanged.

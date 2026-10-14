@@ -33,9 +33,11 @@ final class DesktopComparisonHostTests: XCTestCase {
         await controller.comparisonTask?.value
         let persisted = await controller.comparisons
         let store = try XCTUnwrap(persisted)
-        let rounds = await store.rounds()
+        var rounds = await store.rounds()
         XCTAssertEqual(rounds.count, 2)
         XCTAssertTrue(rounds.allSatisfy { $0.inputMode == .batch && $0.language == "en_GB" })
+        try await finishPausedBatch(controller, effects: effects, rounds: rounds)
+        rounds = await store.rounds()
         XCTAssertTrue(
             rounds.allSatisfy { $0.entries.allSatisfy { $0.transcript == "Raw only" } },
             rounds.flatMap(\.entries).compactMap(\.errorDescription).joined(separator: "\n")
@@ -47,6 +49,11 @@ final class DesktopComparisonHostTests: XCTestCase {
         XCTAssertEqual(history.records.map(\.id), [existing.id])
         XCTAssertEqual(try Data(contentsOf: historyMetadata), historyBeforeComparison)
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("settings.json").path))
+        try await assertBatchExport(controller, root: root)
+        await controller.close()
+    }
+
+    private func assertBatchExport(_ controller: DesktopHostController<FakePlatform>, root: URL) async throws {
         let exported = root.appendingPathComponent("export.json")
         await controller.comparisonEvent(107, text: exported.path, index: 0)
         let decoder = JSONDecoder()
@@ -54,7 +61,21 @@ final class DesktopComparisonHostTests: XCTestCase {
         let document = try decoder.decode(ModelComparisonExport.Document.self, from: Data(contentsOf: exported))
         XCTAssertEqual(document.rounds.count, 2)
         XCTAssertEqual(document.schemaVersion, 1)
-        await controller.close()
+    }
+
+    private func finishPausedBatch(
+        _ controller: DesktopHostController<FakePlatform>, effects: ComparisonHostEffects,
+        rounds: [ModelComparisonRound]
+    ) async throws {
+        XCTAssertEqual(effects.bytes.count, 2, "Batch must pause before requesting the next sample.")
+        let currentID = await controller.comparisonSelection
+        let first = try XCTUnwrap(rounds.first { $0.id == currentID })
+        await controller.comparisonEvent(128, text: first.id.uuidString, index: 0)
+        XCTAssertEqual(effects.bytes.count, 2, "Next file must not bypass blind judging.")
+        await controller.comparisonEvent(106, text: first.id.uuidString + "\n1,2", index: 0)
+        XCTAssertEqual(effects.bytes.count, 2, "Judging alone must not start another provider request.")
+        await controller.comparisonEvent(128, text: first.id.uuidString, index: 0)
+        await controller.comparisonTask?.value
     }
 
     func testConfiguredModulateFlags_ReachRawBatchLanesWithoutNormalKeywords() async throws {
@@ -216,7 +237,7 @@ private final class ComparisonTestHasher: LocalModelSHA256Hasher {
     func finish() throws -> String { String(repeating: "a", count: 64) }
 }
 
-private final class ComparisonHostEffects: DesktopHostEffects, @unchecked Sendable {
+final class ComparisonHostEffects: DesktopHostEffects, @unchecked Sendable {
     typealias Platform = FakePlatform
     private let lock = NSLock()
     private var observed: [Data] = []
@@ -227,6 +248,7 @@ private final class ComparisonHostEffects: DesktopHostEffects, @unchecked Sendab
     let sourceToMutate: URL
     let gate: Gate?
     let liveEnabled: Bool
+    var failedModels: Set<String> = []
     var bytes: [Data] { lock.withLock { observed } }
     var captureCount: Int { lock.withLock { captures } }
     var liveClients: [HostComparisonClient] { lock.withLock { clients } }
@@ -272,6 +294,7 @@ private final class ComparisonHostEffects: DesktopHostEffects, @unchecked Sendab
         }
         await gate?.pass()
         try Task.checkCancellation()
+        if failedModels.contains(request.model) { throw DesktopHostError(message: "Synthetic comparison failure.") }
         if mutateOriginal {
             try Data("Changed original during the first sample request".utf8).write(to: sourceToMutate)
         }
@@ -287,7 +310,7 @@ private final class ComparisonHostEffects: DesktopHostEffects, @unchecked Sendab
     func writeSettings(_ data: Data, to url: URL) throws { XCTFail("No settings mutation.") }
 }
 
-private final class HostComparisonClient: FinalizingStreamingTranscriptionClient,
+final class HostComparisonClient: FinalizingStreamingTranscriptionClient,
     StreamingAudioReadyProviding, @unchecked Sendable {
     let isReadyForAudio = true
     let finalShape = TranscriptFinalShape.cumulativeTranscript

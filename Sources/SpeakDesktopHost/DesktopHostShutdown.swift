@@ -200,6 +200,7 @@ extension DesktopHostController {
     /// or start new work once `closed` is set, stopping the closing
     /// comparison capture within `deadline` before the rest proceed.
     private func cancelInFlightWork(until deadline: ContinuousClock.Instant) async {
+        discardComparisonBatch()
         comparisonAdmissionTask?.cancel()
         comparisonTask?.cancel()
         comparisonInitialization?.task.cancel()

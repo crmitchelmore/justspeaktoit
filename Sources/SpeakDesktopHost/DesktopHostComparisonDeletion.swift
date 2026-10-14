@@ -13,12 +13,16 @@ extension DesktopHostController {
             return
         }
         busy = true
+        if comparisonBatch?.currentRoundID == id { comparisonBatch = nil }
         activeOperations += 1
         let generation = UUID()
         comparisonGeneration = generation
         comparisonTask = Task {
             do {
                 try await self.playback.stopAndWait()
+                try Task.checkCancellation()
+                guard !self.closed, self.comparisonGeneration == generation else { throw CancellationError() }
+                await self.releaseComparisonFileExecution()
                 try Task.checkCancellation()
                 guard !self.closed, self.comparisonGeneration == generation else { throw CancellationError() }
                 try await comparisons.remove(id: id)
@@ -28,6 +32,7 @@ extension DesktopHostController {
             } catch {
                 self.comparisonStatus("Comparison deletion: \(error.localizedDescription)")
             }
+            await self.releaseComparisonFileExecution()
             self.comparisonTask = nil
             self.busy = false
             self.finishOperation()

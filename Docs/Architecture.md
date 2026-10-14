@@ -220,6 +220,12 @@ admission prevent stale readiness from starting audio/provider work.
 `DesktopHostComparisonAdmission` keeps File/Live admission out of the native
 settings queue as separately owned cancellable work, so Cancel and shutdown do
 not wait behind pending playback admission.
+`DesktopHostComparisonBatch` snapshots the queue before the first request, then
+pauses after every round. Judging never starts another sample: explicit Next file
+is required, including after an unranked failure reveal. Queued execution leases
+protect snapshots from sync/deletion; Cancel, discard, editor close and shutdown
+release them without starting providers. Relaunch retains evidence but never
+automatically resumes billable work.
 `WindowsComparison.cpp` and `LinuxComparison.c` own their native editors and
 file/save pickers, connected by small host adapters. `DesktopHostComparisonExports`
 uses canonical all-round/selected-round JSON/Markdown documents for saves and

@@ -13,6 +13,7 @@ package struct DesktopComparisonPresentation: Sendable {
     package var sync = DesktopComparisonSyncControls()
     package var references = ""
     package var reference = ""
+    package var batch = DesktopComparisonBatchControls()
 }
 
 package struct DesktopHostComparisonCapture {
@@ -90,7 +91,7 @@ extension DesktopHostController {
     private func startComparison(_ payload: String, live: Bool) async {
         guard !Task.isCancelled else { return }
         guard !closed, !busy, recording == nil, comparisonCapture == nil,
-              comparisonTask == nil, comparisonFinalization == nil else {
+              comparisonTask == nil, comparisonFinalization == nil, comparisonBatch == nil else {
             comparisonStatus("Finish or cancel the current recording or comparison first.")
             return
         }
@@ -127,11 +128,16 @@ extension DesktopHostController {
         } catch { comparisonStatus("Comparison could not start: \(error.localizedDescription)") }
     }
 
-    private func launchComparison(_ configuration: DesktopComparisonConfiguration, live: Bool, paths: [String]) {
+    func launchComparison(
+        _ configuration: DesktopComparisonConfiguration, live: Bool, paths: [String],
+        sample: ComparisonSampleSnapshot? = nil
+    ) {
         comparisonTask = Task {
             do {
                 if live {
                     try await self.startComparisonCapture(configuration)
+                } else if let sample {
+                    try await self.runComparisonSample(sample, configuration: configuration)
                 } else {
                     try await self.runComparisonFiles(paths, configuration: configuration)
                 }
@@ -140,13 +146,12 @@ extension DesktopHostController {
                     self.comparisonStatus("Comparison stopped: \(error.localizedDescription)")
                     self.comparisonLive?.cancel()
                     self.comparisonLive = nil
+                    self.comparisonBatch = nil
                 }
             }
             if self.comparisonGeneration == configuration.generation {
                 if self.comparisonCapture == nil {
-                    await self.comparisons?.endExecution(ids: self.comparisonOwnedRoundIDs)
-                    self.comparisonOwnedRoundIDs.removeAll()
-                    self.comparisonSync?.changed()
+                    await self.releaseComparisonFileExecution()
                 }
                 self.comparisonTask = nil
                 if self.comparisonCapture == nil { self.busy = false }
@@ -269,6 +274,7 @@ extension DesktopHostController {
         if comparisonTask == nil, comparisonCapture == nil, comparisonFinalization == nil {
             comparisonGeneration = UUID()
         }
+        discardComparisonBatch()
         comparisonTask?.cancel()
         comparisonFinalization?.cancel()
         comparisonLive?.cancel()
@@ -283,6 +289,11 @@ extension DesktopHostController {
             }
             guard lines.count == 2, let id = UUID(uuidString: lines[0]), let comparisons else {
                 throw DesktopHostError(message: "Select a saved comparison to judge.")
+            }
+            guard comparisonBatch?.queuedIDs.contains(id) != true else {
+                throw DesktopHostError(
+                    message: "This sample is queued. Judge the current round, then choose Next file."
+                )
             }
             let values = lines[1].components(separatedBy: ",")
             let ranks = values.compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
@@ -300,7 +311,8 @@ extension DesktopHostController {
         let presentationRevision = comparisonPresentationRevision
         let rounds = await comparisons.rounds()
         let round = comparisonPreview(rounds.first { $0.id == comparisonSelection } ?? rounds.first)
-        let state = DesktopComparisonRoundPresentation(round: round, busy: busy)
+        let queued = round.map { comparisonBatch?.queuedIDs.contains($0.id) == true } ?? false
+        let state = DesktopComparisonRoundPresentation(round: round, busy: busy || queued)
         comparisonSelection = round?.id
         let reference = round.flatMap { current in
             current.entriesInBlindOrder.first { $0.id == comparisonReference }
@@ -315,6 +327,7 @@ extension DesktopHostController {
         var detail = comparisonNotice + "\n\n"
             + "Choose two to eight models. File/Batch uses copied samples; Live shares one microphone.\n"
             + "Raw transcripts only. No insertion, post-processing or History changes.\n"
+        detail += comparisonBatchNotice(queued: queued)
         if let round {
             detail += await comparisonRoundDetail(round, state: state, reference: reference)
         }
@@ -337,7 +350,8 @@ extension DesktopHostController {
             references: round?.entriesInBlindOrder.map {
                 "\($0.id.uuidString)\tResult \(round?.blindLabel(for: $0.id) ?? "")"
             }.joined(separator: "\n") ?? "",
-            reference: reference?.id.uuidString ?? ""
+            reference: reference?.id.uuidString ?? "",
+            batch: comparisonBatchControls(round: round)
         ))
     }
 

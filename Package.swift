@@ -137,7 +137,6 @@ let appleCoreSources: [String] = [
     "XAILiveClient.swift",
     "XAILiveFinalisation.swift",
     "XAILiveProtocol.swift",
-    "XAITTSAPI.swift",
     "XAITTSRealtime.swift"
 ]
 

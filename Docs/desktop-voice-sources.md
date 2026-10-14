@@ -1,7 +1,7 @@
 # Desktop Voice Output sources and WAV export
 
 Windows and Linux remain developer previews, not macOS-parity releases.
-Voice Output uses shared Deepgram, Azure neural and Azure MAI speech contracts,
+Voice Output uses shared Deepgram, Azure neural, Azure MAI and xAI REST speech contracts,
 canonical catalogue projections and native playback. `DesktopSpeechVoice` exposes only
 routes the host executes, not every provider in the macOS catalogue. The seven
 built-in Azure neural catalogue entries now have one `AzureNeuralVoiceCatalog` definition
@@ -10,6 +10,23 @@ The current MAI-Voice-2.1 and Flash speakers come directly from the existing
 `AzureMAIVoiceCatalog`, including their locale/model identifiers. MAI uses the
 same regional Azure request builder, saved `key:region` credential and native
 WAV decoding/playback, not a second provider client or credential store.
+
+xAI's documented Eve and Ara presets come from `XAITTSCatalog`. Read, Generate
+and text export use the shared `/v1/tts` request contract with automatic language,
+mono PCM16 WAV at 24 kHz and the existing `xai.apiKey` credential. There is no
+invented API model field, account voice discovery or realtime WebSocket fallback.
+The native controls receive the canonical xAI speed limits (0.7-1.5) atomically
+with the selected voice. Speed is executed; pitch and SSML are unsupported and
+disabled, while stored choices remain visible. Out-of-route speed or unsupported
+controls refuse synthesis before credential access; selecting xAI does not clamp
+or discard preferences. Normal controls remains an explicit reset.
+Long text uses the existing 15,000-character xAI chunker, validates every response,
+and joins bounded PCM before publication. Failed, cancelled, empty or incompatible
+audio never publishes a partial result. Local usage records observe the actual
+requests and validated duration; canonical USD15/million-character pricing is an
+estimate, not a billed receipt. Retained replay/export does not synthesize again.
+Account-discovered voices, explicit language selection, progressive xAI delivery
+and wider output formats remain gaps, not advertised desktop capabilities.
 
 ## Journey
 
@@ -192,6 +209,8 @@ here; macOS's Deepgram path currently ignores those same controls, and native
 hosts deliberately refuse them for Deepgram instead. Current canonical MAI
 models now execute Read, Generate and text export through that same bounded
 Azure engine, with retained replay/export independent of later settings.
+The documented xAI Eve/Ara presets now execute the REST/WAV journey with
+canonical speed and true request accounting, not account discovery or progressive delivery.
 System and wider providers, selectable export format/quality and broader
 Voice workspace parity remain gaps. Advanced configuration transfer is a
 separately coordinated settings integration; this PR does not create another

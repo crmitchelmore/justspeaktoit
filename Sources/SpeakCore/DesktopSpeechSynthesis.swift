@@ -27,6 +27,9 @@ public struct DesktopSpeechSynthesis: Sendable {
             )
         case .azureNeural, .azureMAI:
             return try await synthesizeAzure(source.text, voice: voice, options: options, credential: credential)
+        case .xai:
+            return try await DesktopXAISpeechSynthesis(session: session).synthesize(
+                source, voice: voice, options: options, credential: credential)
         }
     }
 

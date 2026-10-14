@@ -29,6 +29,10 @@ int32_t jsti_window_set_voice_generated_result(const char *result_id, int32_t wo
  * remain visible; only explicit Normal controls resets them. */
 int32_t jsti_window_set_voice_synthesis_options(double speed, double pitch, int32_t ssml,
                                                int32_t capabilities, const char *voice);
+/* Atomic route-specific limits from shared capabilities; the original setter
+ * remains a wrapper using the established generic range. */
+int32_t jsti_window_set_voice_synthesis_options_with_limits(double speed, double pitch, int32_t ssml,
+    int32_t capabilities, const char *voice, double minimum_speed, double maximum_speed);
 /* Completes the pending Save only after persistence; 0 keeps the editor open
  * with an error, 1 closes it. Closed/replaced request tokens are ignored. */
 int32_t jsti_window_finish_voice_synthesis_options(const char *request_id, int32_t success);

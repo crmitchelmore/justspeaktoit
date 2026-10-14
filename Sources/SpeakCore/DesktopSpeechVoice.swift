@@ -6,12 +6,14 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
     case deepgram(DeepgramSpeechCatalog.Voice)
     case azureNeural(AzureNeuralVoice)
     case azureMAI(AzureMAIVoice)
+    case xai(XAITTSVoice)
 
     public var id: String {
         switch self {
         case .deepgram(let voice): voice.id
         case .azureNeural(let voice): voice.id
         case .azureMAI(let voice): voice.id
+        case .xai(let voice): voice.providerVoiceID
         }
     }
 
@@ -20,6 +22,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .deepgram(let voice): voice.name
         case .azureNeural(let voice): voice.name
         case .azureMAI(let voice): voice.displayName
+        case .xai(let voice): voice.displayName
         }
     }
 
@@ -28,6 +31,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .deepgram(let voice): voice.model.id
         case .azureNeural: "azure/neural"
         case .azureMAI(let voice): voice.model.rawValue
+        case .xai: XAITTSCatalog.providerIdentifier
         }
     }
 
@@ -36,6 +40,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .deepgram(let voice): "\(voice.displayName) — \(voice.model.displayName)"
         case .azureNeural(let voice): "\(voice.name) — Azure Speech (\(voice.shortName))"
         case .azureMAI(let voice): "\(voice.displayName) — Azure Speech"
+        case .xai(let voice): "\(voice.displayName) — xAI Speech"
         }
     }
 
@@ -43,6 +48,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         switch self {
         case .deepgram: VoiceOutputProvider.deepgram.apiKeyIdentifier
         case .azureNeural, .azureMAI: AzureSpeechConfiguration.credentialIdentifier
+        case .xai: XAITTSCatalog.credentialIdentifier
         }
     }
 
@@ -51,17 +57,27 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .deepgram: .naturalSpeech
         case .azureNeural: .azureNeural
         case .azureMAI: .azureMAI
+        case .xai: .xai
         }
     }
 
     public static var voices: [Self] {
         DeepgramSpeechCatalog.voices.map(Self.deepgram) + AzureNeuralVoiceCatalog.voices.map(Self.azureNeural)
             + AzureMAIVoiceCatalog.voices.map(Self.azureMAI)
+            + XAITTSCatalog.voices.map(Self.xai)
     }
 
     public static func resolved(modelID: String?, voiceID: String?) throws -> Self {
         let model = modelID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let identifier = voiceID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if model == XAITTSCatalog.providerIdentifier || model?.hasPrefix(XAITTSCatalog.voiceIDPrefix) == true
+            || identifier?.hasPrefix(XAITTSCatalog.voiceIDPrefix) == true {
+            guard model == nil || model == XAITTSCatalog.providerIdentifier,
+                  let identifier, let voice = XAITTSCatalog.voice(forID: identifier) else {
+                throw VoiceSynthesisConfigurationError.unsupportedVoice
+            }
+            return .xai(voice)
+        }
         let maiModel = model?.hasPrefix(AzureMAIVoiceCatalog.modelMarker.dropFirst().lowercased()) == true
         if model?.hasPrefix("azure/") == true || identifier?.hasPrefix("azure/") == true || maiModel {
             if let voice = AzureMAIVoiceCatalog.voices.first(where: { $0.id.lowercased() == identifier }) {

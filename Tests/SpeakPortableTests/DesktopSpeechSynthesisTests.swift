@@ -100,7 +100,7 @@ final class DesktopSpeechSynthesisTests: DeepgramSpeechStubTestCase {
         XCTAssertThrowsError(try DesktopSpeechVoice.resolved(modelID: nil, voiceID: "azure/unknown"))
         XCTAssertEqual(DesktopSpeechVoice.voices.count,
                        DeepgramSpeechCatalog.voices.count + AzureNeuralVoiceCatalog.voices.count
-                           + AzureMAIVoiceCatalog.voices.count)
+                           + AzureMAIVoiceCatalog.voices.count + XAITTSCatalog.voices.count)
         XCTAssertEqual(Set(DesktopSpeechVoice.voices.map(\.id)).count, DesktopSpeechVoice.voices.count)
         for voice in AzureNeuralVoiceCatalog.voices {
             XCTAssertEqual(

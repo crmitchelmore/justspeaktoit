@@ -62,12 +62,16 @@ package struct DesktopVoiceOutputSettings: Codable, Equatable, Sendable {
             let voice = try DesktopSpeechVoice.resolved(modelID: modelID, voiceID: voiceID)
             return .init(speed: speed ?? VoiceSynthesisOptions.defaultSpeed,
                          pitch: pitch ?? VoiceSynthesisOptions.defaultPitch, ssml: useSSML == true ? 1 : 0,
-                         capabilities: voice.capabilities.nativeFlags, label: voice.label)
+                         capabilities: voice.capabilities.nativeFlags, label: voice.label,
+                         minimumSpeed: voice.capabilities.speedRange.lowerBound,
+                         maximumSpeed: voice.capabilities.speedRange.upperBound)
         } catch {
             return .init(speed: speed ?? VoiceSynthesisOptions.defaultSpeed,
                          pitch: pitch ?? VoiceSynthesisOptions.defaultPitch,
                          ssml: useSSML == true ? 1 : 0, capabilities: 0,
-                         label: "Stored voice unavailable. Choices are retained; select a compatible voice.")
+                         label: "Stored voice unavailable. Choices are retained; select a compatible voice.",
+                         minimumSpeed: VoiceSynthesisOptions.speedRange.lowerBound,
+                         maximumSpeed: VoiceSynthesisOptions.speedRange.upperBound)
         }
     }
 
@@ -97,6 +101,8 @@ package struct DesktopVoiceControlsPresentation: Sendable {
     package let ssml: Int32
     package let capabilities: Int32
     package let label: String
+    package let minimumSpeed: Double
+    package let maximumSpeed: Double
 }
 
 /// History playback that can also speak a record's Read aloud as consecutive

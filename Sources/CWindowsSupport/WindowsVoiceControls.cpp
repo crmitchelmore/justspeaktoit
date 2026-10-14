@@ -12,7 +12,12 @@ int32_t jsti_save_owned_window_snapshot(HWND window, const char *path, char *err
 
 namespace {
 enum { speedLabel = 960, speedID, pitchLabel, pitchID, ssmlID, noticeID, saveID, normalID };
-struct Options { double speed = 1, pitch = 0; int ssml = 0, capabilities = 0; std::wstring voice = L"Deepgram"; };
+struct Options {
+    double speed = 1, pitch = 0;
+    int ssml = 0, capabilities = 0;
+    std::wstring voice = L"Deepgram";
+    double minimumSpeed = 0.5, maximumSpeed = 2;
+};
 std::mutex mutex;
 Options saved;
 HWND active = nullptr;
@@ -27,6 +32,11 @@ struct Dialog {
     bool saving = false;
 };
 int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
+std::wstring speedCaption(const Options &options) {
+    std::wostringstream stream; stream.imbue(std::locale::classic());
+    stream << std::setprecision(15) << L"&Speed (" << options.minimumSpeed << L" to " << options.maximumSpeed << L")";
+    return stream.str();
+}
 void fill(HWND window, const Options &options) {
     auto value = [](double number) {
         std::wostringstream stream; stream.imbue(std::locale::classic());
@@ -51,8 +61,9 @@ bool save(HWND window, Dialog &dialog) {
     if (dialog.saving) return false;
     double speed = 0, pitch = 0;
     if (!number(window, speedID, speed) || !number(window, pitchID, pitch) ||
-        speed < 0.5 || speed > 2 || pitch < -12 || pitch > 12 || std::round(pitch) != pitch) {
-        SetDlgItemTextW(window, noticeID, L"Use speed 0.5 to 2 and a whole-number pitch -12 to 12 semitones.");
+        speed < dialog.options.minimumSpeed || speed > dialog.options.maximumSpeed ||
+        pitch < -12 || pitch > 12 || std::round(pitch) != pitch) {
+        SetDlgItemTextW(window, noticeID, L"Use speed within the displayed limits and a whole-number pitch -12 to 12.");
         return false;
     }
     const bool ssml = SendDlgItemMessageW(window, ssmlID, BM_GETCHECK, 0, 0) == BST_CHECKED;
@@ -100,7 +111,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         dialog->font = CreateFontW(-MulDiv(10, GetDpiForWindow(window), 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
         if (!add(L"STATIC", dialog->options.voice.c_str(), SS_LEFT, 980, 20, 18, 450, 36) ||
-            !add(L"STATIC", L"&Speed (0.5 to 2)", 0, speedLabel, 20, 65, 250, 24) ||
+            !add(L"STATIC", speedCaption(dialog->options).c_str(), 0, speedLabel, 20, 65, 250, 24) ||
             !add(L"EDIT", L"", WS_TABSTOP | ES_AUTOHSCROLL, speedID, 300, 60, 150, 34) ||
             !add(L"STATIC", L"&Pitch (-12 to 12 semitones)", 0, pitchLabel, 20, 110, 270, 24) ||
             !add(L"EDIT", L"", WS_TABSTOP | ES_AUTOHSCROLL, pitchID, 300, 105, 150, 34) ||
@@ -183,11 +194,17 @@ HWND makeDialog(HWND owner, Dialog &dialog) {
 
 int32_t jsti_window_set_voice_synthesis_options(double speed, double pitch, int32_t ssml,
                                                int32_t capabilities, const char *voice) {
+    return jsti_window_set_voice_synthesis_options_with_limits(speed, pitch, ssml, capabilities, voice, 0.5, 2);
+}
+int32_t jsti_window_set_voice_synthesis_options_with_limits(double speed, double pitch, int32_t ssml,
+    int32_t capabilities, const char *voice, double minimumSpeed, double maximumSpeed) {
     std::wstring name;
     if (!std::isfinite(speed) || !std::isfinite(pitch) || ssml < 0 || ssml > 1 || capabilities < 0 || capabilities > 7 ||
+        !std::isfinite(minimumSpeed) || !std::isfinite(maximumSpeed) ||
+        minimumSpeed < 0.5 || minimumSpeed > 1 || maximumSpeed < 1 || maximumSpeed > 2 ||
         !jsti::wide(voice ? voice : "", name)) return -1;
     std::lock_guard<std::mutex> lock(mutex);
-    saved = {speed, pitch, ssml, capabilities, std::move(name)};
+    saved = {speed, pitch, ssml, capabilities, std::move(name), minimumSpeed, maximumSpeed};
     return 0;
 }
 int32_t jsti_window_finish_voice_synthesis_options(const char *request, int32_t success) {
@@ -262,15 +279,41 @@ bool jsti_voice_controls_self_test(HWND owner, std::string &error) {
         std::vector<wchar_t> path(32768, 0);
         const DWORD length = GetEnvironmentVariableW(L"JSTI_UI_SNAPSHOT_PATH", path.data(),
             static_cast<DWORD>(path.size()));
+        passed = save(window, dialog) && passed && receipt.request != first;
+        passed = jsti_window_finish_voice_synthesis_options(first.c_str(), 1) == 0 && passed;
+        drain(); passed = passed && IsWindow(window) && dialog.saving;
+        passed = jsti_window_finish_voice_synthesis_options(receipt.request.c_str(), 1) == 0 && passed;
+        drain(); passed = passed && !IsWindow(window);
+        if (IsWindow(window)) DestroyWindow(window);
+        Options original;
+        { std::lock_guard<std::mutex> lock(mutex); original = saved; }
+        passed = passed &&
+            jsti_window_set_voice_synthesis_options_with_limits(1, 0, 0, 1, "Synthetic xAI", NAN, 1.5) == -1 &&
+            jsti_window_set_voice_synthesis_options_with_limits(1, 0, 0, 1, "Synthetic xAI", 1.1, 1.5) == -1 &&
+            jsti_window_set_voice_synthesis_options_with_limits(1, 0, 0, 1, "Synthetic xAI", 0.7, 0.9) == -1 &&
+            jsti_window_set_voice_synthesis_options_with_limits(0.5, 0, 0, 1, "Synthetic xAI Eve", 0.7, 1.5) == 0;
+        { std::lock_guard<std::mutex> lock(mutex); dialog.options = saved; saved = original; }
+        dialog.saving = false;
+        window = makeDialog(owner, dialog);
+        if (!window) { error = "Range-aware Voice controls fixture could not open."; return false; }
+        wchar_t rangeCaption[64]{};
+        GetDlgItemTextW(window, speedLabel, rangeCaption, 64);
+        passed = passed && std::wstring(rangeCaption) == L"&Speed (0.7 to 1.5)" &&
+            number(window, speedID, value) && value == 0.5 && IsWindowEnabled(GetDlgItem(window, speedID)) &&
+            !IsWindowEnabled(GetDlgItem(window, pitchID)) && !IsWindowEnabled(GetDlgItem(window, ssmlID)) &&
+            !save(window, dialog) && receipt.calls == 2;
+        SetDlgItemTextW(window, speedID, L"0.7");
+        passed = save(window, dialog) && passed && receipt.calls == 3;
+        passed = jsti_window_finish_voice_synthesis_options(receipt.request.c_str(), 0) == 0 && passed;
+        drain();
+        SetDlgItemTextW(window, speedID, L"1.5");
         if (length && length < path.size()) {
             char failure[1024]{}; ShowWindow(window, SW_SHOWNOACTIVATE);
             passed = jsti_save_owned_window_snapshot(window,
                 (jsti::utf8(path.data()) + ".voice-controls.bmp").c_str(), failure, sizeof(failure)) == 0 && passed;
             if (failure[0]) error = failure;
         }
-        passed = save(window, dialog) && passed && receipt.request != first;
-        passed = jsti_window_finish_voice_synthesis_options(first.c_str(), 1) == 0 && passed;
-        drain(); passed = passed && IsWindow(window) && dialog.saving;
+        passed = save(window, dialog) && passed && receipt.calls == 4;
         passed = jsti_window_finish_voice_synthesis_options(receipt.request.c_str(), 1) == 0 && passed;
         drain(); passed = passed && !IsWindow(window);
         if (IsWindow(window)) DestroyWindow(window);

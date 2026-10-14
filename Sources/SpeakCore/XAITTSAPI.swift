@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Errors surfaced by the shared xAI speech-generation transports.
 public enum XAITTSAPIError: Error, Sendable, Equatable {
@@ -120,24 +123,7 @@ public struct XAITTSAPI: Sendable {
         apiKey: String,
         request: XAITTSRequest
     ) async throws -> Data {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw XAITTSAPIError.emptyText
-        }
-        guard text.count <= Self.maximumTextCharacters else {
-            throw XAITTSAPIError.textTooLong(
-                limit: Self.maximumTextCharacters,
-                characterCount: text.count
-            )
-        }
-
-        var urlRequest = URLRequest(url: Self.speechEndpoint)
-        urlRequest.httpMethod = "POST"
-        urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.httpBody = try JSONSerialization.data(
-            withJSONObject: request.jsonBody(text: text)
-        )
-
+        let urlRequest = try Self.synthesisRequest(text: text, apiKey: apiKey, request: request)
         try Task.checkCancellation()
         let data: Data
         let response: URLResponse
@@ -156,6 +142,31 @@ public struct XAITTSAPI: Sendable {
         }
         guard !data.isEmpty else { throw XAITTSAPIError.invalidResponse }
         return data
+    }
+
+    /// The same request contract for hosts that require a bounded response reader.
+    public static func synthesisRequest(
+        text: String, apiKey: String, request: XAITTSRequest
+    ) throws -> URLRequest {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw XAITTSAPIError.emptyText
+        }
+        guard text.count <= Self.maximumTextCharacters else {
+            throw XAITTSAPIError.textTooLong(
+                limit: Self.maximumTextCharacters,
+                characterCount: text.count
+            )
+        }
+
+        var urlRequest = URLRequest(url: Self.speechEndpoint)
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.httpBody = try JSONSerialization.data(
+            withJSONObject: request.jsonBody(text: text)
+        )
+
+        return urlRequest
     }
 
     /// `GET /v1/tts/voices` — the account's own voice list, which is where the

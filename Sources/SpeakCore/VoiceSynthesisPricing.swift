@@ -9,6 +9,7 @@ public enum VoiceSynthesisPricing {
         switch voice {
         case .azureNeural: return azureNeuralPerThousandCharacters
         case .azureMAI: return AzureMAIVoiceCatalog.costPerThousandCharacters(forVoiceID: voice.id)
+        case .xai: return XAITTSAPI.estimatedCostPerThousandCharacters
         case .deepgram(let voice):
             return voice.model == DeepgramSpeechCatalog.flux ? nil : DeepgramTTSAPI.costPerThousandCharacters
         }

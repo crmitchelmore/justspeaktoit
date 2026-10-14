@@ -32,7 +32,9 @@ extension WindowsNative {
     static func configureVoiceControls(_ settings: WindowsVoiceOutputSettings) -> Bool {
         let shown = settings.controlsPresentation
         return shown.label.withCString {
-            jsti_window_set_voice_synthesis_options(shown.speed, shown.pitch, shown.ssml, shown.capabilities, $0) == 0
+            jsti_window_set_voice_synthesis_options_with_limits(
+                shown.speed, shown.pitch, shown.ssml, shown.capabilities, $0,
+                shown.minimumSpeed, shown.maximumSpeed) == 0
         }
     }
 

@@ -3,6 +3,10 @@
 Open **Settings → Data & Migration** for full manual export/import on macOS.
 Windows/Linux provide recording History/audio backups and read-only inspection;
 full native category collection and transactional import remain unfinished.
+Native ZIP inspection also validates profile structure and declared coverage
+through the shared profile catalogue. Missing profile data is not an empty
+collection; prompts and identifiers are never displayed. Profile checks are not
+current-store merge counts, import approval or native application of profiles.
 
 ## Export
 

@@ -39,6 +39,19 @@ healthy final folding. Cancelled or failed sessions keep recovery text and
 ignore late projections. Providers without projected text retain legacy folding.
 This does not implement clipboard voice commands or live LLM polishing.
 
+Independent final-only clipboard-command primitives now share the canonical
+recognizer and immutable policy described in
+[Windows development](windows-development.md). `LinuxClipboardRead.readText()`
+uses an owned GTK source, cancellable GDK/GIO stream reads, a 1 MiB UTF-8 limit
+and a two-second caller deadline. Cancelled queued sources are removed; late
+callbacks cannot publish text, and only one request is admitted while native
+cleanup remains pending. Missing GTK readiness and **Wayland background reads
+are explicit unsupported errors**, not an absent clipboard or an acknowledged
+paste. Empty remote format metadata is reported as an indeterminate read failure,
+not proof that the clipboard is empty. Synthetic stream/deadline fixtures do not
+initialize a display or access the user's clipboard. Host finalization/configuration wiring is still pending;
+the existing output-write/restore and portal paths are unchanged.
+
 ## Build and run
 
 Ubuntu 24.04 (or any distribution with GTK 4.14+, libadwaita 1.5+) and Swift 6.2.3:

@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "LinuxClipboardRead.h"
 
 #ifdef __cplusplus
 extern "C" {

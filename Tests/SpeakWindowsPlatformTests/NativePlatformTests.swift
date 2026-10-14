@@ -3,6 +3,12 @@ import CWindowsSupport
 import XCTest
 
 final class NativePlatformTests: XCTestCase {
+    func testClipboardReader_SyntheticDecodeDeadlineAndWorkerOwnership() {
+        var error = [CChar](repeating: 0, count: 1024)
+        let result = jsti_windows_clipboard_read_self_test(&error, error.count)
+        XCTAssertEqual(result, 0, String(cString: error))
+    }
+
     func testNativeAudioFramingAndUnicode_FailsClosedWithoutDeviceAccess() {
         var error = [CChar](repeating: 0, count: 1024)
         let result = jsti_native_self_test(&error, error.count)

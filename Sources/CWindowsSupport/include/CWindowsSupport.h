@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "WindowsClipboardRead.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -89,6 +89,20 @@ an authoritative text projection retain their existing segment-folding behavior.
 This is transcript-state parity, not clipboard voice commands or live LLM
 polishing; those host/settings behaviors remain separate work.
 
+The next clipboard-command slice supplies independent, final-only primitives:
+`ClipboardVoiceCommandPolicy` freezes enabled/custom-trigger policy, the canonical
+`VoiceCommandProcessor` recognizes commands without reading the clipboard, and
+`DesktopClipboardVoiceCommands` reads current text once only for a recognized
+command. `WindowsClipboardRead.readText()` runs off the actor/UI/capture path,
+caps UTF-8 text at 1 MiB, and reports cancellation, malformed text, access errors,
+cleanup-busy admission and a two-second caller deadline explicitly. Win32 delayed
+rendering can outlive that deadline; one globally admitted native reader retains
+its borrowed clipboard handle until the OS returns. Cancellation neither kills
+that thread nor closes its clipboard from another thread. Synthetic native
+fixtures never read the user's clipboard. These primitives are **not yet wired
+into the host finalization/configuration pipeline** and do not change text-output
+ownership, restoration, hands-free rearming or live previews.
+
 Grok Voice also has an injected portable client, preserving manual turns,
 input-only captions and the absence of `response.create`, but remains hidden
 from desktop route selection. A synthetic conversation peer cannot establish

@@ -292,19 +292,33 @@ extension DesktopMigrationInspectionTests {
     func testInvalidSourceURLs_AreRejectedBeforeReader() async throws {
         let fixture = try InspectionFixture()
         defer { fixture.remove() }
-        let reader = DesktopMigrationInspection.Reader { _ in
-            XCTFail("Invalid source URLs must never reach the reader.")
-            return fixture.snapshot(directory: nil)
-        }
-        let sources = [
-            try XCTUnwrap(URL(string: "https://example.invalid/backup.zip")),
-            fixture.root.appendingPathComponent("Directory", isDirectory: true),
-            fixture.root.appendingPathComponent("Archive\0other.zip")
+        // Encoded construction keeps path normalization from erasing the invalid input.
+        let encodedNUL = try XCTUnwrap(URL(
+            string: "Archive%00other.zip", relativeTo: fixture.root.appendingPathComponent("", isDirectory: true)
+        )).absoluteURL
+        XCTAssertTrue(encodedNUL.absoluteString.contains("%00"))
+        let sources: [(name: String, url: URL)] = [
+            ("remote", try XCTUnwrap(URL(string: "https://example.invalid/backup.zip"))),
+            ("directory", fixture.root.appendingPathComponent("Directory", isDirectory: true)),
+            ("encoded NUL", encodedNUL)
         ]
-        for source in sources {
+        for (name, source) in sources {
+            let reader = DesktopMigrationInspection.Reader { _ in
+                XCTFail("Invalid \(name) source URLs must never reach the reader.")
+                return fixture.snapshot(directory: nil)
+            }
             let outcome = await DesktopMigrationInspection.inspect(source, reader: reader)
-            guard case .failed = outcome else { return XCTFail("\(outcome)") }
+            guard case .failed = outcome else { return XCTFail("\(name): \(outcome)") }
         }
+    }
+
+    func testLiteralPercentZeroFilename_IsNotAnEncodedNUL() throws {
+        let fixture = try InspectionFixture()
+        defer { fixture.remove() }
+        let source = fixture.root.appendingPathComponent("Literal%00name.zip")
+        XCTAssertTrue(source.absoluteString.contains("%2500"))
+        XCTAssertFalse(source.path.contains("\0"))
+        XCTAssertNoThrow(try DesktopMigrationStaging.requireLocalFile(source))
     }
 
     func testMissingReaderStagingAndCleanupFailures_AreExplicitFailures() async throws {

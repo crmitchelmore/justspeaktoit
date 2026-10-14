@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "VoiceSources.h"
+#include "../../CWindowsSupport/include/VoiceCredentials.h"
 
 #ifdef __cplusplus
 extern "C" {

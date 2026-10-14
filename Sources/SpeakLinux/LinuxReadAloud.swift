@@ -102,6 +102,9 @@ extension LinuxWindow {
             }
         }
         if result != 0 { LinuxHostPlatform.update("The Voice Output sources could not be shown.") }
+        if jsti_window_set_voice_credential_handler(linuxVoiceCredentialEvent, context) != 0 {
+            LinuxHostPlatform.update("The Voice provider key entry could not be configured.")
+        }
     }
     /// Fills the voice picker from the canonical catalogue and selects the
     /// saved voice, or the catalogue default for a retired one.

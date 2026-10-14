@@ -68,8 +68,8 @@ WAV decoding/playback, not a second provider client or credential store.
 **OpenAI (local candidate)** uses one `OpenAITTSCatalog` for Mac and desktop.
 Native Voice pages and settings describe the selected provider rather than
 incorrectly claiming that every voice sends text to Deepgram. The separate
-OpenAI TTS credential must already be available in secure storage; direct
-native entry of that distinct credential is not qualified by this local slice.
+OpenAI TTS credential is separate from transcription. Its original synthesis
+source qualification does not cover the subsequent native key-entry candidate below.
 Mac's eleven `openai/<voice>` identifiers, order, names and traits remain intact.
 Its default quality is still High (`tts-1`); Standard selects
 `gpt-4o-mini-tts`, Highest selects `tts-1-hd`. The documented TTS-1/HD subset
@@ -103,6 +103,46 @@ tokens, so token counts and input/audio/total charges remain **unestimated**,
 not inferred from characters or duration. Mac's existing legacy cost display is
 not refactored or treated as desktop mini pricing authority. No live OpenAI
 service or physical-device acceptance is claimed by this local candidate.
+
+**Purpose-specific Voice key entry (local candidate)** adds a native Provider key
+action on the Windows Voice page and legacy Voice chooser, and a native password
+row on Linux's existing Voice page. Neither changes General/transcription key
+entry, the page count, settings keys or the provider catalogue. The dedicated
+callback carries the Voice purpose, exact canonical slot, request UUID and
+selection epoch; it never reinterprets a transcription model index.
+
+`VoiceOutputCredentialSlot` validates the executable voice against the shared
+purpose resolver and the engine's actual credential identifier. Deepgram uses its
+canonical provider identifier, including Flux's unprefixed model/voice names.
+OpenAI always uses `openai.tts.apiKey`, never `openai.apiKey`. Azure validation
+reuses `AzureSpeechConfiguration`, including its existing bare-key/eastus default.
+Synthesis of account voices still requires matching current account evidence.
+
+Saved, missing, unavailable and busy states are distinct. Keys are masked and
+never prefilled; blank replacement refuses instead of deleting. Removal is a
+separate confirmed action. Shared-key effects and existing key-sync preferences
+are disclosed. Replace and remove use the existing secure vault/hand-marked
+`saveKeyByHand` path, not plaintext settings, History, usage or audio exports.
+
+Save admission returns immediately; the host owns and counts the cancellable
+operation through shutdown's existing grace period. Default synchronous vault
+reads/writes run outside the host actor: cancellation cannot release ownership
+or allow a racing replacement/removal while a native write is unfinished.
+Native view reads coalesce to one in-flight lookup and the latest requested view;
+close remains responsive even if the vault ignores cancellation. Selection epochs fence
+away-and-back changes, and native request/epoch checks reject stale responses
+without clearing newer input. Closing/cancelling cannot promise rollback of a
+vault operation that already wrote; errors are sanitized and unconfirmed or
+late confirmed writes are reported honestly. No History ownership, speech handle,
+publication helper, capture lifecycle or synthesis request is changed.
+
+Windows reserves Voice button185, credential controls1030-1037 and `WM_APP+29`.
+The shared C credential header introduces no global Voice events110-119.
+Linux posts UI work through the existing GTK queue, without a MainActor hop.
+UUID identities accept GLib/Swift case differences; credential identifiers remain exact.
+Synthetic backend/native fixtures do not access a real vault or provider.
+Local source checks are not full-app Windows/Linux or Apple runtime acceptance;
+the earlier unresolved native adapter failure remains unresolved.
 
 **Speechmatics (local candidate)** executes the four canonical English voices:
 Sarah/Theo (UK) and Megan/Jack (US), appended to the existing native picker.

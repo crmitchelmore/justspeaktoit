@@ -176,6 +176,10 @@ where Playback: DesktopHostSpeechPlayback, VoiceOutputSettings == DesktopVoiceOu
     /// The engine, staging synthesized audio in `directory`, which it creates
     /// readable only by the current user.
     static func makeVoiceOutput(stagingDirectory directory: URL) throws -> VoiceOutput
+    static func voiceCredential(
+        _ result: Result<DesktopVoiceCredentialPresentation, VoiceOutputCredentialError>, requestID: UUID)
+    static func voiceCredentialFinished(
+        _ result: Result<Void, VoiceOutputCredentialError>, request: VoiceOutputCredentialRequest)
     static func synthesizeVoiceOutput(
         _ source: VoiceOutputSourceSnapshot, selection: DesktopSpeechSelection,
         credential: @Sendable () async throws -> String
@@ -186,6 +190,11 @@ where Playback: DesktopHostSpeechPlayback, VoiceOutputSettings == DesktopVoiceOu
 }
 
 package extension DesktopHostReadAloudPlatform {
+    static func voiceCredential(
+        _ result: Result<DesktopVoiceCredentialPresentation, VoiceOutputCredentialError>, requestID: UUID) {}
+    static func voiceCredentialFinished(
+        _ result: Result<Void, VoiceOutputCredentialError>, request: VoiceOutputCredentialRequest) {}
+
     static func makeReadAloudState() -> ReadAloudState { ReadAloudState() }
 
     static func synthesizeVoiceOutput(
@@ -257,6 +266,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
 
     package func persistVoiceOutput(_ voiceOutput: DesktopVoiceOutputSettings, message: String) -> Bool {
         guard !closed else { return false }
+        let previous = voiceOutputSettings()
         let wasTracking = voiceUsageTrackingEnabled
         var changed = settings
         changed.voiceOutput = voiceOutput
@@ -265,6 +275,9 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 JSONEncoder().encode(changed), to: directory.appendingPathComponent("settings.json")
             )
             settings = changed
+            if previous.modelID != voiceOutput.modelID || previous.voiceID != voiceOutput.voiceID {
+                voiceCredentialEpoch = UUID()
+            }
             if wasTracking != voiceUsageTrackingEnabled { voiceUsage.epoch = UUID() }
             if !busy, recording == nil { update(message) }
             return true

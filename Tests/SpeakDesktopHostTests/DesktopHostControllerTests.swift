@@ -39,16 +39,38 @@ final class FakeLog: @unchecked Sendable {
     private var clipboard: [String] = []
     private var hudStates: [DesktopHUDState] = []
     var keys: [String: String] = [:]
+    private var keyWriteHook: (@Sendable (String, String) throws -> Void)?
+    private var keyReadHook: (@Sendable (String) -> Void)?
 
-    func reset() { lock.withLock { statuses = []; clipboard = []; hudStates = []; keys = [:] } }
+    func reset() {
+        lock.withLock {
+            statuses = []; clipboard = []; hudStates = []; keys = [:]
+            keyWriteHook = nil; keyReadHook = nil
+        }
+    }
     func hud(_ state: DesktopHUDState) { lock.withLock { hudStates.append(state) } }
     var huds: [DesktopHUDState] { lock.withLock { hudStates } }
     func status(_ text: String) { lock.withLock { statuses.append(text) } }
     func copy(_ text: String) { lock.withLock { clipboard.append(text) } }
     var allStatuses: [String] { lock.withLock { statuses } }
     var copies: [String] { lock.withLock { clipboard } }
-    func key(_ name: String) -> String { lock.withLock { keys[name] ?? "" } }
+    func key(_ name: String) -> String {
+        let hook = lock.withLock { keyReadHook }
+        hook?(name)
+        return lock.withLock { keys[name] ?? "" }
+    }
     func setKey(_ key: String, name: String) { lock.withLock { keys[name] = key } }
+    func installKeyWriteHook(_ hook: @escaping @Sendable (String, String) throws -> Void) {
+        lock.withLock { keyWriteHook = hook }
+    }
+    func installKeyReadHook(_ hook: @escaping @Sendable (String) -> Void) {
+        lock.withLock { keyReadHook = hook }
+    }
+    func saveKey(_ key: String, name: String) throws {
+        let hook = lock.withLock { keyWriteHook }
+        try hook?(key, name)
+        setKey(key, name: name)
+    }
 }
 
 enum FakePlatform: DesktopHostPlatform {
@@ -69,7 +91,7 @@ enum FakePlatform: DesktopHostPlatform {
     static func voiceTextImportCancelled(_ requestID: String) {
         FakeLog.shared.status("Import stopped: \(requestID)")
     }
-    static func saveAPIKey(_ key: String, name: String) throws { FakeLog.shared.setKey(key, name: name) }
+    static func saveAPIKey(_ key: String, name: String) throws { try FakeLog.shared.saveKey(key, name: name) }
     static func uploadStaging(directory: URL) -> SharedMultipartUploadStaging {
         // No `.posix` default on Windows, where these tests also run.
         SharedMultipartUploadStaging(directory: directory, securityPolicy: .init(

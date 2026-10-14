@@ -49,6 +49,12 @@ void jsti_voice_usage_show_fixture(struct _GtkWindow *owner);
 int32_t jsti_voice_usage_save_snapshot(const char *path);
 
 struct _GtkWidget;
+struct _GtkWidget *jsti_voice_credentials_group_new(void);
+void jsti_voice_credentials_set_idle(gboolean idle);
+void jsti_voice_credentials_selection_changed(void);
+void jsti_voice_credentials_selection_pending(void);
+void jsti_voice_credentials_close(void);
+int32_t jsti_voice_credentials_self_test(char *error, size_t capacity);
 struct _GtkLabel;
 int32_t jsti_window_save_widget_png(struct _GtkWidget *widget, const char *path, gboolean opaque);
 

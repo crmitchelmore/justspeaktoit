@@ -109,6 +109,8 @@ extension DesktopHostController {
         modelDiscoveryTask?.cancel()
         voiceDiscovery.requestID = nil
         voiceDiscovery.task?.cancel()
+        voiceCredentialTask?.cancel()
+        voiceCredentialReadTask?.cancel()
         voiceDiscovery.inventory = nil
         cancelOutput()
         generatedVoice = nil

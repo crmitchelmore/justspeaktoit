@@ -37,6 +37,9 @@ void jsti_show_hotkey_settings(HWND owner);
 bool jsti_hotkey_self_test(HWND owner, int (*observe)(void *), void *context, std::string &error);
 bool jsti_voice_output_available();
 void jsti_show_voice_settings(HWND owner);
+bool jsti_voice_credentials_available();
+void jsti_show_voice_credentials(HWND owner);
+bool jsti_voice_credentials_self_test(HWND owner, std::string &error);
 bool jsti_voice_settings_self_test(HWND owner, std::string &error);
 void jsti_show_voice_sources(HWND owner, const char *record, const char *history);
 bool jsti_voice_sources_self_test(HWND owner, std::string &error);
@@ -81,6 +84,7 @@ constexpr int transcriptLabelID = 92;
 constexpr int readAloudID = 172;
 constexpr int voiceSettingsID = 173;
 constexpr int voiceSourcesID = 184;
+constexpr int voiceCredentialID = 185;
 // The Source picker (Remote/Local) and the Local models dialog button, which
 // takes the place of Refresh models while the Local source is selected.
 constexpr int sourceLabelID = 89;
@@ -470,6 +474,7 @@ void updateHistoryControls(HWND window, int recording) {
         jsti_voice_output_available());
     EnableWindow(GetDlgItem(window, voiceSettingsID), recording == 0 && jsti_voice_output_available());
     EnableWindow(GetDlgItem(window, voiceSourcesID), recording == 0 && jsti_voice_output_available());
+    EnableWindow(GetDlgItem(window, voiceCredentialID), recording == 0 && jsti_voice_credentials_available());
     EnableWindow(GetDlgItem(window, copyID), state.historyPresentationReady && (!selected || recording == 0));
     if (!selected) applyVariant(window, -1, false, recording);
     else EnableWindow(GetDlgItem(window, variantID), state.variantSwitchable && recording == 0);
@@ -548,7 +553,7 @@ unsigned pagesOf(int identifier) {
     case historySpendID:
         return page(historyPage);
     case readAloudID: case stopPlaybackID: return page(historyPage) | page(voicePage);
-    case voiceSettingsID: case voiceSourcesID: return page(voicePage);
+    case voiceSettingsID: case voiceSourcesID: case voiceCredentialID: return page(voicePage);
     case 94: case microphoneID: case textOutputID: case appearanceLabelID: case appearanceID: case automationID:
     case loginItemID:
         return page(generalPage);
@@ -825,6 +830,7 @@ void layoutSettings(HWND window, const RECT &content) {
         place(window, stopPlaybackID, box(right - scale(window, 196) - scale(window, 8) - scale(window, 96), y,
                                           scale(window, 96), row));
         place(window, voiceSourcesID, box(left, y + row + gap, scale(window, 260), row));
+        place(window, voiceCredentialID, box(right - scale(window, 190), y + row + gap, scale(window, 190), row));
         break;
     }
     case generalPage: {
@@ -1475,6 +1481,7 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"Stop", BS_PUSHBUTTON | WS_TABSTOP, stopPlaybackID) &&
         add(L"BUTTON", L"Choose &voice…", BS_PUSHBUTTON | WS_TABSTOP, voiceSettingsID) &&
         add(L"BUTTON", L"&Text and export...", BS_PUSHBUTTON | WS_TABSTOP, voiceSourcesID) &&
+        add(L"BUTTON", L"Provider &key...", BS_PUSHBUTTON | WS_TABSTOP, voiceCredentialID) &&
         add(L"BUTTON", L"Edit app &profiles…", BS_PUSHBUTTON | WS_TABSTOP, profilesID) &&
         add(L"STATIC", L"&Source", 0, sourceLabelID) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP, sourceID) &&
@@ -2117,6 +2124,11 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case voiceSettingsID:
             if (HIWORD(wparam) == BN_CLICKED && idleControl(window, voiceSettingsID) && IsWindowEnabled(window)) {
                 jsti_show_voice_settings(window);
+            }
+            return 0;
+        case voiceCredentialID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, voiceCredentialID) && IsWindowEnabled(window)) {
+                jsti_show_voice_credentials(window);
             }
             return 0;
         case voiceSourcesID:
@@ -3758,6 +3770,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         return jsti_settings_self_test(window, failure) && jsti_profiles_self_test(window, failure) &&
             jsti_text_output_settings_self_test(window, textOutputID, setRecording, recordingBlocked, &observed, failure) &&
             jsti_hotkey_self_test(window, observe, &observed, failure) && jsti_voice_settings_self_test(window, failure) &&
+            jsti_voice_credentials_self_test(window, failure) &&
             jsti_voice_sources_self_test(window, failure) &&
             jsti_local_models_self_test(window, failure) && jsti_cloud_sync_settings_self_test(window, failure) &&
             jsti_azure_resource_settings_self_test(window, failure);

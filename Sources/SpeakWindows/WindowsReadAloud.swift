@@ -81,7 +81,8 @@ extension WindowsNative {
         defer { pointers.forEach { $0.deallocate() } }
         let borrowed: [UnsafePointer<CChar>?] = pointers.map { UnsafePointer($0) }
         return borrowed.withUnsafeBufferPointer {
-            jsti_window_set_voice_sources($0.baseAddress, $0.count, windowsVoiceSourceEvent, context) == 0
+            jsti_window_set_voice_sources($0.baseAddress, $0.count, windowsVoiceSourceEvent, context) == 0 &&
+                jsti_window_set_voice_credential_handler(windowsVoiceCredentialEvent, context) == 0
         }
     }
 

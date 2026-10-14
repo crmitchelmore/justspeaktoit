@@ -78,7 +78,7 @@ extension DesktopHostController {
         case 104: requestComparisonStop()
         case 105: await cancelComparison()
         case 106: await judgeComparison(text)
-        case 107: await exportComparisons(path: text, markdown: index == 1)
+        case 107, 126, 127: await comparisonExportEvent(event, text: text, index: index)
         case 108: await playComparison(text)
         default: break
         }
@@ -304,17 +304,6 @@ extension DesktopHostController {
             comparisonSelection = id
             await refreshComparison()
         } catch { comparisonStatus("Ranking was not saved: \(error.localizedDescription)") }
-    }
-
-    private func exportComparisons(path: String, markdown: Bool) async {
-        do {
-            guard let comparisons else { throw DesktopHostError(message: "No comparisons are open.") }
-            let rounds = await comparisons.rounds()
-            let data = try markdown ? Data(ModelComparisonExport.markdown(rounds: rounds).utf8)
-                : ModelComparisonExport.json(rounds: rounds)
-            try data.write(to: URL(fileURLWithPath: path), options: .atomic)
-            comparisonStatus("Comparison export saved. It includes model identities and transcripts, never audio.")
-        } catch { comparisonStatus("Comparison export failed: \(error.localizedDescription)") }
     }
 
     package func refreshComparison() async {

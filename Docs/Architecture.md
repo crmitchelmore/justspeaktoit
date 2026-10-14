@@ -212,7 +212,10 @@ the initially persisted blind identities/order. `SpeakDesktopHost/DesktopHostCom
 owns admission, cancellation, capture, raw provider execution, judging and
 exports without using normal History, post-processing or insertion.
 `WindowsComparison.cpp` and `LinuxComparison.c` own their native editors and
-file/save pickers, connected by small host adapters. Separate comparison hooks
+file/save pickers, connected by small host adapters. `DesktopHostComparisonExports`
+uses canonical all-round/selected-round JSON/Markdown documents for saves and
+explicit native clipboard copies. Picker-scoped round identities survive later
+selection changes; missing rounds fail explicitly. Separate comparison hooks
 connect the store to the existing owned desktop iCloud service and its explicit
 native consent/retry controls. `DesktopComparisonSyncPass` wraps the canonical
 `ComparisonSyncCoordinator` and web transport with frozen-session requests

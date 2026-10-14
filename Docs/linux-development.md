@@ -136,6 +136,11 @@ language hint, saved rounds, raw blind results, ranking/reveal, scoreboard,
 sample playback and JSON/Markdown exports. File selection accepts one to 32
 local samples; save dialogs use the desktop's native file chooser. Picker errors
 appear in the comparison editor instead of being hidden behind its modal window.
+The export scope chooses **All rounds** or **Selected round** for both
+**Save JSON / Markdown** and explicit **Copy JSON / Markdown**. Save requests
+freeze the selected round when the chooser opens, independently of later
+selection changes; a deleted/missing round is an error, never an all-round fallback.
+Clipboard export does not insert text or mutate normal History.
 Closing a picker/editor invalidates that picker request, so a late selection
 cannot start a replacement editor's run.
 
@@ -171,7 +176,8 @@ and protected against remote deletion; remote metadata never supplies audio.
 Automatic interrupted/failed provider retry is not a Mac comparison feature and
 is not added here.
 The GTK window self-test checks wrapped labels, model and language payloads,
-ranking, playback, explicit sync consent/retry and busy/recording controls with synthetic fixtures only.
+ranking, playback, scoped export payloads, explicit sync consent/retry and
+busy/recording controls with synthetic fixtures only.
 The screenshot tour adds `comparison-blind-light.png` and
 `comparison-revealed-dark.png`, plus `-full.png` views including the below-fold
 ranking/export controls, without changing page ordinals. Native execution

@@ -9,12 +9,14 @@ typedef struct {
     GtkListBox *models;
     GtkDropDown *rounds;
     GtkDropDown *reference;
+    GtkDropDown *export_scope;
     GtkTextView *detail;
     GtkWidget *column;
     GtkButton *run, *stop, *cancel, *judge, *json, *markdown, *play, *stop_audio, *delete_round;
     GtkCheckButton *sync;
     GtkButton *sync_now;
     GtkButton *select_all, *select_none;
+    GtkButton *copy_json, *copy_markdown;
     GPtrArray *model_ids, *round_ids, *reference_ids;
     gchar *selected, *model_rows, *round_rows, *reference_rows;
     gboolean suppress;
@@ -251,13 +253,21 @@ static void delete_clicked(GtkButton *button, gpointer data) {
         picker_request(g_string_new(ui.selected), FALSE), free_deletion_request, 0);
     gtk_window_present(GTK_WINDOW(dialog));
 }
+static void save_export(PickerRequest *request, const char *path) {
+    if (ui.window != request->window) return;
+    if (request->payload != NULL) {
+        gchar *payload = g_strdup_printf("%s\n%s", request->payload->str, path);
+        comparison_emit(127, payload, request->markdown ? 1 : 0);
+        g_free(payload);
+    } else comparison_emit(107, path, request->markdown ? 1 : 0);
+}
 static void export_chosen(GObject *source, GAsyncResult *result, gpointer data) {
     PickerRequest *request = data;
     GError *error = NULL;
     GFile *file = gtk_file_dialog_save_finish(GTK_FILE_DIALOG(source), result, &error);
     if (file != NULL) {
         gchar *path = g_file_get_path(file);
-        if (path != NULL && ui.window == request->window) comparison_emit(107, path, request->markdown ? 1 : 0);
+        if (path != NULL && ui.window == request->window) save_export(request, path);
         else if (ui.window == request->window) comparison_error("Choose a local destination for the comparison export.");
         g_free(path); g_object_unref(file);
     }
@@ -266,12 +276,24 @@ static void export_chosen(GObject *source, GAsyncResult *result, gpointer data) 
 }
 static void export_clicked(GtkButton *button, gpointer data) {
     (void)data;
+    if (gtk_drop_down_get_selected(ui.export_scope) == 1 && (ui.selected == NULL || *ui.selected == '\0')) {
+        comparison_error("Select a saved comparison to export."); return;
+    }
     gboolean markdown = button == ui.markdown;
     GtkFileDialog *picker = gtk_file_dialog_new();
     gtk_file_dialog_set_title(picker, "Export transcripts and model identities (no audio)");
     gtk_file_dialog_set_initial_name(picker, markdown ? "Comparisons.md" : "Comparisons.json");
-    gtk_file_dialog_save(picker, ui.window, NULL, export_chosen, picker_request(NULL, markdown));
+    GString *scope = gtk_drop_down_get_selected(ui.export_scope) == 1 ? g_string_new(ui.selected) : NULL;
+    gtk_file_dialog_save(picker, ui.window, NULL, export_chosen, picker_request(scope, markdown));
     g_object_unref(picker);
+}
+static void copy_export(GtkButton *button, gpointer data) {
+    (void)data;
+    const char *scope = gtk_drop_down_get_selected(ui.export_scope) == 1 ? ui.selected : "";
+    if (scope == NULL || (gtk_drop_down_get_selected(ui.export_scope) == 1 && *scope == '\0')) {
+        comparison_error("Select a saved comparison to export."); return;
+    }
+    comparison_emit(126, scope != NULL ? scope : "", button == ui.copy_markdown ? 1 : 0);
 }
 static gboolean closing(GtkWindow *window, gpointer data) {
     (void)window; (void)data;
@@ -376,11 +398,22 @@ void jsti_comparison_open(GtkWindow *parent) {
     gtk_box_append(GTK_BOX(column), GTK_WIDGET(ui.ranks));
     ui.judge = GTK_BUTTON(button_new("Save ranking and reveal", G_CALLBACK(action_clicked)));
     gtk_box_append(GTK_BOX(column), GTK_WIDGET(ui.judge));
+    heading(GTK_BOX(column), "Export transcripts and model identities (no audio)");
+    const char *scopes[] = {"All rounds", "Selected round", NULL};
+    ui.export_scope = GTK_DROP_DOWN(gtk_drop_down_new_from_strings(scopes));
+    named(GTK_WIDGET(ui.export_scope), "Comparison export scope");
+    gtk_box_append(GTK_BOX(column), GTK_WIDGET(ui.export_scope));
     GtkWidget *exports = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    ui.json = GTK_BUTTON(button_new("Export JSON", G_CALLBACK(export_clicked)));
-    ui.markdown = GTK_BUTTON(button_new("Export Markdown", G_CALLBACK(export_clicked)));
+    ui.json = GTK_BUTTON(button_new("Save JSON…", G_CALLBACK(export_clicked)));
+    ui.markdown = GTK_BUTTON(button_new("Save Markdown…", G_CALLBACK(export_clicked)));
     gtk_box_append(GTK_BOX(exports), GTK_WIDGET(ui.json)); gtk_box_append(GTK_BOX(exports), GTK_WIDGET(ui.markdown));
     gtk_box_append(GTK_BOX(column), exports);
+    GtkWidget *copies = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    ui.copy_json = GTK_BUTTON(button_new("Copy JSON", G_CALLBACK(copy_export)));
+    ui.copy_markdown = GTK_BUTTON(button_new("Copy Markdown", G_CALLBACK(copy_export)));
+    gtk_box_append(GTK_BOX(copies), GTK_WIDGET(ui.copy_json));
+    gtk_box_append(GTK_BOX(copies), GTK_WIDGET(ui.copy_markdown));
+    gtk_box_append(GTK_BOX(column), copies);
     ui.delete_round = GTK_BUTTON(button_new("Delete / discard saved round…", G_CALLBACK(delete_clicked)));
     gtk_widget_add_css_class(GTK_WIDGET(ui.delete_round), "destructive-action");
     gtk_box_append(GTK_BOX(column), GTK_WIDGET(ui.delete_round));
@@ -472,6 +505,9 @@ static void present(gpointer value) {
     gtk_widget_set_sensitive(GTK_WIDGET(ui.play), !p->busy && ui.round_ids->len > 0);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.json), !p->busy && ui.round_ids->len > 0);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.markdown), !p->busy && ui.round_ids->len > 0);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.copy_json), !p->busy && ui.round_ids->len > 0);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.copy_markdown), !p->busy && ui.round_ids->len > 0);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.export_scope), !p->busy && ui.round_ids->len > 0);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.delete_round), !p->busy && p->selected[0] != '\0');
     gtk_check_button_set_active(ui.sync, p->sync_enabled);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.sync), p->sync_available);
@@ -556,20 +592,36 @@ int32_t jsti_comparison_self_test(GtkWindow *parent, char *error, size_t capacit
     valid = valid && test_event == 106 && g_strcmp0(test_payload, "synthetic-round\n2,1") == 0;
     g_signal_emit_by_name(ui.play, "clicked");
     valid = valid && test_event == 108 && g_strcmp0(test_payload, "synthetic-round") == 0;
+    g_signal_emit_by_name(ui.copy_json, "clicked");
+    valid = valid && test_event == 126 && test_index == 0 && g_strcmp0(test_payload, "") == 0;
+    gtk_drop_down_set_selected(ui.export_scope, 1);
+    g_signal_emit_by_name(ui.copy_markdown, "clicked");
+    valid = valid && test_event == 126 && test_index == 1 && g_strcmp0(test_payload, "synthetic-round") == 0;
+    PickerRequest *export_request = picker_request(g_string_new("picker-round"), FALSE);
+    save_export(export_request, "synthetic.json");
+    valid = valid && test_event == 127 && test_index == 0
+        && g_strcmp0(test_payload, "picker-round\nsynthetic.json") == 0;
+    free_request(export_request);
     PickerRequest *deletion = picker_request(g_string_new(ui.selected), FALSE);
     confirm_deletion(deletion, "cancel");
-    valid = valid && test_event == 108;
+    valid = valid && test_event == 127;
     confirm_deletion(deletion, "delete");
     valid = valid && test_event == 120 && g_strcmp0(test_payload, "synthetic-round") == 0;
     g_string_assign(deletion->payload, "a-stale-round");
     test_event = 0; confirm_deletion(deletion, "delete");
     valid = valid && test_event == 0;
     free_request(deletion);
+    PickerRequest *stale_export = picker_request(g_string_new(ui.selected), TRUE);
     p.busy = TRUE; p.recording = TRUE; p.judgeable = FALSE; present(&p);
     valid = valid && !gtk_widget_get_sensitive(GTK_WIDGET(ui.run))
-        && gtk_widget_get_sensitive(GTK_WIDGET(ui.stop)) && !gtk_widget_get_sensitive(GTK_WIDGET(ui.judge));
+        && gtk_widget_get_sensitive(GTK_WIDGET(ui.stop)) && !gtk_widget_get_sensitive(GTK_WIDGET(ui.judge))
+        && !gtk_widget_get_sensitive(GTK_WIDGET(ui.copy_json))
+        && !gtk_widget_get_sensitive(GTK_WIDGET(ui.export_scope));
     finish_fixture();
     valid = valid && test_event == 123;
+    save_export(stale_export, "late-picker.md");
+    valid = valid && test_event == 123;
+    free_request(stale_export);
     if (!valid) jsti_set_error(error, capacity, "Comparison selection, judging, playback or capture controls failed.");
     return valid ? 0 : -1;
 }

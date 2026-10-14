@@ -34,17 +34,23 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package struct Settings: Codable, Sendable {
         private var values = SettingsValues()
         private var preserved: [String: AnyCodable] = [:]
+        var archiveModelKeys: Set<String> = []
+        package var archiveUnknownKeys: Set<String> { Set(preserved.keys) }
         package init() {}
 
         package subscript<Value>(dynamicMember keyPath: WritableKeyPath<SettingsValues, Value>) -> Value {
             get { values[keyPath: keyPath] }
-            set { values[keyPath: keyPath] = newValue }
+            set {
+                values[keyPath: keyPath] = newValue
+                noteArchiveWrite(keyPath)
+            }
         }
 
         package init(from decoder: Decoder) throws {
             values = try SettingsValues(from: decoder)
             let container = try decoder.singleValueContainer()
             let all = try container.decode([String: AnyCodable].self)
+            captureArchivePresence(all)
             try adoptStoredStreamingPreference(all)
             var configuration = values.configuration?.values ?? [:]
             let warmKey = DesktopConnectionPreWarming.preferenceKey
@@ -377,7 +383,9 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
         try Self.importStoredVoiceSelection(into: &loadedSettings)
         self.localModels = try Platform.loadLocalModels(directory: directory)
         self.localCleanup = try Platform.makeLocalCleanup(directory: directory)
-        modelCatalog = try Self.prepareModelCatalog(directory: directory, settings: &loadedSettings)
+        modelCatalog = try loadedSettings.preservingArchiveModelPresence {
+            try Self.prepareModelCatalog(directory: directory, settings: &$0)
+        }
         if let processing = loadedSettings.postProcessing {
             loadedSettings.postProcessing = DesktopPostProcessing.migrated(processing)
         }

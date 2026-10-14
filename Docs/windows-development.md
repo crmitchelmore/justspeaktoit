@@ -644,8 +644,18 @@ The export API requires an explicit credential opt-in and refuses missing or
 damaged category snapshots rather than emitting a destructive empty category.
 It returns a new app-owned private staging ZIP, not a successfully published
 user destination. Cancellation, I/O, hashing and cleanup failures are surfaced
-and partial staging is removed. On POSIX the folder/file modes are 0700/0600;
-Windows staging inherits the selected parent directory's ACL. Hosts must use
+and partial staging is removed. On POSIX the folder/file modes are 0700/0600.
+`WindowsMigrationArchive` supplies the existing native current-user/SYSTEM ACL
+adapter for both read and export. The shared Windows API refuses staging without
+an explicit storage policy; inherited parent ACLs are not a privacy guarantee.
+`LinuxMigrationArchive` supplies the existing native private-directory and
+exclusive 0600-file adapters. Each operation owns a fresh staging directory,
+creates it exclusively with private permissions and owner from the outset
+(including an elevated Windows process), and creates protected empty files before
+writing archive or audio bytes. Directory/file protection failures abort the
+whole operation rather than becoming a successful partial import. Cancellation
+after directory protection removes it before any file creation. The policy
+never secures or changes the caller-selected parent folder. Hosts must use
 exclusive native publication before reporting a saved export and then clean up
 the owned staging folder. This codec is not yet wired to a native export picker,
 complete category collection, import preview/application, credential recovery or

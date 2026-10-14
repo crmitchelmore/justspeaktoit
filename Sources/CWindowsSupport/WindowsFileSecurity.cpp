@@ -329,7 +329,7 @@ bool createTestJunction(const std::wstring &path, const std::wstring &target, st
 }
 
 struct TestFiles {
-    std::wstring root, file, target, junction;
+    std::wstring root, file, target, junction, exclusiveDirectory;
     bool cleanUp(std::string *error = nullptr) {
         bool success = true;
         auto remove = [&](std::wstring &path, bool directory) {
@@ -346,6 +346,7 @@ struct TestFiles {
         remove(junction, true);
         remove(target, true);
         remove(file, false);
+        remove(exclusiveDirectory, true);
         remove(root, true);
         return success;
     }
@@ -388,6 +389,34 @@ int jsti_private_directory_prepare(const char *path, char *error, size_t capacit
     return prepareDirectory(path, error, capacity);
 }
 
+int jsti_private_directory_create(const char *path, char *error, size_t capacity) {
+    try {
+        std::string detail;
+        std::vector<std::wstring> components;
+        PrivateSecurity security;
+        std::vector<std::unique_ptr<jsti::Handle>> parents;
+        if (!parsePath(path, components, detail) || !security.initialise(detail) ||
+            !openParents(components, parents, detail)) return jsti::fail(detail, error, capacity);
+        jsti::Handle leaf;
+        const ACCESS_MASK access = READ_CONTROL | FILE_READ_ATTRIBUTES | DELETE;
+        if (!openRelative(parents.back()->value, components.back(), access,
+                          FILE_CREATE, true, &security.descriptor, leaf, detail)) {
+            return jsti::fail(detail, error, capacity);
+        }
+        if (!verifyPrivate(leaf.value, security, detail)) {
+            FILE_DISPOSITION_INFO disposition{TRUE};
+            if (!SetFileInformationByHandle(leaf.value, FileDispositionInfo, &disposition, sizeof(disposition))) {
+                detail += " " + jsti::systemError("Remove invalid private directory");
+            }
+            return jsti::fail(detail, error, capacity);
+        }
+        if (error && capacity) error[0] = 0;
+        return 0;
+    } catch (const std::exception &) {
+        return jsti::fail("Private directory creation could not allocate its security state.", error, capacity);
+    }
+}
+
 int jsti_private_file_create(const char *path, char *error, size_t capacity) {
     std::string detail;
     jsti::Handle file;
@@ -405,6 +434,9 @@ int jsti_private_storage_self_test(char *error, size_t capacity) {
             if (jsti_private_directory_prepare(path, localError, sizeof(localError)) != -1 || !localError[0] ||
                 jsti_private_file_create(path, localError, sizeof(localError)) != -1 || !localError[0]) {
                 return jsti::fail("Private storage accepted an unsafe test path.", error, capacity);
+            }
+            if (jsti_private_directory_create(path, localError, sizeof(localError)) != -1 || !localError[0]) {
+                return jsti::fail("Private directory creation accepted an unsafe test path.", error, capacity);
             }
         }
         wchar_t temporary[32768] = {};
@@ -433,8 +465,17 @@ int jsti_private_storage_self_test(char *error, size_t capacity) {
         paths.file = paths.root + L"\\upload.multipart";
         paths.target = paths.root + L"\\junction-target";
         paths.junction = paths.root + L"\\junction";
+        paths.exclusiveDirectory = paths.root + L"\\exclusive";
         const std::string root = jsti::utf8(paths.root);
         const std::string file = jsti::utf8(paths.file);
+        const std::string exclusive = jsti::utf8(paths.exclusiveDirectory);
+        if (jsti_private_directory_create(exclusive.c_str(), localError, sizeof(localError)) != 0) {
+            return jsti::fail(localError, error, capacity);
+        }
+        if (jsti_private_directory_create(exclusive.c_str(), localError, sizeof(localError)) != -1 ||
+            !localError[0]) {
+            return jsti::fail("Private directory creation accepted an existing directory.", error, capacity);
+        }
         if (jsti_private_directory_prepare(root.c_str(), localError, sizeof(localError)) != 0 ||
             jsti_private_file_create(file.c_str(), localError, sizeof(localError)) != 0) {
             return jsti::fail(localError, error, capacity);

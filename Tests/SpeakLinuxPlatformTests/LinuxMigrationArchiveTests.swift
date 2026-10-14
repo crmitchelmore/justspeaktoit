@@ -20,9 +20,9 @@ final class LinuxMigrationArchiveTests: XCTestCase {
         try await store.save(record)
         let source = try await store.migrationSnapshot(categories: [.history, .recordings],
                                                        digests: LinuxSHA256Hasher.provider)
-        let file = try DesktopMigrationArchive.export(source, digests: LinuxSHA256Hasher.provider)
+        let file = try LinuxMigrationArchive.export(source, digests: LinuxSHA256Hasher.provider)
         addTeardownBlock { try FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
-        let result = try DesktopMigrationArchive.read(file, digests: LinuxSHA256Hasher.provider)
+        let result = try LinuxMigrationArchive.read(file, digests: LinuxSHA256Hasher.provider)
         let staging = try XCTUnwrap(result.directory)
         addTeardownBlock { try FileManager.default.removeItem(at: staging) }
         XCTAssertEqual(result.records, source.records)
@@ -34,14 +34,14 @@ final class LinuxMigrationArchiveTests: XCTestCase {
     }
 
     func testArchiveExport_StreamsNativeGLibVerifiedAudioIntoReadableZIP64() throws {
-        let source = try DesktopMigrationArchive.read(
+        let source = try LinuxMigrationArchive.read(
             MigrationArchiveFixtures.url("long-unicode"), digests: LinuxSHA256Hasher.provider
         )
         let sourceDirectory = try XCTUnwrap(source.directory)
         addTeardownBlock { try FileManager.default.removeItem(at: sourceDirectory) }
-        let file = try DesktopMigrationArchive.export(source, digests: LinuxSHA256Hasher.provider)
+        let file = try LinuxMigrationArchive.export(source, digests: LinuxSHA256Hasher.provider)
         addTeardownBlock { try FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
-        let result = try DesktopMigrationArchive.read(file, digests: LinuxSHA256Hasher.provider)
+        let result = try LinuxMigrationArchive.read(file, digests: LinuxSHA256Hasher.provider)
         let resultDirectory = try XCTUnwrap(result.directory)
         addTeardownBlock { try FileManager.default.removeItem(at: resultDirectory) }
         XCTAssertEqual(result.records, source.records)
@@ -64,7 +64,7 @@ final class LinuxMigrationArchiveTests: XCTestCase {
     }
 
     func testArchiveAudio_UsesNativeGLibVerificationAndGeneratedStaging() throws {
-        let result = try DesktopMigrationArchive.read(
+        let result = try LinuxMigrationArchive.read(
             MigrationArchiveFixtures.url("zip64"), digests: LinuxSHA256Hasher.provider
         )
         let directory = try XCTUnwrap(result.directory)

@@ -6,9 +6,10 @@ import SpeakCore
 public enum DesktopMigrationArchive {
     public static func read(
         _ source: URL, digests: LocalModelDigestProvider,
-        stagingRoot: URL = FileManager.default.temporaryDirectory
+        stagingRoot: URL = FileManager.default.temporaryDirectory, storage: Storage? = nil
     ) throws -> DataMigrationSnapshot {
         try Task.checkCancellation()
+        let storage = try Storage.resolve(storage)
         let reader = try DesktopMigrationZipReader(source: source)
         guard let entry = reader.entry(named: "manifest.json") else {
             throw DataMigrationError.invalid("No migration manifest found.")
@@ -20,18 +21,12 @@ public enum DesktopMigrationArchive {
         let available = (attributes[.systemFreeSize] as? NSNumber)?.uint64Value
         try DataMigrationArchivePolicy.requireStagingCapacity(archiveBytes: total, availableBytes: available)
         let directory = stagingRoot.appendingPathComponent("migration-\(UUID().uuidString)", isDirectory: true)
-        #if os(Windows)
-        let permissions: [FileAttributeKey: Any] = [:]
-        #else
-        let permissions: [FileAttributeKey: Any] = [.posixPermissions: 0o700]
-        #endif
-        try FileManager.default.createDirectory(
-            at: directory, withIntermediateDirectories: false, attributes: permissions
-        )
+        try storage.createDirectory(directory)
         do {
+            try Task.checkCancellation()
             var snapshot = DataMigrationSnapshot(manifest: manifest, records: [:], directory: directory)
             for category in manifest.categories {
-                try read(category, reader: reader, digests: digests, snapshot: &snapshot, directory: directory)
+                try read(category, reader: reader, digests: digests, snapshot: &snapshot, storage: storage)
             }
             try Task.checkCancellation()
             return snapshot
@@ -53,7 +48,7 @@ public enum DesktopMigrationArchive {
 
     private static func read(
         _ category: DataMigrationCategory, reader: DesktopMigrationZipReader,
-        digests: LocalModelDigestProvider, snapshot: inout DataMigrationSnapshot, directory: URL
+        digests: LocalModelDigestProvider, snapshot: inout DataMigrationSnapshot, storage: Storage
     ) throws {
         let values: [AnyCodable]
         do {
@@ -76,7 +71,7 @@ public enum DesktopMigrationArchive {
                     throw DataMigrationError.invalid("Duplicate entry identifier.")
                 }
                 if category == .recordings {
-                    try extract(record, reader: reader, digests: digests, snapshot: &snapshot, directory: directory)
+                    try extract(record, reader: reader, digests: digests, snapshot: &snapshot, storage: storage)
                 }
                 snapshot.records[category, default: []].append(record)
             } catch let failure as DesktopMigrationStagingError {
@@ -92,14 +87,23 @@ public enum DesktopMigrationArchive {
 
     private static func extract(
         _ record: DataMigrationRecord, reader: DesktopMigrationZipReader,
-        digests: LocalModelDigestProvider, snapshot: inout DataMigrationSnapshot, directory: URL
+        digests: LocalModelDigestProvider, snapshot: inout DataMigrationSnapshot, storage: Storage
     ) throws {
         guard let path = record.file, DataMigrationArchivePolicy.safeAudioPath(path),
               snapshot.files[path] == nil, let entry = reader.entry(named: path) else {
             throw DataMigrationError.invalid("Recording missing, duplicated or unsupported.")
         }
+        guard let directory = snapshot.directory else {
+            throw DesktopMigrationStagingError(detail: "Private migration staging is unavailable.")
+        }
         let target = directory.appendingPathComponent(UUID().uuidString + "." + (path as NSString).pathExtension)
-        try Data().write(to: target, options: .withoutOverwriting)
+        do {
+            try storage.createFile(target)
+        } catch {
+            throw DesktopMigrationStagingError(
+                detail: "Could not create private migration audio: " + error.localizedDescription
+            )
+        }
         do {
             let file = try FileHandle(forWritingTo: target)
             do {

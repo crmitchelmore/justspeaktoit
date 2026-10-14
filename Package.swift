@@ -223,7 +223,11 @@ let portablePackage = Package(
             name: "SpeakTestSupport", path: "Tests/SpeakTestSupport",
             resources: [.copy("MigrationArchiveFixtures")]
         ),
-        .testTarget(name: "SpeakDesktopTests", dependencies: ["SpeakDesktop", "SpeakCore", "SpeakTestSupport"]),
+        .testTarget(
+            name: "SpeakDesktopTests",
+            dependencies: ["SpeakDesktop", "SpeakCore", "SpeakTestSupport"]
+                + (windowsTargetBuild ? [.target(name: "SpeakWindowsPlatform")] : [])
+        ),
         .testTarget(
             name: "SpeakDesktopHostTests",
             dependencies: [

@@ -360,6 +360,7 @@ int32_t jsti_window_set_playback(const char *record_id, int32_t state, const cha
 /* Creates a directory (and parents) readable only by the current user, or
  * tightens an existing one. Refuses symbolic links. */
 int32_t jsti_private_directory_prepare(const char *path, char *error, size_t error_capacity);
+int32_t jsti_private_directory_create(const char *path, char *error, size_t error_capacity);
 /* Creates a new empty file with mode 0600; refuses existing paths and links. */
 int32_t jsti_private_file_create(const char *path, char *error, size_t error_capacity);
 int32_t jsti_open_path(const char *path, char *error, size_t error_capacity);

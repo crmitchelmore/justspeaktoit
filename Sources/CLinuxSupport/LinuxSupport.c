@@ -126,6 +126,22 @@ static int32_t make_private_directory(const char *path, char *error, size_t capa
     return 0;
 }
 
+int32_t jsti_private_directory_create(const char *path, char *error, size_t capacity) {
+    if (path == NULL || path[0] != '/') {
+        jsti_set_error(error, capacity, "A private folder needs an absolute path.");
+        return -1;
+    }
+    if (mkdir(path, 0700) != 0) {
+        jsti_set_error(error, capacity, "Could not create the private folder: %s", g_strerror(errno));
+        return -1;
+    }
+    if (make_private_directory(path, error, capacity) == 0) return 0;
+    if (rmdir(path) != 0) {
+        jsti_set_error(error, capacity, "Private folder protection and cleanup failed: %s", g_strerror(errno));
+    }
+    return -1;
+}
+
 int32_t jsti_private_directory_prepare(const char *path, char *error, size_t capacity) {
     if (path == NULL || path[0] != '/') {
         jsti_set_error(error, capacity, "A private folder needs an absolute path.");
@@ -175,7 +191,18 @@ int32_t jsti_native_self_test(char *error, size_t capacity) {
     gchar *folder = g_build_filename(root, "Private", "Nested", NULL);
     gchar *file = g_build_filename(folder, "upload.bin", NULL);
     gchar *link = g_build_filename(root, "Link", NULL);
+    gchar *exclusive = g_build_filename(root, "Exclusive", NULL);
     struct stat info;
+    char ignored[256];
+    if (jsti_private_directory_create(exclusive, error, capacity) != 0) goto done;
+    if (stat(exclusive, &info) != 0 || (info.st_mode & 0777) != 0700 || info.st_uid != geteuid()) {
+        jsti_set_error(error, capacity, "Self-test: exclusive private folder has invalid permissions or owner.");
+        goto done;
+    }
+    if (jsti_private_directory_create(exclusive, ignored, sizeof ignored) == 0) {
+        jsti_set_error(error, capacity, "Self-test: exclusive creation accepted an existing folder.");
+        goto done;
+    }
     if (jsti_private_directory_prepare(folder, error, capacity) != 0) goto done;
     if (stat(folder, &info) != 0 || (info.st_mode & 0777) != 0700) {
         jsti_set_error(error, capacity, "Self-test: private folder mode is not 0700.");
@@ -186,7 +213,6 @@ int32_t jsti_native_self_test(char *error, size_t capacity) {
         jsti_set_error(error, capacity, "Self-test: private file mode is not 0600.");
         goto done;
     }
-    char ignored[256];
     if (jsti_private_file_create(file, ignored, sizeof ignored) == 0) {
         jsti_set_error(error, capacity, "Self-test: an existing private file was reopened.");
         goto done;
@@ -197,6 +223,7 @@ int32_t jsti_native_self_test(char *error, size_t capacity) {
     }
     result = 0;
 done:
+    rmdir(exclusive);
     unlink(link);
     unlink(file);
     rmdir(folder);
@@ -205,6 +232,7 @@ done:
     g_free(parent);
     rmdir(root);
     g_free(link);
+    g_free(exclusive);
     g_free(file);
     g_free(folder);
     g_free(root);

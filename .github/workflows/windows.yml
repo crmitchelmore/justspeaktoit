@@ -352,6 +352,27 @@ jobs:
       - name: Verify portable source boundary
         run: python3 scripts/verify-portable-core-boundary.py
       - name: Test portable graph with native Linux Swift
+        shell: bash
         run: |
-          swift --version
-          swift test --configuration release --jobs 4
+          set -euo pipefail
+          # The host-mounted checkout can have foreign/writable ancestry.
+          # Keep ownership guards intact and test an identical private copy.
+          test_user=nobody
+          test "$(id -u "$test_user")" -ne 0
+          command -v runuser
+          umask 077
+          work="$(mktemp -d /jsti-portable.XXXXXX)"
+          git ls-files -z | tar --null -T - -cf - | tar --no-same-owner --no-same-permissions -xf - -C "$work"
+          chown -R "$test_user:$(id -gn "$test_user")" "$work"
+          runuser -u "$test_user" -- env HOME="$work/.home" TMPDIR="$work/.runtime" bash -c '
+            set -euo pipefail
+            cd "$1"
+            mkdir -m 700 "$HOME" "$TMPDIR"
+            test "$(id -u)" -ne 0
+            grep -qx "CapEff:[[:space:]]*0000000000000000" "/proc/$$/status"
+            id
+            grep "^CapEff:" "/proc/$$/status"
+            stat -c "%n owner=%u mode=%a" / "$1" "$HOME" "$TMPDIR"
+            swift --version
+            swift test --configuration release --jobs 4
+          ' _ "$work"

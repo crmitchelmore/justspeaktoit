@@ -1652,6 +1652,24 @@ int jsti_recording_registry_self_test(const char *history, char *error, size_t c
 }
 
 namespace {
+// The user-mode Windows SDK omits this classic NT rename payload/class.
+// Keep its ABI private: publication still targets the held directory handle.
+struct RegistryRenameInformationV2 {
+    BOOLEAN ReplaceIfExists;
+    HANDLE RootDirectory;
+    ULONG FileNameLength;
+    WCHAR FileName[1];
+};
+constexpr auto registryRenameInformationClassV2 = static_cast<FILE_INFORMATION_CLASS>(10);
+static_assert(sizeof(BOOLEAN) == 1 && sizeof(ULONG) == 4 && sizeof(WCHAR) == 2);
+static_assert(sizeof(HANDLE) == 4 || sizeof(HANDLE) == 8);
+static_assert(alignof(RegistryRenameInformationV2) == alignof(HANDLE));
+static_assert(offsetof(RegistryRenameInformationV2, ReplaceIfExists) == 0);
+static_assert(offsetof(RegistryRenameInformationV2, RootDirectory) == sizeof(HANDLE));
+static_assert(offsetof(RegistryRenameInformationV2, FileNameLength) == 2 * sizeof(HANDLE));
+static_assert(offsetof(RegistryRenameInformationV2, FileName) == 2 * sizeof(HANDLE) + sizeof(ULONG));
+static_assert(sizeof(RegistryRenameInformationV2) == (sizeof(HANDLE) == 8 ? 24 : 16));
+
 bool registryOutcome(JSTIRegistryOutcomeV2 *outcome) {
     static_assert(offsetof(JSTIRegistryOutcomeV2, abi_version) == 0);
     static_assert(offsetof(JSTIRegistryOutcomeV2, struct_size) == sizeof(uint32_t));
@@ -1672,8 +1690,8 @@ void registryCause(JSTIRegistryOutcomeV2 &outcome, uint32_t domain, uint32_t cod
     // resource releases. No loop appends per byte/name or retries a release.
     if (outcome.cause_count == JSTI_REGISTRY_MAX_CAUSES_V2) std::terminate();
     const uint32_t index = outcome.cause_count++;
-    outcome.causes[index] = {cleanup ? JSTI_REGISTRY_CAUSE_CLEANUP_V2 :
-        (index ? JSTI_REGISTRY_CAUSE_SECONDARY_V2 : JSTI_REGISTRY_CAUSE_PRIMARY_V2),
+    outcome.causes[index] = {static_cast<uint32_t>(cleanup ? JSTI_REGISTRY_CAUSE_CLEANUP_V2 :
+        (index ? JSTI_REGISTRY_CAUSE_SECONDARY_V2 : JSTI_REGISTRY_CAUSE_PRIMARY_V2)),
         domain, code, stage, resource};
     if (!index) outcome.primary_index = 0;
     if (cleanup) ++outcome.cleanup_count;
@@ -2181,14 +2199,14 @@ int jsti_recording_registry_append_v2(JSTIRecordingRegistryV2 *registry, const u
             else if (!StringFromGUID2(guid, identifier, 40)) registryContract(*outcome,
                 JSTI_REGISTRY_CONTRACT_INVALID_V2, JSTI_REGISTRY_STAGE_OPEN_V2);
             const std::wstring pending = L".pending-" + std::wstring(identifier + 1, 36);
-            alignas(FILE_RENAME_INFORMATION) std::array<BYTE, 512> renameBytes{};
-            auto *rename = reinterpret_cast<FILE_RENAME_INFORMATION *>(renameBytes.data());
+            alignas(RegistryRenameInformationV2) std::array<BYTE, 512> renameBytes{};
+            auto *rename = reinterpret_cast<RegistryRenameInformationV2 *>(renameBytes.data());
             rename->ReplaceIfExists = FALSE;
             rename->RootDirectory = registry->resources[registry->directory].value;
             rename->FileNameLength = static_cast<ULONG>(leaf.size() * sizeof(wchar_t));
             std::memcpy(rename->FileName, leaf.data(), rename->FileNameLength);
             const ULONG renameSize = static_cast<ULONG>(std::max(sizeof(*rename),
-                offsetof(FILE_RENAME_INFORMATION, FileName) + rename->FileNameLength));
+                offsetof(RegistryRenameInformationV2, FileName) + rename->FileNameLength));
             if (!outcome->cause_count && !registryCancelled(cancelled, context,
                 JSTI_REGISTRY_CHECK_ADMISSION_V2, *outcome) && registry->openRelativeV2(
                 registry->directory, pending,
@@ -2238,7 +2256,7 @@ int jsti_recording_registry_append_v2(JSTIRecordingRegistryV2 *registry, const u
                     JSTI_REGISTRY_CHECK_PRECOMMIT_V2, *outcome)) {
                     IO_STATUS_BLOCK status{};
                     const NTSTATUS code = NtSetInformationFile(registry->resources[file].value, &status,
-                        rename, renameSize, FileRenameInformation);
+                        rename, renameSize, registryRenameInformationClassV2);
                     if (code < 0) registryCause(*outcome, JSTI_REGISTRY_DOMAIN_NTSTATUS_V2,
                         static_cast<uint32_t>(code), JSTI_REGISTRY_STAGE_PUBLISH_V2);
                     else outcome->effect = JSTI_REGISTRY_EFFECT_PUBLISHED_V2;

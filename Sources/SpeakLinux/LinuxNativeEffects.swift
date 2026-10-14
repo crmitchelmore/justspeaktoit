@@ -45,6 +45,8 @@ struct LinuxNativeEffects: DesktopHostEffects {
 
     func perform(_ job: LinuxOutputJob, text: String) -> DesktopTextOutputResult { job.performResult(text) }
 
+    func readClipboardText() async throws -> String? { try await LinuxClipboardRead.readText() }
+
     func captureInsertionTarget() async throws -> LinuxInsertionTarget? {
         guard LinuxHostPlatform.session.canUseX11Injection else {
             throw DesktopHostError(

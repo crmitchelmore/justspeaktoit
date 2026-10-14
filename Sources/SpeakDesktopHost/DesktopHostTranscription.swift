@@ -6,7 +6,8 @@ extension DesktopHostController {
     /// Output is the recording's own authority; imports and retries pass nil.
     package func transcribe(
         _ original: DesktopRecordingStore.Record, duration: TimeInterval, output: DesktopHostRecordingOutput<Platform>?,
-        profile: DesktopProfileSession? = nil, azureEndpoint: String? = nil
+        profile: DesktopProfileSession? = nil, azureEndpoint: String? = nil,
+        recordingOptions: DesktopHostRecordingConfiguration? = nil
     ) async {
         var record = original
         cancellationRequested = false
@@ -27,7 +28,7 @@ extension DesktopHostController {
             hud(record.id, .transcribing())
             let request = DesktopHostTranscriptionRequest(
                 audio: audio, model: record.modelIdentifier, key: key, duration: duration, language: session.language,
-                azureEndpoint: azureEndpoint ?? azureResourceEndpoint(),
+                azureEndpoint: recordingOptions?.azureEndpoint ?? azureEndpoint ?? azureResourceEndpoint(),
                 keywords: try await vocabularyKeywords()
             )
             let effects = self.effects
@@ -42,8 +43,9 @@ extension DesktopHostController {
             let result = try await task.value
             record = recordWithResult(result, replacing: record, skippedPolishReason: session.skippedPolishReason)
             try await saveRecord(record)
-            record = try await applyVocabulary(record)
-            record = await postProcess(record, options: session.postProcessing)
+            record = try await transformFinalTranscript(
+                record, options: recordingOptions, postProcessing: session.postProcessing
+            )
             if cancellationRequested { record.failure = "Cancelled. Completed transcription and audio retained." }
             try await saveRecord(record)
             // A response already received is still durably saved during shutdown,
@@ -141,7 +143,7 @@ extension DesktopHostController {
         cancellationRequested = true
         recordingTail?.task.cancel()
         transcriptionTask?.cancel()
-        postProcessingTask?.cancel()
+        finalTranscriptTasks.cancel()
         liveFinalisation?.cancel()
         update("Cancelling… Saved audio and completed results will be retained.", state: 2)
     }

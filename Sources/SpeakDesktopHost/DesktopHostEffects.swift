@@ -63,6 +63,8 @@ package protocol DesktopHostEffects<Platform>: Sendable {
     func perform(_ job: Platform.OutputJob, text: String) -> DesktopTextOutputResult
     /// Captures the automatic utterance's destination away from PCM and the UI thread.
     func captureInsertionTarget() async throws -> Platform.InsertionTarget?
+    /// Bounded and cancellable; nil means genuinely absent plain text.
+    func readClipboardText() async throws -> String?
     func captureUtteranceContext(
         requiresInsertionTarget: Bool
     ) async throws -> DesktopHostUtteranceContext<Platform.InsertionTarget>
@@ -71,6 +73,10 @@ package protocol DesktopHostEffects<Platform>: Sendable {
 }
 
 package extension DesktopHostEffects {
+    func readClipboardText() async throws -> String? {
+        throw DesktopClipboardReadError.unsupported("This host does not support clipboard voice command reads.")
+    }
+
     func captureUtteranceContext(
         requiresInsertionTarget: Bool
     ) async throws -> DesktopHostUtteranceContext<Platform.InsertionTarget> {

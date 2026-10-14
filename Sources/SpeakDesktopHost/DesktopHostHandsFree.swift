@@ -250,7 +250,7 @@ extension DesktopHostController {
         cancellationRequested = true
         cancelRecordingTail()
         transcriptionTask?.cancel()
-        postProcessingTask?.cancel()
+        finalTranscriptTasks.cancel()
         liveFinalisation?.cancel()
         cancelOutput()
         var failure: String?

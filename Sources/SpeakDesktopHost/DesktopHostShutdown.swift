@@ -139,7 +139,7 @@ extension DesktopHostController {
         migrationInspectionWorker?.cancel()
         migrationInspectionTask?.cancel()
         audioCleanupConfirmation = nil
-        postProcessingTask?.cancel()
+        finalTranscriptTasks.cancel()
         liveFinalisation?.cancel()
         var report = DesktopHostShutdownReport()
         recordingFeedbackPreview?.cancel()

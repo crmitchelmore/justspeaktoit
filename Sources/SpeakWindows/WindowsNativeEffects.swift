@@ -42,6 +42,8 @@ struct WindowsNativeEffects: WindowsControllerEffects {
 
     func perform(_ job: WindowsOutputJob, text: String) -> DesktopTextOutputResult { job.performResult(text) }
 
+    func readClipboardText() async throws -> String? { try await WindowsClipboardRead.readText() }
+
     func captureInsertionTarget() async throws -> WindowsInsertionTarget? {
         try await Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()

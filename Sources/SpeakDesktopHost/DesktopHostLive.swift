@@ -65,8 +65,9 @@ extension DesktopHostController {
         do {
             try await saveRecord(record)
             if record.failure == nil {
-                record = try await applyVocabulary(record)
-                record = await postProcess(record, options: options)
+                record = try await transformFinalTranscript(
+                    record, options: stopped.options, postProcessing: options
+                )
             }
             if cancellationRequested { record.failure = "Cancelled. Completed transcription and audio retained." }
             try await saveRecord(record)

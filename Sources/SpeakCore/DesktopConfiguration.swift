@@ -2,6 +2,7 @@ import Foundation
 
 /// Scalar dictation defaults shared by Apple and portable preference stores.
 public enum SpeechDefaults {
+    public static let voiceCommandsEnabled = true
     public static let temperature = 0.2
     public static let outputLanguage = "English"
     public static let liveStopGracePeriod = 0.0
@@ -58,6 +59,13 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
               group: "Transcription", kind: .text, defaultValue: AnyCodable(.string(""))),
         .init(key: ApplicationPreferenceKey.assemblyAIKeyterms.rawValue,
               title: "AssemblyAI keyterms (same shared keyword list)",
+              group: "Transcription", kind: .text, defaultValue: AnyCodable(.string(""))),
+        .init(key: ApplicationPreferenceKey.voiceCommandsEnabled.rawValue,
+              title: "Clipboard voice commands (new recordings; Linux requires X11)",
+              group: "Transcription", kind: .boolean,
+              defaultValue: AnyCodable(.bool(SpeechDefaults.voiceCommandsEnabled))),
+        .init(key: ApplicationPreferenceKey.clipboardInsertionTriggers.rawValue,
+              title: "Additional clipboard command phrases (comma-separated)",
               group: "Transcription", kind: .text, defaultValue: AnyCodable(.string(""))),
         .init(key: ApplicationPreferenceKey.liveStopGracePeriod.rawValue,
               title: "Live stop grace (seconds; AssemblyAI and Cartesia)",

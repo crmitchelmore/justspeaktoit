@@ -132,7 +132,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package var selectedHistoryID: UUID?
     package var transcriptVariant: DesktopTranscriptVariant = .processed
     var transcriptionTask: Task<TranscriptionResult, Error>?
-    var postProcessingTask: Task<DesktopPostProcessing.Outcome, Error>?
+    var finalTranscriptTasks = DesktopHostFinalTranscriptTasks()
     package var microphoneWarning: String?
     var cancellationRequested = false
     var historyDeletionInProgress = false

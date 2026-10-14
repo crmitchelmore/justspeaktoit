@@ -37,10 +37,11 @@ The shared desktop live session uses macOS's canonical authoritative transcript
 projection for replacement, empty retraction, confirmed/interim composition and
 healthy final folding. Cancelled or failed sessions keep recovery text and
 ignore late projections. Providers without projected text retain legacy folding.
-This does not implement clipboard voice commands or live LLM polishing.
+This does not implement live LLM polishing.
 
-Independent final-only clipboard-command primitives now share the canonical
-recognizer and immutable policy described in
+New batch and live microphone recordings apply final-only clipboard voice
+commands before vocabulary corrections and post-processing, using the canonical
+recognizer and immutable recording policy described in
 [Windows development](windows-development.md). `LinuxClipboardRead.readText()`
 uses an owned GTK source, cancellable GDK/GIO stream reads, a 1 MiB UTF-8 limit
 and a two-second caller deadline. Cancelled queued sources are removed; late
@@ -48,9 +49,15 @@ callbacks cannot publish text, and only one request is admitted while native
 cleanup remains pending. Missing GTK readiness and **Wayland background reads
 are explicit unsupported errors**, not an absent clipboard or an acknowledged
 paste. Empty remote format metadata is reported as an indeterminate read failure,
-not proof that the clipboard is empty. Synthetic stream/deadline fixtures do not
-initialize a display or access the user's clipboard. Host finalization/configuration wiring is still pending;
-the existing output-write/restore and portal paths are unchanged.
+not proof that the clipboard is empty. The existing `voiceCommandsEnabled` and
+`clipboardInsertionTriggers` preferences are exposed through Configuration.
+Ordinary text, disabled commands, live interim/retraction updates, imports and
+History retries never read the clipboard. A recognized command on Wayland fails
+explicitly and retains raw text/audio without automatic delivery; no portal
+acknowledgement is inferred. Cancellation, shutdown and hands-free disarm fence
+late reads. Synthetic stream/deadline fixtures do not initialize a display or
+access the user's clipboard; real X11 clipboard owners and compositor acceptance
+remain unverified. The existing output-write/restore and portal paths are unchanged.
 
 ## Build and run
 

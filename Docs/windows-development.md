@@ -192,10 +192,17 @@ snapshots retract the preview, and confirmed plus interim text is composed once.
 Healthy finalisation adopts the provider's final projection; failure and
 cancellation preserve recovery text and reject late updates. Clients without
 an authoritative text projection retain their existing segment-folding behavior.
-This is transcript-state parity, not clipboard voice commands or live LLM
-polishing; those host/settings behaviors remain separate work.
+This is transcript-state parity, not live LLM polishing.
 
-The next clipboard-command slice supplies independent, final-only primitives:
+Clipboard voice commands run only on healthy final transcripts of new microphone
+recordings, both batch and live, before vocabulary corrections and post-processing.
+The Configuration controls use the existing `voiceCommandsEnabled` and
+`clipboardInsertionTriggers` preference identities; each recording freezes its
+policy before capture starts. Clipboard contents are read at finalization, not
+at startup. Imports and History retries do not reinterpret old commands against
+the current clipboard. Interim text, including authoritative retractions, never
+reads or expands clipboard commands.
+
 `ClipboardVoiceCommandPolicy` freezes enabled/custom-trigger policy, the canonical
 `VoiceCommandProcessor` recognizes commands without reading the clipboard, and
 `DesktopClipboardVoiceCommands` reads current text once only for a recognized
@@ -205,9 +212,13 @@ cleanup-busy admission and a two-second caller deadline explicitly. Win32 delaye
 rendering can outlive that deadline; one globally admitted native reader retains
 its borrowed clipboard handle until the OS returns. Cancellation neither kills
 that thread nor closes its clipboard from another thread. Synthetic native
-fixtures never read the user's clipboard. These primitives are **not yet wired
-into the host finalization/configuration pipeline** and do not change text-output
-ownership, restoration, hands-free rearming or live previews.
+fixtures never read the user's clipboard. Command failures retain raw provider
+text and audio in History, skip polishing and automatic delivery, and report the
+error. Cancel, shutdown and hands-free disarm cancel the owned read and fence late
+results. Empty expansions remain empty. The existing typed output, target
+ownership, restoration and hands-free delivery-acknowledgement rules are unchanged.
+Portable controller tests and synthetic native fixtures do not establish physical
+clipboard-owner, browser, Office or delayed-rendering acceptance.
 
 Grok Voice also has an injected portable client, preserving manual turns,
 input-only captions and the absence of `response.create`, but remains hidden

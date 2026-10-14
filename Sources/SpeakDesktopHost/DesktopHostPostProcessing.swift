@@ -46,12 +46,12 @@ extension DesktopHostController {
     ) async -> DesktopRecordingStore.Record {
         var record = original
         guard let result = record.result else { return record }
-        if TranscriptPostProcessingPolicy.isEffectivelyEmptyTranscript(result.text) {
+        let input = record.correctedText ?? result.text
+        if TranscriptPostProcessingPolicy.isEffectivelyEmptyTranscript(input) {
             record.processedText = ""
             return record
         }
         guard !closed, !cancellationRequested, options.mode == .remote else { return record }
-        let input = record.correctedText ?? result.text
         let directives = record.lexiconDirectives ?? []
         let tags = record.lexiconContextTags ?? []
         do {
@@ -67,8 +67,8 @@ extension DesktopHostController {
                     lexiconDirectives: directives, lexiconContextTags: tags
                 )
             }
-            postProcessingTask = task
-            defer { postProcessingTask = nil }
+            finalTranscriptTasks.postProcessing = task
+            defer { finalTranscriptTasks.postProcessing = nil }
             let outcome = try await task.value
             record.processedText = outcome.processedText
             record.postProcessingModelIdentifier = outcome.modelIdentifier

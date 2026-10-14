@@ -4,6 +4,36 @@ import SpeakCore
 import SpeakDesktop
 
 final class DesktopConfigurationTests: XCTestCase {
+    func testClipboardCommandPolicyUsesExistingPreferenceIdentitiesAndRoundTrips() throws {
+        let enabled = ApplicationPreferenceKey.voiceCommandsEnabled.rawValue
+        let triggers = ApplicationPreferenceKey.clipboardInsertionTriggers.rawValue
+        XCTAssertTrue(DesktopConfiguration.supportedKeys.isSuperset(of: [enabled, triggers]))
+        let defaults = try DesktopConfiguration().clipboardVoiceCommandPolicy
+        XCTAssertEqual(defaults.isEnabled, SpeechDefaults.voiceCommandsEnabled)
+        XCTAssertEqual(defaults.customTriggers, "")
+        let configured = try DesktopConfiguration(values: [
+            enabled: AnyCodable(.bool(false)), triggers: AnyCodable(.string("my snippet, insert context"))
+        ])
+        let restored = try JSONDecoder().decode(
+            DesktopConfiguration.self, from: JSONEncoder().encode(configured.applying(configured.entries))
+        )
+        XCTAssertEqual(restored.clipboardVoiceCommandPolicy, ClipboardVoiceCommandPolicy(
+            isEnabled: false, customTriggers: "my snippet, insert context"
+        ))
+        XCTAssertEqual(
+            try restored.applying(restored.entries).clipboardVoiceCommandPolicy, configured.clipboardVoiceCommandPolicy
+        )
+    }
+
+    func testClipboardCommandPolicyRejectsWrongTypes() {
+        XCTAssertThrowsError(try DesktopConfiguration(values: [
+            ApplicationPreferenceKey.voiceCommandsEnabled.rawValue: AnyCodable(.string("true"))
+        ]))
+        XCTAssertThrowsError(try DesktopConfiguration(values: [
+            ApplicationPreferenceKey.clipboardInsertionTriggers.rawValue: AnyCodable(.bool(true))
+        ]))
+    }
+
     func testChoiceMetadataIsUnambiguousBoundedAndIncludesItsDefault() {
         for field in DesktopConfiguration.fields {
             guard case .choice(let choices) = field.kind else { continue }

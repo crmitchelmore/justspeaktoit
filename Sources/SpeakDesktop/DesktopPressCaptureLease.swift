@@ -26,15 +26,22 @@ package actor DesktopPressCaptureLease {
         worker: any DesktopPressCaptureWorker,
         onFailure: @escaping @Sendable (DesktopPressCaptureError) -> Void
     ) {
-        self.init(worker: worker, onFailureEvent: { onFailure($0.error) })
+        self.init(worker: worker, eventSink: { onFailure($0.error) })
     }
 
-    package init(
+    package static func observingFailures(
         worker: any DesktopPressCaptureWorker,
         onFailureEvent: @escaping @Sendable (DesktopPressCaptureFailureEvent) -> Void
+    ) -> DesktopPressCaptureLease {
+        DesktopPressCaptureLease(worker: worker, eventSink: onFailureEvent)
+    }
+
+    private init(
+        worker: any DesktopPressCaptureWorker,
+        eventSink: @escaping @Sendable (DesktopPressCaptureFailureEvent) -> Void
     ) {
         self.worker = worker
-        self.onFailureEvent = onFailureEvent
+        self.onFailureEvent = eventSink
     }
 
     package var phase: DesktopPressCapturePhase { run?.phase ?? .idle }
@@ -108,10 +115,22 @@ package actor DesktopPressCaptureLease {
         _ token: DesktopPressCaptureToken, identity: DesktopPressCaptureIdentity,
         admission: DesktopPressCaptureAdmission, sink: @escaping @Sendable (Data) -> Void
     ) throws {
+        try adoptDelivery(token, identity: identity, admission: admission, onPCMDelivery: { sink($0.data) })
+    }
+
+    package func adoptDelivery(
+        _ token: DesktopPressCaptureToken, identity: DesktopPressCaptureIdentity,
+        admission: DesktopPressCaptureAdmission,
+        onPCMDelivery: @escaping @Sendable (DesktopPressCapturePCMDelivery) -> Void
+    ) throws {
         try validate(token, identity: identity, admission: admission)
         guard var current = run, current.phase == .reserved else { throw DesktopPressCaptureError.invalidPhase }
         guard current.ready else { throw DesktopPressCaptureError.notReady }
-        do { try current.relay.attach(sink) } catch {
+        do {
+            try current.relay.attachDelivery { pcm in
+                onPCMDelivery(DesktopPressCapturePCMDelivery(token: token, identity: identity, pcm: pcm))
+            }
+        } catch {
             cancel(token)
             throw error
         }

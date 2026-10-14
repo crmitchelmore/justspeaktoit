@@ -90,21 +90,57 @@ actor PressCaptureTestWorker: DesktopPressCaptureWorker {
     func fail(id: UUID, message: String) { failureCallbacks[id]?(message) }
 }
 
+actor PressCaptureTestProducer {
+    private let data: Data
+    private let receive: @Sendable (Data) -> Void
+    private var gate: CheckedContinuation<Void, Never>?
+    private var pending: CheckedContinuation<Void, Never>?
+
+    init(data: Data, receive: @escaping @Sendable (Data) -> Void) {
+        self.data = data
+        self.receive = receive
+    }
+
+    func send() async {
+        await withCheckedContinuation {
+            gate = $0
+            pending?.resume()
+            pending = nil
+        }
+        receive(data)
+    }
+
+    func waitUntilPending() async {
+        if gate == nil { await withCheckedContinuation { pending = $0 } }
+    }
+
+    func release() {
+        gate?.resume()
+        gate = nil
+    }
+}
+
 final class PressCaptureTestLog: @unchecked Sendable {
     private let lock = NSLock()
     private var storedPCM = Data()
     private var storedFailures: [DesktopPressCaptureError] = []
     private var storedEvents: [DesktopPressCaptureFailureEvent] = []
+    private var storedDeliveries: [DesktopPressCapturePCMDelivery] = []
+    private var storedBatches: [Data] = []
     private var storedAccepted: [Int] = []
     private var storedFinished = false
     var pcm: Data { lock.withLock { storedPCM } }
     var failures: [DesktopPressCaptureError] { lock.withLock { storedFailures } }
     var events: [DesktopPressCaptureFailureEvent] { lock.withLock { storedEvents } }
+    var deliveries: [DesktopPressCapturePCMDelivery] { lock.withLock { storedDeliveries } }
+    var batches: [Data] { lock.withLock { storedBatches } }
     var accepted: [Int] { lock.withLock { storedAccepted } }
     var finished: Bool { lock.withLock { storedFinished } }
     func append(_ data: Data) { lock.withLock { storedPCM.append(data) } }
     func fail(_ error: DesktopPressCaptureError) { lock.withLock { storedFailures.append(error) } }
     func observe(_ event: DesktopPressCaptureFailureEvent) { lock.withLock { storedEvents.append(event) } }
+    func observe(_ delivery: DesktopPressCapturePCMDelivery) { lock.withLock { storedDeliveries.append(delivery) } }
+    func batch(_ data: Data) { lock.withLock { storedBatches.append(data) } }
     func accept(_ value: Int) { lock.withLock { storedAccepted.append(value) } }
     func finish() { lock.withLock { storedFinished = true } }
 }

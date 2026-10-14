@@ -54,7 +54,7 @@ final class DesktopPressCaptureFailureEventTests: XCTestCase {
     func testOpenAndCleanupFailures_KeepAdmittedIdentityAndExplicitRetry() async throws {
         let worker = PressCaptureTestWorker(failOpen: true, failedCloses: 1)
         let log = PressCaptureTestLog()
-        let lease = DesktopPressCaptureLease(worker: worker, onFailureEvent: log.observe)
+        let lease = DesktopPressCaptureLease.observingFailures(worker: worker, onFailureEvent: log.observe)
         let identity = pressCaptureIdentity(device: "opening-device", profile: "opening-profile")
         let token = try await lease.begin(
             identity: identity, admission: pressCaptureAdmission(), limits: pressCaptureLimits()
@@ -81,7 +81,7 @@ final class DesktopPressCaptureFailureEventTests: XCTestCase {
         ] {
             let worker = PressCaptureTestWorker(failedCloses: 1)
             let log = PressCaptureTestLog()
-            let lease = DesktopPressCaptureLease(worker: worker, onFailureEvent: log.observe)
+            let lease = DesktopPressCaptureLease.observingFailures(worker: worker, onFailureEvent: log.observe)
             let identity = pressCaptureIdentity(device: "device-\(expected)", route: "route-\(expected)")
             let token = try await lease.begin(
                 identity: identity, admission: pressCaptureAdmission(), limits: pressCaptureLimits()
@@ -125,7 +125,7 @@ final class DesktopPressCaptureFailureEventTests: XCTestCase {
         let worker = PressCaptureTestWorker()
         let receiver = DeferredPressFailureReceiver()
         let log = PressCaptureTestLog()
-        let lease = DesktopPressCaptureLease(worker: worker, onFailureEvent: { event in
+        let lease = DesktopPressCaptureLease.observingFailures(worker: worker, onFailureEvent: { event in
             log.observe(event)
             Task { await receiver.receive(event) }
         })
@@ -165,6 +165,32 @@ final class DesktopPressCaptureFailureEventTests: XCTestCase {
         XCTAssertEqual(closes, [first.id, second.id])
         let maximumActive = await worker.maximumActive
         XCTAssertEqual(maximumActive, 1)
+    }
+
+    func testLegacyIgnoredArgumentInitializer_ReportsSeparateCleanupAndRetainsExclusion() async throws {
+        let worker = PressCaptureTestWorker(failOpen: true, failedCloses: 1)
+        let log = PressCaptureTestLog()
+        let lease = DesktopPressCaptureLease(worker: worker) { _ in log.accept(1) }
+        let identity = pressCaptureIdentity()
+        let token = try await lease.begin(
+            identity: identity, admission: pressCaptureAdmission(), limits: pressCaptureLimits()
+        )
+        await assertPressError(.cleanupFailed("close")) { try await lease.settle() }
+        XCTAssertEqual(log.accepted, [1, 1])
+        let failure = await lease.failure
+        XCTAssertEqual(failure, .cleanupFailed("close"))
+        await assertPressPhase(lease, .closing)
+        await assertPressError(.occupied) {
+            _ = try await lease.begin(
+                identity: identity, admission: pressCaptureAdmission(), limits: pressCaptureLimits()
+            )
+        }
+        try await lease.retryClose(token)
+        try await lease.settle()
+        await assertPressPhase(lease, .idle)
+        XCTAssertEqual(log.accepted, [1, 1])
+        let closes = await worker.closes
+        XCTAssertEqual(closes, [token.id, token.id])
     }
 
     func testErrorOnlyInitializer_ProjectsOpenAndCleanupWithoutDuplicateSubscription() async throws {

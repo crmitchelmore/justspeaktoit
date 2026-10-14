@@ -290,9 +290,20 @@ and joins previously admitted delivery before worker cleanup. No per-frame actor
 task, file, History record, provider, cue or insertion is introduced.
 The package failure-event observer carries the generating opaque token, admitted
 immutable capture identity and error, including distinct cleanup failures.
+Construct it with `DesktopPressCaptureLease.observingFailures(worker:onFailureEvent:)`;
+the original error-only initializer remains the only package initializer, so
+its ignored-argument unlabeled trailing closures stay source-compatible.
 Deferred receivers must retain that event's identity rather than tagging it with
 the current recording. The compatibility observer projects only its error from
 the same canonical event sink; this does not install a Host subscription.
+The optional immutable PCM delivery annotates each existing drain batch with
+token, identity and mono PCM16 sample-offset ranges before/after the atomic
+relay reservation through `adoptDelivery`. Legacy `adopt` Data sinks still
+receive that batch exactly once, including ignored-argument trailing closures.
+This classifies relay admission order only: physically earlier samples
+submitted later are after-reservation, not evidence of gesture/sample time.
+It is not an approved Host silence clock. Native close-time partial callbacks
+remain fenced; span metadata does not establish lossless native final flushing.
 Portable fake-worker/race tests do not establish native permission, readiness,
 keyboard timing or latency. Windows currently uses `RegisterHotKey` plus 15 ms
 release polling, not a low-level physical-key hook; toggle mode has no paired

@@ -16,10 +16,11 @@ package final class DesktopPressCapturePCMRelay: @unchecked Sendable {
     private let onFailure: @Sendable (DesktopPressCaptureError) -> Void
     private var phase = Phase.rolling
     private var buffered = Data()
+    private var beforeReservationSampleCount = 0
     private var inFlightBytes = 0
     private var draining = false
     private var storedFailure: DesktopPressCaptureError?
-    private var sink: (@Sendable (Data) -> Void)?
+    private var sink: (@Sendable (DesktopPressCapturePCMBuffer) -> Void)?
 
     package init(
         limits: DesktopPressCaptureBufferLimits,
@@ -51,11 +52,16 @@ package final class DesktopPressCapturePCMRelay: @unchecked Sendable {
     package func reserve() throws {
         try lock.withLock {
             guard phase == .rolling else { throw DesktopPressCaptureError.invalidPhase }
+            beforeReservationSampleCount = buffered.count / 2
             phase = .reserved
         }
     }
 
     package func attach(_ sink: @escaping @Sendable (Data) -> Void) throws {
+        try attachDelivery { sink($0.data) }
+    }
+
+    func attachDelivery(_ sink: @escaping @Sendable (DesktopPressCapturePCMBuffer) -> Void) throws {
         let needsDrain = try lock.withLock {
             guard phase == .reserved else { throw DesktopPressCaptureError.invalidPhase }
             self.sink = sink
@@ -111,6 +117,7 @@ package final class DesktopPressCapturePCMRelay: @unchecked Sendable {
         } else {
             phase = .closed
             buffered.removeAll()
+            beforeReservationSampleCount = 0
             sink = nil
         }
     }
@@ -124,22 +131,26 @@ package final class DesktopPressCapturePCMRelay: @unchecked Sendable {
 
     private func drain() {
         while let next = lock.withLock({ takeDelivery() }) {
-            next.sink(next.data)
+            next.sink(next.pcm)
             lock.withLock { inFlightBytes = 0 }
         }
         joined.leave()
     }
 
-    private func takeDelivery() -> (sink: @Sendable (Data) -> Void, data: Data)? {
+    private func takeDelivery() -> (sink: @Sendable (DesktopPressCapturePCMBuffer) -> Void,
+                                   pcm: DesktopPressCapturePCMBuffer)? {
         guard !buffered.isEmpty, let sink else {
             draining = false
             if phase == .closing { phase = .closed; self.sink = nil }
             return nil
         }
-        let data = buffered
+        let pcm = DesktopPressCapturePCMBuffer(
+            data: buffered, beforeReservationSampleCount: beforeReservationSampleCount
+        )
         buffered = Data()
-        inFlightBytes = data.count
-        return (sink, data)
+        beforeReservationSampleCount = 0
+        inFlightBytes = pcm.data.count
+        return (sink, pcm)
     }
 
     private func appendRolling(_ data: Data) {

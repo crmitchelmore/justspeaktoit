@@ -601,8 +601,19 @@ start/stop remains unqualified for bounded readiness/cleanup, and neither a save
 preference nor a fake lifecycle result enables speculative capture.
 Package failure events preserve the generating token and immutable admitted
 identity across deferred delivery, with cleanup failure reported separately.
+Use `DesktopPressCaptureLease.observingFailures(worker:onFailureEvent:)` for
+correlated events; the original error-only initializer retains untyped,
+ignored-argument trailing-closure compatibility without an initializer overload.
 The error-only observer remains a compatibility projection, not a second
 subscription or a native/Host failure adapter.
+Optional PCM deliveries preserve legacy Data batch projection while labeling
+mono PCM16 sample offsets before/after reservation under the relay state lock.
+The canonical `adoptDelivery` name keeps legacy `adopt` trailing closures
+source-compatible even when their Data argument is ignored.
+These are relay admission-order regions, not physical sample/gesture times or
+an approved Host silence clock; physically earlier PCM submitted later is after
+reservation. Native stop-time partial flush remains fenced and separately
+unqualified, not made lossless by span metadata.
 
 `.github/workflows/linux.yml` (ubuntu-24.04, `swift:6.2.3-noble`, pinned by
 digest) installs the packages above, then runs the boundary check, the

@@ -852,10 +852,62 @@ whole operation rather than becoming a successful partial import. Cancellation
 after directory protection removes it before any file creation. The policy
 never secures or changes the caller-selected parent folder. Hosts must use
 exclusive native publication before reporting a saved export and then clean up
-the owned staging folder. This codec is not yet wired to a native export picker,
-complete category collection, import preview/application, credential recovery or
-recording-location changes. Native CNG/GLib and Mac ZIPFoundation interoperability
-tests remain separate required acceptance receipts.
+the owned staging folder.
+
+`WindowsMigrationArchive.publish` and `LinuxMigrationArchive.publish` copy the
+private source into protected staging on the selected destination filesystem,
+using a frozen source length and 64-KiB buffers, then publish without replacing
+any existing file or link. The source remains available after success,
+cancellation or failure. Windows pins ancestor handles, refuses reparse paths,
+denies concurrent source writers and applies the current-user/SYSTEM descriptor
+before writing bytes. Linux refuses linked/nonregular/nonprivate sources and
+checks source size and modification/change timestamps after copying. It prefers
+anonymous `O_TMPFILE` staging; named fallback requires a current-user-owned folder
+that other accounts cannot modify and `RENAME_NOREPLACE` support. Unsupported
+filesystem/portal semantics fail explicitly; ordinary Linux acceptance does not
+establish Flatpak destination-grant support. Both adapters check cancellation
+between chunks and immediately before commit and remove only their owned
+uncommitted staging. A native post-commit cleanup/durability error has a distinct
+`CopyCompletionFailure`: the destination already exists and must not be deleted
+or retried. Successful publication is never relabelled as cancellation.
+These synchronous APIs require an owned cancellable worker, not the UI actor or
+settings admission queue.
+
+General > History backup uses a separate native ZIP save picker and an explicit
+include-saved-audio choice, enabled by default. Turning it off exports History
+text only; a complete History/audio export refuses missing audio rather than
+silently omitting it. Settings, profiles and credentials are not included.
+Settings queues admit the backup without awaiting archive I/O: an owned
+cancellable off-actor worker collects the actual store, builds the archive,
+publishes exclusively and removes only its owned private staging directory.
+Cancel and bounded app close cancel this worker; late results cannot update a
+closed window, and cancellation after commit still reports the saved backup.
+GTK's chooser snapshots its audio choice, weakly holds its parent, is cancelled
+on close and distinguishes dismissal from real picker failures.
+Windows keeps the backup controls together in the existing Audio and output
+card rather than adding an overflowing third card at its 980-by-760 minimum;
+GTK uses a separate History backup preferences group in its scrollable page.
+
+General also offers **Inspect backup** through a separate native ZIP open
+picker. This is read-only archive inspection, not import approval or application:
+the bounded native reader checks the envelope and extracted audio CRC/digests,
+then reports canonical category counts and the number of archive notices.
+An unreadable declared category is shown as unreadable, never as an empty
+successful category. Credential values and record contents are not displayed.
+The report explicitly states that record values are not yet approved for import
+and import/apply is unavailable. Its separately owned cancellable worker removes
+only its reader-created private staging directory, preserves the selected ZIP
+and application state, and cannot present a late report after close. The GTK
+open/save chooser shares cancellation and weak-parent lifetime fencing while
+keeping the selected operation and audio choice frozen. Windows posts owned
+report text through its existing window dispatcher; GTK posts a native report
+dialog with a single Close response.
+
+Complete category collection, conflict preview/application, credential recovery
+and recording-location changes are not yet wired. Native CNG/GLib and Mac
+ZIPFoundation interoperability tests, picker lifecycle and paired light/dark
+layout acceptance remain separate required receipts. Ordinary Linux local-path
+checks do not establish Flatpak destination-grant support.
 
 The filter editor scrolls vertically when the available work area is too short;
 keyboard traversal reveals the focused control. Long model names have native

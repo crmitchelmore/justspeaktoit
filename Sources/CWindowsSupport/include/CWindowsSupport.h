@@ -59,6 +59,8 @@ enum JSTIWindowEvent {
     JSTI_EVENT_RECORDINGS_FOLDER = 93,
     JSTI_EVENT_AUDIO_CLEANUP = 94,
     JSTI_EVENT_AUDIO_CLEANUP_RESPONSE = 95, /* text: confirmation UUID; index: 1 confirms, 0 cancels */
+    JSTI_EVENT_MIGRATION_EXPORT = 96, /* text: selected ZIP destination; index: 1 includes saved audio */
+    JSTI_EVENT_MIGRATION_INSPECT = 97, /* text: selected ZIP source; no application changes */
     JSTI_EVENT_USER_ABSENT = 120
 };
 
@@ -293,6 +295,7 @@ int jsti_shell_open_file(const char *path, char *error, size_t error_capacity);
 /* Reveals an existing directory in Explorer; never opens a file association. */
 int jsti_shell_open_directory(const char *path, char *error, size_t error_capacity);
 int jsti_window_confirm_audio_cleanup(const char *token, size_t count, char *error, size_t error_capacity);
+int jsti_window_show_migration_report(const char *text, char *error, size_t error_capacity);
 
 /* Atomic Apply callback from the native settings dialog, on the UI thread.
  * prompt/new_key are borrowed until return. Empty new_key means keep the saved
@@ -679,6 +682,15 @@ int jsti_private_directory_prepare(const char *path, char *error, size_t error_c
  * when the process is elevated. An existing directory is never changed. */
 int jsti_private_directory_create(const char *path, char *error, size_t error_capacity);
 int jsti_private_file_create(const char *path, char *error, size_t error_capacity);
+/* Copies a private regular source into private destination-side staging, then
+ * publishes exclusively. The source is retained. 0 committed, 2 cancelled
+ * before commit, -1 failed, 3 committed with a handle-cleanup error (never
+ * retry or delete that destination). Cancellation is checked between bounded chunks.
+ * Existing destinations and reparse paths are never replaced or followed. */
+typedef int (*jsti_file_publication_cancelled_fn)(void *context);
+int jsti_private_file_publish(const char *source, const char *destination,
+                              jsti_file_publication_cancelled_fn cancelled, void *context,
+                              char *error, size_t error_capacity);
 /* Uses a unique temporary directory and synthetic bytes only; verifies ACLs,
  * directory repair, existing-file preservation and junction refusal. */
 int jsti_private_storage_self_test(char *error, size_t error_capacity);

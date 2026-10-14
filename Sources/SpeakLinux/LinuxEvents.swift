@@ -236,6 +236,14 @@ private func linuxHistoryManagementEvent(_ event: Int, value: String, slot: Int,
         holder.enqueueSettings { await holder.controller.beginAudioCleanupConfirmation() }
     case Int(JSTI_EVENT_AUDIO_CLEANUP_RESPONSE):
         holder.enqueueSettings { await holder.controller.answerAudioCleanup(value, delete: slot == 1) }
+    case Int(JSTI_EVENT_MIGRATION_INSPECT):
+        holder.enqueueSettings {
+            await holder.controller.beginMigrationInspection(URL(fileURLWithPath: value))
+        }
+    case Int(JSTI_EVENT_MIGRATION_EXPORT):
+        holder.enqueueSettings {
+            await holder.controller.beginMigrationExport(URL(fileURLWithPath: value), includeAudio: slot == 1)
+        }
     default: return false
     }
     return true

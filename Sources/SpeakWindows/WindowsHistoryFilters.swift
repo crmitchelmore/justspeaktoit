@@ -14,6 +14,12 @@ func windowsHistoryManagementEvent(
     case 93: Task { await holder.controller.revealRecordingsDirectory() }
     case 94: holder.enqueueSettings { await holder.controller.beginAudioCleanupConfirmation() }
     case 95: holder.enqueueSettings { await holder.controller.answerAudioCleanup(value, delete: index == 1) }
+    case 96:
+        holder.enqueueSettings {
+            await holder.controller.beginMigrationExport(URL(fileURLWithPath: value), includeAudio: index == 1)
+        }
+    case 97:
+        holder.enqueueSettings { await holder.controller.beginMigrationInspection(URL(fileURLWithPath: value)) }
     default: return false
     }
     return true

@@ -107,15 +107,15 @@ import/mutation, or atomic destination publication. The parent must preserve
 category completeness and unknown/native-only material deliberately rather
 than feeding these partial arrays into destructive replacement.
 
-## Local value-bearing native configuration capture
+## Value-bearing native configuration source capture (ff6)
 
 `DesktopHostController.configurationCapture(categories:selectedNativeFields:validateJSON:)`
 and pure `DesktopHostConfigurationCapture.capture` return the **unchanged**
 canonical preference projection alongside a separately selected
 `DesktopNativeConfigurationCapture`. This non-Codable result is captured data,
-**not an archive carrier, retained-unapplied payload, import contract or proof
-of complete backup**. Parent aggregation still needs an explicitly supported
-carrier before these values become transferable retention. No schema format,
+**not itself an archive carrier, retained-unapplied payload, import contract or
+proof of complete backup**. The isolated codec below is an opt-in transport seam;
+parent aggregation and a safe target retention route remain separate. No schema format,
 settings keys, controls, ABI, runtime behavior, profiles or credentials change.
 
 `SpeakCore/DesktopNativeConfigurationField.swift` is the single noncredential
@@ -165,7 +165,78 @@ Windows Swift projections and strict pinned lint on 22 Swift inputs.
 `git diff --check` passes and `Package.resolved` is restored unchanged.
 The first build was interrupted by concurrent local source edits; these results
 come from the subsequent stable-source runs. No native/Apple, installed-app,
-archive-carrier or full-parity acceptance is claimed for this unpublished slice.
+archive-carrier or full-parity acceptance is claimed for the frozen ff6 capture.
+
+## Isolated native configuration archive transport
+
+`DesktopNativeConfigurationArchiveCodec.project(capture,checkCancellation:)`
+returns immutable `DesktopNativeConfigurationArchive`: validated records,
+original entries, read coverage and value-free unresolved source names.
+`inspect(records,category:checkCancellation:)` validates records after generic
+ZIP reading; `encode(archive,checkCancellation:)` and
+`decode(data,checkCancellation:)` provide a strict deterministic JSON boundary.
+`decode(record,checkCancellation:)` validates one transport record.
+Only the existing closed `DesktopNativeConfigurationField` definitions are
+accepted. No new settings, native capabilities or source inventories are added.
+
+Transport records use category `.settings`, kind `nativeConfiguration` and
+deterministic ID `native/<sourcePlatform>/<sourcePath>`. Their closed envelope
+contains `schemaVersion: 1`, `sourcePlatform`, `sourcePath`, `provenance` and
+`isPresent`; `value` exists exactly when present. An absent selected field still
+has a record with no value. Explicit null, false, zero, empty text, whitespace
+and source-platform structured values remain distinct. No target conversion,
+defaults, trimming, clamping or fabricated profile/global-Mac identity occurs.
+Windows-only structured data remains labelled Windows when read on Linux.
+
+`DesktopNativeConfigurationCoverage` exposes the exact selected IDs and
+`keysByKind`, with an explicitly partial `selectionScope`. Empty selection
+produces an empty `selectedIDs` set, never nil/full-category scope.
+These are **read coverage only**, not apply or replacement approval.
+`permitsReplacement` and `isCompleteCategory` are always false, but those flags
+do not change the generic planner's authority. Aggregators must not treat this
+transport as an approved native importer or as a complete settings collection.
+Existing canonical preference projection/catalogue, migration format, planner
+and executable import acceptance remain unchanged. Canonical preference
+validation still refuses the new transport kind; the Mac importer also has a
+dedicated rejection regression, requiring an Apple test host to execute.
+
+Per-record and aggregate encoded JSON, and raw decode input, are bounded by
+`DataMigrationArchivePolicy.maximumJSONBytes` (128,000,000 bytes), not a separate
+small prompt limit. Record count derives from the canonical field and source
+platform enums. Depth eight covers every currently accepted closed shape;
+parser/member bounds refuse excessive nested or unclassified material.
+Cancellation is checked before work, between records and periodically while
+scanning strings/input/output. Foundation coding itself is synchronous but
+its input/output is bounded and cancellation is checked around each call.
+Run large codec work on an owned cancellable off-actor worker, not a settings
+admission queue or the PCM path.
+Malformed JSON, duplicate keys (including escaped equivalents), identities,
+platforms, provenance, presence/value mismatches, types, unknown members,
+attachments and credential-bearing Azure origins abort explicitly rather than
+returning filtered success.
+
+Actual ZIP regressions exercise `DesktopMigrationArchive` transport with all
+ten source paths, unknown-to-target Windows values and every presence state.
+They require unchanged records, exact selection scopes, no notices and no audio
+hashing. Generic ZIP reading is not the codec's strict raw-JSON parser: callers
+must inspect returned records, and must not claim recovery of outer members
+already discarded by the generic Codable reader. Unresolved/unselected names
+are not value-bearing records and are not included in codec JSON.
+
+This seam does **not** collect credentials or full wrappers, mutate native
+settings/stores, import/apply/retain values on a target, collect profiles,
+publish a destination, or establish full 91-key/feature/native/Apple parity.
+Existing `6db` native compile failures and the integration's separate General
+minimum-window UI failure are not repaired or qualified by this codec.
+
+Local frozen-source qualification passes **117 focused tests**, including
+16 new portable codec/ZIP regressions; **1906 full portable tests / 30 skipped /
+zero failures**; all four Windows Swift projections; and strict pinned lint on
+28 attributable Swift inputs. `Package.resolved` is restored unchanged.
+The added Mac importer-rejection regression is linted but not executed locally;
+Apple frameworks/runtime and actual Windows native linking/runtime remain
+unqualified. Holding-branch publication does not select an integration source
+or widen target retention/import/apply acceptance.
 
 ## Generated-speech coordination
 

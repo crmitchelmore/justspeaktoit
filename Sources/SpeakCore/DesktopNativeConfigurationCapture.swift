@@ -1,6 +1,6 @@
 /// Pure, explicitly selected source data. No Codable/archive carrier or retention claim is provided.
 public struct DesktopNativeConfigurationCapture: Sendable, Equatable {
-    public enum Platform: String, Sendable { case windows, linux }
+    public enum Platform: String, CaseIterable, Sendable { case windows, linux }
     public enum Provenance: String, Sendable { case nativeSettings, legacyConfiguration }
 
     public struct Entry: Sendable, Equatable {

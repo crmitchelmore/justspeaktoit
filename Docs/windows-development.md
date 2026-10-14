@@ -584,6 +584,28 @@ emits category-prefixed preservation notices, without converting a missing
 category into an empty one. Every caller must supply its real record validator;
 this is not a permissive native category validator or an import/apply UI.
 
+`DesktopMigrationHistory` maps that wire model to durable native History.
+Imported duration, scalar costs without invented token counts, all model
+identifiers and original Mac metadata remain available to native History,
+filters, insights and playback. An optional `desktopHistory` carrier preserves
+native language, profile and result metadata through Mac decode/re-export;
+unknown carrier fields survive native round-trips. Canonical transcripts and
+costs override stale embedded results. Imports are not CloudKit synced copies.
+Shared redaction removes audio paths, network/debug payloads and recursive
+carriers; audio-only values also remove transcript, prompt, correction and
+failure content. JSON numbers are normalized before computing revisions, and
+sub-second native timestamps remain in the carrier for stable re-export.
+
+The actor-owned `DesktopRecordingStore.migrationSnapshot` now collects real
+History and owned recording files, with exact selection/date scopes and active
+audio exclusion. It fences file identity around native hashing, represents
+shared audio for each retained History identity, and assigns stable separate
+identities to standalone or deletion-kept audio without reviving tombstoned
+History. Identifier collisions, cancellation and changed files fail explicitly.
+Missing referenced audio emits preservation notices that block destructive
+archive export. This collector owns only History/audio; it does not claim
+settings, vocabulary, profiles, Voice or credential collection/application.
+
 `DataMigrationArchivePolicy` also centralizes the existing Mac archive path,
 entry/total/JSON-size, duplicate-path, manifest and staging-capacity rules.
 Mac ZIP reads use this policy; portable tests exercise exact limits without
@@ -623,7 +645,7 @@ and partial staging is removed. On POSIX the folder/file modes are 0700/0600;
 Windows staging inherits the selected parent directory's ACL. Hosts must use
 exclusive native publication before reporting a saved export and then clean up
 the owned staging folder. This codec is not yet wired to a native export picker,
-snapshot collection, import preview/application, credential recovery or
+complete category collection, import preview/application, credential recovery or
 recording-location changes. Native CNG/GLib and Mac ZIPFoundation interoperability
 tests remain separate required acceptance receipts.
 

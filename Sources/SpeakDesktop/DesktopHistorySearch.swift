@@ -52,8 +52,8 @@ public enum DesktopHistorySearch {
     }
 
     public static func modelIdentifiers(for record: DesktopRecordingStore.Record) -> [String] {
-        Array(Set([record.modelIdentifier, record.result?.modelIdentifier, record.postProcessingModelIdentifier]
-            .compactMap { $0 }.filter { !$0.isEmpty })).sorted()
+        Array(Set(([record.modelIdentifier, record.result?.modelIdentifier, record.postProcessingModelIdentifier]
+            .compactMap { $0 } + (record.importedModelIdentifiers ?? [])).filter { !$0.isEmpty })).sorted()
     }
 
     public static func availableModels(
@@ -78,7 +78,7 @@ public enum DesktopHistorySearch {
         return criteria.matches(HistoryPresentationItem(
             id: record.id, createdAt: record.createdAt,
             rawTranscription: record.originalText, processedTranscription: record.processedText,
-            modelIdentifiers: modelIdentifiers(for: record), recordingDuration: record.result?.duration ?? 0,
+            modelIdentifiers: modelIdentifiers(for: record), recordingDuration: record.recordingDuration ?? 0,
             errorCount: (record.failure == nil ? 0 : 1) + (record.postProcessingFailure == nil ? 0 : 1),
             originPlatform: record.originPlatform ?? ""
         ))

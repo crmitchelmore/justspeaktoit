@@ -106,7 +106,7 @@ extension DesktopRecordingStore {
             && UUID(uuidString: url.deletingPathExtension().lastPathComponent) != nil
     }
 
-    private static func audioCleanupIdentity(at url: URL) throws -> DesktopRecordingAudioSnapshot.Identity {
+    static func audioCleanupIdentity(at url: URL) throws -> DesktopRecordingAudioSnapshot.Identity {
         let values = try FileManager.default.attributesOfItem(atPath: url.path)
         guard values[.type] as? FileAttributeType == .typeRegular,
               let size = values[.size] as? NSNumber,

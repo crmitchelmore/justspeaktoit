@@ -25,6 +25,7 @@ public struct ApplicationHistoryItem: Codable, Identifiable, Hashable, Sendable 
     public let postProcessingPrompt: ApplicationPostProcessingPromptPayload?
     public let diagnosticContext: ApplicationHistoryDiagnosticContext?
     public let latency: SessionLatencyMetrics?
+    public let desktopHistory: AnyCodable?
 
     public init(
         id: UUID = UUID(), createdAt: Date = Date(), updatedAt: Date = Date(), modelsUsed: [String],
@@ -37,7 +38,8 @@ public struct ApplicationHistoryItem: Codable, Identifiable, Hashable, Sendable 
         source: ApplicationHistoryItemSource? = nil,
         postProcessingPrompt: ApplicationPostProcessingPromptPayload? = nil,
         diagnosticContext: ApplicationHistoryDiagnosticContext? = nil,
-        latency: SessionLatencyMetrics? = nil
+        latency: SessionLatencyMetrics? = nil,
+        desktopHistory: AnyCodable? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -59,5 +61,6 @@ public struct ApplicationHistoryItem: Codable, Identifiable, Hashable, Sendable 
         self.postProcessingPrompt = postProcessingPrompt
         self.diagnosticContext = diagnosticContext
         self.latency = latency
+        self.desktopHistory = desktopHistory
     }
 }

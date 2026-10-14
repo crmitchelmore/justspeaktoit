@@ -170,7 +170,7 @@ extension DesktopHostController {
         guard !closed else { return }
         selectedHistoryID = id
         // A retry has no recording hotkey, so it never outputs automatically.
-        await transcribe(record, duration: record.result?.duration ?? 0, output: nil)
+        await transcribe(record, duration: record.recordingDuration ?? 0, output: nil)
     }
 
     /// Why the model a recording was made with cannot transcribe it again

@@ -8,15 +8,26 @@ typedef union {
     void *pointer;
 } allocation_header;
 
-struct jsti_zip_reader {
-    mz_zip_archive archive;
+typedef struct {
     size_t allocated;
     size_t budget;
     int limit_exceeded;
+} allocation_budget;
+
+struct jsti_zip_reader {
+    mz_zip_archive archive;
+    allocation_budget memory;
+};
+
+struct jsti_zip_writer {
+    mz_zip_archive archive;
+    allocation_budget memory;
+    uint32_t maximum_entries;
+    const char *failure;
 };
 
 static void *allocate(void *opaque, size_t items, size_t size) {
-    jsti_zip_reader *reader = opaque;
+    allocation_budget *reader = opaque;
     if (size != 0 && items > SIZE_MAX / size) {
         reader->limit_exceeded = 1;
         return NULL;
@@ -35,7 +46,7 @@ static void *allocate(void *opaque, size_t items, size_t size) {
 
 static void release(void *opaque, void *address) {
     if (!address) return;
-    jsti_zip_reader *reader = opaque;
+    allocation_budget *reader = opaque;
     allocation_header *header = (allocation_header *)address - 1;
     reader->allocated -= header->size;
     free(header);
@@ -43,7 +54,7 @@ static void release(void *opaque, void *address) {
 
 static void *resize(void *opaque, void *address, size_t items, size_t size) {
     if (!address) return allocate(opaque, items, size);
-    jsti_zip_reader *reader = opaque;
+    allocation_budget *reader = opaque;
     allocation_header *header = (allocation_header *)address - 1;
     if (size != 0 && items > SIZE_MAX / size) {
         reader->limit_exceeded = 1;
@@ -63,7 +74,7 @@ static void *resize(void *opaque, void *address, size_t items, size_t size) {
 }
 
 const char *jsti_zip_error(jsti_zip_reader *reader) {
-    if (reader->limit_exceeded) return "The ZIP index exceeds the bounded memory budget.";
+    if (reader->memory.limit_exceeded) return "The ZIP index exceeds the bounded memory budget.";
     return mz_zip_get_error_string(mz_zip_peek_last_error(&reader->archive));
 }
 
@@ -80,11 +91,11 @@ jsti_zip_reader *jsti_zip_open(uint64_t size, jsti_zip_read read, void *context,
         if (error && error_size) snprintf(error, error_size, "Could not allocate a ZIP reader.");
         return NULL;
     }
-    reader->budget = index_budget;
+    reader->memory.budget = index_budget;
     reader->archive.m_pAlloc = allocate;
     reader->archive.m_pFree = release;
     reader->archive.m_pRealloc = resize;
-    reader->archive.m_pAlloc_opaque = reader;
+    reader->archive.m_pAlloc_opaque = &reader->memory;
     reader->archive.m_pRead = read;
     reader->archive.m_pIO_opaque = context;
     if (!mz_zip_reader_init(&reader->archive, size, MZ_ZIP_FLAG_DO_NOT_SORT_CENTRAL_DIRECTORY)) {
@@ -122,4 +133,69 @@ uint32_t jsti_zip_filename(jsti_zip_reader *reader, uint32_t index, char *buffer
 
 int jsti_zip_extract(jsti_zip_reader *reader, uint32_t index, jsti_zip_consume consume, void *context) {
     return mz_zip_reader_extract_to_callback(&reader->archive, index, consume, context, 0);
+}
+
+const char *jsti_zip_writer_error(jsti_zip_writer *writer) {
+    if (writer->memory.limit_exceeded) return "The ZIP writer exceeds the bounded memory budget.";
+    if (writer->failure) return writer->failure;
+    return mz_zip_get_error_string(mz_zip_peek_last_error(&writer->archive));
+}
+
+void jsti_zip_writer_close(jsti_zip_writer *writer) {
+    if (!writer) return;
+    if (writer->archive.m_pState) mz_zip_writer_end(&writer->archive);
+    free(writer);
+}
+
+jsti_zip_writer *jsti_zip_writer_open(jsti_zip_consume write, void *context, size_t index_budget,
+                                     uint32_t maximum_entries, char *error, size_t error_size) {
+    jsti_zip_writer *writer = calloc(1, sizeof(*writer));
+    if (!writer) {
+        if (error && error_size) snprintf(error, error_size, "Could not allocate a ZIP writer.");
+        return NULL;
+    }
+    writer->memory.budget = index_budget;
+    writer->maximum_entries = maximum_entries;
+    writer->archive.m_pAlloc = allocate;
+    writer->archive.m_pFree = release;
+    writer->archive.m_pRealloc = resize;
+    writer->archive.m_pAlloc_opaque = &writer->memory;
+    writer->archive.m_pWrite = write;
+    writer->archive.m_pIO_opaque = context;
+    if (!mz_zip_writer_init_v2(&writer->archive, 0, MZ_ZIP_FLAG_WRITE_ZIP64)) {
+        if (error && error_size) snprintf(error, error_size, "%s", jsti_zip_writer_error(writer));
+        jsti_zip_writer_close(writer);
+        return NULL;
+    }
+    return writer;
+}
+
+static int writer_accepts(jsti_zip_writer *writer, const char *path) {
+    if (writer->failure) return 0;
+    if (!path || !*path || strlen(path) > UINT16_MAX) {
+        writer->failure = "Invalid ZIP export entry name.";
+        return 0;
+    }
+    if (writer->archive.m_total_files >= writer->maximum_entries) {
+        writer->failure = "The ZIP export contains too many entries.";
+        return 0;
+    }
+    return 1;
+}
+
+int jsti_zip_writer_add_memory(jsti_zip_writer *writer, const char *path, const void *data, size_t bytes) {
+    if (!writer_accepts(writer, path)) return 0;
+    return mz_zip_writer_add_mem(&writer->archive, path, data, bytes, 0);
+}
+
+int jsti_zip_writer_add_file(jsti_zip_writer *writer, const char *path, uint64_t bytes,
+                            jsti_zip_read read, void *context) {
+    if (!writer_accepts(writer, path)) return 0;
+    return mz_zip_writer_add_read_buf_callback(
+        &writer->archive, path, read, context, bytes, NULL, NULL, 0, 0, NULL, 0, NULL, 0);
+}
+
+int jsti_zip_writer_finalize(jsti_zip_writer *writer) {
+    if (writer->failure) return 0;
+    return mz_zip_writer_finalize_archive(&writer->archive);
 }

@@ -17,20 +17,30 @@ public enum DataMigrationArchivePolicy {
         }
     }
 
-    public static func preflight<S: Sequence>(_ entries: S) throws -> UInt64 where S.Element == Entry {
-        var paths = Set<String>()
-        var bytes: UInt64 = 0
-        for entry in entries {
-            guard paths.insert(entry.path).inserted, paths.count <= maximumEntries,
+    public struct EntryBudget {
+        private var paths = Set<String>()
+        public private(set) var bytes: UInt64 = 0
+
+        public init() {}
+
+        public mutating func admit(_ entry: Entry) throws {
+            guard !paths.contains(entry.path), paths.count < maximumEntries,
                   entry.uncompressedBytes <= maximumEntryBytes else {
                 throw DataMigrationError.invalid("The archive contains duplicate paths or oversized entries.")
             }
-            bytes += entry.uncompressedBytes
-            guard bytes <= maximumArchiveBytes else {
+            let total = bytes + entry.uncompressedBytes
+            guard total <= maximumArchiveBytes else {
                 throw DataMigrationError.invalid("The archive exceeds 50 GB.")
             }
+            paths.insert(entry.path)
+            bytes = total
         }
-        return bytes
+    }
+
+    public static func preflight<S: Sequence>(_ entries: S) throws -> UInt64 where S.Element == Entry {
+        var budget = EntryBudget()
+        for entry in entries { try budget.admit(entry) }
+        return budget.bytes
     }
 
     public static func requireStagingCapacity(archiveBytes: UInt64, availableBytes: UInt64?) throws {

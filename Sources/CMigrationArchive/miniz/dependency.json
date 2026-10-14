@@ -9,6 +9,7 @@
     "miniz.c": "f23204efee2bfaffb72a974d2e28c64c3c1d9787144b5c5890f129c465e467bd",
     "miniz.h": "f0b67217bdd8e45b74eb9b7c2c7ae20ed6760a1d76f3276b93617039ebd082df",
     "miniz_common.h": "f1ba29821c8caef83585b328196aa346c5da7c82890a70a3d10d77c6cec0ed39",
+    "miniz_tdef.c": "85b93205232d51d092f24041934d951f11f9edc02df1f475e8ceb7b281a1e7f6",
     "miniz_tdef.h": "d62da02953c3834dfcbde4db026c6d9345013ef9b0e53185131016a3a4e48c33",
     "miniz_tinfl.c": "2296ebd21ef9af5ebbefd5b454d4bb67d8fb4af2d24945e7fb32114374f75a76",
     "miniz_tinfl.h": "da4850920fdf09f8877d9affabe1ebba1852ce4b1ebbd121f2ba7a7ea8e57e5d",

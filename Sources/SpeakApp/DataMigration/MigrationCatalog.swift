@@ -18,20 +18,10 @@ enum MigrationCatalog {
             defaultsKey: nil,
             path: "LocalModels/migration-model-references.json"
         ),
-        .init(kind: "profile", category: .profiles, defaultsKey: "dictationProfiles", path: nil),
-        .init(
-            kind: "pronunciation",
-            category: .vocabulary,
-            defaultsKey: "pronunciationDictionary",
-            path: nil
-        ),
-        .init(kind: "lexicon", category: .vocabulary, defaultsKey: nil, path: "PersonalLexicon/lexicon.json"),
-        .init(
-            kind: "correction",
-            category: .vocabulary,
-            defaultsKey: nil,
-            path: "AutoCorrections/candidates.json"
-        ),
+        .init(kind: "profile", category: .profiles, defaultsKey: "dictationProfiles", path: nil)
+    ] + DataMigrationVocabularyCatalog.collections.map {
+        Collection(kind: $0.kind, category: .vocabulary, defaultsKey: $0.defaultsKey, path: $0.path)
+    } + [
         .init(kind: "ttsUsage", category: .history, defaultsKey: "ttsUsageHistory", path: nil),
         .init(kind: "whisperModel", category: .models, defaultsKey: nil,
               path: "LocalModels/imported-hugging-face-models.json"),
@@ -62,6 +52,11 @@ enum MigrationCatalog {
         return MigrationRecord(id: key, kind: kind, value: payload)
     }
     static func collectionRecords(_ collection: Collection, data: Data) throws -> [MigrationRecord] {
+        if collection.category == .vocabulary {
+            return try DataMigrationVocabularyCatalog.records(
+                data: data, kind: collection.kind, digest: MigrationCoding.digest
+            )
+        }
         let values = try JSONDecoder().decode([AnyCodable].self, from: data)
         return try values.map { value in
             let object = value.value as? [String: Any] ?? [:]
@@ -109,15 +104,15 @@ enum MigrationCatalog {
            id != record.id {
             throw MigrationError.invalid("Mismatched item identifier")
         }
+        if category == .vocabulary {
+            try DataMigrationVocabularyCatalog.validate(record, category: category)
+            return
+        }
         if category == .models {
             try validateModel(record); return
         }
         switch record.kind {
         case "profile": _ = try MigrationCoding.decode(DictationProfile.self, record.value)
-        case "pronunciation":
-            _ = try JSONDecoder().decode(PronunciationEntry.self, from: JSONEncoder().encode(record.value))
-        case "lexicon": _ = try MigrationCoding.decode(PersonalLexiconRule.self, record.value)
-        case "correction": _ = try MigrationCoding.decode(AutoCorrectionCandidate.self, record.value)
         case "ttsUsage": _ = try JSONDecoder().decode(
                 TTSUsageRecord.self,
                 from: JSONEncoder().encode(record.value)

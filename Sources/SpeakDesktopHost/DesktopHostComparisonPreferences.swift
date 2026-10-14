@@ -15,10 +15,9 @@ extension DesktopHostController {
             return
         }
         guard !busy else { return }
-        let available = Set(DesktopHostModels.visible.filter {
-            DesktopHostModels.isLive($0.id) == live
-                && (!DesktopHostModels.isLocal($0.id) || Platform.localReadiness($0.id, controller: self) == nil)
-        }.map(\.id))
+        let available = Set(comparisonModelStates().filter {
+            DesktopHostModels.isLive($0.option.id) == live && $0.unavailableReason == nil
+        }.map(\.option.id))
         do {
             let selected = Set(text.split(separator: "\t").map(String.init))
             try await comparisons.selectModels(selected, replacing: available)

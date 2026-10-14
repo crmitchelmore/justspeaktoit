@@ -41,7 +41,16 @@ reveal models; standings are derived from the persisted canonical rounds.
 As on Mac, fewer than two usable results reveal the evidence without fabricating
 a ranking or scoreboard credit.
 Candidate selection is remembered separately for File/Batch and Live, with
-native Select all/none controls. The blind **Diff against** picker reuses
+native **Select all ready / Select none** controls. Only qualified routes with
+currently readable, non-empty canonical credentials (or a ready local runtime)
+are selectable; Azure live also requires the configured resource endpoint.
+Unavailable models and specific recovery reasons remain visible in the detail
+pane. Their saved selections are retained, not cleared or advertised as ready.
+Key writes, cloud-key imports and Azure endpoint changes refresh the editor.
+Admission rechecks keys and settings after playback stops, before any sample,
+client or microphone work; admitted runs retain their immutable snapshots.
+This is configuration readiness, not evidence that a service accepts the key.
+The blind **Diff against** picker reuses
 `TranscriptWordDiff`; signed `[+added]` / `[-removed]` annotations remain readable
 without colour and leave original transcript text untouched. Reference changes
 do not judge or alter saved rounds. Word alignment is cached and computed off the

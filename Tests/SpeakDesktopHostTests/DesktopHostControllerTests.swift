@@ -21,13 +21,15 @@ struct FakeJob: Sendable {
 }
 
 final class FakePlayback: DesktopHostPlayback, @unchecked Sendable {
+    let stopping = Gate(open: false)
+    var stopGate: Gate?
     func setStatusHandler(_ handler: @escaping @Sendable (UInt64, String) -> Void) {}
     func isCurrent(revision: UInt64) -> Bool { false }
     func play(recordID: UUID, path: String, knownDuration: TimeInterval?) throws {}
     func togglePause(recordID: UUID) -> Bool { false }
     func stop(announcing: Bool) {}
     func stop(unless recordID: UUID) {}
-    func stopAndWait() async throws {}
+    func stopAndWait() async throws { stopping.release(); await stopGate?.pass() }
     func close() async throws {}
 }
 

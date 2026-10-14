@@ -71,6 +71,7 @@ final class DesktopComparisonPreferencesTests: XCTestCase {
         let candidate = try XCTUnwrap(DesktopHostModels.visible.first {
             !DesktopHostModels.isLive($0.id) && !DesktopHostModels.isLocal($0.id)
         })
+        FakeLog.shared.setKey("synthetic-key", name: try await controller.credentialIdentifier(for: candidate.id))
         await controller.comparisonEvent(125, text: candidate.id, index: 0)
         let selected = await store.selectedModelIDs()
         XCTAssertEqual(selected, [candidate.id])

@@ -85,26 +85,6 @@ extension DesktopHostController {
         await refreshComparison()
     }
 
-    private func candidates(_ identifiers: [String], live: Bool) throws -> [DesktopComparisonCandidate] {
-        let available = DesktopHostModels.visible
-        let result = try identifiers.map { identifier in
-            guard let option = available.first(where: { $0.id == identifier }),
-                  DesktopHostModels.isLive(identifier) == live else {
-                throw DesktopHostError(message: "A selected model is no longer available for this comparison mode.")
-            }
-            if DesktopHostModels.isLocal(identifier),
-               let reason = Platform.localReadiness(identifier, controller: self) {
-                throw DesktopHostError(message: reason)
-            }
-            return DesktopComparisonCandidate(
-                modelID: identifier, displayName: option.displayName,
-                providerName: DesktopHostModels.provider(for: identifier)?.displayName ?? "On-device"
-            )
-        }
-        try DesktopComparisonRunner.validate(result)
-        return result
-    }
-
     private func startComparison(_ payload: String, live: Bool) async {
         guard !closed, !busy, recording == nil, comparisonCapture == nil,
               comparisonTask == nil, comparisonFinalization == nil else {
@@ -121,23 +101,16 @@ extension DesktopHostController {
             let lines = payload.components(separatedBy: "\n")
             guard lines.count >= 2 else { throw DesktopHostError(message: "Invalid comparison request.") }
             let language = lines[0].isEmpty ? nil : lines[0]
-            let selected = try candidates(lines[1].components(separatedBy: "\t"), live: live)
-            let keys = try Dictionary(uniqueKeysWithValues: selected.map {
-                ($0.modelID, try transcriptionKey(for: $0.modelID))
-            })
             cancelOutput()
             try await playback.stopAndWait()
             guard !closed else { return }
             let generation = UUID()
+            let configuration = try comparisonAdmission(
+                lines[1].components(separatedBy: "\t"), live: live, language: language, generation: generation
+            )
             comparisonGeneration = generation
             comparisonLanguage = language
             let paths = Array(lines.dropFirst(2))
-            let endpoint = azureResourceEndpoint()
-            let microphone = settings.microphoneDeviceID ?? ""
-            let configuration = DesktopComparisonConfiguration(
-                selected: selected, keys: keys, language: language, endpoint: endpoint,
-                deviceID: microphone, generation: generation
-            )
             launchComparison(configuration, live: live, paths: paths)
             transferred = true
             await refreshComparison()
@@ -322,12 +295,6 @@ extension DesktopHostController {
         comparisonReference = reference?.id
         let selectedModels = await comparisons.selectedModelIDs()
         playback.stop(unless: round?.id ?? UUID())
-        let models = DesktopHostModels.visible.filter {
-            !DesktopHostModels.isLocal($0.id) || Platform.localReadiness($0.id, controller: self) == nil
-        }.map {
-            "\($0.id)\t\(DesktopHostModels.uiText($0.displayName))\t\(DesktopHostModels.isLive($0.id) ? 1 : 0)"
-                + "\t\(selectedModels.contains($0.id) ? 1 : 0)"
-        }.joined(separator: "\n")
         let rows = rounds.map { "\($0.id.uuidString)\t\(DesktopHostModels.uiText($0.sample.name))" }
             .joined(separator: "\n")
         var detail = comparisonNotice + "\n\n"
@@ -339,6 +306,14 @@ extension DesktopHostController {
         detail += "\n" + ModelComparisonExport.scoreboardMarkdown(rounds: rounds)
         let sync = await comparisonSyncPresentation()
         guard !closed, comparisonVisible, presentationRevision == comparisonPresentationRevision else { return }
+        let (models, unavailable) = comparisonModelPresentation(selectedModels: selectedModels)
+        if models.isEmpty {
+            detail = "No comparison models are ready. Add API keys in Settings or prepare a local model; "
+                + "specific reasons are below.\n\n" + detail
+        }
+        if !unavailable.isEmpty {
+            detail += "\nUnavailable comparison models (not selectable):\n" + unavailable.joined(separator: "\n")
+        }
         detail += "\n" + sync.status
         Platform.comparisonPresentation(.init(
             models: models, rounds: rows, detail: detail, busy: busy, recording: comparisonCapture != nil,

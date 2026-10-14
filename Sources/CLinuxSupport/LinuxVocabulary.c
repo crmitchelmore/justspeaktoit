@@ -5,19 +5,51 @@
 GtkWidget *jsti_vocabulary_page_new(int kind);
 
 typedef struct {
+    gchar *value;
+    guint count;
+} Category;
+typedef struct {
     int kind;
-    GtkWidget *root, *fields[8], *preview, *preview_tags, *status, *search;
+    GtkWidget *root, *fields[8], *preview, *preview_tags, *status, *search, *category_filter;
     GtkListBox *list;
-    GPtrArray *rows;
+    GPtrArray *rows, *categories;
+    gchar *category;
     GPtrArray *buttons;
     gint selected;
-    gboolean filling;
+    gboolean filling, busy;
     GtkCheckButton *include_rules, *include_tags;
     GtkEntry *tags;
 } Editor;
 static Editor *editors[4];
 static const char *activations[] = { "automatic", "requireContextMatch", "manual", NULL };
 static const char *confidences[] = { "high", "medium", "low", NULL };
+static gboolean filter(GtkListBoxRow *row, gpointer data);
+static gboolean hidden_selection(Editor *e) {
+    if (e->kind != 1 || e->selected < 0) return FALSE;
+    GtkListBoxRow *row = gtk_list_box_get_row_at_index(e->list, e->selected);
+    return row == NULL || !filter(row, e);
+}
+static void selection_controls(Editor *e) {
+    if (e->kind != 1) return;
+    const gboolean hidden = hidden_selection(e);
+    for (guint i = 0; i < e->buttons->len; ++i) {
+        GtkWidget *button = g_ptr_array_index(e->buttons, i);
+        const char *action = g_object_get_data(G_OBJECT(button), "vocabulary-action");
+        if (g_strcmp0(action, "save") == 0 || g_strcmp0(action, "delete") == 0
+            || g_strcmp0(action, "up") == 0 || g_strcmp0(action, "down") == 0)
+            gtk_widget_set_sensitive(button, !e->busy && !hidden);
+    }
+}
+static void apply_filters(Editor *e) {
+    const gint selected = e->selected;
+    e->filling = TRUE;
+    gtk_list_box_invalidate_filter(e->list);
+    GtkListBoxRow *row = selected >= 0 ? gtk_list_box_get_row_at_index(e->list, selected) : NULL;
+    if (row != NULL && filter(row, e)) gtk_list_box_select_row(e->list, row);
+    else gtk_list_box_unselect_all(e->list);
+    e->selected = selected; e->filling = FALSE;
+    selection_controls(e);
+}
 
 static gchar *escape(const char *text) {
     GString *result = g_string_new(NULL);
@@ -67,8 +99,10 @@ static void fill(Editor *e, gchar **row) {
     }
 }
 static void pending(Editor *e, gboolean busy) {
+    e->busy = busy;
     for (guint i = 0; i < e->buttons->len; ++i) gtk_widget_set_sensitive(g_ptr_array_index(e->buttons, i), !busy);
     gtk_widget_set_sensitive(GTK_WIDGET(e->list), !busy);
+    selection_controls(e);
 }
 static void append_field(GString *payload, const char *value) {
     gchar *escaped = escape(value);
@@ -80,6 +114,7 @@ static void selected(GtkListBox *list, GtkListBoxRow *row, gpointer data) {
     if (e->filling) return;
     e->selected = row != NULL ? gtk_list_box_row_get_index(row) : -1;
     if (e->selected >= 0) fill(e, g_ptr_array_index(e->rows, (guint)e->selected));
+    selection_controls(e);
 }
 static gchar *action_payload(Editor *e, const char *action) {
     GString *payload = g_string_new(action);
@@ -113,6 +148,12 @@ static gchar *action_payload(Editor *e, const char *action) {
     return g_string_free(payload, FALSE);
 }
 static void send_action(Editor *e, const char *action) {
+    if (hidden_selection(e) && (g_strcmp0(action, "save") == 0 || g_strcmp0(action, "delete") == 0
+        || g_strcmp0(action, "up") == 0 || g_strcmp0(action, "down") == 0)) {
+        gtk_label_set_text(GTK_LABEL(e->status),
+            "The selected entry is hidden by filters. Clear filters or select a visible entry.");
+        return;
+    }
     gchar *payload = action_payload(e, action);
     pending(e, TRUE); gtk_label_set_text(GTK_LABEL(e->status), "Saving or previewing...");
     jsti_window_emit(70, payload, e->kind); g_free(payload);
@@ -216,7 +257,7 @@ static void clicked(GtkButton *button, gpointer data) {
         gtk_window_present(GTK_WINDOW(dialog)); return;
     }
     if (g_strcmp0(action, "new") == 0) {
-        e->selected = -1; gtk_list_box_unselect_all(e->list); fill(e, NULL); return;
+        e->selected = -1; gtk_list_box_unselect_all(e->list); fill(e, NULL); selection_controls(e); return;
     }
     if (g_strcmp0(action, "refresh") == 0) {
         pending(e, TRUE); jsti_window_emit(71, "", e->kind); return;
@@ -257,13 +298,84 @@ static GtkWidget *button(Editor *e, const char *title, const char *action) {
 static gboolean filter(GtkListBoxRow *row, gpointer data) {
     Editor *e = data;
     const char *query = gtk_editable_get_text(GTK_EDITABLE(e->search));
+    if (e->kind == 1) {
+        const gint index = gtk_list_box_row_get_index(row);
+        if (index < 0 || (guint)index >= e->rows->len) return FALSE;
+        gchar **fields = g_ptr_array_index(e->rows, (guint)index);
+        if (e->category[0] != '\0' && g_strcmp0(fields[4], e->category) != 0) return FALSE;
+        gchar *needle = g_utf8_casefold(query, -1);
+        gboolean match = FALSE;
+        for (guint i = 1; i <= 3; ++i) {
+            gchar *haystack = g_utf8_casefold(fields[i], -1);
+            match = match || strstr(haystack, needle) != NULL;
+            g_free(haystack);
+        }
+        g_free(needle); return match;
+    }
     GtkWidget *label = gtk_list_box_row_get_child(row);
     gchar *haystack = g_utf8_casefold(gtk_label_get_text(GTK_LABEL(label)), -1), *needle = g_utf8_casefold(query, -1);
     gboolean match = strstr(haystack, needle) != NULL;
     g_free(haystack); g_free(needle); return match;
 }
 static void search_changed(GtkSearchEntry *search, gpointer data) {
-    (void)search; Editor *e = data; gtk_list_box_invalidate_filter(e->list);
+    (void)search; Editor *e = data;
+    if (e->kind == 1) apply_filters(e);
+    else gtk_list_box_invalidate_filter(e->list);
+}
+static void category_changed(GObject *object, GParamSpec *spec, gpointer data) {
+    (void)object; (void)spec; Editor *e = data;
+    if (e->filling) return;
+    const guint selected = gtk_drop_down_get_selected(GTK_DROP_DOWN(e->category_filter));
+    if (selected >= e->categories->len) return;
+    Category *category = g_ptr_array_index(e->categories, selected);
+    g_free(e->category); e->category = g_strdup(category->value);
+    apply_filters(e);
+}
+static void category_free(gpointer data) {
+    Category *category = data; g_free(category->value); g_free(category);
+}
+static GPtrArray *category_options(gchar **header, GPtrArray *rows) {
+    const guint length = g_strv_length(header);
+    GPtrArray *options = g_ptr_array_new_with_free_func(category_free);
+    Category *all = g_new0(Category, 1); all->value = g_strdup(""); all->count = rows->len;
+    g_ptr_array_add(options, all);
+    if (length == 4) return options;
+    gchar *total = g_strdup_printf("%u", rows->len);
+    const gboolean modern = length >= 6 && g_strcmp0(header[4], "pronunciationCategories.v1") == 0
+        && (length - 6) % 2 == 0 && g_strcmp0(header[5], total) == 0;
+    g_free(total);
+    if (!modern) { g_ptr_array_unref(options); return NULL; }
+    for (guint i = 6; i < length; i += 2) {
+        gchar *name = g_uri_unescape_string(header[i], NULL);
+        if (name == NULL || name[0] == '\0') { g_free(name); g_ptr_array_unref(options); return NULL; }
+        guint count = 0;
+        for (guint j = 0; j < rows->len; ++j)
+            if (g_strcmp0(((gchar **)g_ptr_array_index(rows, j))[4], name) == 0) ++count;
+        gchar *expected = g_strdup_printf("%u", count);
+        gboolean valid = count > 0 && g_strcmp0(header[i + 1], expected) == 0;
+        g_free(expected);
+        for (guint j = 0; j < options->len; ++j)
+            if (g_strcmp0(((Category *)g_ptr_array_index(options, j))->value, name) == 0) valid = FALSE;
+        if (!valid) { g_free(name); g_ptr_array_unref(options); return NULL; }
+        Category *category = g_new0(Category, 1); category->value = name; category->count = count;
+        g_ptr_array_add(options, category);
+    }
+    return options;
+}
+static void update_categories(Editor *e, GPtrArray *options) {
+    g_ptr_array_unref(e->categories); e->categories = options;
+    GtkStringList *model = gtk_string_list_new(NULL);
+    guint selected = 0;
+    for (guint i = 0; i < options->len; ++i) {
+        Category *category = g_ptr_array_index(options, i);
+        gchar *label = g_strdup_printf("%s (%u)", i == 0 ? "All" : category->value, category->count);
+        gtk_string_list_append(model, label); g_free(label);
+        if (g_strcmp0(e->category, category->value) == 0) selected = i;
+    }
+    gtk_drop_down_set_model(GTK_DROP_DOWN(e->category_filter), G_LIST_MODEL(model)); g_object_unref(model);
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(e->category_filter), selected);
+    g_free(e->category);
+    e->category = g_strdup(((Category *)g_ptr_array_index(options, selected))->value);
 }
 static GtkWidget *multiline(GtkWidget **view) {
     *view = gtk_text_view_new();
@@ -276,11 +388,13 @@ static GtkWidget *multiline(GtkWidget **view) {
 static void destroy_editor(gpointer data) {
     Editor *e = data;
     if (editors[e->kind] == e) editors[e->kind] = NULL;
-    g_ptr_array_unref(e->rows); g_ptr_array_unref(e->buttons); g_free(e);
+    g_ptr_array_unref(e->rows); g_ptr_array_unref(e->categories); g_ptr_array_unref(e->buttons);
+    g_free(e->category); g_free(e);
 }
 GtkWidget *jsti_vocabulary_page_new(int kind) {
     Editor *e = g_new0(Editor, 1); e->kind = kind; e->selected = -1;
     e->rows = g_ptr_array_new_with_free_func((GDestroyNotify)g_strfreev);
+    e->categories = g_ptr_array_new_with_free_func(category_free); e->category = g_strdup("");
     e->buttons = g_ptr_array_new();
     GtkWidget *column, *page = jsti_page_new(&column); e->root = page; editors[kind] = e;
     g_object_set_data_full(G_OBJECT(page), "vocabulary-editor", e, destroy_editor);
@@ -294,6 +408,18 @@ GtkWidget *jsti_vocabulary_page_new(int kind) {
     gtk_widget_set_tooltip_text(e->search, "Search saved entries");
     g_signal_connect(e->search, "search-changed", G_CALLBACK(search_changed), e);
     gtk_box_append(GTK_BOX(column), e->search);
+    if (kind == 1) {
+        GtkWidget *label = gtk_label_new_with_mnemonic("Category _filter");
+        gtk_label_set_xalign(GTK_LABEL(label), 0);
+        gtk_box_append(GTK_BOX(column), label);
+        const char *initial[] = {"All (0)", NULL};
+        e->category_filter = gtk_drop_down_new_from_strings(initial);
+        gtk_label_set_mnemonic_widget(GTK_LABEL(label), e->category_filter);
+        gtk_accessible_update_property(GTK_ACCESSIBLE(e->category_filter), GTK_ACCESSIBLE_PROPERTY_LABEL,
+            "Category filter", -1);
+        g_signal_connect(e->category_filter, "notify::selected", G_CALLBACK(category_changed), e);
+        gtk_box_append(GTK_BOX(column), e->category_filter);
+    }
     e->list = GTK_LIST_BOX(gtk_list_box_new());
     gtk_widget_add_css_class(GTK_WIDGET(e->list), "boxed-list");
     gtk_list_box_set_filter_func(e->list, filter, e, NULL);
@@ -425,13 +551,7 @@ static void present(gpointer data) {
         gchar *tags = g_uri_unescape_string(header[3], NULL);
         gtk_editable_set_text(GTK_EDITABLE(e->tags), tags != NULL ? tags : ""); g_free(tags);
     }
-    g_strfreev(header);
-    gchar *selected_id = e->selected >= 0
-        ? g_strdup(((gchar **)g_ptr_array_index(e->rows, (guint)e->selected))[0]) : NULL;
-    e->filling = TRUE; e->selected = -1;
-    GtkWidget *child;
-    while ((child = gtk_widget_get_first_child(GTK_WIDGET(e->list))) != NULL) gtk_list_box_remove(e->list, child);
-    g_ptr_array_set_size(e->rows, 0);
+    GPtrArray *rows = g_ptr_array_new_with_free_func((GDestroyNotify)g_strfreev);
     for (guint i = 1; lines[i] != NULL; ++i) {
         gchar **row = g_strsplit(lines[i], "\t", -1);
         if (g_strv_length(row) != 8) { g_strfreev(row); continue; }
@@ -441,20 +561,46 @@ static void present(gpointer data) {
             if (value == NULL) { valid = FALSE; break; }
             g_free(row[j]); row[j] = value;
         }
-        if (!valid) { g_strfreev(row); continue; }
-        if (g_strcmp0(row[0], selected_id) == 0) e->selected = (gint)e->rows->len;
+        if (valid) g_ptr_array_add(rows, row);
+        else g_strfreev(row);
+    }
+    GPtrArray *categories = e->kind == 1 ? category_options(header, rows) : NULL;
+    g_strfreev(header); g_strfreev(lines);
+    if (e->kind == 1 && categories == NULL) {
+        g_ptr_array_unref(rows); pending(e, TRUE);
+        for (guint i = 0; i < e->buttons->len; ++i) {
+            GtkWidget *button = g_ptr_array_index(e->buttons, i);
+            if (g_strcmp0(g_object_get_data(G_OBJECT(button), "vocabulary-action"), "refresh") == 0)
+                gtk_widget_set_sensitive(button, TRUE);
+        }
+        gtk_label_set_text(GTK_LABEL(e->status),
+            "Invalid pronunciation category metadata. Reload the editor before making changes.");
+        return;
+    }
+    gchar *selected_id = e->selected >= 0
+        ? g_strdup(((gchar **)g_ptr_array_index(e->rows, (guint)e->selected))[0]) : NULL;
+    e->filling = TRUE; e->selected = -1;
+    GtkWidget *child;
+    while ((child = gtk_widget_get_first_child(GTK_WIDGET(e->list))) != NULL) gtk_list_box_remove(e->list, child);
+    g_ptr_array_unref(e->rows); e->rows = rows;
+    if (e->kind == 1) update_categories(e, categories);
+    for (guint i = 0; i < e->rows->len; ++i) {
+        gchar **row = g_ptr_array_index(e->rows, i);
+        if (g_strcmp0(row[0], selected_id) == 0) e->selected = (gint)i;
         gchar *title = e->kind == 3 ? g_strdup_printf("%s -> %s (seen %s; %s)", row[1], row[2], row[3], row[7])
             : e->kind == 1 ? g_strdup_printf("%s -> %s [%s]", row[1], row[2], row[4])
             : g_strdup_printf("%s -> %s", row[1], row[2]);
         GtkWidget *label = gtk_label_new(title); gtk_label_set_xalign(GTK_LABEL(label), 0);
         gtk_label_set_wrap(GTK_LABEL(label), TRUE); gtk_list_box_append(e->list, label);
-        g_free(title); g_ptr_array_add(e->rows, row);
+        g_free(title);
     }
-    g_strfreev(lines); g_free(selected_id); e->filling = FALSE;
+    e->filling = FALSE;
     if (e->selected >= 0) {
-        gtk_list_box_select_row(e->list, gtk_list_box_get_row_at_index(e->list, e->selected));
         fill(e, g_ptr_array_index(e->rows, (guint)e->selected));
-    }
+    } else if (selected_id != NULL && e->kind == 1) fill(e, NULL);
+    g_free(selected_id);
+    if (e->kind == 1) apply_filters(e);
+    else if (e->selected >= 0) gtk_list_box_select_row(e->list, gtk_list_box_get_row_at_index(e->list, e->selected));
     pending(e, FALSE);
     if (e->kind == 3 && editors[0] != NULL) jsti_window_emit(71, "", 0);
 }
@@ -466,6 +612,153 @@ int32_t jsti_vocabulary_set(int32_t kind, const char *payload, int32_t refresh) 
     return jsti_window_post(present, p, presentation_free);
 }
 
+static guint filter_visible_count(Editor *e) {
+    guint count = 0;
+    for (guint i = 0; i < e->rows->len; ++i)
+        if (gtk_widget_get_child_visible(GTK_WIDGET(gtk_list_box_get_row_at_index(e->list, (gint)i)))) ++count;
+    return count;
+}
+static void filter_fixture(const char *header, const char *rows) {
+    Presentation p = {1, g_strconcat(header, rows, NULL), TRUE};
+    present(&p); g_free(p.payload);
+}
+static void filter_query(Editor *e, const char *query) {
+    gtk_editable_set_text(GTK_EDITABLE(e->search), query);
+    g_signal_emit_by_name(e->search, "search-changed");
+}
+static gboolean filter_expect(gboolean condition, const char *message, char *error, size_t capacity) {
+    if (!condition) jsti_set_error(error, capacity, "%s", message);
+    return condition;
+}
+static gboolean filter_action_sensitive(Editor *e, const char *action) {
+    for (guint i = 0; i < e->buttons->len; ++i) {
+        GtkWidget *button = g_ptr_array_index(e->buttons, i);
+        if (g_strcmp0(g_object_get_data(G_OBJECT(button), "vocabulary-action"), action) == 0)
+            return gtk_widget_get_sensitive(button);
+    }
+    return FALSE;
+}
+static gboolean pronunciation_filter_checks(Editor *e, char *error, size_t capacity) {
+    const char *legacy = "\ttrue\ttrue\t";
+    const char *modern = "\ttrue\ttrue\t\tpronunciationCategories.v1\t4\tTechnical\t1\tNames\t1";
+    const char *rows =
+        "\nfixture-a\tAlpha\tFirst\tReplacementOnly\tTechnical\tfalse\tfalse\t"
+        "\nfixture-b\tBeta\tSecond\tOther\tNames\tfalse\tfalse\t"
+        "\nfixture-u\tGamma\tThird\tOther\tImported\tfalse\tfalse\t"
+        "\nfixture-n\tDelta\tFourth\t\t\tfalse\tfalse\t";
+    filter_fixture(modern, rows);
+    GtkStringList *model = GTK_STRING_LIST(gtk_drop_down_get_model(GTK_DROP_DOWN(e->category_filter)));
+    if (!filter_expect(filter_visible_count(e) == 4 && e->categories->len == 3
+        && g_strcmp0(gtk_string_list_get_string(model, 0), "All (4)") == 0
+        && g_strcmp0(gtk_string_list_get_string(model, 1), "Technical (1)") == 0,
+        "Pronunciation category counts failed.", error, capacity)) return FALSE;
+    filter_query(e, "rEpLaCeMeNtOnLy");
+    if (!filter_expect(filter_visible_count(e) == 1
+        && gtk_widget_get_child_visible(GTK_WIDGET(gtk_list_box_get_row_at_index(e->list, 0))),
+        "Replacement-only pronunciation search failed.", error, capacity)) return FALSE;
+    filter_query(e, "Technical");
+    if (!filter_expect(filter_visible_count(e) == 0,
+        "Pronunciation search incorrectly searched category labels.", error, capacity)) return FALSE;
+    filter_query(e, "");
+    if (!filter_expect(filter_visible_count(e) == 4,
+        "Clearing pronunciation search lost unknown or uncategorized entries.", error, capacity)) return FALSE;
+    gtk_list_box_select_row(e->list, gtk_list_box_get_row_at_index(e->list, 1));
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(e->category_filter), 1);
+    send_action(e, "save");
+    gchar *word = text(e->fields[1]);
+    const gboolean hidden = e->selected == 1 && hidden_selection(e) && !e->busy
+        && filter_visible_count(e) == 1 && g_strcmp0(word, "Beta") == 0
+        && !filter_action_sensitive(e, "save") && !filter_action_sensitive(e, "delete")
+        && !filter_action_sensitive(e, "up") && !filter_action_sensitive(e, "down");
+    g_free(word);
+    if (!filter_expect(hidden, "A hidden pronunciation selection changed identity or remained writable.",
+        error, capacity)) return FALSE;
+    filter_query(e, "Second");
+    if (!filter_expect(filter_visible_count(e) == 0
+        && g_strcmp0(gtk_string_list_get_string(model, 0), "All (4)") == 0,
+        "Pronunciation search and category filtering were not conjunctive.", error, capacity)) return FALSE;
+    filter_query(e, "");
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(e->category_filter), 2);
+    if (!filter_expect(filter_visible_count(e) == 1 && !hidden_selection(e) && e->selected == 1
+        && filter_action_sensitive(e, "save"),
+        "Clearing filters did not restore the selected pronunciation entry.", error, capacity)) return FALSE;
+    filter_fixture(modern,
+        "\nfixture-b\tBeta\tSecond\tOther\tNames\tfalse\tfalse\t"
+        "\nfixture-u\tGamma\tThird\tOther\tImported\tfalse\tfalse\t"
+        "\nfixture-a\tAlpha\tFirst\tReplacementOnly\tTechnical\tfalse\tfalse\t"
+        "\nfixture-n\tDelta\tFourth\t\t\tfalse\tfalse\t");
+    gchar *payload = action_payload(e, "save");
+    gchar **fields = g_strsplit(payload, "\t", -1);
+    const gboolean identity = g_strcmp0(e->category, "Names") == 0 && e->selected == 0
+        && filter_visible_count(e) == 1 && g_strv_length(fields) == 9 && g_strcmp0(fields[1], "fixture-b") == 0;
+    g_strfreev(fields); g_free(payload);
+    if (!filter_expect(identity, "Pronunciation reload did not preserve category and UUID identity.",
+        error, capacity)) return FALSE;
+    filter_fixture("\ttrue\ttrue\t\tpronunciationCategories.v1\t3\tTechnical\t1",
+        "\nfixture-u\tGamma\tThird\tOther\tImported\tfalse\tfalse\t"
+        "\nfixture-a\tAlpha\tFirst\tReplacementOnly\tTechnical\tfalse\tfalse\t"
+        "\nfixture-n\tDelta\tFourth\t\t\tfalse\tfalse\t");
+    word = text(e->fields[1]);
+    const gboolean removed = e->category[0] == '\0' && e->selected == -1 && filter_visible_count(e) == 3
+        && word[0] == '\0';
+    g_free(word);
+    if (!filter_expect(removed, "A removed pronunciation category or entry became another selection.",
+        error, capacity)) return FALSE;
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(e->category_filter), 1);
+    filter_fixture("\ttrue\ttrue\t\tpronunciationCategories.v1\t0", "");
+    if (!filter_expect(e->category[0] == '\0' && filter_visible_count(e) == 0 && e->categories->len == 1,
+        "An empty pronunciation collection did not reset its category filter.", error, capacity)) return FALSE;
+    filter_fixture(legacy, rows);
+    if (!filter_expect(e->categories->len == 1 && filter_visible_count(e) == 4,
+        "Legacy pronunciation payload handling failed.", error, capacity)) return FALSE;
+    const char *invalid[] = {
+        "\ttrue\ttrue\t\tpronunciationCategories.v2\t4",
+        "\ttrue\ttrue\t\tpronunciationCategories.v1",
+        "\ttrue\ttrue\t\tpronunciationCategories.v1\t4\tTechnical",
+        "\ttrue\ttrue\t\tpronunciationCategories.v1\t-1",
+        "\ttrue\ttrue\t\tpronunciationCategories.v1\t999999999999999999999",
+        "\ttrue\ttrue\t\tpronunciationCategories.v1\t3",
+        "\ttrue\ttrue\t\tpronunciationCategories.v1\t4\tTechnical\t-1",
+        "\ttrue\ttrue\t\tpronunciationCategories.v1\t4\tTechnical\t0",
+        "\ttrue\ttrue\t\tpronunciationCategories.v1\t4\tTechnical\t2",
+        "\ttrue\ttrue\t\tpronunciationCategories.v1\t4\tTechnical\t01",
+        "\ttrue\ttrue\t\tpronunciationCategories.v1\t4\tTechnical\t1\tTechnical\t1",
+        "\ttrue\ttrue\t\tpronunciationCategories.v1\t4\t\t1"
+    };
+    for (guint i = 0; i < G_N_ELEMENTS(invalid); ++i) {
+        filter_fixture(invalid[i], rows);
+        if (!filter_expect(e->busy && e->rows->len == 4 && !filter_action_sensitive(e, "save")
+            && filter_action_sensitive(e, "refresh")
+            && g_str_has_prefix(gtk_label_get_text(GTK_LABEL(e->status)), "Invalid pronunciation category metadata"),
+            "Malformed modern pronunciation metadata was not explicitly refused.", error, capacity)) return FALSE;
+        filter_fixture(modern, rows);
+    }
+    int minimum = 0;
+    gtk_widget_measure(e->root, GTK_ORIENTATION_HORIZONTAL, -1, &minimum, NULL, NULL, NULL);
+    gtk_widget_allocate(e->root, 800, 640, -1, NULL);
+    graphene_rect_t dropdown, search, list;
+    const gboolean bounds = gtk_widget_compute_bounds(e->category_filter, e->root, &dropdown)
+        && gtk_widget_compute_bounds(e->search, e->root, &search)
+        && gtk_widget_compute_bounds(GTK_WIDGET(e->list), e->root, &list);
+    return filter_expect(minimum <= 800 && bounds && dropdown.size.width > 0 && dropdown.size.height > 0
+        && dropdown.origin.x >= 0 && dropdown.origin.x + dropdown.size.width <= 800
+        && search.origin.y + search.size.height <= dropdown.origin.y
+        && dropdown.origin.y + dropdown.size.height <= list.origin.y
+        && gtk_widget_get_scale_factor(e->category_filter) >= 1,
+        "Pronunciation category controls exceeded minimum-size/scaled bounds.", error, capacity);
+}
+static gboolean pronunciation_filter_self_test(char *error, size_t capacity) {
+    Editor *previous = editors[1];
+    GtkWidget *window = gtk_window_new(); g_object_ref_sink(window);
+    gtk_window_set_default_size(GTK_WINDOW(window), 800, 640);
+    GtkWidget *page = jsti_vocabulary_page_new(1);
+    gtk_window_set_child(GTK_WINDOW(window), page);
+    gtk_widget_realize(window);
+    const gboolean valid = pronunciation_filter_checks(editors[1], error, capacity);
+    gtk_window_destroy(GTK_WINDOW(window)); g_object_unref(window);
+    editors[1] = previous;
+    return valid;
+}
 int32_t jsti_vocabulary_self_test(char *error, size_t capacity) {
     for (int kind = 0; kind < 2; ++kind) {
         Editor *e = editors[kind];
@@ -504,5 +797,5 @@ int32_t jsti_vocabulary_self_test(char *error, size_t capacity) {
     candidate_valid = candidate_valid && g_strcmp0(candidate_payload, "clear") == 0;
     g_free(candidate_payload); g_object_unref(candidate_page); editors[3] = existing_candidates;
     if (!candidate_valid) { jsti_set_error(error, capacity, "Stored candidate events were not preserved."); return -1; }
-    return 0;
+    return pronunciation_filter_self_test(error, capacity) ? 0 : -1;
 }

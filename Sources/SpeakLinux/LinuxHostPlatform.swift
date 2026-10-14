@@ -162,6 +162,10 @@ enum LinuxHostPlatform: DesktopHostPlatform {
 
     package static func cancel(_ job: LinuxOutputJob) { job.cancel() }
 
+    package static func requiresInsertionTarget(_ options: LinuxTextOutputOptions) -> Bool {
+        options.method != .clipboardOnly
+    }
+
     package static func isClipboard(_ job: LinuxOutputJob) -> Bool { job.plan.isClipboard }
 
     package static func makePlayback() -> LinuxAudioPlayback { LinuxAudioPlayback() }

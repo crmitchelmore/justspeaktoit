@@ -123,6 +123,10 @@ enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPla
         return target.map { .insertion($0, options) }
     }
 
+    package static func requiresInsertionTarget(_ options: WindowsTextOutputOptions) -> Bool {
+        options.method != .clipboardOnly
+    }
+
     package static func cancel(_ job: WindowsOutputJob) { job.cancel() }
 
     package static func isClipboard(_ job: WindowsOutputJob) -> Bool {

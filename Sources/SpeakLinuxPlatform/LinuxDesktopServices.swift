@@ -64,12 +64,18 @@ public enum LinuxX11 {
 
     /// The focused X11 top-level window, unless it belongs to this process.
     public static func captureTarget() -> LinuxInsertionTarget? {
+        try? captureTargetChecked()
+    }
+
+    public static func captureTargetChecked() throws -> LinuxInsertionTarget? {
         var window: UInt64 = 0
         var windowClass = [CChar](repeating: 0, count: 256)
         var pid: Int32 = 0
         var error = [CChar](repeating: 0, count: 256)
-        guard jsti_x11_active_window(&window, &windowClass, windowClass.count, &pid, &error, error.count) == 0,
-              window != 0, pid != getpid() else { return nil }
+        guard jsti_x11_active_window(&window, &windowClass, windowClass.count, &pid, &error, error.count) == 0 else {
+            throw LinuxNativeError(message: String(cString: error))
+        }
+        guard window != 0, pid != getpid() else { return nil }
         let executable = pid > 0
             ? try? FileManager.default.destinationOfSymbolicLink(atPath: "/proc/\(pid)/exe") : nil
         let className = String(cString: windowClass)

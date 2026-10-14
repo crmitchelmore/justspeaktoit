@@ -7,7 +7,6 @@ final class DesktopHandsFreeRun<Platform: DesktopHostPlatform>: @unchecked Senda
     let id: UUID
     let audio: DesktopHandsFreeAudio
     let profile: DesktopProfileSession
-    let target: Platform.InsertionTarget?
     let textOutput: Platform.TextOutputOptions
     let deviceID: String
     var capture: (any DesktopRecordingCapture)?
@@ -15,12 +14,11 @@ final class DesktopHandsFreeRun<Platform: DesktopHostPlatform>: @unchecked Senda
 
     init(
         id: UUID, audio: DesktopHandsFreeAudio, profile: DesktopProfileSession,
-        target: Platform.InsertionTarget?, textOutput: Platform.TextOutputOptions, deviceID: String
+        textOutput: Platform.TextOutputOptions, deviceID: String
     ) {
         self.id = id
         self.audio = audio
         self.profile = profile
-        self.target = target
         self.textOutput = textOutput
         self.deviceID = deviceID
     }
@@ -103,7 +101,7 @@ extension DesktopHostController {
                 onFailure: { [weak self] message in Task { await self?.failHandsFree(message, runID: id) } }
             )
             let run = DesktopHandsFreeRun<Platform>(
-                id: id, audio: audio, profile: profile, target: request.target,
+                id: id, audio: audio, profile: profile,
                 textOutput: textOutput, deviceID: request.deviceID
             )
             handsFreeRun = run
@@ -155,8 +153,10 @@ extension DesktopHostController {
             beginBusyOperation()
             defer { finishBusyOperation() }
             do {
+                let target = try await utteranceTarget(run)
+                guard !closed, handsFreeRun?.id == runID else { return }
                 try await startRecording(
-                    target: run.target, deviceID: run.deviceID, profile: run.profile,
+                    target: target, deviceID: run.deviceID, profile: run.profile,
                     textOutput: run.textOutput, handsFree: run
                 )
                 guard handsFreeRun?.id == runID, let record = recording else { return }
@@ -184,8 +184,21 @@ extension DesktopHostController {
         guard !closed, handsFreeRun?.id == run.id else { return }
         if let record = history[recordID], record.result != nil,
            record.failure == nil, record.postProcessingFailure == nil, !cancellationRequested {
-            if let delivery = outputSlot.task { await delivery.value }
+            if outputSlot.recordID == recordID, let delivery = outputSlot.task { await delivery.value }
             guard !closed, handsFreeRun?.id == run.id, !cancellationRequested else { return }
+            guard outputSlot.recordID == recordID, let result = outputSlot.result else {
+                await disarmHandsFree(
+                    status: "Hands-free stopped: no automatic output was delivered. The transcript stays in History."
+                )
+                return
+            }
+            guard result.permitsAutomaticResume else {
+                await disarmHandsFree(
+                    status: "Hands-free stopped. \(result.status) "
+                        + "Check the original field before using the hotkey again."
+                )
+                return
+            }
             _ = handsFreeMachine.handle(.captureFinished)
             run.audio.resumeListening()
             announceHandsFreeListening(run.id)
@@ -194,6 +207,16 @@ extension DesktopHostController {
                 status: "Hands-free stopped after a failed session. Captured audio stays in History."
             )
         }
+    }
+
+    private func utteranceTarget(_ run: DesktopHandsFreeRun<Platform>) async throws -> Platform.InsertionTarget? {
+        guard Platform.requiresInsertionTarget(run.textOutput) else { return nil }
+        guard let target = try await effects.captureInsertionTarget() else {
+            throw DesktopHostError(
+                message: "No external destination was captured. Focus a text field or select clipboard-only output."
+            )
+        }
+        return target
     }
 
     func failHandsFree(_ message: String, runID: UUID) async {

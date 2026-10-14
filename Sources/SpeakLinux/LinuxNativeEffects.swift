@@ -44,7 +44,20 @@ struct LinuxNativeEffects: DesktopHostEffects {
         )
     }
 
-    func perform(_ job: LinuxOutputJob, text: String) -> String { job.perform(text) }
+    func perform(_ job: LinuxOutputJob, text: String) -> DesktopTextOutputResult { job.performResult(text) }
+
+    func captureInsertionTarget() async throws -> LinuxInsertionTarget? {
+        guard LinuxHostPlatform.session.canUseX11Injection else {
+            throw DesktopHostError(
+                message: "This desktop cannot freeze an external insertion destination. "
+                    + "Use clipboard-only hands-free output or manual recording."
+            )
+        }
+        return try await Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
+            return try LinuxX11.captureTargetChecked()
+        }.value
+    }
 
     func writeSettings(_ data: Data, to url: URL) throws { try data.write(to: url, options: .atomic) }
 }

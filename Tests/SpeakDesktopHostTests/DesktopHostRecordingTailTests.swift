@@ -62,6 +62,23 @@ final class TailEffects: DesktopHostEffects, @unchecked Sendable {
     private var storedCapture: TailCapture?
     private var requests: [DesktopHostTranscriptionRequest] = []
     private var performed = 0
+    private var jobs: [FakeJob] = []
+    private var targetRequests = 0
+    private var storedTarget: String? = "synthetic-field"
+    private var storedDelivery = DesktopTextOutputResult(.confirmedInsertion, status: "Delivered.")
+    var target: String? {
+        get { lock.withLock { storedTarget } }
+        set { lock.withLock { storedTarget = newValue } }
+    }
+    var delivery: DesktopTextOutputResult {
+        get { lock.withLock { storedDelivery } }
+        set { lock.withLock { storedDelivery = newValue } }
+    }
+    let targetGate = Gate(open: true)
+    let transcriptionGate = Gate(open: true)
+    let outputGate = Gate(open: true)
+    var targetRequestCount: Int { lock.withLock { targetRequests } }
+    var outputJobs: [FakeJob] { lock.withLock { jobs } }
     var failStart = false
     var failTranscription = false
     var failSettingsWrite = false
@@ -84,15 +101,23 @@ final class TailEffects: DesktopHostEffects, @unchecked Sendable {
         _ request: DesktopHostTranscriptionRequest, with controller: DesktopHostController<FakePlatform>
     ) async throws -> TranscriptionResult {
         lock.withLock { requests.append(request) }
+        await transcriptionGate.pass()
+        try Task.checkCancellation()
         if failTranscription { throw DesktopHostError(message: "Synthetic transcription failure.") }
         return TranscriptionResult(
             text: "Batch tail transcript", segments: [], confidence: nil, duration: request.duration,
             modelIdentifier: request.model, cost: nil, rawPayload: nil, debugInfo: nil
         )
     }
-    func perform(_ job: FakeJob, text: String) -> String {
-        lock.withLock { performed += 1 }
-        return "Delivered."
+    func captureInsertionTarget() async throws -> String? {
+        let captured = lock.withLock { targetRequests += 1; return storedTarget }
+        await targetGate.pass()
+        return captured
+    }
+    func perform(_ job: FakeJob, text: String) -> DesktopTextOutputResult {
+        lock.withLock { performed += 1; jobs.append(job) }
+        while !outputGate.isOpen, !Task.isCancelled { Thread.sleep(forTimeInterval: 0.002) }
+        return delivery
     }
     func writeSettings(_ data: Data, to url: URL) throws {
         if failSettingsWrite { throw DesktopHostError(message: "Synthetic settings write failure.") }

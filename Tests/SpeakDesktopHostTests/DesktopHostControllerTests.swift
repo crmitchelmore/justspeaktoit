@@ -106,6 +106,7 @@ enum FakePlatform: DesktopHostPlatform {
     static func makeOutputJob(options: FakeTextOutput, target: String?) -> FakeJob? {
         options.label == "copy" || target != nil ? FakeJob(label: options.label, target: target) : nil
     }
+    static func requiresInsertionTarget(_ options: FakeTextOutput) -> Bool { options.label != "copy" }
     static func cancel(_ job: FakeJob) {}
     static func isClipboard(_ job: FakeJob) -> Bool { job.target == nil }
     static func makePlayback() -> FakePlayback { FakePlayback() }
@@ -119,6 +120,7 @@ final class Gate: @unchecked Sendable {
     private let lock = NSLock()
     private var open: Bool
     init(open: Bool) { self.open = open }
+    var isOpen: Bool { lock.withLock { open } }
     func hold() { lock.withLock { open = false } }
     func release() { lock.withLock { open = true } }
     func pass() async {
@@ -166,9 +168,9 @@ final class SyntheticEffects: DesktopHostEffects, @unchecked Sendable {
             modelIdentifier: request.model, cost: nil, rawPayload: nil, debugInfo: nil
         )
     }
-    func perform(_ job: FakeJob, text: String) -> String {
+    func perform(_ job: FakeJob, text: String) -> DesktopTextOutputResult {
         lock.withLock { performed.append((job, text)) }
-        return "Delivered."
+        return DesktopTextOutputResult(.confirmedInsertion, status: "Delivered.")
     }
     func writeSettings(_ data: Data, to url: URL) throws { try data.write(to: url, options: .atomic) }
 }
@@ -390,6 +392,8 @@ final class GatedEffects: DesktopHostEffects, @unchecked Sendable {
         try Task.checkCancellation()
         throw CancellationError()
     }
-    func perform(_ job: FakeJob, text: String) -> String { "Delivered." }
+    func perform(_ job: FakeJob, text: String) -> DesktopTextOutputResult {
+        DesktopTextOutputResult(.confirmedInsertion, status: "Delivered.")
+    }
     func writeSettings(_ data: Data, to url: URL) throws { try data.write(to: url, options: .atomic) }
 }

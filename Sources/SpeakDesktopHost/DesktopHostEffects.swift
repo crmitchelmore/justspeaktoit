@@ -49,12 +49,18 @@ package protocol DesktopHostEffects<Platform>: Sendable {
         _ request: DesktopHostTranscriptionRequest, with controller: DesktopHostController<Platform>
     ) async throws -> TranscriptionResult
     /// Blocking automatic output, called off the UI thread and the controller.
-    func perform(_ job: Platform.OutputJob, text: String) -> String
+    func perform(_ job: Platform.OutputJob, text: String) -> DesktopTextOutputResult
+    /// Captures the automatic utterance's destination away from PCM and the UI thread.
+    func captureInsertionTarget() async throws -> Platform.InsertionTarget?
     /// Replaces the settings file atomically.
     func writeSettings(_ data: Data, to url: URL) throws
 }
 
 package extension DesktopHostEffects {
+    func captureInsertionTarget() async throws -> Platform.InsertionTarget? {
+        throw DesktopHostError(message: "This host cannot capture a hands-free insertion destination.")
+    }
+
     func makeLiveClient(
         model: String, key: String, language: String?, azureEndpoint: String, options: LiveClientOptions
     ) -> (any FinalizingStreamingTranscriptionClient)? {

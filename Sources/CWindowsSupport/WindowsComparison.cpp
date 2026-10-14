@@ -16,6 +16,7 @@ constexpr UINT presentMessage = WM_APP + 70;
 constexpr int deleteID = 740;
 constexpr int syncID = 741, syncNowID = 742;
 constexpr int referenceID = 743, allID = 744, noneID = 745, referenceLabelID = 746;
+constexpr int exportScopeID = 747, exportLabelID = 748, copyJSONID = 749, copyMarkdownID = 750;
 struct Row { std::string id; std::wstring name; bool live = false, selected = false; };
 struct Presentation {
     std::string models, rounds, detail, selected;
@@ -147,6 +148,8 @@ void present(HWND window, Dialog &dialog) {
     EnableWindow(GetDlgItem(window, playID), !next.busy && !dialog.rounds.empty());
     EnableWindow(GetDlgItem(window, jsonID), !next.busy && !dialog.rounds.empty());
     EnableWindow(GetDlgItem(window, markdownID), !next.busy && !dialog.rounds.empty());
+    for (int id : {exportScopeID, copyJSONID, copyMarkdownID})
+        EnableWindow(GetDlgItem(window, id), !next.busy && !dialog.rounds.empty());
     EnableWindow(GetDlgItem(window, deleteID), !next.busy && !next.selected.empty());
     SendDlgItemMessageW(window, syncID, BM_SETCHECK, next.syncEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
     EnableWindow(GetDlgItem(window, syncID), next.syncAvailable);
@@ -156,7 +159,7 @@ void present(HWND window, Dialog &dialog) {
 }
 void layout(HWND window, Dialog &dialog) {
     RECT client{}; GetClientRect(window, &client);
-    const int height = std::max(static_cast<int>(client.bottom), scale(window, 690));
+    const int height = std::max(static_cast<int>(client.bottom), scale(window, 740));
     const int width = std::max(static_cast<int>(client.right), scale(window, 640));
     dialog.scroll = std::clamp(dialog.scroll, 0, height - static_cast<int>(client.bottom));
     SCROLLINFO info{}; info.cbSize = sizeof(info); info.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
@@ -181,9 +184,11 @@ void layout(HWND window, Dialog &dialog) {
     move(detailID, 270, 126, 340, 356);
     move(ranksLabelID, 270, 490, 340, 24); move(ranksID, 270, 516, 140, 30);
     move(judgeID, 420, 516, 190, 30);
-    move(jsonID, 270, 557, 140, 30); move(markdownID, 420, 557, 190, 30);
+    move(exportLabelID, 270, 557, 75, 24); move(exportScopeID, 350, 554, 260, 160);
+    move(jsonID, 270, 592, 155, 30); move(markdownID, 435, 592, 175, 30);
+    move(copyJSONID, 270, 632, 155, 30); move(copyMarkdownID, 435, 632, 175, 30);
     move(deleteID, 16, 585, 240, 32);
-    move(syncID, 16, 633, 420, 32); move(syncNowID, 450, 633, 160, 32);
+    move(syncID, 16, 686, 420, 32); move(syncNowID, 450, 686, 160, 32);
     const HFONT font = jsti::chrome::font(jsti::chrome::Font::body, GetDpiForWindow(window));
     for (HWND control : dialog.controls) SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
 }
@@ -227,7 +232,20 @@ void run(HWND window, Dialog &dialog) {
     }
     emit(dialog, live ? 103 : 102, payload);
 }
+std::string exportScope(HWND window, const Dialog &dialog) {
+    return SendDlgItemMessageW(window, exportScopeID, CB_GETCURSEL, 0, 0) == 1 ? dialog.shown.selected : "";
+}
+bool validExportScope(HWND window, const std::string &scope) {
+    if (SendDlgItemMessageW(window, exportScopeID, CB_GETCURSEL, 0, 0) != 1 || !scope.empty()) return true;
+    MessageBoxW(window, L"Select a saved comparison to export.", L"Comparison", MB_OK | MB_ICONWARNING);
+    return false;
+}
+void saveExport(Dialog &dialog, const std::string &scope, const std::string &path, bool markdown) {
+    emit(dialog, scope.empty() ? 107 : 127, scope.empty() ? path : scope + "\n" + path, markdown ? 1 : 0);
+}
 void exportFile(HWND window, Dialog &dialog, bool markdown) {
+    const auto scope = exportScope(window, dialog);
+    if (!validExportScope(window, scope)) return;
     std::vector<wchar_t> path(32768, 0);
     const wchar_t *name = markdown ? L"Comparisons.md" : L"Comparisons.json";
     wcscpy_s(path.data(), path.size(), name);
@@ -237,7 +255,7 @@ void exportFile(HWND window, Dialog &dialog, bool markdown) {
     picker.lpstrDefExt = markdown ? L"md" : L"json";
     picker.lpstrFilter = markdown ? L"Markdown\0*.md\0" : L"JSON\0*.json\0";
     picker.Flags = OFN_EXPLORER | OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
-    if (GetSaveFileNameW(&picker)) emit(dialog, 107, jsti::utf8(path.data()), markdown ? 1 : 0);
+    if (GetSaveFileNameW(&picker)) saveExport(dialog, scope, jsti::utf8(path.data()), markdown);
     else if (CommDlgExtendedError()) MessageBoxW(window, L"Could not open the save picker.", L"Comparison", MB_OK);
 }
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
@@ -278,8 +296,12 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             && add(ranksLabelID, L"STATIC", L"Ranks for A, B, ... (e.g. 2,1,3; rank failures too)", 0)
             && add(ranksID, L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP)
             && add(judgeID, L"BUTTON", L"&Save ranking and reveal", BS_PUSHBUTTON | WS_TABSTOP)
-            && add(jsonID, L"BUTTON", L"Export &JSON", BS_PUSHBUTTON | WS_TABSTOP)
-            && add(markdownID, L"BUTTON", L"Export &Markdown", BS_PUSHBUTTON | WS_TABSTOP)
+            && add(exportLabelID, L"STATIC", L"Export", 0)
+            && add(exportScopeID, L"COMBOBOX", L"Comparison export scope", CBS_DROPDOWNLIST | WS_TABSTOP)
+            && add(jsonID, L"BUTTON", L"Save &JSON...", BS_PUSHBUTTON | WS_TABSTOP)
+            && add(markdownID, L"BUTTON", L"Save &Markdown...", BS_PUSHBUTTON | WS_TABSTOP)
+            && add(copyJSONID, L"BUTTON", L"Copy JSON", BS_PUSHBUTTON | WS_TABSTOP)
+            && add(copyMarkdownID, L"BUTTON", L"Copy Markdown", BS_PUSHBUTTON | WS_TABSTOP)
             && add(deleteID, L"BUTTON", L"&Delete / discard saved round...", BS_PUSHBUTTON | WS_TABSTOP)
             && add(syncID, L"BUTTON", L"Sync comparison transcripts and rankings with &iCloud",
                    BS_AUTOCHECKBOX | BS_MULTILINE | WS_TABSTOP)
@@ -289,6 +311,9 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         SendDlgItemMessageW(window, modeID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"File / multi-sample Batch"));
         SendDlgItemMessageW(window, modeID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Live microphone"));
         SendDlgItemMessageW(window, modeID, CB_SETCURSEL, 0, 0);
+        SendDlgItemMessageW(window, exportScopeID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"All rounds"));
+        SendDlgItemMessageW(window, exportScopeID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Selected round"));
+        SendDlgItemMessageW(window, exportScopeID, CB_SETCURSEL, 0, 0);
         layout(window, *dialog); present(window, *dialog); return 0;
     }
     case presentMessage: present(window, *dialog); return 0;
@@ -348,6 +373,12 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case judgeID: emit(*dialog, 106, dialog->shown.selected + "\n" + text(window, ranksID)); break;
         case jsonID: exportFile(window, *dialog, false); break;
         case markdownID: exportFile(window, *dialog, true); break;
+        case copyJSONID: case copyMarkdownID: {
+            const auto scope = exportScope(window, *dialog);
+            if (validExportScope(window, scope))
+                emit(*dialog, 126, scope, LOWORD(wparam) == copyMarkdownID ? 1 : 0);
+            break;
+        }
         case playID: emit(*dialog, 108, dialog->shown.selected); break;
         case stopAudioID: emit(*dialog, 109); break;
         case syncID: emit(*dialog, 121, {}, SendDlgItemMessageW(window, syncID, BM_GETCHECK, 0, 0) == BST_CHECKED); break;
@@ -403,7 +434,7 @@ void jsti_show_comparison(HWND owner, JSTIWindowCallback callback, void *context
     if (!RegisterClassW(&type) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return;
     RECT work{}; SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
     const int width = std::min(scale(owner, 900), static_cast<int>(work.right - work.left));
-    const int height = std::min(scale(owner, 760), static_cast<int>(work.bottom - work.top));
+    const int height = std::min(scale(owner, 820), static_cast<int>(work.bottom - work.top));
     HWND window = CreateWindowExW(WS_EX_CONTROLPARENT, type.lpszClassName, L"Compare Models",
         WS_OVERLAPPEDWINDOW | WS_VSCROLL | WS_HSCROLL, work.left + (work.right - work.left - width) / 2,
         work.top + (work.bottom - work.top - height) / 2, width, height, owner, nullptr, type.hInstance, &dialog);
@@ -502,6 +533,16 @@ bool jsti_comparison_self_test(HWND owner, std::string &error, const std::string
         require(check.event == 106 && check.payload == "synthetic-round\n2,1", "Comparison ranking payload changed.");
         SendMessageW(window, WM_COMMAND, MAKEWPARAM(playID, BN_CLICKED), 0);
         require(check.event == 108 && check.payload == "synthetic-round", "Comparison sample playback lost its round.");
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(copyJSONID, BN_CLICKED), 0);
+        require(check.event == 126 && check.payload.empty() && check.index == 0,
+                "All-round JSON copy lost its export scope.");
+        SendDlgItemMessageW(window, exportScopeID, CB_SETCURSEL, 1, 0);
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(copyMarkdownID, BN_CLICKED), 0);
+        require(check.event == 126 && check.payload == "synthetic-round" && check.index == 1,
+                "Selected-round Markdown copy lost its identity.");
+        saveExport(*dialog, "picker-round", "synthetic.json", false);
+        require(check.event == 127 && check.payload == "picker-round\nsynthetic.json" && check.index == 0,
+                "Selected-round save did not preserve the picker scope.");
         { std::lock_guard<std::mutex> lock(mutex);
           pending.detail = "Synthetic judged comparison\n\nResult A - File A (rank 2)\nCould we meet Friday?\n"
                            "\nResult B - File B (rank 1)\nCould we meet on Friday?\n\nScoreboard\nFile B: 1 win\nFile A: 0 wins";
@@ -513,6 +554,8 @@ bool jsti_comparison_self_test(HWND owner, std::string &error, const std::string
         present(window, *dialog);
         require(!IsWindowEnabled(GetDlgItem(window, runID)) && IsWindowEnabled(GetDlgItem(window, stopID)),
                 "Comparison run/stop controls do not follow capture state.");
+        require(!IsWindowEnabled(GetDlgItem(window, copyJSONID))
+                && !IsWindowEnabled(GetDlgItem(window, exportScopeID)), "Busy comparison exports remain enabled.");
         SetWindowPos(window, nullptr, 0, 0, 580, 400, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
         require(GetScrollPos(window, SB_VERT) == 0, "Comparison short-area scroll did not reset.");
         PostMessageW(window, WM_CLOSE, 0, 0);

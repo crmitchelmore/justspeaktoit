@@ -5,7 +5,7 @@
 #include <cstring>
 #include <vector>
 
-int32_t jsti_save_owned_window_snapshot(HWND window, const char *path, char *error, size_t capacity);
+int32_t jsti_owned_window_save_snapshot(HWND window, const char *path, char *error, size_t capacity);
 
 namespace {
 enum { headingID = 990, voicesID, statusID, refreshID, chooseID, closeID };
@@ -267,7 +267,7 @@ bool jsti_voice_discovery_self_test(HWND owner, std::string &error) {
     const DWORD length = GetEnvironmentVariableW(L"JSTI_UI_SNAPSHOT_PATH", path.data(), static_cast<DWORD>(path.size()));
     if (length && length < path.size()) {
         char failure[1024]{}; ShowWindow(window, SW_SHOWNOACTIVATE);
-        passed = jsti_save_owned_window_snapshot(window, (jsti::utf8(path.data()) + ".voice-discovery.bmp").c_str(),
+        passed = jsti_owned_window_save_snapshot(window, (jsti::utf8(path.data()) + ".voice-discovery.bmp").c_str(),
             failure, sizeof(failure)) == 0 && passed;
         if (failure[0]) error = failure;
     }

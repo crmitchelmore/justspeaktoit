@@ -170,15 +170,24 @@ public enum DataMigrationPlanner {
 
     private static func equivalent(_ lhs: DataMigrationRecord, _ rhs: DataMigrationRecord) -> Bool {
         if lhs.kind == "audio" { return lhs.digest == rhs.digest }
-        if lhs.kind == "history", var left = lhs.value.value as? [String: Any],
-           var right = rhs.value.value as? [String: Any] {
-            for key in ["id", "updatedAt"] {
-                left.removeValue(forKey: key)
-                right.removeValue(forKey: key)
-            }
-            return (try? AnyCodable(left)) == (try? AnyCodable(right))
+        if lhs.kind == "history", let left = comparisonHistoryValue(lhs.value),
+           let right = comparisonHistoryValue(rhs.value) {
+            return left == right
         }
         return lhs.value == rhs.value
+    }
+
+    private static func comparisonHistoryValue(_ value: AnyCodable) -> AnyCodable? {
+        guard var fields = value.value as? [String: Any] else { return nil }
+        fields.removeValue(forKey: "id")
+        fields.removeValue(forKey: "updatedAt")
+        // Applying a planned version reidentifies both carriers. Envelope
+        // identity already matched; the native carrier's other fields still matter.
+        if var desktop = fields["desktopHistory"] as? [String: Any] {
+            desktop.removeValue(forKey: "id")
+            fields["desktopHistory"] = desktop
+        }
+        return try? AnyCodable(fields)
     }
 
     private static func valueDigest(_ value: AnyCodable, digest: (Data) throws -> String) throws -> String {

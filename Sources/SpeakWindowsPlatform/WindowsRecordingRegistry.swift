@@ -4,6 +4,36 @@ import SpeakDesktop
 
 /// Native closed-writer qualification is separate from verified Swift identity/reload integration.
 public enum WindowsRecordingRegistry {
+    static func verifyV2SyntheticReload(history: URL) throws {
+        let payload = Data("JSTI native capability fixture, not a codec registration".utf8)
+        let writer = try WindowsRecordingRegistryCapability(history: history, initialize: true)
+        do {
+            try writer.append("registry.jloc", data: payload, checkCancellation: {})
+            try writer.close()
+        } catch {
+            let primary = error
+            do { try writer.close() } catch {
+                throw WindowsRegistryCleanupFailure(primaryError: primary, cleanupError: error)
+            }
+            throw primary
+        }
+        let reader = try WindowsRecordingRegistryCapability(history: history, initialize: false)
+        do {
+            guard try reader.read("registry.jloc") == payload,
+                  try reader.names() == ["registry.jloc"] else {
+                throw WindowsRegistryCapabilityError.invalidOutcome
+            }
+            _ = try reader.identity()
+            try reader.close()
+        } catch {
+            let primary = error
+            do { try reader.close() } catch {
+                throw WindowsRegistryCleanupFailure(primaryError: primary, cleanupError: error)
+            }
+            throw primary
+        }
+    }
+
     public static var factory: DesktopRecordingRegistryFactory {
         #if os(Windows)
         .init { _, _ in throw DesktopRecordingRegistryError.identityUnavailable }

@@ -700,6 +700,80 @@ int jsti_recording_registry_append(JSTIRecordingRegistry *registry, const char *
 int jsti_recording_registry_close(JSTIRecordingRegistry *registry, char *error, size_t error_capacity);
 void jsti_recording_registry_destroy(JSTIRecordingRegistry *registry);
 int jsti_recording_registry_self_test(const char *history, char *error, size_t error_capacity);
+/* Qualification-only additive ABI. No shared POSIX identity conversion.
+ * Caller supplies a writable outcome header (two uint32_t fields) describing
+ * the entire available storage. Invalid version/size returns -1 without writes.
+ * Valid outcomes preserve all causes; native codes are unsigned bit patterns.
+ * Calls and destruction must be serialized; cancellation is synchronous and
+ * borrowed. Close attempts are terminal even when native release is unconfirmed.
+ * No published leaf is removed or retried. No raw native handle is exported. */
+#define JSTI_REGISTRY_ABI_V2 2u
+#define JSTI_REGISTRY_MAX_RESOURCES_V2 256u
+#define JSTI_REGISTRY_MAX_CAUSES_V2 512u
+#define JSTI_REGISTRY_MAX_LEAF_BYTES_V2 16384u
+#define JSTI_REGISTRY_MAX_NAMES_V2 4096u
+#define JSTI_REGISTRY_MAX_NAMES_BYTES_V2 262144u
+#define JSTI_REGISTRY_MAX_PATH_UTF8_BYTES_V2 128000u
+#define JSTI_REGISTRY_MAX_LEAF_NAME_BYTES_V2 64u
+enum {
+    JSTI_REGISTRY_DOMAIN_NONE_V2 = 0, JSTI_REGISTRY_DOMAIN_WIN32_V2 = 1,
+    JSTI_REGISTRY_DOMAIN_NTSTATUS_V2 = 2, JSTI_REGISTRY_DOMAIN_HRESULT_V2 = 3,
+    JSTI_REGISTRY_DOMAIN_CONTRACT_V2 = 4
+};
+enum { JSTI_REGISTRY_EFFECT_NOT_PUBLISHED_V2 = 0, JSTI_REGISTRY_EFFECT_PUBLISHED_V2 = 1 };
+enum {
+    JSTI_REGISTRY_CAUSE_PRIMARY_V2 = 1, JSTI_REGISTRY_CAUSE_SECONDARY_V2 = 2,
+    JSTI_REGISTRY_CAUSE_CLEANUP_V2 = 3
+};
+enum {
+    JSTI_REGISTRY_CONTRACT_INVALID_V2 = 1, JSTI_REGISTRY_CONTRACT_BUDGET_V2 = 2,
+    JSTI_REGISTRY_CONTRACT_CLOSED_V2 = 3, JSTI_REGISTRY_CONTRACT_REENTRANT_V2 = 4,
+    JSTI_REGISTRY_CONTRACT_CANCELLED_V2 = 5, JSTI_REGISTRY_CONTRACT_UNSUPPORTED_V2 = 6,
+    JSTI_REGISTRY_CONTRACT_IDENTITY_V2 = 7, JSTI_REGISTRY_CONTRACT_CHANGED_V2 = 8,
+    JSTI_REGISTRY_CONTRACT_TEARDOWN_UNCONFIRMED_V2 = 9, JSTI_REGISTRY_CONTRACT_ALLOCATION_V2 = 10
+};
+enum {
+    JSTI_REGISTRY_STAGE_ADMISSION_V2 = 1, JSTI_REGISTRY_STAGE_OPEN_V2 = 2,
+    JSTI_REGISTRY_STAGE_IDENTITY_V2 = 3, JSTI_REGISTRY_STAGE_ENUMERATE_V2 = 4,
+    JSTI_REGISTRY_STAGE_READ_V2 = 5, JSTI_REGISTRY_STAGE_WRITE_V2 = 6,
+    JSTI_REGISTRY_STAGE_READONLY_V2 = 7, JSTI_REGISTRY_STAGE_FLUSH_V2 = 8,
+    JSTI_REGISTRY_STAGE_PRECOMMIT_V2 = 9, JSTI_REGISTRY_STAGE_PUBLISH_V2 = 10,
+    JSTI_REGISTRY_STAGE_POSTCOMMIT_V2 = 11, JSTI_REGISTRY_STAGE_FENCE_ANCESTRY_V2 = 12,
+    JSTI_REGISTRY_STAGE_FENCE_IDENTITY_V2 = 13, JSTI_REGISTRY_STAGE_FENCE_CONTENT_V2 = 14,
+    JSTI_REGISTRY_STAGE_FENCE_ACL_V2 = 15, JSTI_REGISTRY_STAGE_FENCE_ATTRIBUTES_V2 = 16,
+    JSTI_REGISTRY_STAGE_FENCE_LINKS_V2 = 17, JSTI_REGISTRY_STAGE_DISCARD_V2 = 18,
+    JSTI_REGISTRY_STAGE_CLOSE_V2 = 19, JSTI_REGISTRY_STAGE_DESTROY_V2 = 20
+};
+enum {
+    JSTI_REGISTRY_CHECK_ADMISSION_V2 = 1, JSTI_REGISTRY_CHECK_PRECOMMIT_V2 = 2,
+    JSTI_REGISTRY_CHECK_POSTCOMMIT_V2 = 3
+};
+typedef struct { uint64_t volume_serial; uint8_t file_id[16]; } JSTIRegistryIdentityV2;
+typedef struct {
+    uint32_t kind, domain, native_code, stage;
+    uint64_t resource_id;
+} JSTIRegistryCauseV2;
+typedef struct {
+    uint32_t abi_version, struct_size, effect, cause_count, primary_index, cleanup_count;
+    uint32_t close_attempt_count, release_unconfirmed_count, capability_poisoned;
+    JSTIRegistryCauseV2 causes[JSTI_REGISTRY_MAX_CAUSES_V2];
+} JSTIRegistryOutcomeV2;
+typedef struct JSTIRecordingRegistryV2 JSTIRecordingRegistryV2;
+typedef int (*jsti_registry_cancelled_v2_fn)(void *context, uint32_t checkpoint);
+int jsti_recording_registry_open_v2(const uint8_t *history_utf8, size_t history_count, int initialize,
+                                   JSTIRecordingRegistryV2 **result, JSTIRegistryOutcomeV2 *outcome);
+int jsti_recording_registry_identity_v2(JSTIRecordingRegistryV2 *registry, JSTIRegistryIdentityV2 *history,
+                                       JSTIRegistryIdentityV2 *namespace_identity, JSTIRegistryOutcomeV2 *outcome);
+int jsti_recording_registry_names_v2(JSTIRecordingRegistryV2 *registry, uint8_t *names, size_t capacity,
+                                    size_t *written, uint32_t *count, JSTIRegistryOutcomeV2 *outcome);
+int jsti_recording_registry_read_v2(JSTIRecordingRegistryV2 *registry, const uint8_t *name, size_t name_count,
+                                   uint8_t *bytes, size_t capacity, size_t *written, JSTIRegistryOutcomeV2 *outcome);
+int jsti_recording_registry_append_v2(JSTIRecordingRegistryV2 *registry, const uint8_t *name, size_t name_count,
+                                     const uint8_t *bytes, size_t count, jsti_registry_cancelled_v2_fn cancelled,
+                                     void *context, JSTIRegistryOutcomeV2 *outcome);
+int jsti_recording_registry_validate_v2(JSTIRecordingRegistryV2 *registry, JSTIRegistryOutcomeV2 *outcome);
+int jsti_recording_registry_close_v2(JSTIRecordingRegistryV2 *registry, JSTIRegistryOutcomeV2 *outcome);
+int jsti_recording_registry_destroy_v2(JSTIRecordingRegistryV2 **registry, JSTIRegistryOutcomeV2 *outcome);
 int jsti_private_file_publish(const char *source, const char *destination,
                               jsti_file_publication_cancelled_fn cancelled, void *context,
                               char *error, size_t error_capacity);

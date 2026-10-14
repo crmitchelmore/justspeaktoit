@@ -27,5 +27,20 @@ final class WindowsRecordingRegistryTests: XCTestCase {
         throw XCTSkip("Stub graph compilation is not Windows native runtime qualification.")
         #endif
     }
+
+    func testQualificationFactoryDoesNotBecomeSharedDefault() throws {
+        #if os(Windows)
+        let fixture = try RecordingLocationFixture()
+        defer { try? fixture.clean() }
+        XCTAssertThrowsError(try DesktopLocalRecordingPersistence.initialize(
+            historyDirectory: fixture.history, using: .native
+        ))
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: fixture.history.appendingPathComponent(".recording-locations").path
+        ))
+        #else
+        throw XCTSkip("The Windows default factory is not executed by a Linux stub graph.")
+        #endif
+    }
 }
 #endif

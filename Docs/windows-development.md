@@ -573,6 +573,36 @@ native C receipts and stub compilation do not qualify Windows Swift or Darwin.
 The default shared factory supports only Linux. These synchronous APIs require
 a separately owned cancellable host worker and lifecycle/mutation admission;
 neither is installed, and the executable host does not use this persistence.
+The additive Windows registry v2 capability is an **unaccepted local
+qualification candidate**, not factory enablement. It transports native volume
+and all sixteen file-ID bytes without conversion into the shared POSIX codec.
+Its counted-buffer ABI records primary, secondary and individual cleanup
+causes and irreversible publication effect. Private ACL checks reuse the existing
+policy. Admission reserves fixed resource/error storage before namespace creation;
+there are at most 256 owned resources and fewer than 512 possible causes.
+Post-third-callback verification checks retained ancestry, held/named full
+identities, exact bounded contents, private ACL, readonly attributes and single
+link, including after cancellation. These remain point-in-time fences.
+
+Native close failure is **release unconfirmed**, possibly leaving process-owned
+resources/locks until exit. The numeric handle is retired exactly once, further
+I/O is poisoned, and repeated close/consuming destroy retain the failure instead
+of retrying a possibly reused handle or asserting successful cleanup. Freeing
+bookkeeping does not establish native release. Only an unpublished held file
+can receive a deletion disposition; successful disposition is not proof of
+completed deletion after failed close. Published names are never rolled back.
+Scoped synchronous cancellation retains the original Swift error; it does not
+dispatch to MainActor or escape into another task. The internal capability is
+not Sendable and is not used by Host, settings, audio or either default factory.
+
+Normally linked NTFS C/Swift fixtures, separate-process native restart and real
+native failure evidence still require exact-source Windows qualification.
+Portable/fake tests and cached native-header/COFF compilation cannot provide it.
+Test-only wrapper variants must forward the real native rename and label actual
+close failure, omitted-close injection and successful-close/error-report injection
+separately. Native runtime execution and CI source selection/publication require
+separate authorization. No new runtime, native Swift or Darwin acceptance is
+claimed by the local candidate.
 Failed appends never switch an existing working registration; cancellation or
 uncertain append completion may leave an unused immutable reservation and an
 empty private directory, never authority to overwrite or recursively clean it.

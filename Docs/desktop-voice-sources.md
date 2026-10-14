@@ -480,6 +480,50 @@ Mac `TextToSpeechManager` currently appends successful `TTSResult`s and persists
 accounting deliberately additionally exposes failed/cancelled transport attempts
 without describing those attempts as billed usage.
 
+## Mistral shared backend boundary (not native UI acceptance)
+
+The bounded Mistral candidate reuses macOS's actual `MistralTTSCatalog`,
+`MistralTTSRequest`, `MistralTTSAPI` and `TTSTextChunker`: the pinned default
+Voxtral model, 1,800-grapheme guidance and a non-streaming JSON/base64 speech
+response. This is guidance, not an invented service hard limit. Joined chunks
+preserve the trimmed input, including internal whitespace and Unicode grapheme
+clusters. The rolling alias is not exposed as an executable desktop choice.
+
+Mistral has no offline preset list. Only a completely received, validated account
+inventory can supply an executable voice, and the immutable selection retains
+its provider, discovery session/epoch, metadata and captured-key evidence.
+Provider-context mismatches, unavailable or forged voices and unsupported
+speed/pitch/SSML are refused before credential or speech HTTP admission.
+Synthesis captures one key for every chunk and refuses an inventory belonging
+to another key. Replacing a native selection must still cancel and fence the
+owning operation before accepting any late result; this shared backend does not
+select, persist or publish a native tuple.
+
+Account listing uses canonical page size/offsets with at most ten pages,
+512 accepted voices and 512 KiB per page. A duplicate UUID (including another
+case spelling), malformed entry, response overflow or later-page failure
+rejects the entire new listing, never a partial success. Errors distinguish
+missing keys, cancellation, service status, invalid listings and transport.
+Explicit-provider credential messages have their own typed discovery context;
+parsing is not host authorization to read or write a vault slot.
+
+The desktop candidate requests WAV, bounds each JSON response and cumulative
+PCM, and validates the decoded file against the existing native mono PCM16,
+24 kHz contract. An actual other-rate/format, silent, truncated or malformed WAV
+is refused; no guessed sample-rate request field, relabelling, raw float32
+interpretation or implicit resampling is used. Completed chunks contribute
+actual submitted Unicode-scalar observations and validated PCM duration.
+Canonical character-rate estimates use submitted graphemes after segmentation,
+matching macOS; they are estimates, not charges, tokens or provider receipts.
+Typed/clipboard requests retain nil History attribution.
+
+The account-provider projection, parser and synthesis backend are shared-only
+work until separately reviewed source qualification and native integration.
+No Mistral provider selector, key/list/pick UI, new setting or native ABI is
+enabled by this candidate. Native Mistral playback/accessibility, real account
+responses and Apple acceptance remain unverified; fake HTTP evidence is not a
+provider service probe or complete Voice parity.
+
 ## Actual macOS features and remaining gaps
 
 `Sources/SpeakApp/VoiceOutputView.swift` currently offers manual text, clipboard,

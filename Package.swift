@@ -82,7 +82,6 @@ let appleCoreSources: [String] = [
     "Logging.swift",
     "MacConnection.swift",
     "MetaMuseLiveClient.swift",
-    "MistralTTSAPI.swift",
     "ModulateLiveClient.swift",
     "OpenClawClient.swift",
     "OpenClawClientReceive.swift",

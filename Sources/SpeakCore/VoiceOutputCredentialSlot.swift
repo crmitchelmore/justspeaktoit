@@ -69,14 +69,26 @@ public struct VoiceOutputCredentialSlot: Equatable, Sendable {
     public let identifier: String
     public let providerName: String
 
+    public init(provider: VoiceAccountProvider) throws {
+        guard case .apiKey(let identifier, let name) = ModelCredentialResolver.requirement(
+            for: provider.id, purpose: .voiceOutput) else { throw VoiceOutputCredentialError.unavailable }
+        self.purpose = .voiceOutput
+        self.identifier = identifier
+        self.providerName = name
+    }
+
     public init(voice: DesktopSpeechVoice, inventory: XAIAccountVoiceInventory? = nil) throws {
+        try self.init(voice: voice, accountInventory: inventory.map(VoiceAccountInventory.xai))
+    }
+
+    public init(voice: DesktopSpeechVoice, accountInventory: VoiceAccountInventory?) throws {
         let resolverID: String
         if case .deepgram = voice {
             resolverID = VoiceOutputProvider.deepgram.rawValue
         } else {
             resolverID = voice.id
         }
-        guard DesktopSpeechVoice.voices.contains(voice) || inventory?.contains(voice) == true,
+        guard DesktopSpeechVoice.voices.contains(voice) || accountInventory?.contains(voice) == true,
               case .apiKey(let identifier, let providerName) = ModelCredentialResolver.requirement(
                 for: resolverID, purpose: .voiceOutput),
               identifier == voice.apiKeyIdentifier else {

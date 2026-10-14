@@ -9,6 +9,10 @@ public enum VoiceSynthesisPricing {
         case .cartesia: return CartesiaTTSAPI.pricingEstimateBasis
         case .gemini: return GeminiTTSCatalog.pricingEstimateBasis
         case .groq: return GroqTTSCatalog.pricingEstimateBasis
+        case .mistral:
+            return "Mistral estimates use the canonical character rate and submitted graphemes after segmentation. "
+                + "Observed input Unicode scalars can differ from graphemes and provider billing counts. "
+                + "No tokens or billing receipts are reported; estimates are not charges."
         case .openai(.mini, _):
             return "OpenAI mini TTS uses text/audio token pricing. Binary WAV responses report no usage tokens "
                 + "or billing receipts; characters and PCM duration are not token counts. Charges are unestimated."
@@ -26,7 +30,17 @@ public enum VoiceSynthesisPricing {
     public static func ratePerThousandCharacters(
         for voice: DesktopSpeechVoice, xaiInventory: XAIAccountVoiceInventory?
     ) -> Decimal? {
-        guard DesktopSpeechVoice.voices.contains(voice) || xaiInventory?.contains(voice) == true else { return nil }
+        ratePerThousandCharacters(for: voice, accountInventory: xaiInventory.map(VoiceAccountInventory.xai))
+    }
+
+    public static func ratePerThousandCharacters(
+        for voice: DesktopSpeechVoice, accountInventory: VoiceAccountInventory?
+    ) -> Decimal? {
+        guard DesktopSpeechVoice.voices.contains(voice) || accountInventory?.contains(voice) == true else { return nil }
+        return publishedRate(for: voice)
+    }
+
+    private static func publishedRate(for voice: DesktopSpeechVoice) -> Decimal? {
         switch voice {
         case .azureNeural: return azureNeuralPerThousandCharacters
         case .azureMAI: return AzureMAIVoiceCatalog.costPerThousandCharacters(forVoiceID: voice.id)
@@ -36,6 +50,7 @@ public enum VoiceSynthesisPricing {
         case .groq(let voice): return voice.model.costPerThousandCharacters
         case .speechmatics: return SpeechmaticsTTSAPI.estimatedCostPerThousandCharacters
         case .openai(let model, _): return model.costPerThousandCharacters
+        case .mistral: return MistralTTSAPI.estimatedCostPerThousandCharacters
         case .deepgram(let voice):
             return voice.model == DeepgramSpeechCatalog.flux ? nil : DeepgramTTSAPI.costPerThousandCharacters
         }
@@ -59,6 +74,12 @@ public enum VoiceSynthesisPricing {
     public static func estimate(
         for voice: DesktopSpeechVoice, text: String, xaiInventory: XAIAccountVoiceInventory? = nil
     ) throws -> Decimal? {
+        try estimate(for: voice, text: text, accountInventory: xaiInventory.map(VoiceAccountInventory.xai))
+    }
+
+    public static func estimate(
+        for voice: DesktopSpeechVoice, text: String, accountInventory: VoiceAccountInventory?
+    ) throws -> Decimal? {
         let count: Int
         if case .groq = voice {
             do {
@@ -70,17 +91,27 @@ public enum VoiceSynthesisPricing {
             count = SpeechTextSegmenter.segments(text).reduce(0) { $0 + $1.count }
         } else if case .openai = voice {
             count = try OpenAITTSAPI.synthesisSegments(text).reduce(0) { $0 + $1.count }
+        } else if case .mistral = voice {
+            count = TTSTextChunker.chunks(text, maximumCharacters: MistralTTSAPI.maxInputCharacters)
+                .reduce(0) { $0 + $1.count }
         } else {
             count = text.unicodeScalars.count
         }
-        return estimate(for: voice, characterCount: count, xaiInventory: xaiInventory)
+        return estimate(for: voice, characterCount: count, accountInventory: accountInventory)
     }
 
     public static func estimate(
         for voice: DesktopSpeechVoice, characterCount: Int, xaiInventory: XAIAccountVoiceInventory?
     ) -> Decimal? {
+        estimate(for: voice, characterCount: characterCount,
+                 accountInventory: xaiInventory.map(VoiceAccountInventory.xai))
+    }
+
+    public static func estimate(
+        for voice: DesktopSpeechVoice, characterCount: Int, accountInventory: VoiceAccountInventory?
+    ) -> Decimal? {
         guard characterCount >= 0 else { return nil }
-        return ratePerThousandCharacters(for: voice, xaiInventory: xaiInventory).map {
+        return ratePerThousandCharacters(for: voice, accountInventory: accountInventory).map {
             Decimal(characterCount) * $0 / 1_000
         }
     }

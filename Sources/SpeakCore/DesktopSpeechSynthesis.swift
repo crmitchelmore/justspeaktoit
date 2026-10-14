@@ -23,8 +23,17 @@ public struct DesktopSpeechSynthesis: Sendable {
         options: VoiceSynthesisOptions, xaiInventory: XAIAccountVoiceInventory?,
         credential: @Sendable () async throws -> String
     ) async throws -> Data {
+        try await synthesize(source, voice: voice, options: options,
+                             accountInventory: xaiInventory.map(VoiceAccountInventory.xai), credential: credential)
+    }
+
+    public func synthesize(
+        _ source: VoiceOutputSourceSnapshot, voice: DesktopSpeechVoice,
+        options: VoiceSynthesisOptions, accountInventory: VoiceAccountInventory?,
+        credential: @Sendable () async throws -> String
+    ) async throws -> Data {
         try Task.checkCancellation()
-        guard DesktopSpeechVoice.voices.contains(voice) || xaiInventory?.contains(voice) == true else {
+        guard DesktopSpeechVoice.voices.contains(voice) || accountInventory?.contains(voice) == true else {
             throw VoiceSynthesisConfigurationError.unsupportedVoice
         }
         try options.validate(for: voice.capabilities)
@@ -37,7 +46,7 @@ public struct DesktopSpeechSynthesis: Sendable {
             return try await synthesizeAzure(source.text, voice: voice, options: options, credential: credential)
         case .xai:
             return try await DesktopXAISpeechSynthesis(session: session).synthesize(
-                source, voice: voice, options: options, inventory: xaiInventory, credential: credential)
+                source, voice: voice, options: options, inventory: accountInventory?.xai, credential: credential)
         case .cartesia:
             return try await DesktopCartesiaSpeechSynthesis(session: session).synthesize(
                 source, voice: voice, options: options, credential: credential)
@@ -53,6 +62,9 @@ public struct DesktopSpeechSynthesis: Sendable {
         case .openai:
             return try await DesktopOpenAISpeechSynthesis(session: session).synthesize(
                 source, voice: voice, options: options, credential: credential)
+        case .mistral:
+            return try await DesktopMistralSpeechSynthesis(session: session).synthesize(
+                source, voice: voice, inventory: accountInventory, credential: credential)
         }
     }
 

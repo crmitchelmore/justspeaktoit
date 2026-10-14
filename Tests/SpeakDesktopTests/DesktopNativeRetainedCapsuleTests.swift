@@ -1,6 +1,6 @@
 import Foundation
 import SpeakCore
-import SpeakDesktop
+@testable import SpeakDesktop
 import XCTest
 #if os(Windows)
 import SpeakWindowsPlatform
@@ -240,6 +240,78 @@ final class DesktopNativeRetainedCapsuleTests: XCTestCase {
 }
 
 extension DesktopNativeRetainedCapsuleTests {
+    func testDirectoryReplacementWithUnchangedFileIdentity_RejectsHeldReceiptButAllowsCurrentRead() throws {
+        let root = try root()
+        let sentinelBytes = Data("unrelated sentinel".utf8)
+        let rootSentinel = root.appendingPathComponent("unrelated-root.bin")
+        try sentinelBytes.write(to: rootSentinel)
+        let real = publication
+        let seeded = DesktopFilePublication.Copy { staging, destination in
+            try DesktopFilePublication.copy(source: staging, destination: destination, using: real)
+            try sentinelBytes.write(to: destination.deletingLastPathComponent().appendingPathComponent("old.bin"))
+        }
+        let original = try archive(["postProcessing.customPrompt": AnyCodable(.string("original"))])
+        let capsule = try DesktopNativeRetainedCapsule.create(
+            original, in: root, storage: storage, publication: seeded
+        )
+        XCTAssertEqual(try capsule.reload().records, original.records)
+        let name = DesktopNativeRetainedCapsule.filename
+        let file = capsule.directory.appendingPathComponent(name)
+        let bytes = try Data(contentsOf: file)
+        let before = try DesktopRecordingStore.audioCleanupIdentity(at: file)
+        let backup = root.appendingPathComponent("prior-directory", isDirectory: true)
+        try FileManager.default.moveItem(at: capsule.directory, to: backup)
+        try FileManager.default.createDirectory(at: capsule.directory, withIntermediateDirectories: false)
+        try FileManager.default.moveItem(at: backup.appendingPathComponent(name), to: file)
+        let newSentinel = capsule.directory.appendingPathComponent("new.bin")
+        try sentinelBytes.write(to: newSentinel)
+        let after = try DesktopRecordingStore.audioCleanupIdentity(at: file)
+        XCTAssertEqual(try Data(contentsOf: file), bytes)
+        XCTAssertEqual(try Data(contentsOf: backup.appendingPathComponent("old.bin")), sentinelBytes)
+        XCTAssertEqual(try Data(contentsOf: newSentinel), sentinelBytes)
+        XCTAssertEqual(try Data(contentsOf: rootSentinel), sentinelBytes)
+        try XCTSkipIf(before != after, "Move changed full canonical file identity; no independent chain proof.")
+        XCTAssertEqual(before, after)
+        let fresh = try DesktopOwnedAppDataFileReader.readStrict(
+            DesktopNativeRetainedCapsule.filename, appDirectory: capsule.directory,
+            maximumBytes: DesktopNativeConfigurationArchiveCodec.maximumEncodedBytes
+        )
+        XCTAssertEqual(fresh.data, bytes)
+        try DesktopOwnedAppDataFileReader.revalidateStrict(fresh.receipt)
+        XCTAssertEqual(try DesktopNativeRetainedCapsule.read(from: capsule.directory).records, original.records)
+        XCTAssertThrowsError(try capsule.reload()) {
+            guard case DesktopOwnedAppDataFileReadError.changedSource = $0 else {
+                return XCTFail("Expected independent directory-chain rejection, got \($0).")
+            }
+        }
+        XCTAssertThrowsError(try capsule.exportProjection())
+        XCTAssertTrue(FileManager.default.fileExists(atPath: backup.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: capsule.directory.path))
+        XCTAssertEqual(try Data(contentsOf: backup.appendingPathComponent("old.bin")), sentinelBytes)
+        XCTAssertEqual(try Data(contentsOf: newSentinel), sentinelBytes)
+        XCTAssertEqual(try Data(contentsOf: rootSentinel), sentinelBytes)
+        XCTAssertEqual(try Data(contentsOf: file), bytes)
+    }
+
+    func testHeldStrictReceipt_RejectsIdenticalByteReplacementButRestartOnlyValidatesCurrentSource() throws {
+        let root = try root()
+        let original = try archive(["postProcessing.customPrompt": AnyCodable(.string("original"))])
+        let capsule = try DesktopNativeRetainedCapsule.create(
+            original, in: root, storage: storage, publication: publication
+        )
+        let file = capsule.directory.appendingPathComponent(DesktopNativeRetainedCapsule.filename)
+        let bytes = try Data(contentsOf: file)
+        try bytes.write(to: file, options: .atomic)
+        XCTAssertThrowsError(try capsule.reload()) {
+            guard case DesktopOwnedAppDataFileReadError.changedSource = $0 else {
+                return XCTFail("Expected the original strict receipt to reject replacement, got \($0).")
+            }
+        }
+        XCTAssertThrowsError(try capsule.exportProjection())
+        XCTAssertEqual(try DesktopNativeRetainedCapsule.read(from: capsule.directory).records, original.records)
+        XCTAssertEqual(try Data(contentsOf: file), bytes)
+    }
+
     func testStagingReplacedByDirectoryBeforePublicationFailure_PreservesChildAndBothErrors() throws {
         let root = try root()
         let failed = DesktopFilePublication.Copy { staging, _ in

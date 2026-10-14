@@ -13,7 +13,13 @@ public enum DesktopMigrationHistory {
         }
         let native: DesktopRecordingStore.Record?
         if let desktop = item.desktopHistory {
-            native = try JSONDecoder().decode(DesktopRecordingStore.Record.self, from: JSONEncoder().encode(desktop))
+            // Preserve the original raw field in migrationMetadata, but never decode imported local authority.
+            var sanitized = desktop
+            if case .object(var fields) = desktop.storage {
+                fields.removeValue(forKey: "localAudio")
+                sanitized = AnyCodable(.object(fields))
+            }
+            native = try JSONDecoder().decode(DesktopRecordingStore.Record.self, from: JSONEncoder().encode(sanitized))
         } else {
             native = nil
         }
@@ -73,13 +79,15 @@ public enum DesktopMigrationHistory {
         native.migrationMetadata = nil
         let metadata = try JSONDecoder().decode(AnyCodable.self, from: JSONEncoder().encode(native))
         if case .object(var desktop) = metadata.storage {
+            desktop.removeValue(forKey: "localAudio")
             desktop["audioFilename"] = .string("")
             if case .object(var original) = object["desktopHistory"] {
                 for key in ["recordedDuration", "importedCost", "importedModelIdentifiers"] where original[key] == nil {
                     desktop.removeValue(forKey: key)
                 }
                 desktop["originPlatform"] = original["originPlatform"]
-                for key in DesktopRecordingStore.Record.CodingKeys.allCases where desktop[key.rawValue] == nil {
+                for key in DesktopRecordingStore.Record.CodingKeys.allCases
+                    where key != .localAudio && desktop[key.rawValue] == nil {
                     original.removeValue(forKey: key.rawValue)
                 }
                 desktop = original.merging(desktop) { _, current in current }

@@ -484,6 +484,67 @@ root/directory/file replacement exclusion. Passing Linux stub projections does
 not establish native Windows Swift runtime qualification; the default stays
 unavailable until that evidence is reviewed.
 
+### Local recording-location provenance prerequisite
+
+`DesktopRecordingLocations` accepts only an explicit
+`DesktopRecordingLocationPersistence` host adapter. Local selection registers an
+existing root with a new immutable identity; exclusive held capture creation
+then mints a separate per-record ownership claim. The claim binds History's
+directory identity, location identity, UUID-relative WAV path, private directory
+identity and actual file identity. Directory modification dates are not stable
+identities: creating the next capture must not invalidate earlier recordings.
+The same selected root can receive several distinct registrations without
+overwriting any earlier selection. There is no persisted "current directory"
+setting or automatic profile-path activation.
+Directory/file identity checks are point-in-time read fences, not an
+expected-root create CAS. The caller must exclude namespace/source mutation
+during authorization, allocation and collection, and exclude active capture
+filenames from snapshots. Allocation and failed-allocation cleanup still use
+the actual held native capture capability, never a read receipt. A namespace
+change can leave a freshly allocated empty private UUID directory; no host
+admission/lifecycle gate is installed by this policy-only slice.
+
+`Record.localAudio` is descriptive Codable metadata, not authority. Resolving it
+requires a matching separately verified claim and unchanged root, private
+directory and file. Missing registrations, foreign History stores, duplicate
+identities, links and replacements fail explicitly; no legacy fallback occurs
+for a record carrying invalid local provenance. Migration import ignores this
+field as authority while retaining its original raw value in migration
+metadata. Local claims are not exported. Existing `originPlatform` semantics
+and imported audio ownership are unchanged.
+
+The store's `audioURL(for:)` seam supplies replay/retry and backup resolution;
+`readAudio(for:maximumBytes:)` additionally uses the existing strict bounded
+reader. Audio snapshots enumerate only verified capture claims outside History,
+never selected-root contents. Legacy flat History resolution and orphan
+enumeration stay unchanged. History JSON and deletion journals stay in the
+stable History directory. Snapshot/export source evidence is read-only, so
+callers must still exclude capture/source mutations during collection.
+
+External-audio cleanup candidates are not deletion capabilities. Cleanup
+reports an explicit unsupported-mutation failure for them, and audio-deleting
+History actions stop before journaling. Interrupted external WAVs remain
+retained without invoking path-based repair. Existing legacy cleanup,
+deletion, recovery and metadata-only deletion behavior remain in place.
+
+**Not executable host restart support:** the supplied tests inject an in-memory
+verified append-only persistence adapter and reconstruct the policy/store from
+its sealed values. Production has no registration codec or verified private
+immutable-registration writer/reload adapter. The held capture primitive creates
+only a fresh private UUID directory/UUID WAV; it is not an API for publishing and
+reloading a protected registration ledger. The strict reader's receipts cannot
+fill that writer/authority gap. A host must provide that native append/reload
+boundary before these registrations can survive a real process restart.
+Failed appends never switch an existing working registration; cancellation or
+uncertain append completion may leave an unused immutable reservation and an
+empty private directory, never authority to overwrite or recursively clean it.
+If allocation and discard both fail, `DesktopRecordingLocationCleanupFailure`
+preserves typed `primaryError` and `cleanupError` for inspection; its fixed
+display text never interpolates underlying paths or values.
+Settings, native UI and capture routing are not wired. The Windows default
+factory remains disabled; native Windows Swift and Darwin qualification are
+still outstanding.
+
 The host still uses its existing History WAV initializer. Location selection,
 owned configuration persistence, per-record location provenance, migration
 mapping, recovery and deletion authority remain prerequisites to configurable

@@ -106,9 +106,12 @@ extension DesktopRecordingStore {
         if deletionLedger.intents[id] == nil {
             let files = try deletionMetadata(id: id)
             let record = try files.first.map { try loadRecord(at: $0) }
+            if deleteAudio, let record { try requireLegacyAudioMutation(record) }
             let audioFilename = record?.audioFilename ?? ""
             for file in files {
-                guard try loadRecord(at: file).audioFilename == audioFilename else {
+                let candidate = try loadRecord(at: file)
+                if deleteAudio { try requireLegacyAudioMutation(candidate) }
+                guard candidate.audioFilename == audioFilename else {
                     throw DesktopHistoryDeletionError.changedAudioOwnership
                 }
             }
@@ -206,7 +209,9 @@ extension DesktopRecordingStore {
         guard let intent = deletionLedger.intents[id], intent.localCleanupPending else { return }
         let files = try deletionMetadata(id: id)
         for file in files {
-            guard try loadRecord(at: file).audioFilename == intent.audioFilename else {
+            let record = try loadRecord(at: file)
+            if intent.deleteAudio != false { try requireLegacyAudioMutation(record) }
+            guard record.audioFilename == intent.audioFilename else {
                 throw DesktopHistoryDeletionError.changedAudioOwnership
             }
         }

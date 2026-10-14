@@ -90,7 +90,7 @@ extension DesktopOwnedAppDataFileReader {
         }
     }
 
-    private static func directoryChain(
+    static func directoryChain(
         _ location: Location, checkCancellation: () throws -> Void
     ) throws -> [DirectoryState] {
         let states = try location.parents.map { url in

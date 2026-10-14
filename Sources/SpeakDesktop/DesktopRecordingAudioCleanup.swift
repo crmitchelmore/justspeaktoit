@@ -10,6 +10,26 @@ public struct DesktopRecordingAudioSnapshot: Sendable {
     struct Entry: Sendable {
         let filename: String
         let identity: Identity
+        let recordingID: UUID?
+        let localAudio: DesktopRecordingAudioReference?
+        var sourceKey: String { localAudio?.sourceKey ?? filename }
+        var resolutionRecord: DesktopRecordingStore.Record {
+            var record = DesktopRecordingStore.Record(
+                id: recordingID ?? UUID(), audioFilename: filename, modelIdentifier: ""
+            )
+            record.localAudio = localAudio
+            return record
+        }
+
+        init(
+            filename: String, identity: Identity, recordingID: UUID? = nil,
+            localAudio: DesktopRecordingAudioReference? = nil
+        ) {
+            self.filename = filename
+            self.identity = identity
+            self.recordingID = recordingID
+            self.localAudio = localAudio
+        }
     }
 
     struct Identity: Equatable, Sendable {
@@ -48,14 +68,19 @@ public enum DesktopRecordingAudioCleanupError: Error, LocalizedError, Sendable {
 }
 
 extension DesktopRecordingStore {
-    /// Only flat, app-owned audio belongs to this operation. Synthesis, conversion
-    /// and comparison staging folders are not recording archives.
+    /// Legacy flat audio and explicitly registered capture claims only.
+    /// Selected roots and synthesis/conversion/comparison folders are never scanned.
     public func snapshotSavedAudio(excluding filenames: Set<String> = []) throws -> DesktopRecordingAudioSnapshot {
         let root = directory.resolvingSymlinksInPath().standardizedFileURL
         var known = Set(deletionLedger.intents.values.map(\.audioFilename))
         for file in try metadataFiles() {
             try Task.checkCancellation()
-            known.insert(try loadRecord(at: file).audioFilename)
+            let record = try loadRecord(at: file)
+            known.insert(record.audioFilename)
+            if record.localAudio != nil {
+                do { _ = try ownedAudioURL(for: record) } catch let error as CocoaError
+                    where error.code == .fileReadNoSuchFile { /* Missing owned audio is reported by migration. */ }
+            }
         }
         var entries: [DesktopRecordingAudioSnapshot.Entry] = []
         for name in try FileManager.default.contentsOfDirectory(atPath: root.path).sorted() {
@@ -68,6 +93,25 @@ extension DesktopRecordingStore {
             let record = Record(id: UUID(), audioFilename: name, modelIdentifier: "")
             let url = try ownedAudioURL(for: record)
             entries.append(.init(filename: name, identity: try Self.audioCleanupIdentity(at: url)))
+        }
+        // Never enumerate a chosen root. Only immutable, locally verified capture claims are candidates.
+        for ownership in audioLocations?.recordings.values.sorted(by: {
+            $0.recordingID.uuidString < $1.recordingID.uuidString
+        }) ?? [] {
+            try Task.checkCancellation()
+            let filename = ownership.recordingID.uuidString + ".wav"
+            guard !filenames.contains(filename) else { continue }
+            var record = Record(id: ownership.recordingID, audioFilename: filename, modelIdentifier: "")
+            record.localAudio = ownership.reference
+            do {
+                let url = try ownedAudioURL(for: record)
+                entries.append(.init(
+                    filename: filename, identity: try Self.audioCleanupIdentity(at: url),
+                    recordingID: record.id, localAudio: record.localAudio
+                ))
+            } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+                continue
+            }
         }
         return DesktopRecordingAudioSnapshot(directory: root, entries: entries)
     }
@@ -84,7 +128,8 @@ extension DesktopRecordingStore {
         for entry in snapshot.entries {
             if Task.isCancelled { outcome.cancelled = true; break }
             do {
-                let record = Record(id: UUID(), audioFilename: entry.filename, modelIdentifier: "")
+                let record = entry.resolutionRecord
+                try requireLegacyAudioMutation(record)
                 let url = try ownedAudioURL(for: record)
                 guard try Self.audioCleanupIdentity(at: url) == entry.identity else {
                     throw DesktopRecordingAudioCleanupError.changedFile

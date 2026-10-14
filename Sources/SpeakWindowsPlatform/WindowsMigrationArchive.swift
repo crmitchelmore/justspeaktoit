@@ -4,6 +4,22 @@ import SpeakCore
 import SpeakDesktop
 
 public enum WindowsMigrationArchive {
+    public static func publish(_ source: URL, to destination: URL) throws {
+        try DesktopFilePublication.copy(source: source, destination: destination, using: .init { source, destination in
+            var error = [CChar](repeating: 0, count: 1_024)
+            let result = jsti_private_file_publish(
+                source.path, destination.path, { _ in Task.isCancelled ? 1 : 0 }, nil, &error, error.count
+            )
+            if result == 2 { throw CancellationError() }
+            if result == 3 {
+                throw DesktopFilePublication.CopyCompletionFailure(
+                    destination: destination, detail: String(cString: error)
+                )
+            }
+            guard result == 0 else { throw DataMigrationError.invalid(String(cString: error)) }
+        })
+    }
+
     public static let storage = DesktopMigrationArchive.Storage(
         createDirectory: { url in try checked { jsti_private_directory_create(url.path, $0, $1) } },
         createFile: { url in try checked { jsti_private_file_create(url.path, $0, $1) } }

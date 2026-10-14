@@ -640,6 +640,15 @@ int jsti_private_directory_prepare(const char *path, char *error, size_t error_c
  * when the process is elevated. An existing directory is never changed. */
 int jsti_private_directory_create(const char *path, char *error, size_t error_capacity);
 int jsti_private_file_create(const char *path, char *error, size_t error_capacity);
+/* Copies a private regular source into private destination-side staging, then
+ * publishes exclusively. The source is retained. 0 committed, 2 cancelled
+ * before commit, -1 failed, 3 committed with a handle-cleanup error (never
+ * retry or delete that destination). Cancellation is checked between bounded chunks.
+ * Existing destinations and reparse paths are never replaced or followed. */
+typedef int (*jsti_file_publication_cancelled_fn)(void *context);
+int jsti_private_file_publish(const char *source, const char *destination,
+                              jsti_file_publication_cancelled_fn cancelled, void *context,
+                              char *error, size_t error_capacity);
 /* Uses a unique temporary directory and synthetic bytes only; verifies ACLs,
  * directory repair, existing-file preservation and junction refusal. */
 int jsti_private_storage_self_test(char *error, size_t error_capacity);

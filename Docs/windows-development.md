@@ -657,7 +657,28 @@ whole operation rather than becoming a successful partial import. Cancellation
 after directory protection removes it before any file creation. The policy
 never secures or changes the caller-selected parent folder. Hosts must use
 exclusive native publication before reporting a saved export and then clean up
-the owned staging folder. This codec is not yet wired to a native export picker,
+the owned staging folder.
+
+`WindowsMigrationArchive.publish` and `LinuxMigrationArchive.publish` copy the
+private source into protected staging on the selected destination filesystem,
+using a frozen source length and 64-KiB buffers, then publish without replacing
+any existing file or link. The source remains available after success,
+cancellation or failure. Windows pins ancestor handles, refuses reparse paths,
+denies concurrent source writers and applies the current-user/SYSTEM descriptor
+before writing bytes. Linux refuses linked/nonregular/nonprivate sources and
+checks source size and modification/change timestamps after copying. It prefers
+anonymous `O_TMPFILE` staging; named fallback requires a current-user-owned folder
+that other accounts cannot modify and `RENAME_NOREPLACE` support. Unsupported
+filesystem/portal semantics fail explicitly; ordinary Linux acceptance does not
+establish Flatpak destination-grant support. Both adapters check cancellation
+between chunks and immediately before commit and remove only their owned
+uncommitted staging. A native post-commit cleanup/durability error has a distinct
+`CopyCompletionFailure`: the destination already exists and must not be deleted
+or retried. Successful publication is never relabelled as cancellation.
+These synchronous APIs require an owned cancellable worker, not the UI actor or
+settings admission queue.
+
+This codec is not yet wired to a native export picker,
 complete category collection, import preview/application, credential recovery or
 recording-location changes. Native CNG/GLib and Mac ZIPFoundation interoperability
 tests remain separate required acceptance receipts.

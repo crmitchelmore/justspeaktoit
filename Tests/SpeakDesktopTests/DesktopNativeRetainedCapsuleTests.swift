@@ -156,7 +156,8 @@ final class DesktopNativeRetainedCapsuleTests: XCTestCase {
         XCTAssertThrowsError(try DesktopNativeRetainedCapsule.create(
             source, in: root, storage: storage, publication: incomplete
         )) {
-            XCTAssertTrue($0 is DesktopNativeRetentionPublishedFailure)
+            let failure = $0 as? DesktopNativeRetentionPublishedFailure
+            XCTAssertTrue(failure?.underlyingError is DesktopFilePublication.CopyCompletionFailure)
         }
         let directories = try FileManager.default.contentsOfDirectory(
             at: root, includingPropertiesForKeys: nil
@@ -224,6 +225,7 @@ final class DesktopNativeRetainedCapsuleTests: XCTestCase {
             _ = try await task.value
             XCTFail("Post-publication cancellation must report the committed-effect uncertainty.")
         } catch let failure as DesktopNativeRetentionPublishedFailure {
+            XCTAssertTrue(failure.underlyingError is CancellationError)
             let restart = try DesktopNativeRetainedCapsule.read(from: failure.directory)
             XCTAssertEqual(restart.records, original.records)
             XCTAssertEqual(try Data(contentsOf: counter), Data("one publication\n".utf8))
@@ -234,6 +236,58 @@ final class DesktopNativeRetainedCapsuleTests: XCTestCase {
                 atPath: failure.directory.appendingPathComponent("unpublished.json").path
             ))
         }
+    }
+}
+
+extension DesktopNativeRetainedCapsuleTests {
+    func testStagingReplacedByDirectoryBeforePublicationFailure_PreservesChildAndBothErrors() throws {
+        let root = try root()
+        let failed = DesktopFilePublication.Copy { staging, _ in
+            try FileManager.default.removeItem(at: staging)
+            try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: false)
+            try Data("sentinel".utf8).write(to: staging.appendingPathComponent("unrelated.bin"))
+            throw CapsuleFixtureError.refused
+        }
+        XCTAssertThrowsError(try DesktopNativeRetainedCapsule.create(
+            archive(), in: root, storage: storage, publication: failed
+        )) {
+            let failure = $0 as? DesktopNativeRetentionCleanupFailure
+            XCTAssertTrue(failure?.primaryError is CapsuleFixtureError)
+            XCTAssertTrue(failure?.cleanupError is CocoaError)
+            XCTAssertFalse($0.localizedDescription.contains("unrelated.bin"))
+        }
+        let leaf = try XCTUnwrap(FileManager.default.contentsOfDirectory(
+            at: root, includingPropertiesForKeys: nil
+        ).first)
+        let sentinel = leaf.appendingPathComponent("unpublished.json").appendingPathComponent("unrelated.bin")
+        XCTAssertEqual(try Data(contentsOf: sentinel), Data("sentinel".utf8))
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: leaf.appendingPathComponent(DesktopNativeRetainedCapsule.filename).path
+        ))
+    }
+
+    func testStagingReplacedByDirectoryAfterPublication_PreservesChildAndPublishedEnvelope() throws {
+        let root = try root()
+        let original = try archive(["postProcessing.customPrompt": AnyCodable(.string("original"))])
+        let real = publication
+        let changed = DesktopFilePublication.Copy { staging, destination in
+            try DesktopFilePublication.copy(source: staging, destination: destination, using: real)
+            try FileManager.default.removeItem(at: staging)
+            try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: false)
+            try Data("sentinel".utf8).write(to: staging.appendingPathComponent("unrelated.bin"))
+        }
+        XCTAssertThrowsError(try DesktopNativeRetainedCapsule.create(
+            original, in: root, storage: storage, publication: changed
+        )) {
+            let failure = $0 as? DesktopNativeRetentionPublishedFailure
+            XCTAssertTrue(failure?.underlyingError is CocoaError)
+        }
+        let leaf = try XCTUnwrap(FileManager.default.contentsOfDirectory(
+            at: root, includingPropertiesForKeys: nil
+        ).first)
+        let sentinel = leaf.appendingPathComponent("unpublished.json").appendingPathComponent("unrelated.bin")
+        XCTAssertEqual(try Data(contentsOf: sentinel), Data("sentinel".utf8))
+        XCTAssertEqual(try DesktopNativeRetainedCapsule.read(from: leaf).records, original.records)
     }
 }
 

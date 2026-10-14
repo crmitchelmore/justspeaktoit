@@ -240,7 +240,7 @@ test('tooling gate delegates to the complete local discovery target', () => {
 
 const platformPythonTestRoots = [
   'scripts/linux-local-runtime', 'scripts/windows-local-runtime', 'scripts/windows-bundle',
-  'scripts/windows-cross', 'scripts/windows-cloudkit', 'scripts/windows-package',
+  'scripts/windows-cross', 'scripts/windows-cloudkit', 'scripts/windows-package', 'scripts/migration',
 ];
 const platformPythonCommand = root => `\tpython3 -B -m unittest discover -s ${root} -p 'test_*.py' -v\n`;
 

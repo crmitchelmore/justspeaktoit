@@ -60,7 +60,8 @@ final class DataMigrationKindScopeInteropTests: XCTestCase {
         let value = try AnyCodable(raw)
         fixture.defaults.set(try JSONEncoder().encode([value]), forKey: "ttsUsageHistory")
         let imported = MigrationRecord(
-            id: id, kind: "history", value: try HistoryItem.placeholder.migrationValue(id: id)
+            id: id, kind: "history", value: try HistoryItem.placeholder.migrationValue(id: id),
+            date: HistoryItem.placeholder.createdAt
         )
         let incoming = MigrationSnapshot(
             manifest: .init(categories: [.history], scopes: ["history": .init(selectedKinds: ["history"])]),

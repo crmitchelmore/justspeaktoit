@@ -87,6 +87,7 @@ package protocol DesktopHostPlatform: Sendable {
     static func revealDirectory(_ url: URL) throws
     static func confirmAudioCleanup(id: UUID, count: Int) throws
     static var migrationArchive: DesktopMigrationBackup.Adapter? { get }
+    static var migrationInspector: DesktopHostMigrationInspector? { get }
     static func copyToClipboard(_ text: String) throws
 
     // Automatic output and playback.

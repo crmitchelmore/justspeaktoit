@@ -78,6 +78,7 @@ typedef struct UI {
     GtkButton *audio_cleanup;
     AdwSwitchRow *backup_audio;
     GtkButton *backup_export;
+    GtkButton *backup_inspect;
     GCancellable *backup_chooser;
     gboolean closing;
     GtkButton *import_button;
@@ -239,6 +240,7 @@ static void refresh_actions(void) {
     if (ui.backup_audio != NULL) {
         gtk_widget_set_sensitive(GTK_WIDGET(ui.backup_audio), idle && ui.backup_chooser == NULL);
         gtk_widget_set_sensitive(GTK_WIDGET(ui.backup_export), idle && ui.backup_chooser == NULL);
+        gtk_widget_set_sensitive(GTK_WIDGET(ui.backup_inspect), idle && ui.backup_chooser == NULL);
     }
     gtk_widget_set_sensitive(GTK_WIDGET(ui.model_row), idle);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.microphone_row), idle);
@@ -468,6 +470,7 @@ typedef struct BackupChoice {
     GWeakRef parent;
     GCancellable *cancelled;
     gint32 include_audio;
+    gboolean inspect;
 } BackupChoice;
 
 static gboolean backup_choice_active(const BackupChoice *choice, GObject *parent) {
@@ -475,26 +478,32 @@ static gboolean backup_choice_active(const BackupChoice *choice, GObject *parent
         ui.backup_chooser == choice->cancelled && !g_cancellable_is_cancelled(choice->cancelled);
 }
 
+static void backup_emit_path(const BackupChoice *choice, const char *path) {
+    emit(choice->inspect ? JSTI_EVENT_MIGRATION_INSPECT : JSTI_EVENT_MIGRATION_EXPORT,
+         path, choice->inspect ? 0 : choice->include_audio);
+}
+
 static void backup_chosen(GObject *source, GAsyncResult *result, gpointer data) {
     BackupChoice *choice = data;
     GError *error = NULL;
-    GFile *file = gtk_file_dialog_save_finish(GTK_FILE_DIALOG(source), result, &error);
+    GFile *file = choice->inspect ? gtk_file_dialog_open_finish(GTK_FILE_DIALOG(source), result, &error)
+                                : gtk_file_dialog_save_finish(GTK_FILE_DIALOG(source), result, &error);
     GObject *parent = g_weak_ref_get(&choice->parent);
     gboolean active = backup_choice_active(choice, parent);
     if (ui.backup_chooser == choice->cancelled) g_clear_object(&ui.backup_chooser);
     if (active) {
         if (file != NULL) {
             gchar *path = g_file_get_path(file);
-            if (path != NULL) emit(JSTI_EVENT_MIGRATION_EXPORT, path, choice->include_audio);
-            else jsti_window_update("Choose a local ZIP destination. This portal did not provide a local path.", NULL, -1);
+            if (path != NULL) backup_emit_path(choice, path);
+            else jsti_window_update("Choose a local ZIP file. This portal did not provide a local path.", NULL, -1);
             g_free(path);
         } else if (error == NULL) {
-            jsti_window_update("The History backup picker returned no destination or error. Choose a local ZIP path.",
+            jsti_window_update("The backup picker returned no file or error. Choose a local ZIP path.",
                                NULL, -1);
         } else if (!g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED) &&
                    !g_error_matches(error, GTK_DIALOG_ERROR, GTK_DIALOG_ERROR_DISMISSED) &&
                    !g_error_matches(error, GTK_DIALOG_ERROR, GTK_DIALOG_ERROR_CANCELLED)) {
-            gchar *message = g_strdup_printf("Could not choose History backup destination: %s", error->message);
+            gchar *message = g_strdup_printf("Could not choose backup file: %s", error->message);
             jsti_window_update(message, NULL, -1);
             g_free(message);
         }
@@ -509,17 +518,19 @@ static void backup_chosen(GObject *source, GAsyncResult *result, gpointer data) 
 }
 
 static void on_backup(GtkButton *button, gpointer data) {
-    (void)button; (void)data;
+    (void)button;
     if (ui.closing || ui.state != 0 || ui.backup_chooser != NULL) return;
     BackupChoice *choice = g_new0(BackupChoice, 1);
     g_weak_ref_init(&choice->parent, G_OBJECT(ui.window));
     choice->cancelled = g_cancellable_new();
     choice->include_audio = adw_switch_row_get_active(ui.backup_audio) ? 1 : 0;
+    choice->inspect = GPOINTER_TO_INT(data) != 0;
     ui.backup_chooser = g_object_ref(choice->cancelled);
     refresh_actions();
     GtkFileDialog *dialog = gtk_file_dialog_new();
-    gtk_file_dialog_set_title(dialog, "Save History backup (existing files are never replaced)");
-    gtk_file_dialog_set_initial_name(dialog, "JustSpeakToIt-History.zip");
+    gtk_file_dialog_set_title(dialog, choice->inspect ? "Inspect backup (no data will be imported)"
+                                                    : "Save History backup (existing files are never replaced)");
+    if (!choice->inspect) gtk_file_dialog_set_initial_name(dialog, "JustSpeakToIt-History.zip");
     GtkFileFilter *filter = gtk_file_filter_new();
     gtk_file_filter_set_name(filter, "ZIP backups");
     gtk_file_filter_add_pattern(filter, "*.zip");
@@ -527,7 +538,8 @@ static void on_backup(GtkButton *button, gpointer data) {
     g_list_store_append(filters, filter);
     gtk_file_dialog_set_filters(dialog, G_LIST_MODEL(filters));
     gtk_file_dialog_set_default_filter(dialog, filter);
-    gtk_file_dialog_save(dialog, ui.window, choice->cancelled, backup_chosen, choice);
+    if (choice->inspect) gtk_file_dialog_open(dialog, ui.window, choice->cancelled, backup_chosen, choice);
+    else gtk_file_dialog_save(dialog, ui.window, choice->cancelled, backup_chosen, choice);
     g_object_unref(filters);
     g_object_unref(filter);
     g_object_unref(dialog);
@@ -1122,6 +1134,15 @@ static GtkWidget *build_general(void) {
     g_signal_connect(ui.backup_export, "clicked", G_CALLBACK(on_backup), NULL);
     adw_action_row_add_suffix(ADW_ACTION_ROW(backup_row), GTK_WIDGET(ui.backup_export));
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(backup), backup_row);
+    GtkWidget *inspect_row = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(inspect_row), "Inspect a ZIP backup");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(inspect_row),
+        "Review categories and archive notices without importing any data.");
+    ui.backup_inspect = GTK_BUTTON(gtk_button_new_with_mnemonic("_Inspect…"));
+    gtk_widget_set_valign(GTK_WIDGET(ui.backup_inspect), GTK_ALIGN_CENTER);
+    g_signal_connect(ui.backup_inspect, "clicked", G_CALLBACK(on_backup), GINT_TO_POINTER(1));
+    adw_action_row_add_suffix(ADW_ACTION_ROW(inspect_row), GTK_WIDGET(ui.backup_inspect));
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(backup), inspect_row);
     gtk_box_append(GTK_BOX(column), backup);
     return page;
 }
@@ -1894,6 +1915,24 @@ int32_t jsti_window_confirm_audio_cleanup(const char *token, size_t count) {
     return post(audio_cleanup_confirmation_apply, confirmation, audio_cleanup_confirmation_free);
 }
 
+static GtkWidget *migration_report_dialog(const char *text) {
+    GtkWidget *dialog = adw_message_dialog_new(ui.window, "Backup inspection (read only)", text);
+    adw_message_dialog_add_response(ADW_MESSAGE_DIALOG(dialog), "close", "Close");
+    adw_message_dialog_set_default_response(ADW_MESSAGE_DIALOG(dialog), "close");
+    adw_message_dialog_set_close_response(ADW_MESSAGE_DIALOG(dialog), "close");
+    g_signal_connect_swapped(dialog, "response", G_CALLBACK(gtk_window_destroy), dialog);
+    return dialog;
+}
+
+static void migration_report_apply(gpointer pointer) {
+    if (ui.window != NULL && !ui.closing) gtk_window_present(GTK_WINDOW(migration_report_dialog(pointer)));
+}
+
+int32_t jsti_window_show_migration_report(const char *text) {
+    if (text == NULL || text[0] == '\0' || !g_utf8_validate(text, -1, NULL)) return -1;
+    return post(migration_report_apply, g_strdup(text), g_free);
+}
+
 typedef struct Insights {
     gchar *all[5];
     gchar *visible[5];
@@ -2402,7 +2441,8 @@ static int32_t login_item_self_test(char *error, size_t capacity) {
 int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (ui.window == NULL) return fail(error, capacity, "the window was not created");
     if (ui.recordings_folder == NULL || ui.audio_cleanup == NULL ||
-        ui.backup_audio == NULL || ui.backup_export == NULL || !adw_switch_row_get_active(ui.backup_audio) ||
+        ui.backup_audio == NULL || ui.backup_export == NULL || ui.backup_inspect == NULL ||
+        !adw_switch_row_get_active(ui.backup_audio) ||
         jsti_window_confirm_audio_cleanup(NULL, 1) != -1 ||
         g_strcmp0(gtk_button_get_label(ui.recordings_folder), "_Open folder") != 0) {
         return fail(error, capacity, "the recording folder control was not created");
@@ -2415,7 +2455,17 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     refresh_actions();
     gboolean backup_ok = backup_choice_active(&choice, choice_parent) &&
         !gtk_widget_get_sensitive(GTK_WIDGET(ui.backup_audio)) &&
-        !gtk_widget_get_sensitive(GTK_WIDGET(ui.backup_export));
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.backup_export)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.backup_inspect));
+    jsti_window_event_fn backup_callback = ui.callback;
+    ui.callback = observe_event;
+    choice.inspect = TRUE;
+    choice.include_audio = 1;
+    backup_emit_path(&choice, "synthetic-review.zip");
+    backup_ok = backup_ok && observed.event == JSTI_EVENT_MIGRATION_INSPECT && observed.index == 0 &&
+        g_strcmp0(observed.text, "synthetic-review.zip") == 0;
+    ui.callback = backup_callback;
+    g_clear_pointer(&observed.text, g_free);
     ui.closing = TRUE;
     backup_ok = backup_ok && !backup_choice_active(&choice, choice_parent);
     ui.closing = FALSE;
@@ -2427,6 +2477,17 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     g_object_unref(choice.cancelled);
     refresh_actions();
     if (!backup_ok) return fail(error, capacity, "History backup chooser cancellation or late-close fence failed");
+    gchar report_text[] = "Synthetic read-only report.";
+    GtkWidget *report_dialog = migration_report_dialog(report_text);
+    g_object_ref_sink(report_dialog);
+    report_text[0] = 'x';
+    gboolean report_ok = jsti_window_show_migration_report(NULL) == -1 &&
+        g_strcmp0(adw_message_dialog_get_body(ADW_MESSAGE_DIALOG(report_dialog)), "Synthetic read-only report.") == 0 &&
+        g_strcmp0(adw_message_dialog_get_default_response(ADW_MESSAGE_DIALOG(report_dialog)), "close") == 0 &&
+        g_strcmp0(adw_message_dialog_get_close_response(ADW_MESSAGE_DIALOG(report_dialog)), "close") == 0;
+    gtk_window_destroy(GTK_WINDOW(report_dialog));
+    g_object_unref(report_dialog);
+    if (!report_ok) return fail(error, capacity, "Backup inspection report text ownership or close defaults changed");
     gchar audio_token[] = "00000000-0000-0000-0000-000000000093";
     GtkWidget *audio_confirmation = audio_cleanup_dialog(audio_token, 2);
     g_object_ref_sink(audio_confirmation);

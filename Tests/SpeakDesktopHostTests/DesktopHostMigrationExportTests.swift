@@ -232,7 +232,7 @@ final class DesktopHostMigrationExportTests: XCTestCase {
     }
 }
 
-private struct BackupHostFixture {
+struct BackupHostFixture {
     let root: URL
     let controller: DesktopHostController<FakePlatform>
     var destination: URL { root.appendingPathComponent("History backup.zip") }
@@ -302,7 +302,7 @@ private final class BackupFixtureDigest: LocalModelSHA256Hasher {
     func finish() throws -> String { String(repeating: "a", count: 64) }
 }
 
-private final class BackupPublicationGate: @unchecked Sendable {
+final class BackupPublicationGate: @unchecked Sendable {
     private let arrived = DispatchSemaphore(value: 0)
     private let released = DispatchSemaphore(value: 0)
 

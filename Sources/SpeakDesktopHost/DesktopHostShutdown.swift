@@ -115,6 +115,8 @@ extension DesktopHostController {
         audioCleanupTask?.cancel()
         migrationExportWorker?.cancel()
         migrationExportTask?.cancel()
+        migrationInspectionWorker?.cancel()
+        migrationInspectionTask?.cancel()
         audioCleanupConfirmation = nil
         postProcessingTask?.cancel()
         liveFinalisation?.cancel()

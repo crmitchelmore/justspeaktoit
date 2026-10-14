@@ -93,6 +93,11 @@ extension DesktopHostController {
 
     package func cancelTranscription() {
         guard !closed else { return }
+        if let inspection = migrationInspectionWorker {
+            inspection.cancel()
+            update("Stopping backup inspection... No application data will be changed.", state: 2)
+            return
+        }
         if let export = migrationExportWorker {
             export.cancel()
             update("Stopping History backup... Existing files will be kept.", state: 2)

@@ -91,6 +91,7 @@ constexpr int historyDeleteID = 461, historyClearID = 462;
 constexpr int recordingsFolderLabelID = 463, recordingsFolderID = 464;
 constexpr int audioCleanupID = 465;
 constexpr int backupAudioID = 466, backupExportID = 467;
+constexpr int backupInspectID = 468;
 constexpr int sourceID = 175;
 // Model modes: bit 0 is live, bit 1 is local (on-device).
 constexpr int modeCount = 4;
@@ -201,6 +202,7 @@ struct WindowState {
     std::string selectedHistoryID;
     std::string allHistoryIDs;
     std::string audioCleanupToken;
+    std::wstring migrationReport;
     size_t audioCleanupCount = 0;
     JSTIWindowCallback callback = nullptr;
     void *context = nullptr;
@@ -483,6 +485,7 @@ void updateHistoryControls(HWND window, int recording) {
     EnableWindow(GetDlgItem(window, audioCleanupID), recording == 0);
     EnableWindow(GetDlgItem(window, backupAudioID), recording == 0);
     EnableWindow(GetDlgItem(window, backupExportID), recording == 0);
+    EnableWindow(GetDlgItem(window, backupInspectID), recording == 0);
     jsti_history_filters_enabled(recording == 0);
     SetDlgItemTextW(window, historyFiltersID, jsti_history_filters_label().c_str());
     EnableWindow(GetDlgItem(window, clearSearchID), recording == 0 && searching(window));
@@ -573,7 +576,7 @@ unsigned pagesOf(int identifier) {
     case voiceSettingsID: return page(voicePage);
     case 94: case microphoneID: case textOutputID: case appearanceLabelID: case appearanceID: case automationID:
     case loginItemID: case recordingsFolderLabelID: case recordingsFolderID: case audioCleanupID:
-    case backupAudioID: case backupExportID:
+    case backupAudioID: case backupExportID: case backupInspectID:
         return page(generalPage);
     case processingID: return page(postProcessingPage);
     case profilesID: return page(profilesPage);
@@ -873,10 +876,11 @@ void layoutSettings(HWND window, const RECT &content) {
         place(window, loginItemID, RECT{left + scale(window, 188 + 220 + 24), y, right, y + row});
         place(window, automationID, RECT{left, y + row + scale(window, 12), right, y + 2 * row + scale(window, 12)});
         label(recordingsFolderLabelID, y + 2 * row + scale(window, 24));
-        control(recordingsFolderID, y + 2 * row + scale(window, 24), scale(window, 140));
+        control(recordingsFolderID, y + 2 * row + scale(window, 24), scale(window, 110));
         place(window, audioCleanupID, RECT{
-            left + scale(window, 188 + 140 + 12), y + 2 * row + scale(window, 24),
-            right, y + 3 * row + scale(window, 24)});
+            left + scale(window, 188 + 110 + 12), y + 2 * row + scale(window, 24),
+            right - scale(window, 172), y + 3 * row + scale(window, 24)});
+        button(backupInspectID, y + 2 * row + scale(window, 24), scale(window, 160));
         break;
     }
     case transcriptionPage: {
@@ -1545,6 +1549,7 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"Delete all a&udio...", BS_PUSHBUTTON | WS_TABSTOP, audioCleanupID) &&
         add(L"BUTTON", L"Include &backup audio", BS_AUTOCHECKBOX | WS_TABSTOP, backupAudioID) &&
         add(L"BUTTON", L"Save History &backup...", BS_PUSHBUTTON | WS_TABSTOP, backupExportID) &&
+        add(L"BUTTON", L"&Inspect backup...", BS_PUSHBUTTON | WS_TABSTOP, backupInspectID) &&
         add(L"BUTTON", L"i&Cloud sync settings…", BS_PUSHBUTTON | WS_TABSTOP, cloudSyncID) &&
         add(L"BUTTON", L"View on &GitHub", BS_PUSHBUTTON | WS_TABSTOP, githubID) &&
         add(L"BUTTON", L"Report an iss&ue", BS_PUSHBUTTON | WS_TABSTOP, issueID) &&
@@ -1716,7 +1721,7 @@ void applyInsights(HWND window) {
 }
 
 void applyUpdate(HWND window) {
-    std::wstring status, transcript;
+    std::wstring status, transcript, migrationReport;
     bool microphonesChanged;
     std::vector<MicrophoneRow> microphones;
     std::wstring microphoneError;
@@ -1733,6 +1738,7 @@ void applyUpdate(HWND window) {
     {
         std::lock_guard<std::mutex> lock(state.mutex);
         status.swap(state.status); transcript.swap(state.transcript);
+        migrationReport.swap(state.migrationReport);
         presentationChanged = state.presentationChanged;
         if (presentationChanged) presentation = std::move(state.pendingPresentation);
         state.presentationChanged = false;
@@ -1880,6 +1886,36 @@ void applyUpdate(HWND window) {
     }
     updateHistoryControls(window, recording);
     refreshSetup(window);
+    if (!migrationReport.empty() && IsWindow(window)) {
+        MessageBoxW(window, migrationReport.c_str(), L"Backup inspection (read only)", MB_OK | MB_ICONINFORMATION);
+    }
+}
+
+void emitMigrationInspection(const std::string &path) {
+    if (state.callback) state.callback(JSTI_EVENT_MIGRATION_INSPECT, path.c_str(), 0, state.context);
+}
+
+void inspectMigrationBackup(HWND window) {
+    std::vector<wchar_t> path(32768);
+    OPENFILENAMEW chooser{};
+    chooser.lStructSize = sizeof(chooser);
+    chooser.hwndOwner = window;
+    chooser.lpstrFile = path.data();
+    chooser.nMaxFile = static_cast<DWORD>(path.size());
+    chooser.lpstrFilter = L"ZIP backups (*.zip)\0*.zip\0\0";
+    chooser.lpstrTitle = L"Inspect backup (no data will be imported)";
+    chooser.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_EXPLORER;
+    if (!GetOpenFileNameW(&chooser)) {
+        const DWORD code = CommDlgExtendedError();
+        if (code) showFailure(window, jsti::systemError("Choosing backup for inspection", code));
+        return;
+    }
+    const std::string selected = jsti::utf8(path.data());
+    if (selected.empty()) {
+        showFailure(window, "Windows returned an invalid backup path. Choose a local ZIP file.");
+        return;
+    }
+    emitMigrationInspection(selected);
 }
 
 void importAudio(HWND window) {
@@ -2223,6 +2259,9 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case backupExportID:
             if (HIWORD(wparam) == BN_CLICKED && idleControl(window, backupExportID)) exportMigrationBackup(window);
             return 0;
+        case backupInspectID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, backupInspectID)) inspectMigrationBackup(window);
+            return 0;
         case githubID: case issueID: case privacyID: {
             if (HIWORD(wparam) != BN_CLICKED) return 0;
             const wchar_t *address = LOWORD(wparam) == githubID ? L"https://github.com/crmitchelmore/justspeaktoit"
@@ -2460,7 +2499,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         jsti_hotkey_stop(window);
         {
             std::lock_guard<std::mutex> lock(state.mutex);
-            state.window = nullptr; state.posted = false; state.audioCleanupToken.clear();
+            state.window = nullptr; state.posted = false; state.audioCleanupToken.clear(); state.migrationReport.clear();
         }
         PostQuitMessage(0); return 0;
     }
@@ -2513,6 +2552,26 @@ int jsti_window_confirm_audio_cleanup(const char *token, size_t count, char *err
     if (!PostMessageW(state.window, audioCleanupMessage, 0, 0)) {
         state.audioCleanupToken.clear();
         return jsti::fail("Could not show the recording audio confirmation.", error, capacity);
+    }
+    return 0;
+}
+
+int jsti_window_show_migration_report(const char *text, char *error, size_t capacity) {
+    std::wstring report;
+    if (!text || !jsti::wide(text, report) || report.empty()) {
+        return jsti::fail("The backup inspection report is invalid.", error, capacity);
+    }
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (!state.window || !state.migrationReport.empty()) {
+        return jsti::fail("The backup inspection report is unavailable.", error, capacity);
+    }
+    state.migrationReport = std::move(report);
+    if (!state.posted) {
+        state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
+        if (!state.posted) {
+            state.migrationReport.clear();
+            return jsti::fail("Could not show the backup inspection report.", error, capacity);
+        }
     }
     return 0;
 }
@@ -3290,15 +3349,33 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         emitMigrationBackup(window, "synthetic-history-only.zip");
         const bool historyOnly = observed.event == JSTI_EVENT_MIGRATION_EXPORT &&
             observed.id == "synthetic-history-only.zip" && observed.model == 0;
+        emitMigrationInspection("synthetic-review.zip");
+        const bool inspection = observed.event == JSTI_EVENT_MIGRATION_INSPECT &&
+            observed.id == "synthetic-review.zip" && observed.model == 0;
         SendDlgItemMessageW(window, backupAudioID, BM_SETCHECK, BST_CHECKED, 0);
         updateHistoryControls(window, 2);
         const bool backupLocked = !IsWindowEnabled(GetDlgItem(window, backupAudioID)) &&
-            !IsWindowEnabled(GetDlgItem(window, backupExportID));
+            !IsWindowEnabled(GetDlgItem(window, backupExportID)) && !IsWindowEnabled(GetDlgItem(window, backupInspectID));
         updateHistoryControls(window, 0);
-        if (!includesAudio || !historyOnly || !backupLocked ||
-            !IsWindowEnabled(GetDlgItem(window, backupAudioID)) || !IsWindowEnabled(GetDlgItem(window, backupExportID))) {
+        if (!includesAudio || !historyOnly || !inspection || !backupLocked ||
+            !IsWindowEnabled(GetDlgItem(window, backupAudioID)) || !IsWindowEnabled(GetDlgItem(window, backupExportID)) ||
+            !IsWindowEnabled(GetDlgItem(window, backupInspectID))) {
             failure = "History backup lost its explicit audio choice or idle-only controls."; return false;
         }
+        char reportError[256]{};
+        std::string report = "Synthetic read-only report.";
+        if (jsti_window_show_migration_report(nullptr, reportError, sizeof(reportError)) == 0 ||
+            jsti_window_show_migration_report(report.c_str(), reportError, sizeof(reportError)) != 0) {
+            failure = "Backup inspection report validation or dispatch failed."; return false;
+        }
+        report.assign("Changed caller storage");
+        bool reportOwned;
+        {
+            std::lock_guard<std::mutex> lock(state.mutex);
+            reportOwned = state.migrationReport == L"Synthetic read-only report.";
+            state.migrationReport.clear(); // Do not open a modal report in the automated fixture.
+        }
+        if (!reportOwned) { failure = "Backup inspection report did not own its posted text."; return false; }
         observed = {};
         // Deliberately interleaved global rows prove callbacks do not leak the
         // filtered combo index. These are never sent to the real Swift host.

@@ -18,6 +18,8 @@ func windowsHistoryManagementEvent(
         holder.enqueueSettings {
             await holder.controller.beginMigrationExport(URL(fileURLWithPath: value), includeAudio: index == 1)
         }
+    case 97:
+        holder.enqueueSettings { await holder.controller.beginMigrationInspection(URL(fileURLWithPath: value)) }
     default: return false
     }
     return true

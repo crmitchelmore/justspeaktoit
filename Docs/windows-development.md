@@ -693,7 +693,22 @@ Windows keeps the backup controls together in the existing Audio and output
 card rather than adding an overflowing third card at its 980-by-760 minimum;
 GTK uses a separate History backup preferences group in its scrollable page.
 
-Complete category collection, import preview/application, credential recovery
+General also offers **Inspect backup** through a separate native ZIP open
+picker. This is read-only archive inspection, not import approval or application:
+the bounded native reader checks the envelope and extracted audio CRC/digests,
+then reports canonical category counts and the number of archive notices.
+An unreadable declared category is shown as unreadable, never as an empty
+successful category. Credential values and record contents are not displayed.
+The report explicitly states that record values are not yet approved for import
+and import/apply is unavailable. Its separately owned cancellable worker removes
+only its reader-created private staging directory, preserves the selected ZIP
+and application state, and cannot present a late report after close. The GTK
+open/save chooser shares cancellation and weak-parent lifetime fencing while
+keeping the selected operation and audio choice frozen. Windows posts owned
+report text through its existing window dispatcher; GTK posts a native report
+dialog with a single Close response.
+
+Complete category collection, conflict preview/application, credential recovery
 and recording-location changes are not yet wired. Native CNG/GLib and Mac
 ZIPFoundation interoperability tests, picker lifecycle and paired light/dark
 layout acceptance remain separate required receipts. Ordinary Linux local-path

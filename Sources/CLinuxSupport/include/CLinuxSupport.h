@@ -53,7 +53,8 @@ enum {
     JSTI_EVENT_RECORDINGS_FOLDER = 93,
     JSTI_EVENT_AUDIO_CLEANUP = 94,
     JSTI_EVENT_AUDIO_CLEANUP_RESPONSE = 95, /* text: confirmation UUID; index: 1 confirms, 0 cancels */
-    JSTI_EVENT_MIGRATION_EXPORT = 96 /* text: selected ZIP destination; index: 1 includes saved audio */
+    JSTI_EVENT_MIGRATION_EXPORT = 96, /* text: selected ZIP destination; index: 1 includes saved audio */
+    JSTI_EVENT_MIGRATION_INSPECT = 97 /* text: selected ZIP source; no application changes */
 };
 
 /* Read aloud, Appearance and Launch at login. Linux-only numbers 40-46. */
@@ -152,6 +153,7 @@ int32_t jsti_window_set_history(const JSTIHistoryRow *rows, size_t count, const 
 /* Complete retained IDs, including filtered-out rows. Copied for Clear confirmation. */
 int32_t jsti_window_set_history_management(const char *identifiers);
 int32_t jsti_window_confirm_audio_cleanup(const char *token, size_t count);
+int32_t jsti_window_show_migration_report(const char *text);
 /* The dashboard totals (`all` saved records) and the History header totals
  * (`visible`, the records the search shows). */
 int32_t jsti_window_set_insights(const JSTIInsights *all, const JSTIInsights *visible);

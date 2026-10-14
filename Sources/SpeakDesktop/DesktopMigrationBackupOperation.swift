@@ -15,13 +15,13 @@ extension DesktopMigrationBackup {
             let snapshot = try await store.migrationSnapshot(categories: categories, digests: adapter.digests)
             try Task.checkCancellation()
             let file = try adapter.archive(snapshot)
-            guard file.isFileURL, file.lastPathComponent == "export.zip",
-                  file.deletingLastPathComponent().lastPathComponent.hasPrefix("migration-export-"),
-                  UUID(uuidString: String(file.deletingLastPathComponent().lastPathComponent
-                      .dropFirst("migration-export-".count))) != nil else {
+            try DesktopMigrationStaging.requireLocalFile(file)
+            guard file.lastPathComponent == "export.zip" else {
                 throw DataMigrationError.invalid("The archive producer returned an invalid owned staging path.")
             }
-            staging = file
+            staging = try DesktopMigrationStaging.directory(
+                file.deletingLastPathComponent(), prefix: "migration-export-"
+            )
             try Task.checkCancellation()
             try adapter.publish(file, destination)
             outcome = .saved
@@ -34,7 +34,7 @@ extension DesktopMigrationBackup {
         }
         if let staging {
             do {
-                try FileManager.default.removeItem(at: staging.deletingLastPathComponent())
+                try FileManager.default.removeItem(at: staging)
             } catch {
                 outcome = outcome.addingCleanupFailure(error.localizedDescription)
             }

@@ -57,7 +57,7 @@ final class DataMigrationKindScopeInteropTests: XCTestCase {
         )
         raw["id"] = id
         raw["futureMetadata"] = ["retained": true]
-        let value = AnyCodable(raw)
+        let value = try AnyCodable(raw)
         fixture.defaults.set(try JSONEncoder().encode([value]), forKey: "ttsUsageHistory")
         let imported = MigrationRecord(
             id: id, kind: "history", value: try HistoryItem.placeholder.migrationValue(id: id)

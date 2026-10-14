@@ -2,7 +2,8 @@ import Foundation
 
 public enum DataMigrationFormat {
     public static let identifier = "JustSpeakToIt"
-    public static let version = 1
+    public static let version = 2
+    public static let minimumReadableVersion = 1
 }
 
 public enum DataMigrationCategory: String, Codable, CaseIterable, Identifiable, Sendable {
@@ -36,14 +37,27 @@ public struct DataMigrationScope: Codable, Equatable, Sendable {
     public var start: Date?
     public var end: Date?
     public var selectedIDs: Set<String>?
+    public var selectedKinds: Set<String>?
 
     public init(start: Date? = nil, end: Date? = nil, selectedIDs: Set<String>? = nil) {
+        self.init(start: start, end: end, selectedIDs: selectedIDs, selectedKinds: nil)
+    }
+
+    public init(
+        start: Date? = nil, end: Date? = nil, selectedIDs: Set<String>? = nil, selectedKinds: Set<String>?
+    ) {
         self.start = start
         self.end = end
         self.selectedIDs = selectedIDs
+        self.selectedKinds = selectedKinds
     }
 
-    public func contains(id: String, date: Date?) -> Bool {
+    public func contains(id: String, date: Date?) -> Bool { contains(id: id, date: date, kind: nil) }
+
+    public func contains(id: String, date: Date?, kind: String?) -> Bool {
+        if let selectedKinds {
+            guard let kind, selectedKinds.contains(kind) else { return false }
+        }
         if let selectedIDs, !selectedIDs.contains(id) { return false }
         if let start {
             guard let date else { return false }
@@ -56,7 +70,13 @@ public struct DataMigrationScope: Codable, Equatable, Sendable {
         return true
     }
 
-    public var isComplete: Bool { start == nil && end == nil && selectedIDs == nil }
+    public func contains(kind: String) -> Bool { selectedKinds?.contains(kind) ?? true }
+
+    public func contains(id: String, kind: String) -> Bool {
+        contains(kind: kind) && (selectedIDs?.contains(id) ?? true)
+    }
+
+    public var isComplete: Bool { start == nil && end == nil && selectedIDs == nil && selectedKinds == nil }
 }
 
 public struct DataMigrationRecord: Codable, Equatable, Identifiable, Sendable {

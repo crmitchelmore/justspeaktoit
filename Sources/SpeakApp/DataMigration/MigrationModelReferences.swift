@@ -33,7 +33,10 @@ extension MigrationStore {
                                         source: model.repoID, destination: destination, family: "llm"))
             }
         #endif
-        for reference in references {
+        let scope = snapshot.manifest.scopes[MigrationCategory.models.rawValue] ?? MigrationScope()
+        for reference in references
+            where scope.selectedKinds == nil
+                || scope.contains(id: reference.id, date: nil, kind: "modelReference") {
             let record = MigrationRecord(
                 id: reference.id,
                 kind: "modelReference",

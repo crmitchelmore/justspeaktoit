@@ -63,9 +63,12 @@ public enum DataMigrationRecordValidation {
         using recordValidator: (DataMigrationRecord, DataMigrationCategory) throws -> Void
     ) throws {
         try recordValidator(record, category)
-        if category == .history || category == .recordings {
-            let scope = incoming.manifest.scopes[category.rawValue] ?? DataMigrationScope()
-            guard scope.contains(id: record.id, date: record.date) else {
+        let scope = incoming.manifest.scopes[category.rawValue] ?? DataMigrationScope()
+        guard scope.contains(kind: record.kind) else {
+            throw DataMigrationError.invalid("Item is outside the exported record kinds")
+        }
+        if category == .history || category == .recordings || scope.selectedKinds != nil {
+            guard scope.contains(id: record.id, date: record.date, kind: record.kind) else {
                 throw DataMigrationError.invalid("Item is outside the exported selection")
             }
         }

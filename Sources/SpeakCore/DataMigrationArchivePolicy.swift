@@ -52,15 +52,23 @@ public enum DataMigrationArchivePolicy {
     }
 
     public static func validateManifest(_ manifest: DataMigrationManifest) throws {
-        guard manifest.format == DataMigrationFormat.identifier, manifest.version == DataMigrationFormat.version,
+        guard manifest.format == DataMigrationFormat.identifier,
+              (DataMigrationFormat.minimumReadableVersion...DataMigrationFormat.version).contains(manifest.version),
               Set(manifest.categories).count == manifest.categories.count else {
             throw DataMigrationError.invalid("This export format is unsupported. Update the app before importing it.")
+        }
+        for scope in manifest.scopes.values {
+            guard let kinds = scope.selectedKinds else { continue }
+            guard manifest.version >= 2, kinds.count <= 100,
+                  kinds.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 128 && !$0.contains("\0") }) else {
+                throw DataMigrationError.invalid("Record-kind selections require a supported version-2 export.")
+            }
         }
     }
 
     public static func safeAudioPath(_ path: String) -> Bool {
         let parts = path.split(separator: "/", omittingEmptySubsequences: false)
-        // Version-1 archive acceptance is deliberately narrower than audio import.
+        // Archive acceptance is deliberately narrower than audio import.
         let extensions: Set<String> = ["wav", "m4a", "mp3", "flac", "ogg", "aiff", "aif", "aac", "caf", "audio"]
         return parts.count == 2 && parts[0] == "recordings" && !parts[1].isEmpty
             && extensions.contains((path as NSString).pathExtension.lowercased())

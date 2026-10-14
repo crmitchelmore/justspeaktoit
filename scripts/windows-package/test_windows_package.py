@@ -6,6 +6,8 @@ import importlib.util
 import json
 import pathlib
 import struct
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -205,8 +207,13 @@ class IdentityTests(unittest.TestCase):
             lambda data: data["identity"].update(processorArchitectures="x64"),
             lambda data: data["application"].update(executionAlias="nested\\alias.exe"),
             lambda data: data["application"].update(executable="speak.exe"),
+            lambda data: data["application"].update(id="ChangedGUI"),
             lambda data: data["application"].update(executionAlias="JustSpeakToItDeveloperCLI.exe"),
             lambda data: data["cli"].update(executable="SpeakWindows.exe"),
+            lambda data: data["cli"].update(id="ChangedCLI"),
+            lambda data: data["cli"].update(id="JustSpeakToIt"),
+            lambda data: data["cli"].pop("id"),
+            lambda data: data["cli"].update(startupTask={"id": "Extra", "parameters": "--background"}),
             lambda data: data["cli"].update(executionAlias="speak.exe"),
             lambda data: data["cli"].update(executionAlias="nested\\alias.exe"),
             lambda data: data["cli"].update(executable="..\\speak.exe"),
@@ -244,12 +251,19 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(application.get("{%s}TrustLevel" % ns["uap10"]), "mediumIL")
         alias = application.find(".//desktop:ExecutionAlias", ns)
         self.assertEqual(alias.get("Alias"), "JustSpeakToItDeveloper.exe")
-        cli_extension = application.find("f:Extensions/uap5:Extension", ns)
+        applications = root.findall("f:Applications/f:Application", ns)
+        self.assertEqual([app.get("Id") for app in applications], ["JustSpeakToIt", "JustSpeakToItCLI"])
+        cli_application = applications[1]
+        self.assertEqual(cli_application.get("Executable"), "speak.exe")
+        self.assertEqual(cli_application.find("uap:VisualElements", ns).get("AppListEntry"), "none")
+        self.assertIsNone(application.find("uap:VisualElements", ns).get("AppListEntry"))
+        cli_extension = cli_application.find("f:Extensions/uap5:Extension", ns)
         self.assertEqual(cli_extension.get("Executable"), "speak.exe")
         cli_alias = cli_extension.find("uap5:AppExecutionAlias", ns)
         self.assertEqual(cli_alias.get("{%s}Subsystem" % ns["uap10"]), "console")
         self.assertEqual(cli_alias.find("uap5:ExecutionAlias", ns).get("Alias"), "JustSpeakToItDeveloperCLI.exe")
-        self.assertEqual(len(root.findall("f:Applications/f:Application", ns)), 1)
+        self.assertEqual(len(cli_application.find("f:Extensions", ns)), 1)
+        self.assertIsNone(cli_application.find(".//desktop:StartupTask", ns))
         startup = application.find("f:Extensions/desktop:Extension[@Category='windows.startupTask']", ns)
         self.assertEqual((startup.get("Executable"), startup.get("{%s}Parameters" % ns["uap10"])),
                          ("SpeakWindows.exe", "--background"))
@@ -331,10 +345,200 @@ class ManifestTests(unittest.TestCase):
                                             "CN=Just Speak to It Developer")
         root = ET.fromstring(data)
         ns = windows_msix.NAMESPACES
-        extensions = root.find("f:Applications/f:Application/f:Extensions", ns)
+        extensions = root.findall("f:Applications/f:Application", ns)[1].find("f:Extensions", ns)
         extensions.append(copy.deepcopy(extensions.find("uap5:Extension", ns)))
         with self.assertRaisesRegex(windows_msix.PackageError, "exactly"):
             windows_msix.check_manifest(ET.tostring(root), self.identity, "0.0.7.1", "CN=Just Speak to It Developer")
+
+    def test_application_topology_visuals_and_extension_ownership_are_exact_on_both_architectures(self):
+        ns = windows_msix.NAMESPACES
+        for architecture in ("x64", "arm64"):
+            original = windows_msix.render_manifest(self.identity, "0.0.7.1", "CN=Just Speak to It Developer",
+                                                    architecture=architecture)
+            for mutation in ("old-topology", "extra-hidden-app", "duplicate-app-id", "wrong-cli-id",
+                             "cli-visible", "gui-hidden", "cli-missing-visual", "cli-foreign-logo",
+                             "gui-foreign-logo", "cli-startup", "extra-extension", "swapped-aliases",
+                             "cli-extra-visual", "cli-wrong-trust", "gui-extra-activation",
+                             "duplicate-category", "cli-wrong-executable", "cli-wrong-alias",
+                             "cli-wrong-subsystem", "cli-missing-subsystem", "cli-extra-alias"):
+                with self.subTest(architecture=architecture, mutation=mutation):
+                    root = ET.fromstring(original)
+                    apps = root.find("f:Applications", ns)
+                    gui, cli = list(apps)
+                    gui_extensions = gui.find("f:Extensions", ns)
+                    cli_extensions = cli.find("f:Extensions", ns)
+                    visual = cli.find("uap:VisualElements", ns)
+                    if mutation == "old-topology":
+                        gui_extensions.append(cli_extensions[0])
+                        apps.remove(cli)
+                    elif mutation == "extra-hidden-app":
+                        apps.append(copy.deepcopy(cli))
+                    elif mutation == "duplicate-app-id":
+                        cli.set("Id", gui.get("Id"))
+                    elif mutation == "wrong-cli-id":
+                        cli.set("Id", "UnreviewedCLI")
+                    elif mutation == "cli-visible":
+                        visual.attrib.pop("AppListEntry")
+                    elif mutation == "gui-hidden":
+                        gui.find("uap:VisualElements", ns).set("AppListEntry", "none")
+                    elif mutation == "cli-missing-visual":
+                        cli.remove(visual)
+                    elif mutation == "cli-foreign-logo":
+                        visual.set("Square44x44Logo", "Assets\\StoreLogo.png")
+                    elif mutation == "gui-foreign-logo":
+                        gui.find("uap:VisualElements", ns).set("Square150x150Logo", "Assets\\StoreLogo.png")
+                    elif mutation == "cli-startup":
+                        cli_extensions.append(copy.deepcopy(gui_extensions[1]))
+                    elif mutation == "extra-extension":
+                        ET.SubElement(cli_extensions, "{%s}Extension" % ns["uap5"], Category="windows.userActivity")
+                    elif mutation == "swapped-aliases":
+                        gui_alias, cli_alias = gui_extensions[0], cli_extensions[0]
+                        gui_extensions.remove(gui_alias)
+                        cli_extensions.remove(cli_alias)
+                        gui_extensions.insert(0, cli_alias)
+                        cli_extensions.append(gui_alias)
+                    elif mutation == "cli-extra-visual":
+                        ET.SubElement(visual, "{%s}DefaultTile" % ns["uap"])
+                    elif mutation == "cli-wrong-trust":
+                        cli.set("{%s}TrustLevel" % ns["uap10"], "appContainer")
+                    elif mutation == "duplicate-category":
+                        gui_extensions.append(copy.deepcopy(cli_extensions[0]))
+                    elif mutation == "cli-wrong-executable":
+                        cli.set("Executable", "SpeakWindows.exe")
+                    elif mutation == "cli-wrong-alias":
+                        cli_extensions[0][0][0].set("Alias", "JustSpeakToItDeveloper.exe")
+                    elif mutation == "cli-wrong-subsystem":
+                        cli_extensions[0][0].set("{%s}Subsystem" % ns["uap10"], "windows")
+                    elif mutation == "cli-missing-subsystem":
+                        cli_extensions[0][0].attrib.pop("{%s}Subsystem" % ns["uap10"])
+                    elif mutation == "cli-extra-alias":
+                        cli_extensions[0][0].append(copy.deepcopy(cli_extensions[0][0][0]))
+                    else:
+                        gui.set("EntryPoint", "Unreviewed.Activation")
+                    with self.assertRaises(windows_msix.PackageError):
+                        windows_msix.check_manifest(ET.tostring(root), self.identity, "0.0.7.1",
+                                                    "CN=Just Speak to It Developer", architecture=architecture)
+
+
+class StartEntryMockTests(unittest.TestCase):
+    def test_native_family_entry_projection_with_mock_startapps(self):
+        pwsh = shutil.which("pwsh")
+        if pwsh is None:
+            self.skipTest("PowerShell 7 is unavailable; no tools are downloaded")
+        script = r"""
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$tokens = $null; $errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($args[0], [ref] $tokens, [ref] $errors)
+if ($errors.Count) { throw ($errors | Out-String) }
+foreach ($name in @('Get-StartMenuEntry', 'Wait-StartMenuEntry')) {
+    $function = @($ast.FindAll({ param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
+    }, $true))
+    if ($function.Count -ne 1) { throw "Expected one $name function" }
+    . ([scriptblock]::Create($function[0].Extent.Text))
+}
+$base = @{ packageFamilyName = 'developer_family'; displayName = 'Developer GUI' }
+$aumid = 'developer_family!JustSpeakToIt'
+$script:waiting = $false
+function Get-FakeStartItems {
+    if ($script:waiting) {
+        $index = [Math]::Min($script:polls, $script:frames.Count - 1)
+        $script:items = $script:frames[$index].items
+        $script:polls++
+    }
+    $script:items
+}
+function Get-StartApps { Get-FakeStartItems }
+function Get-Command {
+    param($Name, $ErrorAction)
+    if (-not $script:useShell) { [pscustomobject]@{ Name = 'Get-StartApps' } }
+}
+function New-Object {
+    param($ComObject)
+    if ($ComObject -ne 'Shell.Application') { throw 'Unexpected COM request' }
+    $script:folder = [pscustomobject]@{}
+    $script:folder | Add-Member ScriptMethod Items {
+        Get-FakeStartItems | ForEach-Object { [pscustomobject]@{ Path = $_.AppID; Name = $_.Name } }
+    }
+    $shell = [pscustomobject]@{}
+    $shell | Add-Member ScriptMethod NameSpace {
+        param($Path)
+        if ($Path -ne 'shell:AppsFolder') { throw 'Unexpected shell namespace' }
+        $script:folder
+    }
+    $shell
+}
+$gui = [pscustomobject]@{ AppID = $aumid; Name = 'Developer GUI' }
+$cli = [pscustomobject]@{ AppID = 'developer_family!JustSpeakToItCLI'; Name = 'Unexpected CLI' }
+$other = [pscustomobject]@{ AppID = 'other_family!Other'; Name = 'Other app' }
+$near = [pscustomobject]@{ AppID = 'developer_family_extra!Other'; Name = 'Similar family' }
+foreach ($script:useShell in @($false, $true)) {
+foreach ($case in @(
+    @{ items = @(); count = 0; present = $false },
+    @{ items = @($other); count = 0; present = $false },
+    @{ items = @($gui, $other); count = 1; present = $true },
+    @{ items = @($gui, $cli); count = 2; present = $true },
+    @{ items = @($cli); count = 1; present = $false },
+    @{ items = @($gui, $gui); count = 2; present = $true },
+    @{ items = @($near); count = 0; present = $false }
+)) {
+    $script:items = $case.items
+    $entry = Get-StartMenuEntry
+    if ($entry.entries.Count -ne $case.count -or $entry.present -ne $case.present) {
+        throw 'Incorrect family entry projection'
+    }
+}
+}
+Write-Output 'PASS fourteen mock-only Start entry projections (StartApps and shell fallback)'
+function Get-Date { ([datetime]'2026-01-01T00:00:00').AddSeconds($script:elapsed) }
+function Start-Sleep {
+    param([int] $Seconds)
+    if ($Seconds -ne 1) { throw 'The existing polling interval must remain one second' }
+    $script:elapsed += $Seconds
+}
+$wrongName = [pscustomobject]@{ AppID = $aumid; Name = 'Unreviewed name' }
+$cases = @(
+    @{ present = $true; frames = @(@{ items = @($gui, $cli) }, @{ items = @($gui) })
+       count = 1; gui = $true; polls = 2; elapsed = 1; ids = $aumid },
+    @{ present = $false; frames = @(@{ items = @($cli) }, @{ items = @() })
+       count = 0; gui = $false; polls = 2; elapsed = 1; ids = '' },
+    @{ present = $true; frames = @(@{ items = @($wrongName) }, @{ items = @($gui) })
+       count = 1; gui = $true; polls = 2; elapsed = 1; ids = $aumid },
+    @{ present = $true; frames = @(@{ items = @($cli) }, @{ items = @($gui) })
+       count = 1; gui = $true; polls = 2; elapsed = 1; ids = $aumid },
+    @{ present = $true; frames = @(@{ items = @($gui, $cli) })
+       count = 2; gui = $true; polls = 3; elapsed = 3; ids = "$aumid,developer_family!JustSpeakToItCLI" },
+    @{ present = $true; frames = @(@{ items = @($cli) })
+       count = 1; gui = $false; polls = 3; elapsed = 3; ids = 'developer_family!JustSpeakToItCLI' },
+    @{ present = $false; frames = @(@{ items = @($gui, $cli) })
+       count = 2; gui = $true; polls = 3; elapsed = 3; ids = "$aumid,developer_family!JustSpeakToItCLI" },
+    @{ present = $false; frames = @(@{ items = @($cli) })
+       count = 1; gui = $false; polls = 3; elapsed = 3; ids = 'developer_family!JustSpeakToItCLI' }
+)
+$script:waiting = $true
+foreach ($script:useShell in @($false, $true)) {
+    foreach ($case in $cases) {
+        $script:frames = $case.frames; $script:polls = 0; $script:elapsed = 0
+        $entry = Wait-StartMenuEntry -Present $case.present -Seconds 3
+        $ids = ($entry.entries | ForEach-Object { $_.id }) -join ','
+        if ($entry.entries.Count -ne $case.count -or $entry.present -ne $case.gui -or
+            $script:polls -ne $case.polls -or $script:elapsed -ne $case.elapsed -or $ids -cne $case.ids) {
+            throw "Incorrect bounded family convergence or final evidence: $($case.ids)"
+        }
+    }
+}
+Write-Output 'PASS sixteen deterministic mock-only family waits (no real sleeps or native queries)'
+"""
+        with tempfile.TemporaryDirectory() as scratch:
+            fixture = pathlib.Path(scratch) / "start-entry-mock.ps1"
+            fixture.write_text(script, encoding="utf-8")
+            result = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-File", str(fixture),
+                                     str(HERE / "test-windows-package-lifecycle.ps1")],
+                                    capture_output=True, text=True, encoding="utf-8", timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("PASS fourteen mock-only", result.stdout)
+        self.assertIn("PASS sixteen deterministic mock-only", result.stdout)
 
 
 class AssetTests(unittest.TestCase):
@@ -422,6 +626,9 @@ class LayoutTests(unittest.TestCase):
         self.assertEqual(set(package_manifest["executables"]), set(BUILD.EXECUTABLES))
         self.assertEqual(package_manifest["executables"]["speak.exe"]["subsystem"], "console")
         self.assertEqual(package_manifest["package"]["cliExecutionAlias"], "JustSpeakToItDeveloperCLI.exe")
+        self.assertEqual(package_manifest["package"]["cliApplicationId"], "JustSpeakToItCLI")
+        self.assertEqual(package_manifest["package"]["cliAppUserModelId"],
+                         package_manifest["package"]["packageFamilyName"] + "!JustSpeakToItCLI")
         self.assertEqual(evidence["layout"]["files"], len(hashes))
 
     def test_arm64_bundle_becomes_an_arm64_package_of_the_same_identity(self):
@@ -433,6 +640,9 @@ class LayoutTests(unittest.TestCase):
         self.assertEqual(package_manifest["package"]["kind"], "unsigned Windows ARM64 developer MSIX payload")
         manifest = ET.fromstring((self.root / "out/layout/AppxManifest.xml").read_bytes())
         self.assertEqual(manifest.find("f:Identity", windows_msix.NAMESPACES).get("ProcessorArchitecture"), "arm64")
+        self.assertEqual(package_manifest["package"]["cliApplicationId"], "JustSpeakToItCLI")
+        self.assertEqual(package_manifest["package"]["cliAppUserModelId"],
+                         package_manifest["package"]["packageFamilyName"] + "!JustSpeakToItCLI")
         x64 = self.build(make_bundle(self.root / "x64-bundle"), output="x64")
         self.assertEqual(x64["package"]["packageFamilyName"], evidence["package"]["packageFamilyName"])
         self.assertEqual(x64["package"]["architecture"], "x64")

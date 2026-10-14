@@ -33,6 +33,7 @@
     }
   },
   "cli": {
+    "id": "JustSpeakToItCLI",
     "executable": "speak.exe",
     "executionAlias": "JustSpeakToItDeveloperCLI.exe"
   },

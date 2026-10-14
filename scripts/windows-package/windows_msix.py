@@ -136,6 +136,8 @@ def package_identity(identity, version, publisher, architecture="x64"):
             "applicationId": identity["application"]["id"],
             "appUserModelId": family + "!" + identity["application"]["id"],
             "executionAlias": identity["application"]["executionAlias"],
+            "cliApplicationId": identity["cli"]["id"],
+            "cliAppUserModelId": family + "!" + identity["cli"]["id"],
             "cliExecutionAlias": identity["cli"]["executionAlias"],
             "displayName": identity["presentation"]["displayName"]}
 
@@ -146,10 +148,12 @@ def check_execution_identity(data):
         value = application.get(key)
         if not isinstance(value, str) or not EXECUTABLE_PATTERN.fullmatch(value) or FILE_NAME_FORBIDDEN.search(value):
             raise PackageError(key + " must be an .exe file name without a directory")
-    if data.get("cli") != {"executable": BUNDLE.CLI, "executionAlias": "JustSpeakToItDeveloperCLI.exe"}:
-        raise PackageError("cli must declare exactly speak.exe and the developer-specific CLI execution alias")
-    if application["executable"] != BUNDLE.APPLICATION or application["executionAlias"] != "JustSpeakToItDeveloper.exe":
-        raise PackageError("the existing GUI executable and developer execution alias must not be retargeted")
+    if data.get("cli") != {"id": "JustSpeakToItCLI", "executable": BUNDLE.CLI,
+                           "executionAlias": "JustSpeakToItDeveloperCLI.exe"}:
+        raise PackageError("cli must declare exactly JustSpeakToItCLI, speak.exe and the developer CLI execution alias")
+    if (application["id"] != "JustSpeakToIt" or application["executable"] != BUNDLE.APPLICATION
+            or application["executionAlias"] != "JustSpeakToItDeveloper.exe"):
+        raise PackageError("the existing GUI application id, executable and developer alias must not be retargeted")
 
 
 def load_identity(path=IDENTITY_PATH):
@@ -392,6 +396,7 @@ def render_manifest(identity, version, publisher, template_path=TEMPLATE_PATH, a
         "deviceFamily": family["name"], "minVersion": family["minVersion"],
         "maxVersionTested": family["maxVersionTested"], "applicationId": application["id"],
         "executable": application["executable"], "executionAlias": application["executionAlias"],
+        "cliApplicationId": identity["cli"]["id"],
         "cliExecutable": identity["cli"]["executable"], "cliExecutionAlias": identity["cli"]["executionAlias"],
         "startupTaskId": application["startupTask"]["id"],
         "startupTaskParameters": application["startupTask"]["parameters"],
@@ -423,11 +428,36 @@ def check_manifest(data, identity, version, publisher, architecture="x64"):
         raise PackageError("manifest must disable file-system write virtualisation")
     applications = root.findall("f:Applications/f:Application", ns)
     application = identity["application"]
-    if (len(applications) != 1 or applications[0].get("Id") != application["id"]
-            or applications[0].get("Executable") != application["executable"]
-            or applications[0].get("{%s}TrustLevel" % ns["uap10"]) != "mediumIL"
-            or applications[0].get("{%s}RuntimeBehavior" % ns["uap10"]) != "packagedClassicApp"):
-        raise PackageError("manifest must declare exactly the full-trust packaged desktop application")
+    if len(applications) != 2:
+        raise PackageError("manifest must declare exactly the reviewed GUI and hidden CLI applications")
+    for index, (element, expected_application) in enumerate(zip(applications, (application, identity["cli"]))):
+        expected_attributes = {
+            "Id": expected_application["id"], "Executable": expected_application["executable"],
+            "{%s}TrustLevel" % ns["uap10"]: "mediumIL",
+            "{%s}RuntimeBehavior" % ns["uap10"]: "packagedClassicApp",
+        }
+        if element.attrib != expected_attributes:
+            raise PackageError("manifest application identity and activation must match the reviewed GUI and CLI")
+        visual = element.find("uap:VisualElements", ns)
+        app_extensions = element.find("f:Extensions", ns)
+        if visual is None or app_extensions is None or list(element) != [visual, app_extensions]:
+            raise PackageError("each application must contain exactly its visual elements and reviewed extensions")
+        expected_visual = {
+            "DisplayName": identity["presentation"]["displayName"],
+            "Description": identity["presentation"]["description"], "BackgroundColor": "transparent",
+            "Square150x150Logo": "Assets\\Square150x150Logo.png",
+            "Square44x44Logo": "Assets\\Square44x44Logo.png",
+        }
+        if index == 1:
+            expected_visual["AppListEntry"] = "none"
+            categories = ["windows.appExecutionAlias"]
+        else:
+            categories = ["windows.appExecutionAlias", "windows.startupTask"]
+        if visual.attrib != expected_visual or list(visual):
+            raise PackageError("manifest must keep canonical GUI visuals and a hidden CLI with the same icons")
+        if ([child.get("Category") for child in app_extensions] != categories
+                or app_extensions.attrib):
+            raise PackageError("each application must declare exactly one alias extension and only the GUI startup")
     extensions = [element for element in root.iter() if element.get("Category") == "windows.appExecutionAlias"]
     expected_aliases = [
         ("uap3", application["executable"], "desktop", application["executionAlias"], {}),
@@ -436,14 +466,15 @@ def check_manifest(data, identity, version, publisher, architecture="x64"):
     ]
     if len(extensions) != len(expected_aliases):
         raise PackageError("manifest must declare exactly the reviewed GUI and CLI alias extensions")
-    for extension, (prefix, executable, alias_prefix, alias, attributes) in zip(extensions, expected_aliases):
+    for index, (extension, (prefix, executable, alias_prefix, alias, attributes)) in enumerate(
+            zip(extensions, expected_aliases)):
         expected_extension = {
             "Category": "windows.appExecutionAlias", "Executable": executable,
             "{%s}RuntimeBehavior" % ns["uap10"]: "packagedClassicApp",
             "{%s}TrustLevel" % ns["uap10"]: "mediumIL",
         }
         children = list(extension)
-        if (extension not in list(applications[0].find("f:Extensions", ns))
+        if (extension not in list(applications[index].find("f:Extensions", ns))
                 or extension.tag != "{%s}Extension" % ns[prefix] or extension.attrib != expected_extension
                 or len(children) != 1 or children[0].tag != "{%s}AppExecutionAlias" % ns[prefix]
                 or children[0].attrib != attributes or len(list(children[0])) != 1
@@ -453,7 +484,7 @@ def check_manifest(data, identity, version, publisher, architecture="x64"):
     aliases = [element for element in root.iter() if element.tag.rsplit("}", 1)[-1] == "ExecutionAlias"]
     if len(aliases) != 2:
         raise PackageError("manifest must contain exactly the reviewed execution aliases")
-    tasks = [element for element in applications[0].iter("{%s}Extension" % ns["desktop"])
+    tasks = [element for element in root.iter("{%s}Extension" % ns["desktop"])
              if element.get("Category") == "windows.startupTask"]
     startup = application["startupTask"]
     declared = [(element.get("Executable"), element.get("EntryPoint"), element.get("{%s}Parameters" % ns["uap10"]),

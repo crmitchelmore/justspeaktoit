@@ -40,18 +40,26 @@
             <desktop:ExecutionAlias Alias="${executionAlias}"/>
           </uap3:AppExecutionAlias>
         </uap3:Extension>
-        <!-- A console alias for the real CLI, without another Application or Start menu tile. -->
+        <!-- General › Launch at login. Off until the user turns it on; a login launch starts minimised. -->
+        <desktop:Extension Category="windows.startupTask" Executable="${executable}"
+          EntryPoint="Windows.FullTrustApplication" uap10:Parameters="${startupTaskParameters}">
+          <desktop:StartupTask TaskId="${startupTaskId}" Enabled="false" DisplayName="${displayName}"/>
+        </desktop:Extension>
+      </Extensions>
+    </Application>
+    <Application Id="${cliApplicationId}" Executable="${cliExecutable}"
+      uap10:RuntimeBehavior="packagedClassicApp" uap10:TrustLevel="mediumIL">
+      <uap:VisualElements DisplayName="${displayName}" Description="${description}" BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png" Square44x44Logo="Assets\Square44x44Logo.png"
+        AppListEntry="none"/>
+      <Extensions>
+        <!-- Each Application admits one alias extension; the CLI has no visible Start entry. -->
         <uap5:Extension Category="windows.appExecutionAlias" Executable="${cliExecutable}"
           uap10:RuntimeBehavior="packagedClassicApp" uap10:TrustLevel="mediumIL">
           <uap5:AppExecutionAlias uap10:Subsystem="console">
             <uap5:ExecutionAlias Alias="${cliExecutionAlias}"/>
           </uap5:AppExecutionAlias>
         </uap5:Extension>
-        <!-- General › Launch at login. Off until the user turns it on; a login launch starts minimised. -->
-        <desktop:Extension Category="windows.startupTask" Executable="${executable}"
-          EntryPoint="Windows.FullTrustApplication" uap10:Parameters="${startupTaskParameters}">
-          <desktop:StartupTask TaskId="${startupTaskId}" Enabled="false" DisplayName="${displayName}"/>
-        </desktop:Extension>
       </Extensions>
     </Application>
   </Applications>

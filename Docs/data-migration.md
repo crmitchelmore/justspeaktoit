@@ -92,6 +92,15 @@ non-synchronising, device-only Keychain item, outside the exportable key registr
 Losing that Keychain item prevents credential recovery on another Mac. Ordinary
 exports remain portable and unencrypted as requested.
 
+Profile prompts are stored in each `profiles` / `profile` record's `polishPrompt`,
+not a global Mac preference. Shared collection projection retains original raw
+values, array order, identifier spelling and unknown matcher/routing members;
+typed decoding validates existing acceptance rules without replacing payloads.
+Native `profiles.json` uses the same format. Backups must read original bytes,
+not re-encode the runtime profile list, whose tolerant decoder drops unknown
+matcher kinds and newer routing values. This codec does not itself establish
+owned-file read authority, multi-store consistency or native import availability.
+
 ## Verification
 
 `make test` runs the archive, merge, validation, disk round-trip, separate audio/text,

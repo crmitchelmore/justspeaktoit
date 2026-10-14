@@ -18,7 +18,8 @@ enum MigrationCatalog {
             defaultsKey: nil,
             path: "LocalModels/migration-model-references.json"
         ),
-        .init(kind: "profile", category: .profiles, defaultsKey: "dictationProfiles", path: nil),
+        .init(kind: DataMigrationProfileCatalog.kind, category: DataMigrationProfileCatalog.category,
+              defaultsKey: DataMigrationProfileCatalog.defaultsKey, path: nil),
         .init(
             kind: "pronunciation",
             category: .vocabulary,
@@ -62,19 +63,7 @@ enum MigrationCatalog {
         return MigrationRecord(id: key, kind: kind, value: payload)
     }
     static func collectionRecords(_ collection: Collection, data: Data) throws -> [MigrationRecord] {
-        let values = try JSONDecoder().decode([AnyCodable].self, from: data)
-        return try values.map { value in
-            let object = value.value as? [String: Any] ?? [:]
-            let id = try (object["id"] as? String ?? MigrationCoding
-                .digest(MigrationCoding.encoder.encode(value)))
-            var date: Date?
-            if let text = object["timestamp"] as? String {
-                date = ISO8601DateFormatter().date(from: text)
-            }
-            if let number = object["timestamp"] as? Double {
-                date = Date(timeIntervalSinceReferenceDate: number) }
-            return MigrationRecord(id: id, kind: collection.kind, value: value, date: date)
-        }
+        try DataMigrationCollectionRecords.records(data: data, kind: collection.kind, digest: MigrationCoding.digest)
     }
     static func validate(_ record: MigrationRecord, category: MigrationCategory) throws {
         guard !record.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -113,7 +102,7 @@ enum MigrationCatalog {
             try validateModel(record); return
         }
         switch record.kind {
-        case "profile": _ = try MigrationCoding.decode(DictationProfile.self, record.value)
+        case DataMigrationProfileCatalog.kind: try DataMigrationProfileCatalog.validate(record, category: category)
         case "pronunciation":
             _ = try JSONDecoder().decode(PronunciationEntry.self, from: JSONEncoder().encode(record.value))
         case "lexicon": _ = try MigrationCoding.decode(PersonalLexiconRule.self, record.value)

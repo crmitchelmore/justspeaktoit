@@ -1,7 +1,7 @@
 # Desktop Voice Output sources and WAV export
 
 Windows and Linux remain developer previews, not macOS-parity releases.
-Voice Output uses shared Deepgram, Azure neural and Azure MAI speech contracts,
+Voice Output uses shared Deepgram, Azure neural, Azure MAI, xAI and Cartesia REST speech contracts,
 canonical catalogue projections and native playback. `DesktopSpeechVoice` exposes only
 routes the host executes, not every provider in the macOS catalogue. The seven
 built-in Azure neural catalogue entries now have one `AzureNeuralVoiceCatalog` definition
@@ -10,6 +10,64 @@ The current MAI-Voice-2.1 and Flash speakers come directly from the existing
 `AzureMAIVoiceCatalog`, including their locale/model identifiers. MAI uses the
 same regional Azure request builder, saved `key:region` credential and native
 WAV decoding/playback, not a second provider client or credential store.
+
+**Cartesia Sonic 3.6** executes the five existing `CartesiaTTSCatalog` presets,
+not the entire account library or older stored Sonic models. Read, Generate and
+text export reuse `CartesiaTTSAPI` request construction, API version and the
+shared `cartesia.apiKey` used for Ink transcription. Audio is actual mono PCM16
+WAV at 24 kHz; no compressed or progressive transport is advertised.
+The existing native Voice controls execute the canonical 0.6-1.5 speed range.
+Pitch and SSML are disabled but preserved; incompatible controls refuse synthesis
+before key access instead of letting the shared request builder clamp them.
+Unknown voices and older models remain stored/unavailable, never substitute a
+default preset or another provider.
+
+The shared Automatic language resolver uses content detection when the platform
+has it, otherwise the device language. There is no new explicit language setting
+in this slice. Long desktop input uses the existing 4,500-character
+`TTSTextChunker` target, not an asserted Cartesia service limit. One immutable
+credential and language selection cover every chunk. Every response is bounded,
+validated and joined before publication; a later failure never returns partial
+audio. Existing native playback, retained replay/export and publication helpers
+are unchanged. Actual requests and validated PCM feed local usage with the
+canonical USD0.0392/thousand-character **Startup-plan estimate**, not a billed
+charge or a guarantee of the user's plan. Cartesia account discovery, explicit
+language, format/quality selection and physical/service acceptance remain gaps.
+
+xAI's documented Eve and Ara presets come from `XAITTSCatalog`. Read, Generate
+and text export use the shared `/v1/tts` request contract with automatic language,
+mono PCM16 WAV at 24 kHz and the existing `xai.apiKey` credential. There is no
+invented API model field or realtime WebSocket fallback.
+The native controls receive the canonical xAI speed limits (0.7-1.5) atomically
+with the selected voice. Speed is executed; pitch and SSML are unsupported and
+disabled, while stored choices remain visible. Out-of-route speed or unsupported
+controls refuse synthesis before credential access; selecting xAI does not clamp
+or discard preferences. Normal controls remains an explicit reset.
+Long text uses the existing 15,000-character xAI chunker, validates every response,
+and joins bounded PCM before publication. Failed, cancelled, empty or incompatible
+audio never publishes a partial result. Local usage records observe the actual
+requests and validated duration; canonical USD15/million-character pricing is an
+estimate, not a billed receipt. Retained replay/export does not synthesize again.
+**xAI account voices** opens a native chooser with documented presets labelled
+separately from account-listed voices. **Refresh** explicitly requests the shared
+`GET /v1/tts/voices` contract using the saved xAI key; it sends no source text and
+does not synthesize audio. Listing has a 20-second budget, a 64 KiB response limit
+and a maximum of 512 voices. Malformed, duplicate and oversized lists fail
+explicitly. A failed refresh may retain a previous same-key listing, but never
+labels that fallback as a successful new listing.
+**Choose voice** saves the stable prefixed account identifier in the sole voice
+model, preserving all other controls/preferences. Read, Generate, text export,
+controls and estimates use the same immutable account evidence. Account synthesis
+checks the actual request credential against that evidence before transport or
+usage. Listing evidence is memory-only and discarded on key changes or restart:
+a stored account choice remains unavailable until explicitly refreshed, not
+silently replaced with a preset. Closing/replacing the chooser cancels discovery
+and rejects late results; shutdown counts and bounds cancelled work. Replay and
+result export remain independent of inventory or credentials. No listing key is
+presented, persisted in settings/usage or retained with generated audio.
+Opaque stored identifier case is preserved; the shared xAI request builder retains
+its documented case-insensitive API normalization. Explicit language selection,
+progressive xAI delivery and wider output formats remain gaps.
 
 ## Journey
 
@@ -192,6 +250,8 @@ here; macOS's Deepgram path currently ignores those same controls, and native
 hosts deliberately refuse them for Deepgram instead. Current canonical MAI
 models now execute Read, Generate and text export through that same bounded
 Azure engine, with retained replay/export independent of later settings.
+The documented xAI Eve/Ara presets now execute the REST/WAV journey with
+canonical speed and true request accounting, not account discovery or progressive delivery.
 System and wider providers, selectable export format/quality and broader
 Voice workspace parity remain gaps. Advanced configuration transfer is a
 separately coordinated settings integration; this PR does not create another

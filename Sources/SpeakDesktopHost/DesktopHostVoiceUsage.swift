@@ -67,13 +67,15 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         voiceUsage.requestID = requestID
         let count = text.unicodeScalars.count
         do {
-            let selection = try voiceOutputSettings().synthesisSelection()
-            let estimate = VoiceSynthesisPricing.estimate(for: selection.voice, characterCount: count)
+            let selection = try currentVoiceSelection()
+            let estimate = VoiceSynthesisPricing.estimate(
+                for: selection.voice, characterCount: count, xaiInventory: selection.xaiInventory)
             voiceUsage.estimate = "Captured text: \(count) input characters (Unicode scalars).\n"
                 + "Voice: \(selection.voice.label)\n"
                 + (estimate.map { "Input estimate: USD \(Self.voiceCost($0))." }
                     ?? "Input estimate: unknown; no published rate for this model.")
                 + (selection.options.useSSML ? "\nSSML is enabled; markup may be billed differently." : "")
+                + (VoiceSynthesisPricing.estimateBasis(for: selection.voice).map { "\n\($0)" } ?? "")
         } catch {
             voiceUsage.estimate = "Input estimate unavailable: \(error.localizedDescription)"
         }
@@ -146,6 +148,9 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             voiceUsageTrackingEnabled ? "Tracking on: only text-free local metadata is kept."
                 : "Tracking off: new requests are not recorded; earlier local usage is retained."
         ]
+        if records.contains(where: { $0.voiceID.hasPrefix(CartesiaTTSCatalog.voiceIDPrefix) }) {
+            lines.append(CartesiaTTSAPI.pricingEstimateBasis)
+        }
         if let last = records.last {
             lines.append("Last request: \(last.modelID) / \(last.voiceID), \(last.operation.rawValue), "
                 + "\(last.source.displayName), \(last.outcome.rawValue), \(last.inputCharacters) input characters.")

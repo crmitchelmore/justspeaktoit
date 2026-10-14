@@ -43,10 +43,17 @@ public enum VoiceSynthesisUsage {
 
         /// Called only after credentials and the request have been validated, immediately before transport.
         public func begin(voice: DesktopSpeechVoice, inputCharacters: Int, usesSSML: Bool) -> UUID {
+            begin(voice: voice, inputCharacters: inputCharacters, usesSSML: usesSSML, xaiInventory: nil)
+        }
+
+        public func begin(
+            voice: DesktopSpeechVoice, inputCharacters: Int, usesSSML: Bool, xaiInventory: XAIAccountVoiceInventory?
+        ) -> UUID {
             let request = Record(
                 id: UUID(), timestamp: Date(), operation: operation, source: source, historyRecordID: historyRecordID,
                 modelID: voice.modelID, voiceID: voice.id, inputCharacters: inputCharacters, usesSSML: usesSSML,
-                estimatedCostUSD: VoiceSynthesisPricing.estimate(for: voice, characterCount: inputCharacters),
+                estimatedCostUSD: VoiceSynthesisPricing.estimate(
+                    for: voice, characterCount: inputCharacters, xaiInventory: xaiInventory),
                 outcome: .failed, audioDuration: nil
             )
             lock.withLock { requests.append(request) }

@@ -10,8 +10,16 @@ import CWindowsSupport
 typealias WindowsVoiceOutputSettings = DesktopVoiceOutputSettings
 
 extension WindowsNative {
+    private static let voiceContext = WindowsVoiceContext()
     static func configureVoiceOutput(_ settings: WindowsVoiceOutputSettings, context: UnsafeMutableRawPointer) -> Bool {
-        let presentation = settings.pickerPresentation
+        configureVoiceOutput(settings, context: context, inventory: nil)
+    }
+
+    static func configureVoiceOutput(
+        _ settings: WindowsVoiceOutputSettings, context: UnsafeMutableRawPointer, inventory: XAIAccountVoiceInventory?
+    ) -> Bool {
+        voiceContext.set(context)
+        let presentation = settings.pickerPresentation(inventory: inventory)
         let selected = presentation.selected
         let labels = presentation.labels.map { Array($0.utf8CString) }
         let pointers = labels.map { chars -> UnsafeMutablePointer<CChar> in
@@ -26,13 +34,39 @@ extension WindowsNative {
         }
         return configured && configureVoiceSources(context: context) &&
             jsti_window_set_voice_generation_options(settings.generationOptions.nativeFlags) == 0 &&
-            configureVoiceControls(settings)
+            configureVoiceControls(settings, inventory: inventory)
     }
 
-    static func configureVoiceControls(_ settings: WindowsVoiceOutputSettings) -> Bool {
-        let shown = settings.controlsPresentation
+    static func configureVoiceControls(
+        _ settings: WindowsVoiceOutputSettings, inventory: XAIAccountVoiceInventory? = nil
+    ) -> Bool {
+        let shown = settings.controlsPresentation(inventory: inventory)
         return shown.label.withCString {
-            jsti_window_set_voice_synthesis_options(shown.speed, shown.pitch, shown.ssml, shown.capabilities, $0) == 0
+            jsti_window_set_voice_synthesis_options_with_limits(
+                shown.speed, shown.pitch, shown.ssml, shown.capabilities, $0,
+                shown.minimumSpeed, shown.maximumSpeed) == 0
+        }
+
+    }
+
+    static func voiceDiscovery(_ shown: DesktopVoiceDiscoveryPresentation) {
+        let labels = shown.voices.map {
+            $0.label + (DesktopSpeechVoice.voices.contains($0) ? " (documented preset)" : " (account listing)")
+        }.joined(separator: "\n")
+        let ids = shown.voices.map(\.id).joined(separator: "\n")
+        let result = shown.requestID.withCString { token in
+            labels.withCString { names in
+                ids.withCString { identifiers in
+                    shown.message.withCString {
+                        jsti_window_set_voice_account_inventory(
+                            token, names, identifiers, Int32(shown.selected), $0, shown.loading ? 1 : 0)
+                    }
+                }
+            }
+        }
+        guard let context = voiceContext.get(), result == 0,
+              configureVoiceOutput(shown.settings, context: context, inventory: shown.inventory) else {
+            update("The account voice listing or saved voice could not be shown."); return
         }
     }
 
@@ -69,6 +103,9 @@ extension WindowsNative {
 }
 
 extension WindowsHostPlatform {
+    package static func voiceDiscovery(_ presentation: DesktopVoiceDiscoveryPresentation) {
+        WindowsNative.voiceDiscovery(presentation)
+    }
     package static func voiceUsage(_ presentation: DesktopVoiceUsagePresentation) {
         let result = presentation.requestID.withCString { token in
             presentation.text.withCString {
@@ -110,6 +147,8 @@ func windowsVoiceSourceEvent(
             record: record.map(String.init(cString:)) ?? "", path: path.map(String.init(cString:)) ?? ""
         )
         switch message {
+        case .discoveryOpen, .discoveryRefresh, .discoveryClose, .discoveryChoose:
+            holder.enqueueSettings { await holder.controller.handleVoiceDiscovery(message) }
         case .event(let event): holder.submitHistoryPlayback(event)
         case .preferences(let options):
             holder.enqueueSettings {
@@ -124,17 +163,31 @@ func windowsVoiceSourceEvent(
         case .usageTracking(let enabled, let requestID):
             holder.enqueueSettings { await holder.controller.saveVoiceUsageTracking(enabled, requestID: requestID) }
         case .synthesisPreferences(let options, let requestID):
-            holder.enqueueSettings {
-                let saved = await holder.controller.saveVoiceSynthesisOptions(options)
-                if !WindowsNative.configureVoiceControls(await holder.controller.voiceOutputSettings()) {
-                    WindowsNative.update("The saved Voice synthesis controls could not be shown.")
-                }
-                if requestID.withCString({ jsti_window_finish_voice_synthesis_options($0, saved ? 1 : 0) }) != 0 {
-                    WindowsNative.update("The Voice controls save result could not be shown.")
-                }
-            }
+            saveWindowsVoiceControls(options, requestID: requestID, holder: holder)
         }
     } catch { WindowsNative.update(error.localizedDescription) }
+}
+
+private func saveWindowsVoiceControls(
+    _ options: VoiceSynthesisOptions, requestID: String, holder: WindowsEventContext
+) {
+    holder.enqueueSettings {
+        let saved = await holder.controller.saveVoiceSynthesisOptions(options)
+        if !WindowsNative.configureVoiceControls(await holder.controller.voiceOutputSettings(),
+            inventory: await holder.controller.currentVoiceInventory()) {
+            WindowsNative.update("The saved Voice synthesis controls could not be shown.")
+        }
+        if requestID.withCString({ jsti_window_finish_voice_synthesis_options($0, saved ? 1 : 0) }) != 0 {
+            WindowsNative.update("The Voice controls save result could not be shown.")
+        }
+    }
+}
+
+private final class WindowsVoiceContext: @unchecked Sendable {
+    private let lock = NSLock()
+    private var context: UnsafeMutableRawPointer?
+    func set(_ value: UnsafeMutableRawPointer) { lock.withLock { context = value } }
+    func get() -> UnsafeMutableRawPointer? { lock.withLock { context } }
 }
 
 /// Apply from the native Voice output dialog, on the UI thread.

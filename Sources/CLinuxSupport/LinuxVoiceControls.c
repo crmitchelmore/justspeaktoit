@@ -2,8 +2,8 @@
 #include <gtk/gtk.h>
 #include <math.h>
 
-typedef struct { double speed, pitch; gint ssml, capabilities; gchar *voice; } Options;
-static Options saved = {1, 0, 0, 0, NULL};
+typedef struct { double speed, pitch; gint ssml, capabilities; gchar *voice; double minimum, maximum; } Options;
+static Options saved = {1, 0, 0, 0, NULL, 0.5, 2};
 typedef struct {
     GtkWindow *window;
     GtkEntry *speed, *pitch;
@@ -12,6 +12,7 @@ typedef struct {
     GtkWidget *apply, *reset, *cancel;
     gboolean saving;
     gint capabilities;
+    double minimum, maximum;
     gchar *request;
     JSTIVoiceSourceCallback callback;
     void *context;
@@ -48,8 +49,10 @@ static gboolean emit(Controls *controls) {
     if (controls->saving) return FALSE;
     double speed = 0, pitch = 0;
     if (!number(controls->speed, &speed) || !number(controls->pitch, &pitch) ||
-        speed < 0.5 || speed > 2 || pitch < -12 || pitch > 12 || round(pitch) != pitch) {
-        gtk_label_set_text(controls->notice, "Use speed 0.5 to 2 and a whole-number pitch -12 to 12 semitones.");
+        speed < controls->minimum || speed > controls->maximum ||
+        pitch < -12 || pitch > 12 || round(pitch) != pitch) {
+        gtk_label_set_text(controls->notice,
+            "Use speed within the displayed limits and a whole-number pitch -12 to 12.");
         return FALSE;
     }
     gchar first[G_ASCII_DTOSTR_BUF_SIZE], second[G_ASCII_DTOSTR_BUF_SIZE];
@@ -93,6 +96,7 @@ static Controls *make_controls(GtkWindow *owner, JSTIVoiceSourceCallback callbac
     Controls *controls = g_new0(Controls, 1);
     controls->callback = callback; controls->context = context;
     controls->capabilities = saved.capabilities;
+    controls->minimum = saved.minimum; controls->maximum = saved.maximum;
     controls->window = GTK_WINDOW(gtk_window_new());
     g_object_set_data_full(G_OBJECT(controls->window), "voice-controls", controls, destroyed);
     gtk_window_set_title(controls->window, "Voice synthesis controls");
@@ -105,7 +109,11 @@ static Controls *make_controls(GtkWindow *owner, JSTIVoiceSourceCallback callbac
     gtk_widget_set_margin_top(box, 20); gtk_widget_set_margin_bottom(box, 20);
     gtk_window_set_child(controls->window, box);
     gtk_box_append(GTK_BOX(box), label(saved.voice != NULL ? saved.voice : "Deepgram"));
-    entry(controls, box, "Speed (0.5 to 2)", &controls->speed);
+    gchar first[G_ASCII_DTOSTR_BUF_SIZE], second[G_ASCII_DTOSTR_BUF_SIZE];
+    gchar *caption = g_strdup_printf("Speed (%s to %s)",
+        g_ascii_formatd(first, sizeof(first), "%.15g", saved.minimum),
+        g_ascii_formatd(second, sizeof(second), "%.15g", saved.maximum));
+    entry(controls, box, caption, &controls->speed); g_free(caption);
     entry(controls, box, "Pitch (-12 to 12 semitones)", &controls->pitch);
     controls->ssml = GTK_CHECK_BUTTON(gtk_check_button_new_with_label("Use SSML"));
     gtk_box_append(GTK_BOX(box), GTK_WIDGET(controls->ssml));
@@ -144,11 +152,17 @@ static void apply_options(gpointer data) {
 static void free_options(gpointer data) { Options *options = data; g_free(options->voice); g_free(options); }
 int32_t jsti_window_set_voice_synthesis_options(double speed, double pitch, int32_t ssml,
                                                int32_t capabilities, const char *voice) {
+    return jsti_window_set_voice_synthesis_options_with_limits(speed, pitch, ssml, capabilities, voice, 0.5, 2);
+}
+int32_t jsti_window_set_voice_synthesis_options_with_limits(double speed, double pitch, int32_t ssml,
+    int32_t capabilities, const char *voice, double minimum, double maximum) {
     if (!isfinite(speed) || !isfinite(pitch) || ssml < 0 || ssml > 1 || capabilities < 0 || capabilities > 7 ||
+        !isfinite(minimum) || !isfinite(maximum) || minimum < 0.5 || minimum > 1 || maximum < 1 || maximum > 2 ||
         !g_utf8_validate(voice != NULL ? voice : "", -1, NULL)) return -1;
     Options *options = g_new0(Options, 1);
     options->speed = speed; options->pitch = pitch; options->ssml = ssml; options->capabilities = capabilities;
     options->voice = g_strdup(voice != NULL ? voice : "");
+    options->minimum = minimum; options->maximum = maximum;
     return jsti_window_post(apply_options, options, free_options);
 }
 typedef struct { gchar *request; gint success; } Completion;
@@ -182,7 +196,7 @@ static void receive_fixture(int32_t action, int32_t source, const char *text,
 }
 int32_t jsti_voice_controls_self_test(GtkWindow *owner, char *error, size_t capacity) {
     Options original = saved;
-    saved = (Options){1.2345678901234567, -2, 1, 0, g_strdup("Synthetic compatible voice")};
+    saved = (Options){1.2345678901234567, -2, 1, 0, g_strdup("Synthetic compatible voice"), 0.5, 2};
     Receipt receipt = {0};
     Controls *controls = make_controls(owner, receive_fixture, &receipt); active = controls;
     double speed = 0;
@@ -210,7 +224,42 @@ int32_t jsti_voice_controls_self_test(GtkWindow *owner, char *error, size_t capa
     Completion finished = {receipt.request, 1}; finish_options(&finished);
     passed = passed && active == NULL;
     if (active != NULL) close_controls(NULL, active);
-    g_free(first); g_free(receipt.json); g_free(receipt.request);
+    g_free(first);
+    passed = passed &&
+        jsti_window_set_voice_synthesis_options_with_limits(1, 0, 0, 1, "Synthetic xAI", NAN, 1.5) == -1 &&
+        jsti_window_set_voice_synthesis_options_with_limits(1, 0, 0, 1, "Synthetic xAI", 1.1, 1.5) == -1 &&
+        jsti_window_set_voice_synthesis_options_with_limits(1, 0, 0, 1, "Synthetic xAI", 0.7, 0.9) == -1;
+    g_free(saved.voice);
+    saved = (Options){0.5, 0, 0, 1, g_strdup("Synthetic xAI Eve"), 0.7, 1.5};
+    controls = make_controls(owner, receive_fixture, &receipt); active = controls;
+    passed = number(controls->speed, &speed) && speed == 0.5 && passed &&
+        gtk_widget_get_sensitive(GTK_WIDGET(controls->speed)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(controls->pitch)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(controls->ssml)) && !emit(controls) && receipt.calls == 2;
+    fill(controls, 0.7, 0, FALSE);
+    passed = emit(controls) && passed && receipt.calls == 3;
+    Completion retry = {receipt.request, 0}; finish_options(&retry);
+    fill(controls, 1.5, 0, FALSE);
+    passed = emit(controls) && passed && receipt.calls == 4;
+    Completion upper = {receipt.request, 1}; finish_options(&upper);
+    passed = passed && active == NULL;
+    if (active != NULL) close_controls(NULL, active);
+    g_free(saved.voice);
+    saved = (Options){0.5, 0, 0, 1, g_strdup("Synthetic Cartesia Sonic 3.6"), 0.6, 1.5};
+    controls = make_controls(owner, receive_fixture, &receipt); active = controls;
+    passed = number(controls->speed, &speed) && speed == 0.5 && passed &&
+        gtk_widget_get_sensitive(GTK_WIDGET(controls->speed)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(controls->pitch)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(controls->ssml)) && !emit(controls) && receipt.calls == 4;
+    fill(controls, 0.6, 0, FALSE);
+    passed = emit(controls) && passed && receipt.calls == 5;
+    Completion cartesia_retry = {receipt.request, 0}; finish_options(&cartesia_retry);
+    fill(controls, 1.5, 0, FALSE);
+    passed = emit(controls) && passed && receipt.calls == 6;
+    Completion cartesia_upper = {receipt.request, 1}; finish_options(&cartesia_upper);
+    passed = passed && active == NULL;
+    if (active != NULL) close_controls(NULL, active);
+    g_free(receipt.json); g_free(receipt.request);
     g_free(saved.voice); saved = original;
     if (!passed) jsti_set_error(error, capacity, "Voice controls capabilities, precision or save ownership failed.");
     return passed ? 0 : -1;
@@ -222,7 +271,7 @@ static void snapshot_callback(int32_t action, int32_t source, const char *text,
 }
 void jsti_voice_controls_show_fixture(GtkWindow *owner) {
     Options original = saved;
-    saved = (Options){1.25, -2, 1, 7, g_strdup("Synthetic compatible voice")};
+    saved = (Options){1.25, 0, 0, 1, g_strdup("Synthetic Cartesia Sonic 3.6"), 0.6, 1.5};
     Controls *controls = make_controls(owner, snapshot_callback, NULL);
     snapshot_window = controls->window;
     g_object_add_weak_pointer(G_OBJECT(snapshot_window), (gpointer *)&snapshot_window);

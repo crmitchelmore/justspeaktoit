@@ -46,6 +46,10 @@ public struct VoiceSynthesisOptions: Codable, Equatable, Sendable {
               capabilities.ssml || !useSSML else {
             throw VoiceSynthesisConfigurationError.unsupportedControls
         }
+        guard !capabilities.speed || capabilities.speedRange.contains(speed) else {
+            throw VoiceSynthesisConfigurationError.unsupportedSpeed(
+                minimum: capabilities.speedRange.lowerBound, maximum: capabilities.speedRange.upperBound)
+        }
     }
 }
 
@@ -53,17 +57,31 @@ public struct VoiceSynthesisCapabilities: Equatable, Sendable {
     public let speed: Bool
     public let pitch: Bool
     public let ssml: Bool
+    public let speedRange: ClosedRange<Double>
     public var nativeFlags: Int32 { (speed ? 1 : 0) | (pitch ? 2 : 0) | (ssml ? 4 : 0) }
+
+    public init(
+        speed: Bool, pitch: Bool, ssml: Bool,
+        speedRange: ClosedRange<Double> = VoiceSynthesisOptions.speedRange
+    ) {
+        self.speed = speed
+        self.pitch = pitch
+        self.ssml = ssml
+        self.speedRange = speedRange
+    }
 
     public static let naturalSpeech = Self(speed: false, pitch: false, ssml: false)
     public static let azureNeural = Self(speed: true, pitch: true, ssml: true)
     public static let azureMAI = Self(speed: false, pitch: false, ssml: true)
+    public static let xai = Self(speed: true, pitch: false, ssml: false, speedRange: XAITTSAPI.speedRange)
+    public static let cartesia = Self(speed: true, pitch: false, ssml: false, speedRange: CartesiaTTSAPI.speedRange)
 }
 
 public enum VoiceSynthesisConfigurationError: LocalizedError, Equatable {
     case invalidControls
     case unsupportedControls
     case unsupportedVoice
+    case unsupportedSpeed(minimum: Double, maximum: Double)
 
     public var errorDescription: String? {
         switch self {
@@ -75,6 +93,9 @@ public enum VoiceSynthesisConfigurationError: LocalizedError, Equatable {
         case .unsupportedVoice:
             "The stored voice is not available on this host. "
                 + "Choose an executable voice; stored choices are unchanged."
+        case .unsupportedSpeed(let minimum, let maximum):
+            "This voice supports speed between \(minimum) and \(maximum). "
+                + "Choose a supported speed or normal controls; stored choices are unchanged."
         }
     }
 }

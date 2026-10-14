@@ -64,6 +64,7 @@ package protocol DesktopHostPlatform: Sendable {
     static func recordingState(_ state: Int32)
     static func voiceGenerated(_ presentation: DesktopVoiceResultPresentation)
     static func voiceUsage(_ presentation: DesktopVoiceUsagePresentation)
+    static func voiceDiscovery(_ presentation: DesktopVoiceDiscoveryPresentation)
     static func voiceTextImportCancelled(_ requestID: String)
     static func history(_ records: [DesktopRecordingStore.Record], selected: UUID?, selectRecord: Bool)
     /// Totals for the dashboard (`all` saved records) and the History header
@@ -175,6 +176,7 @@ package extension DesktopHostPlatform {
     static func comparisonPresentation(_ presentation: DesktopComparisonPresentation) {}
     static func voiceGenerated(_ presentation: DesktopVoiceResultPresentation) {}
     static func voiceUsage(_ presentation: DesktopVoiceUsagePresentation) {}
+    static func voiceDiscovery(_ presentation: DesktopVoiceDiscoveryPresentation) {}
     static func voiceTextImportCancelled(_ requestID: String) {}
     static func handsFreeReadinessFailure() -> String? { "Hands-free is unavailable on this host." }
     static func update(_ status: String) { update(status, transcript: nil, state: -1) }

@@ -123,6 +123,9 @@ extension DesktopHostController {
             await DesktopHostShutdown.wait(until: deadline) { captured.stop() }
         }
         modelDiscoveryTask?.cancel()
+        voiceDiscovery.requestID = nil
+        voiceDiscovery.task?.cancel()
+        voiceDiscovery.inventory = nil
         cancelOutput()
         generatedVoice = nil
         voiceTextImportTask?.cancel()

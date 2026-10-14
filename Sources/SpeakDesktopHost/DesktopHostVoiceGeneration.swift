@@ -23,7 +23,8 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             VoiceOutputSourceSnapshot, DesktopSpeechSelection, @Sendable () async throws -> String
         ) async throws -> Data = { snapshot, selection, credential in
             try await DesktopSpeechSynthesis().synthesize(
-                snapshot, voice: selection.voice, options: selection.options, credential: credential
+                snapshot, voice: selection.voice, options: selection.options,
+                xaiInventory: selection.xaiInventory, credential: credential
             )
         }
     ) {
@@ -39,7 +40,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             return
         }
         let selection: DesktopSpeechSelection
-        do { selection = try voiceOutputSettings().synthesisSelection() } catch {
+        do { selection = try currentVoiceSelection() } catch {
             presentVoiceResult(working: false, message: error.localizedDescription); return
         }
         stopReadAloud()

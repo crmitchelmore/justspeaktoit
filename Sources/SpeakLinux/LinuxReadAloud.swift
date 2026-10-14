@@ -24,6 +24,24 @@ extension LinuxHostPlatform: DesktopHostReadAloudPlatform {
 }
 
 extension LinuxHostPlatform {
+    package static func voiceDiscovery(_ shown: DesktopVoiceDiscoveryPresentation) {
+        let labels = shown.voices.map {
+            $0.label + (DesktopSpeechVoice.voices.contains($0) ? " (documented preset)" : " (account listing)")
+        }.joined(separator: "\n")
+        let ids = shown.voices.map(\.id).joined(separator: "\n")
+        let result = shown.requestID.withCString { token in
+            labels.withCString { names in
+                ids.withCString { identifiers in
+                    shown.message.withCString {
+                        jsti_window_set_voice_account_inventory(
+                            token, names, identifiers, Int32(shown.selected), $0, shown.loading ? 1 : 0)
+                    }
+                }
+            }
+        }
+        if result != 0 { update("The account voice listing could not be shown.") }
+        LinuxWindow.voiceOutput(shown.settings, inventory: shown.inventory)
+    }
     package static func voiceUsage(_ presentation: DesktopVoiceUsagePresentation) {
         let result = presentation.requestID.withCString { token in
             presentation.text.withCString {
@@ -87,8 +105,8 @@ extension LinuxWindow {
     }
     /// Fills the voice picker from the canonical catalogue and selects the
     /// saved voice, or the catalogue default for a retired one.
-    static func voiceOutput(_ settings: LinuxVoiceOutputSettings) {
-        let presentation = settings.pickerPresentation
+    static func voiceOutput(_ settings: LinuxVoiceOutputSettings, inventory: XAIAccountVoiceInventory? = nil) {
+        let presentation = settings.pickerPresentation(inventory: inventory)
         let strings = Strings()
         let names: [UnsafePointer<CChar>?] = presentation.labels.map { strings.add($0) }
         let selected = presentation.selected
@@ -100,13 +118,15 @@ extension LinuxWindow {
         if jsti_window_set_voice_generation_options(settings.generationOptions.nativeFlags) != 0 {
             LinuxHostPlatform.update("The generated voice preferences could not be shown.")
         }
-        voiceControls(settings)
+        voiceControls(settings, inventory: inventory)
     }
 
-    static func voiceControls(_ settings: LinuxVoiceOutputSettings) {
-        let shown = settings.controlsPresentation
+    static func voiceControls(_ settings: LinuxVoiceOutputSettings, inventory: XAIAccountVoiceInventory? = nil) {
+        let shown = settings.controlsPresentation(inventory: inventory)
         let result = shown.label.withCString {
-            jsti_window_set_voice_synthesis_options(shown.speed, shown.pitch, shown.ssml, shown.capabilities, $0)
+            jsti_window_set_voice_synthesis_options_with_limits(
+                shown.speed, shown.pitch, shown.ssml, shown.capabilities, $0,
+                shown.minimumSpeed, shown.maximumSpeed)
         }
         if result != 0 { LinuxHostPlatform.update("The saved Voice synthesis controls could not be shown.") }
     }
@@ -125,6 +145,8 @@ func linuxVoiceSourceEvent(
             record: record.map(String.init(cString:)) ?? "", path: path.map(String.init(cString:)) ?? ""
         )
         switch message {
+        case .discoveryOpen, .discoveryRefresh, .discoveryClose, .discoveryChoose:
+            holder.enqueueSettings { await holder.controller.handleVoiceDiscovery(message) }
         case .event(let event): holder.submitHistoryPlayback(event)
         case .preferences(let options):
             holder.enqueueSettings {
@@ -141,7 +163,8 @@ func linuxVoiceSourceEvent(
         case .synthesisPreferences(let options, let requestID):
             holder.enqueueSettings {
                 let saved = await holder.controller.saveVoiceSynthesisOptions(options)
-                LinuxWindow.voiceControls(await holder.controller.voiceOutputSettings())
+                LinuxWindow.voiceControls(await holder.controller.voiceOutputSettings(),
+                    inventory: await holder.controller.currentVoiceInventory())
                 if requestID.withCString({ jsti_window_finish_voice_synthesis_options($0, saved ? 1 : 0) }) != 0 {
                     LinuxHostPlatform.update("The Voice controls save result could not be shown.")
                 }

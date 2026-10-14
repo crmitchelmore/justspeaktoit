@@ -39,8 +39,8 @@ if [ -n "${JSTI_UI_SCREENSHOT_DIR:-}" ]; then
               corrections pronunciation keyboard icloud-sync about general-portal-output
               dashboard-dark history-dark dashboard-recording
               hud-recording hud-completed history-filters history-filters-dark
-              hud-expanded-recording hud-compact-recording hud-compact-completed
-              voice-sources voice-controls voice-usage)
+              general-dark hud-expanded-recording hud-compact-recording hud-compact-completed
+              voice-sources voice-controls voice-usage voice-discovery)
     index=1
     for name in "${expected[@]}"; do
         printf -v file '%02d-%s.png' "$index" "$name"

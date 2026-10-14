@@ -517,8 +517,14 @@ int publishPrivateFile(const char *sourcePath, const char *destinationPath,
     rename->FileNameLength = static_cast<DWORD>(bytes);
     std::memcpy(rename->FileName, target.data(), bytes);
     if (publicationCancelled(cancelled, context)) return 2;
-    if (!SetFileInformationByHandle(output.value, FileRenameInfo, rename, static_cast<DWORD>(storage.size()))) {
-        error = jsti::systemError("Publish private export without replacing an existing file");
+    // Preserve the held root all the way through rename. The Win32 wrapper
+    // rejects this relative-name form on supported Windows hosts.
+    IO_STATUS_BLOCK status{};
+    const NTSTATUS renamed = NtSetInformationFile(
+        output.value, &status, rename, static_cast<ULONG>(storage.size()), FileRenameInformation);
+    if (renamed < 0) {
+        error = jsti::systemError("Publish private export without replacing an existing file",
+                                  RtlNtStatusToDosError(renamed));
         return -1;
     }
     return 0;

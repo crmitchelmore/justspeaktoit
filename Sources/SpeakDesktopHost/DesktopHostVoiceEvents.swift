@@ -6,9 +6,9 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     package func performVoiceEvent(
         _ event: DesktopHistoryEvent,
         imported: @escaping @Sendable (String, Result<String, Error>) -> Void
-    ) {
+    ) async {
         switch event {
-        case .voiceRead(let snapshot): readVoiceSource(snapshot)
+        case .voiceRead(let snapshot): await readVoiceSource(snapshot)
         case .voiceExport(let snapshot, let path): exportVoiceSource(snapshot, path: path)
         case .voiceImport(let path, let requestID):
             importVoiceText(path: path, requestID: requestID) { imported(requestID, $0) }

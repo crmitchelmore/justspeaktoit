@@ -40,15 +40,6 @@ struct WindowsNativeEffects: WindowsControllerEffects {
         )
     }
 
-    func makeLiveClient(
-        model: String, key: String, language: String?, azureEndpoint: String, options: LiveClientOptions
-    ) -> (any FinalizingStreamingTranscriptionClient)? {
-        DesktopLiveTranscription.makeClient(
-            model: model, apiKey: key, language: language, azureEndpoint: azureEndpoint, options: options,
-            makeConnection: { WinHTTPStreamingConnection(request: $0) }
-        )
-    }
-
     func perform(_ job: WindowsOutputJob, text: String) -> String { job.perform(text) }
 
     func writeSettings(_ data: Data, to url: URL) throws { try data.write(to: url, options: .atomic) }

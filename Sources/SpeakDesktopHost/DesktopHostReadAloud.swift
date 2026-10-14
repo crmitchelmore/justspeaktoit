@@ -271,11 +271,11 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         let rendered = PronunciationRenderer().applyReplacements(to: text, entries: pronunciations)
         let segments = SpeechTextSegmenter.segments(rendered)
         guard !segments.isEmpty else { update("There is no transcript to read aloud."); return }
-        startVoiceRead(text: text, owner: id, recordID: id)
+        startVoiceRead(text: rendered, owner: id, recordID: id)
     }
 
-    package func readVoiceSource(_ snapshot: VoiceOutputSourceSnapshot) {
-        if let id = snapshot.recordID { readAloud(id.uuidString, text: snapshot.text); return }
+    package func readVoiceSource(_ snapshot: VoiceOutputSourceSnapshot) async {
+        if let id = snapshot.recordID { await readAloud(id.uuidString, text: snapshot.text); return }
         guard !closed, canUseHistory else { return }
         startVoiceRead(text: snapshot.text, owner: UUID(), recordID: nil)
     }
@@ -286,7 +286,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             selection = try voiceOutputSettings().synthesisSelection()
             try selection.options.validate(for: selection.voice.capabilities)
         } catch {
-            update(error.localizedDescription); return
+            update("Read aloud failed: \(error.localizedDescription)"); return
         }
         let staging = directory.appendingPathComponent("VoiceOutput")
         let voiceOutput: Platform.VoiceOutput?

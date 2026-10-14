@@ -555,8 +555,6 @@ let package = portableCoreBuild ? portablePackage : Package(
         // sources through its own glob.
         .target(
             name: "SpeakTestSupport",
-        .target(
-            name: "SpeakTestSupport",
             path: "Tests/SpeakTestSupport",
             resources: [.copy("MigrationArchiveFixtures")]
         ),

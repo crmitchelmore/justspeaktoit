@@ -14,6 +14,7 @@ public struct DesktopNativeRetainedCapsule: Sendable {
     public static let filename = "records.json"
     public let directory: URL
     private let sealedBytes: Data
+    private let readReceipt: DesktopOwnedAppDataFileReader.StrictReceipt
 
     public static func create(
         _ archive: DesktopNativeConfigurationArchive, in root: URL,
@@ -35,9 +36,9 @@ public struct DesktopNativeRetainedCapsule: Sendable {
         do {
             try operations.createFile(staging)
             try write(bytes, to: staging, checkCancellation: checkCancellation)
-            let reread = try readBytes(staging, checkCancellation: checkCancellation)
-            guard reread == bytes else { throw invalid("Retained staging changed before publication.") }
-            _ = try DesktopNativeConfigurationArchiveCodec.decode(reread, checkCancellation: checkCancellation)
+            _ = try readValidated(
+                in: directory, filename: "unpublished.json", expectedBytes: bytes, checkCancellation: checkCancellation
+            )
             try checkCancellation()
             do {
                 try DesktopFilePublication.copy(source: staging, destination: destination, using: publication)
@@ -50,9 +51,10 @@ public struct DesktopNativeRetainedCapsule: Sendable {
                 throw error
             }
             try DesktopNativeRetentionIO.removeStaging(staging)
-            let capsule = Self(directory: directory, sealedBytes: bytes)
-            _ = try capsule.reload(checkCancellation: checkCancellation)
-            return capsule
+            let validated = try readValidated(
+                in: directory, expectedBytes: bytes, checkCancellation: checkCancellation
+            )
+            return Self(directory: directory, sealedBytes: bytes, readReceipt: validated.receipt)
         } catch let primary {
             if published || FileManager.default.fileExists(atPath: destination.path) {
                 throw DesktopNativeRetentionPublishedFailure(directory: directory, underlyingError: primary)
@@ -66,14 +68,15 @@ public struct DesktopNativeRetainedCapsule: Sendable {
         }
     }
 
-    /// A held byte receipt detects changed content; it never supplies mutation CAS.
+    /// Original byte and strict read receipts detect change; neither supplies mutation CAS.
     public func reload(
         checkCancellation: () throws -> Void = { try Task.checkCancellation() }
     ) throws -> DesktopNativeConfigurationArchive {
-        let bytes = try Self.readBytes(directory.appendingPathComponent(Self.filename),
-                                       checkCancellation: checkCancellation)
-        guard bytes == sealedBytes else { throw Self.invalid("The immutable retained capsule changed.") }
-        return try DesktopNativeConfigurationArchiveCodec.decode(bytes, checkCancellation: checkCancellation)
+        let validated = try Self.readValidated(
+            in: directory, expectedBytes: sealedBytes, checkCancellation: checkCancellation
+        )
+        try DesktopOwnedAppDataFileReader.revalidateStrict(readReceipt, checkCancellation: checkCancellation)
+        return validated.archive
     }
 
     /// Restart inspection is read-only. A directory name alone is never ownership or write authority.
@@ -81,8 +84,7 @@ public struct DesktopNativeRetainedCapsule: Sendable {
         from directory: URL, checkCancellation: () throws -> Void = { try Task.checkCancellation() }
     ) throws -> DesktopNativeConfigurationArchive {
         let directory = try DesktopMigrationStaging.directory(directory, prefix: directoryPrefix)
-        let bytes = try readBytes(directory.appendingPathComponent(filename), checkCancellation: checkCancellation)
-        return try DesktopNativeConfigurationArchiveCodec.decode(bytes, checkCancellation: checkCancellation)
+        return try readValidated(in: directory, checkCancellation: checkCancellation).archive
     }
 
     public func exportProjection(
@@ -109,26 +111,20 @@ public struct DesktopNativeRetainedCapsule: Sendable {
         })
     }
 
-    private static func readBytes(_ file: URL, checkCancellation: () throws -> Void) throws -> Data {
-        try checkCancellation()
-        try DesktopMigrationStaging.requireLocalFile(file)
-        let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
-        guard attributes[.type] as? FileAttributeType == .typeRegular else {
-            throw invalid("Retained native data must be a regular file.")
-        }
-        let handle = try FileHandle(forReadingFrom: file)
-        return try DesktopNativeRetentionIO.perform(closing: { try handle.close() }, operation: {
-            var bytes = Data()
-            while let chunk = try handle.read(upToCount: 65_536), !chunk.isEmpty {
-                try checkCancellation()
-                guard UInt64(bytes.count) + UInt64(chunk.count)
-                    <= DesktopNativeConfigurationArchiveCodec.maximumEncodedBytes else {
-                    throw invalid("Retained native data exceeds the canonical archive budget.")
-                }
-                bytes.append(chunk)
-            }
-            return bytes
-        })
+    private static func readValidated(
+        in directory: URL, filename: String = Self.filename, expectedBytes: Data? = nil,
+        checkCancellation: () throws -> Void
+    ) throws -> (archive: DesktopNativeConfigurationArchive, receipt: DesktopOwnedAppDataFileReader.StrictReceipt) {
+        let snapshot = try DesktopOwnedAppDataFileReader.readStrict(
+            filename, appDirectory: directory,
+            maximumBytes: DesktopNativeConfigurationArchiveCodec.maximumEncodedBytes,
+            checkCancellation: checkCancellation
+        )
+        guard let bytes = snapshot.data else { throw CocoaError(.fileReadNoSuchFile) }
+        if let expectedBytes, bytes != expectedBytes { throw invalid("The immutable retained capsule changed.") }
+        let archive = try DesktopNativeConfigurationArchiveCodec.decode(bytes, checkCancellation: checkCancellation)
+        try DesktopOwnedAppDataFileReader.revalidateStrict(snapshot.receipt, checkCancellation: checkCancellation)
+        return (archive, snapshot.receipt)
     }
 
     private static func invalid(_ message: String) -> DataMigrationError { .invalid(message) }

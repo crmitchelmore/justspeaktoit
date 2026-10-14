@@ -722,9 +722,10 @@ strictly decodes it. `read(from:)` performs bounded strict restart inspection.
 Restart validation proves current codec validity, **not** historical
 authenticity if an external writer substituted different valid bytes; directory
 naming alone establishes neither ownership nor mutation authority.
-Reads still check and open by path, not through an identity-bound canonical
-strict-reader receipt. The check/open race is an explicit qualification limit;
-held bytes do not turn this IO into strict source identity or mutation CAS.
+The published `990ff362` implementation checks and opens by path without
+canonical strict-reader evidence; its check/open race remains a qualification
+limit. The subsequent local reader candidate below reuses stronger canonical
+point-in-time fences, not atomic held-descriptor reads or mutation CAS.
 `exportProjection` returns only `.settings` native records with exact selected
 IDs (including an explicit empty set), never complete/replacement scope.
 Canonical/Mac automatic import continues to reject `nativeConfiguration`.
@@ -742,8 +743,9 @@ nonrecursive `rmdir`/`_wrmdir`; neither path recursively deletes children.
 `cleanupError`; `DesktopNativeRetentionPublishedFailure.underlyingError`
 preserves the original failure, including cancellation. Their user-facing
 messages do not interpolate underlying errors, paths or captured values.
-Read/write handle cleanup attempts close once, preserving a dual failure and
-never retrying a failed close.
+Write handle cleanup attempts close once, preserving a dual failure and never
+retrying a failed close. Canonical read-handle cleanup follows its own selected
+single-close contract.
 Construction/reload/export run off the UI/settings-admission/PCM paths.
 
 The frozen `86a` IO primitives provide protected creation and exclusive
@@ -798,6 +800,65 @@ all four Windows compile projections passed, and strict lint of the expanded
 **34-path** Swift set returned **0 violations**. These qualify the repaired
 source, not native Windows/Apple runtime, strict identity-bound IO or mutation
 authority. The prior 135/1924/32-path receipts remain prior-source evidence only.
+
+### Local canonical strict-reader candidate
+
+The capsule imports only these exact canonical modules from selected
+`578cd14f105273cfeddb4e38e792e709f9e28954`, not that branch's profile/History/UI work:
+`DesktopOwnedAppDataFileReadError.swift` (`5d1de758a6045b596bf5925e6842849dd1fb409d`),
+`DesktopOwnedAppDataFileReader.swift` (`fe9c69f02b83c15c65d88dd2830f001aa432a15a`) and
+`DesktopOwnedAppDataFileReader+Strict.swift` (`db7e0a4f3bd5be189256d750b153313dd19d8bea`),
+all under `Sources/SpeakDesktop`. On the integration head these readers were
+already present from the earlier owned-AppData reader integration; the capsule
+uses the head copies. The head `+Strict` file differs from the cited blob only
+by `directoryChain` being internal rather than private.
+
+Staging/published reads use `readStrict` and `revalidateStrict` around codec
+inspection, preserving the canonical byte budget, cancellation and original
+typed read/IO causes. A held capsule keeps both its original sealed bytes and
+`StrictReceipt`; reload/export revalidate the original receipt, so identical
+bytes alone cannot establish the original held source. The receipt compares
+file and directory-chain identity as well as bytes; the same-byte new-file
+identity case is exercised locally.
+Restart inspects the current snapshot only, never historical authenticity.
+Missing records fail rather than becoming empty settings. Missing required
+native metadata fails closed with `insufficientIdentity`, including Windows
+hosts whose Foundation metadata cannot support this contract; there is no
+fallback to the older path-only reader.
+
+These are bounded pre/post byte/file/directory-chain point-in-time fences.
+They are not atomic held-descriptor reads, do not eliminate every check/open
+or ABA race, and grant no mutable Root, deletion, journal or write-CAS authority.
+Canonical generic-scanner adaptation is a separate milestone and remains
+outside this reader candidate.
+
+The isolated directory-only replacement fixture compares the **full canonical
+file identity**, not just inode and bytes. It explicitly skips on this WSL
+filesystem because moving the file changes that identity. Exact bytes and
+unrelated sentinels in both directories remain checked, but this does **not**
+provide an independent directory-chain-only rejection proof on this host.
+No metadata normalization or synthetic identity is used to manufacture one.
+Native Windows/Apple runtime and that independent directory-only case remain
+unqualified.
+
+Final candidate receipts from `validate-native-retention-reader.sh`:
+
+- `SPEAK_PORTABLE_CORE=1 swift test --scratch-path /tmp/jsti-settings-eacacdaf --jobs 4 --filter DesktopNativeRet`:
+  **34 tests / 1 explicit identity-fixture skip / 0 failures**.
+- The same full portable command above: **1940 tests / 31 skipped / 0 failures**,
+  including the explicitly unproven directory-only case.
+- Strict lint with the pinned expanded **38-path** Swift set: **0 violations**.
+- All four Windows compile projections passed before the approved test-only
+  refinement. Their **1318** source/resource/HostTests/manifest/script inputs
+  remain identical, SHA-256
+  `DC68A624962469C190D7B1F0214E1D27FB7F7C1E140AE804BCC4069D124ED9D5`.
+  `SpeakDesktopTests` is outside those graph targets; no extra graph run or
+  native runtime acceptance is inferred from the final test change.
+
+Earlier 33/1939 receipts describe the pre-refinement test source only. The
+selected three canonical source blobs remain byte-identical throughout.
+These receipts were recorded on the original holding branch and were not
+re-run on the integration head.
 
 ## Generated-speech coordination
 

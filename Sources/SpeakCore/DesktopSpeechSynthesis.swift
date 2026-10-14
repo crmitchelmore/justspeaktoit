@@ -25,13 +25,13 @@ public struct DesktopSpeechSynthesis: Sendable {
             return try await DeepgramSpeechExport(session: session).synthesize(
                 source, voice: voice, credential: credential
             )
-        case .azureNeural(let voice):
-            return try await synthesizeAzure(source.text, voice: voice, options: options, credential: credential)
+        case .azureNeural, .azureMAI:
+            return try await synthesizeAzure(source.text, voiceID: voice.id, options: options, credential: credential)
         }
     }
 
     private func synthesizeAzure(
-        _ text: String, voice: AzureNeuralVoice, options: VoiceSynthesisOptions,
+        _ text: String, voiceID: String, options: VoiceSynthesisOptions,
         credential: @Sendable () async throws -> String
     ) async throws -> Data {
         let isDocument = options.useSSML && text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("<speak")
@@ -48,7 +48,7 @@ public struct DesktopSpeechSynthesis: Sendable {
         var pcm = Data()
         for segment in segments {
             let request = try AzureSpeechVoiceAPI.synthesisRequest(
-                credentials: supplied, text: segment, voice: voice.id, format: "riff-24khz-16bit-mono-pcm",
+                credentials: supplied, text: segment, voice: voiceID, format: "riff-24khz-16bit-mono-pcm",
                 speed: options.speed, pitch: options.pitch, useSSML: options.useSSML
             )
             guard let requestBody = request.httpBody, requestBody.count <= Self.maximumSSMLBytes else {

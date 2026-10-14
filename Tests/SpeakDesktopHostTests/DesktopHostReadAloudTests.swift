@@ -161,12 +161,25 @@ final class DesktopHostReadAloudTests: XCTestCase {
     private var statuses: [String] { FakeLog.shared.allStatuses }
 
     func testAzureRead_UsesNativePlaybackWithRealHistoryOwnershipAndCleansTemporaryAudioOnStop() async throws {
+        try await assertAzureRead(
+            voice: .azureNeural(AzureNeuralVoiceCatalog.voices[0]),
+            options: VoiceSynthesisOptions(speed: 1.25, pitch: -2)
+        )
+    }
+
+    func testMAIRead_UsesSharedAzureCredentialAndPreservesRealHistoryOwnershipThroughStop() async throws {
+        try await assertAzureRead(
+            voice: .azureMAI(AzureMAIVoiceCatalog.voices[0]), options: VoiceSynthesisOptions(useSSML: true)
+        )
+    }
+
+    private func assertAzureRead(voice: DesktopSpeechVoice, options: VoiceSynthesisOptions) async throws {
         FakeSpeech.shared.reset(holdingSegments: true)
         FakeLog.shared.setKey("synthetic-key:eastus", name: AzureSpeechConfiguration.credentialIdentifier)
-        await controller.selectVoiceOutput(DesktopSpeechVoice.azureNeural(AzureNeuralVoiceCatalog.voices[0]))
-        let saved = await controller.saveVoiceSynthesisOptions(try VoiceSynthesisOptions(speed: 1.25, pitch: -2))
+        await controller.selectVoiceOutput(voice)
+        let saved = await controller.saveVoiceSynthesisOptions(options)
         XCTAssertTrue(saved)
-        await controller.readAloud(record.uuidString, text: "Synthetic neural speech.")
+        await controller.readAloud(record.uuidString, text: "Synthetic Azure speech.")
         try await waitFor("native synthetic playback") { FakeSpeech.shared.events.contains("play") }
         let owner = await controller.voiceOutputRecordID
         XCTAssertEqual(owner, record)

@@ -5,6 +5,7 @@
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
   xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
   xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
   xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
   xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
@@ -39,6 +40,13 @@
             <desktop:ExecutionAlias Alias="${executionAlias}"/>
           </uap3:AppExecutionAlias>
         </uap3:Extension>
+        <!-- A console alias for the real CLI, without another Application or Start menu tile. -->
+        <uap5:Extension Category="windows.appExecutionAlias" Executable="${cliExecutable}"
+          uap10:RuntimeBehavior="packagedClassicApp" uap10:TrustLevel="mediumIL">
+          <uap5:AppExecutionAlias uap10:Subsystem="console">
+            <uap5:ExecutionAlias Alias="${cliExecutionAlias}"/>
+          </uap5:AppExecutionAlias>
+        </uap5:Extension>
         <!-- General › Launch at login. Off until the user turns it on; a login launch starts minimised. -->
         <desktop:Extension Category="windows.startupTask" Executable="${executable}"
           EntryPoint="Windows.FullTrustApplication" uap10:Parameters="${startupTaskParameters}">

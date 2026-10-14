@@ -4,8 +4,8 @@ The Mac-to-Windows cross pipeline previously produced only `SpeakWindows.exe`
 and its resource directories, so running the app on Windows still needed the
 Swift 6.2.3 toolchain and a Visual C++ redistributable installed by developer
 tooling. This bundle closes that gap: a deterministic ZIP containing the
-**production executable, its resources and only the redistributable runtime
-DLLs it actually imports**, with licences, hashes and provenance. It is an
+**production GUI and CLI executables, their resources and only the redistributable
+runtime DLLs in their combined import closure**, with licences, hashes and provenance. It is an
 **unsigned developer bundle**. It is not an installer, an updater, a signed
 release or evidence of physical audio, insertion or performance acceptance;
 those remain separate gates. This document describes the x64 bundle; the ARM64
@@ -17,19 +17,22 @@ bundle, built from the native ARM64 build, is described in
 | Path | Origin | Why it is included |
 |---|---|---|
 | `SpeakWindows.exe` | `build-windows-app.py` release output; hash checked against `app-build-metadata.json` | Production app; a test-enabled build or anything importing `XCTest.dll`/`Testing.dll` is refused |
+| `speak.exe` | Separate `speak` release product, copied and hashed before building tests | Real console automation CLI; the same production hash, native architecture and test-import rules apply |
 | `SpeakApp_SpeakCore.resources/` | SwiftPM resource bundle from the same build | Loaded beside the executable at runtime; `*Tests.resources` are skipped |
-| 14 Swift runtime DLLs | Swift 6.2.3 runtime package `rtl.msi` from the pinned swift.org installer | Static import closure of the executable (see below) |
+| Swift runtime DLLs | Swift 6.2.3 runtime package `rtl.msi` from the pinned swift.org installer | Exact combined static and delay-load import closure of both executables (see below); not a fixed DLL count |
 | `msvcp140.dll`, `vcruntime140.dll`, `vcruntime140_1.dll` | Microsoft's official `VC_redist.x64.exe` 14.51.36247.0, read as data | Static import closure; never taken from the Swift installer copy |
 | `whisper.dll`, `ggml.dll`, `ggml-base.dll`, `ggml-vulkan.dll`, `ggml-cpu-*.dll` | whisper.cpp 1.9.4 built from its pinned commit by `scripts/windows-local-runtime` (`--local-runtime`) | On-device transcription; loaded at run time, never imported by the executable |
 | `licenses/` | Swift, ICU, curl and zlib licences pinned to release-tag commits; the app's MIT licence; a Microsoft runtime notice | Redistribution terms and attribution |
 | `THIRD-PARTY-NOTICES.txt`, `README.txt` | Generated deterministically | Human-readable summary and usage |
 | `bundle-manifest.json` | Generated | Every file with size and SHA-256, the import graph, the sources and the policy used |
 
-The Swift modules reached from the executable are `swiftCore`,
+The earlier GUI-only bundle reached these Swift modules: `swiftCore`,
 `swift_Concurrency`, `swift_StringProcessing`, `swift_RegexParser`, `swiftCRT`,
 `swiftWinSDK`, `swiftDispatch`, `dispatch`, `BlocksRuntime`, `Foundation`,
 `FoundationEssentials`, `FoundationInternationalization`, `FoundationNetworking`
-and `_FoundationICU`. `FoundationXML`, `swiftSwiftOnoneSupport`,
+and `_FoundationICU`. The current builder recalculates the closure from both
+production roots; the historical list is not a second packaging allowlist.
+In that earlier bundle, `FoundationXML`, `swiftSwiftOnoneSupport`,
 `swiftRemoteMirror`, `plutil.exe` and the other runtime-package files are not
 imported and are not shipped. Windows modules (`kernel32`, `user32`, `winhttp`,
 `bcrypt`, the `api-ms-win-core-*` and Universal CRT `api-ms-win-crt-*` API sets
@@ -40,6 +43,16 @@ Nothing from the compiler, SDK or test toolchain is packaged: no headers, import
 libraries, Swift modules, symbol files, installers, cabinets, `XCTest`,
 `Testing.dll`, test executables or test resources. `runtime-policy.json` lists
 those forbidden patterns and the layout check refuses any match, as do the tests.
+
+## Portable CLI
+
+Run `.\speak.exe --help` or `.\speak.exe --version` from the extracted bundle.
+This is the existing `SpeakCLI`/`CLIRunner`, not a renamed GUI, new protocol or
+PATH installer. Help and version do not connect to the app or read credentials.
+Other commands use the running app's same-user automation pipe.
+Windows currently reports the CLI's existing `0.0.0-dev` fallback, not an MSIX
+version or a new release version; packaging does not change version discovery.
+Neither executable's inclusion changes GUI startup, capabilities or icons.
 
 ## Canonical application icons
 
@@ -75,7 +88,7 @@ behavior: those require the native Windows CI and desktop acceptance evidence.
 directory, the delay-load import directory (both RVA-based and legacy
 address-based descriptors) and the `VS_VERSIONINFO` resource without executing
 anything. `build-windows-bundle.py` walks imports breadth-first from the
-executable and classifies every module through the documented allowlist in
+two executable roots and classifies every module through the documented allowlist in
 `scripts/windows-bundle/runtime-policy.json`:
 
 - **Windows system modules** are an explicit list rooted in the imports actually
@@ -96,6 +109,14 @@ Windows job's loaded-module evidence (below) fails if the process loads any
 sampled non-system module from outside the bundle. In CI the closure is additionally
 cross-checked against `llvm-readobj --coff-imports` from the pinned LLVM 20.1.8
 tools, and a difference fails the build.
+
+The manifest and bundle evidence retain the GUI's `executableSHA256` field and
+also record the canonical `application.executables` name-to-SHA-256 map for
+`SpeakWindows.exe` and `speak.exe`. Shared DLLs retain every immediate importer,
+including the root executable and static/delay edge kind. Whisper runtime-loaded
+edges belong only to the GUI. `dependencies.roots` records the static-only
+reachability for each root: GUI module sampling must not demand CLI-only DLLs
+or DLLs reachable only through delay-load/LoadLibrary edges.
 
 ## Sources, provenance and licences
 
@@ -221,6 +242,9 @@ earlier native and cross checks stay unchanged and strict:
    - checks the archive hash, size and source commit, expands it, checks every
      extracted file's size and SHA-256 against the manifest, and refuses extra or
      forbidden files;
+   - re-reads both production PEs through `verify-native-execution.py images`,
+     checks the CLI console subsystem and both build hashes, and requires a
+     native host for the bundle architecture;
    - sets `PATH` to the Windows system directories only, clears Swift-related
      variables and `ICU_DATA`, confirms no `swift.exe` is reachable and that no bundled Swift
      runtime DLL exists in any `PATH` directory (copies of Microsoft runtime
@@ -232,8 +256,13 @@ earlier native and cross checks stay unchanged and strict:
    - extracts to a path with spaces and Unicode, then runs `--bundle-self-test`, `--self-test` and `--ui-smoke-test` from an unrelated empty working directory while
      polling the process's loaded modules, and fails if any module comes from
      outside the bundle or `%SystemRoot%`, if a bundled module was loaded from
-     elsewhere, if a statically imported bundled module was not observed, or if
+     elsewhere, if a GUI-root statically reachable bundled module was not observed, or if
      the success markers or the window snapshot are missing;
+   - runs `speak.exe --help` and `--version` with redirected streams from the
+     unrelated directory under the same isolated PATH, with a 15-second exit
+     budget. These short-run receipts prove output and exit plus separate
+     PE/hash/native-host evidence; they do not claim sampled module provenance
+     or add a CLI handshake;
    - asserts real SwiftPM release-note resources, Codable, Unicode regex, ICU locale/date formatting and atomic file I/O; a disposable copy missing `ReleaseNotes.json` must fail its explicit resource assertion. The short Foundation probe waits at most 10 seconds for the harness to acknowledge sampled DLL paths; this handshake only applies in its opt-in CLI test mode;
    - writes `bundle-execution-evidence.json`, the logs and the snapshot even when
      a check fails, then reports every failure.
@@ -242,6 +271,13 @@ The existing `execute` job keeps installing the pinned Swift runtime for the
 separate test-enabled executable, as before.
 
 ## Evidence at this checkpoint
+
+Adding the second production root requires fresh x64 and ARM64 native receipts.
+The historical GUI-only receipts below do not qualify CLI packaging, console
+alias activation, or a new package lifecycle. Python fixtures and
+`scripts/windows-bundle/test-bundle-cli.ps1` exercise policy, root attribution,
+tamper refusal, output validation, isolation, timeouts and ownership without
+running a production app; they are not native build/install evidence.
 
 - The 41 unit tests pass locally with Python 3.14: PE import and version
   parsing on synthetic images, closure traversal with delay imports, cycles and

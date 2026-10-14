@@ -89,6 +89,8 @@ $dataDirectory = Join-Path $env:LOCALAPPDATA $settings.fileSystem.dataDirectoryN
 $packageDataDirectory = Join-Path $env:LOCALAPPDATA ('Packages\' + $base.packageFamilyName)
 $virtualisedDataDirectory = Join-Path $packageDataDirectory ('LocalCache\Local\' + $settings.fileSystem.dataDirectoryName)
 $aliasPath = Join-Path $env:LOCALAPPDATA ('Microsoft\WindowsApps\' + $base.executionAlias)
+$cliAliasPath = Join-Path $env:LOCALAPPDATA ('Microsoft\WindowsApps\' + $base.cliExecutionAlias)
+. (Join-Path $PSScriptRoot '..\windows-bundle\BundleCLI.ps1')
 $systemRoot = $env:SystemRoot
 $isolatedPath = "$systemRoot\System32;$systemRoot;$systemRoot\System32\Wbem;$systemRoot\System32\WindowsPowerShell\v1.0"
 $readyPattern = '^(Enter and save the selected provider.s API key|Ready\. Ctrl\+Alt\+Space|Recording sounds unavailable\. Check audio output; dictation still works\.$)'
@@ -425,6 +427,16 @@ function Assert-Installed([string] $Label, $Expected, [string] $Layout) {
     $entry = Wait-StartMenuEntry $true
     Assert-Check "$Label appears in the Start menu" ($entry.present -and $entry.name -eq $Expected.displayName) $entry
     Assert-Check "$Label registers its execution alias" (Wait-PathState $aliasPath $true 60) $aliasPath
+    Assert-Check "$Label registers its CLI execution alias" (Wait-PathState $cliAliasPath $true 60) $cliAliasPath
+    [xml] $installedManifest = Get-Content -LiteralPath (Join-Path $package.InstallLocation 'AppxManifest.xml') -Raw
+    $cliExtensions = @($installedManifest.SelectNodes(
+        "//*[local-name()='Extension' and @Category='windows.appExecutionAlias' and @Executable='speak.exe']"))
+    Assert-Check "$Label maps its CLI alias to speak.exe as a console" (
+        $cliExtensions.Count -eq 1 -and
+        $cliExtensions[0].SelectSingleNode("*[local-name()='AppExecutionAlias']").GetAttribute(
+            'Subsystem', 'http://schemas.microsoft.com/appx/manifest/uap/windows10/10') -eq 'console' -and
+        $cliExtensions[0].SelectSingleNode(".//*[local-name()='ExecutionAlias']").GetAttribute('Alias') -eq
+            $Expected.cliExecutionAlias) $Expected.cliExecutionAlias
     return $package
 }
 
@@ -438,6 +450,7 @@ function Assert-Removed([string] $Label, $Package) {
     $entry = Wait-StartMenuEntry $false
     Assert-Check "$Label removes its Start menu entry" (-not $entry.present) $entry
     Assert-Check "$Label removes its execution alias" (Wait-PathState $aliasPath $false 60) $aliasPath
+    Assert-Check "$Label removes its CLI execution alias" (Wait-PathState $cliAliasPath $false 60) $cliAliasPath
     Assert-Check "$Label removes package-private app data" (Wait-PathState $packageDataDirectory $false 120) $packageDataDirectory
     Add-Check "$Label removes its installed files" (
         $installLocation -and (Wait-PathState $installLocation $false 120)) $installLocation
@@ -476,11 +489,7 @@ function Assert-PreviousIntact([string] $Label, $Expected, [string] $Layout, [st
 
 # --- running the installed app ---------------------------------------------------------------------------
 function Get-StaticRuntimeModules {
-    $names = @()
-    foreach ($property in $bundleManifest.dependencies.bundled.PSObject.Properties) {
-        if (@($property.Value.importedBy | Where-Object { $_.kind -eq 'static' }).Count) { $names += $property.Value.name }
-    }
-    return $names
+    return @(Get-BundleStaticModules $bundleManifest.dependencies 'SpeakWindows.exe')
 }
 $staticModules = Get-StaticRuntimeModules
 $bundledModules = @($bundleManifest.dependencies.bundled.PSObject.Properties | ForEach-Object { $_.Value.name })
@@ -676,6 +685,17 @@ function Invoke-StartMenuLaunch([string] $Label, $Installed, [int] $Rows, [strin
 }
 
 function Assert-AliasSelfTests([string] $Label, $Installed, [switch] $All) {
+    foreach ($argument in @('--help', '--version')) {
+        Assert-JstiAdmitted $script:ledger
+        $cli = Invoke-BundleCLIReadOnly -Executable $cliAliasPath -Argument $argument `
+            -WorkingDirectory $emptyDirectory -IsolatedPath $isolatedPath `
+            -OnStarted { param($process) Add-JstiOwnedProcess $script:ledger $process }
+        $cli.label = "$Label-cli-" + $argument.TrimStart('-')
+        $cli.executableSHA256 = Get-JstiSha256 (Join-Path $Installed.InstallLocation 'speak.exe')
+        [void] $script:report.runs.Add($cli)
+        Assert-Check "$Label CLI alias $argument passes with the verified CLI bytes and no module-sampling claim" (
+            $cli.passed -and $cli.executableSHA256 -eq $bundleManifest.application.executables.'speak.exe') $cli
+    }
     $run = Invoke-AliasRun "$Label-bundle-self-test" '--bundle-self-test' $Installed 60 -Handshake
     Assert-Check "$Label bundle self-test passes inside the package identity" (
         $run.exitCode -eq 0 -and $run.output -match 'JSTI_BUNDLE_SELF_TEST_OK' -and
@@ -722,7 +742,8 @@ try {
         registrations = @(Get-AppxPackage -Name $name -AllUsers | ForEach-Object { $_.PackageFullName })
         packageData = Test-Path -LiteralPath $packageDataDirectory
         alias = Test-Path -LiteralPath $aliasPath
-        processes = @(Get-Process -Name SpeakWindows -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
+        cliAlias = Test-Path -LiteralPath $cliAliasPath
+        processes = @(Get-Process -Name SpeakWindows, speak -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
         publisherCertificates = @(Get-ChildItem Cert:\CurrentUser\My, Cert:\LocalMachine\TrustedPeople |
             Where-Object { $_.Subject -eq $base.publisher } | ForEach-Object { $_.PSPath })
     }

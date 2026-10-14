@@ -31,6 +31,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'BundleEnvironment.ps1')
+. (Join-Path $PSScriptRoot 'BundleCLI.ps1')
 $StatusDllNotFound = -1073741515  # NTSTATUS 0xC0000135 as a signed exit code
 # Loaded only into emulated x64 or ARM64EC, and WOW64, processes.
 $EmulationModules = @('xtajit.dll', 'xtajit64.dll', 'xtajit64se.dll', 'xtabase.dll', 'wow64.dll', 'wow64base.dll',
@@ -106,6 +107,8 @@ $report = [ordered]@{
     negativeControl = $null
     resourceNegativeControl = $null
     runs = @()
+    cliRuns = @()
+    productionImages = $null
     failures = @()
 }
 
@@ -162,6 +165,30 @@ try {
     }
     if ((Get-ChildItem -LiteralPath $bundle -Recurse -File).Count -ne $expected.Count) { throw 'Bundle file count mismatch.' }
     Write-Host "Verified $($expected.Count) bundle files against the Mac-recorded manifest."
+    $roots = @('SpeakWindows.exe', 'speak.exe')
+    foreach ($record in @($manifest.application.executables, $evidence.application.executables)) {
+        if (@($record.PSObject.Properties).Count -ne 2) { throw 'Production evidence must name both executable roots.' }
+        foreach ($root in $roots) {
+            if ((Get-Sha256 (Join-Path $bundle $root)) -ne $record.$root) {
+                throw "Production executable hash differs from its build receipt: $root"
+            }
+        }
+    }
+    $imageEvidence = Join-Path $evidenceDirectory 'production-images.json'
+    Remove-Item -LiteralPath $imageEvidence -Force -ErrorAction SilentlyContinue
+    $architecture = if ($manifest.bundle.architecture -eq 'aarch64') { 'arm64' } else { 'x64' }
+    # Reuse the canonical PE reader; this is an image receipt, not short-process module sampling.
+    & python -B (Join-Path $PSScriptRoot 'verify-native-execution.py') --architecture $architecture `
+        --evidence $imageEvidence images (Join-Path $bundle 'SpeakWindows.exe') (Join-Path $bundle 'speak.exe')
+    if ($LASTEXITCODE -ne 0) { throw 'Production PE architecture verification failed.' }
+    $report.productionImages = (Get-Content -LiteralPath $imageEvidence -Raw | ConvertFrom-Json).images
+    if (@($report.productionImages | Where-Object { $_.dll -or -not $_.native }).Count -or
+        @($report.productionImages | Where-Object { $_.name -eq 'speak.exe' -and $_.subsystem -eq 3 }).Count -ne 1) {
+        throw 'Production roots must be native executables and speak.exe must be a console executable.'
+    }
+    if ($architecture -eq 'x64' -and $runnerNativeMachine -ne 0x8664) {
+        throw 'Native x64 CLI verification requires an x64 host, not an emulated x64 process.'
+    }
 
     # --- 3. Isolate the environment ----------------------------------------------
     $systemRoot = $env:SystemRoot
@@ -171,6 +198,7 @@ try {
     if (Get-Command swift.exe -ErrorAction SilentlyContinue) { throw 'A Swift toolchain is reachable on the isolated PATH.' }
     $bundled = @{}
     foreach ($property in $manifest.dependencies.bundled.PSObject.Properties) { $bundled[$property.Name] = $property.Value }
+    $guiStaticModules = @(Get-BundleStaticModules $manifest.dependencies 'SpeakWindows.exe')
     $systemCopies = @()
     foreach ($entry in $bundled.Values) {
         foreach ($directory in $isolatedPath.Split(';')) {
@@ -227,7 +255,19 @@ try {
     }
     Write-Host "Negative control failed to start as expected (STATUS_DLL_NOT_FOUND)."
 
-    # --- 5. Run the bundled production executable and record loaded modules -------
+    # Fast help/version need no app, devices or credentials. Do not require or claim sampled modules.
+    foreach ($argument in @('--help', '--version')) {
+        try {
+            $cli = Invoke-BundleCLIReadOnly -Executable (Join-Path $bundle 'speak.exe') -Argument $argument `
+                -WorkingDirectory $emptyWorkingDirectory -IsolatedPath $isolatedPath
+            $cli.label = 'cli-' + $argument.TrimStart('-')
+            $cli.executableSHA256 = Get-Sha256 (Join-Path $bundle 'speak.exe')
+            $report.cliRuns += $cli
+            if (-not $cli.passed) { throw "speak.exe $argument failed: $($cli.failures -join '; ')" }
+        } catch { $failures.Add($_.Exception.Message) }
+    }
+
+    # --- 5. Run the bundled GUI production executable and record loaded modules -------
     function Invoke-Bundled([string] $arguments, [string] $label, [int] $seconds) {
         $parameters = @{
             FilePath = (Join-Path $bundle 'SpeakWindows.exe')
@@ -251,9 +291,8 @@ try {
                 $process.Refresh()
                 foreach ($module in $process.Modules) { $loaded[$module.FileName.ToLowerInvariant()] = $module.FileName }
                 $allStaticObserved = $true
-                foreach ($entry in $bundled.Values) {
-                    if (@($entry.importedBy | Where-Object { $_.kind -eq 'static' }).Count -eq 0) { continue }
-                    $expectedPath = (Join-Path $bundle $entry.name).ToLowerInvariant()
+                foreach ($name in $guiStaticModules) {
+                    $expectedPath = (Join-Path $bundle $name).ToLowerInvariant()
                     if (-not $loaded.ContainsKey($expectedPath)) { $allStaticObserved = $false }
                 }
                 if ($allStaticObserved) { [System.IO.File]::WriteAllText($probeRelease, 'sampled') }
@@ -285,7 +324,7 @@ try {
         }
         $missing = @()
         foreach ($entry in $bundled.Values) {
-            $static = @($entry.importedBy | Where-Object { $_.kind -eq 'static' }).Count -gt 0
+            $static = $guiStaticModules -contains $entry.name
             $observed = @($fromBundle | Where-Object { $_ -ieq $entry.name }).Count -gt 0
             if ($static -and -not $observed) { $missing += $entry.name }
             foreach ($path in $fromSystem + $fromPackages + $foreign) {

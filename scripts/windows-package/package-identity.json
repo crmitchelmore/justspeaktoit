@@ -32,6 +32,10 @@
       "parameters": "--background"
     }
   },
+  "cli": {
+    "executable": "speak.exe",
+    "executionAlias": "JustSpeakToItDeveloperCLI.exe"
+  },
   "targetDeviceFamily": {
     "name": "Windows.Desktop",
     "minVersion": "10.0.19041.0",

@@ -12,16 +12,17 @@ import pathlib
 import platform
 import shutil
 import stat
-import struct
 import subprocess
 import sys
 import tarfile
 import tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(HERE.parent / "windows-bundle"))
+import windows_pe  # noqa: E402
 SPEC = importlib.util.spec_from_file_location("cross_bootstrap", HERE / "build-foundation-proof.py")
 BOOTSTRAP = importlib.util.module_from_spec(SPEC)
-sys.dont_write_bytecode = True
 SPEC.loader.exec_module(BOOTSTRAP)
 
 
@@ -87,12 +88,28 @@ def run_package_build(command, environment, log, package):
 
 def copy_executable(source, destination, clang, log):
     binary = source.read_bytes()
-    pe_offset = struct.unpack_from("<I", binary, 0x3c)[0]
-    if binary[:2] != b"MZ" or binary[pe_offset:pe_offset + 6] != b"PE\0\0\x64\x86":
+    image = windows_pe.PEImage(binary, source.name)
+    if not image.runs_natively_on("x64") or image.is_dll:
         raise ValueError("Expected a Windows x64 executable: " + source.name)
+    if destination.name == "speak.exe" and image.subsystem != windows_pe.IMAGE_SUBSYSTEM_WINDOWS_CUI:
+        raise ValueError("speak.exe must use the console subsystem")
+    if destination.name in ("SpeakWindows.exe", "speak.exe"):
+        tests = [name for name in image.imports() + image.delay_imports() if name.lower() in ("xctest.dll", "testing.dll")]
+        if tests:
+            raise ValueError(destination.name + " imports a test library: " + ", ".join(tests))
     shutil.copy2(source, destination)
     BOOTSTRAP.run([clang / "llvm-readobj", "--file-headers", "--coff-imports", destination], log)
     return BOOTSTRAP.digest(destination)
+
+
+def build_production(command, environment, log, package, built, output, clang):
+    """Build and retain both production products before testable imports are enabled."""
+    artifacts = {}
+    for product in ("SpeakWindows", "speak"):
+        run_package_build(command + ["--product", product], environment, log, package)
+        name = product + ".exe"
+        artifacts[name] = copy_executable(built / name, output / name, clang, log)
+    return artifacts
 
 
 def positive_integer(value):
@@ -176,11 +193,7 @@ def main():
     environment.update(SPEAK_WINDOWS_TARGET="1", CC=str(clang / "clang"), CXX=str(clang / "clang++"))
     built = scratch / "x86_64-unknown-windows-msvc" / args.configuration
     print("Cross-building the optimised Windows application", flush=True)
-    run_package_build(command + ["--product", "SpeakWindows"], environment, log, HERE.parent.parent)
-    # Retain the production app before building tests: testable imports must
-    # not change the app artifact's optimisation or internal symbol visibility.
-    artifacts = {"SpeakWindows.exe": copy_executable(
-        built / "SpeakWindows.exe", output / "SpeakWindows.exe", clang, log)}
+    artifacts = build_production(command, environment, log, HERE.parent.parent, built, output, clang)
     print("Cross-building optimised tests with testable imports", flush=True)
     run_package_build(command + ["--build-tests", "-Xswiftc", "-enable-testing"],
                       environment, log, HERE.parent.parent)

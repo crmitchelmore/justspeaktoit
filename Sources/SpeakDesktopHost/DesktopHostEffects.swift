@@ -19,9 +19,13 @@ package struct DesktopHostTranscriptionRequest: Sendable {
     package let duration: TimeInterval
     package let language: String?
     package let keywords: [String]
+    /// An explicit override; nil lets the adapter fall back to the saved Azure
+    /// Speech resource captured at the start of its own transcription attempt.
+    package let azureEndpoint: String?
 
     package init(
-        audio: URL, model: String, key: String, duration: TimeInterval, language: String?, keywords: [String] = []
+        audio: URL, model: String, key: String, duration: TimeInterval, language: String?, keywords: [String] = [],
+        azureEndpoint: String? = nil
     ) {
         self.audio = audio
         self.model = model
@@ -29,6 +33,7 @@ package struct DesktopHostTranscriptionRequest: Sendable {
         self.duration = duration
         self.language = language
         self.keywords = keywords
+        self.azureEndpoint = azureEndpoint
     }
 }
 

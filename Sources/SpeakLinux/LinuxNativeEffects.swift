@@ -39,16 +39,7 @@ struct LinuxNativeEffects: DesktopHostEffects {
     ) async throws -> TranscriptionResult {
         try await controller.transcribePreparedAudio(
             request.audio, model: request.model, key: request.key, duration: request.duration,
-            language: request.language, keywords: request.keywords
-        )
-    }
-
-    func makeLiveClient(
-        model: String, key: String, language: String?, azureEndpoint: String, options: LiveClientOptions
-    ) -> (any FinalizingStreamingTranscriptionClient)? {
-        DesktopLiveTranscription.makeClient(
-            model: model, apiKey: key, language: language, azureEndpoint: azureEndpoint, options: options,
-            makeConnection: { NIOStreamingConnection(request: $0) }
+            language: request.language, keywords: request.keywords, azureEndpoint: request.azureEndpoint
         )
     }
 

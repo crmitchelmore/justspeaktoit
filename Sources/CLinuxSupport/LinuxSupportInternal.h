@@ -43,6 +43,8 @@ int32_t jsti_voice_sources_self_test(struct _GtkWindow *owner, char *error, size
 void jsti_voice_sources_close(void);
 void jsti_voice_sources_show_fixture(struct _GtkWindow *owner);
 int32_t jsti_voice_sources_save_snapshot(const char *path);
+void jsti_voice_controls_show_fixture(struct _GtkWindow *owner);
+int32_t jsti_voice_controls_save_snapshot(const char *path);
 
 struct _GtkWidget;
 struct _GtkLabel;

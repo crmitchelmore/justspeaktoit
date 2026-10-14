@@ -75,6 +75,7 @@ bool save(HWND window, Dialog &dialog) {
     EnableWindow(GetDlgItem(window, pitchID), FALSE);
     EnableWindow(GetDlgItem(window, ssmlID), FALSE);
     SetDlgItemTextW(window, noticeID, L"Saving synthesis controls...");
+    SetDlgItemTextW(window, IDCANCEL, L"Close");
     dialog.callback(119, 0, value.c_str(), request.c_str(), "", dialog.context);
     return true;
 }
@@ -145,6 +146,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         EnableWindow(GetDlgItem(window, pitchID), dialog->options.capabilities & 2);
         EnableWindow(GetDlgItem(window, ssmlID), dialog->options.capabilities & 4);
         SetDlgItemTextW(window, noticeID, L"Could not save controls. Previous settings are unchanged. Retry or Cancel.");
+        SetDlgItemTextW(window, IDCANCEL, L"Cancel");
         return 0;
     }
     if (message == WM_COMMAND && HIWORD(wparam) == BN_CLICKED) {
@@ -243,11 +245,16 @@ bool jsti_voice_controls_self_test(HWND owner, std::string &error) {
         SendMessageW(window, WM_COMMAND, MAKEWPARAM(normalID, BN_CLICKED), 0);
         passed = save(window, dialog) && passed && receipt.json == "{\"speed\":1,\"pitch\":0,\"useSSML\":false}" &&
             !receipt.request.empty() && dialog.saving && !IsWindowEnabled(GetDlgItem(window, saveID));
+        wchar_t caption[16]{};
+        GetDlgItemTextW(window, IDCANCEL, caption, 16);
+        passed = passed && std::wstring(caption) == L"Close";
         const std::string first = receipt.request;
         passed = jsti_window_finish_voice_synthesis_options("obsolete-request", 1) == 0 && passed;
         drain(); passed = passed && IsWindow(window) && dialog.saving;
         passed = jsti_window_finish_voice_synthesis_options(first.c_str(), 0) == 0 && passed;
         drain(); passed = passed && !dialog.saving && IsWindowEnabled(GetDlgItem(window, saveID));
+        GetDlgItemTextW(window, IDCANCEL, caption, 16);
+        passed = passed && std::wstring(caption) == L"Cancel";
         dialog.options.capabilities = 7; fill(window, dialog.options);
         SetDlgItemTextW(window, speedID, L"0.49");
         passed = !save(window, dialog) && receipt.calls == 1 && passed;

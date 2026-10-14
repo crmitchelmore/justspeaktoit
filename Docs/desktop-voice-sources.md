@@ -79,7 +79,8 @@ a credential, rather than silently ignoring them or changing provider.
 all controls. Unknown provider choices appear as unavailable, not Deepgram.
 Save waits for persistence acknowledgement before closing, reports write
 failures without changing previous settings, and ignores acknowledgements for
-closed/replaced requests. Cancel remains available while saving.
+closed/replaced requests. Close remains available while saving; closing the
+editor does not undo an already-admitted settings write.
 
 Plain text uses the canonical segmenter; SSML is never split across XML tags.
 SSML input and complete request bodies are limited to 64 KiB. A full `<speak>`

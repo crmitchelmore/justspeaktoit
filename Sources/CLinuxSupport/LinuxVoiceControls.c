@@ -9,7 +9,7 @@ typedef struct {
     GtkEntry *speed, *pitch;
     GtkCheckButton *ssml;
     GtkLabel *notice;
-    GtkWidget *apply, *reset;
+    GtkWidget *apply, *reset, *cancel;
     gboolean saving;
     gint capabilities;
     gchar *request;
@@ -63,6 +63,7 @@ static gboolean emit(Controls *controls) {
     gtk_widget_set_sensitive(GTK_WIDGET(controls->pitch), FALSE);
     gtk_widget_set_sensitive(GTK_WIDGET(controls->ssml), FALSE);
     gtk_label_set_text(controls->notice, "Saving synthesis controls...");
+    gtk_button_set_label(GTK_BUTTON(controls->cancel), "Close");
     controls->callback(119, 0, json, controls->request, "", controls->context);
     g_free(json);
     return TRUE;
@@ -115,7 +116,7 @@ static Controls *make_controls(GtkWindow *owner, JSTIVoiceSourceCallback callbac
     GtkWidget *reset = gtk_button_new_with_label("Normal controls");
     GtkWidget *spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0); gtk_widget_set_hexpand(spacer, TRUE);
     GtkWidget *apply = gtk_button_new_with_label("Save"), *cancel = gtk_button_new_with_label("Cancel");
-    controls->apply = apply; controls->reset = reset;
+    controls->apply = apply; controls->reset = reset; controls->cancel = cancel;
     gtk_widget_set_size_request(reset, -1, 36); gtk_widget_set_size_request(apply, -1, 36);
     gtk_widget_set_size_request(cancel, -1, 36); gtk_widget_add_css_class(apply, "suggested-action");
     gtk_box_append(GTK_BOX(actions), reset); gtk_box_append(GTK_BOX(actions), spacer);
@@ -162,6 +163,7 @@ static void finish_options(gpointer data) {
     gtk_widget_set_sensitive(GTK_WIDGET(active->pitch), active->capabilities & 2);
     gtk_widget_set_sensitive(GTK_WIDGET(active->ssml), active->capabilities & 4);
     gtk_label_set_text(active->notice, "Could not save controls. Previous settings are unchanged. Retry or Cancel.");
+    gtk_button_set_label(GTK_BUTTON(active->cancel), "Cancel");
 }
 static void free_completion(gpointer data) { Completion *completion = data; g_free(completion->request); g_free(completion); }
 int32_t jsti_window_finish_voice_synthesis_options(const char *request, int32_t success) {
@@ -191,12 +193,14 @@ int32_t jsti_voice_controls_self_test(GtkWindow *owner, char *error, size_t capa
     normal(NULL, controls);
     passed = emit(controls) && passed && receipt.calls == 1 && receipt.request != NULL &&
         g_strcmp0(receipt.json, "{\"speed\":1,\"pitch\":0,\"useSSML\":false}") == 0 &&
-        !gtk_widget_get_sensitive(controls->apply);
+        !gtk_widget_get_sensitive(controls->apply) &&
+        g_strcmp0(gtk_button_get_label(GTK_BUTTON(controls->cancel)), "Close") == 0;
     gchar *first = g_strdup(receipt.request);
     Completion obsolete = {"obsolete-request", 1}; finish_options(&obsolete);
     passed = passed && active == controls && controls->saving;
     Completion failed = {first, 0}; finish_options(&failed);
-    passed = passed && !controls->saving && gtk_widget_get_sensitive(controls->apply);
+    passed = passed && !controls->saving && gtk_widget_get_sensitive(controls->apply) &&
+        g_strcmp0(gtk_button_get_label(GTK_BUTTON(controls->cancel)), "Cancel") == 0;
     gtk_editable_set_text(GTK_EDITABLE(controls->speed), "0.49");
     passed = !emit(controls) && receipt.calls == 1 && passed;
     fill(controls, 1.25, -2, TRUE);
@@ -211,14 +215,23 @@ int32_t jsti_voice_controls_self_test(GtkWindow *owner, char *error, size_t capa
     if (!passed) jsti_set_error(error, capacity, "Voice controls capabilities, precision or save ownership failed.");
     return passed ? 0 : -1;
 }
-int32_t jsti_voice_controls_save_snapshot(GtkWindow *owner, const char *path) {
+static GtkWindow *snapshot_window;
+static void snapshot_callback(int32_t action, int32_t source, const char *text,
+                              const char *request, const char *path, void *context) {
+    (void)action; (void)source; (void)text; (void)request; (void)path; (void)context;
+}
+void jsti_voice_controls_show_fixture(GtkWindow *owner) {
     Options original = saved;
     saved = (Options){1.25, -2, 1, 7, g_strdup("Synthetic compatible voice")};
-    Receipt receipt = {0};
-    Controls *controls = make_controls(owner, receive_fixture, &receipt);
+    Controls *controls = make_controls(owner, snapshot_callback, NULL);
+    snapshot_window = controls->window;
+    g_object_add_weak_pointer(G_OBJECT(snapshot_window), (gpointer *)&snapshot_window);
     gtk_window_present(controls->window);
-    const int32_t result = jsti_window_save_widget_png(GTK_WIDGET(controls->window), path, TRUE);
-    gtk_window_destroy(controls->window);
-    g_free(receipt.json); g_free(receipt.request); g_free(saved.voice); saved = original;
+    g_free(saved.voice); saved = original;
+}
+int32_t jsti_voice_controls_save_snapshot(const char *path) {
+    if (snapshot_window == NULL) return -1;
+    const int32_t result = jsti_window_save_widget_png(GTK_WIDGET(snapshot_window), path, TRUE);
+    gtk_window_destroy(snapshot_window);
     return result;
 }

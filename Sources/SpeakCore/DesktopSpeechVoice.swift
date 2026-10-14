@@ -10,6 +10,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
     case cartesia(CartesiaTTSVoice)
     case gemini(GeminiTTSVoice)
     case groq(GroqTTSVoice)
+    case speechmatics(SpeechmaticsTTSVoice)
 
     public var id: String {
         switch self {
@@ -20,6 +21,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .cartesia(let voice): voice.providerVoiceID
         case .gemini(let voice): voice.providerVoiceID
         case .groq(let voice): voice.providerVoiceID
+        case .speechmatics(let voice): voice.providerVoiceID
         }
     }
 
@@ -32,6 +34,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .cartesia(let voice): voice.displayName
         case .gemini(let voice): voice.displayName
         case .groq(let voice): voice.displayName
+        case .speechmatics(let voice): voice.displayName
         }
     }
 
@@ -44,6 +47,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .cartesia: CartesiaTTSCatalog.desktopModelIdentifier
         case .gemini: GeminiTTSCatalog.desktopModelIdentifier
         case .groq(let voice): voice.model.desktopModelIdentifier
+        case .speechmatics: SpeechmaticsTTSCatalog.providerIdentifier
         }
     }
 
@@ -57,6 +61,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
             "\(voice.displayName) — Cartesia \(CartesiaTTSCatalog.defaultModel.displayName)"
         case .gemini(let voice): "\(voice.displayName) — \(GeminiTTSCatalog.defaultModel.displayName)"
         case .groq(let voice): "\(voice.displayName) — Groq"
+        case .speechmatics(let voice): "\(voice.displayName) — Speechmatics English"
         }
     }
 
@@ -68,6 +73,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .cartesia: CartesiaTTSCatalog.credentialIdentifier
         case .gemini: GeminiTTSCatalog.credentialIdentifier
         case .groq: GroqTTSCatalog.credentialIdentifier
+        case .speechmatics: SpeechmaticsTTSCatalog.credentialIdentifier
         }
     }
 
@@ -78,8 +84,13 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .azureMAI: .azureMAI
         case .xai: .xai
         case .cartesia: .cartesia
-        case .gemini, .groq: .naturalSpeech
+        case .gemini, .groq, .speechmatics: .naturalSpeech
         }
+    }
+
+    public var sampleRate: Int {
+        if case .speechmatics = self { return SpeechmaticsTTSOutputFormat.wav16k.sampleRate }
+        return 24_000
     }
 
     public static var voices: [Self] {
@@ -89,6 +100,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
             + CartesiaTTSCatalog.voices.map(Self.cartesia)
             + GeminiTTSCatalog.voices.map(Self.gemini)
             + GroqTTSCatalog.voices.map(Self.groq)
+            + SpeechmaticsTTSCatalog.voices.map(Self.speechmatics)
     }
 
     public static func resolved(
@@ -102,13 +114,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
     ) throws -> Self {
         let model = modelID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let identifier = voiceID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if let voice = try groqSelection(model: model, identifier: identifier) {
-            return voice
-        }
-        if let voice = try geminiSelection(model: model, identifier: identifier) {
-            return voice
-        }
-        if let voice = try cartesiaSelection(model: model, identifier: identifier) {
+        if let voice = try fixedProviderSelection(model: model, identifier: identifier) {
             return voice
         }
         if let voice = try xaiSelection(model: model, identifier: identifier,
@@ -140,6 +146,24 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
             throw VoiceSynthesisConfigurationError.unsupportedVoice
         }
         return .deepgram(DeepgramSpeechCatalog.resolvedSelection(modelID: modelID, voiceID: voiceID).voice)
+    }
+
+    private static func fixedProviderSelection(model: String?, identifier: String?) throws -> Self? {
+        try speechmaticsSelection(model: model, identifier: identifier)
+            ?? groqSelection(model: model, identifier: identifier)
+            ?? geminiSelection(model: model, identifier: identifier)
+            ?? cartesiaSelection(model: model, identifier: identifier)
+    }
+
+    private static func speechmaticsSelection(model: String?, identifier: String?) throws -> Self? {
+        guard model == SpeechmaticsTTSCatalog.providerIdentifier
+            || model?.hasPrefix(SpeechmaticsTTSCatalog.voiceIDPrefix) == true
+            || identifier?.hasPrefix(SpeechmaticsTTSCatalog.voiceIDPrefix) == true else { return nil }
+        guard model == nil || model == SpeechmaticsTTSCatalog.providerIdentifier,
+              let identifier, let voice = SpeechmaticsTTSCatalog.voice(forID: identifier) else {
+            throw VoiceSynthesisConfigurationError.unsupportedVoice
+        }
+        return .speechmatics(voice)
     }
 
     private static func geminiSelection(model: String?, identifier: String?) throws -> Self? {

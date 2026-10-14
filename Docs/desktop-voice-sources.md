@@ -54,7 +54,8 @@ fabricated tokens/cost/duration, inferred audio link, archive category/kind/scop
 or import/apply behavior is introduced by this bridge.
 
 Windows and Linux remain developer previews, not macOS-parity releases.
-Voice Output uses shared Deepgram, Azure neural, Azure MAI, xAI, Cartesia, Gemini and Groq REST speech contracts,
+Voice Output uses shared Deepgram, Azure neural, Azure MAI, xAI, Cartesia, Gemini,
+Groq and Speechmatics REST speech contracts,
 canonical catalogue projections and native playback. `DesktopSpeechVoice` exposes only
 routes the host executes, not every provider in the macOS catalogue. The seven
 built-in Azure neural catalogue entries now have one `AzureNeuralVoiceCatalog` definition
@@ -63,6 +64,43 @@ The current MAI-Voice-2.1 and Flash speakers come directly from the existing
 `AzureMAIVoiceCatalog`, including their locale/model identifiers. MAI uses the
 same regional Azure request builder, saved `key:region` credential and native
 WAV decoding/playback, not a second provider client or credential store.
+
+**Speechmatics (local candidate)** executes the four canonical English voices:
+Sarah/Theo (UK) and Megan/Jack (US), appended to the existing native picker.
+Read, Generate and text export reuse the same `SpeechmaticsTTSAPI`
+URLRequest builder as Mac, the shared `speechmatics.apiKey`, and canonical
+segmentation. The provider has no model, speed, pitch or language request
+selector. English is named in the voice labels; numeric speed/pitch and SSML
+are disabled and incompatible retained values are refused before key access.
+Unknown voices and foreign model/voice tuples are unavailable, never silently
+replaced by the permissive legacy Mac request resolver.
+
+Only complete non-silent mono PCM16 `wav_16000` responses are admitted.
+Each segment must match the route's actual 16 kHz rate; mismatched/mixed-rate
+chunks, malformed/truncated audio or later failures publish no partial result.
+Joining retains that rate and calculates duration from the actual frame count,
+without relabelling or resampling. The generated-result validator now accepts
+explicit 16 kHz or 24 kHz expectations; its existing default remains 24 kHz.
+Every existing provider keeps its previous 24 kHz validation and output.
+Native playback, archival and export receive the validated WAV unchanged;
+retained replay/export need no new synthesis request or credential.
+
+Observed input remains Unicode scalars. Speechmatics estimates use only
+submitted grapheme counts after segmentation/trim, matching Mac's `String.count`,
+and the canonical Pro-plan USD0.011/thousand-character estimate. Audio seconds
+are measured from validated PCM, with no invented tokens, charges or receipts.
+Key/access, exhausted-credit and rate-limit errors are distinct and do not
+echo provider bodies. Stop/close retain the existing cancellation, shutdown and
+History-or-nil ownership contracts. No native ABI, controls, events, settings
+keys, playback/publication implementation or provider fallback is added.
+
+A local device-free Windows fixture executes the unchanged native MF
+decoder/render pipeline at both 16 kHz and 24 kHz, proving exact synthetic
+samples, durations and unchanged sources. It does not prove physical playback
+or resolve the separate red pause/resume gate. Linux's existing header reader
+passes the exact rate through to its existing PulseAudio mono PCM16 stream;
+no new Linux native-execution receipt, real-provider, Apple or iOS runtime
+acceptance is claimed for this local candidate.
 
 **Groq Orpheus (local candidate)** executes the twelve canonical personas:
 six English and six Saudi Arabic voices, each bound to its own model. The
@@ -275,7 +313,8 @@ one bounded validated WAV before native playback; Deepgram Read retains its
 existing segmented playback. No independent playback engine or IPC is added.
 
 Long text uses the canonical segmenter. Export validates each provider response,
-joins decoded mono PCM16 at 24 kHz, and writes exactly one RIFF/WAVE header, with
+joins decoded mono PCM16 at the route's declared rate (Speechmatics 16 kHz;
+existing routes 24 kHz), and writes exactly one RIFF/WAVE header, with
 a 64 MiB PCM limit. A failed segment produces no partial destination. The native
 save chooser confirms replacement; only after synthesis succeeds does an atomic
 write replace the chosen file. Destinations inside the app's data folder are
@@ -314,7 +353,7 @@ and, for Deepgram, pronunciation/trim processing. Audio seconds come from
 validated PCM, not playback time. Partial successful segments remain accounted
 for even if a later segment, playback, archival or export fails.
 Replay and retained-result export do not create synthesis entries.
-Groq pricing uses submitted grapheme counts separately from this scalar
+Groq and Speechmatics pricing use submitted grapheme counts separately from this scalar
 observation, including canonical segmentation and whitespace trimming.
 
 All displayed costs are **published-rate estimates, not measured/billed charges**.

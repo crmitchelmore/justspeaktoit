@@ -95,7 +95,7 @@ void select(HWND window, Dialog &dialog) {
     SetDlgItemTextW(window, noticeID, dialog.source == 0 && dialog.record.empty()
         ? L"Choose a recording in History, then reopen this editor. History text is captured when this editor opens."
         : L"Read, Generate and Export text send this snapshot to the selected voice provider with your saved key. "
-          L"Generate retains a 24 kHz mono PCM16 WAV; Play/Export result reuse it without a provider request. "
+          L"Generate retains the provider's mono PCM16 WAV; Play/Export result reuse it without a provider request. "
           L"Voice controls show the selected route's actual capabilities. Stop cancels active voice work.");
     refresh(window, dialog);
 }

@@ -92,7 +92,7 @@ static void select_source(GObject *object, GParamSpec *spec, gpointer data) {
     gtk_label_set_text(dialog->notice, dialog->selected == 0 && dialog->record[0] == '\0'
         ? "Choose a recording in History, then reopen this editor. History is captured when the editor opens."
         : "Read, Generate and Export text send this snapshot to the selected voice provider with your saved key. "
-          "Generate retains a 24 kHz mono PCM16 WAV; Play/Export result reuse it without a provider request. "
+          "Generate retains the provider's mono PCM16 WAV; Play/Export result reuse it without a provider request. "
           "Voice controls show the selected route's actual capabilities. Stop cancels active voice work.");
     refresh(dialog);
 }

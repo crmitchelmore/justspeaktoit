@@ -63,7 +63,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     case .groq: return GroqTTSCatalog.credentialIdentifier
     case .gemini: return GeminiTTSCatalog.credentialIdentifier
     case .mistral: return "mistral.apiKey"
-    case .speechmatics: return "speechmatics.apiKey"
+    case .speechmatics: return SpeechmaticsTTSCatalog.credentialIdentifier
     // One xAI key covers Grok Voice transcription, dedicated speech to text
     // and speech generation.
     case .xai: return "xai.apiKey"

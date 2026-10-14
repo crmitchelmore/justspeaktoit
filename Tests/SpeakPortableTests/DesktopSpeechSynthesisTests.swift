@@ -102,7 +102,9 @@ final class DesktopSpeechSynthesisTests: DeepgramSpeechStubTestCase {
                        DeepgramSpeechCatalog.voices.count + AzureNeuralVoiceCatalog.voices.count
                            + AzureMAIVoiceCatalog.voices.count + XAITTSCatalog.voices.count
                            + CartesiaTTSCatalog.voices.count + GeminiTTSCatalog.voices.count
-                           + GroqTTSCatalog.voices.count)
+                           + GroqTTSCatalog.voices.count + SpeechmaticsTTSCatalog.voices.count)
+        XCTAssertEqual(Array(DesktopSpeechVoice.voices.suffix(SpeechmaticsTTSCatalog.voices.count)),
+                       SpeechmaticsTTSCatalog.voices.map(DesktopSpeechVoice.speechmatics))
         XCTAssertEqual(Set(DesktopSpeechVoice.voices.map(\.id)).count, DesktopSpeechVoice.voices.count)
         for voice in AzureNeuralVoiceCatalog.voices {
             XCTAssertEqual(

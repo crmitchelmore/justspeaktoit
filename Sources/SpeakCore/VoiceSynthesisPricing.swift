@@ -28,6 +28,7 @@ public enum VoiceSynthesisPricing {
         case .cartesia: return CartesiaTTSAPI.estimatedCostPerThousandCharacters
         case .gemini: return nil
         case .groq(let voice): return voice.model.costPerThousandCharacters
+        case .speechmatics: return SpeechmaticsTTSAPI.estimatedCostPerThousandCharacters
         case .deepgram(let voice):
             return voice.model == DeepgramSpeechCatalog.flux ? nil : DeepgramTTSAPI.costPerThousandCharacters
         }
@@ -58,6 +59,8 @@ public enum VoiceSynthesisPricing {
             } catch let error as GroqTTSAPIError {
                 throw DesktopGroqSpeechError(error)
             }
+        } else if case .speechmatics = voice {
+            count = SpeechTextSegmenter.segments(text).reduce(0) { $0 + $1.count }
         } else {
             count = text.unicodeScalars.count
         }

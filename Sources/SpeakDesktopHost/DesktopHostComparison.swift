@@ -272,6 +272,7 @@ extension DesktopHostController {
             comparisonGeneration = UUID()
         }
         discardComparisonBatch()
+        comparisonOperations.cancelAll()
         comparisonTask?.cancel()
         comparisonFinalization?.cancel()
         comparisonLive?.cancel()
@@ -322,7 +323,7 @@ extension DesktopHostController {
         let rows = rounds.map { "\($0.id.uuidString)\t\(DesktopHostModels.uiText($0.sample.name))" }
             .joined(separator: "\n")
         var detail = comparisonNotice + "\n\n"
-            + "Choose two to eight models. File/Batch uses copied samples; Live shares one microphone.\n"
+            + "Choose at least two File/Batch models; Live supports two to eight on one microphone.\n"
             + "Raw transcripts only. No insertion, post-processing or History changes.\n"
         detail += comparisonBatchNotice(queued: queued)
         if let round {

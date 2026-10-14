@@ -18,6 +18,7 @@ public struct DesktopComparisonCandidate: Hashable, Sendable {
 }
 
 public enum DesktopComparisonRunner {
+    private static let defaultOperations = DesktopComparisonOperations()
     public static func completing(
         _ pending: ModelComparisonRound, entries: [ModelComparisonEntry], sample: ModelComparisonSample
     ) throws -> ModelComparisonRound {
@@ -40,8 +41,8 @@ public enum DesktopComparisonRunner {
     }
 
     public static func validate(_ candidates: [DesktopComparisonCandidate]) throws {
-        guard (2...8).contains(candidates.count), Set(candidates.map(\.modelID)).count == candidates.count else {
-            throw DesktopComparisonError.message("Select two to eight different models.")
+        guard candidates.count >= 2, Set(candidates.map(\.modelID)).count == candidates.count else {
+            throw DesktopComparisonError.message("Select at least two different models.")
         }
     }
 
@@ -51,35 +52,42 @@ public enum DesktopComparisonRunner {
         timeout: Duration = .seconds(120),
         transcribe: @escaping @Sendable (URL, DesktopComparisonCandidate, String?) async throws -> TranscriptionResult
     ) async throws -> ModelComparisonRound {
+        try await file(
+            audio: audio, pending: pending, candidates: candidates, timeout: timeout,
+            execution: .init(operations: defaultOperations, admitted: { _ in }, exited: { _ in }),
+            transcribe: transcribe
+        )
+    }
+
+    package static func file(
+        audio: URL, pending: ModelComparisonRound, candidates: [DesktopComparisonCandidate],
+        timeout: Duration = .seconds(120), execution: DesktopComparisonFileExecution,
+        transcribe: @escaping @Sendable (URL, DesktopComparisonCandidate, String?) async throws -> TranscriptionResult
+    ) async throws -> ModelComparisonRound {
         try validate(candidates)
         guard pending.isValid, pending.inputMode != .streaming,
               pending.entries.map(\.modelID) == candidates.map(\.modelID) else {
             throw DesktopComparisonError.message("Invalid file comparison snapshot.")
         }
-        let entries = await withTaskGroup(of: (Int, ModelComparisonEntry).self) { group in
-            for (index, candidate) in candidates.enumerated() {
-                group.addTask {
-                    var entry = candidate.entry()
-                    let started = ContinuousClock.now
-                    do {
-                        let result = try await DesktopComparisonDeadline.run(timeout: timeout) {
-                            try await transcribe(audio, candidate, pending.language)
-                        }
-                        entry.transcript = result.text
-                        if let cost = result.cost { entry.estimatedCostUSD = cost.totalCost }
-                        if entry.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            entry.errorDescription = "The model returned no transcript."
-                        }
-                    } catch {
-                        entry.errorDescription = error is CancellationError
-                            ? "Comparison cancelled." : error.localizedDescription
-                    }
-                    entry.timeToFinalMs = milliseconds(started.duration(to: .now))
-                    return (index, entry)
-                }
+        let request = DesktopComparisonFileRequest(
+            audio: audio, language: pending.language, timeout: timeout, execution: execution, transcribe: transcribe
+        )
+        let entries = try await withThrowingTaskGroup(of: (Int, ModelComparisonEntry).self) { group in
+            var next = 0
+            while next < min(candidates.count, DesktopComparisonOperations.capacity) {
+                let index = next
+                group.addTask { (index, try await request.run(candidates[index])) }
+                next += 1
             }
             var completed: [(Int, ModelComparisonEntry)] = []
-            for await entry in group { completed.append(entry) }
+            while let entry = try await group.next() {
+                completed.append(entry)
+                if next < candidates.count {
+                    let index = next
+                    group.addTask { (index, try await request.run(candidates[index])) }
+                    next += 1
+                }
+            }
             return completed.sorted { $0.0 < $1.0 }.map(\.1)
         }
         return try completing(pending, entries: entries, sample: pending.sample)

@@ -14,11 +14,11 @@ Apple capture path.
 
 ## Model comparison
 
-**Transcription > Compare Models** opens a separate native editor. Select two to
-eight currently supported routes, an optional language hint, and File/Batch or
-Live. The file picker accepts one sample or up to 32 samples. All sources are
-copied and normalized before any provider request; each sample's candidates run
-independently with a 120-second deadline. Downloaded local batch models appear
+**Transcription > Compare Models** opens a separate native editor. Select at least
+two currently supported File/Batch routes, or two to eight Live routes, an optional
+language hint, and File/Batch or Live. File/Batch has no model/sample count ceiling.
+All sources are copied and normalized before any provider request; each sample's
+candidates run independently with a 120-second deadline. Downloaded local batch models appear
 only when the existing local runtime/model readiness check passes.
 
 Live prepares the qualified shared clients before starting one WASAPI capture:
@@ -59,9 +59,25 @@ another request; **Next file** is explicit (also after fewer than two usable
 results reveal unranked). Queued samples keep their sync/deletion execution leases.
 Cancel, discarding the current round, editor close and app shutdown cancel the
 queue, retain recovery audio/results and never auto-resume after relaunch.
-The native 2–8-model and 1–32-sample ceilings remain temporary resource limits:
-Mac's comparison controller/picker has no matching upper bounds. They are not
-platform-parity claims or hardware-validated limits.
+File/Batch uses at most eight genuinely owned provider operations, with sliding
+workers rather than one task per selected model. A deadline or Cancel returns
+without joining an uncooperative provider, but its permit, frozen sample lease and
+accounted bytes remain owned until its actual operation exits. Exhausted slots
+produce explicit unavailable-budget errors; they do not admit replacements.
+Local/cloud deletion and sync cannot remove a sample still in use. Close remains
+bounded and reports unfinished owned operations.
+
+Newly owned staged audio and canonical revision metadata share a deliberate
+800,000,000-byte budget, preflighted before copying and accounted incrementally,
+including result metadata. A separate single import scratch slot permits at most
+25,000,000 bytes. Preparation remains serial and cancellation rolls back unused
+reservations/snapshots; queued and still-running requests retain their reservations.
+This bounds active staging ownership, not the lifetime size of persisted comparison history.
+The native picker retains its 131,072-wide-character buffer and explicitly reports
+file-name overflow instead of silently increasing it. These are resource policies,
+not Mac equivalence or physical-hardware acceptance. Native per-file import and
+conversion remain 25 MB versus Mac comparison's 100 MiB; Live remains at most eight
+simultaneous lanes. Live is never simulated through waves or replay.
 This is configuration readiness, not evidence that a service accepts the key.
 The blind **Diff against** picker reuses
 `TranscriptWordDiff`; signed `[+added]` / `[-removed]` annotations remain readable

@@ -107,6 +107,7 @@ extension DesktopHostController {
         closed = true
         let deadline = ContinuousClock.now.advanced(by: shutdownGrace)
         discardComparisonBatch()
+        comparisonOperations.cancelAll()
         comparisonAdmissionTask?.cancel()
         comparisonTask?.cancel()
         comparisonInitialization?.task.cancel()
@@ -145,6 +146,7 @@ extension DesktopHostController {
             let ended = await DesktopHostShutdown.wait(until: deadline) { await self.operationsEnded() }
             if !ended { report.unfinishedOperations = activeOperations }
         }
+        report.unfinishedOperations += comparisonOperations.activeCount
         if let discovery = modelDiscoveryTask {
             report.discoveryEnded = await DesktopHostShutdown.wait(until: deadline) { await discovery.value }
         }

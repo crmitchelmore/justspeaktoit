@@ -224,6 +224,17 @@ is required, including after an unranked failure reveal. Queued execution leases
 protect snapshots from sync/deletion; Cancel, discard, editor close and shutdown
 release them without starting providers. Relaunch retains evidence but never
 automatically resumes billable work.
+`DesktopComparisonOperations` limits File/Batch to eight actual provider operations:
+deadline/cancellation ends the UI wait, not ownership. Independent operation-token
+store leases and staging reservations survive until actual exit, including after
+Cancel, editor reopen or Next file. Sliding workers remove the File model-count
+ceiling without creating one waiting task per selection. `DesktopComparisonStaging`
+preflights and incrementally bounds newly owned audio/revision metadata to
+800,000,000 bytes, with separate single 25 MB scratch ownership and serial import.
+File/Batch has no sample-count ceiling; bounded preparation rolls back unused files
+and reservations. These are deliberate native safety policies, not Mac equivalence:
+per-file import/conversion stays 25 MB (Mac comparison: 100 MiB), and Live retains
+eight simultaneous lanes and its existing PCM/provider budgets.
 `WindowsComparison.cpp` and `LinuxComparison.c` own their native editors and
 file/save pickers, connected by small host adapters. `DesktopHostComparisonExports`
 uses canonical all-round/selected-round JSON/Markdown documents for saves and

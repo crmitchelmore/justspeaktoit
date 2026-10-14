@@ -5,6 +5,52 @@ import XCTest
 @testable import SpeakDesktopHost
 
 final class DesktopComparisonBatchTests: XCTestCase {
+    func testMoreThanThirtyTwoSamplesFreezeWithoutAutomaticRequestsAndReleaseAccountedBytesOnCancel() async throws {
+        let fixture = try BatchFixture(count: 33)
+        defer { fixture.remove() }
+        await fixture.start()
+        let store = try await fixture.store()
+        let rounds = await store.rounds()
+        XCTAssertEqual(rounds.count, 33)
+        XCTAssertEqual(fixture.effects.bytes.count, 2)
+        let first = try await fixture.current()
+        let controls = await fixture.controller.comparisonBatchControls(round: first)
+        XCTAssertEqual(controls.remaining, 32)
+        let reserved = await fixture.controller.comparisonStaging.byteCount
+        XCTAssertGreaterThan(reserved, 0)
+        await fixture.controller.cancelComparison()
+        await fixture.controller.comparisonTask?.value
+        let released = await fixture.controller.comparisonStaging.byteCount
+        XCTAssertEqual(released, 0)
+        let revisions = await store.pendingRevisions()
+        XCTAssertEqual(revisions.count, 33)
+        XCTAssertEqual(fixture.effects.bytes.count, 2)
+        await fixture.controller.close()
+    }
+
+    func testAggregateBudgetRejectsBeforeCopyingNormalizingOrWritingAnyRound() async throws {
+        let fixture = try BatchFixture(count: 1)
+        defer { fixture.remove() }
+        let source = fixture.root.appendingPathComponent("synthetic.mp3")
+        try Data([1]).write(to: source)
+        let paths = Array(repeating: source.path, count: 33)
+        await fixture.controller.comparisonEvent(
+            102, text: "\n" + fixture.models.joined(separator: "\t") + "\n" + paths.joined(separator: "\n"), index: 0
+        )
+        await fixture.controller.comparisonTask?.value
+        let bytes = await fixture.controller.comparisonStaging.byteCount
+        let notice = await fixture.controller.comparisonNotice
+        let rounds = await (try fixture.store()).rounds()
+        XCTAssertEqual(bytes, 0)
+        XCTAssertTrue(notice.contains("safety budget"), notice)
+        XCTAssertTrue(rounds.isEmpty)
+        XCTAssertTrue(fixture.effects.bytes.isEmpty)
+        let samples = fixture.root.appendingPathComponent("Comparisons").appendingPathComponent("Samples")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: samples.path))
+        XCTAssertEqual(try Data(contentsOf: source), Data([1]))
+        await fixture.controller.close()
+    }
+
     func testPausesWithQueuedLeaseAndValidatesRankingBeforeExplicitProgress() async throws {
         let fixture = try BatchFixture(count: 3)
         defer { fixture.remove() }

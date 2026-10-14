@@ -140,6 +140,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
         package let target: Platform.InsertionTarget?
         package let live: DesktopLiveSession?
         package let profile: DesktopProfileSession
+        package let options: DesktopHostRecordingConfiguration
         package let textOutput: Platform.TextOutputOptions
         /// What started this session; a shortcut gesture stops only its own kind.
         package let trigger: HotKeySessionTrigger
@@ -151,6 +152,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
         package let target: Platform.InsertionTarget?
         package let live: DesktopLiveSession?
         package let profile: DesktopProfileSession
+        /// Legacy-path snapshot; owned dictation freezes its inputs in `input`.
+        package var options: DesktopHostRecordingConfiguration?
         package let textOutput: Platform.TextOutputOptions
         package var input: DesktopHostRecordingInput?
         package var output: DesktopHostRecordingOutput<Platform> { .init(options: textOutput, target: target) }

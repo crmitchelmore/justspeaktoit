@@ -176,3 +176,203 @@ final class DesktopHostHandsFreeDeliveryTests: XCTestCase {
         XCTAssertEqual(effects.capture?.stopCount, 1)
     }
 }
+
+extension DesktopHostHandsFreeDeliveryTests {
+    private func profile(_ name: String, path: String, model: String, language: String) -> DictationProfile {
+        DictationProfile(
+            name: name, matchers: [.windowsExecutablePath(path)],
+            transcriptionModelID: model, polishEnabled: false,
+            languageIdentifier: language, transcriptionRouting: .remoteBatch
+        )
+    }
+
+    func testEachUtteranceResolvesCurrentAppProfile_ThenRestoresAppDefaults() async throws {
+        let models = DesktopHostModels.visible.filter {
+            !DesktopHostModels.isLive($0.id) && DesktopTranscription.provider(for: $0.id) != nil
+        }
+        XCTAssertGreaterThanOrEqual(models.count, 2)
+        for model in models {
+            if let provider = DesktopHostModels.provider(for: model.id) {
+                FakeLog.shared.setKey("synthetic", name: provider.apiKeyIdentifier)
+            }
+        }
+        let first = #"C:\Apps\first.exe"#
+        let second = #"C:\Apps\second.exe"#
+        await controller.saveProfiles([
+            profile("First", path: first, model: models[0].id, language: "fr"),
+            profile("Second", path: second, model: models[1].id, language: "de")
+        ])
+        await shortcut()
+        effects.executablePath = first
+        try await utterance()
+        try await wait { await self.controller.handsFreeState() == .armed && self.effects.outputCount == 1 }
+        effects.executablePath = second
+        try await utterance()
+        try await wait { await self.controller.handsFreeState() == .armed && self.effects.outputCount == 2 }
+        effects.executablePath = #"C:\Apps\unmatched.exe"#
+        try await utterance()
+        try await wait { await self.controller.handsFreeState() == .armed && self.effects.outputCount == 3 }
+        XCTAssertEqual(effects.transcriptions.map(\.model), [
+            models[0].id, models[1].id, DesktopHostModels.all[index].id
+        ])
+        XCTAssertEqual(effects.transcriptions.map(\.language), ["fr", "de", nil])
+        let records = try await controller.store.records()
+        XCTAssertEqual(Set(records.compactMap(\.profileName)), Set(["First", "Second"]))
+        let preferences = await controller.preferredModelIDs()
+        XCTAssertEqual(preferences.batch, DesktopHostModels.all[index].id)
+        XCTAssertEqual(effects.contextRequestCount, 3)
+    }
+
+    func testClipboardOnlyStillResolvesFreshAppIdentity_WithoutAnInsertionTarget() async throws {
+        let path = #"C:\Apps\clipboard.exe"#
+        await controller.saveProfiles([
+            profile("Clipboard", path: path, model: DesktopHostModels.all[index].id, language: "de")
+        ])
+        effects.target = nil
+        effects.executablePath = path
+        effects.delivery = DesktopTextOutputResult(.copied, status: "Copied.")
+        await shortcut(copy: true)
+        try await utterance()
+        try await wait { await self.controller.handsFreeState() == .armed && self.effects.outputCount == 1 }
+        XCTAssertEqual(effects.transcriptions.first?.language, "de")
+        XCTAssertEqual(effects.targetRequestCount, 0)
+        XCTAssertEqual(effects.contextRequestCount, 1)
+        XCTAssertNil(effects.outputJobs.first?.target)
+    }
+
+    func testCapturedAppAndProfileRemainFixed_DuringTranscription() async throws {
+        let first = #"C:\Apps\first.exe"#
+        let second = #"C:\Apps\second.exe"#
+        let model = DesktopHostModels.all[index].id
+        await controller.saveProfiles([
+            profile("First", path: first, model: model, language: "fr"),
+            profile("Second", path: second, model: model, language: "de")
+        ])
+        await shortcut()
+        effects.executablePath = first
+        effects.transcriptionGate.hold()
+        try await utterance()
+        try await wait { self.effects.transcriptions.count == 1 }
+        effects.executablePath = second
+        effects.transcriptionGate.release()
+        try await wait { await self.controller.handsFreeState() == .armed && self.effects.outputCount == 1 }
+        let records = try await controller.store.records()
+        XCTAssertEqual(records.first?.profileName, "First")
+        XCTAssertEqual(records.first?.languageIdentifier, "fr")
+        XCTAssertEqual(effects.transcriptions.first?.language, "fr")
+    }
+
+    func testUnavailableProfileRefusesRecording_WithoutProviderFallback() async throws {
+        let path = #"C:\Apps\unsupported.exe"#
+        await controller.saveProfiles([
+            profile("Unavailable", path: path, model: "apple/local/unsupported", language: "fr")
+        ])
+        await shortcut()
+        effects.executablePath = path
+        try emit(2_000)
+        try await wait { await self.controller.handsFreeState() == .off }
+        let records = try await controller.store.records()
+        XCTAssertTrue(records.isEmpty)
+        XCTAssertTrue(effects.transcriptions.isEmpty)
+        XCTAssertEqual(effects.outputCount, 0)
+        XCTAssertTrue(FakeLog.shared.allStatuses.last?.contains("not available") == true)
+    }
+
+    func testDifferentRateProfileDisarms_BeforeRelabelingDetectorPCM() async throws {
+        let route = try XCTUnwrap(DesktopHostModels.live.first {
+            DesktopLiveTranscription.route(forID: $0.id)?.sampleRate != PCMRecordingFile.sampleRate
+        })
+        let path = #"C:\Apps\rate.exe"#
+        await controller.saveProfiles([DictationProfile(
+            name: "Different rate", matchers: [.windowsExecutablePath(path)],
+            transcriptionModelID: route.id, transcriptionRouting: .remoteStreaming
+        )])
+        await shortcut()
+        effects.executablePath = path
+        try emit(2_000)
+        try await wait { await self.controller.handsFreeState() == .off }
+        let records = try await controller.store.records()
+        XCTAssertTrue(records.isEmpty)
+        XCTAssertTrue(effects.transcriptions.isEmpty)
+        XCTAssertEqual(effects.live.frameCount, 0)
+        XCTAssertTrue(FakeLog.shared.allStatuses.last?.contains("arm a new detector") == true)
+    }
+
+    func testRecordingKeepsItsProviderConfiguration_WhenCurrentSettingsChange() async throws {
+        let original = try DesktopConfiguration(values: [
+            "handsFreeDictationEnabled": AnyCodable(.bool(true)),
+            "silenceDuration": AnyCodable(.double(0.5)),
+            "postRecordingTailDuration": AnyCodable(.double(0)),
+            "transcriptionKeywords": AnyCodable(.string("original"))
+        ])
+        await controller.replaceConfigurationForSnapshotTest(original, endpoint: "https://original.example")
+        await shortcut()
+        try emit(2_000)
+        try await wait { await self.controller.recording != nil }
+        let current = await controller.recording
+        let active = try XCTUnwrap(current)
+        var values = original.values
+        values["transcriptionKeywords"] = AnyCodable(.string("changed"))
+        let changed = try DesktopConfiguration(values: values)
+        await controller.replaceConfigurationForSnapshotTest(changed, endpoint: "https://changed.example")
+        XCTAssertEqual(active.options.configuration?.liveOptions.keywords, ["original"])
+        XCTAssertEqual(active.options.azureEndpoint, "https://original.example")
+        try emit(0, frames: 8)
+        try await wait { await self.controller.handsFreeState() == .armed && self.effects.outputCount == 1 }
+        XCTAssertEqual(effects.transcriptions.first?.azureEndpoint, "https://original.example")
+    }
+
+    func testProfilePolishChoicesRemainRecordBound_WithoutMutatingAppDefaults() async throws {
+        let path = #"C:\Apps\polish.exe"#
+        await controller.saveProfiles([DictationProfile(
+            name: "Polish", matchers: [.windowsExecutablePath(path)],
+            transcriptionModelID: DesktopHostModels.all[index].id,
+            polishEnabled: true, polishPrompt: "Profile instruction", polishOutputLanguage: "de",
+            transcriptionRouting: .remoteBatch
+        )])
+        await shortcut()
+        effects.executablePath = path
+        try emit(2_000)
+        try await wait { await self.controller.recording != nil }
+        let current = await controller.recording
+        let active = try XCTUnwrap(current)
+        XCTAssertEqual(active.profile.postProcessing.mode, .remote)
+        XCTAssertEqual(active.profile.postProcessing.customPrompt, "Profile instruction")
+        XCTAssertEqual(active.profile.postProcessing.outputLanguage, "de")
+        let appOptions = await controller.settings.postProcessing
+        XCTAssertNotEqual(appOptions?.customPrompt, "Profile instruction")
+        await shortcut()
+        XCTAssertTrue(effects.transcriptions.isEmpty)
+    }
+
+    func testDelayedContextKeepsItsCapturedApp_DespiteLaterFocusChanges() async throws {
+        let first = #"C:\Apps\first.exe"#
+        let second = #"C:\Apps\second.exe"#
+        let model = DesktopHostModels.all[index].id
+        await controller.saveProfiles([
+            profile("First", path: first, model: model, language: "fr"),
+            profile("Second", path: second, model: model, language: "de")
+        ])
+        await shortcut()
+        effects.executablePath = first
+        effects.targetGate.hold()
+        try emit(2_000)
+        try await wait { self.effects.contextRequestCount == 1 }
+        effects.executablePath = second
+        effects.targetGate.release()
+        try await wait { await self.controller.recording != nil }
+        let current = await controller.recording
+        XCTAssertEqual(current?.profile.profileName, "First")
+        XCTAssertEqual(current?.profile.language, "fr")
+        try emit(0, frames: 8)
+        try await wait { await self.controller.handsFreeState() == .armed && self.effects.outputCount == 1 }
+        XCTAssertEqual(effects.transcriptions.first?.language, "fr")
+    }
+}
+
+private extension DesktopHostController where Platform == FakePlatform {
+    func replaceConfigurationForSnapshotTest(_ configuration: DesktopConfiguration, endpoint: String) {
+        settings.configuration = configuration
+        settings.azureSpeechResourceEndpoint = endpoint
+    }
+}

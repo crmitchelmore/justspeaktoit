@@ -19,6 +19,8 @@ struct DesktopHostRecordingStart<Platform: DesktopHostPlatform> {
     let trigger: HotKeySessionTrigger
     let handsFree: DesktopHandsFreeRun<Platform>?
     let capturePolicy: DesktopHostCapturePolicy?
+    /// Explains a per-utterance profile fallback in the recording's History.
+    var profileNotice: String?
 }
 
 extension DesktopHostController {

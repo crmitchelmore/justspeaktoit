@@ -110,6 +110,10 @@ extension DesktopHostController {
 
     package func cancelTranscription() {
         guard !closed else { return }
+        if ownedCaptureStartup != nil {
+            requestOwnedStartupAbort()
+            return
+        }
         if let inspection = migrationInspectionWorker {
             inspection.cancel()
             update("Stopping backup inspection... No application data will be changed.", state: 2)

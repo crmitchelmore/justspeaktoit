@@ -104,13 +104,14 @@ extension DesktopHostController {
         _ startupFailure: Error, record: DesktopRecordingStore.Record, file: PCMRecordingFile
     ) async throws {
         // Always close the WAV, including failure before native allocation.
-        var failed = record
-        failed.failure = closed ? "Recording cancelled when the app closed. Audio retained."
-            : startupFailure.localizedDescription
+        var failed = DesktopHostStartupRecord.failed(
+            record, message: closed ? "Recording cancelled when the app closed. Audio retained."
+                : startupFailure.localizedDescription
+        )
         do { _ = try file.finish() } catch {
-            failed.failure = "\(failed.failure ?? "Recording failed.") "
-                + "Audio finalization failed: \(error.localizedDescription)"
+            failed = DesktopHostStartupRecord.audioFailed(failed, error: error)
         }
+
         do { try await saveRecord(failed) } catch {
             throw DesktopHostError(message: "\(failed.failure ?? "Recording failed.") "
                 + "History could not be saved: \(error.localizedDescription)")
@@ -167,4 +168,92 @@ enum DesktopHostRecordingStop {
             modelIdentifier: model, cost: nil, rawPayload: nil, debugInfo: nil
         )
     }
+}
+
+enum DesktopHostStartupRecord {
+    static func failed(_ record: DesktopRecordingStore.Record, message: String) -> DesktopRecordingStore.Record {
+        var record = record
+        record.failure = message
+        return record
+    }
+
+    static func audioFailed(_ record: DesktopRecordingStore.Record, error: Error) -> DesktopRecordingStore.Record {
+        failed(record, message: "\(record.failure ?? "Recording failed.") "
+            + "Audio finalization failed: \(error.localizedDescription)")
+    }
+}
+
+package enum DesktopHostOwnedFileStep: Sendable {
+    case create, initialSave, finish, finalSave
+}
+
+/// No file or callback context escapes this actor. It never receives/adopts PCM.
+package actor DesktopHostOwnedStartupFile {
+    private let store: DesktopRecordingStore
+    private let url: URL
+    private let rate: Int
+    private let before: @Sendable (DesktopHostOwnedFileStep) async -> Void
+    private let afterFinish: @Sendable () throws -> Void
+    private var file: PCMRecordingFile?
+    private var finishAttempted = false
+    private var retained: DesktopRecordingStore.Record
+    package private(set) var finishCount = 0
+    package private(set) var audioFailure: String?
+    package private(set) var historyFailure: String?
+
+    package init(
+        store: DesktopRecordingStore, directory: URL, record: DesktopRecordingStore.Record, rate: Int,
+        before: @escaping @Sendable (DesktopHostOwnedFileStep) async -> Void = { _ in },
+        afterFinish: @escaping @Sendable () throws -> Void = {}
+    ) {
+        self.store = store
+        self.retained = record
+        self.url = directory.appendingPathComponent(record.audioFilename)
+        self.rate = rate
+        self.before = before
+        self.afterFinish = afterFinish
+    }
+
+    func prepare() async throws {
+        await before(.create)
+        do { file = try PCMRecordingFile(url: url, sampleRate: rate) } catch {
+            audioFailure = "Recording file creation failed: \(error.localizedDescription)"
+            throw error
+        }
+        await before(.initialSave)
+        do { try await store.save(retained) } catch {
+            throw DesktopHostError(message: "Initial History could not be saved: \(error.localizedDescription)")
+        }
+    }
+
+    func dispose(message: String) async -> Bool {
+        retained = DesktopHostStartupRecord.failed(retained, message: message)
+        if !finishAttempted {
+            finishAttempted = true
+            if let file {
+                await before(.finish)
+                finishCount += 1
+                do {
+                    _ = try file.finish()
+                    try afterFinish()
+                } catch {
+                    audioFailure = error.localizedDescription
+                }
+            }
+        }
+        if let audioFailure {
+            retained.failure = "\(message) Audio finalization failed: \(audioFailure)"
+        }
+        await before(.finalSave)
+        do {
+            try await store.save(retained)
+            historyFailure = nil
+            return true
+        } catch {
+            historyFailure = "History could not be saved: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    package func record() -> DesktopRecordingStore.Record { retained }
 }

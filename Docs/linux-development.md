@@ -627,6 +627,21 @@ an approved Host silence clock; physically earlier PCM submitted later is after
 reservation. Native stop-time partial flush remains fenced and separately
 unqualified, not made lossless by span metadata.
 
+The injected package/internal Host startup transaction has no production factory
+and does not activate production capture or a successful recording. It retains the real
+owned ticket through early failure/ticket-delivery races, uses request-specific
+failure/barrier acknowledgement and joins actual native cleanup before WAV finish.
+Cleanup failure retains exclusion and permits only explicit owned retry, even
+after close. A separate actor owns file operations; neither Host admission nor
+settings queue waits on file/native IO. Finish is attempted once; independent
+audio/History errors remain visible, and failed save retains the record/file
+owner until explicit disposition retry. Closed persistence never presents UI.
+See the [shared startup contract](windows-development.md) for bounds and limits.
+This leaves synchronous normal/HF/comparison capture, canonical PCM ingestion,
+silence clocks and fence-before-close unchanged. Native owner/callback lifetime,
+permission/device/readiness, active-recording handoff and final flush still
+require separate qualification and activation.
+
 `.github/workflows/linux.yml` (ubuntu-24.04, `swift:6.2.3-noble`, pinned by
 digest) installs the packages above, then runs the boundary check, the
 release build, `swift test` with `SPEAK_LINUX_TARGET=1`,

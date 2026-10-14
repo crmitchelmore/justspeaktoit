@@ -110,7 +110,58 @@ extension DesktopHostController {
             return shutdownReport ?? DesktopHostShutdownReport()
         }
         closed = true
+        let ownedStartup = ownedCaptureStartup
+        requestOwnedStartupAbort()
         let deadline = ContinuousClock.now.advanced(by: shutdownGrace)
+        await cancelInFlightWork(until: deadline)
+        var report = DesktopHostShutdownReport()
+        recordingFeedbackPreview?.cancel()
+        async let feedbackClosed = closeRecordingFeedback(until: deadline)
+        let detector = handsFreeRun
+        handsFreeRun = nil
+        _ = handsFreeMachine.handle(.userDisarmed)
+        async let detectorClosed = DesktopHostShutdown.wait(until: deadline) {
+            do { try detector?.stopDetector() } catch {
+                FileHandle.standardError.write(Data("Hands-free cleanup failed: \(error.localizedDescription)\n".utf8))
+            }
+        }
+        // Ending the live session, stopping capture and writing the WAV and
+        // record run off this actor, so a provider, device or file system that
+        // stalls cannot hold closing past its deadline.
+        if let open = takeRecordingOnClose() {
+            let store = store
+            report.recordingSaved = await DesktopHostShutdown.wait(until: deadline) { await open.save(in: store) }
+        }
+        if let ownedStartup {
+            let settled = await DesktopHostShutdown.wait(until: deadline) {
+                await ownedStartup.owner.waitForDisposition()
+            }
+            report.recordingSaved = report.recordingSaved && settled
+        }
+        // Includes admitted opens and every background release attempt.
+        let playback = playback
+        report.playbackClosed = await DesktopHostShutdown.wait(until: deadline) {
+            do { try await playback.close() } catch {
+                FileHandle.standardError.write(Data("Playback cleanup failed: \(error.localizedDescription)\n".utf8))
+            }
+        }
+        // The network task alone is insufficient: its owner must also finish
+        // success/failure persistence and release native/file resources.
+        if activeOperations > 0 {
+            let ended = await DesktopHostShutdown.wait(until: deadline) { await self.operationsEnded() }
+            if !ended { report.unfinishedOperations = activeOperations }
+        }
+        if let discovery = modelDiscoveryTask {
+            report.discoveryEnded = await DesktopHostShutdown.wait(until: deadline) { await discovery.value }
+        }
+        modelDiscoveryTask = nil
+        report.recordingFeedbackClosed = await feedbackClosed
+        report.handsFreeClosed = await detectorClosed
+        finishShutdown(report)
+        return report
+    }
+
+    private func cancelInFlightWork(until deadline: ContinuousClock.Instant) async {
         comparisonAdmissionTask?.cancel()
         comparisonTask?.cancel()
         comparisonInitialization?.task.cancel()
@@ -141,45 +192,6 @@ extension DesktopHostController {
         audioCleanupConfirmation = nil
         finalTranscriptTasks.cancel()
         liveFinalisation?.cancel()
-        var report = DesktopHostShutdownReport()
-        recordingFeedbackPreview?.cancel()
-        async let feedbackClosed = closeRecordingFeedback(until: deadline)
-        let detector = handsFreeRun
-        handsFreeRun = nil
-        _ = handsFreeMachine.handle(.userDisarmed)
-        async let detectorClosed = DesktopHostShutdown.wait(until: deadline) {
-            do { try detector?.stopDetector() } catch {
-                FileHandle.standardError.write(Data("Hands-free cleanup failed: \(error.localizedDescription)\n".utf8))
-            }
-        }
-        // Ending the live session, stopping capture and writing the WAV and
-        // record run off this actor, so a provider, device or file system that
-        // stalls cannot hold closing past its deadline.
-        if let open = takeRecordingOnClose() {
-            let store = store
-            report.recordingSaved = await DesktopHostShutdown.wait(until: deadline) { await open.save(in: store) }
-        }
-        // Includes admitted opens and every background release attempt.
-        let playback = playback
-        report.playbackClosed = await DesktopHostShutdown.wait(until: deadline) {
-            do { try await playback.close() } catch {
-                FileHandle.standardError.write(Data("Playback cleanup failed: \(error.localizedDescription)\n".utf8))
-            }
-        }
-        // The network task alone is insufficient: its owner must also finish
-        // success/failure persistence and release native/file resources.
-        if activeOperations > 0 {
-            let ended = await DesktopHostShutdown.wait(until: deadline) { await self.operationsEnded() }
-            if !ended { report.unfinishedOperations = activeOperations }
-        }
-        if let discovery = modelDiscoveryTask {
-            report.discoveryEnded = await DesktopHostShutdown.wait(until: deadline) { await discovery.value }
-        }
-        modelDiscoveryTask = nil
-        report.recordingFeedbackClosed = await feedbackClosed
-        report.handsFreeClosed = await detectorClosed
-        finishShutdown(report)
-        return report
     }
 
     private func closeRecordingFeedback(until deadline: ContinuousClock.Instant) async -> Bool {

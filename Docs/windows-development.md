@@ -325,6 +325,28 @@ down/up events. macOS's `HotKeyPressPrimer` and its tests remain unchanged and
 unextracted. Native wiring requires separate reviewed permission/readiness and
 late-cleanup evidence before effective capability or settings exposure.
 
+The package/internal `admitOwnedCaptureStartup` seam is explicitly injected and
+has no production factory. It only prepares or abandons a startup: it never
+creates an active recording, adopts PCM, starts a provider or plays a positive cue.
+An immutable request/record slot and dedicated lease failure sink precede
+`beginOwned`; the real returned ticket is retained even when failure/cancellation
+arrives before delivery. A bounded FIFO failure inbox and explicit acknowledgement
+barrier preserve canonical causes before disposition; unexpected overflow is
+reported, not treated as success. Native release is joined by ticket/attempt,
+never aggregate operation counts or legacy token retry. Failed cleanup keeps
+exclusion until an explicit owned retry, including after controller close.
+The file operation owns its WAV on a separate actor; file IO never runs on the
+Host actor/settings queue. WAV finish is attempted once after actual release;
+audio errors remain in the failed record. Failed History persistence retains
+the record/file owner and busy exclusion until explicit `retryDisposition`.
+Shutdown grace bounds observation only, not cleanup ownership. Closed persistence
+uses the captured store without presentation. Existing synchronous normal,
+hands-free and comparison capture paths and their PCM/silence behavior are unchanged.
+Synthetic Host/package tests and C-stub graphs do not qualify native ownership,
+permission, endpoint identity, readiness, physical timing or final-partial flush.
+Successful owned recording, provider/tail/context handoff and native activation
+remain separately unselected.
+
 Automation is off by default. Settings → Allow automation starts a named-pipe
 server, `\\.\pipe\JustSpeakToIt-SpeakApp-automation-<user SID>`. It rejects
 remote clients, its DACL grants only the current user, and each client is

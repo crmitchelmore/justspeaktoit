@@ -98,11 +98,9 @@ final class DesktopSpeechSynthesisTests: DeepgramSpeechStubTestCase {
             from: Data(#"{"speed":4,"pitch":0,"useSSML":false}"#.utf8)))
         XCTAssertThrowsError(try DesktopSpeechVoice.resolved(modelID: nil, voiceID: "system/Alex"))
         XCTAssertThrowsError(try DesktopSpeechVoice.resolved(modelID: nil, voiceID: "azure/unknown"))
-        XCTAssertThrowsError(try DesktopSpeechVoice.resolved(
-            modelID: nil, voiceID: AzureMAIVoiceCatalog.voices[0].id
-        ))
         XCTAssertEqual(DesktopSpeechVoice.voices.count,
-                       DeepgramSpeechCatalog.voices.count + AzureNeuralVoiceCatalog.voices.count)
+                       DeepgramSpeechCatalog.voices.count + AzureNeuralVoiceCatalog.voices.count
+                           + AzureMAIVoiceCatalog.voices.count)
         XCTAssertEqual(Set(DesktopSpeechVoice.voices.map(\.id)).count, DesktopSpeechVoice.voices.count)
         for voice in AzureNeuralVoiceCatalog.voices {
             XCTAssertEqual(

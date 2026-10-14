@@ -57,6 +57,7 @@ public struct VoiceSynthesisCapabilities: Equatable, Sendable {
 
     public static let naturalSpeech = Self(speed: false, pitch: false, ssml: false)
     public static let azureNeural = Self(speed: true, pitch: true, ssml: true)
+    public static let azureMAI = Self(speed: false, pitch: false, ssml: true)
 }
 
 public enum VoiceSynthesisConfigurationError: LocalizedError, Equatable {

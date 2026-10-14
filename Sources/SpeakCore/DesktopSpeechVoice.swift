@@ -5,11 +5,13 @@ import Foundation
 public enum DesktopSpeechVoice: Hashable, Sendable {
     case deepgram(DeepgramSpeechCatalog.Voice)
     case azureNeural(AzureNeuralVoice)
+    case azureMAI(AzureMAIVoice)
 
     public var id: String {
         switch self {
         case .deepgram(let voice): voice.id
         case .azureNeural(let voice): voice.id
+        case .azureMAI(let voice): voice.id
         }
     }
 
@@ -17,6 +19,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         switch self {
         case .deepgram(let voice): voice.name
         case .azureNeural(let voice): voice.name
+        case .azureMAI(let voice): voice.displayName
         }
     }
 
@@ -24,6 +27,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         switch self {
         case .deepgram(let voice): voice.model.id
         case .azureNeural: "azure/neural"
+        case .azureMAI(let voice): voice.model.rawValue
         }
     }
 
@@ -31,13 +35,14 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         switch self {
         case .deepgram(let voice): "\(voice.displayName) — \(voice.model.displayName)"
         case .azureNeural(let voice): "\(voice.name) — Azure Speech (\(voice.shortName))"
+        case .azureMAI(let voice): "\(voice.displayName) — Azure Speech"
         }
     }
 
     public var apiKeyIdentifier: String {
         switch self {
         case .deepgram: VoiceOutputProvider.deepgram.apiKeyIdentifier
-        case .azureNeural: AzureSpeechConfiguration.credentialIdentifier
+        case .azureNeural, .azureMAI: AzureSpeechConfiguration.credentialIdentifier
         }
     }
 
@@ -45,17 +50,28 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         switch self {
         case .deepgram: .naturalSpeech
         case .azureNeural: .azureNeural
+        case .azureMAI: .azureMAI
         }
     }
 
     public static var voices: [Self] {
         DeepgramSpeechCatalog.voices.map(Self.deepgram) + AzureNeuralVoiceCatalog.voices.map(Self.azureNeural)
+            + AzureMAIVoiceCatalog.voices.map(Self.azureMAI)
     }
 
     public static func resolved(modelID: String?, voiceID: String?) throws -> Self {
         let model = modelID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let identifier = voiceID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if model?.hasPrefix("azure/") == true || identifier?.hasPrefix("azure/") == true {
+        let maiModel = model?.hasPrefix(AzureMAIVoiceCatalog.modelMarker.dropFirst().lowercased()) == true
+        if model?.hasPrefix("azure/") == true || identifier?.hasPrefix("azure/") == true || maiModel {
+            if let voice = AzureMAIVoiceCatalog.voices.first(where: { $0.id.lowercased() == identifier }) {
+                // Existing Azure imports can carry the old route identifier;
+                // the canonical MAI model is selected by the voice-name suffix.
+                guard model == nil || model == "azure/neural" || model == voice.model.rawValue.lowercased() else {
+                    throw VoiceSynthesisConfigurationError.unsupportedVoice
+                }
+                return .azureMAI(voice)
+            }
             guard let voice = AzureNeuralVoiceCatalog.voices.first(where: { $0.id.lowercased() == identifier }),
                   model == nil || model == "azure/neural" else {
                 throw VoiceSynthesisConfigurationError.unsupportedVoice

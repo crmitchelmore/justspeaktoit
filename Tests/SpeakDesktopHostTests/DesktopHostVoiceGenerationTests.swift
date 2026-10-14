@@ -243,6 +243,78 @@ final class DesktopHostVoiceGenerationTests: XCTestCase {
             from: JSONEncoder().encode(stored)), stored)
     }
 
+}
+
+extension DesktopHostVoiceGenerationTests {
+    func testMAISelection_PreservesUnsupportedStoredProsodyAndRefusesGenerationBeforeWork() async throws {
+        let saved = await controller.saveVoiceSynthesisOptions(try VoiceSynthesisOptions(speed: 1.25, pitch: -2))
+        XCTAssertTrue(saved)
+        let voice = DesktopSpeechVoice.azureMAI(AzureMAIVoiceCatalog.voices[0])
+        await controller.selectVoiceOutput(voice)
+        let settings = await controller.voiceOutputSettings()
+        XCTAssertEqual(settings.controlsPresentation.capabilities, 4)
+        XCTAssertEqual(settings.speed, 1.25)
+        XCTAssertEqual(settings.pitch, -2)
+        XCTAssertThrowsError(try settings.synthesisSelection())
+        let count = VoiceGenerationCounter()
+        let wav = try audio()
+        await controller.generateVoiceSource(
+            try VoiceOutputSourceSnapshot(source: .typedText, text: "Synthetic MAI incompatible controls."),
+            options: .init(autoPlay: false, saveToRecordings: false)
+        ) { _, _, _ in count.increment(); return wav }
+        await finish()
+        await assertRetained(false)
+        XCTAssertEqual(count.value, 0)
+        XCTAssertTrue(FakeSpeech.shared.events.isEmpty)
+        XCTAssertTrue(FakeLog.shared.allStatuses.last?.contains("cannot apply") == true)
+    }
+
+    func testMAIGeneration_CapturesCanonicalModelAndNormalOptionsForCredentialFreeRetainedExport() async throws {
+        let voice = DesktopSpeechVoice.azureMAI(AzureMAIVoiceCatalog.voices[1])
+        await controller.selectVoiceOutput(voice)
+        let options = try VoiceSynthesisOptions(useSSML: true)
+        let saved = await controller.saveVoiceSynthesisOptions(options)
+        XCTAssertTrue(saved)
+        let settings = await controller.voiceOutputSettings()
+        XCTAssertEqual(settings.modelID, AzureMAIVoiceCatalog.voices[1].model.rawValue)
+        XCTAssertEqual(try JSONDecoder().decode(DesktopVoiceOutputSettings.self,
+            from: JSONEncoder().encode(settings)), settings)
+        let source = try VoiceOutputSourceSnapshot(source: .typedText, text: "Synthetic MAI snapshot.")
+        let wav = try audio()
+        let gate = VoiceGenerationGate()
+        let count = VoiceGenerationCounter()
+        await controller.generateVoiceSource(
+            source, options: .init(autoPlay: false, saveToRecordings: false)
+        ) { _, selection, _ in
+            XCTAssertEqual(selection.voice, voice)
+            XCTAssertEqual(selection.options, options)
+            count.increment()
+            await gate.wait()
+            return wav
+        }
+        await controller.selectVoiceOutput(DesktopSpeechVoice.deepgram(DeepgramSpeechCatalog.voices[0]))
+        let current = await controller.voiceOutputSettings()
+        XCTAssertThrowsError(try current.synthesisSelection())
+        await gate.release()
+        await finish()
+        let result = try await retainedResult()
+        XCTAssertEqual(result.voice, voice)
+        XCTAssertEqual(result.options, options)
+        XCTAssertNil(result.source.recordID)
+        let destination = directory.deletingLastPathComponent().appendingPathComponent("synthetic-mai-\(UUID()).wav")
+        defer { try? FileManager.default.removeItem(at: destination) }
+        await controller.exportGeneratedVoice(result.id.uuidString, path: destination.path)
+        let task = await controller.readAloudState.exportTask
+        await task?.value
+        XCTAssertEqual(try Data(contentsOf: destination), wav)
+        XCTAssertEqual(count.value, 1)
+        let owner = await controller.voiceOutputRecordID
+        XCTAssertNil(owner)
+    }
+
+}
+
+extension DesktopHostVoiceGenerationTests {
     private func retained() async -> DesktopGeneratedVoiceResult? { await controller.generatedVoice }
 
     private func retainedResult() async throws -> DesktopGeneratedVoiceResult {

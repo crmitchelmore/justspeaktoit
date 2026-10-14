@@ -1,11 +1,15 @@
 # Desktop Voice Output sources and WAV export
 
 Windows and Linux remain developer previews, not macOS-parity releases.
-Voice Output uses shared Deepgram and Azure neural speech contracts, canonical
-catalogue projections and native playback. `DesktopSpeechVoice` exposes only
+Voice Output uses shared Deepgram, Azure neural and Azure MAI speech contracts,
+canonical catalogue projections and native playback. `DesktopSpeechVoice` exposes only
 routes the host executes, not every provider in the macOS catalogue. The seven
 built-in Azure neural catalogue entries now have one `AzureNeuralVoiceCatalog` definition
 shared with macOS; native hosts do not copy voice entries.
+The current MAI-Voice-2.1 and Flash speakers come directly from the existing
+`AzureMAIVoiceCatalog`, including their locale/model identifiers. MAI uses the
+same regional Azure request builder, saved `key:region` credential and native
+WAV decoding/playback, not a second provider client or credential store.
 
 ## Journey
 
@@ -77,6 +81,15 @@ Read/Generate/text export explicitly refuse incompatible choices before reading
 a credential, rather than silently ignoring them or changing provider.
 **Normal controls** is an explicit reset; selecting another voice preserves
 all controls. Unknown provider choices appear as unavailable, not Deepgram.
+MAI supports normal speed/pitch only: the native fields are disabled while
+retaining stored non-default values, and execution refuses those values before
+reading credentials. Choose **Normal controls** explicitly to reset them.
+SSML is submitted unsplit without an automatic neural prosody wrapper; the
+service still decides which MAI-specific tags it supports. The curated models
+are executable routes, not a guarantee that every Azure resource grants access.
+MAI's canonical model suffix is persisted unchanged; older Azure route-only
+imports remain readable without rewriting their stored identifiers. Unlisted
+voices and unknown MAI models remain unavailable rather than falling back.
 Save waits for persistence acknowledgement before closing, reports write
 failures without changing previous settings, and ignores acknowledgements for
 closed/replaced requests. Close remains available while saving; closing the
@@ -121,8 +134,10 @@ user-chosen lossless WAV export, including editable UTF-8 text-file snapshots.
 Native generation additionally supports auto-play, managed audio archival and
 replay/export of a completed result. Azure neural speed/pitch/SSML are executable
 here; macOS's Deepgram path currently ignores those same controls, and native
-hosts deliberately refuse them for Deepgram instead. MAI/system and wider
-providers, selectable export format/quality, provider cost/usage UI and broader
+hosts deliberately refuse them for Deepgram instead. Current canonical MAI
+models now execute Read, Generate and text export through that same bounded
+Azure engine, with retained replay/export independent of later settings.
+System and wider providers, selectable export format/quality, provider cost/usage UI and broader
 Voice workspace parity remain gaps. Advanced configuration transfer is a
 separately coordinated settings integration; this PR does not create another
 configuration authority.

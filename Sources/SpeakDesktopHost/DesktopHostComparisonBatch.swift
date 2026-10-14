@@ -74,9 +74,11 @@ extension DesktopHostController {
     func releaseComparisonFileExecution() async {
         let released = comparisonOwnedRoundIDs.subtracting(comparisonBatch?.queuedIDs ?? [])
         await comparisons?.endExecution(ids: released)
+        comparisonStaging.releaseOwners(released)
         comparisonOwnedRoundIDs.subtract(released)
         if comparisonBatch == nil, !comparisonOwnedRoundIDs.isEmpty {
             await comparisons?.endExecution(ids: comparisonOwnedRoundIDs)
+            comparisonStaging.releaseOwners(comparisonOwnedRoundIDs)
             comparisonOwnedRoundIDs.removeAll()
         }
         comparisonSync?.changed()

@@ -10,6 +10,7 @@ public actor DesktopComparisonStore {
     }
     private var document: Document
     private var executing: Set<UUID> = []
+    private var operationLeases: [UUID: Set<UUID>] = [:]
     public nonisolated let directory: URL
     private let storageURL: URL
     private let write: @Sendable (Data, URL) throws -> Void
@@ -61,21 +62,37 @@ public actor DesktopComparisonStore {
 
     public func pendingRevisions() -> [ModelComparisonRevision] {
         document.revisions.values.filter {
-            !executing.contains($0.id) && document.acknowledgements[$0.id] != $0.updatedAt
+            !isExecuting($0.id) && document.acknowledgements[$0.id] != $0.updatedAt
         }
             .sorted { $0.updatedAt < $1.updatedAt }
     }
 
     public func revisions() -> [ModelComparisonRevision] {
-        document.revisions.values.filter { !executing.contains($0.id) }.sorted { $0.updatedAt < $1.updatedAt }
+        document.revisions.values.filter { !isExecuting($0.id) }.sorted { $0.updatedAt < $1.updatedAt }
     }
 
     public func endExecution(ids: Set<UUID>) {
         executing.subtract(ids)
     }
 
+    package func retainOperation(roundID: UUID, operationID: UUID) throws {
+        guard document.revisions[roundID]?.round != nil else {
+            throw DesktopComparisonError.message("The comparison sample is no longer available.")
+        }
+        operationLeases[roundID, default: []].insert(operationID)
+    }
+
+    package func releaseOperation(roundID: UUID, operationID: UUID) {
+        operationLeases[roundID]?.remove(operationID)
+        if operationLeases[roundID]?.isEmpty == true { operationLeases[roundID] = nil }
+    }
+
+    package func isExecuting(_ id: UUID) -> Bool {
+        executing.contains(id) || operationLeases[id]?.isEmpty == false
+    }
+
     public func remove(id: UUID, at date: Date = Date()) throws {
-        guard !executing.contains(id) else {
+        guard !isExecuting(id) else {
             throw DesktopComparisonError.message("Finish or cancel the active comparison before deleting it.")
         }
         guard let round = document.revisions[id]?.round else {
@@ -91,7 +108,7 @@ public actor DesktopComparisonStore {
     }
 
     public func applyRemoteRevision(_ revision: ModelComparisonRevision) throws {
-        guard !executing.contains(revision.id) else {
+        guard !isExecuting(revision.id) else {
             throw DesktopComparisonError.message("An active comparison cannot be changed by sync.")
         }
         guard revision.isValid else { throw DesktopComparisonError.message("Invalid comparison revision.") }
@@ -161,7 +178,7 @@ public actor DesktopComparisonStore {
     }
 
     public func judge(id: UUID, ranksInBlindOrder: [Int]) throws {
-        guard !executing.contains(id), var round = document.revisions[id]?.round, !round.isJudged,
+        guard !isExecuting(id), var round = document.revisions[id]?.round, !round.isJudged,
               ranksInBlindOrder.count == round.blindOrder.count else {
             throw DesktopComparisonError.message("Select an unjudged round and rank every result.")
         }

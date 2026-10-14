@@ -1,6 +1,7 @@
 #include "include/CWindowsSupport.h"
 #include "WindowsWindowChrome.hpp"
 #include <commdlg.h>
+#include <cderr.h>
 #include <mutex>
 #include <sstream>
 #include <vector>
@@ -216,11 +217,12 @@ void run(HWND window, Dialog &dialog) {
             if (count++) payload += "\t";
             payload += dialog.visible[i].id;
         }
-    if (count < 2 || count > 8) {
-        MessageBoxW(window, L"Select two to eight models (Ctrl+click or Shift+click).",
+    const bool live = SendDlgItemMessageW(window, modeID, CB_GETCURSEL, 0, 0) == 1;
+    if (count < 2 || (live && count > 8)) {
+        MessageBoxW(window, live ? L"Select two to eight Live models (Ctrl+click or Shift+click)."
+                                : L"Select at least two File models (Ctrl+click or Shift+click).",
                     L"Comparison models", MB_OK | MB_ICONWARNING); return;
     }
-    const bool live = SendDlgItemMessageW(window, modeID, CB_GETCURSEL, 0, 0) == 1;
     if (!live) {
         std::vector<wchar_t> files(131072, 0);
         OPENFILENAMEW picker{}; picker.lStructSize = sizeof(picker); picker.hwndOwner = window;
@@ -229,7 +231,10 @@ void run(HWND window, Dialog &dialog) {
         picker.lpstrFilter = L"Audio\0*.wav;*.mp3;*.m4a;*.aac;*.mp4;*.flac;*.ogg;*.opus;*.webm\0";
         picker.Flags = OFN_EXPLORER | OFN_ALLOWMULTISELECT | OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
         if (!GetOpenFileNameW(&picker)) {
-            if (CommDlgExtendedError()) MessageBoxW(window, L"Could not open the audio picker.", L"Comparison", MB_OK);
+            const DWORD error = CommDlgExtendedError();
+            if (error) MessageBoxW(window, error == FNERR_BUFFERTOOSMALL
+                ? L"The selected file names exceed the native picker's buffer. Choose fewer or shorter names."
+                : L"Could not open the audio picker.", L"Comparison", MB_OK | MB_ICONWARNING);
             return;
         }
         const std::wstring first(files.data());

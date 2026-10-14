@@ -166,7 +166,7 @@ static void files_chosen(GObject *source, GAsyncResult *result, gpointer data) {
     GError *error = NULL;
     GListModel *files = gtk_file_dialog_open_multiple_finish(GTK_FILE_DIALOG(source), result, &error);
     if (files != NULL) {
-        gboolean valid = g_list_model_get_n_items(files) <= 32;
+        gboolean valid = g_list_model_get_n_items(files) > 0;
         for (guint i = 0; valid && i < g_list_model_get_n_items(files); ++i) {
             GFile *file = g_list_model_get_item(files, i);
             gchar *path = g_file_get_path(file);
@@ -175,7 +175,7 @@ static void files_chosen(GObject *source, GAsyncResult *result, gpointer data) {
             g_free(path); g_object_unref(file);
         }
         if (valid && ui.window == request->window) comparison_emit(102, payload->str, 0);
-        else if (ui.window == request->window) comparison_error("Choose one to 32 local audio files with single-line names.");
+        else if (ui.window == request->window) comparison_error("Choose local audio files with single-line names.");
         g_object_unref(files);
     }
     if (ui.window == request->window) picker_error(error); else g_clear_error(&error);
@@ -198,11 +198,12 @@ static void run_clicked(GtkButton *button, gpointer data) {
             g_string_append(payload, g_ptr_array_index(ui.model_ids, i));
         }
     }
-    if (count < 2 || count > 8) {
-        comparison_error("Select two to eight comparison models.");
+    gboolean live = gtk_drop_down_get_selected(ui.mode) == 1;
+    if (count < 2 || (live && count > 8)) {
+        comparison_error(live ? "Select two to eight Live models." : "Select at least two File models.");
         g_string_free(payload, TRUE); return;
     }
-    if (gtk_drop_down_get_selected(ui.mode) == 1) {
+    if (live) {
         comparison_emit(103, payload->str, 0); g_string_free(payload, TRUE); return;
     }
     GtkFileDialog *picker = gtk_file_dialog_new();
@@ -356,7 +357,7 @@ void jsti_comparison_open(GtkWindow *parent) {
     gtk_entry_set_placeholder_text(ui.language, "Language hint (e.g. en_GB); blank is Automatic");
     named(GTK_WIDGET(ui.language), "Comparison language hint");
     gtk_box_append(GTK_BOX(column), GTK_WIDGET(ui.language));
-    heading(GTK_BOX(column), "Models (select two to eight)");
+    heading(GTK_BOX(column), "Models (at least two; Live supports up to eight)");
     GtkWidget *selection = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     ui.select_all = GTK_BUTTON(button_new("Select all ready", G_CALLBACK(select_models)));
     ui.select_none = GTK_BUTTON(button_new("Select none", G_CALLBACK(select_models)));

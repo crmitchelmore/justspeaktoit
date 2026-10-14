@@ -183,9 +183,10 @@ those remain native CI and desktop validation gates.
 **Transcription > Compare Models** opens a native GTK/libadwaita editor with
 wrapped, accessibly named model checkboxes, File/Batch and Live input modes,
 language hint, saved rounds, raw blind results, ranking/reveal, scoreboard,
-sample playback and JSON/Markdown exports. File selection accepts one to 32
-local samples; save dialogs use the desktop's native file chooser. Picker errors
-appear in the comparison editor instead of being hidden behind its modal window.
+sample playback and JSON/Markdown exports. File selection accepts one or more
+local samples without a sample-count ceiling; save dialogs use the desktop's native
+file chooser. Picker errors appear in the comparison editor instead of being hidden
+behind its modal window.
 The export scope chooses **All rounds** or **Selected round** for both
 **Save JSON / Markdown** and explicit **Copy JSON / Markdown**. Save requests
 freeze the selected round when the chooser opens, independently of later
@@ -221,9 +222,20 @@ pauses after each round for judging. Saving ranks only reveals: **Next file** mu
 explicitly start the next sample, including after an unranked failure reveal.
 Queued rounds retain sync/deletion leases. Cancel, discarding the current round,
 editor close and shutdown retain recovery evidence but never resume requests on
-relaunch. The native 2–8-model / 1–32-sample ceilings are temporary resource limits,
-not Mac parity or physical-hardware acceptance: Mac has no corresponding upper
-bounds in its comparison controller/file picker.
+relaunch. File/Batch has no model-count ceiling and uses a sliding set of at most
+eight underlying provider operations. Deadlines/cancellation do not release an
+uncooperative operation's slot, audio lease or accounted bytes before actual exit;
+exhausted capacity is an explicit error, not replacement admission. Close does not
+join those operations. Sync and local deletion cannot remove their samples.
+Preflight and incremental accounting bound newly owned staged audio plus canonical
+revision metadata to 800,000,000 bytes, with a separate single 25,000,000-byte scratch
+slot and serial preparation. Unused reservations roll back; queued/still-running
+operations retain theirs. See the Windows workflow for the common ownership policy.
+This bounds active staging ownership, not the lifetime size of persisted comparison history.
+The staging budget is a deliberate resource limit, not Mac equivalence or hardware
+acceptance. Per-file import/conversion remains 25 MB versus Mac comparison's 100 MiB.
+Live still admits two to eight simultaneous lanes; no waves or replay stand in for
+live comparison.
 A blind **Diff against** dropdown uses the shared
 `TranscriptWordDiff`, with accessible `[+added]` / `[-removed]` text annotations
 instead of colour-only edits; original transcripts and persisted ranks stay unchanged.

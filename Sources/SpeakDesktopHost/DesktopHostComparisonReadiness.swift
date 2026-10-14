@@ -83,6 +83,12 @@ extension DesktopHostController {
             )
         }
         try DesktopComparisonRunner.validate(candidates)
+        guard !live || candidates.count <= 8 else {
+            throw DesktopHostError(message: "Live comparison supports at most eight simultaneous models.")
+        }
+        guard !live || comparisonOperations.activeCount == 0 else {
+            throw DesktopHostError(message: "Wait for the still-owned file comparison operations before starting Live.")
+        }
         var configuration = DesktopComparisonConfiguration(
             selected: candidates, keys: Dictionary(uniqueKeysWithValues: states.map { ($0.option.id, $0.key) }),
             language: language, endpoint: azureResourceEndpoint(), deviceID: settings.microphoneDeviceID ?? "",

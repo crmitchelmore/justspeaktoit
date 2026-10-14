@@ -325,6 +325,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var comparisonInitialization: DesktopComparisonStoreLoading?
     var comparisonAdmissionTask: Task<Void, Never>?
     var comparisonBatch: DesktopComparisonBatch?
+    let comparisonOperations = DesktopComparisonOperations()
+    let comparisonStaging = DesktopComparisonStaging()
     package var comparisonTask: Task<Void, Never>?
     package var comparisonFinalization: Task<Void, Never>?
     var comparisonUpdates: Task<Void, Never>?

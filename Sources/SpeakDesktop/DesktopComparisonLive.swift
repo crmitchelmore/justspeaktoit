@@ -45,6 +45,9 @@ public final class DesktopComparisonLive: @unchecked Sendable {
 
     public init(lanes: [Lane]) throws {
         try DesktopComparisonRunner.validate(lanes.map(\.candidate))
+        guard lanes.count <= 8 else {
+            throw DesktopComparisonError.message("Live comparison supports at most eight simultaneous models.")
+        }
         guard lanes.allSatisfy({ [16_000, 24_000].contains($0.sampleRate)
             && $0.client is any StreamingAudioReadyProviding }) else {
             throw DesktopComparisonError.message("A selected live route cannot provide comparison audio readiness.")

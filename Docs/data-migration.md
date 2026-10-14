@@ -1,12 +1,22 @@
 # macOS data export and import
 
-Open **Settings → Data & Migration**. This feature is manual and macOS-only.
+Open **Settings → Data & Migration** for full manual export/import on macOS.
+Windows/Linux provide recording History/audio backups and read-only inspection;
+full native category collection and transactional import remain unfinished.
 
 ## Export
 
 One unencrypted ZIP contains `manifest.json`, a readable JSON file for each
 selected category, and any selected recordings. All categories start selected
 except **API keys & credentials**. Select all/none shortcuts are available.
+
+New exports use format version 2; version-1 exports remain readable. Version 2
+can declare covered record kinds and keys, so a partial source cannot clear
+uncollected kinds or unsupported preferences during replacement. Older
+version-1-only apps explicitly reject these exports; update the receiving app.
+Native recording-store backups select recording `history` records only, not
+the separate per-attempt Voice usage ledger. Standalone saved speech WAVs are
+audio-only records without fabricated usage or History ownership.
 
 | Category | Contents |
 | --- | --- |
@@ -45,7 +55,8 @@ for each included category. Review the preview before confirming the import.
 - Configuration conflicts show existing/imported values and require an explicit
   choice. Profile and vocabulary records match by their stable identifiers.
 - Replace changes the selected category. For a filtered history/audio export,
-  only the exported IDs/date range are replaced; outside entries stay intact.
+  only the exported IDs/date range and covered kinds/keys are replaced;
+  outside entries stay intact.
   Superseded audio in managed recording folders is removed after recovery is
   saved and the import succeeds; original files outside those folders are preserved.
 - History and recordings reconnect by session identity, regardless of import

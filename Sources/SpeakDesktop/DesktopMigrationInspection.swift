@@ -51,6 +51,7 @@ public enum DesktopMigrationInspection {
         public let historyChecks: [Category]
         public let invalidHistoryItems: Int
         public let mergePreview: [MergeCategory]
+        public let recordingHistoryOnly: Bool
 
         public var text: String {
             let rows = categories.map { row in
@@ -63,6 +64,11 @@ public enum DesktopMigrationInspection {
             ]
             if noticeCount > 0 {
                 sections.append("\(noticeCount) archive notices: some data may be missing or damaged.")
+            }
+            if recordingHistoryOnly {
+                sections.append(
+                    "This backup selects recording History only. Separate speech-usage ledgers are excluded."
+                )
             }
             if !historyChecks.isEmpty {
                 let checks = historyChecks.map { row in
@@ -116,6 +122,8 @@ public enum DesktopMigrationInspection {
                 return count + read - valid
             }
             self.mergePreview = mergePreview
+            recordingHistoryOnly = snapshot.manifest.categories.contains(.history)
+                && snapshot.manifest.scopes[DataMigrationCategory.history.rawValue]?.selectedKinds == ["history"]
         }
     }
 

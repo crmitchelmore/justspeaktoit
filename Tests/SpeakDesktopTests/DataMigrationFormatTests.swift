@@ -20,7 +20,7 @@ final class DataMigrationFormatTests: XCTestCase {
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
         XCTAssertEqual(Set(object.keys), ["format", "version", "createdAt", "categories", "scopes"])
         XCTAssertEqual(object["format"] as? String, "JustSpeakToIt")
-        XCTAssertEqual(object["version"] as? Int, 1)
+        XCTAssertEqual(object["version"] as? Int, DataMigrationFormat.version)
         XCTAssertEqual(object["createdAt"] as? String, "1970-01-01T00:00:00Z")
         XCTAssertEqual(object["categories"] as? [String], ["history", "recordings"])
         let decoder = JSONDecoder()

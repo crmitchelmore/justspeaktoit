@@ -13,8 +13,11 @@ extension DesktopRecordingStore {
         try Self.validateMigrationScopeDates(scopes)
         let retained = try records().filter { !filenames.contains($0.audioFilename) }
         let audio = categories.contains(.recordings) ? try snapshotSavedAudio(excluding: filenames) : nil
+        let archiveScopes = Self.recordingHistoryScopes(scopes, categories: categories)
         var snapshot = DataMigrationSnapshot(
-            manifest: .init(categories: DataMigrationCategory.allCases.filter(categories.contains), scopes: scopes),
+            manifest: .init(
+                categories: DataMigrationCategory.allCases.filter(categories.contains), scopes: archiveScopes
+            ),
             records: Dictionary(uniqueKeysWithValues: categories.map { ($0, []) })
         )
         let byFilename = Dictionary(grouping: retained.filter { !$0.audioFilename.isEmpty }, by: \.audioFilename)
@@ -22,10 +25,10 @@ extension DesktopRecordingStore {
         var standaloneIDs = Set<UUID>()
         if categories.contains(.history) {
             snapshot.records[.history] = try Self.migrationHistory(
-                retained, scope: scopes[DataMigrationCategory.history.rawValue] ?? .init(), digests: digests
+                retained, scope: archiveScopes[DataMigrationCategory.history.rawValue] ?? .init(), digests: digests
             )
         }
-        let audioScope = scopes[DataMigrationCategory.recordings.rawValue] ?? .init()
+        let audioScope = archiveScopes[DataMigrationCategory.recordings.rawValue] ?? .init()
         if let audio {
             snapshot.notices = try Self.unavailableMigrationAudio(retained, audio: audio, scope: audioScope)
         }
@@ -39,7 +42,7 @@ extension DesktopRecordingStore {
                 records = [Record(id: id, audioFilename: entry.filename, modelIdentifier: "",
                                   createdAt: entry.identity.created ?? .distantPast)]
             }
-            records = records.filter { audioScope.contains(id: $0.id.uuidString, date: $0.createdAt) }
+            records = records.filter { audioScope.contains(id: $0.id.uuidString, date: $0.createdAt, kind: "audio") }
             guard let first = records.first else { continue }
             let url = try ownedAudioURL(for: first)
             let digest = try Self.migrationAudioDigest(url, identity: entry.identity, digests: digests)
@@ -51,6 +54,17 @@ extension DesktopRecordingStore {
         }
         try Task.checkCancellation()
         return snapshot
+    }
+
+    private static func recordingHistoryScopes(
+        _ scopes: [String: DataMigrationScope], categories: Set<DataMigrationCategory>
+    ) -> [String: DataMigrationScope] {
+        guard categories.contains(.history) else { return scopes }
+        var result = scopes
+        var history = result[DataMigrationCategory.history.rawValue] ?? .init()
+        history.selectedKinds = history.selectedKinds.map { $0.intersection(["history"]) } ?? ["history"]
+        result[DataMigrationCategory.history.rawValue] = history
+        return result
     }
 
     private static func migrationAudioRecord(
@@ -72,7 +86,7 @@ extension DesktopRecordingStore {
         var history: [DataMigrationRecord] = []
         for record in records {
             try Task.checkCancellation()
-            guard scope.contains(id: record.id.uuidString, date: record.createdAt) else { continue }
+            guard scope.contains(id: record.id.uuidString, date: record.createdAt, kind: "history") else { continue }
             let value = try DesktopMigrationHistory.value(record)
             history.append(.init(
                 id: record.id.uuidString, kind: "history", value: value, date: try migrationDate(record.createdAt),
@@ -103,7 +117,7 @@ extension DesktopRecordingStore {
         var notices: [String] = []
         for record in records where !record.audioFilename.isEmpty && !available.contains(record.audioFilename) {
             try Task.checkCancellation()
-            guard scope.contains(id: record.id.uuidString, date: record.createdAt) else { continue }
+            guard scope.contains(id: record.id.uuidString, date: record.createdAt, kind: "audio") else { continue }
             notices.append("Recordings, \(record.id.uuidString): file unavailable; skipped.")
         }
         return notices

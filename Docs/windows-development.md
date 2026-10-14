@@ -926,6 +926,19 @@ preview. No other category or credential is collected for this comparison.
 Preview counts are not a reserved transaction or application approval:
 deletion-tombstone eligibility, stale-state checks and transactional application
 remain required before a future import can change data.
+New exports use format version 2, with explicit record-kind coverage.
+The recording-store collector selects only `history` records: the separate
+native per-attempt Voice usage ledger is **not** included or converted into
+Mac successful `ttsUsage` entries, and saved standalone Voice WAVs remain
+independent recording-only files with no fabricated usage/History linkage.
+The inspector discloses this limitation. Kind-scoped replacement preserves
+unselected kinds even when their identifiers coincide; preference projections
+can also restrict covered keys without clearing unsupported defaults or
+uncollected vocabulary collections. Shared validation and both platform
+collectors honour these selections. Legacy version-1 ZIPs remain readable.
+Older version-1-only applications reject version-2 exports explicitly rather
+than silently ignoring the narrower destructive scope; update the receiving
+Mac app before restoring a new scoped export.
 The report explicitly states that record values are not yet approved for import
 and import/apply is unavailable. Its separately owned cancellable worker removes
 only its reader-created private staging directory, preserves the selected ZIP

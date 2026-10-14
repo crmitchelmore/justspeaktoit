@@ -26,6 +26,8 @@ final class DesktopHostMigrationInspectionTests: XCTestCase {
             XCTAssertEqual(report.mergePreview.map { $0.changes?.updated }, [0, 0])
             XCTAssertEqual(report.mergePreview.map { $0.changes?.retained }, [1, 1])
             XCTAssertTrue(report.text.contains("Read-only merge preview"))
+            XCTAssertTrue(report.recordingHistoryOnly)
+            XCTAssertTrue(report.text.contains("Separate speech-usage ledgers are excluded"))
             XCTAssertFalse(report.text.contains(record.id.uuidString))
         })
         await fixture.controller.beginMigrationInspection(fixture.destination, using: inspector)

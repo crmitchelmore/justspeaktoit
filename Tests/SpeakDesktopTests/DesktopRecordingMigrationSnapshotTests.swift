@@ -46,9 +46,13 @@ final class DesktopRecordingMigrationSnapshotTests: XCTestCase {
         XCTAssertEqual(result.files.count, 1)
         XCTAssertEqual(audio.digest, String(repeating: "a", count: 64))
         XCTAssertTrue(result.notices.isEmpty)
+        XCTAssertEqual(result.manifest.version, 2)
+        XCTAssertEqual(result.manifest.scopes["history"]?.selectedKinds, ["history"])
+        XCTAssertFalse(result.manifest.scopes["history"]?.isComplete == true)
         let archive = try MigrationTestArchive.export(result, digests: digests, stagingRoot: directory)
         let read = try MigrationTestArchive.read(archive, digests: digests, stagingRoot: directory)
         XCTAssertEqual(read.records, result.records)
+        XCTAssertEqual(read.manifest.scopes["history"]?.selectedKinds, ["history"])
     }
 
     func testScopesAndActiveAudioExclusion_DoNotExportUnfinishedOrUnselectedRecords() async throws {

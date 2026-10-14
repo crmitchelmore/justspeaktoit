@@ -55,8 +55,9 @@ public enum DataMigrationPlanner {
             }
             if modes[category] == .replace && !hasInvalidItems {
                 records.removeAll { record in
-                    category == .history || category == .recordings
-                        ? scope.contains(id: record.id, date: record.date) : true
+                    category == .history || category == .recordings || scope.selectedKinds != nil
+                        ? scope.contains(id: record.id, date: record.date, kind: record.kind)
+                        : true
                 }
             }
             var indexes = Dictionary(

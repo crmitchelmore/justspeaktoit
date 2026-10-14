@@ -58,7 +58,8 @@ enum JSTIWindowEvent {
     JSTI_EVENT_HISTORY_DELETE = 91, /* text: frozen newline-separated UUIDs; index: 1 removes owned audio */
     JSTI_EVENT_RECORDINGS_FOLDER = 93,
     JSTI_EVENT_AUDIO_CLEANUP = 94,
-    JSTI_EVENT_AUDIO_CLEANUP_RESPONSE = 95 /* text: confirmation UUID; index: 1 confirms, 0 cancels */
+    JSTI_EVENT_AUDIO_CLEANUP_RESPONSE = 95, /* text: confirmation UUID; index: 1 confirms, 0 cancels */
+    JSTI_EVENT_USER_ABSENT = 120
 };
 
 /* Runs on the UI thread. text is borrowed until callback returns. model_index
@@ -79,6 +80,7 @@ typedef struct JSTIConfigurationField {
     int requires_hud_overlay;
     /* Optional newline-separated choices: raw value, tab, display title. */
     const char *choices;
+    int requires_hands_free_guard;
 } JSTIConfigurationField;
 /* action 0 applies fields; 1 imports and 2 exports a path in values[0].
  * action 3 applies fields plus the selected recovered-keyword text in the final
@@ -97,6 +99,8 @@ void jsti_window_clear_configuration(void);
 int jsti_comparison_present(const char *models, const char *rounds, const char *detail,
                            const char *selected, int busy, int recording, int judgeable,
                            int sync_enabled, int sync_available, const char *references, const char *reference);
+/* Thread-safe; false refuses hands-free if native lock/sleep observation failed. */
+int jsti_window_hands_free_guard_ready(void);
 int jsti_window_run(const char *const *model_names, size_t model_count, int selected_index,
                     JSTIWindowCallback callback, void *context, char *error, size_t error_capacity);
 /* Optional pre-run mode catalogue with the same count/order as window_run's

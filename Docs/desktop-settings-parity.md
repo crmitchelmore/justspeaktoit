@@ -29,6 +29,8 @@ retained results and the native Voice controls remain in #1217.
 Voice flags do not increase this slice's editable preference count. There are fourteen
 previously accepted preferences plus three recording-sound preferences now
 qualified natively below; installed-package sound acceptance is still pending.
+Four additional dictation preferences now have executable desktop behavior;
+their qualification and platform differences are recorded separately below.
 
 The published `VoiceSynthesisOptions` contract from #1217 now validates transfer
 of `ttsSpeed`, `ttsPitch` and `ttsUseSSML` into that same model. Transfer-only
@@ -62,6 +64,72 @@ separate generated-result cache/playback staging does not. Foreign imported
 `recordingsDirectory` values are never executed. UUID filenames replace the
 Mac's colon-containing timestamps on Windows. Native archival and Voice
 acceptance belong to the Voice/parent workstreams, not this defaults extraction.
+
+## Hands-free and silence execution
+
+The native Transcription editor now exposes `handsFreeDictationEnabled`,
+`silenceDetectionEnabled`, `silenceThreshold` and `silenceDuration`, using the
+same canonical keys and Mac meter/default/range definitions. This increases the
+editor to 21 preferences, not 21 fully accepted product features.
+`DictationSilencePolicy.swift` owns the PCM meter's -60 dB scale, 0.7 RMS/0.3 peak
+weighting, 0.05 threshold and two-second hold. Manual auto-stop includes initial
+quiet and uses the existing recording buffer, provider finalization,
+post-processing and insertion pipeline; manual Record stays manual even when
+the hands-free preference is enabled.
+
+Windows/Linux hands-free is explicitly **sound activation, not Apple's ML speech
+classifier**. Noise can trigger it. The existing pure `HandsFreeDictationMachine`
+and activity tracker now compile portably; unchanged Apple classification,
+sensitivity and model admission live in `HandsFreeDictationApple.swift`.
+The native hotkey arms/disarms, sound starts an utterance, configured silence
+finishes it, and a successful transcription rearms the same native capture after
+the existing automatic output finishes. Output retains its existing status-only
+failure/recovery API; this slice does not add typed delivery acknowledgements.
+Capture/provider/post-processing failures, Cancel, Record, committed configuration
+changes, lock/sleep and close disarm. A refused start or user-absence event never
+cancels a manual recording.
+The run freezes its original profile, insertion target and output options;
+disarm/rearm to change target. Following foreground app changes between
+utterances remains a gap, not an asserted Mac-equivalent behavior.
+
+`DesktopHandsFreeAudio.swift` keeps quiet pre-roll only in RAM (0.5 seconds).
+Startup audio is bounded to three seconds; overflow fails and disarms rather
+than silently losing first words. Quiet listening creates neither History/WAV
+nor a provider session. Each utterance uses the existing WAV/provider sink;
+stopping joins that sink before finalization without restarting the detector.
+Automatic recording cues are muted only during sound activation to prevent
+self-triggering. The armed run reserves the existing independent feedback
+channel, cancels/stops an earlier preview before microphone startup and refuses
+new previews until disarmed. No audio IPC, disk polling, native inference/resampling
+replacement, recording-directory change or Voice persistence mirror is added.
+
+Arming requires native session monitoring. Windows observes WTS lock,
+disconnect/logoff and power messages and verifies initial session/input-desktop
+state. Linux observes logind sleep/current-session state and an existing
+GNOME/freedesktop screen service, subscribing before querying initial state.
+Independent absence bits prevent unlock from clearing sleep (or wake from
+clearing lock). Lost buses/services or invalidated session state fail closed.
+Missing access/monitoring disables enabling a new native mode with an explanation
+and refuses runtime arming. A previously saved enabled mode remains editable so
+users can turn it off and restore manual shortcuts; its value is not silently
+discarded. Manual recording still works. A failed monitor needs an
+app restart, not an unprotected automatic retry. Flatpak permissions are
+unchanged; its installed session-monitoring availability is unqualified.
+Linux settings retain native scrolling. Windows now scrolls fields/recovery
+controls while keeping the section, error region and footer fixed; wheel,
+scrollbar and Page Up/Down make the last fields reachable.
+
+The final local runtime tree passes 99 focused hands-free/configuration/feedback
+tests and the full portable suite (1436 tests, 28 skipped, zero failures), all four Windows Swift projections and
+strict lint across the 29 changed Swift source/test files. The boundary check
+reports 275 shared sources and 110 explicit Apple exclusions; canonical-key
+coverage remains 91/91. Local production Win32 control fixtures pass grouped validation, recovery,
+scroll-to-end, fixed-footer bounds and guard-disabled state. Production GLib
+fixtures pass independent lock/sleep state and service-loss refusal. Changed
+native C/C++ syntax passes. These synthetic/native-control receipts do **not**
+prove real microphone latency, real OS lock/sleep delivery, ambient-noise
+quality, Apple compilation or installed-package acceptance. Exact-head CI and
+physical/device qualification must be reported separately.
 
 ## Recording feedback (native qualified; package acceptance pending)
 
@@ -327,10 +395,10 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | ttsFavoriteVoices | Missing / Missing | No voice favourites |
 | ttsPronunciationDictionary | Missing / Missing | No TTS pronunciation editor/pipeline |
 | historyFlushInterval | Missing selector / Missing selector | History is durable per operation, not configurable timed flush |
-| silenceDetectionEnabled | Missing / Missing | No configured silence stop pipeline |
-| handsFreeDictationEnabled | Missing / Missing | No hands-free session loop in this baseline |
-| silenceThreshold | Missing / Missing | No silence threshold editor/pipeline |
-| silenceDuration | Missing / Missing | No silence duration editor/pipeline |
+| silenceDetectionEnabled | Executable; qualification pending / Same | Native switch; initial quiet and configured silence stop the existing manual recording/finalization pipeline |
+| handsFreeDictationEnabled | Sound-activation replacement; qualification pending / Same | Hotkey arm, RAM pre-roll, utterance/finalize/output/rearm; native absence guard required; not Apple's classifier and target stays fixed per run |
+| silenceThreshold | Executable; qualification pending / Same | Canonical range/default and Mac PCM meter; native editor feeds manual silence and sound activation |
+| silenceDuration | Executable; qualification pending / Same | Canonical hold/range feeds manual auto-stop and hands-free debounce; existing recording tail is retained |
 | connectionPreWarmingEnabled | Missing / Missing | No persistent provider prewarming preference |
 | audioPreWarmingEnabled | Missing / Missing | Native capture opened on demand, no capture prewarming preference |
 | warmMicrophoneOnKeyPress | Missing / Missing | No speculative microphone-open preference |

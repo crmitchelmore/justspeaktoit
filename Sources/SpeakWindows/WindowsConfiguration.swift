@@ -26,7 +26,8 @@ extension WindowsNative {
                 title: strings.add(field.title), value: strings.add(value), group: strings.add(field.group),
                 is_boolean: { if case .boolean = field.kind { return 1 }; return 0 }(),
                 requires_hud_overlay: field.requiresHUDOverlay ? 1 : 0,
-                choices: field.serializedChoices.map { strings.add($0) }
+                choices: field.serializedChoices.map { strings.add($0) },
+                requires_hands_free_guard: field.requiresHandsFreeGuard ? 1 : 0
             )
         }
         let recovered: [UnsafePointer<CChar>?] = preferences.recoveredKeywords.map { strings.add($0) }

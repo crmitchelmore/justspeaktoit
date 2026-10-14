@@ -117,6 +117,14 @@ extension DesktopHostController {
             update("Stopping History deletion… Remaining recordings will be kept.", state: 2)
             return
         }
+        if let runID = handsFreeRun?.id {
+            Task {
+                guard self.handsFreeRun?.id == runID else { return }
+                await self.disarmHandsFree()
+            }
+        } else if handsFreeMachine.isArmed {
+            _ = handsFreeMachine.handle(.userDisarmed)
+        }
         cancelOutput()
         guard busy else { return }
         cancellationRequested = true

@@ -32,7 +32,7 @@ extension DesktopHostController {
     }
 
     package func previewRecordingFeedback(_ sound: RecordingFeedbackSound) throws {
-        guard !closed, !busy, recording == nil else {
+        guard !closed, !busy, recording == nil, !handsFreeMachine.isArmed else {
             throw DesktopHostError(message: "Finish dictation before previewing recording sounds.")
         }
         guard let feedback = recordingFeedback else {

@@ -217,6 +217,7 @@ private func linuxSessionEvent(_ event: Int, value: String, slot: Int, holder: L
     case Int(JSTI_EVENT_COPY): holder.copyDisplayed()
     case Int(JSTI_EVENT_READY): linuxReady(holder)
     case Int(JSTI_EVENT_CANCEL): Task { await controller.cancelTranscription() }
+    case Int(JSTI_EVENT_USER_ABSENT): Task { await controller.handsFreeUserAbsent(value) }
     case Int(JSTI_EVENT_REFRESH_MODELS): Task { await controller.refreshModels(force: true) }
     default: return false
     }

@@ -21,6 +21,10 @@ final class DesktopHostConfigurationTests: XCTestCase {
         try FileManager.default.removeItem(at: directory)
     }
 
+    private func index(_ key: ApplicationPreferenceKey) throws -> Int {
+        try XCTUnwrap(DesktopConfiguration.fields.firstIndex { $0.key == key.rawValue })
+    }
+
     func testSavePersistsPreferencesAndPreservesRootUnknownSettings() async throws {
         await controller.close()
         let values: [String: AnyCodable] = [
@@ -31,9 +35,9 @@ final class DesktopHostConfigurationTests: XCTestCase {
         try JSONEncoder().encode(values).write(to: settingsURL)
         controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
         var entries = try await controller.configuration().entries
-        entries[0] = "fr_FR"
-        entries[4] = "0.6"
-        entries[5] = "French"
+        entries[try index(.preferredLocale)] = "fr_FR"
+        entries[try index(.postProcessingTemperature)] = "0.6"
+        entries[try index(.postProcessingOutputLanguage)] = "French"
         try await controller.saveConfiguration(entries)
         let disk = try JSONDecoder().decode([String: AnyCodable].self, from: Data(contentsOf: settingsURL))
         XCTAssertEqual(disk["futureEngine"], values["futureEngine"])
@@ -77,7 +81,7 @@ final class DesktopHostConfigurationTests: XCTestCase {
             XCTAssertTrue(error.localizedDescription.contains("Hold threshold"))
         }
         var entries = before.entries
-        entries[4] = "2"
+        entries[try index(.postProcessingTemperature)] = "2"
         do { try await controller.saveConfiguration(entries); XCTFail("Invalid temperature accepted") } catch {
             XCTAssertTrue(error.localizedDescription.contains("Temperature"))
         }
@@ -87,14 +91,14 @@ final class DesktopHostConfigurationTests: XCTestCase {
 
     func testHUDPreferencesGatePresentationAndLiveText() async throws {
         var entries = try await controller.configuration().entries
-        entries[9] = "0"
+        entries[try index(.showLiveTranscriptInHUD)] = "0"
         try await controller.saveConfiguration(entries)
         let id = UUID()
         await controller.beginHUD(id, .recording(profile: nil, liveText: "Synthetic speech"))
         XCTAssertEqual(FakeLog.shared.huds.last?.liveText, "")
         XCTAssertEqual(FakeLog.shared.huds.last?.phase, .recording)
         await controller.finishHUD(id, .success("Done"))
-        entries[8] = "0"
+        entries[try index(.showHUD)] = "0"
         try await controller.saveConfiguration(entries)
         await controller.beginHUD(UUID(), .recording(profile: nil, liveText: "Synthetic speech"))
         XCTAssertEqual(FakeLog.shared.huds.last, .hidden)
@@ -110,7 +114,7 @@ final class DesktopHostConfigurationTests: XCTestCase {
         let saved = try Data(contentsOf: settingsURL)
         effects.refusesWrites = true
         var entries = before.entries
-        entries[0] = "de_DE"
+        entries[try index(.preferredLocale)] = "de_DE"
         do { try await controller.saveConfiguration(entries); XCTFail("Failed save accepted") } catch {
             XCTAssertEqual((error as NSError).code, CocoaError.fileWriteOutOfSpace.rawValue)
         }
@@ -145,8 +149,8 @@ final class DesktopHostConfigurationTests: XCTestCase {
 
     func testChangingPostProcessingDoesNotResetAdvancedPreferences() async throws {
         var entries = try await controller.configuration().entries
-        entries[4] = "0.7"
-        entries[5] = "German"
+        entries[try index(.postProcessingTemperature)] = "0.7"
+        entries[try index(.postProcessingOutputLanguage)] = "German"
         try await controller.saveConfiguration(entries)
         await controller.savePostProcessing(enabled: false, modelIndex: 0, prompt: "Custom", key: "")
         let saved = await controller.postProcessingOptions()
@@ -157,8 +161,8 @@ final class DesktopHostConfigurationTests: XCTestCase {
 
     func testShortenedErrorDurationPreservesLiveTextPolicyAndSuccessTiming() async throws {
         var entries = try await controller.configuration().entries
-        entries[9] = "0"
-        entries[10] = "1"
+        entries[try index(.showLiveTranscriptInHUD)] = "0"
+        entries[try index(.shortenErrorDisplay)] = "1"
         try await controller.saveConfiguration(entries)
         let id = UUID()
         await controller.beginHUD(id, .recording(profile: nil, liveText: "Synthetic speech"))
@@ -172,7 +176,7 @@ final class DesktopHostConfigurationTests: XCTestCase {
         XCTAssertNil(FakeLog.shared.huds.last?.displayDuration)
         await controller.finishHUD(replacement, .success("Completed"))
         XCTAssertEqual(FakeLog.shared.huds.last?.displayDuration, 2.4)
-        entries[10] = "0"
+        entries[try index(.shortenErrorDisplay)] = "0"
         try await controller.saveConfiguration(entries)
         await controller.beginHUD(id, .recording(profile: nil))
         await controller.finishHUD(id, .failure("Synthetic error"))
@@ -187,7 +191,7 @@ final class DesktopHostConfigurationTests: XCTestCase {
         try JSONEncoder().encode(DesktopConfigurationDocument(preferences: preferences)).write(to: file)
         try await controller.importConfiguration(path: file.path)
         var entries = try await controller.configuration().entries
-        entries[1] = String(repeating: "a", count: 65_535)
+        entries[try index(.transcriptionKeywords)] = String(repeating: "a", count: 65_535)
         try await controller.saveConfiguration(entries)
         let original = Data("Existing export".utf8)
         try original.write(to: file)
@@ -199,10 +203,10 @@ final class DesktopHostConfigurationTests: XCTestCase {
 
     func testCompactHUDPolicyPreservesTimersRetractionsAndReplacementIdentity() async throws {
         var entries = try await controller.configuration().entries
-        let compactIndex = try XCTUnwrap(DesktopConfiguration.fields.firstIndex { $0.key == "showCompactHUD" })
+        let compactIndex = try index(.showCompactHUD)
         entries[compactIndex] = "1"
-        entries[9] = "0"
-        entries[10] = "1"
+        entries[try index(.showLiveTranscriptInHUD)] = "0"
+        entries[try index(.shortenErrorDisplay)] = "1"
         try await controller.saveConfiguration(entries)
         let first = UUID()
         await controller.beginHUD(first, .recording(profile: nil, liveText: "Synthetic speech"))
@@ -213,7 +217,7 @@ final class DesktopHostConfigurationTests: XCTestCase {
         XCTAssertEqual(FakeLog.shared.huds.last?.compact, true)
         XCTAssertEqual(FakeLog.shared.huds.last?.displayDuration, 3.6)
 
-        entries[9] = "1"
+        entries[try index(.showLiveTranscriptInHUD)] = "1"
         try await controller.saveConfiguration(entries)
         let second = UUID()
         await controller.beginHUD(second, .recording(profile: nil, liveText: "Latest words"))
@@ -231,7 +235,7 @@ final class DesktopHostConfigurationTests: XCTestCase {
         XCTAssertEqual(FakeLog.shared.huds.last?.compact, false)
         XCTAssertEqual(FakeLog.shared.huds.last?.liveText, "Full card")
         await controller.finishHUD(first, .success("Completed"))
-        entries[8] = "0"
+        entries[try index(.showHUD)] = "0"
         entries[compactIndex] = "1"
         try await controller.saveConfiguration(entries)
         await controller.beginHUD(UUID(), .recording(profile: nil))

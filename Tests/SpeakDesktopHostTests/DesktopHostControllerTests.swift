@@ -21,13 +21,14 @@ struct FakeJob: Sendable {
 }
 
 final class FakePlayback: DesktopHostPlayback, @unchecked Sendable {
+    let stopping = Gate(open: true)
     func setStatusHandler(_ handler: @escaping @Sendable (UInt64, String) -> Void) {}
     func isCurrent(revision: UInt64) -> Bool { false }
     func play(recordID: UUID, path: String, knownDuration: TimeInterval?) throws {}
     func togglePause(recordID: UUID) -> Bool { false }
     func stop(announcing: Bool) {}
     func stop(unless recordID: UUID) {}
-    func stopAndWait() async throws {}
+    func stopAndWait() async throws { await stopping.pass() }
     func stopSavedAudioAndWait() async throws { await FakeLog.shared.stopSavedAudio() }
     func close() async throws {}
 }
@@ -93,6 +94,7 @@ final class FakeLog: @unchecked Sendable {
 }
 
 enum FakePlatform: DesktopHostPlatform {
+    static func handsFreeReadinessFailure() -> String? { nil }
     typealias VoiceOutputSettings = DesktopVoiceOutputSettings
     static let displayName = "Test"
     static let credentialStoreName = "the test keyring"
@@ -150,6 +152,7 @@ final class Gate: @unchecked Sendable {
     private let lock = NSLock()
     private var open: Bool
     init(open: Bool) { self.open = open }
+    func hold() { lock.withLock { open = false } }
     func release() { lock.withLock { open = true } }
     func pass() async {
         while !lock.withLock({ open }) {

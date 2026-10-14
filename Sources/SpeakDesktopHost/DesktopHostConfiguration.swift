@@ -42,9 +42,10 @@ extension DesktopHostController {
         changed.postProcessing = polish
         try effects.writeSettings(JSONEncoder().encode(changed), to: directory.appendingPathComponent("settings.json"))
         settings = changed
+        let cleanup = await disarmHandsFreeForConfiguration()
         try await configureRecordingFeedback(configuration)
         Platform.hud(.hidden)
-        update(status)
+        update(status + cleanup)
     }
 
     /// Export only portable preferences, never keys, device paths, native hotkeys
@@ -93,6 +94,7 @@ extension DesktopHostController {
         changed.postProcessing = polish
         try effects.writeSettings(JSONEncoder().encode(changed), to: directory.appendingPathComponent("settings.json"))
         settings = changed
+        let cleanup = await disarmHandsFreeForConfiguration()
         try await configureRecordingFeedback(document.preferences)
         Platform.hud(.hidden)
         let supported = DesktopConfiguration.supportedKeys.union(Platform.voiceConfigurationKeys)
@@ -103,7 +105,14 @@ extension DesktopHostController {
             ? "Configuration imported. Voice controls require a compatible provider; service choices unchanged."
             : "Configuration imported. Provider/model choices and service permissions are unchanged."
         update(status
-            + (unknown.isEmpty ? "" : " Preserved but not applied: \(unknown.joined(separator: ", "))."))
+            + (unknown.isEmpty ? "" : " Preserved but not applied: \(unknown.joined(separator: ", ")).")
+            + cleanup)
+    }
+
+    private func disarmHandsFreeForConfiguration() async -> String {
+        guard handsFreeMachine.isArmed else { return "" }
+        let failure = await disarmHandsFree(status: "Hands-free disarmed after configuration changed.")
+        return failure.map { " Hands-free cleanup failed: \($0)" } ?? ""
     }
 }
 

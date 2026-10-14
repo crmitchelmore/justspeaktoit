@@ -71,7 +71,8 @@ enum {
     JSTI_EVENT_APPEARANCE = 45,
     /* General › Launch at login. index: 1 on, 0 off. The switch stays
      * insensitive until jsti_window_set_login_item reports the state reached. */
-    JSTI_EVENT_LOGIN_ITEM = 46
+    JSTI_EVENT_LOGIN_ITEM = 46,
+    JSTI_EVENT_USER_ABSENT = 120
 };
 
 /* The argument the login item starts the app with (the shared
@@ -90,6 +91,7 @@ typedef struct JSTIConfigurationField {
     int32_t requires_hud_overlay;
     /* Optional newline-separated choices: raw value, tab, display title. */
     const char *choices;
+    int32_t requires_hands_free_guard;
 } JSTIConfigurationField;
 typedef int32_t (*JSTIConfigurationCallback)(int32_t action, const char *const *values, size_t count,
                                             void *context, char *error, size_t capacity);
@@ -99,6 +101,8 @@ typedef int32_t (*JSTIConfigurationCallback)(int32_t action, const char *const *
 int32_t jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t count,
                                       const char *const *recovered_keywords, size_t recovered_count,
                                       JSTIConfigurationCallback callback, void *context);
+/* False when logind/screen-lock observation is unavailable; manual capture is unaffected. */
+int32_t jsti_window_hands_free_guard_ready(void);
 
 typedef struct JSTIModelRow {
     const char *id;

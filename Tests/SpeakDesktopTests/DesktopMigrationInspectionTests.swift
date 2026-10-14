@@ -72,6 +72,100 @@ final class DesktopMigrationInspectionTests: XCTestCase {
         XCTAssertFalse(report.text.contains("\(DataMigrationCategory.history.title): 0 structurally valid"))
     }
 
+}
+
+extension DesktopMigrationInspectionTests {
+    func testProfiles_ValidateCanonicalPayloadAndCoverageWithoutDisplayingOrChangingValues() async throws {
+        let fixture = try InspectionFixture()
+        defer { fixture.remove() }
+        let directory = try fixture.staging()
+        let profile = DictationProfile(name: "SYNTHETIC-PRIVATE-NAME", polishPrompt: "SYNTHETIC-PRIVATE-PROMPT")
+        var valid = DataMigrationRecord(
+            id: profile.id.uuidString, kind: DataMigrationProfileCatalog.kind,
+            value: try DataMigrationCoding.value(profile)
+        )
+        guard case var .object(fields) = valid.value.storage else { return XCTFail("Expected profile object.") }
+        fields["transcriptionRouting"] = .string("future-routing")
+        fields["matchers"] = .array([.object(["kind": .string("future"), "value": .string("private-matcher")])])
+        valid.value = AnyCodable(.object(fields))
+        var forged = valid
+        forged.id = UUID().uuidString
+        var outside = valid
+        outside.kind = "future-kind"
+        var broken = valid
+        broken.value = AnyCodable(.string("SYNTHETIC-INVALID-PROFILE"))
+        let records = [valid, forged, outside, broken]
+        let snapshot = DataMigrationSnapshot(
+            manifest: .init(
+                categories: [.profiles],
+                scopes: ["profiles": .init(selectedIDs: [valid.id], selectedKinds: [DataMigrationProfileCatalog.kind])]
+            ),
+            records: [.profiles: records], directory: directory
+        )
+        let outcome = await DesktopMigrationInspection.inspect(fixture.source, reader: .init { _ in snapshot })
+        guard case let .inspected(report) = outcome else { return XCTFail("\(outcome)") }
+        XCTAssertEqual(report.categories.map(\.items), [4])
+        XCTAssertEqual(report.profileChecks.map(\.items), [1])
+        XCTAssertEqual(report.invalidProfileItems, 3)
+        XCTAssertEqual(report.historyChecks, [])
+        XCTAssertEqual(report.invalidHistoryItems, 0)
+        XCTAssertTrue(report.text.contains("3 profile items failed record validation"))
+        for privateValue in [profile.name, profile.polishPrompt ?? "", valid.id, forged.id,
+                             "private-matcher", "SYNTHETIC-INVALID-PROFILE"] {
+            XCTAssertFalse(report.text.contains(privateValue))
+        }
+        XCTAssertEqual(snapshot.records[.profiles], records)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
+    }
+
+    func testProfiles_MissingAndPresentEmptyRemainDistinct() async throws {
+        let fixture = try InspectionFixture()
+        defer { fixture.remove() }
+        let sources: [[DataMigrationCategory: [DataMigrationRecord]]] = [[:], [.profiles: []]]
+        for records in sources {
+            let snapshot = DataMigrationSnapshot(
+                manifest: .init(categories: [.profiles], scopes: [:]),
+                records: records, directory: try fixture.staging()
+            )
+            let outcome = await DesktopMigrationInspection.inspect(fixture.source, reader: .init { _ in snapshot })
+            guard case let .inspected(report) = outcome else { return XCTFail("\(outcome)") }
+            XCTAssertEqual(report.profileChecks.first?.items, records[.profiles]?.count)
+            XCTAssertEqual(report.invalidProfileItems, 0)
+            if records[.profiles] == nil {
+                XCTAssertTrue(report.text.contains("\(DataMigrationCategory.profiles.title): could not be validated"))
+                XCTAssertFalse(report.text.contains("\(DataMigrationCategory.profiles.title): 0 structurally valid"))
+            }
+        }
+    }
+
+    func testProfileZIP_UsesCanonicalValidationAndLeavesOriginalArchiveUnchanged() async throws {
+        let fixture = try InspectionFixture()
+        defer { fixture.remove() }
+        let profile = DictationProfile(name: "Synthetic profile", polishPrompt: "SYNTHETIC-PRIVATE-PROMPT")
+        let record = DataMigrationRecord(
+            id: profile.id.uuidString, kind: DataMigrationProfileCatalog.kind,
+            value: try DataMigrationCoding.value(profile)
+        )
+        let snapshot = DataMigrationSnapshot(
+            manifest: .init(categories: [.profiles], scopes: [:]), records: [.profiles: [record]]
+        )
+        let archive = try DesktopMigrationArchive.export(
+            snapshot, digests: InspectionFixture.digests, stagingRoot: fixture.root, storage: InspectionFixture.storage
+        )
+        try FileManager.default.copyItem(at: archive, to: fixture.source)
+        let original = try Data(contentsOf: fixture.source)
+        let outcome = await DesktopMigrationInspection.inspect(fixture.source, reader: fixture.reader)
+        guard case let .inspected(report) = outcome else { return XCTFail("\(outcome)") }
+        XCTAssertEqual(report.profileChecks.map(\.items), [1])
+        XCTAssertEqual(report.invalidProfileItems, 0)
+        XCTAssertTrue(report.mergePreview.isEmpty)
+        XCTAssertFalse(report.text.contains(profile.polishPrompt ?? ""))
+        XCTAssertEqual(try Data(contentsOf: fixture.source), original)
+    }
+
+}
+
+extension DesktopMigrationInspectionTests {
     func testRealZIP_ReportsCategoriesWithoutDisplayingValuesOrChangingSource() async throws {
         let fixture = try InspectionFixture()
         defer { fixture.remove() }

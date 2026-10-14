@@ -50,6 +50,8 @@ public enum DesktopMigrationInspection {
         public let noticeCount: Int
         public let historyChecks: [Category]
         public let invalidHistoryItems: Int
+        public let profileChecks: [Category]
+        public let invalidProfileItems: Int
         public let mergePreview: [MergeCategory]
         public let recordingHistoryOnly: Bool
 
@@ -70,14 +72,17 @@ public enum DesktopMigrationInspection {
                     "This backup selects recording History only. Separate speech-usage ledgers are excluded."
                 )
             }
-            if !historyChecks.isEmpty {
-                let checks = historyChecks.map { row in
+            if !historyChecks.isEmpty || !profileChecks.isEmpty {
+                let checks = (historyChecks + profileChecks).map { row in
                     guard let count = row.items else { return "\(row.category.title): could not be validated" }
                     return "\(row.category.title): \(count) structurally valid"
                 }
                 sections.append(checks.joined(separator: "\n"))
                 if invalidHistoryItems > 0 {
                     sections.append("\(invalidHistoryItems) History/audio items failed record validation.")
+                }
+                if invalidProfileItems > 0 {
+                    sections.append("\(invalidProfileItems) profile items failed record validation.")
                 }
             }
             if !mergePreview.isEmpty {
@@ -98,7 +103,7 @@ public enum DesktopMigrationInspection {
             }
             sections.append(
                 "Inspection checks the archive envelope and extracted audio checksums. "
-                    + "History/audio record structure is checked; other record values are not validated. "
+                    + "History/audio and profile record structure is checked; other record values are not validated. "
                     + "Record values are not yet approved for import. Import/apply is not available here."
             )
             if categories.contains(where: { $0.category == .credentials }) {
@@ -118,6 +123,12 @@ public enum DesktopMigrationInspection {
                 .init(category: $0, items: checked.records[$0]?.count)
             }
             invalidHistoryItems = historyChecks.reduce(0) { count, row in
+                guard let read = snapshot.records[row.category]?.count, let valid = row.items else { return count }
+                return count + read - valid
+            }
+            profileChecks = snapshot.manifest.categories.contains(.profiles)
+                ? [.init(category: .profiles, items: checked.records[.profiles]?.count)] : []
+            invalidProfileItems = profileChecks.reduce(0) { count, row in
                 guard let read = snapshot.records[row.category]?.count, let valid = row.items else { return count }
                 return count + read - valid
             }
@@ -156,11 +167,7 @@ public enum DesktopMigrationInspection {
             try Task.checkCancellation()
             let checked = try DataMigrationRecordValidation.validate(
                 snapshot, checkCancellation: { try Task.checkCancellation() },
-                recordValidator: { record, category in
-                    if category == .history || category == .recordings {
-                        _ = try DesktopMigrationHistory.record(record, category: category)
-                    }
-                }
+                recordValidator: validateRecord
             )
             let preview = try await mergePreview(checked, comparison: comparison)
             outcome = .inspected(Report(snapshot, checked: checked, mergePreview: preview))
@@ -183,5 +190,16 @@ public enum DesktopMigrationInspection {
         }
         if case .inspected = outcome, Task.isCancelled { return .cancelled }
         return outcome
+    }
+
+    private static func validateRecord(_ record: DataMigrationRecord, category: DataMigrationCategory) throws {
+        switch category {
+        case .history, .recordings:
+            _ = try DesktopMigrationHistory.record(record, category: category)
+        case .profiles:
+            try DataMigrationProfileCatalog.validate(record, category: category)
+        default:
+            break
+        }
     }
 }

@@ -315,7 +315,7 @@ bool jsti_voice_controls_self_test(HWND owner, std::string &error) {
         SetDlgItemTextW(window, speedID, L"1.5");
         if (length && length < path.size()) {
             char failure[1024]{}; ShowWindow(window, SW_SHOWNOACTIVATE);
-            passed = jsti_save_owned_window_snapshot(window,
+            passed = jsti_owned_window_save_snapshot(window,
                 (jsti::utf8(path.data()) + ".voice-controls.bmp").c_str(), failure, sizeof(failure)) == 0 && passed;
             if (failure[0]) error = failure;
         }
@@ -341,7 +341,7 @@ bool jsti_voice_controls_self_test(HWND owner, std::string &error) {
         SetDlgItemTextW(window, speedID, L"1.5");
         if (length && length < path.size()) {
             char failure[1024]{}; ShowWindow(window, SW_SHOWNOACTIVATE);
-            passed = jsti_save_owned_window_snapshot(window,
+            passed = jsti_owned_window_save_snapshot(window,
                 (jsti::utf8(path.data()) + ".voice-controls.bmp").c_str(), failure, sizeof(failure)) == 0 && passed;
             if (failure[0]) error = failure;
         }

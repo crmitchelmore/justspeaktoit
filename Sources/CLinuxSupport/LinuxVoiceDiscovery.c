@@ -190,7 +190,7 @@ void jsti_voice_discovery_show_fixture(GtkWindow *owner) {
 }
 int32_t jsti_voice_discovery_save_snapshot(const char *path) {
     if (active == NULL) return -1;
-    int32_t result = jsti_window_save_widget_png(GTK_WIDGET(active->window), path, TRUE);
+    int32_t result = jsti_widget_save_snapshot(GTK_WIDGET(active->window), path, TRUE);
     gtk_window_destroy(active->window);
     return result;
 }

@@ -8,6 +8,7 @@ public actor DesktopRecordingStore {
         // swiftlint:disable:next nesting
         enum CodingKeys: String, CodingKey, CaseIterable {
             case id, createdAt, audioFilename, modelIdentifier, result, failure, processedText
+            case correctedText, lexiconSummary, lexiconDirectives, lexiconContextTags
             case postProcessingModelIdentifier, postProcessingFailure, languageIdentifier, profileName, profileNotes
             case originPlatform, migrationMetadata, recordedDuration, importedCost, importedModelIdentifiers
         }

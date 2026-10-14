@@ -231,7 +231,6 @@ final class DesktopHostReadAloudTests: XCTestCase {
         XCTAssertEqual(retained.useSSML, stored.useSSML)
     }
 
-
     func testReadAloud_SpeaksEachSegmentWithTheSavedVoiceThenFinishes() async throws {
         FakeLog.shared.setKey("deepgram-key", name: deepgramKey)
         let voice = try XCTUnwrap(DeepgramSpeechCatalog.fluxVoices.first { $0.id == "flux-kit-en" })

@@ -46,6 +46,11 @@ int32_t jsti_window_set_voice_usage(const char *request_id, const char *text, in
  * Stale/closed tokens are ignored; loading disables selection. */
 int32_t jsti_window_set_voice_account_inventory(const char *request_id, const char *labels,
     const char *identifiers, int32_t selected, const char *status, int32_t loading);
+/* Modern open: tagged118 account-open-modern, source-1, empty text, session36.
+ * Provider transition: account-provider, text providerID + newline + epoch36.
+ * Refresh/Pick use acknowledged epoch; Close uses session. Never History IDs. */
+int32_t jsti_window_set_voice_account_providers(const char *request_id, const char *discovery_epoch,
+    const char *provider_ids, const char *labels, int32_t selected);
 #ifdef __cplusplus
 }
 #endif

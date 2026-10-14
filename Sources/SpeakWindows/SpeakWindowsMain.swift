@@ -354,6 +354,9 @@ enum SpeakWindowsMain {
     }
 
     private static func runWindow(controller: WindowsAppController, holder: WindowsEventContext) async throws {
+        // swiftlint:disable file_length
+        let providerCallbacks = try WindowsNative.beginVoiceProviderCallbacks(holder)
+        defer { WindowsNative.endVoiceProviderCallbacks(providerCallbacks) }
         try await configureWindow(controller: controller, holder: holder)
         let strings = WindowsModels.all.map { Array($0.displayName.utf8CString) }
         let pointers = strings.map { chars -> UnsafeMutablePointer<CChar> in
@@ -378,6 +381,7 @@ enum SpeakWindowsMain {
         let monitor = holder.microphoneMonitor
         await Task.detached { monitor?.stop() }.value
         holder.microphoneMonitor = nil
+        WindowsNative.endVoiceProviderCallbacks(providerCallbacks)
         await holder.finishSettings()
         // A drained Apply may have refreshed the dialog; never leave it holding
         // this context once the holder can be released.

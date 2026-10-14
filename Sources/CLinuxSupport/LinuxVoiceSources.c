@@ -398,7 +398,7 @@ static Dialog *make_dialog(GtkWindow *owner, const char *record, const char *his
     dialog->notice = GTK_LABEL(label("")); gtk_box_append(GTK_BOX(box), GTK_WIDGET(dialog->notice));
     GtkWidget *usage = gtk_button_new_with_label("Usage and input estimate...");
     gtk_widget_set_size_request(usage, -1, 44);
-    GtkWidget *account = gtk_button_new_with_label("xAI account voices...");
+    GtkWidget *account = gtk_button_new_with_label("Account voices...");
     gtk_widget_set_size_request(account, -1, 44);
     GtkWidget *discovery = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     gtk_widget_set_hexpand(usage, TRUE); gtk_widget_set_hexpand(account, TRUE);

@@ -304,6 +304,47 @@ Opaque stored identifier case is preserved; the shared xAI request builder retai
 its documented case-insensitive API normalization. Explicit language selection,
 progressive xAI delivery and wider output formats remain gaps.
 
+**Modern account provider forms (component-qualified candidate)** replace the
+xAI-only launch caption with **Account voices**. Initial open uses the explicit
+`118/account-open-modern` carrier, source `-1`, empty text and a canonical
+36-character session UUID; legacy account-open payloads remain distinct.
+Provider choices come exclusively from `VoiceAccountProvider.all` through the
+host projection. The native chooser proposes a different fresh epoch, then
+keeps provider/key/Refresh/list/Pick disabled until an exact
+session/epoch/provider acknowledgement and matching inventory have arrived.
+An empty Mistral account list is explicit: key entry and Refresh become
+available after acknowledgement, but Pick remains disabled. Opening, the
+initial handshake and closing do not look up a cached key, list voices or
+synthesize; Refresh and key actions remain explicit.
+
+Provider key entry has independent native state and never touches the selected
+voice key form. Each read/write result must match the form's session, epoch,
+provider and outstanding request; writes echo only the host-issued slot.
+Entry starts masked and empty, native temporary copies are wiped, and Remove
+requires confirmation. A write outcome remains visible after the follow-up
+state read, including failure; closing is not rollback or permission to retry.
+Browsing providers leaves the selected voice tuple and its credential workers
+unchanged.
+
+Each window run owns a registration handle. Ending that exact handle closes
+native admission, advances its generation and waits for synchronous Swift
+borrowed-string copying/FIFO admission before releasing the strong holder
+lease. Double or delayed end cannot unregister a replacement, including
+same-holder reuse. Only begin registers; late presentation cannot revive it.
+Posted results hold no callback/holder snapshot and reject stale generations
+before form access. GTK unregister does not post widget changes or wait for a
+stopped loop. The original selected-key callback and four exports are unchanged.
+
+Synthetic component qualification is not production app acceptance: a hidden
+Windows widget/registry fixture and an exact Linux Swift helper with the real
+GLib registry, Core parser and desktop FIFO can exercise these boundaries
+without real keys or user text. The helper uses a synthetic holder/controller
+and executes no GTK widgets. GTK widget execution additionally requires a
+compatible Adwaita runtime; header syntax alone is not runtime evidence.
+Production Swift/C app shutdown, ARM, Apple and real-vault/provider journeys
+remain separate gates. This component-qualified candidate is not selected for
+production; holding persistence alone does not authorize composition or activation.
+
 ## Journey
 
 Choose **Voice Output > Text and export**. The native editor defaults to a

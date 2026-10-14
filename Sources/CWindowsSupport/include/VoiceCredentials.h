@@ -24,6 +24,26 @@ int32_t jsti_window_set_voice_credential(
 int32_t jsti_window_finish_voice_credential(
     const char *requestID, const char *selectionEpoch, int32_t success, const char *message);
 
+/* Independent account-dialog channel. Unregister(NULL, NULL) synchronously
+   fences admitted callbacks; one null argument is invalid. No secret prefill. */
+typedef void (*JSTIVoiceProviderCredentialCallback)(
+    const char *operation, const char *purpose, const char *providerID,
+    const char *identifier, const char *discoverySessionID,
+    const char *discoveryEpoch, const char *requestID, const char *secret,
+    void *context);
+int32_t jsti_window_set_voice_provider_credential_handler(
+    JSTIVoiceProviderCredentialCallback callback, void *context);
+int32_t jsti_window_set_voice_account_providers(
+    const char *requestID, const char *discoveryEpoch,
+    const char *providerIDs, const char *labels, int32_t selected);
+int32_t jsti_window_set_voice_provider_credential(
+    const char *requestID, const char *discoverySessionID, const char *discoveryEpoch,
+    const char *providerID, const char *identifier, const char *label,
+    const char *privacy, const char *status, int32_t saved, int32_t canSave);
+int32_t jsti_window_finish_voice_provider_credential(
+    const char *requestID, const char *discoverySessionID,
+    const char *discoveryEpoch, const char *providerID, int32_t success, const char *message);
+
 #ifdef __cplusplus
 }
 #endif

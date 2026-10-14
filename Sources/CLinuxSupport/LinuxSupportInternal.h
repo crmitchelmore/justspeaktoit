@@ -41,6 +41,11 @@ struct _GtkWindow;
 void jsti_show_voice_sources(struct _GtkWindow *owner, const char *record, const char *history);
 int32_t jsti_voice_sources_self_test(struct _GtkWindow *owner, char *error, size_t capacity);
 void jsti_voice_sources_close(void);
+guint64 jsti_voice_provider_generation(void);
+gboolean jsti_voice_provider_enter(guint64 generation);
+void jsti_voice_provider_leave(void);
+void jsti_show_voice_provider_credentials(struct _GtkWindow *owner, guint64 generation,
+    const char *session, const char *epoch, const char *provider);
 void jsti_voice_sources_show_fixture(struct _GtkWindow *owner);
 int32_t jsti_voice_sources_save_snapshot(const char *path);
 void jsti_voice_controls_show_fixture(struct _GtkWindow *owner);

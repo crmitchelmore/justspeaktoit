@@ -4,6 +4,37 @@ import SpeakDesktopHost
 import CLinuxSupport
 
 extension LinuxHostPlatform {
+    package static func voiceProviderCredential(
+        _ result: Result<DesktopVoiceCredentialPresentation, VoiceOutputCredentialError>,
+        requestID: UUID, context: VoiceAccountCredentialContext
+    ) {
+        let view = DesktopVoiceCredentialView(result, requestID: requestID, credentialStore: credentialStoreName)
+        if jsti_window_set_voice_provider_credential(
+            view.requestID, context.sessionID.uuidString, context.epoch.uuidString, context.provider.id,
+            view.identifier, view.label, view.privacy, view.status, view.saved, view.canSave) < 0 {
+            update("The account Voice key state could not be shown.")
+        }
+    }
+
+    package static func voiceProviderCredentialFinished(
+        _ result: Result<Void, VoiceOutputCredentialError>, request: VoiceProviderCredentialRequest
+    ) {
+        let success: Int32
+        let message: String
+        switch result {
+        case .success:
+            success = 1
+            message = request.operation == .remove
+                ? "The saved provider key was removed." : "The provider key was saved."
+        case .failure(let error): success = 0; message = error.localizedDescription
+        }
+        if jsti_window_finish_voice_provider_credential(
+            request.id.uuidString, request.context.sessionID.uuidString,
+            request.context.epoch.uuidString, request.context.provider.id, success, message) < 0 {
+            update("The account Voice key operation result could not be shown.")
+        }
+    }
+
     package static func voiceCredential(
         _ result: Result<DesktopVoiceCredentialPresentation, VoiceOutputCredentialError>, requestID: UUID
     ) {

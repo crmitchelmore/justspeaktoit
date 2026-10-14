@@ -1,5 +1,11 @@
 import Foundation
 
+/// A host can wait for admission before opening a shared microphone capture.
+/// This is a synchronized observation of the protocol handshake, not socket task state.
+public protocol StreamingAudioReadyProviding: StreamingTranscriptionClient {
+    var isReadyForAudio: Bool { get }
+}
+
 // MARK: - Shared streaming transcription client pattern
 //
 // Every cloud live-transcription provider is driven by a single, cross-platform

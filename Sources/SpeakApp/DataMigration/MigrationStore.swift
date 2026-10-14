@@ -54,29 +54,9 @@ final class MigrationStore {
     }
 
     func validate(_ incoming: MigrationSnapshot) -> MigrationSnapshot {
-        var validated = incoming
-        for category in incoming.manifest.categories {
-            guard let records = incoming.records[category] else {
-                continue
-            }
-            validated.records[category] = records.filter { record in
-                do {
-                    try MigrationCatalog.validate(record, category: category)
-                    if category == .history || category == .recordings {
-                        let scope = incoming.manifest.scopes[category.rawValue] ?? MigrationScope()
-                        guard scope.contains(id: record.id, date: record.date) else {
-                            throw MigrationError.invalid("Item is outside the exported selection")
-                        }
-                    }
-                    return true
-                } catch {
-                    validated.notices
-                        .append("\(category.title), \(record.id): skipped invalid or unsupported item.")
-                    return false
-                }
-            }
+        DataMigrationRecordValidation.validate(incoming) { record, category in
+            try MigrationCatalog.validate(record, category: category)
         }
-        return validated
     }
 
     func apply(_ snapshot: MigrationSnapshot, categories: Set<MigrationCategory>) async throws {

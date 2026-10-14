@@ -64,6 +64,17 @@ final class WindowsAudioPlaybackSpeechTests: XCTestCase {
         controller.endSpeech(speech)
     }
 
+    func testAudioHousekeeping_DoesNotStopSpeechOrItsNextSegment() async throws {
+        let speech = try controller.beginSpeech(recordID: UUID())
+        try await controller.stopSavedAudioAndWait()
+        let (operation, handle) = try await segment(speech)
+        try await controller.stopSavedAudioAndWait()
+        XCTAssertEqual(handle.counts.cancelled, 0)
+        handle.complete(.init(status: .finished, played: 1))
+        _ = try await operation.value
+        controller.endSpeech(speech)
+    }
+
     /// The user's Stop ends speech while it is synthesised or playing, and
     /// refuses every segment still queued behind it.
     func testStop_EndsSpeechAndRefusesItsQueuedSegments() async throws {

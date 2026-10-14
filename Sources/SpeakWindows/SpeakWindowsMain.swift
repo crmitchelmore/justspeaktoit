@@ -37,6 +37,12 @@ final class WindowsEventContext {
             case .playPause(let identifier): await controller.playbackToggle(identifier)
             case .stop: await controller.playbackStop()
             case .readAloud(let identifier, let text): await controller.readAloud(identifier, text: text)
+            case .filter(let payload): await controller.applyHistoryFilters(payload)
+            case .voiceRead, .voiceExport, .voiceImport, .voiceImportCancel,
+                 .voiceGenerate, .voiceGeneratedPlay, .voiceGeneratedExport:
+                await controller.performVoiceEvent(event) {
+                    WindowsNative.voiceTextImported($1, requestID: $0)
+                }
             }
         }
     }
@@ -213,6 +219,10 @@ func postProcessingEvent(
 }
 
 private func secondaryWindowEvent(_ event: Int32, value: String, index: Int, holder: WindowsEventContext) {
+    if windowsHistoryManagementEvent(event, value: value, index: index, holder: holder) { return }
+    if (70...72).contains(event) {
+        return windowsVocabularyEvent(event, payload: value, kind: index, holder: holder)
+    }
     if (21...23).contains(event) { return hotKeyWindowEvent(event, value: value, index: index, holder: holder) }
     if event == 24 { return readAloudEvent(value, holder: holder) }
     if event == 25 { return automationEvent(requested: value == "1", holder: holder) }
@@ -283,8 +293,7 @@ enum SpeakWindowsMain {
         }
     }
 
-    /// A hand-edited or corrupt shortcut falls back to the default rather than
-    /// none; the Read aloud voice resolves through the canonical catalogue.
+    /// Restores the shortcut fallback and canonical Read aloud voice before launch.
     private static func configureHotKey(_ holder: WindowsEventContext) async throws {
         var hotKey = await holder.controller.hotKeySettings()
         let context = Unmanaged.passUnretained(holder).toOpaque()
@@ -310,8 +319,7 @@ enum SpeakWindowsMain {
         }
     }
 
-    /// Hands every dialog its saved state and restores services before the
-    /// window opens.
+    /// Restores native dialog state and services before the window opens.
     private static func configureWindow(controller: WindowsAppController, holder: WindowsEventContext) async throws {
         let microphone = await controller.selectedMicrophone()
         let smokeTest = holder.smokeTest
@@ -350,7 +358,7 @@ enum SpeakWindowsMain {
             try names.withUnsafeBufferPointer { buffer in
                 try WindowsNative.checked { error, capacity in
                     jsti_window_run(
-                        buffer.baseAddress, buffer.count, Int32(selected), windowEvent,
+                        buffer.baseAddress, buffer.count, Int32(selected), comparisonWindowEvent,
                         Unmanaged.passUnretained(holder).toOpaque(), error, capacity
                     )
                 }

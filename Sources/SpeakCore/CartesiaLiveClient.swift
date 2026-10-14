@@ -256,3 +256,7 @@ public final class CartesiaLiveClient: FinalizingStreamingTranscriptionClient,
         if let outbound { drive(outbound) }
     }
 }
+
+extension CartesiaLiveClient: StreamingAudioReadyProviding {
+    public var isReadyForAudio: Bool { lock.withLock { run.phase == .streaming && run.opened } }
+}

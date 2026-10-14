@@ -40,7 +40,6 @@ let appleCoreSources: [String] = [
     "AppleSpeechModelPreparation.swift",
     "AppleSpeechPreparationOperations.swift",
     "AutoCorrectionEngine.swift",
-    "AutoCorrectionStore.swift",
     "AutomationIntentSupport.swift",
     "AzureSpeechEndpointField.swift",
     "BrandColors.swift",
@@ -53,14 +52,11 @@ let appleCoreSources: [String] = [
     "CaptureSafetyClaim.swift",
     "CaptureSelfTest.swift",
     "CaptureWatchdogs.swift",
-    "CartesiaTTSAPI.swift",
     "DeepgramBalanceClient.swift",
     "DeprecatedCompatibility.swift",
     "DeviceIdentityStore.swift",
     "ElevenLabsBalanceClient.swift",
     "FileProductAnalyticsStateStore.swift",
-    "GeminiLiveClient.swift",
-    "GeminiLiveProtocol.swift",
     "GeminiTTSAPI.swift",
     "GroqTTSAPI.swift",
     "HandsFreeAudioPreRollBuffer.swift",
@@ -84,9 +80,7 @@ let appleCoreSources: [String] = [
     "LiveTranscriptionClientFactory.swift",
     "Logging.swift",
     "MacConnection.swift",
-    "MetaMuseLiveClient.swift",
     "MistralTTSAPI.swift",
-    "ModulateLiveClient.swift",
     "OpenClawClient.swift",
     "OpenClawClientReceive.swift",
     "OpenRouterAPIClient.swift",
@@ -101,7 +95,6 @@ let appleCoreSources: [String] = [
     "PaidAccess/PaidAudioPayload.swift",
     "PaidAccess/PaidStoreKitSync.swift",
     "PersonalLexiconService.swift",
-    "PersonalLexiconStore.swift",
     "ProductAnalytics.swift",
     "ProductAnalyticsDimensions.swift",
     "PronunciationManager.swift",
@@ -134,10 +127,6 @@ let appleCoreSources: [String] = [
     "TransportChannel.swift",
     "TransportProtocol.swift",
     "WatchCaptureImportJournal.swift",
-    "XAILiveClient.swift",
-    "XAILiveFinalisation.swift",
-    "XAILiveProtocol.swift",
-    "XAITTSAPI.swift",
     "XAITTSRealtime.swift"
 ]
 
@@ -168,6 +157,16 @@ let appleSyncTestSources: [String] = [
     "HistorySyncEngineTests.swift",
     "NativeRecordParityTests.swift"
 ]
+
+let migrationArchiveTarget = Target.target(
+    name: "CMigrationArchive",
+    exclude: ["miniz/LICENSE", "miniz/dependency.json"],
+    publicHeadersPath: "include",
+    cSettings: [
+        .define("MINIZ_NO_STDIO"), .define("MINIZ_NO_TIME"),
+        .define("MINIZ_NO_ZLIB_COMPATIBLE_NAMES")
+    ]
+)
 
 // Keep the existing root assets in one resource target, without collecting
 // unrelated branding or platform icon directories added by other targets.
@@ -204,7 +203,8 @@ let portablePackage = Package(
             resources: [.process("Resources")],
             swiftSettings: [.define("SPEAK_PORTABLE_CORE")]
         ),
-        .target(name: "SpeakDesktop", dependencies: ["SpeakCore"]),
+        migrationArchiveTarget,
+        .target(name: "SpeakDesktop", dependencies: ["SpeakCore", "CMigrationArchive"]),
         // Recording, History, output, settings and iCloud sync orchestration
         // shared by the Windows and Linux hosts behind DesktopHostPlatform.
         .target(
@@ -220,10 +220,14 @@ let portablePackage = Package(
         // Desktop History and API-key sync over CloudKit Web Services. Portable
         // only: Apple apps keep their native CloudKit engines.
         .target(name: "SpeakDesktopSync", dependencies: ["SpeakDesktop", "SpeakSync", "SpeakCore"]),
-        .target(name: "SpeakTestSupport", path: "Tests/SpeakTestSupport"),
+        .target(
+            name: "SpeakTestSupport", path: "Tests/SpeakTestSupport",
+            resources: [.copy("MigrationArchiveFixtures")]
+        ),
         .testTarget(
             name: "SpeakDesktopTests",
             dependencies: ["SpeakDesktop", "SpeakCore", "SpeakTestSupport", "SpeakFeedbackResources"]
+                + (windowsTargetBuild ? [.target(name: "SpeakWindowsPlatform")] : [])
         ),
         .testTarget(
             name: "SpeakDesktopHostTests",
@@ -284,7 +288,11 @@ if windowsTargetBuild {
                 .linkedLibrary("gdiplus"), .linkedLibrary("dwmapi"), .linkedLibrary("uxtheme"),
                 .linkedLibrary("shcore"),
                 // CNG SHA-256 for downloaded local models.
-                .linkedLibrary("bcrypt")
+                .linkedLibrary("bcrypt"),
+                // Architecture-neutral Win32 resources: Explorer/shortcuts and
+                // native window/tray icons use the same canonical Mac exports.
+                .unsafeFlags(["-Xlinker", URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+                    .appendingPathComponent("Resources/Desktop/AppIcon.res").path])
             ]
         ),
         // Same-user named pipes for `speak` and the app; kept apart so the CLI
@@ -327,7 +335,7 @@ if windowsTargetBuild {
         .testTarget(
             name: "SpeakWindowsPlatformTests",
             dependencies: [
-                "SpeakCore", "SpeakSync", "SpeakWindowsPlatform", "CWindowsSupport", "SpeakTestSupport",
+                "SpeakCore", "SpeakSync", "SpeakDesktop", "SpeakWindowsPlatform", "CWindowsSupport", "SpeakTestSupport",
                 "SpeakAutomationKit"
             ],
             resources: [.copy("Fixtures")]
@@ -395,7 +403,8 @@ if linuxTargetBuild {
             dependencies: [
                 "SpeakCore", "SpeakDesktop", "SpeakDesktopHost", "SpeakLinuxPlatform", "SpeakLinuxWebSocket",
                 "CLinuxSupport", "SpeakDesktopSync", "SpeakSync"
-            ]
+            ],
+            resources: [.copy("Resources/hicolor")]
         ),
         .testTarget(
             name: "SpeakLinuxPlatformTests",
@@ -406,7 +415,7 @@ if linuxTargetBuild {
         ),
         .testTarget(
             name: "SpeakLinuxWebSocketTests",
-            dependencies: ["SpeakCore", "SpeakDesktop", "SpeakLinuxWebSocket"]
+            dependencies: ["SpeakCore", "SpeakDesktop", "SpeakLinuxWebSocket", "SpeakTestSupport"]
         )
     ])
 }
@@ -463,8 +472,9 @@ let package = portableCoreBuild ? portablePackage : Package(
         )
     ],
     targets: [
+        migrationArchiveTarget,
         feedbackResourcesTarget,
-        .target(name: "SpeakDesktop", dependencies: ["SpeakCore"]),
+        .target(name: "SpeakDesktop", dependencies: ["SpeakCore", "CMigrationArchive"]),
         .testTarget(
             name: "SpeakDesktopTests",
             dependencies: ["SpeakDesktop", "SpeakCore", "SpeakTestSupport", "SpeakFeedbackResources"]
@@ -544,7 +554,8 @@ let package = portableCoreBuild ? portablePackage : Package(
         // sources through its own glob.
         .target(
             name: "SpeakTestSupport",
-            path: "Tests/SpeakTestSupport"
+            path: "Tests/SpeakTestSupport",
+            resources: [.copy("MigrationArchiveFixtures")]
         ),
         .testTarget(
             name: "SpeakCoreTests",
@@ -566,6 +577,7 @@ let package = portableCoreBuild ? portablePackage : Package(
             name: "SpeakAppTests",
             dependencies: [
                 "SpeakApp",
+                "SpeakDesktop",
                 "SpeakAutomationKit",
                 "SpeakHotKeys",
                 "SpeakTestSupport",

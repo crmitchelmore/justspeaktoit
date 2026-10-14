@@ -49,7 +49,7 @@ extension DesktopHostController {
     }
 
     /// Saves an entry `DesktopHostAzureResource.normalized` accepted.
-    package func saveAzureResourceEndpoint(_ endpoint: String) {
+    package func saveAzureResourceEndpoint(_ endpoint: String) async {
         guard !closed else { return }
         var changed = settings
         changed.azureSpeechResourceEndpoint = endpoint.isEmpty ? nil : endpoint
@@ -62,6 +62,7 @@ extension DesktopHostController {
             update(endpoint.isEmpty
                 ? "Azure Speech resource endpoint cleared. Recorded audio uses the region in your Azure key."
                 : "Azure Speech resource endpoint saved.")
+            await refreshComparison()
         } catch { update("Could not save the Azure Speech resource endpoint: \(error.localizedDescription)") }
     }
 }

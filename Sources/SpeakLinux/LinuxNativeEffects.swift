@@ -26,21 +26,20 @@ struct LinuxNativeEffects: DesktopHostEffects {
         LinuxLiveTransport.makeClient(model: model, key: key, language: language, azureEndpoint: azureEndpoint)
     }
 
+    func makeLiveClient(
+        model: String, key: String, language: String?, azureEndpoint: String, options: LiveClientOptions
+    ) -> (any FinalizingStreamingTranscriptionClient)? {
+        LinuxLiveTransport.makeClient(
+            model: model, key: key, language: language, azureEndpoint: azureEndpoint, options: options
+        )
+    }
+
     func transcribe(
         _ request: DesktopHostTranscriptionRequest, with controller: LinuxAppController
     ) async throws -> TranscriptionResult {
         try await controller.transcribePreparedAudio(
             request.audio, model: request.model, key: request.key, duration: request.duration,
-            language: request.language, azureEndpoint: request.azureEndpoint
-        )
-    }
-
-    func makeLiveClient(
-        model: String, key: String, language: String?, azureEndpoint: String, options: LiveClientOptions
-    ) -> (any FinalizingStreamingTranscriptionClient)? {
-        DesktopLiveTranscription.makeClient(
-            model: model, apiKey: key, language: language, azureEndpoint: azureEndpoint, options: options,
-            makeConnection: { NIOStreamingConnection(request: $0) }
+            language: request.language, azureEndpoint: request.azureEndpoint, keywords: request.keywords
         )
     }
 
@@ -120,10 +119,10 @@ enum LinuxLiveTransport {
     static let qualified = true
 
     static func makeClient(
-        model: String, key: String, language: String?, azureEndpoint: String
+        model: String, key: String, language: String?, azureEndpoint: String, options: LiveClientOptions = .init()
     ) -> (any FinalizingStreamingTranscriptionClient)? {
         DesktopLiveTranscription.makeClient(
-            model: model, apiKey: key, language: language, azureEndpoint: azureEndpoint,
+            model: model, apiKey: key, language: language, azureEndpoint: azureEndpoint, options: options,
             makeConnection: { NIOStreamingConnection(request: $0) }
         )
     }

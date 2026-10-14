@@ -5,9 +5,9 @@ public actor PersonalLexiconStore {
   private let encoder: JSONEncoder
   private let decoder: JSONDecoder
   private let fileManager: FileManager
+  private var directory: VocabularyStoreDirectory
 
   public init(fileManager: FileManager = .default, baseDirectory: URL? = nil) {
-    self.fileManager = fileManager
     let supportURL: URL
     if let baseDirectory {
       supportURL = baseDirectory
@@ -15,13 +15,16 @@ public actor PersonalLexiconStore {
       supportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
         ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
     }
-    let appFolder = supportURL.appendingPathComponent(ReleaseTrain.current.supportDirectory, isDirectory: true)
-    let lexiconFolder = appFolder.appendingPathComponent("PersonalLexicon", isDirectory: true)
+    self.init(
+      fileManager: fileManager,
+      appDirectory: supportURL.appendingPathComponent(ReleaseTrain.current.supportDirectory, isDirectory: true)
+    )
+  }
 
-    if !fileManager.fileExists(atPath: lexiconFolder.path) {
-      try? fileManager.createDirectory(at: lexiconFolder, withIntermediateDirectories: true)
-    }
-
+  public init(fileManager: FileManager = .default, appDirectory: URL) {
+    self.fileManager = fileManager
+    let lexiconFolder = appDirectory.appendingPathComponent("PersonalLexicon", isDirectory: true)
+    directory = VocabularyStoreDirectory(fileManager: fileManager, url: lexiconFolder)
     fileURL = lexiconFolder.appendingPathComponent("lexicon.json")
 
     encoder = JSONEncoder()
@@ -31,6 +34,7 @@ public actor PersonalLexiconStore {
   }
 
   public func load() throws -> [PersonalLexiconRule] {
+    try directory.prepare()
     guard fileManager.fileExists(atPath: fileURL.path) else {
       return []
     }
@@ -40,6 +44,7 @@ public actor PersonalLexiconStore {
   }
 
   public func save(_ rules: [PersonalLexiconRule]) throws {
+    try directory.prepare()
     if rules.isEmpty {
       if fileManager.fileExists(atPath: fileURL.path) {
         try fileManager.removeItem(at: fileURL)

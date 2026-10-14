@@ -19,9 +19,11 @@ package struct DesktopHostTranscriptionRequest: Sendable {
     package let duration: TimeInterval
     package let language: String?
     package let azureEndpoint: String?
+    package let keywords: [String]
 
     package init(
-        audio: URL, model: String, key: String, duration: TimeInterval, language: String?, azureEndpoint: String? = nil
+        audio: URL, model: String, key: String, duration: TimeInterval, language: String?,
+        azureEndpoint: String? = nil, keywords: [String] = []
     ) {
         self.audio = audio
         self.model = model
@@ -29,6 +31,7 @@ package struct DesktopHostTranscriptionRequest: Sendable {
         self.duration = duration
         self.language = language
         self.azureEndpoint = azureEndpoint
+        self.keywords = keywords
     }
 }
 
@@ -51,6 +54,10 @@ package protocol DesktopHostEffects<Platform>: Sendable {
     ) -> (any FinalizingStreamingTranscriptionClient)?
     func transcribe(
         _ request: DesktopHostTranscriptionRequest, with controller: DesktopHostController<Platform>
+    ) async throws -> TranscriptionResult
+    func transcribeComparison(
+        _ request: DesktopHostTranscriptionRequest, azureEndpoint: String,
+        with controller: DesktopHostController<Platform>
     ) async throws -> TranscriptionResult
     /// Blocking automatic output, called off the UI thread and the controller.
     func perform(_ job: Platform.OutputJob, text: String) -> DesktopTextOutputResult
@@ -79,6 +86,12 @@ package extension DesktopHostEffects {
     ) -> (any FinalizingStreamingTranscriptionClient)? {
         makeLiveClient(model: model, key: key, language: language, azureEndpoint: azureEndpoint)
     }
+    func transcribeComparison(
+        _ request: DesktopHostTranscriptionRequest, azureEndpoint: String,
+        with controller: DesktopHostController<Platform>
+    ) async throws -> TranscriptionResult {
+        try await controller.transcribeComparison(request, endpoint: azureEndpoint)
+    }
 }
 
 /// Owned until native capture stop has joined its worker, so no callback sees
@@ -86,6 +99,7 @@ package extension DesktopHostEffects {
 package final class DesktopCaptureContext: @unchecked Sendable {
     package let file: PCMRecordingFile?
     package let live: DesktopLiveSession?
+    package let comparison: DesktopComparisonLive?
     package let onFailure: @Sendable (String) -> Void
     private let lock = NSLock()
     private var failed = false
@@ -96,12 +110,14 @@ package final class DesktopCaptureContext: @unchecked Sendable {
     private let onPCM: (@Sendable (UnsafePointer<Int16>, Int) -> Void)?
 
     package init(
-        file: PCMRecordingFile, live: DesktopLiveSession? = nil, sampleRate: Int = PCMRecordingFile.sampleRate,
+        file: PCMRecordingFile, live: DesktopLiveSession? = nil, comparison: DesktopComparisonLive? = nil,
+        sampleRate: Int = PCMRecordingFile.sampleRate,
         silence: DictationSilenceMonitor? = nil, onSilence: (@Sendable () -> Void)? = nil,
         onFailure: @escaping @Sendable (String) -> Void
     ) {
         self.file = file
         self.live = live
+        self.comparison = comparison
         self.onFailure = onFailure
         self.sampleRate = sampleRate
         self.silence = silence
@@ -115,6 +131,7 @@ package final class DesktopCaptureContext: @unchecked Sendable {
     ) {
         file = nil
         live = nil
+        comparison = nil
         sampleRate = PCMRecordingFile.sampleRate
         onSilence = nil
         self.onPCM = onPCM
@@ -138,6 +155,7 @@ package final class DesktopCaptureContext: @unchecked Sendable {
             let data = Data(bytes: samples, count: count * MemoryLayout<Int16>.size)
             try file?.append(data)
             live?.sendAudio(data)
+            comparison?.sendAudio(data)
             let shouldStop = lock.withLock { () -> Bool in
                 guard silence != nil, !failed else { return false }
                 receivedSeconds += Double(count) / Double(sampleRate)

@@ -35,10 +35,10 @@ public struct DesktopHistoryInsights: Equatable, Sendable {
         for record in records {
             sessions += 1
             if record.failure != nil || record.postProcessingFailure != nil { sessionsWithErrors += 1 }
-            if let duration = record.result?.duration, duration.isFinite, duration > 0 {
+            if let duration = record.recordingDuration, duration.isFinite, duration > 0 {
                 recordingDuration += duration
             }
-            if let cost = record.result?.cost?.totalCost, cost > 0 { spend += cost }
+            if let cost = record.recordingCost?.total, cost > 0 { spend += cost }
         }
     }
 
@@ -130,10 +130,10 @@ public struct DesktopHistoryRowSummary: Equatable, Sendable {
     ) {
         id = record.id
         created = DesktopHistoryFormat.created(record.createdAt, locale: locale, timeZone: timeZone)
-        audioLength = record.result.flatMap { $0.duration > 0 ? DesktopHistoryFormat.audioLength($0.duration) : nil }
-        cost = record.result?.cost.flatMap { cost in
-            guard cost.totalCost > 0 else { return nil }
-            return DesktopHistoryFormat.spend(cost.totalCost, currency: cost.currency, locale: locale)
+        audioLength = record.recordingDuration.flatMap { $0 > 0 ? DesktopHistoryFormat.audioLength($0) : nil }
+        cost = record.recordingCost.flatMap { cost in
+            guard cost.total > 0 else { return nil }
+            return DesktopHistoryFormat.spend(cost.total, currency: cost.currency, locale: locale)
         }
         let text: String
         if let failure = record.failure {

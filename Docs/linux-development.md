@@ -21,7 +21,29 @@ The Linux targets are opt-in with `SPEAK_LINUX_TARGET=1`, like
 `SPEAK_WINDOWS_TARGET=1`, so the `portable-linux` job (which has no GTK
 packages) is unchanged.
 
+Gemini Transcribe Live, Meta Muse realtime ASR and Modulate Velma now use the
+shared injected provider clients through Linux's NIO WebSocket adapter, with
+the same canonical route/options projection as Windows. Audio is bounded and
+single-flight, readiness is provider-specific, and a finish without the
+documented terminal event is an error, not a successful recovered transcript.
+The native NIO loopback probe suite checks generated PCM, production request
+shapes, completion and early closure for these clients and the portable Grok
+Voice client. Grok Voice remains unavailable for selection until a live
+transcription-only/no-assistant service acceptance receipt exists. Synthetic
+transport evidence does not establish provider-account or hardware parity;
+see [Windows shared streaming details](windows-development.md).
+
+The shared desktop live session uses macOS's canonical authoritative transcript
+projection for replacement, empty retraction, confirmed/interim composition and
+healthy final folding. Cancelled or failed sessions keep recovery text and
+ignore late projections. Providers without projected text retain legacy folding.
+This does not implement clipboard voice commands or live LLM polishing.
+
 ## Build and run
+
+Voice Output also offers a native text editor, explicit clipboard snapshots and
+user-chosen lossless WAV export. See [Desktop Voice Output sources](desktop-voice-sources.md)
+for source ownership and honest external-selection/Wayland capability limits.
 
 Ubuntu 24.04 (or any distribution with GTK 4.14+, libadwaita 1.5+) and Swift 6.2.3:
 
@@ -61,11 +83,123 @@ The integration script runs this against its private PipeWire null sink.
 An installed package must pass `--self-test` as well; a source-tree pass does
 not establish resource placement or codec availability in a Flatpak runtime.
 
+### Canonical application icons
+
+The Linux application uses the canonical Mac icon exports, not a separately
+drawn approximation. `scripts/generate-icon.swift` invokes the dependency-free
+`scripts/generate-desktop-icons.py`, producing a private hicolor theme with
+16, 24, 32, 48, 64, 128, 256 and 512px PNGs and transparent corners. SwiftPM
+bundles that theme in `SpeakApp_SpeakLinux.resources`; it is loaded via
+`Bundle.module`, not the current working directory. GTK sets the window icon
+name to the desktop entry's `com.justspeaktoit.JustSpeakToIt`. The in-app brand
+marks and StatusNotifier pixmaps read the same artwork; panel exports include
+64/96px variants and preserve the recording dot. The coloured app icon is
+identical in light/dark themes, not a symbolic icon; Wayland compositors use
+the matching application/desktop identity rather than a client-supplied
+title-bar bitmap.
+
+Flatpak ships both the private runtime theme and installed hicolor PNGs.
+For a native developer layout, stage (do not install) the executable, resource
+bundles, desktop entry, metainfo and icons with:
+
+```sh
+python3 scripts/stage-linux-desktop.py --binary .build/release/SpeakLinux \
+  --output .build/linux-desktop-layout --prefix /usr/local
+```
+
+The output contains `bin/` and `share/`, intended for the stated prefix.
+It still requires the matching Swift/native libraries; this is not a
+self-contained Linux release. The stager never changes the running system and
+refuses an existing output directory. Installed icons do not overwrite the
+system hicolor `index.theme`; the private bundle retains its own index.
+The stager collects every non-test sibling `.resources` bundle, including future
+production modules, while still requiring the core and Linux icon bundles.
+Linked bundles, linked entries and non-regular resource content are refused
+before creating output. Flatpak uses this same stager with `/app` as its prefix
+instead of maintaining a separate resource list.
+Spaces, quotes, backslashes, dollar signs and backticks in prefixes use the two
+Desktop Entry escaping layers. Percent/equal-sign prefixes are refused before
+writing because they are not portable executable paths for desktop launchers.
+
+`python3 scripts/generate-desktop-icons.py --check` verifies exact exports;
+`python3 -B -m unittest discover -s scripts/tests -p test_desktop_icons.py`
+checks native resource wiring and a synthetic staged layout. The GTK window
+self-test requires the canonical name to resolve in the theme. The Python
+checks are not proof of GTK/Wayland/panel rendering or an installed Flatpak;
+those remain native CI and desktop validation gates.
+
+## Model comparison
+
+**Transcription > Compare Models** opens a native GTK/libadwaita editor with
+wrapped, accessibly named model checkboxes, File/Batch and Live input modes,
+language hint, saved rounds, raw blind results, ranking/reveal, scoreboard,
+sample playback and JSON/Markdown exports. File selection accepts one to 32
+local samples; save dialogs use the desktop's native file chooser. Picker errors
+appear in the comparison editor instead of being hidden behind its modal window.
+The export scope chooses **All rounds** or **Selected round** for both
+**Save JSON / Markdown** and explicit **Copy JSON / Markdown**. Save requests
+freeze the selected round when the chooser opens, independently of later
+selection changes; a deleted/missing round is an error, never an all-round fallback.
+Clipboard export does not insert text or mutate normal History.
+Closing a picker/editor invalidates that picker request, so a late selection
+cannot start a replacement editor's run.
+
+Windows and Linux share `DesktopComparisonRunner`, `DesktopComparisonLive`,
+`DesktopComparisonStore` and `DesktopHostComparison`: all file snapshots are
+prepared before provider work, one native microphone capture fans out to the
+qualified live routes, and raw results never reach insertion, post-processing,
+dictation settings or normal History. Failed candidates remain independently
+judgeable. Complete distinct ranks 1...N reveal models; canonical persisted
+rounds determine standings and exports.
+Fewer than two usable results reveal unranked evidence, matching Mac, rather than
+inventing rankings or scoreboard credit. See the
+[Windows comparison workflow](windows-development.md#model-comparison) for the
+shared 120-second file, 12-second readiness and 30-second finalization budgets.
+Native **Select all ready / Select none** and remembered per-mode candidate
+selection use canonical credential readiness plus local-runtime/Azure endpoint
+checks. Unavailable qualified models have explicit reasons in the detail pane;
+their saved selections survive ready-only edits and relaunch. Credential writes,
+cloud-key imports and endpoint changes refresh readiness. Keys/settings are read
+again after the final admission suspension, before audio/provider work, and
+admitted runs keep immutable snapshots. Readiness does not validate a key with
+the real service. Cancel/editor close invalidates pending admission across
+editor reopen.
+`DesktopSettingsQueue` admits File/Live work without waiting for playback:
+separately owned admission tasks are cancelled on Cancel/editor close/shutdown.
+A blind **Diff against** dropdown uses the shared
+`TranscriptWordDiff`, with accessible `[+added]` / `[-removed]` text annotations
+instead of colour-only edits; original transcripts and persisted ranks stay unchanged.
+
+`Comparisons/rounds.json` and app-owned `Comparisons/Samples/` live in the private
+data directory. Interrupted rounds retain their audio; interrupted live metadata
+can remain unknown until normal finalization. Native confirmed delete/discard
+persists a canonical tombstone before cleaning up its app-owned sample, while
+startup prunes orphan samples. Original imports and normal History are untouched.
+The shared comparison capture safety limit is 600 seconds, not an age/count
+retention policy. The editor's separate explicit iCloud consent and **Sync now /
+retry** use the same canonical, account/consent-fenced metadata-only comparison
+sync as Windows. Sign in from the existing iCloud Sync settings; local changes,
+manual retry and the existing 300-second web heartbeat reconcile rounds and
+tombstones. Comparison owns a separate cursor/acknowledgements and preserves
+original-account provenance. Active capture/queued batch revisions are excluded
+and protected against remote deletion; remote metadata never supplies audio.
+Automatic interrupted/failed provider retry is not a Mac comparison feature and
+is not added here.
+The GTK window self-test checks wrapped labels, model and language payloads,
+ranking, playback, scoped export payloads, explicit sync consent/retry and
+busy/recording controls with synthetic fixtures only.
+The screenshot tour adds `comparison-blind-light.png` and
+`comparison-revealed-dark.png`, plus `-full.png` views including the below-fold
+ranking/export controls, without changing page ordinals. Native execution
+at the final head, physical PulseAudio/PipeWire devices, screen-reader/keyboard
+acceptance, small-screen behavior, live-provider and real-account CloudKit receipts are separate gates;
+portable tests and syntax/type checks do not establish those gates.
+
 ## Window
 
 The window follows the Mac app's layout and look. A sidebar lists **Speak**
 (Dashboard, History, Voice Output) and **Settings** (General, Transcription,
-Post-processing, Keyboard, iCloud Sync, About), and collapses to one pane below
+Post-processing, Keyboard, Corrections, Pronunciation, iCloud Sync, About), and collapses to one pane below
 640 px. The header carries Import audio, the page title with the selected model,
 and Record; the status line sits at the bottom of every page.
 
@@ -74,11 +208,21 @@ and Record; the status line sits at the bottom of every page.
   displayed transcript with Copy (and Cancel while transcribing); Insights
   (Sessions, Recording Time, Average Length, Spend) and a Setup card echoing the
   microphone, model, shortcut and text output.
-- **History**: search and Import in the hero with Sessions, Errors, Average
+- **History**: search, Filters and Import in the hero with Sessions, Errors, Average
   Length and Spend for the recordings the search shows; each recording is a card
   with Created, Audio, Cost and Context badges, the transcript preview and the
   models used. The selected card expands with its transcript, version, Play,
   Stop, Copy, Read aloud, Retry, Export and Open audio.
+- **History filters**: the native GTK popover combines any recorded transcription
+  or post-processing models, errors only, and optional From/Through calendar
+  dates with the existing Unicode/profile search. Apply and Reset change only
+  visibility; hidden selections stop playback and Read aloud. Dates use the
+  shared `HistorySearchQuery` day policy in the local time zone. This does not
+  add History deletion, retention, or migration. Long model names wrap without
+  losing their full labels, and date buttons distinguish From/Through in their
+  accessible names. The screenshot tour requires light/dark filter-popover
+  artifacts; source assertions and snapshots do not replace physical accessibility
+  acceptance.
 - Totals and row wording come from the shared `DesktopHistoryInsights` and
   `DesktopHistoryRowSummary` (SpeakDesktop), counted and formatted as the Mac
   counts them, so Windows shows the same figures.
@@ -135,6 +279,31 @@ Flatpak: `~/.var/app/com.justspeaktoit.JustSpeakToIt/data/JustSpeakToIt`):
 private to the user (0700/0600). API keys are in the Secret Service keyring
 under the same canonical identifiers as Windows Credential Manager. iCloud
 sync keeps its state in `CloudSync/state.json` there (see below).
+
+### Vocabulary and pronunciation
+
+The **Corrections** and **Pronunciation** pages use real GTK entries, multiline
+variant/preview fields, dropdowns, check buttons and filtered saved-entry lists.
+Both support durable editing, deletion confirmation, explicit ordering,
+validation and saved-entry preview; pronunciation also supports canonical
+defaults and local JSON merge/replace/import/export. **History > Correction
+results** shows the retained applied corrections, unapplied suggestions,
+confidence, reasons and context in a native read-only scrolling dialog.
+
+Windows and Linux use the same portable domain/store machinery and apply
+corrections at recording/import/retry/live-finalisation before post-processing,
+without replacing the original provider transcript. Read aloud runs the
+canonical pronunciation replacement renderer once before segmenting expanded
+text to Deepgram's request limit. IPA-only entries are retained but not claimed
+as supported by Deepgram. Context tags are explicit input; there is no OS-wide
+edit observation, permission request or fabricated learning. Candidate
+management logic is shared, but a desktop candidate-management UI is not yet
+implemented. Data remains in the existing private XDG application directory.
+
+See [the shared desktop journey](windows-development.md#vocabulary-and-pronunciation-journey)
+for rule semantics, storage files, supported provider hints and remaining
+physical/native acceptance. Native syntax checks and synthetic form-event
+self-tests do not replace target-platform runtime evidence.
 
 ### Flatpak
 

@@ -24,6 +24,7 @@ package protocol DesktopHostPlayback: AnyObject, Sendable {
     func stop(unless recordID: UUID)
     /// Returns once output is acknowledged silent.
     func stopAndWait() async throws
+    func stopSavedAudioAndWait() async throws
     func close() async throws
 }
 
@@ -61,10 +62,16 @@ package protocol DesktopHostPlatform: Sendable {
     // Window presenter. Safe from any thread.
     static func update(_ status: String, transcript: String?, state: Int32)
     static func recordingState(_ state: Int32)
+    static func voiceGenerated(_ presentation: DesktopVoiceResultPresentation)
+    static func voiceUsage(_ presentation: DesktopVoiceUsagePresentation)
+    static func voiceDiscovery(_ presentation: DesktopVoiceDiscoveryPresentation)
+    static func voiceTextImportCancelled(_ requestID: String)
     static func history(_ records: [DesktopRecordingStore.Record], selected: UUID?, selectRecord: Bool)
     /// Totals for the dashboard (`all` saved records) and the History header
     /// (`visible`, the records the search shows). Sent with every History list.
     static func historyInsights(all: DesktopHistoryInsights, visible: DesktopHistoryInsights)
+    static func historyFilters(models: [String], selection: DesktopHistoryFilter)
+    static func historyManagement(identifiers: [UUID])
     /// The recording HUD's phase for the dictation it follows; `.hidden` hides it.
     static func hud(_ state: DesktopHUDState)
     static func historyPresentation(
@@ -88,7 +95,14 @@ package protocol DesktopHostPlatform: Sendable {
     static func convertAudio(input: URL, output: URL) async throws -> TimeInterval
     /// Opens a saved recording in the user's default application.
     static func openFile(_ url: URL) throws
+    static func revealDirectory(_ url: URL) throws
+    static func confirmAudioCleanup(id: UUID, count: Int) throws
+    static var migrationArchive: DesktopMigrationBackup.Adapter? { get }
+    static var migrationInspector: DesktopHostMigrationInspector? { get }
     static func copyToClipboard(_ text: String) throws
+
+    static var comparisonDigest: LocalModelDigestProvider? { get }
+    static func comparisonPresentation(_ presentation: DesktopComparisonPresentation)
 
     // Automatic output and playback.
     /// The job for a finished recording, or nil when no output is possible
@@ -151,11 +165,25 @@ package protocol DesktopHostPlatform: Sendable {
 }
 
 package extension DesktopHostPlatform {
+    static func revealDirectory(_ url: URL) throws {
+        throw DesktopHostError(message: "Opening recording folders is unavailable on this host.")
+    }
+    static func confirmAudioCleanup(id: UUID, count: Int) throws {
+        throw DesktopHostError(message: "Recording audio cleanup is unavailable on this host.")
+    }
     static func makeRecordingFeedbackLoader() -> (any DesktopRecordingFeedbackLoader)? { nil }
+    static var comparisonDigest: LocalModelDigestProvider? { LocalModelDigestProvider.platformDefault }
+    static func comparisonPresentation(_ presentation: DesktopComparisonPresentation) {}
+    static func voiceGenerated(_ presentation: DesktopVoiceResultPresentation) {}
+    static func voiceUsage(_ presentation: DesktopVoiceUsagePresentation) {}
+    static func voiceDiscovery(_ presentation: DesktopVoiceDiscoveryPresentation) {}
+    static func voiceTextImportCancelled(_ requestID: String) {}
     static func handsFreeReadinessFailure() -> String? { "Hands-free is unavailable on this host." }
     static func update(_ status: String) { update(status, transcript: nil, state: -1) }
     /// Hosts without a dashboard or History header show no totals.
     static func historyInsights(all: DesktopHistoryInsights, visible: DesktopHistoryInsights) {}
+    static func historyFilters(models: [String], selection: DesktopHistoryFilter) {}
+    static func historyManagement(identifiers: [UUID]) {}
     /// Hosts without a HUD show dictation progress on the status line only.
     static func hud(_ state: DesktopHUDState) {}
     static var loginItemSettingsName: String { "the system's startup settings" }

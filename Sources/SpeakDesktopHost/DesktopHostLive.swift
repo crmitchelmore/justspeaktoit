@@ -6,10 +6,12 @@ extension DesktopHostController {
     func makeLiveSession(
         model: String, key: String, id: UUID, language: String? = nil,
         options: DesktopHostRecordingConfiguration
-    ) -> DesktopLiveSession? {
-        guard DesktopHostModels.isLive(model), let client = effects.makeLiveClient(
-            model: model, key: key, language: language, azureEndpoint: options.azureEndpoint,
-            options: options.configuration?.liveOptions ?? .init()
+    ) async throws -> DesktopLiveSession? {
+        guard DesktopHostModels.isLive(model) else { return nil }
+        let liveOptions = (options.configuration?.liveOptions ?? .init())
+            .includingVocabularyKeywords(try await vocabularyKeywords())
+        guard let client = effects.makeLiveClient(
+            model: model, key: key, language: language, azureEndpoint: options.azureEndpoint, options: liveOptions
         ) else { return nil }
         return DesktopLiveSession(client: client, id: id)
     }
@@ -61,7 +63,10 @@ extension DesktopHostController {
         }
         do {
             try await saveRecord(record)
-            if record.failure == nil { record = await postProcess(record, options: options) }
+            if record.failure == nil {
+                record = try await applyVocabulary(record)
+                record = await postProcess(record, options: options)
+            }
             if cancellationRequested { record.failure = "Cancelled. Completed transcription and audio retained." }
             try await saveRecord(record)
             if !closed { present(record, output: stopped.output) }

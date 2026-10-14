@@ -87,6 +87,18 @@ struct DeepgramSpeechSynthesizer: Sendable {
         } catch {
             throw DeepgramSpeechError.invalidResponse
         }
+        try Task.checkCancellation()
+        let capture = VoiceSynthesisUsage.capture
+        let usageID = capture?.begin(
+            voice: .deepgram(utterance.voice), inputCharacters: utterance.characterCount, usesSSML: false
+        )
+        var completed = false
+        var failedOutcome = VoiceSynthesisUsage.Outcome.failed
+        defer {
+            if !completed, let usageID {
+                capture?.finish(usageID, outcome: Task.isCancelled ? .cancelled : failedOutcome)
+            }
+        }
         let body: Data
         do {
             body = try await OpenRouterBoundedResponseTransport.perform(
@@ -100,10 +112,15 @@ struct DeepgramSpeechSynthesizer: Sendable {
                 }
             }.body
         } catch {
-            throw Self.speechError(from: error)
+            let failure = Self.speechError(from: error)
+            if failure is CancellationError { failedOutcome = .cancelled }
+            throw failure
         }
         try Task.checkCancellation()
-        return try DeepgramSpeechWAV.canonical(body, sampleRate: Self.sampleRate)
+        let audio = try DeepgramSpeechWAV.canonical(body, sampleRate: Self.sampleRate)
+        if let usageID { capture?.finish(usageID, outcome: .completed, audioDuration: audio.duration) }
+        completed = true
+        return audio
     }
 
     static func queryItems(for voice: DeepgramSpeechCatalog.Voice) -> [URLQueryItem] {

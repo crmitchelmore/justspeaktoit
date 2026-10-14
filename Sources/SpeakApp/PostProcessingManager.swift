@@ -454,72 +454,7 @@ final class PostProcessingManager: ObservableObject {
     for context: PersonalLexiconContext,
     corrections: PersonalLexiconHistorySummary?
   ) -> [String] {
-    var canonicalToAliases: [String: Set<String>] = [:]
-    var canonicalConfidence: [String: PersonalLexiconConfidence] = [:]
-
-    func merge(alias: String, canonical: String, confidence: PersonalLexiconConfidence) {
-      canonicalToAliases[canonical, default: []].insert(alias)
-      let existing = canonicalConfidence[canonical]
-      canonicalConfidence[canonical] = maxConfidence(existing, confidence)
-    }
-
-    for rule in personalLexicon.activeRules(for: context) {
-      for alias in rule.aliases {
-        merge(alias: alias, canonical: rule.canonical, confidence: rule.confidence)
-      }
-    }
-
-    if let corrections {
-      for record in corrections.applied {
-        merge(alias: record.alias, canonical: record.canonical, confidence: record.confidence)
-      }
-    }
-
-    var directives: [String] = []
-
-    let sortedCanonicalNames = canonicalToAliases.keys.sorted {
-      $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
-    }
-    for canonical in sortedCanonicalNames {
-      let aliases = canonicalToAliases[canonical]?.sorted() ?? []
-      guard !aliases.isEmpty else { continue }
-      let aliasList = aliases.joined(separator: ", ")
-      let confidenceLabel = confidenceDescription(canonicalConfidence[canonical] ?? .medium)
-      directives.append("Normalize \(aliasList) to \"\(canonical)\" (confidence: \(confidenceLabel)).")
-    }
-
-    if let suggestions = corrections?.suggestions, !suggestions.isEmpty {
-      for suggestion in suggestions {
-        let confidenceLabel = confidenceDescription(suggestion.confidence)
-        let reason = suggestion.reason ?? "manual rule"
-        directives.append(
-          "Suggestion: Only change \"\(suggestion.alias)\" to \"\(suggestion.canonical)\" "
-            + "when the conversation matches (confidence: \(confidenceLabel), reason: \(reason))."
-        )
-      }
-    }
-
-    return directives
-  }
-
-  private func confidenceDescription(_ confidence: PersonalLexiconConfidence) -> String {
-    switch confidence {
-    case .high: return "high"
-    case .medium: return "medium"
-    case .low: return "low"
-    }
-  }
-
-  private func maxConfidence(
-    _ existing: PersonalLexiconConfidence?,
-    _ candidate: PersonalLexiconConfidence
-  ) -> PersonalLexiconConfidence {
-    guard let existing else { return candidate }
-    let order: [PersonalLexiconConfidence: Int] = [.low: 0, .medium: 1, .high: 2]
-    if (order[candidate] ?? 0) >= (order[existing] ?? 0) {
-      return candidate
-    }
-    return existing
+    PersonalLexiconDirectives.build(rules: personalLexicon.rules, context: context, corrections: corrections)
   }
 
   // swiftlint:disable:next file_length

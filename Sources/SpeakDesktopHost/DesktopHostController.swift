@@ -95,6 +95,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package var profiles: [DictationProfile]
     var profileWarning: String?
     package var settings: Settings
+    var vocabularyLoad: Task<DesktopVocabulary, Error>?
     package var recording: Recording?
     package var recordingTail: (recordID: UUID, task: Task<Void, Never>)?
     private var isReady = false
@@ -111,6 +112,14 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package var transcript = ""
     package var hotKeySession = DesktopHostHotKeySessionState()
     package var readAloudState = Platform.makeReadAloudState()
+    /// Actual History ownership of active voice work; nil for every non-History source.
+    package var voiceOutputRecordID: UUID?
+    package var voiceTextImportTask: Task<Void, Never>?
+    package var voiceTextImportRequestID: String?
+    package var voiceGenerationTask: Task<Void, Never>?
+    package var generatedVoice: DesktopGeneratedVoiceResult?
+    package var voiceUsage = DesktopVoiceUsageState()
+    package var voiceDiscovery = DesktopVoiceDiscoveryState()
     /// The one History Play or Read aloud request that may still start audio or report.
     package var playbackRequests = DesktopPlaybackRequests()
     package var history: [UUID: DesktopRecordingStore.Record] = [:]
@@ -118,12 +127,23 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     /// each keystroke filters cached strings instead of re-normalising transcripts.
     package var historySearchText: [UUID: String] = [:]
     var historyQuery = ""
+    var historyFilter = HistorySearchQuery.none
+    var historyFilterDraft = DesktopHistoryFilter.none
     package var selectedHistoryID: UUID?
     package var transcriptVariant: DesktopTranscriptVariant = .processed
     var transcriptionTask: Task<TranscriptionResult, Error>?
     var postProcessingTask: Task<DesktopPostProcessing.Outcome, Error>?
     package var microphoneWarning: String?
     var cancellationRequested = false
+    var historyDeletionInProgress = false
+    var historyDeletionTask: Task<Void, Never>?
+    var folderRevealTask: Task<Void, Error>?
+    var audioCleanupTask: Task<Void, Never>?
+    var migrationExportTask: Task<Void, Never>?
+    var migrationExportWorker: Task<DesktopMigrationBackup.Outcome, Never>?
+    var migrationInspectionTask: Task<Void, Never>?
+    var migrationInspectionWorker: Task<DesktopMigrationInspection.Outcome, Never>?
+    var audioCleanupConfirmation: (id: UUID, snapshot: DesktopRecordingAudioSnapshot)?
     var liveUpdates: Task<Void, Never>?
     var liveFinalisation: DesktopLiveSession?
     /// The recording the HUD follows, from Record until its result.
@@ -139,6 +159,25 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package let playback = Platform.makePlayback()
     var recordingFeedback: DesktopRecordingFeedback?
     var recordingFeedbackPreview: Task<Void, Never>?
+    package var comparisons: DesktopComparisonStore?
+    var comparisonSync: DesktopHostComparisonSyncHooks?
+    var comparisonVisible = false
+    var comparisonInitialization: DesktopComparisonStoreLoading?
+    var comparisonAdmissionTask: Task<Void, Never>?
+    package var comparisonTask: Task<Void, Never>?
+    package var comparisonFinalization: Task<Void, Never>?
+    var comparisonUpdates: Task<Void, Never>?
+    package var comparisonCapture: DesktopHostComparisonCapture?
+    package var comparisonLive: DesktopComparisonLive?
+    package var comparisonSelection: UUID?
+    var comparisonReference: UUID?
+    var comparisonPresentationRevision: UInt64 = 0
+    let comparisonWords = DesktopComparisonWordPresentation()
+    package var comparisonGeneration = UUID()
+    var comparisonOwnedRoundIDs: Set<UUID> = []
+    package var comparisonLanguage: String?
+    package var comparisonPending: ModelComparisonRound?
+    package var comparisonNotice = "Select models and an input to begin."
     var handsFreeMachine = HandsFreeDictationMachine()
     var handsFreeRun: DesktopHandsFreeRun<Platform>?
 
@@ -331,6 +370,12 @@ extension DesktopHostController {
         activeOperations += 1
         defer { finishOperation() }
         do {
+            var deletionWarning: String?
+            do {
+                try await store.resumePendingDeletions()
+            } catch {
+                deletionWarning = "History deletion cleanup needs attention: \(error.localizedDescription)"
+            }
             let recovery = try await store.recoverInterruptedRecordings()
             guard !closed, !busy, recording == nil else { return }
             let records = recovery.records
@@ -342,9 +387,14 @@ extension DesktopHostController {
             transcriptVariant = .processed
             refreshHistory(selectRecord: true)
             var status = try readyStatus(savedRecordings: records.count)
+            do { _ = try await loadComparisonStore() } catch {
+                status += " Saved comparisons could not be opened: \(error.localizedDescription)"
+            }
+            guard !closed else { return }
             if !recovery.unreadableFiles.isEmpty {
                 status += " \(recovery.unreadableFiles.count) history records could not be read."
             }
+            if let deletionWarning { status += " \(deletionWarning)" }
             if let microphoneWarning { status += " \(microphoneWarning)" }
             if let profileWarning { status += " \(profileWarning)" }
             showSelectedHistory(status: status, state: 0)

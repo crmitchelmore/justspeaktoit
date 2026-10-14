@@ -28,10 +28,10 @@ public enum AnyCodableError: Error, Equatable, Sendable, CustomStringConvertible
 /// into value types, and anything that is not JSON-representable is rejected
 /// with ``AnyCodableError`` at construction time rather than trapping or
 /// failing later during encoding.
-public struct AnyCodable: Codable, Equatable, Sendable {
+public struct AnyCodable: Codable, Hashable, Sendable {
 
     /// A closed, recursively Sendable representation of a JSON value.
-    public enum JSONValue: Equatable, Sendable {
+    public enum JSONValue: Hashable, Sendable {
         case null
         case bool(Bool)
         case int(Int)

@@ -111,10 +111,34 @@ extension DesktopHostController {
         }
         closed = true
         let deadline = ContinuousClock.now.advanced(by: shutdownGrace)
+        comparisonAdmissionTask?.cancel()
+        comparisonTask?.cancel()
+        comparisonInitialization?.task.cancel()
+        comparisonFinalization?.cancel()
+        comparisonUpdates?.cancel()
+        comparisonLive?.cancel()
+        if let active = comparisonCapture {
+            comparisonCapture = nil
+            let captured = DesktopHostComparisonClosingCapture(active)
+            await DesktopHostShutdown.wait(until: deadline) { captured.stop() }
+        }
         modelDiscoveryTask?.cancel()
+        voiceDiscovery.requestID = nil
+        voiceDiscovery.task?.cancel()
+        voiceDiscovery.inventory = nil
         cancelOutput()
+        generatedVoice = nil
+        voiceTextImportTask?.cancel()
         cancellationRequested = true
         transcriptionTask?.cancel()
+        historyDeletionTask?.cancel()
+        folderRevealTask?.cancel()
+        audioCleanupTask?.cancel()
+        migrationExportWorker?.cancel()
+        migrationExportTask?.cancel()
+        migrationInspectionWorker?.cancel()
+        migrationInspectionTask?.cancel()
+        audioCleanupConfirmation = nil
         postProcessingTask?.cancel()
         liveFinalisation?.cancel()
         var report = DesktopHostShutdownReport()

@@ -60,6 +60,13 @@ enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPla
         WindowsNative.insights(all: all, visible: visible)
     }
 
+    package static func historyManagement(identifiers: [UUID]) {
+        let value = identifiers.map(\.uuidString).joined(separator: "\n")
+        if jsti_window_set_history_management(value) != 0 {
+            update("History management could not be refreshed. Saved recordings remain on disk.")
+        }
+    }
+
     package static func hud(_ state: DesktopHUDState) {
         _ = jsti_window_set_hud_layout(
             state.phase.rawValue, state.headline, state.subheadline, state.liveText,
@@ -103,6 +110,16 @@ enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPla
         try url.path.withCString { path in
             try WindowsNative.checked { jsti_shell_open_file(path, $0, $1) }
         }
+    }
+
+    package static func revealDirectory(_ url: URL) throws {
+        try url.path.withCString { path in
+            try WindowsNative.checked { jsti_shell_open_directory(path, $0, $1) }
+        }
+    }
+
+    package static func confirmAudioCleanup(id: UUID, count: Int) throws {
+        try WindowsNative.checked { jsti_window_confirm_audio_cleanup(id.uuidString, count, $0, $1) }
     }
 
     package static func copyToClipboard(_ text: String) throws {

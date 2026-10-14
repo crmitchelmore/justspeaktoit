@@ -135,42 +135,11 @@ void jsti_style_install(void) {
 
 /* ------------------------------------------------------------ brand icon */
 
-static void rounded_rectangle(cairo_t *cr, double x, double y, double width, double height, double radius) {
-    cairo_new_sub_path(cr);
-    cairo_arc(cr, x + width - radius, y + radius, radius, -M_PI_2, 0);
-    cairo_arc(cr, x + width - radius, y + height - radius, radius, 0, M_PI_2);
-    cairo_arc(cr, x + radius, y + height - radius, radius, M_PI_2, M_PI);
-    cairo_arc(cr, x + radius, y + radius, radius, M_PI, 3 * M_PI_2);
-    cairo_close_path(cr);
-}
-
-/* Resources/Brand/AppIcon.svg on a 1024 grid: an orange rounded square and
- * five dark bars. */
 static void draw_brand_icon(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer data) {
     (void)area; (void)data;
     double size = MIN(width, height);
     cairo_translate(cr, (width - size) / 2, (height - size) / 2);
     jsti_brand_icon_paint(cr, size);
-}
-
-void jsti_brand_icon_paint(cairo_t *cr, double size) {
-    cairo_save(cr);
-    cairo_scale(cr, size / 1024.0, size / 1024.0);
-    cairo_pattern_t *surface = cairo_pattern_create_linear(0, 0, 0, 1024);
-    cairo_pattern_add_color_stop_rgb(surface, 0, 1.0, 0.42, 0.24);
-    cairo_pattern_add_color_stop_rgb(surface, 1, 1.0, 0.61, 0.29);
-    rounded_rectangle(cr, 0, 0, 1024, 1024, 224);
-    cairo_set_source(cr, surface);
-    cairo_fill(cr);
-    cairo_pattern_destroy(surface);
-    static const double bars[5][2] = { { 224, 408 }, { 348, 328 }, { 472, 240 }, { 596, 328 }, { 720, 408 } };
-    cairo_set_source_rgb(cr, 0x18 / 255.0, 0x1b / 255.0, 0x1d / 255.0);
-    for (int index = 0; index < 5; index++) {
-        double top = bars[index][1];
-        rounded_rectangle(cr, bars[index][0], top, 80, 1024 - 2 * top, 40);
-        cairo_fill(cr);
-    }
-    cairo_restore(cr);
 }
 
 GtkWidget *jsti_brand_icon_new(int size) {

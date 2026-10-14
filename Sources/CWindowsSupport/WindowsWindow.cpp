@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <objbase.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <dwmapi.h>
 #include <uxtheme.h>
 #include <mutex>
@@ -19,12 +20,16 @@
 #include "WindowsTray.hpp"
 #include "WindowsLoginItem.hpp"
 #include "WindowsWindowChrome.hpp"
+#include "WindowsHistoryFilters.hpp"
+#include "WindowsAppIcon.hpp"
 
 bool jsti_postprocessing_available();
 void jsti_show_postprocessing(HWND owner);
 bool jsti_settings_self_test(HWND owner, std::string &error);
 bool jsti_profiles_self_test(HWND owner, std::string &error);
 void jsti_show_profiles(HWND owner);
+void jsti_show_comparison(HWND owner, JSTIWindowCallback callback, void *context);
+bool jsti_comparison_self_test(HWND owner, std::string &error, const std::string &directory = {});
 void jsti_cancel_profiles_request();
 bool jsti_text_output_available();
 void jsti_show_text_output(HWND owner);
@@ -40,6 +45,9 @@ bool jsti_hotkey_self_test(HWND owner, int (*observe)(void *), void *context, st
 bool jsti_voice_output_available();
 void jsti_show_voice_settings(HWND owner);
 bool jsti_voice_settings_self_test(HWND owner, std::string &error);
+void jsti_show_voice_sources(HWND owner, const char *record, const char *history);
+bool jsti_voice_sources_self_test(HWND owner, std::string &error);
+void jsti_voice_sources_stop();
 bool jsti_azure_resource_available();
 void jsti_show_configuration(HWND owner, const wchar_t *group);
 void jsti_show_azure_resource_settings(HWND owner);
@@ -53,6 +61,11 @@ bool jsti_cloud_sync_available();
 void jsti_show_cloud_sync_settings(HWND owner);
 bool jsti_cloud_sync_settings_self_test(HWND owner, std::string &error);
 int jsti_window_recording_state();
+void jsti_show_vocabulary(HWND owner, int kind, void (*emit)(int, const char *, int));
+void jsti_show_vocabulary_result(HWND owner, const char *record, void (*emit)(int, const char *, int));
+bool jsti_vocabulary_self_test(HWND owner, std::string &error);
+
+int jsti_owned_window_save_snapshot(HWND window, const char *path, char *error, size_t errorCapacity);
 
 namespace {
 HMODULE handsFreeWts = nullptr;
@@ -111,6 +124,7 @@ void stopHandsFreeGuard(HWND window) {
 
 constexpr UINT updateMessage = WM_APP + 1;
 constexpr UINT profilesMessage = WM_APP + 17;
+constexpr UINT audioCleanupMessage = WM_APP + 23;
 constexpr int hotkeyID = 1;
 constexpr int modelRefreshID = 140;
 constexpr int modelStatusID = 141;
@@ -135,31 +149,43 @@ constexpr int transcriptLabelID = 92;
 // Read aloud emits an event; Voice… opens the native Voice output dialog.
 constexpr int readAloudID = 172;
 constexpr int voiceSettingsID = 173;
+constexpr int correctionsID = 180, pronunciationID = 181;
+constexpr int historyCorrectionsID = 182;
+constexpr int voiceSourcesID = 184;
 // The Source picker (Remote/Local) and the Local models dialog button, which
 // takes the place of Refresh models while the Local source is selected.
 constexpr int sourceLabelID = 89;
 constexpr int localModelsID = 174;
+constexpr int historyFiltersID = 460;
+constexpr int historyDeleteID = 461, historyClearID = 462;
+constexpr int recordingsFolderLabelID = 463, recordingsFolderID = 464;
+constexpr int audioCleanupID = 465;
+constexpr int backupAudioID = 466, backupExportID = 467;
+constexpr int backupInspectID = 468;
 constexpr int sourceID = 175;
+constexpr int comparisonID = 183;
 // Model modes: bit 0 is live, bit 1 is local (on-device).
 constexpr int modeCount = 4;
 constexpr int playbackIdle = 0, playbackPreparing = 1, playbackPlaying = 2, playbackPaused = 3;
 const wchar_t *const playbackIdleText = L"00:00.00 / --:--";
 // Pages, in sidebar order, as on the Mac: Speak, then Settings.
 enum Page { dashboardPage, historyPage, voicePage, generalPage, transcriptionPage, postProcessingPage,
-            profilesPage, keyboardPage, cloudSyncPage, aboutPage, pageCount };
+            correctionsPage, pronunciationPage, profilesPage, keyboardPage, cloudSyncPage, aboutPage, pageCount };
 struct PageInfo { const wchar_t *title; const wchar_t *subtitle; wchar_t glyph; const char *name; };
 const PageInfo pageInfo[pageCount] = {
     {L"Dashboard", L"Ready to capture ideas instantly. Check your setup, follow your usage, and pick up your latest "
                    L"session.", 0xE80F, "dashboard"},
     {L"History", L"Search, replay and reuse past recordings and their transcripts.", 0xE81C, "history"},
-    {L"Voice Output", L"Hear any History transcript read back in a Deepgram Aura voice, through your own Deepgram "
-                      L"key.", 0xE767, "voice-output"},
+    {L"Voice Output", L"Read History, typed text or an explicit clipboard snapshot in a Deepgram Aura voice. "
+                      L"Export lossless WAV audio with your own Deepgram key.", 0xE767, "voice-output"},
     {L"General", L"Choose the microphone, where finished text goes, whether the app starts at login, and how it "
                  L"looks.", 0xE713, "general"},
     {L"Transcription", L"Pick the speech model for new recordings, on this PC or with your own provider key.", 0xE720,
      "transcription"},
     {L"Post-processing", L"Optionally polish transcripts with an OpenRouter model. The original is always kept.", 0xE734,
      "post-processing"},
+    {L"Corrections", L"Your preferred spellings, applied before optional post-processing.", 0xE8D2, "corrections"},
+    {L"Pronunciation", L"Your dictionary for Read aloud. Entries stay on this device.", 0xE82D, "pronunciation"},
     {L"Profiles", L"Give specific apps their own model, language and clean-up prompt.", 0xE77B, "profiles"},
     {L"Keyboard", L"Start and stop dictation from anywhere with a global shortcut.", 0xE765, "keyboard"},
     {L"iCloud Sync", L"Keep History in step with your Mac, through your own iCloud account.", 0xE753, "icloud-sync"},
@@ -248,6 +274,10 @@ struct WindowState {
     std::vector<HistoryRow> pendingHistory;
     std::string pendingHistorySelection;
     std::string selectedHistoryID;
+    std::string allHistoryIDs;
+    std::string audioCleanupToken;
+    std::wstring migrationReport;
+    size_t audioCleanupCount = 0;
     JSTIWindowCallback callback = nullptr;
     void *context = nullptr;
     HFONT font = nullptr;
@@ -280,6 +310,11 @@ struct WindowState {
     std::wstring tourDirectory;
     int tourStep = -1;
 } state;
+
+std::string historyManagementIDs() {
+    std::lock_guard<std::mutex> lock(state.mutex);
+    return state.allHistoryIDs;
+}
 
 int selection(HWND window) {
     const LRESULT index = SendDlgItemMessageW(window, modelID, CB_GETCURSEL, 0, 0);
@@ -495,7 +530,7 @@ void updatePlaybackControls(HWND window, bool selected, int recording) {
     SetDlgItemTextW(window, playPauseID,
         state.displayedPlayback == playbackPreparing || state.displayedPlayback == playbackPlaying ? L"Pause" : L"Play");
     EnableWindow(GetDlgItem(window, playPauseID), (selected && recording == 0) || active);
-    EnableWindow(GetDlgItem(window, stopPlaybackID), active);
+    EnableWindow(GetDlgItem(window, stopPlaybackID), active || (state.page == voicePage && recording == 0));
 }
 
 // The playback display never infers progress: it shows only what the host
@@ -509,21 +544,32 @@ void applyPlayback(HWND window, int playback, const std::wstring &text, bool sel
 void updateHistoryControls(HWND window, int recording) {
     const LRESULT index = SendDlgItemMessageW(window, historyID, LB_GETCURSEL, 0, 0);
     const bool selected = index != LB_ERR && static_cast<size_t>(index) < state.displayedHistory.size();
-    const bool filtering = searching(window);
+    const bool filtering = searching(window) || jsti_history_filters_active();
     if (!selected && state.displayedPlayback != playbackIdle) applyPlayback(window, playbackIdle, L"", false, recording);
     else updatePlaybackControls(window, selected, recording);
     SetDlgItemTextW(window, historyDetailID, selected ? state.displayedHistory[static_cast<size_t>(index)].detail.c_str()
         : (state.displayedHistory.empty()
-            ? (filtering ? L"No saved recordings match this search." : L"Your saved recordings will appear here.")
+            ? (filtering ? L"No saved recordings match this search or filter." : L"Your saved recordings will appear here.")
             : L"Select a saved recording."));
     EnableWindow(GetDlgItem(window, historyID), recording == 0);
     EnableWindow(GetDlgItem(window, searchID), recording == 0);
-    EnableWindow(GetDlgItem(window, clearSearchID), recording == 0 && filtering);
+    EnableWindow(GetDlgItem(window, historyFiltersID), recording == 0);
+    EnableWindow(GetDlgItem(window, historyDeleteID), recording == 0 && selected);
+    EnableWindow(GetDlgItem(window, historyClearID), recording == 0 && !historyManagementIDs().empty());
+    EnableWindow(GetDlgItem(window, audioCleanupID), recording == 0);
+    EnableWindow(GetDlgItem(window, backupAudioID), recording == 0);
+    EnableWindow(GetDlgItem(window, backupExportID), recording == 0);
+    EnableWindow(GetDlgItem(window, backupInspectID), recording == 0);
+    jsti_history_filters_enabled(recording == 0);
+    SetDlgItemTextW(window, historyFiltersID, jsti_history_filters_label().c_str());
+    EnableWindow(GetDlgItem(window, clearSearchID), recording == 0 && searching(window));
     for (int id : {retryID, openAudioID}) EnableWindow(GetDlgItem(window, id), selected && recording == 0);
+    EnableWindow(GetDlgItem(window, historyCorrectionsID), selected && recording == 0 && state.historyPresentationReady);
     EnableWindow(GetDlgItem(window, exportID), selected && recording == 0 && state.historyPresentationReady);
     EnableWindow(GetDlgItem(window, readAloudID), selected && recording == 0 && state.historyPresentationReady &&
         jsti_voice_output_available());
     EnableWindow(GetDlgItem(window, voiceSettingsID), recording == 0 && jsti_voice_output_available());
+    EnableWindow(GetDlgItem(window, voiceSourcesID), recording == 0 && jsti_voice_output_available());
     EnableWindow(GetDlgItem(window, copyID), state.historyPresentationReady && (!selected || recording == 0));
     if (!selected) applyVariant(window, -1, false, recording);
     else EnableWindow(GetDlgItem(window, variantID), state.variantSwitchable && recording == 0);
@@ -596,20 +642,25 @@ unsigned pagesOf(int identifier) {
     case insightSessionsID: case insightTimeID: case insightAverageID: case insightSpendID:
     case setupMicrophoneID: case setupModelID: case setupShortcutID: case setupOutputID:
         return page(dashboardPage);
-    case searchLabelID: case searchID: case clearSearchID: case 93: case historyID: case historyDetailID:
+    case searchLabelID: case searchID: case clearSearchID: case historyFiltersID:
+    case historyDeleteID: case historyClearID: case 93: case historyID: case historyDetailID:
     case variantLabelID: case variantID: case retryID: case exportID: case openAudioID: case playbackLabelID:
     case playbackTimeID: case playPauseID: case historySessionsID: case historyErrorsID: case historyAverageID:
-    case historySpendID:
+    case historySpendID: case historyCorrectionsID:
         return page(historyPage);
     case readAloudID: case stopPlaybackID: return page(historyPage) | page(voicePage);
-    case voiceSettingsID: return page(voicePage);
+    case voiceSettingsID: case voiceSourcesID: return page(voicePage);
     case configurationID:
         return page(generalPage) | page(transcriptionPage) | page(postProcessingPage) | page(keyboardPage);
     case 94: case microphoneID: case textOutputID: case appearanceLabelID: case appearanceID: case automationID:
-    case loginItemID:
+    case loginItemID: case recordingsFolderLabelID: case recordingsFolderID: case audioCleanupID:
+    case backupAudioID: case backupExportID: case backupInspectID:
         return page(generalPage);
     case processingID: return page(postProcessingPage);
     case profilesID: return page(profilesPage);
+    case correctionsID: return page(correctionsPage);
+    case pronunciationID: return page(pronunciationPage);
+    case comparisonID: return page(transcriptionPage);
     case shortcutValueID: case shortcutID: return page(keyboardPage);
     case cloudSyncID: return page(cloudSyncPage);
     case githubID: case issueID: case privacyID: return page(aboutPage);
@@ -796,12 +847,15 @@ void layoutHistory(HWND window, const RECT &content) {
     const int heroBottom = layoutHero(window, content, scale(window, 168), jsti::chrome::Gradient::brand);
     place(window, importID, box(frame.hero.right - scale(window, 26) - scale(window, 124), frame.hero.top + scale(window, 24),
                                 scale(window, 124), row));
+    place(window, historyClearID, box(frame.hero.right - scale(window, 294), frame.hero.top + scale(window, 24),
+                                     scale(window, 136), row));
     layoutChips(window, {{historySessionsID, L"Sessions"}, {historyErrorsID, L"Errors"},
                          {historyAverageID, L"Average Length"}, {historySpendID, L"Spend"}});
     const int searchTop = heroBottom + scale(window, 14);
     place(window, searchLabelID, box(content.left, searchTop + scale(window, 8), scale(window, 112), scale(window, 20)));
     placeField(window, searchID, RECT{content.left + scale(window, 116), searchTop,
-                                      content.right - scale(window, 88), searchTop + row});
+                                      content.right - scale(window, 216), searchTop + row});
+    place(window, historyFiltersID, box(content.right - scale(window, 208), searchTop, scale(window, 120), row));
     place(window, clearSearchID, box(content.right - scale(window, 80), searchTop, scale(window, 80), row));
     const int top = searchTop + row + scale(window, 14);
     const int listWidth = (widthOf(content) - gap) * 13 / 25;
@@ -817,7 +871,7 @@ void layoutHistory(HWND window, const RECT &content) {
     place(window, variantLabelID, box(left, y + scale(window, 7), scale(window, 128), scale(window, 20)));
     place(window, variantID, RECT{left + scale(window, 132), y, right, y + scale(window, 200)});
     y += row + scale(window, 10);
-    const int actionsHeight = 3 * row + 2 * scale(window, 8) + scale(window, 26);
+    const int actionsHeight = 4 * row + 3 * scale(window, 8) + scale(window, 26);
     placeField(window, transcriptID, RECT{left, y, right, detail.bottom - inset - actionsHeight - scale(window, 10)}, true);
     int actions = detail.bottom - inset - actionsHeight;
     place(window, playbackLabelID, box(left, actions, scale(window, 80), scale(window, 20)));
@@ -836,8 +890,12 @@ void layoutHistory(HWND window, const RECT &content) {
     place(window, readAloudID, cell(0, actions, 2));
     place(window, retryID, cell(1, actions, 2));
     actions += row + scale(window, 8);
-    place(window, exportID, cell(0, actions, 2));
-    place(window, openAudioID, cell(1, actions, 2));
+    place(window, exportID, cell(0, actions, 3));
+    place(window, openAudioID, cell(1, actions, 3));
+    place(window, historyCorrectionsID, cell(2, actions, 3));
+    setLabel(window, exportID, L"&Export...");
+    actions += row + scale(window, 8);
+    place(window, historyDeleteID, cell(0, actions, 3));
 }
 
 // A settings card: `rows` controls, top to bottom, with a description.
@@ -874,18 +932,25 @@ void layoutSettings(HWND window, const RECT &content) {
     switch (state.page) {
     case voicePage: {
         int y = layoutSettingsCard(window, top, content, 0xE767, L"Read aloud",
-            L"Choose a recording in History, then read its transcript aloud here or from History. Recording, choosing "
-            L"another recording or Stop ends it. Read aloud uses the Deepgram key saved under Transcription.", row);
+            L"Read the selected History transcript, or open Text and export for typed/pasted text and an explicit "
+            L"clipboard snapshot. The saved Deepgram key is used. External selected text is unavailable.", 2 * row + gap);
         place(window, voiceSettingsID, box(left, y, scale(window, 150), row));
         button(readAloudID, y, scale(window, 196));
         place(window, stopPlaybackID, box(right - scale(window, 196) - scale(window, 8) - scale(window, 96), y,
                                           scale(window, 96), row));
+        place(window, voiceSourcesID, box(left, y + row + gap, scale(window, 260), row));
         break;
     }
     case generalPage: {
-        int y = layoutSettingsCard(window, top, content, 0xE720, L"Microphone", L"", row);
+        int y = layoutSettingsCard(window, top, content, 0xE720, L"Audio and output",
+            L"Finished text goes to the app where dictation started, or the clipboard. "
+            L"Backups include History text and optional audio, not settings, profiles or credentials.",
+            2 * row + scale(window, 12));
         label(94, y); control(microphoneID, y);
-        top = y + row + scale(window, 20) + gap;
+        const int backupY = y + row + scale(window, 12);
+        place(window, backupAudioID, RECT{left + scale(window, 182), backupY, right - scale(window, 210), backupY + row});
+        button(backupExportID, backupY, scale(window, 196));
+        top = y + 2 * row + scale(window, 32) + gap;
         y = layoutSettingsCard(window, top, content, 0xE8C8, L"Output",
             L"Finished text goes back into the app you were in when dictation started, or to the clipboard.", row);
         place(window, textOutputID, box(left, y, scale(window, 170), row));
@@ -894,10 +959,16 @@ void layoutSettings(HWND window, const RECT &content) {
         // The Mac's App Behaviour card. The note appears only when the system
         // decides Launch at login, so the page still fits the minimum height.
         y = layoutSettingsCard(window, top, content, 0xE713, L"App behaviour", state.loginItemNote,
-                               2 * row + scale(window, 12));
+                               3 * row + scale(window, 24));
         label(appearanceLabelID, y); control(appearanceID, y, scale(window, 220));
         place(window, loginItemID, RECT{left + scale(window, 188 + 220 + 24), y, right, y + row});
         place(window, automationID, RECT{left, y + row + scale(window, 12), right, y + 2 * row + scale(window, 12)});
+        label(recordingsFolderLabelID, y + 2 * row + scale(window, 24));
+        control(recordingsFolderID, y + 2 * row + scale(window, 24), scale(window, 110));
+        place(window, audioCleanupID, RECT{
+            left + scale(window, 188 + 110 + 12), y + 2 * row + scale(window, 24),
+            right - scale(window, 172), y + 3 * row + scale(window, 24)});
+        button(backupInspectID, y + 2 * row + scale(window, 24), scale(window, 160));
         break;
     }
     case transcriptionPage: {
@@ -920,6 +991,10 @@ void layoutSettings(HWND window, const RECT &content) {
         y += row + scale(window, 12);
         place(window, azureID, box(left + scale(window, 188), y, scale(window, 240), row));
         place(window, configurationID, box(right - scale(window, 220), y, scale(window, 220), row));
+        top = y + row + scale(window, 20) + gap;
+        y = layoutSettingsCard(window, top, content, 0xE9D2, L"Compare Models",
+            L"Run the same audio through several models, rank the raw results blind, and export the scoreboard.", row);
+        place(window, comparisonID, box(left, y, scale(window, 220), row));
         break;
     }
     case postProcessingPage: {
@@ -928,6 +1003,19 @@ void layoutSettings(HWND window, const RECT &content) {
             L"instructions. Empty recordings stay empty, and History keeps the original beside the result.", row);
         place(window, processingID, box(left, y, scale(window, 230), row));
         place(window, configurationID, box(left + scale(window, 242), y, scale(window, 220), row));
+        break;
+    }
+    case correctionsPage: case pronunciationPage: {
+        const bool corrections = state.page == correctionsPage;
+        const int y = layoutSettingsCard(window, top, content, 0xE8D2,
+            corrections ? L"Personal corrections" : L"Pronunciation dictionary",
+            corrections
+                ? L"Add canonical spellings and spoken variants, choose automatic, context or manual rules, "
+                  L"and preview applied corrections and suggestions. Original provider text stays in History. "
+                  L"Automatic observation of edits in other apps is not available on this platform."
+                : L"Edit words, phonetic pronunciations and text replacements. Regular expressions, case sensitivity "
+                  L"and entry order use the same matching as the Mac. Deepgram uses text replacements, not IPA tags.", row);
+        place(window, corrections ? correctionsID : pronunciationID, box(left, y, scale(window, 230), row));
         break;
     }
     case profilesPage: {
@@ -1254,7 +1342,7 @@ void drawControl(HWND window, const DRAWITEMSTRUCT &item) {
         if (pressed) chrome::fillRound(dc, rect, heightOf(rect) / 2, RGB(0, 0, 0), 30);
         const bool large = heightOf(rect) > s(44);
         const std::wstring shown = recording == 1 ? (large ? L"Stop Recording" : L"Stop")
-            : recording == 2 ? L"Cancel" : (large ? L"Start Recording" : L"Record");
+            : recording == 2 ? (large ? L"Cancel operation" : L"Cancel") : (large ? L"Start Recording" : L"Record");
         HGDIOBJ previous = SelectObject(dc, chrome::font(chrome::Font::bodySemibold, dpi));
         SIZE extent{};
         GetTextExtentPoint32W(dc, shown.c_str(), static_cast<int>(shown.size()), &extent);
@@ -1415,6 +1503,9 @@ void applyTheme(HWND window) {
         wchar_t kind[16] = {};
         GetClassNameW(control, kind, 16);
         if (_wcsicmp(kind, L"COMBOBOX") == 0) SetWindowTheme(control, dark ? L"DarkMode_CFD" : nullptr, nullptr);
+        else if (GetDlgCtrlID(control) == backupAudioID) {
+            SetWindowTheme(control, dark ? L"DarkMode_Explorer" : L"Explorer", nullptr);
+        }
         else if (_wcsicmp(kind, L"EDIT") == 0 || _wcsicmp(kind, L"LISTBOX") == 0) {
             SetWindowTheme(control, dark ? L"DarkMode_Explorer" : L"Explorer", nullptr);
         }
@@ -1422,6 +1513,7 @@ void applyTheme(HWND window) {
     backdrop.dirty = true;
     RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME);
     jsti::hud::refresh();
+    jsti_history_filters_refresh_theme();
 }
 
 void refreshFont(HWND window) {
@@ -1516,6 +1608,9 @@ bool createControls(HWND window) {
         add(L"STATIC", L"&Find in history", 0, searchLabelID) &&
         add(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, searchID) &&
         add(L"BUTTON", L"C&lear", BS_PUSHBUTTON | WS_TABSTOP, clearSearchID) &&
+        add(L"BUTTON", L"Fil&ters...", BS_PUSHBUTTON | WS_TABSTOP, historyFiltersID) &&
+        add(L"BUTTON", L"Delete...", BS_PUSHBUTTON | WS_TABSTOP, historyDeleteID) &&
+        add(L"BUTTON", L"Clear history...", BS_PUSHBUTTON | WS_TABSTOP, historyClearID) &&
         add(L"STATIC", L"&History", 0, 93) &&
         add(L"LISTBOX", L"", LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP,
             historyID) &&
@@ -1526,6 +1621,7 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"&Export text", BS_PUSHBUTTON | WS_TABSTOP, exportID) &&
         add(L"BUTTON", L"&Open audio", BS_PUSHBUTTON | WS_TABSTOP, openAudioID) &&
         add(L"BUTTON", L"Rea&d aloud", BS_PUSHBUTTON | WS_TABSTOP, readAloudID) &&
+        add(L"BUTTON", L"Co&rrections...", BS_PUSHBUTTON | WS_TABSTOP, historyCorrectionsID) &&
         // The label carries the mnemonic and precedes Play/Pause, so Alt+B
         // and assistive technology reach the playback controls.
         add(L"STATIC", L"Play&back", 0, playbackLabelID) &&
@@ -1533,7 +1629,11 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"Play", BS_PUSHBUTTON | WS_TABSTOP, playPauseID) &&
         add(L"BUTTON", L"Stop", BS_PUSHBUTTON | WS_TABSTOP, stopPlaybackID) &&
         add(L"BUTTON", L"Choose &voice…", BS_PUSHBUTTON | WS_TABSTOP, voiceSettingsID) &&
+        add(L"BUTTON", L"&Text and export...", BS_PUSHBUTTON | WS_TABSTOP, voiceSourcesID) &&
         add(L"BUTTON", L"Edit app &profiles…", BS_PUSHBUTTON | WS_TABSTOP, profilesID) &&
+        add(L"BUTTON", L"Edit &corrections...", BS_PUSHBUTTON | WS_TABSTOP, correctionsID) &&
+        add(L"BUTTON", L"Edit &pronunciations...", BS_PUSHBUTTON | WS_TABSTOP, pronunciationID) &&
+        add(L"BUTTON", L"Compare &Models...", BS_PUSHBUTTON | WS_TABSTOP, comparisonID) &&
         add(L"STATIC", L"&Source", 0, sourceLabelID) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP, sourceID) &&
         add(L"STATIC", L"&Mode", 0, 95) &&
@@ -1558,6 +1658,12 @@ bool createControls(HWND window) {
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP, appearanceID) &&
         add(L"BUTTON", L"Launch at &login", BS_PUSHBUTTON | WS_TABSTOP, loginItemID) &&
         add(L"BUTTON", L"Allow &automation (speak command and MCP)", BS_PUSHBUTTON | WS_TABSTOP, automationID) &&
+        add(L"STATIC", L"Recording storage", 0, recordingsFolderLabelID) &&
+        add(L"BUTTON", L"Open &folder", BS_PUSHBUTTON | WS_TABSTOP, recordingsFolderID) &&
+        add(L"BUTTON", L"Delete all a&udio...", BS_PUSHBUTTON | WS_TABSTOP, audioCleanupID) &&
+        add(L"BUTTON", L"Include &backup audio", BS_AUTOCHECKBOX | WS_TABSTOP, backupAudioID) &&
+        add(L"BUTTON", L"Save History &backup...", BS_PUSHBUTTON | WS_TABSTOP, backupExportID) &&
+        add(L"BUTTON", L"&Inspect backup...", BS_PUSHBUTTON | WS_TABSTOP, backupInspectID) &&
         add(L"BUTTON", L"i&Cloud sync settings…", BS_PUSHBUTTON | WS_TABSTOP, cloudSyncID) &&
         add(L"BUTTON", L"View on &GitHub", BS_PUSHBUTTON | WS_TABSTOP, githubID) &&
         add(L"BUTTON", L"Report an iss&ue", BS_PUSHBUTTON | WS_TABSTOP, issueID) &&
@@ -1565,6 +1671,7 @@ bool createControls(HWND window) {
         add(L"STATIC", jsti_hotkey_label().c_str(), 0, transcriptLabelID) &&
         add(L"EDIT", L"", ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL | WS_TABSTOP, transcriptID) &&
         add(L"BUTTON", L"&Copy transcript", BS_PUSHBUTTON | WS_TABSTOP, copyID);
+    SendDlgItemMessageW(window, backupAudioID, BM_SETCHECK, BST_CHECKED, 0);
     for (int identifier : {chipSessionsID, chipTimeID, chipSpendID, insightSessionsID, insightTimeID, insightAverageID,
                            insightSpendID, historySessionsID, historyErrorsID, historyAverageID, historySpendID,
                            setupMicrophoneID, setupModelID, setupShortcutID, setupOutputID}) {
@@ -1729,7 +1836,7 @@ void applyInsights(HWND window) {
 }
 
 void applyUpdate(HWND window) {
-    std::wstring status, transcript;
+    std::wstring status, transcript, migrationReport;
     bool microphonesChanged;
     std::vector<MicrophoneRow> microphones;
     std::wstring microphoneError;
@@ -1746,6 +1853,7 @@ void applyUpdate(HWND window) {
     {
         std::lock_guard<std::mutex> lock(state.mutex);
         status.swap(state.status); transcript.swap(state.transcript);
+        migrationReport.swap(state.migrationReport);
         presentationChanged = state.presentationChanged;
         if (presentationChanged) presentation = std::move(state.pendingPresentation);
         state.presentationChanged = false;
@@ -1893,6 +2001,36 @@ void applyUpdate(HWND window) {
     }
     updateHistoryControls(window, recording);
     refreshSetup(window);
+    if (!migrationReport.empty() && IsWindow(window)) {
+        MessageBoxW(window, migrationReport.c_str(), L"Backup inspection (read only)", MB_OK | MB_ICONINFORMATION);
+    }
+}
+
+void emitMigrationInspection(const std::string &path) {
+    if (state.callback) state.callback(JSTI_EVENT_MIGRATION_INSPECT, path.c_str(), 0, state.context);
+}
+
+void inspectMigrationBackup(HWND window) {
+    std::vector<wchar_t> path(32768);
+    OPENFILENAMEW chooser{};
+    chooser.lStructSize = sizeof(chooser);
+    chooser.hwndOwner = window;
+    chooser.lpstrFile = path.data();
+    chooser.nMaxFile = static_cast<DWORD>(path.size());
+    chooser.lpstrFilter = L"ZIP backups (*.zip)\0*.zip\0\0";
+    chooser.lpstrTitle = L"Inspect backup (no data will be imported)";
+    chooser.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_EXPLORER;
+    if (!GetOpenFileNameW(&chooser)) {
+        const DWORD code = CommDlgExtendedError();
+        if (code) showFailure(window, jsti::systemError("Choosing backup for inspection", code));
+        return;
+    }
+    const std::string selected = jsti::utf8(path.data());
+    if (selected.empty()) {
+        showFailure(window, "Windows returned an invalid backup path. Choose a local ZIP file.");
+        return;
+    }
+    emitMigrationInspection(selected);
 }
 
 void importAudio(HWND window) {
@@ -1914,16 +2052,62 @@ void importAudio(HWND window) {
     }
 }
 
+void emitMigrationBackup(HWND window, const std::string &path) {
+    const int audio = SendDlgItemMessageW(window, backupAudioID, BM_GETCHECK, 0, 0) == BST_CHECKED ? 1 : 0;
+    if (state.callback) state.callback(JSTI_EVENT_MIGRATION_EXPORT, path.c_str(), audio, state.context);
+}
+
+void exportMigrationBackup(HWND window) {
+    std::vector<wchar_t> path(32768);
+    const std::wstring name = L"JustSpeakToIt-History.zip";
+    std::copy(name.begin(), name.end(), path.begin());
+    OPENFILENAMEW chooser{};
+    chooser.lStructSize = sizeof(chooser);
+    chooser.hwndOwner = window;
+    chooser.lpstrFilter = L"ZIP backups (*.zip)\0*.zip\0\0";
+    chooser.lpstrFile = path.data();
+    chooser.nMaxFile = static_cast<DWORD>(path.size());
+    chooser.lpstrDefExt = L"zip";
+    chooser.lpstrTitle = L"Save History backup (existing files are never replaced)";
+    chooser.Flags = OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_EXPLORER | OFN_DONTADDTORECENT;
+    if (!GetSaveFileNameW(&chooser)) {
+        const DWORD code = CommDlgExtendedError();
+        if (code) showFailure(window, jsti::systemError("Choosing History backup destination", code));
+        return;
+    }
+    const DWORD attributes = GetFileAttributesW(path.data());
+    if (attributes != INVALID_FILE_ATTRIBUTES) {
+        showFailure(window, "A file or folder already exists at that destination. "
+                    "Choose a new backup filename; existing files are never replaced.");
+        return;
+    }
+    const DWORD code = GetLastError();
+    if (code != ERROR_FILE_NOT_FOUND) {
+        showFailure(window, jsti::systemError("Checking History backup destination", code));
+        return;
+    }
+    const std::string selected = jsti::utf8(path.data());
+    if (selected.empty()) {
+        showFailure(window, "Windows returned an invalid History backup path. Choose another filename.");
+        return;
+    }
+    emitMigrationBackup(window, selected);
+}
+
 // The screenshot tour: every page, then the dashboard and History in dark
-// mode, then the dashboard while recording. Each step is shown, drawn, then
-// saved as NN-name.bmp beside the others; the window closes afterwards.
+// mode, then recording/HUD states, the light/dark filter editors, the
+// expanded/compact HUD variants, and the General page in dark mode. Each
+// step is saved as NN-name.bmp; the window closes afterwards.
 enum TourStep { tourDarkDashboard = pageCount, tourDarkHistory, tourDashboardRecording, tourHUDRecording,
-                tourHUDCompleted, tourExpandedRecording, tourCompactRecording, tourCompactCompleted, tourSteps };
+                tourHUDCompleted, tourHistoryFilters, tourDarkHistoryFilters, tourExpandedRecording,
+                tourCompactRecording, tourCompactCompleted, tourGeneralDark, tourSteps };
 
 std::string tourName(int step) {
     if (step < pageCount) return pageInfo[step].name;
     const char *const extra[] = {"dashboard-dark", "history-dark", "dashboard-recording", "hud-recording",
-                                 "hud-completed", "hud-expanded-recording", "hud-compact-recording", "hud-compact-completed"};
+                                 "hud-completed", "history-filters", "history-filters-dark",
+                                 "hud-expanded-recording", "hud-compact-recording", "hud-compact-completed",
+                                 "general-dark"};
     return extra[step - pageCount];
 }
 
@@ -1937,6 +2121,28 @@ void tourShow(HWND window, int step) {
         showPage(window, dashboardPage);
     } else if (step == tourDarkHistory) {
         showPage(window, historyPage);
+    } else if (step == tourGeneralDark) {
+        state.displayedRecording = 0;
+        jsti::chrome::setAppearance(2);
+        applyTheme(window);
+        updateHistoryControls(window, 0);
+        updateSettingsButtons(window, 0);
+        showPage(window, generalPage);
+    } else if (step == tourHistoryFilters || step == tourDarkHistoryFilters) {
+        const JSTIHistoryFilterModel models[] = {
+            {"model/sample", "Sample transcription model", 0},
+            {"model/long", "An imported transcription model with a long descriptive name and vocabulary context", 0}
+        };
+        if (jsti_window_set_history_filters(models, 2, 0, "", "") != 0) {
+            emit(window, JSTI_EVENT_ERROR, "Could not prepare the sample History filter editor.");
+            PostMessageW(window, WM_CLOSE, 0, 0);
+            return;
+        }
+        state.displayedRecording = 0;
+        jsti::chrome::setAppearance(step == tourHistoryFilters ? 1 : 2);
+        applyTheme(window);
+        showPage(window, historyPage);
+        jsti_show_history_filters(window, [](const std::string &) {});
     } else if (step == tourHUDRecording) {
         jsti::hud::stage(1, L"Recording", L"Capturing audio",
                          L"Could we move the catch-up to Friday? That gives us a little more time");
@@ -1975,7 +2181,13 @@ void tourStep(HWND window) {
     char error[512] = {};
     std::string hudError;
     std::wstring widePath;
-    if (state.tourStep >= tourHUDRecording && state.tourStep <= tourCompactCompleted) {
+    if (state.tourStep == tourHistoryFilters || state.tourStep == tourDarkHistoryFilters) {
+        HWND filters = jsti_history_filters_window();
+        if (jsti_owned_window_save_snapshot(filters, path.c_str(), error, sizeof error) != 0) {
+            emit(window, JSTI_EVENT_ERROR, error);
+        }
+        if (filters) DestroyWindow(filters);
+    } else if (state.tourStep >= tourHUDRecording && state.tourStep <= tourCompactCompleted) {
         // The HUD is its own layered window; it is drawn straight to the file.
         if (!jsti::wide(path.c_str(), widePath) || !jsti::hud::saveSnapshot(widePath, hudError)) {
             emit(window, JSTI_EVENT_ERROR, hudError.empty() ? "The HUD snapshot path is invalid." : hudError.c_str());
@@ -1985,7 +2197,12 @@ void tourStep(HWND window) {
     }
     ++state.tourStep;
     if (state.tourStep < tourSteps) tourShow(window, state.tourStep);
-    else PostMessageW(window, WM_CLOSE, 0, 0);
+    else {
+        std::string comparisonError;
+        if (!jsti_comparison_self_test(window, comparisonError, jsti::utf8(state.tourDirectory)))
+            emit(window, JSTI_EVENT_ERROR, comparisonError.c_str());
+        PostMessageW(window, WM_CLOSE, 0, 0);
+    }
 }
 
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
@@ -2019,6 +2236,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     case WM_SIZE:
         layout(window); return 0;
     case WM_DPICHANGED: {
+        std::string iconFailure;
+        if (!jsti::appIcon::refresh(window, HIWORD(wparam), iconFailure)) showFailure(window, iconFailure);
         auto bounds = reinterpret_cast<RECT *>(lparam);
         SetWindowPos(window, nullptr, bounds->left, bounds->top, bounds->right - bounds->left,
             bounds->bottom - bounds->top, SWP_NOZORDER | SWP_NOACTIVATE);
@@ -2067,7 +2286,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         const auto &palette = jsti::chrome::palette();
         HDC dc = reinterpret_cast<HDC>(wparam);
         const int identifier = GetDlgCtrlID(reinterpret_cast<HWND>(lparam));
-        const COLORREF surface = message == WM_CTLCOLORLISTBOX && identifier == historyID ? palette.window : palette.field;
+        COLORREF surface = message == WM_CTLCOLORLISTBOX && identifier == historyID ? palette.window : palette.field;
+        if (identifier == backupAudioID) surface = palette.card;
         SetTextColor(dc, palette.text);
         SetBkColor(dc, surface);
         return reinterpret_cast<LRESULT>(brushFor(surface));
@@ -2082,6 +2302,28 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         return 0;
     case updateMessage:
         applyUpdate(window); return 0;
+    case audioCleanupMessage: {
+        std::string token;
+        size_t count;
+        {
+            std::lock_guard<std::mutex> lock(state.mutex);
+            token.swap(state.audioCleanupToken);
+            count = state.audioCleanupCount;
+        }
+        if (token.empty()) return 0;
+        bool confirmed = false;
+        if (idleControl(window, audioCleanupID) && IsWindowEnabled(window)) {
+            const std::wstring body = L"Permanently delete " + std::to_wstring(count) +
+                L" saved audio file(s), including audio kept after deleting History entries?\n\n"
+                L"History entries and transcripts will be kept. Recordings saved after this "
+                L"confirmation will not be deleted. This cannot be undone.";
+            confirmed = MessageBoxW(window, body.c_str(), L"Delete saved recordings?",
+                MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) == IDYES;
+        }
+        if (state.callback) state.callback(JSTI_EVENT_AUDIO_CLEANUP_RESPONSE, token.c_str(),
+            confirmed ? 1 : 0, state.context);
+        return 0;
+    }
     case WM_HOTKEY:
         jsti_hotkey_message(window, message, wparam);
         return 0;
@@ -2116,8 +2358,28 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             return 0;
         }
         switch (LOWORD(wparam)) {
+        case historyCorrectionsID:
+            if (HIWORD(wparam) == BN_CLICKED && IsWindowEnabled(GetDlgItem(window, historyCorrectionsID))) {
+                const std::string record = selectedHistory(window);
+                if (!record.empty()) jsti_show_vocabulary_result(window, record.c_str(),
+                    [](int event, const char *payload, int kind) {
+                        if (state.callback) state.callback(event, payload, kind, state.context);
+                    });
+            }
+            return 0;
+        case correctionsID: case pronunciationID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, LOWORD(wparam))) {
+                jsti_show_vocabulary(window, LOWORD(wparam) == correctionsID ? 0 : 1,
+                    [](int event, const char *payload, int kind) {
+                        if (state.callback) state.callback(event, payload, kind, state.context);
+                    });
+            }
+            return 0;
         case profilesID:
             if (idleControl(window, profilesID)) emit(window, 17);
+            return 0;
+        case comparisonID:
+            if (idleControl(window, comparisonID)) jsti_show_comparison(window, state.callback, state.context);
             return 0;
         case recordID: emitRecording(window); return 0;
         case importID:
@@ -2170,6 +2432,20 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             emit(window, JSTI_EVENT_LOGIN_ITEM, requested ? "1" : "0");
             return 0;
         }
+        case recordingsFolderID:
+            if (HIWORD(wparam) == BN_CLICKED) emit(window, JSTI_EVENT_RECORDINGS_FOLDER, "");
+            return 0;
+        case audioCleanupID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, audioCleanupID)) {
+                emit(window, JSTI_EVENT_AUDIO_CLEANUP, "");
+            }
+            return 0;
+        case backupExportID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, backupExportID)) exportMigrationBackup(window);
+            return 0;
+        case backupInspectID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, backupInspectID)) inspectMigrationBackup(window);
+            return 0;
         case githubID: case issueID: case privacyID: {
             if (HIWORD(wparam) != BN_CLICKED) return 0;
             const wchar_t *address = LOWORD(wparam) == githubID ? L"https://github.com/crmitchelmore/justspeaktoit"
@@ -2217,6 +2493,14 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
                 jsti_show_voice_settings(window);
             }
             return 0;
+        case voiceSourcesID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, voiceSourcesID) && IsWindowEnabled(window)) {
+                const std::string transcript = state.historyPresentationReady
+                    ? jsti::utf8(controlText(GetDlgItem(window, transcriptID))) : "";
+                const std::string record = state.historyPresentationReady ? state.selectedHistoryID : "";
+                jsti_show_voice_sources(window, record.c_str(), transcript.c_str());
+            }
+            return 0;
         case playPauseID:
             if (HIWORD(wparam) == BN_CLICKED && IsWindowEnabled(GetDlgItem(window, playPauseID))) {
                 emitHistory(window, JSTI_EVENT_HISTORY_PLAY_PAUSE);
@@ -2224,7 +2508,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             return 0;
         case stopPlaybackID:
             if (HIWORD(wparam) == BN_CLICKED && IsWindowEnabled(GetDlgItem(window, stopPlaybackID))) {
-                emitHistory(window, JSTI_EVENT_HISTORY_STOP);
+                if (state.page == voicePage) jsti_voice_sources_stop();
+                else emitHistory(window, JSTI_EVENT_HISTORY_STOP);
             }
             return 0;
         case historyID:
@@ -2251,6 +2536,44 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case clearSearchID:
             if (idleControl(window, clearSearchID)) clearSearch(window);
             return 0;
+        case historyFiltersID:
+            if (idleControl(window, historyFiltersID)) {
+                jsti_show_history_filters(window, [window](const std::string &value) {
+                    emit(window, JSTI_EVENT_HISTORY_FILTERS, value.c_str());
+                });
+            }
+            return 0;
+        case historyDeleteID: {
+            if (!idleControl(window, historyDeleteID)) return 0;
+            const LRESULT selected = SendDlgItemMessageW(window, historyID, LB_GETCURSEL, 0, 0);
+            if (selected == LB_ERR || static_cast<size_t>(selected) >= state.displayedHistory.size()) return 0;
+            const std::string id = state.displayedHistory[static_cast<size_t>(selected)].id;
+            const int answer = MessageBoxW(window,
+                L"Delete this History entry? Its saved recording file will be kept.\n\n"
+                L"This cannot be undone. If History sync is enabled, its synced text will also be deleted.",
+                L"Delete History entry", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
+            if (answer == IDYES && state.callback) {
+                state.callback(JSTI_EVENT_HISTORY_DELETE, id.c_str(), 0, state.context);
+            }
+            return 0;
+        }
+        case historyClearID: {
+            if (!idleControl(window, historyClearID)) return 0;
+            const std::string ids = historyManagementIDs();
+            if (ids.empty()) return 0;
+            const size_t count = 1 + static_cast<size_t>(std::count(ids.begin(), ids.end(), '\n'));
+            const std::wstring prompt = L"Clear all " + std::to_wstring(count)
+                + L" History entries, including hidden and filtered entries?\n\n"
+                L"Yes: delete History and its owned recording files.\n"
+                L"No: delete History but keep recording files.\nCancel: keep everything.\n\n"
+                L"This cannot be undone. If History sync is enabled, synced text will also be deleted.";
+            const int answer = MessageBoxW(window, prompt.c_str(), L"Clear History",
+                MB_YESNOCANCEL | MB_ICONWARNING | MB_DEFBUTTON3);
+            if ((answer == IDYES || answer == IDNO) && state.callback) {
+                state.callback(JSTI_EVENT_HISTORY_DELETE, ids.c_str(), answer == IDYES ? 1 : 0, state.context);
+            }
+            return 0;
+        }
         case IDCANCEL:
             // Escape inside the search box is a keyboard clear affordance.
             if (GetFocus() == GetDlgItem(window, searchID) && idleControl(window, searchID)) clearSearch(window);
@@ -2368,7 +2691,10 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         jsti::tray::remove();
         backdrop.release();
         jsti_hotkey_stop(window);
-        { std::lock_guard<std::mutex> lock(state.mutex); state.window = nullptr; state.posted = false; }
+        {
+            std::lock_guard<std::mutex> lock(state.mutex);
+            state.window = nullptr; state.posted = false; state.audioCleanupToken.clear(); state.migrationReport.clear();
+        }
         PostQuitMessage(0); return 0;
     }
     return DefWindowProcW(window, message, wparam, lparam);
@@ -2396,6 +2722,56 @@ void jsti_window_hotkey_event(HWND window, int event) {
     case JSTI_EVENT_HOTKEY_DEADLINE: emit(window, event); break;
     default: break;
     }
+}
+
+int jsti_window_set_history_management(const char *identifiers) {
+    std::wstring checked;
+    if (!identifiers || !jsti::wide(identifiers, checked)) return -1;
+    std::lock_guard<std::mutex> lock(state.mutex);
+    state.allHistoryIDs = identifiers;
+    if (state.window && !state.posted) {
+        state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
+        if (!state.posted) return -1;
+    }
+    return 0;
+}
+
+int jsti_window_confirm_audio_cleanup(const char *token, size_t count, char *error, size_t capacity) {
+    std::wstring checked;
+    if (!token || !jsti::wide(token, checked) || checked.empty() || count == 0) {
+        return jsti::fail("The recording audio confirmation is invalid.", error, capacity);
+    }
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (!state.window || !state.audioCleanupToken.empty()) {
+        return jsti::fail("The recording audio confirmation is unavailable.", error, capacity);
+    }
+    state.audioCleanupToken = token;
+    state.audioCleanupCount = count;
+    if (!PostMessageW(state.window, audioCleanupMessage, 0, 0)) {
+        state.audioCleanupToken.clear();
+        return jsti::fail("Could not show the recording audio confirmation.", error, capacity);
+    }
+    return 0;
+}
+
+int jsti_window_show_migration_report(const char *text, char *error, size_t capacity) {
+    std::wstring report;
+    if (!text || !jsti::wide(text, report) || report.empty()) {
+        return jsti::fail("The backup inspection report is invalid.", error, capacity);
+    }
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (!state.window || !state.migrationReport.empty()) {
+        return jsti::fail("The backup inspection report is unavailable.", error, capacity);
+    }
+    state.migrationReport = std::move(report);
+    if (!state.posted) {
+        state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
+        if (!state.posted) {
+            state.migrationReport.clear();
+            return jsti::fail("Could not show the backup inspection report.", error, capacity);
+        }
+    }
+    return 0;
 }
 
 int jsti_window_set_automation(int enabled) {
@@ -2465,41 +2841,6 @@ ULONG_PTR activateVisualStyles() {
     return cookie;
 }
 
-// The app icon at `size` pixels, drawn from the brand geometry.
-// `recording` adds a red dot, as the Mac's menu bar icon shows while recording.
-HICON brandIcon(int size, bool recording = false) {
-    if (size <= 0 || !jsti::chrome::startup()) return nullptr;
-    BITMAPINFO info{};
-    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    info.bmiHeader.biWidth = size;
-    info.bmiHeader.biHeight = -size;
-    info.bmiHeader.biPlanes = 1;
-    info.bmiHeader.biBitCount = 32;
-    info.bmiHeader.biCompression = BI_RGB;
-    void *pixels = nullptr;
-    HDC screen = GetDC(nullptr);
-    HBITMAP colour = CreateDIBSection(screen, &info, DIB_RGB_COLORS, &pixels, nullptr, 0);
-    ReleaseDC(nullptr, screen);
-    if (!colour || !pixels) return nullptr;
-    std::memset(pixels, 0, static_cast<size_t>(size) * size * 4);
-    HDC dc = CreateCompatibleDC(nullptr);
-    HGDIOBJ previous = SelectObject(dc, colour);
-    jsti::chrome::brandIcon(dc, RECT{0, 0, size, size});
-    if (recording) {
-        const int dot = std::max(6, size * 7 / 16);
-        jsti::chrome::fillRound(dc, RECT{size - dot, size - dot, size, size}, dot / 2, RGB(0xFF, 0xFF, 0xFF));
-        jsti::chrome::fillRound(dc, RECT{size - dot + 1, size - dot + 1, size - 1, size - 1}, dot / 2 - 1,
-                                jsti::chrome::red);
-    }
-    SelectObject(dc, previous);
-    DeleteDC(dc);
-    HBITMAP mask = CreateBitmap(size, size, 1, 1, nullptr);
-    ICONINFO parts{TRUE, 0, 0, mask, colour};
-    HICON icon = CreateIconIndirect(&parts);
-    DeleteObject(mask);
-    DeleteObject(colour);
-    return icon;
-}
 } // namespace
 
 int jsti_window_run(const char *const *models, size_t count, int selected,
@@ -2567,6 +2908,7 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
         state.pendingPlaybackState = playbackIdle;
         state.pendingPlaybackText.clear();
         state.pendingHistory.clear(); state.pendingHistorySelection.clear(); state.selectedHistoryID.clear();
+        state.allHistoryIDs.clear();
         state.status.clear(); state.transcript.clear();
     }
     state.callback = callback; state.context = context;
@@ -2589,23 +2931,26 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
     type.lpszClassName = L"JustSpeakToItWindows";
     type.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     type.hbrBackground = nullptr;
-    HICON icon = brandIcon(GetSystemMetrics(SM_CXICON)), smallIcon = brandIcon(GetSystemMetrics(SM_CXSMICON));
-    HICON recordingIcon = brandIcon(GetSystemMetrics(SM_CXSMICON), true);
-    type.hIcon = icon ? icon : LoadIconW(nullptr, IDI_APPLICATION);
     const ATOM registered = RegisterClassW(&type);
     HWND window = registered ? CreateWindowExW(WS_EX_CONTROLPARENT, type.lpszClassName,
         L"Just Speak to It", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT,
         1180, 820, nullptr, nullptr, instance, nullptr) : nullptr;
-    if (window && smallIcon) SendMessageW(window, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(smallIcon));
     int outcome = 0;
-    if (!window) outcome = jsti::fail(jsti::systemError("Creating native desktop window"), error, capacity);
-    else {
+    std::string iconFailure;
+    if (window && !jsti::appIcon::refresh(window, GetDpiForWindow(window), iconFailure)) {
+        outcome = jsti::fail(iconFailure, error, capacity);
+        DestroyWindow(window);
+        window = nullptr;
+    }
+    if (!window) {
+        if (!outcome) outcome = jsti::fail(jsti::systemError("Creating native desktop window"), error, capacity);
+    } else {
         { std::lock_guard<std::mutex> lock(state.mutex); state.window = window; }
         // A login launch starts minimised and leaves the focus where it is.
         ShowWindow(window, jsti::login::launchedAtLogin() ? SW_SHOWMINNOACTIVE : SW_SHOWDEFAULT);
         UpdateWindow(window);
         // Optional: without a notification area the app works the same.
-        jsti::tray::add(window, smallIcon ? smallIcon : type.hIcon, recordingIcon);
+        jsti::tray::add(window, jsti::appIcon::smallHandle(), jsti::appIcon::recordingHandle());
         emit(window, JSTI_EVENT_READY);
         std::string shortcutFailure;
         if (IsWindow(window) && !jsti_hotkey_start(window, shortcutFailure)) showFailure(window, shortcutFailure);
@@ -2621,7 +2966,9 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
                 showPage(window, digit == 0 ? pageCount - 1 : digit - 1);
                 continue;
             }
-            if (!IsDialogMessageW(window, &message)) { TranslateMessage(&message); DispatchMessageW(&message); }
+            if (!jsti_history_filters_message(&message) && !IsDialogMessageW(window, &message)) {
+                TranslateMessage(&message); DispatchMessageW(&message);
+            }
         }
         if (result < 0) {
             outcome = jsti::fail(jsti::systemError("Reading desktop messages"), error, capacity);
@@ -2631,9 +2978,7 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
     jsti::hud::destroy();
     state.font = nullptr;
     state.controls.clear(); state.callback = nullptr; state.context = nullptr;
-    if (icon) DestroyIcon(icon);
-    if (smallIcon) DestroyIcon(smallIcon);
-    if (recordingIcon) DestroyIcon(recordingIcon);
+    jsti::appIcon::destroy();
     if (visualStyles) DeactivateActCtx(0, visualStyles);
     state.displayedHistory.clear();
     if (registered) UnregisterClassW(type.lpszClassName, instance);
@@ -3073,11 +3418,40 @@ int jsti_shell_open_file(const char *path, char *error, size_t errorCapacity) {
     return 0;
 }
 
+int jsti_shell_open_directory(const char *path, char *error, size_t errorCapacity) {
+    std::wstring folder;
+    if (!jsti::wide(path, folder) || folder.empty()) {
+        return jsti::fail("No valid recording folder supplied.", error, errorCapacity);
+    }
+    const DWORD attributes = GetFileAttributesW(folder.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES || !(attributes & FILE_ATTRIBUTE_DIRECTORY)) {
+        return jsti::fail("The recording folder does not exist or is not a directory.", error, errorCapacity);
+    }
+    const HRESULT apartment = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    if (FAILED(apartment) && apartment != RPC_E_CHANGED_MODE) {
+        return jsti::fail("Windows could not initialize the folder launcher.", error, errorCapacity);
+    }
+    PIDLIST_ABSOLUTE item = ILCreateFromPathW(folder.c_str());
+    const HRESULT opened = item ? SHOpenFolderAndSelectItems(item, 0, nullptr, 0) : E_INVALIDARG;
+    CoTaskMemFree(item);
+    if (SUCCEEDED(apartment)) CoUninitialize();
+    if (FAILED(opened)) return jsti::fail("Windows could not reveal the recording folder.", error, errorCapacity);
+    return 0;
+}
+
 int jsti_window_self_test(char *error, size_t errorCapacity) {
     HWND window;
     { std::lock_guard<std::mutex> lock(state.mutex); window = state.window; }
     if (!window || GetWindowThreadProcessId(window, nullptr) != GetCurrentThreadId()) {
         return jsti::fail("Window checks must run on the UI thread after READY.", error, errorCapacity);
+    }
+    char folderError[256] = {};
+    if (!GetDlgItem(window, recordingsFolderID) || !GetDlgItem(window, audioCleanupID) ||
+        !GetDlgItem(window, backupExportID) || !GetDlgItem(window, backupAudioID) ||
+        SendDlgItemMessageW(window, backupAudioID, BM_GETCHECK, 0, 0) != BST_CHECKED ||
+        jsti_window_confirm_audio_cleanup(nullptr, 1, folderError, sizeof(folderError)) == 0 ||
+        jsti_shell_open_directory(nullptr, folderError, sizeof(folderError)) == 0) {
+        return jsti::fail("Recording folder control or invalid-path refusal failed.", error, errorCapacity);
     }
     const std::vector<MicrophoneRow> originalMicrophones = state.microphones;
     const std::string originalMicrophoneID = state.microphoneSelection;
@@ -3144,13 +3518,51 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             MapWindowPoints(nullptr, window, reinterpret_cast<POINT *>(&bounds), 2);
             if (bounds.left < 0 || bounds.top < 0 || bounds.right > client.right || bounds.bottom > client.bottom ||
                 bounds.right <= bounds.left || bounds.bottom <= bounds.top) {
-                failure = "A native control falls outside the minimum desktop window bounds.";
+                failure = "Native control " + std::to_string(GetDlgCtrlID(control)) +
+                    " falls outside the minimum desktop window bounds (" +
+                    std::to_string(bounds.left) + "," + std::to_string(bounds.top) + "-" +
+                    std::to_string(bounds.right) + "," + std::to_string(bounds.bottom) + ").";
                 return false;
             }
         }
         return true;
     };
     auto check = [&]() -> bool {
+        emitMigrationBackup(window, "synthetic-backup.zip");
+        const bool includesAudio = observed.event == JSTI_EVENT_MIGRATION_EXPORT &&
+            observed.id == "synthetic-backup.zip" && observed.model == 1;
+        SendDlgItemMessageW(window, backupAudioID, BM_SETCHECK, BST_UNCHECKED, 0);
+        emitMigrationBackup(window, "synthetic-history-only.zip");
+        const bool historyOnly = observed.event == JSTI_EVENT_MIGRATION_EXPORT &&
+            observed.id == "synthetic-history-only.zip" && observed.model == 0;
+        emitMigrationInspection("synthetic-review.zip");
+        const bool inspection = observed.event == JSTI_EVENT_MIGRATION_INSPECT &&
+            observed.id == "synthetic-review.zip" && observed.model == 0;
+        SendDlgItemMessageW(window, backupAudioID, BM_SETCHECK, BST_CHECKED, 0);
+        updateHistoryControls(window, 2);
+        const bool backupLocked = !IsWindowEnabled(GetDlgItem(window, backupAudioID)) &&
+            !IsWindowEnabled(GetDlgItem(window, backupExportID)) && !IsWindowEnabled(GetDlgItem(window, backupInspectID));
+        updateHistoryControls(window, 0);
+        if (!includesAudio || !historyOnly || !inspection || !backupLocked ||
+            !IsWindowEnabled(GetDlgItem(window, backupAudioID)) || !IsWindowEnabled(GetDlgItem(window, backupExportID)) ||
+            !IsWindowEnabled(GetDlgItem(window, backupInspectID))) {
+            failure = "History backup lost its explicit audio choice or idle-only controls."; return false;
+        }
+        char reportError[256]{};
+        std::string report = "Synthetic read-only report.";
+        if (jsti_window_show_migration_report(nullptr, reportError, sizeof(reportError)) == 0 ||
+            jsti_window_show_migration_report(report.c_str(), reportError, sizeof(reportError)) != 0) {
+            failure = "Backup inspection report validation or dispatch failed."; return false;
+        }
+        report.assign("Changed caller storage");
+        bool reportOwned;
+        {
+            std::lock_guard<std::mutex> lock(state.mutex);
+            reportOwned = state.migrationReport == L"Synthetic read-only report.";
+            state.migrationReport.clear(); // Do not open a modal report in the automated fixture.
+        }
+        if (!reportOwned) { failure = "Backup inspection report did not own its posted text."; return false; }
+        observed = {};
         // Deliberately interleaved global rows prove callbacks do not leak the
         // filtered combo index. These are never sent to the real Swift host.
         state.modelNames = {L"Batch Alpha", L"Live One", L"Batch Beta", L"Live Two"};
@@ -3381,10 +3793,21 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             failure = "No active microphones did not retain the dynamic default without emitting a user change."; return false;
         }
         const JSTIHistoryRow first[] = {{"one", "First recording", "Completed"}, {"two", "Second recording", "Failed"}};
+        if (jsti_window_set_history_management(nullptr) != -1 ||
+            jsti_window_set_history_management("\xff") != -1) {
+            failure = "Invalid History management input was accepted."; return false;
+        }
+        if (jsti_window_set_history_management("one\ntwo") != 0) {
+            failure = "Complete History management snapshot was refused."; return false;
+        }
         if (jsti_window_set_history(first, 2, "two") != 0) { failure = "Initial history update failed."; return false; }
         applyUpdate(window);
         if (SendDlgItemMessageW(window, historyID, LB_GETCOUNT, 0, 0) != 2 || selectedHistory(window) != "two") {
             failure = "History rows or explicit selection were not rendered."; return false;
+        }
+        if (!IsWindowEnabled(GetDlgItem(window, historyDeleteID)) ||
+            !IsWindowEnabled(GetDlgItem(window, historyClearID)) || historyManagementIDs() != "one\ntwo") {
+            failure = "History deletion controls did not use the retained snapshot."; return false;
         }
         const JSTIHistoryRow reordered[] = {first[1], first[0]};
         if (jsti_window_set_history(reordered, 2, nullptr) != 0) { failure = "History replacement failed."; return false; }
@@ -3555,7 +3978,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         applyUpdate(window);
         wchar_t detail[64] = {};
         GetDlgItemTextW(window, historyDetailID, detail, 64);
-        if (std::wstring(detail) != L"No saved recordings match this search.") {
+        if (std::wstring(detail) != L"No saved recordings match this search or filter.") {
             failure = "An empty search result did not explain the missing rows."; return false;
         }
         // A fresh launch sends its empty History and Ready status together; the
@@ -3872,10 +4295,14 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         };
         auto observe = [](void *context) { return static_cast<Event *>(context)->event; };
         return jsti_settings_self_test(window, failure) && jsti_profiles_self_test(window, failure) &&
+            jsti_history_filters_self_test(window, failure) &&
+            jsti_vocabulary_self_test(window, failure) &&
             jsti_text_output_settings_self_test(window, textOutputID, setRecording, recordingBlocked, &observed, failure) &&
             jsti_hotkey_self_test(window, observe, &observed, failure) && jsti_voice_settings_self_test(window, failure) &&
+            jsti_voice_sources_self_test(window, failure) &&
             jsti_local_models_self_test(window, failure) && jsti_cloud_sync_settings_self_test(window, failure) &&
-            jsti_azure_resource_settings_self_test(window, failure) && jsti_configuration_self_test(window, failure);
+            jsti_azure_resource_settings_self_test(window, failure) && jsti_configuration_self_test(window, failure)
+            && jsti_comparison_self_test(window, failure);
     };
     bool passed = false;
     try { passed = check(); }
@@ -3931,6 +4358,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         SWP_NOZORDER | SWP_NOACTIVATE);
     showPage(window, originalPage);
     if (passed) passed = jsti::hud::selfTest(failure);
+    if (passed) passed = jsti::appIcon::selfTest(window, failure);
     if (passed) passed = jsti::tray::selfTest(failure);
     return passed ? 0 : jsti::fail(failure, error, errorCapacity);
 }
@@ -3938,6 +4366,16 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
 int jsti_window_save_snapshot(const char *path, char *error, size_t errorCapacity) {
     HWND window;
     { std::lock_guard<std::mutex> lock(state.mutex); window = state.window; }
+    extern int jsti_owned_window_save_snapshot(HWND, const char *, char *, size_t);
+    return jsti_owned_window_save_snapshot(window, path, error, errorCapacity);
+}
+
+int jsti_owned_window_save_snapshot(HWND window, const char *path, char *error, size_t errorCapacity) {
+    DWORD process = 0;
+    GetWindowThreadProcessId(window, &process);
+    if (process != GetCurrentProcessId()) {
+        return jsti::fail("Only an app-owned native window can be captured.", error, errorCapacity);
+    }
     if (!window || GetWindowThreadProcessId(window, nullptr) != GetCurrentThreadId()) {
         return jsti::fail("The native snapshot must run on the UI thread after READY.", error, errorCapacity);
     }
@@ -3956,7 +4394,7 @@ int jsti_window_save_snapshot(const char *path, char *error, size_t errorCapacit
         return jsti::fail("Native snapshot dimensions exceed the 64 MiB diagnostic limit.", error, errorCapacity);
     }
     // Only this app's own client DC is acquired. Never use GetDC(nullptr),
-    // desktop BitBlt, or a caller-supplied window handle here.
+    // desktop BitBlt, or another process's window handle here.
     struct BitmapResources {
         HWND window;
         HDC source = nullptr;
@@ -4038,3 +4476,4 @@ int jsti_window_save_snapshot(const char *path, char *error, size_t errorCapacit
     }
     return 0;
 }
+

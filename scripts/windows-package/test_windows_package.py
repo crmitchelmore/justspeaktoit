@@ -257,6 +257,8 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(cli_application.get("Executable"), "speak.exe")
         self.assertEqual(cli_application.find("uap:VisualElements", ns).get("AppListEntry"), "none")
         self.assertIsNone(application.find("uap:VisualElements", ns).get("AppListEntry"))
+        self.assertEqual(cli_application.get("{%s}SupportsMultipleInstances" % ns["uap10"]), "true")
+        self.assertIsNone(application.get("{%s}SupportsMultipleInstances" % ns["uap10"]))
         cli_extension = cli_application.find("f:Extensions/uap5:Extension", ns)
         self.assertEqual(cli_extension.get("Executable"), "speak.exe")
         cli_alias = cli_extension.find("uap5:AppExecutionAlias", ns)
@@ -360,7 +362,12 @@ class ManifestTests(unittest.TestCase):
                              "gui-foreign-logo", "cli-startup", "extra-extension", "swapped-aliases",
                              "cli-extra-visual", "cli-wrong-trust", "gui-extra-activation",
                              "duplicate-category", "cli-wrong-executable", "cli-wrong-alias",
-                             "cli-wrong-subsystem", "cli-missing-subsystem", "cli-extra-alias"):
+                             "cli-wrong-subsystem", "cli-missing-subsystem", "cli-extra-alias",
+                             "cli-missing-supports-multiple-instances",
+                             "cli-false-supports-multiple-instances",
+                             "cli-unqualified-supports-multiple-instances",
+                             "cli-supports-multiple-instances-wrong-location",
+                             "gui-extra-supports-multiple-instances"):
                 with self.subTest(architecture=architecture, mutation=mutation):
                     root = ET.fromstring(original)
                     apps = root.find("f:Applications", ns)
@@ -413,6 +420,18 @@ class ManifestTests(unittest.TestCase):
                         cli_extensions[0][0].attrib.pop("{%s}Subsystem" % ns["uap10"])
                     elif mutation == "cli-extra-alias":
                         cli_extensions[0][0].append(copy.deepcopy(cli_extensions[0][0][0]))
+                    elif mutation == "cli-missing-supports-multiple-instances":
+                        cli.attrib.pop("{%s}SupportsMultipleInstances" % ns["uap10"])
+                    elif mutation == "cli-false-supports-multiple-instances":
+                        cli.set("{%s}SupportsMultipleInstances" % ns["uap10"], "false")
+                    elif mutation == "cli-unqualified-supports-multiple-instances":
+                        cli.attrib.pop("{%s}SupportsMultipleInstances" % ns["uap10"])
+                        cli.set("SupportsMultipleInstances", "true")
+                    elif mutation == "cli-supports-multiple-instances-wrong-location":
+                        cli.attrib.pop("{%s}SupportsMultipleInstances" % ns["uap10"])
+                        cli_extensions.set("{%s}SupportsMultipleInstances" % ns["uap10"], "true")
+                    elif mutation == "gui-extra-supports-multiple-instances":
+                        gui.set("{%s}SupportsMultipleInstances" % ns["uap10"], "true")
                     else:
                         gui.set("EntryPoint", "Unreviewed.Activation")
                     with self.assertRaises(windows_msix.PackageError):

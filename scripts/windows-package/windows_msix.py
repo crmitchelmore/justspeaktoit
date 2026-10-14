@@ -436,6 +436,11 @@ def check_manifest(data, identity, version, publisher, architecture="x64"):
             "{%s}TrustLevel" % ns["uap10"]: "mediumIL",
             "{%s}RuntimeBehavior" % ns["uap10"]: "packagedClassicApp",
         }
+        if index == 1:
+            # The CLI alias extension declares uap10:Subsystem="console"; the schema requires its own
+            # Application to also declare uap10:SupportsMultipleInstances="true". The GUI Application has
+            # no console alias and must not carry this attribute.
+            expected_attributes["{%s}SupportsMultipleInstances" % ns["uap10"]] = "true"
         if element.attrib != expected_attributes:
             raise PackageError("manifest application identity and activation must match the reviewed GUI and CLI")
         visual = element.find("uap:VisualElements", ns)

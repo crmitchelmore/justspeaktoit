@@ -50,7 +50,10 @@ the GUI Application, AUMID, icons, alias and startup task remain unchanged.
 The real CLI keeps
 [`uap5:Extension`'s `Executable` override](https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-uap5-extension)
 and [`uap5:AppExecutionAlias`'s `uap10:Subsystem="console"`](https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-uap5-appexecutionalias).
-No generic `speak.exe` alias is registered and no PATH, trust, install or
+A console-subsystem alias must also declare
+[`uap10:SupportsMultipleInstances="true"`](https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-f-application)
+on its own `Application` element; the hidden CLI Application does this and the
+GUI Application is unchanged. No generic `speak.exe` alias is registered and no PATH, trust, install or
 startup policy changes. Run `JustSpeakToItDeveloperCLI.exe --help` or
 `JustSpeakToItDeveloperCLI.exe --version` after a developer package installation;
 portable use remains `.\speak.exe`.

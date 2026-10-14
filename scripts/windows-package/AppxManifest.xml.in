@@ -48,7 +48,8 @@
       </Extensions>
     </Application>
     <Application Id="${cliApplicationId}" Executable="${cliExecutable}"
-      uap10:RuntimeBehavior="packagedClassicApp" uap10:TrustLevel="mediumIL">
+      uap10:RuntimeBehavior="packagedClassicApp" uap10:TrustLevel="mediumIL"
+      uap10:SupportsMultipleInstances="true">
       <uap:VisualElements DisplayName="${displayName}" Description="${description}" BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png" Square44x44Logo="Assets\Square44x44Logo.png"
         AppListEntry="none"/>

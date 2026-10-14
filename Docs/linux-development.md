@@ -33,6 +33,12 @@ transcription-only/no-assistant service acceptance receipt exists. Synthetic
 transport evidence does not establish provider-account or hardware parity;
 see [Windows shared streaming details](windows-development.md).
 
+The shared desktop live session uses macOS's canonical authoritative transcript
+projection for replacement, empty retraction, confirmed/interim composition and
+healthy final folding. Cancelled or failed sessions keep recovery text and
+ignore late projections. Providers without projected text retain legacy folding.
+This does not implement clipboard voice commands or live LLM polishing.
+
 ## Build and run
 
 Ubuntu 24.04 (or any distribution with GTK 4.14+, libadwaita 1.5+) and Swift 6.2.3:

@@ -20,8 +20,8 @@ public final class DesktopLiveSession: @unchecked Sendable {
     public let id: UUID
     private let client: any FinalizingStreamingTranscriptionClient
     /// Lifecycle/audio calls cannot overtake each other. Provider callbacks
-    /// acquire only stateLock, so synchronous provider callbacks cannot form a
-    /// lock cycle with start/send/stop or a provider's own serial queue.
+    /// read provider projections before acquiring stateLock, so synchronous
+    /// callbacks cannot form a lock cycle with a provider's own serial queue.
     private let calls = NSLock()
     private let stateLock = NSLock()
     private var phase = Phase.idle
@@ -71,8 +71,9 @@ public final class DesktopLiveSession: @unchecked Sendable {
 
     /// Exactly one provider finish runs, even when multiple callers await it.
     /// The provider returns a whole-session transcript, which replaces display
-    /// text; nil/blank success is empty. Errors and cancellation retain the best
-    /// available display text instead of inventing a completed result.
+    /// text unless a provider supplies an authoritative final projection.
+    /// Unprojected nil/blank success is empty. Errors and cancellation retain
+    /// the best display text instead of inventing a completed result.
     public func finish() async -> Snapshot {
         if Task.isCancelled { return cancel() }
         let task = beginFinish()
@@ -121,11 +122,20 @@ public final class DesktopLiveSession: @unchecked Sendable {
     private func completeFinish() async -> Snapshot {
         guard stateLock.withLock({ phase == .finishing }) else { return snapshot() }
         let final = await client.finishAndWait()
+        let projection = (client as? StreamingTranscriptSnapshotProviding)?
+            .transcriptSnapshot(captureDuration: 0)
         return calls.withLock {
             stateLock.withLock {
                 if phase == .finishing {
                     accumulator.replace(with: final ?? "")
                     text = accumulator.text
+                    if let projection, let resolved = projection.resolvedDisplayText,
+                       projection.confirmedText != nil ||
+                       !resolved.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        text = SharedTranscriptProjection.apply(
+                            eventText: final ?? "", isFinal: true, snapshot: projection, accumulator: &accumulator
+                        ) ?? accumulator.text
+                    }
                     phase = .finished
                     revision += 1
                 }
@@ -136,10 +146,16 @@ public final class DesktopLiveSession: @unchecked Sendable {
     }
 
     private func receive(_ transcript: String, isFinal: Bool) {
+        let projection = (client as? StreamingTranscriptSnapshotProviding)?
+            .transcriptSnapshot(captureDuration: 0)
         stateLock.withLock {
             guard phase == .recording || phase == .finishing else { return }
             let next: String
-            if isFinal {
+            if projection?.resolvedDisplayText != nil {
+                next = SharedTranscriptProjection.apply(
+                    eventText: transcript, isFinal: isFinal, snapshot: projection, accumulator: &accumulator
+                ) ?? accumulator.text
+            } else if isFinal {
                 next = accumulator.append(final: transcript)
             } else { next = accumulator.display(withInterim: transcript) }
             if next != text { text = next; revision += 1 }

@@ -113,6 +113,7 @@ package final class DesktopCaptureContext: @unchecked Sendable {
     ) {
         file = nil
         live = nil
+        comparison = nil
         sampleRate = PCMRecordingFile.sampleRate
         onSilence = nil
         self.onPCM = onPCM

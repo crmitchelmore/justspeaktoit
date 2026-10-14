@@ -389,6 +389,12 @@ module provenance, runner facts (build, integrity, UAC settings), the
 admission decision, the cleanup record, and the admission control's evidence
 with the refused run's own evidence.
 
+MakeAppx failures print the last 4096 characters of each captured output stream
+and the full log path without changing the failure status. Separate always-run
+pack-diagnostic artifacts retain only `*.pack.log` from the base, upgrade and
+optional signed-job layouts, even when packing fails before lifecycle testing.
+They do not include signing material or environment dumps.
+
 ## Evidence at this checkpoint
 
 - Locally on macOS (Python 3.14.4), 28 packaging unit tests pass. They cover

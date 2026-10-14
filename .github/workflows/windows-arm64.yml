@@ -483,6 +483,7 @@ jobs:
           python -B -X warn_default_encoding -W error::EncodingWarning -m unittest discover -s scripts/windows-package -p 'test_*.py'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./scripts/windows-package/test-lifecycle-ownership.ps1
+          ./scripts/windows-package/test-pack-diagnostics.ps1
           foreach ($kind in 'base', 'upgrade') {
             $version = if ($kind -eq 'base') { $env:BASE_VERSION } else { $env:UPGRADE_VERSION }
             python -B scripts/windows-package/build-windows-package-layout.py --bundle bundle `
@@ -502,6 +503,16 @@ jobs:
               -Output (Join-Path $root "JustSpeakToIt-Developer_${version}_arm64_unsigned.msix") `
               -ToolCache (Join-Path $env:RUNNER_TEMP 'packaging-tools')
           }
+      - name: Upload MakeAppx pack diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: windows-developer-msix-arm64-pack-diagnostics
+          path: |
+            ${{ runner.temp }}/package-base/*.pack.log
+            ${{ runner.temp }}/package-upgrade/*.pack.log
+          if-no-files-found: warn
+          retention-days: 14
       - name: Upload the unsigned ARM64 developer package
         uses: actions/upload-artifact@v7.0.1
         with:

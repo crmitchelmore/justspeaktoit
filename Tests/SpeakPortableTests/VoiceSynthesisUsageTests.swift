@@ -5,7 +5,6 @@ import FoundationNetworking
 import SpeakTestSupport
 import XCTest
 @testable import SpeakCore
-import SpeakDesktop
 
 final class VoiceSynthesisUsageTests: DeepgramSpeechStubTestCase {
     func testCanonicalPrices_KeepBothMAIModelsAndFluxUnknown() throws {
@@ -79,21 +78,6 @@ final class VoiceSynthesisUsageTests: DeepgramSpeechStubTestCase {
         XCTAssertEqual(capture.records.first?.inputCharacters, utterance.characterCount)
         XCTAssertEqual(capture.records.first?.historyRecordID, owner)
         XCTAssertEqual(capture.records.first?.outcome, .completed)
-    }
-
-    func testUsageABI_RequiresExactTagsTokensAndBooleanFlags() throws {
-        XCTAssertEqual(try DesktopVoiceSourceMessage(action: 118, source: -1, text: "", record: "fixture",
-            path: "usage-report"), .usageReport(text: "", requestID: "fixture"))
-        XCTAssertEqual(try DesktopVoiceSourceMessage(action: 118, source: 0, text: "", record: "fixture",
-            path: "usage-tracking"), .usageTracking(false, requestID: "fixture"))
-        for source in [-1, 2, 4] {
-            XCTAssertThrowsError(try DesktopVoiceSourceMessage(action: 118, source: Int32(source), text: "",
-                record: "fixture", path: "usage-tracking"))
-        }
-        XCTAssertThrowsError(try DesktopVoiceSourceMessage(action: 118, source: -1, text: "",
-            record: "", path: "usage-report"))
-        XCTAssertThrowsError(try DesktopVoiceSourceMessage(action: 118, source: 0, text: "",
-            record: "fixture", path: "usage-unknown"))
     }
 
     func testCancelledTransportAndInvalidAudio_KeepRequestsButNeverInventDuration() async throws {

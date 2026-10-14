@@ -4,6 +4,11 @@ import Foundation
 public enum VoiceSynthesisPricing {
     public static let azureNeuralPerThousandCharacters = Decimal(string: "0.016")!
 
+    public static func estimateBasis(for voice: DesktopSpeechVoice) -> String? {
+        guard case .cartesia = voice else { return nil }
+        return CartesiaTTSAPI.pricingEstimateBasis
+    }
+
     public static func ratePerThousandCharacters(for voice: DesktopSpeechVoice) -> Decimal? {
         ratePerThousandCharacters(for: voice, xaiInventory: nil)
     }
@@ -16,6 +21,7 @@ public enum VoiceSynthesisPricing {
         case .azureNeural: return azureNeuralPerThousandCharacters
         case .azureMAI: return AzureMAIVoiceCatalog.costPerThousandCharacters(forVoiceID: voice.id)
         case .xai: return XAITTSAPI.estimatedCostPerThousandCharacters
+        case .cartesia: return CartesiaTTSAPI.estimatedCostPerThousandCharacters
         case .deepgram(let voice):
             return voice.model == DeepgramSpeechCatalog.flux ? nil : DeepgramTTSAPI.costPerThousandCharacters
         }

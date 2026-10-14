@@ -317,6 +317,32 @@ bool jsti_voice_controls_self_test(HWND owner, std::string &error) {
         passed = jsti_window_finish_voice_synthesis_options(receipt.request.c_str(), 1) == 0 && passed;
         drain(); passed = passed && !IsWindow(window);
         if (IsWindow(window)) DestroyWindow(window);
+        passed = jsti_window_set_voice_synthesis_options_with_limits(
+            0.5, 0, 0, 1, "Synthetic Cartesia Sonic 3.6", 0.6, 1.5) == 0 && passed;
+        { std::lock_guard<std::mutex> lock(mutex); dialog.options = saved; saved = original; }
+        dialog.saving = false;
+        window = makeDialog(owner, dialog);
+        if (!window) { error = "Cartesia Voice controls fixture could not open."; return false; }
+        GetDlgItemTextW(window, speedLabel, rangeCaption, 64);
+        passed = passed && std::wstring(rangeCaption) == L"&Speed (0.6 to 1.5)" &&
+            number(window, speedID, value) && value == 0.5 && !save(window, dialog) && receipt.calls == 4 &&
+            IsWindowEnabled(GetDlgItem(window, speedID)) &&
+            !IsWindowEnabled(GetDlgItem(window, pitchID)) && !IsWindowEnabled(GetDlgItem(window, ssmlID));
+        SetDlgItemTextW(window, speedID, L"0.6");
+        passed = save(window, dialog) && passed && receipt.calls == 5;
+        passed = jsti_window_finish_voice_synthesis_options(receipt.request.c_str(), 0) == 0 && passed;
+        drain();
+        SetDlgItemTextW(window, speedID, L"1.5");
+        if (length && length < path.size()) {
+            char failure[1024]{}; ShowWindow(window, SW_SHOWNOACTIVATE);
+            passed = jsti_save_owned_window_snapshot(window,
+                (jsti::utf8(path.data()) + ".voice-controls.bmp").c_str(), failure, sizeof(failure)) == 0 && passed;
+            if (failure[0]) error = failure;
+        }
+        passed = save(window, dialog) && passed && receipt.calls == 6;
+        passed = jsti_window_finish_voice_synthesis_options(receipt.request.c_str(), 1) == 0 && passed;
+        drain(); passed = passed && !IsWindow(window);
+        if (IsWindow(window)) DestroyWindow(window);
         if (!passed && error.empty()) error = "Voice controls fixture failed bounds, capabilities, precision or save ownership.";
         return passed;
     }

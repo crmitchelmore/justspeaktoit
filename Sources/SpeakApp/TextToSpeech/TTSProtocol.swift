@@ -56,7 +56,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     // One Soniox key covers transcription and speech generation.
     case .soniox: return "soniox.apiKey"
     // One Cartesia key covers Ink transcription and Sonic speech generation.
-    case .cartesia: return "cartesia.apiKey"
+    case .cartesia: return CartesiaTTSCatalog.credentialIdentifier
     // These four each use one account key for transcription and for speech
     // generation, so they reuse the identifier the transcription provider
     // already writes.

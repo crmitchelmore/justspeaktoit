@@ -1,7 +1,7 @@
 # Desktop Voice Output sources and WAV export
 
 Windows and Linux remain developer previews, not macOS-parity releases.
-Voice Output uses shared Deepgram, Azure neural, Azure MAI and xAI REST speech contracts,
+Voice Output uses shared Deepgram, Azure neural, Azure MAI, xAI and Cartesia REST speech contracts,
 canonical catalogue projections and native playback. `DesktopSpeechVoice` exposes only
 routes the host executes, not every provider in the macOS catalogue. The seven
 built-in Azure neural catalogue entries now have one `AzureNeuralVoiceCatalog` definition
@@ -10,6 +10,29 @@ The current MAI-Voice-2.1 and Flash speakers come directly from the existing
 `AzureMAIVoiceCatalog`, including their locale/model identifiers. MAI uses the
 same regional Azure request builder, saved `key:region` credential and native
 WAV decoding/playback, not a second provider client or credential store.
+
+**Cartesia Sonic 3.6** executes the five existing `CartesiaTTSCatalog` presets,
+not the entire account library or older stored Sonic models. Read, Generate and
+text export reuse `CartesiaTTSAPI` request construction, API version and the
+shared `cartesia.apiKey` used for Ink transcription. Audio is actual mono PCM16
+WAV at 24 kHz; no compressed or progressive transport is advertised.
+The existing native Voice controls execute the canonical 0.6-1.5 speed range.
+Pitch and SSML are disabled but preserved; incompatible controls refuse synthesis
+before key access instead of letting the shared request builder clamp them.
+Unknown voices and older models remain stored/unavailable, never substitute a
+default preset or another provider.
+
+The shared Automatic language resolver uses content detection when the platform
+has it, otherwise the device language. There is no new explicit language setting
+in this slice. Long desktop input uses the existing 4,500-character
+`TTSTextChunker` target, not an asserted Cartesia service limit. One immutable
+credential and language selection cover every chunk. Every response is bounded,
+validated and joined before publication; a later failure never returns partial
+audio. Existing native playback, retained replay/export and publication helpers
+are unchanged. Actual requests and validated PCM feed local usage with the
+canonical USD0.0392/thousand-character **Startup-plan estimate**, not a billed
+charge or a guarantee of the user's plan. Cartesia account discovery, explicit
+language, format/quality selection and physical/service acceptance remain gaps.
 
 xAI's documented Eve and Ara presets come from `XAITTSCatalog`. Read, Generate
 and text export use the shared `/v1/tts` request contract with automatic language,

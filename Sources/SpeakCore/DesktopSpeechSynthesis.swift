@@ -38,6 +38,9 @@ public struct DesktopSpeechSynthesis: Sendable {
         case .xai:
             return try await DesktopXAISpeechSynthesis(session: session).synthesize(
                 source, voice: voice, options: options, inventory: xaiInventory, credential: credential)
+        case .cartesia:
+            return try await DesktopCartesiaSpeechSynthesis(session: session).synthesize(
+                source, voice: voice, options: options, credential: credential)
         }
     }
 

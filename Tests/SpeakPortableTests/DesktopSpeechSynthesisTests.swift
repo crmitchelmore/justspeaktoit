@@ -17,7 +17,7 @@ final class DesktopSpeechSynthesisTests: DeepgramSpeechStubTestCase {
         ) { "synthetic-key:eastus" }
         XCTAssertEqual(wav, fixtureWAV)
         let request = try XCTUnwrap(StubURLProtocol.recordedRequests.first)
-        let body = try XCTUnwrap(String(bytes: XCTUnwrap(request.httpBody), encoding: .utf8))
+        let body = try XCTUnwrap(String(bytes: StubURLProtocol.body(of: request), encoding: .utf8))
         XCTAssertTrue(body.contains("rate='+50%' pitch='-3st'"), body)
         XCTAssertTrue(body.contains("Synthetic A &amp; B."), body)
         XCTAssertEqual(request.value(forHTTPHeaderField: "X-Microsoft-OutputFormat"), "riff-24khz-16bit-mono-pcm")
@@ -74,7 +74,7 @@ final class DesktopSpeechSynthesisTests: DeepgramSpeechStubTestCase {
         ) { "synthetic-key:eastus" }
         XCTAssertEqual(StubURLProtocol.recordedRequests.count, 1)
         let request = try XCTUnwrap(StubURLProtocol.recordedRequests.first)
-        let body = try XCTUnwrap(String(bytes: XCTUnwrap(request.httpBody), encoding: .utf8))
+        let body = try XCTUnwrap(String(bytes: StubURLProtocol.body(of: request), encoding: .utf8))
         XCTAssertTrue(body.contains(fragment), body)
         XCTAssertTrue(body.contains("pitch='+2st'"), body)
     }

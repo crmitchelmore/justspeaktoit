@@ -114,6 +114,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package var voiceTextImportRequestID: String?
     package var voiceGenerationTask: Task<Void, Never>?
     package var generatedVoice: DesktopGeneratedVoiceResult?
+    package var voiceUsage = DesktopVoiceUsageState()
     /// The one History Play or Read aloud request that may still start audio or report.
     package var playbackRequests = DesktopPlaybackRequests()
     package var history: [UUID: DesktopRecordingStore.Record] = [:]

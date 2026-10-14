@@ -12,6 +12,7 @@ package struct DesktopVoiceOutputSettings: Codable, Equatable, Sendable {
     package var speed: Double?
     package var pitch: Double?
     package var useSSML: Bool?
+    package var trackUsage: Bool?
 
     private enum CodingKeys: String, CodingKey {
         case modelID, voiceID
@@ -20,6 +21,7 @@ package struct DesktopVoiceOutputSettings: Codable, Equatable, Sendable {
         case speed = "ttsSpeed"
         case pitch = "ttsPitch"
         case useSSML = "ttsUseSSML"
+        case trackUsage = "ttsTrackUsage"
     }
 
     package var generationOptions: VoiceGenerationOptions {
@@ -234,8 +236,9 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         return persistVoiceOutput(changed, message: "Generated voice playback and save preferences saved.")
     }
 
-    private func persistVoiceOutput(_ voiceOutput: DesktopVoiceOutputSettings, message: String) -> Bool {
+    package func persistVoiceOutput(_ voiceOutput: DesktopVoiceOutputSettings, message: String) -> Bool {
         guard !closed else { return false }
+        let wasTracking = voiceUsageTrackingEnabled
         var changed = settings
         changed.voiceOutput = voiceOutput
         do {
@@ -243,6 +246,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 JSONEncoder().encode(changed), to: directory.appendingPathComponent("settings.json")
             )
             settings = changed
+            if wasTracking != voiceUsageTrackingEnabled { voiceUsage.epoch = UUID() }
             if !busy, recording == nil { update(message) }
             return true
         } catch { update("Could not save Voice Output settings: \(error.localizedDescription)"); return false }
@@ -271,16 +275,16 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         let rendered = PronunciationRenderer().applyReplacements(to: text, entries: pronunciations)
         let segments = SpeechTextSegmenter.segments(rendered)
         guard !segments.isEmpty else { update("There is no transcript to read aloud."); return }
-        startVoiceRead(text: rendered, owner: id, recordID: id)
+        startVoiceRead(text: rendered, source: .history, owner: id, recordID: id)
     }
 
     package func readVoiceSource(_ snapshot: VoiceOutputSourceSnapshot) async {
         if let id = snapshot.recordID { await readAloud(id.uuidString, text: snapshot.text); return }
         guard !closed, canUseHistory else { return }
-        startVoiceRead(text: snapshot.text, owner: UUID(), recordID: nil)
+        startVoiceRead(text: snapshot.text, source: snapshot.source, owner: UUID(), recordID: nil)
     }
 
-    private func startVoiceRead(text: String, owner: UUID, recordID: UUID?) {
+    private func startVoiceRead(text: String, source: VoiceOutputSource, owner: UUID, recordID: UUID?) {
         let selection: DesktopSpeechSelection
         do {
             selection = try voiceOutputSettings().synthesisSelection()
@@ -312,14 +316,17 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         readAloudState.speech = speech
         voiceOutputRecordID = recordID
         update("Reading aloud with \(voice.name)…")
+        let usage = beginVoiceUsage(operation: .read, source: source, recordID: recordID)
         activeOperations += 1
         readAloudState.task = Task {
-            defer { self.finishOperation() }
+            defer { self.finishVoiceUsage(usage); self.finishOperation() }
             var outcome: String?
             do {
-                try await self.executeVoiceRead(
-                    text: text, recordID: recordID, selection: selection, output: voiceOutput, speech: speech
-                )
+                try await VoiceSynthesisUsage.$capture.withValue(usage?.capture) {
+                    try await self.executeVoiceRead(
+                        text: text, recordID: recordID, selection: selection, output: voiceOutput, speech: speech
+                    )
+                }
                 outcome = "Finished reading aloud."
             } catch is CancellationError {
                 outcome = "Reading aloud stopped."

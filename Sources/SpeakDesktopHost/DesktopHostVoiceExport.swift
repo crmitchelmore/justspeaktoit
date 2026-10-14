@@ -31,14 +31,18 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         update(selection.map { "Synthesizing WAV with \($0.voice.name). Stop cancels export…" } ??
             "Exporting retained voice audio. No synthesis request is sent. Stop cancels export…")
         voiceOutputRecordID = snapshot.recordID
+        let usage = retainedAudio == nil
+            ? beginVoiceUsage(operation: .export, source: snapshot.source, recordID: snapshot.recordID) : nil
         activeOperations += 1
         readAloudState.exportTask = Task {
-            defer { self.finishOperation() }
+            defer { self.finishVoiceUsage(usage); self.finishOperation() }
             do {
                 let wav: Data
                 if let retainedAudio { wav = retainedAudio } else if let selection {
-                    wav = try await synthesize(snapshot, selection) {
-                        try effects.apiKey(name: selection.voice.apiKeyIdentifier)
+                    wav = try await VoiceSynthesisUsage.$capture.withValue(usage?.capture) {
+                        try await synthesize(snapshot, selection) {
+                            try effects.apiKey(name: selection.voice.apiKeyIdentifier)
+                        }
                     }
                 } else {
                     throw VoiceSynthesisConfigurationError.unsupportedVoice

@@ -64,4 +64,19 @@ final class DesktopVoiceSourceMessageTests: XCTestCase {
                 text: payload, record: "request", path: ""))
         }
     }
+
+    func testUsageABI_RequiresExactTagsTokensAndBooleanFlags() throws {
+        XCTAssertEqual(try DesktopVoiceSourceMessage(action: 118, source: -1, text: "", record: "fixture",
+            path: "usage-report"), .usageReport(text: "", requestID: "fixture"))
+        XCTAssertEqual(try DesktopVoiceSourceMessage(action: 118, source: 0, text: "", record: "fixture",
+            path: "usage-tracking"), .usageTracking(false, requestID: "fixture"))
+        for source in [-1, 2, 4] {
+            XCTAssertThrowsError(try DesktopVoiceSourceMessage(action: 118, source: Int32(source), text: "",
+                record: "fixture", path: "usage-tracking"))
+        }
+        XCTAssertThrowsError(try DesktopVoiceSourceMessage(action: 118, source: -1, text: "",
+            record: "", path: "usage-report"))
+        XCTAssertThrowsError(try DesktopVoiceSourceMessage(action: 118, source: 0, text: "",
+            record: "fixture", path: "usage-unknown"))
+    }
 }

@@ -63,6 +63,7 @@ package protocol DesktopHostPlatform: Sendable {
     static func update(_ status: String, transcript: String?, state: Int32)
     static func recordingState(_ state: Int32)
     static func voiceGenerated(_ presentation: DesktopVoiceResultPresentation)
+    static func voiceUsage(_ presentation: DesktopVoiceUsagePresentation)
     static func voiceTextImportCancelled(_ requestID: String)
     static func history(_ records: [DesktopRecordingStore.Record], selected: UUID?, selectRecord: Bool)
     /// Totals for the dashboard (`all` saved records) and the History header
@@ -168,6 +169,7 @@ package extension DesktopHostPlatform {
     static var comparisonDigest: LocalModelDigestProvider? { LocalModelDigestProvider.platformDefault }
     static func comparisonPresentation(_ presentation: DesktopComparisonPresentation) {}
     static func voiceGenerated(_ presentation: DesktopVoiceResultPresentation) {}
+    static func voiceUsage(_ presentation: DesktopVoiceUsagePresentation) {}
     static func voiceTextImportCancelled(_ requestID: String) {}
     static func update(_ status: String) { update(status, transcript: nil, state: -1) }
     /// Hosts without a dashboard or History header show no totals.

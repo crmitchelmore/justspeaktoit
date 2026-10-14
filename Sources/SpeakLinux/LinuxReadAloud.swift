@@ -24,6 +24,15 @@ extension LinuxHostPlatform: DesktopHostReadAloudPlatform {
 }
 
 extension LinuxHostPlatform {
+    package static func voiceUsage(_ presentation: DesktopVoiceUsagePresentation) {
+        let result = presentation.requestID.withCString { token in
+            presentation.text.withCString {
+                jsti_window_set_voice_usage(token, $0, presentation.trackingEnabled ? 1 : 0)
+            }
+        }
+        if result < 0 { update("The Voice usage report could not be shown.") }
+    }
+
     package static func voiceTextImportCancelled(_ requestID: String) {
         let result = requestID.withCString { token in
             "".withCString { empty in
@@ -125,6 +134,10 @@ func linuxVoiceSourceEvent(
                     LinuxHostPlatform.update("The saved Voice Output preferences could not be shown.")
                 }
             }
+        case .usageReport(let text, let requestID):
+            holder.enqueueSettings { await holder.controller.showVoiceUsage(text: text, requestID: requestID) }
+        case .usageTracking(let enabled, let requestID):
+            holder.enqueueSettings { await holder.controller.saveVoiceUsageTracking(enabled, requestID: requestID) }
         case .synthesisPreferences(let options, let requestID):
             holder.enqueueSettings {
                 let saved = await holder.controller.saveVoiceSynthesisOptions(options)

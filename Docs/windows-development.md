@@ -714,6 +714,14 @@ ZIPFoundation interoperability tests, picker lifecycle and paired light/dark
 layout acceptance remain separate required receipts. Ordinary Linux local-path
 checks do not establish Flatpak destination-grant support.
 
+Canonical History merging compares content independently of both the
+application item ID and the optional `desktopHistory.id`: application of a
+planned version reidentifies both through `DataMigrationHistoryValue`. A later
+export/reimport must not create another version solely because that native
+carrier now contains the assigned version ID. Other native/unknown carrier
+fields remain significant, and raw record/schema validation still rejects a
+mismatched envelope identity before planning.
+
 The filter editor scrolls vertically when the available work area is too short;
 keyboard traversal reveals the focused control. Long model names have native
 horizontal scrolling, and an open editor follows application appearance changes.

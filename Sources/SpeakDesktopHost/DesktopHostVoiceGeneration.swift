@@ -24,7 +24,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         ) async throws -> Data = { snapshot, selection, credential in
             try await DesktopSpeechSynthesis().synthesize(
                 snapshot, voice: selection.voice, options: selection.options,
-                xaiInventory: selection.xaiInventory, credential: credential
+                accountInventory: selection.accountInventory, credential: credential
             )
         }
     ) {
@@ -50,12 +50,15 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         voiceOutputRecordID = snapshot.recordID
         presentVoiceResult(working: true, message: "Generating voice audio with \(voice.name)…")
         let usage = beginVoiceUsage(operation: .generate, source: snapshot.source, recordID: snapshot.recordID)
+        let accountWork = beginAccountVoiceWork(selection, ticket: ticket)
         activeOperations += 1
         voiceGenerationTask = Task {
             defer {
+                self.finishAccountVoiceWork(accountWork)
                 self.finishVoiceUsage(usage)
                 self.voiceGenerationTask = nil
                 self.finishOperation()
+                self.settleVoiceAccountPresentation()
             }
             await VoiceSynthesisUsage.$capture.withValue(usage?.capture) {
                 await self.runVoiceGeneration(
@@ -77,7 +80,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         var published = false
         do {
             let wav = try await synthesize(snapshot, selection) {
-                try effects.apiKey(name: selection.voice.apiKeyIdentifier)
+                try await Self.readVoiceSynthesisKey(effects: effects, name: selection.voice.apiKeyIdentifier)
             }
             try Task.checkCancellation()
             guard voiceTicketIsCurrent(ticket) else { return }

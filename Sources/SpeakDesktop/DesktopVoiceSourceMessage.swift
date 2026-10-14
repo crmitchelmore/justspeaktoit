@@ -10,6 +10,7 @@ public enum DesktopVoiceSourceMessage: Equatable, Sendable {
     case usageTracking(Bool, requestID: String)
     case discoveryOpen(String), discoveryRefresh(String), discoveryClose(String)
     case discoveryChoose(voiceID: String, requestID: String)
+    case discoveryProvider(VoiceAccountCredentialContext)
 
     public init(action: Int32, source: Int32, text: String, record: String, path: String) throws {
         switch action {
@@ -61,6 +62,7 @@ public enum DesktopVoiceSourceMessage: Equatable, Sendable {
         source: Int32, text: String, record: String, path: String
     ) throws -> Self {
         guard source == -1 else { throw Failure.invalidPreferences }
+        if path == "account-provider" { return try providerMessage(text: text, record: record) }
         switch path {
         case "account-open", "account-refresh", "account-close":
             guard text.isEmpty else { throw Failure.invalidPreferences }
@@ -70,8 +72,9 @@ public enum DesktopVoiceSourceMessage: Equatable, Sendable {
             default: return .discoveryClose(record)
             }
         case "account-choose":
-            guard text.hasPrefix(XAITTSCatalog.voiceIDPrefix),
-                  text.utf8.count > XAITTSCatalog.voiceIDPrefix.utf8.count, text.utf8.count <= 260,
+            guard VoiceAccountProvider.all.contains(where: {
+                text.hasPrefix($0.id + "/") && text.utf8.count > $0.id.utf8.count + 1
+            }), text.utf8.count <= 260,
                   text == text.trimmingCharacters(in: .whitespacesAndNewlines),
                   !text.unicodeScalars.contains(where: {
                       CharacterSet.controlCharacters.contains($0)
@@ -79,6 +82,15 @@ public enum DesktopVoiceSourceMessage: Equatable, Sendable {
             return .discoveryChoose(voiceID: text, requestID: record)
         default: throw Failure.invalidPreferences
         }
+    }
+
+    private static func providerMessage(text: String, record: String) throws -> Self {
+        let fields = text.split(separator: "\n", omittingEmptySubsequences: false)
+        guard record.utf8.count == 36, let session = UUID(uuidString: record),
+              fields.count == 2, fields[1].utf8.count == 36,
+              let epoch = UUID(uuidString: String(fields[1])) else { throw Failure.invalidPreferences }
+        return .discoveryProvider(try .init(
+            provider: VoiceAccountProvider(id: String(fields[0])), sessionID: session, epoch: epoch))
     }
 
     private static func textEvent(

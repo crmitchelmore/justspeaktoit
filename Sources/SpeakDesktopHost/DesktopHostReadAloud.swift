@@ -38,13 +38,17 @@ package struct DesktopVoiceOutputSettings: Codable, Equatable, Sendable {
     }
 
     package func synthesisSelection(inventory: XAIAccountVoiceInventory?) throws -> DesktopSpeechSelection {
+        try synthesisSelection(accountInventory: inventory.map(VoiceAccountInventory.xai))
+    }
+
+    package func synthesisSelection(accountInventory: VoiceAccountInventory?) throws -> DesktopSpeechSelection {
         try .init(
-            voice: DesktopSpeechVoice.resolved(modelID: modelID, voiceID: voiceID, xaiInventory: inventory),
+            voice: DesktopSpeechVoice.resolved(modelID: modelID, voiceID: voiceID, accountInventory: accountInventory),
             options: VoiceSynthesisOptions(
                 speed: speed ?? VoiceSynthesisOptions.defaultSpeed,
                 pitch: pitch ?? VoiceSynthesisOptions.defaultPitch,
                 useSSML: useSSML ?? VoiceSynthesisOptions.defaultUseSSML
-            ), xaiInventory: inventory
+            ), accountInventory: accountInventory
         )
     }
 
@@ -53,9 +57,14 @@ package struct DesktopVoiceOutputSettings: Codable, Equatable, Sendable {
     }
 
     package func pickerPresentation(inventory: XAIAccountVoiceInventory?) -> (labels: [String], selected: Int) {
+        pickerPresentation(accountInventory: inventory.map(VoiceAccountInventory.xai))
+    }
+
+    package func pickerPresentation(accountInventory: VoiceAccountInventory?) -> (labels: [String], selected: Int) {
         var labels = DesktopSpeechVoice.voices.map(\.label)
         do {
-            let voice = try DesktopSpeechVoice.resolved(modelID: modelID, voiceID: voiceID, xaiInventory: inventory)
+            let voice = try DesktopSpeechVoice.resolved(
+                modelID: modelID, voiceID: voiceID, accountInventory: accountInventory)
             if let selected = DesktopSpeechVoice.voices.firstIndex(of: voice) { return (labels, selected) }
             labels.append(String(voice.label.prefix(220)))
             return (labels, labels.count - 1)
@@ -70,8 +79,13 @@ package struct DesktopVoiceOutputSettings: Codable, Equatable, Sendable {
     }
 
     package func controlsPresentation(inventory: XAIAccountVoiceInventory?) -> DesktopVoiceControlsPresentation {
+        controlsPresentation(accountInventory: inventory.map(VoiceAccountInventory.xai))
+    }
+
+    package func controlsPresentation(accountInventory: VoiceAccountInventory?) -> DesktopVoiceControlsPresentation {
         do {
-            let voice = try DesktopSpeechVoice.resolved(modelID: modelID, voiceID: voiceID, xaiInventory: inventory)
+            let voice = try DesktopSpeechVoice.resolved(
+                modelID: modelID, voiceID: voiceID, accountInventory: accountInventory)
             return .init(speed: speed ?? VoiceSynthesisOptions.defaultSpeed,
                          pitch: pitch ?? VoiceSynthesisOptions.defaultPitch, ssml: useSSML == true ? 1 : 0,
                          capabilities: voice.capabilities.nativeFlags, label: voice.label,
@@ -167,60 +181,6 @@ package struct DesktopHostReadAloudState<Speech: Sendable, Engine: DesktopHostVo
     }
 }
 
-/// A host that reads History transcripts aloud with a canonical Deepgram voice
-/// through its own playback, sharing one controller implementation.
-package protocol DesktopHostReadAloudPlatform: DesktopHostPlatform
-where Playback: DesktopHostSpeechPlayback, VoiceOutputSettings == DesktopVoiceOutputSettings,
-      ReadAloudState == DesktopHostReadAloudState<Playback.Speech, VoiceOutput> {
-    associatedtype VoiceOutput: DesktopHostVoiceOutput
-    /// The engine, staging synthesized audio in `directory`, which it creates
-    /// readable only by the current user.
-    static func makeVoiceOutput(stagingDirectory directory: URL) throws -> VoiceOutput
-    static func voiceCredential(
-        _ result: Result<DesktopVoiceCredentialPresentation, VoiceOutputCredentialError>, requestID: UUID)
-    static func voiceCredentialFinished(
-        _ result: Result<Void, VoiceOutputCredentialError>, request: VoiceOutputCredentialRequest)
-    static func synthesizeVoiceOutput(
-        _ source: VoiceOutputSourceSnapshot, selection: DesktopSpeechSelection,
-        credential: @Sendable () async throws -> String
-    ) async throws -> Data
-    /// Where this window saves the Deepgram key, e.g. "choose a Deepgram
-    /// model, then Save key", for the missing-key status line.
-    static var deepgramKeyHint: String { get }
-}
-
-package extension DesktopHostReadAloudPlatform {
-    static func voiceCredential(
-        _ result: Result<DesktopVoiceCredentialPresentation, VoiceOutputCredentialError>, requestID: UUID) {}
-    static func voiceCredentialFinished(
-        _ result: Result<Void, VoiceOutputCredentialError>, request: VoiceOutputCredentialRequest) {}
-
-    static func makeReadAloudState() -> ReadAloudState { ReadAloudState() }
-
-    static func synthesizeVoiceOutput(
-        _ source: VoiceOutputSourceSnapshot, selection: DesktopSpeechSelection,
-        credential: @Sendable () async throws -> String
-    ) async throws -> Data {
-        try await DesktopSpeechSynthesis().synthesize(
-            source, voice: selection.voice, options: selection.options,
-            xaiInventory: selection.xaiInventory, credential: credential
-        )
-    }
-
-    /// Cancels the segment being synthesized, so no later one is admitted, and
-    /// returns the record's controls to idle once nothing more will be spoken.
-    static func stopReadAloud(_ state: inout ReadAloudState, playback: Playback) {
-        state.task?.cancel()
-        state.task = nil
-        state.exportTask?.cancel()
-        state.exportTask = nil
-        if let speech = state.speech { playback.endSpeech(speech) }
-        state.speech = nil
-    }
-
-    static func isReadingAloud(_ state: ReadAloudState) -> Bool { state.task != nil || state.exportTask != nil }
-}
-
 /// Read aloud speaks the displayed transcript of the selected record through
 /// the shared playback, so speech and History playback are never audible
 /// together and share Play/Pause, Stop and the recording lockout. Long
@@ -230,7 +190,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
 
     package func saveVoiceOutput(_ voiceOutput: DesktopVoiceOutputSettings) {
         let label = (try? DesktopSpeechVoice.resolved(
-            modelID: voiceOutput.modelID, voiceID: voiceOutput.voiceID, xaiInventory: currentVoiceInventory()
+            modelID: voiceOutput.modelID, voiceID: voiceOutput.voiceID, accountInventory: selectedVoiceAccountInventory
         ))?.label
         _ = persistVoiceOutput(voiceOutput, message: label.map { "Read aloud voice saved: \($0)." } ??
             "Voice Output settings saved. The stored voice is unavailable on this host.")
@@ -330,9 +290,10 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         voiceOutputRecordID = recordID
         update("Reading aloud with \(voice.name)…")
         let usage = beginVoiceUsage(operation: .read, source: source, recordID: recordID)
+        let accountWork = beginAccountVoiceWork(selection, ticket: ticket)
         activeOperations += 1
         readAloudState.task = Task {
-            defer { self.finishVoiceUsage(usage); self.finishOperation() }
+            defer { self.finishAccountVoiceOperation(accountWork, usage: usage) }
             var outcome: String?
             do {
                 try await VoiceSynthesisUsage.$capture.withValue(usage?.capture) {
@@ -363,7 +324,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 try Task.checkCancellation()
                 let request = try DeepgramSpeechRequest(text: segment, voice: voice, speed: selection.options.speed)
                 _ = try await output.speak(request, credential: {
-                    try effects.apiKey(name: selection.voice.apiKeyIdentifier)
+                    try await Self.readVoiceSynthesisKey(effects: effects, name: selection.voice.apiKeyIdentifier)
                 }, through: { file in
                     try await playback.playToCompletion(speech, path: file.path)
                 })
@@ -373,7 +334,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 source: recordID == nil ? .typedText : .history, text: text, recordID: recordID
             )
             let wav = try await Platform.synthesizeVoiceOutput(source, selection: selection) {
-                try effects.apiKey(name: selection.voice.apiKeyIdentifier)
+                try await Self.readVoiceSynthesisKey(effects: effects, name: selection.voice.apiKeyIdentifier)
             }
             try await DesktopVoicePlaybackFile.play(
                 VoiceGeneratedAudio(validating: wav, sampleRate: selection.voice.sampleRate),

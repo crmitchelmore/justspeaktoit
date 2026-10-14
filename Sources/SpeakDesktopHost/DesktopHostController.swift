@@ -91,6 +91,11 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package var voiceCredentialRequestID: UUID?
     package var voiceCredentialReadTask: Task<Void, Never>?
     package var voiceCredentialReadID: UUID?
+    package var voiceCredentialReadDestination: VoiceOutputCredentialDestination?
+    package var voiceProviderIssuedSlot: VoiceOutputCredentialSlot?
+    package var voiceAccountWorkers = 0
+    package var voiceSynthesisWorkers = 0
+    package var voiceAccountOutputTicket: DesktopPlaybackRequests.Ticket?
     package var generatedVoice: DesktopGeneratedVoiceResult?
     package var voiceUsage = DesktopVoiceUsageState()
     package var voiceDiscovery = DesktopVoiceDiscoveryState()

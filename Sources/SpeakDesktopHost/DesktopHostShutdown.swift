@@ -111,7 +111,12 @@ extension DesktopHostController {
         voiceDiscovery.task?.cancel()
         voiceCredentialTask?.cancel()
         voiceCredentialReadTask?.cancel()
-        voiceDiscovery.inventory = nil
+        voiceDiscovery.inventories = [:]
+        voiceDiscovery.context = nil
+        voiceDiscovery.listing = nil
+        voiceDiscovery.listingContext = nil
+        voiceProviderIssuedSlot = nil
+        voiceCredentialReadDestination = nil
         cancelOutput()
         generatedVoice = nil
         voiceTextImportTask?.cancel()

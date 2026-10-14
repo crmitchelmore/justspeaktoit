@@ -90,7 +90,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         do {
             let selection = try currentVoiceSelection()
             let estimate = try VoiceSynthesisPricing.estimate(
-                for: selection.voice, text: text, xaiInventory: selection.xaiInventory)
+                for: selection.voice, text: text, accountInventory: selection.accountInventory)
             voiceUsage.estimate = "Captured text: \(count) input characters (Unicode scalars).\n"
                 + "Voice: \(selection.voice.label)\n"
                 + (estimate.map { "Input estimate: USD \(Self.voiceCost($0))." }

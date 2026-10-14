@@ -37,8 +37,11 @@ final class DesktopMistralFailureTests: DeepgramSpeechStubTestCase {
         StubURLProtocol.resetRecordedRequests()
         let started = expectation(description: "Synthetic Mistral request admitted")
         let stopped = expectation(description: "Synthetic Mistral request cancelled")
-        StubURLProtocol.handler = { _ in .hang }
-        StubURLProtocol.onStartLoading = { started.fulfill() }
+        StubURLProtocol.handler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            started.fulfill()
+            return .hang
+        }
         StubURLProtocol.onStopLoading = { stopped.fulfill() }
         let source = try longSource()
         let capture = VoiceSynthesisUsage.Capture(operation: .read, source: .typedText, historyRecordID: nil)

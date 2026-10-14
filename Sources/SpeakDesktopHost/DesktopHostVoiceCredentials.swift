@@ -16,6 +16,12 @@ package struct DesktopVoiceCredentialPresentation: Equatable, Sendable {
     }
 }
 
+package struct DesktopVoiceCredentialWriteRequest: Sendable {
+    package let id: UUID
+    package let operation: VoiceCredentialOperation
+    package let destination: VoiceOutputCredentialDestination
+}
+
 extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     package func handleVoiceCredential(_ message: VoiceOutputCredentialMessage) {
         guard !closed else { return }
@@ -36,22 +42,43 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         }
     }
 
-    private func beginVoiceCredentialRead(_ id: UUID) {
+    package func beginVoiceCredentialRead(_ id: UUID, destination: VoiceOutputCredentialDestination? = nil) {
+        let destination = destination ?? .selectedVoice(selectionEpoch: voiceCredentialEpoch)
         voiceCredentialReadID = id
+        voiceCredentialReadDestination = destination
         if let pending = voiceCredentialReadTask { pending.cancel(); return }
         activeOperations += 1
         voiceCredentialReadTask = Task {
-            let result = await self.voiceCredentialPresentation()
+            let result = await self.readVoiceCredentialPresentation(destination)
             self.voiceCredentialReadTask = nil
             self.finishOperation()
+            self.settleVoiceAccountPresentation()
             guard !self.closed else { self.voiceCredentialReadID = nil; return }
-            guard self.voiceCredentialReadID == id else {
-                if let next = self.voiceCredentialReadID { self.beginVoiceCredentialRead(next) }
+            guard self.voiceCredentialReadID == id, self.voiceCredentialReadDestination == destination else {
+                if let next = self.voiceCredentialReadID {
+                    self.beginVoiceCredentialRead(next, destination: self.voiceCredentialReadDestination)
+                }
                 return
             }
             self.voiceCredentialReadID = nil
+            self.voiceCredentialReadDestination = nil
             guard !Task.isCancelled else { return }
-            Platform.voiceCredential(result, requestID: id)
+            switch destination {
+            case .selectedVoice: Platform.voiceCredential(result, requestID: id)
+            case .explicitProvider(let context):
+                guard self.voiceAccountContextIsCurrent(context) else { return }
+                Platform.voiceProviderCredential(result, requestID: id, context: context)
+            }
+        }
+    }
+
+    private func readVoiceCredentialPresentation(_ destination: VoiceOutputCredentialDestination) async
+        -> Result<DesktopVoiceCredentialPresentation, VoiceOutputCredentialError> {
+        switch destination {
+        case .selectedVoice(let epoch):
+            guard epoch == voiceCredentialEpoch else { return .failure(.destinationChanged) }
+            return await voiceCredentialPresentation()
+        case .explicitProvider(let context): return await voiceProviderCredentialPresentation(context)
         }
     }
 
@@ -59,7 +86,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         -> Result<DesktopVoiceCredentialPresentation, VoiceOutputCredentialError> {
         guard !closed else { return .failure(.closed) }
         let epoch = voiceCredentialEpoch, settings = voiceOutputSettings()
-        let effects = effects, cached = voiceDiscovery.inventory
+        let effects = effects, cached = selectedVoiceAccountInventory
         let lookup = Task.detached {
             Self.lookupVoiceCredential(settings: settings, effects: effects, cached: cached)
         }
@@ -85,7 +112,9 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         guard request.selectionEpoch == voiceCredentialEpoch else {
             completion(voiceCredentialFailure(.destinationChanged)); return
         }
-        guard canSaveVoiceCredential else { completion(voiceCredentialFailure(.busy)); return }
+        guard canSaveVoiceCredential, voiceCredentialReadTask == nil else {
+            completion(voiceCredentialFailure(.busy)); return
+        }
         let slot: VoiceOutputCredentialSlot
         let cleaned: String
         do {
@@ -95,6 +124,15 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         } catch {
             completion(voiceCredentialFailure(error as? VoiceOutputCredentialError ?? .unavailable)); return
         }
+        admitVoiceCredentialWrite(cleaned, slot: slot,
+            request: .init(id: request.id, operation: request.operation,
+                destination: .selectedVoice(selectionEpoch: request.selectionEpoch)), completion: completion)
+    }
+
+    package func admitVoiceCredentialWrite(
+        _ cleaned: String, slot: VoiceOutputCredentialSlot, request: DesktopVoiceCredentialWriteRequest,
+        completion: @escaping @Sendable (Result<Void, VoiceOutputCredentialError>) -> Void
+    ) {
         activeOperations += 1
         voiceCredentialRequestID = request.id
         voiceCredentialTask = Task {
@@ -102,10 +140,11 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 self.voiceCredentialTask = nil
                 self.voiceCredentialRequestID = nil
                 self.finishOperation()
+                self.settleVoiceAccountPresentation()
             }
             do {
                 try Task.checkCancellation()
-                guard !self.closed, request.selectionEpoch == self.voiceCredentialEpoch else {
+                guard self.voiceCredentialDestinationIsCurrent(request.destination) else {
                     completion(self.voiceCredentialFailure(self.closed ? .closed : .destinationChanged)); return
                 }
                 if let saveByHand = self.cloudSync.saveKeyByHand {
@@ -113,10 +152,11 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 } else {
                     try await Self.writeVoiceCredential(cleaned, identifier: slot.identifier)
                 }
+                self.invalidateVoiceInventory(for: slot)
                 guard !self.closed, !Task.isCancelled else {
                     completion(.failure(.completedWhileClosing)); return
                 }
-                guard request.selectionEpoch == self.voiceCredentialEpoch,
+                guard self.voiceCredentialDestinationIsCurrent(request.destination),
                       self.voiceCredentialRequestID == request.id else {
                     completion(.failure(.completedForPreviousSelection)); return
                 }
@@ -136,10 +176,11 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         return true
     }
 
-    private var canSaveVoiceCredential: Bool {
+    package var canSaveVoiceCredential: Bool {
         !closed && !busy && recording == nil && voiceCredentialTask == nil
             && voiceTextImportTask == nil && voiceDiscovery.task == nil && voiceGenerationTask == nil
             && readAloudState.task == nil && readAloudState.exportTask == nil
+            && voiceSynthesisWorkers == 0
     }
 
     private nonisolated static func writeVoiceCredential(_ key: String, identifier: String) async throws {
@@ -152,41 +193,39 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
 
     private nonisolated static func lookupVoiceCredential(
         settings: DesktopVoiceOutputSettings, effects: any DesktopHostEffects<Platform>,
-        cached: XAIAccountVoiceInventory?
+        cached: VoiceAccountInventory?
     ) -> Result<(VoiceOutputCredentialSlot, Bool), VoiceOutputCredentialError> {
         guard !Task.isCancelled else { return .failure(.cancelled) }
         let voice: DesktopSpeechVoice
         do {
             voice = try DesktopSpeechVoice.resolved(
-                modelID: settings.modelID, voiceID: settings.voiceID, xaiInventory: cached)
+                modelID: settings.modelID, voiceID: settings.voiceID, accountInventory: cached)
         } catch { return .failure(.unavailable) }
-        var inventory = cached
-        if case .xai = voice, let cached {
-            do {
-                if !cached.matchesCredential(try effects.apiKey(name: XAITTSCatalog.credentialIdentifier)) {
-                    inventory = nil
-                }
-            } catch { return .failure(.readFailed) }
-        }
         let slot: VoiceOutputCredentialSlot
         do {
-            slot = try .init(voice: voice, inventory: inventory)
+            slot = try .init(voice: voice, accountInventory: cached)
         } catch { return .failure(.unavailable) }
         guard !Task.isCancelled else { return .failure(.cancelled) }
-        do { return .success((slot, try !effects.apiKey(name: slot.identifier).isEmpty)) } catch {
+        do {
+            let key = try effects.apiKey(name: slot.identifier)
+            if !DesktopSpeechVoice.voices.contains(voice), cached?.matchesCredential(key) != true {
+                return .failure(.unavailable)
+            }
+            return .success((slot, !key.isEmpty))
+        } catch {
             return .failure(.readFailed)
         }
     }
 
     private func currentVoiceCredentialSlot() throws -> VoiceOutputCredentialSlot {
-        let inventory = voiceDiscovery.inventory
+        let inventory = selectedVoiceAccountInventory
         let saved = voiceOutputSettings()
         let voice = try DesktopSpeechVoice.resolved(
-            modelID: saved.modelID, voiceID: saved.voiceID, xaiInventory: inventory)
-        return try .init(voice: voice, inventory: inventory)
+            modelID: saved.modelID, voiceID: saved.voiceID, accountInventory: inventory)
+        return try .init(voice: voice, accountInventory: inventory)
     }
 
-    private func voiceCredentialFailure(_ error: VoiceOutputCredentialError)
+    package func voiceCredentialFailure(_ error: VoiceOutputCredentialError)
         -> Result<Void, VoiceOutputCredentialError> {
         if !closed { update(error.localizedDescription) }
         return .failure(error)

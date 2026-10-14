@@ -524,6 +524,42 @@ enabled by this candidate. Native Mistral playback/accessibility, real account
 responses and Apple acceptance remain unverified; fake HTTP evidence is not a
 provider service probe or complete Voice parity.
 
+### Explicit-provider host boundary (not exposed by native UI)
+
+The host candidate adds a separate account-dialog session and acknowledged
+provider epoch. Modern Refresh/Pick require that epoch, not a legacy dialog
+token; Close retains the session identity. Provider transitions synchronously
+clear offered choices and issued slots before awaiting anything. A completed
+listing must match its provider, captured key and context, and Pick rechecks
+the key before atomically saving the complete model/voice tuple. Listing and
+credential operations alone do not change that tuple. Browsing another provider
+does not erase evidence for the current saved voice; a new dialog cannot Pick
+an old dialog's evidence simply because its key still matches.
+
+Explicit-provider key entry obtains its slot from the canonical purpose
+resolver, without requiring an already picked Mistral voice. The host must
+issue that slot for the current context before admitting replacement/removal.
+Selected-voice entry and explicit-provider entry share the same coalesced,
+owned vault worker; their epochs are not interchangeable. Blocking vault I/O
+is detached, and reads, writes, listing and synthesis remain counted until
+actual settlement after cancellation. Late confirmed writes remain truthful
+and invalidate the affected account evidence even if their dialog changed.
+
+Provider/session changes cancel and fence active account-only synthesis,
+without cancelling unrelated built-in Voice output, retained replay/export or
+text import. Actual synthesis owns its credential lookup; unsupported controls
+fail before lookup/HTTP, and cancellation does not permit a racing key write
+while a native lookup is still settling. Generic account evidence is passed
+through Read, Generate, text export and estimates. Completed audio retains the
+existing native WAV/publication path, actual History UUID-or-nil attribution
+and usage opt-out; no token counts or billing receipts are inferred.
+
+These are internal host seams and synthetic tests only. The existing selected
+credential C ABI and native controls are unchanged. Mistral provider/key/list/pick
+controls, full native app/vault/playback/accessibility and Apple/runtime service
+acceptance remain a separately reviewed native integration, not accomplished
+by this host checkpoint.
+
 ## Actual macOS features and remaining gaps
 
 `Sources/SpeakApp/VoiceOutputView.swift` currently offers manual text, clipboard,

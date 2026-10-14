@@ -60,6 +60,11 @@ final class LinuxEventContext: @unchecked Sendable {
             case .stop: await controller.playbackStop()
             case .readAloud(let identifier, let text): await controller.readAloud(identifier, text: text)
             case .filter(let payload): await controller.applyHistoryFilters(payload)
+            case .voiceRead, .voiceExport, .voiceImport, .voiceImportCancel,
+                 .voiceGenerate, .voiceGeneratedPlay, .voiceGeneratedExport:
+                await controller.performVoiceEvent(event) {
+                    LinuxWindow.voiceTextImported($1, requestID: $0)
+                }
             }
         }
     }

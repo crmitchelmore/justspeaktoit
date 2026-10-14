@@ -40,6 +40,13 @@ struct _GtkWidget *jsti_history_filters_button_new(void);
 int32_t jsti_history_filters_self_test(char *error, size_t capacity);
 gboolean jsti_history_filters_active(void);
 
+struct _GtkWindow;
+void jsti_show_voice_sources(struct _GtkWindow *owner, const char *record, const char *history);
+int32_t jsti_voice_sources_self_test(struct _GtkWindow *owner, char *error, size_t capacity);
+void jsti_voice_sources_close(void);
+void jsti_voice_sources_show_fixture(struct _GtkWindow *owner);
+int32_t jsti_voice_sources_save_snapshot(const char *path);
+
 struct _GtkWidget;
 struct _GtkLabel;
 struct _GtkWindow;

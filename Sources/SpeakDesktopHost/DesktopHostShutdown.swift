@@ -120,6 +120,8 @@ extension DesktopHostController {
         }
         modelDiscoveryTask?.cancel()
         cancelOutput()
+        generatedVoice = nil
+        voiceTextImportTask?.cancel()
         cancellationRequested = true
         transcriptionTask?.cancel()
         historyDeletionTask?.cancel()

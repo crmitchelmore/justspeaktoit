@@ -43,6 +43,9 @@ bool jsti_hotkey_self_test(HWND owner, int (*observe)(void *), void *context, st
 bool jsti_voice_output_available();
 void jsti_show_voice_settings(HWND owner);
 bool jsti_voice_settings_self_test(HWND owner, std::string &error);
+void jsti_show_voice_sources(HWND owner, const char *record, const char *history);
+bool jsti_voice_sources_self_test(HWND owner, std::string &error);
+void jsti_voice_sources_stop();
 bool jsti_azure_resource_available();
 void jsti_show_configuration(HWND owner, const wchar_t *group);
 void jsti_show_azure_resource_settings(HWND owner);
@@ -92,6 +95,7 @@ constexpr int readAloudID = 172;
 constexpr int voiceSettingsID = 173;
 constexpr int correctionsID = 180, pronunciationID = 181;
 constexpr int historyCorrectionsID = 182;
+constexpr int voiceSourcesID = 184;
 // The Source picker (Remote/Local) and the Local models dialog button, which
 // takes the place of Refresh models while the Local source is selected.
 constexpr int sourceLabelID = 89;
@@ -114,8 +118,8 @@ const PageInfo pageInfo[pageCount] = {
     {L"Dashboard", L"Ready to capture ideas instantly. Check your setup, follow your usage, and pick up your latest "
                    L"session.", 0xE80F, "dashboard"},
     {L"History", L"Search, replay and reuse past recordings and their transcripts.", 0xE81C, "history"},
-    {L"Voice Output", L"Hear any History transcript read back in a Deepgram Aura voice, through your own Deepgram "
-                      L"key.", 0xE767, "voice-output"},
+    {L"Voice Output", L"Read History, typed text or an explicit clipboard snapshot in a Deepgram Aura voice. "
+                      L"Export lossless WAV audio with your own Deepgram key.", 0xE767, "voice-output"},
     {L"General", L"Choose the microphone, where finished text goes, whether the app starts at login, and how it "
                  L"looks.", 0xE713, "general"},
     {L"Transcription", L"Pick the speech model for new recordings, on this PC or with your own provider key.", 0xE720,
@@ -467,7 +471,7 @@ void updatePlaybackControls(HWND window, bool selected, int recording) {
     SetDlgItemTextW(window, playPauseID,
         state.displayedPlayback == playbackPreparing || state.displayedPlayback == playbackPlaying ? L"Pause" : L"Play");
     EnableWindow(GetDlgItem(window, playPauseID), (selected && recording == 0) || active);
-    EnableWindow(GetDlgItem(window, stopPlaybackID), active);
+    EnableWindow(GetDlgItem(window, stopPlaybackID), active || (state.page == voicePage && recording == 0));
 }
 
 // The playback display never infers progress: it shows only what the host
@@ -503,6 +507,7 @@ void updateHistoryControls(HWND window, int recording) {
     EnableWindow(GetDlgItem(window, readAloudID), selected && recording == 0 && state.historyPresentationReady &&
         jsti_voice_output_available());
     EnableWindow(GetDlgItem(window, voiceSettingsID), recording == 0 && jsti_voice_output_available());
+    EnableWindow(GetDlgItem(window, voiceSourcesID), recording == 0 && jsti_voice_output_available());
     EnableWindow(GetDlgItem(window, copyID), state.historyPresentationReady && (!selected || recording == 0));
     if (!selected) applyVariant(window, -1, false, recording);
     else EnableWindow(GetDlgItem(window, variantID), state.variantSwitchable && recording == 0);
@@ -582,7 +587,7 @@ unsigned pagesOf(int identifier) {
     case historySpendID: case historyCorrectionsID:
         return page(historyPage);
     case readAloudID: case stopPlaybackID: return page(historyPage) | page(voicePage);
-    case voiceSettingsID: return page(voicePage);
+    case voiceSettingsID: case voiceSourcesID: return page(voicePage);
     case configurationID:
         return page(generalPage) | page(transcriptionPage) | page(postProcessingPage) | page(keyboardPage);
     case 94: case microphoneID: case textOutputID: case appearanceLabelID: case appearanceID: case automationID:
@@ -864,12 +869,13 @@ void layoutSettings(HWND window, const RECT &content) {
     switch (state.page) {
     case voicePage: {
         int y = layoutSettingsCard(window, top, content, 0xE767, L"Read aloud",
-            L"Choose a recording in History, then read its transcript aloud here or from History. Recording, choosing "
-            L"another recording or Stop ends it. Read aloud uses the Deepgram key saved under Transcription.", row);
+            L"Read the selected History transcript, or open Text and export for typed/pasted text and an explicit "
+            L"clipboard snapshot. The saved Deepgram key is used. External selected text is unavailable.", 2 * row + gap);
         place(window, voiceSettingsID, box(left, y, scale(window, 150), row));
         button(readAloudID, y, scale(window, 196));
         place(window, stopPlaybackID, box(right - scale(window, 196) - scale(window, 8) - scale(window, 96), y,
                                           scale(window, 96), row));
+        place(window, voiceSourcesID, box(left, y + row + gap, scale(window, 260), row));
         break;
     }
     case generalPage: {
@@ -1552,6 +1558,7 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"Play", BS_PUSHBUTTON | WS_TABSTOP, playPauseID) &&
         add(L"BUTTON", L"Stop", BS_PUSHBUTTON | WS_TABSTOP, stopPlaybackID) &&
         add(L"BUTTON", L"Choose &voice…", BS_PUSHBUTTON | WS_TABSTOP, voiceSettingsID) &&
+        add(L"BUTTON", L"&Text and export...", BS_PUSHBUTTON | WS_TABSTOP, voiceSourcesID) &&
         add(L"BUTTON", L"Edit app &profiles…", BS_PUSHBUTTON | WS_TABSTOP, profilesID) &&
         add(L"BUTTON", L"Edit &corrections...", BS_PUSHBUTTON | WS_TABSTOP, correctionsID) &&
         add(L"BUTTON", L"Edit &pronunciations...", BS_PUSHBUTTON | WS_TABSTOP, pronunciationID) &&
@@ -2304,6 +2311,14 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
                 jsti_show_voice_settings(window);
             }
             return 0;
+        case voiceSourcesID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, voiceSourcesID) && IsWindowEnabled(window)) {
+                const std::string transcript = state.historyPresentationReady
+                    ? jsti::utf8(controlText(GetDlgItem(window, transcriptID))) : "";
+                const std::string record = state.historyPresentationReady ? state.selectedHistoryID : "";
+                jsti_show_voice_sources(window, record.c_str(), transcript.c_str());
+            }
+            return 0;
         case playPauseID:
             if (HIWORD(wparam) == BN_CLICKED && IsWindowEnabled(GetDlgItem(window, playPauseID))) {
                 emitHistory(window, JSTI_EVENT_HISTORY_PLAY_PAUSE);
@@ -2311,7 +2326,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             return 0;
         case stopPlaybackID:
             if (HIWORD(wparam) == BN_CLICKED && IsWindowEnabled(GetDlgItem(window, stopPlaybackID))) {
-                emitHistory(window, JSTI_EVENT_HISTORY_STOP);
+                if (state.page == voicePage) jsti_voice_sources_stop();
+                else emitHistory(window, JSTI_EVENT_HISTORY_STOP);
             }
             return 0;
         case historyID:
@@ -4025,6 +4041,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             jsti_vocabulary_self_test(window, failure) &&
             jsti_text_output_settings_self_test(window, textOutputID, setRecording, recordingBlocked, &observed, failure) &&
             jsti_hotkey_self_test(window, observe, &observed, failure) && jsti_voice_settings_self_test(window, failure) &&
+            jsti_voice_sources_self_test(window, failure) &&
             jsti_local_models_self_test(window, failure) && jsti_cloud_sync_settings_self_test(window, failure) &&
             jsti_azure_resource_settings_self_test(window, failure) && jsti_configuration_self_test(window, failure)
             && jsti_comparison_self_test(window, failure);
@@ -4119,7 +4136,7 @@ int jsti_owned_window_save_snapshot(HWND window, const char *path, char *error, 
         return jsti::fail("Native snapshot dimensions exceed the 64 MiB diagnostic limit.", error, errorCapacity);
     }
     // Only this app's own client DC is acquired. Never use GetDC(nullptr),
-    // desktop BitBlt. The internal handle must belong to this process/thread.
+    // desktop BitBlt, or another process's window handle here.
     struct BitmapResources {
         HWND window;
         HDC source = nullptr;
@@ -4201,3 +4218,4 @@ int jsti_owned_window_save_snapshot(HWND window, const char *path, char *error, 
     }
     return 0;
 }
+

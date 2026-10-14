@@ -38,6 +38,11 @@ final class WindowsEventContext {
             case .stop: await controller.playbackStop()
             case .readAloud(let identifier, let text): await controller.readAloud(identifier, text: text)
             case .filter(let payload): await controller.applyHistoryFilters(payload)
+            case .voiceRead, .voiceExport, .voiceImport, .voiceImportCancel,
+                 .voiceGenerate, .voiceGeneratedPlay, .voiceGeneratedExport:
+                await controller.performVoiceEvent(event) {
+                    WindowsNative.voiceTextImported($1, requestID: $0)
+                }
             }
         }
     }
@@ -285,8 +290,7 @@ enum SpeakWindowsMain {
         }
     }
 
-    /// A hand-edited or corrupt shortcut falls back to the default rather than
-    /// none; the Read aloud voice resolves through the canonical catalogue.
+    /// Restores the shortcut fallback and canonical Read aloud voice before launch.
     private static func configureHotKey(_ holder: WindowsEventContext) async throws {
         var hotKey = await holder.controller.hotKeySettings()
         let context = Unmanaged.passUnretained(holder).toOpaque()
@@ -312,8 +316,7 @@ enum SpeakWindowsMain {
         }
     }
 
-    /// Hands every dialog its saved state and restores services before the
-    /// window opens.
+    /// Restores native dialog state and services before the window opens.
     private static func configureWindow(controller: WindowsAppController, holder: WindowsEventContext) async throws {
         let microphone = await controller.selectedMicrophone()
         let smokeTest = holder.smokeTest

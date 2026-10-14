@@ -64,6 +64,7 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
         LinuxWindow.postProcessing(await controller.postProcessingOptions())
         _ = jsti_window_set_azure_resource(await controller.azureResourceEndpoint())
         LinuxWindow.voiceOutput(await controller.voiceOutputSettings())
+        LinuxWindow.voiceSources(context: Unmanaged.passUnretained(holder).toOpaque())
         _ = jsti_window_set_appearance(Int32(await controller.appearance().rawValue))
         await controller.configureLocalModels()
         return await controller.selectedIndex()

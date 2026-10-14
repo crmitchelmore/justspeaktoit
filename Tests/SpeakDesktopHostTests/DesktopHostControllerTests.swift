@@ -109,6 +109,9 @@ enum FakePlatform: DesktopHostPlatform {
     static func transcriptVariant(_ variant: DesktopTranscriptVariant?, for record: UUID?, switchable: Bool) {}
     static func publishModels(status: String, refreshing: Bool) throws {}
     static func apiKey(name: String) throws -> String { FakeLog.shared.key(name) }
+    static func voiceTextImportCancelled(_ requestID: String) {
+        FakeLog.shared.status("Import stopped: \(requestID)")
+    }
     static func saveAPIKey(_ key: String, name: String) throws { FakeLog.shared.setKey(key, name: name) }
     static func uploadStaging(directory: URL) -> SharedMultipartUploadStaging {
         // No `.posix` default on Windows, where these tests also run.

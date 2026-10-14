@@ -1,4 +1,5 @@
 import Foundation
+import SpeakCore
 
 /// A History pane event, submitted on the UI thread in the order the user
 /// made it. Selection and version choose what is displayed; the others act on
@@ -16,6 +17,13 @@ public enum DesktopHistoryEvent: Equatable, Sendable {
     /// Carries the transcript displayed at the click, which is spoken as is.
     case readAloud(String, text: String)
     case filter(String)
+    case voiceRead(VoiceOutputSourceSnapshot)
+    case voiceExport(VoiceOutputSourceSnapshot, path: String)
+    case voiceImport(path: String, requestID: String)
+    case voiceImportCancel(requestID: String)
+    case voiceGenerate(VoiceOutputSourceSnapshot, options: VoiceGenerationOptions)
+    case voiceGeneratedPlay(String)
+    case voiceGeneratedExport(String, path: String)
 
     /// Play/Pause and Read aloud clicks kept while the host catches up.
     /// Further clicks are ignored until it does, like clicks on a busy button;
@@ -43,17 +51,33 @@ public enum DesktopHistoryEvent: Equatable, Sendable {
             guard pending.filter({ $0.kind == .action }).count < maximumPendingActions else { return }
         case .filter:
             pending.removeAll { $0.kind == .filter || $0.kind == .action || $0.kind == .version }
+        case .importCancellation:
+            guard case let .voiceImportCancel(requestID) = event else { return }
+            let queued = pending.contains {
+                if case let .voiceImport(_, queuedID) = $0 { return queuedID == requestID }
+                return false
+            }
+            pending.removeAll {
+                switch $0 {
+                case let .voiceImport(_, queuedID), let .voiceImportCancel(queuedID):
+                    return queuedID == requestID
+                default: return false
+                }
+            }
+            if queued { return }
         }
         pending.append(event)
     }
 
-    private enum Kind { case row, version, action, stop, filter }
+    private enum Kind { case row, version, action, stop, filter, importCancellation }
 
     private var kind: Kind {
         switch self {
         case .selection: return .row
         case .version: return .version
-        case .playPause, .readAloud: return .action
+        case .playPause, .readAloud, .voiceRead, .voiceExport, .voiceImport,
+             .voiceGenerate, .voiceGeneratedPlay, .voiceGeneratedExport: return .action
+        case .voiceImportCancel: return .importCancellation
         case .stop: return .stop
         case .filter: return .filter
         }

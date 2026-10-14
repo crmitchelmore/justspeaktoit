@@ -110,6 +110,7 @@ typedef struct UI {
     /* Voice Output page actions. */
     GtkButton *voice_read;
     GtkButton *voice_stop;
+    GtkButton *voice_sources;
     AdwComboRow *appearance_row;
     AdwSwitchRow *login_row;
     GtkWidget *configuration_columns[4];
@@ -243,7 +244,8 @@ static void refresh_actions(void) {
     gboolean voices = g_list_model_get_n_items(G_LIST_MODEL(read_aloud.voices)) > 0;
     gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.button), idle && presented && has_text && voices);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_read), idle && presented && has_text && voices);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), has_record && ui.playback_state != 0);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), idle);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_sources), idle && voices);
     gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.voice_row), idle);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.import_button), idle);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.history_import), idle);
@@ -563,6 +565,7 @@ static void on_import(GtkButton *button, gpointer data) {
 
 static gboolean on_close_request(GtkWindow *window, gpointer data) {
     (void)window; (void)data;
+    jsti_voice_sources_close();
     jsti_hud_destroy();
     jsti_tray_stop();
     emit(JSTI_EVENT_CLOSING, "", 0);
@@ -960,18 +963,27 @@ static GtkWidget *build_history(GtkTextBuffer *buffer) {
     return page;
 }
 
+static void on_voice_sources(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    gboolean presented = ui.selected_id != NULL && g_strcmp0(ui.presented_id, ui.selected_id) == 0;
+    gchar *snapshot = presented ? displayed_transcript() : g_strdup("");
+    jsti_show_voice_sources(ui.window, presented ? ui.selected_id : "", snapshot);
+    g_free(snapshot);
+}
+
 static GtkWidget *build_voice_output(void) {
     GtkWidget *column, *page = jsti_page_new(&column);
     gtk_box_append(GTK_BOX(column), jsti_hero_new(
         "voice", "Voice Output",
-        "Hear any History transcript read back in a Deepgram Aura voice, through your own Deepgram key.", NULL,
+        "Read History, typed text or an explicit clipboard snapshot in a Deepgram Aura voice. "
+        "Export lossless WAV audio with your own Deepgram key.", NULL,
         NULL));
     GtkWidget *body;
     GtkWidget *card = jsti_card_new("audio-speakers-symbolic", "Read aloud", &body);
     gtk_box_append(GTK_BOX(body), read_aloud_group());
     GtkWidget *note = gtk_label_new(
-        "Choose a recording in History, then read its transcript aloud here or from its card. Starting a "
-        "recording, choosing another recording or pressing Stop ends it.");
+        "Choose a recording in History, or open Text and export for typed/pasted text and an explicit clipboard "
+        "snapshot. External selected text is unavailable. Recording, another playback or Stop ends voice output.");
     gtk_label_set_wrap(GTK_LABEL(note), TRUE);
     gtk_label_set_xalign(GTK_LABEL(note), 0);
     gtk_widget_add_css_class(note, "dim-label");
@@ -981,9 +993,12 @@ static GtkWidget *build_voice_output(void) {
     ui.voice_stop = GTK_BUTTON(gtk_button_new_with_label("Stop"));
     g_signal_connect(ui.voice_stop, "clicked", G_CALLBACK(on_stop_play), NULL);
     ui.voice_read = GTK_BUTTON(gtk_button_new_with_label("Read Selected Recording"));
+    ui.voice_sources = GTK_BUTTON(gtk_button_new_with_label("Text and export..."));
+    g_signal_connect(ui.voice_sources, "clicked", G_CALLBACK(on_voice_sources), NULL);
     gtk_widget_add_css_class(GTK_WIDGET(ui.voice_read), "suggested-action");
     g_signal_connect(ui.voice_read, "clicked", G_CALLBACK(on_read_aloud), NULL);
     gtk_box_append(GTK_BOX(actions), GTK_WIDGET(ui.voice_stop));
+    gtk_box_append(GTK_BOX(actions), GTK_WIDGET(ui.voice_sources));
     gtk_box_append(GTK_BOX(actions), GTK_WIDGET(ui.voice_read));
     gtk_box_append(GTK_BOX(body), actions);
     gtk_box_append(GTK_BOX(column), card);
@@ -2934,6 +2949,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
         return fail(error, capacity, "Copy or the version control stayed unavailable");
     }
     if (read_aloud_self_test(first, error, capacity) != 0) return -1;
+    if (jsti_voice_sources_self_test(ui.window, error, capacity) != 0) return -1;
     History *empty = history_copy(NULL, 0, "");
     history_apply(empty);
     history_free(empty);
@@ -2966,7 +2982,7 @@ int32_t jsti_widget_save_snapshot(GtkWidget *widget, const char *path, gboolean 
     GskRenderNode *node = gtk_snapshot_free_to_node(snapshot);
     int32_t result = -1;
     if (node != NULL) {
-        GskRenderer *renderer = gtk_native_get_renderer(GTK_NATIVE(ui.window));
+        GskRenderer *renderer = gtk_native_get_renderer(gtk_widget_get_native(widget));
         GdkTexture *texture = gsk_renderer_render_texture(
             renderer, node, &GRAPHENE_RECT_INIT(0, 0, (float)width, (float)height));
         if (texture != NULL && gdk_texture_save_to_png(texture, path)) result = 0;
@@ -2985,7 +3001,7 @@ typedef struct Tour {
 
 enum { TOUR_PORTAL_OUTPUT = JSTI_PAGE_COUNT, TOUR_DARK_DASHBOARD, TOUR_DARK_HISTORY, TOUR_RECORDING, TOUR_HUD_RECORDING,
        TOUR_HUD_COMPLETED, TOUR_HISTORY_FILTERS, TOUR_DARK_HISTORY_FILTERS, TOUR_EXPANDED_RECORDING,
-       TOUR_COMPACT_RECORDING, TOUR_COMPACT_COMPLETED, TOUR_DONE };
+       TOUR_COMPACT_RECORDING, TOUR_COMPACT_COMPLETED, TOUR_VOICE_SOURCES, TOUR_DONE };
 
 static gboolean tour_capture(gpointer data);
 
@@ -3023,6 +3039,9 @@ static void tour_show(Tour *tour) {
                                     "Could we move the catch-up to Friday? That gives us a little more time", 0, TRUE);
     } else if (tour->step == TOUR_COMPACT_COMPLETED) {
         jsti_hud_show_presentation(5, "Completed", "Saved. Pasted into the original window.", "", 2400, TRUE);
+    } else if (tour->step == TOUR_VOICE_SOURCES) {
+        jsti_hud_destroy();
+        jsti_voice_sources_show_fixture(ui.window);
     } else {
         /* Late, because it replaces the displayed transcript. */
         Update recording = { .transcript = (gchar *)"Could we move the catch-up to Friday? That gives us a little",
@@ -3047,6 +3066,7 @@ static const char *tour_name(gint32 step) {
     case TOUR_DARK_HISTORY: return "history-dark";
     case TOUR_HISTORY_FILTERS: return "history-filters";
     case TOUR_DARK_HISTORY_FILTERS: return "history-filters-dark";
+    case TOUR_VOICE_SOURCES: return "voice-sources";
     default: return page_info[step].name;
     }
 }
@@ -3063,7 +3083,7 @@ static gboolean tour_capture(gpointer data) {
     char message[256] = { 0 };
     if (tour->step == TOUR_HISTORY_FILTERS || tour->step == TOUR_DARK_HISTORY_FILTERS) {
         GtkPopover *popover = gtk_menu_button_get_popover(GTK_MENU_BUTTON(ui.history_filters));
-        if (!popover || save_widget_png(GTK_WIDGET(popover), path, TRUE) != 0) {
+        if (!popover || jsti_widget_save_snapshot(GTK_WIDGET(popover), path, TRUE) != 0) {
             g_printerr("The History filter editor %s could not be saved.\n", file);
         }
         gtk_menu_button_set_popover(GTK_MENU_BUTTON(ui.history_filters), NULL);
@@ -3073,6 +3093,19 @@ static gboolean tour_capture(gpointer data) {
         else {
             g_free(tour->directory); g_free(tour);
             gtk_window_close(ui.window);
+        }
+        return G_SOURCE_REMOVE;
+    }
+    if (tour->step == TOUR_VOICE_SOURCES) {
+        if (jsti_voice_sources_save_snapshot(path) != 0) g_printerr("The Voice Output editor snapshot failed.\n");
+        g_free(path); g_free(file);
+        tour->step++;
+        if (tour->step < TOUR_DONE) {
+            tour_show(tour);
+        } else {
+            jsti_comparison_screenshot_tour(ui.window, tour->directory);
+            g_free(tour->directory);
+            g_free(tour);
         }
         return G_SOURCE_REMOVE;
     }

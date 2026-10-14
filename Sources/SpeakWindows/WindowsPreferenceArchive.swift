@@ -3,6 +3,8 @@ import SpeakDesktopHost
 import SpeakWindowsPlatform
 
 extension WindowsHostPlatform {
+    static var nativeConfigurationPlatform: DesktopNativeConfigurationCapture.Platform? { .windows }
+
     static func archiveNativePreferences(
         textOutput: TextOutputOptions?, hotKey: HotKeySettings?, voiceOutput: VoiceOutputSettings?
     ) -> DesktopHostNativePreferenceProjection {

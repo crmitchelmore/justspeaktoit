@@ -494,7 +494,7 @@ and `LinuxPreferenceArchive.swift`; Mac wire names are established by
 | `postProcessing.mode`, `.modelIdentifier`, `.temperature` | `postProcessingEnabled`, `postProcessingModel`, `postProcessingTemperature`; explicit native options override stale configuration mirrors. |
 | `postProcessing.includeLexiconDirectives`, `.includeContextTags`, `.streamingEnabled` | `postProcessingIncludeLexiconDirectives`, `postProcessingIncludeContextTags`, `postProcessingStreamingEnabled`; the native options are their sole desktop authority. `lastRemoteModelIdentifier` is dormant picker recall and is not projected. |
 | `postProcessing.outputLanguage` | Stored text, including explicit empty text, maps to `postProcessingOutputLanguage`; native nil suppresses a stale mirror without inventing a replacement string. |
-| `postProcessing.customPrompt` | Native-only notice; it is outside the canonical 91 keys and is not silently discarded or stuffed into another setting. |
+| `postProcessing.customPrompt` | Value-free native-only notice, not transferable retention. No current Mac global scalar identity exists; the separate opt-in local capture below preserves the native source value without fabricating a profile. |
 | `appearance` | Native system/light/dark maps to canonical textual appearance, not the native integer encoding. |
 | `runAtLogin` | Explicit recorded boolean only; no OS registration query or side effect. |
 | `automationEnabled` | Explicit `enableAutomationServer` boolean; no service admission or permission change. |
@@ -537,8 +537,15 @@ On its original base, the candidate passed 85 focused preference/Voice/hands-fre
 Strict pinned SwiftLint passed all 17 candidate
 and composition-resolution Swift inputs. All four Windows Swift projections
 pass, including the production Windows projection hook and host tests. Those
-header-backed projections do not prove native linking or runtime behavior;
-there are no new native/Apple or installed-app receipts for this candidate.
+header-backed projections do not prove native linking or runtime behavior.
+Published `6dbefced3d899f8e3b4e61d668738443c78cfdb1` has exact-tree native
+**failure** receipts: Windows x64 job115750034474 and ARM64 job115750175252
+failed at `WindowsVoiceControls.cpp:318,344`; Linux job115750206937 failed at
+`LinuxVoiceUsage.c:144`. The undeclared helpers are inherited from selected78ad.
+Their checkout `5c9aec40f8f498e98a257d519b7f8814f41984b0` has published tree
+`35c9ea0e7ac1d9b4b307c798c094ed155d814af0`; no native tests/fixtures ran.
+These failures remain attributed to that frozen source, not replaced by local
+capture checks, historical greens or later integration corrections.
 
 Known limitations remain visible: no raw-file preservation guarantee for values
 already changed by existing startup migrations or unknown members discarded by
@@ -548,6 +555,73 @@ collection-store collection, credential access, default reset semantics,
 import/mutation, or atomic destination publication. The parent must preserve
 category completeness and unknown/native-only material deliberately rather
 than feeding these partial arrays into destructive replacement.
+
+## Local value-bearing native configuration capture
+
+`DesktopHostController.configurationCapture(categories:selectedNativeFields:validateJSON:)`
+and pure `DesktopHostConfigurationCapture.capture` return the **unchanged**
+canonical preference projection alongside a separately selected
+`DesktopNativeConfigurationCapture`. This non-Codable result is captured data,
+**not an archive carrier, retained-unapplied payload, import contract or proof
+of complete backup**. Parent aggregation still needs an explicitly supported
+carrier before these values become transferable retention. No schema format,
+settings keys, controls, ABI, runtime behavior, profiles or credentials change.
+
+`SpeakCore/DesktopNativeConfigurationField.swift` is the single noncredential
+source-path/owner/type definition. Opt-in paths cover `postProcessing.customPrompt`,
+separately `configuration.postProcessingSystemPrompt`, `microphoneDeviceID`,
+`localUseGPU`, `azureSpeechResourceEndpoint`, `voiceOutput.modelID`,
+`voiceOutput.voiceID`, `voiceOutput.ttsTrackUsage`, `hotKey` and `textOutput`.
+Each selected entry names its actual Windows/Linux platform, source path and
+native-settings versus legacy-configuration provenance, with explicit presence
+and an optional raw `AnyCodable` value. Missing is not false, zero, empty text or
+an explicit JSON null in these nullable source fields.
+An empty selection captures no values. Unknown/credential/canonical-preference
+selection paths fail; unknown/unselected material is reported by name only.
+
+Native adapters identify only their actual host platform. The shared snapshot
+reads stored authorities, not OS state, editor defaults, activation fallbacks,
+Voice execution getters, providers or credential stores. In-memory source
+metadata retains explicitly decoded native root values before nested typed
+decoders could materialize defaults or discard members; an explicit write
+replaces that source with the current stored authority. Persisted encoding is
+unchanged. This is not recovery of raw values already lost before the snapshot
+was created, nor a raw-file/full-wrapper backup. Root members the head's native
+encoders write and the canonical projection already classifies (post-processing
+lexicon/context-tag/streaming booleans; Voice favourites, Soniox region, language,
+quality and format) are not reported as unresolved. `voiceOutput.strictVoiceSelection`
+and `postProcessing.lastRemoteModelIdentifier` are not captured fields and are named
+in `unresolvedPaths` when present.
+
+Structured shortcuts/output must contain the classified host members (only an
+unset `appSwitchDelivery`, which the native encoder omits, may be absent);
+unexpected, missing, credential-like members and invalid UInt32 shortcut
+numbers fail, never return a sanitized partial object. Unsupported stored
+style/method strings remain raw, without executable-support claims. Azure
+origins reuse `AzureSpeechConfiguration.batchResourceURL`: valid resource or
+existing literal-loopback origins retain the original text, while userinfo,
+query/fragment credentials and invalid URLs fail. Explicit blank endpoint
+text stays blank rather than becoming a default. Prompt whitespace is not
+trimmed; the native global prompt and any actually present legacy scalar remain
+distinct owners, with no invented profile, UUID, matcher or Mac global setting.
+
+Current Mac custom polish persistence is `DictationProfile.polishPrompt` in
+UserDefaults `dictationProfiles` (`DictationProfileStore.swift:9,46-57`), applied
+through transient `PostProcessingManager.sessionPromptOverride`. Its existing
+canonical archive identity is `.profiles`, kind `profile`, existing UUID and
+`value.polishPrompt` (`MigrationCatalog.swift:21,64-77,116`).
+All seven auxiliary preference definitions were checked: none defines a global
+prompt identity. Profiles require their separate raw collection owner; this
+capture never synthesizes profile records from a global prompt.
+
+On its original base, local qualification passed **101 focused tests** (including 16 new capture
+regressions), **1890 full portable tests / 30 skipped / zero failures**, all four
+Windows Swift projections and strict pinned lint on 22 Swift inputs.
+`git diff --check` passes and `Package.resolved` is restored unchanged.
+The first build was interrupted by concurrent local source edits; these results
+come from the subsequent stable-source runs. No native/Apple, installed-app,
+archive-carrier or full-parity acceptance is claimed for this unpublished slice.
+These counts were not re-run on the integration head.
 
 ## Generated-speech coordination
 
@@ -1193,8 +1267,11 @@ replacement/nearest implemented surface; they do not assert hidden support.
 
 ## Beyond the enum and destinations
 
-`postProcessingSystemPrompt` is represented by the existing native custom prompt
-and reaches the shared cleanup policy. `customShortcutBindings`/individual action
+The native global custom prompt reaches the shared cleanup policy, but
+`postProcessingSystemPrompt` is not a current Mac persisted scalar or
+`PromptStore` owner. Mac custom prompts live in profile `polishPrompt` records;
+an actually present legacy desktop scalar is a distinct opt-in captured source,
+not silently mapped to a profile. `customShortcutBindings`/individual action
 shortcuts, Shortcut presets/reset, Escape cancellation and conflict management
 beyond the global key remain gaps. Profiles have a Windows native editor with
 shared ordering/session snapshots; this separate source-only candidate adds

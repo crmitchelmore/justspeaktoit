@@ -5,6 +5,8 @@ import SpeakDesktop
 import XCTest
 
 extension FakePlatform {
+    static var nativeConfigurationPlatform: DesktopNativeConfigurationCapture.Platform? { .windows }
+
     static func archiveNativePreferences(
         textOutput: FakeTextOutput?, hotKey: FakeHotKey?, voiceOutput: DesktopVoiceOutputSettings?
     ) -> DesktopHostNativePreferenceProjection {

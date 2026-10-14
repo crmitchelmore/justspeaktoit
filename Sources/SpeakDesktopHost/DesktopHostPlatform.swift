@@ -46,6 +46,7 @@ package protocol DesktopHostPlatform: Sendable {
     static func archiveNativePreferences(
         textOutput: TextOutputOptions?, hotKey: HotKeySettings?, voiceOutput: VoiceOutputSettings?
     ) -> DesktopHostNativePreferenceProjection
+    static var nativeConfigurationPlatform: DesktopNativeConfigurationCapture.Platform? { get }
     static var voiceConfigurationKeys: Set<String> { get }
     static func exportVoiceConfiguration(
         _ voiceOutput: VoiceOutputSettings?, over configuration: DesktopConfiguration

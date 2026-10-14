@@ -35,6 +35,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
         private var values = SettingsValues()
         private var preserved: [String: AnyCodable] = [:]
         var archiveModelKeys: Set<String> = []
+        var nativeSourceRoots: [String: AnyCodable] = [:]
         package var archiveUnknownKeys: Set<String> { Set(preserved.keys) }
         package init() {}
 

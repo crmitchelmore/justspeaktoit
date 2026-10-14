@@ -51,6 +51,8 @@ package struct DesktopHostNativePreferenceProjection: Sendable {
 }
 
 extension DesktopHostPlatform {
+    package static var nativeConfigurationPlatform: DesktopNativeConfigurationCapture.Platform? { nil }
+
     package static func archiveNativePreferences(
         textOutput: TextOutputOptions?, hotKey: HotKeySettings?, voiceOutput: VoiceOutputSettings?
     ) -> DesktopHostNativePreferenceProjection {

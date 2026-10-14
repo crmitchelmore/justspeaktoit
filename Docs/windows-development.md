@@ -572,6 +572,18 @@ This also fixes Mac migration rejecting valid Boolean values for
 execution support: imported directories, credentials, hotkeys and unsupported
 preferences still need their native validators and application adapters.
 
+History wire values now live once in `SpeakCore` (`ApplicationHistoryItem` and
+its event, error, network, trigger, prompt and diagnostic metadata). Mac keeps
+source-compatible aliases and its platform-specific placeholder/presentation
+extensions. Existing JSON keys, enum raw values, required arrays and optional
+fields are unchanged; immutable values are `Sendable`.
+`DataMigrationHistorySchema` validates the exact History/audio payload,
+identifier, creation date and duration used by Mac. The shared
+`DataMigrationRecordValidation` also enforces exported History/audio scopes and
+emits category-prefixed preservation notices, without converting a missing
+category into an empty one. Every caller must supply its real record validator;
+this is not a permissive native category validator or an import/apply UI.
+
 `DataMigrationArchivePolicy` also centralizes the existing Mac archive path,
 entry/total/JSON-size, duplicate-path, manifest and staging-capacity rules.
 Mac ZIP reads use this policy; portable tests exercise exact limits without

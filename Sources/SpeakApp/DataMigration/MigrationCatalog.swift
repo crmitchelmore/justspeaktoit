@@ -98,16 +98,7 @@ enum MigrationCatalog {
         }
     }
     private static func validateHistory(_ record: MigrationRecord, category: MigrationCategory) throws {
-        guard category == (record.kind == "history" ? .history : .recordings),
-              UUID(uuidString: record.id) != nil else {
-            throw MigrationError.invalid("Invalid history identifier")
-        }
-        let item = try MigrationCoding.decode(HistoryItem.self, record.value)
-        guard item.id.uuidString.lowercased() == record.id.lowercased(), item.recordingDuration >= 0,
-              record.date.map({ abs(item.createdAt.timeIntervalSince($0)) < 1 }) == true
-        else {
-            throw MigrationError.invalid("Invalid history item")
-        }
+        _ = try DataMigrationHistorySchema.validate(record, category: category)
     }
     private static func validateCollection(_ record: MigrationRecord, category: MigrationCategory) throws {
         guard let collection = collections.first(where: { $0.kind == record.kind }),

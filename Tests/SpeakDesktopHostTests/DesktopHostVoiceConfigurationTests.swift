@@ -5,7 +5,7 @@ import SpeakDesktop
 import XCTest
 
 extension FakePlatform {
-    static var voiceConfigurationKeys: Set<String> { DesktopConfiguration.voiceGenerationTransferKeys }
+    static var voiceConfigurationKeys: Set<String> { DesktopConfiguration.voiceTransferKeys }
     static func exportVoiceConfiguration(
         _ voiceOutput: VoiceOutputSettings?, over configuration: DesktopConfiguration
     ) throws -> DesktopConfiguration {
@@ -105,6 +105,8 @@ final class DesktopHostVoiceConfigurationTests: XCTestCase {
                 try await importValues([
                     "preferredLocale": AnyCodable(.string("fr_FR")),
                     "ttsAutoPlay": AnyCodable(.bool(true)),
+                    "ttsSpeed": AnyCodable(.double(1.25)), "ttsPitch": AnyCodable(.int(-2)),
+                    "ttsUseSSML": AnyCodable(.bool(true)),
                     "ttsSaveToDirectory": refuseWrite ? AnyCodable(.bool(true)) : AnyCodable(.string("true"))
                 ])
                 XCTFail("Invalid or failed import was accepted.")
@@ -124,7 +126,10 @@ final class DesktopHostVoiceConfigurationTests: XCTestCase {
     }
 
     func testHostWithoutVoiceBridge_PreservesButDoesNotApplyVoicePreferences() throws {
-        let preferences = try DesktopConfiguration(values: ["ttsAutoPlay": AnyCodable(.bool(false))])
+        let preferences = try DesktopConfiguration(values: [
+            "ttsAutoPlay": AnyCodable(.bool(false)), "ttsSpeed": AnyCodable(.double(1.25)),
+            "ttsPitch": AnyCodable(.int(-2)), "ttsUseSSML": AnyCodable(.bool(true))
+        ])
         var voice: FakeLocalPlatform.VoiceOutputSettings?
         let result = try FakeLocalPlatform.importVoiceConfiguration(from: preferences, into: &voice)
         XCTAssertNil(voice)
@@ -143,5 +148,96 @@ final class DesktopHostVoiceConfigurationTests: XCTestCase {
         XCTAssertEqual(exported.values["ttsAutoPlay"], AnyCodable(.bool(true)))
         XCTAssertEqual(exported.values["ttsSaveToDirectory"], AnyCodable(.bool(false)))
         XCTAssertEqual(legacy.values["ttsAutoPlay"], AnyCodable(.bool(false)))
+    }
+
+    func testSynthesisImport_UpdatesSoleModelAtomicallyWithoutSelectingProvider() async throws {
+        let selected = try XCTUnwrap(DesktopVoiceOutputSettings.voices.last)
+        await controller.selectVoiceOutput(selected)
+        let writes = effects.writes
+        try await importValues([
+            "ttsAutoPlay": AnyCodable(.bool(false)), "ttsSpeed": AnyCodable(.double(1.25)),
+            "ttsPitch": AnyCodable(.int(-3)), "ttsUseSSML": AnyCodable(.bool(true)),
+            "ttsQuality": AnyCodable(.string("future-quality"))
+        ])
+        let saved = await controller.voiceOutputSettings()
+        XCTAssertEqual(effects.writes, writes + 1)
+        XCTAssertEqual(saved.modelID, selected.model.id)
+        XCTAssertEqual(saved.voiceID, selected.id)
+        XCTAssertEqual(saved.speed, 1.25)
+        XCTAssertEqual(saved.pitch, -3)
+        XCTAssertEqual(saved.useSSML, true)
+        XCTAssertFalse(saved.generationOptions.autoPlay)
+        let configuration = try await controller.configuration()
+        XCTAssertTrue(DesktopConfiguration.voiceTransferKeys.isDisjoint(with: configuration.values.keys))
+        XCTAssertEqual(configuration.values["ttsQuality"], AnyCodable(.string("future-quality")))
+        XCTAssertThrowsError(try saved.validatedSynthesisOptions().validate(for: .naturalSpeech))
+        let file = directory.appendingPathComponent("synthesis-export.json")
+        try await controller.exportConfiguration(path: file.path)
+        let document = try JSONDecoder().decode(DesktopConfigurationDocument.self, from: Data(contentsOf: file))
+        XCTAssertEqual(document.preferences.values["ttsSpeed"], AnyCodable(.double(1.25)))
+        XCTAssertEqual(document.preferences.values["ttsPitch"], AnyCodable(.int(-3)))
+        await controller.close()
+        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        let restored = await controller.voiceOutputSettings()
+        XCTAssertEqual(restored, saved)
+    }
+
+    func testPartialImport_PreservesExistingInvalidRawOptionsAndExportsRecoveryMaterial() async throws {
+        var stored = DesktopVoiceOutputSettings()
+        stored.speed = 9
+        stored.pitch = 12.5
+        stored.useSSML = true
+        await controller.saveVoiceOutput(stored)
+        try await importValues(["ttsSpeed": AnyCodable(.double(0.75)), "ttsAutoPlay": AnyCodable(.bool(false))])
+        let saved = await controller.voiceOutputSettings()
+        XCTAssertEqual(saved.speed, 0.75)
+        XCTAssertEqual(saved.pitch, 12.5)
+        XCTAssertEqual(saved.useSSML, true)
+        XCTAssertFalse(saved.generationOptions.autoPlay)
+        let file = directory.appendingPathComponent("recovery-export.json")
+        try await controller.exportConfiguration(path: file.path)
+        let document = try JSONDecoder().decode(DesktopConfigurationDocument.self, from: Data(contentsOf: file))
+        XCTAssertEqual(document.preferences.values["ttsPitch"], AnyCodable(.double(12.5)))
+        XCTAssertThrowsError(try saved.validatedSynthesisOptions())
+    }
+
+    func testMalformedSynthesisImport_IsAtomicAcrossDictationAndEveryVoiceFlag() async throws {
+        try await importValues(["preferredLocale": AnyCodable(.string("en_GB")),
+                                "ttsAutoPlay": AnyCodable(.bool(false))])
+        let path = directory.appendingPathComponent("settings.json")
+        let before = try Data(contentsOf: path)
+        let writes = effects.writes
+        for (key, value) in [
+            ("ttsSpeed", AnyCodable(.double(0.49))), ("ttsPitch", AnyCodable(.double(0.5))),
+            ("ttsUseSSML", AnyCodable(.string("true")))
+        ] {
+            do {
+                try await importValues([
+                    "preferredLocale": AnyCodable(.string("fr_FR")),
+                    "ttsAutoPlay": AnyCodable(.bool(true)), key: value
+                ])
+                XCTFail("Malformed synthesis import was accepted.")
+            } catch {
+                XCTAssertTrue(error is DesktopConfigurationError || error is VoiceSynthesisConfigurationError)
+            }
+            XCTAssertEqual(effects.writes, writes)
+            XCTAssertEqual(try Data(contentsOf: path), before)
+        }
+    }
+
+    func testExport_AbsentNewModelFieldsDoNotEraseLegacyOpaqueSynthesisMaterial() throws {
+        let legacy = try DesktopConfiguration(values: [
+            "ttsSpeed": AnyCodable(.double(9)), "ttsPitch": AnyCodable(.string("future-pitch")),
+            "ttsUseSSML": AnyCodable(.null)
+        ])
+        var voice = DesktopVoiceOutputSettings()
+        let retained = try DesktopVoiceOutputSettings.exportConfiguration(voice, over: legacy)
+        for key in DesktopConfiguration.voiceSynthesisTransferKeys {
+            XCTAssertEqual(retained.values[key], legacy.values[key])
+        }
+        voice.speed = 1.25
+        let projected = try DesktopVoiceOutputSettings.exportConfiguration(voice, over: legacy)
+        XCTAssertEqual(projected.values["ttsSpeed"], AnyCodable(.double(1.25)))
+        XCTAssertEqual(projected.values["ttsPitch"], legacy.values["ttsPitch"])
     }
 }

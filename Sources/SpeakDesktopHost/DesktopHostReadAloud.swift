@@ -282,7 +282,10 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
 
     private func startVoiceRead(text: String, owner: UUID, recordID: UUID?) {
         let selection: DesktopSpeechSelection
-        do { selection = try voiceOutputSettings().synthesisSelection() } catch {
+        do {
+            selection = try voiceOutputSettings().synthesisSelection()
+            try selection.options.validate(for: selection.voice.capabilities)
+        } catch {
             update(error.localizedDescription); return
         }
         let staging = directory.appendingPathComponent("VoiceOutput")

@@ -1,8 +1,9 @@
 # Desktop settings coverage
 
 This is a settings slice, **not full Windows/Linux feature parity**. Baseline:
-macOS `AppSettings.DefaultsKey` has 91 keys
-(`Sources/SpeakApp/AppSettings.swift:289-381`), plus preferences and collections
+macOS `AppSettings.DefaultsKey` aliases the shared 91-key
+`ApplicationPreferenceKey` (`Sources/SpeakCore/ApplicationPreferenceKey.swift`),
+plus preferences and collections
 outside that enum. Track remaining product acceptance in #1157.
 
 ## Generated-speech coordination
@@ -20,11 +21,39 @@ transferred flags from the dictation configuration dictionary. Export derives
 them from that model, not a second persisted authority. Shared transfer-only
 metadata does not add duplicate Voice switches to the dictation editor. Native
 voice selection preserves both flags.
+Dictation and Voice transfer key projections now reuse the parent's exact
+canonical application-key definition; this does not import its migration
+catalogue or make all 91 preferences executable.
 This is **transfer support, not executable Voice acceptance**: Generate,
 retained results and the native Voice controls remain in #1217.
 Voice flags do not increase this slice's editable preference count. There are fourteen
 previously accepted preferences plus three recording-sound preferences now
 qualified natively below; installed-package sound acceptance is still pending.
+
+The published `VoiceSynthesisOptions` contract from #1217 now validates transfer
+of `ttsSpeed`, `ttsPitch` and `ttsUseSSML` into that same model. Transfer-only
+metadata reuses its bounds/defaults and canonical application keys, not a second
+provider catalogue or native editor. New imports require finite speed in the
+shared range, whole-number pitch in the shared range and strict SSML booleans;
+shape validation is separate from provider execution admission.
+Partial imports preserve absent fields, IDs and already stored unsupported or
+out-of-range values. Export projects raw stored material for recovery rather
+than clamping it or calling a throwing execution getter. Invalid new imports
+and write failures change neither dictation nor Voice settings.
+Absent new model fields do not erase older opaque configuration values during
+export; those values remain unapplied until explicit validated transfer.
+This branch still offers only its existing Deepgram Read aloud choices: it
+explicitly refuses unsupported/nondefault or invalid synthesis controls before
+creating playback or reading credentials. Voice selection itself preserves stored options
+without an implicit reset. Azure execution and native advanced
+controls remain in #1217; no inert speed/pitch/SSML controls are added here.
+
+The final synthesis-transfer slice passed 26 focused portable tests and the full
+portable suite (1417 tests, 28 skipped, zero failures). All four Windows Swift
+projections and strict lint across ten changed Swift files passed. These are
+shared behavior/projection receipts, not new native editor or installed-package
+acceptance; the native recording-feedback receipts below remain tied to their
+explicit earlier commits.
 
 Generated audio archival follows the parent's app-owned destination: the actual
 `DesktopRecordingStore.directory`, as a flat canonical `UUID.wav` without a
@@ -206,11 +235,12 @@ General's Import/Export preferences actions use a bounded, versioned JSON object
 Both transfers enforce a 1 MB limit. An oversized export is refused before
 replacing its destination, rather than producing a file the importer cannot read.
 
-This transfers the portable preferences above and projects the two supported
-generated-speech flags when a Voice model has been saved. A legacy document with
-no flags leaves the existing Voice options unchanged. Hosts without the executable
-Voice contract preserve those keys without applying them. Other Voice options,
-including speed/pitch/SSML, remain opaque until a real provider can execute them.
+This transfers the portable preferences above and projects five Voice scalar
+preferences when a Voice model has been saved. A legacy document with no Voice
+keys leaves existing options unchanged. Hosts without the transfer contract
+preserve those keys without applying them. Provider compatibility is checked
+before execution, not inferred from successful transfer. Other Voice options
+such as quality, language and pronunciation remain opaque and unapplied here.
 It does not read credential stores
 or transfer native model selections, hotkey codes, microphone IDs, device paths,
 startup registration or automation permission. Imported unknown/unsupported
@@ -287,13 +317,13 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | defaultTTSVoice | Partial / Partial | Voice; canonical Deepgram Read aloud voices only |
 | ttsLanguage | Missing / Missing | No independent TTS-language editor |
 | sonioxTTSRegion | Missing / Missing | Soniox TTS route unavailable |
-| ttsSpeed | Missing / Missing | No speech-rate editor |
-| ttsPitch | Missing / Missing | No pitch editor |
+| ttsSpeed | Transfer wired; workflow separate / Same | Canonical validation and sole-model transfer; incompatible Read aloud explicitly refused; native advanced editor/Azure execution in #1217 |
+| ttsPitch | Transfer wired; workflow separate / Same | Shared integer/range validation, raw recovery export and partial-import preservation; no native pitch editor in this slice |
 | ttsQuality | Missing / Missing | No quality editor/provider options |
 | ttsOutputFormat | Missing / Missing | Read aloud uses native staging format |
 | ttsAutoPlay | Transfer wired; workflow pending / Same | Strict canonical boolean projects to the sole Voice model; explicit Read aloud remains playback; Generate acceptance belongs to #1217 |
 | ttsSaveToDirectory | Transfer wired; workflow pending / Same | Strict boolean projects to sole Voice model; generated WAV archival uses actual owned recordings directory in #1217, never an imported foreign path |
-| ttsUseSSML | Missing / Missing | No SSML input/editor/provider contract |
+| ttsUseSSML | Transfer wired; workflow separate / Same | Strict boolean transfer; existing Deepgram Read aloud refuses SSML before credentials/playback; executable Azure/native editor in #1217 |
 | ttsFavoriteVoices | Missing / Missing | No voice favourites |
 | ttsPronunciationDictionary | Missing / Missing | No TTS pronunciation editor/pipeline |
 | historyFlushInterval | Missing selector / Missing selector | History is durable per operation, not configurable timed flush |

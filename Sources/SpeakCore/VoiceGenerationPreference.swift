@@ -1,8 +1,23 @@
 import Foundation
 
-public enum VoiceGenerationPreference: String, CaseIterable, Sendable {
-    case autoPlay = "ttsAutoPlay"
-    case saveToRecordings = "ttsSaveToDirectory"
+public enum VoiceGenerationPreference: RawRepresentable, CaseIterable, Sendable {
+    case autoPlay
+    case saveToRecordings
+
+    public var rawValue: String {
+        switch self {
+        case .autoPlay: return ApplicationPreferenceKey.ttsAutoPlay.rawValue
+        case .saveToRecordings: return ApplicationPreferenceKey.ttsSaveToDirectory.rawValue
+        }
+    }
+
+    public init?(rawValue: String) {
+        switch ApplicationPreferenceKey(rawValue: rawValue) {
+        case .ttsAutoPlay: self = .autoPlay
+        case .ttsSaveToDirectory: self = .saveToRecordings
+        default: return nil
+        }
+    }
 
     public var title: String {
         switch self {

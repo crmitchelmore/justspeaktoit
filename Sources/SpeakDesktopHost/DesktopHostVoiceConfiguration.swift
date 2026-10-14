@@ -6,14 +6,33 @@ extension DesktopVoiceOutputSettings {
         projection[VoiceGenerationPreference.autoPlay.rawValue] = AnyCodable(.bool(generationOptions.autoPlay))
         projection[VoiceGenerationPreference.saveToRecordings.rawValue] =
             AnyCodable(.bool(generationOptions.saveToRecordings))
+        projection[ApplicationPreferenceKey.ttsSpeed.rawValue] =
+            speed.map { AnyCodable(.double($0)) } ?? projection[ApplicationPreferenceKey.ttsSpeed.rawValue]
+                ?? AnyCodable(.double(VoiceSynthesisOptions.defaultSpeed))
+        projection[ApplicationPreferenceKey.ttsPitch.rawValue] =
+            pitch.map { AnyCodable(.double($0)) } ?? projection[ApplicationPreferenceKey.ttsPitch.rawValue]
+                ?? AnyCodable(.double(VoiceSynthesisOptions.defaultPitch))
+        projection[ApplicationPreferenceKey.ttsUseSSML.rawValue] =
+            useSSML.map { AnyCodable(.bool($0)) } ?? projection[ApplicationPreferenceKey.ttsUseSSML.rawValue]
+                ?? AnyCodable(.bool(VoiceSynthesisOptions.defaultUseSSML))
         return projection
     }
 
     package mutating func applyConfigurationProjection(_ values: [String: AnyCodable]) throws {
-        if let enabled = try VoiceGenerationPreference.autoPlay.value(in: values) { autoPlay = enabled }
-        if let enabled = try VoiceGenerationPreference.saveToRecordings.value(in: values) {
-            saveToRecordings = enabled
-        }
+        let play = try VoiceGenerationPreference.autoPlay.value(in: values)
+        let save = try VoiceGenerationPreference.saveToRecordings.value(in: values)
+        let synthesis = try VoiceSynthesisPreferenceUpdate(preferences: values)
+        if let play { autoPlay = play }
+        if let save { saveToRecordings = save }
+        if let speed = synthesis.speed { self.speed = speed }
+        if let pitch = synthesis.pitch { self.pitch = pitch }
+        if let useSSML = synthesis.useSSML { self.useSSML = useSSML }
+    }
+
+    package func validatedSynthesisOptions() throws -> VoiceSynthesisOptions {
+        try .init(speed: speed ?? VoiceSynthesisOptions.defaultSpeed,
+                  pitch: pitch ?? VoiceSynthesisOptions.defaultPitch,
+                  useSSML: useSSML ?? VoiceSynthesisOptions.defaultUseSSML)
     }
 }
 
@@ -21,7 +40,7 @@ extension DesktopVoiceOutputSettings {
     package static func importConfiguration(
         from configuration: DesktopConfiguration, into voiceOutput: inout Self?
     ) throws -> DesktopConfiguration {
-        let keys = DesktopConfiguration.voiceGenerationTransferKeys
+        let keys = DesktopConfiguration.voiceTransferKeys
         guard !keys.isDisjoint(with: configuration.values.keys) else { return configuration }
         var voice = voiceOutput ?? .init()
         try voice.applyConfigurationProjection(configuration.values)

@@ -30,7 +30,7 @@ enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPla
         WindowsRecordingFeedbackLoader()
     }
 
-    package static var voiceConfigurationKeys: Set<String> { DesktopConfiguration.voiceGenerationTransferKeys }
+    package static var voiceConfigurationKeys: Set<String> {     DesktopConfiguration.voiceTransferKeys }
     package static func exportVoiceConfiguration(
         _ voiceOutput: VoiceOutputSettings?, over configuration: DesktopConfiguration
     ) throws -> DesktopConfiguration {

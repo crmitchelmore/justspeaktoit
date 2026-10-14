@@ -49,6 +49,7 @@ pane. Their saved selections are retained, not cleared or advertised as ready.
 Key writes, cloud-key imports and Azure endpoint changes refresh the editor.
 Admission rechecks keys and settings after playback stops, before any sample,
 client or microphone work; admitted runs retain their immutable snapshots.
+Cancel or editor close invalidates pending admission, even if the editor reopens.
 This is configuration readiness, not evidence that a service accepts the key.
 The blind **Diff against** picker reuses
 `TranscriptWordDiff`; signed `[+added]` / `[-removed]` annotations remain readable

@@ -224,6 +224,41 @@ final class DesktopComparisonReadinessTests: XCTestCase {
         XCTAssertNil(capture)
     }
 
+    func testCancelOrEditorCloseAndReopenDuringAdmissionCannotReviveLateWork() async throws {
+        for event: Int32 in [105, 123] {
+            let root = temporaryRoot()
+            defer { try? FileManager.default.removeItem(at: root) }
+            let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+            FakeLog.shared.setKey("synthetic-key", name: "openai.apiKey")
+            let ids = DesktopHostModels.visible.filter {
+                !DesktopHostModels.isLive($0.id)
+                    && DesktopHostModels.provider(for: $0.id)?.apiKeyIdentifier == "openai.apiKey"
+            }.prefix(2).map(\.id)
+            let gate = Gate(open: false)
+            let playback = await controller.suspendComparisonPlayback(gate)
+            let start = Task {
+                await controller.comparisonEvent(
+                    102, text: "\n" + ids.joined(separator: "\t") + "\nsynthetic.wav", index: 0
+                )
+            }
+            await playback.stopping.pass()
+            let pendingGeneration = await controller.comparisonGeneration
+            await controller.comparisonEvent(event, text: "", index: 0)
+            let cancelledGeneration = await controller.comparisonGeneration
+            XCTAssertNotEqual(cancelledGeneration, pendingGeneration)
+            if event == 123 { await controller.openComparison() }
+            gate.release()
+            await start.value
+            let generation = await controller.comparisonGeneration
+            XCTAssertEqual(
+                generation, cancelledGeneration, "A cancelled start cannot acquire a new identity after editor reopen."
+            )
+            let task = await controller.comparisonTask
+            XCTAssertNil(task)
+            await controller.close()
+        }
+    }
+
     private func temporaryRoot() -> URL {
         FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     }

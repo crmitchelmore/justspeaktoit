@@ -43,7 +43,7 @@ final class DesktopMAISpeechSynthesisTests: DeepgramSpeechStubTestCase {
             let result = try await synthesize(source, voice: voice)
             XCTAssertEqual(result, audio)
             let request = try XCTUnwrap(StubURLProtocol.recordedRequests.last)
-            let body = try XCTUnwrap(String(data: XCTUnwrap(request.httpBody), encoding: .utf8))
+            let body = try XCTUnwrap(String(data: StubURLProtocol.body(of: request), encoding: .utf8))
             XCTAssertTrue(body.contains("name='\(voice.shortName)'"), body)
             XCTAssertTrue(body.contains("Synthetic MAI A &amp; B."), body)
             XCTAssertFalse(body.contains("<prosody"), body)
@@ -78,7 +78,7 @@ final class DesktopMAISpeechSynthesisTests: DeepgramSpeechStubTestCase {
         _ = try await synthesize(source, options: VoiceSynthesisOptions(useSSML: true))
         XCTAssertEqual(StubURLProtocol.recordedRequests.count, 1)
         let request = try XCTUnwrap(StubURLProtocol.recordedRequests.first)
-        let body = try XCTUnwrap(String(data: XCTUnwrap(request.httpBody), encoding: .utf8))
+        let body = try XCTUnwrap(String(data: StubURLProtocol.body(of: request), encoding: .utf8))
         XCTAssertTrue(body.contains(fragment), body)
         XCTAssertFalse(body.contains("<prosody"), body)
     }

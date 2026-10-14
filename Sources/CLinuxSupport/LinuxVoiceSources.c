@@ -1,6 +1,7 @@
 #include "LinuxSupportInternal.h"
 #include <gtk/gtk.h>
 void jsti_show_voice_controls(GtkWindow *owner, JSTIVoiceSourceCallback callback, void *context);
+void jsti_show_voice_usage(GtkWindow *owner, const char *snapshot, JSTIVoiceSourceCallback callback, void *context);
 
 typedef struct {
     gchar **names;
@@ -280,6 +281,15 @@ static void synthesis_controls(GtkButton *button, gpointer data) {
     Dialog *dialog = data;
     jsti_show_voice_controls(dialog->window, dialog->callback, dialog->context);
 }
+static void usage_report(GtkButton *button, gpointer data) {
+    (void)button;
+    Dialog *dialog = data;
+    gchar *snapshot = text(dialog);
+    if (g_utf8_strlen(snapshot, -1) > 100000) gtk_label_set_text(dialog->notice,
+        "Text exceeds 100,000 input characters. Shorten it before opening the usage estimate.");
+    else jsti_show_voice_usage(dialog->window, snapshot, dialog->callback, dialog->context);
+    g_free(snapshot);
+}
 static void apply_generation_options(gpointer data) {
     generation_flags = *(guint *)data;
     if (active == NULL || active->window == NULL) return;
@@ -357,7 +367,7 @@ static Dialog *make_dialog(GtkWindow *owner, const char *record, const char *his
     gtk_window_set_transient_for(dialog->window, owner); gtk_window_set_modal(dialog->window, TRUE);
     gtk_window_set_destroy_with_parent(dialog->window, TRUE);
     g_signal_connect(dialog->window, "close-request", G_CALLBACK(close_request), dialog);
-    gtk_window_set_default_size(dialog->window, 680, 650);
+    gtk_window_set_default_size(dialog->window, 680, 700);
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
     gtk_widget_set_margin_start(box, 20); gtk_widget_set_margin_end(box, 20);
     gtk_widget_set_margin_top(box, 20); gtk_widget_set_margin_bottom(box, 20);
@@ -380,6 +390,10 @@ static Dialog *make_dialog(GtkWindow *owner, const char *record, const char *his
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), GTK_WIDGET(dialog->editor));
     gtk_box_append(GTK_BOX(box), scroll);
     dialog->notice = GTK_LABEL(label("")); gtk_box_append(GTK_BOX(box), GTK_WIDGET(dialog->notice));
+    GtkWidget *usage = gtk_button_new_with_label("Usage and input estimate...");
+    gtk_widget_set_size_request(usage, -1, 44);
+    gtk_box_append(GTK_BOX(box), usage);
+    g_signal_connect(usage, "clicked", G_CALLBACK(usage_report), dialog);
     GtkWidget *options = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     dialog->auto_play = GTK_CHECK_BUTTON(gtk_check_button_new_with_label("Auto-play generated audio"));
     dialog->save = GTK_CHECK_BUTTON(gtk_check_button_new_with_label("Save audio to recordings"));
@@ -488,6 +502,7 @@ static void receive_fixture(int32_t action, int32_t source, const char *value,
     received->text = g_strdup(value); received->record = g_strdup(record);
 }
 int32_t jsti_voice_controls_self_test(GtkWindow *owner, char *error, size_t capacity);
+int32_t jsti_voice_usage_self_test(GtkWindow *owner, char *error, size_t capacity);
 int32_t jsti_voice_sources_self_test(GtkWindow *owner, char *error, size_t capacity) {
     Dialog *dialog = make_dialog(owner, "synthetic-record", "Synthetic History snapshot");
     if (dialog == NULL) { jsti_set_error(error, capacity, "Voice sources fixture could not open."); return -1; }
@@ -554,5 +569,6 @@ int32_t jsti_voice_sources_self_test(GtkWindow *owner, char *error, size_t capac
         clipboard_snapshot && file_snapshot && stale_import && failed_import && edited_import &&
         generated_snapshot && busy_result && retained_result;
     if (!passed) jsti_set_error(error, capacity, "Voice sources state/snapshot checks failed.");
-    return passed ? jsti_voice_controls_self_test(owner, error, capacity) : -1;
+    return passed && jsti_voice_controls_self_test(owner, error, capacity) == 0
+        ? jsti_voice_usage_self_test(owner, error, capacity) : -1;
 }

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Source identifiers and wording are shared; membership is not host support.
-public enum VoiceOutputSource: Int32, CaseIterable, Sendable {
+public enum VoiceOutputSource: Int32, CaseIterable, Codable, Sendable {
     case history
     case typedText
     case clipboard

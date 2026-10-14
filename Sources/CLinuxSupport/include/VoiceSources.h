@@ -32,6 +32,10 @@ int32_t jsti_window_set_voice_synthesis_options(double speed, double pitch, int3
 /* Completes the pending Save only after persistence; 0 keeps the editor open
  * with an error, 1 closes it. Closed/replaced request tokens are ignored. */
 int32_t jsti_window_finish_voice_synthesis_options(const char *request_id, int32_t success);
+/* Tagged 118 actions: path "usage-report", source -1, text snapshot; or path
+ * "usage-tracking", source strict 0/1, empty text. record is an opaque dialog
+ * token, never History ownership. Results/acknowledgements ignore closed tokens. */
+int32_t jsti_window_set_voice_usage(const char *request_id, const char *text, int32_t tracking);
 #ifdef __cplusplus
 }
 #endif

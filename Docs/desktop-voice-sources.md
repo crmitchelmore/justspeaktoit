@@ -124,6 +124,61 @@ Deletion integration must use the actual voice owner rather than the currently
 selected History row. Settings keep their existing catalogue identifiers and
 migrations. These source choices are editor-local, not new stored preferences.
 
+## Local synthesis estimates and usage
+
+**Usage and input estimate** captures the current editor text and selected
+executable voice without sending a synthesis request. Reopen it after changing
+text or voice for a fresh estimate. Rates come from `VoiceSynthesisPricing`:
+the existing shared Deepgram Aura rate, Azure neural USD 16/million characters,
+and the canonical MAI model rates (USD 22/million for MAI-Voice-2.1;
+USD 15/million for Flash). Flux remains explicitly unpriced; unknown models
+never borrow an unrelated route's rate.
+
+Actual usage is observed at the owned Core HTTP boundary for Read, Generate
+and text export, after credential/request validation. Entries distinguish
+transport attempts, failures/cancellation and completed **validated PCM**.
+Input counts are the Unicode scalars supplied to each request after segmentation
+and, for Deepgram, pronunciation/trim processing. Audio seconds come from
+validated PCM, not playback time. Partial successful segments remain accounted
+for even if a later segment, playback, archival or export fails.
+Replay and retained-result export do not create synthesis entries.
+
+All displayed costs are **input-based estimates, not measured/billed charges**.
+No provider billing receipts or token counts are available on these routes.
+The completed-audio subtotal excludes unpriced entries and names that exclusion.
+SSML markup, provider character rules, discounts and regional pricing can
+change actual charges. A transport attempt does not prove server receipt, and
+a failed/cancelled request can still incur a provider charge.
+
+The bounded local ledger is `VoiceUsage/requests.json`, in a private directory,
+retaining the latest 1,000 request observations rather than claiming lifetime
+or billing-account totals. It contains no text, audio, key or provider body.
+Each entry snapshots its route/rate, operation/source and genuine History UUID,
+or nil for every other source; cache/speech/request UUIDs are not History
+authority. It does not mutate History or imported History costs.
+Malformed/oversized ledgers are preserved and explicitly reported, not replaced
+with an empty success. Failed writes report memory-only usage.
+
+**Keep local synthesis usage** is an executable native preference, stored as
+optional `ttsTrackUsage` in the sole `DesktopVoiceOutputSettings`; canonical
+metadata/defaults live in `VoiceUsagePolicy`. The default is on, matching Mac's
+local TTS ledger. The opt-out is a deliberate desktop privacy extension, not
+a previously missing Mac option: the traced Mac manager has no equivalent
+Voice-specific tracking switch. Off preserves earlier usage, creates no new ledger entries,
+and invalidates completions from opted-out work even after re-enabling.
+It is not telemetry consent or a new analytics service. Preference persistence
+is acknowledged from actual host state; closed/replaced dialog tokens cannot
+revive a window. The additive key still needs the separately owned advanced
+configuration bridge upon composition, not a second settings authority here.
+Once composed with the parent-owned canonical preference-key enum/catalogue,
+the key must derive from that enum with Boolean/default/category metadata and
+lossless transfer/bridge tests, rather than maintaining a second key literal.
+
+Mac `TextToSpeechManager` currently appends successful `TTSResult`s and persists
+`ttsUsageHistory`; its character-rate `cost` is also an estimate. Native
+accounting deliberately additionally exposes failed/cancelled transport attempts
+without describing those attempts as billed usage.
+
 ## Actual macOS features and remaining gaps
 
 `Sources/SpeakApp/VoiceOutputView.swift` currently offers manual text, clipboard,
@@ -137,7 +192,7 @@ here; macOS's Deepgram path currently ignores those same controls, and native
 hosts deliberately refuse them for Deepgram instead. Current canonical MAI
 models now execute Read, Generate and text export through that same bounded
 Azure engine, with retained replay/export independent of later settings.
-System and wider providers, selectable export format/quality, provider cost/usage UI and broader
+System and wider providers, selectable export format/quality and broader
 Voice workspace parity remain gaps. Advanced configuration transfer is a
 separately coordinated settings integration; this PR does not create another
 configuration authority.

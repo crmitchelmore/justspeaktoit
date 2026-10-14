@@ -6,6 +6,8 @@ public enum DesktopVoiceSourceMessage: Equatable, Sendable {
     case event(DesktopHistoryEvent)
     case preferences(VoiceGenerationOptions)
     case synthesisPreferences(VoiceSynthesisOptions, requestID: String)
+    case usageReport(text: String, requestID: String)
+    case usageTracking(Bool, requestID: String)
 
     public init(action: Int32, source: Int32, text: String, record: String, path: String) throws {
         switch action {
@@ -14,7 +16,8 @@ public enum DesktopVoiceSourceMessage: Equatable, Sendable {
         case 114: self = .event(.voiceImportCancel(requestID: record))
         case 116: self = .event(.voiceGeneratedPlay(record))
         case 117: self = .event(.voiceGeneratedExport(record, path: path))
-        case 118: self = .preferences(try Self.options(source))
+        case 118:
+            self = try Self.preferenceMessage(source: source, text: text, record: record, path: path)
         case 119:
             guard text.utf8.count <= 1_024, !record.isEmpty, record.utf8.count <= 64,
                   record.utf8.allSatisfy({ (0x20...0x7E).contains($0) }) else { throw Failure.invalidPreferences }
@@ -24,6 +27,28 @@ public enum DesktopVoiceSourceMessage: Equatable, Sendable {
         case 110, 111, 115:
             self = .event(try Self.textEvent(action: action, source: source, text: text, record: record, path: path))
         default: throw Failure.invalidAction
+        }
+    }
+
+    private static func preferenceMessage(
+        source: Int32, text: String, record: String, path: String
+    ) throws -> Self {
+        if path.isEmpty {
+            guard text.isEmpty, record.isEmpty else { throw Failure.invalidPreferences }
+            return .preferences(try options(source))
+        }
+        guard !record.isEmpty, record.utf8.count <= 64,
+              record.utf8.allSatisfy({ (0x20...0x7E).contains($0) }) else { throw Failure.invalidPreferences }
+        switch path {
+        case "usage-report":
+            guard source == -1, text.unicodeScalars.count <= VoiceOutputSourceSnapshot.maximumCharacters else {
+                throw Failure.invalidPreferences
+            }
+            return .usageReport(text: text, requestID: record)
+        case "usage-tracking":
+            guard source == 0 || source == 1, text.isEmpty else { throw Failure.invalidPreferences }
+            return .usageTracking(source == 1, requestID: record)
+        default: throw Failure.invalidPreferences
         }
     }
 

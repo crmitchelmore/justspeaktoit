@@ -26,12 +26,12 @@ public struct DesktopSpeechSynthesis: Sendable {
                 source, voice: voice, credential: credential
             )
         case .azureNeural, .azureMAI:
-            return try await synthesizeAzure(source.text, voiceID: voice.id, options: options, credential: credential)
+            return try await synthesizeAzure(source.text, voice: voice, options: options, credential: credential)
         }
     }
 
     private func synthesizeAzure(
-        _ text: String, voiceID: String, options: VoiceSynthesisOptions,
+        _ text: String, voice: DesktopSpeechVoice, options: VoiceSynthesisOptions,
         credential: @Sendable () async throws -> String
     ) async throws -> Data {
         let isDocument = options.useSSML && text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("<speak")
@@ -47,21 +47,7 @@ public struct DesktopSpeechSynthesis: Sendable {
         try Task.checkCancellation()
         var pcm = Data()
         for segment in segments {
-            let request = try AzureSpeechVoiceAPI.synthesisRequest(
-                credentials: supplied, text: segment, voice: voiceID, format: "riff-24khz-16bit-mono-pcm",
-                speed: options.speed, pitch: options.pitch, useSSML: options.useSSML
-            )
-            guard let requestBody = request.httpBody, requestBody.count <= Self.maximumSSMLBytes else {
-                throw DesktopSpeechSynthesisError.ssmlTooLarge
-            }
-            let body = try await receive(request)
-            try Task.checkCancellation()
-            let audio: DeepgramSpeechAudio
-            do {
-                audio = try DeepgramSpeechWAV.canonical(body, sampleRate: 24_000)
-            } catch {
-                throw DesktopSpeechSynthesisError.invalidAudio
-            }
+            let audio = try await azureSegment(segment, voice: voice, options: options, credential: supplied)
             let payload = audio.wav.dropFirst(44)
             guard payload.count <= DeepgramSpeechExport.maximumPCMBytes - pcm.count else {
                 throw DesktopSpeechSynthesisError.audioTooLarge
@@ -73,6 +59,34 @@ public struct DesktopSpeechSynthesis: Sendable {
             throw DesktopSpeechSynthesisError.invalidAudio
         }
         return wav
+    }
+
+    private func azureSegment(
+        _ text: String, voice: DesktopSpeechVoice, options: VoiceSynthesisOptions, credential: String
+    ) async throws -> DeepgramSpeechAudio {
+        try Task.checkCancellation()
+        let request = try AzureSpeechVoiceAPI.synthesisRequest(
+            credentials: credential, text: text, voice: voice.id, format: "riff-24khz-16bit-mono-pcm",
+            speed: options.speed, pitch: options.pitch, useSSML: options.useSSML
+        )
+        guard let body = request.httpBody, body.count <= Self.maximumSSMLBytes else {
+            throw DesktopSpeechSynthesisError.ssmlTooLarge
+        }
+        let capture = VoiceSynthesisUsage.capture
+        let id = capture?.begin(voice: voice, inputCharacters: text.unicodeScalars.count, usesSSML: options.useSSML)
+        do {
+            let received = try await receive(request)
+            try Task.checkCancellation()
+            let audio: DeepgramSpeechAudio
+            do { audio = try DeepgramSpeechWAV.canonical(received, sampleRate: 24_000) } catch {
+                throw DesktopSpeechSynthesisError.invalidAudio
+            }
+            if let id { capture?.finish(id, outcome: .completed, audioDuration: audio.duration) }
+            return audio
+        } catch {
+            if let id { capture?.finish(id, outcome: error is CancellationError ? .cancelled : .failed) }
+            throw error
+        }
     }
 
     private func receive(_ request: URLRequest) async throws -> Data {

@@ -48,15 +48,19 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         let voice = selection.voice
         voiceOutputRecordID = snapshot.recordID
         presentVoiceResult(working: true, message: "Generating voice audio with \(voice.name)…")
+        let usage = beginVoiceUsage(operation: .generate, source: snapshot.source, recordID: snapshot.recordID)
         activeOperations += 1
         voiceGenerationTask = Task {
             defer {
+                self.finishVoiceUsage(usage)
                 self.voiceGenerationTask = nil
                 self.finishOperation()
             }
-            await self.runVoiceGeneration(
-                snapshot, selection: selection, options: options, ticket: ticket, synthesize: synthesize
-            )
+            await VoiceSynthesisUsage.$capture.withValue(usage?.capture) {
+                await self.runVoiceGeneration(
+                    snapshot, selection: selection, options: options, ticket: ticket, synthesize: synthesize
+                )
+            }
         }
     }
 

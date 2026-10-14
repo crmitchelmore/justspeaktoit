@@ -44,7 +44,8 @@ final class FakeLog: @unchecked Sendable {
     private var directoryLauncher: (@Sendable (URL) throws -> Void)?
     private var savedAudioStopper: (@Sendable () async -> Void)?
     private var presentationStates: [Int32] = []
-    private var transcripts: [String] = []
+    private var displayedTranscriptValues: [String] = []
+    private var transcriptValues: [String] = []
     var keys: [String: String] = [:]
 
     func reset() {
@@ -57,7 +58,8 @@ final class FakeLog: @unchecked Sendable {
             savedAudioStopper = nil
             keys = [:]
             presentationStates = []
-            transcripts = []
+            displayedTranscriptValues = []
+            transcriptValues = []
         }
     }
     func setDirectoryLauncher(_ launcher: (@Sendable (URL) throws -> Void)?) {
@@ -80,7 +82,7 @@ final class FakeLog: @unchecked Sendable {
     func status(_ text: String, transcript: String? = nil, state: Int32? = nil) {
         lock.withLock {
             statuses.append(text)
-            if let transcript { transcripts.append(transcript) }
+            if let transcript { displayedTranscriptValues.append(transcript) }
             if let state { presentationStates.append(state) }
         }
     }
@@ -88,7 +90,11 @@ final class FakeLog: @unchecked Sendable {
     var allStatuses: [String] { lock.withLock { statuses } }
     var copies: [String] { lock.withLock { clipboard } }
     var states: [Int32] { lock.withLock { presentationStates } }
-    var displayedTranscripts: [String] { lock.withLock { transcripts } }
+    var displayedTranscripts: [String] { lock.withLock { displayedTranscriptValues } }
+    func transcript(_ text: String?) {
+        if let text { lock.withLock { transcriptValues.append(text) } }
+    }
+    var transcripts: [String] { lock.withLock { transcriptValues } }
     func key(_ name: String) -> String { lock.withLock { keys[name] ?? "" } }
     func setKey(_ key: String, name: String) { lock.withLock { keys[name] = key } }
 }
@@ -101,6 +107,7 @@ enum FakePlatform: DesktopHostPlatform {
 
     static func update(_ status: String, transcript: String?, state: Int32) {
         FakeLog.shared.status(status, transcript: transcript, state: state)
+        FakeLog.shared.transcript(transcript)
     }
     static func recordingState(_ state: Int32) {}
     static func hud(_ state: DesktopHUDState) { FakeLog.shared.hud(state) }

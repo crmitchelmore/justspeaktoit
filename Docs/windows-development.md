@@ -166,6 +166,15 @@ PCM and protocol frames over Apple URLSession, WinHTTP and Linux NIO in their
 native probe suites. These are not real-service, accuracy, microphone-device
 or Bluetooth acceptance receipts.
 
+Desktop live sessions also consume the same authoritative transcript projection
+as macOS: whole-session revisions replace rather than append, explicit empty
+snapshots retract the preview, and confirmed plus interim text is composed once.
+Healthy finalisation adopts the provider's final projection; failure and
+cancellation preserve recovery text and reject late updates. Clients without
+an authoritative text projection retain their existing segment-folding behavior.
+This is transcript-state parity, not clipboard voice commands or live LLM
+polishing; those host/settings behaviors remain separate work.
+
 Grok Voice also has an injected portable client, preserving manual turns,
 input-only captions and the absence of `response.create`, but remains hidden
 from desktop route selection. A synthetic conversation peer cannot establish

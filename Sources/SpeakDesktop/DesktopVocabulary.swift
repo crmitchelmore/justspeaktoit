@@ -126,10 +126,12 @@ public final class DesktopVocabulary {
     public func speechText(_ text: String) -> String { renderer.applyReplacements(to: text, entries: entries) }
 
     public func presentation(kind: Int, notice: String = "") -> String {
-        var rows = [DesktopVocabularyWire.encode([
+        var header = [
             notice, String(preferences.includeLexiconDirectives), String(preferences.includeContextTags),
             preferences.contextTags.sorted().joined(separator: ", ")
-        ])]
+        ]
+        if kind == 1 { header += DesktopPronunciationCategories.fields(for: entries) }
+        var rows = [DesktopVocabularyWire.encode(header)]
         if kind == 3 {
             rows += candidateRows()
         } else if kind == 0 {

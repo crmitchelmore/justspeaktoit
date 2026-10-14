@@ -662,6 +662,26 @@ dictionary snapshot and runs the canonical renderer once before request
 segmentation, so expanded replacements also respect Deepgram's text limit.
 Deepgram supports text replacements, not IPA phoneme tags; the UI says so.
 
+Pronunciation search matches the word, pronunciation or replacement, not the
+category displayed in its unchanged row label. An independent, labelled native
+category filter combines with search. **All** includes unknown/imported and
+uncategorized entries; other options and their whole-collection counts come
+only from present `PronunciationEntry.Category.allCases` in the shared host
+projection, never a platform-owned category list. Filter state is not persisted.
+Updates retain the category by canonical value while it remains present, or
+return to All. A filtered-out selected UUID cannot be edited, deleted or moved
+until visible again; filtering never substitutes another row's identity.
+
+Only the kind-1 presentation header is extended: fields 0-3 are unchanged,
+field 4 is `pronunciationCategories.v1`, field 5 is the total entry count, and
+the remainder is escaped canonical-category/count pairs in shared enum order.
+Zero-count categories are omitted. Genuine four-field legacy headers support
+All only. Both native consumers refuse malformed modern metadata explicitly,
+including incomplete pairs, duplicate categories, invalid counts or totals
+inconsistent with the unchanged eight-field rows. No C ABI, events, settings,
+archive, import/apply authority or shared window controls are added by this
+presentation contract.
+
 Device-local state uses `PersonalLexicon/lexicon.json`,
 `AutoCorrections/candidates.json`, `pronunciation.json` and `vocabulary.json`
 under the existing private desktop application directory. Shared

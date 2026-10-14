@@ -12,13 +12,18 @@ namespace {
 constexpr UINT update = WM_APP + 93;
 enum { list = 900, add, save, remove, up, down, field = 910, preview = 920,
        previewTags, previewButton, notice, includeRules, includeTags, tags, preferences, defaults,
-       search = 930, importMerge = 934, importReplace, exportJSON,
+       search = 930, categoryFilter = 931, importMerge = 934, importReplace, exportJSON,
        reviewCandidates = 960, promoteCandidate, dismissCandidate, clearCandidates };
 using Row = std::array<std::string, 8>;
+struct Category { std::string value; size_t count; };
 struct Dialog {
     int kind = 0, selected = -1, scroll = 0;
     HWND window = nullptr;
+    HWND categoryLabel = nullptr;
     HFONT font = nullptr;
+    bool busy = true;
+    std::string category;
+    std::vector<Category> categories;
     std::vector<HWND> controls;
     std::vector<Row> rows;
     std::vector<int> visible;
@@ -123,6 +128,46 @@ void fill(Dialog &d, const Row &row) {
         } else set(d.window, field + i - 1, row[static_cast<size_t>(i)]);
     }
 }
+bool hiddenSelection(const Dialog &d) {
+    return d.kind == 1 && d.selected >= 0
+        && std::find(d.visible.begin(), d.visible.end(), d.selected) == d.visible.end();
+}
+void selectionControls(Dialog &d) {
+    if (d.kind != 1) return;
+    for (int id : {save, remove, up, down})
+        EnableWindow(GetDlgItem(d.window, id), !d.busy && !hiddenSelection(d));
+}
+bool categoryOptions(const std::vector<std::string> &header, const std::vector<Row> &rows,
+                     std::vector<Category> &options) {
+    options = {{"", rows.size()}};
+    if (header.size() == 4) return true;
+    if (header.size() < 6 || header[4] != "pronunciationCategories.v1"
+        || (header.size() - 6) % 2 != 0 || header[5] != std::to_string(rows.size())) return false;
+    for (size_t i = 6; i < header.size(); i += 2) {
+        const auto name = decoded(header[i]);
+        const size_t count = static_cast<size_t>(std::count_if(rows.begin(), rows.end(),
+            [&](const Row &row) { return row[4] == name; }));
+        if (name.empty() || count == 0 || header[i + 1] != std::to_string(count)
+            || std::any_of(options.begin(), options.end(), [&](const Category &item) { return item.value == name; }))
+            return false;
+        options.push_back({name, count});
+    }
+    return true;
+}
+void updateCategories(Dialog &d, std::vector<Category> options) {
+    d.categories = std::move(options);
+    SendDlgItemMessageW(d.window, categoryFilter, CB_RESETCONTENT, 0, 0);
+    size_t selected = 0;
+    for (size_t i = 0; i < d.categories.size(); ++i) {
+        const auto &item = d.categories[i];
+        std::wstring label;
+        jsti::wide(((i == 0 ? "All" : item.value) + " (" + std::to_string(item.count) + ")").c_str(), label);
+        SendDlgItemMessageW(d.window, categoryFilter, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
+        if (item.value == d.category) selected = i;
+    }
+    d.category = d.categories[selected].value;
+    SendDlgItemMessageW(d.window, categoryFilter, CB_SETCURSEL, selected, 0);
+}
 void rebuild(Dialog &d) {
     std::wstring query; jsti::wide(get(d.window, search).c_str(), query);
     std::transform(query.begin(), query.end(), query.begin(), [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
@@ -133,19 +178,35 @@ void rebuild(Dialog &d) {
         const std::string suffix = d.kind == 3 ? " (seen " + row[3] + "; " + row[7] + ")"
             : d.kind == 1 ? " [" + row[4] + "]" : "";
         jsti::wide((row[1] + " -> " + row[2] + suffix).c_str(), label);
-        folded = label;
-        std::transform(folded.begin(), folded.end(), folded.begin(), [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
-        if (folded.find(query) == std::wstring::npos) continue;
+        bool match = false;
+        if (d.kind == 1) {
+            if (!d.category.empty() && row[4] != d.category) continue;
+            for (size_t index : {1, 2, 3}) {
+                jsti::wide(row[index].c_str(), folded);
+                std::transform(folded.begin(), folded.end(), folded.begin(),
+                    [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
+                match = match || folded.find(query) != std::wstring::npos;
+            }
+        } else {
+            folded = label;
+            std::transform(folded.begin(), folded.end(), folded.begin(),
+                [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
+            match = folded.find(query) != std::wstring::npos;
+        }
+        if (!match) continue;
         SendDlgItemMessageW(d.window, list, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
         if (d.selected == static_cast<int>(i))
             SendDlgItemMessageW(d.window, list, LB_SETCURSEL, d.visible.size(), 0);
         d.visible.push_back(static_cast<int>(i));
     }
+    selectionControls(d);
 }
 void pending(Dialog &d, bool busy) {
+    d.busy = busy;
     for (int id : {save, remove, up, down, add, previewButton, preferences, defaults, list, importMerge,
          importReplace, exportJSON, reviewCandidates, promoteCandidate, dismissCandidate, clearCandidates})
         EnableWindow(GetDlgItem(d.window, id), !busy);
+    selectionControls(d);
 }
 void transfer(Dialog &d, const char *action) {
     std::vector<wchar_t> path(32768, 0);
@@ -165,6 +226,11 @@ void transfer(Dialog &d, const char *action) {
     pending(d, true); d.emit(70, payload.c_str(), d.kind);
 }
 void action(Dialog &d, const char *name) {
+    if (hiddenSelection(d) && (std::strcmp(name, "save") == 0 || std::strcmp(name, "delete") == 0
+        || std::strcmp(name, "up") == 0 || std::strcmp(name, "down") == 0)) {
+        set(d.window, notice, "The selected entry is hidden by filters. Clear filters or select a visible entry.");
+        return;
+    }
     std::string payload = name;
     if (d.kind == 3) {
         if (std::strcmp(name, "clear") != 0) {
@@ -222,7 +288,12 @@ void layout(Dialog &d) {
             w < 0 ? width : scale(d.window, w), scale(d.window, h), TRUE);
     };
     move(951, 16, 16, 210, 20); move(search, 16, 42, 210, 28);
-    move(list, 16, 80, 210, 436);
+    if (d.kind == 1) {
+        MoveWindow(d.categoryLabel, scale(d.window, 16), scale(d.window, 80) - d.scroll,
+            scale(d.window, 210), scale(d.window, 20), TRUE);
+        move(categoryFilter, 16, 104, 210, 180);
+    }
+    move(list, 16, d.kind == 1 ? 144 : 80, 210, d.kind == 1 ? 372 : 436);
     move(add, 16, 528, 100, 30); move(remove, 126, 528, 100, 30);
     move(up, 16, 568, 100, 30); move(down, 126, 568, 100, 30);
     for (int i = 1; i < 8; ++i) {
@@ -269,8 +340,14 @@ bool createControls(Dialog &d) {
     }
     const DWORD button = WS_TABSTOP | BS_PUSHBUTTON;
     if (!control(L"STATIC", L"Searc&h saved entries", 0, 951)
-        || !control(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, search)
-        || !control(L"LISTBOX", L"", LBS_NOTIFY | WS_TABSTOP | WS_VSCROLL | WS_BORDER, list)) return false;
+        || !control(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, search)) return false;
+    if (d.kind == 1) {
+        if (!control(L"STATIC", L"Category &filter", 0, -1)) return false;
+        d.categoryLabel = d.controls.back();
+        if (!control(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, categoryFilter)) return false;
+        updateCategories(d, {{"", 0}});
+    }
+    if (!control(L"LISTBOX", L"", LBS_NOTIFY | WS_TABSTOP | WS_VSCROLL | WS_BORDER, list)) return false;
     if (d.kind == 3) {
         for (const auto &item : std::vector<std::pair<int, const wchar_t *>>{
              {promoteCandidate, L"&Approve"}, {dismissCandidate, L"&Dismiss"}, {remove, L"&Remove"},
@@ -384,18 +461,27 @@ LRESULT CALLBACK procedure(HWND w, UINT message, WPARAM wp, LPARAM lp) {
             CheckDlgButton(w, includeTags, header[2] == "true" ? BST_CHECKED : BST_UNCHECKED);
             set(w, tags, decoded(header[3]));
         }
-        std::string selected = d->selected >= 0 ? d->rows[static_cast<size_t>(d->selected)][0] : "";
-        d->rows.clear(); d->selected = -1; SendDlgItemMessageW(w, list, LB_RESETCONTENT, 0, 0);
+        std::vector<Row> rows;
         for (size_t i = 1; i < lines.size(); ++i) {
             auto fields = split(lines[i], '\t');
             if (fields.size() != 8) continue;
             Row row;
             for (size_t j = 0; j < 8; ++j) row[j] = decoded(fields[j]);
-            if (row[0] == selected) d->selected = static_cast<int>(d->rows.size());
-            d->rows.push_back(std::move(row));
+            rows.push_back(std::move(row));
         }
+        std::vector<Category> categories;
+        if (d->kind == 1 && !categoryOptions(header, rows, categories)) {
+            set(w, notice, "Invalid pronunciation category metadata. Reload the editor before making changes.");
+            pending(*d, true); return 0;
+        }
+        const std::string selected = d->selected >= 0 ? d->rows[static_cast<size_t>(d->selected)][0] : "";
+        d->rows = std::move(rows); d->selected = -1;
+        for (size_t i = 0; i < d->rows.size(); ++i)
+            if (d->rows[i][0] == selected) d->selected = static_cast<int>(i);
+        if (d->kind == 1) updateCategories(*d, std::move(categories));
         rebuild(*d);
         if (d->selected >= 0) fill(*d, d->rows[static_cast<size_t>(d->selected)]);
+        else if (!selected.empty() && d->kind == 1) fill(*d, Row{});
         pending(*d, false); return 0;
     }
     case WM_COMMAND: {
@@ -411,10 +497,17 @@ LRESULT CALLBACK procedure(HWND w, UINT message, WPARAM wp, LPARAM lp) {
             layout(*d);
         }
         if (id == search && HIWORD(wp) == EN_CHANGE) { rebuild(*d); return 0; }
+        if (id == categoryFilter && HIWORD(wp) == CBN_SELCHANGE && d->kind == 1) {
+            const auto chosen = SendDlgItemMessageW(w, categoryFilter, CB_GETCURSEL, 0, 0);
+            if (chosen >= 0 && static_cast<size_t>(chosen) < d->categories.size())
+                d->category = d->categories[static_cast<size_t>(chosen)].value;
+            rebuild(*d); return 0;
+        }
         if (id == list && HIWORD(wp) == LBN_SELCHANGE) {
             const int index = static_cast<int>(SendDlgItemMessageW(w, list, LB_GETCURSEL, 0, 0));
             d->selected = index >= 0 && static_cast<size_t>(index) < d->visible.size() ? d->visible[static_cast<size_t>(index)] : -1;
             if (d->selected >= 0) fill(*d, d->rows[static_cast<size_t>(d->selected)]);
+            selectionControls(*d);
             return 0;
         }
         if (HIWORD(wp) != BN_CLICKED) break;
@@ -446,7 +539,8 @@ LRESULT CALLBACK procedure(HWND w, UINT message, WPARAM wp, LPARAM lp) {
             d->selected = -1; Row row{};
             row[4] = d->kind == 0 ? "automatic" : "";
             row[6] = d->kind == 0 ? "high" : "false"; row[5] = d->kind == 0 ? "" : "false";
-            fill(*d, row); return 0;
+            if (d->kind == 1) SendDlgItemMessageW(w, list, LB_SETCURSEL, static_cast<WPARAM>(-1), 0);
+            fill(*d, row); selectionControls(*d); return 0;
         }
         if (id == remove && (d->selected < 0 || MessageBoxW(w, L"Delete this saved entry?", L"Confirm deletion",
             MB_YESNO | MB_ICONQUESTION) != IDYES)) return 0;
@@ -489,6 +583,121 @@ HWND createWindow(HWND owner, Dialog &dialog) {
                 ? L"Recording corrections - Just Speak to It" : L"Stored correction candidates - Just Speak to It",
         WS_OVERLAPPEDWINDOW | WS_VSCROLL, CW_USEDEFAULT, CW_USEDEFAULT, scale(owner, 850), scale(owner, 740),
         owner, nullptr, type.hInstance, &dialog);
+}
+bool pronunciationFilterSelfTest(Dialog &d, std::string &captured, std::string &error) {
+    const std::vector<Row> rows = {
+        {"fixture-a", "Alpha", "First", "ReplacementOnly", "Technical", "false", "false", ""},
+        {"fixture-b", "Beta", "Second", "Other", "Names", "false", "false", ""},
+        {"fixture-u", "Gamma", "Third", "Other", "Imported", "false", "false", ""},
+        {"fixture-n", "Delta", "Fourth", "", "", "false", "false", ""}
+    };
+    const std::string legacy = "\ttrue\ttrue\t";
+    const std::string modern = legacy + "\tpronunciationCategories.v1\t4\tTechnical\t1\tNames\t1";
+    auto present = [&](const std::string &header, const std::vector<Row> &values) {
+        std::string payload = header;
+        for (const auto &row : values) {
+            payload += '\n';
+            for (size_t i = 0; i < row.size(); ++i) payload += (i ? "\t" : "") + escaped(row[i]);
+        }
+        SendMessageW(d.window, update, 0, reinterpret_cast<LPARAM>(new Update{payload, true}));
+    };
+    auto expect = [&](bool condition, const char *message) {
+        if (!condition) error = message;
+        return condition;
+    };
+    auto choose = [&](size_t index) {
+        SendDlgItemMessageW(d.window, categoryFilter, CB_SETCURSEL, index, 0);
+        SendMessageW(d.window, WM_COMMAND, MAKEWPARAM(categoryFilter, CBN_SELCHANGE),
+            reinterpret_cast<LPARAM>(GetDlgItem(d.window, categoryFilter)));
+    };
+    auto label = [&](size_t index) {
+        wchar_t value[128]{};
+        SendDlgItemMessageW(d.window, categoryFilter, CB_GETLBTEXT, index, reinterpret_cast<LPARAM>(value));
+        return std::wstring(value);
+    };
+    present(modern, rows);
+    if (!expect(d.visible.size() == 4 && d.categories.size() == 3 && label(0) == L"All (4)"
+        && label(1) == L"Technical (1)" && label(2) == L"Names (1)", "Pronunciation category counts failed.")) return false;
+    set(d.window, search, "rEpLaCeMeNtOnLy");
+    if (!expect(d.visible == std::vector<int>{0}, "Replacement-only pronunciation search failed.")) return false;
+    set(d.window, search, "Technical");
+    if (!expect(d.visible.empty(), "Pronunciation search incorrectly searched category labels.")) return false;
+    set(d.window, search, "");
+    if (!expect(d.visible.size() == 4, "Clearing pronunciation search lost unknown or uncategorized entries.")) return false;
+    SendDlgItemMessageW(d.window, list, LB_SETCURSEL, 1, 0);
+    SendMessageW(d.window, WM_COMMAND, MAKEWPARAM(list, LBN_SELCHANGE),
+        reinterpret_cast<LPARAM>(GetDlgItem(d.window, list)));
+    choose(1);
+    const auto previous = captured;
+    action(d, "save");
+    if (!expect(d.selected == 1 && d.visible == std::vector<int>{0}
+        && !IsWindowEnabled(GetDlgItem(d.window, save)) && captured == previous
+        && get(d.window, field) == "Beta", "A hidden pronunciation selection changed identity or remained writable.")) return false;
+    set(d.window, search, "Second");
+    if (!expect(d.visible.empty() && label(0) == L"All (4)" && label(1) == L"Technical (1)",
+        "Pronunciation search and category filtering were not conjunctive.")) return false;
+    set(d.window, search, "");
+    choose(2);
+    if (!expect(d.visible == std::vector<int>{1} && IsWindowEnabled(GetDlgItem(d.window, save)),
+        "Clearing filters did not restore the selected pronunciation entry.")) return false;
+    present(modern, {rows[1], rows[2], rows[0], rows[3]});
+    if (!expect(d.category == "Names" && d.selected == 0 && d.visible == std::vector<int>{0},
+        "Pronunciation reload did not preserve category and UUID identity.")) return false;
+    action(d, "save");
+    auto fields = split(captured, '\t');
+    if (!expect(fields.size() == 9 && decoded(fields[1]) == "fixture-b",
+        "Filtered pronunciation editing targeted another row.")) return false;
+    present(legacy + "\tpronunciationCategories.v1\t3\tTechnical\t1", {rows[2], rows[0], rows[3]});
+    if (!expect(d.category.empty() && d.selected == -1 && d.visible.size() == 3 && get(d.window, field).empty(),
+        "A removed pronunciation category or entry was retained as another selection.")) return false;
+    choose(1);
+    present(legacy + "\tpronunciationCategories.v1\t0", {});
+    if (!expect(d.category.empty() && d.visible.empty() && d.categories.size() == 1 && label(0) == L"All (0)",
+        "An empty pronunciation collection did not reset its category filter.")) return false;
+    present(legacy, rows);
+    if (!expect(d.categories.size() == 1 && d.visible.size() == 4, "Legacy pronunciation payload handling failed.")) return false;
+    const std::vector<std::string> invalid = {
+        legacy + "\tpronunciationCategories.v2\t4",
+        legacy + "\tpronunciationCategories.v1",
+        legacy + "\tpronunciationCategories.v1\t4\tTechnical",
+        legacy + "\tpronunciationCategories.v1\t-1",
+        legacy + "\tpronunciationCategories.v1\t999999999999999999999",
+        legacy + "\tpronunciationCategories.v1\t3",
+        legacy + "\tpronunciationCategories.v1\t4\tTechnical\t-1",
+        legacy + "\tpronunciationCategories.v1\t4\tTechnical\t0",
+        legacy + "\tpronunciationCategories.v1\t4\tTechnical\t2",
+        legacy + "\tpronunciationCategories.v1\t4\tTechnical\t01",
+        legacy + "\tpronunciationCategories.v1\t4\tTechnical\t1\tTechnical\t1",
+        legacy + "\tpronunciationCategories.v1\t4\t\t1"
+    };
+    for (const auto &header : invalid) {
+        present(header, rows);
+        if (!expect(d.busy && !IsWindowEnabled(GetDlgItem(d.window, save)) && d.rows.size() == 4
+            && get(d.window, notice).find("Invalid pronunciation category metadata") == 0,
+            "Malformed modern pronunciation metadata was not explicitly refused.")) return false;
+        present(modern, rows);
+    }
+    MINMAXINFO minimum{};
+    SendMessageW(d.window, WM_GETMINMAXINFO, 0, reinterpret_cast<LPARAM>(&minimum));
+    SetWindowPos(d.window, nullptr, 0, 0, minimum.ptMinTrackSize.x, minimum.ptMinTrackSize.y,
+        SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER);
+    RECT bounds{}; GetWindowRect(d.window, &bounds);
+    const auto dpi = GetDpiForWindow(d.window);
+    SendMessageW(d.window, WM_DPICHANGED, MAKEWPARAM(dpi, dpi), reinterpret_cast<LPARAM>(&bounds));
+    RECT client{}, filterBounds{}, listBounds{}, searchBounds{}, labelBounds{};
+    GetClientRect(d.window, &client);
+    GetWindowRect(GetDlgItem(d.window, categoryFilter), &filterBounds);
+    GetWindowRect(GetDlgItem(d.window, list), &listBounds);
+    GetWindowRect(GetDlgItem(d.window, search), &searchBounds);
+    GetWindowRect(d.categoryLabel, &labelBounds);
+    for (RECT *rect : {&filterBounds, &listBounds, &searchBounds, &labelBounds})
+        MapWindowPoints(nullptr, d.window, reinterpret_cast<POINT *>(rect), 2);
+    return expect(dpi > 0 && minimum.ptMinTrackSize.x == scale(d.window, 800)
+        && minimum.ptMinTrackSize.y == scale(d.window, 480) && filterBounds.left >= 0
+        && filterBounds.right <= client.right && searchBounds.bottom <= labelBounds.top
+        && labelBounds.bottom <= filterBounds.top && filterBounds.bottom <= listBounds.top
+        && GetWindow(GetDlgItem(d.window, categoryFilter), GW_HWNDPREV) == d.categoryLabel,
+        "Pronunciation category controls exceeded minimum-size/DPI bounds or lost their accessible label.");
 }
 }
 
@@ -561,8 +770,12 @@ bool jsti_vocabulary_self_test(HWND owner, std::string &error) {
         action(dialog, "preview"); fields = split(captured, '\t');
         valid = valid && fields.size() == 3 && decoded(fields[1]) == "Synthetic\t%\n"
             && decoded(fields[2]) == "work";
+        if (valid && kind == 1) valid = pronunciationFilterSelfTest(dialog, captured, error);
         DestroyWindow(window);
-        if (!valid) { error = "Vocabulary editor did not preserve field or preview events."; return false; }
+        if (!valid) {
+            if (error.empty()) error = "Vocabulary editor did not preserve field or preview events.";
+            return false;
+        }
     }
     return true;
 }

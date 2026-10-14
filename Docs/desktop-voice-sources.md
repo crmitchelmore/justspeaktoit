@@ -4,7 +4,7 @@ Windows and Linux remain developer previews, not macOS-parity releases.
 Voice Output uses shared Deepgram and Azure neural speech contracts, canonical
 catalogue projections and native playback. `DesktopSpeechVoice` exposes only
 routes the host executes, not every provider in the macOS catalogue. The seven
-offline Azure neural voices now have one `AzureNeuralVoiceCatalog` definition
+built-in Azure neural catalogue entries now have one `AzureNeuralVoiceCatalog` definition
 shared with macOS; native hosts do not copy voice entries.
 
 ## Journey

@@ -259,6 +259,25 @@ int32_t jsti_voice_controls_self_test(GtkWindow *owner, char *error, size_t capa
     Completion cartesia_upper = {receipt.request, 1}; finish_options(&cartesia_upper);
     passed = passed && active == NULL;
     if (active != NULL) close_controls(NULL, active);
+    g_free(saved.voice);
+    saved = (Options){1.25, -2, 1, 0, g_strdup("Synthetic Gemini 3.1 Flash TTS"), 0.5, 2};
+    controls = make_controls(owner, receive_fixture, &receipt); active = controls;
+    double pitch = 0;
+    passed = number(controls->speed, &speed) && speed == 1.25 && passed &&
+        number(controls->pitch, &pitch) && pitch == -2 &&
+        gtk_check_button_get_active(controls->ssml) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(controls->speed)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(controls->pitch)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(controls->ssml));
+    normal(NULL, controls);
+    passed = emit(controls) && passed && receipt.calls == 7 &&
+        g_strcmp0(receipt.json, "{\"speed\":1,\"pitch\":0,\"useSSML\":false}") == 0;
+    Completion gemini_retry = {receipt.request, 0}; finish_options(&gemini_retry);
+    passed = active == controls && !controls->saving && passed;
+    passed = emit(controls) && passed && receipt.calls == 8;
+    Completion gemini_finished = {receipt.request, 1}; finish_options(&gemini_finished);
+    passed = passed && active == NULL;
+    if (active != NULL) close_controls(NULL, active);
     g_free(receipt.json); g_free(receipt.request);
     g_free(saved.voice); saved = original;
     if (!passed) jsti_set_error(error, capacity, "Voice controls capabilities, precision or save ownership failed.");
@@ -271,7 +290,7 @@ static void snapshot_callback(int32_t action, int32_t source, const char *text,
 }
 void jsti_voice_controls_show_fixture(GtkWindow *owner) {
     Options original = saved;
-    saved = (Options){1.25, 0, 0, 1, g_strdup("Synthetic Cartesia Sonic 3.6"), 0.6, 1.5};
+    saved = (Options){1.25, -2, 1, 0, g_strdup("Synthetic Gemini 3.1 Flash TTS"), 0.5, 2};
     Controls *controls = make_controls(owner, snapshot_callback, NULL);
     snapshot_window = controls->window;
     g_object_add_weak_pointer(G_OBJECT(snapshot_window), (gpointer *)&snapshot_window);

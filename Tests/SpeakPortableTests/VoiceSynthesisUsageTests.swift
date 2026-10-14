@@ -100,6 +100,37 @@ final class VoiceSynthesisUsageTests: DeepgramSpeechStubTestCase {
         XCTAssertNil(invalid.records.first?.audioDuration)
     }
 
+    func testGeminiCosts_UseOnlyReportedTokensAndValidatedDurationIncludingRealZero() throws {
+        let voice = DesktopSpeechVoice.gemini(GeminiTTSCatalog.defaultVoice)
+        let capture = VoiceSynthesisUsage.Capture(operation: .generate, source: .typedText, historyRecordID: UUID())
+        for tokens: Int? in [200, nil, 0] {
+            let id = capture.begin(voice: voice, inputCharacters: 1_000, usesSSML: false)
+            capture.finish(id, outcome: .completed, audioDuration: 2, reportedInputTokens: tokens)
+        }
+        XCTAssertEqual(capture.records.map(\.estimatedAudioCostUSD), [.init(string: "0.001"), .init(string: "0.001"),
+                                                                     .init(string: "0.001")])
+        XCTAssertEqual(capture.records.map(\.reportedInputTokens), [200, nil, 0])
+        XCTAssertEqual(capture.records.map(\.estimatedInputCostUSD), [.init(string: "0.0002"), nil, .zero])
+        XCTAssertEqual(capture.records.map(\.estimatedCostUSD), [.init(string: "0.0012"), nil, .init(string: "0.001")])
+        XCTAssertTrue(capture.records.allSatisfy { $0.historyRecordID == nil })
+        XCTAssertNil(VoiceSynthesisPricing.geminiAudioEstimate(duration: .nan))
+        XCTAssertNil(VoiceSynthesisPricing.geminiAudioEstimate(duration: -1))
+        XCTAssertNil(VoiceSynthesisPricing.geminiInputEstimate(reportedTokens: -1))
+        let encoded = try JSONEncoder().encode(capture.records)
+        XCTAssertEqual(try JSONDecoder().decode([VoiceSynthesisUsage.Record].self, from: encoded), capture.records)
+    }
+
+    func testOlderCharacterLedgers_DecodeWithAbsentTokenAndComponentFields() throws {
+        let capture = VoiceSynthesisUsage.Capture(operation: .read, source: .history, historyRecordID: UUID())
+        let id = capture.begin(voice: .azureMAI(AzureMAIVoiceCatalog.voices[0]), inputCharacters: 17, usesSSML: false)
+        capture.finish(id, outcome: .completed, audioDuration: 1)
+        let data = try JSONEncoder().encode(capture.records)
+        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
+        XCTAssertFalse(json.contains("reportedInputTokens"))
+        XCTAssertFalse(json.contains("estimatedAudioCostUSD"))
+        XCTAssertEqual(try JSONDecoder().decode([VoiceSynthesisUsage.Record].self, from: data), capture.records)
+    }
+
     private func synthesize(
         _ source: VoiceOutputSourceSnapshot,
         credential: @Sendable () async throws -> String = { "synthetic-key:eastus" }

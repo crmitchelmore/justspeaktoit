@@ -8,6 +8,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
     case azureMAI(AzureMAIVoice)
     case xai(XAITTSVoice)
     case cartesia(CartesiaTTSVoice)
+    case gemini(GeminiTTSVoice)
 
     public var id: String {
         switch self {
@@ -16,6 +17,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .azureMAI(let voice): voice.id
         case .xai(let voice): voice.providerVoiceID
         case .cartesia(let voice): voice.providerVoiceID
+        case .gemini(let voice): voice.providerVoiceID
         }
     }
 
@@ -26,6 +28,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .azureMAI(let voice): voice.displayName
         case .xai(let voice): voice.displayName
         case .cartesia(let voice): voice.displayName
+        case .gemini(let voice): voice.displayName
         }
     }
 
@@ -36,6 +39,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .azureMAI(let voice): voice.model.rawValue
         case .xai: XAITTSCatalog.providerIdentifier
         case .cartesia: CartesiaTTSCatalog.desktopModelIdentifier
+        case .gemini: GeminiTTSCatalog.desktopModelIdentifier
         }
     }
 
@@ -47,6 +51,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .xai(let voice): "\(voice.displayName) — xAI Speech"
         case .cartesia(let voice):
             "\(voice.displayName) — Cartesia \(CartesiaTTSCatalog.defaultModel.displayName)"
+        case .gemini(let voice): "\(voice.displayName) — \(GeminiTTSCatalog.defaultModel.displayName)"
         }
     }
 
@@ -56,6 +61,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .azureNeural, .azureMAI: AzureSpeechConfiguration.credentialIdentifier
         case .xai: XAITTSCatalog.credentialIdentifier
         case .cartesia: CartesiaTTSCatalog.credentialIdentifier
+        case .gemini: GeminiTTSCatalog.credentialIdentifier
         }
     }
 
@@ -66,6 +72,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .azureMAI: .azureMAI
         case .xai: .xai
         case .cartesia: .cartesia
+        case .gemini: .naturalSpeech
         }
     }
 
@@ -74,6 +81,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
             + AzureMAIVoiceCatalog.voices.map(Self.azureMAI)
             + XAITTSCatalog.voices.map(Self.xai)
             + CartesiaTTSCatalog.voices.map(Self.cartesia)
+            + GeminiTTSCatalog.voices.map(Self.gemini)
     }
 
     public static func resolved(
@@ -87,6 +95,9 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
     ) throws -> Self {
         let model = modelID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let identifier = voiceID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let voice = try geminiSelection(model: model, identifier: identifier) {
+            return voice
+        }
         if let voice = try cartesiaSelection(model: model, identifier: identifier) {
             return voice
         }
@@ -119,6 +130,20 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
             throw VoiceSynthesisConfigurationError.unsupportedVoice
         }
         return .deepgram(DeepgramSpeechCatalog.resolvedSelection(modelID: modelID, voiceID: voiceID).voice)
+    }
+
+    private static func geminiSelection(model: String?, identifier: String?) throws -> Self? {
+        guard model == GeminiTTSCatalog.providerIdentifier
+            || model?.hasPrefix(GeminiTTSCatalog.voiceIDPrefix) == true
+            || model?.hasPrefix("gemini-") == true
+            || identifier?.hasPrefix(GeminiTTSCatalog.voiceIDPrefix) == true else { return nil }
+        guard model == nil || model == GeminiTTSCatalog.providerIdentifier
+            || model == GeminiTTSCatalog.desktopModelIdentifier
+            || model == GeminiTTSCatalog.defaultModel.rawValue,
+            let identifier, let voice = GeminiTTSCatalog.voice(forID: identifier) else {
+            throw VoiceSynthesisConfigurationError.unsupportedVoice
+        }
+        return .gemini(voice)
     }
 
     private static func cartesiaSelection(model: String?, identifier: String?) throws -> Self? {

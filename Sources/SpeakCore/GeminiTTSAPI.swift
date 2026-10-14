@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Errors surfaced by the shared Gemini speech-generation transport.
 public enum GeminiTTSAPIError: Error, Sendable, Equatable {
@@ -196,13 +199,7 @@ public struct GeminiTTSAPI: Sendable {
         apiKey: String,
         request: GeminiTTSRequest
     ) async throws -> GeminiTTSAudio {
-        var urlRequest = URLRequest(url: Self.interactionsEndpoint)
-        urlRequest.httpMethod = "POST"
-        urlRequest.setValue(apiKey, forHTTPHeaderField: Self.apiKeyHeader)
-        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.httpBody = try JSONSerialization.data(
-            withJSONObject: request.jsonBody(input: input)
-        )
+        let urlRequest = try Self.synthesisRequest(input: input, apiKey: apiKey, request: request)
 
         try Task.checkCancellation()
         let (data, response) = try await session.data(for: urlRequest)
@@ -217,11 +214,35 @@ public struct GeminiTTSAPI: Sendable {
         return try Self.audio(from: data, requestedSampleRate: request.sampleRate)
     }
 
+    public static func synthesisRequest(
+        input: String, apiKey: String, request: GeminiTTSRequest
+    ) throws -> URLRequest {
+        guard !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw GeminiTTSAPIError.emptyText
+        }
+        var urlRequest = URLRequest(url: interactionsEndpoint)
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue(apiKey, forHTTPHeaderField: apiKeyHeader)
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.httpBody = try JSONSerialization.data(withJSONObject: request.jsonBody(input: input))
+        return urlRequest
+    }
+
     /// Extracts the first audio content block from an interaction response.
     static func audio(from data: Data, requestedSampleRate: Int) throws -> GeminiTTSAudio {
+        try audio(from: data, requestedSampleRate: requestedSampleRate, reportInputTokens: { _ in })
+    }
+
+    static func audio(
+        from data: Data, requestedSampleRate: Int, reportInputTokens: (Int?) -> Void
+    ) throws -> GeminiTTSAudio {
         guard let interaction = try? JSONDecoder().decode(InteractionResponse.self, from: data) else {
             throw GeminiTTSAPIError.invalidResponse
         }
+        guard interaction.usage?.textInputTokens.map({ $0 >= 0 }) ?? true else {
+            throw GeminiTTSAPIError.invalidResponse
+        }
+        reportInputTokens(interaction.usage?.textInputTokens)
         let blocks = (interaction.steps ?? []).flatMap { $0.content ?? [] }
         guard let audioBlock = blocks.first(where: { $0.type == "audio" }),
               let encoded = audioBlock.data,

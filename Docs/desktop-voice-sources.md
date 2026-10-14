@@ -1,7 +1,7 @@
 # Desktop Voice Output sources and WAV export
 
 Windows and Linux remain developer previews, not macOS-parity releases.
-Voice Output uses shared Deepgram, Azure neural, Azure MAI, xAI and Cartesia REST speech contracts,
+Voice Output uses shared Deepgram, Azure neural, Azure MAI, xAI, Cartesia and Gemini REST speech contracts,
 canonical catalogue projections and native playback. `DesktopSpeechVoice` exposes only
 routes the host executes, not every provider in the macOS catalogue. The seven
 built-in Azure neural catalogue entries now have one `AzureNeuralVoiceCatalog` definition
@@ -10,6 +10,36 @@ The current MAI-Voice-2.1 and Flash speakers come directly from the existing
 `AzureMAIVoiceCatalog`, including their locale/model identifiers. MAI uses the
 same regional Azure request builder, saved `key:region` credential and native
 WAV decoding/playback, not a second provider client or credential store.
+
+**Gemini 3.1 Flash TTS** executes all thirty canonical `GeminiTTSCatalog`
+voices through the shared Interactions request and `google.apiKey` used for
+Gemini transcription. Unknown voices, foreign model/voice pairs and older
+stored previews remain unavailable, without the shared builder's default-voice
+fallback. Numeric speed/pitch and SSML are unsupported: native controls are
+disabled, stored values remain visible, and non-default settings refuse before
+key access. **Normal controls** is the explicit reset.
+
+Read, Generate and text export use canonical 8,000-character chunks, one captured
+credential, automatic provider language detection, bounded HTTP responses and
+validated 24 kHz mono PCM16 WAV. The shared documented server/no-audio retry is
+limited to one extra attempt per chunk; auth, quota, content, malformed audio
+and transport failures do not trigger provider retries. Every actual attempt
+is observed separately. A later failure never publishes partial audio.
+Existing native decoding/playback, retained replay/export, publication and
+History-or-nil ownership are unchanged. There is no progressive delivery,
+explicit language or selectable format/quality in this journey.
+
+Gemini's reported text-input tokens are optional real response metadata, not
+inferred from characters. Audio cost is a canonical **duration-based estimate**
+from validated PCM at USD0.0005/second. Reported-token input cost uses
+USD0.000001/token; missing tokens leave input and total cost **unknown**, while
+the known audio component remains visible. A reported zero is distinct from
+missing metadata. No billed amount, invoice or output-token count is invented.
+Unlike the Mac client's existing four-characters/token estimate, desktop usage
+does not fill missing tokens with a heuristic. Native Usage displays these
+components without double-counting its complete-price subtotal. Account/service,
+physical playback and final-head target acceptance remain distinct from
+synthetic portable/local native validation.
 
 **Cartesia Sonic 3.6** executes the five existing `CartesiaTTSCatalog` presets,
 not the entire account library or older stored Sonic models. Read, Generate and
@@ -201,8 +231,11 @@ validated PCM, not playback time. Partial successful segments remain accounted
 for even if a later segment, playback, archival or export fails.
 Replay and retained-result export do not create synthesis entries.
 
-All displayed costs are **input-based estimates, not measured/billed charges**.
-No provider billing receipts or token counts are available on these routes.
+All displayed costs are **published-rate estimates, not measured/billed charges**.
+Character-priced routes have no reported token counts. Gemini additionally keeps
+only actual reported text-input tokens and separate input/audio estimates;
+missing input tokens leave its total unknown, not estimated from characters.
+No provider billing receipts are available on these routes.
 The completed-audio subtotal excludes unpriced entries and names that exclusion.
 SSML markup, provider character rules, discounts and regional pricing can
 change actual charges. A transport attempt does not prove server receipt, and
@@ -211,6 +244,8 @@ a failed/cancelled request can still incur a provider charge.
 The bounded local ledger is `VoiceUsage/requests.json`, in a private directory,
 retaining the latest 1,000 request observations rather than claiming lifetime
 or billing-account totals. It contains no text, audio, key or provider body.
+Optional Gemini token/component fields are absent for character-priced routes;
+older ledgers remain readable without manufacturing new measurements.
 Each entry snapshots its route/rate, operation/source and genuine History UUID,
 or nil for every other source; cache/speech/request UUIDs are not History
 authority. It does not mutate History or imported History costs.

@@ -1,12 +1,15 @@
 import Foundation
 
-/// Published character-rate estimates, not provider invoices or token usage.
+/// Published-rate estimates, not provider invoices.
 public enum VoiceSynthesisPricing {
     public static let azureNeuralPerThousandCharacters = Decimal(string: "0.016")!
 
     public static func estimateBasis(for voice: DesktopSpeechVoice) -> String? {
-        guard case .cartesia = voice else { return nil }
-        return CartesiaTTSAPI.pricingEstimateBasis
+        switch voice {
+        case .cartesia: return CartesiaTTSAPI.pricingEstimateBasis
+        case .gemini: return GeminiTTSCatalog.pricingEstimateBasis
+        default: return nil
+        }
     }
 
     public static func ratePerThousandCharacters(for voice: DesktopSpeechVoice) -> Decimal? {
@@ -22,9 +25,21 @@ public enum VoiceSynthesisPricing {
         case .azureMAI: return AzureMAIVoiceCatalog.costPerThousandCharacters(forVoiceID: voice.id)
         case .xai: return XAITTSAPI.estimatedCostPerThousandCharacters
         case .cartesia: return CartesiaTTSAPI.estimatedCostPerThousandCharacters
+        case .gemini: return nil
         case .deepgram(let voice):
             return voice.model == DeepgramSpeechCatalog.flux ? nil : DeepgramTTSAPI.costPerThousandCharacters
         }
+
+    }
+
+    public static func geminiAudioEstimate(duration: TimeInterval?) -> Decimal? {
+        guard let duration, duration.isFinite, duration >= 0 else { return nil }
+        return Decimal(duration) * GeminiTTSCatalog.defaultModel.costPerSecondOfSpeech
+    }
+
+    public static func geminiInputEstimate(reportedTokens: Int?) -> Decimal? {
+        guard let reportedTokens, reportedTokens >= 0 else { return nil }
+        return Decimal(reportedTokens) * GeminiTTSCatalog.defaultModel.costPerInputToken
     }
 
     public static func estimate(for voice: DesktopSpeechVoice, characterCount: Int) -> Decimal? {

@@ -75,6 +75,13 @@ public struct GeminiTTSVoice: Identifiable, Codable, Hashable, Sendable {
 
 /// Canonical Gemini speech-generation catalogue.
 public enum GeminiTTSCatalog {
+    public static let providerIdentifier = "google"
+    public static let credentialIdentifier = "google.apiKey"
+    public static var desktopModelIdentifier: String { "\(voiceIDPrefix)\(defaultModel.rawValue)" }
+    public static let pricingEstimateBasis =
+        "Gemini audio cost is estimated from validated PCM seconds; input cost uses only reported text tokens. "
+        + "Missing tokens leave input and total cost unknown. No billing receipt is available."
+
     /// Prefix that routes a stored voice identifier back to this provider.
     ///
     /// It matches the `google` provider naming used by Gemini transcription, so

@@ -61,7 +61,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     // generation, so they reuse the identifier the transcription provider
     // already writes.
     case .groq: return "groq.apiKey"
-    case .gemini: return "google.apiKey"
+    case .gemini: return GeminiTTSCatalog.credentialIdentifier
     case .mistral: return "mistral.apiKey"
     case .speechmatics: return "speechmatics.apiKey"
     // One xAI key covers Grok Voice transcription, dedicated speech to text

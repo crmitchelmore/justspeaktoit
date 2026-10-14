@@ -27,15 +27,9 @@ actor GroqTTSClient: TextToSpeechClient {
     // Groq caps one Orpheus request at 200 characters. Longer input becomes a
     // sequence of requests split at sentence ends, and the parts are joined
     // into the single file the caller expects.
-    let segments = TTSTextChunker.chunks(
-      text,
-      maximumCharacters: GroqTTSAPI.maxInputCharacters
-    )
-    guard !segments.isEmpty else {
-      throw TTSError.synthesisFailure("There is no text to speak")
-    }
-    if let overLong = Self.excessiveFanOutMessage(segmentCount: segments.count) {
-      throw TTSError.synthesisFailure(overLong)
+    let segments: [String]
+    do { segments = try GroqTTSAPI.synthesisSegments(text) } catch let error as GroqTTSAPIError {
+      throw Self.ttsError(for: error)
     }
     if let unsupported = Self.unsupportedSettingsMessage(settings) {
       throw TTSError.synthesisFailure(unsupported)
@@ -112,11 +106,7 @@ actor GroqTTSClient: TextToSpeechClient {
   /// temporary file and its own round trip, so an unbounded paste is a cost
   /// surprise rather than a slow success.
   static func excessiveFanOutMessage(segmentCount: Int) -> String? {
-    guard segmentCount > GroqTTSAPI.maxRequestsPerSynthesis else { return nil }
-    return "Groq Orpheus speaks at most \(GroqTTSAPI.maxInputCharacters) characters per "
-      + "request, so this text would cost \(segmentCount) separate requests. Speak at most "
-      + "\(GroqTTSAPI.maxSynthesisCharacters) characters at a time, or choose a provider "
-      + "that takes longer input."
+    GroqTTSAPI.excessiveFanOutMessage(segmentCount: segmentCount)
   }
 
   static func ttsError(for error: GroqTTSAPIError) -> TTSError {
@@ -125,6 +115,10 @@ actor GroqTTSClient: TextToSpeechClient {
       return TTSError.synthesisFailure("Invalid response")
     case .emptyText:
       return TTSError.synthesisFailure("There is no text to speak")
+    case .excessiveFanOut(let count):
+      return TTSError.synthesisFailure(
+        GroqTTSAPI.excessiveFanOutMessage(segmentCount: count) ?? "Groq request limit exceeded."
+      )
     case .unauthorized:
       // The status code is the deciding signal: a revoked key must point the
       // user at Settings rather than at a generic synthesis failure.

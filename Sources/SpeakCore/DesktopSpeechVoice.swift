@@ -9,6 +9,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
     case xai(XAITTSVoice)
     case cartesia(CartesiaTTSVoice)
     case gemini(GeminiTTSVoice)
+    case groq(GroqTTSVoice)
 
     public var id: String {
         switch self {
@@ -18,6 +19,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .xai(let voice): voice.providerVoiceID
         case .cartesia(let voice): voice.providerVoiceID
         case .gemini(let voice): voice.providerVoiceID
+        case .groq(let voice): voice.providerVoiceID
         }
     }
 
@@ -29,6 +31,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .xai(let voice): voice.displayName
         case .cartesia(let voice): voice.displayName
         case .gemini(let voice): voice.displayName
+        case .groq(let voice): voice.displayName
         }
     }
 
@@ -40,6 +43,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .xai: XAITTSCatalog.providerIdentifier
         case .cartesia: CartesiaTTSCatalog.desktopModelIdentifier
         case .gemini: GeminiTTSCatalog.desktopModelIdentifier
+        case .groq(let voice): voice.model.desktopModelIdentifier
         }
     }
 
@@ -52,6 +56,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .cartesia(let voice):
             "\(voice.displayName) — Cartesia \(CartesiaTTSCatalog.defaultModel.displayName)"
         case .gemini(let voice): "\(voice.displayName) — \(GeminiTTSCatalog.defaultModel.displayName)"
+        case .groq(let voice): "\(voice.displayName) — Groq"
         }
     }
 
@@ -62,6 +67,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .xai: XAITTSCatalog.credentialIdentifier
         case .cartesia: CartesiaTTSCatalog.credentialIdentifier
         case .gemini: GeminiTTSCatalog.credentialIdentifier
+        case .groq: GroqTTSCatalog.credentialIdentifier
         }
     }
 
@@ -72,7 +78,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .azureMAI: .azureMAI
         case .xai: .xai
         case .cartesia: .cartesia
-        case .gemini: .naturalSpeech
+        case .gemini, .groq: .naturalSpeech
         }
     }
 
@@ -82,6 +88,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
             + XAITTSCatalog.voices.map(Self.xai)
             + CartesiaTTSCatalog.voices.map(Self.cartesia)
             + GeminiTTSCatalog.voices.map(Self.gemini)
+            + GroqTTSCatalog.voices.map(Self.groq)
     }
 
     public static func resolved(
@@ -95,6 +102,9 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
     ) throws -> Self {
         let model = modelID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let identifier = voiceID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let voice = try groqSelection(model: model, identifier: identifier) {
+            return voice
+        }
         if let voice = try geminiSelection(model: model, identifier: identifier) {
             return voice
         }
@@ -143,7 +153,25 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
             let identifier, let voice = GeminiTTSCatalog.voice(forID: identifier) else {
             throw VoiceSynthesisConfigurationError.unsupportedVoice
         }
+
         return .gemini(voice)
+    }
+
+    private static func groqSelection(model: String?, identifier: String?) throws -> Self? {
+        guard model == GroqTTSCatalog.providerIdentifier
+            || model?.hasPrefix(GroqTTSCatalog.voiceIDPrefix) == true
+            || model?.hasPrefix("canopylabs/") == true
+            || model?.hasPrefix("playai-tts") == true
+            || identifier?.hasPrefix(GroqTTSCatalog.voiceIDPrefix) == true else { return nil }
+        guard let identifier,
+              let voice = GroqTTSCatalog.voices.first(where: {
+                  $0.providerVoiceID == identifier || $0.apiVoiceID == identifier
+              }),
+              model == nil || model == GroqTTSCatalog.providerIdentifier
+                  || model == voice.model.rawValue || model == voice.model.desktopModelIdentifier else {
+            throw VoiceSynthesisConfigurationError.unsupportedVoice
+        }
+        return .groq(voice)
     }
 
     private static func cartesiaSelection(model: String?, identifier: String?) throws -> Self? {

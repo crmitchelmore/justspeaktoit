@@ -60,7 +60,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     // These four each use one account key for transcription and for speech
     // generation, so they reuse the identifier the transcription provider
     // already writes.
-    case .groq: return "groq.apiKey"
+    case .groq: return GroqTTSCatalog.credentialIdentifier
     case .gemini: return GeminiTTSCatalog.credentialIdentifier
     case .mistral: return "mistral.apiKey"
     case .speechmatics: return "speechmatics.apiKey"

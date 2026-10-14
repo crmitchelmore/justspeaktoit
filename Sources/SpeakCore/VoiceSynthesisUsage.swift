@@ -53,11 +53,19 @@ public enum VoiceSynthesisUsage {
         public func begin(
             voice: DesktopSpeechVoice, inputCharacters: Int, usesSSML: Bool, xaiInventory: XAIAccountVoiceInventory?
         ) -> UUID {
+            begin(voice: voice, inputCharacters: inputCharacters, usesSSML: usesSSML,
+                  pricingCharacters: inputCharacters, xaiInventory: xaiInventory)
+        }
+
+        func begin(
+            voice: DesktopSpeechVoice, inputCharacters: Int, usesSSML: Bool, pricingCharacters: Int,
+            xaiInventory: XAIAccountVoiceInventory? = nil
+        ) -> UUID {
             let request = Record(
                 id: UUID(), timestamp: Date(), operation: operation, source: source, historyRecordID: historyRecordID,
                 modelID: voice.modelID, voiceID: voice.id, inputCharacters: inputCharacters, usesSSML: usesSSML,
                 estimatedCostUSD: VoiceSynthesisPricing.estimate(
-                    for: voice, characterCount: inputCharacters, xaiInventory: xaiInventory),
+                    for: voice, characterCount: pricingCharacters, xaiInventory: xaiInventory),
                 outcome: .failed, audioDuration: nil
             )
             lock.withLock { requests.append(request) }

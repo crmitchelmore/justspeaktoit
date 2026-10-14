@@ -44,6 +44,9 @@ public struct DesktopSpeechSynthesis: Sendable {
         case .gemini:
             return try await DesktopGeminiSpeechSynthesis(session: session).synthesize(
                 source, voice: voice, credential: credential)
+        case .groq:
+            return try await DesktopGroqSpeechSynthesis(session: session).synthesize(
+                source, voice: voice, credential: credential)
         }
     }
 

@@ -1,7 +1,7 @@
 # Desktop Voice Output sources and WAV export
 
 Windows and Linux remain developer previews, not macOS-parity releases.
-Voice Output uses shared Deepgram, Azure neural, Azure MAI, xAI, Cartesia and Gemini REST speech contracts,
+Voice Output uses shared Deepgram, Azure neural, Azure MAI, xAI, Cartesia, Gemini and Groq REST speech contracts,
 canonical catalogue projections and native playback. `DesktopSpeechVoice` exposes only
 routes the host executes, not every provider in the macOS catalogue. The seven
 built-in Azure neural catalogue entries now have one `AzureNeuralVoiceCatalog` definition
@@ -10,6 +10,37 @@ The current MAI-Voice-2.1 and Flash speakers come directly from the existing
 `AzureMAIVoiceCatalog`, including their locale/model identifiers. MAI uses the
 same regional Azure request builder, saved `key:region` credential and native
 WAV decoding/playback, not a second provider client or credential store.
+
+**Groq Orpheus (local candidate)** executes the twelve canonical personas:
+six English and six Saudi Arabic voices, each bound to its own model. The
+existing native picker appends them without changing earlier voice indices.
+Unknown, retired PlayAI, foreign and wrong-model choices remain unavailable;
+the permissive Mac request builder cannot silently replace a desktop choice.
+Read, Generate and text export share `GroqTTSAPI` request construction and
+`groq.apiKey`. Canonical segmentation caps each request at 200 characters and
+refuses more than sixty requests before reading a key. One captured credential
+covers sequential requests, with no provider retries. Model terms, organisation
+access/spend limits, key rejection and quota failures have distinct advice;
+provider response bodies are never echoed.
+
+Only complete, bounded, non-silent 24 kHz mono PCM16 WAV responses are admitted
+to the existing native playback/export pipeline. Sample-rate/channel/depth
+mismatches and later-chunk failures never publish partial audio. Numeric
+speed/pitch and SSML are unsupported: native controls are disabled, stored
+choices are preserved and execution refuses incompatible settings before
+credential access. Existing retained replay/export and History-or-nil ownership
+are unchanged; no new controls, events, settings keys or native ABI are added.
+
+Groq estimates use the canonical submitted `String.count` after segmentation,
+matching the Mac client, at USD0.022/thousand English or USD0.040/thousand Saudi
+Arabic characters. The separate observed input count remains Unicode scalars;
+it is not relabelled as a billing count. Requests keep measured validated-PCM
+duration and nil token counts, never fabricated charges or receipts. Input
+estimates use the same segmentation/counting rule as actual synthesis. This
+candidate has no real-provider/physical-speaker receipt or new native/Apple CI
+qualification; the frozen published Gemini head's red x64 adapter remains
+unresolved, not waived by local tests. System voices, additional providers,
+explicit language/progressive delivery and selectable format/quality remain gaps.
 
 **Gemini 3.1 Flash TTS** executes all thirty canonical `GeminiTTSCatalog`
 voices through the shared Interactions request and `google.apiKey` used for
@@ -230,6 +261,8 @@ and, for Deepgram, pronunciation/trim processing. Audio seconds come from
 validated PCM, not playback time. Partial successful segments remain accounted
 for even if a later segment, playback, archival or export fails.
 Replay and retained-result export do not create synthesis entries.
+Groq pricing uses submitted grapheme counts separately from this scalar
+observation, including canonical segmentation and whitespace trimming.
 
 All displayed costs are **published-rate estimates, not measured/billed charges**.
 Character-priced routes have no reported token counts. Gemini additionally keeps

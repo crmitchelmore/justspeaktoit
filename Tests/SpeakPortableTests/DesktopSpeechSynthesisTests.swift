@@ -101,7 +101,8 @@ final class DesktopSpeechSynthesisTests: DeepgramSpeechStubTestCase {
         XCTAssertEqual(DesktopSpeechVoice.voices.count,
                        DeepgramSpeechCatalog.voices.count + AzureNeuralVoiceCatalog.voices.count
                            + AzureMAIVoiceCatalog.voices.count + XAITTSCatalog.voices.count
-                           + CartesiaTTSCatalog.voices.count + GeminiTTSCatalog.voices.count)
+                           + CartesiaTTSCatalog.voices.count + GeminiTTSCatalog.voices.count
+                           + GroqTTSCatalog.voices.count)
         XCTAssertEqual(Set(DesktopSpeechVoice.voices.map(\.id)).count, DesktopSpeechVoice.voices.count)
         for voice in AzureNeuralVoiceCatalog.voices {
             XCTAssertEqual(

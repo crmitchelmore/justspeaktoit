@@ -8,6 +8,7 @@ public enum VoiceSynthesisPricing {
         switch voice {
         case .cartesia: return CartesiaTTSAPI.pricingEstimateBasis
         case .gemini: return GeminiTTSCatalog.pricingEstimateBasis
+        case .groq: return GroqTTSCatalog.pricingEstimateBasis
         default: return nil
         }
     }
@@ -26,6 +27,7 @@ public enum VoiceSynthesisPricing {
         case .xai: return XAITTSAPI.estimatedCostPerThousandCharacters
         case .cartesia: return CartesiaTTSAPI.estimatedCostPerThousandCharacters
         case .gemini: return nil
+        case .groq(let voice): return voice.model.costPerThousandCharacters
         case .deepgram(let voice):
             return voice.model == DeepgramSpeechCatalog.flux ? nil : DeepgramTTSAPI.costPerThousandCharacters
         }
@@ -44,6 +46,22 @@ public enum VoiceSynthesisPricing {
 
     public static func estimate(for voice: DesktopSpeechVoice, characterCount: Int) -> Decimal? {
         estimate(for: voice, characterCount: characterCount, xaiInventory: nil)
+    }
+
+    public static func estimate(
+        for voice: DesktopSpeechVoice, text: String, xaiInventory: XAIAccountVoiceInventory? = nil
+    ) throws -> Decimal? {
+        let count: Int
+        if case .groq = voice {
+            do {
+                count = try GroqTTSAPI.synthesisSegments(text).reduce(0) { $0 + $1.count }
+            } catch let error as GroqTTSAPIError {
+                throw DesktopGroqSpeechError(error)
+            }
+        } else {
+            count = text.unicodeScalars.count
+        }
+        return estimate(for: voice, characterCount: count, xaiInventory: xaiInventory)
     }
 
     public static func estimate(

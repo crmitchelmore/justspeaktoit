@@ -60,7 +60,6 @@ let appleCoreSources: [String] = [
     "FileProductAnalyticsStateStore.swift",
     "GeminiLiveClient.swift",
     "GeminiLiveProtocol.swift",
-    "GroqTTSAPI.swift",
     "HandsFreeAudioPreRollBuffer.swift",
     "HandsFreeDictation.swift",
     "KeyDerivation.swift",

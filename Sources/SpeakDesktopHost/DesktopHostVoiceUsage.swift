@@ -68,8 +68,8 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         let count = text.unicodeScalars.count
         do {
             let selection = try currentVoiceSelection()
-            let estimate = VoiceSynthesisPricing.estimate(
-                for: selection.voice, characterCount: count, xaiInventory: selection.xaiInventory)
+            let estimate = try VoiceSynthesisPricing.estimate(
+                for: selection.voice, text: text, xaiInventory: selection.xaiInventory)
             voiceUsage.estimate = "Captured text: \(count) input characters (Unicode scalars).\n"
                 + "Voice: \(selection.voice.label)\n"
                 + (estimate.map { "Input estimate: USD \(Self.voiceCost($0))." }

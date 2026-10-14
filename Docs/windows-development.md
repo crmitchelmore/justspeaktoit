@@ -840,6 +840,32 @@ separate responsibilities. Native-only `vocabulary.json` remains explicitly
 unmapped/unapplied; it is not invented as a Mac collection kind. Raw payload
 preservation does not imply unknown record-envelope or manifest field retention.
 
+`DesktopOwnedAppDataFileReader.read(_:appDirectory:maximumBytes:checkCancellation:)`
+is the reusable, codec-free owned-source seam. Its default mode retains the
+vocabulary reader's regular/single-link, non-linked-directory, bounded-chunk and
+metadata-fence behavior. A missing source returns nil; a present source returns
+exact `Data` and a sealed `Receipt`. `revalidate` checks metadata only; it does
+not claim content or directory-chain binding. Caller paths are fixed relative
+app-data paths, not external file authority, and the caller supplies its existing
+source byte budget. No directory or file is created or mutated by the reader.
+
+`readStrict` is a separate explicit opt-in. Its sealed `StrictReceipt` binds
+exact bytes (including empty versus missing), file identity and available
+directory-chain identities before/after capture. `revalidateStrict` performs
+another bounded cancellable read and compares those bindings, rejecting source
+or parent appearance/disappearance, replacement, links, growth and changed
+bytes even at the same size/timestamp. Insufficient platform identity metadata
+throws rather than silently degrading the guarantee. Codecs/digests remain
+caller-owned. Strict absence needs an existing owned root with usable identity;
+an absent root is insufficient identity, not an unanchored successful receipt.
+Even strict receipts are only **point-in-time read evidence**:
+they do not hold a file, prevent later changes, provide atomic CAS or authorize
+publication, deletion, transactions or rollback. A Voice adapter may erase a
+strict receipt into a Sendable throwing revalidation closure; composition and
+write admission remain separate, unwired responsibilities. Its agreed fixed
+source is `VoiceUsage/requests.json` beneath the owned host app-data directory,
+with the existing 2,097,152-byte cap, not the recording/audio directory.
+
 `DataMigrationArchivePolicy` also centralizes the existing Mac archive path,
 entry/total/JSON-size, duplicate-path, manifest and staging-capacity rules.
 Mac ZIP reads use this policy; portable tests exercise exact limits without

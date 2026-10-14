@@ -185,7 +185,7 @@ public enum DataMigrationPlanner {
         try checkedDigest(DataMigrationCoding.encoder.encode(value), digest: digest)
     }
 
-    private static func variantID(id: String, revision: String, digest: (Data) throws -> String) throws -> String {
+    public static func variantID(id: String, revision: String, digest: (Data) throws -> String) throws -> String {
         let hex = Array(try checkedDigest(Data((id + ":" + revision).utf8), digest: digest).prefix(32))
         return [String(hex[0..<8]), String(hex[8..<12]), String(hex[12..<16]),
                 String(hex[16..<20]), String(hex[20..<32])].joined(separator: "-").uppercased()

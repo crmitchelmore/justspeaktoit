@@ -5,6 +5,13 @@ import SpeakCore
 /// Audio is written before a network request and retained after any failure.
 public actor DesktopRecordingStore {
     public struct Record: Codable, Identifiable, Sendable {
+        // swiftlint:disable:next nesting
+        enum CodingKeys: String, CodingKey, CaseIterable {
+            case id, createdAt, audioFilename, modelIdentifier, result, failure, processedText
+            case postProcessingModelIdentifier, postProcessingFailure, languageIdentifier, profileName, profileNotes
+            case originPlatform, migrationMetadata, recordedDuration, importedCost, importedModelIdentifiers
+        }
+
         public let id: UUID
         public let createdAt: Date
         public let audioFilename: String
@@ -29,6 +36,16 @@ public actor DesktopRecordingStore {
         /// as `macos`. `nil` for a recording made on this device. A synced copy
         /// has no audio here: its audio never leaves the device that recorded it.
         public var originPlatform: String?
+        /// Original imported wire metadata, including fields this host cannot edit.
+        public var migrationMetadata: AnyCodable?
+        public var recordedDuration: TimeInterval?
+        public var importedCost: ApplicationHistoryCost?
+        public var importedModelIdentifiers: [String]?
+
+        public var recordingDuration: TimeInterval? { result?.duration ?? recordedDuration }
+        public var recordingCost: ApplicationHistoryCost? {
+            result?.cost.map { .init(total: $0.totalCost, currency: $0.currency, breakdown: $0) } ?? importedCost
+        }
 
         /// True for a transcript that arrived through History sync.
         public var isSyncedCopy: Bool { originPlatform != nil }

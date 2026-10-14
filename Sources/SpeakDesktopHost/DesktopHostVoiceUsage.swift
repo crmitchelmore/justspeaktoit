@@ -15,9 +15,18 @@ package struct DesktopVoiceUsageState: Sendable {
     package var epoch = UUID()
     package var requestID: String?
     package var estimate = "Open Usage again to capture a fresh text/voice estimate."
+    package var active: [UUID: DesktopVoiceUsageOperation] = [:]
+    package var unsaved: [VoiceSynthesisUsage.Record] = []
+    package var unsavedBytes = 2
+    package var unsavedSizes: [UUID: Int] = [:]
+    package var omittedUnsavedObservations = 0
+    package var unsavedProblem: String?
+    package var revision: UInt64 = 0
+    package var collecting = false
 }
 
 package struct DesktopVoiceUsageOperation: Sendable {
+    package let id = UUID()
     package let capture: VoiceSynthesisUsage.Capture
     package let epoch: UUID
 }
@@ -31,16 +40,22 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         operation: VoiceSynthesisUsage.Operation, source: VoiceOutputSource, recordID: UUID?
     ) -> DesktopVoiceUsageOperation? {
         guard voiceUsageTrackingEnabled else { return nil }
-        return .init(capture: .init(operation: operation, source: source, historyRecordID: recordID),
-                     epoch: voiceUsage.epoch)
+        let started = DesktopVoiceUsageOperation(
+            capture: .init(operation: operation, source: source, historyRecordID: recordID), epoch: voiceUsage.epoch)
+        voiceUsage.active[started.id] = started
+        voiceUsage.revision &+= 1
+        return started
     }
 
     package func finishVoiceUsage(_ operation: DesktopVoiceUsageOperation?) {
-        guard let operation, operation.epoch == voiceUsage.epoch, voiceUsageTrackingEnabled else { return }
+        guard let operation, voiceUsage.active.removeValue(forKey: operation.id) != nil else { return }
+        voiceUsage.revision &+= 1
+        guard operation.epoch == voiceUsage.epoch, voiceUsageTrackingEnabled else { return }
         let requests = operation.capture.records
         guard !requests.isEmpty else { return }
         loadVoiceUsage()
         guard !voiceUsage.loadFailed else {
+            retainUnsavedVoiceUsage(requests)
             presentVoiceUsage()
             if !closed, let warning = voiceUsage.warning { update(warning) }
             return
@@ -53,8 +68,14 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             try JSONEncoder().encode(voiceUsage.records ?? []).write(
                 to: folder.appendingPathComponent("requests.json"), options: .atomic
             )
+            let persisted = voiceUsage.records ?? []
+            voiceUsage.unsaved.removeAll { persisted.contains($0) }
+            let retained = Set(voiceUsage.unsaved.map(\.id))
+            voiceUsage.unsavedSizes = voiceUsage.unsavedSizes.filter { retained.contains($0.key) }
+            voiceUsage.unsavedBytes = 2 + voiceUsage.unsavedSizes.values.reduce(0, +)
             voiceUsage.warning = nil
         } catch {
+            retainUnsavedVoiceUsage(requests)
             voiceUsage.warning = "Usage is only in memory: the local ledger could not be saved. "
                 + error.localizedDescription
         }
@@ -101,6 +122,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
 
     private func loadVoiceUsage() {
         guard voiceUsage.records == nil, !voiceUsage.loadFailed else { return }
+        defer { voiceUsage.revision &+= 1 }
         let url = directory.appendingPathComponent("VoiceUsage/requests.json")
         do {
             guard FileManager.default.fileExists(atPath: url.path) else { voiceUsage.records = []; return }
@@ -122,6 +144,28 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             voiceUsage.loadFailed = true
             voiceUsage.warning = "Usage accounting unavailable; the existing ledger is unchanged. "
                 + error.localizedDescription
+        }
+    }
+
+    private func retainUnsavedVoiceUsage(_ requests: [VoiceSynthesisUsage.Record]) {
+        for record in requests {
+            guard !voiceUsage.unsaved.contains(where: { $0.id == record.id }) else { continue }
+            do {
+                let size = try JSONEncoder().encode(record).count + 1
+                guard voiceUsage.unsaved.count < VoiceUsagePolicy.maximumRetainedRequests,
+                      size <= DesktopVoiceUsageLedger.maximumBytes - voiceUsage.unsavedBytes else {
+                    voiceUsage.omittedUnsavedObservations += 1
+                    voiceUsage.unsavedProblem = "Unsaved Voice observations exceeded their bounded buffer."
+                    continue
+                }
+                voiceUsage.unsaved.append(record)
+                voiceUsage.unsavedSizes[record.id] = size
+                voiceUsage.unsavedBytes += size
+            } catch {
+                voiceUsage.omittedUnsavedObservations += 1
+                voiceUsage.unsavedProblem = "An unsaved Voice observation could not be encoded: "
+                    + error.localizedDescription
+            }
         }
     }
 
@@ -168,6 +212,9 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             lines.append("History owner: \(last.historyRecordID?.uuidString ?? "none (not a History source)").")
         }
         if let warning = voiceUsage.warning { lines.append(warning) }
+        if let problem = voiceUsage.unsavedProblem {
+            lines.append("\(problem) Unsaved-buffer observations omitted: \(voiceUsage.omittedUnsavedObservations).")
+        }
         return lines.joined(separator: "\n\n")
     }
 

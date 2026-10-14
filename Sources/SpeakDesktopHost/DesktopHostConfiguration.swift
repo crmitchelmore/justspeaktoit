@@ -97,7 +97,12 @@ extension DesktopHostController {
         Platform.hud(.hidden)
         let supported = DesktopConfiguration.supportedKeys.union(Platform.voiceConfigurationKeys)
         let unknown = document.preferences.values.keys.filter { !supported.contains($0) }.sorted()
-        update("Configuration imported. Provider/model choices and service permissions are unchanged."
+        let hasSynthesis = !DesktopConfiguration.voiceSynthesisTransferKeys
+            .isDisjoint(with: document.preferences.values.keys)
+        let status = hasSynthesis
+            ? "Configuration imported. Voice controls require a compatible provider; service choices unchanged."
+            : "Configuration imported. Provider/model choices and service permissions are unchanged."
+        update(status
             + (unknown.isEmpty ? "" : " Preserved but not applied: \(unknown.joined(separator: ", "))."))
     }
 }

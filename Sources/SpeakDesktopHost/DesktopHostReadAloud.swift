@@ -9,11 +9,17 @@ package struct DesktopVoiceOutputSettings: Codable, Equatable, Sendable {
     package var voiceID: String?
     package var autoPlay: Bool?
     package var saveToRecordings: Bool?
+    package var speed: Double?
+    package var pitch: Double?
+    package var useSSML: Bool?
 
     private enum CodingKeys: String, CodingKey {
         case modelID, voiceID
         case autoPlay = "ttsAutoPlay"
         case saveToRecordings = "ttsSaveToDirectory"
+        case speed = "ttsSpeed"
+        case pitch = "ttsPitch"
+        case useSSML = "ttsUseSSML"
     }
 
     package var generationOptions: VoiceGenerationOptions {
@@ -166,6 +172,10 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
               selectedHistoryID == id, isVisible(id) else { return }
         let segments = SpeechTextSegmenter.segments(text)
         guard !segments.isEmpty else { update("There is no transcript to read aloud."); return }
+        do { try voiceOutputSettings().validatedSynthesisOptions().validate(for: .naturalSpeech) } catch {
+            update("Read aloud failed: \(error.localizedDescription)")
+            return
+        }
         let staging = directory.appendingPathComponent("VoiceOutput")
         guard let voiceOutput = readAloudState.output({ try Platform.makeVoiceOutput(stagingDirectory: staging) })
         else {

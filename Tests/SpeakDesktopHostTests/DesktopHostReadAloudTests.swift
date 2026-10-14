@@ -152,6 +152,42 @@ final class DesktopHostReadAloudTests: XCTestCase {
 
     private var statuses: [String] { FakeLog.shared.allStatuses }
 
+    func testReadAloud_RefusesUnsupportedOrInvalidSavedControlsBeforePlayback() async throws {
+        FakeLog.shared.setKey("deepgram-key", name: deepgramKey)
+        for (speed, pitch, ssml) in [(1.25, 0.0, false), (1.0, 2.0, false), (1.0, 0.0, true),
+                                    (9.0, 0.0, false), (1.0, 0.5, false)] {
+            var stored = DesktopVoiceOutputSettings()
+            stored.speed = speed
+            stored.pitch = pitch
+            stored.useSSML = ssml
+            await controller.saveVoiceOutput(stored)
+            await controller.readAloud(record.uuidString, text: "This must not be silently normalized.")
+            XCTAssertTrue(statuses.last?.hasPrefix("Read aloud failed:") == true)
+            XCTAssertTrue(FakeSpeech.shared.events.isEmpty)
+            XCTAssertTrue(FakeSpeech.shared.spoken.isEmpty)
+            let retained = await controller.voiceOutputSettings()
+            XCTAssertEqual(retained, stored)
+        }
+    }
+
+    func testVoiceSelection_RetainsIncompatibleOptionsWithoutImplicitReset() async throws {
+        let first = try XCTUnwrap(DesktopVoiceOutputSettings.voices.first)
+        let last = try XCTUnwrap(DesktopVoiceOutputSettings.voices.last)
+        var stored = DesktopVoiceOutputSettings(voice: first)
+        stored.speed = 1.25
+        await controller.saveVoiceOutput(stored)
+        let file = directory.appendingPathComponent("settings.json")
+        let before = try Data(contentsOf: file)
+        await controller.selectVoiceOutput(last)
+        XCTAssertNotEqual(try Data(contentsOf: file), before)
+        let retained = await controller.voiceOutputSettings()
+        XCTAssertEqual(retained.modelID, last.model.id)
+        XCTAssertEqual(retained.voiceID, last.id)
+        XCTAssertEqual(retained.speed, stored.speed)
+        XCTAssertEqual(retained.pitch, stored.pitch)
+        XCTAssertEqual(retained.useSSML, stored.useSSML)
+    }
+
     func testReadAloud_SpeaksEachSegmentWithTheSavedVoiceThenFinishes() async throws {
         FakeLog.shared.setKey("deepgram-key", name: deepgramKey)
         let voice = try XCTUnwrap(DeepgramSpeechCatalog.fluxVoices.first { $0.id == "flux-kit-en" })

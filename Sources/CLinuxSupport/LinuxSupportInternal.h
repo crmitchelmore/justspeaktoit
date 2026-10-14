@@ -42,6 +42,11 @@ gboolean jsti_history_filters_active(void);
 
 struct _GtkWidget;
 struct _GtkLabel;
+struct _GtkWindow;
+void jsti_comparison_open(struct _GtkWindow *parent);
+int32_t jsti_comparison_self_test(struct _GtkWindow *parent, char *error, size_t capacity);
+void jsti_comparison_screenshot_tour(struct _GtkWindow *parent, const char *directory);
+int32_t jsti_widget_save_snapshot(struct _GtkWidget *widget, const char *path, gboolean opaque);
 
 /* LinuxWindowStyle.c: the app's look, shared by every page. Colours follow
  * the Mac app's brand tokens and switch with the desktop's light or dark

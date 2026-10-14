@@ -95,6 +95,9 @@ package protocol DesktopHostPlatform: Sendable {
     static func confirmAudioCleanup(id: UUID, count: Int) throws
     static func copyToClipboard(_ text: String) throws
 
+    static var comparisonDigest: LocalModelDigestProvider? { get }
+    static func comparisonPresentation(_ presentation: DesktopComparisonPresentation)
+
     // Automatic output and playback.
     /// The job for a finished recording, or nil when no output is possible
     /// (no captured field, or the clipboard is unavailable).
@@ -160,6 +163,8 @@ package extension DesktopHostPlatform {
         throw DesktopHostError(message: "Recording audio cleanup is unavailable on this host.")
     }
     static func makeRecordingFeedbackLoader() -> (any DesktopRecordingFeedbackLoader)? { nil }
+    static var comparisonDigest: LocalModelDigestProvider? { LocalModelDigestProvider.platformDefault }
+    static func comparisonPresentation(_ presentation: DesktopComparisonPresentation) {}
     static func update(_ status: String) { update(status, transcript: nil, state: -1) }
     /// Hosts without a dashboard or History header show no totals.
     static func historyInsights(all: DesktopHistoryInsights, visible: DesktopHistoryInsights) {}

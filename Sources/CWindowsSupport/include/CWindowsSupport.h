@@ -89,6 +89,13 @@ int jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t c
                                   const char *const *recovered_keywords, size_t recovered_count,
                                   JSTIConfigurationCallback callback, void *context);
 void jsti_window_clear_configuration(void);
+
+/* Comparison actions 100-107. Model rows: id TAB name TAB live(0/1), round rows:
+ * id TAB name. Run payload: language LF tab-separated model ids LF file paths.
+ * Rank payload: round id LF comma-separated ranks in persisted blind order. */
+int jsti_comparison_present(const char *models, const char *rounds, const char *detail,
+                           const char *selected, int busy, int recording, int judgeable,
+                           int sync_enabled, int sync_available, const char *references, const char *reference);
 int jsti_window_run(const char *const *model_names, size_t model_count, int selected_index,
                     JSTIWindowCallback callback, void *context, char *error, size_t error_capacity);
 /* Optional pre-run mode catalogue with the same count/order as window_run's

@@ -352,7 +352,7 @@ enum SpeakWindowsMain {
             try names.withUnsafeBufferPointer { buffer in
                 try WindowsNative.checked { error, capacity in
                     jsti_window_run(
-                        buffer.baseAddress, buffer.count, Int32(selected), windowEvent,
+                        buffer.baseAddress, buffer.count, Int32(selected), comparisonWindowEvent,
                         Unmanaged.passUnretained(holder).toOpaque(), error, capacity
                     )
                 }

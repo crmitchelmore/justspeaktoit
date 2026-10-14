@@ -52,6 +52,10 @@ package protocol DesktopHostEffects<Platform>: Sendable {
     func transcribe(
         _ request: DesktopHostTranscriptionRequest, with controller: DesktopHostController<Platform>
     ) async throws -> TranscriptionResult
+    func transcribeComparison(
+        _ request: DesktopHostTranscriptionRequest, azureEndpoint: String,
+        with controller: DesktopHostController<Platform>
+    ) async throws -> TranscriptionResult
     /// Blocking automatic output, called off the UI thread and the controller.
     func perform(_ job: Platform.OutputJob, text: String) -> String
     /// Replaces the settings file atomically.
@@ -64,6 +68,12 @@ package extension DesktopHostEffects {
     ) -> (any FinalizingStreamingTranscriptionClient)? {
         makeLiveClient(model: model, key: key, language: language, azureEndpoint: azureEndpoint)
     }
+    func transcribeComparison(
+        _ request: DesktopHostTranscriptionRequest, azureEndpoint: String,
+        with controller: DesktopHostController<Platform>
+    ) async throws -> TranscriptionResult {
+        try await controller.transcribeComparison(request, endpoint: azureEndpoint)
+    }
 }
 
 /// Owned until native capture stop has joined its worker, so no callback sees
@@ -71,15 +81,18 @@ package extension DesktopHostEffects {
 package final class DesktopCaptureContext: @unchecked Sendable {
     package let file: PCMRecordingFile
     package let live: DesktopLiveSession?
+    package let comparison: DesktopComparisonLive?
     package let onFailure: @Sendable (String) -> Void
     private let lock = NSLock()
     private var failed = false
 
     package init(
-        file: PCMRecordingFile, live: DesktopLiveSession? = nil, onFailure: @escaping @Sendable (String) -> Void
+        file: PCMRecordingFile, live: DesktopLiveSession? = nil, comparison: DesktopComparisonLive? = nil,
+        onFailure: @escaping @Sendable (String) -> Void
     ) {
         self.file = file
         self.live = live
+        self.comparison = comparison
         self.onFailure = onFailure
     }
 
@@ -98,6 +111,7 @@ package final class DesktopCaptureContext: @unchecked Sendable {
             let data = Data(bytes: samples, count: count * MemoryLayout<Int16>.size)
             try file.append(data)
             live?.sendAudio(data)
+            comparison?.sendAudio(data)
         } catch {
             fail(error.localizedDescription)
         }

@@ -173,6 +173,10 @@ func linuxWindowEvent(
         linuxVocabularyEvent(Int32(event), payload: value, kind: slot, holder: holder)
         return
     }
+    if (100...109).contains(event) || (120...129).contains(event) {
+        holder.enqueueSettings { await holder.controller.comparisonEvent(Int32(event), text: value, index: index) }
+        return
+    }
     if linuxSessionEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxHistoryManagementEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxHistoryEvent(event, value: value, slot: slot, holder: holder) { return }

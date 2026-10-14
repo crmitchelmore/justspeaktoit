@@ -17,6 +17,74 @@ output. Apple audio, UI, local inference and security integrations retain their
 native implementations. No web view or separate process is introduced into the
 Apple capture path.
 
+## Model comparison
+
+**Transcription > Compare Models** opens a separate native editor. Select two to
+eight currently supported routes, an optional language hint, and File/Batch or
+Live. The file picker accepts one sample or up to 32 samples. All sources are
+copied and normalized before any provider request; each sample's candidates run
+independently with a 120-second deadline. Downloaded local batch models appear
+only when the existing local runtime/model readiness check passes.
+
+Live prepares the qualified shared clients before starting one WASAPI capture:
+each lane must expose synchronized audio readiness, with a 12-second handshake
+budget. All ready lanes receive the common 24 kHz PCM, or the same streaming
+16 kHz projection, in 100 ms capture frames. Failed lanes do not cancel healthy
+lanes. Stop flushes native capture and bounds each lane's finalization to 30
+seconds; cancellation retains recovery text and the app-owned sample. Finalization
+is an owned task, so serialized native events do not leave Cancel queued behind
+Stop; shutdown also cancels that task within the existing host grace period.
+Comparison capture stops at the Mac's 600-second safety limit; this is not an
+audio retention limit.
+
+Comparison uses raw results only and never inserts text, post-processes, changes
+dictation settings, or writes normal History. Saved rounds and their blind order
+live under `Comparisons/rounds.json`, using the canonical revision shape. Audio
+and original import snapshots live under `Comparisons/Samples/`. Rank every
+blind result with each rank from 1 to N exactly once (including failures) to
+reveal models; standings are derived from the persisted canonical rounds.
+As on Mac, fewer than two usable results reveal the evidence without fabricating
+a ranking or scoreboard credit.
+Candidate selection is remembered separately for File/Batch and Live, with
+native Select all/none controls. The blind **Diff against** picker reuses
+`TranscriptWordDiff`; signed `[+added]` / `[-removed]` annotations remain readable
+without colour and leave original transcript text untouched. Reference changes
+do not judge or alter saved rounds. Word alignment is cached and computed off the
+UI executor; superseded presentations cannot overwrite a newer view.
+Play sample reuses native playback. JSON/Markdown exports use the canonical
+SpeakCore documents through overwrite-confirming native save pickers. Exports
+include transcripts and model identities, even for unjudged rounds, but no audio.
+
+Interrupted runs remain visible after relaunch; retained live audio may have
+unknown duration/hash until normal finalization. Delete / discard saved round
+requires native confirmation, persists a canonical deletion tombstone before
+removing only its app-owned sample, and leaves original imports and normal
+History untouched. Startup prunes orphan app-owned sample files, not recordings
+referenced by saved rounds; no age/count retention policy is imposed.
+Comparison sync is a separate explicit opt-in in this editor, using the existing
+iCloud sign-in in Settings. It reuses `ComparisonSyncCoordinator` and the
+canonical CloudKit Web Services round/tombstone codec. Only transcript, model,
+ranking and sample metadata syncs; audio and credentials never do. Local changes
+trigger an owned pass, **Sync now / retry** triggers another, and the existing
+300-second web heartbeat reconciles remote changes (web clients have no native
+CloudKit change notifications or documented expired-cursor error code, so
+automatic cursor-expiry recovery is not claimed). Consent-off, cancellation and account changes
+fence local commits/cursors/acknowledgements; network requests never run inside
+the non-reentrant session gate. Comparison cursors and acknowledgements are
+separate from History. Previously synced rounds/deletions stay bound to their
+original account, including across relaunch; unsynced local deletions remain
+local. Active microphone and queued batch rounds cannot sync or be deleted
+remotely until execution releases them. Remote rounds have no playable sample
+unless their app-owned audio also exists locally.
+Neither Mac nor these native editors automatically retry interrupted or failed
+comparison runs; sync retry retries metadata reconciliation, not providers.
+The native smoke test exercises selection/action payloads, blind/revealed state,
+rank/play controls, explicit sync consent/retry and capture admission. The screenshot tour also emits
+`comparison-blind-light.bmp` and `comparison-revealed-dark.bmp`, independently of
+page ordinals. Synthetic tests establish isolation, persistence and lifecycle
+behavior, not real-provider accuracy, physical microphone/speaker acceptance,
+Narrator, high contrast or multi-monitor/DPI acceptance.
+
 ## Build and run
 
 Windows CI uses **Swift 6.2.3, Windows Server 2022, x86_64**. Follow the official
@@ -728,7 +796,7 @@ but must not be presented as the identical Apple-only engine or service.
 | Personal vocabulary | Native Corrections/Pronunciation editors; shared durable CRUD, order, validation and preview; stored-candidate review/promotion/dismissal/removal/clear; canonical correction matching before post-processing in recording/import/retry/live completion; separately retained provider/corrected/processed text and applied/suggested snapshots; native History correction results; xAI/Azure batch and xAI/AssemblyAI live keyword hints | Final-head native/Apple CI and physical editing/recording/speech acceptance; OS-wide safe edit observation |
 | Profiles and settings | Native ordered per-app editor and shared validation; immutable recording overrides, model-specific live language hints and preserved unknown values | Final-head native UI, physical executable matching, remaining settings and lexicon overrides |
 | History | Native record selection, case/diacritic-insensitive search over original/processed text and friendly model names, original/processed transcript selection for copy and export, retry, text export, external audio opening and in-app playback with Play/Pause, Stop and elapsed/remaining through Media Foundation and WASAPI; durable original/processed results and interrupted-recording recovery | Final-head UI smoke and device acceptance, physical speaker/Bluetooth/USB playback, history import and retention controls |
-| Model comparison | Shared rounds, scoring and transcript differences compile | Native comparison UI, parallel execution and audio/provider isolation |
+| Model comparison | Native Compare Models editor; isolated File and multi-sample Batch runs; one microphone fan-out with readiness, lane errors, bounded finalization and 600s capture safety; persisted blind rankings/reveal and canonical scoreboard/JSON/Markdown exports; confirmed delete/discard with durable tombstones, owned sample cleanup and startup orphan pruning; account/consent-fenced canonical metadata sync with explicit consent/retry. Synthetic portable orchestration/host/sync tests, native smoke checks and named screenshots | Final-head Windows/Linux native CI, physical microphone/playback, Narrator, high contrast and multi-monitor/DPI acceptance, real provider and real-account CloudKit receipts |
 | Voice output | Read aloud speaks the displayed History transcript (the version shown) with a canonical Deepgram Aura or Flux voice chosen in a native Voice dialog. Native pronunciation entries render through the canonical renderer exactly once before segmentation. Transcripts longer than Deepgram's 2,000-character request limit are spoken as consecutive sentence-bounded segments (shared `SpeechTextSegmenter`). Speech plays through the same `WindowsAudioPlaybackController` as History playback, so only one is ever audible; Play/Pause and Stop act on it, and recording, import, selecting another row, History playback and close stop it, including a segment still being synthesized. The shared Deepgram engine keeps its bounded WAV validation, exclusive private staging and owned-file cleanup, and the Read aloud controller (`DesktopHostReadAloud`, SpeakDesktopHost) is shared with Linux; Windows supplies its player, engine staging and Voice dialog. Normal speed only. Cross-compiled locally; awaited-playback controller tests pass under a local Windows ABI runner | Windows CI for this revision, a real Deepgram receipt (including Flux linear16/WAV), physical speaker acceptance, speed control, system voices, other providers, clipboard and selected-text sources, and removal of staged files left by an earlier launch |
 | Hands-free dictation | Domain seams exist; no Windows workflow | Native VAD, pre-roll, endpointing and recovery |
 | Credentials | Windows Credential Manager uses canonical identifiers for the seventeen transcription provider families | Physical credential lifecycle acceptance, credential removal UI and remaining providers |

@@ -46,4 +46,7 @@ if [ -n "${JSTI_UI_SCREENSHOT_DIR:-}" ]; then
         [ -s "$JSTI_UI_SCREENSHOT_DIR/$file" ] || { echo "Missing screenshot $file" >&2; exit 1; }
         index=$((index + 1))
     done
+    for name in comparison-blind-light comparison-revealed-dark comparison-blind-light-full comparison-revealed-dark-full; do
+        [ -s "$JSTI_UI_SCREENSHOT_DIR/$name.png" ] || { echo "Missing screenshot $name.png" >&2; exit 1; }
+    done
 fi

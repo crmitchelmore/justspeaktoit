@@ -291,3 +291,9 @@ public final class AssemblyAILiveClient: FinalizingStreamingTranscriptionClient,
         value.isFinite ? max(0, value) : 0
     }
 }
+
+extension AssemblyAILiveClient: StreamingAudioReadyProviding {
+    public var isReadyForAudio: Bool {
+        synchronized { run.phase == .active && run.attempt?.didBegin == true }
+    }
+}

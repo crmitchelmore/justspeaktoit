@@ -118,6 +118,57 @@ self-test requires the canonical name to resolve in the theme. The Python
 checks are not proof of GTK/Wayland/panel rendering or an installed Flatpak;
 those remain native CI and desktop validation gates.
 
+## Model comparison
+
+**Transcription > Compare Models** opens a native GTK/libadwaita editor with
+wrapped, accessibly named model checkboxes, File/Batch and Live input modes,
+language hint, saved rounds, raw blind results, ranking/reveal, scoreboard,
+sample playback and JSON/Markdown exports. File selection accepts one to 32
+local samples; save dialogs use the desktop's native file chooser. Picker errors
+appear in the comparison editor instead of being hidden behind its modal window.
+Closing a picker/editor invalidates that picker request, so a late selection
+cannot start a replacement editor's run.
+
+Windows and Linux share `DesktopComparisonRunner`, `DesktopComparisonLive`,
+`DesktopComparisonStore` and `DesktopHostComparison`: all file snapshots are
+prepared before provider work, one native microphone capture fans out to the
+qualified live routes, and raw results never reach insertion, post-processing,
+dictation settings or normal History. Failed candidates remain independently
+judgeable. Complete distinct ranks 1...N reveal models; canonical persisted
+rounds determine standings and exports.
+Fewer than two usable results reveal unranked evidence, matching Mac, rather than
+inventing rankings or scoreboard credit. See the
+[Windows comparison workflow](windows-development.md#model-comparison) for the
+shared 120-second file, 12-second readiness and 30-second finalization budgets.
+Native Select all/none and remembered per-mode candidate selection match the
+Mac selection workflow. A blind **Diff against** dropdown uses the shared
+`TranscriptWordDiff`, with accessible `[+added]` / `[-removed]` text annotations
+instead of colour-only edits; original transcripts and persisted ranks stay unchanged.
+
+`Comparisons/rounds.json` and app-owned `Comparisons/Samples/` live in the private
+data directory. Interrupted rounds retain their audio; interrupted live metadata
+can remain unknown until normal finalization. Native confirmed delete/discard
+persists a canonical tombstone before cleaning up its app-owned sample, while
+startup prunes orphan samples. Original imports and normal History are untouched.
+The shared comparison capture safety limit is 600 seconds, not an age/count
+retention policy. The editor's separate explicit iCloud consent and **Sync now /
+retry** use the same canonical, account/consent-fenced metadata-only comparison
+sync as Windows. Sign in from the existing iCloud Sync settings; local changes,
+manual retry and the existing 300-second web heartbeat reconcile rounds and
+tombstones. Comparison owns a separate cursor/acknowledgements and preserves
+original-account provenance. Active capture/queued batch revisions are excluded
+and protected against remote deletion; remote metadata never supplies audio.
+Automatic interrupted/failed provider retry is not a Mac comparison feature and
+is not added here.
+The GTK window self-test checks wrapped labels, model and language payloads,
+ranking, playback, explicit sync consent/retry and busy/recording controls with synthetic fixtures only.
+The screenshot tour adds `comparison-blind-light.png` and
+`comparison-revealed-dark.png`, plus `-full.png` views including the below-fold
+ranking/export controls, without changing page ordinals. Native execution
+at the final head, physical PulseAudio/PipeWire devices, screen-reader/keyboard
+acceptance, small-screen behavior, live-provider and real-account CloudKit receipts are separate gates;
+portable tests and syntax/type checks do not establish those gates.
+
 ## Window
 
 The window follows the Mac app's layout and look. A sidebar lists **Speak**

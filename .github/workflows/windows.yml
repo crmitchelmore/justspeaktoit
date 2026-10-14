@@ -246,6 +246,10 @@ jobs:
             $file = Join-Path $folder ('{0:D2}-{1}.bmp' -f ($index + 1), $expected[$index])
             if (-not (Test-Path $file)) { throw "Missing screenshot $file" }
           }
+          foreach ($name in @('comparison-blind-light', 'comparison-revealed-dark')) {
+            $file = Join-Path $folder ($name + '.bmp')
+            if (-not (Test-Path $file)) { throw "Missing screenshot $file" }
+          }
 
       - name: Upload page screenshots
         if: ${{ !cancelled() && steps.page-screenshots.outcome != 'skipped' }}

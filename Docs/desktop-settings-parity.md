@@ -82,15 +82,33 @@ classifier**. Noise can trigger it. The existing pure `HandsFreeDictationMachine
 and activity tracker now compile portably; unchanged Apple classification,
 sensitivity and model admission live in `HandsFreeDictationApple.swift`.
 The native hotkey arms/disarms, sound starts an utterance, configured silence
-finishes it, and a successful transcription rearms the same native capture after
-the existing automatic output finishes. Output retains its existing status-only
-failure/recovery API; this slice does not add typed delivery acknowledgements.
+finishes it, and successful transcription rearms the same native capture only
+after record-bound output confirms field insertion or an explicitly requested
+clipboard copy. `DesktopTextOutputResult` separates delivery evidence from status
+copy: accepted paste keys, fallback recovery copies, failures and cancellation
+never authorize automatic rearm. The last completion survives output-slot cleanup
+without retaining its native job, and cannot acknowledge a different recording.
 Capture/provider/post-processing failures, Cancel, Record, committed configuration
 changes, lock/sleep and close disarm. A refused start or user-absence event never
 cancels a manual recording.
-The run freezes its original profile, insertion target and output options;
-disarm/rearm to change target. Following foreground app changes between
-utterances remains a gap, not an asserted Mac-equivalent behavior.
+Each sound-start captures a fresh native destination off the PCM callback and UI
+thread, then freezes it through transcription/output. Windows retains the
+captured field; X11 retains/rechecks its window. A missing/refused destination
+stops hands-free rather than delivering to a different field. Wayland cannot
+freeze another client's destination, so automatic utterances require explicitly
+selected clipboard-only output; manual portal paste remains available.
+Windows requires verified insertion into the retained native edit control, or
+verified UI Automation insertion with field identity, to rearm. A window-only
+paste does not qualify.
+X11/portal key submission is not text readback: it reports unconfirmed insertion,
+stops listening and asks the user to check the original field before rearming
+with the hotkey. There is no automatic retry that could duplicate uncertain text.
+Capture-target completion after disarm/close cannot start a late recording.
+
+The run still freezes its original per-app profile/model, device and output
+options. Unlike Mac `startSession(.handsFree)`, it does **not** re-resolve the
+foreground-app profile at each utterance. This remains a separate behavioral
+gap; the fixed in-process capture rate is not silently reinterpreted.
 
 `DesktopHandsFreeAudio.swift` keeps quiet pre-roll only in RAM (0.5 seconds).
 Startup audio is bounded to three seconds; overflow fails and disarms rather
@@ -119,7 +137,7 @@ Linux settings retain native scrolling. Windows now scrolls fields/recovery
 controls while keeping the section, error region and footer fixed; wheel,
 scrollbar and Page Up/Down make the last fields reachable.
 
-The final local runtime tree passes 99 focused hands-free/configuration/feedback
+The frozen f29 runtime tree passes 99 focused hands-free/configuration/feedback
 tests and the full portable suite (1436 tests, 28 skipped, zero failures), all four Windows Swift projections and
 strict lint across the 29 changed Swift source/test files. The boundary check
 reports 275 shared sources and 110 explicit Apple exclusions; canonical-key
@@ -130,6 +148,17 @@ native C/C++ syntax passes. These synthetic/native-control receipts do **not**
 prove real microphone latency, real OS lock/sleep delivery, ambient-noise
 quality, Apple compilation or installed-package acceptance. Exact-head CI and
 physical/device qualification must be reported separately.
+
+The subsequent target/delivery slice passes 50 focused host tests (including
+nine new delivery/target lifecycle cases), the full portable suite (1445 tests,
+28 skipped, zero failures), all four Windows Swift projections and strict lint
+across 24 changed Swift files. An initial full run exposed the existing unrelated
+OpenRouter cancellation error-shape race; its unchanged eight-test suite and the
+full rerun passed. Native Windows tests additionally classify retained-control
+versus UIA/window-only proof, and native Linux tests classify accepted keys,
+explicit copy and fallback copy; those require separate exact-head native CI
+receipts, not substitution of the frozen f29 receipts above. No native control
+IDs, events, C headers, clipboard ownership algorithm or icon assets changed.
 
 ## Recording feedback (native qualified; package acceptance pending)
 
@@ -396,7 +425,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | ttsPronunciationDictionary | Missing / Missing | No TTS pronunciation editor/pipeline |
 | historyFlushInterval | Missing selector / Missing selector | History is durable per operation, not configurable timed flush |
 | silenceDetectionEnabled | Executable; qualification pending / Same | Native switch; initial quiet and configured silence stop the existing manual recording/finalization pipeline |
-| handsFreeDictationEnabled | Sound-activation replacement; qualification pending / Same | Hotkey arm, RAM pre-roll, utterance/finalize/output/rearm; native absence guard required; not Apple's classifier and target stays fixed per run |
+| handsFreeDictationEnabled | Sound-activation replacement; qualification pending / Same | Fresh frozen target per utterance, record-bound acknowledged output; unconfirmed paste stops, Wayland requires clipboard-only; profile/model still fixed per run; not Apple's classifier |
 | silenceThreshold | Executable; qualification pending / Same | Canonical range/default and Mac PCM meter; native editor feeds manual silence and sound activation |
 | silenceDuration | Executable; qualification pending / Same | Canonical hold/range feeds manual auto-stop and hands-free debounce; existing recording tail is retained |
 | connectionPreWarmingEnabled | Missing / Missing | No persistent provider prewarming preference |

@@ -1,4 +1,5 @@
 import Foundation
+import SpeakDesktop
 
 /// Automatic output authority for one recording: the text output options
 /// persisted when it started and the field captured at its hotkey, if any.
@@ -18,14 +19,17 @@ package struct DesktopHostOutputState<Platform: DesktopHostPlatform>: Sendable {
     package var job: Platform.OutputJob?
     package var id: UUID?
     package var recordID: UUID?
+    package var result: DesktopTextOutputResult?
 
     package init(
-        task: Task<Void, Never>? = nil, job: Platform.OutputJob? = nil, id: UUID? = nil, recordID: UUID? = nil
+        task: Task<Void, Never>? = nil, job: Platform.OutputJob? = nil, id: UUID? = nil,
+        recordID: UUID? = nil, result: DesktopTextOutputResult? = nil
     ) {
         self.task = task
         self.job = job
         self.id = id
         self.recordID = recordID
+        self.result = result
     }
 }
 
@@ -57,25 +61,34 @@ extension DesktopHostController {
         }
         guard outputSlot.task == nil, !closed else { Platform.cancel(job); return .busy }
         let identifier = UUID()
-        outputSlot = DesktopHostOutputState<Platform>(task: nil, job: job, id: identifier, recordID: recordID)
+        outputSlot = DesktopHostOutputState<Platform>(job: job, id: identifier, recordID: recordID)
         activeOperations += 1
         let effects = self.effects
         let worker = Task.detached(priority: .userInitiated) {
             effects.perform(job, text: text)
         }
         outputSlot.task = Task {
-            let status = await withTaskCancellationHandler {
+            let result = await withTaskCancellationHandler {
                 await worker.value
             } onCancel: {
                 Platform.cancel(job)
                 worker.cancel()
             }
-            if outputSlot.id == identifier { outputSlot = DesktopHostOutputState<Platform>() }
             defer { finishOperation() }
+            let completion = Task.isCancelled
+                ? DesktopTextOutputResult(
+                    .cancelled, status: "Output cancelled. Check the original field before retrying."
+                )
+                : result
+            if outputSlot.id == identifier {
+                outputSlot = DesktopHostOutputState<Platform>(recordID: recordID, result: completion)
+            }
+            guard !Task.isCancelled, !closed else { return }
             // A newer dictation owns the HUD by now if one started; this finishes only its own.
-            finishHUD(recordID, .success(status))
-            guard !Task.isCancelled, !closed, recording == nil, selectedHistoryID == recordID else { return }
-            update(status, state: 0)
+            finishHUD(recordID, completion.permitsAutomaticResume
+                ? .success(completion.status) : .failure(completion.status, headline: "Check text output"))
+            guard recording == nil, selectedHistoryID == recordID else { return }
+            update(completion.status, state: 0)
         }
         return Platform.isClipboard(job) ? .copying : .inserting
     }

@@ -107,6 +107,7 @@ package protocol DesktopHostPlatform: Sendable {
     /// The job for a finished recording, or nil when no output is possible
     /// (no captured field, or the clipboard is unavailable).
     static func makeOutputJob(options: TextOutputOptions, target: InsertionTarget?) -> OutputJob?
+    static func requiresInsertionTarget(_ options: TextOutputOptions) -> Bool
     static func makePlayback() -> Playback
     static func makeRecordingFeedbackLoader() -> (any DesktopRecordingFeedbackLoader)?
     /// Why native session lock/sleep monitoring cannot protect an armed microphone.

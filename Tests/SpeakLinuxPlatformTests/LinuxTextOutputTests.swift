@@ -92,7 +92,7 @@ final class LinuxOutputPlanTests: XCTestCase {
 }
 
 /// Records every native effect in order.
-private final class RecordingNative: LinuxOutputNative, @unchecked Sendable {
+final class RecordingNative: LinuxOutputNative, @unchecked Sendable {
     let lock = NSLock()
     var clipboard: String?
     var ownership: UInt64 = 0

@@ -116,7 +116,9 @@ final class SettingsWriteEffects: DesktopHostEffects, @unchecked Sendable {
             modelIdentifier: request.model, cost: nil, rawPayload: nil, debugInfo: nil
         )
     }
-    func perform(_ job: FakeJob, text: String) -> String { "Delivered." }
+    func perform(_ job: FakeJob, text: String) -> DesktopTextOutputResult {
+        DesktopTextOutputResult(.confirmedInsertion, status: "Delivered.")
+    }
     func writeSettings(_ data: Data, to url: URL) throws {
         try lock.withLock {
             if refusing { throw CocoaError(.fileWriteOutOfSpace) }

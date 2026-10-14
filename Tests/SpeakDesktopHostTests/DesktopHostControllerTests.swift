@@ -146,6 +146,7 @@ enum FakePlatform: DesktopHostPlatform {
     static func makeOutputJob(options: FakeTextOutput, target: String?) -> FakeJob? {
         options.label == "copy" || target != nil ? FakeJob(label: options.label, target: target) : nil
     }
+    static func requiresInsertionTarget(_ options: FakeTextOutput) -> Bool { options.label != "copy" }
     static func cancel(_ job: FakeJob) {}
     static func isClipboard(_ job: FakeJob) -> Bool { job.target == nil }
     static func makePlayback() -> FakePlayback { FakePlayback() }
@@ -159,6 +160,7 @@ final class Gate: @unchecked Sendable {
     private let lock = NSLock()
     private var open: Bool
     init(open: Bool) { self.open = open }
+    var isOpen: Bool { lock.withLock { open } }
     func hold() { lock.withLock { open = false } }
     func release() { lock.withLock { open = true } }
     func pass() async {
@@ -206,9 +208,9 @@ final class SyntheticEffects: DesktopHostEffects, @unchecked Sendable {
             modelIdentifier: request.model, cost: nil, rawPayload: nil, debugInfo: nil
         )
     }
-    func perform(_ job: FakeJob, text: String) -> String {
+    func perform(_ job: FakeJob, text: String) -> DesktopTextOutputResult {
         lock.withLock { performed.append((job, text)) }
-        return "Delivered."
+        return DesktopTextOutputResult(.confirmedInsertion, status: "Delivered.")
     }
     func writeSettings(_ data: Data, to url: URL) throws { try data.write(to: url, options: .atomic) }
 }
@@ -407,4 +409,31 @@ final class DesktopHostControllerTests: XCTestCase {
         try Data().write(to: empty)
         XCTAssertThrowsError(try DesktopHostImport.validate(empty))
     }
+}
+
+/// Transcription blocks until cancelled or released.
+final class GatedEffects: DesktopHostEffects, @unchecked Sendable {
+    typealias Platform = FakePlatform
+    let gate: Gate
+    init(gate: Gate) { self.gate = gate }
+    func apiKey(name: String) throws -> String { FakeLog.shared.key(name) }
+    func makeCapture(
+        context: DesktopCaptureContext, deviceID: String, sampleRate: Int, frameMilliseconds: Int
+    ) throws -> any DesktopRecordingCapture { SyntheticCapture(context: context) }
+    func makeLiveClient(
+        model: String, key: String, language: String?, azureEndpoint: String
+    ) -> (any FinalizingStreamingTranscriptionClient)? {
+        nil
+    }
+    func transcribe(
+        _ request: DesktopHostTranscriptionRequest, with controller: DesktopHostController<FakePlatform>
+    ) async throws -> TranscriptionResult {
+        await gate.pass()
+        try Task.checkCancellation()
+        throw CancellationError()
+    }
+    func perform(_ job: FakeJob, text: String) -> DesktopTextOutputResult {
+        DesktopTextOutputResult(.confirmedInsertion, status: "Delivered.")
+    }
+    func writeSettings(_ data: Data, to url: URL) throws { try data.write(to: url, options: .atomic) }
 }

@@ -40,7 +40,14 @@ struct WindowsNativeEffects: WindowsControllerEffects {
         )
     }
 
-    func perform(_ job: WindowsOutputJob, text: String) -> String { job.perform(text) }
+    func perform(_ job: WindowsOutputJob, text: String) -> DesktopTextOutputResult { job.performResult(text) }
+
+    func captureInsertionTarget() async throws -> WindowsInsertionTarget? {
+        try await Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
+            return try WindowsInsertionTarget.capture()
+        }.value
+    }
 
     func writeSettings(_ data: Data, to url: URL) throws { try data.write(to: url, options: .atomic) }
 }

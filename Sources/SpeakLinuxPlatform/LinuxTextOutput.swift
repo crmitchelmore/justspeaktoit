@@ -1,4 +1,5 @@
 import Foundation
+import SpeakDesktop
 
 /// Persisted automatic output choices. Unknown or missing keys keep the
 /// defaults, so a settings file from a newer build still loads.
@@ -169,7 +170,13 @@ public final class LinuxOutputJob: @unchecked Sendable {
     private var isCancelled: Bool { lock.withLock { cancelled } }
 
     public func perform(_ text: String) -> String {
-        guard !isCancelled else { return "Output cancelled. Saved to History." }
+        performResult(text).status
+    }
+
+    public func performResult(_ text: String) -> DesktopTextOutputResult {
+        guard !isCancelled else {
+            return DesktopTextOutputResult(.cancelled, status: "Output cancelled. Saved to History.")
+        }
         switch plan {
         case .copy(let reason):
             return copy(text, reason: reason)
@@ -180,18 +187,22 @@ public final class LinuxOutputJob: @unchecked Sendable {
         }
     }
 
-    private func copy(_ text: String, reason: String?) -> String {
+    private func copy(_ text: String, reason: String?) -> DesktopTextOutputResult {
         do {
             try native.writeClipboard(text)
         } catch {
-            return "Saved. The transcript could not be copied; select Copy. \(error.localizedDescription)"
+            return DesktopTextOutputResult(
+                .failed, status: "Saved. The transcript could not be copied; select Copy. \(error.localizedDescription)"
+            )
         }
-        guard let reason else { return "Transcript copied to the clipboard and saved to History." }
+        guard let reason else {
+            return DesktopTextOutputResult(.copied, status: "Transcript copied to the clipboard and saved to History.")
+        }
         native.notify(title: "Transcript copied", body: "Press Ctrl+V to paste it.")
-        return "Transcript copied; press Ctrl+V to paste. \(reason)"
+        return DesktopTextOutputResult(.recoveryCopy, status: "Transcript copied; press Ctrl+V to paste. \(reason)")
     }
 
-    private func x11Paste(_ text: String, window: UInt64, shift: Bool, restore: Bool) -> String {
+    private func x11Paste(_ text: String, window: UInt64, shift: Bool, restore: Bool) -> DesktopTextOutputResult {
         var previous: String?
         var readFailure: String?
         if restore {
@@ -204,50 +215,70 @@ public final class LinuxOutputJob: @unchecked Sendable {
             } else {
                 try native.writeClipboard(text)
             }
-            guard !isCancelled else { return "Output cancelled. The transcript is on the clipboard." }
+            guard !isCancelled else {
+                return DesktopTextOutputResult(
+                    .cancelled, status: "Output cancelled. The transcript is on the clipboard."
+                )
+            }
             guard try native.x11Paste(window: window, shift: shift) else {
                 native.notify(title: "Transcript copied", body: "The focused window changed. Press Ctrl+V to paste.")
-                return "The focused window changed, so nothing was pasted. The transcript is on the clipboard."
+                return DesktopTextOutputResult(
+                    .recoveryCopy,
+                    status: "The focused window changed, so nothing was pasted. The transcript is on the clipboard."
+                )
             }
         } catch {
-            return "Saved. Automatic paste unavailable; select Copy. \(error.localizedDescription)"
+            return DesktopTextOutputResult(
+                .unconfirmedInsertion,
+                status: "Saved. Automatic paste could not be confirmed; check the original field before retrying. "
+                    + error.localizedDescription
+            )
         }
         if let readFailure {
-            return "Transcript pasted and saved to History. Previous clipboard text could not be read: \(readFailure)"
+            return unconfirmedPaste(" Previous clipboard text could not be read: \(readFailure)")
         }
-        guard restore, let previous, let ownership else { return "Transcript pasted and saved to History." }
+        guard restore, let previous, let ownership else { return unconfirmedPaste() }
         return restorePreviousClipboard(previous, ownership: ownership)
     }
 
-    private func restorePreviousClipboard(_ previous: String, ownership: UInt64) -> String {
+    private func restorePreviousClipboard(_ previous: String, ownership: UInt64) -> DesktopTextOutputResult {
         native.sleep(milliseconds: Self.restoreDelayMilliseconds)
-        guard !isCancelled else { return "Transcript pasted and saved to History." }
+        guard !isCancelled else { return unconfirmedPaste() }
         do {
             guard try native.restoreClipboard(previous, ownership: ownership) else {
-                return "Transcript pasted and saved to History."
+                return unconfirmedPaste()
             }
         } catch {
-            return "Transcript pasted. Previous clipboard text could not be restored: \(error.localizedDescription)"
+            return unconfirmedPaste(" Previous clipboard text could not be restored: \(error.localizedDescription)")
         }
-        return "Transcript pasted and saved to History. The clipboard was restored."
+        return unconfirmedPaste(" The clipboard was restored.")
     }
 
-    private func portalPaste(_ text: String, shift: Bool) -> String {
+    private func portalPaste(_ text: String, shift: Bool) -> DesktopTextOutputResult {
         if native.ownWindowFocused() {
             return copy(text, reason: "JustSpeakToIt itself was focused, so nothing was pasted.")
         }
         do {
             let sharedClipboard = try native.prepareRemoteDesktop()
-            guard !isCancelled else { return "Output cancelled. Saved to History." }
+            guard !isCancelled else {
+                return DesktopTextOutputResult(.cancelled, status: "Output cancelled. Saved to History.")
+            }
             if sharedClipboard {
                 try native.remotePaste(text: text, shift: shift)
             } else {
                 try native.writeClipboard(text)
                 try native.remotePaste(text: nil, shift: shift)
             }
-            return "Transcript pasted and saved to History. It also stays on the clipboard."
+            return unconfirmedPaste(" It also stays on the clipboard.")
         } catch {
             return copy(text, reason: "Automatic paste unavailable: \(error.localizedDescription)")
         }
+    }
+
+    private func unconfirmedPaste(_ detail: String = "") -> DesktopTextOutputResult {
+        DesktopTextOutputResult(
+            .unconfirmedInsertion,
+            status: "Paste keys sent; insertion could not be confirmed. Saved to History." + detail
+        )
     }
 }

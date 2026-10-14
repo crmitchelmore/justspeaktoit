@@ -215,7 +215,10 @@ private final class ComparisonHostEffects: DesktopHostEffects, @unchecked Sendab
             cost: nil, rawPayload: nil, debugInfo: nil
         )
     }
-    func perform(_ job: FakeJob, text: String) -> String { XCTFail("No automatic output."); return "" }
+    func perform(_ job: FakeJob, text: String) -> DesktopTextOutputResult {
+        XCTFail("No automatic output.")
+        return DesktopTextOutputResult(.confirmedInsertion, status: "")
+    }
     func writeSettings(_ data: Data, to url: URL) throws { XCTFail("No settings mutation.") }
 }
 

@@ -134,9 +134,9 @@ final class StubbornEffects: DesktopHostEffects, @unchecked Sendable {
             modelIdentifier: request.model, cost: nil, rawPayload: nil, debugInfo: nil
         )
     }
-    func perform(_ job: FakeJob, text: String) -> String {
+    func perform(_ job: FakeJob, text: String) -> DesktopTextOutputResult {
         lock.withLock { performed.append(text) }
-        return "Delivered."
+        return DesktopTextOutputResult(.confirmedInsertion, status: "Delivered.")
     }
     func writeSettings(_ data: Data, to url: URL) throws { try data.write(to: url, options: .atomic) }
 }

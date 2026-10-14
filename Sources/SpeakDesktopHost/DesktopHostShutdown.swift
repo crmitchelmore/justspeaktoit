@@ -113,6 +113,8 @@ extension DesktopHostController {
         historyDeletionTask?.cancel()
         folderRevealTask?.cancel()
         audioCleanupTask?.cancel()
+        migrationExportWorker?.cancel()
+        migrationExportTask?.cancel()
         audioCleanupConfirmation = nil
         postProcessingTask?.cancel()
         liveFinalisation?.cancel()

@@ -52,7 +52,8 @@ enum JSTIWindowEvent {
     JSTI_EVENT_HISTORY_DELETE = 91, /* text: frozen newline-separated UUIDs; index: 1 removes owned audio */
     JSTI_EVENT_RECORDINGS_FOLDER = 93,
     JSTI_EVENT_AUDIO_CLEANUP = 94,
-    JSTI_EVENT_AUDIO_CLEANUP_RESPONSE = 95 /* text: confirmation UUID; index: 1 confirms, 0 cancels */
+    JSTI_EVENT_AUDIO_CLEANUP_RESPONSE = 95, /* text: confirmation UUID; index: 1 confirms, 0 cancels */
+    JSTI_EVENT_MIGRATION_EXPORT = 96 /* text: selected ZIP destination; index: 1 includes saved audio */
 };
 
 /* Runs on the UI thread. text is borrowed until callback returns. model_index

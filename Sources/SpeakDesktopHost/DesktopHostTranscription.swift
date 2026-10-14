@@ -93,6 +93,11 @@ extension DesktopHostController {
 
     package func cancelTranscription() {
         guard !closed else { return }
+        if let export = migrationExportWorker {
+            export.cancel()
+            update("Stopping History backup... Existing files will be kept.", state: 2)
+            return
+        }
         if let cleanup = audioCleanupTask {
             cleanup.cancel()
             update("Stopping audio cleanup... Remaining audio and History will be kept.", state: 2)

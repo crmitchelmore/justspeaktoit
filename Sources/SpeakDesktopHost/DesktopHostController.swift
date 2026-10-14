@@ -100,6 +100,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var historyDeletionTask: Task<Void, Never>?
     var folderRevealTask: Task<Void, Error>?
     var audioCleanupTask: Task<Void, Never>?
+    var migrationExportTask: Task<Void, Never>?
+    var migrationExportWorker: Task<DesktopMigrationBackup.Outcome, Never>?
     var audioCleanupConfirmation: (id: UUID, snapshot: DesktopRecordingAudioSnapshot)?
     var liveUpdates: Task<Void, Never>?
     var liveFinalisation: DesktopLiveSession?

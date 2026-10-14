@@ -90,6 +90,7 @@ constexpr int historyFiltersID = 460;
 constexpr int historyDeleteID = 461, historyClearID = 462;
 constexpr int recordingsFolderLabelID = 463, recordingsFolderID = 464;
 constexpr int audioCleanupID = 465;
+constexpr int backupAudioID = 466, backupExportID = 467;
 constexpr int sourceID = 175;
 // Model modes: bit 0 is live, bit 1 is local (on-device).
 constexpr int modeCount = 4;
@@ -480,6 +481,8 @@ void updateHistoryControls(HWND window, int recording) {
     EnableWindow(GetDlgItem(window, historyDeleteID), recording == 0 && selected);
     EnableWindow(GetDlgItem(window, historyClearID), recording == 0 && !historyManagementIDs().empty());
     EnableWindow(GetDlgItem(window, audioCleanupID), recording == 0);
+    EnableWindow(GetDlgItem(window, backupAudioID), recording == 0);
+    EnableWindow(GetDlgItem(window, backupExportID), recording == 0);
     jsti_history_filters_enabled(recording == 0);
     SetDlgItemTextW(window, historyFiltersID, jsti_history_filters_label().c_str());
     EnableWindow(GetDlgItem(window, clearSearchID), recording == 0 && searching(window));
@@ -570,6 +573,7 @@ unsigned pagesOf(int identifier) {
     case voiceSettingsID: return page(voicePage);
     case 94: case microphoneID: case textOutputID: case appearanceLabelID: case appearanceID: case automationID:
     case loginItemID: case recordingsFolderLabelID: case recordingsFolderID: case audioCleanupID:
+    case backupAudioID: case backupExportID:
         return page(generalPage);
     case processingID: return page(postProcessingPage);
     case profilesID: return page(profilesPage);
@@ -852,10 +856,14 @@ void layoutSettings(HWND window, const RECT &content) {
     }
     case generalPage: {
         int y = layoutSettingsCard(window, top, content, 0xE720, L"Audio and output",
-            L"Finished text goes back into the app you were in when dictation started, or to the clipboard.",
+            L"Finished text goes to the app where dictation started, or the clipboard. "
+            L"Backups include History text and optional audio, not settings, profiles or credentials.",
             2 * row + scale(window, 12));
         label(94, y); control(microphoneID, y);
         place(window, textOutputID, box(left, y + row + scale(window, 12), scale(window, 170), row));
+        const int backupY = y + row + scale(window, 12);
+        place(window, backupAudioID, RECT{left + scale(window, 182), backupY, right - scale(window, 210), backupY + row});
+        button(backupExportID, backupY, scale(window, 196));
         top = y + 2 * row + scale(window, 32) + gap;
         // Combining the input/output controls leaves room for housekeeping at
         // the native minimum size without shrinking the controls.
@@ -1383,6 +1391,9 @@ void applyTheme(HWND window) {
         wchar_t kind[16] = {};
         GetClassNameW(control, kind, 16);
         if (_wcsicmp(kind, L"COMBOBOX") == 0) SetWindowTheme(control, dark ? L"DarkMode_CFD" : nullptr, nullptr);
+        else if (GetDlgCtrlID(control) == backupAudioID) {
+            SetWindowTheme(control, dark ? L"DarkMode_Explorer" : L"Explorer", nullptr);
+        }
         else if (_wcsicmp(kind, L"EDIT") == 0 || _wcsicmp(kind, L"LISTBOX") == 0) {
             SetWindowTheme(control, dark ? L"DarkMode_Explorer" : L"Explorer", nullptr);
         }
@@ -1532,6 +1543,8 @@ bool createControls(HWND window) {
         add(L"STATIC", L"Recording storage", 0, recordingsFolderLabelID) &&
         add(L"BUTTON", L"Open &folder", BS_PUSHBUTTON | WS_TABSTOP, recordingsFolderID) &&
         add(L"BUTTON", L"Delete all a&udio...", BS_PUSHBUTTON | WS_TABSTOP, audioCleanupID) &&
+        add(L"BUTTON", L"Include &backup audio", BS_AUTOCHECKBOX | WS_TABSTOP, backupAudioID) &&
+        add(L"BUTTON", L"Save History &backup...", BS_PUSHBUTTON | WS_TABSTOP, backupExportID) &&
         add(L"BUTTON", L"i&Cloud sync settings…", BS_PUSHBUTTON | WS_TABSTOP, cloudSyncID) &&
         add(L"BUTTON", L"View on &GitHub", BS_PUSHBUTTON | WS_TABSTOP, githubID) &&
         add(L"BUTTON", L"Report an iss&ue", BS_PUSHBUTTON | WS_TABSTOP, issueID) &&
@@ -1539,6 +1552,7 @@ bool createControls(HWND window) {
         add(L"STATIC", jsti_hotkey_label().c_str(), 0, transcriptLabelID) &&
         add(L"EDIT", L"", ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL | WS_TABSTOP, transcriptID) &&
         add(L"BUTTON", L"&Copy transcript", BS_PUSHBUTTON | WS_TABSTOP, copyID);
+    SendDlgItemMessageW(window, backupAudioID, BM_SETCHECK, BST_CHECKED, 0);
     for (int identifier : {chipSessionsID, chipTimeID, chipSpendID, insightSessionsID, insightTimeID, insightAverageID,
                            insightSpendID, historySessionsID, historyErrorsID, historyAverageID, historySpendID,
                            setupMicrophoneID, setupModelID, setupShortcutID, setupOutputID}) {
@@ -1887,15 +1901,57 @@ void importAudio(HWND window) {
     }
 }
 
+void emitMigrationBackup(HWND window, const std::string &path) {
+    const int audio = SendDlgItemMessageW(window, backupAudioID, BM_GETCHECK, 0, 0) == BST_CHECKED ? 1 : 0;
+    if (state.callback) state.callback(JSTI_EVENT_MIGRATION_EXPORT, path.c_str(), audio, state.context);
+}
+
+void exportMigrationBackup(HWND window) {
+    std::vector<wchar_t> path(32768);
+    const std::wstring name = L"JustSpeakToIt-History.zip";
+    std::copy(name.begin(), name.end(), path.begin());
+    OPENFILENAMEW chooser{};
+    chooser.lStructSize = sizeof(chooser);
+    chooser.hwndOwner = window;
+    chooser.lpstrFilter = L"ZIP backups (*.zip)\0*.zip\0\0";
+    chooser.lpstrFile = path.data();
+    chooser.nMaxFile = static_cast<DWORD>(path.size());
+    chooser.lpstrDefExt = L"zip";
+    chooser.lpstrTitle = L"Save History backup (existing files are never replaced)";
+    chooser.Flags = OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_EXPLORER | OFN_DONTADDTORECENT;
+    if (!GetSaveFileNameW(&chooser)) {
+        const DWORD code = CommDlgExtendedError();
+        if (code) showFailure(window, jsti::systemError("Choosing History backup destination", code));
+        return;
+    }
+    const DWORD attributes = GetFileAttributesW(path.data());
+    if (attributes != INVALID_FILE_ATTRIBUTES) {
+        showFailure(window, "A file or folder already exists at that destination. "
+                    "Choose a new backup filename; existing files are never replaced.");
+        return;
+    }
+    const DWORD code = GetLastError();
+    if (code != ERROR_FILE_NOT_FOUND) {
+        showFailure(window, jsti::systemError("Checking History backup destination", code));
+        return;
+    }
+    const std::string selected = jsti::utf8(path.data());
+    if (selected.empty()) {
+        showFailure(window, "Windows returned an invalid History backup path. Choose another filename.");
+        return;
+    }
+    emitMigrationBackup(window, selected);
+}
+
 // The screenshot tour: every page, then the dashboard and History in dark
 // mode, then recording/HUD states and the light/dark filter editors. Each
 // step is saved as NN-name.bmp; the window closes afterwards.
-constexpr int tourSteps = pageCount + 7;
+constexpr int tourSteps = pageCount + 8;
 
 std::string tourName(int step) {
     if (step < pageCount) return pageInfo[step].name;
     const char *const extra[] = {"dashboard-dark", "history-dark", "dashboard-recording", "hud-recording",
-                                 "hud-completed", "history-filters", "history-filters-dark"};
+                                 "hud-completed", "history-filters", "history-filters-dark", "general-dark"};
     return extra[step - pageCount];
 }
 
@@ -1909,7 +1965,14 @@ void tourShow(HWND window, int step) {
         showPage(window, dashboardPage);
     } else if (step == pageCount + 1) {
         showPage(window, historyPage);
-    } else if (step >= pageCount + 5) {
+    } else if (step == pageCount + 7) {
+        state.displayedRecording = 0;
+        jsti::chrome::setAppearance(2);
+        applyTheme(window);
+        updateHistoryControls(window, 0);
+        updateSettingsButtons(window, 0);
+        showPage(window, generalPage);
+    } else if (step == pageCount + 5 || step == pageCount + 6) {
         const JSTIHistoryFilterModel models[] = {
             {"model/sample", "Sample transcription model", 0},
             {"model/long", "An imported transcription model with a long descriptive name and vocabulary context", 0}
@@ -1950,13 +2013,13 @@ void tourStep(HWND window) {
     char error[512] = {};
     std::string hudError;
     std::wstring widePath;
-    if (state.tourStep >= pageCount + 5) {
+    if (state.tourStep == pageCount + 5 || state.tourStep == pageCount + 6) {
         HWND filters = jsti_history_filters_window();
         if (saveNativeSnapshot(filters, path.c_str(), error, sizeof error) != 0) {
             emit(window, JSTI_EVENT_ERROR, error);
         }
         if (filters) DestroyWindow(filters);
-    } else if (state.tourStep >= pageCount + 3) {
+    } else if (state.tourStep == pageCount + 3 || state.tourStep == pageCount + 4) {
         // The HUD is its own layered window; it is drawn straight to the file.
         if (!jsti::wide(path.c_str(), widePath) || !jsti::hud::saveSnapshot(widePath, hudError)) {
             emit(window, JSTI_EVENT_ERROR, hudError.empty() ? "The HUD snapshot path is invalid." : hudError.c_str());
@@ -2029,7 +2092,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         const auto &palette = jsti::chrome::palette();
         HDC dc = reinterpret_cast<HDC>(wparam);
         const int identifier = GetDlgCtrlID(reinterpret_cast<HWND>(lparam));
-        const COLORREF surface = message == WM_CTLCOLORLISTBOX && identifier == historyID ? palette.window : palette.field;
+        COLORREF surface = message == WM_CTLCOLORLISTBOX && identifier == historyID ? palette.window : palette.field;
+        if (identifier == backupAudioID) surface = palette.card;
         SetTextColor(dc, palette.text);
         SetBkColor(dc, surface);
         return reinterpret_cast<LRESULT>(brushFor(surface));
@@ -2155,6 +2219,9 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             if (HIWORD(wparam) == BN_CLICKED && idleControl(window, audioCleanupID)) {
                 emit(window, JSTI_EVENT_AUDIO_CLEANUP, "");
             }
+            return 0;
+        case backupExportID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, backupExportID)) exportMigrationBackup(window);
             return 0;
         case githubID: case issueID: case privacyID: {
             if (HIWORD(wparam) != BN_CLICKED) return 0;
@@ -3149,6 +3216,8 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     }
     char folderError[256] = {};
     if (!GetDlgItem(window, recordingsFolderID) || !GetDlgItem(window, audioCleanupID) ||
+        !GetDlgItem(window, backupExportID) || !GetDlgItem(window, backupAudioID) ||
+        SendDlgItemMessageW(window, backupAudioID, BM_GETCHECK, 0, 0) != BST_CHECKED ||
         jsti_window_confirm_audio_cleanup(nullptr, 1, folderError, sizeof(folderError)) == 0 ||
         jsti_shell_open_directory(nullptr, folderError, sizeof(folderError)) == 0) {
         return jsti::fail("Recording folder control or invalid-path refusal failed.", error, errorCapacity);
@@ -3214,6 +3283,23 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         return true;
     };
     auto check = [&]() -> bool {
+        emitMigrationBackup(window, "synthetic-backup.zip");
+        const bool includesAudio = observed.event == JSTI_EVENT_MIGRATION_EXPORT &&
+            observed.id == "synthetic-backup.zip" && observed.model == 1;
+        SendDlgItemMessageW(window, backupAudioID, BM_SETCHECK, BST_UNCHECKED, 0);
+        emitMigrationBackup(window, "synthetic-history-only.zip");
+        const bool historyOnly = observed.event == JSTI_EVENT_MIGRATION_EXPORT &&
+            observed.id == "synthetic-history-only.zip" && observed.model == 0;
+        SendDlgItemMessageW(window, backupAudioID, BM_SETCHECK, BST_CHECKED, 0);
+        updateHistoryControls(window, 2);
+        const bool backupLocked = !IsWindowEnabled(GetDlgItem(window, backupAudioID)) &&
+            !IsWindowEnabled(GetDlgItem(window, backupExportID));
+        updateHistoryControls(window, 0);
+        if (!includesAudio || !historyOnly || !backupLocked ||
+            !IsWindowEnabled(GetDlgItem(window, backupAudioID)) || !IsWindowEnabled(GetDlgItem(window, backupExportID))) {
+            failure = "History backup lost its explicit audio choice or idle-only controls."; return false;
+        }
+        observed = {};
         // Deliberately interleaved global rows prove callbacks do not leak the
         // filtered combo index. These are never sent to the real Swift host.
         state.modelNames = {L"Batch Alpha", L"Live One", L"Batch Beta", L"Live Two"};

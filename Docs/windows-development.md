@@ -678,10 +678,26 @@ or retried. Successful publication is never relabelled as cancellation.
 These synchronous APIs require an owned cancellable worker, not the UI actor or
 settings admission queue.
 
-This codec is not yet wired to a native export picker,
-complete category collection, import preview/application, credential recovery or
-recording-location changes. Native CNG/GLib and Mac ZIPFoundation interoperability
-tests remain separate required acceptance receipts.
+General > History backup uses a separate native ZIP save picker and an explicit
+include-saved-audio choice, enabled by default. Turning it off exports History
+text only; a complete History/audio export refuses missing audio rather than
+silently omitting it. Settings, profiles and credentials are not included.
+Settings queues admit the backup without awaiting archive I/O: an owned
+cancellable off-actor worker collects the actual store, builds the archive,
+publishes exclusively and removes only its owned private staging directory.
+Cancel and bounded app close cancel this worker; late results cannot update a
+closed window, and cancellation after commit still reports the saved backup.
+GTK's chooser snapshots its audio choice, weakly holds its parent, is cancelled
+on close and distinguishes dismissal from real picker failures.
+Windows keeps the backup controls together in the existing Audio and output
+card rather than adding an overflowing third card at its 980-by-760 minimum;
+GTK uses a separate History backup preferences group in its scrollable page.
+
+Complete category collection, import preview/application, credential recovery
+and recording-location changes are not yet wired. Native CNG/GLib and Mac
+ZIPFoundation interoperability tests, picker lifecycle and paired light/dark
+layout acceptance remain separate required receipts. Ordinary Linux local-path
+checks do not establish Flatpak destination-grant support.
 
 The filter editor scrolls vertically when the available work area is too short;
 keyboard traversal reveals the focused control. Long model names have native

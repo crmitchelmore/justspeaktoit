@@ -6,8 +6,13 @@ extension DesktopHostController {
     func startRecording(
         target: Platform.InsertionTarget?, deviceID: String, profile: DesktopProfileSession,
         textOutput: Platform.TextOutputOptions, trigger: HotKeySessionTrigger = .other,
-        handsFree: DesktopHandsFreeRun<Platform>? = nil
+        handsFree: DesktopHandsFreeRun<Platform>? = nil, profileNotice: String? = nil
     ) async throws {
+        let rate = DesktopLiveTranscription.route(forID: profile.modelIdentifier)?.sampleRate
+            ?? PCMRecordingFile.sampleRate
+        let options = DesktopHostRecordingConfiguration(
+            configuration: settings.configuration, azureEndpoint: azureResourceEndpoint(), sampleRate: rate
+        )
         let key = try requireCredentialOrLocalModel(profile.modelIdentifier)
         try requireAzureResource(forLive: profile.modelIdentifier)
         // Holds a profile's or the app's on-device model while startup suspends;
@@ -18,38 +23,32 @@ extension DesktopHostController {
         await recordingFeedback?.recordingRequested(id)
         guard !closed, handsFree == nil || handsFreeRun?.id == handsFree?.id else { throw CancellationError() }
         let filename = id.uuidString + ".wav"
-        let audio = directory.appendingPathComponent("History").appendingPathComponent(filename)
-        let rate = DesktopLiveTranscription.route(forID: profile.modelIdentifier)?.sampleRate
-            ?? PCMRecordingFile.sampleRate
-        let file: PCMRecordingFile
-        do { file = try PCMRecordingFile(url: audio, sampleRate: rate) } catch {
-            await recordingFeedback?.cancelRecording(id)
-            throw error
-        }
-        let record = profileRecord(id: id, filename: filename, profile: profile)
+        let file = try await makeRecordingFile(filename: filename, sampleRate: rate, id: id)
+        var record = profileRecord(id: id, filename: filename, profile: profile)
+        if let profileNotice { record.profileNotes = (record.profileNotes ?? []) + [profileNotice] }
         var live: DesktopLiveSession?
         do {
             // The parent operation remains active through every metadata write,
             // so shutdown cannot return while startup is suspended here.
             try await saveRecord(record)
             guard !closed, handsFree == nil || handsFreeRun?.id == handsFree?.id else { throw CancellationError() }
-            live = makeLiveSession(model: profile.modelIdentifier, key: key, id: id, language: profile.language)
+            live = makeLiveSession(
+                model: profile.modelIdentifier, key: key, id: id, language: profile.language, options: options
+            )
             live?.start()
-            let context = captureContext(file: file, live: live, rate: rate, id: id, handsFree: handsFree != nil)
-            let capture = try handsFree.map { run -> any DesktopRecordingCapture in
-                DesktopHandsFreeUtteranceCapture(audio: run.audio, context: context)
-            }
-                ?? effects.makeCapture(
-                    context: context, deviceID: deviceID, sampleRate: rate,
-                    frameMilliseconds: DesktopLiveTranscription.captureFrameMilliseconds(forID: profile.modelIdentifier)
-                )
+            let context = captureContext(
+                file: file, live: live, id: id, handsFree: handsFree != nil, options: options
+            )
+            let capture = try makeRecordingCapture(
+                context: context, deviceID: deviceID, model: profile.modelIdentifier, handsFree: handsFree
+            )
             do { try capture.start() } catch {
                 capture.destroy()
                 throw error
             }
             recording = Recording(
                 capture: capture, context: context, file: file, handsFree: handsFree != nil,
-                record: record, target: target, live: live, profile: profile,
+                record: record, target: target, live: live, profile: profile, options: options,
                 textOutput: textOutput, trigger: trigger
             )
             if let live { monitorLive(live) }
@@ -64,17 +63,37 @@ extension DesktopHostController {
         announceRecording(id, profile: profile, trigger: trigger)
     }
 
+    private func makeRecordingFile(filename: String, sampleRate: Int, id: UUID) async throws -> PCMRecordingFile {
+        let audio = directory.appendingPathComponent("History").appendingPathComponent(filename)
+        do { return try PCMRecordingFile(url: audio, sampleRate: sampleRate) } catch {
+            await recordingFeedback?.cancelRecording(id)
+            throw error
+        }
+    }
+
+    private func makeRecordingCapture(
+        context: DesktopCaptureContext, deviceID: String, model: String, handsFree: DesktopHandsFreeRun<Platform>?
+    ) throws -> any DesktopRecordingCapture {
+        if let handsFree { return DesktopHandsFreeUtteranceCapture(audio: handsFree.audio, context: context) }
+        let rate = DesktopLiveTranscription.route(forID: model)?.sampleRate ?? PCMRecordingFile.sampleRate
+        return try effects.makeCapture(
+            context: context, deviceID: deviceID, sampleRate: rate,
+            frameMilliseconds: DesktopLiveTranscription.captureFrameMilliseconds(forID: model)
+        )
+    }
+
     private func captureContext(
-        file: PCMRecordingFile, live: DesktopLiveSession?, rate: Int, id: UUID, handsFree: Bool
+        file: PCMRecordingFile, live: DesktopLiveSession?, id: UUID, handsFree: Bool,
+        options: DesktopHostRecordingConfiguration
     ) -> DesktopCaptureContext {
-        let configuration = settings.configuration
+        let configuration = options.configuration
         let silence = !handsFree && configuration?.enabled("silenceDetectionEnabled") == true
             ? DictationSilenceMonitor(
                 threshold: configuration?.number("silenceThreshold") ?? DictationSilencePolicy.defaultThreshold,
                 duration: configuration?.number("silenceDuration") ?? DictationSilencePolicy.defaultDuration
             ) : nil
         return DesktopCaptureContext(
-            file: file, live: live, sampleRate: rate, silence: silence,
+            file: file, live: live, sampleRate: options.sampleRate, silence: silence,
             onSilence: { Task { await self.stopForSilence(recordingID: id) } },
             onFailure: { message in Task { await self.captureFailed(message, recordingID: id) } }
         )
@@ -109,7 +128,7 @@ extension DesktopHostController {
         }
         return StoppedRecording(
             record: active.record, duration: duration, target: active.target, live: active.live,
-            profile: active.profile, textOutput: active.textOutput
+            profile: active.profile, options: active.options, textOutput: active.textOutput
         )
     }
 

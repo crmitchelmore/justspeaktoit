@@ -3,10 +3,13 @@ import SpeakCore
 import SpeakDesktop
 
 extension DesktopHostController {
-    func makeLiveSession(model: String, key: String, id: UUID, language: String? = nil) -> DesktopLiveSession? {
+    func makeLiveSession(
+        model: String, key: String, id: UUID, language: String? = nil,
+        options: DesktopHostRecordingConfiguration
+    ) -> DesktopLiveSession? {
         guard DesktopHostModels.isLive(model), let client = effects.makeLiveClient(
-            model: model, key: key, language: language, azureEndpoint: azureResourceEndpoint(),
-            options: settings.configuration?.liveOptions ?? .init()
+            model: model, key: key, language: language, azureEndpoint: options.azureEndpoint,
+            options: options.configuration?.liveOptions ?? .init()
         ) else { return nil }
         return DesktopLiveSession(client: client, id: id)
     }

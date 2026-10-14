@@ -105,10 +105,24 @@ stops listening and asks the user to check the original field before rearming
 with the hotkey. There is no automatic retry that could duplicate uncertain text.
 Capture-target completion after disarm/close cannot start a late recording.
 
-The run still freezes its original per-app profile/model, device and output
-options. Unlike Mac `startSession(.handsFree)`, it does **not** re-resolve the
-foreground-app profile at each utterance. This remains a separate behavioral
-gap; the fixed in-process capture rate is not silently reinterpreted.
+Each Windows utterance now resolves the fresh captured application's profile
+through the canonical resolver. Its model, language and polish choices remain
+record-bound; no override is persisted into app defaults. Explicit clipboard
+output still resolves the current app without probing an editable field or
+creating an insertion worker. Unavailable models refuse the utterance without
+fallback. A route requiring a different PCM rate disarms before creating a WAV
+or starting a provider, with guidance to arm again in the destination app.
+The preferred microphone and output method remain detector/run-owned.
+
+Recording configuration, live options, Azure endpoint and capture rate are
+snapshotted before asynchronous startup and retained through finalization.
+Linux uses fresh default settings, not a fictional Windows-path match:
+the canonical matcher currently has no Linux executable-path kind, and Linux
+has no native profile editor. X11/Wayland recordings explicitly retain that
+default-only limitation in their profile notes. Unsupported imported profiles
+are preserved. A Linux matcher/editor/archive-compatibility follow-up remains
+necessary for actual Linux profile parity.
+That matcher/editor/archive follow-up is tracked separately in #1219.
 
 `DesktopHandsFreeAudio.swift` keeps quiet pre-roll only in RAM (0.5 seconds).
 Startup audio is bounded to three seconds; overflow fails and disarms rather
@@ -159,6 +173,26 @@ versus UIA/window-only proof, and native Linux tests classify accepted keys,
 explicit copy and fallback copy; those require separate exact-head native CI
 receipts, not substitution of the frozen f29 receipts above. No native control
 IDs, events, C headers, clipboard ownership algorithm or icon assets changed.
+
+Frozen target/delivery head `7fb5b546c633ab286c83245dac9c493c7feaca0f` subsequently
+passed exact-tree native Windows x64 and ARM64 (each 1666 tests, 62 skipped,
+zero failures) and Linux (1547 tests, 29 skipped, zero failures), including
+the actual disposable-session integrations. All three checked out
+`cffe28a92cf2c41ac440e8e14d5c7b1d1b09267e`, whose complete tree equals that head.
+The later profile/configuration slice needs its own receipts; these are not
+qualification of subsequent source. Its additive Windows foreground-path ABI
+does not change insertion/clipboard ownership or native control IDs.
+
+The bounded profile/configuration slice passes 70 focused tests (eight new
+actual-host profile/configuration cases), full portable 1453 tests with 28
+skipped and zero failures, all four Windows projections and strict lint across
+15 Swift inputs. The actual Windows guarded-output/clipboard/profile fixture
+also passes locally: process identity, bounded workers, short-buffer failure
+and exclusion of this app's own process. Its private MinGW header lacks the
+standard read-only UIA attribute ID, so the local fixture compile supplies
+that SDK constant; official-SDK native/Apple acceptance is separate.
+No microphone/installed-package or complete Linux app-profile claim follows
+from these synthetic and local receipts.
 
 ## Recording feedback (native qualified; package acceptance pending)
 
@@ -425,7 +459,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | ttsPronunciationDictionary | Missing / Missing | No TTS pronunciation editor/pipeline |
 | historyFlushInterval | Missing selector / Missing selector | History is durable per operation, not configurable timed flush |
 | silenceDetectionEnabled | Executable; qualification pending / Same | Native switch; initial quiet and configured silence stop the existing manual recording/finalization pipeline |
-| handsFreeDictationEnabled | Sound-activation replacement; qualification pending / Same | Fresh frozen target per utterance, record-bound acknowledged output; unconfirmed paste stops, Wayland requires clipboard-only; profile/model still fixed per run; not Apple's classifier |
+| handsFreeDictationEnabled | Sound-activation replacement; per-slice qualification / Same | Fresh target and Windows app profile per utterance, immutable provider options, record-bound output evidence; rate changes refuse/rearm; Linux profiles remain default-only; not Apple's classifier |
 | silenceThreshold | Executable; qualification pending / Same | Canonical range/default and Mac PCM meter; native editor feeds manual silence and sound activation |
 | silenceDuration | Executable; qualification pending / Same | Canonical hold/range feeds manual auto-stop and hands-free debounce; existing recording tail is retained |
 | connectionPreWarmingEnabled | Missing / Missing | No persistent provider prewarming preference |

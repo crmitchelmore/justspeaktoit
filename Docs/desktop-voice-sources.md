@@ -1,5 +1,58 @@
 # Desktop Voice Output sources and audio export
 
+## Local archival bridge boundary
+
+The unpublished native Voice bridge is a read-only source/state projection, not
+a migration manifest, category selector or Mac `ttsUsage` mapper. The owned app
+root is `DesktopHostController.directory`; its fixed source is
+`VoiceUsage/requests.json`, bounded at 2,097,152 bytes and the existing 1,000
+retained records. `DesktopVoiceUsageReadAccess` takes an injected reader returning
+original `Data?` and a throwing `@Sendable` receipt-revalidation closure. Nil
+means a verified missing source, not unreadable or corrupt data. Composition must
+bind this closure to the separately verified shared owned-file reader; this
+branch has no native reader fallback, copied identity implementation or new
+filesystem authority. A digest comes from the existing platform SHA-256 provider.
+
+`voiceUsageSnapshot(access:digests:)` copies actor-owned memory and active usage
+capture metadata, reads off the actor, then fences the result against actor
+revision, tracking epoch and changes to the captured attempt arrays. One
+collection is admitted at a time; cancellation remains explicit, workers remain
+counted until they end, and close rejects late results. No HTTP/audio/controller
+task is retained by the active-capture registry.
+
+The projection distinguishes missing, accepted, invalid, unreadable, oversized
+and changed sources. Invalid/unsupported bounded bytes remain available exactly
+as read, with their digest but without typed acceptance. Active captures,
+completed unsaved observations and the legacy loaded-record cache are separate
+provenance views, not lists to concatenate: their request UUIDs can overlap.
+Active attempts are unfinished observations, not completed audio or billed usage.
+New completed observations survive failed load/save in a separate bounded
+in-memory buffer. Buffer omissions/encoding failures are explicit, not silent
+evictions; the bridge cannot reconstruct observations or unknown fields already
+lost by earlier code. Tracking opt-out still invalidates in-flight captures.
+
+`DesktopVoiceUsageLedger` accepts the existing typed ledger contract in the
+native writer's UTF-8 encoding while retaining original element bytes and order,
+including unknown members and number spelling. UTF-16/32 originals remain raw
+unsupported evidence; they cannot be spliced into UTF-8 output.
+`preparedAppend()` is **pure preparation**, retaining existing elements,
+deduplicating matching request UUIDs and preserving the existing latest-1,000
+policy. It refuses invalid sources, conflicting UUID values, known buffer
+omissions/encoding failures and loaded memory that cannot be reconciled with
+either the original source or the prepared result. It neither writes a file
+nor supplies write/publication authority.
+A point-in-time read receipt and revalidation do not make a later overwrite
+atomic or eliminate check/write races. The new raw-preserving append/write
+engine remains **unwired** pending a separately qualified owned-write contract.
+
+Default native persistence remains unchanged: successful legacy writes still
+use their existing typed JSON encoding and can erase unknown members. The loss
+fix does not disable normal writes, alter retention, add provider requests or
+change Voice playback. There is no complete native archival-authority claim
+until actual reader/write composition is qualified. No source text, credentials,
+fabricated tokens/cost/duration, inferred audio link, archive category/kind/scope
+or import/apply behavior is introduced by this bridge.
+
 Windows and Linux remain developer previews, not macOS-parity releases.
 
 ## Imported default voice (source-only successor)

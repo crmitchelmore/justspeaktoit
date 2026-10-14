@@ -89,9 +89,11 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package var voiceCredentialEpoch = UUID()
     package var voiceCredentialTask: Task<Void, Never>?
     package var voiceCredentialRequestID: UUID?
+    package var voiceCredentialWriteDestination: VoiceOutputCredentialDestination?
     package var voiceCredentialReadTask: Task<Void, Never>?
     package var voiceCredentialReadID: UUID?
     package var voiceCredentialReadDestination: VoiceOutputCredentialDestination?
+    package var voiceCredentialReadWorkerDestination: VoiceOutputCredentialDestination?
     package var voiceProviderIssuedSlot: VoiceOutputCredentialSlot?
     package var voiceAccountWorkers = 0
     package var voiceSynthesisWorkers = 0

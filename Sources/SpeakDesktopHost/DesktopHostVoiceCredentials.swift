@@ -48,9 +48,11 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         voiceCredentialReadDestination = destination
         if let pending = voiceCredentialReadTask { pending.cancel(); return }
         activeOperations += 1
+        voiceCredentialReadWorkerDestination = destination
         voiceCredentialReadTask = Task {
             let result = await self.readVoiceCredentialPresentation(destination)
             self.voiceCredentialReadTask = nil
+            self.voiceCredentialReadWorkerDestination = nil
             self.finishOperation()
             self.settleVoiceAccountPresentation()
             guard !self.closed else { self.voiceCredentialReadID = nil; return }
@@ -135,10 +137,12 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     ) {
         activeOperations += 1
         voiceCredentialRequestID = request.id
+        voiceCredentialWriteDestination = request.destination
         voiceCredentialTask = Task {
             defer {
                 self.voiceCredentialTask = nil
                 self.voiceCredentialRequestID = nil
+                self.voiceCredentialWriteDestination = nil
                 self.finishOperation()
                 self.settleVoiceAccountPresentation()
             }

@@ -90,9 +90,9 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
 
     package func openVoiceDiscovery(_ requestID: String) {
         guard !closed else { return }
+        cancelVoiceProviderCredentialWork(voiceDiscovery.context)
         cancelAccountVoiceWork()
         voiceDiscovery.task?.cancel()
-        voiceCredentialReadTask?.cancel()
         voiceProviderIssuedSlot = nil
         voiceDiscovery.requestID = requestID
         voiceDiscovery.modern = false
@@ -109,6 +109,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
 
     package func closeVoiceDiscovery(_ requestID: String) {
         guard sameVoiceDialog(requestID) else { return }
+        cancelVoiceProviderCredentialWork(voiceDiscovery.context)
         cancelAccountVoiceWork()
         voiceDiscovery.requestID = nil
         voiceDiscovery.context = nil
@@ -117,7 +118,6 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         voiceProviderIssuedSlot = nil
         voiceDiscovery.offeredIDs = []
         voiceDiscovery.task?.cancel()
-        voiceCredentialReadTask?.cancel()
     }
 
     package func refreshVoiceDiscovery(

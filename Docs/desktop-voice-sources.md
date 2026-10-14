@@ -544,6 +544,13 @@ owned vault worker; their epochs are not interchangeable. Blocking vault I/O
 is detached, and reads, writes, listing and synthesis remain counted until
 actual settlement after cancellation. Late confirmed writes remain truthful
 and invalidate the affected account evidence even if their dialog changed.
+Provider switch, dialog close and reopen cancel only credential workers owned
+by the displaced explicit-provider context, before clearing that context.
+Selected-voice reads/writes survive browsing with their unchanged selection
+epoch. The coalesced read's worker destination is retained separately from its
+latest requested destination, so a closing provider cannot clear a queued
+selected-voice request. Writes retain their owned destination through actual
+settlement; full controller shutdown still cancels every credential worker.
 
 Provider/session changes cancel and fence active account-only synthesis,
 without cancelling unrelated built-in Voice output, retained replay/export or

@@ -30,6 +30,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             return
         }
         if let current = voiceDiscovery.context { voiceDiscovery.retiredEpochs.insert(current.epoch) }
+        cancelVoiceProviderCredentialWork(voiceDiscovery.context)
         voiceDiscovery.context = proposed
         voiceDiscovery.modern = true
         voiceDiscovery.listing = nil
@@ -37,8 +38,6 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         voiceDiscovery.offeredIDs = []
         voiceProviderIssuedSlot = nil
         voiceDiscovery.task?.cancel()
-        voiceCredentialReadTask?.cancel()
-        voiceCredentialTask?.cancel()
         cancelAccountVoiceWork()
         presentVoiceAccountProviders()
         presentVoiceDiscovery("Provider selected for this dialog only. Set its key and Refresh, then Pick "

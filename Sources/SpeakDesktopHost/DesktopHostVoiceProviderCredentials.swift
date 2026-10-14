@@ -32,7 +32,8 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 voiceCredentialReadID = nil
                 voiceCredentialReadDestination = nil
                 voiceProviderIssuedSlot = nil
-            } else if !cancelVoiceCredentialSave(id) {
+            } else if voiceCredentialWriteDestination != .explicitProvider(context)
+                        || !cancelVoiceCredentialSave(id) {
                 update("That account Voice key operation is no longer pending.")
             }
         case .save(let key, let request):
@@ -40,6 +41,17 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 Platform.voiceProviderCredentialFinished($0, request: request)
             }
         }
+    }
+
+    package func cancelVoiceProviderCredentialWork(_ context: VoiceAccountCredentialContext?) {
+        guard let context else { return }
+        let destination = VoiceOutputCredentialDestination.explicitProvider(context)
+        if voiceCredentialReadWorkerDestination == destination { voiceCredentialReadTask?.cancel() }
+        if voiceCredentialReadDestination == destination {
+            voiceCredentialReadID = nil
+            voiceCredentialReadDestination = nil
+        }
+        if voiceCredentialWriteDestination == destination { voiceCredentialTask?.cancel() }
     }
 
     package func voiceProviderCredentialPresentation(_ context: VoiceAccountCredentialContext) async

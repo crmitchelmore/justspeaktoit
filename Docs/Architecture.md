@@ -31,6 +31,8 @@ code, and only the dependency-free `SpeakWatchCore` is built for watchOS.
 | `SpeakWatchCore` | library target | No dependencies; Foundation-only watch capture/complication types and `ReleaseTrain`, linked by the watch targets. |
 | `SpeakCore` | library target | Depends on `SpeakWatchCore` (re-exported); shared catalogues, protocols, models, capture policies and resources. |
 | `SpeakSync` | library target | Depends on `SpeakCore`; CloudKit history, comparison and encrypted-key sync. |
+| `CRecordingFileSupport` | internal C target | libc-only anonymous registration-file creation and verified descriptor publication on Linux; explicit unsupported outcomes elsewhere. |
+| `SpeakDesktop` | library target | Depends on `SpeakCore`, `CMigrationArchive` and `CRecordingFileSupport`; portable desktop orchestration and owned storage. |
 | `SpeakiOSLib` | library target | Depends on `SpeakCore` and `SpeakSync`; iOS views and services. |
 | `SpeakAutomationKit` | library target | Depends on `SpeakCore`; CLI parsing, socket client and MCP server. |
 | `SpeakCLI` | executable target | Depends on `SpeakAutomationKit` and `SpeakCore`; product name `speak`. |
@@ -51,6 +53,7 @@ The products are `SpeakHotKeys`, `SpeakCore`, `SpeakWatchCore`, `SpeakSync`, `Sp
 
 ```mermaid
 flowchart TD
+    RecordingFiles[CRecordingFileSupport] --> Desktop[SpeakDesktop]
     WatchCore[SpeakWatchCore] --> Core[SpeakCore]
     Core --> Sync[SpeakSync]
     Core --> IOSLib[SpeakiOSLib]
@@ -115,7 +118,8 @@ excluded; the Keychain implementation inside the client contract file is guarded
 | --- | --- | --- |
 | `SpeakCore` | library target | Portable build (`SPEAK_PORTABLE_CORE`) of the shared catalogues, provider clients and policies. |
 | `SpeakSync` | library target | Depends on `SpeakCore`; the portable CloudKit Web Services client and envelope formats. |
-| `SpeakDesktop` | library target | Depends on `SpeakCore`; desktop batch and live transcription routing, the recording store, History search and retry, post-processing, profiles and on-device model download, verification and ownership. |
+| `CRecordingFileSupport` | internal C target | No native UI/audio dependencies; libc-only held anonymous registration-file capabilities on Linux, explicit unsupported outcomes elsewhere. |
+| `SpeakDesktop` | library target | Depends on `SpeakCore`, `CMigrationArchive` and `CRecordingFileSupport`; desktop batch and live transcription routing, the recording store, History search and retry, post-processing, profiles and on-device model download, verification and ownership. |
 | `SpeakDesktopSync` | library target | Depends on `SpeakDesktop`, `SpeakSync` and `SpeakCore`; iCloud History sync and key import for desktop hosts. |
 | `SpeakDesktopHost` | library target | Depends on `SpeakCore`, `SpeakDesktop`, `SpeakDesktopSync` and `SpeakSync`; `DesktopHostController<Platform>`, the recording, History, playback, output, settings, Read aloud, on-device model and iCloud sync orchestration shared by the Windows and Linux apps behind `DesktopHostPlatform`. |
 | `CWindowsSupport`, `CWindowsAutomation` | C++ targets | `SPEAK_WINDOWS_TARGET`; Win32, WASAPI, Media Foundation, UI Automation, WinHTTP, CNG, Credential Manager and the run-time whisper.cpp loader. |
@@ -130,6 +134,7 @@ excluded; the Keychain implementation inside the client contract file is guarded
 ```mermaid
 flowchart TD
     Core[SpeakCore] --> Desktop[SpeakDesktop]
+    RecordingFiles[CRecordingFileSupport] --> Desktop
     Core --> Sync[SpeakSync]
     Desktop --> DesktopSync[SpeakDesktopSync]
     Sync --> DesktopSync

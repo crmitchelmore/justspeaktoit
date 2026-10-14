@@ -527,14 +527,52 @@ History actions stop before journaling. Interrupted external WAVs remain
 retained without invoking path-based repair. Existing legacy cleanup,
 deletion, recovery and metadata-only deletion behavior remain in place.
 
-**Not executable host restart support:** the supplied tests inject an in-memory
-verified append-only persistence adapter and reconstruct the policy/store from
-its sealed values. Production has no registration codec or verified private
-immutable-registration writer/reload adapter. The held capture primitive creates
-only a fresh private UUID directory/UUID WAV; it is not an API for publishing and
-reloading a protected registration ledger. The strict reader's receipts cannot
-fill that writer/authority gap. A host must provide that native append/reload
-boundary before these registrations can survive a real process restart.
+**Opt-in Linux process-restart persistence:** `DesktopLocalRecordingPersistence`
+explicitly initializes or opens History's private `.recording-locations`
+namespace. It never creates or repairs a missing namespace while opening.
+`registry.jloc`, `registration-<UUID>.jloc` and `ownership-<UUID>.jloc` are
+immutable binary leaves, not audio or importer-controlled JSON. The versioned
+`JSTILOC1` codec binds History and namespace identities, caps each leaf at 16 KiB,
+and rejects unsupported identities, malformed paths, truncation and trailing
+bytes. CRC32 detects accidental corruption; it grants no authorization.
+Reload is bounded to 4,096 named leaves and 8 MiB, rejects unknown/pending leaves,
+foreign bindings and orphan claims, and never scans selected audio roots.
+
+The Linux adapter retains no-follow directory anchors and an exclusive native
+namespace lock. It verifies POSIX identities against the existing strict reader,
+writes through a real held anonymous `O_TMPFILE` descriptor, makes the leaf
+read-only, synchronizes it and publishes using an exclusive procfs descriptor
+link. Internal libc-only `CRecordingFileSupport` owns Linux native constants and
+typed filesystem checks. It holds no-follow real procfs/current-PID/fd anchors,
+checks the proc view against the held source inode, and reports publication
+immediately after the link even if later verification or helper teardown fails.
+There is no named staging fallback or pathname cleanup; precommit teardown closes
+only the anonymous owned descriptor. Unsupported platforms, filesystems and
+procfs availability return explicit failures preserving their native errno.
+After the third cancellation callback, Swift still checks History/namespace
+ancestry, held/named identity, owner, readonly mode, single link and exact bounded
+contents. These are point-in-time fences, not CAS or all-ABA protection.
+A failure/cancellation after publication retains the immutable leaf
+and reports its publication effect; there is no overwrite, deletion, mutable
+current-location pointer or pathname CAS. Missing, unreadable, corrupt, linked,
+replaced and incomplete sources fail explicitly rather than becoming empty state.
+Interrupted initialization may leave an empty private namespace;
+this API supplies no automatic repair or recursive cleanup.
+Separate Linux subprocess fixtures persist three selections and capture claims,
+then reload all three plus legacy History JSON/audio in a new process.
+Test-only syscall instrumentation exercises actual descriptor links at publication
+and cleanup boundaries; injected close/fsync/availability failures are not kernel
+failure reproduction. Neither Linux fixtures nor nonLinux compile-only evidence
+qualify Windows/Darwin runtime or executable host routing.
+
+The Windows C file-capability bridge is qualification-only: it exposes native
+128-bit identities and retains private-ACL directory/file handles for immutable
+append and closed-writer reload. The Windows Swift factory fails before mutation
+because compatibility with the shared identity representation is unqualified;
+native C receipts and stub compilation do not qualify Windows Swift or Darwin.
+The default shared factory supports only Linux. These synchronous APIs require
+a separately owned cancellable host worker and lifecycle/mutation admission;
+neither is installed, and the executable host does not use this persistence.
 Failed appends never switch an existing working registration; cancellation or
 uncertain append completion may leave an unused immutable reservation and an
 empty private directory, never authority to overwrite or recursively clean it.
@@ -545,9 +583,9 @@ Settings, native UI and capture routing are not wired. The Windows default
 factory remains disabled; native Windows Swift and Darwin qualification are
 still outstanding.
 
-The host still uses its existing History WAV initializer. Location selection,
-owned configuration persistence, per-record location provenance, migration
-mapping, recovery and deletion authority remain prerequisites to configurable
+The host still uses its existing History WAV initializer. Host location selection,
+owned configuration persistence and routing, and external recovery/deletion
+authority remain prerequisites to configurable
 recording storage. This capability does not relocate audio, authorize imported
 paths, change History metadata, or enable a settings/picker UI.
 

@@ -672,6 +672,34 @@ int jsti_owned_capture_file_self_test(const char *root, char *error, size_t erro
  * retry or delete that destination). Cancellation is checked between bounded chunks.
  * Existing destinations and reparse paths are never replaced or followed. */
 typedef int (*jsti_file_publication_cancelled_fn)(void *context);
+/* Opt-in private immutable recording namespace. Identity is native FILE_ID_INFO,
+ * never a Foundation systemFileNumber conversion. initialize exclusively creates
+ * the named namespace; open never repairs permissions or manufactures missing records.
+ * append returns 0 success, 2 cancelled, -1 failure; published is set once rename
+ * commits, including post-commit cancellation/close failure. Never retry/delete a
+ * published leaf. Every writer is closed before append returns. Maximum leaf 16 KiB;
+ * enumeration caps at 4096 NUL-terminated ASCII names. The verified provider must
+ * enforce the aggregate byte/record budget and decode/bind records before granting authority.
+ * Held directory sharing excludes a competing namespace capability and replacement;
+ * callers serialize operations and do not close/destroy during another call. */
+typedef struct JSTIRecordingRegistry JSTIRecordingRegistry;
+int jsti_recording_registry_open(const char *history, int initialize, JSTIRecordingRegistry **result,
+                                 char *error, size_t error_capacity);
+int jsti_recording_registry_identity(JSTIRecordingRegistry *registry, uint64_t *history_volume,
+                                     uint8_t *history_id16, uint64_t *namespace_volume, uint8_t *namespace_id16,
+                                     char *error, size_t error_capacity);
+int jsti_recording_registry_names(JSTIRecordingRegistry *registry, char *names, size_t names_capacity,
+                                  size_t *written, uint32_t *count, char *error, size_t error_capacity);
+int jsti_recording_registry_read(JSTIRecordingRegistry *registry, const char *name,
+                                 uint8_t *bytes, size_t bytes_capacity, size_t *written,
+                                 char *error, size_t error_capacity);
+int jsti_recording_registry_append(JSTIRecordingRegistry *registry, const char *name,
+                                   const uint8_t *bytes, size_t count,
+                                   jsti_file_publication_cancelled_fn cancelled, void *context, int *published,
+                                   char *error, size_t error_capacity);
+int jsti_recording_registry_close(JSTIRecordingRegistry *registry, char *error, size_t error_capacity);
+void jsti_recording_registry_destroy(JSTIRecordingRegistry *registry);
+int jsti_recording_registry_self_test(const char *history, char *error, size_t error_capacity);
 int jsti_private_file_publish(const char *source, const char *destination,
                               jsti_file_publication_cancelled_fn cancelled, void *context,
                               char *error, size_t error_capacity);

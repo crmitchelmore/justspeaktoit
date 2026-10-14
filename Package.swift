@@ -179,6 +179,8 @@ let migrationArchiveTarget = Target.target(
     ]
 )
 
+let recordingFileSupportTarget = Target.target(name: "CRecordingFileSupport", publicHeadersPath: "include")
+
 let portablePackage = Package(
     name: "SpeakApp",
     defaultLocalization: "en",
@@ -203,7 +205,8 @@ let portablePackage = Package(
             swiftSettings: [.define("SPEAK_PORTABLE_CORE")]
         ),
         migrationArchiveTarget,
-        .target(name: "SpeakDesktop", dependencies: ["SpeakCore", "CMigrationArchive"]),
+        recordingFileSupportTarget,
+        .target(name: "SpeakDesktop", dependencies: ["SpeakCore", "CMigrationArchive", "CRecordingFileSupport"]),
         // Recording, History, output, settings and iCloud sync orchestration
         // shared by the Windows and Linux hosts behind DesktopHostPlatform.
         .target(
@@ -462,7 +465,8 @@ let package = portableCoreBuild ? portablePackage : Package(
     ],
     targets: [
         migrationArchiveTarget,
-        .target(name: "SpeakDesktop", dependencies: ["SpeakCore", "CMigrationArchive"]),
+        recordingFileSupportTarget,
+        .target(name: "SpeakDesktop", dependencies: ["SpeakCore", "CMigrationArchive", "CRecordingFileSupport"]),
         .testTarget(name: "SpeakDesktopTests", dependencies: ["SpeakDesktop", "SpeakCore", "SpeakTestSupport"]),
         .target(
             name: "SpeakHotKeys",

@@ -2,6 +2,7 @@ import Foundation
 
 public enum DesktopRecordingLocationError: Error, LocalizedError, Sendable {
     case unregistered, foreignRegistration, duplicateIdentity, invalidReference, changedLocation, mutationUnavailable
+    case privateNamespace
 
     public var errorDescription: String? {
         switch self {
@@ -12,6 +13,8 @@ public enum DesktopRecordingLocationError: Error, LocalizedError, Sendable {
         case .changedLocation: return "A registered recording directory or audio file was replaced."
         case .mutationUnavailable:
             return "External recording audio is retained: an owned repair/deletion capability is not implemented."
+        case .privateNamespace:
+            return "Private recording registration storage cannot be selected as an audio folder."
         }
     }
 }
@@ -43,7 +46,7 @@ public struct DesktopRecordingAudioReference: Codable, Equatable, Sendable {
 /// Trusted host adapter boundary, like DesktopOwnedCaptureFile.Factory, not an import codec.
 /// Implementations must verify private local persistence before returning sealed registrations,
 /// and append immutable identities exclusively. Overwriting a registry file is not this contract.
-/// No production persistence adapter is supplied; an injected implementation is not host restart support.
+/// The native immutable adapter is opt-in; injected in-memory state is not host restart support.
 public protocol DesktopRecordingLocationPersistence: Sendable {
     func loadVerified() throws -> DesktopRecordingLocationState
     func appendRegistration(_ registration: DesktopRecordingLocationRegistration) throws
@@ -104,7 +107,7 @@ struct DesktopRecordingLocationIdentity: Equatable, Sendable {
         return Self(device: identity.device, file: identity.file)
     }
 
-    private init(device: UInt64, file: UInt64) {
+    init(device: UInt64, file: UInt64) {
         self.device = device
         self.file = file
     }
@@ -278,6 +281,10 @@ public struct DesktopRecordingLocations: Sendable {
             throw DesktopRecordingLocationError.foreignRegistration
         }
         try Self.validateRootURL(registration.root)
+        let namespace = history.appendingPathComponent(".recording-locations", isDirectory: true)
+        guard !registration.root.standardizedFileURL.pathComponents.starts(with: namespace.pathComponents, by: {
+            $0.caseInsensitiveCompare($1) == .orderedSame
+        }) else { throw DesktopRecordingLocationError.privateNamespace }
         guard try DesktopRecordingLocationIdentity.directory(registration.root) == registration.rootIdentity else {
             throw DesktopRecordingLocationError.changedLocation
         }

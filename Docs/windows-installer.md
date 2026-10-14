@@ -22,6 +22,7 @@ identity in the repository.
 | Default publisher | `CN=Just Speak to It Developer` (placeholder for the unsigned package) |
 | Package family | `com.justspeaktoit.windows.developer_12qtdfzdxrxs0` for the default publisher |
 | Application / AUMID | `JustSpeakToIt` / `<family>!JustSpeakToIt` |
+| Hidden CLI application / AUMID | `JustSpeakToItCLI` / `<family>!JustSpeakToItCLI` |
 | Display name | Just Speak to It Developer |
 | GUI execution alias | `JustSpeakToItDeveloper.exe` → `SpeakWindows.exe` (unchanged) |
 | CLI execution alias | `JustSpeakToItDeveloperCLI.exe` → `speak.exe` (console) |
@@ -40,8 +41,13 @@ dependency graph. Packaging re-reads both PEs and their static/delay imports;
 missing/tampered CLI bytes, test or unknown imports, foreign architecture and
 false importer/root attribution are refused before layout creation.
 
-The CLI alias is a second extension under the existing GUI Application, not a
-second Start menu tile or a retargeted GUI alias. It uses
+The SDK permits only one `windows.appExecutionAlias` extension per Application,
+even when the extensions use different namespace versions. The CLI therefore
+has its own `JustSpeakToItCLI` Application, with required canonical visual
+assets and [`AppListEntry="none"`](https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-uap-visualelements).
+There are exactly two reviewed Applications but only one visible Start entry;
+the GUI Application, AUMID, icons, alias and startup task remain unchanged.
+The real CLI keeps
 [`uap5:Extension`'s `Executable` override](https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-uap5-extension)
 and [`uap5:AppExecutionAlias`'s `uap10:Subsystem="console"`](https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-uap5-appexecutionalias).
 No generic `speak.exe` alias is registered and no PATH, trust, install or
@@ -52,12 +58,17 @@ The existing Windows CLI version fallback is `0.0.0-dev`; it is not the MSIX
 version. Other commands still use the running app's existing automation pipe.
 
 Disposable-runner lifecycle checks require both aliases to appear and disappear,
-verify the installed CLI executable/alias association, and run help/version with
+verify the hidden CLI application and installed executable/alias association,
+require exactly one visible GUI entry for the package family, and run help/version with
 bounded redirected streams and isolated PATH. A pre-existing CLI alias or CLI
 process blocks admission and is never owned or removed by a refused run.
 Fast CLI checks do not substitute stdout for GUI module provenance. Fresh native
 build and MakeAppx/install/alias/removal receipts are still required: earlier
-GUI-only receipts do not qualify this CLI packaging change.
+GUI-only receipts do not qualify this CLI packaging change. The `6d920e46`
+developer layouts were rejected by MakeAppx with `0x80080204` because both alias
+extensions occupied the GUI Application. Static/mock topology tests do not
+qualify the corrected layout: actual x64/ARM64 SDK packing and installed
+alias/start/upgrade/removal receipts remain required.
 
 Package logos come from the canonical Mac 1024px export with transparent
 corners. The three manifest roots (`StoreLogo`, `Square44x44Logo` and

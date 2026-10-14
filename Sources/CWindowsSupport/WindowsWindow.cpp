@@ -98,8 +98,8 @@ const PageInfo pageInfo[pageCount] = {
     {L"Dashboard", L"Ready to capture ideas instantly. Check your setup, follow your usage, and pick up your latest "
                    L"session.", 0xE80F, "dashboard"},
     {L"History", L"Search, replay and reuse past recordings and their transcripts.", 0xE81C, "history"},
-    {L"Voice Output", L"Read History, typed text or an explicit clipboard snapshot in a Deepgram Aura voice. "
-                      L"Export lossless WAV audio with your own Deepgram key.", 0xE767, "voice-output"},
+    {L"Voice Output", L"Read History, typed text, clipboard snapshots or imported text with your selected voice. "
+                      L"Export lossless WAV audio.", 0xE767, "voice-output"},
     {L"General", L"Choose the microphone, where finished text goes, whether the app starts at login, and how it "
                  L"looks.", 0xE713, "general"},
     {L"Transcription", L"Pick the speech model for new recordings, on this PC or with your own provider key.", 0xE720,
@@ -818,8 +818,8 @@ void layoutSettings(HWND window, const RECT &content) {
     switch (state.page) {
     case voicePage: {
         int y = layoutSettingsCard(window, top, content, 0xE767, L"Read aloud",
-            L"Read the selected History transcript, or open Text and export for typed/pasted text and an explicit "
-            L"clipboard snapshot. The saved Deepgram key is used. External selected text is unavailable.", 2 * row + gap);
+            L"Read the selected History transcript, or open Text and export to edit, paste or import text. "
+            L"The selected voice provider uses its saved key. External selected text is unavailable.", 2 * row + gap);
         place(window, voiceSettingsID, box(left, y, scale(window, 150), row));
         button(readAloudID, y, scale(window, 196));
         place(window, stopPlaybackID, box(right - scale(window, 196) - scale(window, 8) - scale(window, 96), y,

@@ -514,8 +514,8 @@ static GtkWidget *read_aloud_group(void) {
     GtkWidget *widget = group("Voice");
     adw_preferences_group_set_description(
         ADW_PREFERENCES_GROUP(widget),
-        "Read aloud speaks the transcript shown for the selected recording with a Deepgram voice, using the "
-        "saved Deepgram API key. Play, Pause and Stop control it.");
+        "Read aloud sends the displayed History transcript to the selected voice provider using its saved key. "
+        "Play, Pause and Stop control playback.");
     read_aloud.voices = gtk_string_list_new(NULL);
     read_aloud.voice_row = ADW_COMBO_ROW(adw_combo_row_new());
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(read_aloud.voice_row), "Voice");
@@ -840,8 +840,8 @@ static GtkWidget *build_voice_output(void) {
     GtkWidget *column, *page = jsti_page_new(&column);
     gtk_box_append(GTK_BOX(column), jsti_hero_new(
         "voice", "Voice Output",
-        "Read History, typed text or an explicit clipboard snapshot in a Deepgram Aura voice. "
-        "Export lossless WAV audio with your own Deepgram key.", NULL,
+        "Read History, typed text, clipboard snapshots or imported text with your selected voice. "
+        "Export lossless WAV audio.", NULL,
         NULL));
     GtkWidget *body;
     GtkWidget *card = jsti_card_new("audio-speakers-symbolic", "Read aloud", &body);
@@ -2089,6 +2089,11 @@ static void observe_event(gint32 event, const char *text, gint32 index, void *co
  * and the window is idle, it reports that record, and the voice picker
  * reports the chosen position. */
 static int32_t read_aloud_self_test(const char *record, char *error, size_t capacity) {
+    GtkWidget *group = gtk_widget_get_ancestor(GTK_WIDGET(read_aloud.voice_row), ADW_TYPE_PREFERENCES_GROUP);
+    const char *description = group ? adw_preferences_group_get_description(ADW_PREFERENCES_GROUP(group)) : NULL;
+    if (!description || !strstr(description, "selected voice provider") || strstr(description, "Deepgram")) {
+        return fail(error, capacity, "Voice output does not disclose the selected provider accurately");
+    }
     if (g_list_model_get_n_items(G_LIST_MODEL(read_aloud.voices)) < 2) {
         return fail(error, capacity, "Read aloud offers fewer than two voices");
     }

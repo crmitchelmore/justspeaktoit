@@ -66,6 +66,10 @@ same regional Azure request builder, saved `key:region` credential and native
 WAV decoding/playback, not a second provider client or credential store.
 
 **OpenAI (local candidate)** uses one `OpenAITTSCatalog` for Mac and desktop.
+Native Voice pages and settings describe the selected provider rather than
+incorrectly claiming that every voice sends text to Deepgram. The separate
+OpenAI TTS credential must already be available in secure storage; direct
+native entry of that distinct credential is not qualified by this local slice.
 Mac's eleven `openai/<voice>` identifiers, order, names and traits remain intact.
 Its default quality is still High (`tts-1`); Standard selects
 `gpt-4o-mini-tts`, Highest selects `tts-1-hd`. The documented TTS-1/HD subset

@@ -520,8 +520,10 @@ int publishPrivateFile(const char *sourcePath, const char *destinationPath,
     // Preserve the held root all the way through rename. The Win32 wrapper
     // rejects this relative-name form on supported Windows hosts.
     IO_STATUS_BLOCK status{};
+    // FileRenameInformation is NT class 10; the user-mode SDK omits its name.
+    constexpr auto renameInformation = static_cast<FILE_INFORMATION_CLASS>(10);
     const NTSTATUS renamed = NtSetInformationFile(
-        output.value, &status, rename, static_cast<ULONG>(storage.size()), FileRenameInformation);
+        output.value, &status, rename, static_cast<ULONG>(storage.size()), renameInformation);
     if (renamed < 0) {
         error = jsti::systemError("Publish private export without replacing an existing file",
                                   RtlNtStatusToDosError(renamed));

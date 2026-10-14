@@ -234,6 +234,16 @@ private actor HistoryHostProbe {
             audible = .playing(id)
         }
     }
+
+    private func togglePlayback(_ id: String) {
+        if audible == .playing(id) {
+            audible = .paused(id)
+        } else if audible == .paused(id) {
+            audible = .playing(id)
+        } else if id == selected {
+            audible = .playing(id)
+        }
+    }
 }
 
 /// Holds only the first event that reaches it, until resumed.

@@ -337,7 +337,8 @@ final class DesktopHostReadAloudTests: XCTestCase {
         await controller.readAloud(record.uuidString, text: longText)
         try await waitFor("the first segment") { FakeSpeech.shared.events.contains("play") }
         let filter = try JSONEncoder().encode(DesktopHistoryFilter(errorsOnly: true))
-        await controller.applyHistoryFilters(String(decoding: filter, as: UTF8.self))
+        let payload = try XCTUnwrap(String(bytes: filter, encoding: .utf8))
+        await controller.applyHistoryFilters(payload)
         XCTAssertEqual(FakeSpeech.shared.events, ["begin", "play", "end"])
         let selected = await controller.selectedHistoryID
         XCTAssertNil(selected)

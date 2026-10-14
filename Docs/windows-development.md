@@ -697,6 +697,13 @@ General also offers **Inspect backup** through a separate native ZIP open
 picker. This is read-only archive inspection, not import approval or application:
 the bounded native reader checks the envelope and extracted audio CRC/digests,
 then reports canonical category counts and the number of archive notices.
+History/audio records also pass cancellable canonical identity/date/scope
+validation and native desktop decoding; the report separately counts
+structurally valid and rejected records. Other categories are counted but
+their record values are not validated. Cancellation before, between or after
+records aborts validation rather than returning partial data or treating
+cancellation as an invalid-item notice. The existing non-cancellable validation
+API retains its behavior for other callers.
 An unreadable declared category is shown as unreadable, never as an empty
 successful category. Credential values and record contents are not displayed.
 The report explicitly states that record values are not yet approved for import

@@ -270,8 +270,30 @@ final class DesktopOwnedCaptureFileTests: XCTestCase {
     }
 }
 
+extension DesktopOwnedCaptureFileTests {
+    func testChangedLocationDuringHeaderAdmissionDiscardsOnlyUnpublishedAndDestroysOnce() throws {
+        let writer = CaptureTestWriter()
+        let owned = try makeFile(writer)
+        writer.failValidationAfterWrite = true
+        XCTAssertThrowsError(try PCMRecordingFile(ownedFile: owned)) {
+            XCTAssertEqual($0 as? CaptureTestWriter.Failure, .validate)
+        }
+        XCTAssertEqual(writer.removals, 1)
+        XCTAssertEqual(writer.closes, 1)
+        try owned.close()
+        XCTAssertEqual(writer.closes, 1)
+    }
+
+    func testNativeCreateFailureDoesNotProduceAnOwnedCapability() {
+        XCTAssertThrowsError(try DesktopOwnedCaptureFile.create(
+            in: URL(fileURLWithPath: FileManager.default.currentDirectoryPath),
+            using: .init { _, _, _ in throw CaptureTestWriter.Failure.create }
+        )) { XCTAssertEqual($0 as? CaptureTestWriter.Failure, .create) }
+    }
+}
+
 private final class CaptureTestWriter: DesktopOwnedCaptureWriter, @unchecked Sendable {
-    enum Failure: Error { case write, seek, synchronize, validate, remove, close }
+    enum Failure: Error { case create, write, seek, synchronize, validate, remove, close }
     let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("fake.wav")
     var data = Data()
     var offset = 0
@@ -279,6 +301,7 @@ private final class CaptureTestWriter: DesktopOwnedCaptureWriter, @unchecked Sen
     var removals = 0
     var failure: Failure?
     var failClose = false
+    var failValidationAfterWrite = false
 
     func write(_ bytes: Data) throws {
         if failure == .write { throw Failure.write }
@@ -298,7 +321,7 @@ private final class CaptureTestWriter: DesktopOwnedCaptureWriter, @unchecked Sen
     }
 
     func validateLocation() throws {
-        if failure == .validate { throw Failure.validate }
+        if failure == .validate || (failValidationAfterWrite && !data.isEmpty) { throw Failure.validate }
     }
 
     func removeUnpublished() throws {

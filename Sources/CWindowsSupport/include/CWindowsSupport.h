@@ -643,6 +643,29 @@ int jsti_private_directory_prepare(const char *path, char *error, size_t error_c
  * when the process is elevated. An existing directory is never changed. */
 int jsti_private_directory_create(const char *path, char *error, size_t error_capacity);
 int jsti_private_file_create(const char *path, char *error, size_t error_capacity);
+/* Opt-in held capture capability; not wired to the host/default Swift factory.
+ * root must already exist. IDs must be UUID strings. Creation is exclusive in
+ * a new private UUID directory and never repairs the caller-selected root.
+ * Reuses private-staging ACLs and pinned, non-reparse ancestor traversal.
+ * Calls must be serialized. Destroy exactly once, after close; destroy also
+ * closes an abandoned capability, but never deletes retained audio.
+ * Discard marks only the held file for deletion; directories are never removed.
+ * Close is idempotent and reports teardown failures without retrying handles. */
+typedef struct JSTIOwnedCaptureFile JSTIOwnedCaptureFile;
+int jsti_owned_capture_file_create(const char *root, const char *directory_id, const char *recording_id,
+                                   JSTIOwnedCaptureFile **result, char *error, size_t error_capacity);
+int jsti_owned_capture_file_write(JSTIOwnedCaptureFile *file, const uint8_t *bytes, size_t count,
+                                  char *error, size_t error_capacity);
+int jsti_owned_capture_file_seek(JSTIOwnedCaptureFile *file, uint64_t offset,
+                                 char *error, size_t error_capacity);
+int jsti_owned_capture_file_flush(JSTIOwnedCaptureFile *file, char *error, size_t error_capacity);
+int jsti_owned_capture_file_validate(JSTIOwnedCaptureFile *file, char *error, size_t error_capacity);
+int jsti_owned_capture_file_discard(JSTIOwnedCaptureFile *file, char *error, size_t error_capacity);
+int jsti_owned_capture_file_close(JSTIOwnedCaptureFile *file, char *error, size_t error_capacity);
+void jsti_owned_capture_file_destroy(JSTIOwnedCaptureFile *file);
+/* Native qualification fixture. Caller supplies an exclusively owned
+ * test root; only new UUID children and synthetic bytes are used. */
+int jsti_owned_capture_file_self_test(const char *root, char *error, size_t error_capacity);
 /* Copies a private regular source into private destination-side staging, then
  * publishes exclusively. The source is retained. 0 committed, 2 cancelled
  * before commit, -1 failed, 3 committed with a handle-cleanup error (never

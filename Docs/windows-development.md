@@ -456,12 +456,33 @@ Finalization/retention rejects changed directory or file bindings; writes never
 redirect to replacement paths.
 
 Linux native qualification does not establish Windows/Darwin support or enable
-host routing. Windows and Darwin allocation explicitly report
-unsupported pending executable host qualification. The existing Windows native
-private-file creator returns no held HANDLE; Darwin also needs an ACL-aware
-held-directory adapter, not a POSIX-mode-only security claim. Neither may
-close/reopen a pathname as a substitute. Injectable writer tests cover portable
-lifecycle behavior on those hosts, not native qualification.
+host routing. The shared default factory remains explicitly unsupported on
+Windows and Darwin. Darwin still needs an ACL-aware held-directory adapter,
+not a POSIX-mode-only security claim.
+
+`WindowsOwnedCaptureFile.qualificationFactory` is a separate, explicitly opt-in
+qualification route, never a host/default route. Its C bridge extends
+`WindowsFileSecurity.cpp` and reuses `PrivateSecurity`, `openParents`,
+`openRelative` and `verifyPrivate`: there is no second ACL policy. Selected roots
+and ancestors use the existing non-reparse traversal contract; their ACLs are
+not repaired. New UUID directories/files get the same protected current-user/
+SYSTEM DACL and explicit current-user ownership as private migration staging.
+Directory handles deny delete sharing until close, and the actual file HANDLE
+denies competing writers/deleters. Writes, seeks and flushes use that same
+HANDLE. Discard uses `FileDispositionInfo` on the owned unpublished file,
+never a pathname or identity-recheck CAS. Direct bridge callers must serialize
+methods; the shared capability provides serialization and retention policy.
+
+The additive C ABI is one opaque `JSTIOwnedCaptureFile` and
+`jsti_owned_capture_file_{create,write,seek,flush,validate,discard,close,destroy}`,
+plus `jsti_owned_capture_file_self_test` for qualification in a caller-owned
+fixture root. There are no event IDs, UI/resource changes, new libraries or
+package graph edges: `SpeakWindowsPlatform` already depends on `SpeakDesktop`
+and `CWindowsSupport`. Windows conditional fixtures cover both PCM rates,
+exclusive collisions, cancellation/owned cleanup, ACL/reparse validation and
+root/directory/file replacement exclusion. Passing Linux stub projections does
+not establish native Windows Swift runtime qualification; the default stays
+unavailable until that evidence is reviewed.
 
 The host still uses its existing History WAV initializer. Location selection,
 owned configuration persistence, per-record location provenance, migration

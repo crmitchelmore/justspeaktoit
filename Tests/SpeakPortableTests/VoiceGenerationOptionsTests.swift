@@ -13,4 +13,3 @@ final class VoiceGenerationOptionsTests: XCTestCase {
         XCTAssertNil(VoiceGenerationOptions(nativeFlags: 4))
     }
 }
-

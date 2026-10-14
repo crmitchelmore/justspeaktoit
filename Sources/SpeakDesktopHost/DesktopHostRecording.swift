@@ -27,6 +27,42 @@ extension DesktopHostController {
             throw error
         }
         let record = profileRecord(id: id, filename: filename, profile: profile)
+        try await beginLiveRecording(
+            LiveRecordingStart(
+                key: key, profile: profile, id: id, record: record, file: file, rate: rate,
+                target: target, deviceID: deviceID, textOutput: textOutput, trigger: trigger, handsFree: handsFree
+            )
+        )
+        guard !closed, recording?.record.id == id else { return }
+        announceRecording(id, profile: profile, trigger: trigger)
+    }
+
+    /// Groups the parameters needed to start a live session and capture for an
+    /// already-saved recording, keeping `beginLiveRecording` within the project's
+    /// parameter-count limit without changing any argument semantics.
+    private struct LiveRecordingStart {
+        let key: String
+        let profile: DesktopProfileSession
+        let id: UUID
+        let record: DesktopRecordingStore.Record
+        let file: PCMRecordingFile
+        let rate: Int
+        let target: Platform.InsertionTarget?
+        let deviceID: String
+        let textOutput: Platform.TextOutputOptions
+        let trigger: HotKeySessionTrigger
+        let handsFree: DesktopHandsFreeRun<Platform>?
+    }
+
+    /// Starts the live session and capture for an already-saved recording,
+    /// saving a startup-failure record and rethrowing when either step fails.
+    private func beginLiveRecording(_ start: LiveRecordingStart) async throws {
+        let (key, profile, id, record, file, rate) = (
+            start.key, start.profile, start.id, start.record, start.file, start.rate
+        )
+        let (target, deviceID, textOutput, trigger, handsFree) = (
+            start.target, start.deviceID, start.textOutput, start.trigger, start.handsFree
+        )
         var live: DesktopLiveSession?
         do {
             // The parent operation remains active through every metadata write,
@@ -63,8 +99,6 @@ extension DesktopHostController {
             try await saveStartupFailure(error, record: record, file: file)
             throw error
         }
-        guard !closed, recording?.record.id == id else { return }
-        announceRecording(id, profile: profile, trigger: trigger)
     }
 
     private func captureContext(

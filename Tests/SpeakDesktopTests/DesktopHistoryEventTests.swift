@@ -209,20 +209,31 @@ private actor HistoryHostProbe {
         applied.append(event)
         switch event {
         case .selection(let id):
-            if id != selected { audible = nil }
-            selected = id
+            applySelection(id)
         case .version: break
         case .playPause(let id):
             togglePlayback(id)
         case .stop: audible = nil
         case .readAloud(let id, let text):
-            if id == selected { audible = .reading(id, text) }
+            applyReadAloud(id: id, text: text)
         case .filter: audible = nil
         case .voiceRead(let snapshot):
             audible = .reading(snapshot.recordID?.uuidString ?? "text-source", snapshot.text)
         case .voiceExport: audible = nil
         case .voiceImport, .voiceImportCancel, .voiceGenerate, .voiceGeneratedPlay, .voiceGeneratedExport: break
         }
+    }
+
+    /// `.selection` clears whatever is audible unless it already matches the
+    /// row being selected, then records the newly-selected row.
+    private func applySelection(_ id: String) {
+        if id != selected { audible = nil }
+        selected = id
+    }
+
+    /// `.readAloud` only takes over the audible slot for the selected row.
+    private func applyReadAloud(id: String, text: String) {
+        if id == selected { audible = .reading(id, text) }
     }
 
     private func togglePlayback(_ id: String) {

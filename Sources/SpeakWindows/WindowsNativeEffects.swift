@@ -36,7 +36,7 @@ struct WindowsNativeEffects: WindowsControllerEffects {
     ) async throws -> TranscriptionResult {
         try await controller.transcribePreparedAudio(
             request.audio, model: request.model, key: request.key, duration: request.duration,
-            language: request.language, keywords: request.keywords
+            language: request.language, azureEndpoint: request.azureEndpoint, keywords: request.keywords
         )
     }
 
@@ -46,6 +46,21 @@ struct WindowsNativeEffects: WindowsControllerEffects {
         try await Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()
             return try WindowsInsertionTarget.capture()
+        }.value
+    }
+
+    func captureUtteranceContext(
+        requiresInsertionTarget: Bool
+    ) async throws -> DesktopHostUtteranceContext<WindowsInsertionTarget> {
+        try await Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
+            if requiresInsertionTarget {
+                let target = try WindowsInsertionTarget.capture()
+                return try DesktopHostUtteranceContext(target: target, executablePath: target.executablePathChecked())
+            }
+            return try DesktopHostUtteranceContext(
+                target: nil, executablePath: WindowsInsertionTarget.foregroundExecutablePath()
+            )
         }.value
     }
 

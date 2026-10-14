@@ -65,6 +65,8 @@ final class TailEffects: DesktopHostEffects, @unchecked Sendable {
     private var jobs: [FakeJob] = []
     private var targetRequests = 0
     private var storedTarget: String? = "synthetic-field"
+    private var storedExecutablePath: String?
+    private var contextRequests = 0
     private var storedDelivery = DesktopTextOutputResult(.confirmedInsertion, status: "Delivered.")
     var target: String? {
         get { lock.withLock { storedTarget } }
@@ -74,6 +76,11 @@ final class TailEffects: DesktopHostEffects, @unchecked Sendable {
         get { lock.withLock { storedDelivery } }
         set { lock.withLock { storedDelivery = newValue } }
     }
+    var executablePath: String? {
+        get { lock.withLock { storedExecutablePath } }
+        set { lock.withLock { storedExecutablePath = newValue } }
+    }
+    var contextRequestCount: Int { lock.withLock { contextRequests } }
     let targetGate = Gate(open: true)
     let transcriptionGate = Gate(open: true)
     let outputGate = Gate(open: true)
@@ -113,6 +120,19 @@ final class TailEffects: DesktopHostEffects, @unchecked Sendable {
         let captured = lock.withLock { targetRequests += 1; return storedTarget }
         await targetGate.pass()
         return captured
+    }
+    func captureUtteranceContext(
+        requiresInsertionTarget: Bool
+    ) async throws -> DesktopHostUtteranceContext<String> {
+        let context = lock.withLock {
+            contextRequests += 1
+            if requiresInsertionTarget { targetRequests += 1 }
+            return DesktopHostUtteranceContext(
+                target: requiresInsertionTarget ? storedTarget : nil, executablePath: storedExecutablePath
+            )
+        }
+        await targetGate.pass()
+        return context
     }
     func perform(_ job: FakeJob, text: String) -> DesktopTextOutputResult {
         lock.withLock { performed += 1; jobs.append(job) }

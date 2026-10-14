@@ -952,6 +952,21 @@ std::string checkCapturedProcessAndWorkerBounds(Fixture &state) {
     if (jsti_insertion_executable_path(target.value, path.data(), path.size(), &required, message, sizeof(message)) != 0 ||
         std::strlen(path.data()) + 1 != required) return describe("captured process", "path query failed", message);
     const std::string original(path.data());
+    std::vector<char> foregroundPath(131073);
+    const size_t workers = liveWorkerCount();
+    if (jsti_foreground_executable_path(foregroundPath.data(), foregroundPath.size(), message, sizeof(message)) != 0 ||
+        original != foregroundPath.data() || liveWorkerCount() != workers) {
+        return describe("foreground profile", "app lookup changed workers or returned another process", message);
+    }
+    if (jsti_foreground_executable_path(shortBuffer, 1, message, sizeof(message)) != -1 || shortBuffer[0]) {
+        return describe("foreground profile", "short-buffer failure was not explicit", message);
+    }
+    environment.allowCurrentProcess = false;
+    setEnvironment(environment);
+    if (jsti_foreground_executable_path(foregroundPath.data(), foregroundPath.size(), message, sizeof(message)) != 0 ||
+        foregroundPath[0]) return describe("foreground profile", "the app matched its own process", message);
+    environment.allowCurrentProcess = true;
+    setEnvironment(environment);
     state.foreground = GetDesktopWindow();
     jsti_insertion_cancel(target.value);
     const int status = jsti_insertion_executable_path(target.value, path.data(), path.size(), &required, message, sizeof(message));

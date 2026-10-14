@@ -6,7 +6,7 @@ extension DesktopHostController {
     /// Output is the recording's own authority; imports and retries pass nil.
     package func transcribe(
         _ original: DesktopRecordingStore.Record, duration: TimeInterval, output: DesktopHostRecordingOutput<Platform>?,
-        profile: DesktopProfileSession? = nil
+        profile: DesktopProfileSession? = nil, azureEndpoint: String? = nil
     ) async {
         var record = original
         cancellationRequested = false
@@ -27,6 +27,7 @@ extension DesktopHostController {
             hud(record.id, .transcribing())
             let request = DesktopHostTranscriptionRequest(
                 audio: audio, model: record.modelIdentifier, key: key, duration: duration, language: session.language,
+                azureEndpoint: azureEndpoint ?? azureResourceEndpoint(),
                 keywords: try await vocabularyKeywords()
             )
             let effects = self.effects

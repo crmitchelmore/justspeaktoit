@@ -39,16 +39,7 @@ struct LinuxNativeEffects: DesktopHostEffects {
     ) async throws -> TranscriptionResult {
         try await controller.transcribePreparedAudio(
             request.audio, model: request.model, key: request.key, duration: request.duration,
-            language: request.language, keywords: request.keywords
-        )
-    }
-
-    func makeLiveClient(
-        model: String, key: String, language: String?, azureEndpoint: String, options: LiveClientOptions
-    ) -> (any FinalizingStreamingTranscriptionClient)? {
-        DesktopLiveTranscription.makeClient(
-            model: model, apiKey: key, language: language, azureEndpoint: azureEndpoint, options: options,
-            makeConnection: { NIOStreamingConnection(request: $0) }
+            language: request.language, azureEndpoint: request.azureEndpoint, keywords: request.keywords
         )
     }
 
@@ -64,6 +55,34 @@ struct LinuxNativeEffects: DesktopHostEffects {
         return try await Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()
             return try LinuxX11.captureTargetChecked()
+        }.value
+    }
+
+    func captureUtteranceContext(
+        requiresInsertionTarget: Bool
+    ) async throws -> DesktopHostUtteranceContext<LinuxInsertionTarget> {
+        guard LinuxHostPlatform.session.canUseX11Injection else {
+            if requiresInsertionTarget {
+                throw DesktopHostError(message: "This desktop cannot freeze an external insertion destination.")
+            }
+            return .init(
+                target: nil, executablePath: nil,
+                profileNotice: "Wayland does not expose the external app identity. Normal app settings apply."
+            )
+        }
+        guard requiresInsertionTarget else {
+            return .init(
+                target: nil, executablePath: nil,
+                profileNotice: "Linux executable profile matchers are not available. Normal app settings apply."
+            )
+        }
+        return try await Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
+            let target = try LinuxX11.captureTargetChecked()
+            return DesktopHostUtteranceContext(
+                target: target, executablePath: nil,
+                profileNotice: "Linux executable profile matchers are not available. Normal app settings apply."
+            )
         }.value
     }
 

@@ -199,15 +199,31 @@ public final class WindowsInsertionTarget: @unchecked Sendable {
     /// Full executable path from the process retained at capture. This performs
     /// no focus lookup or accessibility query, including after focus has moved.
     public var executablePath: String? {
+        try? executablePathChecked()
+    }
+
+    public func executablePathChecked() throws -> String {
         var required = 0
         var error = [CChar](repeating: 0, count: 512)
         let status = jsti_insertion_executable_path(handle, nil, 0, &required, &error, error.count)
-        guard status == 2, required > 1, required <= 131_073 else { return nil }
+        guard status == 2, required > 1, required <= 131_073 else {
+            throw WindowsTextOutputError(String(cString: error))
+        }
         var path = [CChar](repeating: 0, count: required)
         guard jsti_insertion_executable_path(
             handle, &path, path.count, &required, &error, error.count
-        ) == 0 else { return nil }
+        ) == 0 else { throw WindowsTextOutputError(String(cString: error)) }
         return String(cString: path)
+    }
+
+    public static func foregroundExecutablePath() throws -> String? {
+        var path = [CChar](repeating: 0, count: 131_073)
+        var error = [CChar](repeating: 0, count: 512)
+        guard jsti_foreground_executable_path(&path, path.count, &error, error.count) == 0 else {
+            throw WindowsTextOutputError(String(cString: error))
+        }
+        let value = String(cString: path)
+        return value.isEmpty ? nil : value
     }
 
     /// Copies for an explicit clipboard-only output request. Native cancellation

@@ -6,25 +6,19 @@ extension DesktopMigrationArchive {
     /// it to the user's destination, then remove its containing directory.
     public static func export(
         _ snapshot: DataMigrationSnapshot, digests: LocalModelDigestProvider,
-        stagingRoot: URL = FileManager.default.temporaryDirectory, includeCredentials: Bool = false
+        stagingRoot: URL = FileManager.default.temporaryDirectory, includeCredentials: Bool = false,
+        storage: Storage? = nil
     ) throws -> URL {
         try Task.checkCancellation()
+        let storage = try Storage.resolve(storage)
         try DataMigrationArchivePolicy.validateManifest(snapshot.manifest)
         let audio = try exportAudio(snapshot, includeCredentials: includeCredentials)
         let directory = stagingRoot.appendingPathComponent("migration-export-\(UUID().uuidString)", isDirectory: true)
-        #if os(Windows)
-        let permissions: [FileAttributeKey: Any] = [:]
-        #else
-        let permissions: [FileAttributeKey: Any] = [.posixPermissions: 0o700]
-        #endif
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
-                                                attributes: permissions)
+        try storage.createDirectory(directory)
         do {
+            try Task.checkCancellation()
             let file = directory.appendingPathComponent("export.zip")
-            try Data().write(to: file, options: .withoutOverwriting)
-            #if !os(Windows)
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
-            #endif
+            try storage.createFile(file)
             try writeExport(snapshot, audio: audio, file: file, digests: digests)
             try Task.checkCancellation()
             return file

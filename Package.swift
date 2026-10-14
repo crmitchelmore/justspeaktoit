@@ -229,6 +229,7 @@ let portablePackage = Package(
         .testTarget(
             name: "SpeakDesktopTests",
             dependencies: ["SpeakDesktop", "SpeakCore", "SpeakTestSupport", "SpeakFeedbackResources"]
+                + (windowsTargetBuild ? [.target(name: "SpeakWindowsPlatform")] : [])
         ),
         .testTarget(
             name: "SpeakDesktopHostTests",

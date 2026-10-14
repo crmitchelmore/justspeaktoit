@@ -21,9 +21,9 @@ final class WindowsMigrationArchiveTests: XCTestCase {
         try await store.save(record)
         let source = try await store.migrationSnapshot(categories: [.history, .recordings],
                                                        digests: WindowsSHA256Hasher.provider)
-        let file = try DesktopMigrationArchive.export(source, digests: WindowsSHA256Hasher.provider)
+        let file = try WindowsMigrationArchive.export(source, digests: WindowsSHA256Hasher.provider)
         addTeardownBlock { try FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
-        let result = try DesktopMigrationArchive.read(file, digests: WindowsSHA256Hasher.provider)
+        let result = try WindowsMigrationArchive.read(file, digests: WindowsSHA256Hasher.provider)
         let staging = try XCTUnwrap(result.directory)
         addTeardownBlock { try FileManager.default.removeItem(at: staging) }
         XCTAssertEqual(result.records, source.records)
@@ -39,14 +39,14 @@ final class WindowsMigrationArchiveTests: XCTestCase {
 
     func testArchiveExport_StreamsNativeCNGVerifiedAudioIntoReadableZIP64() throws {
         #if os(Windows)
-        let source = try DesktopMigrationArchive.read(
+        let source = try WindowsMigrationArchive.read(
             MigrationArchiveFixtures.url("long-unicode"), digests: WindowsSHA256Hasher.provider
         )
         let sourceDirectory = try XCTUnwrap(source.directory)
         addTeardownBlock { try FileManager.default.removeItem(at: sourceDirectory) }
-        let file = try DesktopMigrationArchive.export(source, digests: WindowsSHA256Hasher.provider)
+        let file = try WindowsMigrationArchive.export(source, digests: WindowsSHA256Hasher.provider)
         addTeardownBlock { try FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
-        let result = try DesktopMigrationArchive.read(file, digests: WindowsSHA256Hasher.provider)
+        let result = try WindowsMigrationArchive.read(file, digests: WindowsSHA256Hasher.provider)
         let resultDirectory = try XCTUnwrap(result.directory)
         addTeardownBlock { try FileManager.default.removeItem(at: resultDirectory) }
         XCTAssertEqual(result.records, source.records)
@@ -77,7 +77,7 @@ final class WindowsMigrationArchiveTests: XCTestCase {
 
     func testArchiveAudio_UsesNativeCNGVerificationAndGeneratedStaging() throws {
         #if os(Windows)
-        let result = try DesktopMigrationArchive.read(
+        let result = try WindowsMigrationArchive.read(
             MigrationArchiveFixtures.url("zip64"), digests: WindowsSHA256Hasher.provider
         )
         let directory = try XCTUnwrap(result.directory)

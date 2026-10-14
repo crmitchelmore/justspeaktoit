@@ -10,6 +10,7 @@ extension DesktopRecordingStore {
             throw DataMigrationError.invalid("This collector owns only History and recording audio.")
         }
         try Task.checkCancellation()
+        try Self.validateMigrationScopeDates(scopes)
         let retained = try records().filter { !filenames.contains($0.audioFilename) }
         let audio = categories.contains(.recordings) ? try snapshotSavedAudio(excluding: filenames) : nil
         var snapshot = DataMigrationSnapshot(
@@ -43,19 +44,26 @@ extension DesktopRecordingStore {
             let url = try ownedAudioURL(for: first)
             let digest = try Self.migrationAudioDigest(url, identity: entry.identity, digests: digests)
             for record in records {
-                let value = try DesktopMigrationHistory.value(record)
-                let path = "recordings/\(record.id.uuidString)-\(digest).\(url.pathExtension.lowercased())"
-                let revision = try digests.sha256(of: DataMigrationCoding.encoder.encode(value))
-                snapshot.records[.recordings, default: []].append(.init(
-                    id: record.id.uuidString, kind: "audio",
-                    value: try DataMigrationHistoryValue.value(value, audioOnly: true), date: record.createdAt,
-                    file: path, digest: digest, revision: revision
-                ))
-                snapshot.files[path] = url
+                let audioRecord = try Self.migrationAudioRecord(record, url: url, digest: digest, digests: digests)
+                snapshot.records[.recordings, default: []].append(audioRecord.record)
+                snapshot.files[audioRecord.path] = url
             }
         }
         try Task.checkCancellation()
         return snapshot
+    }
+
+    private static func migrationAudioRecord(
+        _ record: Record, url: URL, digest: String, digests: LocalModelDigestProvider
+    ) throws -> (record: DataMigrationRecord, path: String) {
+        try Task.checkCancellation()
+        let value = try DesktopMigrationHistory.value(record)
+        let path = "recordings/\(record.id.uuidString)-\(digest).\(url.pathExtension.lowercased())"
+        let revision = try digests.sha256(of: DataMigrationCoding.encoder.encode(value))
+        return (.init(
+            id: record.id.uuidString, kind: "audio", value: try DataMigrationHistoryValue.value(value, audioOnly: true),
+            date: try migrationDate(record.createdAt), file: path, digest: digest, revision: revision
+        ), path)
     }
 
     private static func migrationHistory(
@@ -67,11 +75,25 @@ extension DesktopRecordingStore {
             guard scope.contains(id: record.id.uuidString, date: record.createdAt) else { continue }
             let value = try DesktopMigrationHistory.value(record)
             history.append(.init(
-                id: record.id.uuidString, kind: "history", value: value, date: record.createdAt,
+                id: record.id.uuidString, kind: "history", value: value, date: try migrationDate(record.createdAt),
                 revision: try digests.sha256(of: DataMigrationCoding.encoder.encode(value))
             ))
         }
         return history
+    }
+
+    private static func migrationDate(_ date: Date) throws -> Date {
+        try DataMigrationCoding.decode(Date.self, DataMigrationCoding.value(date))
+    }
+
+    private static func validateMigrationScopeDates(_ scopes: [String: DataMigrationScope]) throws {
+        for scope in scopes.values {
+            for boundary in [scope.start, scope.end].compactMap({ $0 }) {
+                guard try migrationDate(boundary) == boundary else {
+                    throw DataMigrationError.invalid("Archive date scopes require whole-second boundaries.")
+                }
+            }
+        }
     }
 
     private static func unavailableMigrationAudio(

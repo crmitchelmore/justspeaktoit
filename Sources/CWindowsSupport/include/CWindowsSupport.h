@@ -663,7 +663,7 @@ int jsti_credential_read(const char *name, uint8_t *bytes, size_t capacity, size
                          char *error, size_t error_capacity);
 int jsti_credential_delete(const char *name, char *error, size_t error_capacity);
 
-/* App-owned multipart staging only. Absolute local paths; relative paths,
+/* App-owned sensitive-file staging only. Absolute local paths; relative paths,
  * alternate data streams and all reparse points in the path are rejected.
  * Directory preparation creates/repairs only the supplied leaf directory; its
  * parent must exist and an existing leaf must belong to the current user.
@@ -671,6 +671,9 @@ int jsti_credential_delete(const char *name, char *error, size_t error_capacity)
  * and SYSTEM full control. File creation is exclusive: existing files are
  * never opened, truncated or followed. No parent ACL is changed. */
 int jsti_private_directory_prepare(const char *path, char *error, size_t error_capacity);
+/* Exclusive private leaf creation, including explicit current-user ownership
+ * when the process is elevated. An existing directory is never changed. */
+int jsti_private_directory_create(const char *path, char *error, size_t error_capacity);
 int jsti_private_file_create(const char *path, char *error, size_t error_capacity);
 /* Uses a unique temporary directory and synthetic bytes only; verifies ACLs,
  * directory repair, existing-file preservation and junction refusal. */

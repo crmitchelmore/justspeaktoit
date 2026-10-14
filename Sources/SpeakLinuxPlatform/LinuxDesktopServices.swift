@@ -33,6 +33,11 @@ public enum LinuxClipboard {
 }
 
 public enum LinuxFiles {
+    /// Creates only a new private leaf; never repairs an existing directory.
+    public static func createPrivateDirectory(_ url: URL) throws {
+        try url.path.withCString { path in try LinuxNative.call { jsti_private_directory_create(path, $0, $1) } }
+    }
+
     /// Creates (or tightens) a folder only the current user can read.
     public static func preparePrivateDirectory(_ url: URL) throws {
         try url.path.withCString { path in try LinuxNative.call { jsti_private_directory_prepare(path, $0, $1) } }

@@ -16,7 +16,7 @@ final class DesktopMigrationArchiveTests: XCTestCase {
 
     func testStoredDeflateAndZIP64_ReadCanonicalManifestRecordsAndAudio() throws {
         for name in ["stored", "deflate", "zip64"] {
-            let result = try DesktopMigrationArchive.read(
+            let result = try MigrationTestArchive.read(
                 MigrationArchiveFixtures.url(name), digests: digests, stagingRoot: root()
             )
             XCTAssertEqual(result.manifest.format, "JustSpeakToIt")
@@ -32,7 +32,7 @@ final class DesktopMigrationArchiveTests: XCTestCase {
     }
 
     func testLongUnicodeName_IsNotTruncatedIntoAnotherEntryOrDestination() throws {
-        let result = try DesktopMigrationArchive.read(
+        let result = try MigrationTestArchive.read(
             MigrationArchiveFixtures.url("long-unicode"), digests: digests, stagingRoot: root()
         )
         let path = "recordings/" + String(repeating: "\u{00F1}", count: 260) + ".wav"
@@ -44,7 +44,7 @@ final class DesktopMigrationArchiveTests: XCTestCase {
     func testDuplicateArchivePathsAndManifestCRC_RejectBeforeStaging() throws {
         for name in ["duplicate-path", "bad-manifest-crc"] {
             let staging = try root()
-            XCTAssertThrowsError(try DesktopMigrationArchive.read(
+            XCTAssertThrowsError(try MigrationTestArchive.read(
                 MigrationArchiveFixtures.url(name), digests: digests, stagingRoot: staging
             ))
             XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: staging.path).isEmpty)
@@ -53,7 +53,7 @@ final class DesktopMigrationArchiveTests: XCTestCase {
 
     func testInvalidAudioCRCAndDigest_LeaveNoPartialRecording() throws {
         for name in ["bad-audio-crc", "bad-digest"] {
-            let result = try DesktopMigrationArchive.read(
+            let result = try MigrationTestArchive.read(
                 MigrationArchiveFixtures.url(name), digests: digests, stagingRoot: root()
             )
             XCTAssertEqual(result.records[.recordings], [])
@@ -67,7 +67,7 @@ final class DesktopMigrationArchiveTests: XCTestCase {
 
     func testTraversalAndSymlinks_AreReportedWithoutMaterialization() throws {
         for name in ["traversal", "symlink"] {
-            let result = try DesktopMigrationArchive.read(
+            let result = try MigrationTestArchive.read(
                 MigrationArchiveFixtures.url(name), digests: digests, stagingRoot: root()
             )
             XCTAssertTrue(result.files.isEmpty)
@@ -81,7 +81,7 @@ final class DesktopMigrationArchiveTests: XCTestCase {
 
     func testDuplicateReferenceAndInvalidItem_PreserveValidDataAndReportPartialImport() throws {
         for name in ["duplicate-recording", "invalid-item"] {
-            let result = try DesktopMigrationArchive.read(
+            let result = try MigrationTestArchive.read(
                 MigrationArchiveFixtures.url(name), digests: digests, stagingRoot: root()
             )
             XCTAssertEqual(result.records[.recordings]?.count, 1)
@@ -94,7 +94,7 @@ final class DesktopMigrationArchiveTests: XCTestCase {
     }
 
     func testMissingCategory_RemainsAbsentToPreventDestructiveReplacement() throws {
-        let result = try DesktopMigrationArchive.read(
+        let result = try MigrationTestArchive.read(
             MigrationArchiveFixtures.url("missing-category"), digests: digests, stagingRoot: root()
         )
         XCTAssertNil(result.records[.settings])
@@ -117,7 +117,7 @@ final class DesktopMigrationArchiveTests: XCTestCase {
         let unavailable = LocalModelDigestProvider(name: "Unavailable fixture provider") {
             throw LocalModelDigestError.unavailable("Synthetic provider failure.")
         }
-        XCTAssertThrowsError(try DesktopMigrationArchive.read(
+        XCTAssertThrowsError(try MigrationTestArchive.read(
             MigrationArchiveFixtures.url("deflate"), digests: unavailable, stagingRoot: staging
         )) { error in
             XCTAssertTrue(error.localizedDescription.contains("Synthetic provider failure."))
@@ -131,7 +131,7 @@ final class DesktopMigrationArchiveTests: XCTestCase {
         let digests = digests
         let task = Task {
             withUnsafeCurrentTask { $0?.cancel() }
-            return try DesktopMigrationArchive.read(fixture, digests: digests, stagingRoot: staging)
+            return try MigrationTestArchive.read(fixture, digests: digests, stagingRoot: staging)
         }
         do {
             _ = try await task.value
@@ -147,7 +147,7 @@ final class DesktopMigrationArchiveTests: XCTestCase {
         let digests = LocalModelDigestProvider(name: "Cancel during verification") {
             FixtureHasher(cancelOnUpdate: true)
         }
-        let task = Task { try DesktopMigrationArchive.read(fixture, digests: digests, stagingRoot: staging) }
+        let task = Task { try MigrationTestArchive.read(fixture, digests: digests, stagingRoot: staging) }
         do {
             _ = try await task.value
             XCTFail("A cancelled audio verification succeeded.")

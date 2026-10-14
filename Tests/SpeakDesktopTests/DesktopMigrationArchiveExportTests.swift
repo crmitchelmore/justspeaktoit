@@ -15,15 +15,15 @@ final class DesktopMigrationArchiveExportTests: XCTestCase {
     }
 
     private func snapshot(_ directory: URL) throws -> DataMigrationSnapshot {
-        try DesktopMigrationArchive.read(MigrationArchiveFixtures.url("deflate"), digests: digests,
+        try MigrationTestArchive.read(MigrationArchiveFixtures.url("deflate"), digests: digests,
                                          stagingRoot: directory)
     }
 
     func testCanonicalZIP64Export_RoundTripsEveryRecordAndStreamedAudio() throws {
         let directory = try root()
         let source = try snapshot(directory)
-        let file = try DesktopMigrationArchive.export(source, digests: digests, stagingRoot: directory)
-        let result = try DesktopMigrationArchive.read(file, digests: digests, stagingRoot: directory)
+        let file = try MigrationTestArchive.export(source, digests: digests, stagingRoot: directory)
+        let result = try MigrationTestArchive.read(file, digests: digests, stagingRoot: directory)
         XCTAssertEqual(result.records, source.records)
         XCTAssertEqual(result.manifest.categories, source.manifest.categories)
         XCTAssertEqual(result.manifest.createdAt, source.manifest.createdAt)
@@ -40,8 +40,8 @@ final class DesktopMigrationArchiveExportTests: XCTestCase {
         let directory = try root()
         let source = try snapshot(directory)
         let original = try Data(contentsOf: XCTUnwrap(source.files["recordings/test.wav"]))
-        let first = try DesktopMigrationArchive.export(source, digests: digests, stagingRoot: directory)
-        let second = try DesktopMigrationArchive.export(source, digests: digests, stagingRoot: directory)
+        let first = try MigrationTestArchive.export(source, digests: digests, stagingRoot: directory)
+        let second = try MigrationTestArchive.export(source, digests: digests, stagingRoot: directory)
         XCTAssertNotEqual(first, second)
         XCTAssertEqual(try Data(contentsOf: first), try Data(contentsOf: second))
         XCTAssertEqual(try Data(contentsOf: XCTUnwrap(source.files["recordings/test.wav"])), original)
@@ -55,11 +55,11 @@ final class DesktopMigrationArchiveExportTests: XCTestCase {
 
     func testLongUnicodeAudioName_IsEmittedAndReadWithoutTruncation() throws {
         let directory = try root()
-        let source = try DesktopMigrationArchive.read(
+        let source = try MigrationTestArchive.read(
             MigrationArchiveFixtures.url("long-unicode"), digests: digests, stagingRoot: directory
         )
-        let file = try DesktopMigrationArchive.export(source, digests: digests, stagingRoot: directory)
-        let result = try DesktopMigrationArchive.read(file, digests: digests, stagingRoot: directory)
+        let file = try MigrationTestArchive.export(source, digests: digests, stagingRoot: directory)
+        let result = try MigrationTestArchive.read(file, digests: digests, stagingRoot: directory)
         XCTAssertEqual(result.records, source.records)
         XCTAssertEqual(Set(result.files.keys), Set(source.files.keys))
         XCTAssertTrue(result.notices.isEmpty)
@@ -71,16 +71,16 @@ final class DesktopMigrationArchiveExportTests: XCTestCase {
         var source = DataMigrationSnapshot(
             manifest: .init(categories: [.credentials], scopes: [:]), records: [.credentials: [record]]
         )
-        XCTAssertThrowsError(try DesktopMigrationArchive.export(source, digests: digests, stagingRoot: directory))
+        XCTAssertThrowsError(try MigrationTestArchive.export(source, digests: digests, stagingRoot: directory))
         XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
-        let file = try DesktopMigrationArchive.export(
+        let file = try MigrationTestArchive.export(
             source, digests: digests, stagingRoot: directory, includeCredentials: true
         )
-        XCTAssertEqual(try DesktopMigrationArchive.read(file, digests: digests, stagingRoot: directory)
+        XCTAssertEqual(try MigrationTestArchive.read(file, digests: digests, stagingRoot: directory)
             .records[.credentials], [record])
         source.manifest.categories = [.settings]
         source.records = [.settings: [record]]
-        XCTAssertThrowsError(try DesktopMigrationArchive.export(
+        XCTAssertThrowsError(try MigrationTestArchive.export(
             source, digests: digests, stagingRoot: directory, includeCredentials: true
         ))
     }
@@ -88,15 +88,15 @@ final class DesktopMigrationArchiveExportTests: XCTestCase {
     func testMissingAndDamagedCategories_CannotBecomeValidEmptyExports() throws {
         let directory = try root()
         let source = DataMigrationSnapshot(manifest: .init(categories: [.settings], scopes: [:]), records: [:])
-        XCTAssertThrowsError(try DesktopMigrationArchive.export(source, digests: digests, stagingRoot: directory))
+        XCTAssertThrowsError(try MigrationTestArchive.export(source, digests: digests, stagingRoot: directory))
         var damaged = source
         damaged.records = [.settings: []]
         damaged.notices = ["Settings & shortcuts, item 1: skipped invalid item."]
-        XCTAssertThrowsError(try DesktopMigrationArchive.export(damaged, digests: digests, stagingRoot: directory))
+        XCTAssertThrowsError(try MigrationTestArchive.export(damaged, digests: digests, stagingRoot: directory))
         XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
         damaged.notices = []
-        let file = try DesktopMigrationArchive.export(damaged, digests: digests, stagingRoot: directory)
-        XCTAssertEqual(try DesktopMigrationArchive.read(file, digests: digests, stagingRoot: directory)
+        let file = try MigrationTestArchive.export(damaged, digests: digests, stagingRoot: directory)
+        XCTAssertEqual(try MigrationTestArchive.read(file, digests: digests, stagingRoot: directory)
             .records[.settings], [])
     }
 
@@ -110,7 +110,7 @@ final class DesktopMigrationArchiveExportTests: XCTestCase {
             if variant == 0 { audio.digest = nil }
             if variant == 1 { audio.file = "recordings/../outside.wav" }
             source.records[.recordings] = variant == 2 ? [audio, audio] : [audio]
-            XCTAssertThrowsError(try DesktopMigrationArchive.export(source, digests: digests, stagingRoot: directory))
+            XCTAssertThrowsError(try MigrationTestArchive.export(source, digests: digests, stagingRoot: directory))
             XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), initial)
         }
     }
@@ -121,11 +121,11 @@ final class DesktopMigrationArchiveExportTests: XCTestCase {
         let initial = try FileManager.default.contentsOfDirectory(atPath: directory.path)
         var changed = original
         changed.records[.recordings]?[0].digest = String(repeating: "0", count: 64)
-        XCTAssertThrowsError(try DesktopMigrationArchive.export(changed, digests: digests, stagingRoot: directory))
+        XCTAssertThrowsError(try MigrationTestArchive.export(changed, digests: digests, stagingRoot: directory))
         let unavailable = LocalModelDigestProvider(name: "Synthetic unavailable provider") {
             throw LocalModelDigestError.unavailable("Synthetic export failure")
         }
-        XCTAssertThrowsError(try DesktopMigrationArchive.export(original, digests: unavailable, stagingRoot: directory))
+        XCTAssertThrowsError(try MigrationTestArchive.export(original, digests: unavailable, stagingRoot: directory))
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), initial)
         XCTAssertEqual(try Data(contentsOf: XCTUnwrap(original.files["recordings/test.wav"])),
                        MigrationArchiveFixtures.audio)
@@ -138,7 +138,7 @@ final class DesktopMigrationArchiveExportTests: XCTestCase {
         let digests = digests
         let task = Task {
             withUnsafeCurrentTask { $0?.cancel() }
-            return try DesktopMigrationArchive.export(source, digests: digests, stagingRoot: directory)
+            return try MigrationTestArchive.export(source, digests: digests, stagingRoot: directory)
         }
         do {
             _ = try await task.value
@@ -155,7 +155,7 @@ final class DesktopMigrationArchiveExportTests: XCTestCase {
         let digests = LocalModelDigestProvider(name: "Cancel export during hashing") {
             ExportFixtureHasher(cancelOnUpdate: true)
         }
-        let task = Task { try DesktopMigrationArchive.export(source, digests: digests, stagingRoot: directory) }
+        let task = Task { try MigrationTestArchive.export(source, digests: digests, stagingRoot: directory) }
         do {
             _ = try await task.value
             XCTFail("A cancelled export succeeded.")

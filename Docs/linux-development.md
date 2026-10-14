@@ -590,6 +590,16 @@ over the existing network permission. None of this is built or tested.
 
 ## CI
 
+The portable press-capture lease/PCM relay is currently fake-worker-qualified
+ownership scaffolding only, not a Linux microphone-on-key-press implementation.
+See the [shared ownership contract](windows-development.md) for admission,
+bounded RAM, late cleanup and delivery-join guarantees. No native worker,
+permission adapter, host handoff or settings row is installed. X11 press/release
+events and Wayland portal Activated/Deactivated have different timing semantics;
+portal activation is not physical-key-down or pre-recognition evidence. Native
+start/stop remains unqualified for bounded readiness/cleanup, and neither a saved
+preference nor a fake lifecycle result enables speculative capture.
+
 `.github/workflows/linux.yml` (ubuntu-24.04, `swift:6.2.3-noble`, pinned by
 digest) installs the packages above, then runs the boundary check, the
 release build, `swift test` with `SPEAK_LINUX_TARGET=1`,

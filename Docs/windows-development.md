@@ -274,6 +274,27 @@ before the working one is released. Gesture styles report the native press and
 the release, observed by polling the key only while it is held, to the shared
 SpeakCore gesture machine and session policy that state the macOS rules; a
 gesture stops only the kind of session it started.
+
+The portable `DesktopPressCaptureLease` and `DesktopPressCapturePCMRelay` are
+**ownership scaffolding, not an enabled microphone-on-key-press feature**.
+No native worker, host handoff, preference control or permission adapter is
+installed. Explicit admission separates the enabled input from qualified
+capability, granted permission and idle capture ownership. Opaque tokens bind
+device, route, profile and PCM format at reserve/adopt. A closing lease excludes
+another open until real cleanup acknowledges; a failed close retains exclusion.
+Caller cancellation or a deadline does not prove native cleanup completed.
+The immutable PCM callback retains only bounded RAM before admission, switches
+from rolling pre-roll to lossless bounded reservation, and reports overflow
+once. One serial drain delivers outside the state lock; closing fences new PCM
+and joins previously admitted delivery before worker cleanup. No per-frame actor
+task, file, History record, provider, cue or insertion is introduced.
+Portable fake-worker/race tests do not establish native permission, readiness,
+keyboard timing or latency. Windows currently uses `RegisterHotKey` plus 15 ms
+release polling, not a low-level physical-key hook; toggle mode has no paired
+down/up events. macOS's `HotKeyPressPrimer` and its tests remain unchanged and
+unextracted. Native wiring requires separate reviewed permission/readiness and
+late-cleanup evidence before effective capability or settings exposure.
+
 Automation is off by default. Settings → Allow automation starts a named-pipe
 server, `\\.\pipe\JustSpeakToIt-SpeakApp-automation-<user SID>`. It rejects
 remote clients, its DACL grants only the current user, and each client is

@@ -1,0 +1,154 @@
+import Foundation
+
+/// A single bounded drain delivers in admission order without invoking user code under the state lock.
+/// Closing fences new PCM; settling joins delivery admitted before that fence, including an active sink.
+package final class DesktopPressCapturePCMRelay: @unchecked Sendable {
+    private enum Phase { case rolling, reserved, attached, closing, closed }
+    private struct Receipt {
+        var accepted = false
+        var failure: DesktopPressCaptureError?
+        var drain = false
+    }
+    private let lock = NSLock()
+    private let delivery = DispatchQueue(label: "jsti.press-capture-delivery")
+    private let joined = DispatchGroup()
+    private let limits: DesktopPressCaptureBufferLimits
+    private let onFailure: @Sendable (DesktopPressCaptureError) -> Void
+    private var phase = Phase.rolling
+    private var buffered = Data()
+    private var inFlightBytes = 0
+    private var draining = false
+    private var storedFailure: DesktopPressCaptureError?
+    private var sink: (@Sendable (Data) -> Void)?
+
+    package init(
+        limits: DesktopPressCaptureBufferLimits,
+        onFailure: @escaping @Sendable (DesktopPressCaptureError) -> Void
+    ) {
+        self.limits = limits
+        self.onFailure = onFailure
+    }
+
+    package var bufferedBytes: Int { lock.withLock { buffered.count + inFlightBytes } }
+    package var failure: DesktopPressCaptureError? { lock.withLock { storedFailure } }
+
+    @discardableResult
+    package func receive(_ data: Data) -> Bool {
+        let receipt = lock.withLock { () -> Receipt in
+            guard phase != .closed, phase != .closing else { return Receipt() }
+            if let error = append(data) {
+                storedFailure = error
+                fence()
+                return Receipt(failure: error)
+            }
+            return Receipt(accepted: true, drain: claimDrain())
+        }
+        if receipt.drain { delivery.async { self.drain() } }
+        if let failure = receipt.failure { onFailure(failure) }
+        return receipt.accepted
+    }
+
+    package func reserve() throws {
+        try lock.withLock {
+            guard phase == .rolling else { throw DesktopPressCaptureError.invalidPhase }
+            phase = .reserved
+        }
+    }
+
+    package func attach(_ sink: @escaping @Sendable (Data) -> Void) throws {
+        let needsDrain = try lock.withLock {
+            guard phase == .reserved else { throw DesktopPressCaptureError.invalidPhase }
+            self.sink = sink
+            phase = .attached
+            return claimDrain()
+        }
+        if needsDrain { delivery.async { self.drain() } }
+    }
+
+    package func close() {
+        lock.withLock { fence() }
+    }
+
+    package func fail(_ error: DesktopPressCaptureError) {
+        let publish = lock.withLock {
+            guard phase != .closed, phase != .closing else { return false }
+            storedFailure = error
+            fence()
+            return true
+        }
+        if publish { onFailure(error) }
+    }
+
+    package func settleDelivery() async throws {
+        guard lock.withLock({ phase == .closed || phase == .closing }) else {
+            throw DesktopPressCaptureError.invalidPhase
+        }
+        await withCheckedContinuation { done in
+            joined.notify(queue: .global()) { done.resume() }
+        }
+    }
+
+    private func append(_ data: Data) -> DesktopPressCaptureError? {
+        guard data.count.isMultiple(of: 2) else { return .invalidPCM }
+        if phase == .rolling {
+            appendRolling(data)
+        } else {
+            guard data.count <= limits.reservedBytes - buffered.count - inFlightBytes else {
+                return .startupOverflow
+            }
+            buffered.append(data)
+        }
+        return nil
+    }
+
+    private func fence() {
+        if phase == .attached || phase == .closing {
+            phase = .closing
+            if !draining {
+                phase = .closed
+                sink = nil
+            }
+        } else {
+            phase = .closed
+            buffered.removeAll()
+            sink = nil
+        }
+    }
+
+    private func claimDrain() -> Bool {
+        guard phase == .attached, !buffered.isEmpty, !draining else { return false }
+        draining = true
+        joined.enter()
+        return true
+    }
+
+    private func drain() {
+        while let next = lock.withLock({ takeDelivery() }) {
+            next.sink(next.data)
+            lock.withLock { inFlightBytes = 0 }
+        }
+        joined.leave()
+    }
+
+    private func takeDelivery() -> (sink: @Sendable (Data) -> Void, data: Data)? {
+        guard !buffered.isEmpty, let sink else {
+            draining = false
+            if phase == .closing { phase = .closed; self.sink = nil }
+            return nil
+        }
+        let data = buffered
+        buffered = Data()
+        inFlightBytes = data.count
+        return (sink, data)
+    }
+
+    private func appendRolling(_ data: Data) {
+        if data.count >= limits.preRollBytes {
+            buffered = Data(data.suffix(limits.preRollBytes))
+        } else {
+            let excess = buffered.count - (limits.preRollBytes - data.count)
+            if excess > 0 { buffered.removeFirst(excess) }
+            buffered.append(data)
+        }
+    }
+}

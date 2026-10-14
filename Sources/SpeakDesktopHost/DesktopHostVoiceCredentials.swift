@@ -138,7 +138,8 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
 
     private var canSaveVoiceCredential: Bool {
         !closed && !busy && recording == nil && voiceCredentialTask == nil
-            && voiceGenerationTask == nil && readAloudState.task == nil && readAloudState.exportTask == nil
+            && voiceTextImportTask == nil && voiceDiscovery.task == nil && voiceGenerationTask == nil
+            && readAloudState.task == nil && readAloudState.exportTask == nil
     }
 
     private nonisolated static func writeVoiceCredential(_ key: String, identifier: String) async throws {
@@ -154,8 +155,13 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         cached: XAIAccountVoiceInventory?
     ) -> Result<(VoiceOutputCredentialSlot, Bool), VoiceOutputCredentialError> {
         guard !Task.isCancelled else { return .failure(.cancelled) }
+        let voice: DesktopSpeechVoice
+        do {
+            voice = try DesktopSpeechVoice.resolved(
+                modelID: settings.modelID, voiceID: settings.voiceID, xaiInventory: cached)
+        } catch { return .failure(.unavailable) }
         var inventory = cached
-        if let cached {
+        if case .xai = voice, let cached {
             do {
                 if !cached.matchesCredential(try effects.apiKey(name: XAITTSCatalog.credentialIdentifier)) {
                     inventory = nil
@@ -164,8 +170,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         }
         let slot: VoiceOutputCredentialSlot
         do {
-            slot = try .init(voice: DesktopSpeechVoice.resolved(
-                modelID: settings.modelID, voiceID: settings.voiceID, xaiInventory: inventory), inventory: inventory)
+            slot = try .init(voice: voice, inventory: inventory)
         } catch { return .failure(.unavailable) }
         guard !Task.isCancelled else { return .failure(.cancelled) }
         do { return .success((slot, try !effects.apiKey(name: slot.identifier).isEmpty)) } catch {

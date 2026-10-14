@@ -129,7 +129,11 @@ operation through shutdown's existing grace period. Default synchronous vault
 reads/writes run outside the host actor: cancellation cannot release ownership
 or allow a racing replacement/removal while a native write is unfinished.
 Native view reads coalesce to one in-flight lookup and the latest requested view;
-close remains responsive even if the vault ignores cancellation. Selection epochs fence
+close remains responsive even if the vault ignores cancellation. Owned text imports
+and account discovery also block replacement/removal until they actually settle,
+including after cancellation. Cached xAI account evidence is checked only for an
+actual xAI selection; unrelated providers read only their own credential.
+Selection epochs fence
 away-and-back changes, and native request/epoch checks reject stale responses
 without clearing newer input. Closing/cancelling cannot promise rollback of a
 vault operation that already wrote; errors are sanitized and unconfirmed or

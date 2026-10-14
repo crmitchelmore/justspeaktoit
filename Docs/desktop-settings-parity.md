@@ -6,6 +6,100 @@ macOS `AppSettings.DefaultsKey` aliases the shared 91-key
 plus preferences and collections
 outside that enum. Track remaining product acceptance in #1157.
 
+## Local canonical archive projection candidate
+
+This bounded bridge is a **read-only partial projection**, not a full backup,
+import transaction, native control change or declaration of 91 executable
+preferences. It is locally composed with the explicitly selected integration
+base `78ad44e849cffdb986c25948de2c286c8f42ff80`; its qualification must not borrow
+the earlier native or Apple receipts below. Publication requires parent review.
+
+The parent collector can call
+`DesktopHostController.preferenceArchiveProjection(categories:validateJSON:)`
+inside the host, or
+`DesktopHostPreferenceArchive.project(_:categories:validateJSON:)` on an
+immutable `Settings` snapshot. The result is
+`DataMigrationPreferenceProjection`, containing category-keyed canonical
+`DataMigrationRecord` arrays and typed, value-free notices. Only explicitly
+selected `.settings`, `.vocabulary` and `.connections` are accepted; any
+credentials/collection category is rejected. Empty selected categories are
+returned as empty arrays, not as a guarantee that every store was collected.
+The collector still owns aggregation, completeness and publication.
+
+`SpeakCore/DataMigrationPreferenceCatalog.swift` is the sole key/category/kind
+authority: 89 accepted canonical preferences plus seven auxiliaries, not a
+second desktop catalogue. `trackedKeyIdentifiers` and
+`transcriptionKeywordsLastReconciled` remain excluded. Vocabulary and connections
+partition through that catalogue; the bridge never reclassifies them as settings.
+Unknown configuration entries and wrapper fields are named in notices, not
+dumped as arbitrary archive keys. Credential-default values are excluded even
+when retained in a configuration dictionary. No credential APIs are invoked.
+
+Every `SettingsValues` authority is accounted for below. The implementation
+sources are `DesktopHostSettingsValues.swift`, `DesktopHostPreferenceArchive.swift`,
+`DesktopHostNativePreferenceProjection.swift`, `WindowsPreferenceArchive.swift`
+and `LinuxPreferenceArchive.swift`; Mac wire names are established by
+`AppSettings.swift` and the shared application-key/catalogue definitions.
+
+| Native authority | Canonical projection or explicit boundary |
+| --- | --- |
+| Explicit active `model` | The existing desktop batch/live registries and shared local-family resolver select `transcriptionMode` and the active model key. Unknown/Apple-only routes are reported, never guessed as batch. Multi-purpose models remain batch when admitted by the batch registry. |
+| `batchModel`, `liveModel`, `localModel` | Stored model slots map to their canonical model keys. An explicit active model wins over its corresponding remembered slot. Local engine/source submode is not invented. |
+| `postProcessing.mode`, `.modelIdentifier`, `.temperature` | `postProcessingEnabled`, `postProcessingModel`, `postProcessingTemperature`; explicit native options override stale configuration mirrors. |
+| `postProcessing.outputLanguage` | Stored text, including explicit empty text, maps to `postProcessingOutputLanguage`; native nil suppresses a stale mirror without inventing a replacement string. |
+| `postProcessing.customPrompt` | Native-only notice; it is outside the canonical 91 keys and is not silently discarded or stuffed into another setting. |
+| `appearance` | Native system/light/dark maps to canonical textual appearance, not the native integer encoding. |
+| `runAtLogin` | Explicit recorded boolean only; no OS registration query or side effect. |
+| `automationEnabled` | Explicit `enableAutomationServer` boolean; no service admission or permission change. |
+| Windows `textOutput` | smart/direct-only/clipboard-only map to smart/accessibilityOnly/clipboardOnly; cursor/replace-field map to insertAtCursor/replaceAll; restoration retains its explicit boolean. |
+| Linux `textOutput` | Clipboard-only maps exactly; native paste has no exact Mac method and is reported instead of relabelled smart. Restoration retains its boolean. |
+| `hotKey` | Exact shared Mac activation styles map to `hotKeyActivation`; press-to-toggle/unknown styles are native-only, never fallback conversions. Windows virtual-key bindings and Linux portal/fixed bindings do not become Carbon `selectedHotKey` data. |
+| `voiceOutput` | Only explicitly stored auto-play/save/speed/pitch/SSML values overlay their five canonical keys. No execution getter, default materialization, clamping, provider selection or synthesis occurs. |
+| `voiceOutput.modelID`, `.voiceID`, `.trackUsage` | Native-only notices. The desktop provider/model/voice tuple is not assumed to equal Mac `defaultTTSVoice`; usage tracking is not a new canonical key. |
+| `microphoneDeviceID` | Native-only notice; a native device identifier is not reinterpreted as a Mac audio-input UID. |
+| `localUseGPU`, `azureSpeechResourceEndpoint` | Native-only notices; neither belongs to the canonical application-key set. |
+| `configuration.values` | Selected, known records are retained and type-validated using the canonical catalogue. Each retained value is explicitly distinguished from a native-authority overlay; retention does not prove execution support. |
+| Unknown top-level `Settings` fields | Names are reported; values remain in the existing settings wrapper, not in canonical records. |
+
+This rule covers every canonical preference without copying its entries:
+explicit native projections win, remaining known configuration values retain
+their catalogue category/kind, the two excluded canonical keys are reported,
+and absent values stay absent. Editor defaults (`value(for:)`), platform
+fallback shortcut getters, effective Voice defaults and the restricted portable
+configuration exporter are not used to fill missing values. New settings track
+whether their otherwise implicit active model/slots were explicitly set; stored
+model keys are explicit on decode. Startup normalization preserves that presence
+metadata without changing runtime selection or existing Codable encoding.
+Optional Voice fields retain legacy opaque values
+when no explicit native replacement exists, with a retained-value notice.
+Projection does not mutate mirrors, Voice, providers, controls or settings files.
+
+All emitted records pass canonical scalar shape/finite-number validation.
+Archive-valid but currently unexecutable Voice values remain raw for recovery,
+not clamped into a different preference. `ttsPronunciationDictionary` is decoded
+as `[String: String]` and emitted as structured `jsonDefault`; a JSON string or
+base64 blob is not equivalent. Apple shortcut JSON requires an explicit typed
+validator supplied by its owning collector; without one it is reported and
+excluded, not accepted by an object-shape guess. Validator failure aborts the
+projection rather than returning success-shaped partial records.
+
+The local candidate passes 85 focused preference/Voice/hands-free/tail tests
+(23 new projection regressions) and the complete portable suite: 1874 tests,
+30 skipped, zero failures. Strict pinned SwiftLint passes all 17 candidate
+and composition-resolution Swift inputs. All four Windows Swift projections
+pass, including the production Windows projection hook and host tests. Those
+header-backed projections do not prove native linking or runtime behavior;
+there are no new native/Apple or installed-app receipts for this candidate.
+
+Known limitations remain visible: no raw-file preservation guarantee for values
+already changed by existing startup migrations or unknown members discarded by
+existing nested typed decoders; no synthesized
+Mac shortcut/Voice identifier, device UID, local submode or prompt record; no
+collection-store collection, credential access, default reset semantics,
+import/mutation, or atomic destination publication. The parent must preserve
+category completeness and unknown/native-only material deliberately rather
+than feeding these partial arrays into destructive replacement.
+
 ## Generated-speech coordination
 
 `SpeechGenerationDefaults` defines the Mac's existing `ttsAutoPlay` (true) and

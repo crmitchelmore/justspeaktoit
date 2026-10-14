@@ -5,7 +5,7 @@ import SpeakLinuxPlatform
 
 extension LinuxHostPlatform {
     package static var migrationInspector: DesktopHostMigrationInspector? {
-        .init(reader: .init { try LinuxMigrationArchive.read($0) }, present: {
+        .init(reader: .init { try LinuxMigrationArchive.read($0) }, digests: LinuxSHA256Hasher.provider, present: {
             guard jsti_window_show_migration_report($0.text) == 0 else {
                 throw DesktopHostError(message: "The native backup inspection report is unavailable.")
             }

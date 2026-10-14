@@ -1,15 +1,18 @@
 import Foundation
+import SpeakCore
 import SpeakDesktop
 
 package struct DesktopHostMigrationInspector: Sendable {
     let reader: DesktopMigrationInspection.Reader
+    let digests: LocalModelDigestProvider?
     let present: @Sendable (DesktopMigrationInspection.Report) throws -> Void
 
     package init(
-        reader: DesktopMigrationInspection.Reader,
+        reader: DesktopMigrationInspection.Reader, digests: LocalModelDigestProvider? = nil,
         present: @escaping @Sendable (DesktopMigrationInspection.Report) throws -> Void
     ) {
         self.reader = reader
+        self.digests = digests
         self.present = present
     }
 }
@@ -36,8 +39,14 @@ extension DesktopHostController {
         cancellationRequested = false
         activeOperations += 1
         update("Inspecting backup... No application data will be changed.", state: 2)
+        let store = store
+        let comparison = inspector.digests.map { digests in
+            DesktopMigrationInspection.Comparison(digests: digests, current: {
+                try await store.migrationSnapshot(categories: $0, digests: digests)
+            })
+        }
         let worker = Task.detached {
-            await DesktopMigrationInspection.inspect(source, reader: inspector.reader)
+            await DesktopMigrationInspection.inspect(source, reader: inspector.reader, comparison: comparison)
         }
         migrationInspectionWorker = worker
         migrationInspectionTask = Task {

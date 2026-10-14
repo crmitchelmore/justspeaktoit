@@ -706,6 +706,17 @@ cancellation as an invalid-item notice. The existing non-cancellable validation
 API retains its behavior for other callers.
 An unreadable declared category is shown as unreadable, never as an empty
 successful category. Credential values and record contents are not displayed.
+Native reports also include a read-only **History/audio merge preview** against
+the current store, using the canonical planner and native SHA-256 adapter on the
+same owned off-actor worker. Counts distinguish existing, added, updated and
+retained items; conflicting versions follow the canonical non-overwriting
+History/audio rules. Invalid incoming items are excluded; unreadable categories
+remain unavailable rather than looking like empty merges. Missing, invalid,
+duplicate or damaged current data and collector failures explicitly fail the
+preview. No other category or credential is collected for this comparison.
+Preview counts are not a reserved transaction or application approval:
+deletion-tombstone eligibility, stale-state checks and transactional application
+remain required before a future import can change data.
 The report explicitly states that record values are not yet approved for import
 and import/apply is unavailable. Its separately owned cancellable worker removes
 only its reader-created private staging directory, preserves the selected ZIP
@@ -715,7 +726,7 @@ keeping the selected operation and audio choice frozen. Windows posts owned
 report text through its existing window dispatcher; GTK posts a native report
 dialog with a single Close response.
 
-Complete category collection, conflict preview/application, credential recovery
+Complete category collection, selectable configuration conflicts/application, credential recovery
 and recording-location changes are not yet wired. Native CNG/GLib and Mac
 ZIPFoundation interoperability tests, picker lifecycle and paired light/dark
 layout acceptance remain separate required receipts. Ordinary Linux local-path

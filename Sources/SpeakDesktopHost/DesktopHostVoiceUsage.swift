@@ -97,7 +97,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                     ?? (selection.voice.modelID == GeminiTTSCatalog.desktopModelIdentifier
                         ? "Input estimate: unknown until Gemini reports text-input tokens; "
                             + "audio estimate requires validated PCM duration."
-                        : "Input estimate: unknown; no published rate for this model."))
+                        : Self.unknownVoiceEstimate(selection.voice)))
                 + (selection.options.useSSML ? "\nSSML is enabled; markup may be billed differently." : "")
                 + (VoiceSynthesisPricing.estimateBasis(for: selection.voice).map { "\n\($0)" } ?? "")
         } catch {
@@ -105,6 +105,13 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         }
         loadVoiceUsage()
         presentVoiceUsage()
+    }
+
+    private static func unknownVoiceEstimate(_ voice: DesktopSpeechVoice) -> String {
+        if case .openai(.mini, _) = voice {
+            return "Input/audio estimate: unknown; OpenAI text/audio tokens and billing were not reported."
+        }
+        return "Input estimate: unknown; no published rate for this model."
     }
 
     package func saveVoiceUsageTracking(_ enabled: Bool, requestID: String) {

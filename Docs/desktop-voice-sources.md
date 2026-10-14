@@ -55,7 +55,7 @@ or import/apply behavior is introduced by this bridge.
 
 Windows and Linux remain developer previews, not macOS-parity releases.
 Voice Output uses shared Deepgram, Azure neural, Azure MAI, xAI, Cartesia, Gemini,
-Groq and Speechmatics REST speech contracts,
+Groq, Speechmatics and OpenAI REST speech contracts,
 canonical catalogue projections and native playback. `DesktopSpeechVoice` exposes only
 routes the host executes, not every provider in the macOS catalogue. The seven
 built-in Azure neural catalogue entries now have one `AzureNeuralVoiceCatalog` definition
@@ -64,6 +64,41 @@ The current MAI-Voice-2.1 and Flash speakers come directly from the existing
 `AzureMAIVoiceCatalog`, including their locale/model identifiers. MAI uses the
 same regional Azure request builder, saved `key:region` credential and native
 WAV decoding/playback, not a second provider client or credential store.
+
+**OpenAI (local candidate)** uses one `OpenAITTSCatalog` for Mac and desktop.
+Mac's eleven `openai/<voice>` identifiers, order, names and traits remain intact.
+Its default quality is still High (`tts-1`); Standard selects
+`gpt-4o-mini-tts`, Highest selects `tts-1-hd`. The documented TTS-1/HD subset
+excludes Ballad and Verse. Desktop appends only the 29 executable model/voice
+tuples; a voice identifier can occur with different model identifiers, so the
+complete tuple, not a voice ID alone, identifies the picker selection.
+Unknown/foreign/incompatible tuples refuse execution without default-voice
+substitution or rewriting stored preferences.
+
+Mac and desktop share the `OpenAITTSAPI` request builder and separate existing
+`openai.tts.apiKey` credential (never the transcription key). Mac retains its
+MP3/AAC/WAV request formats. Desktop executes **24 kHz mono PCM16 WAV only**,
+using the existing host speed range 0.5-2 (within the API range 0.25-4).
+Pitch/SSML are unsupported and disabled; retained incompatible controls refuse
+before credential access. No instructions, language, progressive output,
+additional API voices, new UI IDs, native ABI or settings keys are introduced.
+
+Each native request is bounded to 4,096 Unicode scalars without splitting
+graphemes; indivisible oversized input refuses before credentials. One captured
+key serves sequential requests, each response is validated at the actual rate,
+and later failure/cancellation never publishes partial audio. Native playback,
+independent archive, retained replay and chosen WAV export use existing
+publication/ownership helpers unchanged. History attribution stays the actual
+History UUID or nil for non-History sources.
+
+Observed usage includes submitted scalars and validated PCM duration, not
+provider receipt or billing. TTS-1/HD character estimates use submitted grapheme
+counts after segmentation and canonical USD0.015/0.030 per thousand characters.
+Mini TTS is priced in text/audio tokens: its binary WAV response reports no
+tokens, so token counts and input/audio/total charges remain **unestimated**,
+not inferred from characters or duration. Mac's existing legacy cost display is
+not refactored or treated as desktop mini pricing authority. No live OpenAI
+service or physical-device acceptance is claimed by this local candidate.
 
 **Speechmatics (local candidate)** executes the four canonical English voices:
 Sarah/Theo (UK) and Megan/Jack (US), appended to the existing native picker.

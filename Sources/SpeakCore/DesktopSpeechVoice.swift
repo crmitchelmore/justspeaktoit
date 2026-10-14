@@ -11,6 +11,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
     case gemini(GeminiTTSVoice)
     case groq(GroqTTSVoice)
     case speechmatics(SpeechmaticsTTSVoice)
+    case openai(OpenAITTSModel, OpenAITTSVoice)
 
     public var id: String {
         switch self {
@@ -22,6 +23,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .gemini(let voice): voice.providerVoiceID
         case .groq(let voice): voice.providerVoiceID
         case .speechmatics(let voice): voice.providerVoiceID
+        case .openai(_, let voice): voice.providerVoiceID
         }
     }
 
@@ -35,6 +37,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .gemini(let voice): voice.displayName
         case .groq(let voice): voice.displayName
         case .speechmatics(let voice): voice.displayName
+        case .openai(_, let voice): voice.name
         }
     }
 
@@ -48,6 +51,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .gemini: GeminiTTSCatalog.desktopModelIdentifier
         case .groq(let voice): voice.model.desktopModelIdentifier
         case .speechmatics: SpeechmaticsTTSCatalog.providerIdentifier
+        case .openai(let model, _): model.desktopModelIdentifier
         }
     }
 
@@ -62,6 +66,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .gemini(let voice): "\(voice.displayName) — \(GeminiTTSCatalog.defaultModel.displayName)"
         case .groq(let voice): "\(voice.displayName) — Groq"
         case .speechmatics(let voice): "\(voice.displayName) — Speechmatics English"
+        case .openai(let model, let voice): "\(voice.name) — OpenAI \(model.displayName)"
         }
     }
 
@@ -74,6 +79,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .gemini: GeminiTTSCatalog.credentialIdentifier
         case .groq: GroqTTSCatalog.credentialIdentifier
         case .speechmatics: SpeechmaticsTTSCatalog.credentialIdentifier
+        case .openai: OpenAITTSCatalog.credentialIdentifier
         }
     }
 
@@ -85,6 +91,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .xai: .xai
         case .cartesia: .cartesia
         case .gemini, .groq, .speechmatics: .naturalSpeech
+        case .openai: .openai
         }
     }
 
@@ -94,13 +101,18 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
     }
 
     public static var voices: [Self] {
-        DeepgramSpeechCatalog.voices.map(Self.deepgram) + AzureNeuralVoiceCatalog.voices.map(Self.azureNeural)
-            + AzureMAIVoiceCatalog.voices.map(Self.azureMAI)
-            + XAITTSCatalog.voices.map(Self.xai)
-            + CartesiaTTSCatalog.voices.map(Self.cartesia)
-            + GeminiTTSCatalog.voices.map(Self.gemini)
-            + GroqTTSCatalog.voices.map(Self.groq)
-            + SpeechmaticsTTSCatalog.voices.map(Self.speechmatics)
+        var voices = DeepgramSpeechCatalog.voices.map(Self.deepgram)
+        voices.append(contentsOf: AzureNeuralVoiceCatalog.voices.map(Self.azureNeural))
+        voices.append(contentsOf: AzureMAIVoiceCatalog.voices.map(Self.azureMAI))
+        voices.append(contentsOf: XAITTSCatalog.voices.map(Self.xai))
+        voices.append(contentsOf: CartesiaTTSCatalog.voices.map(Self.cartesia))
+        voices.append(contentsOf: GeminiTTSCatalog.voices.map(Self.gemini))
+        voices.append(contentsOf: GroqTTSCatalog.voices.map(Self.groq))
+        voices.append(contentsOf: SpeechmaticsTTSCatalog.voices.map(Self.speechmatics))
+        for model in OpenAITTSCatalog.models {
+            voices.append(contentsOf: OpenAITTSCatalog.voices(for: model).map { Self.openai(model, $0) })
+        }
+        return voices
     }
 
     public static func resolved(
@@ -149,10 +161,31 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
     }
 
     private static func fixedProviderSelection(model: String?, identifier: String?) throws -> Self? {
-        try speechmaticsSelection(model: model, identifier: identifier)
+        try openaiSelection(model: model, identifier: identifier)
+            ?? speechmaticsSelection(model: model, identifier: identifier)
             ?? groqSelection(model: model, identifier: identifier)
             ?? geminiSelection(model: model, identifier: identifier)
             ?? cartesiaSelection(model: model, identifier: identifier)
+    }
+
+    private static func openaiSelection(model: String?, identifier: String?) throws -> Self? {
+        guard model == OpenAITTSCatalog.providerIdentifier
+            || model?.hasPrefix(OpenAITTSCatalog.voiceIDPrefix) == true
+            || OpenAITTSCatalog.models.contains(where: { $0.rawValue == model })
+            || identifier?.hasPrefix(OpenAITTSCatalog.voiceIDPrefix) == true else { return nil }
+        let selected: OpenAITTSModel
+        if model == nil || model == OpenAITTSCatalog.providerIdentifier {
+            selected = OpenAITTSCatalog.defaultModel
+        } else {
+            guard let found = OpenAITTSCatalog.models.first(where: {
+                $0.rawValue == model || $0.desktopModelIdentifier == model
+            }) else { throw VoiceSynthesisConfigurationError.unsupportedVoice }
+            selected = found
+        }
+        guard let identifier, let voice = OpenAITTSCatalog.voice(forID: identifier), voice.supports(selected) else {
+            throw VoiceSynthesisConfigurationError.unsupportedVoice
+        }
+        return .openai(selected, voice)
     }
 
     private static func speechmaticsSelection(model: String?, identifier: String?) throws -> Self? {

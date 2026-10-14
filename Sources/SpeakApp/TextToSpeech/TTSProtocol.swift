@@ -49,7 +49,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
   var apiKeyIdentifier: String {
     switch self {
     case .elevenlabs: return "elevenlabs.apiKey"
-    case .openai: return "openai.tts.apiKey"
+    case .openai: return OpenAITTSCatalog.credentialIdentifier
     case .openrouter: return "openrouter.apiKey"
     case .azure: return "azure.speech.apiKey"
     case .deepgram: return "deepgram.apiKey"
@@ -404,85 +404,25 @@ struct VoiceCatalog {
     )
   ]
 
-  static let openaiVoices: [TTSVoice] = [
-    TTSVoice(
-      id: "openai/alloy",
-      name: "Alloy",
-      provider: .openai,
-      traits: [.neutral, .professional, .multilingual],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "openai/ash",
-      name: "Ash",
-      provider: .openai,
-      traits: [.male, .warm, .multilingual],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "openai/ballad",
-      name: "Ballad",
-      provider: .openai,
-      traits: [.neutral, .warm, .multilingual],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "openai/coral",
-      name: "Coral",
-      provider: .openai,
-      traits: [.female, .warm, .multilingual],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "openai/echo",
-      name: "Echo",
-      provider: .openai,
-      traits: [.male, .clear, .multilingual],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "openai/fable",
-      name: "Fable",
-      provider: .openai,
-      traits: [.british, .professional, .multilingual],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "openai/onyx",
-      name: "Onyx",
-      provider: .openai,
-      traits: [.male, .deep, .multilingual],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "openai/nova",
-      name: "Nova",
-      provider: .openai,
-      traits: [.female, .energetic, .multilingual],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "openai/sage",
-      name: "Sage",
-      provider: .openai,
-      traits: [.neutral, .professional, .multilingual],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "openai/shimmer",
-      name: "Shimmer",
-      provider: .openai,
-      traits: [.female, .warm, .multilingual],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "openai/verse",
-      name: "Verse",
-      provider: .openai,
-      traits: [.neutral, .clear, .multilingual],
-      previewURL: nil
-    )
-  ]
+  static let openaiVoices: [TTSVoice] = OpenAITTSCatalog.voices.map { voice in
+    TTSVoice(id: voice.providerVoiceID, name: voice.name, provider: .openai,
+             traits: voice.traits.map(openaiTrait), previewURL: nil)
+  }
+
+  private static func openaiTrait(_ trait: OpenAITTSVoice.Trait) -> TTSVoice.VoiceTrait {
+    switch trait {
+    case .male: .male
+    case .female: .female
+    case .neutral: .neutral
+    case .british: .british
+    case .professional: .professional
+    case .deep: .deep
+    case .clear: .clear
+    case .warm: .warm
+    case .energetic: .energetic
+    case .multilingual: .multilingual
+    }
+  }
 
   /// Offline Azure fallback: the conventional neural voices plus the current
   /// MAI models. A keyed resource's own listing replaces the neural part.

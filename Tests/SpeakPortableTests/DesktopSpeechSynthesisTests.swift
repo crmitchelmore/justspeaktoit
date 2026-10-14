@@ -102,10 +102,14 @@ final class DesktopSpeechSynthesisTests: DeepgramSpeechStubTestCase {
                        DeepgramSpeechCatalog.voices.count + AzureNeuralVoiceCatalog.voices.count
                            + AzureMAIVoiceCatalog.voices.count + XAITTSCatalog.voices.count
                            + CartesiaTTSCatalog.voices.count + GeminiTTSCatalog.voices.count
-                           + GroqTTSCatalog.voices.count + SpeechmaticsTTSCatalog.voices.count)
-        XCTAssertEqual(Array(DesktopSpeechVoice.voices.suffix(SpeechmaticsTTSCatalog.voices.count)),
-                       SpeechmaticsTTSCatalog.voices.map(DesktopSpeechVoice.speechmatics))
-        XCTAssertEqual(Set(DesktopSpeechVoice.voices.map(\.id)).count, DesktopSpeechVoice.voices.count)
+                           + GroqTTSCatalog.voices.count + SpeechmaticsTTSCatalog.voices.count
+                           + OpenAITTSCatalog.models.reduce(0) { $0 + OpenAITTSCatalog.voices(for: $1).count })
+        let tuples = OpenAITTSCatalog.models.flatMap { model in
+            OpenAITTSCatalog.voices(for: model).map { DesktopSpeechVoice.openai(model, $0) }
+        }
+        XCTAssertEqual(Array(DesktopSpeechVoice.voices.suffix(tuples.count)), tuples)
+        XCTAssertEqual(Set(DesktopSpeechVoice.voices.map { "\($0.modelID)|\($0.id)" }).count,
+                       DesktopSpeechVoice.voices.count)
         for voice in AzureNeuralVoiceCatalog.voices {
             XCTAssertEqual(
                 try DesktopSpeechVoice.resolved(modelID: "azure/neural", voiceID: voice.id), .azureNeural(voice)

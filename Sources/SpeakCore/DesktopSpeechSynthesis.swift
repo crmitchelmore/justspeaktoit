@@ -50,6 +50,9 @@ public struct DesktopSpeechSynthesis: Sendable {
         case .speechmatics:
             return try await DesktopSpeechmaticsSpeechSynthesis(session: session).synthesize(
                 source, voice: voice, credential: credential)
+        case .openai:
+            return try await DesktopOpenAISpeechSynthesis(session: session).synthesize(
+                source, voice: voice, options: options, credential: credential)
         }
     }
 

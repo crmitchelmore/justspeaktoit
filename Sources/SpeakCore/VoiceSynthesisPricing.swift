@@ -9,6 +9,12 @@ public enum VoiceSynthesisPricing {
         case .cartesia: return CartesiaTTSAPI.pricingEstimateBasis
         case .gemini: return GeminiTTSCatalog.pricingEstimateBasis
         case .groq: return GroqTTSCatalog.pricingEstimateBasis
+        case .openai(.mini, _):
+            return "OpenAI mini TTS uses text/audio token pricing. Binary WAV responses report no usage tokens "
+                + "or billing receipts; characters and PCM duration are not token counts. Charges are unestimated."
+        case .openai:
+            return "OpenAI TTS-1/HD estimates use submitted characters after segmentation. "
+                + "Observed Unicode scalars and provider billing counts may differ; estimates are not charges."
         default: return nil
         }
     }
@@ -29,6 +35,7 @@ public enum VoiceSynthesisPricing {
         case .gemini: return nil
         case .groq(let voice): return voice.model.costPerThousandCharacters
         case .speechmatics: return SpeechmaticsTTSAPI.estimatedCostPerThousandCharacters
+        case .openai(let model, _): return model.costPerThousandCharacters
         case .deepgram(let voice):
             return voice.model == DeepgramSpeechCatalog.flux ? nil : DeepgramTTSAPI.costPerThousandCharacters
         }
@@ -61,6 +68,8 @@ public enum VoiceSynthesisPricing {
             }
         } else if case .speechmatics = voice {
             count = SpeechTextSegmenter.segments(text).reduce(0) { $0 + $1.count }
+        } else if case .openai = voice {
+            count = try OpenAITTSAPI.synthesisSegments(text).reduce(0) { $0 + $1.count }
         } else {
             count = text.unicodeScalars.count
         }

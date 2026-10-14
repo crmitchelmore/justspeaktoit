@@ -273,12 +273,12 @@ public final class LinuxOutputJob: @unchecked Sendable {
         } catch {
             return copy(text, reason: "Automatic paste unavailable: \(error.localizedDescription)")
         }
+    }
 
-        private func unconfirmedPaste(_ detail: String = "") -> DesktopTextOutputResult {
-            DesktopTextOutputResult(
-                .unconfirmedInsertion,
-                status: "Paste keys sent; insertion could not be confirmed. Saved to History." + detail
-            )
-        }
+    private func unconfirmedPaste(_ detail: String = "") -> DesktopTextOutputResult {
+        DesktopTextOutputResult(
+            .unconfirmedInsertion,
+            status: "Paste keys sent; insertion could not be confirmed. Saved to History." + detail
+        )
     }
 }

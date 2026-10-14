@@ -426,6 +426,49 @@ flowchart TB
 | Desktop sync | History projection, synced copies, per-account cursors and acknowledgements, opt-in key import, build-time token resolution | `Sources/SpeakDesktopSync/` |
 | Apple services | Existing SwiftUI, AVFoundation, Speech, Core ML, Keychain, CloudKit and Sparkle integrations | `Sources/SpeakApp/`, `Sources/SpeakiOS/`, native adapters in `Sources/SpeakSync/` |
 
+### Held capture-file prerequisite
+
+`DesktopOwnedCaptureFile` is an opt-in allocation/writer capability, not a
+recording-directory setting. Its POSIX adapter holds directory descriptors from
+the filesystem root and exclusively creates a 0700 UUID subdirectory and a 0600
+UUID WAV. Linked ancestry, foreign owners and group/world-writable ancestors are
+rejected; the private leaf must belong to the current user with no group/other
+access. This follows the private-staging ownership boundary, not a read receipt
+or configuration compare-and-swap. The caller must not share mutation authority
+over that private leaf with another operation; hostile same-user processes are
+outside this single-owner boundary.
+Allocation and finalization are synchronous I/O primitives: host integration must
+run them on its separately owned cancellable worker, never the MainActor or the
+settings queue.
+
+`PCMRecordingFile(ownedFile:sampleRate:)` uses that same open file through header
+creation, PCM writes and finalization. Successful header initialization retains
+audio for recovery, including subsequent failures and abandoned recordings.
+Finalization reports close failures; if a primary failure also occurred,
+`RecordingFileCloseFailure` retains both original errors. A failed close is not
+retried and never authorizes removal of retained audio.
+Unpublished allocation cancellation removes only its file through the held
+private directory, never by the selected root's current pathname. Replaced
+files are kept with an explicit error. Empty private UUID directories can remain
+after aborted allocation or discard and are deliberately retained: removing
+their former names could remove replacements.
+Finalization/retention rejects changed directory or file bindings; writes never
+redirect to replacement paths.
+
+Linux native qualification does not establish Windows/Darwin support or enable
+host routing. Windows and Darwin allocation explicitly report
+unsupported pending executable host qualification. The existing Windows native
+private-file creator returns no held HANDLE; Darwin also needs an ACL-aware
+held-directory adapter, not a POSIX-mode-only security claim. Neither may
+close/reopen a pathname as a substitute. Injectable writer tests cover portable
+lifecycle behavior on those hosts, not native qualification.
+
+The host still uses its existing History WAV initializer. Location selection,
+owned configuration persistence, per-record location provenance, migration
+mapping, recovery and deletion authority remain prerequisites to configurable
+recording storage. This capability does not relocate audio, authorize imported
+paths, change History metadata, or enable a settings/picker UI.
+
 `Package.swift` selects the portable graph on Windows/Linux and when explicitly
 requested on macOS. New `SpeakCore` source files enter the portable build by
 default. `appleCoreSources` names the existing Apple-bound dependency closure;

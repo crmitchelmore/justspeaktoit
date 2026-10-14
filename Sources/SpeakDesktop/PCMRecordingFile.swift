@@ -1,13 +1,26 @@
 import Foundation
 import SpeakCore
 
+private protocol PCMRecordingSink: AnyObject {
+    func write(contentsOf data: Data) throws
+    func seek(toOffset offset: UInt64) throws
+    func synchronize() throws
+    func close() throws
+}
+
+extension FileHandle: PCMRecordingSink {}
+
+extension DesktopOwnedCaptureFile: PCMRecordingSink {
+    fileprivate func write(contentsOf data: Data) throws { try write(data) }
+}
+
 /// Appends capture frames directly to disk, with constant memory use. The native
 /// capture worker calls append after releasing its WASAPI packet; never on a UI
 /// or system audio callback. finish must follow the native worker's stop/join.
 public final class PCMRecordingFile: @unchecked Sendable {
     public let url: URL
     public let recordingSampleRate: Int
-    private let handle: FileHandle
+    private let handle: any PCMRecordingSink
     private let lock = NSLock()
     private var byteCount = 0
     private var closed = false
@@ -33,11 +46,25 @@ public final class PCMRecordingFile: @unchecked Sendable {
         ) else {
             throw CocoaError(.fileWriteUnknown)
         }
-        self.handle = try FileHandle(forWritingTo: url)
+        let handle = try FileHandle(forWritingTo: url)
+        self.handle = handle
         try handle.seekToEnd()
     }
 
-    deinit { try? handle.close() }
+    /// Consumes a newly allocated held file. Once its header is written, audio
+    /// has the same retain-for-recovery lifetime as the legacy URL initializer.
+    /// Neither initialization, PCM appends nor finalization reopen its path.
+    public init(ownedFile: DesktopOwnedCaptureFile, sampleRate: Int = PCMRecordingFile.sampleRate) throws {
+        guard Self.supportedSampleRates.contains(sampleRate) else { throw RecordingFileError.invalidPCM }
+        try ownedFile.initializePCM(header: Self.header(payloadBytes: 0, sampleRate: sampleRate))
+        self.url = ownedFile.url
+        self.recordingSampleRate = sampleRate
+        self.handle = ownedFile
+    }
+
+    deinit {
+        if !closed { try? handle.close() }
+    }
 
     public func append(_ data: Data) throws {
         lock.lock()
@@ -63,13 +90,21 @@ public final class PCMRecordingFile: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         guard !closed else { throw RecordingFileError.alreadyClosed }
-        defer { closed = true; try? handle.close() }
-        // Generate only the header: patch payload lengths without copying audio.
-        let header = try Self.header(payloadBytes: byteCount, sampleRate: recordingSampleRate)
-        try handle.seek(toOffset: 0)
-        try handle.write(contentsOf: header)
-        try handle.synchronize()
-        if let writeFailure { throw writeFailure }
+        closed = true
+        var failure: Error?
+        do {
+            // Generate only the header: patch payload lengths without copying audio.
+            let header = try Self.header(payloadBytes: byteCount, sampleRate: recordingSampleRate)
+            try handle.seek(toOffset: 0)
+            try handle.write(contentsOf: header)
+            try handle.synchronize()
+            if let writeFailure { throw writeFailure }
+        } catch { failure = error }
+        do { try handle.close() } catch {
+            if let failure { throw RecordingFileCloseFailure(original: failure, cleanup: error) }
+            throw error
+        }
+        if let failure { throw failure }
         return Double(byteCount) / Double(recordingSampleRate * 2)
     }
 
@@ -114,6 +149,17 @@ public final class PCMRecordingFile: @unchecked Sendable {
             withUnsafeBytes(of: &value) { header.replaceSubrange(offset..<(offset + 4), with: $0) }
         }
         return header
+    }
+}
+
+/// Both errors remain inspectable when closing fails after failed finalization.
+public struct RecordingFileCloseFailure: LocalizedError {
+    public let original: Error
+    public let cleanup: Error
+
+    public var errorDescription: String? {
+        "Recording finalization failed: \(original.localizedDescription) "
+            + "Audio close also failed: \(cleanup.localizedDescription)"
     }
 }
 

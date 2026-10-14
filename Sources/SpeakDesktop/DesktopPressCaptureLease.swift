@@ -12,6 +12,7 @@ package actor DesktopPressCaptureLease {
         var ready = false
         var cleanupFailure: DesktopPressCaptureError?
         var reportedRelayFailure = false
+        var releaseAttempt: DesktopPressCaptureReleaseAttempt?
     }
 
     private let worker: any DesktopPressCaptureWorker
@@ -65,7 +66,12 @@ package actor DesktopPressCaptureLease {
         operationGeneration &+= 1
         operation = Task {
             guard run?.token == token else { return }
-            guard run?.phase != .closing, !closed else { run = nil; return }
+            guard run?.phase != .closing, !closed else {
+                let attempt = run?.releaseAttempt
+                run = nil
+                await attempt?.complete(error: nil)
+                return
+            }
             do {
                 try await worker.open(
                     id: token.id, identity: identity, receive: { _ = relay.receive($0) },
@@ -170,12 +176,11 @@ package actor DesktopPressCaptureLease {
     }
 
     package func retryClose(_ token: DesktopPressCaptureToken) throws {
-        guard var current = run, current.token == token, current.cleanupFailure != nil else {
+        guard let current = run, current.token == token, current.cleanupFailure != nil,
+              current.releaseAttempt == nil else {
             throw DesktopPressCaptureError.invalidPhase
         }
-        current.cleanupFailure = nil
-        run = current
-        enqueueClose(token)
+        restartClose(current, attempt: nil)
     }
 
     private func validate(
@@ -236,11 +241,44 @@ package actor DesktopPressCaptureLease {
             try await current.relay.settleDelivery()
             try await worker.close(id: token.id)
             if run?.token == token { run = nil }
+            await current.releaseAttempt?.complete(error: nil)
         } catch {
             let error = DesktopPressCaptureError.cleanupFailed(String(describing: error))
             run?.cleanupFailure = error
             failure = error
             onFailureEvent(DesktopPressCaptureFailureEvent(token: token, identity: current.identity, error: error))
+            await current.releaseAttempt?.complete(error: error)
         }
+    }
+}
+
+extension DesktopPressCaptureLease {
+    package func beginOwned(
+        identity: DesktopPressCaptureIdentity, admission: DesktopPressCaptureAdmission,
+        limits: DesktopPressCaptureBufferLimits
+    ) throws -> DesktopPressCaptureOwnedRelease {
+        let token = try begin(identity: identity, admission: admission, limits: limits)
+        let attempt = DesktopPressCaptureReleaseAttempt(token: token, identity: identity)
+        run?.releaseAttempt = attempt
+        return DesktopPressCaptureOwnedRelease(lease: self, attempt: attempt)
+    }
+
+    func retryOwnedRelease(
+        _ token: DesktopPressCaptureToken, identity: DesktopPressCaptureIdentity
+    ) -> Result<DesktopPressCaptureReleaseAttempt, DesktopPressCaptureError> {
+        guard let current = run, current.token == token else { return .failure(.staleLease) }
+        guard current.identity == identity else { return .failure(.identityChanged) }
+        guard current.releaseAttempt != nil, current.cleanupFailure != nil else { return .failure(.invalidPhase) }
+        let attempt = DesktopPressCaptureReleaseAttempt(token: token, identity: identity)
+        restartClose(current, attempt: attempt)
+        return .success(attempt)
+    }
+
+    private func restartClose(_ current: Run, attempt: DesktopPressCaptureReleaseAttempt?) {
+        var current = current
+        current.cleanupFailure = nil
+        current.releaseAttempt = attempt
+        run = current
+        enqueueClose(current.token)
     }
 }

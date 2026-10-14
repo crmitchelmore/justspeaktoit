@@ -293,6 +293,20 @@ immutable capture identity and error, including distinct cleanup failures.
 Construct it with `DesktopPressCaptureLease.observingFailures(worker:onFailureEvent:)`;
 the original error-only initializer remains the only package initializer, so
 its ignored-argument unlabeled trailing closures stay source-compatible.
+The optional package `beginOwned` entry registers a structurally Sendable
+release ticket in the same actor turn, before queued opening can run. Its
+`release()` joins one token/attempt-specific result, including never-started
+cancellation, late open, admitted drain and actual worker cleanup; it does not
+read the global current run's failure. A cancelled waiter cannot cancel that
+owned IO. Failed release remains owned and repeated calls observe the same
+failure; after observing it, only explicit `retryRelease()` requests another
+attempt. Owned runs reject legacy `lease.retryClose(token)` with `invalidPhase`
+before any state reset or IO; the exposed token is not legacy retry authority.
+Use the ticket's `retryRelease()` for owned runs. Runs admitted by legacy `begin`
+retain their existing `retryClose` behavior. Callback fencing before close is unchanged.
+Owners must retain the ticket through every terminal path; this installs no
+Host startup event mapping, capture/file handoff or native worker. WAV finish
+and context release still require a separately reviewed actual cleanup join.
 Deferred receivers must retain that event's identity rather than tagging it with
 the current recording. The compatibility observer projects only its error from
 the same canonical event sink; this does not install a Host subscription.

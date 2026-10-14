@@ -604,6 +604,18 @@ identity across deferred delivery, with cleanup failure reported separately.
 Use `DesktopPressCaptureLease.observingFailures(worker:onFailureEvent:)` for
 correlated events; the original error-only initializer retains untyped,
 ignored-argument trailing-closure compatibility without an initializer overload.
+Optional `beginOwned` creates a package release ticket before queued opening
+can run. Its retained token/attempt result joins real cleanup independently of
+lease-global `settle()` and any later run. Cancelled waiters do not cancel IO;
+failed cleanup retains exclusion, and repeated release observes that failure
+until an explicit `retryRelease()` after it is observed. Owned runs reject
+legacy `lease.retryClose(token)` with `invalidPhase` before any state reset or IO;
+the exposed token is not legacy retry authority. Only the ticket's `retryRelease()`
+retries owned cleanup. Legacy `begin` runs retain their existing `retryClose` behavior,
+and the relay fence before worker close is unchanged. Retaining/releasing the
+ticket on every startup/record/shutdown terminal path, Host failure mapping,
+native ownership and WAV/context finalization remain separate prerequisites;
+this package API neither installs them nor enables microphone capture.
 The error-only observer remains a compatibility projection, not a second
 subscription or a native/Host failure adapter.
 Optional PCM deliveries preserve legacy Data batch projection while labeling

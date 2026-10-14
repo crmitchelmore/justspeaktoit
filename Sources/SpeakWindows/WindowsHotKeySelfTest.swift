@@ -63,6 +63,13 @@ enum WindowsHotKeySelfTest {
         try await waitFor("classified gestures") { log.inputs.count == expected.count }
         try require(log.inputs == expected.map { .gesture($0) }, "gestures reached the controller out of order")
         try require(log.styles.last == .holdAndDoubleTap, "the hold ended by a style change used the new style")
+        gestures.configure(style: .holdAndDoubleTap)
+        gestures.configureTiming(hold: 0.8, doubleTap: 0.7)
+        press(at: 40)
+        try require((799...801).contains(log.lastArmed), "the configured hold threshold was not used")
+        release(at: 40.05)
+        try require((699...701).contains(log.lastArmed), "the configured double-tap window was not used")
+        gestures.configure(style: .holdToRecord)
     }
 
     private static func checkSessions(_ controller: WindowsAppController) async throws {

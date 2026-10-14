@@ -82,7 +82,7 @@ private final class HostLiveProjectionEffects: DesktopHostEffects, @unchecked Se
     ) async throws -> TranscriptionResult {
         try await base.transcribe(request, with: controller)
     }
-    func perform(_ job: FakeJob, text: String) -> String { base.perform(job, text: text) }
+    func perform(_ job: FakeJob, text: String) -> DesktopTextOutputResult { base.perform(job, text: text) }
     func writeSettings(_ data: Data, to url: URL) throws { try base.writeSettings(data, to: url) }
 }
 

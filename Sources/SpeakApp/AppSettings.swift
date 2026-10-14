@@ -240,24 +240,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     }
   }
 
-  enum HUDSizePreference: String, CaseIterable, Identifiable {
-    case compact
-    case expanded
-    case autoExpand
-
-    var id: String { rawValue }
-
-    var displayName: String {
-      switch self {
-      case .compact:
-        return "Compact"
-      case .expanded:
-        return "Always Expanded"
-      case .autoExpand:
-        return "Auto-Expand"
-      }
-    }
-  }
+  typealias HUDSizePreference = HUDExpansionPreference
 
   enum SpeedMode: String, CaseIterable, Identifiable {
     case instant       // Mode A: Raw, no LLM
@@ -303,99 +286,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     }
   }
 
-  enum DefaultsKey: String, CaseIterable {
-    case appearance
-    case visualDensity
-    case transcriptionMode
-    case liveTranscriptionModel
-    case batchTranscriptionModel
-    case localTranscriptionModel
-    case localTranscriptionMode
-    case localStreamingModelSource
-    case postProcessingEnabled
-    case postProcessingModel
-    case postProcessingTemperature
-    case postProcessingOutputLanguage
-    case postProcessingIncludeLexiconDirectives
-    case postProcessingIncludeContextTags
-    case textOutputMethod
-    case restoreClipboard
-    case appSwitchDelivery
-    case showHUD
-    case appVisibility
-    case showStatusBarIconInDockOnly
-    case compactStatusBarIcon
-    case runAtLogin
-    case recordingsDirectory
-    case hotKeyActivation
-    case holdThreshold
-    case doubleTapWindow
-    case trackedKeyIdentifiers
-    case preferredLocale
-    case postRecordingTailDuration
-    case deepgramStopGracePeriod
-    case liveStopGracePeriod
-    case preferredAudioInputUID
-    case defaultTTSVoice
-    case ttsLanguage
-    case sonioxTTSRegion
-    case ttsSpeed
-    case ttsPitch
-    case ttsQuality
-    case ttsOutputFormat
-    case ttsAutoPlay
-    case ttsSaveToDirectory
-    case ttsUseSSML
-    case ttsFavoriteVoices
-    case ttsPronunciationDictionary
-    case historyFlushInterval
-    case silenceDetectionEnabled
-    case handsFreeDictationEnabled
-    case silenceThreshold
-    case silenceDuration
-    case connectionPreWarmingEnabled
-    case audioPreWarmingEnabled
-    case warmMicrophoneOnKeyPress
-    case postProcessingStreamingEnabled
-    case hudSizePreference
-    case showLiveTranscriptInHUD
-    case showCompactHUD
-    case shortenErrorDisplay
-    case showSidebarShortcutHints
-    case speedMode
-    case livePolishModel
-    case livePolishDebounceMs
-    case livePolishMinDeltaChars
-    case livePolishTailWindowChars
-    case skipPostProcessingWithLivePolish
-    case voiceCommandsEnabled
-    case streamingInsertionEnabled
-    case clipboardInsertionTriggers
-    case enableSendToMac
-    case enableAutomationServer
-    case pasteRemoteTranscriptsAtCursor
-    case autoCorrectionsEnabled
-    case autoCorrectionsPromotionThreshold
-    case recordingSoundsEnabled
-    case recordingSoundProfile
-    case recordingSoundVolume
-    case assemblyAIKeyterms
-    case transcriptionKeywords
-    case transcriptionKeywordsLastReconciled
-    case recoveredTranscriptionKeywords
-    case assemblyAIIgnoredPronunciationTerms
-    case modulateSpeakerDiarization
-    case modulateEmotionSignal
-    case modulateAccentSignal
-    case modulatePIIPhiTagging
-    case accessibilityInsertionMode
-    case selectedHotKey
-    case paidAccessRoutingEnabled
-    case simpleModelChoices
-    case rememberedLocalTranscriptionSource
-    case rememberedRemoteTranscriptionMode
-    case analyticsEnabled
-  }
+  typealias DefaultsKey = ApplicationPreferenceKey
 
   private static let defaultLocalTranscriptionModel = "local/whisperkit/tiny"
 
@@ -1248,7 +1139,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       defaults.string(forKey: DefaultsKey.postProcessingModel.rawValue)
     )
     postProcessingTemperature =
-      defaults.object(forKey: DefaultsKey.postProcessingTemperature.rawValue) as? Double ?? 0.2
+      defaults.object(forKey: DefaultsKey.postProcessingTemperature.rawValue) as? Double ?? SpeechDefaults.temperature
     // Without timestamps, preserve competing nonempty edits. A deliberate clear
     // after migration wins over a conflicting edit, which remains recoverable.
     let storedKeywords = defaults.string(forKey: DefaultsKey.transcriptionKeywords.rawValue) ?? ""
@@ -1289,7 +1180,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     modulatePIIPhiTaggingEnabled =
       defaults.object(forKey: DefaultsKey.modulatePIIPhiTagging.rawValue) as? Bool ?? false
     postProcessingOutputLanguage =
-      defaults.string(forKey: DefaultsKey.postProcessingOutputLanguage.rawValue) ?? "English"
+      defaults.string(forKey: DefaultsKey.postProcessingOutputLanguage.rawValue) ?? SpeechDefaults.outputLanguage
     postProcessingIncludeLexiconDirectives =
       defaults.object(forKey: DefaultsKey.postProcessingIncludeLexiconDirectives.rawValue) as? Bool ?? true
     postProcessingIncludeContextTags =
@@ -1309,13 +1200,13 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     appSwitchDelivery =
       defaults.string(forKey: DefaultsKey.appSwitchDelivery.rawValue)
         .flatMap(AppSwitchDelivery.init(rawValue:)) ?? .originalApp
-    showHUDDuringSessions = defaults.object(forKey: DefaultsKey.showHUD.rawValue) as? Bool ?? true
+    showHUDDuringSessions = defaults.object(forKey: DefaultsKey.showHUD.rawValue) as? Bool ?? SpeechDefaults.showHUD
     showLiveTranscriptInHUD =
-      defaults.object(forKey: DefaultsKey.showLiveTranscriptInHUD.rawValue) as? Bool ?? true
+      defaults.object(forKey: DefaultsKey.showLiveTranscriptInHUD.rawValue) as? Bool ?? SpeechDefaults.liveTranscriptHUD
     showCompactHUD =
-      defaults.object(forKey: DefaultsKey.showCompactHUD.rawValue) as? Bool ?? false
+      defaults.object(forKey: DefaultsKey.showCompactHUD.rawValue) as? Bool ?? SpeechDefaults.compactHUD
     shortenErrorDisplay =
-      defaults.object(forKey: DefaultsKey.shortenErrorDisplay.rawValue) as? Bool ?? false
+      defaults.object(forKey: DefaultsKey.shortenErrorDisplay.rawValue) as? Bool ?? SpeechDefaults.shortErrors
     showSidebarShortcutHints =
       defaults.object(forKey: DefaultsKey.showSidebarShortcutHints.rawValue) as? Bool ?? true
     appVisibility =
@@ -1350,7 +1241,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       selectedHotKey = .fnKey
     }
     postRecordingTailDuration =
-      defaults.object(forKey: DefaultsKey.postRecordingTailDuration.rawValue) as? Double ?? 0.5
+      defaults.object(forKey: DefaultsKey.postRecordingTailDuration.rawValue) as? Double
+        ?? SpeechDefaults.recordingTailDuration
     // Migration: reuse the legacy `deepgramStopGracePeriod` value the first
     // time the user launches a build that has the generic
     // `liveStopGracePeriod`. After this, the legacy key is left intact (not
@@ -1360,7 +1252,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       liveStopGracePeriod = stored
     } else {
       let legacy = defaults.object(forKey: DefaultsKey.deepgramStopGracePeriod.rawValue) as? Double
-      let migrated = legacy ?? 0
+      let migrated = legacy ?? SpeechDefaults.liveStopGracePeriod
       liveStopGracePeriod = migrated
       // `didSet` does not fire during init, so persist the migrated value
       // explicitly — otherwise the next launch would re-read the legacy key
@@ -1386,9 +1278,12 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     ttsOutputFormat =
       AudioFormat(rawValue: defaults.string(forKey: DefaultsKey.ttsOutputFormat.rawValue) ?? "")
       ?? .mp3
-    ttsAutoPlay = defaults.object(forKey: DefaultsKey.ttsAutoPlay.rawValue) as? Bool ?? true
+    ttsAutoPlay =
+      defaults.object(forKey: DefaultsKey.ttsAutoPlay.rawValue) as? Bool
+        ?? SpeechGenerationDefaults.autoPlay
     ttsSaveToDirectory =
-      defaults.object(forKey: DefaultsKey.ttsSaveToDirectory.rawValue) as? Bool ?? false
+      defaults.object(forKey: DefaultsKey.ttsSaveToDirectory.rawValue) as? Bool
+        ?? SpeechGenerationDefaults.saveToRecordings
     ttsUseSSML = defaults.object(forKey: DefaultsKey.ttsUseSSML.rawValue) as? Bool ?? false
     ttsFavoriteVoices =
       defaults.array(forKey: DefaultsKey.ttsFavoriteVoices.rawValue) as? [String] ?? []
@@ -1411,7 +1306,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     hudSizePreference =
       HUDSizePreference(
         rawValue: defaults.string(forKey: DefaultsKey.hudSizePreference.rawValue)
-          ?? HUDSizePreference.autoExpand.rawValue) ?? .autoExpand
+          ?? HUDSizePreference.defaultValue.rawValue) ?? .defaultValue
 
     // Speed Mode Settings (Live Polish)
     speedMode =
@@ -1464,9 +1359,10 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     handsFreeDictationEnabled =
       defaults.object(forKey: DefaultsKey.handsFreeDictationEnabled.rawValue) as? Bool ?? false
     silenceThreshold =
-      Float(defaults.object(forKey: DefaultsKey.silenceThreshold.rawValue) as? Double ?? 0.05)
+      Float(defaults.object(forKey: DefaultsKey.silenceThreshold.rawValue) as? Double
+        ?? DictationSilencePolicy.defaultThreshold)
     silenceDuration =
-      defaults.object(forKey: DefaultsKey.silenceDuration.rawValue) as? Double ?? 2.0
+      defaults.object(forKey: DefaultsKey.silenceDuration.rawValue) as? Double ?? DictationSilencePolicy.defaultDuration
 
     // Auto-Corrections Settings
     autoCorrectionsEnabled =
@@ -1475,14 +1371,15 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       defaults.object(forKey: DefaultsKey.autoCorrectionsPromotionThreshold.rawValue) as? Int ?? 2
 
     recordingSoundsEnabled =
-      defaults.object(forKey: DefaultsKey.recordingSoundsEnabled.rawValue) as? Bool ?? true
+      defaults.object(forKey: DefaultsKey.recordingSoundsEnabled.rawValue) as? Bool ?? RecordingFeedbackDefaults.enabled
     recordingSoundProfile =
       RecordingSoundPlayer.SoundProfile(
         rawValue: defaults.string(forKey: DefaultsKey.recordingSoundProfile.rawValue)
-          ?? RecordingSoundPlayer.SoundProfile.classic.rawValue
-      ) ?? .classic
+          ?? RecordingFeedbackDefaults.profile.rawValue
+      ) ?? RecordingFeedbackDefaults.profile
     recordingSoundVolume =
-      Float(defaults.object(forKey: DefaultsKey.recordingSoundVolume.rawValue) as? Double ?? 0.7)
+      Float(defaults.object(forKey: DefaultsKey.recordingSoundVolume.rawValue) as? Double
+        ?? RecordingFeedbackDefaults.volume)
 
     ensureRecordingsDirectoryExists()
     applyAppVisibility()
@@ -1644,29 +1541,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   private static func mergedTranscriptionKeywords(
     canonical: String, legacy: String, lastReconciled: String?
   ) -> (active: String, recovered: String?) {
-    if canonical == legacy { return (canonical, nil) }
-    let canonicalIsEmpty = canonical.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    let legacyIsEmpty = legacy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    // After a downgrade or a write from another platform, an unchanged mirror
-    // must not override a deliberate edit (including clearing) on the other side.
-    if let lastReconciled {
-      if canonical == lastReconciled { return (legacy, nil) }
-      if legacy == lastReconciled { return (canonical, nil) }
-      // Both mirrors changed independently. Do not silently undo a clear, and
-      // do not destroy the competing edit: Settings exposes it for recovery.
-      if canonicalIsEmpty || legacyIsEmpty {
-        let recovered = canonicalIsEmpty ? legacy : canonical
-        return ("", recovered.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : recovered)
-      }
-    }
-    if canonicalIsEmpty { return (legacy, nil) }
-    if legacyIsEmpty { return (canonical, nil) }
-    var seen: Set<String> = []
-    let merged = (canonical + "," + legacy).components(separatedBy: ",")
-      .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-      .filter { !$0.isEmpty && seen.insert($0).inserted }
-      .joined(separator: ", ")
-    return (merged, nil)
+    TranscriptionKeywordPolicy.reconcile(canonical: canonical, legacy: legacy, lastReconciled: lastReconciled)
   }
 
   private static func normalizedBatchModel(_ identifier: String?) -> String {

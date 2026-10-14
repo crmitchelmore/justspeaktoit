@@ -43,7 +43,7 @@ extension WindowsAppController {
             let text = record.displayText ?? ""
             return AutomationHistoryEntry(
                 id: record.id.uuidString, text: text, createdAt: record.createdAt,
-                model: record.modelIdentifier, durationSeconds: record.result?.duration,
+                model: record.modelIdentifier, durationSeconds: record.recordingDuration,
                 wordCount: AutomationHistoryEntry.wordCount(of: text)
             )
         }

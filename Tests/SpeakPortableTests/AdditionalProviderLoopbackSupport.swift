@@ -7,20 +7,25 @@ import SpeakCore
 /// The same generated protocol/capture scenario on Apple, WinHTTP and NIO.
 /// Tests supply only the native transport; production requests are redirected
 /// without altering their provider path, query, credentials or setup.
-public final class AdditionalProviderLoopback: @unchecked Sendable {
-    public enum Provider: String, CaseIterable, Sendable {
+///
+/// Duplicated per-target (also in SpeakLinuxWebSocketTests and
+/// SpeakWindowsPlatformTests) rather than hosted in SpeakTestSupport: that
+/// target must stay dependency-free of SpeakCore so fixture-only imports
+/// cannot regress its clean release build.
+final class AdditionalProviderLoopback: @unchecked Sendable {
+    enum Provider: String, CaseIterable, Sendable {
         case gemini, meta, modulate, grok
-        public var sampleRate: Int { self == .meta || self == .grok ? 24_000 : 16_000 }
-        public var expectedTranscript: String { self == .grok ? "Tail." : "Before. Tail." }
+        var sampleRate: Int { self == .meta || self == .grok ? 24_000 : 16_000 }
+        var expectedTranscript: String { self == .grok ? "Tail." : "Before. Tail." }
     }
 
-    public let client: any FinalizingStreamingTranscriptionClient
+    let client: any FinalizingStreamingTranscriptionClient
     private let provider: Provider
     private let lock = NSLock()
     private var failures: [Error] = []
-    public var errors: [Error] { lock.withLock { failures } }
+    var errors: [Error] { lock.withLock { failures } }
 
-    public init(
+    init(
         provider: Provider, port: Int, scenario: String,
         makeConnection: @escaping @Sendable (URLRequest) -> any StreamingWebSocketConnection
     ) {
@@ -48,7 +53,7 @@ public final class AdditionalProviderLoopback: @unchecked Sendable {
         }
     }
 
-    public func start(onHeard: @escaping @Sendable () -> Void) {
+    func start(onHeard: @escaping @Sendable () -> Void) {
         client.start(onTranscript: { text, _ in if text == "Before." { onHeard() } },
                      onError: { [weak self] error in
                          guard let self else { return }

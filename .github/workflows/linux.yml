@@ -4,7 +4,12 @@ on:
   push:
     branches: [main]
     paths:
+      - .gitattributes
       - Package.swift
+      - Resources/AppIcon.iconset/**
+      - scripts/generate-desktop-icons.py
+      - scripts/stage-linux-desktop.py
+      - scripts/tests/test_desktop_icons.py
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
       - Sources/SpeakDesktopHost/**
@@ -37,7 +42,12 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - .gitattributes
       - Package.swift
+      - Resources/AppIcon.iconset/**
+      - scripts/generate-desktop-icons.py
+      - scripts/stage-linux-desktop.py
+      - scripts/tests/test_desktop_icons.py
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
       - Sources/SpeakDesktopHost/**
@@ -100,6 +110,7 @@ jobs:
           DEBIAN_FRONTEND=noninteractive apt-get install -y -q \
             libgtk-4-dev libadwaita-1-dev libpulse-dev libsecret-1-dev libx11-dev libxtst-dev libssl-dev pkg-config \
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+            gstreamer1.0-libav \
             dbus dbus-x11 gnome-keyring pipewire pipewire-pulse wireplumber pulseaudio-utils \
             xvfb openbox zenity xdotool weston python3 python3-gi gir1.2-glib-2.0 \
             fonts-cantarell adwaita-icon-theme

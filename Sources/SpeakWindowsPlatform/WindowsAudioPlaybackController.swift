@@ -161,6 +161,25 @@ public final class WindowsAudioPlaybackController: @unchecked Sendable {
             guard ContinuousClock.now < deadline else {
                 throw WindowsAudioPlaybackError("Audio output has not stopped. Recording has not started.")
             }
+
+            try await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
+    /// Housekeeping removes captured audio, not synthesized speech.
+    public func stopSavedAudioAndWait() async throws {
+        let identifier = lock.withLock { () -> UUID? in
+            guard speechState == nil, let run = current else { return nil }
+            stopLocked(run)
+            return run.id
+        }
+        guard let identifier else { return }
+        let deadline = ContinuousClock.now + .seconds(stopTimeout)
+        while !lock.withLock({ live[identifier]?.outputQuiet ?? true }) {
+            try Task.checkCancellation()
+            guard ContinuousClock.now < deadline else {
+                throw WindowsAudioPlaybackError("Saved audio playback has not stopped. Audio cleanup was cancelled.")
+            }
             try await Task.sleep(for: .milliseconds(5))
         }
     }

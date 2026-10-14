@@ -1,7 +1,6 @@
 import Foundation
 import SpeakCore
 import SpeakLinuxWebSocket
-import SpeakTestSupport
 import XCTest
 
 extension NIOStreamingConnectionProbeTests {

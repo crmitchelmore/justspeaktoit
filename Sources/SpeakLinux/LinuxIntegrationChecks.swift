@@ -187,7 +187,9 @@ enum LinuxIntegrationChecks {
             native: LinuxOutputNativeAdapter()
         ).perform("must not paste")
         try require(moved.contains("focused window changed"), "a stale target was pasted into: \(moved)")
-        print("X11: pasted into the captured window, restored the clipboard and refused a stale target.")
+        try LinuxNative.call { jsti_clipboard_ownership_self_test($0, $1) }
+        print("X11: pasted and restored owned text; refused stale targets, "
+            + "same-text copies and another client's selection.")
     }
 
     /// The X11 Ctrl+Alt+Space grab: the script presses the key with XTest once
@@ -252,8 +254,11 @@ enum LinuxIntegrationChecks {
         // First run: no token, consent, a new token saved to the keyring.
         try? LinuxCredentialStore.save("", name: LinuxOutputNativeAdapter.restoreTokenCredential)
         let job = LinuxOutputJob(plan: .portalPaste(shift: false), native: LinuxOutputNativeAdapter())
-        let status = job.perform("Portal dictation ✓")
-        try require(status.hasPrefix("Transcript pasted"), "portal paste reported: \(status)")
+        let delivery = job.performResult("Portal dictation ✓")
+        try require(
+            delivery.disposition == .unconfirmedInsertion && !delivery.permitsAutomaticResume,
+            "portal keys must not acknowledge field insertion: \(delivery.status)"
+        )
         let token = try LinuxCredentialStore.read(name: LinuxOutputNativeAdapter.restoreTokenCredential)
         try require(token == "fake-restore-token-1", "the restore token was not saved (\(token))")
         // The target asks for the selection after the keystroke; keep the
@@ -262,10 +267,15 @@ enum LinuxIntegrationChecks {
         LinuxPortal.stopRemoteDesktop()
         // Second run resumes with the saved token.
         let shifted = LinuxOutputJob(plan: .portalPaste(shift: true), native: LinuxOutputNativeAdapter())
-        _ = shifted.perform("Second")
+        let resumed = shifted.performResult("Second")
+        try require(
+            resumed.disposition == .unconfirmedInsertion && !resumed.permitsAutomaticResume,
+            "resumed portal keys must not acknowledge field insertion: \(resumed.status)"
+        )
         Thread.sleep(forTimeInterval: 0.3)
         LinuxPortal.stopRemoteDesktop()
-        print("RemoteDesktop: pasted through the shared clipboard and resumed with the saved restore token.")
+        print("RemoteDesktop: submitted paste keys through the shared clipboard "
+              + "and resumed with the saved restore token.")
         try backgroundPortal()
     }
 

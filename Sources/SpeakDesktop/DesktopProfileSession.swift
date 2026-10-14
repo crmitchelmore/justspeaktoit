@@ -194,10 +194,17 @@ public enum DesktopProfileSessionResolver {
         profile: DictationProfile?,
         defaultModel: String,
         defaultPostProcessing: DesktopPostProcessing.Options,
-        capabilities: DesktopProfileCapabilities
+        capabilities: DesktopProfileCapabilities,
+        defaultLanguage: String? = nil
     ) -> DesktopProfileSession {
         guard let profile else {
-            return .defaults(modelIdentifier: defaultModel, postProcessing: defaultPostProcessing)
+            let language = effectiveLanguage(defaultLanguage, model: defaultModel, capabilities: capabilities)
+            return DesktopProfileSession(
+                profileName: nil, modelIdentifier: defaultModel, language: language,
+                postProcessing: defaultPostProcessing,
+                limitations: language == nil
+                    ? defaultLanguage.map { [.languageUnavailableForLiveModel(languageIdentifier: $0)] } ?? [] : []
+            )
         }
         var limitations: [DesktopProfileLimitation] = []
         var model = defaultModel
@@ -214,12 +221,15 @@ public enum DesktopProfileSessionResolver {
         }
 
         var language: String?
-        if let identifier = TranscriptionLanguageCatalog.providerLanguage(for: profile.languageIdentifier ?? "") {
+        if let identifier = TranscriptionLanguageCatalog.providerLanguage(
+            for: profile.languageIdentifier ?? defaultLanguage ?? ""
+        ) {
             if effectiveModelIsLive, !capabilities.supportsLiveLanguage(for: model) {
                 limitations.append(.languageUnavailableForLiveModel(languageIdentifier: identifier))
             } else {
                 language = identifier
             }
+
         }
 
         let polish = resolvePolish(
@@ -233,6 +243,13 @@ public enum DesktopProfileSessionResolver {
             limitations: limitations,
             skippedPolishReason: polish.skippedReason
         )
+    }
+
+    private static func effectiveLanguage(
+        _ language: String?, model: String, capabilities: DesktopProfileCapabilities
+    ) -> String? {
+        guard !capabilities.isLive(model) || capabilities.supportsLiveLanguage(for: model) else { return nil }
+        return TranscriptionLanguageCatalog.providerLanguage(for: language ?? "")
     }
 
     private static func resolvePolish(

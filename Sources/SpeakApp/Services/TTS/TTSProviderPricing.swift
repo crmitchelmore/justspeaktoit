@@ -41,7 +41,7 @@ extension TTSProvider {
       }
     case .azure:
       // ~$16 per 1M characters for neural voices.
-      return Decimal(string: "0.016")
+      return VoiceSynthesisPricing.azureNeuralPerThousandCharacters
     case .deepgram:
       return DeepgramTTSAPI.costPerThousandCharacters
     case .soniox:

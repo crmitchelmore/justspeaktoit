@@ -353,3 +353,7 @@ extension SonioxLiveClient {
     /// A finish drains every admitted frame before `finalize` and end-of-stream.
     public var finishFlushesBufferedAudio: Bool { true }
 }
+
+extension SonioxLiveClient: StreamingAudioReadyProviding {
+    public var isReadyForAudio: Bool { isConnected }
+}

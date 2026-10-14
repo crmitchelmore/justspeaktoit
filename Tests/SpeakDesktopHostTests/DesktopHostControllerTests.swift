@@ -21,13 +21,27 @@ struct FakeJob: Sendable {
 }
 
 final class FakePlayback: DesktopHostPlayback, @unchecked Sendable {
+    let stopping = Gate(open: true)
+    var stopGate: Gate?
     func setStatusHandler(_ handler: @escaping @Sendable (UInt64, String) -> Void) {}
     func isCurrent(revision: UInt64) -> Bool { false }
     func play(recordID: UUID, path: String, knownDuration: TimeInterval?) throws {}
     func togglePause(recordID: UUID) -> Bool { false }
     func stop(announcing: Bool) {}
     func stop(unless recordID: UUID) {}
-    func stopAndWait() async throws {}
+    // With no suspending `stopGate`, this preserves the pre-existing hold/release
+    // contract hands-free arming relies on. When a comparison suspends playback via
+    // `stopGate`, releasing `stopping` first signals suspension has begun (so callers
+    // can synchronize) before blocking on the externally controlled gate.
+    func stopAndWait() async throws {
+        if let stopGate {
+            stopping.release()
+            await stopGate.pass()
+        } else {
+            await stopping.pass()
+        }
+    }
+    func stopSavedAudioAndWait() async throws { await FakeLog.shared.stopSavedAudio() }
     func close() async throws {}
 }
 
@@ -38,18 +52,57 @@ final class FakeLog: @unchecked Sendable {
     private var statuses: [String] = []
     private var clipboard: [String] = []
     private var hudStates: [DesktopHUDState] = []
+    private var folders: [URL] = []
+    private var directoryLauncher: (@Sendable (URL) throws -> Void)?
+    private var savedAudioStopper: (@Sendable () async -> Void)?
+    private var presentationStates: [Int32] = []
+    private var displayedTranscriptValues: [String] = []
     private var transcriptValues: [String] = []
     var keys: [String: String] = [:]
 
     func reset() {
-        lock.withLock { statuses = []; clipboard = []; hudStates = []; transcriptValues = []; keys = [:] }
+        lock.withLock {
+            statuses = []
+            clipboard = []
+            hudStates = []
+            folders = []
+            directoryLauncher = nil
+            savedAudioStopper = nil
+            keys = [:]
+            presentationStates = []
+            displayedTranscriptValues = []
+            transcriptValues = []
+        }
+    }
+    func setDirectoryLauncher(_ launcher: (@Sendable (URL) throws -> Void)?) {
+        lock.withLock { directoryLauncher = launcher }
+    }
+    func reveal(_ folder: URL) throws {
+        let launcher = lock.withLock { folders.append(folder); return directoryLauncher }
+        try launcher?(folder)
+    }
+    var revealedFolders: [URL] { lock.withLock { folders } }
+    func setSavedAudioStopper(_ stopper: (@Sendable () async -> Void)?) {
+        lock.withLock { savedAudioStopper = stopper }
+    }
+    func stopSavedAudio() async {
+        let stopper = lock.withLock { savedAudioStopper }
+        await stopper?()
     }
     func hud(_ state: DesktopHUDState) { lock.withLock { hudStates.append(state) } }
     var huds: [DesktopHUDState] { lock.withLock { hudStates } }
-    func status(_ text: String) { lock.withLock { statuses.append(text) } }
+    func status(_ text: String, transcript: String? = nil, state: Int32? = nil) {
+        lock.withLock {
+            statuses.append(text)
+            if let transcript { displayedTranscriptValues.append(transcript) }
+            if let state { presentationStates.append(state) }
+        }
+    }
     func copy(_ text: String) { lock.withLock { clipboard.append(text) } }
     var allStatuses: [String] { lock.withLock { statuses } }
     var copies: [String] { lock.withLock { clipboard } }
+    var states: [Int32] { lock.withLock { presentationStates } }
+    var displayedTranscripts: [String] { lock.withLock { displayedTranscriptValues } }
     func transcript(_ text: String?) {
         if let text { lock.withLock { transcriptValues.append(text) } }
     }
@@ -59,12 +112,13 @@ final class FakeLog: @unchecked Sendable {
 }
 
 enum FakePlatform: DesktopHostPlatform {
+    static func handsFreeReadinessFailure() -> String? { nil }
     typealias VoiceOutputSettings = DesktopVoiceOutputSettings
     static let displayName = "Test"
     static let credentialStoreName = "the test keyring"
 
     static func update(_ status: String, transcript: String?, state: Int32) {
-        FakeLog.shared.status(status)
+        FakeLog.shared.status(status, transcript: transcript, state: state)
         FakeLog.shared.transcript(transcript)
     }
     static func recordingState(_ state: Int32) {}
@@ -76,6 +130,9 @@ enum FakePlatform: DesktopHostPlatform {
     static func transcriptVariant(_ variant: DesktopTranscriptVariant?, for record: UUID?, switchable: Bool) {}
     static func publishModels(status: String, refreshing: Bool) throws {}
     static func apiKey(name: String) throws -> String { FakeLog.shared.key(name) }
+    static func voiceTextImportCancelled(_ requestID: String) {
+        FakeLog.shared.status("Import stopped: \(requestID)")
+    }
     static func saveAPIKey(_ key: String, name: String) throws { FakeLog.shared.setKey(key, name: name) }
     static func uploadStaging(directory: URL) -> SharedMultipartUploadStaging {
         // No `.posix` default on Windows, where these tests also run.
@@ -93,10 +150,15 @@ enum FakePlatform: DesktopHostPlatform {
         throw DesktopHostError(message: "No converter in tests.")
     }
     static func openFile(_ url: URL) throws {}
+    static func revealDirectory(_ url: URL) throws { try FakeLog.shared.reveal(url) }
+    static func confirmAudioCleanup(id: UUID, count: Int) throws {
+        FakeLog.shared.status("Audio confirmation \(id.uuidString): \(count)")
+    }
     static func copyToClipboard(_ text: String) throws { FakeLog.shared.copy(text) }
     static func makeOutputJob(options: FakeTextOutput, target: String?) -> FakeJob? {
         options.label == "copy" || target != nil ? FakeJob(label: options.label, target: target) : nil
     }
+    static func requiresInsertionTarget(_ options: FakeTextOutput) -> Bool { options.label != "copy" }
     static func cancel(_ job: FakeJob) {}
     static func isClipboard(_ job: FakeJob) -> Bool { job.target == nil }
     static func makePlayback() -> FakePlayback { FakePlayback() }
@@ -110,6 +172,8 @@ final class Gate: @unchecked Sendable {
     private let lock = NSLock()
     private var open: Bool
     init(open: Bool) { self.open = open }
+    var isOpen: Bool { lock.withLock { open } }
+    func hold() { lock.withLock { open = false } }
     func release() { lock.withLock { open = true } }
     func pass() async {
         while !lock.withLock({ open }) {
@@ -156,9 +220,9 @@ final class SyntheticEffects: DesktopHostEffects, @unchecked Sendable {
             modelIdentifier: request.model, cost: nil, rawPayload: nil, debugInfo: nil
         )
     }
-    func perform(_ job: FakeJob, text: String) -> String {
+    func perform(_ job: FakeJob, text: String) -> DesktopTextOutputResult {
         lock.withLock { performed.append((job, text)) }
-        return "Delivered."
+        return DesktopTextOutputResult(.confirmedInsertion, status: "Delivered.")
     }
     func writeSettings(_ data: Data, to url: URL) throws { try data.write(to: url, options: .atomic) }
 }
@@ -264,7 +328,7 @@ final class DesktopHostControllerTests: XCTestCase {
                 textOutput: FakeTextOutput()
             )
         }
-        try await waitFor("transcription to start") { await self.controller.busy }
+        try await waitFor("transcription to start") { FakeLog.shared.huds.last?.phase == .transcribing }
         await controller.cancelTranscription()
         await stopping.value
         let saved = try await records()
@@ -380,6 +444,8 @@ final class GatedEffects: DesktopHostEffects, @unchecked Sendable {
         try Task.checkCancellation()
         throw CancellationError()
     }
-    func perform(_ job: FakeJob, text: String) -> String { "Delivered." }
+    func perform(_ job: FakeJob, text: String) -> DesktopTextOutputResult {
+        DesktopTextOutputResult(.confirmedInsertion, status: "Delivered.")
+    }
     func writeSettings(_ data: Data, to url: URL) throws { try data.write(to: url, options: .atomic) }
 }

@@ -143,10 +143,10 @@ final class BlockingOutputEffects: DesktopHostEffects, @unchecked Sendable {
             modelIdentifier: request.model, cost: nil, rawPayload: nil, debugInfo: nil
         )
     }
-    func perform(_ job: FakeJob, text: String) -> String {
+    func perform(_ job: FakeJob, text: String) -> DesktopTextOutputResult {
         lock.withLock { isStarted = true }
         while !lock.withLock({ isReleased }) { Thread.sleep(forTimeInterval: 0.002) }
-        return "Delivered late."
+        return DesktopTextOutputResult(.confirmedInsertion, status: "Delivered late.")
     }
     func writeSettings(_ data: Data, to url: URL) throws { try data.write(to: url, options: .atomic) }
 }

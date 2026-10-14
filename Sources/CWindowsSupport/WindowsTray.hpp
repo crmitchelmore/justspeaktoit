@@ -19,6 +19,7 @@ enum Command : UINT { none = 0, toggle = 1, open = 2, settings = 3, quit = 4 };
 // the same without it.
 bool add(HWND owner, HICON idle, HICON recording);
 void remove();
+void setIcons(HICON idle, HICON recording);
 // recording: 0 idle, 1 recording, 2 transcribing. `summary` is the Sessions,
 // Recording Time and Spend line; empty hides it.
 void setState(int recording, const std::wstring &summary);

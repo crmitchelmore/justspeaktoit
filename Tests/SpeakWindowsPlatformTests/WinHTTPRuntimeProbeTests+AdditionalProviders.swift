@@ -1,6 +1,5 @@
 import Foundation
 import SpeakCore
-import SpeakTestSupport
 import SpeakWindowsPlatform
 import XCTest
 

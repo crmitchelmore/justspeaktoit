@@ -2,7 +2,7 @@ import Foundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
-import SpeakCore
+@testable import SpeakCore
 import SpeakTestSupport
 import XCTest
 @testable import SpeakDesktop
@@ -29,6 +29,7 @@ final class DesktopTranscriptionTests: XCTestCase {
                 XCTAssertEqual(descriptor.apiKeyURL, OpenRouterService.apiKeysURL)
                 continue
             }
+
             XCTAssertEqual(descriptor.id, ModelRouting.family(for: model.id).providerID)
             let accountURL: URL?
             if let fileProvider = FileSpeechProvider(rawValue: descriptor.id) {
@@ -270,6 +271,49 @@ final class DesktopTranscriptionTests: XCTestCase {
         }
     }
 
+}
+
+extension DesktopTranscriptionTests {
+    func testVocabularyHintsReachOnlySupportedBatchProviderContracts() async throws {
+        let audio = try fixture()
+        defer { try? FileManager.default.removeItem(at: audio) }
+        for model in [XAISpeechToText.batchCatalogID, AzureTranscriptionModels.fast, "openai/whisper-1"] {
+            StubURLProtocol.reset()
+            StubURLProtocol.handler = { request in
+                let body = StubURLProtocol.body(of: request)
+                if model == AzureTranscriptionModels.fast {
+                    XCTAssertNotNil(body.range(of: Data("\"phraseList\"".utf8)))
+                    XCTAssertNotNil(body.range(of: Data("SyntheticCanonical".utf8)))
+                    let response = #"{"combinedPhrases":[{"text":"fixture"}],"durationMilliseconds":1000}"#
+                    return .ok(Data(response.utf8), url: request.url!)
+                }
+                XCTAssertNil(
+                    body.range(of: Data("SyntheticCanonical".utf8)), "Unsupported routes must not acquire hint fields"
+                )
+                return .ok(Data(#"{"text":"fixture"}"#.utf8), url: request.url!)
+            }
+            var xaiClient = XAIBatchTranscriptionClient(session: StubURLProtocol.makeSession())
+            xaiClient.uploadRecording = { request, file in
+                let body = try Data(contentsOf: file)
+                XCTAssertNotNil(body.range(of: Data("name=\"keyterm\"".utf8)))
+                XCTAssertNotNil(body.range(of: Data("SyntheticCanonical".utf8)))
+                let url = try XCTUnwrap(request.url)
+                let response = try XCTUnwrap(HTTPURLResponse(
+                    url: url, statusCode: 200, httpVersion: nil, headerFields: nil
+                ))
+                return (Data(#"{"text":"fixture"}"#.utf8), response)
+            }
+            let multipart = DesktopMultipartFixture()
+            defer { multipart.remove() }
+            let result = try await DesktopTranscription.transcribe(
+                audioURL: audio, model: model, apiKey: "fixture-key", duration: 1,
+                azureEndpoint: "https://fixture.cognitiveservices.azure.com",
+                staging: multipart.staging, keywords: ["SyntheticCanonical"], session: StubURLProtocol.makeSession(),
+                xaiClient: xaiClient
+            )
+            XCTAssertEqual(result.text, "fixture")
+        }
+    }
 }
 
 private extension DesktopTranscriptionTests {

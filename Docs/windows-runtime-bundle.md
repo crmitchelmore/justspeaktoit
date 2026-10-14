@@ -41,6 +41,34 @@ libraries, Swift modules, symbol files, installers, cabinets, `XCTest`,
 `Testing.dll`, test executables or test resources. `runtime-policy.json` lists
 those forbidden patterns and the layout check refuses any match, as do the tests.
 
+## Canonical application icons
+
+`scripts/generate-icon.swift` also runs `scripts/generate-desktop-icons.py`.
+The dependency-free exporter reuses `Resources/AppIcon.iconset` pixels, rather
+than drawing another waveform. It writes a multi-resolution
+`Resources/Desktop/AppIcon.ico` and an architecture-neutral Win32 `.res` with
+idle and recording icon groups at 16, 20, 24, 32, 40, 48, 64, 128 and 256 pixels.
+SwiftPM links the resource into the Windows executable on both x64 and ARM64,
+including cross-builds. Explorer, executable-based shortcuts, the window,
+Alt-Tab/taskbar and notification area use that artwork. Window/tray handles
+refresh on per-monitor DPI changes; the recording group adds only the existing
+red recording indicator. The coloured, transparent brand remains the same in
+light and dark shells; it is not a monochrome/template icon.
+
+The generated bundle `README.txt` includes optional PowerShell commands for
+a per-user Start menu shortcut. Its `IconLocation` is the permanent extracted
+`SpeakWindows.exe` path plus `,0`, so moving the bundle requires updating that
+shortcut. The ZIP itself still performs no installation or autostart change.
+MSIX installs its Start menu entry through its manifest; see
+[Windows installer](windows-installer.md).
+
+Check generated assets with `python3 scripts/generate-desktop-icons.py --check`
+and run `python3 -B -m unittest discover -s scripts/tests -p test_desktop_icons.py`.
+The native window self-test also loads both resource groups at every exported
+size and checks the bitmap dimensions. Python checks prove export bytes and
+wiring, not successful PE linking, Explorer rendering or physical mixed-DPI
+behavior: those require the native Windows CI and desktop acceptance evidence.
+
 ## How the dependency closure is computed
 
 `scripts/windows-bundle/windows_pe.py` reads PE headers, the static import

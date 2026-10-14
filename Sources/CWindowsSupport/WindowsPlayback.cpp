@@ -375,8 +375,8 @@ Wake awaitSample(ReadState &state, const std::atomic<bool> &cancelled, std::chro
     return ready ? Wake::ready : Wake::timeout;
 }
 
-Decoder::Decoder(const std::atomic<bool> &cancelled, std::shared_ptr<ReadState> state)
-    : cancelled(cancelled), state(state), resources(state) {}
+Decoder::Decoder(const std::atomic<bool> &cancelled, std::shared_ptr<ReadState> state, DWORD readTimeout)
+    : cancelled(cancelled), state(state), resources(state), readTimeout(readTimeout) {}
 
 Decoder::~Decoder() {
     resources.close();
@@ -501,6 +501,7 @@ public:
     UINT32 bufferFrames() const noexcept override { return frames; }
     HRESULT start() noexcept override { return client->Start(); }
     HRESULT stop() noexcept override { return client->Stop(); }
+    HRESULT reset() noexcept override { return client->Reset(); }
     HRESULT padding(UINT32 &value) noexcept override { return client->GetCurrentPadding(&value); }
     HRESULT acquire(UINT32 count, BYTE **data) noexcept override { return renderer->GetBuffer(count, data); }
     HRESULT release(UINT32 count) noexcept override { return renderer->ReleaseBuffer(count, 0); }
@@ -516,7 +517,9 @@ public:
 // audio engine's converter finishes the job. No active endpoint, a disabled
 // device or an unsupported mix format are explicit failures.
 class WasapiFactory final : public OutputFactory {
+    const bool feedback;
 public:
+    explicit WasapiFactory(bool feedback = false) : feedback(feedback) {}
     std::unique_ptr<RenderOutput> open(Decoder &decoder, FormatSpec &format) override {
         jsti::COM<IMMDeviceEnumerator> enumerator;
         require(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
@@ -537,7 +540,11 @@ public:
         struct MixFormat { WAVEFORMATEX *value; ~MixFormat() { CoTaskMemFree(value); } } owned{mix};
         const FormatSpec mixFormat = parseFormat(mix, sizeof(WAVEFORMATEX) + mix->cbSize);
         DWORD flags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
-        if (SUCCEEDED(decoder.configure(mixFormat))) {
+        if (feedback) {
+            format = floatFormat(mixFormat.rate, mixFormat.channels, mixFormat.mask);
+            require(decoder.configure(format, 1 << 20), "Decode feedback as endpoint-rate float PCM");
+            flags |= AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
+        } else if (SUCCEEDED(decoder.configure(mixFormat))) {
             format = mixFormat;
         } else {
             const FormatSpec native = decoder.nativeFloatFormat();
@@ -545,7 +552,8 @@ public:
             format = native;
             flags |= AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
         }
-        require(client->Initialize(AUDCLNT_SHAREMODE_SHARED, flags, renderBufferDuration, 0, format.wave(), nullptr),
+        require(client->Initialize(AUDCLNT_SHAREMODE_SHARED, flags,
+                                   feedback ? 300000 : renderBufferDuration, 0, format.wave(), nullptr),
                 "Configuring shared-mode audio output");
         jsti::Handle event;
         event.value = CreateEventW(nullptr, FALSE, FALSE, nullptr);
@@ -556,6 +564,9 @@ public:
         if (!frames || frames > format.rate * maximumBufferSeconds) {
             throw Failure{AUDCLNT_E_BUFFER_ERROR, "The audio output driver returned an invalid or excessive buffer"};
         }
+        if (feedback && frames > format.rate / 20) {
+            throw Failure{AUDCLNT_E_BUFFER_ERROR, "The audio device cannot provide a feedback buffer within 50 ms"};
+        }
         jsti::COM<IAudioRenderClient> renderer;
         require(client->GetService(__uuidof(IAudioRenderClient), reinterpret_cast<void **>(&renderer.value)),
                 "Opening the audio output stream");
@@ -563,6 +574,12 @@ public:
     }
 };
 } // namespace
+
+std::unique_ptr<jsti::playback::RenderOutput> jsti::playback::openFeedbackOutput(
+    Decoder &decoder, FormatSpec &format
+) {
+    return WasapiFactory(true).open(decoder, format);
+}
 
 struct JSTIAudioPlayback {
     std::wstring input;

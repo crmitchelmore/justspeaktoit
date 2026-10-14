@@ -8,6 +8,7 @@ builder's own policy, path and PE checks rather than a second dependency list.
 The package's processor architecture is the bundle's.
 """
 import base64
+import functools
 import hashlib
 import importlib.util
 import io
@@ -326,18 +327,29 @@ def resample_rgba(width, height, rgba, target_width, target_height):
     return bytes(output)
 
 
+@functools.lru_cache(maxsize=64)
+def _render_asset(data, size):
+    width, height, rgba = _decode_asset(data)
+    return encode_png(size, size, resample_rgba(width, height, rgba, size, size))
+
+
+@functools.lru_cache(maxsize=4)
+def _decode_asset(data):
+    return decode_png(data)
+
+
 def render_assets(identity, source_root=REPOSITORY):
     """Derive the package logos from the canonical app icon export."""
     source = identity["assets"]["source"]
     data = (pathlib.Path(source_root) / source).read_bytes()
-    width, height, rgba = decode_png(data)
+    width, height, _ = _decode_asset(data)
     if width != height:
         raise PackageError("the icon source must be square")
     assets = {}
     for path, size in sorted(identity["assets"]["images"].items()):
         if size > width:
             raise PackageError("the icon source is smaller than " + path)
-        assets[path] = encode_png(size, size, resample_rgba(width, height, rgba, size, size))
+        assets[path] = _render_asset(data, size)
     record = {"source": source, "sourceSHA256": sha256(data), "sourceSize": [width, height],
               "method": "exact integer area average of premultiplied RGBA; unfiltered 8-bit RGBA PNG output",
               "images": dict(sorted(identity["assets"]["images"].items()))}
@@ -427,7 +439,12 @@ def check_manifest(data, identity, version, publisher, architecture="x64"):
     logos = {root.findtext("f:Properties/f:Logo", namespaces=ns)}
     visual = applications[0].find("uap:VisualElements", ns)
     logos |= {visual.get("Square150x150Logo"), visual.get("Square44x44Logo")}
-    declared = {path.replace("/", "\\") for path in identity["assets"]["images"]}
+    # MRT resolves qualifier siblings automatically; only the unqualified
+    # roots belong in VisualElements. Every generated variant must have a root.
+    declared = {path.split(".", 1)[0] + ".png" for path in identity["assets"]["images"]}
+    if not declared.issubset(identity["assets"]["images"]):
+        raise PackageError("qualified logo families must include their generated unqualified assets")
+    declared = {path.replace("/", "\\") for path in declared}
     if logos != declared:
         raise PackageError("manifest logos differ from the generated assets")
     return root

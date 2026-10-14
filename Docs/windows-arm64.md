@@ -43,7 +43,7 @@ is the parity matrix.
 | Job | Runner | What it establishes |
 |---|---|---|
 | `local-runtime` (reusable `windows-local-runtime.yml`, `architecture: arm64`) | `windows-11-arm` | whisper.cpp 1.9.4 built natively from the pinned commit with clang, CPU only; every DLL must be a native ARM64 image. Cached by pin |
-| `native` | `windows-11-arm`, 60 min | Pinned ARM64 Swift 6.2.3; native host check; `swift build`; the production `SpeakWindows.exe` retained before tests (`stage-native-app.py`); `swift test` in release; native image checks of the app, the test executable and the runtime; the three WinHTTP loopback probe suites; `--self-test`, `--ui-smoke-test` (30 s) and on-device JFK transcription with the pinned tiny model, each run observed natively |
+| `native` | `windows-11-arm`, 60 min | Pinned ARM64 Swift 6.2.3; native host check; separate release builds of `SpeakWindows` and `speak`; production `SpeakWindows.exe` and `speak.exe` retained and hashed before tests (`stage-native-app.py`); `swift test` in release; native image checks of both production roots, the test executable and the runtime; the three WinHTTP loopback probe suites; `--self-test`, `--ui-smoke-test` (30 s) and on-device JFK transcription with the pinned tiny model, each run observed natively |
 | `bundle` | `macos-15`, 30 min | Extracts the Swift runtime from the pinned ARM64 installer with the pinned 7-Zip. Assembles the ARM64 bundle from the `native` job's production executable, that runtime, the ARM64 Visual C++ runtime and the ARM64 whisper.cpp runtime |
 | `bundle-execute` | `windows-11-arm`, no Swift, 20 min | `verify-windows-bundle.ps1`: hashes, isolated PATH, `STATUS_DLL_NOT_FOUND` negative control, missing-resource control, loaded-module provenance, on-device transcription from the bundle, and a native ARM64 process for every run |
 | `package-lifecycle` | `windows-11-arm`, 45 min | ARM64 developer MSIX (`ProcessorArchitecture="arm64"`, same identity) packed with the pinned MakeAppx. The x64 install, launch, failed-upgrade, upgrade, uninstall and admission-control checks, unchanged |
@@ -128,10 +128,14 @@ Studio's ARM64 developer environment, with clang targeting
   C++ code takes `__CxxFrameHandler3` from the ARM64X `vcruntime140.dll`.
   `__CxxFrameHandler4`, which the x64 app imports from `vcruntime140_1.dll`,
   exists on ARM64 only in that ARM64EC file, for emulated code.
-- **Application.** The production executable staged by the `native` job, with
+- **Application.** Both production executables staged by the `native` job, with
   `app-build-metadata.json` (host Windows, target
   `aarch64-unknown-windows-msvc`, release, not built for testing). The bundle
-  refuses a hash mismatch, an x64 or ARM64EC image, or a test import.
+  refuses a hash mismatch, an x64 or ARM64EC image, or a test import in either
+  root; `speak.exe` must use the console subsystem. The bundle closure is their
+  union with per-root attribution, not an arbitrary union of copied DLLs.
+  Device-free CLI help/version verification records redirected output and exit
+  separately from PE/hash/native-host evidence, not sampled CLI modules.
 - **Package.** `package-identity.json` lists `x64` and `arm64`. A layout takes
   its architecture from the bundle and re-checks every DLL as a native image.
   The family name is shared; the package full name carries `_arm64_`.

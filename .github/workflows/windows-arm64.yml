@@ -156,6 +156,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           swift build --configuration release --product SpeakWindows --jobs 4
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          swift build --configuration release --product speak --jobs 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # The test build recompiles the same modules with testable imports, so the
       # production executable is copied first, as the Mac cross-build does.
@@ -167,7 +169,7 @@ jobs:
           python -B scripts/windows-bundle/stage-native-app.py --architecture arm64 --bin-path $bin --output windows-arm64-app
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -B scripts/windows-bundle/verify-native-execution.py --architecture arm64 --evidence $env:NATIVE_EVIDENCE `
-            images windows-arm64-app/SpeakWindows.exe
+            images windows-arm64-app/SpeakWindows.exe windows-arm64-app/speak.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Test shared core, desktop workflow and native adapters
@@ -441,6 +443,7 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/windows-bundle/test-bundle-environment.ps1
+          ./scripts/windows-bundle/test-bundle-cli.ps1
           $pins = Get-Content scripts/windows-local-runtime/dependencies.json -Raw | ConvertFrom-Json
           ./scripts/windows-bundle/verify-windows-bundle.ps1 -BundleDirectory bundle `
             -Workspace (Join-Path $env:RUNNER_TEMP 'bundle-run') -ExpectedCommit $env:GITHUB_SHA `

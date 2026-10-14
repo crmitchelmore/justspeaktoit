@@ -332,6 +332,7 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/windows-bundle/test-bundle-environment.ps1
+          ./scripts/windows-bundle/test-bundle-cli.ps1
           $pins = Get-Content scripts/windows-local-runtime/dependencies.json -Raw | ConvertFrom-Json
           ./scripts/windows-bundle/verify-windows-bundle.ps1 -BundleDirectory bundle `
             -Workspace (Join-Path $env:RUNNER_TEMP 'bundle-run') -ExpectedCommit $env:GITHUB_SHA `

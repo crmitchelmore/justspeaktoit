@@ -23,7 +23,8 @@ identity in the repository.
 | Package family | `com.justspeaktoit.windows.developer_12qtdfzdxrxs0` for the default publisher |
 | Application / AUMID | `JustSpeakToIt` / `<family>!JustSpeakToIt` |
 | Display name | Just Speak to It Developer |
-| Execution alias | `JustSpeakToItDeveloper.exe` |
+| GUI execution alias | `JustSpeakToItDeveloper.exe` → `SpeakWindows.exe` (unchanged) |
+| CLI execution alias | `JustSpeakToItDeveloperCLI.exe` → `speak.exe` (console) |
 | Architecture | The runtime bundle's: x64, or arm64 from the ARM64 bundle (`processorArchitectures` lists both) |
 | Target | `Windows.Desktop`, minimum 10.0.19041.0, tested 10.0.20348.0 (the CI runner build) |
 | Capabilities | `runFullTrust`, `unvirtualizedResources` (restricted), `microphone` (device) |
@@ -32,6 +33,31 @@ identity in the repository.
 The family name is Windows' hash of the publisher. The builder computes it
 (checked against Microsoft's published `8wekyb3d8bbwe` and `cw5n1h2txyewy`
 IDs) and the lifecycle test requires Windows to report the same value.
+
+The package carries the real `speak` SwiftPM release product for both x64 and
+ARM64, using the verified bundle's two executable hashes and exact multi-root
+dependency graph. Packaging re-reads both PEs and their static/delay imports;
+missing/tampered CLI bytes, test or unknown imports, foreign architecture and
+false importer/root attribution are refused before layout creation.
+
+The CLI alias is a second extension under the existing GUI Application, not a
+second Start menu tile or a retargeted GUI alias. It uses
+[`uap5:Extension`'s `Executable` override](https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-uap5-extension)
+and [`uap5:AppExecutionAlias`'s `uap10:Subsystem="console"`](https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-uap5-appexecutionalias).
+No generic `speak.exe` alias is registered and no PATH, trust, install or
+startup policy changes. Run `JustSpeakToItDeveloperCLI.exe --help` or
+`JustSpeakToItDeveloperCLI.exe --version` after a developer package installation;
+portable use remains `.\speak.exe`.
+The existing Windows CLI version fallback is `0.0.0-dev`; it is not the MSIX
+version. Other commands still use the running app's existing automation pipe.
+
+Disposable-runner lifecycle checks require both aliases to appear and disappear,
+verify the installed CLI executable/alias association, and run help/version with
+bounded redirected streams and isolated PATH. A pre-existing CLI alias or CLI
+process blocks admission and is never owned or removed by a refused run.
+Fast CLI checks do not substitute stdout for GUI module provenance. Fresh native
+build and MakeAppx/install/alias/removal receipts are still required: earlier
+GUI-only receipts do not qualify this CLI packaging change.
 
 Package logos come from the canonical Mac 1024px export with transparent
 corners. The three manifest roots (`StoreLogo`, `Square44x44Logo` and

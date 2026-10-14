@@ -46,9 +46,11 @@ def make_bundle(directory, commit=COMMIT, mutate=None, exe_imports=("swiftCore.d
     directory.mkdir(parents=True, exist_ok=True)
     target = windows_msix.windows_targets.target(architecture)
     machine = target["processMachine"]
-    executable = BUNDLE_TESTS.build_pe(imports=exe_imports, machine=machine)
+    executable = BUNDLE_TESTS.build_pe(imports=exe_imports, machine=machine, subsystem=2)
+    cli = BUNDLE_TESTS.build_pe(imports=["swiftCore.dll", "KERNEL32.dll"], machine=machine)
     entries = {
         "SpeakWindows.exe": executable,
+        "speak.exe": cli,
         "swiftCore.dll": BUNDLE_TESTS.build_pe(imports=["KERNEL32.dll"], dll=True, machine=machine),
         "SpeakApp_SpeakCore.resources/ReleaseNotes.json": b'{"entries": [{"version": "1"}]}',
         # Larger than one 64 KiB block, so block maps have several blocks.
@@ -56,18 +58,26 @@ def make_bundle(directory, commit=COMMIT, mutate=None, exe_imports=("swiftCore.d
         "licenses/LICENSE-JustSpeakToIt.txt": b"MIT License\n",
         "README.txt": b"Developer bundle\n",
     }
-    sources = {"SpeakWindows.exe": "application", "swiftCore.dll": "swift-runtime", "README.txt": "generated",
+    sources = {"SpeakWindows.exe": "application", "speak.exe": "application",
+               "swiftCore.dll": "swift-runtime", "README.txt": "generated",
                "licenses/LICENSE-JustSpeakToIt.txt": "application-license"}
+    # Invalid executable-import fixtures still need a producer-shaped graph;
+    # the consumer must re-read their PEs rather than trust this graph.
+    graph_images = dict(entries, **{"SpeakWindows.exe": BUNDLE_TESTS.build_pe(
+        imports=["swiftCore.dll", "KERNEL32.dll"], machine=machine)})
+    def read_imports(name, category):
+        image = windows_msix.windows_pe.PEImage(graph_images[name], name)
+        return image.imports(), image.delay_imports()
+    closure = BUILD.resolve_closure(BUILD.EXECUTABLES, read_imports, BUILD.Policy.load())
     manifest = {
         "schemaVersion": 1,
         "bundle": {"kind": "unsigned Windows %s developer runtime bundle" % target["displayName"],
                    "architecture": target["bundleArchitecture"], "notInstaller": True, "codeSigned": False},
         "application": {"sourceCommit": commit, "configuration": "release", "appBuiltForTesting": False,
-                        "executableSHA256": sha256(executable)},
-        "dependencies": {"bundled": {"swiftcore.dll": {"name": "swiftCore.dll", "source": "swift-runtime",
-                                                       "importedBy": [{"importer": "SpeakWindows.exe",
-                                                                       "kind": "static"}]}},
-                         "system": {}},
+                        "executableSHA256": sha256(executable),
+                        "executables": {"SpeakWindows.exe": sha256(executable), "speak.exe": sha256(cli)},
+                        "target": target["swiftTriple"], "buildHost": BUILD.APPLICATION_HOSTS[architecture]},
+        "dependencies": dict(closure, additionalRuntimeModules=BUILD.Policy.load().additional),
         "policy": BUILD.Policy.load().data,
     }
     if mutate is not None:
@@ -75,6 +85,12 @@ def make_bundle(directory, commit=COMMIT, mutate=None, exe_imports=("swiftCore.d
     manifest["files"] = [{"path": path, "bytes": len(data), "sha256": sha256(data),
                           "source": sources.get(path, "application-resources")}
                          for path, data in sorted(entries.items()) if path != "bundle-manifest.json"]
+    return write_bundle(directory, entries, manifest, architecture)
+
+
+def write_bundle(directory, entries, manifest, architecture):
+    directory.mkdir(parents=True, exist_ok=True)
+    commit = manifest["application"]["sourceCommit"]
     manifest_bytes = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode()
     entries["bundle-manifest.json"] = manifest_bytes
     archive = directory / ("justspeaktoit-windows-%s-developer-%s.zip" % (architecture, commit[:7]))
@@ -83,7 +99,9 @@ def make_bundle(directory, commit=COMMIT, mutate=None, exe_imports=("swiftCore.d
     evidence = {"schemaVersion": 1,
                 "zip": {"name": archive.name, "sha256": sha256(data), "bytes": len(data), "entries": len(entries)},
                 "manifest": {"name": "bundle-manifest.json", "sha256": sha256(manifest_bytes)},
-                "application": {"sourceCommit": commit, "executableSHA256": sha256(executable)}}
+                "application": {"sourceCommit": commit,
+                                "executableSHA256": manifest["application"]["executableSHA256"],
+                                "executables": manifest["application"]["executables"]}}
     (directory / "bundle-evidence.json").write_text(json.dumps(evidence, indent=2), encoding="utf-8")
     return directory
 
@@ -186,6 +204,13 @@ class IdentityTests(unittest.TestCase):
             lambda data: data["identity"].update(processorArchitectures=["x64", "x64"]),
             lambda data: data["identity"].update(processorArchitectures="x64"),
             lambda data: data["application"].update(executionAlias="nested\\alias.exe"),
+            lambda data: data["application"].update(executable="speak.exe"),
+            lambda data: data["application"].update(executionAlias="JustSpeakToItDeveloperCLI.exe"),
+            lambda data: data["cli"].update(executable="SpeakWindows.exe"),
+            lambda data: data["cli"].update(executionAlias="speak.exe"),
+            lambda data: data["cli"].update(executionAlias="nested\\alias.exe"),
+            lambda data: data["cli"].update(executable="..\\speak.exe"),
+            lambda data: data.pop("cli"),
             lambda data: data["application"]["startupTask"].update(parameters="--minimised"),
             lambda data: data["application"]["startupTask"].update(id="bad id"),
             lambda data: data["application"].pop("startupTask"),
@@ -219,6 +244,12 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(application.get("{%s}TrustLevel" % ns["uap10"]), "mediumIL")
         alias = application.find(".//desktop:ExecutionAlias", ns)
         self.assertEqual(alias.get("Alias"), "JustSpeakToItDeveloper.exe")
+        cli_extension = application.find("f:Extensions/uap5:Extension", ns)
+        self.assertEqual(cli_extension.get("Executable"), "speak.exe")
+        cli_alias = cli_extension.find("uap5:AppExecutionAlias", ns)
+        self.assertEqual(cli_alias.get("{%s}Subsystem" % ns["uap10"]), "console")
+        self.assertEqual(cli_alias.find("uap5:ExecutionAlias", ns).get("Alias"), "JustSpeakToItDeveloperCLI.exe")
+        self.assertEqual(len(root.findall("f:Applications/f:Application", ns)), 1)
         startup = application.find("f:Extensions/desktop:Extension[@Category='windows.startupTask']", ns)
         self.assertEqual((startup.get("Executable"), startup.get("{%s}Parameters" % ns["uap10"])),
                          ("SpeakWindows.exe", "--background"))
@@ -280,6 +311,30 @@ class ManifestTests(unittest.TestCase):
             with self.assertRaises(windows_msix.PackageError):
                 windows_msix.check_manifest(data.replace(original, changed), self.identity, "0.0.7.1",
                                             "CN=Just Speak to It Developer")
+
+    def test_cli_alias_retarget_duplicates_path_injection_and_subsystem_changes_are_refused(self):
+        data = windows_msix.render_manifest(self.identity, "0.0.7.1", "CN=Just Speak to It Developer")
+        for original, changed in (
+            (b'Executable="speak.exe"', b'Executable="SpeakWindows.exe"'),
+            (b'Executable="speak.exe"', b'Executable="nested\\speak.exe"'),
+            (b'Alias="JustSpeakToItDeveloperCLI.exe"', b'Alias="JustSpeakToItDeveloper.exe"'),
+            (b'Alias="JustSpeakToItDeveloperCLI.exe"', b'Alias="speak.exe"'),
+            (b'Alias="JustSpeakToItDeveloperCLI.exe"', b'Alias="..\\CLI.exe"'),
+            (b'uap10:Subsystem="console"', b'uap10:Subsystem="windows"'),
+            (b'uap10:Subsystem="console"', b''),
+            (b'<uap5:ExecutionAlias Alias="JustSpeakToItDeveloperCLI.exe"/>',
+             b'<uap5:ExecutionAlias Alias="JustSpeakToItDeveloperCLI.exe"/>'
+             b'<uap5:ExecutionAlias Alias="extra.exe"/>'),
+        ):
+            with self.subTest(changed=changed), self.assertRaises(windows_msix.PackageError):
+                windows_msix.check_manifest(data.replace(original, changed), self.identity, "0.0.7.1",
+                                            "CN=Just Speak to It Developer")
+        root = ET.fromstring(data)
+        ns = windows_msix.NAMESPACES
+        extensions = root.find("f:Applications/f:Application/f:Extensions", ns)
+        extensions.append(copy.deepcopy(extensions.find("uap5:Extension", ns)))
+        with self.assertRaisesRegex(windows_msix.PackageError, "exactly"):
+            windows_msix.check_manifest(ET.tostring(root), self.identity, "0.0.7.1", "CN=Just Speak to It Developer")
 
 
 class AssetTests(unittest.TestCase):
@@ -363,7 +418,10 @@ class LayoutTests(unittest.TestCase):
         self.assertFalse(package_manifest["package"]["signed"])
         self.assertEqual(package_manifest["bundle"]["sourceCommit"], COMMIT)
         self.assertEqual(package_manifest["bundle"]["runtimeModules"], ["swiftCore.dll"])
-        self.assertEqual(package_manifest["executable"]["subsystem"], "console")
+        self.assertEqual(package_manifest["executable"]["subsystem"], "windows")
+        self.assertEqual(set(package_manifest["executables"]), set(BUILD.EXECUTABLES))
+        self.assertEqual(package_manifest["executables"]["speak.exe"]["subsystem"], "console")
+        self.assertEqual(package_manifest["package"]["cliExecutionAlias"], "JustSpeakToItDeveloperCLI.exe")
         self.assertEqual(evidence["layout"]["files"], len(hashes))
 
     def test_arm64_bundle_becomes_an_arm64_package_of_the_same_identity(self):
@@ -390,7 +448,8 @@ class LayoutTests(unittest.TestCase):
              "not a native arm64 DLL \\(it is arm64ec\\)"),
             ("arm64-exe-in-x64", "x64", lambda entries, manifest: entries.update(
                 {"SpeakWindows.exe": BUNDLE_TESTS.build_pe(imports=["KERNEL32.dll"], machine=arm64)}) or
-             manifest["application"].update(executableSHA256=sha256(entries["SpeakWindows.exe"])),
+             manifest["application"].update(executableSHA256=sha256(entries["SpeakWindows.exe"])) or
+             manifest["application"]["executables"].update({"SpeakWindows.exe": sha256(entries["SpeakWindows.exe"])}),
              "not a Windows x64 executable \\(it is arm64\\)"),
             ("no-architecture", "x64", lambda entries, manifest: manifest["bundle"].pop("architecture"),
              "unsupported bundle architecture"),
@@ -415,6 +474,68 @@ class LayoutTests(unittest.TestCase):
         second = {path.relative_to(self.root / "second").as_posix(): path.read_bytes()
                   for path in (self.root / "second").rglob("*") if path.is_file()}
         self.assertEqual(first, second)
+
+    def test_missing_tampered_retargeted_cli_and_false_root_attribution_are_refused(self):
+        def replace_cli(entries, manifest, data):
+            entries["speak.exe"] = data
+            manifest["application"]["executables"]["speak.exe"] = sha256(data)
+
+        cases = [
+            ("missing", lambda entries, manifest: entries.pop("speak.exe"), "production executable"),
+            ("tampered", lambda entries, manifest: entries.update({"speak.exe": entries["speak.exe"] + b"tamper"}),
+             "production executable"),
+            ("no-cli-receipt", lambda entries, manifest: manifest["application"]["executables"].pop("speak.exe"),
+             "production executable"),
+            ("foreign-cli", lambda entries, manifest: replace_cli(entries, manifest, BUNDLE_TESTS.build_pe(
+                machine=windows_msix.windows_pe.IMAGE_FILE_MACHINE_ARM64)), "speak.exe is not a Windows x64"),
+            ("cli-test", lambda entries, manifest: replace_cli(entries, manifest, BUNDLE_TESTS.build_pe(
+                delay_imports=["Testing.dll"])), "speak.exe imports the test library Testing.dll"),
+            ("gui-as-cli", lambda entries, manifest: replace_cli(entries, manifest, entries["SpeakWindows.exe"]),
+             "console subsystem"),
+            ("cli-unknown", lambda entries, manifest: replace_cli(entries, manifest, BUNDLE_TESTS.build_pe(
+                imports=["unreviewed.dll"])), "speak.exe imports unreviewed.dll"),
+            ("false-importer", lambda entries, manifest: manifest["dependencies"]["bundled"]["swiftcore.dll"]
+             ["importedBy"].pop(), "importer attribution"),
+            ("false-root", lambda entries, manifest: manifest["dependencies"]["roots"]["speak.exe"].update(
+                staticModules=[]), "multi-root dependency closure"),
+            ("cli-source", lambda entries, manifest: manifest["application"].update(buildHost="unreviewed"),
+             "source provenance"),
+            ("cli-target", lambda entries, manifest: manifest["application"].update(target="x86_64-unknown-linux-gnu"),
+             "source provenance"),
+            ("extra-executable", lambda entries, manifest: entries.update({"other.exe": entries["speak.exe"]}),
+             "exact production multi-root closure"),
+        ]
+        for name, mutate, reason in cases:
+            with self.subTest(name=name):
+                bundle = make_bundle(self.root / name, mutate=mutate)
+                with self.assertRaisesRegex(windows_msix.PackageError, reason):
+                    self.build(bundle, output="out-" + name)
+                self.assertFalse((self.root / ("out-" + name)).exists())
+
+    def test_producer_multi_root_graph_round_trips_with_resources_and_miniz_licence(self):
+        for architecture in ("x64", "arm64"):
+            with self.subTest(architecture=architecture):
+                fixture = BUNDLE_TESTS.AssemblyTests()
+                fixture.setUp(architecture)
+                try:
+                    cli = BUNDLE_TESTS.build_pe(imports=["swiftWinSDK.dll"], delay_imports=["Foundation.dll"],
+                                               machine=windows_msix.windows_targets.target(architecture)["processMachine"])
+                    fixture.application["executables"]["speak.exe"] = cli
+                    fixture.application["metadata"]["executables"]["speak.exe"] = sha256(cli)
+                    fixture.application["resources"]["SpeakApp_Future.resources/nested/payload.json"] = b"{}"
+                    licence = BUNDLE_TESTS.MIGRATION.license_entry(windows_msix.REPOSITORY)
+                    entries, manifest = fixture.assemble(architecture=architecture, licenses=fixture.licenses + [licence])
+                    bundle = write_bundle(self.root / ("producer-" + architecture), entries, manifest, architecture)
+                    result = windows_msix.verify_bundle(bundle, fixture.application["metadata"]["sourceCommit"])
+                    self.assertEqual(result["manifest"]["dependencies"], manifest["dependencies"])
+                    self.assertNotIn("swiftWinSDK.dll", manifest["dependencies"]["roots"]["SpeakWindows.exe"]["staticModules"])
+                    self.build(bundle, output="producer-out-" + architecture)
+                    layout = self.root / ("producer-out-" + architecture) / "layout"
+                    self.assertEqual((layout / "speak.exe").read_bytes(), cli)
+                    self.assertEqual((layout / "SpeakApp_Future.resources/nested/payload.json").read_bytes(), b"{}")
+                    self.assertEqual((layout / "licenses/LICENSE-miniz.txt").read_bytes(), licence["data"])
+                finally:
+                    fixture.doCleanups()
 
     def test_external_publisher_changes_the_package_family(self):
         publisher = "CN=Contoso Software, O=Contoso Corporation, C=US"

@@ -253,9 +253,15 @@ struct BackupHostFixture {
         }
     )
 
-    init(grace: Duration = .seconds(5)) throws {
-        root = FileManager.default.temporaryDirectory.appendingPathComponent("backup-host-\(UUID())")
+    init(grace: Duration = .seconds(5), profileData: Data? = nil) throws {
+        root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
+            .appendingPathComponent("backup-host-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        if let profileData {
+            let directory = root.appendingPathComponent("Application")
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+            try profileData.write(to: directory.appendingPathComponent(DesktopDictationProfileStore.filename))
+        }
         controller = try DesktopHostController<FakePlatform>(
             directory: root.appendingPathComponent("Application"), effects: SyntheticEffects(), shutdownGrace: grace
         )

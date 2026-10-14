@@ -55,23 +55,23 @@ final class DataMigrationProfileCatalogTests: XCTestCase {
         for json in ["{}", "[", "null"] {
             XCTAssertThrowsError(try DataMigrationProfileCatalog.records(data: Data(json.utf8), digest: { _ in "" }))
         }
+    }
 
-        func testTimestampProjection_DistinguishesNumbersFromBooleansAndPreservesRawValues() throws {
-            let data = Data("""
-            [{"id":"integer","timestamp":1},{"id":"fractional","timestamp":1.5},
-             {"id":"negative","timestamp":-1},{"id":"true","timestamp":true},
-             {"id":"false","timestamp":false},{"id":"null","timestamp":null},
-             {"id":"invalid","timestamp":"not-a-date"},{"id":"array","timestamp":[]}]
-            """.utf8)
-            let raw = try JSONDecoder().decode([AnyCodable].self, from: data)
-            let records = try DataMigrationCollectionRecords.records(data: data, kind: "fixture", digest: { _ in "" })
-            XCTAssertEqual(records.map(\.value), raw)
-            XCTAssertEqual(records.prefix(3).map(\.date), [
-                Date(timeIntervalSinceReferenceDate: 1), Date(timeIntervalSinceReferenceDate: 1.5),
-                Date(timeIntervalSinceReferenceDate: -1)
-            ])
-            XCTAssertTrue(records.dropFirst(3).allSatisfy { $0.date == nil })
-        }
+    func testTimestampProjection_DistinguishesNumbersFromBooleansAndPreservesRawValues() throws {
+        let data = Data("""
+        [{"id":"integer","timestamp":1},{"id":"fractional","timestamp":1.5},
+         {"id":"negative","timestamp":-1},{"id":"true","timestamp":true},
+         {"id":"false","timestamp":false},{"id":"null","timestamp":null},
+         {"id":"invalid","timestamp":"not-a-date"},{"id":"array","timestamp":[]}]
+        """.utf8)
+        let raw = try JSONDecoder().decode([AnyCodable].self, from: data)
+        let records = try DataMigrationCollectionRecords.records(data: data, kind: "fixture", digest: { _ in "" })
+        XCTAssertEqual(records.map(\.value), raw)
+        XCTAssertEqual(records.prefix(3).map(\.date), [
+            Date(timeIntervalSinceReferenceDate: 1), Date(timeIntervalSinceReferenceDate: 1.5),
+            Date(timeIntervalSinceReferenceDate: -1)
+        ])
+        XCTAssertTrue(records.dropFirst(3).allSatisfy { $0.date == nil })
     }
 
     func testOversizedSource_IsRefusedBeforeDecodingOrDigesting() {

@@ -7,12 +7,27 @@ extension DesktopMigrationBackup {
     public static func export(
         store: DesktopRecordingStore, destination: URL, includeAudio: Bool, adapter: Adapter
     ) async -> Outcome {
+        await export(
+            store: store, destination: destination, includeAudio: includeAudio, profiles: nil, adapter: adapter
+        )
+    }
+
+    public static func export(
+        store: DesktopRecordingStore, destination: URL, includeAudio: Bool,
+        profiles: DesktopDictationProfileStore?, adapter: Adapter
+    ) async -> Outcome {
         var staging: URL?
         var outcome: Outcome
         do {
             try Task.checkCancellation()
             let categories: Set<DataMigrationCategory> = includeAudio ? [.history, .recordings] : [.history]
-            let snapshot = try await store.migrationSnapshot(categories: categories, digests: adapter.digests)
+            var snapshot = try await store.migrationSnapshot(categories: categories, digests: adapter.digests)
+            if let profiles {
+                let profileSnapshot = try profiles.migrationSnapshot(digests: adapter.digests)
+                snapshot.manifest.categories.append(.profiles)
+                snapshot.manifest.scopes.merge(profileSnapshot.manifest.scopes) { _, profile in profile }
+                snapshot.records[.profiles] = profileSnapshot.records[.profiles]
+            }
             try Task.checkCancellation()
             let file = try adapter.archive(snapshot)
             try DesktopMigrationStaging.requireLocalFile(file)

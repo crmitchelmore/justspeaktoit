@@ -33,7 +33,9 @@ final class DesktopLiveProjectionTests: XCTestCase {
         let client = DesktopProjectionTestClient()
         let session = DesktopLiveSession(client: client)
         session.start()
-        client.emit("ignored", snapshot: StreamingTranscriptSnapshot(confirmedText: " Locked. ", pendingInterim: "draft"))
+        client.emit(
+            "ignored", snapshot: StreamingTranscriptSnapshot(confirmedText: " Locked. ", pendingInterim: "draft")
+        )
         XCTAssertEqual(session.snapshot().text, "Locked. draft")
         client.emit("", snapshot: StreamingTranscriptSnapshot(confirmedText: "Locked.", pendingInterim: ""))
         XCTAssertEqual(session.snapshot().text, "Locked.")

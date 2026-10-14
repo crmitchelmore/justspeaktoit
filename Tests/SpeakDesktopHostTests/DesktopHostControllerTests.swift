@@ -38,15 +38,22 @@ final class FakeLog: @unchecked Sendable {
     private var statuses: [String] = []
     private var clipboard: [String] = []
     private var hudStates: [DesktopHUDState] = []
+    private var transcriptValues: [String] = []
     var keys: [String: String] = [:]
 
-    func reset() { lock.withLock { statuses = []; clipboard = []; hudStates = []; keys = [:] } }
+    func reset() {
+        lock.withLock { statuses = []; clipboard = []; hudStates = []; transcriptValues = []; keys = [:] }
+    }
     func hud(_ state: DesktopHUDState) { lock.withLock { hudStates.append(state) } }
     var huds: [DesktopHUDState] { lock.withLock { hudStates } }
     func status(_ text: String) { lock.withLock { statuses.append(text) } }
     func copy(_ text: String) { lock.withLock { clipboard.append(text) } }
     var allStatuses: [String] { lock.withLock { statuses } }
     var copies: [String] { lock.withLock { clipboard } }
+    func transcript(_ text: String?) {
+        if let text { lock.withLock { transcriptValues.append(text) } }
+    }
+    var transcripts: [String] { lock.withLock { transcriptValues } }
     func key(_ name: String) -> String { lock.withLock { keys[name] ?? "" } }
     func setKey(_ key: String, name: String) { lock.withLock { keys[name] = key } }
 }
@@ -56,7 +63,10 @@ enum FakePlatform: DesktopHostPlatform {
     static let displayName = "Test"
     static let credentialStoreName = "the test keyring"
 
-    static func update(_ status: String, transcript: String?, state: Int32) { FakeLog.shared.status(status) }
+    static func update(_ status: String, transcript: String?, state: Int32) {
+        FakeLog.shared.status(status)
+        FakeLog.shared.transcript(transcript)
+    }
     static func recordingState(_ state: Int32) {}
     static func hud(_ state: DesktopHUDState) { FakeLog.shared.hud(state) }
     static func history(_ records: [DesktopRecordingStore.Record], selected: UUID?, selectRecord: Bool) {}

@@ -43,6 +43,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     package func handleVoiceDiscovery(_ message: DesktopVoiceSourceMessage) {
         switch message {
         case .discoveryOpen(let token): openVoiceDiscovery(token)
+        case .discoveryOpenModern(let session): openModernVoiceDiscovery(session)
         case .discoveryRefresh(let token): refreshVoiceDiscovery(token)
         case .discoveryClose(let token): closeVoiceDiscovery(token)
         case .discoveryChoose(let identifier, let token): chooseDiscoveredVoice(identifier, requestID: token)
@@ -90,21 +91,38 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
 
     package func openVoiceDiscovery(_ requestID: String) {
         guard !closed else { return }
+        resetVoiceDiscoveryDialog(requestID, modern: false, context: UUID(uuidString: requestID).map {
+            .init(provider: .xai, sessionID: $0, epoch: UUID())
+        })
+        presentVoiceAccountProviders()
+        presentVoiceDiscovery("Documented presets are always available. Refresh explicitly lists voices "
+            + "using the saved xAI key; no source text or synthesis request is sent.", loading: false)
+    }
+
+    package func openModernVoiceDiscovery(_ sessionID: UUID) {
+        guard !closed else { return }
+        let context = VoiceAccountCredentialContext(provider: .xai, sessionID: sessionID, epoch: UUID())
+        resetVoiceDiscoveryDialog(sessionID.uuidString, modern: true, context: context)
+        presentVoiceAccountProviders()
+        presentModernVoiceDiscovery("Choose an account provider, then explicitly set its key or Refresh. "
+            + "Only Pick saves a voice. No key lookup, listing or synthesis is started by opening this dialog.",
+            loading: voiceAccountWorkIsPending)
+    }
+
+    private func resetVoiceDiscoveryDialog(
+        _ requestID: String, modern: Bool, context: VoiceAccountCredentialContext?
+    ) {
         cancelVoiceProviderCredentialWork(voiceDiscovery.context)
         cancelAccountVoiceWork()
         voiceDiscovery.task?.cancel()
         voiceProviderIssuedSlot = nil
         voiceDiscovery.requestID = requestID
-        voiceDiscovery.modern = false
+        voiceDiscovery.modern = modern
         voiceDiscovery.retiredEpochs = []
         voiceDiscovery.listing = nil
         voiceDiscovery.listingContext = nil
-        voiceDiscovery.context = UUID(uuidString: requestID).map {
-            .init(provider: .xai, sessionID: $0, epoch: UUID())
-        }
-        presentVoiceAccountProviders()
-        presentVoiceDiscovery("Documented presets are always available. Refresh explicitly lists voices "
-            + "using the saved xAI key; no source text or synthesis request is sent.", loading: false)
+        voiceDiscovery.context = context
+        voiceDiscovery.offeredIDs = []
     }
 
     package func closeVoiceDiscovery(_ requestID: String) {

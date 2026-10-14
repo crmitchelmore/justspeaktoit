@@ -148,7 +148,8 @@ func linuxVoiceSourceEvent(
             record: record.map(String.init(cString:)) ?? "", path: path.map(String.init(cString:)) ?? ""
         )
         switch message {
-        case .discoveryOpen, .discoveryRefresh, .discoveryClose, .discoveryChoose, .discoveryProvider:
+        case .discoveryOpen, .discoveryOpenModern, .discoveryRefresh,
+             .discoveryClose, .discoveryChoose, .discoveryProvider:
             holder.enqueueSettings { await holder.controller.handleVoiceDiscovery(message) }
         case .event(let event): holder.submitHistoryPlayback(event)
         case .preferences(let options):

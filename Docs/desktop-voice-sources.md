@@ -526,6 +526,14 @@ provider service probe or complete Voice parity.
 
 ### Explicit-provider host boundary (not exposed by native UI)
 
+The explicitly tagged `account-open-modern` event on carrier118 requires
+source-1, empty text and a canonical36-byte session UUID. Its host path creates
+a fresh provider epoch and presents canonical presets or an empty listing
+without reading a cached account key. Legacy `account-open` retains its original
+opaque/braced-token behavior; modern mode is never inferred from token spelling.
+Both paths share owned dialog reset/cancellation. The modern startup seam and
+thin Swift dispatchers do not themselves expose native controls or a C ABI.
+
 The host candidate adds a separate account-dialog session and acknowledged
 provider epoch. Modern Refresh/Pick require that epoch, not a legacy dialog
 token; Close retains the session identity. Provider transitions synchronously

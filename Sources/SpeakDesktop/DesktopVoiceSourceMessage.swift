@@ -9,6 +9,7 @@ public enum DesktopVoiceSourceMessage: Equatable, Sendable {
     case usageReport(text: String, requestID: String)
     case usageTracking(Bool, requestID: String)
     case discoveryOpen(String), discoveryRefresh(String), discoveryClose(String)
+    case discoveryOpenModern(UUID)
     case discoveryChoose(voiceID: String, requestID: String)
     case discoveryProvider(VoiceAccountCredentialContext)
 
@@ -62,7 +63,7 @@ public enum DesktopVoiceSourceMessage: Equatable, Sendable {
         source: Int32, text: String, record: String, path: String
     ) throws -> Self {
         guard source == -1 else { throw Failure.invalidPreferences }
-        if path == "account-provider" { return try providerMessage(text: text, record: record) }
+        if let message = try contextualDiscoveryMessage(text: text, record: record, path: path) { return message }
         switch path {
         case "account-open", "account-refresh", "account-close":
             guard text.isEmpty else { throw Failure.invalidPreferences }
@@ -81,6 +82,18 @@ public enum DesktopVoiceSourceMessage: Equatable, Sendable {
                   }) else { throw Failure.invalidPreferences }
             return .discoveryChoose(voiceID: text, requestID: record)
         default: throw Failure.invalidPreferences
+        }
+    }
+
+    private static func contextualDiscoveryMessage(text: String, record: String, path: String) throws -> Self? {
+        switch path {
+        case "account-provider": return try providerMessage(text: text, record: record)
+        case "account-open-modern":
+            guard text.isEmpty, record.utf8.count == 36, let session = UUID(uuidString: record) else {
+                throw Failure.invalidPreferences
+            }
+            return .discoveryOpenModern(session)
+        default: return nil
         }
     }
 

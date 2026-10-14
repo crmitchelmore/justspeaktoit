@@ -851,32 +851,97 @@ void layoutHistory(HWND window, const RECT &content) {
                                      scale(window, 136), row));
     layoutChips(window, {{historySessionsID, L"Sessions"}, {historyErrorsID, L"Errors"},
                          {historyAverageID, L"Average Length"}, {historySpendID, L"Spend"}});
-    const int searchTop = heroBottom + scale(window, 14);
+
+    // The detail card stacks a header row, a variant picker, the transcript and four
+    // rows of action buttons, with the search row above it all. At the window's
+    // minimum size there used to be no slack left for any of that, which collapsed
+    // the transcript to zero height (#1218). Every row and every painted region
+    // keeps its full, non-overlapping size always; only pure whitespace -- between
+    // the search row and its neighbours, and inside the detail card -- compresses,
+    // and only by as much as is needed to guarantee a readable (three-line)
+    // transcript, so normal and larger windows render exactly as before -- this
+    // only engages once the card is genuinely too short. Both the search-row gaps
+    // and the detail card's internal gaps share one global shrink factor, derived
+    // below from the two end states (everything full-size vs. everything at its
+    // floor), so the result stays a simple linear interpolation with no circular
+    // dependency even though squeezing the search-row gaps also changes how much
+    // vertical space the detail card itself gets.
+    struct Gap { int full, floor; };
+    const Gap beforeSearch{scale(window, 14), scale(window, 4)};
+    const Gap afterSearch{scale(window, 14), scale(window, 4)};
+    // The card's painted title/icon tile occupies its top scale(18)..scale(54);
+    // beforeHeader must never shrink below that or historyDetailID paints over it,
+    // so it keeps its full spacing and contributes nothing to the squeeze budget.
+    const Gap beforeHeader{scale(window, 58), scale(window, 58)};
+    const Gap afterHeader{scale(window, 40), row + scale(window, 2)};
+    const Gap afterVariant{row + scale(window, 10), row + scale(window, 4)};
+    const Gap beforeActions{scale(window, 10), scale(window, 3)};
+    const Gap actionRowGap{scale(window, 8), scale(window, 3)};
+    const Gap playbackGap{scale(window, 26), scale(window, 20)};
+    const Gap insetV{scale(window, 20), scale(window, 8)};
+
+    const int listWidth = (widthOf(content) - gap) * 13 / 25;
+    const int detailLeft = content.left + listWidth + gap, detailRight = content.right;
+    const int left = detailLeft + scale(window, 20), right = detailRight - scale(window, 20);
+
+    const int localFull = beforeHeader.full + afterHeader.full + afterVariant.full + beforeActions.full +
+                          4 * row + 3 * actionRowGap.full + playbackGap.full + insetV.full;
+    const int localFloor = beforeHeader.floor + afterHeader.floor + afterVariant.floor + beforeActions.floor +
+                           4 * row + 3 * actionRowGap.floor + playbackGap.floor + insetV.floor;
+    const int upstreamFull = beforeSearch.full + row + afterSearch.full;
+    const int upstreamFloor = beforeSearch.floor + row + afterSearch.floor;
+
+    // transcriptID's font is set to Font::mono in refreshFont(), not Font::body;
+    // measuring with the actual control font keeps this guarantee honest (#1218).
+    HDC metricsDC = GetDC(window);
+    const int lineHeight = jsti::chrome::measure(metricsDC, L"Ag", right - left, jsti::chrome::Font::mono, GetDpiForWindow(window));
+    ReleaseDC(window, metricsDC);
+    const int minTranscript = 3 * lineHeight + scale(window, 16);
+
+    const int availableFull = content.bottom - (heroBottom + upstreamFull);
+    const int availableFloor = content.bottom - (heroBottom + upstreamFloor);
+    const int transcriptAtFull = availableFull - localFull;
+    const int transcriptAtFloor = availableFloor - localFloor;
+    const int compressibleTotal = transcriptAtFloor - transcriptAtFull;
+    const double shrink = transcriptAtFull >= minTranscript || compressibleTotal <= 0
+                             ? 0.0
+                             : std::min(1.0, double(minTranscript - transcriptAtFull) / compressibleTotal);
+    // Rounds the reduction up (not down) so every squeezed gap is never larger than
+    // its continuous target -- otherwise truncation could leave the transcript a
+    // few pixels short of minTranscript even though shrink reached 1.0.
+    auto squeeze = [&](Gap g) {
+        const double reduction = (g.full - g.floor) * shrink;
+        const int truncated = static_cast<int>(reduction);
+        return g.full - (truncated < reduction ? truncated + 1 : truncated);
+    };
+
+    const int searchTop = heroBottom + squeeze(beforeSearch);
     place(window, searchLabelID, box(content.left, searchTop + scale(window, 8), scale(window, 112), scale(window, 20)));
     placeField(window, searchID, RECT{content.left + scale(window, 116), searchTop,
                                       content.right - scale(window, 216), searchTop + row});
     place(window, historyFiltersID, box(content.right - scale(window, 208), searchTop, scale(window, 120), row));
     place(window, clearSearchID, box(content.right - scale(window, 80), searchTop, scale(window, 80), row));
-    const int top = searchTop + row + scale(window, 14);
-    const int listWidth = (widthOf(content) - gap) * 13 / 25;
+    const int top = searchTop + row + squeeze(afterSearch);
     place(window, 93, box(content.left, top, listWidth, scale(window, 20)));
     place(window, historyID, RECT{content.left, top + scale(window, 22), content.left + listWidth, content.bottom});
-    const RECT detail{content.left + listWidth + gap, top, content.right, content.bottom};
+    const RECT detail{detailLeft, top, detailRight, content.bottom};
     addCard(detail, 0xE8A5, L"Selected recording");
-    const int inset = scale(window, 20);
-    const int left = detail.left + inset, right = detail.right - inset;
-    int y = detail.top + scale(window, 58);
-    place(window, historyDetailID, RECT{left, y, right, y + scale(window, 34)});
-    y += scale(window, 40);
+
+    const int squeezedActionRowGap = squeeze(actionRowGap), squeezedPlaybackGap = squeeze(playbackGap);
+    const int actionsHeight = 4 * row + 3 * squeezedActionRowGap + squeezedPlaybackGap;
+    const int squeezedInsetV = squeeze(insetV);
+
+    int y = detail.top + squeeze(beforeHeader);
+    place(window, historyDetailID, RECT{left, y, right, y + row});
+    y += squeeze(afterHeader);
     place(window, variantLabelID, box(left, y + scale(window, 7), scale(window, 128), scale(window, 20)));
     place(window, variantID, RECT{left + scale(window, 132), y, right, y + scale(window, 200)});
-    y += row + scale(window, 10);
-    const int actionsHeight = 4 * row + 3 * scale(window, 8) + scale(window, 26);
-    placeField(window, transcriptID, RECT{left, y, right, detail.bottom - inset - actionsHeight - scale(window, 10)}, true);
-    int actions = detail.bottom - inset - actionsHeight;
+    y += squeeze(afterVariant);
+    placeField(window, transcriptID, RECT{left, y, right, detail.bottom - squeezedInsetV - actionsHeight - squeeze(beforeActions)}, true);
+    int actions = detail.bottom - squeezedInsetV - actionsHeight;
     place(window, playbackLabelID, box(left, actions, scale(window, 80), scale(window, 20)));
     place(window, playbackTimeID, RECT{left + scale(window, 84), actions, right, actions + scale(window, 20)});
-    actions += scale(window, 26);
+    actions += squeezedPlaybackGap;
     auto cell = [&](int index, int top, int columns) {
         const int width = (right - left - (columns - 1) * scale(window, 8)) / columns;
         return box(left + index * (width + scale(window, 8)), top, width, row);
@@ -886,15 +951,15 @@ void layoutHistory(HWND window, const RECT &content) {
     place(window, copyID, cell(2, actions, 3));
     // A third of the card is too narrow for "Copy transcript"; the Mac says Copy here too.
     setLabel(window, copyID, L"&Copy");
-    actions += row + scale(window, 8);
+    actions += row + squeezedActionRowGap;
     place(window, readAloudID, cell(0, actions, 2));
     place(window, retryID, cell(1, actions, 2));
-    actions += row + scale(window, 8);
+    actions += row + squeezedActionRowGap;
     place(window, exportID, cell(0, actions, 3));
     place(window, openAudioID, cell(1, actions, 3));
     place(window, historyCorrectionsID, cell(2, actions, 3));
     setLabel(window, exportID, L"&Export...");
-    actions += row + scale(window, 8);
+    actions += row + squeezedActionRowGap;
     place(window, historyDeleteID, cell(0, actions, 3));
 }
 

@@ -2,6 +2,8 @@ import SpeakCore
 import SpeakDesktopHost
 
 extension LinuxHostPlatform {
+    static var nativeConfigurationPlatform: DesktopNativeConfigurationCapture.Platform? { .linux }
+
     static func archiveNativePreferences(
         textOutput: TextOutputOptions?, hotKey: HotKeySettings?, voiceOutput: VoiceOutputSettings?
     ) -> DesktopHostNativePreferenceProjection {

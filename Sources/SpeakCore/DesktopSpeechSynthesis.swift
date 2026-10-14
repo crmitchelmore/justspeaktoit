@@ -15,8 +15,16 @@ public struct DesktopSpeechSynthesis: Sendable {
         _ source: VoiceOutputSourceSnapshot, voice: DesktopSpeechVoice,
         options: VoiceSynthesisOptions, credential: @Sendable () async throws -> String
     ) async throws -> Data {
+        try await synthesize(source, voice: voice, options: options, xaiInventory: nil, credential: credential)
+    }
+
+    public func synthesize(
+        _ source: VoiceOutputSourceSnapshot, voice: DesktopSpeechVoice,
+        options: VoiceSynthesisOptions, xaiInventory: XAIAccountVoiceInventory?,
+        credential: @Sendable () async throws -> String
+    ) async throws -> Data {
         try Task.checkCancellation()
-        guard DesktopSpeechVoice.voices.contains(voice) else {
+        guard DesktopSpeechVoice.voices.contains(voice) || xaiInventory?.contains(voice) == true else {
             throw VoiceSynthesisConfigurationError.unsupportedVoice
         }
         try options.validate(for: voice.capabilities)
@@ -29,7 +37,7 @@ public struct DesktopSpeechSynthesis: Sendable {
             return try await synthesizeAzure(source.text, voice: voice, options: options, credential: credential)
         case .xai:
             return try await DesktopXAISpeechSynthesis(session: session).synthesize(
-                source, voice: voice, options: options, credential: credential)
+                source, voice: voice, options: options, inventory: xaiInventory, credential: credential)
         }
     }
 

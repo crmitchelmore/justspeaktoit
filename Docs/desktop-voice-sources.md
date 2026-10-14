@@ -14,7 +14,7 @@ WAV decoding/playback, not a second provider client or credential store.
 xAI's documented Eve and Ara presets come from `XAITTSCatalog`. Read, Generate
 and text export use the shared `/v1/tts` request contract with automatic language,
 mono PCM16 WAV at 24 kHz and the existing `xai.apiKey` credential. There is no
-invented API model field, account voice discovery or realtime WebSocket fallback.
+invented API model field or realtime WebSocket fallback.
 The native controls receive the canonical xAI speed limits (0.7-1.5) atomically
 with the selected voice. Speed is executed; pitch and SSML are unsupported and
 disabled, while stored choices remain visible. Out-of-route speed or unsupported
@@ -25,8 +25,26 @@ and joins bounded PCM before publication. Failed, cancelled, empty or incompatib
 audio never publishes a partial result. Local usage records observe the actual
 requests and validated duration; canonical USD15/million-character pricing is an
 estimate, not a billed receipt. Retained replay/export does not synthesize again.
-Account-discovered voices, explicit language selection, progressive xAI delivery
-and wider output formats remain gaps, not advertised desktop capabilities.
+**xAI account voices** opens a native chooser with documented presets labelled
+separately from account-listed voices. **Refresh** explicitly requests the shared
+`GET /v1/tts/voices` contract using the saved xAI key; it sends no source text and
+does not synthesize audio. Listing has a 20-second budget, a 64 KiB response limit
+and a maximum of 512 voices. Malformed, duplicate and oversized lists fail
+explicitly. A failed refresh may retain a previous same-key listing, but never
+labels that fallback as a successful new listing.
+**Choose voice** saves the stable prefixed account identifier in the sole voice
+model, preserving all other controls/preferences. Read, Generate, text export,
+controls and estimates use the same immutable account evidence. Account synthesis
+checks the actual request credential against that evidence before transport or
+usage. Listing evidence is memory-only and discarded on key changes or restart:
+a stored account choice remains unavailable until explicitly refreshed, not
+silently replaced with a preset. Closing/replacing the chooser cancels discovery
+and rejects late results; shutdown counts and bounds cancelled work. Replay and
+result export remain independent of inventory or credentials. No listing key is
+presented, persisted in settings/usage or retained with generated audio.
+Opaque stored identifier case is preserved; the shared xAI request builder retains
+its documented case-insensitive API normalization. Explicit language selection,
+progressive xAI delivery and wider output formats remain gaps.
 
 ## Journey
 

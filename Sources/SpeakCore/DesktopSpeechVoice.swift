@@ -67,16 +67,26 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
             + XAITTSCatalog.voices.map(Self.xai)
     }
 
-    public static func resolved(modelID: String?, voiceID: String?) throws -> Self {
+    public static func resolved(
+        modelID: String?, voiceID: String?
+    ) throws -> Self {
+        try resolved(modelID: modelID, voiceID: voiceID, xaiInventory: nil)
+    }
+
+    public static func resolved(
+        modelID: String?, voiceID: String?, xaiInventory: XAIAccountVoiceInventory?
+    ) throws -> Self {
         let model = modelID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let identifier = voiceID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if model == XAITTSCatalog.providerIdentifier || model?.hasPrefix(XAITTSCatalog.voiceIDPrefix) == true
             || identifier?.hasPrefix(XAITTSCatalog.voiceIDPrefix) == true {
-            guard model == nil || model == XAITTSCatalog.providerIdentifier,
-                  let identifier, let voice = XAITTSCatalog.voice(forID: identifier) else {
+            guard model == nil || model == XAITTSCatalog.providerIdentifier, let identifier else {
                 throw VoiceSynthesisConfigurationError.unsupportedVoice
             }
-            return .xai(voice)
+            if let voice = XAITTSCatalog.voice(forID: identifier) { return .xai(voice) }
+            if let original = voiceID?.trimmingCharacters(in: .whitespacesAndNewlines),
+               let voice = xaiInventory?.voice(forID: original) { return .xai(voice) }
+            throw VoiceSynthesisConfigurationError.unsupportedVoice
         }
         let maiModel = model?.hasPrefix(AzureMAIVoiceCatalog.modelMarker.dropFirst().lowercased()) == true
         if model?.hasPrefix("azure/") == true || identifier?.hasPrefix("azure/") == true || maiModel {

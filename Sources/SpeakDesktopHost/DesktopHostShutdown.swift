@@ -107,6 +107,9 @@ extension DesktopHostController {
         closed = true
         let deadline = ContinuousClock.now.advanced(by: shutdownGrace)
         modelDiscoveryTask?.cancel()
+        voiceDiscovery.requestID = nil
+        voiceDiscovery.task?.cancel()
+        voiceDiscovery.inventory = nil
         cancelOutput()
         generatedVoice = nil
         voiceTextImportTask?.cancel()

@@ -2294,8 +2294,10 @@ typedef struct Tour {
     gint32 step;
 } Tour;
 
+void jsti_voice_discovery_show_fixture(GtkWindow *owner);
+int32_t jsti_voice_discovery_save_snapshot(const char *path);
 enum { TOUR_DARK_DASHBOARD = JSTI_PAGE_COUNT, TOUR_DARK_HISTORY, TOUR_RECORDING, TOUR_HUD_RECORDING,
-       TOUR_HUD_COMPLETED, TOUR_VOICE_SOURCES, TOUR_VOICE_CONTROLS, TOUR_VOICE_USAGE, TOUR_DONE };
+       TOUR_HUD_COMPLETED, TOUR_VOICE_SOURCES, TOUR_VOICE_CONTROLS, TOUR_VOICE_USAGE, TOUR_VOICE_DISCOVERY, TOUR_DONE };
 
 static gboolean tour_capture(gpointer data);
 
@@ -2320,6 +2322,8 @@ static void tour_show(Tour *tour) {
         jsti_voice_controls_show_fixture(ui.window);
     } else if (tour->step == TOUR_VOICE_USAGE) {
         jsti_voice_usage_show_fixture(ui.window);
+    } else if (tour->step == TOUR_VOICE_DISCOVERY) {
+        jsti_voice_discovery_show_fixture(ui.window);
     } else {
         /* Late, because it replaces the displayed transcript. */
         Update recording = { .transcript = (gchar *)"Could we move the catch-up to Friday? That gives us a little",
@@ -2341,6 +2345,7 @@ static const char *tour_name(gint32 step) {
     case TOUR_VOICE_SOURCES: return "voice-sources";
     case TOUR_VOICE_CONTROLS: return "voice-controls";
     case TOUR_VOICE_USAGE: return "voice-usage";
+    case TOUR_VOICE_DISCOVERY: return "voice-discovery";
     default: return page_info[step].name;
     }
 }
@@ -2369,6 +2374,12 @@ static gboolean tour_capture(gpointer data) {
     }
     if (tour->step == TOUR_VOICE_USAGE) {
         if (jsti_voice_usage_save_snapshot(path) != 0) g_printerr("The Voice usage snapshot failed.\n");
+        g_free(path); g_free(file);
+        tour->step++; tour_show(tour);
+        return G_SOURCE_REMOVE;
+    }
+    if (tour->step == TOUR_VOICE_DISCOVERY) {
+        if (jsti_voice_discovery_save_snapshot(path) != 0) g_printerr("The account voice snapshot failed.\n");
         g_free(path); g_free(file); g_free(tour->directory); g_free(tour);
         gtk_window_close(ui.window);
         return G_SOURCE_REMOVE;

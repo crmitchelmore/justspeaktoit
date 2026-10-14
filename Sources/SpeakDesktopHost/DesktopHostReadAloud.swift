@@ -34,32 +34,44 @@ package struct DesktopVoiceOutputSettings: Codable, Equatable, Sendable {
     }
 
     package func synthesisSelection() throws -> DesktopSpeechSelection {
+        try synthesisSelection(inventory: nil)
+    }
+
+    package func synthesisSelection(inventory: XAIAccountVoiceInventory?) throws -> DesktopSpeechSelection {
         try .init(
-            voice: DesktopSpeechVoice.resolved(modelID: modelID, voiceID: voiceID),
+            voice: DesktopSpeechVoice.resolved(modelID: modelID, voiceID: voiceID, xaiInventory: inventory),
             options: VoiceSynthesisOptions(
                 speed: speed ?? VoiceSynthesisOptions.defaultSpeed,
                 pitch: pitch ?? VoiceSynthesisOptions.defaultPitch,
                 useSSML: useSSML ?? VoiceSynthesisOptions.defaultUseSSML
-            )
+            ), xaiInventory: inventory
         )
     }
 
     package var pickerPresentation: (labels: [String], selected: Int) {
+        pickerPresentation(inventory: nil)
+    }
+
+    package func pickerPresentation(inventory: XAIAccountVoiceInventory?) -> (labels: [String], selected: Int) {
         var labels = DesktopSpeechVoice.voices.map(\.label)
         do {
-            let voice = try DesktopSpeechVoice.resolved(modelID: modelID, voiceID: voiceID)
+            let voice = try DesktopSpeechVoice.resolved(modelID: modelID, voiceID: voiceID, xaiInventory: inventory)
             if let selected = DesktopSpeechVoice.voices.firstIndex(of: voice) { return (labels, selected) }
+            labels.append(String(voice.label.prefix(220)))
+            return (labels, labels.count - 1)
         } catch {
             labels.append("Unavailable stored voice — choose an executable voice")
             return (labels, labels.count - 1)
         }
-        labels.append("Unavailable stored voice — choose an executable voice")
-        return (labels, labels.count - 1)
     }
 
     package var controlsPresentation: DesktopVoiceControlsPresentation {
+        controlsPresentation(inventory: nil)
+    }
+
+    package func controlsPresentation(inventory: XAIAccountVoiceInventory?) -> DesktopVoiceControlsPresentation {
         do {
-            let voice = try DesktopSpeechVoice.resolved(modelID: modelID, voiceID: voiceID)
+            let voice = try DesktopSpeechVoice.resolved(modelID: modelID, voiceID: voiceID, xaiInventory: inventory)
             return .init(speed: speed ?? VoiceSynthesisOptions.defaultSpeed,
                          pitch: pitch ?? VoiceSynthesisOptions.defaultPitch, ssml: useSSML == true ? 1 : 0,
                          capabilities: voice.capabilities.nativeFlags, label: voice.label,
@@ -181,7 +193,8 @@ package extension DesktopHostReadAloudPlatform {
         credential: @Sendable () async throws -> String
     ) async throws -> Data {
         try await DesktopSpeechSynthesis().synthesize(
-            source, voice: selection.voice, options: selection.options, credential: credential
+            source, voice: selection.voice, options: selection.options,
+            xaiInventory: selection.xaiInventory, credential: credential
         )
     }
 
@@ -208,7 +221,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
 
     package func saveVoiceOutput(_ voiceOutput: DesktopVoiceOutputSettings) {
         let label = (try? DesktopSpeechVoice.resolved(
-            modelID: voiceOutput.modelID, voiceID: voiceOutput.voiceID
+            modelID: voiceOutput.modelID, voiceID: voiceOutput.voiceID, xaiInventory: currentVoiceInventory()
         ))?.label
         _ = persistVoiceOutput(voiceOutput, message: label.map { "Read aloud voice saved: \($0)." } ??
             "Voice Output settings saved. The stored voice is unavailable on this host.")
@@ -275,7 +288,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
 
     private func startVoiceRead(text: String, source: VoiceOutputSource, owner: UUID, recordID: UUID?) {
         let selection: DesktopSpeechSelection
-        do { selection = try voiceOutputSettings().synthesisSelection() } catch {
+        do { selection = try currentVoiceSelection() } catch {
             update(error.localizedDescription); return
         }
         let staging = directory.appendingPathComponent("VoiceOutput")

@@ -9,10 +9,11 @@
 int jsti_save_owned_window_snapshot(HWND window, const char *path, char *error, size_t capacity);
 void jsti_show_voice_controls(HWND owner, JSTIVoiceSourceCallback callback, void *context);
 void jsti_show_voice_usage(HWND owner, const std::string &snapshot, JSTIVoiceSourceCallback callback, void *context);
+void jsti_show_voice_discovery(HWND owner, JSTIVoiceSourceCallback callback, void *context);
 
 namespace {
 enum { sourceLabel = 920, sourceID, textLabel, textID, loadID, noticeID, readID, exportID, stopID };
-enum { autoPlayID = 940, saveID, generateID, playResultID, exportResultID, controlsID, usageID };
+enum { autoPlayID = 940, saveID, generateID, playResultID, exportResultID, controlsID, usageID, discoveryID };
 struct Configuration {
     std::vector<std::wstring> names;
     JSTIVoiceSourceCallback callback = nullptr;
@@ -209,7 +210,8 @@ void layout(HWND window) {
     const int top = margin + scale(window, 96), note = usageRow - gap - scale(window, 90);
     move(textID, margin, top, width, std::max(scale(window, 110), note - gap - top));
     move(noticeID, margin, note, width, scale(window, 90));
-    move(usageID, margin, usageRow, width, height);
+    move(usageID, margin, usageRow, (width - gap) / 2, height);
+    move(discoveryID, margin + (width + gap) / 2, usageRow, (width - gap) / 2, height);
     const int optionWidth = (width - 2 * gap) / 3;
     move(autoPlayID, margin, optionsRow, optionWidth, scale(window, 44));
     move(saveID, margin + optionWidth + gap, optionsRow, optionWidth, scale(window, 44));
@@ -238,6 +240,7 @@ bool create(HWND window, Dialog &dialog) {
              textID, WS_EX_CLIENTEDGE) ||
         !add(L"STATIC", L"", SS_LEFT, noticeID) ||
         !add(L"BUTTON", L"&Usage and input estimate...", BS_PUSHBUTTON | WS_TABSTOP, usageID) ||
+        !add(L"BUTTON", L"&xAI account voices...", BS_PUSHBUTTON | WS_TABSTOP, discoveryID) ||
         !add(L"BUTTON", L"&Auto-play generated audio", BS_AUTOCHECKBOX | BS_MULTILINE | WS_TABSTOP, autoPlayID) ||
         !add(L"BUTTON", L"Save audio to recordings", BS_AUTOCHECKBOX | BS_MULTILINE | WS_TABSTOP, saveID) ||
         !add(L"BUTTON", L"Voice &controls...", BS_PUSHBUTTON | WS_TABSTOP, controlsID) ||
@@ -334,6 +337,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         }
         if (HIWORD(wparam) != BN_CLICKED) break;
         switch (LOWORD(wparam)) {
+        case discoveryID:
+            jsti_show_voice_discovery(window, dialog->config.callback, dialog->config.context); return 0;
         case usageID: {
             const auto snapshot = jsti::utf8(text(window));
             const auto count = std::count_if(snapshot.begin(), snapshot.end(),
@@ -463,6 +468,7 @@ void jsti_voice_sources_stop() {
 
 bool jsti_voice_controls_self_test(HWND owner, std::string &error);
 bool jsti_voice_usage_self_test(HWND owner, std::string &error);
+bool jsti_voice_discovery_self_test(HWND owner, std::string &error);
 bool jsti_voice_sources_self_test(HWND owner, std::string &error) {
     struct Received {
         int calls = 0, source = -1, generated = 0, flags = -1;
@@ -589,5 +595,6 @@ bool jsti_voice_sources_self_test(HWND owner, std::string &error) {
             ", retainedResult=" + std::to_string(retainedResult) +
             ", boundedControls=" + std::to_string(boundedControls) + ".";
     }
-    return passed && captured && jsti_voice_controls_self_test(owner, error) && jsti_voice_usage_self_test(owner, error);
+    return passed && captured && jsti_voice_controls_self_test(owner, error) &&
+        jsti_voice_usage_self_test(owner, error) && jsti_voice_discovery_self_test(owner, error);
 }

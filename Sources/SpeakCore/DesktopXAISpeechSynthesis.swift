@@ -9,6 +9,7 @@ struct DesktopXAISpeechSynthesis: Sendable {
 
     func synthesize(
         _ source: VoiceOutputSourceSnapshot, voice: DesktopSpeechVoice, options: VoiceSynthesisOptions,
+        inventory: XAIAccountVoiceInventory?,
         credential: @Sendable () async throws -> String
     ) async throws -> Data {
         let segments = TTSTextChunker.chunks(source.text, maximumCharacters: XAITTSAPI.maximumTextCharacters)
@@ -16,13 +17,19 @@ struct DesktopXAISpeechSynthesis: Sendable {
         let key = try await credential().trimmingCharacters(in: .whitespacesAndNewlines)
         try Task.checkCancellation()
         guard !key.isEmpty else { throw DesktopXAISpeechError.missingCredential }
+        if !DesktopSpeechVoice.voices.contains(voice) {
+            guard inventory?.contains(voice) == true, inventory?.matchesCredential(key) == true else {
+                throw XAIAccountVoiceDiscoveryError.credentialChanged
+            }
+        }
         let selection = XAITTSRequest(
             voiceID: voice.id, language: nil, codec: .wav, sampleRate: XAITTSAPI.defaultSampleRate,
             speed: options.speed)
         var pcm = Data()
         for segment in segments {
             try Task.checkCancellation()
-            let audio = try await synthesizeSegment(segment, key: key, selection: selection, voice: voice)
+            let audio = try await synthesizeSegment(
+                segment, key: key, selection: selection, voice: voice, inventory: inventory)
             let payload = audio.wav.dropFirst(44)
             guard payload.count <= DeepgramSpeechExport.maximumPCMBytes - pcm.count else {
                 throw DesktopSpeechSynthesisError.audioTooLarge
@@ -37,11 +44,13 @@ struct DesktopXAISpeechSynthesis: Sendable {
     }
 
     private func synthesizeSegment(
-        _ text: String, key: String, selection: XAITTSRequest, voice: DesktopSpeechVoice
+        _ text: String, key: String, selection: XAITTSRequest, voice: DesktopSpeechVoice,
+        inventory: XAIAccountVoiceInventory?
     ) async throws -> DeepgramSpeechAudio {
         let request = try XAITTSAPI.synthesisRequest(text: text, apiKey: key, request: selection)
         let capture = VoiceSynthesisUsage.capture
-        let ticket = capture?.begin(voice: voice, inputCharacters: text.unicodeScalars.count, usesSSML: false)
+        let ticket = capture?.begin(voice: voice, inputCharacters: text.unicodeScalars.count,
+                                   usesSSML: false, xaiInventory: inventory)
         do {
             let received = try await receive(request)
             try Task.checkCancellation()

@@ -40,6 +40,12 @@ int32_t jsti_window_finish_voice_synthesis_options(const char *request_id, int32
  * "usage-tracking", source strict 0/1, empty text. record is an opaque dialog
  * token, never History ownership. Results/acknowledgements ignore closed tokens. */
 int32_t jsti_window_set_voice_usage(const char *request_id, const char *text, int32_t tracking);
+/* Tagged 118 account-open/refresh/choose/close: source -1; text is empty,
+ * except choose carries the stable prefixed voice ID. record is the dialog
+ * token, never History ownership. Lists use newline-separated UTF-8 rows.
+ * Stale/closed tokens are ignored; loading disables selection. */
+int32_t jsti_window_set_voice_account_inventory(const char *request_id, const char *labels,
+    const char *identifiers, int32_t selected, const char *status, int32_t loading);
 #ifdef __cplusplus
 }
 #endif

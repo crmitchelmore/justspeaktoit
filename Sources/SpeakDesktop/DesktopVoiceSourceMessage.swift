@@ -8,6 +8,8 @@ public enum DesktopVoiceSourceMessage: Equatable, Sendable {
     case synthesisPreferences(VoiceSynthesisOptions, requestID: String)
     case usageReport(text: String, requestID: String)
     case usageTracking(Bool, requestID: String)
+    case discoveryOpen(String), discoveryRefresh(String), discoveryClose(String)
+    case discoveryChoose(voiceID: String, requestID: String)
 
     public init(action: Int32, source: Int32, text: String, record: String, path: String) throws {
         switch action {
@@ -39,6 +41,9 @@ public enum DesktopVoiceSourceMessage: Equatable, Sendable {
         }
         guard !record.isEmpty, record.utf8.count <= 64,
               record.utf8.allSatisfy({ (0x20...0x7E).contains($0) }) else { throw Failure.invalidPreferences }
+        if path.hasPrefix("account-") {
+            return try discoveryMessage(source: source, text: text, record: record, path: path)
+        }
         switch path {
         case "usage-report":
             guard source == -1, text.unicodeScalars.count <= VoiceOutputSourceSnapshot.maximumCharacters else {
@@ -48,6 +53,30 @@ public enum DesktopVoiceSourceMessage: Equatable, Sendable {
         case "usage-tracking":
             guard source == 0 || source == 1, text.isEmpty else { throw Failure.invalidPreferences }
             return .usageTracking(source == 1, requestID: record)
+        default: throw Failure.invalidPreferences
+        }
+    }
+
+    private static func discoveryMessage(
+        source: Int32, text: String, record: String, path: String
+    ) throws -> Self {
+        guard source == -1 else { throw Failure.invalidPreferences }
+        switch path {
+        case "account-open", "account-refresh", "account-close":
+            guard text.isEmpty else { throw Failure.invalidPreferences }
+            switch path {
+            case "account-open": return .discoveryOpen(record)
+            case "account-refresh": return .discoveryRefresh(record)
+            default: return .discoveryClose(record)
+            }
+        case "account-choose":
+            guard text.hasPrefix(XAITTSCatalog.voiceIDPrefix),
+                  text.utf8.count > XAITTSCatalog.voiceIDPrefix.utf8.count, text.utf8.count <= 260,
+                  text == text.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !text.unicodeScalars.contains(where: {
+                      CharacterSet.controlCharacters.contains($0)
+                  }) else { throw Failure.invalidPreferences }
+            return .discoveryChoose(voiceID: text, requestID: record)
         default: throw Failure.invalidPreferences
         }
     }

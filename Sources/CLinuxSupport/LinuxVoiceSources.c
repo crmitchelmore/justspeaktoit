@@ -2,6 +2,7 @@
 #include <gtk/gtk.h>
 void jsti_show_voice_controls(GtkWindow *owner, JSTIVoiceSourceCallback callback, void *context);
 void jsti_show_voice_usage(GtkWindow *owner, const char *snapshot, JSTIVoiceSourceCallback callback, void *context);
+void jsti_show_voice_discovery(GtkWindow *owner, JSTIVoiceSourceCallback callback, void *context);
 
 typedef struct {
     gchar **names;
@@ -290,6 +291,11 @@ static void usage_report(GtkButton *button, gpointer data) {
     else jsti_show_voice_usage(dialog->window, snapshot, dialog->callback, dialog->context);
     g_free(snapshot);
 }
+static void account_voices(GtkButton *button, gpointer data) {
+    (void)button;
+    Dialog *dialog = data;
+    jsti_show_voice_discovery(dialog->window, dialog->callback, dialog->context);
+}
 static void apply_generation_options(gpointer data) {
     generation_flags = *(guint *)data;
     if (active == NULL || active->window == NULL) return;
@@ -392,8 +398,14 @@ static Dialog *make_dialog(GtkWindow *owner, const char *record, const char *his
     dialog->notice = GTK_LABEL(label("")); gtk_box_append(GTK_BOX(box), GTK_WIDGET(dialog->notice));
     GtkWidget *usage = gtk_button_new_with_label("Usage and input estimate...");
     gtk_widget_set_size_request(usage, -1, 44);
-    gtk_box_append(GTK_BOX(box), usage);
+    GtkWidget *account = gtk_button_new_with_label("xAI account voices...");
+    gtk_widget_set_size_request(account, -1, 44);
+    GtkWidget *discovery = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    gtk_widget_set_hexpand(usage, TRUE); gtk_widget_set_hexpand(account, TRUE);
+    gtk_box_append(GTK_BOX(discovery), usage); gtk_box_append(GTK_BOX(discovery), account);
+    gtk_box_append(GTK_BOX(box), discovery);
     g_signal_connect(usage, "clicked", G_CALLBACK(usage_report), dialog);
+    g_signal_connect(account, "clicked", G_CALLBACK(account_voices), dialog);
     GtkWidget *options = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     dialog->auto_play = GTK_CHECK_BUTTON(gtk_check_button_new_with_label("Auto-play generated audio"));
     dialog->save = GTK_CHECK_BUTTON(gtk_check_button_new_with_label("Save audio to recordings"));
@@ -503,6 +515,7 @@ static void receive_fixture(int32_t action, int32_t source, const char *value,
 }
 int32_t jsti_voice_controls_self_test(GtkWindow *owner, char *error, size_t capacity);
 int32_t jsti_voice_usage_self_test(GtkWindow *owner, char *error, size_t capacity);
+int32_t jsti_voice_discovery_self_test(GtkWindow *owner, char *error, size_t capacity);
 int32_t jsti_voice_sources_self_test(GtkWindow *owner, char *error, size_t capacity) {
     Dialog *dialog = make_dialog(owner, "synthetic-record", "Synthetic History snapshot");
     if (dialog == NULL) { jsti_set_error(error, capacity, "Voice sources fixture could not open."); return -1; }
@@ -569,6 +582,7 @@ int32_t jsti_voice_sources_self_test(GtkWindow *owner, char *error, size_t capac
         clipboard_snapshot && file_snapshot && stale_import && failed_import && edited_import &&
         generated_snapshot && busy_result && retained_result;
     if (!passed) jsti_set_error(error, capacity, "Voice sources state/snapshot checks failed.");
-    return passed && jsti_voice_controls_self_test(owner, error, capacity) == 0
-        ? jsti_voice_usage_self_test(owner, error, capacity) : -1;
+    return passed && jsti_voice_controls_self_test(owner, error, capacity) == 0 &&
+        jsti_voice_usage_self_test(owner, error, capacity) == 0
+        ? jsti_voice_discovery_self_test(owner, error, capacity) : -1;
 }

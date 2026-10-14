@@ -79,4 +79,25 @@ final class DesktopVoiceSourceMessageTests: XCTestCase {
         XCTAssertThrowsError(try DesktopVoiceSourceMessage(action: 118, source: 0, text: "",
             record: "fixture", path: "usage-unknown"))
     }
+
+    func testDiscoveryABI_UsesStableIdentifierAndDistinctOpaqueDialogTokens() throws {
+        XCTAssertEqual(try DesktopVoiceSourceMessage(action: 118, source: -1, text: "",
+            record: "dialog", path: "account-open"), .discoveryOpen("dialog"))
+        XCTAssertEqual(try DesktopVoiceSourceMessage(action: 118, source: -1, text: "",
+            record: "dialog", path: "account-refresh"), .discoveryRefresh("dialog"))
+        XCTAssertEqual(try DesktopVoiceSourceMessage(action: 118, source: -1, text: "",
+            record: "dialog", path: "account-close"), .discoveryClose("dialog"))
+        XCTAssertEqual(try DesktopVoiceSourceMessage(action: 118, source: -1, text: "xai/Account-A",
+            record: "dialog", path: "account-choose"), .discoveryChoose(voiceID: "xai/Account-A", requestID: "dialog"))
+        for text in ["xai/", "xai/a\n", "deepgram/a", "xai/" + String(repeating: "a", count: 257)] {
+            XCTAssertThrowsError(try DesktopVoiceSourceMessage(action: 118, source: -1,
+                text: text, record: "dialog", path: "account-choose"))
+        }
+        for path in ["account-open", "account-refresh", "account-close", "account-unknown"] {
+            XCTAssertThrowsError(try DesktopVoiceSourceMessage(action: 118, source: 0,
+                text: "", record: "dialog", path: path))
+            XCTAssertThrowsError(try DesktopVoiceSourceMessage(action: 118, source: -1,
+                text: "unexpected input", record: "dialog", path: path))
+        }
+    }
 }

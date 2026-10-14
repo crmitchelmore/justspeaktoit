@@ -172,10 +172,7 @@ public struct XAITTSAPI: Sendable {
     /// `GET /v1/tts/voices` — the account's own voice list, which is where the
     /// voices beyond the two documented presets come from.
     public func listVoices(apiKey: String) async throws -> [XAITTSVoice] {
-        var request = URLRequest(url: Self.voicesEndpoint)
-        request.httpMethod = "GET"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-
+        let request = Self.voiceListRequest(apiKey: apiKey)
         let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw XAITTSAPIError.invalidResponse
@@ -183,7 +180,18 @@ public struct XAITTSAPI: Sendable {
         guard (200..<300).contains(httpResponse.statusCode) else {
             throw Self.error(from: data, statusCode: httpResponse.statusCode)
         }
-        return try Self.decodeVoices(data)
+        return try Self.decodedVoices(from: data)
+    }
+
+    public static func voiceListRequest(apiKey: String) -> URLRequest {
+        var request = URLRequest(url: Self.voicesEndpoint)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        return request
+    }
+
+    public static func decodedVoices(from data: Data) throws -> [XAITTSVoice] {
+        try Self.decodeVoices(data)
     }
 
     static func decodeVoices(_ data: Data) throws -> [XAITTSVoice] {

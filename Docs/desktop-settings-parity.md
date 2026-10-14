@@ -860,6 +860,54 @@ selected three canonical source blobs remain byte-identical throughout.
 These receipts were recorded on the original holding branch and were not
 re-run on the integration head.
 
+### Isolated canonical member-preflight delegation candidate
+
+After freezing reader commit `3c88f274`, `NativeConfigurationJSONScan` delegates
+to the separately selected `JSONMemberPreflight` rather than owning a second
+state machine. Only `Sources/SpeakCore/JSONMemberPreflight.swift` (blob
+`dd5603ef399859c946b647909da85f40e448fc55`) and its seven-case test corpus (blob
+`674c22469281a51c57ad6e2ed2044b01326cccd8`) are imported from qualified peer
+`75a81b5f188a7ea89c1e907c53e7201a6470e0fe`; its native-source codec, metadata
+and branch ancestry are not composed. On the integration head both blobs were
+already present (peer `75a81b5f` was cherry-picked as `6e0602c4`), so this
+delegation adds only the adapter and its scan tests.
+
+The thin adapter retains the original `86a` scanner's settings contract:
+canonical 128,000,000-byte budget; depth 8; 4096 tokens; canonical
+field-count times source-platform-count root records; 32 object keys;
+512 encoded key span (closing quote minus opening quote); absolute-index,
+key-lookahead and completion cancellation checks at the original 4096 stride.
+It retains `Malformed or unbounded native configuration JSON.` for guard
+failures and propagates Foundation key-decoding errors without conversion.
+
+The imported corpus and adapter-specific reference/edge/cancellation cases
+exercise these original expectations. Preflight still does not own JSON
+grammar, root shape or migration schema validation: Foundation's existing
+trailing-comma behavior is not silently tightened. Archive codec inspection,
+the closed field inventory and automatic apply/import admission remain
+unchanged. This is not a complete repository-wide deduplication claim or a new
+native-source, profile, capsule or write authority.
+
+Fresh isolated qualification through `validate-native-preflight-adapter.sh`:
+
+- `SPEAK_PORTABLE_CORE=1 swift test --scratch-path /tmp/jsti-settings-eacacdaf --jobs 4 --filter 'JSONMemberPreflight|NativeConfigurationJSONScan|DesktopNativeConfiguration'`:
+  **34 tests / 0 failures**, including the existing canonical byte-budget,
+  escaped/aggregate-size, duplicate-member and ZIP roundtrip regressions.
+- Full portable command: **1950 tests / 31 skipped / 0 failures**. The inherited
+  independent directory-only identity-fixture skip remains explicit and is not
+  converted into acceptance by this adapter.
+- Strict lint in its separate LF-normalized **41-path** source mirror:
+  **0 violations**.
+- A fresh four-target Windows compile-projection run passed; no reader
+  qualification or peer/component receipt is substituted for this source.
+  These are still stub compile graphs, not native Windows/Apple runtime.
+
+The imported helper/corpus blobs remain exact. Reader/capsule code and its
+qualification limits are unchanged; no field/catalogue/schema, automatic
+import/apply or full-parity admission is inferred.
+These receipts come from the original holding branch and were not re-run on
+the integration head.
+
 ## Generated-speech coordination
 
 `SpeechGenerationDefaults` defines the Mac's existing `ttsAutoPlay` (true) and

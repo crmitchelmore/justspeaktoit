@@ -906,6 +906,30 @@ root, fixed `vocabulary.json`, Windows/Linux provenance and exact
 `nativeSourceDocument` vocabulary kind is rejected by the existing canonical Mac
 vocabulary validator; it is not a settings field, Mac default or profile.
 
+`DesktopVocabularyArchiveSource.collectSensitiveEvidence` is a separate,
+explicit opt-in collection seam. It shares the existing strict owned-source IO;
+legacy `collect` still rejects damaged native preference composites. The new
+seam retains malformed/empty composite bytes as evidence but still refuses
+damaged canonical pronunciation/lexicon/correction arrays. `nativeDomainValidity`
+reports only acceptance by the existing native preferences decoder: it is not
+full-schema validation, a credential-free classification or admission authority.
+IO, cancellation and unexpected failures still propagate.
+
+`Snapshot.projectWithSensitiveNativeEvidence` independently requires sensitive
+opt-in and the canonical closed platform. It combines selected canonical records
+with an unapplied `nativeSourceDocument` carrier from the already-read strict
+snapshot. It reports per-kind canonical presence, native presence and decoder
+acceptance separately; anchored absence is not a fabricated empty payload.
+Scope always has explicit partial IDs; date filters do not invent a native
+timestamp. The combined budget includes **all original source bytes plus the
+mixed encoded record array**, including base64 expansion and envelope overhead,
+even when some source records are excluded. Every source receipt is revalidated
+after projection, including excluded sources. Results always deny apply/backup
+and complete-category authority; mixed records are not Mac-compatible.
+Neither seam is wired to generic ZIP/backup/import, host selection, settings,
+native controls or capsule mutation. Hosts still own source suspension/admission;
+point-in-time receipts do not provide atomicity or CAS.
+
 The entire original file, including unknown members, is potentially sensitive
 user content. No credential exclusion/classification or content scanning is
 performed. Every codec operation requires explicit sensitive-content opt-in.

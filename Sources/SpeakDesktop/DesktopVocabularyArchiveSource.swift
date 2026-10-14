@@ -21,6 +21,7 @@ public enum DesktopVocabularyArchiveSource {
         public let collections: [Collection]
         /// No Mac wire kind exists for this native preference composite.
         public let unmappedPreferences: DesktopOwnedAppDataFileReader.StrictSnapshot
+        public let nativeDomainValidity: NativeDomainValidity
         public var isCompleteCategory: Bool { false }
 
         /// Explicit compatible-kind projection only, never complete-category export authority.
@@ -31,13 +32,10 @@ public enum DesktopVocabularyArchiveSource {
             checkCancellation: () throws -> Void = { try Task.checkCancellation() }
         ) throws -> PartialProjection {
             try checkCancellation()
-            var records: [DataMigrationRecord] = []
-            for collection in collections {
-                for record in collection.records ?? [] {
-                    try checkCancellation()
-                    if scope.contains(id: record.id, date: record.date) { records.append(record) }
-                }
+            guard nativeDomainValidity != .invalid else {
+                throw DataMigrationError.invalid("Native vocabulary preferences are not domain-valid.")
             }
+            let records = try compatibleRecords(scope: scope, checkCancellation: checkCancellation)
             try Self.requireRecordBudget(records)
             try revalidate(checkCancellation: checkCancellation)
             let partialScope = DataMigrationScope(
@@ -47,6 +45,19 @@ public enum DesktopVocabularyArchiveSource {
             return PartialProjection(
                 records: records, scope: partialScope, selectedKinds: Set(collections.map(\.definition.kind))
             )
+        }
+
+        func compatibleRecords(
+            scope: DataMigrationScope, checkCancellation: () throws -> Void
+        ) throws -> [DataMigrationRecord] {
+            var records: [DataMigrationRecord] = []
+            for collection in collections {
+                for record in collection.records ?? [] {
+                    try checkCancellation()
+                    if scope.contains(id: record.id, date: record.date) { records.append(record) }
+                }
+            }
+            return records
         }
 
         /// Point-in-time revalidation, not a multi-store atomic snapshot, CAS or write authority.
@@ -78,6 +89,30 @@ public enum DesktopVocabularyArchiveSource {
         appDirectory: URL, digests: LocalModelDigestProvider,
         checkCancellation: () throws -> Void = { try Task.checkCancellation() }
     ) throws -> Snapshot {
+        try collect(
+            appDirectory: appDirectory, digests: digests, retainInvalidNativeEvidence: false,
+            checkCancellation: checkCancellation
+        )
+    }
+
+    /// Separate local evidence admission only; the legacy collector still rejects invalid composites.
+    public static func collectSensitiveEvidence(
+        appDirectory: URL, digests: LocalModelDigestProvider, allowSensitiveContent: Bool = false,
+        checkCancellation: () throws -> Void = { try Task.checkCancellation() }
+    ) throws -> Snapshot {
+        _ = try DesktopNativeSourceDocumentCodec.project(
+            [], allowSensitiveContent: allowSensitiveContent, checkCancellation: checkCancellation
+        )
+        return try collect(
+            appDirectory: appDirectory, digests: digests, retainInvalidNativeEvidence: true,
+            checkCancellation: checkCancellation
+        )
+    }
+
+    private static func collect(
+        appDirectory: URL, digests: LocalModelDigestProvider, retainInvalidNativeEvidence: Bool,
+        checkCancellation: () throws -> Void
+    ) throws -> Snapshot {
         try checkCancellation()
         var bytes: UInt64 = 0
         var sources: [(DataMigrationVocabularyCatalog.Collection, DesktopOwnedAppDataFileReader.StrictSnapshot)] = []
@@ -88,13 +123,12 @@ public enum DesktopVocabularyArchiveSource {
             sources.append((definition, source))
         }
         let unmapped = try read(
-            DesktopVocabularyMigrationSnapshot.unmappedPreferencePath,
+            DesktopNativeSourceDocument.Source.desktopVocabularyPreferences.path,
             root: appDirectory, bytes: &bytes, checkCancellation: checkCancellation
         )
-        if let data = unmapped.data {
-            try checkCancellation()
-            _ = try JSONDecoder().decode(DesktopVocabularyPreferences.self, from: data)
-        }
+        let nativeValidity = try nativeDomainValidity(
+            unmapped.data, retainInvalid: retainInvalidNativeEvidence, checkCancellation: checkCancellation
+        )
         var collections: [Collection] = []
         var identities = Set<String>()
         for (definition, source) in sources {
@@ -117,7 +151,9 @@ public enum DesktopVocabularyArchiveSource {
         }
         try checkCancellation()
         try Snapshot.requireRecordBudget(collections.flatMap { $0.records ?? [] })
-        let result = Snapshot(collections: collections, unmappedPreferences: unmapped)
+        let result = Snapshot(
+            collections: collections, unmappedPreferences: unmapped, nativeDomainValidity: nativeValidity
+        )
         try result.revalidate(checkCancellation: checkCancellation)
         return result
     }
@@ -132,5 +168,19 @@ public enum DesktopVocabularyArchiveSource {
         )
         bytes += UInt64(source.data?.count ?? 0)
         return source
+    }
+
+    private static func nativeDomainValidity(
+        _ data: Data?, retainInvalid: Bool, checkCancellation: () throws -> Void
+    ) throws -> NativeDomainValidity {
+        guard let data else { return .absent }
+        try checkCancellation()
+        do {
+            _ = try JSONDecoder().decode(DesktopVocabularyPreferences.self, from: data)
+            return .valid
+        } catch let error as DecodingError {
+            guard retainInvalid else { throw error }
+            return .invalid
+        }
     }
 }

@@ -579,7 +579,7 @@ allocating multi-gigabyte fixtures.
 
 `DesktopMigrationArchive` reads stored, DEFLATE and ZIP64 Mac-format exports
 in process with miniz 3.1.2, pinned to commit
-`77d0dce8627735138c51770d1799a1ef48f2117d`. The vendored MIT reader is compiled
+`77d0dce8627735138c51770d1799a1ef48f2117d`. The vendored MIT codec is compiled
 with the app, with no runtime download, external archive process or handwritten
 ZIP parser. `scripts/migration/verify-miniz.py` verifies LF-normalized source and
 licence hashes; Windows bundles and Flatpak include its licence.
@@ -591,6 +591,29 @@ Malformed categories/items produce explicit preservation notices; cancellation
 removes private staging, and failed cleanup or an unavailable digest provider
 aborts explicitly. These are archive-read guarantees, not an implemented native
 preview, lossless data application or recovery transaction.
+
+`DesktopMigrationArchive.export` now writes canonical version-1 JSON and
+stored ZIP64 entries through the same pinned miniz dependency. Audio is copied
+in bounded chunks while its native SHA-256 is checked against the frozen
+record digest; changed, linked, missing or mismatched sources abort the export.
+The writer uses the reader's bounded allocator and shared incremental entry
+budget, including the exact 100,000-entry, 20-GB-entry and 50-GB-total limits;
+JSON retains its 128-MB limit. Incremental admission is linear, not repeated
+whole-archive preflight. The required unmodified `miniz_tdef.c` comes from the
+same pinned upstream commit and is included in source/licence verification;
+exports intentionally use stored entries rather than recompressing audio.
+
+The export API requires an explicit credential opt-in and refuses missing or
+damaged category snapshots rather than emitting a destructive empty category.
+It returns a new app-owned private staging ZIP, not a successfully published
+user destination. Cancellation, I/O, hashing and cleanup failures are surfaced
+and partial staging is removed. On POSIX the folder/file modes are 0700/0600;
+Windows staging inherits the selected parent directory's ACL. Hosts must use
+exclusive native publication before reporting a saved export and then clean up
+the owned staging folder. This codec is not yet wired to a native export picker,
+snapshot collection, import preview/application, credential recovery or
+recording-location changes. Native CNG/GLib and Mac ZIPFoundation interoperability
+tests remain separate required acceptance receipts.
 
 The filter editor scrolls vertically when the available work area is too short;
 keyboard traversal reveals the focused control. Long model names have native

@@ -174,7 +174,7 @@ let migrationArchiveTarget = Target.target(
     exclude: ["miniz/LICENSE", "miniz/dependency.json"],
     publicHeadersPath: "include",
     cSettings: [
-        .define("MINIZ_NO_STDIO"), .define("MINIZ_NO_DEFLATE_APIS"), .define("MINIZ_NO_TIME"),
+        .define("MINIZ_NO_STDIO"), .define("MINIZ_NO_TIME"),
         .define("MINIZ_NO_ZLIB_COMPATIBLE_NAMES")
     ]
 )

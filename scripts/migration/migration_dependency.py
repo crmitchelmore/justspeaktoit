@@ -1,4 +1,4 @@
-"""Verify the immutable, licensed native migration ZIP reader source pin."""
+"""Verify the immutable, licensed native migration ZIP codec source pin."""
 
 import hashlib
 import json
@@ -10,7 +10,7 @@ def license_entry(source_root):
     directory = Path(source_root) / "Sources" / "CMigrationArchive" / "miniz"
     pin = json.loads((directory / "dependency.json").read_text(encoding="utf-8"))
     expected = {
-        "LICENSE", "miniz.c", "miniz.h", "miniz_common.h", "miniz_tdef.h",
+        "LICENSE", "miniz.c", "miniz.h", "miniz_common.h", "miniz_tdef.c", "miniz_tdef.h",
         "miniz_tinfl.c", "miniz_tinfl.h", "miniz_zip.c", "miniz_zip.h",
     }
     if (pin["repository"] != "https://github.com/richgel999/miniz"
@@ -28,6 +28,6 @@ def license_entry(source_root):
     return {
         "name": "LICENSE-miniz.txt", "license": "MIT",
         "url": pin["repository"] + "/blob/" + pin["commit"] + "/LICENSE",
-        "covers": "miniz " + pin["version"] + ", statically compiled native migration ZIP reader",
+        "covers": "miniz " + pin["version"] + ", statically compiled native migration ZIP codec",
         "data": text, "sha256": hashlib.sha256(text).hexdigest(), "bytes": len(text),
     }

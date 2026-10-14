@@ -288,6 +288,11 @@ from rolling pre-roll to lossless bounded reservation, and reports overflow
 once. One serial drain delivers outside the state lock; closing fences new PCM
 and joins previously admitted delivery before worker cleanup. No per-frame actor
 task, file, History record, provider, cue or insertion is introduced.
+The package failure-event observer carries the generating opaque token, admitted
+immutable capture identity and error, including distinct cleanup failures.
+Deferred receivers must retain that event's identity rather than tagging it with
+the current recording. The compatibility observer projects only its error from
+the same canonical event sink; this does not install a Host subscription.
 Portable fake-worker/race tests do not establish native permission, readiness,
 keyboard timing or latency. Windows currently uses `RegisterHotKey` plus 15 ms
 release polling, not a low-level physical-key hook; toggle mode has no paired

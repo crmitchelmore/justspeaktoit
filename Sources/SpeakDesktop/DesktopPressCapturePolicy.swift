@@ -106,6 +106,20 @@ package enum DesktopPressCaptureError: Error, Equatable, Sendable {
     case cleanupFailed(String)
 }
 
+package struct DesktopPressCaptureFailureEvent: Equatable, Sendable {
+    package let token: DesktopPressCaptureToken
+    package let identity: DesktopPressCaptureIdentity
+    package let error: DesktopPressCaptureError
+
+    package init(
+        token: DesktopPressCaptureToken, identity: DesktopPressCaptureIdentity, error: DesktopPressCaptureError
+    ) {
+        self.token = token
+        self.identity = identity
+        self.error = error
+    }
+}
+
 /// An adapter owns its native handles; neither a handle nor a borrowed PCM pointer crosses actors.
 /// Open failure may leave partial resources: close must acknowledge their cleanup, including late opens.
 /// A future native adapter must use its own IO executor, never the UI/host actor or an audio callback.

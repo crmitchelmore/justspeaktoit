@@ -15,7 +15,7 @@ package actor DesktopPressCaptureLease {
     }
 
     private let worker: any DesktopPressCaptureWorker
-    private let onFailure: @Sendable (DesktopPressCaptureError) -> Void
+    private let onFailureEvent: @Sendable (DesktopPressCaptureFailureEvent) -> Void
     private var run: Run?
     private var operation: Task<Void, Never>?
     private var operationGeneration: UInt64 = 0
@@ -26,8 +26,15 @@ package actor DesktopPressCaptureLease {
         worker: any DesktopPressCaptureWorker,
         onFailure: @escaping @Sendable (DesktopPressCaptureError) -> Void
     ) {
+        self.init(worker: worker, onFailureEvent: { onFailure($0.error) })
+    }
+
+    package init(
+        worker: any DesktopPressCaptureWorker,
+        onFailureEvent: @escaping @Sendable (DesktopPressCaptureFailureEvent) -> Void
+    ) {
         self.worker = worker
-        self.onFailure = onFailure
+        self.onFailureEvent = onFailureEvent
     }
 
     package var phase: DesktopPressCapturePhase { run?.phase ?? .idle }
@@ -43,7 +50,8 @@ package actor DesktopPressCaptureLease {
         try identity.validate()
         let token = DesktopPressCaptureToken()
         let relay = DesktopPressCapturePCMRelay(limits: limits) { [weak self] error in
-            Task { await self?.captureFailed(token, error: error) }
+            let event = DesktopPressCaptureFailureEvent(token: token, identity: identity, error: error)
+            Task { await self?.captureFailed(event) }
         }
         run = Run(token: token, identity: identity, relay: relay)
         failure = nil
@@ -58,7 +66,9 @@ package actor DesktopPressCaptureLease {
                 )
                 await opened(token, error: nil)
             } catch {
-                await opened(token, error: .openFailed(String(describing: error)))
+                await opened(token, error: DesktopPressCaptureFailureEvent(
+                    token: token, identity: identity, error: .openFailed(String(describing: error))
+                ))
             }
         }
         return token
@@ -129,7 +139,11 @@ package actor DesktopPressCaptureLease {
     package func settle() async throws {
         var observed: UInt64
         repeat {
-            if let current = run, let error = current.relay.failure { captureFailed(current.token, error: error) }
+            if let current = run, let error = current.relay.failure {
+                captureFailed(DesktopPressCaptureFailureEvent(
+                    token: current.token, identity: current.identity, error: error
+                ))
+            }
             observed = operationGeneration
             await operation?.value
         } while observed != operationGeneration
@@ -162,27 +176,27 @@ package actor DesktopPressCaptureLease {
         }
     }
 
-    private func opened(_ token: DesktopPressCaptureToken, error: DesktopPressCaptureError?) async {
+    private func opened(_ token: DesktopPressCaptureToken, error: DesktopPressCaptureFailureEvent?) async {
         guard var current = run, current.token == token else { return }
         current.ready = true
         if let error {
             current.relay.close()
             current.phase = .closing
-            failure = error
-            onFailure(error)
+            failure = error.error
+            onFailureEvent(error)
         }
         if current.phase == .pending { current.phase = .open }
         run = current
         if current.phase == .closing { await closeWorker(token) }
     }
 
-    private func captureFailed(_ token: DesktopPressCaptureToken, error: DesktopPressCaptureError) {
-        guard var current = run, current.token == token, !current.reportedRelayFailure else { return }
+    private func captureFailed(_ event: DesktopPressCaptureFailureEvent) {
+        guard var current = run, current.token == event.token, !current.reportedRelayFailure else { return }
         current.reportedRelayFailure = true
         run = current
-        failure = error
-        onFailure(error)
-        cancel(token)
+        failure = event.error
+        onFailureEvent(event)
+        cancel(event.token)
     }
 
     private func enqueueClose(_ token: DesktopPressCaptureToken) {
@@ -195,16 +209,19 @@ package actor DesktopPressCaptureLease {
     }
 
     private func closeWorker(_ token: DesktopPressCaptureToken) async {
-        if let error = run?.relay.failure { captureFailed(token, error: error) }
+        guard let current = run, current.token == token else { return }
+        if let error = current.relay.failure {
+            captureFailed(DesktopPressCaptureFailureEvent(token: token, identity: current.identity, error: error))
+        }
         do {
-            try await run?.relay.settleDelivery()
+            try await current.relay.settleDelivery()
             try await worker.close(id: token.id)
             if run?.token == token { run = nil }
         } catch {
             let error = DesktopPressCaptureError.cleanupFailed(String(describing: error))
             run?.cleanupFailure = error
             failure = error
-            onFailure(error)
+            onFailureEvent(DesktopPressCaptureFailureEvent(token: token, identity: current.identity, error: error))
         }
     }
 }

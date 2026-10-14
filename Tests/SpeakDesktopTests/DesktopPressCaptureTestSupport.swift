@@ -94,14 +94,17 @@ final class PressCaptureTestLog: @unchecked Sendable {
     private let lock = NSLock()
     private var storedPCM = Data()
     private var storedFailures: [DesktopPressCaptureError] = []
+    private var storedEvents: [DesktopPressCaptureFailureEvent] = []
     private var storedAccepted: [Int] = []
     private var storedFinished = false
     var pcm: Data { lock.withLock { storedPCM } }
     var failures: [DesktopPressCaptureError] { lock.withLock { storedFailures } }
+    var events: [DesktopPressCaptureFailureEvent] { lock.withLock { storedEvents } }
     var accepted: [Int] { lock.withLock { storedAccepted } }
     var finished: Bool { lock.withLock { storedFinished } }
     func append(_ data: Data) { lock.withLock { storedPCM.append(data) } }
     func fail(_ error: DesktopPressCaptureError) { lock.withLock { storedFailures.append(error) } }
+    func observe(_ event: DesktopPressCaptureFailureEvent) { lock.withLock { storedEvents.append(event) } }
     func accept(_ value: Int) { lock.withLock { storedAccepted.append(value) } }
     func finish() { lock.withLock { storedFinished = true } }
 }

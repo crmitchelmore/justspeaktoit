@@ -599,6 +599,10 @@ events and Wayland portal Activated/Deactivated have different timing semantics;
 portal activation is not physical-key-down or pre-recognition evidence. Native
 start/stop remains unqualified for bounded readiness/cleanup, and neither a saved
 preference nor a fake lifecycle result enables speculative capture.
+Package failure events preserve the generating token and immutable admitted
+identity across deferred delivery, with cleanup failure reported separately.
+The error-only observer remains a compatibility projection, not a second
+subscription or a native/Host failure adapter.
 
 `.github/workflows/linux.yml` (ubuntu-24.04, `swift:6.2.3-noble`, pinned by
 digest) installs the packages above, then runs the boundary check, the

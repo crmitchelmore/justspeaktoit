@@ -3001,7 +3001,7 @@ typedef struct Tour {
 
 enum { TOUR_PORTAL_OUTPUT = JSTI_PAGE_COUNT, TOUR_DARK_DASHBOARD, TOUR_DARK_HISTORY, TOUR_RECORDING, TOUR_HUD_RECORDING,
        TOUR_HUD_COMPLETED, TOUR_HISTORY_FILTERS, TOUR_DARK_HISTORY_FILTERS, TOUR_EXPANDED_RECORDING,
-       TOUR_COMPACT_RECORDING, TOUR_COMPACT_COMPLETED, TOUR_VOICE_SOURCES, TOUR_DONE };
+       TOUR_COMPACT_RECORDING, TOUR_COMPACT_COMPLETED, TOUR_VOICE_SOURCES, TOUR_VOICE_CONTROLS, TOUR_DONE };
 
 static gboolean tour_capture(gpointer data);
 
@@ -3042,6 +3042,9 @@ static void tour_show(Tour *tour) {
     } else if (tour->step == TOUR_VOICE_SOURCES) {
         jsti_hud_destroy();
         jsti_voice_sources_show_fixture(ui.window);
+    } else if (tour->step == TOUR_VOICE_CONTROLS) {
+        jsti_voice_sources_close();
+        jsti_voice_controls_show_fixture(ui.window);
     } else {
         /* Late, because it replaces the displayed transcript. */
         Update recording = { .transcript = (gchar *)"Could we move the catch-up to Friday? That gives us a little",
@@ -3067,6 +3070,7 @@ static const char *tour_name(gint32 step) {
     case TOUR_HISTORY_FILTERS: return "history-filters";
     case TOUR_DARK_HISTORY_FILTERS: return "history-filters-dark";
     case TOUR_VOICE_SOURCES: return "voice-sources";
+    case TOUR_VOICE_CONTROLS: return "voice-controls";
     default: return page_info[step].name;
     }
 }
@@ -3094,6 +3098,12 @@ static gboolean tour_capture(gpointer data) {
             g_free(tour->directory); g_free(tour);
             gtk_window_close(ui.window);
         }
+        return G_SOURCE_REMOVE;
+    }
+    if (tour->step == TOUR_VOICE_CONTROLS) {
+        if (jsti_voice_controls_save_snapshot(path) != 0) g_printerr("The Voice controls snapshot failed.\n");
+        g_free(path); g_free(file); g_free(tour->directory); g_free(tour);
+        gtk_window_close(ui.window);
         return G_SOURCE_REMOVE;
     }
     if (tour->step == TOUR_VOICE_SOURCES) {

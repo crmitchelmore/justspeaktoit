@@ -4,7 +4,7 @@ Windows and Linux remain developer previews, not macOS-parity releases.
 Voice Output uses shared Deepgram and Azure neural speech contracts, canonical
 catalogue projections and native playback. `DesktopSpeechVoice` exposes only
 routes the host executes, not every provider in the macOS catalogue. The seven
-offline Azure neural voices now have one `AzureNeuralVoiceCatalog` definition
+built-in Azure neural catalogue entries now have one `AzureNeuralVoiceCatalog` definition
 shared with macOS; native hosts do not copy voice entries.
 
 ## Journey
@@ -79,7 +79,8 @@ a credential, rather than silently ignoring them or changing provider.
 all controls. Unknown provider choices appear as unavailable, not Deepgram.
 Save waits for persistence acknowledgement before closing, reports write
 failures without changing previous settings, and ignores acknowledgements for
-closed/replaced requests. Cancel remains available while saving.
+closed/replaced requests. Close remains available while saving; closing the
+editor does not undo an already-admitted settings write.
 
 Plain text uses the canonical segmenter; SSML is never split across XML tags.
 SSML input and complete request bodies are limited to 64 KiB. A full `<speak>`

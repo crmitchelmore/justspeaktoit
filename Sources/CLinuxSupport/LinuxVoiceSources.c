@@ -449,14 +449,9 @@ void jsti_voice_sources_show_fixture(GtkWindow *owner) {
         apply_import_result(active, "synthetic-tour-file", "Synthetic imported UTF-8 text for voice output.", "");
     }
 }
-int32_t jsti_voice_controls_save_snapshot(GtkWindow *owner, const char *path);
 int32_t jsti_voice_sources_save_snapshot(const char *path) {
-    if (active == NULL || active->window == NULL) return -1;
-    const int32_t source = jsti_widget_save_snapshot(GTK_WIDGET(active->window), path, TRUE);
-    gchar *controls_path = g_strconcat(path, ".voice-controls.png", NULL);
-    const int32_t controls = jsti_voice_controls_save_snapshot(active->window, controls_path);
-    g_free(controls_path);
-    return source == 0 && controls == 0 ? 0 : -1;
+    return active != NULL && active->window != NULL
+        ? jsti_widget_save_snapshot(GTK_WIDGET(active->window), path, TRUE) : -1;
 }
 typedef struct { gchar **names; JSTIVoiceSourceCallback callback; void *context; } SetSources;
 static void apply_sources(gpointer data) {

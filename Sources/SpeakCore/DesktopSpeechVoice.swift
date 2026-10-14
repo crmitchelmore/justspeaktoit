@@ -53,19 +53,21 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
     }
 
     public static func resolved(modelID: String?, voiceID: String?) throws -> Self {
-        if modelID?.hasPrefix("azure/") == true || voiceID?.hasPrefix("azure/") == true {
-            guard let voice = AzureNeuralVoiceCatalog.voices.first(where: { $0.id == voiceID }),
-                  modelID == nil || modelID == "azure/neural" else {
+        let model = modelID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let identifier = voiceID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if model?.hasPrefix("azure/") == true || identifier?.hasPrefix("azure/") == true {
+            guard let voice = AzureNeuralVoiceCatalog.voices.first(where: { $0.id.lowercased() == identifier }),
+                  model == nil || model == "azure/neural" else {
                 throw VoiceSynthesisConfigurationError.unsupportedVoice
             }
             return .azureNeural(voice)
         }
         // Retain Deepgram's existing short-name and retired-model migrations,
         // but never route another provider's explicit identifier to Deepgram.
-        if let voiceID, voiceID.contains("/"), !voiceID.hasPrefix("deepgram/") {
+        if let identifier, identifier.contains("/"), !identifier.hasPrefix("deepgram/") {
             throw VoiceSynthesisConfigurationError.unsupportedVoice
         }
-        if let modelID, modelID.contains("/"), !modelID.hasPrefix("deepgram/") {
+        if let model, model.contains("/"), !model.hasPrefix("deepgram/") {
             throw VoiceSynthesisConfigurationError.unsupportedVoice
         }
         return .deepgram(DeepgramSpeechCatalog.resolvedSelection(modelID: modelID, voiceID: voiceID).voice)

@@ -112,4 +112,17 @@ final class DesktopSpeechSynthesisTests: DeepgramSpeechStubTestCase {
     }
 
     private var fixtureWAV: Data { DeepgramSpeechFixture.canonicalWAV(pcm: pcm) }
+
+    func testStoredIdentifierWhitespaceAndCase_PreserveExistingMigrationsWithoutForeignProviderFallback() throws {
+        let deepgram = DeepgramSpeechCatalog.fluxVoices[0]
+        XCTAssertEqual(try DesktopSpeechVoice.resolved(
+            modelID: " FLUX ", voiceID: " DEEPGRAM/\(deepgram.id.uppercased()) "
+        ), .deepgram(deepgram))
+        let azure = AzureNeuralVoiceCatalog.voices[0]
+        XCTAssertEqual(try DesktopSpeechVoice.resolved(
+            modelID: " AZURE/NEURAL ", voiceID: " \(azure.id.uppercased()) "
+        ), .azureNeural(azure))
+        XCTAssertThrowsError(try DesktopSpeechVoice.resolved(modelID: " SYSTEM/VOICE ", voiceID: nil))
+        XCTAssertThrowsError(try DesktopSpeechVoice.resolved(modelID: nil, voiceID: " SYSTEM/ALEX "))
+    }
 }

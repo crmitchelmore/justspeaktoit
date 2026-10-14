@@ -49,20 +49,20 @@ public struct DesktopNativeRetainedCapsule: Sendable {
                 published = true
                 throw error
             }
-            try FileManager.default.removeItem(at: staging)
+            try DesktopNativeRetentionIO.removeStaging(staging)
             let capsule = Self(directory: directory, sealedBytes: bytes)
             _ = try capsule.reload(checkCancellation: checkCancellation)
             return capsule
-        } catch {
+        } catch let primary {
             if published || FileManager.default.fileExists(atPath: destination.path) {
-                throw DesktopNativeRetentionPublishedFailure(directory: directory)
+                throw DesktopNativeRetentionPublishedFailure(directory: directory, underlyingError: primary)
             }
             do {
                 try cleanupUnpublished(staging: staging, directory: directory)
             } catch {
-                throw invalid("Unpublished retained capsule cleanup failed; no retention success was reported.")
+                throw DesktopNativeRetentionCleanupFailure(primaryError: primary, cleanupError: error)
             }
-            throw error
+            throw primary
         }
     }
 
@@ -97,7 +97,7 @@ public struct DesktopNativeRetainedCapsule: Sendable {
 
     private static func write(_ bytes: Data, to file: URL, checkCancellation: () throws -> Void) throws {
         let handle = try FileHandle(forWritingTo: file)
-        do {
+        try DesktopNativeRetentionIO.perform(closing: { try handle.close() }, operation: {
             var offset = 0
             while offset < bytes.count {
                 try checkCancellation()
@@ -106,13 +106,7 @@ public struct DesktopNativeRetainedCapsule: Sendable {
                 offset = end
             }
             try handle.synchronize()
-            try handle.close()
-        } catch {
-            do { try handle.close() } catch {
-                throw invalid("Retained staging failed and its handle could not be closed.")
-            }
-            throw error
-        }
+        })
     }
 
     private static func readBytes(_ file: URL, checkCancellation: () throws -> Void) throws -> Data {
@@ -123,7 +117,7 @@ public struct DesktopNativeRetainedCapsule: Sendable {
             throw invalid("Retained native data must be a regular file.")
         }
         let handle = try FileHandle(forReadingFrom: file)
-        do {
+        return try DesktopNativeRetentionIO.perform(closing: { try handle.close() }, operation: {
             var bytes = Data()
             while let chunk = try handle.read(upToCount: 65_536), !chunk.isEmpty {
                 try checkCancellation()
@@ -133,22 +127,14 @@ public struct DesktopNativeRetainedCapsule: Sendable {
                 }
                 bytes.append(chunk)
             }
-            try handle.close()
             return bytes
-        } catch {
-            do { try handle.close() } catch {
-                throw invalid("Retained reading failed and its handle could not be closed.")
-            }
-            throw error
-        }
+        })
     }
 
     private static func invalid(_ message: String) -> DataMigrationError { .invalid(message) }
 
     private static func cleanupUnpublished(staging: URL, directory: URL) throws {
-        if FileManager.default.fileExists(atPath: staging.path) {
-            try FileManager.default.removeItem(at: staging)
-        }
+        try DesktopNativeRetentionIO.removeStaging(staging, allowingMissing: true)
         #if os(Windows)
         let path = directory.withUnsafeFileSystemRepresentation { $0.map(String.init(cString:)) }
         guard let path else { throw invalid("Invalid owned capsule cleanup path.") }
@@ -157,13 +143,14 @@ public struct DesktopNativeRetainedCapsule: Sendable {
         #else
         let removed = directory.path.withCString { rmdir($0) == 0 }
         #endif
-        guard removed else { throw invalid("Owned capsule directory is not empty or could not be removed.") }
+        guard removed else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
     }
 }
 
 /// Validated data may already be published; cleanup must never remove it or retry an overwrite.
 public struct DesktopNativeRetentionPublishedFailure: LocalizedError, Sendable {
     public let directory: URL
+    public let underlyingError: any Error
     public var errorDescription: String? {
         "The retained capsule may already be published, but completion could not be confirmed. "
             + "It was kept; no success or retry permission was reported."

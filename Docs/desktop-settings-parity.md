@@ -722,6 +722,9 @@ strictly decodes it. `read(from:)` performs bounded strict restart inspection.
 Restart validation proves current codec validity, **not** historical
 authenticity if an external writer substituted different valid bytes; directory
 naming alone establishes neither ownership nor mutation authority.
+Reads still check and open by path, not through an identity-bound canonical
+strict-reader receipt. The check/open race is an explicit qualification limit;
+held bytes do not turn this IO into strict source identity or mutation CAS.
 `exportProjection` returns only `.settings` native records with exact selected
 IDs (including an explicit empty set), never complete/replacement scope.
 Canonical/Mac automatic import continues to reject `nativeConfiguration`.
@@ -731,6 +734,16 @@ failure/cancellation removes only the invocation's named unpublished stage;
 empty-directory removal is nonrecursive, so unrelated children are not deleted.
 Once publication may have committed, an explicit published-effect failure keeps
 the capsule rather than deleting it, retrying or claiming success.
+Staging removal uses native nonrecursive `unlink`/`_wunlink`, after checking for
+a regular file. A directory substituted for staging is refused without deleting
+its children, both before and after publication. Directory cleanup itself uses
+nonrecursive `rmdir`/`_wrmdir`; neither path recursively deletes children.
+`DesktopNativeRetentionCleanupFailure` retains typed `primaryError` and
+`cleanupError`; `DesktopNativeRetentionPublishedFailure.underlyingError`
+preserves the original failure, including cancellation. Their user-facing
+messages do not interpolate underlying errors, paths or captured values.
+Read/write handle cleanup attempts close once, preserving a dual failure and
+never retrying a failed close.
 Construction/reload/export run off the UI/settings-admission/PCM paths.
 
 The frozen `86a` IO primitives provide protected creation and exclusive
@@ -747,13 +760,13 @@ content/unknown members; no noncredential classification, scanning, upload or
 automatic carrier admission is inferred. Frozen native-field definitions,
 settings codec/parser, catalogue and source acceptance remain unchanged here.
 
-Local qualification adds **18** merge/capsule regressions, including actual
+The prior `f151d0cc` candidate added **18** merge/capsule regressions, including actual
 publication followed by child-task cancellation. That case reports
 `DesktopNativeRetentionPublishedFailure`, strictly reloads the complete original
 envelope after restart, proves one publication and preserves unrelated Root and
 capsule-side files. It neither retries nor deletes committed data.
 
-The cached WSL Swift toolchain ran these commands through the
+For that prior source only, the cached WSL Swift toolchain ran these commands through the
 `validate-native-retention.sh` session wrapper, which restores `Package.resolved`:
 
 - `SPEAK_PORTABLE_CORE=1 swift test --scratch-path /tmp/jsti-settings-eacacdaf --jobs 4 --filter 'DesktopNativeRet|DesktopNativeConfiguration|DesktopHostConfigurationCapture|DataMigrationPreference|DesktopHostPreferenceArchive|DesktopHostHandsFree|DesktopHostRecordingTail|DesktopHostVoiceConfiguration|DesktopHostKeywordConfiguration'`:
@@ -770,6 +783,21 @@ The cached WSL Swift toolchain ran these commands through the
 Native Windows/Apple runtime and installed-host durability remain unqualified.
 This is an isolated local candidate, not integration selection, a mutable
 retention transaction, a safe target importer or full settings parity.
+The scoped nonrecursive-cleanup/error-preservation repair adds six regressions
+(24 total merge/capsule/IO cases). They preserve the unrelated sentinel when
+`unpublished.json` is replaced by a directory before failed publication or
+after successful publication, inspect both typed failures, and prove
+operation-only, close-only, dual-failure and successful handle cleanup each
+closes exactly once. The existing post-publication cancellation case now also
+inspects the original `CancellationError`.
+
+Fresh receipts use the same commands above through
+`validate-native-retention-repair.sh`, with distinct repair log paths:
+**141 focused / 0 failures**, **1930 full portable / 30 skipped / 0 failures**,
+all four Windows compile projections passed, and strict lint of the expanded
+**34-path** Swift set returned **0 violations**. These qualify the repaired
+source, not native Windows/Apple runtime, strict identity-bound IO or mutation
+authority. The prior 135/1924/32-path receipts remain prior-source evidence only.
 
 ## Generated-speech coordination
 

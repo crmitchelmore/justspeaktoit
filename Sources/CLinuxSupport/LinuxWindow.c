@@ -3343,8 +3343,9 @@ static gboolean tour_capture(gpointer data) {
     }
     if (tour->step == TOUR_VOICE_DISCOVERY) {
         if (jsti_voice_discovery_save_snapshot(path) != 0) g_printerr("The account voice snapshot failed.\n");
-        g_free(path); g_free(file); g_free(tour->directory); g_free(tour);
-        gtk_window_close(ui.window);
+        g_free(path); g_free(file);
+        jsti_comparison_screenshot_tour(ui.window, tour->directory);
+        g_free(tour->directory); g_free(tour);
         return G_SOURCE_REMOVE;
     }
     if (tour->step == TOUR_VOICE_SOURCES) {

@@ -4,6 +4,74 @@ import XCTest
 @testable import SpeakDesktop
 
 final class DesktopMigrationInspectionTests: XCTestCase {
+    func testRecordChecks_ValidateNativeHistoryAudioAndScopeWithoutDisplayingContents() async throws {
+        let fixture = try InspectionFixture()
+        defer { fixture.remove() }
+        let directory = try fixture.staging()
+        let date = Date(timeIntervalSince1970: 1_704_067_200)
+        let privateText = "SYNTHETIC-TRANSCRIPT-DO-NOT-DISPLAY"
+        var native = DesktopRecordingStore.Record(
+            id: UUID(), audioFilename: "", modelIdentifier: "synthetic/model", createdAt: date
+        )
+        native.processedText = privateText
+        let value = try DesktopMigrationHistory.value(native)
+        let valid = DataMigrationRecord(id: native.id.uuidString, kind: "history", value: value, date: date)
+        var forged = valid
+        forged.id = UUID().uuidString
+        let outsideDate = date.addingTimeInterval(10)
+        let outsideNative = DesktopRecordingStore.Record(
+            id: UUID(), audioFilename: "", modelIdentifier: "synthetic/model", createdAt: outsideDate
+        )
+        let outside = DataMigrationRecord(
+            id: outsideNative.id.uuidString, kind: "history",
+            value: try DesktopMigrationHistory.value(outsideNative), date: outsideDate
+        )
+        let brokenCarrier = try malformedCarrier(valid)
+        XCTAssertNoThrow(try DataMigrationHistorySchema.validate(brokenCarrier, category: .history))
+        let audio = DataMigrationRecord(
+            id: native.id.uuidString, kind: "audio",
+            value: try DesktopMigrationHistory.value(native, audioOnly: true), date: date
+        )
+        let snapshot = DataMigrationSnapshot(
+            manifest: .init(
+                categories: [.history, .recordings], scopes: ["history": .init(end: date.addingTimeInterval(1))]
+            ),
+            records: [.history: [valid, forged, outside, brokenCarrier], .recordings: [audio]], directory: directory
+        )
+        let outcome = await DesktopMigrationInspection.inspect(fixture.source, reader: .init { _ in snapshot })
+        guard case let .inspected(report) = outcome else { return XCTFail("\(outcome)") }
+        XCTAssertEqual(report.categories.map(\.items), [4, 1])
+        XCTAssertEqual(report.historyChecks.map(\.items), [1, 1])
+        XCTAssertEqual(report.invalidHistoryItems, 3)
+        XCTAssertEqual(report.noticeCount, 0)
+        XCTAssertTrue(report.text.contains("3 History/audio items failed record validation"))
+        XCTAssertTrue(report.text.contains("other record values are not validated"))
+        XCTAssertFalse(report.text.contains(privateText))
+        XCTAssertFalse(report.text.contains(native.id.uuidString))
+        XCTAssertFalse(report.text.contains(forged.id))
+        XCTAssertFalse(report.text.contains("SYNTHETIC-INVALID-NATIVE-CARRIER"))
+        XCTAssertEqual(snapshot.records[.history], [valid, forged, outside, brokenCarrier])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
+    }
+
+    func testUnreadableHistory_IsNotReportedAsZeroStructurallyValidItems() async throws {
+        let fixture = try InspectionFixture()
+        defer { fixture.remove() }
+        let directory = try fixture.staging()
+        let snapshot = DataMigrationSnapshot(
+            manifest: .init(categories: [.history, .recordings], scopes: [:]),
+            records: [.recordings: []],
+            notices: ["\(DataMigrationCategory.history.title): category could not be read."], directory: directory
+        )
+        let outcome = await DesktopMigrationInspection.inspect(fixture.source, reader: .init { _ in snapshot })
+        guard case let .inspected(report) = outcome else { return XCTFail("\(outcome)") }
+        XCTAssertNil(report.historyChecks.first?.items)
+        XCTAssertEqual(report.historyChecks.last?.items, 0)
+        XCTAssertEqual(report.invalidHistoryItems, 0)
+        XCTAssertTrue(report.text.contains("\(DataMigrationCategory.history.title): could not be validated"))
+        XCTAssertFalse(report.text.contains("\(DataMigrationCategory.history.title): 0 structurally valid"))
+    }
+
     func testRealZIP_ReportsCategoriesWithoutDisplayingValuesOrChangingSource() async throws {
         let fixture = try InspectionFixture()
         defer { fixture.remove() }
@@ -158,6 +226,18 @@ final class DesktopMigrationInspectionTests: XCTestCase {
         let cleanup = await DesktopMigrationInspection.inspect(fixture.source, reader: .init { _ in disappeared })
         guard case let .failed(detail) = cleanup else { return XCTFail("\(cleanup)") }
         XCTAssertTrue(detail.contains("Private inspection staging could not be removed"))
+    }
+
+    private func malformedCarrier(_ source: DataMigrationRecord) throws -> DataMigrationRecord {
+        var record = source
+        record.id = UUID().uuidString
+        let value = try DataMigrationHistoryValue.value(record.value, id: record.id)
+        guard case var .object(fields) = value.storage else {
+            throw DataMigrationError.invalid("Synthetic fixture must contain History fields.")
+        }
+        fields["desktopHistory"] = .string("SYNTHETIC-INVALID-NATIVE-CARRIER")
+        record.value = AnyCodable(.object(fields))
+        return record
     }
 }
 

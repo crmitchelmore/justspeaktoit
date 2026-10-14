@@ -22,6 +22,8 @@ public enum DesktopMigrationInspection {
     public struct Report: Equatable, Sendable {
         public let categories: [Category]
         public let noticeCount: Int
+        public let historyChecks: [Category]
+        public let invalidHistoryItems: Int
 
         public var text: String {
             let rows = categories.map { row in
@@ -35,8 +37,19 @@ public enum DesktopMigrationInspection {
             if noticeCount > 0 {
                 sections.append("\(noticeCount) archive notices: some data may be missing or damaged.")
             }
+            if !historyChecks.isEmpty {
+                let checks = historyChecks.map { row in
+                    guard let count = row.items else { return "\(row.category.title): could not be validated" }
+                    return "\(row.category.title): \(count) structurally valid"
+                }
+                sections.append(checks.joined(separator: "\n"))
+                if invalidHistoryItems > 0 {
+                    sections.append("\(invalidHistoryItems) History/audio items failed record validation.")
+                }
+            }
             sections.append(
                 "Inspection checks the archive envelope and extracted audio checksums. "
+                    + "History/audio record structure is checked; other record values are not validated. "
                     + "Record values are not yet approved for import. Import/apply is not available here."
             )
             if categories.contains(where: { $0.category == .credentials }) {
@@ -45,11 +58,18 @@ public enum DesktopMigrationInspection {
             return sections.joined(separator: "\n\n")
         }
 
-        init(_ snapshot: DataMigrationSnapshot) {
+        init(_ snapshot: DataMigrationSnapshot, checked: DataMigrationSnapshot) {
             categories = DataMigrationCategory.allCases.filter(snapshot.manifest.categories.contains).map {
                 .init(category: $0, items: snapshot.records[$0]?.count)
             }
             noticeCount = snapshot.notices.count
+            historyChecks = [.history, .recordings].filter(snapshot.manifest.categories.contains).map {
+                .init(category: $0, items: checked.records[$0]?.count)
+            }
+            invalidHistoryItems = historyChecks.reduce(0) { count, row in
+                guard let read = snapshot.records[row.category]?.count, let valid = row.items else { return count }
+                return count + read - valid
+            }
         }
     }
 
@@ -80,7 +100,15 @@ public enum DesktopMigrationInspection {
             }
             staging = owned
             try Task.checkCancellation()
-            outcome = .inspected(Report(snapshot))
+            let checked = try DataMigrationRecordValidation.validate(
+                snapshot, checkCancellation: { try Task.checkCancellation() },
+                recordValidator: { record, category in
+                    if category == .history || category == .recordings {
+                        _ = try DesktopMigrationHistory.record(record, category: category)
+                    }
+                }
+            )
+            outcome = .inspected(Report(snapshot, checked: checked))
         } catch is CancellationError {
             outcome = .cancelled
         } catch {

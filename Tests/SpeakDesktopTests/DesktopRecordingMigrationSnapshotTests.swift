@@ -16,14 +16,14 @@ final class DesktopRecordingMigrationSnapshotTests: XCTestCase {
     }
 
     private func save(
-        _ store: DesktopRecordingStore, filename: String? = nil
+        _ store: DesktopRecordingStore, filename: String? = nil, createdAt: Date = Date(timeIntervalSince1970: 100)
     ) async throws -> DesktopRecordingStore.Record {
         let id = UUID()
         let name = filename ?? id.uuidString + ".wav"
         let directory = await store.directory
         try Data("Synthetic audio".utf8).write(to: directory.appendingPathComponent(name))
         var record = DesktopRecordingStore.Record(id: id, audioFilename: name, modelIdentifier: "openai/whisper-1",
-                                                  createdAt: Date(timeIntervalSince1970: 100))
+                                                  createdAt: createdAt)
         record.recordedDuration = 2
         record.processedText = "Retained text"
         try await store.save(record)
@@ -66,6 +66,38 @@ final class DesktopRecordingMigrationSnapshotTests: XCTestCase {
         XCTAssertEqual(selected.records[.history]?.map(\.id), [first.id.uuidString])
         XCTAssertEqual(selected.records[.recordings], [])
         XCTAssertTrue(selected.files.isEmpty)
+    }
+
+    func testFractionalCreationDate_ProducesCanonicalArchiveRecordDatesWithoutLosingNativeTimestamp() async throws {
+        let store = try store()
+        let directory = await store.directory
+        let createdAt = Date(timeIntervalSince1970: 100.625)
+        let original = try await save(store, createdAt: createdAt)
+        let source = try await store.migrationSnapshot(categories: [.history, .recordings], digests: digests)
+        let archive = try DesktopMigrationArchive.export(source, digests: digests, stagingRoot: directory)
+        let result = try DesktopMigrationArchive.read(archive, digests: digests, stagingRoot: directory)
+        XCTAssertEqual(result.records, source.records)
+        let history = try XCTUnwrap(result.records[.history]?.first)
+        XCTAssertEqual(history.date, Date(timeIntervalSince1970: 100))
+        let restored = try DesktopMigrationHistory.record(history, category: .history)
+        XCTAssertEqual(restored.createdAt, createdAt)
+        XCTAssertEqual(restored.id, original.id)
+        XCTAssertEqual(try DesktopMigrationHistory.value(restored), history.value)
+    }
+
+    func testFractionalScopeBoundaries_AreRejectedInsteadOfSilentlyChangingExclusiveEnd() async throws {
+        let store = try store()
+        _ = try await save(store, createdAt: Date(timeIntervalSince1970: 100.625))
+        for scope in [
+            DataMigrationScope(start: Date(timeIntervalSince1970: 100.25)),
+            DataMigrationScope(end: Date(timeIntervalSince1970: 100.75))
+        ] {
+            do {
+                _ = try await store.migrationSnapshot(categories: [.history],
+                                                      scopes: ["history": scope], digests: digests)
+                XCTFail("A fractional scope changed silently through the version-1 date codec.")
+            } catch { XCTAssertTrue(error.localizedDescription.contains("whole-second")) }
+        }
     }
 
     func testSharedOwnedAudio_ExportsEachRetainedHistoryIdentity() async throws {

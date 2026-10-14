@@ -595,6 +595,9 @@ Shared redaction removes audio paths, network/debug payloads and recursive
 carriers; audio-only values also remove transcript, prompt, correction and
 failure content. JSON numbers are normalized before computing revisions, and
 sub-second native timestamps remain in the carrier for stable re-export.
+Record-envelope dates use the existing whole-second version-1 codec. The
+collector rejects fractional scope boundaries rather than silently changing
+inclusive starts/exclusive ends; native day-based selectors remain unchanged.
 
 The actor-owned `DesktopRecordingStore.migrationSnapshot` now collects real
 History and owned recording files, with exact selection/date scopes and active

@@ -151,9 +151,11 @@ final class LiveInputEngineStore<Engine: AnyObject>: @unchecked Sendable {
     }
     lock.unlock()
     // Outside the lock: reading the input node's formats can block on Core Audio.
-    let usable = matching.flatMap { canCapture($0.engine) ? $0 : nil }
+    let validated = matching.flatMap { canCapture($0.engine) ? $0 : nil }
     lock.lock()
-    claimed = usable.flatMap { $0.generation == generation ? $0 : nil }
+    // A preparation that began while validating supersedes this engine.
+    let usable = validated.flatMap { $0.generation == generation ? $0 : nil }
+    claimed = usable
     lock.unlock()
     if let usable {
       if !preservingAdoptedTap {

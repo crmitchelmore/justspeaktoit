@@ -891,8 +891,9 @@ public final class iOSLiveTranscriber: ObservableObject {
         do {
             try installTap(appendingTo: newRequest)
         } catch {
-            self.error = error
-            self.onError?(error)
+            // A rejected tap means the input format changed under the running
+            // engine; end capture through the owner's normal stop path.
+            handleCaptureDisruption(.microphoneChanged)
             return
         }
 

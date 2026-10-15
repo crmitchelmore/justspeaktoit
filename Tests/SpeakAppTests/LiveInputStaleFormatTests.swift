@@ -138,4 +138,30 @@ final class LiveInputStaleFormatTests: XCTestCase {
 
         XCTAssertTrue(store.makeEngine() === primed)
     }
+
+    func testMakeEngine_PreparationSupersededDuringValidation_ReleasesTheStaleEngine() {
+        var log: [String] = []
+        let primed = FakeEngine(isStale: false)
+        var store: LiveInputEngineStore<FakeEngine>!
+        store = LiveInputEngineStore<FakeEngine>(
+            makeEngine: { log.append("build"); return FakeEngine(isStale: false) },
+            primeInput: { _ in },
+            currentInputDeviceID: { 42 },
+            canCapture: { _ in
+                _ = store.beginPreparation()
+                return true
+            }
+        )
+        let hooks = LiveInputEngineStore<FakeEngine>.AdoptionHooks(
+            willHandOut: { _ in log.append("handOut") },
+            release: { _ in log.append("release") }
+        )
+        store.adopt(primed, inputDeviceID: 42, token: store.beginPreparation(), hooks: hooks)
+
+        let engine = store.makeEngine()
+        store.restore(engine)
+
+        XCTAssertFalse(engine === primed)
+        XCTAssertEqual(log, ["release", "build"])
+    }
 }

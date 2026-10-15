@@ -22,6 +22,7 @@ FARPROC WINAPI resolve(HMODULE, LPCSTR);
 NTSTATUS NTAPI create(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, PIO_STATUS_BLOCK,
                      PLARGE_INTEGER, ULONG, ULONG, ULONG, ULONG, PVOID, ULONG);
 static_assert(std::is_same_v<decltype(&setInformation), SetInformation>);
+void borrowedSnapshot(const char *, HANDLE);
 
 // Win64 SDK generic procedure addresses retain their representation, not their signature.
 template<typename To, typename From>
@@ -108,6 +109,9 @@ NTSTATUS NTAPI setInformation(HANDLE file, PIO_STATUS_BLOCK io, PVOID info, ULON
                     offsetof(RegistryRenameInformationV2, RootDirectory),
                     offsetof(RegistryRenameInformationV2, FileNameLength),
                     offsetof(RegistryRenameInformationV2, FileName));
+        std::printf("\n");
+        borrowedSnapshot("staging", file);
+        borrowedSnapshot("destination", root);
     }
     std::printf("\n");
     SetLastError(incoming);
@@ -123,6 +127,241 @@ NTSTATUS NTAPI setInformation(HANDLE file, PIO_STATUS_BLOCK io, PVOID info, ULON
 void failed(const char *operation, DWORD error) {
     ++failures;
     std::printf("diagnostic-error operation=%s error=%lu\n", operation, error);
+}
+
+void borrowedSnapshot(const char *label, HANDLE handle) {
+    const DWORD incoming = GetLastError();
+    PUBLIC_OBJECT_BASIC_INFORMATION access{};
+    ULONG returned = 0;
+    const NTSTATUS status = ::NtQueryObject(handle, ObjectBasicInformation, &access,
+                                            static_cast<ULONG>(sizeof(access)), &returned);
+    std::printf("borrowed phase=%s role=%s handle=%p accessQueryStatus=%08lx returnedBytes=%lu shareMaskNotQueried=1\n",
+                phase, label, handle, static_cast<unsigned long>(status), returned);
+    if (status < 0 || returned != sizeof(access)) {
+        failed("borrowed granted-access query", status < 0 ? RtlNtStatusToDosError(status) : ERROR_BAD_LENGTH);
+    } else {
+        std::printf("borrowed role=%s queriedGrantedAccess=%08lx\n", label, access.GrantedAccess);
+    }
+    FILE_ID_INFO identity{};
+    FILE_BASIC_INFO basic{};
+    if (!GetFileInformationByHandleEx(handle, FileIdInfo, &identity, sizeof(identity)) ||
+        !GetFileInformationByHandleEx(handle, FileBasicInfo, &basic, sizeof(basic))) {
+        failed("borrowed identity/basic query", GetLastError());
+    } else {
+        std::printf("borrowed role=%s volume=%llu id=", label, identity.VolumeSerialNumber);
+        for (BYTE byte : identity.FileId.Identifier) std::printf("%02x", static_cast<unsigned>(byte));
+        std::printf(" attributes=%08lx creation=%lld access=%lld write=%lld change=%lld\n",
+                    basic.FileAttributes, static_cast<long long>(basic.CreationTime.QuadPart),
+                    static_cast<long long>(basic.LastAccessTime.QuadPart),
+                    static_cast<long long>(basic.LastWriteTime.QuadPart),
+                    static_cast<long long>(basic.ChangeTime.QuadPart));
+    }
+    SetLastError(incoming);
+}
+
+bool controlClose(jsti::Handle &handle, const char *label) {
+    if (!handle.value || handle.value == INVALID_HANDLE_VALUE) return true;
+    const HANDLE owned = handle.value;
+    handle.value = nullptr;
+    const BOOL closed = CloseHandle(owned);
+    const DWORD error = closed ? ERROR_SUCCESS : GetLastError();
+    std::printf("primitive-close phase=%s role=%s success=%u error=%lu\n",
+                phase, label, static_cast<unsigned>(closed != FALSE), error);
+    if (!closed) failed("primitive owned CloseHandle", error);
+    return closed != FALSE;
+}
+
+bool controlIdentity(HANDLE handle, FILE_ID_INFO &identity) {
+    if (!GetFileInformationByHandleEx(handle, FileIdInfo, &identity, sizeof(identity))) {
+        failed("primitive identity", GetLastError());
+        return false;
+    }
+    return true;
+}
+
+bool sameControlIdentity(const FILE_ID_INFO &first, const FILE_ID_INFO &second) {
+    return first.VolumeSerialNumber == second.VolumeSerialNumber &&
+           std::memcmp(first.FileId.Identifier, second.FileId.Identifier, sizeof(first.FileId.Identifier)) == 0;
+}
+
+bool controlBytes(HANDLE directory, const std::wstring &name, const std::string &payload,
+                  const FILE_ID_INFO &expected, const PrivateSecurity &security, bool sealed) {
+    jsti::Handle reader;
+    std::string detail;
+    bool valid = openRelative(directory, name, FILE_READ_DATA | FILE_READ_ATTRIBUTES | READ_CONTROL,
+        FILE_OPEN, false, nullptr, reader, detail, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE);
+    if (!valid) std::printf("primitive-error phase=%s operation=read-open detail=%s\n", phase, detail.c_str());
+    if (valid) {
+        FILE_ID_INFO identity{};
+        std::array<char, 256> bytes{};
+        DWORD count = 0;
+        valid = registryFile(reader.value, security, sealed, detail) && controlIdentity(reader.value, identity) &&
+            sameControlIdentity(expected, identity);
+        if (valid && !ReadFile(reader.value, bytes.data(), static_cast<DWORD>(bytes.size()), &count, nullptr)) {
+            failed("primitive ReadFile", GetLastError());
+            valid = false;
+        }
+        valid = valid && count == payload.size() && std::memcmp(bytes.data(), payload.data(), count) == 0;
+    }
+    if (!valid) {
+        std::printf("primitive-error phase=%s operation=exact-bytes-identity-private-ACL detail=%s\n",
+                    phase, detail.c_str());
+        failed("primitive exact bytes/identity/private ACL", ERROR_INVALID_DATA);
+    }
+    return controlClose(reader, "exact-reader") && valid;
+}
+
+struct PrimitiveCase {
+    const char *name;
+    bool directoryDelete;
+    ULONG directoryShare;
+    ULONG stagingShare;
+    bool sealBefore;
+};
+
+void primitive(const std::wstring &base, const PrimitiveCase &test, bool legacyTuple,
+               const PrivateSecurity &security) {
+    const std::string label = std::string(legacyTuple ? "primitive-legacy-" : "primitive-v2-") + test.name;
+    phase = label.c_str();
+    const std::wstring history = base + L"-" + std::wstring(label.begin(), label.end());
+    char error[1024]{};
+    const int created = jsti_private_directory_create(jsti::utf8(history).c_str(), error, sizeof(error));
+    std::printf("primitive-create phase=%s result=%d detail=%s freshRootsRetained=1 notFullBackend=1\n",
+                phase, created, error);
+    if (created) { ++failures; return; }
+    std::vector<std::wstring> components;
+    std::vector<std::unique_ptr<jsti::Handle>> parents;
+    jsti::Handle heldHistory, directory, file;
+    std::string detail;
+    bool published = false, admitted = false, fileCreated = false;
+    const std::string payload = legacyTuple ? std::string("JSTIREG\1", 8) :
+        "JSTI native capability fixture, not a codec registration";
+    const ACCESS_MASK directoryAccess = READ_CONTROL | FILE_LIST_DIRECTORY | FILE_ADD_FILE |
+        FILE_TRAVERSE | FILE_READ_ATTRIBUTES | (test.directoryDelete ? DELETE : 0);
+    const ACCESS_MASK stagingAccess = FILE_WRITE_DATA | FILE_WRITE_ATTRIBUTES | FILE_READ_ATTRIBUTES |
+        READ_CONTROL | DELETE | (legacyTuple ? 0 : FILE_READ_DATA);
+    const unsigned changed = static_cast<unsigned>(!test.directoryDelete) +
+        static_cast<unsigned>(test.directoryShare != (FILE_SHARE_READ | FILE_SHARE_WRITE)) +
+        static_cast<unsigned>(test.stagingShare != FILE_SHARE_READ) + static_cast<unsigned>(!test.sealBefore);
+    std::printf("primitive-tuple phase=%s changedKnobs=%u declaredDirectoryAccess=%08lx "
+                "declaredDirectoryShare=%08lx declaredStagingAccess=%08lx declaredStagingShare=%08lx sealBefore=%u\n",
+                phase, changed, directoryAccess | SYNCHRONIZE, test.directoryShare,
+                stagingAccess | SYNCHRONIZE, test.stagingShare, static_cast<unsigned>(test.sealBefore));
+    do {
+        if (changed > 1) { failed("primitive one-knob invariant", ERROR_INVALID_DATA); break; }
+        if (!parsePath(jsti::utf8(history).c_str(), components, detail) ||
+            !openParents(components, parents, detail) ||
+            !openRelative(parents.back()->value, components.back(), FILE_TRAVERSE | FILE_READ_ATTRIBUTES | READ_CONTROL,
+                FILE_OPEN, true, nullptr, heldHistory, detail) ||
+            !verifyPrivate(heldHistory.value, security, detail) ||
+            !openRelative(heldHistory.value, L".recording-locations", directoryAccess,
+                FILE_CREATE, true, const_cast<SECURITY_DESCRIPTOR *>(&security.descriptor), directory, detail,
+                test.directoryShare) || !verifyPrivate(directory.value, security, detail)) {
+            std::printf("primitive-error phase=%s operation=admission detail=%s\n", phase, detail.c_str());
+            ++failures;
+            break;
+        }
+        FILE_ID_INFO directoryIdentity{}, fileIdentity{}, current{};
+        if (!controlIdentity(directory.value, directoryIdentity)) break;
+        const std::wstring target = history + L"\\.recording-locations\\registry.jloc";
+        const DWORD attributes = GetFileAttributesW(target.c_str());
+        const DWORD absentError = GetLastError();
+        if (attributes != INVALID_FILE_ATTRIBUTES || absentError != ERROR_FILE_NOT_FOUND) {
+            failed("primitive target must be absent", attributes == INVALID_FILE_ATTRIBUTES ? absentError : ERROR_ALREADY_EXISTS);
+            break;
+        }
+        const auto setter = heldRootSetInformation();
+        if (!setter) { failed("primitive typed resolver", ERROR_PROC_NOT_FOUND); break; }
+        fileCreated = openRelative(directory.value, L".pending-control", stagingAccess, FILE_CREATE, false,
+            const_cast<SECURITY_DESCRIPTOR *>(&security.descriptor), file, detail, test.stagingShare);
+        if (!fileCreated || !registryFile(file.value, security, false, detail) ||
+            !controlIdentity(file.value, fileIdentity)) {
+            std::printf("primitive-error phase=%s operation=staging detail=%s\n", phase, detail.c_str());
+            ++failures;
+            break;
+        }
+        DWORD written = 0;
+        if (!WriteFile(file.value, payload.data(), static_cast<DWORD>(payload.size()), &written, nullptr)) {
+            failed("primitive WriteFile", GetLastError());
+            break;
+        }
+        if (written != payload.size()) { failed("primitive short write", ERROR_WRITE_FAULT); break; }
+        if (test.sealBefore && !registryReadOnly(file.value, true, detail)) {
+            std::printf("primitive-error phase=%s operation=readonly-before detail=%s\n", phase, detail.c_str());
+            ++failures;
+            break;
+        }
+        if (!FlushFileBuffers(file.value)) { failed("primitive precommit flush", GetLastError()); break; }
+        if (
+            !controlBytes(directory.value, L".pending-control", payload, fileIdentity, security, test.sealBefore) ||
+            !verifyPrivate(heldHistory.value, security, detail) || !verifyPrivate(directory.value, security, detail) ||
+            !controlIdentity(directory.value, current) || !sameControlIdentity(directoryIdentity, current)) {
+            std::printf("primitive-error phase=%s operation=precommit detail=%s\n", phase, detail.c_str());
+            ++failures;
+            break;
+        }
+        alignas(RegistryRenameInformationV2) std::array<BYTE, 512> storage{};
+        auto *rename = reinterpret_cast<RegistryRenameInformationV2 *>(storage.data());
+        const std::wstring leaf = L"registry.jloc";
+        rename->ReplaceIfExists = FALSE;
+        rename->RootDirectory = directory.value;
+        rename->FileNameLength = static_cast<ULONG>(leaf.size() * sizeof(wchar_t));
+        std::memcpy(rename->FileName, leaf.data(), rename->FileNameLength);
+        const ULONG bytes = static_cast<ULONG>(std::max(sizeof(*rename),
+            offsetof(RegistryRenameInformationV2, FileName) + rename->FileNameLength));
+        IO_STATUS_BLOCK io{};
+        const NTSTATUS status = setter(file.value, &io, rename, bytes, heldRootRenameInformationClass);
+        published = status >= 0;
+        admitted = true;
+        std::printf("primitive-result phase=%s status=%08lx mapped=%lu published=%u noReplacement=1\n",
+                    phase, static_cast<unsigned long>(status), RtlNtStatusToDosError(status),
+                    static_cast<unsigned>(published));
+        if (published) {
+            bool sealed = test.sealBefore || registryReadOnly(file.value, true, detail);
+            if (!sealed) {
+                std::printf("primitive-error phase=%s operation=readonly-after detail=%s\n", phase, detail.c_str());
+                ++failures;
+            }
+            if (!FlushFileBuffers(file.value)) { failed("primitive postcommit flush", GetLastError()); sealed = false; }
+            if (!sealed || !controlBytes(directory.value, leaf, payload, fileIdentity, security, true)) {
+                failed("primitive postpublication verification", ERROR_INVALID_DATA);
+            }
+        } else {
+            if (static_cast<ULONG>(status) != 0xc0000043u) {
+                failed("primitive unexpected rename status", RtlNtStatusToDosError(status));
+            }
+            if (GetFileAttributesW(target.c_str()) != INVALID_FILE_ATTRIBUTES || GetLastError() != ERROR_FILE_NOT_FOUND) {
+                failed("primitive failed rename target absence", ERROR_INVALID_DATA);
+            }
+        }
+        if (!controlIdentity(directory.value, current) || !sameControlIdentity(directoryIdentity, current) ||
+            !verifyPrivate(directory.value, security, detail) || !verifyPrivate(heldHistory.value, security, detail)) {
+            failed("primitive final directory identity/private ACL", ERROR_INVALID_DATA);
+        }
+    } while (false);
+    if (!published && file.value && file.value != INVALID_HANDLE_VALUE) {
+        FILE_DISPOSITION_INFO disposition{TRUE};
+        const bool cleaned = registryReadOnly(file.value, false, detail) &&
+            SetFileInformationByHandle(file.value, FileDispositionInfo, &disposition, sizeof(disposition));
+        std::printf("primitive-unpublished-cleanup phase=%s markedOwnedHandle=%u detail=%s\n",
+                    phase, static_cast<unsigned>(cleaned), detail.c_str());
+        if (!cleaned) failed("primitive owned unpublished disposition", GetLastError());
+    }
+    controlClose(file, "staging");
+    if (fileCreated && !published) {
+        const std::wstring pending = history + L"\\.recording-locations\\.pending-control";
+        const DWORD attributes = GetFileAttributesW(pending.c_str());
+        const DWORD errorCode = GetLastError();
+        const bool absent = attributes == INVALID_FILE_ATTRIBUTES && errorCode == ERROR_FILE_NOT_FOUND;
+        std::printf("primitive-unpublished-cleanup phase=%s ownedLeafAbsentAfterClose=%u\n",
+                    phase, static_cast<unsigned>(absent));
+        if (!absent) failed("primitive unpublished owned leaf retained", ERROR_INVALID_DATA);
+    }
+    controlClose(directory, "destination");
+    controlClose(heldHistory, "history");
+    for (auto item = parents.rbegin(); item != parents.rend(); ++item) controlClose(**item, "ancestor");
+    std::printf("primitive-complete phase=%s renameReached=%u published=%u freshRootRetained=1\n",
+                phase, static_cast<unsigned>(admitted), static_cast<unsigned>(published));
 }
 
 void sid(const char *label, PSID value) {
@@ -348,6 +587,18 @@ int main() {
     result = jsti_private_directory_create(jsti::utf8(legacyHistory).c_str(), detail, sizeof(detail));
     std::printf("legacy-private-create result=%d detail=%s\n", result, detail);
     if (!result) legacy(legacyHistory, security); else ++failures;
+    // These fresh primitive observations never change a production baseline handle or argument.
+    constexpr PrimitiveCase controls[] = {
+        {"baseline", true, FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_SHARE_READ, true},
+        {"directory-no-delete", false, FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_SHARE_READ, true},
+        {"directory-share-delete", true, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, FILE_SHARE_READ, true},
+        {"staging-share-delete", true, FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_SHARE_READ | FILE_SHARE_DELETE, true},
+        {"seal-after-rename", true, FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_SHARE_READ, false}
+    };
+    for (bool legacyTuple : {false, true}) {
+        for (const auto &control : controls) primitive(base, control, legacyTuple, security);
+    }
+    phase = "complete";
     std::printf("diagnostic-failures=%u syntheticRootsRetained=1\n", failures);
     return failures ? 2 : 0;
 }

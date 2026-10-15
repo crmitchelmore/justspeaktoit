@@ -103,7 +103,15 @@ final class WindowsRecordingRegistryCapabilityTests: XCTestCase {
     func testNativeV2SyntheticReload() throws {
         #if os(Windows)
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        var nativeError = [CChar](repeating: 0, count: 1_024)
+        let created = nativeError.withUnsafeMutableBufferPointer {
+            jsti_private_directory_create(root.path, $0.baseAddress, $0.count)
+        }
+        guard created == 0 else {
+            throw NSError(domain: "JSTIWindowsRecordingRegistry", code: Int(created), userInfo: [
+                NSLocalizedDescriptionKey: String(cString: nativeError)
+            ])
+        }
         defer {
             do { try FileManager.default.removeItem(at: root) } catch {
                 XCTFail("Synthetic fixture cleanup failed: \(error)")

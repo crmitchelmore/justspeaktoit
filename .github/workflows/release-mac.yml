@@ -329,19 +329,27 @@ jobs:
         if: steps.receipt.outputs.status != 'verified'
         id: sentry
         run: |
+          # The combined upload below succeeds if either variant has files, so
+          # check each shipped variant on its own and name the missing one.
+          for dsyms in "$ARCHIVE_PATH/dSYMs" "$LEGACY_ARCHIVE_PATH/dSYMs"; do
+            if ! compgen -G "$dsyms/*.dSYM" > /dev/null; then
+              echo "::warning::No dSYMs in $dsyms; crashes from that variant will not be symbolicated."
+            fi
+          done
           {
             echo "release=justspeaktoit-mac@${RELEASE_VERSION}+${BUILD_NUMBER}"
             echo "artifact=mac-dsyms-${RELEASE_TAG}-${{ github.run_attempt }}"
           } >> "$GITHUB_OUTPUT"
 
+      # Kept for a week so a failed sentry-upload job can be re-run on its own.
       - name: Upload dSYMs for Sentry
         if: steps.receipt.outputs.status != 'verified'
         id: dsyms
         continue-on-error: true
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ steps.sentry.outputs.artifact }}
-          retention-days: 1
+          retention-days: 7
           if-no-files-found: error
           # Both paths live under $RUNNER_TEMP/<variant>/, so the artefact keeps
           # them apart as arm64/… and universal/….
@@ -370,15 +378,16 @@ jobs:
     permissions:
       contents: read
     steps:
+      # Pinned to reviewed commits: these run alongside the Sentry token.
       - name: Checkout
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           ref: ${{ inputs.manifest }}
           persist-credentials: false
 
       - name: Download dSYMs
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: ${{ needs.build-and-release.outputs.dsym-artifact }}
           path: ${{ runner.temp }}/dsyms

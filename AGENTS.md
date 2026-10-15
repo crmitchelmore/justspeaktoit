@@ -405,9 +405,9 @@ curl -s -X PUT -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" -H "Content-Type: a
 ```
 
 ## GitHub Actions Security
-- Secrets for privileged jobs belong in environments with a `main`-only deployment branch policy (`sentry`, `windows-signing`), not repository secrets.
+- New secrets belong in an environment with a `main`-only deployment branch policy (as `sentry` and `windows-signing` do), read only by the job that needs them. The Apple signing, notarisation, App Store and Sparkle secrets used by the release workflows are still repository secrets pending migration; do not add more.
 - `issue_comment` / `pull_request_review_comment` / `workflow_run` jobs that hold secrets must gate on `author_association` or `head_repository.full_name == github.repository` before running.
-- Pin third-party actions to a full commit SHA with a version comment; self-hosted runners are only for `main` pushes and approved same-repo SHAs.
+- Pin third-party actions to a full commit SHA with a version comment, and pin every action in a job that holds an environment secret; self-hosted runners are only for `main` pushes and approved same-repo SHAs.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->
 ## Beads Issue Tracker

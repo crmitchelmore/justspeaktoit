@@ -3,12 +3,16 @@ import SpeakDesktop
 
 package struct DesktopHostOwnedStartupSnapshot: Sendable {
     package enum Phase: Equatable, Sendable {
-        case preparing, prepared, releasing, cleanupFailed, dispositionFailed, finished
+        case preparing, prepared, adopting, recording, releasing, cleanupFailed, dispositionFailed, finished
     }
     package let requestID: UUID
     package let recordID: UUID
     package var phase = Phase.preparing
     package var attempt = 0
+    package var revision: UInt64 = 0
+    package var recording: DesktopHostOwnedRecording?
+    package var captureStatus: String?
+    package var persistenceFailure: String?
     package var token: DesktopPressCaptureToken?
     package var causes: [DesktopPressCaptureError] = []
     package var cleanupFailure: DesktopPressCaptureError?
@@ -22,6 +26,8 @@ package struct DesktopHostOwnedStartupDependency: Sendable {
     package var deliverTicket: @Sendable (DesktopPressCaptureOwnedRelease) async -> Void = { _ in }
     package var beforeFile: @Sendable (DesktopHostOwnedFileStep) async -> Void = { _ in }
     package var afterFinish: @Sendable () throws -> Void = {}
+    package var beforePCM: @Sendable (Int) throws -> Void = { _ in }
+    package var beforeOwnedDelivery: @Sendable () async -> Void = {}
 }
 
 struct DesktopHostOwnedStartupHandle: Sendable {
@@ -31,6 +37,11 @@ struct DesktopHostOwnedStartupHandle: Sendable {
     let admission: Task<Void, Never>
     var abortRequested = false
     var observedAttempt = 0
+    var observedRevision: UInt64 = 0
+    var phase = DesktopHostOwnedStartupSnapshot.Phase.preparing
+    var recording: DesktopHostOwnedRecording?
+    var promotion: Task<Void, Never>?
+    var stop: Task<Void, Never>?
 }
 
 actor DesktopHostOwnedStartupBarrier {
@@ -59,22 +70,24 @@ enum DesktopHostOwnedStartupNotice: Sendable {
     }
 }
 
-/// Owns an abandoned/prepared startup, never an active recording or native adapter.
+/// Retains one injected startup and its optional owned recording through durable disposition.
 package actor DesktopHostOwnedStartup {
     package nonisolated let id: UUID
-    private let identity: DesktopPressCaptureIdentity
-    private let admission: DesktopPressCaptureAdmission
+    let identity: DesktopPressCaptureIdentity
+    let admission: DesktopPressCaptureAdmission
     private let limits: DesktopPressCaptureBufferLimits
-    private let dependency: DesktopHostOwnedStartupDependency
-    private let file: DesktopHostOwnedStartupFile
-    private let permitOpening: @Sendable () async -> Bool
+    let dependency: DesktopHostOwnedStartupDependency
+    let file: DesktopHostOwnedStartupFile
+    let permitOpening: @Sendable () async -> Bool
+    let acceptRecording: @Sendable (DesktopHostOwnedStartupSnapshot) async -> Bool
     private var changed: (@Sendable (DesktopHostOwnedStartupSnapshot) async -> Void)?
-    private var state: DesktopHostOwnedStartupSnapshot
-    private var lease: DesktopPressCaptureLease?
-    private var ticket: DesktopPressCaptureOwnedRelease?
-    private var inbox: DesktopEventDispatcher<DesktopHostOwnedStartupNotice>?
+    var state: DesktopHostOwnedStartupSnapshot
+    var lease: DesktopPressCaptureLease?
+    var ticket: DesktopPressCaptureOwnedRelease?
+    var capture = DesktopHostOwnedRecordingState()
+    var inbox: DesktopEventDispatcher<DesktopHostOwnedStartupNotice>?
     private var operation: Task<Void, Never>?
-    private var abortRequested = false
+    var abortRequested = false
     private var admissionEnded = false
     private var dispositionEnded = false
     private var dispositionWaiters: [CheckedContinuation<Void, Never>] = []
@@ -84,6 +97,7 @@ package actor DesktopHostOwnedStartup {
         limits: DesktopPressCaptureBufferLimits, dependency: DesktopHostOwnedStartupDependency,
         file: DesktopHostOwnedStartupFile,
         permitOpening: @escaping @Sendable () async -> Bool,
+        acceptRecording: @escaping @Sendable (DesktopHostOwnedStartupSnapshot) async -> Bool,
         changed: @escaping @Sendable (DesktopHostOwnedStartupSnapshot) async -> Void
     ) {
         self.id = id
@@ -93,6 +107,7 @@ package actor DesktopHostOwnedStartup {
         self.dependency = dependency
         self.file = file
         self.permitOpening = permitOpening
+        self.acceptRecording = acceptRecording
         self.changed = changed
         self.state = .init(requestID: id, recordID: recordID)
     }
@@ -133,6 +148,9 @@ package actor DesktopHostOwnedStartup {
     func abort() {
         guard state.phase != .finished else { return }
         abortRequested = true
+        state.recording = nil
+        state.captureStatus = nil
+        capture.promotion?.cancel()
         if admissionEnded { beginRelease() }
     }
 
@@ -163,13 +181,15 @@ package actor DesktopHostOwnedStartup {
         if !dispositionEnded { await withCheckedContinuation { dispositionWaiters.append($0) } }
     }
 
-    private func beginRelease() {
+    func beginRelease() {
         guard operation == nil, state.phase != .cleanupFailed, state.phase != .dispositionFailed,
               state.phase != .finished else { return }
         state.phase = .releasing
+        state.recording = nil
         let ticket = ticket
         let attempt = state.attempt
         operation = Task { [self] in
+            if capture.promotion != nil { await notify() }
             if let ticket { await release(ticket, retry: false, attempt: attempt) } else { await dispose() }
         }
     }
@@ -184,12 +204,15 @@ package actor DesktopHostOwnedStartup {
             state.contractFailure = "Unexpected release error: \(error.localizedDescription)"
             failure = .cleanupFailed(String(describing: error))
         }
+        await capture.promotion?.value
         let barrier = DesktopHostOwnedStartupBarrier()
         inbox?.submit(.barrier(barrier))
         await barrier.value()
+        await drainPCMFailures()
         guard state.attempt == attempt, state.token == ticket.token else { return }
         if let failure {
             state.cleanupFailure = failure
+            state.captureStatus = nil
             state.phase = .cleanupFailed
             operation = nil
             await notify()
@@ -209,6 +232,9 @@ package actor DesktopHostOwnedStartup {
         case .barrier: break
         }
         abortRequested = true
+        state.recording = nil
+        state.captureStatus = nil
+        capture.promotion?.cancel()
         if admissionEnded { beginRelease() }
         await notify()
     }
@@ -226,13 +252,20 @@ package actor DesktopHostOwnedStartup {
     }
 
     private func dispose() async {
+        if capture.stoppedNormally, capture.dispositionCaptured == nil, !(await permitOpening()) {
+            abortRequested = true
+        }
         let causes = state.causes.map { String(describing: $0) }
-        let message = (causes + [state.contractFailure].compactMap { $0 }).joined(separator: " ")
+        let message = (causes + [state.contractFailure, capture.failure].compactMap { $0 }).joined(separator: " ")
+        let captured = capture.dispositionCaptured ?? (capture.stoppedNormally && !abortRequested && message.isEmpty)
+        capture.dispositionCaptured = captured
         let saved = await file.dispose(
-            message: message.isEmpty ? "Owned capture startup abandoned. Audio retained." : message
+            message: message.isEmpty ? "Owned capture startup abandoned. Audio retained." : message,
+            captured: captured
         )
         state.audioFailure = await file.audioFailure
         state.historyFailure = await file.historyFailure
+        state.captureStatus = await file.record().failure
         state.phase = saved ? .finished : .dispositionFailed
         operation = nil
         await notify()
@@ -241,6 +274,7 @@ package actor DesktopHostOwnedStartup {
             ticket = nil
             lease = nil
             inbox = nil
+            capture = DesktopHostOwnedRecordingState()
             dispositionEnded = true
             let waiters = dispositionWaiters
             dispositionWaiters.removeAll()
@@ -248,7 +282,10 @@ package actor DesktopHostOwnedStartup {
         }
     }
 
-    private func notify() async { await changed?(state) }
+    func notify() async {
+        state.revision &+= 1
+        await changed?(state)
+    }
 }
 
 extension DesktopHostController {
@@ -279,6 +316,7 @@ extension DesktopHostController {
             id: id, recordID: record.id, identity: identity, admission: admission,
             limits: limits, dependency: dependency, file: file,
             permitOpening: { [self] in await permitOwnedStartupOpening(id) },
+            acceptRecording: { [self] snapshot in await acceptOwnedRecording(snapshot) },
             changed: { [self] snapshot in await ownedStartupChanged(snapshot) }
         )
         let abort = DesktopEventDispatcher<Void> { _ in await owner.abort() }
@@ -299,16 +337,22 @@ extension DesktopHostController {
 
     func ownedStartupChanged(_ snapshot: DesktopHostOwnedStartupSnapshot) {
         guard ownedCaptureStartup?.id == snapshot.requestID,
-              snapshot.attempt >= (ownedCaptureStartup?.observedAttempt ?? 0) else { return }
+              snapshot.attempt >= (ownedCaptureStartup?.observedAttempt ?? 0),
+              snapshot.revision > (ownedCaptureStartup?.observedRevision ?? 0) else { return }
         ownedCaptureStartup?.observedAttempt = snapshot.attempt
+        ownedCaptureStartup?.observedRevision = snapshot.revision
+        ownedCaptureStartup?.phase = snapshot.phase
+        let recording = closed || ownedCaptureStartup?.abortRequested == true ? nil : snapshot.recording
+        ownedCaptureStartup?.recording = recording
         if snapshot.phase == .finished {
             ownedCaptureStartup = nil
             finishBusyOperation()
         }
-        if !closed, snapshot.phase != .prepared {
+        if !closed, snapshot.phase != .prepared, snapshot.phase != .adopting, snapshot.phase != .recording {
             let failures = snapshot.causes.map { String(describing: $0) }
-                + [snapshot.contractFailure, snapshot.audioFailure, snapshot.historyFailure].compactMap { $0 }
-            update(failures.isEmpty ? "Owned capture startup abandoned. Audio retained."
+                + [snapshot.contractFailure, snapshot.persistenceFailure, snapshot.audioFailure,
+                   snapshot.historyFailure].compactMap { $0 }
+            update(failures.isEmpty ? snapshot.captureStatus ?? "Owned capture startup abandoned. Audio retained."
                 : failures.joined(separator: " "), state: 0)
         }
     }

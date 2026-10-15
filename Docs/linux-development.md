@@ -628,7 +628,7 @@ reservation. Native stop-time partial flush remains fenced and separately
 unqualified, not made lossless by span metadata.
 
 The injected package/internal Host startup transaction has no production factory
-and does not activate production capture or a successful recording. It retains the real
+and does not activate production capture or successful dictation. It retains the real
 owned ticket through early failure/ticket-delivery races, uses request-specific
 failure/barrier acknowledgement and joins actual native cleanup before WAV finish.
 Cleanup failure retains exclusion and permits only explicit owned retry, even
@@ -637,9 +637,17 @@ settings queue waits on file/native IO. Finish is attempted once; independent
 audio/History errors remain visible, and failed save retains the record/file
 owner until explicit disposition retry. Closed persistence never presents UI.
 See the [shared startup contract](windows-development.md) for bounds and limits.
+An explicitly requested owned recording now uses that same owner's real Lease
+reserve/readiness/adoption, with a separate Host descriptor rather than a fake
+synchronous capture adapter. Its file-only PCM sink reuses the bounded relay
+drain and canonical Context.receive. The memory model includes BOTH aligned
+100 ms scratch and Context's temporary Data copy beyond the relay byte budget.
+No per-frame Task/second PCM queue, provider or positive cue is installed.
+Captured audio is annotated as non-dictation/retryable in real History; writer
+failure, actual native cleanup, WAV finish and History save remain distinct.
 This leaves synchronous normal/HF/comparison capture, canonical PCM ingestion,
 silence clocks and fence-before-close unchanged. Native owner/callback lifetime,
-permission/device/readiness, active-recording handoff and final flush still
+permission/device/readiness, production recording handoff and final flush still
 require separate qualification and activation.
 
 `.github/workflows/linux.yml` (ubuntu-24.04, `swift:6.2.3-noble`, pinned by

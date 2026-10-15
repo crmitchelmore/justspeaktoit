@@ -187,7 +187,7 @@ package enum DesktopHostOwnedFileStep: Sendable {
     case create, initialSave, finish, finalSave
 }
 
-/// No file or callback context escapes this actor. It never receives/adopts PCM.
+/// The only writer handoff is a synchronous capability on the bounded relay drain.
 package actor DesktopHostOwnedStartupFile {
     private let store: DesktopRecordingStore
     private let url: URL
@@ -196,6 +196,7 @@ package actor DesktopHostOwnedStartupFile {
     private let afterFinish: @Sendable () throws -> Void
     private var file: PCMRecordingFile?
     private var finishAttempted = false
+    private var capturedStatus: String?
     private var retained: DesktopRecordingStore.Record
     package private(set) var finishCount = 0
     package private(set) var audioFailure: String?
@@ -226,7 +227,9 @@ package actor DesktopHostOwnedStartupFile {
         }
     }
 
-    func dispose(message: String) async -> Bool {
+    func dispose(message: String, captured: Bool = false) async -> Bool {
+        let message = captured
+            ? "Audio captured. No dictation or transcription was requested. Audio retained for retry." : message
         retained = DesktopHostStartupRecord.failed(retained, message: message)
         if !finishAttempted {
             finishAttempted = true
@@ -234,13 +237,19 @@ package actor DesktopHostOwnedStartupFile {
                 await before(.finish)
                 finishCount += 1
                 do {
-                    _ = try file.finish()
+                    let duration = try file.finish()
+                    if captured {
+                        retained.recordedDuration = duration
+                        capturedStatus = duration == 0 || file.isDigitalSilence
+                            ? "No audio signal captured. No dictation was requested. Audio retained." : message
+                    }
                     try afterFinish()
                 } catch {
                     audioFailure = error.localizedDescription
                 }
             }
         }
+        if let capturedStatus { retained.failure = capturedStatus }
         if let audioFailure {
             retained.failure = "\(message) Audio finalization failed: \(audioFailure)"
         }
@@ -256,4 +265,22 @@ package actor DesktopHostOwnedStartupFile {
     }
 
     package func record() -> DesktopRecordingStore.Record { retained }
+
+    func delivery(
+        token: DesktopPressCaptureToken, identity: DesktopPressCaptureIdentity,
+        before: @escaping @Sendable (Int) throws -> Void, failure: @escaping @Sendable (String) -> Void
+    ) throws -> @Sendable (DesktopPressCapturePCMDelivery) -> Void {
+        guard !finishAttempted, let file else { throw DesktopPressCaptureError.invalidPhase }
+        let memory = try DesktopHostOwnedPCMMemory(sampleRate: rate)
+        let context = DesktopCaptureContext(file: file, sampleRate: rate, onFailure: failure)
+        return { delivery in
+            guard delivery.token == token, delivery.identity == identity else {
+                context.fail("Mismatched owned PCM delivery.")
+                return
+            }
+            memory.deliver(delivery.data, before: {
+                do { try before($0) } catch { context.fail(error.localizedDescription) }
+            }, receive: { context.receive($0, count: $1) })
+        }
+    }
 }

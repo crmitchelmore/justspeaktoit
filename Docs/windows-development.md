@@ -327,7 +327,24 @@ late-cleanup evidence before effective capability or settings exposure.
 
 The package/internal `admitOwnedCaptureStartup` seam is explicitly injected and
 has no production factory. It only prepares or abandons a startup: it never
-creates an active recording, adopts PCM, starts a provider or plays a positive cue.
+creates a legacy active recording, starts a provider or plays a positive cue.
+The separately requested `requestOwnedRecording` promotes its existing owner
+through reserve, real readiness and PCM adoption into a distinct Host
+`ownedRecording` descriptor, not a synchronous `Recording` adapter. The same
+Lease/ticket, file owner, failure inbox and busy slot survive handoff and stop.
+This capture-only route remains unavailable by default and is not production
+dictation/HF/comparison/hotkey integration. Its History annotation explicitly
+retains audio for retry without fabricating a transcript or completed dictation.
+PCM writes use the existing bounded relay's synchronous drain and canonical
+`DesktopCaptureContext.receive`, not per-frame Tasks or a second PCM queue.
+Memory is bounded by the relay budget plus TWO 100 ms blocks: aligned scratch
+and the canonical context's temporary Data copy, plus bounded bookkeeping.
+Producer/native allocations are separate. Latched PCM failure cannot become
+healthy capture; actual sink drain and native release precede single WAV finish
+and save. The file actor issues only a private writer capability to that drain.
+Phase revisions and release-attempt ordinals fence stale handoffs and notices.
+No positive cues, provider calls, insertion, physical timestamp inference or
+lossless native final-flush claim is enabled by this injected seam.
 An immutable request/record slot and dedicated lease failure sink precede
 `beginOwned`; the real returned ticket is retained even when failure/cancellation
 arrives before delivery. A bounded FIFO failure inbox and explicit acknowledgement
@@ -344,7 +361,7 @@ uses the captured store without presentation. Existing synchronous normal,
 hands-free and comparison capture paths and their PCM/silence behavior are unchanged.
 Synthetic Host/package tests and C-stub graphs do not qualify native ownership,
 permission, endpoint identity, readiness, physical timing or final-partial flush.
-Successful owned recording, provider/tail/context handoff and native activation
+Production owned recording, provider/tail/context handoff and native activation
 remain separately unselected.
 
 Automation is off by default. Settings → Allow automation starts a named-pipe

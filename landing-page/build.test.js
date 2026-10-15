@@ -24,6 +24,9 @@ test('deployed styles and motion get new URLs only when their content changes', 
     assert.ok(!html.includes('href="/site.css"'), 'Do not reuse the stale stylesheet URL');
     assert.deepEqual(await readFile(path.join(fixture, 'dist', stylesheet)),
       await readFile(path.join(fixture, 'site.css')), 'The referenced asset must contain current CSS');
+    assert.equal((html.match(/class="brand-wordmark"/g) || []).length, 2, 'Only the existing header/footer wordmarks are accented');
+    assert.deepEqual(await readFile(path.join(fixture, 'dist/images/wordmark-white-1.5x.jpg')),
+      await readFile(path.join(fixture, 'images/wordmark-white-1.5x.jpg')), 'Preserve the HDR gain map byte-for-byte');
     const motion = html.match(/src="\/(voice-motion\.[a-f0-9]{12}\.js)"/)?.[1];
     assert.ok(motion, 'Production HTML must reference fingerprinted motion');
     assert.ok(!html.includes('src="/voice-motion.js"'), 'Do not reuse a stale script URL');
@@ -42,4 +45,19 @@ test('deployed styles and motion get new URLs only when their content changes', 
   const last = await build();
   assert.notEqual(last.motion, next.motion, 'A motion change must invalidate the old script URL');
   assert.equal(last.stylesheet, next.stylesheet, 'A script change should not invalidate CSS');
+});
+
+
+test('HDR wordmarks are narrowly gated and retain readable fallbacks', async () => {
+  const css = await readFile(path.join(source, 'site.css'), 'utf8');
+  assert.match(css, /@media screen and \(dynamic-range: high\) and \(prefers-color-scheme: dark\) and \(forced-colors: none\)/);
+  const accent = css.slice(css.indexOf('/* A tiny 1.5x HDR accent'));
+  assert.match(accent, /@supports \(\(background-clip: text\) or \(-webkit-background-clip: text\)\)/);
+  assert.match(accent, /background-color: var\(--text\)/);
+  assert.match(accent, /padding: \.12em \.08em/);
+  assert.match(accent, /\.brand-wordmark::selection/);
+  assert.match(accent, /-webkit-text-fill-color: HighlightText/);
+  assert.match(accent, /@media print, \(forced-colors: active\)/);
+  assert.match(accent, /-webkit-text-fill-color: currentColor/);
+  assert.ok(!accent.includes('h1') && !accent.includes('hero'), 'Do not accent hero or body copy');
 });

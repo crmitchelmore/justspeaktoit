@@ -832,3 +832,34 @@ kbd {
 }
 
 .footer-bottom a { color: var(--text-dim); }
+
+/* A tiny 1.5x HDR accent on existing near-white wordmarks, never body copy.
+   Opaque white remains visible while the gain-map image loads or fails. */
+@media screen and (dynamic-range: high) and (prefers-color-scheme: dark) and (forced-colors: none) {
+  @supports ((background-clip: text) or (-webkit-background-clip: text)) {
+    .brand-wordmark {
+      display: inline-block;
+      padding: .12em .08em;
+      margin: -.12em -.08em;
+      background-color: var(--text);
+      background-image: url("/images/wordmark-white-1.5x.jpg");
+      background-size: 100% 100%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      -webkit-text-fill-color: transparent;
+    }
+    .brand-wordmark::selection {
+      background: Highlight;
+      color: HighlightText;
+      -webkit-text-fill-color: HighlightText;
+    }
+  }
+}
+@media print, (forced-colors: active) {
+  .brand-wordmark {
+    background: none;
+    color: inherit;
+    -webkit-text-fill-color: currentColor;
+  }
+}

@@ -109,7 +109,19 @@ final class WindowsRecordingRegistryCapabilityTests: XCTestCase {
                 XCTFail("Synthetic fixture cleanup failed: \(error)")
             }
         }
-        try WindowsRecordingRegistry.verifyV2SyntheticReload(history: root)
+        let diagnostics = ProcessInfo.processInfo.environment["JSTI_REGISTRY_DIAGNOSTICS"] == "1"
+        if diagnostics {
+            print("REGISTRY DIAGNOSTIC nativeV2 historyURL=\(root.absoluteString) path=\(root.path)")
+            print("REGISTRY DIAGNOSTIC nativeV2 standardized=\(root.standardizedFileURL.path)")
+            print("REGISTRY DIAGNOSTIC nativeV2 verifyBegin")
+        }
+        do {
+            try WindowsRecordingRegistry.verifyV2SyntheticReload(history: root)
+            if diagnostics { print("REGISTRY DIAGNOSTIC nativeV2 verifyReturned") }
+        } catch {
+            if diagnostics { print("REGISTRY DIAGNOSTIC nativeV2 error=\(String(reflecting: error))") }
+            throw error
+        }
         #else
         throw XCTSkip("Native NTFS C/Swift runtime is not qualified by this stub build.")
         #endif

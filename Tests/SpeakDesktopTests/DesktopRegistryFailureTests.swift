@@ -142,6 +142,9 @@ final class DesktopRegistryFailureTests: XCTestCase {
             XCTAssertThrowsError(try DesktopLocalRecordingPersistence.initialize(
                 historyDirectory: fixture.history, using: .init { _, _ in probe }
             )) { error in
+                self.diagnoseInjectedFailure(
+                    error, context: "injectedEffect=\(effect)", primaryLabel: "preappendPrimary", includeClose: true
+                )
                 guard let cleanup = error as? DesktopRecordingLocationCleanupFailure,
                       let publication = cleanup.primaryError as? DesktopRecordingRegistryWriteFailure else {
                     return XCTFail("Typed publication and teardown causes must survive initialization failure.")
@@ -165,6 +168,7 @@ final class DesktopRegistryFailureTests: XCTestCase {
         XCTAssertThrowsError(try DesktopLocalRecordingPersistence.initialize(
             historyDirectory: fixture.history, using: .init { _, _ in postcommit }
         )) { error in
+            self.diagnoseInjectedFailure(error, context: "postcommitProbe", primaryLabel: "postcommitPrimary")
             guard let cleanup = error as? DesktopRecordingLocationCleanupFailure,
                   let publication = cleanup.primaryError as? DesktopRecordingRegistryWriteFailure,
                   case .published = publication.effect else {
@@ -176,6 +180,18 @@ final class DesktopRegistryFailureTests: XCTestCase {
         }
         XCTAssertEqual(postcommit.appends, 1)
         XCTAssertEqual(postcommit.closes, 1)
+    }
+
+    private func diagnoseInjectedFailure(
+        _ error: Error, context: String, primaryLabel: String, includeClose: Bool = false
+    ) {
+        guard ProcessInfo.processInfo.environment["JSTI_REGISTRY_DIAGNOSTICS"] == "1" else { return }
+        print("REGISTRY DIAGNOSTIC \(context) error=\(String(reflecting: error))")
+        guard let cleanup = error as? DesktopRecordingLocationCleanupFailure else { return }
+        print("REGISTRY DIAGNOSTIC \(primaryLabel)=\(String(reflecting: cleanup.primaryError))")
+        if includeClose {
+            print("REGISTRY DIAGNOSTIC closeError=\(String(reflecting: cleanup.cleanupError))")
+        }
     }
 
     func testAnonymousAbortLeavesDecoyUntouchedAndClosesOnlyOwnedDescriptor() throws {
@@ -264,13 +280,27 @@ private final class RegistryWriteFailureProbe: DesktopRecordingRegistryNamespace
     func read(_: String) throws -> Data { throw DesktopRecordingRegistryError.missing }
     func append(_: String, data _: Data, checkCancellation _: () throws -> Void) throws {
         appends += 1
+        if ProcessInfo.processInfo.environment["JSTI_REGISTRY_DIAGNOSTICS"] == "1" {
+            print("REGISTRY DIAGNOSTIC probeAppend count=\(appends) succeeds=\(appendSucceeds)")
+        }
         if appendSucceeds { return }
         throw DesktopRecordingRegistryWriteFailure(
             primaryError: RegistryInjectedFailure.append, cleanupError: RegistryInjectedFailure.cleanup, effect: effect
         )
     }
-    func validate() throws { throw RegistryInjectedFailure.validation }
-    func close() throws { closes += 1; throw RegistryInjectedFailure.close }
+    func validate() throws {
+        if ProcessInfo.processInfo.environment["JSTI_REGISTRY_DIAGNOSTICS"] == "1" {
+            print("REGISTRY DIAGNOSTIC probeValidate")
+        }
+        throw RegistryInjectedFailure.validation
+    }
+    func close() throws {
+        closes += 1
+        if ProcessInfo.processInfo.environment["JSTI_REGISTRY_DIAGNOSTICS"] == "1" {
+            print("REGISTRY DIAGNOSTIC probeClose count=\(closes)")
+        }
+        throw RegistryInjectedFailure.close
+    }
 }
 
 private final class RegistryCancellationProbe: @unchecked Sendable {

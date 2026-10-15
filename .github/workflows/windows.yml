@@ -128,12 +128,85 @@ jobs:
           swift build --configuration release --product SpeakWindows --jobs 4
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Observe synthetic held-root registry boundaries
+        id: registry-diagnostics
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        continue-on-error: true
+        timeout-minutes: 3
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $folder = New-Item -ItemType Directory -Path registry-diagnostic
+          $compiler = (Get-Command clang-cl -ErrorAction Stop).Source
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $visualStudio = & $vswhere -latest -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -ne 0 -or -not $visualStudio) { throw 'Existing VC toolchain not found.' }
+          $vcvars = Join-Path $visualStudio 'VC\Auxiliary\Build\vcvarsall.bat'
+          $source = Join-Path $env:GITHUB_WORKSPACE 'scripts\registry-native-boundary-diagnostic.cpp'
+          $exe = Join-Path $folder.FullName 'registry-native-boundary-diagnostic.exe'
+          $object = Join-Path $folder.FullName 'registry-native-boundary-diagnostic.obj'
+          $setup = Join-Path $folder.FullName 'sdk-environment.log'
+          $command = 'call "{0}" amd64 10.0.26100.0 > "{1}" 2>&1 && (set INCLUDE & set LIB & set WindowsSdkVersion & set VCToolsVersion) >> "{1}" && "{2}" /nologo /std:c++17 /EHsc /MD /W4 /WX /I"{3}" "{4}" /Fe:"{5}" /Fo:"{6}" /link ntdll.lib advapi32.lib ole32.lib' -f `
+            $vcvars, $setup, $compiler, (Join-Path $env:GITHUB_WORKSPACE 'Sources\CWindowsSupport\include'), $source, $exe, $object
+          $records = [Collections.Generic.List[object]]::new()
+          $inputs = @(
+            $source, 'Sources\CWindowsSupport\WindowsFileSecurity.cpp',
+            'Sources\CWindowsSupport\WindowsSupportInternal.hpp', 'Sources\CWindowsSupport\include\CWindowsSupport.h',
+            $compiler, $vcvars
+          ) | ForEach-Object { [ordered]@{ path = $_; sha256 = (Get-FileHash -LiteralPath $_).Hash } }
+          function Invoke-DiagnosticProcess($name, $file, $arguments, $seconds) {
+            $info = [Diagnostics.ProcessStartInfo]::new($file)
+            $info.Arguments = $arguments
+            $info.UseShellExecute = $false
+            $info.RedirectStandardOutput = $true
+            $info.RedirectStandardError = $true
+            $begin = [DateTimeOffset]::UtcNow.ToString('o')
+            $process = [Diagnostics.Process]::Start($info)
+            $stdout = $process.StandardOutput.ReadToEndAsync()
+            $stderr = $process.StandardError.ReadToEndAsync()
+            $finished = $process.WaitForExit($seconds * 1000)
+            if (-not $finished) { $process.Kill($true); $process.WaitForExit() }
+            $output = $stdout.GetAwaiter().GetResult()
+            $errors = $stderr.GetAwaiter().GetResult()
+            [IO.File]::WriteAllText((Join-Path $folder.FullName "$name.stdout.log"), $output)
+            [IO.File]::WriteAllText((Join-Path $folder.FullName "$name.stderr.log"), $errors)
+            $records.Add([ordered]@{
+              name = $name; executable = $file; arguments = $arguments; pid = $process.Id
+              startedUTC = $begin; endedUTC = [DateTimeOffset]::UtcNow.ToString('o')
+              exit = $process.ExitCode; timedOut = -not $finished; budgetSeconds = $seconds
+            })
+            $output
+            $errors
+            if (-not $finished -or $process.ExitCode -ne 0) { throw "$name failed; no retry." }
+          }
+          try {
+            & $compiler --version
+            if ($LASTEXITCODE -ne 0) { throw 'Compiler version read failed.' }
+            Invoke-DiagnosticProcess 'compile-link' $env:ComSpec ('/d /s /c "' + $command + '"') 120
+            Get-FileHash -LiteralPath $exe, $object | Format-List
+            Invoke-DiagnosticProcess 'native-once' $exe '' 15
+          } finally {
+            [ordered]@{
+              diagnosticOnly = $true; checkoutHEAD = (git rev-parse HEAD); checkoutTree = (git rev-parse 'HEAD^{tree}')
+              inputs = $inputs; commands = $records
+              outputs = @(Get-ChildItem $folder -File | ForEach-Object {
+                [ordered]@{path = $_.FullName; sha256 = (Get-FileHash $_.FullName).Hash}
+              })
+            } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $folder.FullName 'process-binding.json') -Encoding utf8
+          }
+
       - name: Test shared core, desktop workflow and native adapters
         id: native-tests
+        env:
+          JSTI_REGISTRY_DIAGNOSTICS: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
         run: |
           swift test --configuration release --jobs 4 --xunit-output windows-tests.xml 2>&1 |
             Tee-Object -FilePath windows-native-tests.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Preserve failed diagnostic status without suppressing Swift assertions
+        if: ${{ always() && steps.registry-diagnostics.outcome == 'failure' }}
+        run: throw 'Synthetic registry diagnostics failed; inspect retained evidence. No retry or qualification.'
 
       - name: Verify native WinHTTP WebSocket transport against loopback peer
         id: websocket-probe
@@ -314,6 +387,7 @@ jobs:
             windows-websocket-tests.xml
             windows-websocket-*.log
             windows-local-transcription.log
+            registry-diagnostic/
           if-no-files-found: ignore
           retention-days: 14
 
@@ -351,6 +425,16 @@ jobs:
           persist-credentials: false
       - name: Verify portable source boundary
         run: python3 scripts/verify-portable-core-boundary.py
+      - name: Observe old-Git trust on isolated foreign-owned fixture
+        id: registry-git-diagnostics
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        continue-on-error: true
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/registry-git-trust-diagnostic.py --output "$RUNNER_TEMP/registry-git-diagnostic.json"
+          cat "$RUNNER_TEMP/registry-git-diagnostic.json"
       - name: Test portable graph with native Linux Swift
         shell: bash
         run: |
@@ -376,3 +460,17 @@ jobs:
             swift --version
             swift test --configuration release --jobs 4
           ' _ "$work"
+      - name: Upload isolated Git diagnostic evidence
+        if: ${{ always() && github.event_name == 'workflow_dispatch' }}
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: registry-git-diagnostic-${{ github.sha }}
+          path: ${{ runner.temp }}/registry-git-diagnostic.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Preserve failed isolated diagnostic status
+        if: ${{ always() && steps.registry-git-diagnostics.outcome == 'failure' }}
+        shell: bash
+        run: |
+          echo "Isolated Git diagnostic failed; no retry or checkout trust repair." >&2
+          exit 1

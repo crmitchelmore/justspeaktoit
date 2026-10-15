@@ -114,7 +114,40 @@ struct RecordingLocationFixture {
                 at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]
             )
         }
+        #if os(Windows)
+        if ProcessInfo.processInfo.environment["JSTI_REGISTRY_DIAGNOSTICS"] == "1" {
+            diagnoseCodec()
+        }
+        #endif
     }
+
+    #if os(Windows)
+    private func diagnoseCodec() {
+        let prefix = "REGISTRY DIAGNOSTIC fixture=\(root.path)"
+        print("\(prefix) historyURL=\(history.absoluteString) path=\(history.path)")
+        print("\(prefix) standardized=\(history.standardizedFileURL.path) components=\(history.pathComponents)")
+        print("\(prefix) leadingSlash=\(history.path.hasPrefix("/")) byteCount=\(history.path.utf8.count)")
+        print("\(prefix) isFileURL=\(history.isFileURL) host=\(String(describing: history.host))")
+        print("\(prefix) query=\(String(describing: history.query)) fragment=\(String(describing: history.fragment))")
+        print("\(prefix) nul=\(history.path.utf8.contains(0))")
+        print("\(prefix) legacyDerivedHistory=\(root.appendingPathComponent("Synthetic Native History").path)")
+        var stage = "identity"
+        do {
+            let identity = try DesktopRecordingLocationIdentity.directory(history)
+            let binding = DesktopRecordingLocationCodec.Binding(
+                id: UUID(), history: history, historyIdentity: identity, namespaceIdentity: identity
+            )
+            stage = "encode"
+            let bytes = try DesktopRecordingLocationCodec.encode(.init(binding: binding, payload: .header))
+            print("\(prefix) diagnosticProbeEncodeBytes=\(bytes.count)")
+            stage = "decode"
+            let decoded = try DesktopRecordingLocationCodec.decode(bytes)
+            print("\(prefix) diagnosticProbeBindingEqual=\(decoded.binding == binding)")
+        } catch {
+            print("\(prefix) diagnosticProbeStage=\(stage) error=\(String(reflecting: error))")
+        }
+    }
+    #endif
 
     func store() throws -> DesktopRecordingStore {
         try DesktopRecordingStore(

@@ -265,9 +265,14 @@ def volume_identity(value, labels):
     return {key: value[key] for key in ("Name", "Driver", "Scope", "Labels", "Options", "CreatedAt")}
 
 
-def container_identity(value, labels, image_id, volume, source, recipe):
+def container_identity(value, labels, image_id, volume, source, recipe, created=False):
     require(re.fullmatch(r"[0-9a-f]{64}", value["Id"]), "Invalid container ID")
     config, host = value["Config"], value["HostConfig"]
+    # Moby clears the default false to null on start when OomKillDisable is unsupported (cgroup v2).
+    # Canonicalize only the copied proof; creation must still observe the exact false default.
+    require("OomKillDisable" in host and (host["OomKillDisable"] is False or
+            (host["OomKillDisable"] is None and not created)), "Unexpected OomKillDisable observation")
+    host = {**host, "OomKillDisable": False}
     require({key: value for key, value in config["Labels"].items() if key.startswith("jsti.registry.")} == labels
             and config["Image"] == IMAGE and value["Image"] == image_id,
             "Container ticket/nonce/image mismatch")
@@ -489,7 +494,7 @@ def host():
         require(status == 0 and re.fullmatch(r"[0-9a-f]{64}", state["container"]), "Container allocation uncertain")
         _, raw = command("inspect-created", 15, [docker, "inspect", state["container"]])
         value = json.loads(raw)[0]
-        container_proof = container_identity(value, labels, image_id, state["volume"], source, recipe)
+        container_proof = container_identity(value, labels, image_id, state["volume"], source, recipe, created=True)
         require(value["Id"] == state["container"] and value["State"]["Status"] == "created"
                 and not value["State"]["Running"] and "EXPECTED_HEAD=" + head in value["Config"]["Env"]
                 and "EXPECTED_TREE=" + tree in value["Config"]["Env"], "Unexpected fresh container state/binding")

@@ -27,7 +27,9 @@ concurrency:
 jobs:
   review:
     # Comment matching is intentionally a coarse prefilter. The action checks
-    # the complete mention token and enforces the allowed author associations.
+    # the complete mention token and enforces the allowed author associations;
+    # the association is also checked here so a stranger's comment never starts
+    # a job that holds TESSL_TOKEN and a write-scoped GITHUB_TOKEN.
     if: >-
       (github.event_name == 'pull_request' &&
         github.event.pull_request.draft == false &&
@@ -36,6 +38,7 @@ jobs:
       ((github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') &&
         (github.event_name != 'issue_comment' || github.event.issue.pull_request != null) &&
         (github.event.issue.state == 'open' || github.event.pull_request.state == 'open') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
         contains(github.event.comment.body, '@tessl-code-review'))
     runs-on: ubuntu-latest
     timeout-minutes: 30

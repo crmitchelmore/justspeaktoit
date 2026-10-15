@@ -131,3 +131,10 @@ package protocol DesktopPressCaptureWorker: Actor {
     ) async throws
     func close(id: UUID) async throws
 }
+
+/// Acknowledges producer shutdown and completion of final PCM/error callbacks, not resource retirement.
+/// Only adopted runs defer their relay fence until this acknowledgement. Failure may leave live resources;
+/// the lease fences delivery and still calls close. There is deliberately no default acknowledgement.
+package protocol DesktopPressCaptureQuiescingWorker: DesktopPressCaptureWorker {
+    func quiesce(id: UUID) async throws
+}

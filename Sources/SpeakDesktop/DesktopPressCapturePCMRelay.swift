@@ -85,6 +85,16 @@ package final class DesktopPressCapturePCMRelay: @unchecked Sendable {
         if publish { onFailure(error) }
     }
 
+    func recordWorkerFailure(_ error: DesktopPressCaptureError) {
+        let publish = lock.withLock {
+            guard storedFailure == nil else { return false }
+            storedFailure = error
+            fence()
+            return true
+        }
+        if publish { onFailure(error) }
+    }
+
     package func settleDelivery() async throws {
         guard lock.withLock({ phase == .closed || phase == .closing }) else {
             throw DesktopPressCaptureError.invalidPhase

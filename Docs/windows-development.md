@@ -277,7 +277,8 @@ failure; after observing it, only explicit `retryRelease()` requests another
 attempt. Owned runs reject legacy `lease.retryClose(token)` with `invalidPhase`
 before any state reset or IO; the exposed token is not legacy retry authority.
 Use the ticket's `retryRelease()` for owned runs. Runs admitted by legacy `begin`
-retain their existing `retryClose` behavior. Callback fencing before close is unchanged.
+retain their existing `retryClose` behavior. Workers without producer quiescence
+retain immediate callback fencing before close.
 Owners must retain the ticket through every terminal path; this installs no
 Host startup event mapping, capture/file handoff or native worker. WAV finish
 and context release still require a separately reviewed actual cleanup join.
@@ -290,8 +291,27 @@ relay reservation through `adoptDelivery`. Legacy `adopt` Data sinks still
 receive that batch exactly once, including ignored-argument trailing closures.
 This classifies relay admission order only: physically earlier samples
 submitted later are after-reservation, not evidence of gesture/sample time.
-It is not an approved Host silence clock. Native close-time partial callbacks
+It is not an approved Host silence clock. Legacy worker close-time partial callbacks
 remain fenced; span metadata does not establish lossless native final flushing.
+An explicitly conforming `DesktopPressCaptureQuiescingWorker` supplies a real
+`quiesce(id:)` acknowledgement, with no default success implementation. For an
+adopted run without an earlier relay failure, release keeps the SAME bounded
+relay admitting final PCM until the producer has stopped and all final PCM/error
+callbacks have returned. It then fences and settles admitted delivery before
+`close(id:)` retires resources and before Host WAV finish/History save. During
+quiescence the closing lease still excludes new runs and reserve/adopt calls.
+Quiescence failure retains the first capture cause, fences delivery and still
+attempts real retirement. Failed retirement retains the same owner/ticket;
+explicit cleanup retry does not repeat an uncertain or completed final flush.
+Native failures are latched even after the fence and synchronously published
+with their original token/identity before release completion and Host disposition,
+without overwriting an earlier relay cause or growing a cause list.
+The original Worker open/close signatures, non-adopted release and legacy
+fence-before-close path are unchanged. Package and real injected Host tests use
+synthetic PCM/held acknowledgements only: no native worker conforms in production.
+There is no second PCM queue, per-frame Task, new provider, factory or activation.
+Actual native producer/partial-flush acknowledgement, permission/device/readiness
+and physical timing still require separate implementation and qualification.
 Portable fake-worker/race tests do not establish native permission, readiness,
 keyboard timing or latency. Windows currently uses `RegisterHotKey` plus 15 ms
 release polling, not a low-level physical-key hook; toggle mode has no paired

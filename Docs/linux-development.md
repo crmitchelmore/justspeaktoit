@@ -592,7 +592,7 @@ until an explicit `retryRelease()` after it is observed. Owned runs reject
 legacy `lease.retryClose(token)` with `invalidPhase` before any state reset or IO;
 the exposed token is not legacy retry authority. Only the ticket's `retryRelease()`
 retries owned cleanup. Legacy `begin` runs retain their existing `retryClose` behavior,
-and the relay fence before worker close is unchanged. Retaining/releasing the
+and workers without producer quiescence retain their relay fence before close. Retaining/releasing the
 ticket on every startup/record/shutdown terminal path, Host failure mapping,
 native ownership and WAV/context finalization remain separate prerequisites;
 this package API neither installs them nor enables microphone capture.
@@ -604,8 +604,23 @@ The canonical `adoptDelivery` name keeps legacy `adopt` trailing closures
 source-compatible even when their Data argument is ignored.
 These are relay admission-order regions, not physical sample/gesture times or
 an approved Host silence clock; physically earlier PCM submitted later is after
-reservation. Native stop-time partial flush remains fenced and separately
+reservation. Legacy worker stop-time partial flush remains fenced and separately
 unqualified, not made lossless by span metadata.
+The additive `DesktopPressCaptureQuiescingWorker` contract requires an explicit
+`quiesce(id:)` acknowledgement: after producer shutdown ALL final PCM/error
+callbacks must have returned. An adopted, non-failed run continues admitting
+those samples through its SAME bounded relay until acknowledgement, then fences,
+settles admitted delivery and retires native resources before WAV finish/save.
+Closing still excludes a new run throughout; there is no second PCM queue or
+per-frame Task. Failed quiescence records the first capture cause, fences safely
+and still attempts retirement; failed retirement retains the same owner for
+explicit cleanup retry without replaying final PCM. A native failure arriving
+after the fence remains latched and is published with its original token/identity
+before release completion/Host disposition, without replacing an earlier relay cause.
+Non-adopted and non-quiescing workers preserve fence-before-close. This is a
+synthetic package/injected-Host stop contract, not native libpulse/driver evidence
+or production activation; the production dependency stays unavailable. No native
+adapter, permission grant, source identity, readiness or physical timing is inferred.
 
 The injected package/internal Host startup transaction has no production factory
 and does not activate production capture or successful dictation. It retains the real

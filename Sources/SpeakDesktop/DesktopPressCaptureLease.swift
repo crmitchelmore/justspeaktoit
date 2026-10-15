@@ -13,6 +13,7 @@ package actor DesktopPressCaptureLease {
         var cleanupFailure: DesktopPressCaptureError?
         var reportedRelayFailure = false
         var releaseAttempt: DesktopPressCaptureReleaseAttempt?
+        var quiescingWorker: (any DesktopPressCaptureQuiescingWorker)?
     }
 
     private let worker: any DesktopPressCaptureWorker
@@ -75,7 +76,7 @@ package actor DesktopPressCaptureLease {
             do {
                 try await worker.open(
                     id: token.id, identity: identity, receive: { _ = relay.receive($0) },
-                    onFailure: { relay.fail(.captureFailed($0)) }
+                    onFailure: { relay.recordWorkerFailure(.captureFailed($0)) }
                 )
                 await opened(token, error: nil)
             } catch {
@@ -148,7 +149,10 @@ package actor DesktopPressCaptureLease {
     /// The owner must cancel it on abandonment or session stop; dropping a token never releases IO.
     package func cancel(_ token: DesktopPressCaptureToken) {
         guard var current = run, current.token == token, current.phase != .closing else { return }
-        current.relay.close()
+        if current.phase == .adopted, current.relay.failure == nil {
+            current.quiescingWorker = worker as? any DesktopPressCaptureQuiescingWorker
+        }
+        if current.quiescingWorker == nil { current.relay.close() }
         current.phase = .closing
         run = current
         if current.ready { enqueueClose(token) }
@@ -234,15 +238,17 @@ package actor DesktopPressCaptureLease {
 
     private func closeWorker(_ token: DesktopPressCaptureToken) async {
         guard let current = run, current.token == token else { return }
-        if let error = current.relay.failure {
-            captureFailed(DesktopPressCaptureFailureEvent(token: token, identity: current.identity, error: error))
-        }
+        await quiesce(current)
+        current.relay.close()
+        publishRelayFailure(current)
         do {
             try await current.relay.settleDelivery()
             try await worker.close(id: token.id)
+            publishRelayFailure(current)
             if run?.token == token { run = nil }
             await current.releaseAttempt?.complete(error: nil)
         } catch {
+            publishRelayFailure(current)
             let error = DesktopPressCaptureError.cleanupFailed(String(describing: error))
             run?.cleanupFailure = error
             failure = error
@@ -253,6 +259,22 @@ package actor DesktopPressCaptureLease {
 }
 
 extension DesktopPressCaptureLease {
+    private func quiesce(_ current: Run) async {
+        guard let quiescing = current.quiescingWorker else { return }
+        run?.quiescingWorker = nil
+        do {
+            try await quiescing.quiesce(id: current.token.id)
+        } catch {
+            current.relay.recordWorkerFailure(.captureFailed("Producer quiescence failed: \(error)"))
+        }
+    }
+
+    private func publishRelayFailure(_ current: Run) {
+        if let error = current.relay.failure {
+            captureFailed(.init(token: current.token, identity: current.identity, error: error))
+        }
+    }
+
     package func beginOwned(
         identity: DesktopPressCaptureIdentity, admission: DesktopPressCaptureAdmission,
         limits: DesktopPressCaptureBufferLimits

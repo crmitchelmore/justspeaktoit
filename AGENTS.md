@@ -381,7 +381,7 @@ version/baseline authority. `VERSION` is a build hint only.
 - **Project slug:** `justspeaktoit`
 - **Auth token:** stored in `.env` as `SENTRY_AUTH_TOKEN` (do not commit)
 - **DSN:** configured in `Sources/SpeakApp/SentryManager.swift`
-- **GitHub CI secret:** `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, `SENTRY_PROJECT`
+- **GitHub CI secret:** `SENTRY_AUTH_TOKEN` lives only in the `sentry` environment, whose deployment branch policy admits only `main`. Only the `sentry-upload` job in `release-mac.yml` reads it; the build job, which holds the signing secrets, hands dSYMs over as an artefact. Rotate with `gh secret set SENTRY_AUTH_TOKEN --env sentry`; never add it as a repository secret.
 
 ### Querying Sentry from CLI
 ```bash
@@ -403,6 +403,11 @@ curl -s -X PUT -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" -H "Content-Type: a
   -d '{"status":"ignored"}' \
   "https://de.sentry.io/api/0/organizations/$SENTRY_ORG/issues/{ISSUE_ID}/"
 ```
+
+## GitHub Actions Security
+- Secrets for privileged jobs belong in environments with a `main`-only deployment branch policy (`sentry`, `windows-signing`), not repository secrets.
+- `issue_comment` / `pull_request_review_comment` / `workflow_run` jobs that hold secrets must gate on `author_association` or `head_repository.full_name == github.repository` before running.
+- Pin third-party actions to a full commit SHA with a version comment; self-hosted runners are only for `main` pushes and approved same-repo SHAs.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->
 ## Beads Issue Tracker

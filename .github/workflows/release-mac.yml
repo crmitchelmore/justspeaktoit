@@ -31,6 +31,9 @@ jobs:
     timeout-minutes: 240
     permissions:
       contents: write
+    outputs:
+      sentry-release: ${{ steps.sentry.outputs.release }}
+      dsym-artifact: ${{ steps.dsyms.outcome == 'success' && steps.sentry.outputs.artifact || '' }}
 
     steps:
       - name: Checkout
@@ -47,7 +50,7 @@ jobs:
 
       - name: Setup Xcode
         if: steps.receipt.outputs.status != 'verified'
-        uses: maxim-lobanov/setup-xcode@v1
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
         with:
           xcode-version: "26.2"
 
@@ -319,22 +322,81 @@ jobs:
         if: env.RELEASE_TRAIN == 'alpha'
         run: node scripts/release-train.mjs publish-alpha --tag "$RELEASE_TAG"
 
-      # Without dSYMs Sentry cannot symbolicate crashes. Step-level env is not
-      # visible to `if:`, so the token is checked inside the script; a Sentry
-      # outage must never fail a release that is already published.
-      - name: Create Sentry release and upload dSYMs
+      # The Sentry token never enters this job, which also holds the signing,
+      # notarisation and Sparkle secrets: the dSYMs are handed to the
+      # `sentry-upload` job below, which alone can read the `sentry` environment.
+      - name: Hand dSYMs to the Sentry upload job
         if: steps.receipt.outputs.status != 'verified'
+        id: sentry
+        run: |
+          {
+            echo "release=justspeaktoit-mac@${RELEASE_VERSION}+${BUILD_NUMBER}"
+            echo "artifact=mac-dsyms-${RELEASE_TAG}-${{ github.run_attempt }}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload dSYMs for Sentry
+        if: steps.receipt.outputs.status != 'verified'
+        id: dsyms
         continue-on-error: true
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: ${{ steps.sentry.outputs.artifact }}
+          retention-days: 1
+          if-no-files-found: error
+          # Both paths live under $RUNNER_TEMP/<variant>/, so the artefact keeps
+          # them apart as arm64/… and universal/….
+          path: |
+            ${{ env.ARCHIVE_PATH }}/dSYMs
+            ${{ env.LEGACY_ARCHIVE_PATH }}/dSYMs
+
+      - name: Cleanup Keychain
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db" || true
+          rm -f ~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8 || true
+
+  # Isolated so the Sentry token is never exposed to the build job's toolchain,
+  # and readable only by `main` through the `sentry` environment's deployment
+  # branch policy. Runs on the same image so the dSYMs' recorded source paths
+  # resolve for --include-sources. A Sentry outage must never fail a release
+  # that is already published, hence continue-on-error.
+  sentry-upload:
+    needs: build-and-release
+    if: needs.build-and-release.outputs.dsym-artifact != '' && github.ref == 'refs/heads/main'
+    runs-on: macos-15
+    timeout-minutes: 30
+    continue-on-error: true
+    environment: sentry
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.manifest }}
+          persist-credentials: false
+
+      - name: Download dSYMs
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build-and-release.outputs.dsym-artifact }}
+          path: ${{ runner.temp }}/dsyms
+
+      # Step-level env is not visible to `if:`, so the token is checked inside
+      # the script.
+      - name: Create Sentry release and upload dSYMs
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: ${{ secrets.SENTRY_ORG || 'tally-lz' }}
-          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT || 'justspeaktoit' }}
+          SENTRY_ORG: tally-lz
+          SENTRY_PROJECT: justspeaktoit
           SENTRY_URL: https://de.sentry.io/
           SENTRY_CLI_VERSION: 3.8.0
           SENTRY_CLI_SHA256: 2c26914636c47ab9bf9e710484ad7b44d371cbec8bd29cafb36b3cf877bf4285
+          RELEASE: ${{ needs.build-and-release.outputs.sentry-release }}
         run: |
           if [ -z "$SENTRY_AUTH_TOKEN" ]; then
-            echo "::warning::SENTRY_AUTH_TOKEN is not set; crashes from this build will not be symbolicated."
+            echo "::warning::SENTRY_AUTH_TOKEN is not set in the sentry environment; crashes from this build will not be symbolicated."
             exit 0
           fi
           CLI="$RUNNER_TEMP/sentry-cli"
@@ -343,22 +405,16 @@ jobs:
           echo "${SENTRY_CLI_SHA256}  $CLI" | shasum -a 256 -c -
           chmod +x "$CLI"
 
-          RELEASE="justspeaktoit-mac@${RELEASE_VERSION}+${BUILD_NUMBER}"
           status=0
           "$CLI" releases new "$RELEASE" || status=1
           "$CLI" releases set-commits "$RELEASE" --auto --ignore-missing \
             || echo "::warning::Could not associate commits with $RELEASE"
           "$CLI" releases finalize "$RELEASE" || status=1
           # Both variants share the build number; each has its own binary UUIDs.
-          for dsyms in "$ARCHIVE_PATH/dSYMs" "$LEGACY_ARCHIVE_PATH/dSYMs"; do
+          for dsyms in "$RUNNER_TEMP"/dsyms/*/; do
             "$CLI" debug-files upload --include-sources --wait "$dsyms" || status=1
           done
           if [ "$status" -ne 0 ]; then
             echo "::warning::Sentry release or dSYM upload failed for $RELEASE"
+            exit 1
           fi
-
-      - name: Cleanup Keychain
-        if: always()
-        run: |
-          security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db" || true
-          rm -f ~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8 || true

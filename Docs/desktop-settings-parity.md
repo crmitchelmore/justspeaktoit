@@ -39,6 +39,22 @@ modifier/editable-focus refusal and disabled/unmapped destinations. They require
 execution in the actual Win32/GTK shells; portable tests and Windows C-stub Swift
 graphs alone are not native UI or installed-package acceptance.
 
+Windows retains valid bindings and the exact hint flag before its HWND exists.
+Creation claims that owned snapshot under the window mutex and applies it before
+READY; the existing post-hotkey refresh still suppresses reserved chords.
+Live updates retain FIFO asynchronous delivery and posting errors. Mutex-owned,
+monotonically identified payloads are released on delivery or teardown, so a
+destroyed window cannot leave an owned message pointer or reuse an old token.
+Unknown destinations, duplicate destinations/digits and malformed chords fail
+without changing the retained/applied configuration. The C ABI reports allocation
+or synchronization exceptions as its existing failure result.
+
+The existing native self-test now exercises the production delivery/validation
+helpers with both pre-window hint values, actual Win32 button creation, live
+message dispatch, failed posting and queued-update destruction. Its ordinary
+startup/settings path is not skipped; fixture compilation alone does not qualify
+that runtime path or erase earlier failed native runs.
+
 ## Generated-speech coordination
 
 `SpeechGenerationDefaults` defines the Mac's existing `ttsAutoPlay` (true) and

@@ -9,6 +9,7 @@
 #include <dwmapi.h>
 #include <uxtheme.h>
 #include <mutex>
+#include <limits>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
@@ -217,6 +218,66 @@ struct SidebarBindings {
     bool showHints = false;
     SidebarBindings() { std::fill(std::begin(digits), std::end(digits), -1); }
 };
+
+// Delivery is protected by WindowState::mutex; applied bindings remain UI-thread-only.
+struct SidebarDelivery {
+    std::unique_ptr<SidebarBindings> initial;
+    std::unordered_map<UINT_PTR, std::unique_ptr<SidebarBindings>> posted;
+    UINT_PTR sequence = 0;
+
+    int stage(HWND window, std::unique_ptr<SidebarBindings> update) {
+        if (!window) {
+            initial = std::move(update);
+            return 0;
+        }
+        if (sequence == std::numeric_limits<UINT_PTR>::max()) return -1;
+        const UINT_PTR token = ++sequence;
+        posted.emplace(token, std::move(update));
+        if (PostMessageW(window, sidebarMessage, token, 0)) return 0;
+        posted.erase(token);
+        return -1;
+    }
+
+    std::unique_ptr<SidebarBindings> claimInitial() { return std::move(initial); }
+
+    std::unique_ptr<SidebarBindings> claim(UINT_PTR token) {
+        const auto found = posted.find(token);
+        if (found == posted.end()) return {};
+        auto update = std::move(found->second);
+        posted.erase(found);
+        return update;
+    }
+
+    void retire() { posted.clear(); }
+};
+
+int configureSidebarShortcuts(SidebarDelivery &delivery, HWND window,
+                             const JSTISidebarShortcut *bindings, size_t count, int showHints) {
+    if (!bindings || count > 10 || (showHints != 0 && showHints != 1)) return -1;
+    auto update = std::make_unique<SidebarBindings>();
+    bool used[10]{};
+    for (size_t index = 0; index < count; ++index) {
+        const auto &binding = bindings[index];
+        std::wstring hint;
+        if (!binding.destination || binding.digit < 0 || binding.digit > 9 || used[binding.digit] ||
+            !binding.hint || !jsti::wide(binding.hint, hint) ||
+            hint != L"Ctrl+" + std::to_wstring(binding.digit)) return -1;
+        used[binding.digit] = true;
+        bool matched = false;
+        for (int page = 0; page < pageCount; ++page) {
+            if (std::strcmp(pageInfo[page].name, binding.destination) != 0) continue;
+            if (update->digits[page] != -1) return -1;
+            update->digits[page] = binding.digit;
+            update->hints[page] = hint;
+            matched = true;
+            break;
+        }
+        if (!matched) return -1;
+    }
+    update->showHints = showHints != 0;
+    return delivery.stage(window, std::move(update));
+}
+
 constexpr UINT_PTR tourTimerID = 90;
 // How each owner-drawn control is drawn.
 enum class Role { label, caption, status, detail, chipValue, statValue, tileValue, value, button, primary, record,
@@ -252,6 +313,7 @@ struct WindowState {
     // decides the switch.
     std::wstring loginItemNote;
     bool posted = false;
+    SidebarDelivery sidebarDelivery;
     bool statusChanged = false;
     bool transcriptChanged = false;
     bool historyChanged = false;
@@ -1637,16 +1699,18 @@ void showPage(HWND window, int page) {
     RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
 }
 
-void applySidebarBindings(HWND window) {
+void applySidebarBindings(HWND window, const SidebarBindings &bindings) {
     for (int page = 0; page < pageCount; ++page) {
         std::wstring label = pageInfo[page].title;
-        if (state.sidebar.showHints && !state.sidebar.hints[page].empty() &&
-            !jsti_hotkey_reserves_sidebar_digit(state.sidebar.digits[page]))
-            label += L" (" + state.sidebar.hints[page] + L")";
+        if (bindings.showHints && !bindings.hints[page].empty() &&
+            !jsti_hotkey_reserves_sidebar_digit(bindings.digits[page]))
+            label += L" (" + bindings.hints[page] + L")";
         SetWindowTextW(GetDlgItem(window, navBaseID + page), label.c_str());
         InvalidateRect(GetDlgItem(window, navBaseID + page), nullptr, TRUE);
     }
 }
+
+void applySidebarBindings(HWND window) { applySidebarBindings(window, state.sidebar); }
 
 bool navigateSidebar(HWND window, int digit, bool exactControl, HWND focused) {
     if (!exactControl || digit < 0 || digit > 9 || !IsWindowEnabled(window) ||
@@ -2476,7 +2540,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         showPage(window, static_cast<int>(wparam));
         return 0;
     case sidebarMessage: {
-        std::unique_ptr<SidebarBindings> bindings(reinterpret_cast<SidebarBindings *>(lparam));
+        std::unique_ptr<SidebarBindings> bindings;
+        { std::lock_guard<std::mutex> lock(state.mutex); bindings = state.sidebarDelivery.claim(wparam); }
         if (bindings) { state.sidebar = std::move(*bindings); applySidebarBindings(window); }
         return 0;
     }
@@ -2834,10 +2899,113 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         {
             std::lock_guard<std::mutex> lock(state.mutex);
             state.window = nullptr; state.posted = false; state.audioCleanupToken.clear(); state.migrationReport.clear();
+            state.sidebarDelivery.retire();
         }
         PostQuitMessage(0); return 0;
     }
     return DefWindowProcW(window, message, wparam, lparam);
+}
+
+struct SidebarStartupFixture {
+    SidebarDelivery delivery;
+    SidebarBindings applied;
+    HWND window = nullptr;
+};
+
+LRESULT CALLBACK sidebarStartupFixtureProcedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+    if (message == WM_NCCREATE) {
+        auto *create = reinterpret_cast<CREATESTRUCTW *>(lparam);
+        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(create->lpCreateParams));
+    }
+    auto *fixture = reinterpret_cast<SidebarStartupFixture *>(GetWindowLongPtrW(window, GWLP_USERDATA));
+    if (fixture && message == WM_CREATE) {
+        for (int page = 0; page < pageCount; ++page) {
+            if (!CreateWindowExW(0, L"BUTTON", L"", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 160, 36,
+                window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(navBaseID + page)),
+                GetModuleHandleW(nullptr), nullptr)) return -1;
+        }
+        fixture->window = window;
+        auto initial = fixture->delivery.claimInitial();
+        if (initial) fixture->applied = std::move(*initial);
+        applySidebarBindings(window, fixture->applied);
+        return 0;
+    }
+    if (fixture && message == sidebarMessage) {
+        auto update = fixture->delivery.claim(wparam);
+        if (update) {
+            fixture->applied = std::move(*update);
+            applySidebarBindings(window, fixture->applied);
+        }
+        return 0;
+    }
+    if (fixture && message == WM_DESTROY) {
+        fixture->window = nullptr;
+        fixture->delivery.retire();
+        return 0;
+    }
+    return DefWindowProcW(window, message, wparam, lparam);
+}
+
+bool sidebarStartupSelfTest() {
+    const HINSTANCE instance = GetModuleHandleW(nullptr);
+    WNDCLASSW type{};
+    type.lpfnWndProc = sidebarStartupFixtureProcedure;
+    type.hInstance = instance;
+    type.lpszClassName = L"JustSpeakToItSidebarStartupFixture";
+    if (!RegisterClassW(&type)) return false;
+    const JSTISidebarShortcut bindings[] = {{"dashboard", 1, "Ctrl+1"}, {"history", 2, "Ctrl+2"}};
+    SidebarStartupFixture fixture;
+    UINT_PTR lastRetired = 0;
+    bool okay = true;
+    for (int hints : {0, 1}) {
+        okay = configureSidebarShortcuts(fixture.delivery, nullptr, bindings, 2, hints) == 0 && okay;
+        const auto *retained = fixture.delivery.initial.get();
+        okay = okay && retained && retained->showHints == (hints != 0);
+        const JSTISidebarShortcut invalid[] = {
+            {"unknown-page", 3, "Ctrl+3"}, {"dashboard", 3, "Ctrl+Shift+3"},
+            {"dashboard", 10, "Ctrl+10"}, {"dashboard", 3, "\xFF"}, {nullptr, 3, "Ctrl+3"}
+        };
+        for (const auto &binding : invalid)
+            okay = configureSidebarShortcuts(fixture.delivery, nullptr, &binding, 1, hints) == -1 &&
+                fixture.delivery.initial.get() == retained && okay;
+        const JSTISidebarShortcut repeatedID[] = {{"dashboard", 1, "Ctrl+1"}, {"dashboard", 2, "Ctrl+2"}};
+        const JSTISidebarShortcut repeatedDigit[] = {{"dashboard", 1, "Ctrl+1"}, {"history", 1, "Ctrl+1"}};
+        okay = configureSidebarShortcuts(fixture.delivery, nullptr, repeatedID, 2, hints) == -1 &&
+            configureSidebarShortcuts(fixture.delivery, nullptr, repeatedDigit, 2, hints) == -1 &&
+            configureSidebarShortcuts(fixture.delivery, nullptr, bindings, 2, 2) == -1 &&
+            fixture.delivery.initial.get() == retained && okay;
+        HWND window = CreateWindowExW(0, type.lpszClassName, L"Sidebar startup fixture", WS_POPUP,
+            0, 0, 1, 1, nullptr, nullptr, instance, &fixture);
+        if (!window) { okay = false; break; }
+        const bool reserved = jsti_hotkey_reserves_sidebar_digit(1);
+        auto label = [&](bool shown) { return shown && !reserved ? L"Dashboard (Ctrl+1)" : L"Dashboard"; };
+        okay = okay && !fixture.delivery.initial && fixture.applied.digits[dashboardPage] == 1 &&
+            fixture.applied.digits[historyPage] == 2 && fixture.applied.showHints == (hints != 0) &&
+            controlText(GetDlgItem(window, navBaseID)) == label(hints != 0);
+        okay = configureSidebarShortcuts(fixture.delivery, window, bindings, 2, !hints) == 0 &&
+            fixture.delivery.posted.size() == 1 &&
+            fixture.delivery.sequence > lastRetired && !fixture.delivery.claim(lastRetired) &&
+            controlText(GetDlgItem(window, navBaseID)) == label(hints != 0) && okay;
+        MSG message{};
+        while (!fixture.delivery.posted.empty() &&
+               PeekMessageW(&message, window, sidebarMessage, sidebarMessage, PM_REMOVE)) {
+            if (message.message == WM_QUIT) { PostQuitMessage(static_cast<int>(message.wParam)); okay = false; break; }
+            DispatchMessageW(&message);
+        }
+        okay = okay && fixture.delivery.posted.empty() && fixture.applied.showHints == (hints == 0) &&
+            controlText(GetDlgItem(window, navBaseID)) == label(hints == 0);
+        okay = configureSidebarShortcuts(fixture.delivery, window, bindings, 2, hints) == 0 &&
+            fixture.delivery.posted.size() == 1 && okay;
+        const UINT_PTR retired = fixture.delivery.sequence;
+        DestroyWindow(window);
+        okay = okay && !fixture.window && fixture.delivery.posted.empty() && !fixture.delivery.claim(retired);
+        lastRetired = retired;
+        const HWND invalidWindow = reinterpret_cast<HWND>(static_cast<INT_PTR>(-2));
+        okay = configureSidebarShortcuts(fixture.delivery, invalidWindow, bindings, 2, hints) == -1 &&
+            fixture.delivery.posted.empty() && okay;
+    }
+    UnregisterClassW(type.lpszClassName, instance);
+    return okay;
 }
 }
 
@@ -3085,7 +3253,15 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
     if (!window) {
         if (!outcome) outcome = jsti::fail(jsti::systemError("Creating native desktop window"), error, capacity);
     } else {
-        { std::lock_guard<std::mutex> lock(state.mutex); state.window = window; }
+        std::unique_ptr<SidebarBindings> initialSidebar;
+        {
+            std::lock_guard<std::mutex> lock(state.mutex);
+            state.window = window;
+            initialSidebar = state.sidebarDelivery.claimInitial();
+        }
+        if (initialSidebar) state.sidebar = std::move(*initialSidebar);
+        initialSidebar.reset();
+        applySidebarBindings(window);
         // A login launch starts minimised and leaves the focus where it is.
         ShowWindow(window, jsti::login::launchedAtLogin() ? SW_SHOWMINNOACTIVE : SW_SHOWDEFAULT);
         UpdateWindow(window);
@@ -3115,7 +3291,11 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
     if (visualStyles) DeactivateActCtx(0, visualStyles);
     state.displayedHistory.clear();
     if (registered) UnregisterClassW(type.lpszClassName, instance);
-    { std::lock_guard<std::mutex> lock(state.mutex); state.running = false; state.window = nullptr; }
+    {
+        std::lock_guard<std::mutex> lock(state.mutex);
+        state.running = false; state.window = nullptr;
+        state.sidebarDelivery.retire();
+    }
     return outcome;
 }
 
@@ -3381,29 +3561,10 @@ int jsti_window_show_page(int page) {
 }
 
 int jsti_window_set_sidebar_shortcuts(const JSTISidebarShortcut *bindings, size_t count, int showHints) {
-    if (!bindings || count > 10 || (showHints != 0 && showHints != 1)) return -1;
-    auto update = std::make_unique<SidebarBindings>();
-    bool used[10]{};
-    for (size_t index = 0; index < count; ++index) {
-        const auto &binding = bindings[index];
-        std::wstring hint;
-        if (!binding.destination || binding.digit < 0 || binding.digit > 9 || used[binding.digit] ||
-            !binding.hint || !jsti::wide(binding.hint, hint) ||
-            hint != L"Ctrl+" + std::to_wstring(binding.digit)) return -1;
-        used[binding.digit] = true;
-        for (int page = 0; page < pageCount; ++page) {
-            if (std::strcmp(pageInfo[page].name, binding.destination) != 0) continue;
-            if (update->digits[page] != -1) return -1;
-            update->digits[page] = binding.digit;
-            update->hints[page] = hint;
-        }
-    }
-    update->showHints = showHints != 0;
-    std::lock_guard<std::mutex> lock(state.mutex);
-    if (!state.window ||
-        !PostMessageW(state.window, sidebarMessage, 0, reinterpret_cast<LPARAM>(update.get()))) return -1;
-    update.release();
-    return 0;
+    try {
+        std::lock_guard<std::mutex> lock(state.mutex);
+        return configureSidebarShortcuts(state.sidebarDelivery, state.window, bindings, count, showHints);
+    } catch (const std::exception &) { return -1; }
 }
 
 int jsti_window_screenshot_tour(const char *directory, char *error, size_t capacity) {
@@ -3604,6 +3765,12 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     if (!window || GetWindowThreadProcessId(window, nullptr) != GetCurrentThreadId()) {
         return jsti::fail("Window checks must run on the UI thread after READY.", error, errorCapacity);
     }
+    if (!sidebarStartupSelfTest())
+        return jsti::fail("Sidebar pre-window retention, real control application or delivery ownership failed.",
+                          error, errorCapacity);
+    const JSTISidebarShortcut unknownSidebar[] = {{"unknown-page", 1, "Ctrl+1"}};
+    if (jsti_window_set_sidebar_shortcuts(unknownSidebar, 1, 1) != -1)
+        return jsti::fail("An unrecognized sidebar destination was accepted.", error, errorCapacity);
     {
         const auto saved = state.sidebar;
         const int page = state.page;

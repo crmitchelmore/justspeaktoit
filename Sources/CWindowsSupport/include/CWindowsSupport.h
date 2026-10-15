@@ -512,6 +512,49 @@ int jsti_capture_start(JSTICapture *capture, char *error, size_t error_capacity)
 int jsti_capture_stop(JSTICapture *capture, char *error, size_t error_capacity);
 void jsti_capture_destroy(JSTICapture *capture);
 
+/* Package-only owned capture, never selected by the production factory.
+ * Calls are serialized by one owner, outside all native callbacks. run_id is
+ * immutable for the handle lifetime; an owner slot must not be copied/reused.
+ * Open may block in the OS and may return a partial non-null owner on failure.
+ * Never pass this distinct handle to legacy capture_destroy.
+ * Receipt size/version must be initialized by the caller. Only retire success
+ * nulls the slot, after actual producer join and thread-affine resource release.
+ * Audio failure is separate from safety: safe retirement can retain AUDIO_FAILED.
+ * On control/join failure retain owner AND callback context for explicit retry. */
+typedef struct JSTIOwnedCapture JSTIOwnedCapture;
+enum {
+    JSTI_OWNED_CAPTURE_VERSION = 1,
+    JSTI_OWNED_PRODUCER_QUIESCED = 1,
+    JSTI_OWNED_CALLBACKS_DRAINED = 2,
+    JSTI_OWNED_AUDIO_FAILED = 4,
+    JSTI_OWNED_RESOURCES_RETIRED = 8,
+    JSTI_OWNED_OWNERSHIP_RETAINED = 16
+};
+typedef struct JSTIOwnedCaptureReceipt {
+    uint32_t size;
+    uint32_t version;
+    uint32_t flags;
+    uint64_t delivered_samples;
+    char first_audio_error[1024];
+} JSTIOwnedCaptureReceipt;
+int jsti_owned_capture_open(JSTIOwnedCapture **owner, const char *run_id, const char *device_id,
+                            uint32_t sample_rate, uint32_t frame_ms, JSTIAudioCallback audio,
+                            JSTIAudioErrorCallback failure, void *context,
+                            JSTIOwnedCaptureReceipt *receipt, char *error, size_t capacity);
+int jsti_owned_capture_quiesce(JSTIOwnedCapture *owner, const char *run_id,
+                               JSTIOwnedCaptureReceipt *receipt, char *error, size_t capacity);
+int jsti_owned_capture_retire(JSTIOwnedCapture **owner, const char *run_id,
+                              JSTIOwnedCaptureReceipt *receipt, char *error, size_t capacity);
+/* Hardware-free qualification only: bits 1 stop-signal failure, 2 producer-join
+ * failure, 4 writer-join failure (each once), 8 late audio error, 16 partial-open
+ * failure. Uses real threads/events/Frames/writer; emits one final 73-sample tail.
+ * No environment switch or production fallback selects this entrypoint. */
+int jsti_owned_capture_open_fixture(JSTIOwnedCapture **owner, const char *run_id, uint32_t faults,
+                                    uint32_t sample_rate, uint32_t frame_ms, JSTIAudioCallback audio,
+                                    JSTIAudioErrorCallback failure, void *context,
+                                    JSTIOwnedCaptureReceipt *receipt, char *error, size_t capacity);
+int jsti_owned_capture_self_test(char *error, size_t capacity);
+
 /* Legacy direct path, retained for source/ABI compatibility. Capture at the
  * recording hotkey before showing UI. Insertion is explicitly addressed to the
  * original native Edit/RichEdit control only; other applications fail closed

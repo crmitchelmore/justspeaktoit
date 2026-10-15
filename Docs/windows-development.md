@@ -312,6 +312,23 @@ synthetic PCM/held acknowledgements only: no native worker conforms in productio
 There is no second PCM queue, per-frame Task, new provider, factory or activation.
 Actual native producer/partial-flush acknowledgement, permission/device/readiness
 and physical timing still require separate implementation and qualification.
+The package-only Windows owned adapter now supplies a dedicated serial I/O
+executor, an actor-confined non-Sendable driver and immutable per-run callback
+context. Its additive versioned C receipt separates first audio failure from
+producer/final-callback acknowledgement and actual resource retirement. The
+existing WASAPI framing/ring/writer are reused; each synchronous bridge copy is
+bounded to one negotiated frame (at most 4,800 bytes). No per-frame Task or
+second PCM queue is introduced. Partial opens and unsafe signal/join failures
+retain the exact owner until real cleanup; cancellation cannot manufacture a
+bounded OS-open timeout. COM cleanup remains producer-thread-affine. Failed
+real event closes retain ambiguous ownership rather than retrying a possibly
+reused numeric handle. Synthetic fixture entrypoints never open a microphone.
+This adapter is not connected to production Effects, a factory default, the
+warm setting or normal dictation handoff. Hardware-free fixture/type-check
+results are not device, permission, route, physical-readiness or latency proof.
+Real Windows native compilation/runtime and physical acceptance remain required
+before activation; Linux healthy lossless final-tail ownership remains unavailable.
+
 Portable fake-worker/race tests do not establish native permission, readiness,
 keyboard timing or latency. Windows currently uses `RegisterHotKey` plus 15 ms
 release polling, not a low-level physical-key hook; toggle mode has no paired

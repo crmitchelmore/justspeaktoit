@@ -14,6 +14,8 @@
 #include <thread>
 #include <type_traits>
 #include <vector>
+#include <condition_variable>
+#include <system_error>
 
 namespace {
 std::atomic<float> latestCaptureLevel{0.0f};
@@ -181,6 +183,12 @@ public:
         if (!closed.exchange(true, std::memory_order_release) && !SetEvent(available.value)) fail(Failure::wake);
         if (worker.joinable()) worker.join();
     }
+    bool retireEvent() {
+        if (worker.joinable()) return false;
+        if (available.value && !CloseHandle(available.value)) return false;
+        available.value = nullptr;
+        return true;
+    }
     const char *error() const noexcept {
         switch (failure.load(std::memory_order_relaxed)) {
         case Failure::none: return nullptr;
@@ -241,6 +249,71 @@ std::string audioError(const char *operation, HRESULT result) {
     }
     return jsti::systemError(operation, static_cast<DWORD>(result));
 }
+
+struct OwnedCaptureControl {
+    std::mutex mutex;
+    std::condition_variable changed, retry;
+    bool quiesced = false;
+    bool retireRequested = false;
+    bool retirementReady = false;
+    bool stopHandleAmbiguous = false;
+    uint64_t retryGeneration = 0;
+    std::string operationFailure;
+    std::atomic<uint32_t> faults{0};
+
+    bool consumeFault(uint32_t bit) noexcept {
+        return (faults.fetch_and(~bit, std::memory_order_relaxed) & bit) != 0;
+    }
+    void failedUntilRetry(const char *message) {
+        std::unique_lock<std::mutex> lock(mutex);
+        const auto generation = retryGeneration;
+        operationFailure = message;
+        changed.notify_all();
+        retry.wait(lock, [&] { return retryGeneration != generation; });
+    }
+    void finishWriter(BufferedAudioWriter &writer) {
+        while (true) {
+            try {
+                if (consumeFault(4)) throw std::system_error(std::make_error_code(std::errc::io_error));
+                writer.finish();
+                return;
+            } catch (const std::system_error &) {
+                // Keep the producer stack, writer and its joinable thread alive.
+                failedUntilRetry("Joining the owned audio writer failed; ownership is retained.");
+            }
+        }
+    }
+    void park() {
+        std::unique_lock<std::mutex> lock(mutex);
+        quiesced = true;
+        changed.notify_all();
+        retry.wait(lock, [&] { return retireRequested; });
+    }
+    void retireEvents(BufferedAudioWriter *writer, jsti::Handle *available = nullptr) {
+        bool ambiguous = false;
+        while (true) {
+            if (!ambiguous) {
+                if (writer && !writer->retireEvent()) ambiguous = true;
+                if (!ambiguous && available && available->value) {
+                    if (!CloseHandle(available->value)) ambiguous = true;
+                    else available->value = nullptr;
+                }
+            }
+            if (!ambiguous) break;
+            // A failed real CloseHandle gives no authority to reuse/re-close a
+            // numeric handle. Keep the complete producer stack, do not free it.
+            failedUntilRetry("Owned event retirement is ambiguous; native ownership remains retained.");
+        }
+        std::lock_guard<std::mutex> lock(mutex);
+        retirementReady = true;
+        changed.notify_all();
+    }
+};
+
+template<class Action> struct ProducerScope {
+    Action action;
+    ~ProducerScope() { action(); }
+};
 }
 
 struct JSTICapture {
@@ -255,6 +328,7 @@ struct JSTICapture {
     std::thread worker;
     std::mutex failureMutex;
     std::string failure;
+    OwnedCaptureControl *owned = nullptr;
 
     JSTICapture(JSTIAudioCallback callback, JSTIAudioErrorCallback errorCallback, void *context,
                 std::wstring deviceIdentifier, uint32_t sampleRate, uint32_t frameMilliseconds)
@@ -264,6 +338,19 @@ struct JSTICapture {
     void run(std::promise<std::string> ready) {
         bool announced = false;
         auto report = [&](const std::string &message) {
+            if (owned) {
+                bool first = false;
+                {
+                    std::lock_guard<std::mutex> lock(failureMutex);
+                    if (failure.empty()) { failure = message.substr(0, 1023); first = true; }
+                }
+                if (first && errorCallback) {
+                    CaptureCallbackScope scope(this);
+                    try { errorCallback(message.c_str(), context); } catch (...) { /* C callback boundary. */ }
+                }
+                if (!announced) { ready.set_value(message); announced = true; }
+                return;
+            }
             if (!announced) { ready.set_value(message); announced = true; }
             else {
                 { std::lock_guard<std::mutex> lock(failureMutex); failure = message; }
@@ -275,12 +362,39 @@ struct JSTICapture {
         };
         try {
             Apartment apartment;
-            if (FAILED(apartment.result)) { report(audioError("Initializing microphone COM", apartment.result)); return; }
             jsti::COM<IMMDeviceEnumerator> enumerator;
+            jsti::COM<IMMDevice> device;
+            jsti::COM<IMMEndpoint> endpoint;
+            jsti::COM<IAudioClient> client;
+            jsti::COM<IAudioCaptureClient> reader;
+            jsti::Handle available;
+            std::unique_ptr<BufferedAudioWriter> writer;
+            bool clientStarted = false;
+            auto finish = [&] {
+                if (!owned) return;
+                if (!announced || std::uncaught_exceptions()) {
+                    report("Owned microphone initialization or capture failed.");
+                }
+                while (clientStarted) {
+                    const HRESULT stopped = client->Stop();
+                    if (SUCCEEDED(stopped)) { clientStarted = false; break; }
+                    report(audioError("Stopping owned microphone", stopped));
+                    owned->failedUntilRetry("The owned microphone has not stopped; ownership retained.");
+                }
+                if (writer) {
+                    owned->finishWriter(*writer);
+                    if (const char *error = writer->error()) report(error);
+                }
+                owned->park();
+                owned->retireEvents(writer.get(), &available);
+            };
+            // Park BEFORE destruction of writer/COM/event resources on this same
+            // producer thread. Even an early failed open retains its owner.
+            ProducerScope<decltype(finish)> terminal{finish};
+            if (FAILED(apartment.result)) { report(audioError("Initializing microphone COM", apartment.result)); return; }
             HRESULT result = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
                 __uuidof(IMMDeviceEnumerator), reinterpret_cast<void **>(&enumerator.value));
             if (FAILED(result)) { report(audioError("Finding microphones", result)); return; }
-            jsti::COM<IMMDevice> device;
             result = deviceIdentifier.empty()
                 ? enumerator->GetDefaultAudioEndpoint(eCapture, eCommunications, &device.value)
                 : enumerator->GetDevice(deviceIdentifier.c_str(), &device.value);
@@ -295,14 +409,12 @@ struct JSTICapture {
                 report("The selected microphone is disconnected or disabled. Choose an active microphone; no fallback was used.");
                 return;
             }
-            jsti::COM<IMMEndpoint> endpoint;
             result = device->QueryInterface(__uuidof(IMMEndpoint), reinterpret_cast<void **>(&endpoint.value));
             EDataFlow flow = eAll;
             if (FAILED(result) || FAILED(endpoint->GetDataFlow(&flow)) || flow != eCapture) {
                 report("The selected endpoint is not a microphone. Choose an input device; no fallback was used.");
                 return;
             }
-            jsti::COM<IAudioClient> client;
             result = device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, reinterpret_cast<void **>(&client.value));
             if (FAILED(result)) { report(audioError("Activating microphone", result)); return; }
             WAVEFORMATEX format{};
@@ -324,7 +436,6 @@ struct JSTICapture {
                 report(audioError(operation.c_str(), result));
                 return;
             }
-            jsti::Handle available;
             available.value = CreateEventW(nullptr, FALSE, FALSE, nullptr);
             if (!available.value) { report(jsti::systemError("Creating microphone event")); return; }
             result = client->SetEventHandle(available.value);
@@ -338,12 +449,11 @@ struct JSTICapture {
                 report("The microphone driver returned an invalid or excessive capture buffer."); return;
             }
             std::vector<int16_t> packet(capacity);
-            BufferedAudioWriter writer(callback, context, this, sampleRate, frameMilliseconds);
+            writer = std::make_unique<BufferedAudioWriter>(callback, context, this, sampleRate, frameMilliseconds);
             auto enqueue = [](const int16_t *samples, size_t count, void *value) {
                 static_cast<BufferedAudioWriter *>(value)->append(samples, count);
             };
-            Frames frames(sampleRate, enqueue, &writer, frameMilliseconds);
-            jsti::COM<IAudioCaptureClient> reader;
+            Frames frames(sampleRate, enqueue, writer.get(), frameMilliseconds);
             result = client->GetService(__uuidof(IAudioCaptureClient), reinterpret_cast<void **>(&reader.value));
             if (FAILED(result)) { report(audioError("Opening microphone capture stream", result)); return; }
             Scheduling scheduling;
@@ -351,6 +461,7 @@ struct JSTICapture {
             // when the scheduler service is unavailable or disabled by policy.
             result = client->Start();
             if (FAILED(result)) { report(audioError("Starting microphone", result)); return; }
+            clientStarted = true;
             ready.set_value({});
             announced = true;
             bool firstPacket = true;
@@ -388,7 +499,7 @@ struct JSTICapture {
                     firstPacket = false;
                     // Publish after releasing the driver buffer; Swift runs only on the writer thread.
                     frames.append(silence ? nullptr : packet.data(), count);
-                    if (const char *error = writer.error()) { streamFailure = error; return false; }
+                    if (const char *error = writer->error()) { streamFailure = error; return false; }
                 }
             };
             HANDLE events[] = {stop.value, available.value};
@@ -403,13 +514,15 @@ struct JSTICapture {
                 }
             }
             result = client->Stop();
+            if (SUCCEEDED(result)) clientStarted = false;
             if (FAILED(result) && streamFailure.empty()) streamFailure = audioError("Stopping microphone", result);
             if (streamFailure.empty()) drain();
             frames.flush();
             // The producer is finished. Drain all accepted frames, including the
             // final partial frame, before allowing stop/destroy to return.
-            writer.finish();
-            if (const char *error = writer.error(); error && streamFailure.empty()) streamFailure = error;
+            if (owned) owned->finishWriter(*writer);
+            else writer->finish();
+            if (const char *error = writer->error(); error && streamFailure.empty()) streamFailure = error;
             SecureZeroMemory(packet.data(), packet.size() * sizeof(int16_t));
             if (!streamFailure.empty()) report(streamFailure);
         } catch (const std::exception &) {
@@ -481,6 +594,7 @@ JSTICapture *jsti_capture_create_with_options(const char *deviceID, uint32_t sam
 
 int jsti_capture_start(JSTICapture *capture, char *error, size_t capacity) {
     if (!capture) return jsti::fail("No microphone capture instance.", error, capacity);
+    if (capture->owned) return jsti::fail("Owned capture requires its owned control API.", error, capacity);
     if (capture->worker.joinable()) return jsti::fail("The microphone is already started. Stop it before restarting.", error, capacity);
     if (!capture->stop.value) capture->stop.value = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     if (!capture->stop.value) return jsti::fail(jsti::systemError("Creating microphone stop event"), error, capacity);
@@ -501,6 +615,7 @@ int jsti_capture_start(JSTICapture *capture, char *error, size_t capacity) {
 
 int jsti_capture_stop(JSTICapture *capture, char *error, size_t capacity) {
     if (!capture) return jsti::fail("No microphone capture instance.", error, capacity);
+    if (capture->owned) return jsti::fail("Owned capture requires its owned control API.", error, capacity);
     if (activeCaptureCallback == capture) {
         return jsti::fail("Microphone stop must run outside its capture and writer callbacks.", error, capacity);
     }
@@ -517,11 +632,419 @@ int jsti_capture_stop(JSTICapture *capture, char *error, size_t capacity) {
 
 void jsti_capture_destroy(JSTICapture *capture) {
     if (!capture) return;
+    if (capture->owned) return;
     // Refuse a self-join/use-after-free; the caller must destroy on its owner queue.
     if (activeCaptureCallback == capture ||
         (capture->worker.joinable() && capture->worker.get_id() == std::this_thread::get_id())) return;
     jsti_capture_stop(capture, nullptr, 0);
     delete capture;
+}
+
+struct JSTIOwnedCapture {
+    const std::string id;
+    OwnedCaptureControl control;
+    JSTICapture *capture = nullptr;
+    const JSTIAudioCallback audio;
+    const JSTIAudioErrorCallback failed;
+    void *const context;
+    std::atomic<uint64_t> delivered{0};
+
+    JSTIOwnedCapture(std::string id, JSTIAudioCallback audio, JSTIAudioErrorCallback failed, void *context)
+        : id(std::move(id)), audio(audio), failed(failed), context(context) {}
+};
+
+namespace {
+int ownedControlFailure(const char *message, char *error, size_t capacity) noexcept {
+    if (error && capacity) {
+        const size_t count = std::min(std::strlen(message), capacity - 1);
+        std::memcpy(error, message, count);
+        error[count] = 0;
+    }
+    return -1;
+}
+
+bool validOwnedReceipt(JSTIOwnedCaptureReceipt *receipt, char *error, size_t capacity) {
+    if (!receipt || receipt->size != sizeof(*receipt) || receipt->version != JSTI_OWNED_CAPTURE_VERSION) {
+        jsti::fail("Unsupported owned capture receipt size/version.", error, capacity);
+        return false;
+    }
+    return true;
+}
+
+void ownedReceipt(JSTIOwnedCapture *owner, JSTIOwnedCaptureReceipt *receipt, bool retired = false) {
+    receipt->flags = retired ? JSTI_OWNED_RESOURCES_RETIRED : JSTI_OWNED_OWNERSHIP_RETAINED;
+    receipt->delivered_samples = owner->delivered.load(std::memory_order_relaxed);
+    {
+        std::lock_guard<std::mutex> lock(owner->control.mutex);
+        if (owner->control.quiesced) receipt->flags |= JSTI_OWNED_PRODUCER_QUIESCED | JSTI_OWNED_CALLBACKS_DRAINED;
+    }
+    std::lock_guard<std::mutex> lock(owner->capture->failureMutex);
+    std::memset(receipt->first_audio_error, 0, sizeof(receipt->first_audio_error));
+    if (!owner->capture->failure.empty()) {
+        receipt->flags |= JSTI_OWNED_AUDIO_FAILED;
+        std::memcpy(receipt->first_audio_error, owner->capture->failure.data(),
+                    std::min(owner->capture->failure.size(), sizeof(receipt->first_audio_error) - 1));
+    }
+}
+
+bool validOwnedRun(JSTIOwnedCapture *owner, const char *id, char *error, size_t capacity) {
+    if (!owner || !id || owner->id != id) {
+        jsti::fail("Stale owned capture run identity.", error, capacity);
+        return false;
+    }
+    if (activeCaptureCallback == owner->capture ||
+        (owner->capture->worker.joinable() && owner->capture->worker.get_id() == std::this_thread::get_id())) {
+        jsti::fail("Owned capture control cannot run inside its native callback/producer.", error, capacity);
+        return false;
+    }
+    return true;
+}
+
+void ownedAudio(const int16_t *samples, size_t count, void *context) {
+    auto *owner = static_cast<JSTIOwnedCapture *>(context);
+    owner->audio(samples, count, owner->context);
+    owner->delivered.fetch_add(count, std::memory_order_relaxed);
+}
+
+void ownedFailure(const char *message, void *context) {
+    auto *owner = static_cast<JSTIOwnedCapture *>(context);
+    if (owner->failed) owner->failed(message, owner->context);
+}
+
+// The fixture uses the real framing/ring/writer/control/retirement paths but
+// never opens an endpoint. All storage stays owned until the real threads join.
+void ownedFixtureRun(JSTIOwnedCapture *owner, std::promise<std::string> ready) {
+    auto &capture = *owner->capture;
+    auto report = [&](const std::string &message) {
+        bool first = false;
+        {
+            std::lock_guard<std::mutex> lock(capture.failureMutex);
+            if (capture.failure.empty()) { capture.failure = message.substr(0, 1023); first = true; }
+        }
+        if (first) {
+            CaptureCallbackScope scope(&capture);
+            try { ownedFailure(message.c_str(), owner); } catch (...) { /* C callback boundary. */ }
+        }
+    };
+    std::unique_ptr<BufferedAudioWriter> writer;
+    bool announced = false;
+    auto finish = [&] {
+        if (!announced) { report("Owned fixture failed before readiness."); ready.set_value("Fixture open failed."); }
+        if (writer) {
+            owner->control.finishWriter(*writer);
+            if (const char *message = writer->error()) report(message);
+        }
+        if (owner->control.consumeFault(8)) report("Synthetic late native audio failure.");
+        owner->control.park();
+        owner->control.retireEvents(writer.get());
+    };
+    ProducerScope<decltype(finish)> terminal{finish};
+    try {
+        if (owner->control.consumeFault(16)) {
+            report("Synthetic partial native open failure.");
+            ready.set_value("Synthetic partial native open failure.");
+            announced = true;
+            return;
+        }
+        writer = std::make_unique<BufferedAudioWriter>(ownedAudio, owner, &capture,
+                                                       capture.sampleRate, capture.frameMilliseconds);
+        const auto enqueue = [](const int16_t *samples, size_t count, void *value) {
+            static_cast<BufferedAudioWriter *>(value)->append(samples, count);
+        };
+        Frames frames(capture.sampleRate, enqueue, writer.get(), capture.frameMilliseconds);
+        ready.set_value({});
+        announced = true;
+        if (WaitForSingleObject(capture.stop.value, INFINITE) != WAIT_OBJECT_0) {
+            report("Waiting for the synthetic owned producer failed.");
+        } else {
+            std::array<int16_t, 73> tail{};
+            for (size_t i = 0; i < tail.size(); ++i) tail[i] = static_cast<int16_t>(i + 1);
+            frames.append(tail.data(), tail.size());
+            frames.flush();
+            frames.flush();
+        }
+    } catch (...) {
+        report("Synthetic owned producer failed.");
+        if (!announced) { ready.set_value("Synthetic owned open failed."); announced = true; }
+    }
+}
+
+int openOwned(JSTIOwnedCapture **slot, const char *id, const char *device, uint32_t rate, uint32_t frame,
+              JSTIAudioCallback audio, JSTIAudioErrorCallback failure, void *context, bool fixture, uint32_t faults,
+              JSTIOwnedCaptureReceipt *receipt, char *error, size_t capacity) {
+    if (!validOwnedReceipt(receipt, error, capacity)) return -1;
+    if (!slot || *slot || !id || !*id || std::strlen(id) > 64 || !audio ||
+        !supportedSampleRate(rate) || !supportedFrameMilliseconds(frame) || (faults & ~31u)) {
+        return jsti::fail("Invalid owned capture configuration or occupied slot.", error, capacity);
+    }
+    try {
+        auto owner = std::make_unique<JSTIOwnedCapture>(id, audio, failure, context);
+        owner->capture = createCapture(device, rate, frame, ownedAudio, ownedFailure, owner.get(), error, capacity);
+        if (!owner->capture) return -1;
+        owner->capture->owned = &owner->control;
+        owner->control.faults.store(faults, std::memory_order_relaxed);
+        *slot = owner.release(); // Publish before any blocking native operation.
+        auto &capture = *(*slot)->capture;
+        capture.stop.value = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (!capture.stop.value) {
+            ownedReceipt(*slot, receipt);
+            return jsti::fail(jsti::systemError("Creating owned stop event"), error, capacity);
+        }
+        std::promise<std::string> ready;
+        auto initialized = ready.get_future();
+        if (fixture) capture.worker = std::thread(ownedFixtureRun, *slot, std::move(ready));
+        else capture.worker = std::thread(&JSTICapture::run, &capture, std::move(ready));
+        const auto message = initialized.get();
+        ownedReceipt(*slot, receipt);
+        if (!message.empty()) return jsti::fail(message, error, capacity);
+        return 0;
+    } catch (...) {
+        if (slot && *slot) ownedReceipt(*slot, receipt);
+        return jsti::fail("Owned capture open failed; retain any partial owner for retirement.", error, capacity);
+    }
+}
+
+int quiesceOwned(JSTIOwnedCapture *owner, JSTIOwnedCaptureReceipt *receipt, char *error, size_t capacity) {
+    auto &control = owner->control;
+    {
+        std::unique_lock<std::mutex> lock(control.mutex);
+        if (!control.quiesced) {
+            if (!owner->capture->worker.joinable()) {
+                control.quiesced = true; // Thread creation never succeeded; there are no callbacks to join.
+            } else {
+                if (control.consumeFault(1) || !SetEvent(owner->capture->stop.value)) {
+                    lock.unlock();
+                    ownedReceipt(owner, receipt);
+                    return jsti::fail("Signalling owned producer stop failed; ownership retained.", error, capacity);
+                }
+                control.operationFailure.clear();
+                ++control.retryGeneration;
+                control.retry.notify_all();
+                control.changed.wait(lock, [&] { return control.quiesced || !control.operationFailure.empty(); });
+                if (!control.operationFailure.empty()) {
+                    const auto message = control.operationFailure;
+                    lock.unlock();
+                    ownedReceipt(owner, receipt);
+                    return jsti::fail(message, error, capacity);
+                }
+            }
+        }
+    }
+    ownedReceipt(owner, receipt);
+    if (receipt->flags & JSTI_OWNED_AUDIO_FAILED) return jsti::fail(receipt->first_audio_error, error, capacity);
+    return 0;
+}
+}
+
+int jsti_owned_capture_open(JSTIOwnedCapture **owner, const char *id, const char *device,
+                            uint32_t rate, uint32_t frame, JSTIAudioCallback audio,
+                            JSTIAudioErrorCallback failure, void *context,
+                            JSTIOwnedCaptureReceipt *receipt, char *error, size_t capacity) {
+    try {
+        return openOwned(owner, id, device, rate, frame, audio, failure, context, false, 0, receipt, error, capacity);
+    } catch (...) {
+        return ownedControlFailure("Owned open failed; preserve any published owner.", error, capacity);
+    }
+}
+
+int jsti_owned_capture_open_fixture(JSTIOwnedCapture **owner, const char *id, uint32_t faults,
+                                    uint32_t rate, uint32_t frame, JSTIAudioCallback audio,
+                                    JSTIAudioErrorCallback failure, void *context,
+                                    JSTIOwnedCaptureReceipt *receipt, char *error, size_t capacity) {
+    try {
+        return openOwned(owner, id, "", rate, frame, audio, failure, context, true, faults, receipt, error, capacity);
+    } catch (...) {
+        return ownedControlFailure("Owned fixture open failed; preserve any published owner.", error, capacity);
+    }
+}
+
+int jsti_owned_capture_quiesce(JSTIOwnedCapture *owner, const char *id,
+                               JSTIOwnedCaptureReceipt *receipt, char *error, size_t capacity) {
+    try {
+        if (!validOwnedReceipt(receipt, error, capacity) || !validOwnedRun(owner, id, error, capacity)) return -1;
+        return quiesceOwned(owner, receipt, error, capacity);
+    } catch (...) {
+        return ownedControlFailure("Owned quiescence failed without releasing ownership.", error, capacity);
+    }
+}
+
+int jsti_owned_capture_retire(JSTIOwnedCapture **slot, const char *id,
+                              JSTIOwnedCaptureReceipt *receipt, char *error, size_t capacity) {
+    try {
+        if (!validOwnedReceipt(receipt, error, capacity)) return -1;
+        if (!slot) return ownedControlFailure("No owned capture slot supplied for retirement.", error, capacity);
+        if (!validOwnedRun(*slot, id, error, capacity)) return -1;
+        auto *owner = *slot;
+        quiesceOwned(owner, receipt, error, capacity);
+        {
+            std::lock_guard<std::mutex> lock(owner->control.mutex);
+            if (!owner->control.quiesced) return -1;
+            owner->control.operationFailure.clear();
+            owner->control.retireRequested = true;
+            if (!owner->capture->worker.joinable()) owner->control.retirementReady = true;
+            ++owner->control.retryGeneration;
+            owner->control.retry.notify_all();
+        }
+        {
+            std::unique_lock<std::mutex> lock(owner->control.mutex);
+            owner->control.changed.wait(lock, [&] {
+                return owner->control.retirementReady || !owner->control.operationFailure.empty();
+            });
+            if (!owner->control.operationFailure.empty()) {
+                return jsti::fail(owner->control.operationFailure, error, capacity);
+            }
+        }
+        if (owner->control.consumeFault(2)) {
+            return jsti::fail("Joining owned producer failed; ownership retained.", error, capacity);
+        }
+        // COM destruction runs on the producer after its retirement signal.
+        if (owner->capture->worker.joinable()) owner->capture->worker.join();
+        if (owner->capture->stop.value) {
+            if (owner->control.stopHandleAmbiguous || !CloseHandle(owner->capture->stop.value)) {
+                owner->control.stopHandleAmbiguous = true;
+                return jsti::fail("Owned stop-event retirement is ambiguous; owner retained.", error, capacity);
+            }
+            owner->capture->stop.value = nullptr;
+        }
+        ownedReceipt(owner, receipt, true);
+        delete owner->capture;
+        delete owner;
+        *slot = nullptr;
+        return 0;
+    } catch (...) {
+        return ownedControlFailure("Owned retirement failed; native owner and callbacks must be retained.", error, capacity);
+    }
+}
+
+int jsti_owned_capture_self_test(char *error, size_t capacity) {
+    struct Check {
+        std::array<int16_t, 73> samples{};
+        size_t count = 0, calls = 0, failures = 0;
+        JSTIOwnedCapture *owner = nullptr;
+        jsti::Handle entered, release;
+        bool valid = true;
+    };
+    static std::mutex fixtureMutex;
+    std::lock_guard<std::mutex> fixtureLock(fixtureMutex);
+    // If real OS retirement fails, keep the callback context and event owners
+    // alive too. A later explicit self-test invocation retries that same owner.
+    static Check *retained = nullptr;
+    const auto cleanup = [&](Check &check) {
+        if (check.release.value) SetEvent(check.release.value);
+        JSTIOwnedCaptureReceipt receipt{};
+        receipt.size = sizeof(receipt);
+        receipt.version = JSTI_OWNED_CAPTURE_VERSION;
+        for (int attempt = 0; check.owner && attempt < 4; ++attempt) {
+            jsti_owned_capture_retire(&check.owner, "fixture", &receipt, error, capacity);
+        }
+        return check.owner == nullptr;
+    };
+    if (retained) {
+        if (!cleanup(*retained)) return ownedControlFailure("Earlier fixture ownership is still retained.", error, capacity);
+        delete retained;
+        retained = nullptr;
+    }
+    {
+        JSTIOwnedCaptureReceipt receipt{};
+        receipt.size = sizeof(receipt);
+        receipt.version = JSTI_OWNED_CAPTURE_VERSION;
+        char detail[128]{};
+        if (jsti_owned_capture_retire(nullptr, "fixture", &receipt, detail, sizeof(detail)) != -1 || !detail[0]) {
+            return ownedControlFailure("A missing retirement slot was not diagnosed.", error, capacity);
+        }
+    }
+    const auto audio = [](const int16_t *samples, size_t count, void *value) {
+        auto &check = *static_cast<Check *>(value);
+        JSTIOwnedCaptureReceipt receipt{};
+        receipt.size = sizeof(receipt);
+        receipt.version = JSTI_OWNED_CAPTURE_VERSION;
+        if (jsti_owned_capture_quiesce(check.owner, "fixture", &receipt, nullptr, 0) != -1) check.valid = false;
+        if (check.entered.value) {
+            SetEvent(check.entered.value);
+            if (WaitForSingleObject(check.release.value, 3000) != WAIT_OBJECT_0) check.valid = false;
+        }
+        if (count != 73 || check.calls != 0) check.valid = false;
+        if (count == 73) std::copy_n(samples, count, check.samples.data());
+        check.count += count;
+        ++check.calls;
+    };
+    const auto failed = [](const char *, void *value) { ++static_cast<Check *>(value)->failures; };
+    for (uint32_t faults : {0u, 1u, 2u, 4u, 8u, 16u, 1u | 2u | 4u | 8u}) {
+        auto state = std::make_unique<Check>();
+        auto &check = *state;
+        auto &owner = check.owner;
+        JSTIOwnedCaptureReceipt receipt{};
+        receipt.size = sizeof(receipt);
+        receipt.version = JSTI_OWNED_CAPTURE_VERSION;
+        const int opened = jsti_owned_capture_open_fixture(
+            &owner, "fixture", faults, 24000, 100, audio, failed, &check, &receipt, error, capacity);
+        bool valid = owner && (opened == 0) == !(faults & 16);
+        valid = valid && jsti_owned_capture_quiesce(owner, "stale", &receipt, nullptr, 0) == -1;
+        if (owner) {
+            const int stopped = jsti_owned_capture_quiesce(owner, "fixture", &receipt, error, capacity);
+            if (!(faults & (1u | 4u | 8u | 16u))) valid = valid && stopped == 0;
+            else valid = valid && stopped == -1;
+            // Faults are consumed once BEFORE a real signal/join. Retry still
+            // performs the actual signal/join; the test never deletes instead.
+            for (int attempt = 0; owner && attempt < 4; ++attempt) {
+                jsti_owned_capture_retire(&owner, "fixture", &receipt, error, capacity);
+            }
+            if (owner) {
+                retained = state.release();
+                return ownedControlFailure("Fixture retirement failed; callback context remains retained.", error, capacity);
+            }
+            valid = valid && !owner && (receipt.flags & JSTI_OWNED_RESOURCES_RETIRED) &&
+                (receipt.flags & JSTI_OWNED_CALLBACKS_DRAINED);
+        }
+        if (faults & 16) valid = valid && check.calls == 0 && check.failures == 1;
+        else {
+            valid = valid && check.calls == 1 && check.count == 73;
+            for (size_t i = 0; i < check.samples.size(); ++i) valid = valid && check.samples[i] == i + 1;
+        }
+        if (faults & 8) valid = valid && check.failures == 1 && (receipt.flags & JSTI_OWNED_AUDIO_FAILED);
+        if (!valid || !check.valid) return jsti::fail("Owned capture signal/join/partial/retry fixture failed.", error, capacity);
+    }
+    // A held LAST callback prevents acknowledgement, not just later free.
+    auto state = std::make_unique<Check>();
+    auto &check = *state;
+    auto &owner = check.owner;
+    auto &entered = check.entered;
+    auto &release = check.release;
+    entered.value = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    release.value = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!entered.value || !release.value) return jsti::fail("Could not create owned fixture gates.", error, capacity);
+    JSTIOwnedCaptureReceipt receipt{};
+    receipt.size = sizeof(receipt);
+    receipt.version = JSTI_OWNED_CAPTURE_VERSION;
+    if (jsti_owned_capture_open_fixture(
+        &owner, "fixture", 0, 16000, 20, audio, failed, &check, &receipt, error, capacity) != 0) {
+        if (!cleanup(check)) retained = state.release();
+        return -1;
+    }
+    bool valid = false;
+    std::future<int> stop;
+    try {
+        stop = std::async(std::launch::async, [&] {
+            return jsti_owned_capture_quiesce(owner, "fixture", &receipt, error, capacity);
+        });
+        const bool arrived = WaitForSingleObject(entered.value, 3000) == WAIT_OBJECT_0;
+        valid = arrived && stop.wait_for(std::chrono::milliseconds(20)) == std::future_status::timeout;
+        SetEvent(release.value);
+        valid = stop.get() == 0 && valid;
+    } catch (...) {
+        SetEvent(release.value);
+        if (stop.valid()) stop.wait();
+        valid = false;
+    }
+    const int retired = jsti_owned_capture_retire(&owner, "fixture", &receipt, error, capacity);
+    if (owner) {
+        retained = state.release();
+        return ownedControlFailure("Held callback fixture retirement failed; callback context retained.", error, capacity);
+    }
+    if (!valid || retired != 0 || owner || !check.valid || check.calls != 1 || check.count != 73) {
+        return jsti::fail("Owned final callback acknowledgement/retirement fixture failed.", error, capacity);
+    }
+    return 0;
 }
 
 namespace {

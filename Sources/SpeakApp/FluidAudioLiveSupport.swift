@@ -1,6 +1,7 @@
 @preconcurrency import AVFoundation
 import FluidAudio
 import Foundation
+import SpeakCore
 
 /// The subset of `StreamingEouAsrManager` the live controller drives. A seam
 /// so behavioural tests can exercise cancellation and backpressure with
@@ -57,7 +58,7 @@ final class FluidAudioEngineCapture: FluidAudioAudioCapturing {
       guard audioInputFormatIsUsable(inputFormat) else {
         throw TranscriptionManagerError.noUsableAudioInput
       }
-      inputNode.installTap(onBus: 0, bufferSize: 2048, format: inputFormat) { buffer, _ in
+      try inputNode.installTapSafely(onBus: 0, bufferSize: 2048, format: inputFormat) { buffer, _ in
         onBuffer(buffer)
       }
       try await startAudioEngineAfterInputDeviceSettles(audioEngine)

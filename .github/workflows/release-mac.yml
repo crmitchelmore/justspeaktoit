@@ -319,23 +319,42 @@ jobs:
         if: env.RELEASE_TRAIN == 'alpha'
         run: node scripts/release-train.mjs publish-alpha --tag "$RELEASE_TAG"
 
-      - name: Create Sentry Release
-        if: steps.receipt.outputs.status != 'verified' && env.SENTRY_AUTH_TOKEN != ''
+      # Without dSYMs Sentry cannot symbolicate crashes. Step-level env is not
+      # visible to `if:`, so the token is checked inside the script; a Sentry
+      # outage must never fail a release that is already published.
+      - name: Create Sentry release and upload dSYMs
+        if: steps.receipt.outputs.status != 'verified'
+        continue-on-error: true
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
-          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG || 'tally-lz' }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT || 'justspeaktoit' }}
+          SENTRY_URL: https://de.sentry.io/
+          SENTRY_CLI_VERSION: 3.8.0
+          SENTRY_CLI_SHA256: 2c26914636c47ab9bf9e710484ad7b44d371cbec8bd29cafb36b3cf877bf4285
         run: |
-          VERSION="${{ env.RELEASE_VERSION }}"
-          if command -v sentry-cli &>/dev/null; then
-            sentry-cli releases new "justspeaktoit-mac@${VERSION}+${BUILD_NUMBER}"
-            sentry-cli releases set-commits "justspeaktoit-mac@${VERSION}+${BUILD_NUMBER}" --auto
-            sentry-cli releases finalize "justspeaktoit-mac@${VERSION}+${BUILD_NUMBER}"
-            # Upload dSYMs for symbolication (both variants share the build number)
-            sentry-cli debug-files upload --include-sources "$ARCHIVE_PATH/dSYMs"
-            sentry-cli debug-files upload --include-sources "$LEGACY_ARCHIVE_PATH/dSYMs"
-          else
-            echo "sentry-cli not found, skipping release creation"
+          if [ -z "$SENTRY_AUTH_TOKEN" ]; then
+            echo "::warning::SENTRY_AUTH_TOKEN is not set; crashes from this build will not be symbolicated."
+            exit 0
+          fi
+          CLI="$RUNNER_TEMP/sentry-cli"
+          curl -fsSL --retry 3 -o "$CLI" \
+            "https://github.com/getsentry/sentry-cli/releases/download/${SENTRY_CLI_VERSION}/sentry-cli-Darwin-universal"
+          echo "${SENTRY_CLI_SHA256}  $CLI" | shasum -a 256 -c -
+          chmod +x "$CLI"
+
+          RELEASE="justspeaktoit-mac@${RELEASE_VERSION}+${BUILD_NUMBER}"
+          status=0
+          "$CLI" releases new "$RELEASE" || status=1
+          "$CLI" releases set-commits "$RELEASE" --auto --ignore-missing \
+            || echo "::warning::Could not associate commits with $RELEASE"
+          "$CLI" releases finalize "$RELEASE" || status=1
+          # Both variants share the build number; each has its own binary UUIDs.
+          for dsyms in "$ARCHIVE_PATH/dSYMs" "$LEGACY_ARCHIVE_PATH/dSYMs"; do
+            "$CLI" debug-files upload --include-sources --wait "$dsyms" || status=1
+          done
+          if [ "$status" -ne 0 ]; then
+            echo "::warning::Sentry release or dSYM upload failed for $RELEASE"
           fi
 
       - name: Cleanup Keychain

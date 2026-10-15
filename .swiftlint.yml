@@ -20,3 +20,13 @@ identifier_name:
   excluded:
     - id
     - ok
+custom_rules:
+  # AVFAudio rejects a tap by raising an Objective-C exception that Swift cannot
+  # catch, so a raw installTap aborts the app (Sentry 137083080).
+  unsafe_audio_tap:
+    name: "Unsafe audio tap"
+    regex: '\.installTap\s*\(\s*onBus\s*:'
+    match_kinds:
+      - identifier
+    message: "Use installTapSafely(onBus:bufferSize:format:block:) so a rejected tap throws instead of crashing."
+    severity: error

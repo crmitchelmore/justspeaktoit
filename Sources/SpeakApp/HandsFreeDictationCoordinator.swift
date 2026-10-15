@@ -238,7 +238,7 @@ final class HandsFreeDictationCoordinator {
         sourceFormat: inputFormat,
         targetFormat: session.audioFormat
       )
-      inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [preRoll, session] buffer, _ in
+      try inputNode.installTapSafely(onBus: 0, bufferSize: 4096, format: inputFormat) { [preRoll, session] buffer, _ in
         preRoll.append(buffer)
         guard let converted = converter.convert(buffer) else { return }
         session.send(converted)

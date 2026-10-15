@@ -618,14 +618,14 @@ private final class KeyboardReadinessAudioSession {
             stop(deactivateAudioSession: true)
             throw KeyboardReadinessAudioError.noInput
         }
-        if !tapInstalled {
-            input.installTap(onBus: 0, bufferSize: 4_096, format: format) { _, _ in
-                // Deliberately discard idle audio. No persistence or network IO.
-            }
-            tapInstalled = true
-        }
-        engine.prepare()
         do {
+            if !tapInstalled {
+                try input.installTapSafely(onBus: 0, bufferSize: 4_096, format: format) { _, _ in
+                    // Deliberately discard idle audio. No persistence or network IO.
+                }
+                tapInstalled = true
+            }
+            engine.prepare()
             try engine.start()
         } catch {
             stop(deactivateAudioSession: true)

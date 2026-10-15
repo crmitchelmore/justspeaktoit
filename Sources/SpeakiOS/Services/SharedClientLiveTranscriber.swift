@@ -475,7 +475,7 @@ private extension SharedClientLiveTranscriber {
         // (issue #992); a writer failure is reported, never fatal (issue #950).
         recordingLoss.startWriter(audioRecorder, format: nativeFormat)
         let lossReport = recordingLoss.currentReport
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
+        try inputNode.installTapSafely(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
             // Copy the buffer and hop off the real-time audio thread —
             // heavy work in the tap makes CoreAudio drop mic buffers.
             guard let self, let copied = lossReport.copyCapture(buffer, using: self.tapBufferPool) else { return }

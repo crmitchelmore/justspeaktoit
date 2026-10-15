@@ -91,10 +91,10 @@ final class ComparisonLiveFanOut {
         }
 
         configureProcessor(inputFormat: inputFormat)
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [processor] buffer, _ in
-            processor.handleAudioTap(buffer)
-        }
         do {
+            try inputNode.installTapSafely(onBus: 0, bufferSize: 4096, format: inputFormat) { [processor] buffer, _ in
+                processor.handleAudioTap(buffer)
+            }
             try await startAudioEngineAfterInputDeviceSettles(audioEngine)
         } catch {
             if generation == runID { await cleanup() }

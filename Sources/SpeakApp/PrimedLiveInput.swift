@@ -1,6 +1,7 @@
 @preconcurrency import AVFoundation
 import CoreAudio
 import Foundation
+import SpeakCore
 
 /// The primed microphone a hotkey gesture claims, awaited because the open may
 /// still be in flight when the gesture is recognised.
@@ -193,8 +194,8 @@ final class PrimedLiveInput {
   }
 
   /// Selects the preferred input, then starts the standby engine for it (or
-  /// builds one when the standby was built for another device) with a
-  /// pre-roll tap. Nil when no usable input could be started.
+  /// builds one when the standby was built for another device or no longer
+  /// starts) with a pre-roll tap. Nil when no usable input could be started.
   static func open(
     keyDownUptime: TimeInterval,
     deviceManager: AudioInputDeviceManager,
@@ -209,16 +210,19 @@ final class PrimedLiveInput {
     let preRoll = PrimerPreRollBuffer(maximumDuration: preRollDuration)
     let started = await Task.detached(priority: .userInitiated) {
       () -> (engine: AVAudioEngine, tapFormat: AVAudioFormat)? in
-      let engine = standby.take(matching: deviceID) ?? standby.buildEngine()
-      do {
-        let tapFormat = try startCapturing(engine, into: preRoll)
-        return (engine, tapFormat)
-      } catch {
+      let started = startPreferringStandby(
+        standby.take(matching: deviceID),
+        buildEngine: { standby.buildEngine() },
+        start: { try startCapturing($0, into: preRoll) },
+        discard: { engine in
+          engine.inputNode.removeTap(onBus: 0)
+          engine.stop()
+        }
+      )
+      if started == nil {
         preRoll.stopCollecting()
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
-        return nil
       }
+      return started.map { (engine: $0.engine, tapFormat: $0.started) }
     }.value
     guard let started else {
       await deviceManager.endUsingPreferredInput(session: session)
@@ -235,14 +239,46 @@ final class PrimedLiveInput {
     )
   }
 
+  /// Starts the standby engine, or a freshly built one when there is no
+  /// standby or the standby cannot start. A standby can outlive many route
+  /// and format changes, so its failure says nothing about a fresh engine.
+  nonisolated static func startPreferringStandby<Engine: AnyObject, Started>(
+    _ standby: Engine?,
+    buildEngine: () -> Engine,
+    start: (Engine) throws -> Started,
+    discard: (Engine) -> Void
+  ) -> (engine: Engine, started: Started)? {
+    if let standby {
+      if let started = try? start(standby) {
+        return (standby, started)
+      }
+      discard(standby)
+    }
+    let engine = buildEngine()
+    do {
+      return (engine, try start(engine))
+    } catch {
+      discard(engine)
+      return nil
+    }
+  }
+
   private nonisolated static func startCapturing(
     _ engine: AVAudioEngine, into preRoll: PrimerPreRollBuffer
   ) throws -> AVAudioFormat {
     let input = engine.inputNode
     let format = input.outputFormat(forBus: 0)
     guard audioInputFormatIsUsable(format) else { throw TranscriptionManagerError.noUsableAudioInput }
+    // An idle engine keeps the format its input node was built with, while the
+    // device can change rate meanwhile (Bluetooth profile switch, sleep, Audio
+    // MIDI Setup). AVFAudio rejects a tap format the hardware no longer has,
+    // so reject the engine up front; `installTapSafely` still catches anything
+    // this check misses.
+    guard audioInputTapFormatMatchesHardware(format, hardwareFormat: input.inputFormat(forBus: 0)) else {
+      throw TranscriptionManagerError.noUsableAudioInput
+    }
     input.removeTap(onBus: 0)
-    input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+    try input.installTapSafely(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
       preRoll.append(buffer, at: ProcessInfo.processInfo.systemUptime)
     }
     engine.prepare()

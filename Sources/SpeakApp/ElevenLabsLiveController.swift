@@ -131,7 +131,7 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
       audioProcessor.setRunning(true)
       let processor = audioProcessor
       let log = logger
-      inputNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { buffer, _ in
+      try inputNode.installTapSafely(onBus: 0, bufferSize: 1024, format: inputFormat) { buffer, _ in
         processor.handleAudioTap(
           buffer,
           inputFormat: inputFormat,

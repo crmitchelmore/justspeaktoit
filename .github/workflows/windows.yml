@@ -198,7 +198,7 @@ jobs:
 
           function Get-OwnedTestSelection {
               param(
-                  [Parameter(Mandatory)][string[]]$ListLines,
+                  [Parameter(Mandatory)][AllowEmptyString()][AllowEmptyCollection()][string[]]$ListLines,
                   [Parameter(Mandatory)][string]$TargetClass
               )
               # swift-corelibs-xctest's direct --list-tests output format is
@@ -379,7 +379,7 @@ jobs:
               # verdicts, and a terminal count that exactly matches the
               # expected method count (a "nonempty subset" is insufficient).
               param(
-                  [Parameter(Mandatory)][string[]]$StdOutLines,
+                  [Parameter(Mandatory)][AllowEmptyString()][AllowEmptyCollection()][string[]]$StdOutLines,
                   [Parameter(Mandatory)][string]$TargetClass,
                   [Parameter(Mandatory)][string[]]$ExpectedMethods,
                   [Parameter(Mandatory)][bool]$CleanExit

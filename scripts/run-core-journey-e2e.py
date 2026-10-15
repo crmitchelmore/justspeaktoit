@@ -77,7 +77,7 @@ def stop_process_group(process):
     process.wait()
 
 
-def run_gate(command, artifacts_dir, budget, required_suites=REQUIRED_SUITES):
+def run_gate(command, artifacts_dir, budget, required_suites=REQUIRED_SUITES, stage="test"):
     artifacts_dir = Path(artifacts_dir)
     started = time.monotonic()
     command_elapsed = None
@@ -110,10 +110,10 @@ def run_gate(command, artifacts_dir, budget, required_suites=REQUIRED_SUITES):
                 try:
                     exit_code = process.wait(timeout=budget)
                     if exit_code != 0:
-                        errors.append(f"Test command exited with status {exit_code}; see {log_path}.")
+                        errors.append(f"{stage.capitalize()} command exited with status {exit_code}; see {log_path}.")
                 except subprocess.TimeoutExpired:
                     exit_code = 124
-                    errors.append(f"Core journey gate exceeded its {budget}s test budget.")
+                    errors.append(f"Core journey gate exceeded its {budget}s {stage} budget.")
                     stop_process_group(process)
             finally:
                 # The budget covers the command, not log replay, coverage
@@ -144,6 +144,8 @@ def run_gate(command, artifacts_dir, budget, required_suites=REQUIRED_SUITES):
                 json.dumps(
                     {
                         "exit_code": exit_code,
+                        "stage": stage,
+                        "command": command,
                         "elapsed_seconds": elapsed,
                         "command_elapsed_seconds": command_elapsed,
                         "budget_seconds": budget,
@@ -169,19 +171,9 @@ def main():
 
     signal.signal(signal.SIGTERM, interrupted)
     signal.signal(signal.SIGINT, interrupted)
-    try:
-        budget = int(os.environ.get("CORE_JOURNEY_BUDGET_SECONDS", "480"))
-        if budget <= 0:
-            raise ValueError("budget must be positive")
-    except ValueError as error:
-        print(f"Invalid CORE_JOURNEY_BUDGET_SECONDS: {error}", file=sys.stderr)
-        return 2
-    test_filter = "|".join(f"{suite}/" for suite in REQUIRED_SUITES)
-    return run_gate(
-        ["swift", "test", "--filter", test_filter],
-        os.environ.get("CORE_JOURNEY_ARTIFACTS_DIR", ".artifacts/core-journey-e2e"),
-        budget,
-    )
+    import runpy
+    stages = runpy.run_path(str(Path(__file__).with_name("run-core-journey-stages.py")))
+    return stages["main"](["swift", *sys.argv[1:]])
 
 
 if __name__ == "__main__":

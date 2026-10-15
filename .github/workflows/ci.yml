@@ -156,8 +156,11 @@ jobs:
               - 'Tests/SpeakHotKeysTests/**'
               - 'scripts/run-core-journey-e2e.sh'
               - 'scripts/run-core-journey-e2e.py'
+              - 'scripts/run-core-journey-stages.py'
               - 'scripts/verify-core-journey-ui.py'
               - 'scripts/tests/test_core_journey_gate.py'
+              - 'scripts/tests/test_core_journey_stages.py'
+              - 'scripts/tests/verify-ci-gates.test.mjs'
               - '.github/workflows/ci.yml'
 
       - name: Select gate outputs
@@ -180,15 +183,19 @@ jobs:
     name: Core Dictation Journey (≤10m)
     # This non-UI contract gate may use an explicitly approved native runner.
     runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-macos-build","macOS"]') || '["macos-latest"]') }}
-    timeout-minutes: 10
+    # 2m checkout + 3m cache + 12m cold build/receipts + 10m runtime/receipts + 3m upload.
+    # Cold compile observed 405-487s: give it a separate finite 600s command budget.
+    # Actual tests retain their original 480s budget, independent of cold build time.
+    timeout-minutes: 30
     needs: release-paths
     if: needs.release-paths.outputs.core-journey == 'true'
     steps:
       - uses: actions/checkout@v7.0.1
+        timeout-minutes: 2
 
-      # Debug CI populates the shared cache. This bounded gate only restores;
-      # uploading gigabytes afterwards must not consume its ten-minute budget.
+      # Debug CI populates this cache; never upload it from the journey gate.
       - name: Restore Swift packages
+        timeout-minutes: 3
         uses: actions/cache/restore@v6
         with:
           path: .build
@@ -196,11 +203,17 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-swift-
 
-      - name: Run core journey gate
-        run: scripts/run-core-journey-e2e.sh
+      - name: Build core journey test products
+        timeout-minutes: 12
+        run: scripts/run-core-journey-e2e.sh --phase build
+
+      - name: Run prepared core journey gate
+        timeout-minutes: 10
+        run: scripts/run-core-journey-e2e.sh --phase test
 
       - name: Upload stage diagnostics
         if: always()
+        timeout-minutes: 3
         uses: actions/upload-artifact@v7.0.1
         with:
           name: core-journey-e2e-${{ github.run_attempt }}
@@ -211,45 +224,38 @@ jobs:
     name: Core Journey Fixture UI
     # Hosted ARM has the UI automation entitlement; the native pool does not.
     runs-on: macos-latest
-    timeout-minutes: 10
+    # 2m checkout + 6m setup + 12m build/receipts + 12m UI/receipts + 3m upload.
+    # The former 600s job spent ~505s preparing before UI tests. Setup now has a
+    # separate 300s command budget; build has 600s, as do actual UI tests (unchanged).
+    # Each product/source receipt is separately bounded to 60s, not hidden setup.
+    timeout-minutes: 35
     needs: release-paths
     if: needs.release-paths.outputs.core-journey == 'true'
     steps:
       - uses: actions/checkout@v7.0.1
+        timeout-minutes: 2
 
-      - name: Install Tuist
-        run: brew install tuist
+      - name: Prepare Tuist and macOS project
+        timeout-minutes: 6
+        run: python3 scripts/run-core-journey-stages.py ui --phase setup
 
-      - name: Generate macOS project
-        run: tuist generate --no-open
+      - name: Build launched fixture test products
+        timeout-minutes: 12
+        run: python3 scripts/run-core-journey-stages.py ui --phase build
 
       - name: Test Speak bootstrap, global hotkey, and launched fixture
-        run: |
-          set -euo pipefail
-          mkdir -p .artifacts/core-journey-fixture-ui
-          xcodebuild test \
-            -workspace "Just Speak to It.xcworkspace" \
-            -scheme SpeakApp \
-            -configuration Debug \
-            -destination "platform=macOS" \
-            -only-testing:SpeakAppUITests/LaunchUITests \
-            -only-testing:SpeakAppUITests/CoreJourneyFixtureUITests \
-            -only-testing:SpeakAppUITests/CoreJourneyHotKeyUITests \
-            -only-testing:SpeakAppUITests/CoreJourneyBatchUITests \
-            -resultBundlePath .artifacts/core-journey-fixture-ui/CoreJourneyFixture.xcresult \
-            -skipPackagePluginValidation \
-            CODE_SIGN_IDENTITY="-" \
-            DEVELOPMENT_TEAM="" \
-            CODE_SIGN_STYLE=Manual \
-            | tee .artifacts/core-journey-fixture-ui/xcodebuild.log
-          python3 scripts/verify-core-journey-ui.py .artifacts/core-journey-fixture-ui/xcodebuild.log
+        timeout-minutes: 12
+        run: python3 scripts/run-core-journey-stages.py ui --phase test
 
       - name: Upload launched-app diagnostics
         if: always()
+        timeout-minutes: 3
         uses: actions/upload-artifact@v7.0.1
         with:
           name: core-journey-fixture-ui-${{ github.run_attempt }}
-          path: .artifacts/core-journey-fixture-ui
+          path: |
+            .artifacts/core-journey-fixture-ui
+            !.artifacts/core-journey-fixture-ui/DerivedData
           include-hidden-files: true
           if-no-files-found: error
 

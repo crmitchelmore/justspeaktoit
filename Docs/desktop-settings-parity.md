@@ -6,6 +6,39 @@ macOS `AppSettings.DefaultsKey` aliases the shared 91-key
 plus preferences and collections
 outside that enum. Track remaining product acceptance in #1157.
 
+## Window-local sidebar shortcuts
+
+The shared `DesktopSidebarShortcut` catalogue supplies stable destination IDs and
+`Ctrl+number` presentation to both native shells. General's **Show sidebar
+shortcut hints** switch uses the existing `showSidebarShortcutHints` key, defaults
+to true when absent, and accepts strict booleans only. Saving, restarting and the
+existing desktop JSON configuration import/export use that sole persisted value.
+Canonical preference transfer retains explicit false and respects selected-ID/
+kind replacement coverage; this does not claim new native archive-import support.
+The macOS controls, Command shortcuts and persistence are unchanged.
+
+The native mapping is Ctrl+1 Dashboard, Ctrl+2 History, Ctrl+3 Voice Output,
+Ctrl+4 General, Ctrl+5 Transcription, Ctrl+6 Post-processing, Ctrl+7 Corrections,
+Ctrl+8 Pronunciation, Ctrl+9 Profiles and Ctrl+0 About. Linux has no Profiles
+destination: Ctrl+9 is unbound, not renumbered or represented by a fake row.
+Keyboard and iCloud Sync retain native pointer/focus navigation without invented
+numeric bindings. Switching hints off removes chord text/accessibility hints,
+not destination names or keyboard navigation.
+
+These are app-window shortcuts, not new global hotkeys. Both shells leave
+editable fields and additional modifiers alone and refuse unavailable, hidden or
+disabled rows. Windows also gives a configured global dictation Ctrl+number
+chord priority and suppresses the conflicting sidebar hint. GTK handles keys in
+the bubbling phase; the focused widget gets the first opportunity. Linux's
+existing X11 dictation chord is Ctrl+Alt+Space. Wayland/compositor global
+reservations remain outside this app's authority and can intercept local keys;
+no portal permissions or global shortcut behavior are changed.
+
+Native self-test cases cover hint updates, navigation with hints disabled,
+modifier/editable-focus refusal and disabled/unmapped destinations. They require
+execution in the actual Win32/GTK shells; portable tests and Windows C-stub Swift
+graphs alone are not native UI or installed-package acceptance.
+
 ## Generated-speech coordination
 
 `SpeechGenerationDefaults` defines the Mac's existing `ttsAutoPlay` (true) and
@@ -436,7 +469,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | showLiveTranscriptInHUD | Wired / Partial | Config + Windows/X11 HUD; Wayland has no live overlay, so the control is hidden; transcript remains in main window |
 | showCompactHUD | Wired / Partial | Config + native compact Windows/X11 renderer; hidden on Wayland, where notifications are compositor-owned |
 | shortenErrorDisplay | Wired / Partial | Config + HUD; native Windows/X11 timer; Wayland notification lifetime is desktop-owned |
-| showSidebarShortcutHints | Missing / Missing | Native sidebar has no hint visibility preference |
+| showSidebarShortcutHints | Wired; native acceptance pending / Wired; native acceptance pending | General strict Boolean/default true; shared Ctrl-number bindings, live sidebar/accessibility hints; hints off preserves navigation. Linux Profiles is unavailable. |
 | speedMode | Missing / Missing | No Instant/Live Polish setting; no live-polish engine |
 | livePolishModel | Missing / Missing | No live-polish model execution |
 | livePolishDebounceMs | Missing / Missing | No live-polish scheduler |

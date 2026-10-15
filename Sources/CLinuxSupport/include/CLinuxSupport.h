@@ -211,6 +211,14 @@ int32_t jsti_window_set_hud_layout(int32_t phase, const char *headline, const ch
                                    int32_t display_milliseconds, int32_t compact, int32_t expanded);
 /* Shows a JSTI_PAGE_* page, as choosing it in the sidebar does. */
 int32_t jsti_window_show_page(int32_t page);
+/* Window-local bindings from SpeakCore; strings are copied before return.
+ * Missing destinations are unavailable. Hints never control navigation. */
+typedef struct {
+    const char *destination;
+    int32_t digit;
+    const char *hint;
+} JSTISidebarShortcut;
+int32_t jsti_window_set_sidebar_shortcuts(const JSTISidebarShortcut *bindings, size_t count, int32_t show_hints);
 /* variant: 0 processed, 1 original, -1 none. */
 int32_t jsti_window_set_history_presentation(
     const char *record_id, int32_t variant, int32_t switchable, const char *text, const char *status);

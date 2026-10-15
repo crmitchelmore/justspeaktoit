@@ -30,6 +30,19 @@ extension LinuxWindow {
             }
         }
         guard result == 0 else { throw DesktopConfigurationError.invalidField("Native preferences") }
+        let bindings = DesktopSidebarShortcut.allCases.map {
+            JSTISidebarShortcut(
+                destination: strings.add($0.rawValue), digit: Int32($0.digit), hint: strings.add($0.chord)
+            )
+        }
+        let sidebar = withExtendedLifetime(strings) {
+            bindings.withUnsafeBufferPointer {
+                jsti_window_set_sidebar_shortcuts(
+                    $0.baseAddress, $0.count, preferences.enabled("showSidebarShortcutHints") ? 1 : 0
+                )
+            }
+        }
+        guard sidebar == 0 else { throw DesktopConfigurationError.invalidField("Sidebar shortcuts") }
     }
 
     static func performConfigurationAction(

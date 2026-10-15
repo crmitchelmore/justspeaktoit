@@ -36,6 +36,7 @@ void jsti_show_text_output(HWND owner);
 bool jsti_text_output_settings_self_test(HWND owner, int button, void (*setRecording)(HWND, int),
                                          bool (*recordingBlocked)(HWND, void *), void *context, std::string &error);
 bool jsti_hotkey_available();
+bool jsti_hotkey_reserves_sidebar_digit(int digit);
 std::wstring jsti_hotkey_label();
 bool jsti_hotkey_start(HWND window, std::string &failure);
 void jsti_hotkey_stop(HWND window);
@@ -209,6 +210,13 @@ constexpr int appearanceLabelID = 440, appearanceID = 441, automationID = 442, a
     configurationID = 450;
 constexpr UINT tourMessage = WM_APP + 18, appearanceMessage = WM_APP + 19, pageMessage = WM_APP + 20;
 constexpr UINT hudMessage = WM_APP + 21;
+constexpr UINT sidebarMessage = WM_APP + 30;
+struct SidebarBindings {
+    int digits[pageCount];
+    std::wstring hints[pageCount];
+    bool showHints = false;
+    SidebarBindings() { std::fill(std::begin(digits), std::end(digits), -1); }
+};
 constexpr UINT_PTR tourTimerID = 90;
 // How each owner-drawn control is drawn.
 enum class Role { label, caption, status, detail, chipValue, statValue, tileValue, value, button, primary, record,
@@ -303,6 +311,7 @@ struct WindowState {
     std::wstring remoteModelStatus;
     // Pages and presentation (UI thread).
     int page = dashboardPage;
+    SidebarBindings sidebar;
     std::unordered_map<int, bool> wanted;
     std::wstring headerSubtitle;
     int displayedRecording = 0;
@@ -1403,9 +1412,15 @@ void drawControl(HWND window, const DRAWITEMSTRUCT &item) {
         if (selected) chrome::fillRound(dc, rect, s(10), chrome::accent, chrome::dark() ? 58 : 40);
         else if (pressed) chrome::fillRound(dc, rect, s(10), palette.text, 20);
         chrome::glyph(dc, pageInfo[page].glyph, box(rect.left + s(8), rect.top, s(28), heightOf(rect)), navTint(page), dpi);
-        chrome::text(dc, label, RECT{rect.left + s(42), rect.top, rect.right - s(8), rect.bottom},
+        const auto &hint = state.sidebar.hints[page];
+        const bool showHint = state.sidebar.showHints && !hint.empty() &&
+            !jsti_hotkey_reserves_sidebar_digit(state.sidebar.digits[page]);
+        chrome::text(dc, pageInfo[page].title,
+                     RECT{rect.left + s(42), rect.top, rect.right - s(showHint ? 62 : 8), rect.bottom},
                      selected ? chrome::Font::bodySemibold : chrome::Font::body, dpi, palette.text,
-                     DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+                     DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        if (showHint) chrome::text(dc, hint, RECT{rect.right - s(60), rect.top, rect.right - s(8), rect.bottom},
+                                  chrome::Font::caption, dpi, palette.secondary, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
         break;
     }
     case Role::record: {
@@ -1620,6 +1635,46 @@ void showPage(HWND window, int page) {
     if (focus && IsChild(window, focus) && !IsWindowVisible(focus)) SetFocus(GetDlgItem(window, navBaseID + page));
     for (int index : {previous, page}) InvalidateRect(GetDlgItem(window, navBaseID + index), nullptr, TRUE);
     RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
+}
+
+void applySidebarBindings(HWND window) {
+    for (int page = 0; page < pageCount; ++page) {
+        std::wstring label = pageInfo[page].title;
+        if (state.sidebar.showHints && !state.sidebar.hints[page].empty() &&
+            !jsti_hotkey_reserves_sidebar_digit(state.sidebar.digits[page]))
+            label += L" (" + state.sidebar.hints[page] + L")";
+        SetWindowTextW(GetDlgItem(window, navBaseID + page), label.c_str());
+        InvalidateRect(GetDlgItem(window, navBaseID + page), nullptr, TRUE);
+    }
+}
+
+bool navigateSidebar(HWND window, int digit, bool exactControl, HWND focused) {
+    if (!exactControl || digit < 0 || digit > 9 || !IsWindowEnabled(window) ||
+        jsti_hotkey_reserves_sidebar_digit(digit)) return false;
+    for (HWND focus = focused; focus && focus != window; focus = GetParent(focus)) {
+        wchar_t name[128]{};
+        GetClassNameW(focus, name, 128);
+        if (_wcsicmp(name, L"Edit") == 0 || _wcsicmp(name, L"ComboBox") == 0 ||
+            _wcsnicmp(name, L"RichEdit", 8) == 0) return false;
+    }
+    for (int page = 0; page < pageCount; ++page) {
+        HWND row = GetDlgItem(window, navBaseID + page);
+        if (state.sidebar.digits[page] == digit && IsWindowEnabled(row) && IsWindowVisible(row)) {
+            showPage(window, page);
+            return true;
+        }
+
+    }
+    return false;
+}
+
+bool sidebarKeyMessage(HWND window, const MSG &message) {
+    if (message.message != WM_KEYDOWN || message.wParam < '0' || message.wParam > '9' ||
+        !(message.hwnd == window || IsChild(window, message.hwnd))) return false;
+    const bool exactControl = (GetKeyState(VK_CONTROL) & 0x8000) &&
+        !(GetKeyState(VK_MENU) & 0x8000) && !(GetKeyState(VK_SHIFT) & 0x8000) &&
+        !(GetKeyState(VK_LWIN) & 0x8000) && !(GetKeyState(VK_RWIN) & 0x8000);
+    return navigateSidebar(window, static_cast<int>(message.wParam - '0'), exactControl, GetFocus());
 }
 
 // The dashboard's Setup card and the header subtitle echo the settings.
@@ -2420,6 +2475,11 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     case pageMessage:
         showPage(window, static_cast<int>(wparam));
         return 0;
+    case sidebarMessage: {
+        std::unique_ptr<SidebarBindings> bindings(reinterpret_cast<SidebarBindings *>(lparam));
+        if (bindings) { state.sidebar = std::move(*bindings); applySidebarBindings(window); }
+        return 0;
+    }
     case hudMessage:
         jsti::hud::apply();
         return 0;
@@ -2548,6 +2608,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case shortcutID:
             if (HIWORD(wparam) == BN_CLICKED && idleControl(window, shortcutID) && IsWindowEnabled(window)) {
                 jsti_show_hotkey_settings(window);
+                applySidebarBindings(window);
                 SetDlgItemTextW(window, transcriptLabelID, jsti_hotkey_label().c_str());
                 refreshSetup(window);
             }
@@ -3033,18 +3094,11 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
         emit(window, JSTI_EVENT_READY);
         std::string shortcutFailure;
         if (IsWindow(window) && !jsti_hotkey_start(window, shortcutFailure)) showFailure(window, shortcutFailure);
+        if (IsWindow(window)) applySidebarBindings(window);
         MSG message{};
         BOOL result;
         while ((result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
-            // Ctrl+1 to Ctrl+0 open the pages in sidebar order, as the Mac's
-            // Command shortcuts do.
-            if (message.message == WM_KEYDOWN && (GetKeyState(VK_CONTROL) & 0x8000) &&
-                !(GetKeyState(VK_MENU) & 0x8000) && message.wParam >= '0' && message.wParam <= '9' &&
-                (message.hwnd == window || IsChild(window, message.hwnd)) && IsWindowEnabled(window)) {
-                const int digit = static_cast<int>(message.wParam - '0');
-                showPage(window, digit == 0 ? pageCount - 1 : digit - 1);
-                continue;
-            }
+            if (sidebarKeyMessage(window, message)) continue;
             if (!jsti_history_filters_message(&message) && !IsDialogMessageW(window, &message)) {
                 TranslateMessage(&message); DispatchMessageW(&message);
             }
@@ -3326,6 +3380,32 @@ int jsti_window_show_page(int page) {
     return state.window && PostMessageW(state.window, pageMessage, static_cast<WPARAM>(page), 0) ? 0 : -1;
 }
 
+int jsti_window_set_sidebar_shortcuts(const JSTISidebarShortcut *bindings, size_t count, int showHints) {
+    if (!bindings || count > 10 || (showHints != 0 && showHints != 1)) return -1;
+    auto update = std::make_unique<SidebarBindings>();
+    bool used[10]{};
+    for (size_t index = 0; index < count; ++index) {
+        const auto &binding = bindings[index];
+        std::wstring hint;
+        if (!binding.destination || binding.digit < 0 || binding.digit > 9 || used[binding.digit] ||
+            !binding.hint || !jsti::wide(binding.hint, hint) ||
+            hint != L"Ctrl+" + std::to_wstring(binding.digit)) return -1;
+        used[binding.digit] = true;
+        for (int page = 0; page < pageCount; ++page) {
+            if (std::strcmp(pageInfo[page].name, binding.destination) != 0) continue;
+            if (update->digits[page] != -1) return -1;
+            update->digits[page] = binding.digit;
+            update->hints[page] = hint;
+        }
+    }
+    update->showHints = showHints != 0;
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (!state.window ||
+        !PostMessageW(state.window, sidebarMessage, 0, reinterpret_cast<LPARAM>(update.get()))) return -1;
+    update.release();
+    return 0;
+}
+
 int jsti_window_screenshot_tour(const char *directory, char *error, size_t capacity) {
     std::wstring folder;
     if (!directory || !jsti::wide(directory, folder) || folder.empty()) {
@@ -3523,6 +3603,40 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     { std::lock_guard<std::mutex> lock(state.mutex); window = state.window; }
     if (!window || GetWindowThreadProcessId(window, nullptr) != GetCurrentThreadId()) {
         return jsti::fail("Window checks must run on the UI thread after READY.", error, errorCapacity);
+    }
+    {
+        const auto saved = state.sidebar;
+        const int page = state.page;
+        HWND focus = GetFocus();
+        state.sidebar = SidebarBindings();
+        state.sidebar.digits[dashboardPage] = 1;
+        state.sidebar.hints[dashboardPage] = L"Ctrl+1";
+        state.sidebar.showHints = true;
+        applySidebarBindings(window);
+        const bool reserved = jsti_hotkey_reserves_sidebar_digit(1);
+        const std::wstring expected = reserved ? L"Dashboard" : L"Dashboard (Ctrl+1)";
+        bool okay = controlText(GetDlgItem(window, navBaseID)) == expected;
+        showPage(window, historyPage);
+        okay = okay && !navigateSidebar(window, 9, true, window) && state.page == historyPage &&
+            !navigateSidebar(window, 1, false, window) && state.page == historyPage;
+        HWND edit = CreateWindowExW(0, L"EDIT", L"Unchanged", WS_CHILD, 0, 0, 10, 10,
+                                    window, nullptr, GetModuleHandleW(nullptr), nullptr);
+        okay = okay && edit && !navigateSidebar(window, 1, true, edit) && state.page == historyPage;
+        if (edit) DestroyWindow(edit);
+        HWND row = GetDlgItem(window, navBaseID);
+        EnableWindow(row, FALSE);
+        okay = okay && !navigateSidebar(window, 1, true, window) && state.page == historyPage;
+        EnableWindow(row, TRUE);
+        state.sidebar.showHints = false;
+        applySidebarBindings(window);
+        okay = okay && controlText(row) == L"Dashboard";
+        const bool routed = navigateSidebar(window, 1, true, window);
+        okay = okay && (reserved ? !routed && state.page == historyPage : routed && state.page == dashboardPage);
+        state.sidebar = saved;
+        applySidebarBindings(window);
+        showPage(window, page);
+        if (focus && IsWindowVisible(focus)) SetFocus(focus);
+        if (!okay) return jsti::fail("Sidebar hints, focus guards or window-local navigation failed.", error, errorCapacity);
     }
     char folderError[256] = {};
     if (!GetDlgItem(window, recordingsFolderID) || !GetDlgItem(window, audioCleanupID) ||
@@ -4555,4 +4669,3 @@ int jsti_owned_window_save_snapshot(HWND window, const char *path, char *error, 
     }
     return 0;
 }
-

@@ -716,6 +716,12 @@ static const struct {
     [JSTI_PAGE_ABOUT] = { "about", "About", "help-about-symbolic", "jsti-tint-warm" },
 };
 
+static struct {
+    gint digits[JSTI_PAGE_COUNT];
+    GtkWidget *hints[JSTI_PAGE_COUNT];
+    gboolean configured;
+} sidebar_shortcuts;
+
 static void show_page(gint32 page) {
     if (page < 0 || page >= JSTI_PAGE_COUNT) return;
     ui.page = page;
@@ -731,6 +737,31 @@ static void show_page(gint32 page) {
 static void on_sidebar(GtkListBox *box, GtkListBoxRow *row, gpointer data) {
     (void)box; (void)data;
     if (row != NULL) show_page(gtk_list_box_row_get_index(row));
+}
+
+static gboolean sidebar_navigate(guint keyval, GdkModifierType modifiers, GtkWidget *focused) {
+    GdkModifierType relevant = modifiers & (GDK_CONTROL_MASK | GDK_SHIFT_MASK | GDK_ALT_MASK |
+                                            GDK_SUPER_MASK | GDK_HYPER_MASK | GDK_META_MASK);
+    if (relevant != GDK_CONTROL_MASK || keyval < GDK_KEY_0 || keyval > GDK_KEY_9 ||
+        !sidebar_shortcuts.configured || !gtk_widget_is_sensitive(GTK_WIDGET(ui.window))) return FALSE;
+    for (GtkWidget *focus = focused; focus != NULL; focus = gtk_widget_get_parent(focus)) {
+        if (GTK_IS_EDITABLE(focus) || GTK_IS_TEXT_VIEW(focus) || GTK_IS_DROP_DOWN(focus)) return FALSE;
+    }
+    for (gint page = 0; page < JSTI_PAGE_COUNT; ++page) {
+        GtkWidget *row = GTK_WIDGET(gtk_list_box_get_row_at_index(ui.sidebar, page));
+        if (sidebar_shortcuts.digits[page] == (gint)(keyval - GDK_KEY_0) &&
+            gtk_widget_is_sensitive(row) && gtk_widget_get_visible(row)) {
+            show_page(page);
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+static gboolean sidebar_key_pressed(GtkEventControllerKey *controller, guint keyval, guint keycode,
+                                    GdkModifierType modifiers, gpointer data) {
+    (void)controller; (void)keycode; (void)data;
+    return sidebar_navigate(keyval, modifiers, gtk_window_get_focus(ui.window));
 }
 
 static void sidebar_header(GtkListBoxRow *row, GtkListBoxRow *before, gpointer data) {
@@ -759,8 +790,16 @@ static GtkWidget *build_sidebar(void) {
         gtk_box_append(GTK_BOX(line), image);
         GtkWidget *label = gtk_label_new(page_info[page].title);
         gtk_label_set_xalign(GTK_LABEL(label), 0);
+        gtk_widget_set_hexpand(label, TRUE);
         gtk_box_append(GTK_BOX(line), label);
+        GtkWidget *hint = gtk_label_new("");
+        gtk_widget_add_css_class(hint, "dim-label");
+        gtk_accessible_update_state(GTK_ACCESSIBLE(hint), GTK_ACCESSIBLE_STATE_HIDDEN, TRUE, -1);
+        sidebar_shortcuts.hints[page] = hint;
+        gtk_widget_set_visible(hint, FALSE);
+        gtk_box_append(GTK_BOX(line), hint);
         GtkWidget *row = gtk_list_box_row_new();
+        gtk_accessible_update_property(GTK_ACCESSIBLE(row), GTK_ACCESSIBLE_PROPERTY_LABEL, page_info[page].title, -1);
         gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), line);
         if (page >= JSTI_PAGE_GENERAL) gtk_widget_add_css_class(row, "jsti-settings-row");
         gtk_list_box_append(ui.sidebar, row);
@@ -1379,6 +1418,10 @@ static void build_window(void) {
     gtk_window_set_default_size(ui.window, 1080, 760);
     gtk_widget_set_size_request(window, 360, 480);
     g_signal_connect(window, "close-request", G_CALLBACK(on_close_request), NULL);
+    GtkEventController *navigation_keys = gtk_event_controller_key_new();
+    gtk_event_controller_set_propagation_phase(navigation_keys, GTK_PHASE_BUBBLE);
+    g_signal_connect(navigation_keys, "key-pressed", G_CALLBACK(sidebar_key_pressed), NULL);
+    gtk_widget_add_controller(window, navigation_keys);
 
     /* One transcript buffer: the dashboard and the selected History card show
      * the same displayed text, which Copy, Export and Read aloud act on. */
@@ -2166,6 +2209,61 @@ int32_t jsti_window_set_hud_layout(int32_t phase, const char *headline, const ch
 }
 
 static void page_apply(gpointer data) { show_page(GPOINTER_TO_INT(data)); }
+
+typedef struct {
+    gint digits[JSTI_PAGE_COUNT];
+    gchar *hints[JSTI_PAGE_COUNT];
+    gboolean show_hints;
+} SidebarUpdate;
+
+static void sidebar_update_free(gpointer pointer) {
+    SidebarUpdate *update = pointer;
+    for (gint page = 0; page < JSTI_PAGE_COUNT; ++page) g_free(update->hints[page]);
+    g_free(update);
+}
+
+static void sidebar_update_apply(gpointer pointer) {
+    SidebarUpdate *update = pointer;
+    for (gint page = 0; page < JSTI_PAGE_COUNT; ++page) {
+        sidebar_shortcuts.digits[page] = update->digits[page];
+        GtkWidget *hint = sidebar_shortcuts.hints[page];
+        const gchar *text = update->hints[page] != NULL ? update->hints[page] : "";
+        gtk_label_set_text(GTK_LABEL(hint), text);
+        gtk_widget_set_visible(hint, update->show_hints && text[0] != '\0');
+        GtkListBoxRow *row = gtk_list_box_get_row_at_index(ui.sidebar, page);
+        gchar *description = update->show_hints && text[0] != '\0' ? g_strdup_printf("Shortcut: %s.", text) : g_strdup("");
+        gtk_accessible_update_property(GTK_ACCESSIBLE(row),
+            GTK_ACCESSIBLE_PROPERTY_DESCRIPTION, description, -1);
+        g_free(description);
+    }
+    sidebar_shortcuts.configured = TRUE;
+}
+
+int32_t jsti_window_set_sidebar_shortcuts(const JSTISidebarShortcut *bindings, size_t count, int32_t show_hints) {
+    if (bindings == NULL || count > 10 || (show_hints != 0 && show_hints != 1)) return -1;
+    SidebarUpdate *update = g_new0(SidebarUpdate, 1);
+    for (gint page = 0; page < JSTI_PAGE_COUNT; ++page) update->digits[page] = -1;
+    gboolean used[10] = { FALSE };
+    for (size_t index = 0; index < count; ++index) {
+        const JSTISidebarShortcut *binding = &bindings[index];
+        gchar expected[8];
+        g_snprintf(expected, sizeof(expected), "Ctrl+%d", binding->digit);
+        if (binding->destination == NULL || binding->digit < 0 || binding->digit > 9 ||
+            used[binding->digit] || g_strcmp0(binding->hint, expected) != 0) {
+            sidebar_update_free(update);
+            return -1;
+        }
+        used[binding->digit] = TRUE;
+        for (gint page = 0; page < JSTI_PAGE_COUNT; ++page) {
+            if (g_strcmp0(page_info[page].name, binding->destination) != 0) continue;
+            if (update->digits[page] != -1) { sidebar_update_free(update); return -1; }
+            update->digits[page] = binding->digit;
+            update->hints[page] = g_strdup(binding->hint);
+        }
+    }
+    update->show_hints = show_hints != 0;
+    return post(sidebar_update_apply, update, sidebar_update_free);
+}
 
 int32_t jsti_window_show_page(int32_t page) {
     if (page < 0 || page >= JSTI_PAGE_COUNT) return -1;
@@ -2979,9 +3077,56 @@ static gboolean text_output_self_test(void) {
     return valid;
 }
 
+static gboolean sidebar_navigation_self_test(void) {
+    SidebarUpdate saved = { 0 }, fixture = { 0 };
+    const gint original_page = ui.page;
+    const gboolean configured = sidebar_shortcuts.configured;
+    for (gint page = 0; page < JSTI_PAGE_COUNT; ++page) {
+        saved.digits[page] = sidebar_shortcuts.digits[page];
+        saved.hints[page] = g_strdup(gtk_label_get_text(GTK_LABEL(sidebar_shortcuts.hints[page])));
+        fixture.digits[page] = -1;
+    }
+    saved.show_hints = gtk_widget_get_visible(sidebar_shortcuts.hints[JSTI_PAGE_DASHBOARD]);
+    fixture.digits[JSTI_PAGE_DASHBOARD] = 1;
+    fixture.hints[JSTI_PAGE_DASHBOARD] = (gchar *)"Ctrl+1";
+    fixture.show_hints = TRUE;
+    sidebar_update_apply(&fixture);
+    GtkWidget *hint = sidebar_shortcuts.hints[JSTI_PAGE_DASHBOARD];
+    gboolean okay = gtk_widget_get_visible(hint) &&
+        g_strcmp0(gtk_label_get_text(GTK_LABEL(hint)), "Ctrl+1") == 0;
+    show_page(JSTI_PAGE_HISTORY);
+    okay = okay && !sidebar_navigate(GDK_KEY_9, GDK_CONTROL_MASK, NULL) && ui.page == JSTI_PAGE_HISTORY;
+    const GdkModifierType blocked[] = { 0, GDK_CONTROL_MASK | GDK_SHIFT_MASK, GDK_CONTROL_MASK | GDK_ALT_MASK,
+                                       GDK_CONTROL_MASK | GDK_SUPER_MASK };
+    for (guint i = 0; i < G_N_ELEMENTS(blocked); ++i)
+        okay = okay && !sidebar_navigate(GDK_KEY_1, blocked[i], NULL) && ui.page == JSTI_PAGE_HISTORY;
+    GtkWidget *entry = gtk_entry_new();
+    g_object_ref_sink(entry);
+    okay = okay && !sidebar_navigate(GDK_KEY_1, GDK_CONTROL_MASK, entry) && ui.page == JSTI_PAGE_HISTORY;
+    g_object_unref(entry);
+    okay = okay && !sidebar_navigate(GDK_KEY_1, GDK_CONTROL_MASK, GTK_WIDGET(ui.transcript));
+    GtkWidget *row = GTK_WIDGET(gtk_list_box_get_row_at_index(ui.sidebar, JSTI_PAGE_DASHBOARD));
+    gtk_widget_set_sensitive(row, FALSE);
+    okay = okay && !sidebar_navigate(GDK_KEY_1, GDK_CONTROL_MASK, NULL) && ui.page == JSTI_PAGE_HISTORY;
+    gtk_widget_set_sensitive(row, TRUE);
+    fixture.show_hints = FALSE;
+    sidebar_update_apply(&fixture);
+    okay = okay && !gtk_widget_get_visible(hint) &&
+        sidebar_navigate(GDK_KEY_1, GDK_CONTROL_MASK, NULL) && ui.page == JSTI_PAGE_DASHBOARD;
+    const JSTISidebarShortcut invalid[] = { { "dashboard", 1, "Ctrl+1" }, { "history", 1, "Ctrl+1" } };
+    okay = okay && jsti_window_set_sidebar_shortcuts(invalid, 2, 1) == -1;
+    sidebar_update_apply(&saved);
+    sidebar_shortcuts.configured = configured;
+    for (gint page = 0; page < JSTI_PAGE_COUNT; ++page) g_free(saved.hints[page]);
+    show_page(original_page);
+    return okay;
+}
+
 int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (jsti_hands_free_guard_self_test(error, capacity) != 0) return -1;
     if (ui.window == NULL) return fail(error, capacity, "the window was not created");
+    if (!sidebar_navigation_self_test())
+        return fail(error, capacity, "sidebar hints, focus guards or window-local navigation failed");
     if (ui.recordings_folder == NULL || ui.audio_cleanup == NULL ||
         ui.backup_audio == NULL || ui.backup_export == NULL || ui.backup_inspect == NULL ||
         !adw_switch_row_get_active(ui.backup_audio) ||

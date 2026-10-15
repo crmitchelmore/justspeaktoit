@@ -25,6 +25,36 @@ final class DesktopHostConfigurationTests: XCTestCase {
         try XCTUnwrap(DesktopConfiguration.fields.firstIndex { $0.key == key.rawValue })
     }
 
+    func testSidebarHints_SaveRestartExportImportAndFailedWrite() async throws {
+        let key = ApplicationPreferenceKey.showSidebarShortcutHints
+        var entries = try await controller.configuration().entries
+        entries[try index(key)] = "0"
+        try await controller.saveConfiguration(entries)
+        await controller.close()
+        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        let restored = try await controller.configuration()
+        XCTAssertFalse(restored.enabled(key.rawValue))
+        let file = directory.appendingPathComponent("sidebar.json")
+        try await controller.exportConfiguration(path: file.path)
+        let document = try JSONDecoder().decode(DesktopConfigurationDocument.self, from: Data(contentsOf: file))
+        XCTAssertEqual(document.preferences.values[key.rawValue], AnyCodable(.bool(false)))
+        entries = restored.entries
+        entries[try index(key)] = "1"
+        try await controller.saveConfiguration(entries)
+        try await controller.importConfiguration(path: file.path)
+        let imported = try await controller.configuration()
+        XCTAssertFalse(imported.enabled(key.rawValue))
+        await controller.close()
+        let effects = SettingsWriteEffects()
+        effects.refusesWrites = true
+        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        do { try await controller.saveConfiguration(entries); XCTFail("Failed write accepted") } catch {
+            XCTAssertEqual((error as NSError).code, CocoaError.fileWriteOutOfSpace.rawValue)
+        }
+        let unchanged = try await controller.configuration()
+        XCTAssertFalse(unchanged.enabled(key.rawValue))
+    }
+
     func testSavePersistsPreferencesAndPreservesRootUnknownSettings() async throws {
         await controller.close()
         let values: [String: AnyCodable] = [

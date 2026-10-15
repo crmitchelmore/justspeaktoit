@@ -222,6 +222,14 @@ enum {
 };
 /* Shows a JSTI_PAGE_* page, as its sidebar button does. Thread safe. */
 int jsti_window_show_page(int page);
+/* Window-local bindings from SpeakCore. Missing destinations are not bound.
+ * Hiding hints changes presentation only. Strings are copied before return. */
+typedef struct {
+    const char *destination;
+    int digit;
+    const char *hint;
+} JSTISidebarShortcut;
+int jsti_window_set_sidebar_shortcuts(const JSTISidebarShortcut *bindings, size_t count, int show_hints);
 /* General > Theme: 0 follows Windows, 1 light, 2 dark. Safe before or while
  * the window runs; a user choice emits JSTI_EVENT_APPEARANCE with "0"-"2". */
 int jsti_window_set_appearance(int appearance);

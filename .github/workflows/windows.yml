@@ -362,7 +362,7 @@ jobs:
           command -v runuser
           umask 077
           work="$(mktemp -d /jsti-portable.XXXXXX)"
-          git ls-files -z | tar --null -T - -cf - | tar --no-same-owner --no-same-permissions -xf - -C "$work"
+          git -c safe.directory="$PWD" ls-files -z | tar --null -T - -cf - | tar --no-same-owner --no-same-permissions -xf - -C "$work"
           chown -R "$test_user:$(id -gn "$test_user")" "$work"
           runuser -u "$test_user" -- env HOME="$work/.home" TMPDIR="$work/.runtime" bash -c '
             set -euo pipefail

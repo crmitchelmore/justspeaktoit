@@ -11,6 +11,18 @@
 #include <array>
 
 namespace {
+using HeldRootSetInformation = NTSTATUS (NTAPI *)(HANDLE, PIO_STATUS_BLOCK, PVOID, ULONG, ULONG);
+constexpr ULONG heldRootRenameInformationClass = 10;
+
+HeldRootSetInformation heldRootSetInformation() {
+    static const auto resolved = [] {
+        const HMODULE module = GetModuleHandleW(L"ntdll.dll");
+        return module ?
+            reinterpret_cast<HeldRootSetInformation>(GetProcAddress(module, "NtSetInformationFile")) : nullptr;
+    }();
+    return resolved;
+}
+
 struct LocalMemory {
     void *value = nullptr;
     ~LocalMemory() { if (value) LocalFree(value); }
@@ -956,19 +968,14 @@ int publishPrivateFile(const char *sourcePath, const char *destinationPath,
     // Preserve the held root all the way through rename. The Win32 wrapper
     // rejects this relative-name form on supported Windows hosts.
     // The user-mode SDK omits this export and NT information class 10.
-    using SetInformation = NTSTATUS (NTAPI *)(HANDLE, PIO_STATUS_BLOCK, PVOID, ULONG, ULONG);
-    static const auto setInformation = [] {
-        const HMODULE module = GetModuleHandleW(L"ntdll.dll");
-        return module ? reinterpret_cast<SetInformation>(GetProcAddress(module, "NtSetInformationFile")) : nullptr;
-    }();
+    const auto setInformation = heldRootSetInformation();
     if (!setInformation) {
         error = "Windows does not provide NtSetInformationFile required for protected backup publication.";
         return -1;
     }
     IO_STATUS_BLOCK status{};
-    constexpr ULONG renameInformation = 10;
     const NTSTATUS renamed = setInformation(
-        output.value, &status, rename, static_cast<ULONG>(storage.size()), renameInformation);
+        output.value, &status, rename, static_cast<ULONG>(storage.size()), heldRootRenameInformationClass);
     if (renamed < 0) {
         error = jsti::systemError("Publish private export without replacing an existing file",
                                   RtlNtStatusToDosError(renamed));
@@ -1198,13 +1205,11 @@ bool registryRename(HANDLE file, HANDLE directory, const std::wstring &name, std
     rename->RootDirectory = directory;
     rename->FileNameLength = static_cast<DWORD>(bytes);
     std::memcpy(rename->FileName, name.data(), bytes);
-    using SetInformation = NTSTATUS (NTAPI *)(HANDLE, PIO_STATUS_BLOCK, PVOID, ULONG, ULONG);
-    const HMODULE module = GetModuleHandleW(L"ntdll.dll");
-    const auto setInformation = module ?
-        reinterpret_cast<SetInformation>(GetProcAddress(module, "NtSetInformationFile")) : nullptr;
+    const auto setInformation = heldRootSetInformation();
     if (!setInformation) { error = "Held-root immutable publication is unavailable."; return false; }
     IO_STATUS_BLOCK status{};
-    const NTSTATUS code = setInformation(file, &status, rename, static_cast<ULONG>(storage.size()), 10);
+    const NTSTATUS code = setInformation(
+        file, &status, rename, static_cast<ULONG>(storage.size()), heldRootRenameInformationClass);
     if (code < 0) {
         error = jsti::systemError("Publish immutable registration without replacement", RtlNtStatusToDosError(code));
         return false;
@@ -1660,7 +1665,6 @@ struct RegistryRenameInformationV2 {
     ULONG FileNameLength;
     WCHAR FileName[1];
 };
-constexpr auto registryRenameInformationClassV2 = static_cast<FILE_INFORMATION_CLASS>(10);
 static_assert(sizeof(BOOLEAN) == 1 && sizeof(ULONG) == 4 && sizeof(WCHAR) == 2);
 static_assert(sizeof(HANDLE) == 4 || sizeof(HANDLE) == 8);
 static_assert(alignof(RegistryRenameInformationV2) == alignof(HANDLE));
@@ -2189,6 +2193,12 @@ int jsti_recording_registry_append_v2(JSTIRecordingRegistryV2 *registry, const u
         if (!bytes || !count || count > JSTI_REGISTRY_MAX_LEAF_BYTES_V2) {
             registryContract(*outcome, JSTI_REGISTRY_CONTRACT_INVALID_V2, JSTI_REGISTRY_STAGE_ADMISSION_V2);
         } else if (registryLeaf(name, nameCount, leaf, *outcome) && registry->validate(*outcome)) {
+            const auto setInformation = heldRootSetInformation();
+            if (!setInformation) {
+                registryCause(*outcome, JSTI_REGISTRY_DOMAIN_WIN32_V2, ERROR_PROC_NOT_FOUND,
+                              JSTI_REGISTRY_STAGE_PUBLISH_V2);
+                return -1;
+            }
             std::array<uint8_t, JSTI_REGISTRY_MAX_LEAF_BYTES_V2> payload{};
             std::memcpy(payload.data(), bytes, count);
             GUID guid{};
@@ -2255,8 +2265,8 @@ int jsti_recording_registry_append_v2(JSTIRecordingRegistryV2 *registry, const u
                 if (!outcome->cause_count && !registryCancelled(cancelled, context,
                     JSTI_REGISTRY_CHECK_PRECOMMIT_V2, *outcome)) {
                     IO_STATUS_BLOCK status{};
-                    const NTSTATUS code = NtSetInformationFile(registry->resources[file].value, &status,
-                        rename, renameSize, registryRenameInformationClassV2);
+                    const NTSTATUS code = setInformation(registry->resources[file].value, &status,
+                        rename, renameSize, heldRootRenameInformationClass);
                     if (code < 0) registryCause(*outcome, JSTI_REGISTRY_DOMAIN_NTSTATUS_V2,
                         static_cast<uint32_t>(code), JSTI_REGISTRY_STAGE_PUBLISH_V2);
                     else outcome->effect = JSTI_REGISTRY_EFFECT_PUBLISHED_V2;

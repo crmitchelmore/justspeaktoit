@@ -18,6 +18,7 @@ public final class DesktopLiveSession: @unchecked Sendable {
     }
 
     public let id: UUID
+    public let keywordLimitation: String?
     private let client: any FinalizingStreamingTranscriptionClient
     /// Lifecycle/audio calls cannot overtake each other. Provider callbacks
     /// read provider projections before acquiring stateLock, so synchronous
@@ -35,9 +36,12 @@ public final class DesktopLiveSession: @unchecked Sendable {
     /// Confined to calls. Clients may also close themselves during finalisation.
     private var stopped = false
 
-    public init(client: any FinalizingStreamingTranscriptionClient, id: UUID = UUID()) {
+    public init(
+        client: any FinalizingStreamingTranscriptionClient, id: UUID = UUID(), keywordLimitation: String? = nil
+    ) {
         self.client = client
         self.id = id
+        self.keywordLimitation = keywordLimitation
         self.accumulator = TranscriptAccumulator(shape: client.finalShape)
     }
 

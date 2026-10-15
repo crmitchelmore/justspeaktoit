@@ -242,9 +242,8 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
 
     public var liveOptions: LiveClientOptions {
         LiveClientOptions(
-            keywords: MetaMuseVoiceTranscribe.keywords(from: text("transcriptionKeywords")),
-            assemblyAIKeyterms: text("assemblyAIKeyterms").split(separator: ",")
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty },
+            keywords: TranscriptionKeywordPolicy.words(from: text("transcriptionKeywords")),
+            assemblyAIKeyterms: TranscriptionKeywordPolicy.words(from: text("assemblyAIKeyterms")),
             modulate: .none, postStopFinalizeBudget: nil, stopGracePeriod: number("liveStopGracePeriod")
         )
     }

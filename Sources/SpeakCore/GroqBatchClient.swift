@@ -17,6 +17,7 @@ public struct GroqBatchClient: TranscriptionProvider {
   public init(
     session: URLSession = .shared,
     staging: SharedMultipartUploadStaging? = nil,
+    keywords: [String] = [],
     durationResolver: @escaping @Sendable (URL) async -> TimeInterval = { _ in 0 }
   ) {
     compatibleProvider = OpenAIBatchClient(
@@ -24,6 +25,7 @@ public struct GroqBatchClient: TranscriptionProvider {
       baseURL: URL(string: "https://api.groq.com/openai/v1")!,
       validationServiceName: "Groq",
       staging: staging,
+      keywords: keywords,
       durationResolver: durationResolver
     )
   }

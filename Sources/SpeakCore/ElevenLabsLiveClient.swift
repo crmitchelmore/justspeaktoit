@@ -47,6 +47,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     private let apiKey: String
     private let modelID: String
     private let language: String?
+    private let keywords: [String]
     /// PCM16 rate the caller streams in; it is declared to the endpoint and used
     /// to size the send budget and pre-roll.
     let sampleRate: Int
@@ -81,6 +82,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
         modelID: String = "scribe_v2_realtime",
         language: String? = nil,
         sampleRate: Int = LiveTranscriptionProviderID.elevenlabs.expectedSampleRate,
+        keywords: [String] = [],
         makeConnection: @escaping ConnectionFactory,
         schedule: @escaping Scheduler = { seconds, action in
             DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
@@ -88,7 +90,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     ) {
         self.init(
             apiKey: apiKey, modelID: modelID, language: language, sampleRate: sampleRate,
-            timing: .production, makeConnection: makeConnection, schedule: schedule
+            timing: .production, keywords: keywords, makeConnection: makeConnection, schedule: schedule
         )
     }
 
@@ -98,12 +100,14 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
         language: String?,
         sampleRate: Int,
         timing: Timing,
+        keywords: [String] = [],
         makeConnection: @escaping ConnectionFactory,
         schedule: @escaping Scheduler
     ) {
         self.apiKey = apiKey
         self.modelID = modelID
         self.language = language
+        self.keywords = keywords
         self.sampleRate = sampleRate
         self.timing = timing
         self.makeConnection = makeConnection
@@ -134,7 +138,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
                 return
             }
             guard let url = ElevenLabsLiveProtocol.webSocketURL(
-                modelID: modelID, language: language, sampleRate: sampleRate
+                modelID: modelID, language: language, sampleRate: sampleRate, keywords: keywords
             ) else {
                 fail(ElevenLabsLiveError.invalidURL, active)
                 return

@@ -45,6 +45,7 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
     private let apiKey: String
     private let model: String
     private let language: String?
+    private let keywords: [String]
     private let sampleRate: Int
     let makeConnection: ConnectionFactory
     private let schedule: Scheduler
@@ -80,6 +81,7 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
         model: String = "stt-rt-v5",
         language: String? = nil,
         sampleRate: Int = 16_000,
+        keywords: [String] = [],
         makeConnection: @escaping ConnectionFactory,
         schedule: @escaping Scheduler = { seconds, action in
             DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
@@ -89,6 +91,7 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
         self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         self.model = model
         self.language = language
+        self.keywords = keywords
         self.sampleRate = sampleRate
         self.makeConnection = makeConnection
         self.schedule = schedule
@@ -149,7 +152,7 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
             }
             guard sampleRate > 0 else { fail(SonioxStreamingError.invalidSampleRate(sampleRate), active); return }
             guard let config = Self.configJSON(
-                apiKey: apiKey, model: model, language: language, sampleRate: sampleRate
+                apiKey: apiKey, model: model, language: language, sampleRate: sampleRate, keywords: keywords
             ), let request = Self.webSocketRequest() else {
                 fail(StreamingClientError.invalidURL, active); return
             }

@@ -17,6 +17,7 @@ extension DesktopHostController {
             modelIdentifier: record.modelIdentifier, postProcessing: settings.postProcessing ?? .init(),
             language: record.languageIdentifier
         )
+        let keywords = batchKeywords(for: record.modelIdentifier, options: session.transcriptionOptions)
         do {
             guard !closed else { throw CancellationError() }
             let key = try transcriptionKey(for: record.modelIdentifier)
@@ -27,8 +28,9 @@ extension DesktopHostController {
             hud(record.id, .transcribing())
             let request = DesktopHostTranscriptionRequest(
                 audio: audio, model: record.modelIdentifier, key: key, duration: duration, language: session.language,
-                keywords: try await vocabularyKeywords(), azureEndpoint: azureEndpoint
+                keywords: keywords + (try await vocabularyKeywords()), azureEndpoint: azureEndpoint
             )
+            noteKeywordLimitation(&record, keywords: request.keywords)
             let effects = self.effects
             let task = Task {
                 try Task.checkCancellation()
@@ -59,6 +61,20 @@ extension DesktopHostController {
             let failure = record.failure ?? "Audio retained in History."
             reportFailure(failure, for: record.id, headline: "Transcription failed")
         }
+    }
+
+    private func batchKeywords(for model: String, options: LiveClientOptions?) -> [String] {
+        let snapshot = options ?? settings.configuration?.liveOptions ?? .init()
+        return DesktopTranscription.provider(for: model)?.id == "assemblyai"
+            ? snapshot.assemblyAIKeyterms : snapshot.keywords
+    }
+
+    private func noteKeywordLimitation(_ record: inout DesktopRecordingStore.Record, keywords: [String]) {
+        guard let notice = DesktopTranscription.keywordLimitation(model: record.modelIdentifier) else { return }
+        record.profileNotes?.removeAll { $0 == notice }
+        guard !keywords.isEmpty else { return }
+        record.profileNotes = (record.profileNotes ?? []) + [notice]
+        update("Transcribing… " + notice, state: 2)
     }
 
     private func recordWithResult(

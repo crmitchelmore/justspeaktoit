@@ -94,12 +94,14 @@ public enum DesktopLiveTranscription {
         case .openai:
             return OpenAIRealtimeLiveClient(
                 apiKey: apiKey, model: route.apiModelName, language: hint?.localeLanguageCode,
+                prompt: TranscriptionKeywordPolicy.prompt(options.keywords),
                 sampleRate: route.sampleRate,
                 makeConnection: makeConnection
             )
         case .deepgram:
             return DeepgramLiveClient(
                 apiKey: apiKey, model: route.apiModelName, language: hint, sampleRate: route.sampleRate,
+                keywords: options.keywords,
                 makeConnection: makeConnection
             )
         case .assemblyai:
@@ -120,16 +122,18 @@ public enum DesktopLiveTranscription {
         case .speechmatics:
             return SpeechmaticsLiveClient(
                 apiKey: apiKey, model: route.apiModelName, language: hint, sampleRate: route.sampleRate,
+                keywords: options.keywords,
                 makeConnection: makeConnection
             )
         case .elevenlabs:
             return ElevenLabsLiveClient(
                 apiKey: apiKey, modelID: route.apiModelName, language: hint,
-                sampleRate: route.sampleRate, makeConnection: makeConnection
+                sampleRate: route.sampleRate, keywords: options.keywords, makeConnection: makeConnection
             )
         case .soniox:
             return SonioxLiveClient(
                 apiKey: apiKey, model: route.apiModelName, language: hint, sampleRate: route.sampleRate,
+                keywords: options.keywords,
                 makeConnection: makeConnection
             )
         case .mistral:

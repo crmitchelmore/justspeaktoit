@@ -9,7 +9,9 @@ import SpeakDesktop
 extension DesktopHostController {
     /// A recording has started: the status line and a new HUD session say so.
     func announceRecording(_ recordID: UUID, profile: DesktopProfileSession, trigger: HotKeySessionTrigger) {
-        update(profileRecordingStatus(profile, trigger: trigger), state: 1)
+        update(profileRecordingStatus(
+            profile, trigger: trigger, keywordLimitation: recording?.live?.keywordLimitation
+        ), state: 1)
         beginHUD(recordID, .recording(profile: profile.profileName))
     }
 

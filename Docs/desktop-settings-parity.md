@@ -250,11 +250,61 @@ Imports capture the language and retries keep the original recording's language.
 
 Language accepts Automatic or a provider locale, including existing custom locale
 identifiers not listed in the shared catalogue. Model capability gates still
-apply. Keyword bias is currently wired to xAI dedicated STT streaming; AssemblyAI
-projects the same shared list into its keyterms option. Stop grace is wired to AssemblyAI and
-Cartesia. Other live routes and batch providers do **not** gain keyword/grace
-support merely because these fields exist. Additional provider wiring belongs
-in the canonical streaming factory, not a platform-specific list.
+apply. Shared keyword delivery follows the executable route table below.
+Stop grace remains wired to AssemblyAI and Cartesia; vocabulary forwarding does
+not change readiness, finalization, locale, annotations or post-processing.
+
+Global terms are comma/newline separated, trimmed and stably deduplicated
+case-insensitively. Provider limits are applied by shared wire clients, not
+Meta's narrower parser applied globally. A recording freezes its keyword/options
+snapshot with its profile, before startup suspends; changing preferences cannot
+replace that snapshot. Imports and retries take the current active list once at
+attempt admission, then combine it with the existing personal-lexicon keyword
+projection. An explicit empty list stays empty; preserved recovery text is never
+an implicit fallback. Explicit AssemblyAI options remain independent of generic
+keywords for both batch and live requests, including an explicit empty override.
+
+| Existing desktop route | Batch vocabulary | Live vocabulary |
+|---|---|---|
+| OpenAI direct transcription | Glossary `prompt` for Whisper-1/GPT transcription, not diarize | Existing GA transcription `prompt`, only models accepting it; no Whisper prompt |
+| Groq Whisper | Shared compatible-client glossary `prompt` | No desktop route |
+| Deepgram | Repeated `keyterm` for Nova-3; `keywords` for legacy Nova/Enhanced/Base | Repeated `keyterm` for Nova-3/Flux |
+| AssemblyAI | Pro `keyterms_prompt`; Universal-2 `word_boost` | Existing `keyterms_prompt`, separate provider options preserved |
+| ElevenLabs Scribe v2 | Repeated multipart `keyterms` | Repeated query `keyterms` |
+| Speechmatics | `transcription_config.additional_vocab[].content` | Same vocabulary in existing StartRecognition config |
+| Soniox | `context.terms` | `context.terms` in existing session config |
+| Mistral Voxtral Mini latest | Repeated multipart `context_bias` | Explicit limitation; no qualified shared vocabulary mapping |
+| Meta Muse | Existing request `keywords` | Existing session `keywords` |
+| Dedicated xAI STT | Existing repeated multipart `keyterm` | Existing repeated query `keyterm` |
+| Azure Speech | Existing Fast Transcription `phraseList.phrases` | Voice Live: explicit limitation; no qualified shared mapping |
+| Gemini | **Not sent**: preserve word timestamps/diarization, mutually exclusive with custom vocabulary | Existing `customVocabulary` mapping |
+| Cartesia, Rev.ai, Gladia, Modulate, other file/OpenRouter routes | Explicit limitation where a desktop route exists | Explicit limitation where a desktop route exists |
+
+Unknown/unsupported mappings do not receive speculative request fields.
+Scribe Medical and other unmatched model variants retain an explicit limitation,
+rather than inheriting Scribe v2's vocabulary fields by provider name alone.
+Unsupported keyword delivery is surfaced in recording status/History notes;
+live notices use the effective run options after the lexicon merge, including
+lexicon-only terms, and persist with that run without rereading preferences.
+Normal transcription remains available. Gladia's custom vocabulary is
+post-transcription phoneme correction, not an acoustic glossary, and is not
+silently enabled. Vocabulary does not couple to clipboard/voice-command expansion.
+
+The app conservatively bounds OpenAI/Groq glossary text to 224 UTF-8 bytes.
+Individually oversized terms are omitted before the usable-term count/budget;
+valid terms retain prefix truncation when the combined budget is exhausted.
+Deepgram is bounded to 100 terms and a conservative 500-byte budget (without a provider
+tokenizer); AssemblyAI to 100 terms of at most 50 characters; Speechmatics to
+100 terms of at most 100 characters; Soniox to 100 terms/100 characters and
+7,500 UTF-8 term bytes; Mistral to 100 terms/100 characters. ElevenLabs uses
+at most 100 terms, each fewer than 50 characters, at most five words and without
+`<>{}[]\`; terms over those bounds are omitted. ElevenLabs documents a 20%
+keyterm surcharge; the app stays below its >100-term billing threshold.
+Mistral context bias is optimized for English; other languages are experimental.
+Existing xAI, Azure, Meta and Gemini client bounds remain authoritative.
+These are synthetic shared-wire/host contracts, **not live provider API, native
+Windows/ARM/Linux capture, Apple, device or installed-package acceptance**.
+No credential, audio-network probe or native activation is part of this slice.
 
 The keyword and legacy AssemblyAI fields are mirrors of one shared list, as on
 Mac. `TranscriptionKeywordPolicy` is the canonical pure reconciliation policy
@@ -455,7 +505,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | recordingSoundProfile | Native qualified / Native qualified | Canonical four profiles + owned preload replacement and explicit previews; all eight production AACs decoded on Windows/Linux |
 | recordingSoundVolume | Native qualified / Native qualified | Strict 0...1 field + Mac volume-squared gain; native tests and queue bounds passed; installed-package acceptance pending |
 | assemblyAIKeyterms | Wired / Wired | Config + options-bearing live factory; provider enforces vocabulary bounds |
-| transcriptionKeywords | Partial / Partial | Config; xAI STT live only here, other provider/batch forwarding remains |
+| transcriptionKeywords | Route-dependent / Route-dependent | Shared immutable recording snapshot, batch/import/retry and live delivery below; unsupported routes report a limitation |
 | transcriptionKeywordsLastReconciled | Wired / Wired | Shared `TranscriptionKeywordPolicy` + Config; unchanged-mirror/deliberate-clear reconciliation, durable last mirror |
 | recoveredTranscriptionKeywords | Wired / Wired | Config; native selected-edit recovery with stale-selection and atomic-write guards |
 | assemblyAIIgnoredPronunciationTerms | Missing / Missing | No pronunciation keyword-suppression editor |

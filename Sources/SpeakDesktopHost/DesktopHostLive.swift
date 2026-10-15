@@ -4,15 +4,18 @@ import SpeakDesktop
 
 extension DesktopHostController {
     func makeLiveSession(
-        model: String, key: String, id: UUID, language: String? = nil
+        model: String, key: String, id: UUID, language: String? = nil, options: LiveClientOptions? = nil
     ) async throws -> DesktopLiveSession? {
         guard DesktopHostModels.isLive(model) else { return nil }
-        let options = (settings.configuration?.liveOptions ?? .init())
+        let options = (options ?? settings.configuration?.liveOptions ?? .init())
             .includingVocabularyKeywords(try await vocabularyKeywords())
         guard let client = effects.makeLiveClient(
             model: model, key: key, language: language, azureEndpoint: azureResourceEndpoint(), options: options
         ) else { return nil }
-        return DesktopLiveSession(client: client, id: id)
+        return DesktopLiveSession(
+            client: client, id: id,
+            keywordLimitation: options.keywords.isEmpty ? nil : DesktopTranscription.keywordLimitation(model: model)
+        )
     }
 
     func monitorLive(_ session: DesktopLiveSession) {

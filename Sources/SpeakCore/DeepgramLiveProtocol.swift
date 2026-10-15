@@ -15,7 +15,7 @@ extension DeepgramLiveClient {
     /// v1 formatting/endpointing options are not part of that API); the
     /// multilingual Flux model additionally takes a `language_hint`. Everything
     /// else uses `v1/listen` with interim results and smart formatting.
-    static func webSocketURL(model: String, language: String?, sampleRate: Int) -> URL? {
+    static func webSocketURL(model: String, language: String?, sampleRate: Int, keywords: [String] = []) -> URL? {
         let isFlux = isFluxModel(model)
         var urlComponents = URLComponents(
             string: isFlux
@@ -47,6 +47,7 @@ extension DeepgramLiveClient {
             }
         }
 
+        queryItems += TranscriptionKeywordPolicy.deepgramQuery(model: model, words: keywords)
         urlComponents.queryItems = queryItems
         return urlComponents.url
     }

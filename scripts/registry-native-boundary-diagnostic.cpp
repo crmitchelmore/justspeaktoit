@@ -4,9 +4,16 @@
 #include <winternl.h>
 #include <objbase.h>
 #include <cstdio>
+#include <type_traits>
+
+#if !defined(_WIN64) || (!defined(_M_X64) && !defined(__x86_64__))
+#error This diagnostic requires the Windows x64 function-pointer ABI.
+#endif
 
 namespace diagnostic {
 using SetInformation = NTSTATUS (NTAPI *)(HANDLE, PIO_STATUS_BLOCK, PVOID, ULONG, ULONG);
+static_assert(std::is_same_v<FARPROC, INT_PTR (WINAPI *)()>);
+static_assert(sizeof(FARPROC) == 8 && sizeof(SetInformation) == sizeof(FARPROC));
 SetInformation realSetInformation = nullptr;
 const char *phase = "startup";
 unsigned failures = 0;
@@ -14,6 +21,21 @@ NTSTATUS NTAPI setInformation(HANDLE, PIO_STATUS_BLOCK, PVOID, ULONG, ULONG);
 FARPROC WINAPI resolve(HMODULE, LPCSTR);
 NTSTATUS NTAPI create(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, PIO_STATUS_BLOCK,
                      PLARGE_INTEGER, ULONG, ULONG, ULONG, ULONG, PVOID, ULONG);
+static_assert(std::is_same_v<decltype(&setInformation), SetInformation>);
+
+// Win64 SDK generic procedure addresses retain their representation, not their signature.
+template<typename To, typename From>
+bool procedureAddress(const From &source, To &destination) {
+    static_assert(std::is_pointer_v<From> && std::is_pointer_v<To>);
+    static_assert(std::is_function_v<std::remove_pointer_t<From>>);
+    static_assert(std::is_function_v<std::remove_pointer_t<To>>);
+    static_assert(std::is_trivially_copyable_v<From> && std::is_trivially_copyable_v<To>);
+    static_assert(sizeof(From) == sizeof(To) && sizeof(To) == sizeof(FARPROC));
+    std::memcpy(&destination, &source, sizeof(destination));
+    From roundtrip{};
+    std::memcpy(&roundtrip, &destination, sizeof(roundtrip));
+    return roundtrip == source && (source == nullptr) == (destination == nullptr);
+}
 }
 
 // Only this standalone translation unit interposes; the app's C source is unchanged.
@@ -28,10 +50,21 @@ FARPROC WINAPI resolve(HMODULE module, LPCSTR name) {
     const FARPROC result = ::GetProcAddress(module, name);
     const DWORD error = GetLastError();
     if (reinterpret_cast<uintptr_t>(name) > 0xffff && std::strcmp(name, "NtSetInformationFile") == 0) {
-        realSetInformation = reinterpret_cast<SetInformation>(result);
-        std::printf("resolver actual=%p lastError=%lu\n", reinterpret_cast<void *>(result), error);
+        FARPROC forwarded = nullptr;
+        const bool verified = procedureAddress(result, realSetInformation) &&
+                              (!result || procedureAddress(&setInformation, forwarded));
+        unsigned char representation[sizeof(result)]{};
+        std::memcpy(representation, &result, sizeof(result));
+        std::printf("resolver actualRepresentation=");
+        for (unsigned char byte : representation) std::printf("%02x", static_cast<unsigned>(byte));
+        std::printf(" lastError=%lu typedRoundtrip=%u\n", error, static_cast<unsigned>(verified));
+        if (!verified) {
+            ++failures;
+            realSetInformation = nullptr;
+            std::printf("diagnostic-error operation=function-pointer representation\n");
+        }
         SetLastError(error);
-        return result ? reinterpret_cast<FARPROC>(&setInformation) : nullptr;
+        return verified ? forwarded : nullptr;
     }
     SetLastError(error);
     return result;

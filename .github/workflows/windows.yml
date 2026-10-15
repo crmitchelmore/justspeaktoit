@@ -64,6 +64,11 @@ on:
       - .github/workflows/windows.yml
       - .github/workflows/windows-local-runtime.yml
   workflow_dispatch:
+    inputs:
+      registry_diagnostics:
+        description: Observe Linux anonymous-file capability without repairing or skipping tests
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -438,6 +443,8 @@ jobs:
           cat "$RUNNER_TEMP/registry-git-diagnostic.json"
       - name: Test portable graph with native Linux Swift
         shell: bash
+        env:
+          JSTI_REGISTRY_CAPABILITY_DIAGNOSTICS: ${{ github.event_name == 'workflow_dispatch' && inputs.registry_diagnostics && '1' || '0' }}
         run: |
           set -euo pipefail
           # The host-mounted checkout can have foreign/writable ancestry.
@@ -468,7 +475,11 @@ jobs:
           sha256sum < "$paths"
           git --git-dir="$PWD/.git" --work-tree="$PWD" rev-parse HEAD 'HEAD^{tree}'
           chown -R "$test_user:$(id -gn "$test_user")" "$work"
-          runuser -u "$test_user" -- env HOME="$work/.home" TMPDIR="$work/.runtime" bash -c '
+          checkout_head="$(git --git-dir="$PWD/.git" --work-tree="$PWD" rev-parse HEAD)"
+          checkout_tree="$(git --git-dir="$PWD/.git" --work-tree="$PWD" rev-parse 'HEAD^{tree}')"
+          test_status=0
+          runuser -u "$test_user" -- env HOME="$work/.home" TMPDIR="$work/.runtime" \
+            bash -s -- "$work" "$JSTI_REGISTRY_CAPABILITY_DIAGNOSTICS" "$checkout_head" "$checkout_tree" <<'TEST_SCRIPT' || test_status=$?
             set -euo pipefail
             cd "$1"
             mkdir -m 700 "$HOME" "$TMPDIR"
@@ -478,8 +489,86 @@ jobs:
             grep "^CapEff:" "/proc/$$/status"
             stat -c "%n owner=%u mode=%a" / "$1" "$HOME" "$TMPDIR"
             swift --version
-            swift test --configuration release --jobs 4
-          ' _ "$work"
+            if [ "$2" != 1 ]; then
+              swift test --configuration release --jobs 4
+              exit 0
+            fi
+            export evidence="$TMPDIR/registry-capability-evidence"
+            mkdir -m 700 "$evidence"
+            printf 'checkoutHEAD=%s\ncheckoutTree=%s\n' "$3" "$4" > "$evidence/source-binding.log"
+            build_diagnostic() {
+              set -euo pipefail
+              compiler_command() {
+                printf 'commandStartedUTC=%s argv:' "$(date -u +%FT%T.%NZ)"
+                printf ' %q' "$@"
+                printf '\n'
+                "$@" &
+                command_pid=$!
+                command_status=0
+                wait "$command_pid" || command_status=$?
+                printf 'commandPID=%s commandEndedUTC=%s commandExit=%s\n' \
+                  "$command_pid" "$(date -u +%FT%T.%NZ)" "$command_status"
+                return "$command_status"
+              }
+              compiler="$(command -v clang)"
+              printf 'compiler=%s\nresolvedCompiler=%s\n' "$compiler" "$(readlink -f "$compiler")"
+              "$compiler" --version
+              sha256sum "$(readlink -f "$compiler")" \
+                scripts/registry-linux-capability-diagnostic.c \
+                Sources/CRecordingFileSupport/RecordingFileSupport.c \
+                Sources/CRecordingFileSupport/include/CRecordingFileSupport.h
+              set -x
+              compiler_command "$compiler" -std=c11 -Wall -Wextra -Werror -pedantic -MD -MF "$evidence/cli.d" \
+                -c scripts/registry-linux-capability-diagnostic.c -o "$evidence/cli.o"
+              compiler_command "$compiler" -std=c11 -Wall -Wextra -Werror -pedantic -MD -MF "$evidence/production.d" \
+                -I Sources/CRecordingFileSupport/include \
+                -c Sources/CRecordingFileSupport/RecordingFileSupport.c -o "$evidence/production.o"
+              compiler_command "$compiler" "$evidence/cli.o" "$evidence/production.o" \
+                -Wl,-Map,"$evidence/link.map" -o "$evidence/registry-linux-capability-diagnostic"
+              set +x
+              sha256sum "$evidence/cli.o" "$evidence/production.o" "$evidence/registry-linux-capability-diagnostic"
+            }
+            export -f build_diagnostic
+            diagnostic_status=0
+            if timeout --kill-after=2s 120s bash -c build_diagnostic \
+                > "$evidence/compile.stdout.log" 2> "$evidence/compile.stderr.log"; then
+              printf 'argv: timeout --kill-after=2s 15s %q %q %q 65534\n' \
+                "$evidence/registry-linux-capability-diagnostic" "$PWD" "$TMPDIR" > "$evidence/native-command.log"
+              printf 'nativeStartedUTC=%s\n' "$(date -u +%FT%T.%NZ)" >> "$evidence/native-command.log"
+              timeout --kill-after=2s 15s "$evidence/registry-linux-capability-diagnostic" \
+                "$PWD" "$TMPDIR" 65534 > "$evidence/native.stdout.log" 2> "$evidence/native.stderr.log" \
+                || diagnostic_status=$?
+              printf 'nativeEndedUTC=%s nativeExit=%s\n' "$(date -u +%FT%T.%NZ)" \
+                "$diagnostic_status" >> "$evidence/native-command.log"
+            else
+              diagnostic_status=$?
+            fi
+            printf 'diagnosticExit=%s\n' "$diagnostic_status" > "$evidence/status.log"
+            for log in "$evidence"/*.log; do
+              printf '\nEvidence: %s\n' "$log"
+              cat "$log"
+            done
+            set +e
+            swift test --configuration release --jobs 4 2>&1 | tee "$evidence/swift-test.log"
+            statuses=("${PIPESTATUS[@]}")
+            set -e
+            printf 'swiftTestExit=%s\nteeExit=%s\n' "${statuses[0]}" "${statuses[1]}" >> "$evidence/status.log"
+            if [ "${statuses[0]}" -ne 0 ]; then exit "${statuses[0]}"; fi
+            if [ "${statuses[1]}" -ne 0 ]; then exit "${statuses[1]}"; fi
+            exit "$diagnostic_status"
+          TEST_SCRIPT
+          if [ "$JSTI_REGISTRY_CAPABILITY_DIAGNOSTICS" = 1 ]; then
+            cp -R -- "$work/.runtime/registry-capability-evidence" "$RUNNER_TEMP/registry-capability-evidence"
+          fi
+          exit "$test_status"
+      - name: Upload manual Linux capability evidence
+        if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.registry_diagnostics }}
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: registry-linux-capability-${{ github.sha }}
+          path: ${{ runner.temp }}/registry-capability-evidence
+          if-no-files-found: error
+          retention-days: 14
       - name: Upload isolated Git diagnostic evidence
         if: ${{ always() && github.event_name == 'workflow_dispatch' }}
         uses: actions/upload-artifact@v7.0.1

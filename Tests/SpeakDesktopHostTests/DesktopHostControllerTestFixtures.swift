@@ -59,6 +59,8 @@ final class FakeLog: @unchecked Sendable {
     private var presentationStates: [Int32] = []
     private var displayedTranscriptValues: [String] = []
     private var transcriptValues: [String] = []
+    private var keyReadHook: (@Sendable (String) -> Void)?
+    private var keyWriteHook: (@Sendable (String, String) throws -> Void)?
     var keys: [String: String] = [:]
 
     func reset() {
@@ -73,7 +75,32 @@ final class FakeLog: @unchecked Sendable {
             presentationStates = []
             displayedTranscriptValues = []
             transcriptValues = []
+            keyReadHook = nil
+            keyWriteHook = nil
         }
+    }
+    /// Lets a test observe (or block inside) the instant a stored key is actually
+    /// read, without the hook itself holding `lock` for the duration.
+    func installKeyReadHook(_ hook: @escaping @Sendable (String) -> Void) {
+        lock.withLock { keyReadHook = hook }
+    }
+    /// Lets a test observe, block inside, or fail the actual vault write that
+    /// backs `Platform.saveAPIKey` before it lands. The hook runs first and may
+    /// throw to simulate a vault failure (skipping persistence); otherwise the
+    /// write still persists via `setKey` afterward, matching the uncooperative
+    /// I/O the hook cannot roll back once it returns normally. A hook body may
+    /// also call `setKey` itself to simulate persistence racing ahead of the
+    /// surrounding controller logic (e.g. late-confirmed writes); doing so is
+    /// redundant with, not a replacement for, the automatic post-hook persist.
+    func installKeyWriteHook(_ hook: @escaping @Sendable (String, String) throws -> Void) {
+        lock.withLock { keyWriteHook = hook }
+    }
+    func writeKey(_ key: String, name: String) throws {
+        let hook = lock.withLock { keyWriteHook }
+        if let hook {
+            try hook(key, name)
+        }
+        setKey(key, name: name)
     }
     func setDirectoryLauncher(_ launcher: (@Sendable (URL) throws -> Void)?) {
         lock.withLock { directoryLauncher = launcher }
@@ -108,7 +135,11 @@ final class FakeLog: @unchecked Sendable {
         if let text { lock.withLock { transcriptValues.append(text) } }
     }
     var transcripts: [String] { lock.withLock { transcriptValues } }
-    func key(_ name: String) -> String { lock.withLock { keys[name] ?? "" } }
+    func key(_ name: String) -> String {
+        let hook = lock.withLock { keyReadHook }
+        hook?(name)
+        return lock.withLock { keys[name] ?? "" }
+    }
     func setKey(_ key: String, name: String) { lock.withLock { keys[name] = key } }
 }
 
@@ -134,7 +165,7 @@ enum FakePlatform: DesktopHostPlatform {
     static func voiceTextImportCancelled(_ requestID: String) {
         FakeLog.shared.status("Import stopped: \(requestID)")
     }
-    static func saveAPIKey(_ key: String, name: String) throws { FakeLog.shared.setKey(key, name: name) }
+    static func saveAPIKey(_ key: String, name: String) throws { try FakeLog.shared.writeKey(key, name: name) }
     static func uploadStaging(directory: URL) -> SharedMultipartUploadStaging {
         // No `.posix` default on Windows, where these tests also run.
         SharedMultipartUploadStaging(directory: directory, securityPolicy: .init(

@@ -54,6 +54,8 @@ func runSelfTest() throws {
 /// until the window closes, then drains every queue and closes the controller.
 func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws {
     try configureApplicationIcon()
+    let providerCallbacks = try LinuxWindow.beginVoiceProviderCallbacks(holder)
+    defer { LinuxWindow.endVoiceProviderCallbacks(providerCallbacks) }
     let selected = try blocking { () -> Int in
         let microphone = await controller.selectedMicrophone()
         let warning = LinuxWindow.configureMicrophones(selected: microphone, synthetic: holder.smokeTest)
@@ -70,25 +72,9 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
         return await controller.selectedIndex()
     }
     LinuxCloudSync.configure(holder)
-    let strings = LinuxWindow.Strings()
-    let rows = LinuxWindow.modelRows(strings)
     let context = Unmanaged.passUnretained(holder).toOpaque()
-    var arguments = CommandLine.arguments.map { strdup($0) }
-    defer { arguments.forEach { free($0) } }
-    var windowFailure: Error?
-    do {
-        try withExtendedLifetime(strings) {
-            try rows.withUnsafeBufferPointer { rows in
-                try LinuxNative.call { error, capacity in
-                    jsti_window_run(
-                        linuxApplicationID, Int32(arguments.count), &arguments, rows.baseAddress, rows.count,
-                        Int32(selected), linuxWindowEvent, context,
-                        holder.smokeTest ? Int32(JSTI_WINDOW_SMOKE_TEST) : 0, error, capacity
-                    )
-                }
-            }
-        }
-    } catch { windowFailure = error }
+    let windowFailure = runGTKEventLoop(selected: selected, context: context, holder: holder)
+    LinuxWindow.endVoiceProviderCallbacks(providerCallbacks)
     try blocking {
         holder.shortcuts.stop()
         if !holder.smokeTest { holder.microphones.stop() }
@@ -105,6 +91,32 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
     withExtendedLifetime(holder) {}
     if let windowFailure { throw windowFailure }
     if let smokeFailure = holder.smokeTestFailure { throw smokeFailure }
+}
+
+/// Runs the GTK event loop until the window closes, returning any error
+/// raised while marshalling arguments or running `jsti_window_run` instead
+/// of throwing, so the caller can still perform its own cleanup first.
+private func runGTKEventLoop(selected: Int, context: UnsafeMutableRawPointer, holder: LinuxEventContext) -> Error? {
+    let strings = LinuxWindow.Strings()
+    let rows = LinuxWindow.modelRows(strings)
+    var arguments = CommandLine.arguments.map { strdup($0) }
+    defer { arguments.forEach { free($0) } }
+    do {
+        try withExtendedLifetime(strings) {
+            try rows.withUnsafeBufferPointer { rows in
+                try LinuxNative.call { error, capacity in
+                    jsti_window_run(
+                        linuxApplicationID, Int32(arguments.count), &arguments, rows.baseAddress, rows.count,
+                        Int32(selected), linuxWindowEvent, context,
+                        holder.smokeTest ? Int32(JSTI_WINDOW_SMOKE_TEST) : 0, error, capacity
+                    )
+                }
+            }
+        }
+        return nil
+    } catch {
+        return error
+    }
 }
 
 func configureApplicationIcon() throws {

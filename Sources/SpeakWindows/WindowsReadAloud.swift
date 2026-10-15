@@ -18,8 +18,16 @@ extension WindowsNative {
     static func configureVoiceOutput(
         _ settings: WindowsVoiceOutputSettings, context: UnsafeMutableRawPointer, inventory: XAIAccountVoiceInventory?
     ) -> Bool {
+        configureVoiceOutput(settings, context: context,
+            accountInventory: inventory.map(VoiceAccountInventory.xai))
+    }
+
+    static func configureVoiceOutput(
+        _ settings: WindowsVoiceOutputSettings, context: UnsafeMutableRawPointer,
+        accountInventory: VoiceAccountInventory?
+    ) -> Bool {
         voiceContext.set(context)
-        let presentation = settings.pickerPresentation(inventory: inventory)
+        let presentation = settings.pickerPresentation(accountInventory: accountInventory)
         let selected = presentation.selected
         let labels = presentation.labels.map { Array($0.utf8CString) }
         let pointers = labels.map { chars -> UnsafeMutablePointer<CChar> in
@@ -34,13 +42,19 @@ extension WindowsNative {
         }
         return configured && configureVoiceSources(context: context) &&
             jsti_window_set_voice_generation_options(settings.generationOptions.nativeFlags) == 0 &&
-            configureVoiceControls(settings, inventory: inventory)
+            configureVoiceControls(settings, accountInventory: accountInventory)
     }
 
     static func configureVoiceControls(
         _ settings: WindowsVoiceOutputSettings, inventory: XAIAccountVoiceInventory? = nil
     ) -> Bool {
-        let shown = settings.controlsPresentation(inventory: inventory)
+        configureVoiceControls(settings, accountInventory: inventory.map(VoiceAccountInventory.xai))
+    }
+
+    static func configureVoiceControls(
+        _ settings: WindowsVoiceOutputSettings, accountInventory: VoiceAccountInventory?
+    ) -> Bool {
+        let shown = settings.controlsPresentation(accountInventory: accountInventory)
         return shown.label.withCString {
             jsti_window_set_voice_synthesis_options_with_limits(
                 shown.speed, shown.pitch, shown.ssml, shown.capabilities, $0,
@@ -65,7 +79,8 @@ extension WindowsNative {
             }
         }
         guard let context = voiceContext.get(), result == 0,
-              configureVoiceOutput(shown.settings, context: context, inventory: shown.inventory) else {
+              configureVoiceOutput(shown.settings, context: context,
+                  accountInventory: shown.accountInventory ?? shown.inventory.map(VoiceAccountInventory.xai)) else {
             update("The account voice listing or saved voice could not be shown."); return
         }
     }
@@ -81,7 +96,8 @@ extension WindowsNative {
         defer { pointers.forEach { $0.deallocate() } }
         let borrowed: [UnsafePointer<CChar>?] = pointers.map { UnsafePointer($0) }
         return borrowed.withUnsafeBufferPointer {
-            jsti_window_set_voice_sources($0.baseAddress, $0.count, windowsVoiceSourceEvent, context) == 0
+            jsti_window_set_voice_sources($0.baseAddress, $0.count, windowsVoiceSourceEvent, context) == 0 &&
+                jsti_window_set_voice_credential_handler(windowsVoiceCredentialEvent, context) == 0
         }
     }
 
@@ -147,7 +163,8 @@ func windowsVoiceSourceEvent(
             record: record.map(String.init(cString:)) ?? "", path: path.map(String.init(cString:)) ?? ""
         )
         switch message {
-        case .discoveryOpen, .discoveryRefresh, .discoveryClose, .discoveryChoose:
+        case .discoveryOpen, .discoveryOpenModern, .discoveryRefresh,
+             .discoveryClose, .discoveryChoose, .discoveryProvider:
             holder.enqueueSettings { await holder.controller.handleVoiceDiscovery(message) }
         case .event(let event): holder.submitHistoryPlayback(event)
         case .preferences(let options):
@@ -174,7 +191,7 @@ private func saveWindowsVoiceControls(
     holder.enqueueSettings {
         let saved = await holder.controller.saveVoiceSynthesisOptions(options)
         if !WindowsNative.configureVoiceControls(await holder.controller.voiceOutputSettings(),
-            inventory: await holder.controller.currentVoiceInventory()) {
+            accountInventory: await holder.controller.selectedVoiceAccountInventory) {
             WindowsNative.update("The saved Voice synthesis controls could not be shown.")
         }
         if requestID.withCString({ jsti_window_finish_voice_synthesis_options($0, saved ? 1 : 0) }) != 0 {

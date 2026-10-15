@@ -80,7 +80,6 @@ let appleCoreSources: [String] = [
     "LiveTranscriptionClientFactory.swift",
     "Logging.swift",
     "MacConnection.swift",
-    "MistralTTSAPI.swift",
     "OpenClawClient.swift",
     "OpenClawClientReceive.swift",
     "OpenRouterAPIClient.swift",

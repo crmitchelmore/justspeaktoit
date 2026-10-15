@@ -69,6 +69,91 @@ Opaque stored identifier case is preserved; the shared xAI request builder retai
 its documented case-insensitive API normalization. Explicit language selection,
 progressive xAI delivery and wider output formats remain gaps.
 
+**Purpose-specific Voice key entry (local candidate)** adds a native Provider key
+action on the Windows Voice page and legacy Voice chooser, and a native password
+row on Linux's existing Voice page. Neither changes General/transcription key
+entry, the page count, settings keys or the provider catalogue. The dedicated
+callback carries the Voice purpose, exact canonical slot, request UUID and
+selection epoch; it never reinterprets a transcription model index.
+
+`VoiceOutputCredentialSlot` validates the executable voice against the shared
+purpose resolver and the engine's actual credential identifier. Deepgram uses its
+canonical provider identifier, including Flux's unprefixed model/voice names.
+OpenAI always uses `openai.tts.apiKey`, never `openai.apiKey`. Azure validation
+reuses `AzureSpeechConfiguration`, including its existing bare-key/eastus default.
+Synthesis of account voices still requires matching current account evidence.
+
+Saved, missing, unavailable and busy states are distinct. Keys are masked and
+never prefilled; blank replacement refuses instead of deleting. Removal is a
+separate confirmed action. Shared-key effects and existing key-sync preferences
+are disclosed. Replace and remove use the existing secure vault/hand-marked
+`saveKeyByHand` path, not plaintext settings, History, usage or audio exports.
+
+Save admission returns immediately; the host owns and counts the cancellable
+operation through shutdown's existing grace period. Default synchronous vault
+reads/writes run outside the host actor: cancellation cannot release ownership
+or allow a racing replacement/removal while a native write is unfinished.
+Native view reads coalesce to one in-flight lookup and the latest requested view;
+close remains responsive even if the vault ignores cancellation. Owned text imports
+and account discovery also block replacement/removal until they actually settle,
+including after cancellation. Cached xAI account evidence is checked only for an
+actual xAI selection; unrelated providers read only their own credential.
+Selection epochs fence
+away-and-back changes, and native request/epoch checks reject stale responses
+without clearing newer input. Closing/cancelling cannot promise rollback of a
+vault operation that already wrote; errors are sanitized and unconfirmed or
+late confirmed writes are reported honestly. No History ownership, speech handle,
+publication helper, capture lifecycle or synthesis request is changed.
+
+Windows reserves Voice button185, credential controls1030-1037 and `WM_APP+29`.
+The shared C credential header introduces no global Voice events110-119.
+Linux posts UI work through the existing GTK queue, without a MainActor hop.
+UUID identities accept GLib/Swift case differences; credential identifiers remain exact.
+Synthetic backend/native fixtures do not access a real vault or provider.
+Local source checks are not full-app Windows/Linux or Apple runtime acceptance;
+the earlier unresolved native adapter failure remains unresolved.
+
+**Modern account provider forms (component-qualified candidate)** replace the
+xAI-only launch caption with **Account voices**. Initial open uses the explicit
+`118/account-open-modern` carrier, source `-1`, empty text and a canonical
+36-character session UUID; legacy account-open payloads remain distinct.
+Provider choices come exclusively from `VoiceAccountProvider.all` through the
+host projection. The native chooser proposes a different fresh epoch, then
+keeps provider/key/Refresh/list/Pick disabled until an exact
+session/epoch/provider acknowledgement and matching inventory have arrived.
+An empty Mistral account list is explicit: key entry and Refresh become
+available after acknowledgement, but Pick remains disabled. Opening, the
+initial handshake and closing do not look up a cached key, list voices or
+synthesize; Refresh and key actions remain explicit.
+
+Provider key entry has independent native state and never touches the selected
+voice key form. Each read/write result must match the form's session, epoch,
+provider and outstanding request; writes echo only the host-issued slot.
+Entry starts masked and empty, native temporary copies are wiped, and Remove
+requires confirmation. A write outcome remains visible after the follow-up
+state read, including failure; closing is not rollback or permission to retry.
+Browsing providers leaves the selected voice tuple and its credential workers
+unchanged.
+
+Each window run owns a registration handle. Ending that exact handle closes
+native admission, advances its generation and waits for synchronous Swift
+borrowed-string copying/FIFO admission before releasing the strong holder
+lease. Double or delayed end cannot unregister a replacement, including
+same-holder reuse. Only begin registers; late presentation cannot revive it.
+Posted results hold no callback/holder snapshot and reject stale generations
+before form access. GTK unregister does not post widget changes or wait for a
+stopped loop. The original selected-key callback and four exports are unchanged.
+
+Synthetic component qualification is not production app acceptance: a hidden
+Windows widget/registry fixture and an exact Linux Swift helper with the real
+GLib registry, Core parser and desktop FIFO can exercise these boundaries
+without real keys or user text. The helper uses a synthetic holder/controller
+and executes no GTK widgets. GTK widget execution additionally requires a
+compatible Adwaita runtime; header syntax alone is not runtime evidence.
+Production Swift/C app shutdown, ARM, Apple and real-vault/provider journeys
+remain separate gates. This component-qualified candidate is not selected for
+production; holding persistence alone does not authorize composition or activation.
+
 ## Journey
 
 Choose **Voice Output > Text and export**. The native editor defaults to a
@@ -236,6 +321,101 @@ Mac `TextToSpeechManager` currently appends successful `TTSResult`s and persists
 `ttsUsageHistory`; its character-rate `cost` is also an estimate. Native
 accounting deliberately additionally exposes failed/cancelled transport attempts
 without describing those attempts as billed usage.
+
+## Mistral shared backend boundary (not native UI acceptance)
+
+The bounded Mistral candidate reuses macOS's actual `MistralTTSCatalog`,
+`MistralTTSRequest`, `MistralTTSAPI` and `TTSTextChunker`: the pinned default
+Voxtral model, 1,800-grapheme guidance and a non-streaming JSON/base64 speech
+response. This is guidance, not an invented service hard limit. Joined chunks
+preserve the trimmed input, including internal whitespace and Unicode grapheme
+clusters. The rolling alias is not exposed as an executable desktop choice.
+
+Mistral has no offline preset list. Only a completely received, validated account
+inventory can supply an executable voice, and the immutable selection retains
+its provider, discovery session/epoch, metadata and captured-key evidence.
+Provider-context mismatches, unavailable or forged voices and unsupported
+speed/pitch/SSML are refused before credential or speech HTTP admission.
+Synthesis captures one key for every chunk and refuses an inventory belonging
+to another key. Replacing a native selection must still cancel and fence the
+owning operation before accepting any late result; this shared backend does not
+select, persist or publish a native tuple.
+
+Account listing uses canonical page size/offsets with at most ten pages,
+512 accepted voices and 512 KiB per page. A duplicate UUID (including another
+case spelling), malformed entry, response overflow or later-page failure
+rejects the entire new listing, never a partial success. Errors distinguish
+missing keys, cancellation, service status, invalid listings and transport.
+Explicit-provider credential messages have their own typed discovery context;
+parsing is not host authorization to read or write a vault slot.
+
+The desktop candidate requests WAV, bounds each JSON response and cumulative
+PCM, and validates the decoded file against the existing native mono PCM16,
+24 kHz contract. An actual other-rate/format, silent, truncated or malformed WAV
+is refused; no guessed sample-rate request field, relabelling, raw float32
+interpretation or implicit resampling is used. Completed chunks contribute
+actual submitted Unicode-scalar observations and validated PCM duration.
+Canonical character-rate estimates use submitted graphemes after segmentation,
+matching macOS; they are estimates, not charges, tokens or provider receipts.
+Typed/clipboard requests retain nil History attribution.
+
+The account-provider projection, parser and synthesis backend are shared-only
+work until separately reviewed source qualification and native integration.
+No Mistral provider selector, key/list/pick UI, new setting or native ABI is
+enabled by this candidate. Native Mistral playback/accessibility, real account
+responses and Apple acceptance remain unverified; fake HTTP evidence is not a
+provider service probe or complete Voice parity.
+
+### Explicit-provider host boundary (not exposed by native UI)
+
+The explicitly tagged `account-open-modern` event on carrier118 requires
+source-1, empty text and a canonical36-byte session UUID. Its host path creates
+a fresh provider epoch and presents canonical presets or an empty listing
+without reading a cached account key. Legacy `account-open` retains its original
+opaque/braced-token behavior; modern mode is never inferred from token spelling.
+Both paths share owned dialog reset/cancellation. The modern startup seam and
+thin Swift dispatchers do not themselves expose native controls or a C ABI.
+
+The host candidate adds a separate account-dialog session and acknowledged
+provider epoch. Modern Refresh/Pick require that epoch, not a legacy dialog
+token; Close retains the session identity. Provider transitions synchronously
+clear offered choices and issued slots before awaiting anything. A completed
+listing must match its provider, captured key and context, and Pick rechecks
+the key before atomically saving the complete model/voice tuple. Listing and
+credential operations alone do not change that tuple. Browsing another provider
+does not erase evidence for the current saved voice; a new dialog cannot Pick
+an old dialog's evidence simply because its key still matches.
+
+Explicit-provider key entry obtains its slot from the canonical purpose
+resolver, without requiring an already picked Mistral voice. The host must
+issue that slot for the current context before admitting replacement/removal.
+Selected-voice entry and explicit-provider entry share the same coalesced,
+owned vault worker; their epochs are not interchangeable. Blocking vault I/O
+is detached, and reads, writes, listing and synthesis remain counted until
+actual settlement after cancellation. Late confirmed writes remain truthful
+and invalidate the affected account evidence even if their dialog changed.
+Provider switch, dialog close and reopen cancel only credential workers owned
+by the displaced explicit-provider context, before clearing that context.
+Selected-voice reads/writes survive browsing with their unchanged selection
+epoch. The coalesced read's worker destination is retained separately from its
+latest requested destination, so a closing provider cannot clear a queued
+selected-voice request. Writes retain their owned destination through actual
+settlement; full controller shutdown still cancels every credential worker.
+
+Provider/session changes cancel and fence active account-only synthesis,
+without cancelling unrelated built-in Voice output, retained replay/export or
+text import. Actual synthesis owns its credential lookup; unsupported controls
+fail before lookup/HTTP, and cancellation does not permit a racing key write
+while a native lookup is still settling. Generic account evidence is passed
+through Read, Generate, text export and estimates. Completed audio retains the
+existing native WAV/publication path, actual History UUID-or-nil attribution
+and usage opt-out; no token counts or billing receipts are inferred.
+
+These are internal host seams and synthetic tests only. The existing selected
+credential C ABI and native controls are unchanged. Mistral provider/key/list/pick
+controls, full native app/vault/playback/accessibility and Apple/runtime service
+acceptance remain a separately reviewed native integration, not accomplished
+by this host checkpoint.
 
 ## Actual macOS features and remaining gaps
 

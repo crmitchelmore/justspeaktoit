@@ -22,6 +22,41 @@ final class DesktopVoiceSourceMessageTests: XCTestCase {
         ), .preferences(.init(autoPlay: true, saveToRecordings: false)))
     }
 
+    func testProviderTransition_StrictSessionEpochAndCanonicalProviderWithoutLegacyRetagging() throws {
+        let context = VoiceAccountCredentialContext(provider: .mistral, sessionID: UUID(), epoch: UUID())
+        let text = context.provider.id + "\n" + context.epoch.uuidString.lowercased()
+        XCTAssertEqual(try DesktopVoiceSourceMessage(action: 118, source: -1, text: text,
+            record: context.sessionID.uuidString.lowercased(), path: "account-provider"), .discoveryProvider(context))
+        for invalid in ["mistral", text + "\n", "other\n" + context.epoch.uuidString,
+                        "mistral\n{" + context.epoch.uuidString + "}", "mistral\nnot-an-epoch"] {
+            XCTAssertThrowsError(try DesktopVoiceSourceMessage(action: 118, source: -1, text: invalid,
+                record: context.sessionID.uuidString, path: "account-provider"))
+        }
+        XCTAssertThrowsError(try DesktopVoiceSourceMessage(action: 118, source: 0, text: text,
+            record: context.sessionID.uuidString, path: "account-provider"))
+        XCTAssertThrowsError(try DesktopVoiceSourceMessage(action: 118, source: -1, text: text,
+            record: "legacy-dialog", path: "account-provider"))
+    }
+
+    func testModernOpen_RequiresExplicitTagCanonicalSessionAndEmptySourcePayload() throws {
+        let session = UUID()
+        let record = session.uuidString.lowercased()
+        XCTAssertEqual(try DesktopVoiceSourceMessage(action: 118, source: -1, text: "",
+            record: record, path: "account-open-modern"), .discoveryOpenModern(session))
+        for invalid in ["", "opaque-dialog", "{" + record + "}", String(record.dropLast()), record + " "] {
+            XCTAssertThrowsError(try DesktopVoiceSourceMessage(action: 118, source: -1, text: "",
+                record: invalid, path: "account-open-modern"))
+        }
+        XCTAssertThrowsError(try DesktopVoiceSourceMessage(action: 118, source: 0, text: "",
+            record: record, path: "account-open-modern"))
+        XCTAssertThrowsError(try DesktopVoiceSourceMessage(action: 118, source: -1, text: "unexpected",
+            record: record, path: "account-open-modern"))
+        for legacy in [record, "{" + record + "}", "opaque-dialog"] {
+            XCTAssertEqual(try DesktopVoiceSourceMessage(action: 118, source: -1, text: "",
+                record: legacy, path: "account-open"), .discoveryOpen(legacy))
+        }
+    }
+
     func testNativeMessage_RejectsUnsupportedSelectionEmptyInputAndInvalidActionsOrOptions() {
         let cases: [InvalidMessage] = [
             .init(action: 110, source: 3, text: "Synthetic external selection", path: ""),

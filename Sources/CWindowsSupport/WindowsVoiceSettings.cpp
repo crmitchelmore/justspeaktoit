@@ -3,6 +3,10 @@
 #include <mutex>
 #include <vector>
 
+bool jsti_voice_credentials_available();
+void jsti_show_voice_credentials(HWND owner);
+void jsti_voice_credentials_selection_changed();
+
 // Native Voice output dialog: chooses the canonical voice that Read aloud uses.
 // The host supplies the catalogue labels; the dialog returns an index.
 
@@ -45,6 +49,7 @@ void layout(HWND window) {
     move(noteID, margin, at(130), width, std::max(at(44), top - gap - at(130)));
     move(IDOK, static_cast<int>(bounds.right) - margin - 2 * buttonWidth - gap, top, buttonWidth, button);
     move(IDCANCEL, static_cast<int>(bounds.right) - margin - buttonWidth, top, buttonWidth, button);
+    move(185, margin, top, at(200), button);
 }
 
 void refreshFont(HWND window, Dialog &dialog) {
@@ -65,12 +70,13 @@ bool createControls(HWND window, Dialog &dialog) {
         return control != nullptr;
     };
     const bool okay =
-        add(L"STATIC", L"Read aloud speaks the displayed transcript of the selected recording with this voice.",
+        add(L"STATIC", L"Voice Output uses this voice for History and the text source you choose.",
             SS_LEFT, introID) &&
         add(L"STATIC", L"&Voice", 0, voiceLabelID) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, voiceID) &&
-        add(L"STATIC", L"Speech is synthesized by Deepgram: the transcript is sent to Deepgram with the Deepgram "
-            L"API key saved in Windows Credential Manager. Long transcripts are spoken in parts.", SS_LEFT, noteID) &&
+        add(L"STATIC", L"The text is sent to the selected voice provider with its saved API key in Windows "
+            L"Credential Manager. Long text is spoken in parts.", SS_LEFT, noteID) &&
+        add(L"BUTTON", L"Provider &key...", BS_PUSHBUTTON | WS_TABSTOP, 185) &&
         add(L"BUTTON", L"&Apply", BS_DEFPUSHBUTTON | WS_GROUP | WS_TABSTOP, IDOK) &&
         add(L"BUTTON", L"Cancel", BS_PUSHBUTTON | WS_TABSTOP, IDCANCEL);
     if (!okay) return false;
@@ -80,6 +86,7 @@ bool createControls(HWND window, Dialog &dialog) {
     }
     SendDlgItemMessageW(window, voiceID, CB_SETCURSEL, static_cast<WPARAM>(dialog.config.selected), 0);
     refreshFont(window, dialog);
+    EnableWindow(GetDlgItem(window, 185), jsti_voice_credentials_available());
     layout(window);
     return true;
 }
@@ -134,6 +141,9 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         if (HIWORD(wparam) != BN_CLICKED) break;
         if (LOWORD(wparam) == IDOK) { apply(window, *dialog); return 0; }
         if (LOWORD(wparam) == IDCANCEL) { close(window); return 0; }
+        if (LOWORD(wparam) == 185 && jsti_voice_credentials_available()) {
+            jsti_show_voice_credentials(window); return 0;
+        }
         return 0;
     case WM_CLOSE: close(window); return 0;
     case WM_DESTROY:
@@ -209,14 +219,18 @@ int jsti_window_set_voice_output(const char *const *voiceNames, size_t voiceCoun
         updated.selected = selected;
         updated.callback = callback;
         updated.context = context;
-        std::lock_guard<std::mutex> lock(configurationMutex);
-        configuration = std::move(updated);
+        {
+            std::lock_guard<std::mutex> lock(configurationMutex);
+            configuration = std::move(updated);
+        }
     } catch (const std::exception &) { return -1; }
     jsti_window_update(nullptr, nullptr, -1);
+    jsti_voice_credentials_selection_changed();
     return 0;
 }
 
 void jsti_window_clear_voice_output(void) {
+    jsti_window_clear_voice_credentials();
     { std::lock_guard<std::mutex> lock(configurationMutex); configuration = Configuration(); }
     jsti_window_update(nullptr, nullptr, -1);
 }
@@ -252,6 +266,10 @@ bool jsti_voice_settings_self_test(HWND owner, std::string &error) {
             } else {
                 const bool shown = SendDlgItemMessageW(window, voiceID, CB_GETCURSEL, 0, 0) == 1 &&
                     SendDlgItemMessageW(window, voiceID, CB_GETCOUNT, 0, 0) == 3;
+                wchar_t note[256]{};
+                GetDlgItemTextW(window, noteID, note, 256);
+                const bool providerDisclosure = std::wstring(note).find(L"selected voice provider") != std::wstring::npos &&
+                    std::wstring(note).find(L"Deepgram") == std::wstring::npos;
                 SendDlgItemMessageW(window, voiceID, CB_SETCURSEL, 2, 0);
                 SendMessageW(window, WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
                 const bool closed = !IsWindow(window);
@@ -265,7 +283,7 @@ bool jsti_voice_settings_self_test(HWND owner, std::string &error) {
                     SendMessageW(second, WM_COMMAND, MAKEWPARAM(IDCANCEL, BN_CLICKED), 0);
                     if (IsWindow(second)) DestroyWindow(second);
                 }
-                passed = shown && closed && reopened && applied.calls == 1 && applied.voice == 2;
+                passed = shown && providerDisclosure && closed && reopened && applied.calls == 1 && applied.voice == 2;
                 if (!passed) error = "The Voice output dialog did not show, apply or cancel its voice choice exactly once.";
             }
         }

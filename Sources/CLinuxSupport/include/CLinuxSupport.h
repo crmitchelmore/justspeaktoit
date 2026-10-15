@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "VoiceSources.h"
+#include "../../CWindowsSupport/include/VoiceCredentials.h"
 
 int32_t jsti_comparison_present(const char *models, const char *rounds, const char *detail,
                                const char *selected, int32_t busy, int32_t recording, int32_t judgeable,

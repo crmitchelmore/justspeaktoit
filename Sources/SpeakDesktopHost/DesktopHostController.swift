@@ -115,6 +115,18 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package var voiceTextImportTask: Task<Void, Never>?
     package var voiceTextImportRequestID: String?
     package var voiceGenerationTask: Task<Void, Never>?
+    package var voiceCredentialEpoch = UUID()
+    package var voiceCredentialTask: Task<Void, Never>?
+    package var voiceCredentialRequestID: UUID?
+    package var voiceCredentialWriteDestination: VoiceOutputCredentialDestination?
+    package var voiceCredentialReadTask: Task<Void, Never>?
+    package var voiceCredentialReadID: UUID?
+    package var voiceCredentialReadDestination: VoiceOutputCredentialDestination?
+    package var voiceCredentialReadWorkerDestination: VoiceOutputCredentialDestination?
+    package var voiceProviderIssuedSlot: VoiceOutputCredentialSlot?
+    package var voiceAccountWorkers = 0
+    package var voiceSynthesisWorkers = 0
+    package var voiceAccountOutputTicket: DesktopPlaybackRequests.Ticket?
     package var generatedVoice: DesktopGeneratedVoiceResult?
     package var voiceUsage = DesktopVoiceUsageState()
     package var voiceDiscovery = DesktopVoiceDiscoveryState()

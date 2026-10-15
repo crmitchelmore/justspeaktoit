@@ -12,8 +12,11 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         ) async throws -> Data = { snapshot, selection, credential in
             try await DesktopSpeechSynthesis().synthesize(
                 snapshot, voice: selection.voice, options: selection.options,
-                xaiInventory: selection.xaiInventory, credential: credential
+                accountInventory: selection.accountInventory, credential: credential
             )
+        },
+        publish: @escaping @Sendable (Data, URL) async throws -> Void = {
+            try await DesktopVoicePlaybackFile.writeExport($0, to: $1)
         }
     ) {
         guard !closed, canUseHistory else { return }
@@ -34,15 +37,17 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         voiceOutputRecordID = snapshot.recordID
         let usage = retainedAudio == nil
             ? beginVoiceUsage(operation: .export, source: snapshot.source, recordID: snapshot.recordID) : nil
+        let accountWork = beginAccountVoiceWork(selection, ticket: ticket)
         activeOperations += 1
         readAloudState.exportTask = Task {
-            defer { self.finishVoiceUsage(usage); self.finishOperation() }
+            defer { self.finishAccountVoiceOperation(accountWork, usage: usage) }
             do {
                 let wav: Data
                 if let retainedAudio { wav = retainedAudio } else if let selection {
                     wav = try await VoiceSynthesisUsage.$capture.withValue(usage?.capture) {
                         try await synthesize(snapshot, selection) {
-                            try effects.apiKey(name: selection.voice.apiKeyIdentifier)
+                            try await Self.readVoiceSynthesisKey(
+                                effects: effects, name: selection.voice.apiKeyIdentifier)
                         }
                     }
                 } else {
@@ -53,7 +58,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 guard !self.closed, self.playbackRequests.isCurrent(ticket) else { return }
                 // No partial destination is ever published. A failed synthesis or
                 // cancellation before this commit leaves any existing file intact.
-                try await DesktopVoicePlaybackFile.writeExport(wav, to: destination)
+                try await publish(wav, destination)
                 self.finishVoiceExport(ticket, status: retainedAudio == nil ? "Voice audio exported as WAV." :
                     "Retained voice audio exported as WAV; no synthesis request was sent.")
             } catch is CancellationError {

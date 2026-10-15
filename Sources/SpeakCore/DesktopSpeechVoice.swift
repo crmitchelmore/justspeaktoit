@@ -8,6 +8,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
     case azureMAI(AzureMAIVoice)
     case xai(XAITTSVoice)
     case cartesia(CartesiaTTSVoice)
+    case mistral(MistralTTSVoice)
 
     public var id: String {
         switch self {
@@ -16,6 +17,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .azureMAI(let voice): voice.id
         case .xai(let voice): voice.providerVoiceID
         case .cartesia(let voice): voice.providerVoiceID
+        case .mistral(let voice): voice.providerVoiceID
         }
     }
 
@@ -26,6 +28,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .azureMAI(let voice): voice.displayName
         case .xai(let voice): voice.displayName
         case .cartesia(let voice): voice.displayName
+        case .mistral(let voice): voice.displayName
         }
     }
 
@@ -36,6 +39,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .azureMAI(let voice): voice.model.rawValue
         case .xai: XAITTSCatalog.providerIdentifier
         case .cartesia: CartesiaTTSCatalog.desktopModelIdentifier
+        case .mistral: MistralTTSCatalog.defaultModel.desktopModelIdentifier
         }
     }
 
@@ -47,6 +51,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .xai(let voice): "\(voice.displayName) — xAI Speech"
         case .cartesia(let voice):
             "\(voice.displayName) — Cartesia \(CartesiaTTSCatalog.defaultModel.displayName)"
+        case .mistral(let voice): "\(voice.displayName) — Mistral \(MistralTTSCatalog.defaultModel.displayName)"
         }
     }
 
@@ -56,6 +61,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .azureNeural, .azureMAI: AzureSpeechConfiguration.credentialIdentifier
         case .xai: XAITTSCatalog.credentialIdentifier
         case .cartesia: CartesiaTTSCatalog.credentialIdentifier
+        case .mistral: MistralTTSCatalog.credentialIdentifier
         }
     }
 
@@ -66,8 +72,13 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .azureMAI: .azureMAI
         case .xai: .xai
         case .cartesia: .cartesia
+        case .mistral: .naturalSpeech
         }
     }
+
+    /// The PCM sample rate `DesktopMistralSpeechSynthesis` writes the decoded
+    /// WAV at. Every currently-composed provider uses 24 kHz.
+    public var sampleRate: Int { 24_000 }
 
     public static var voices: [Self] {
         DeepgramSpeechCatalog.voices.map(Self.deepgram) + AzureNeuralVoiceCatalog.voices.map(Self.azureNeural)
@@ -85,13 +96,19 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
     public static func resolved(
         modelID: String?, voiceID: String?, xaiInventory: XAIAccountVoiceInventory?
     ) throws -> Self {
+        try resolved(modelID: modelID, voiceID: voiceID, accountInventory: xaiInventory.map(VoiceAccountInventory.xai))
+    }
+
+    public static func resolved(
+        modelID: String?, voiceID: String?, accountInventory: VoiceAccountInventory?
+    ) throws -> Self {
         let model = modelID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let identifier = voiceID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if let voice = try cartesiaSelection(model: model, identifier: identifier) {
             return voice
         }
-        if let voice = try xaiSelection(model: model, identifier: identifier,
-            original: voiceID?.trimmingCharacters(in: .whitespacesAndNewlines), inventory: xaiInventory) {
+        if let voice = try accountSelection(model: model, identifier: identifier,
+            original: voiceID?.trimmingCharacters(in: .whitespacesAndNewlines), inventory: accountInventory) {
             return voice
         }
         let maiModel = model?.hasPrefix(AzureMAIVoiceCatalog.modelMarker.dropFirst().lowercased()) == true
@@ -133,18 +150,5 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
             throw VoiceSynthesisConfigurationError.unsupportedVoice
         }
         return .cartesia(voice)
-    }
-
-    private static func xaiSelection(
-        model: String?, identifier: String?, original: String?, inventory: XAIAccountVoiceInventory?
-    ) throws -> Self? {
-        guard model == XAITTSCatalog.providerIdentifier || model?.hasPrefix(XAITTSCatalog.voiceIDPrefix) == true
-            || identifier?.hasPrefix(XAITTSCatalog.voiceIDPrefix) == true else { return nil }
-        guard model == nil || model == XAITTSCatalog.providerIdentifier, let identifier else {
-            throw VoiceSynthesisConfigurationError.unsupportedVoice
-        }
-        if let voice = XAITTSCatalog.voice(forID: identifier) { return .xai(voice) }
-        if let original, let voice = inventory?.voice(forID: original) { return .xai(voice) }
-        throw VoiceSynthesisConfigurationError.unsupportedVoice
     }
 }

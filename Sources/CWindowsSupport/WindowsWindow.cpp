@@ -48,6 +48,9 @@ bool jsti_voice_settings_self_test(HWND owner, std::string &error);
 void jsti_show_voice_sources(HWND owner, const char *record, const char *history);
 bool jsti_voice_sources_self_test(HWND owner, std::string &error);
 void jsti_voice_sources_stop();
+bool jsti_voice_credentials_available();
+void jsti_show_voice_credentials(HWND owner);
+bool jsti_voice_credentials_self_test(HWND owner, std::string &error);
 bool jsti_azure_resource_available();
 void jsti_show_configuration(HWND owner, const wchar_t *group);
 void jsti_show_azure_resource_settings(HWND owner);
@@ -152,6 +155,7 @@ constexpr int voiceSettingsID = 173;
 constexpr int correctionsID = 180, pronunciationID = 181;
 constexpr int historyCorrectionsID = 182;
 constexpr int voiceSourcesID = 184;
+constexpr int voiceCredentialID = 185;
 // The Source picker (Remote/Local) and the Local models dialog button, which
 // takes the place of Refresh models while the Local source is selected.
 constexpr int sourceLabelID = 89;
@@ -176,8 +180,8 @@ const PageInfo pageInfo[pageCount] = {
     {L"Dashboard", L"Ready to capture ideas instantly. Check your setup, follow your usage, and pick up your latest "
                    L"session.", 0xE80F, "dashboard"},
     {L"History", L"Search, replay and reuse past recordings and their transcripts.", 0xE81C, "history"},
-    {L"Voice Output", L"Read History, typed text or an explicit clipboard snapshot in a Deepgram Aura voice. "
-                      L"Export lossless WAV audio with your own Deepgram key.", 0xE767, "voice-output"},
+    {L"Voice Output", L"Read History, typed text, clipboard snapshots or imported text with your selected voice. "
+                      L"Export lossless WAV audio.", 0xE767, "voice-output"},
     {L"General", L"Choose the microphone, where finished text goes, whether the app starts at login, and how it "
                  L"looks.", 0xE713, "general"},
     {L"Transcription", L"Pick the speech model for new recordings, on this PC or with your own provider key.", 0xE720,
@@ -570,6 +574,7 @@ void updateHistoryControls(HWND window, int recording) {
         jsti_voice_output_available());
     EnableWindow(GetDlgItem(window, voiceSettingsID), recording == 0 && jsti_voice_output_available());
     EnableWindow(GetDlgItem(window, voiceSourcesID), recording == 0 && jsti_voice_output_available());
+    EnableWindow(GetDlgItem(window, voiceCredentialID), recording == 0 && jsti_voice_credentials_available());
     EnableWindow(GetDlgItem(window, copyID), state.historyPresentationReady && (!selected || recording == 0));
     if (!selected) applyVariant(window, -1, false, recording);
     else EnableWindow(GetDlgItem(window, variantID), state.variantSwitchable && recording == 0);
@@ -649,7 +654,7 @@ unsigned pagesOf(int identifier) {
     case historySpendID: case historyCorrectionsID:
         return page(historyPage);
     case readAloudID: case stopPlaybackID: return page(historyPage) | page(voicePage);
-    case voiceSettingsID: case voiceSourcesID: return page(voicePage);
+    case voiceSettingsID: case voiceSourcesID: case voiceCredentialID: return page(voicePage);
     case configurationID:
         return page(generalPage) | page(transcriptionPage) | page(postProcessingPage) | page(keyboardPage);
     case 94: case microphoneID: case textOutputID: case appearanceLabelID: case appearanceID: case automationID:
@@ -998,12 +1003,13 @@ void layoutSettings(HWND window, const RECT &content) {
     case voicePage: {
         int y = layoutSettingsCard(window, top, content, 0xE767, L"Read aloud",
             L"Read the selected History transcript, or open Text and export for typed/pasted text and an explicit "
-            L"clipboard snapshot. The saved Deepgram key is used. External selected text is unavailable.", 2 * row + gap);
+            L"clipboard snapshot. The selected voice provider uses its saved key. External selected text is unavailable.", 2 * row + gap);
         place(window, voiceSettingsID, box(left, y, scale(window, 150), row));
         button(readAloudID, y, scale(window, 196));
         place(window, stopPlaybackID, box(right - scale(window, 196) - scale(window, 8) - scale(window, 96), y,
                                           scale(window, 96), row));
         place(window, voiceSourcesID, box(left, y + row + gap, scale(window, 260), row));
+        place(window, voiceCredentialID, box(right - scale(window, 190), y + row + gap, scale(window, 190), row));
         break;
     }
     case generalPage: {
@@ -1697,6 +1703,7 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"Stop", BS_PUSHBUTTON | WS_TABSTOP, stopPlaybackID) &&
         add(L"BUTTON", L"Choose &voice…", BS_PUSHBUTTON | WS_TABSTOP, voiceSettingsID) &&
         add(L"BUTTON", L"&Text and export...", BS_PUSHBUTTON | WS_TABSTOP, voiceSourcesID) &&
+        add(L"BUTTON", L"Provider &key...", BS_PUSHBUTTON | WS_TABSTOP, voiceCredentialID) &&
         add(L"BUTTON", L"Edit app &profiles…", BS_PUSHBUTTON | WS_TABSTOP, profilesID) &&
         add(L"BUTTON", L"Edit &corrections...", BS_PUSHBUTTON | WS_TABSTOP, correctionsID) &&
         add(L"BUTTON", L"Edit &pronunciations...", BS_PUSHBUTTON | WS_TABSTOP, pronunciationID) &&
@@ -2566,6 +2573,11 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
                     ? jsti::utf8(controlText(GetDlgItem(window, transcriptID))) : "";
                 const std::string record = state.historyPresentationReady ? state.selectedHistoryID : "";
                 jsti_show_voice_sources(window, record.c_str(), transcript.c_str());
+            }
+            return 0;
+        case voiceCredentialID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, voiceCredentialID) && IsWindowEnabled(window)) {
+                jsti_show_voice_credentials(window);
             }
             return 0;
         case playPauseID:
@@ -4366,7 +4378,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             jsti_vocabulary_self_test(window, failure) &&
             jsti_text_output_settings_self_test(window, textOutputID, setRecording, recordingBlocked, &observed, failure) &&
             jsti_hotkey_self_test(window, observe, &observed, failure) && jsti_voice_settings_self_test(window, failure) &&
-            jsti_voice_sources_self_test(window, failure) &&
+            jsti_voice_sources_self_test(window, failure) && jsti_voice_credentials_self_test(window, failure) &&
             jsti_local_models_self_test(window, failure) && jsti_cloud_sync_settings_self_test(window, failure) &&
             jsti_azure_resource_settings_self_test(window, failure) && jsti_configuration_self_test(window, failure)
             && jsti_comparison_self_test(window, failure);

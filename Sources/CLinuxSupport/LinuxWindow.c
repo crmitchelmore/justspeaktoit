@@ -252,6 +252,7 @@ static void refresh_actions(void) {
     gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_read), idle && presented && has_text && voices);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), idle);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_sources), idle && voices);
+    jsti_voice_credentials_set_idle(idle);
     gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.voice_row), idle);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.import_button), idle);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.history_import), idle);
@@ -476,6 +477,7 @@ static void on_read_aloud(GtkButton *button, gpointer data) {
 
 static void on_voice(GObject *object, GParamSpec *spec, gpointer data) {
     (void)object; (void)spec; (void)data;
+    if (!ui.suppress) jsti_voice_credentials_selection_pending();
     guint position = adw_combo_row_get_selected(read_aloud.voice_row);
     if (position != GTK_INVALID_LIST_POSITION) emit(JSTI_EVENT_VOICE_OUTPUT, "", (gint32)position);
 }
@@ -656,6 +658,7 @@ static void on_import(GtkButton *button, gpointer data) {
 static gboolean on_close_request(GtkWindow *window, gpointer data) {
     (void)window; (void)data;
     jsti_voice_sources_close();
+    jsti_voice_credentials_close();
     ui.closing = TRUE;
     if (ui.backup_chooser != NULL) g_cancellable_cancel(ui.backup_chooser);
     g_clear_object(&ui.backup_chooser);
@@ -680,8 +683,8 @@ static GtkWidget *read_aloud_group(void) {
     GtkWidget *widget = group("Voice");
     adw_preferences_group_set_description(
         ADW_PREFERENCES_GROUP(widget),
-        "Read aloud speaks the transcript shown for the selected recording with a Deepgram voice, using the "
-        "saved Deepgram API key. Play, Pause and Stop control it.");
+        "Read aloud sends the displayed History transcript to the selected voice provider using its saved key. "
+        "Play, Pause and Stop control playback.");
     read_aloud.voices = gtk_string_list_new(NULL);
     read_aloud.voice_row = ADW_COMBO_ROW(adw_combo_row_new());
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(read_aloud.voice_row), "Voice");
@@ -1068,12 +1071,13 @@ static GtkWidget *build_voice_output(void) {
     GtkWidget *column, *page = jsti_page_new(&column);
     gtk_box_append(GTK_BOX(column), jsti_hero_new(
         "voice", "Voice Output",
-        "Read History, typed text or an explicit clipboard snapshot in a Deepgram Aura voice. "
-        "Export lossless WAV audio with your own Deepgram key.", NULL,
+        "Read History, typed text, clipboard snapshots or imported text with your selected voice. "
+        "Export lossless WAV audio.", NULL,
         NULL));
     GtkWidget *body;
     GtkWidget *card = jsti_card_new("audio-speakers-symbolic", "Read aloud", &body);
     gtk_box_append(GTK_BOX(body), read_aloud_group());
+    gtk_box_append(GTK_BOX(body), jsti_voice_credentials_group_new());
     GtkWidget *note = gtk_label_new(
         "Choose a recording in History, or open Text and export for typed/pasted text and an explicit clipboard "
         "snapshot. External selected text is unavailable. Recording, another playback or Stop ends voice output.");
@@ -2772,6 +2776,7 @@ static void voices_free(gpointer pointer) {
 
 static void voices_apply(gpointer pointer) {
     Voices *voices = pointer;
+    jsti_voice_credentials_selection_changed();
     ui.suppress = TRUE;
     guint existing = g_list_model_get_n_items(G_LIST_MODEL(read_aloud.voices));
     g_ptr_array_add(voices->names, NULL);
@@ -3163,6 +3168,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
         return fail(error, capacity, "Copy or the version control stayed unavailable");
     }
     if (read_aloud_self_test(first, error, capacity) != 0) return -1;
+    if (jsti_voice_credentials_self_test(error, capacity) != 0) return -1;
     if (jsti_voice_sources_self_test(ui.window, error, capacity) != 0) return -1;
     History *empty = history_copy(NULL, 0, "");
     history_apply(empty);

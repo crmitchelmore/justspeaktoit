@@ -95,7 +95,7 @@ void select(HWND window, Dialog &dialog) {
     SetDlgItemTextW(window, noticeID, dialog.source == 0 && dialog.record.empty()
         ? L"Choose a recording in History, then reopen this editor. History text is captured when this editor opens."
         : L"Read, Generate and Export text send this snapshot to the selected voice provider with your saved key. "
-          L"Generate retains a 24 kHz mono PCM16 WAV; Play/Export result reuse it without a provider request. "
+          L"Generate retains the provider's mono PCM16 WAV; Play/Export result reuse it without a provider request. "
           L"Voice controls show the selected route's actual capabilities. Stop cancels active voice work.");
     refresh(window, dialog);
 }
@@ -240,7 +240,7 @@ bool create(HWND window, Dialog &dialog) {
              textID, WS_EX_CLIENTEDGE) ||
         !add(L"STATIC", L"", SS_LEFT, noticeID) ||
         !add(L"BUTTON", L"&Usage and input estimate...", BS_PUSHBUTTON | WS_TABSTOP, usageID) ||
-        !add(L"BUTTON", L"&xAI account voices...", BS_PUSHBUTTON | WS_TABSTOP, discoveryID) ||
+        !add(L"BUTTON", L"&Account voices...", BS_PUSHBUTTON | WS_TABSTOP, discoveryID) ||
         !add(L"BUTTON", L"&Auto-play generated audio", BS_AUTOCHECKBOX | BS_MULTILINE | WS_TABSTOP, autoPlayID) ||
         !add(L"BUTTON", L"Save audio to recordings", BS_AUTOCHECKBOX | BS_MULTILINE | WS_TABSTOP, saveID) ||
         !add(L"BUTTON", L"Voice &controls...", BS_PUSHBUTTON | WS_TABSTOP, controlsID) ||

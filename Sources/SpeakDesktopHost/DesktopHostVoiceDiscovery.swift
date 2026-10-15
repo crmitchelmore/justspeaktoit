@@ -3,11 +3,23 @@ import SpeakCore
 import SpeakDesktop
 
 package struct DesktopVoiceDiscoveryState: Sendable {
-    package var inventory: XAIAccountVoiceInventory?
+    package var inventories: [VoiceAccountProvider: VoiceAccountInventory] = [:]
+    package var inventory: XAIAccountVoiceInventory? {
+        get { inventories[.xai]?.xai }
+        set { inventories[.xai] = newValue.map(VoiceAccountInventory.xai) }
+    }
+    package var context: VoiceAccountCredentialContext?
+    package var modern = false
+    package var retiredEpochs: Set<UUID> = []
+    package var listing: VoiceAccountInventory?
+    package var listingContext: VoiceAccountCredentialContext?
     package var task: Task<Void, Never>?
     package var requestID: String?
     package var offeredIDs: [String] = []
     package var warning: String?
+    package var message = ""
+    package var actionID: String? { modern ? context?.epoch.uuidString : requestID }
+    package var provider: VoiceAccountProvider { context?.provider ?? .xai }
 }
 
 package struct DesktopVoiceDiscoveryPresentation: Sendable {
@@ -18,15 +30,24 @@ package struct DesktopVoiceDiscoveryPresentation: Sendable {
     package let loading: Bool
     package let settings: DesktopVoiceOutputSettings
     package let inventory: XAIAccountVoiceInventory?
+    package var accountInventory: VoiceAccountInventory?
+}
+
+package struct DesktopVoiceAccountProvidersPresentation: Sendable {
+    package let context: VoiceAccountCredentialContext
+    package let providers: [VoiceAccountProvider]
+    package let pending: Bool
 }
 
 extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     package func handleVoiceDiscovery(_ message: DesktopVoiceSourceMessage) {
         switch message {
         case .discoveryOpen(let token): openVoiceDiscovery(token)
+        case .discoveryOpenModern(let session): openModernVoiceDiscovery(session)
         case .discoveryRefresh(let token): refreshVoiceDiscovery(token)
         case .discoveryClose(let token): closeVoiceDiscovery(token)
         case .discoveryChoose(let identifier, let token): chooseDiscoveredVoice(identifier, requestID: token)
+        case .discoveryProvider(let context): selectVoiceAccountProvider(context)
         default: update("The native account voice action is invalid.")
         }
     }
@@ -48,8 +69,18 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     }
 
     package func currentVoiceSelection() throws -> DesktopSpeechSelection {
-        let inventory = currentVoiceInventory()
-        do { return try voiceOutputSettings().synthesisSelection(inventory: inventory) } catch {
+        let saved = voiceOutputSettings()
+        let inventory: VoiceAccountInventory?
+        if saved.voiceID?.hasPrefix(MistralTTSCatalog.voiceIDPrefix) == true {
+            inventory = voiceDiscovery.inventories[.mistral]
+        } else { inventory = selectedVoiceAccountInventory }
+        do {
+            let selection = try saved.synthesisSelection(accountInventory: inventory)
+            if !DesktopSpeechVoice.voices.contains(selection.voice), voiceAccountWorkers > 0 {
+                throw VoiceOutputCredentialError.busy
+            }
+            return selection
+        } catch {
             if let warning = voiceDiscovery.warning,
                voiceOutputSettings().voiceID?.hasPrefix(XAITTSCatalog.voiceIDPrefix) == true {
                 throw DesktopHostError(message: warning)
@@ -60,15 +91,49 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
 
     package func openVoiceDiscovery(_ requestID: String) {
         guard !closed else { return }
-        voiceDiscovery.task?.cancel()
-        voiceDiscovery.requestID = requestID
+        resetVoiceDiscoveryDialog(requestID, modern: false, context: UUID(uuidString: requestID).map {
+            .init(provider: .xai, sessionID: $0, epoch: UUID())
+        })
+        presentVoiceAccountProviders()
         presentVoiceDiscovery("Documented presets are always available. Refresh explicitly lists voices "
             + "using the saved xAI key; no source text or synthesis request is sent.", loading: false)
     }
 
+    package func openModernVoiceDiscovery(_ sessionID: UUID) {
+        guard !closed else { return }
+        let context = VoiceAccountCredentialContext(provider: .xai, sessionID: sessionID, epoch: UUID())
+        resetVoiceDiscoveryDialog(sessionID.uuidString, modern: true, context: context)
+        presentVoiceAccountProviders()
+        presentModernVoiceDiscovery("Choose an account provider, then explicitly set its key or Refresh. "
+            + "Only Pick saves a voice. No key lookup, listing or synthesis is started by opening this dialog.",
+            loading: voiceAccountWorkIsPending)
+    }
+
+    private func resetVoiceDiscoveryDialog(
+        _ requestID: String, modern: Bool, context: VoiceAccountCredentialContext?
+    ) {
+        cancelVoiceProviderCredentialWork(voiceDiscovery.context)
+        cancelAccountVoiceWork()
+        voiceDiscovery.task?.cancel()
+        voiceProviderIssuedSlot = nil
+        voiceDiscovery.requestID = requestID
+        voiceDiscovery.modern = modern
+        voiceDiscovery.retiredEpochs = []
+        voiceDiscovery.listing = nil
+        voiceDiscovery.listingContext = nil
+        voiceDiscovery.context = context
+        voiceDiscovery.offeredIDs = []
+    }
+
     package func closeVoiceDiscovery(_ requestID: String) {
-        guard voiceDiscovery.requestID == requestID else { return }
+        guard sameVoiceDialog(requestID) else { return }
+        cancelVoiceProviderCredentialWork(voiceDiscovery.context)
+        cancelAccountVoiceWork()
         voiceDiscovery.requestID = nil
+        voiceDiscovery.context = nil
+        voiceDiscovery.listing = nil
+        voiceDiscovery.listingContext = nil
+        voiceProviderIssuedSlot = nil
         voiceDiscovery.offeredIDs = []
         voiceDiscovery.task?.cancel()
     }
@@ -78,6 +143,16 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         fetch: @escaping @Sendable (String) async throws -> XAIAccountVoiceInventory = { key in
             try await .fetch(credential: { key })
         }
+    ) {
+        if voiceDiscovery.modern {
+            refreshVoiceAccountDiscovery(requestID)
+            return
+        }
+        refreshLegacyVoiceDiscovery(requestID, fetch: fetch)
+    }
+
+    private func refreshLegacyVoiceDiscovery(
+        _ requestID: String, fetch: @escaping @Sendable (String) async throws -> XAIAccountVoiceInventory
     ) {
         guard !closed, voiceDiscovery.requestID == requestID else { return }
         guard voiceDiscovery.task == nil else {
@@ -132,6 +207,10 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     }
 
     package func chooseDiscoveredVoice(_ identifier: String, requestID: String) {
+        if voiceDiscovery.modern {
+            chooseVoiceAccountVoice(identifier, epoch: requestID)
+            return
+        }
         guard !closed, voiceDiscovery.requestID == requestID, voiceDiscovery.task == nil,
               voiceDiscovery.offeredIDs.contains(identifier) else { return }
         do {
@@ -152,8 +231,12 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         }
     }
 
-    private func presentVoiceDiscovery(_ message: String, loading: Bool) {
+    package func presentVoiceDiscovery(_ message: String, loading: Bool) {
         guard !closed, let requestID = voiceDiscovery.requestID else { return }
+        if voiceDiscovery.modern {
+            presentModernVoiceDiscovery(message, loading: loading)
+            return
+        }
         let inventory = currentVoiceInventory()
         let voices = XAITTSCatalog.voices.map(DesktopSpeechVoice.xai) + (inventory?.desktopVoices ?? [])
         voiceDiscovery.offeredIDs = voices.map(\.id)

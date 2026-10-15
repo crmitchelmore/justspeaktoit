@@ -88,17 +88,24 @@ extension PressCaptureTestWorker: QuiescenceFixtureWorker {
     }
 }
 
-private struct QuiescenceSinkGate: Sendable {
-    let entered = NSConditionLock(condition: 0)
-    let released = NSConditionLock(condition: 0)
-    func pass() {
-        entered.lock(); entered.unlock(withCondition: 1)
-        guard released.lock(whenCondition: 1, before: Date().addingTimeInterval(10)) else {
-            return XCTFail("Synthetic PCM gate did not release")
+private final class QuiescenceSinkGate: @unchecked Sendable {
+    private let condition = NSCondition()
+    private var released = false
+    func pass(timeout: TimeInterval = 10) -> Bool {
+        condition.lock()
+        defer { condition.unlock() }
+        let deadline = Date().addingTimeInterval(timeout)
+        while !released {
+            if !condition.wait(until: deadline), !released { return false }
         }
-        released.unlock(withCondition: 1)
+        return true
     }
-    func release() { released.lock(); released.unlock(withCondition: 1) }
+    func release() {
+        condition.lock()
+        released = true
+        condition.broadcast()
+        condition.unlock()
+    }
 }
 
 private extension XCTestCase {
@@ -275,6 +282,22 @@ final class DesktopPressCaptureQuiescenceTests: XCTestCase {
 }
 
 final class DesktopPressCaptureQuiescenceRaceTests: XCTestCase {
+    func testReleasedSinkGate_PassesBeforeWaitAndAcrossRepeatedReleases() {
+        let gate = QuiescenceSinkGate()
+        gate.release()
+        for _ in 0..<8 {
+            XCTAssertTrue(gate.pass(timeout: 0))
+            gate.release()
+        }
+    }
+
+    func testUnreleasedSinkGate_TimesOutThenObservesRelease() {
+        let gate = QuiescenceSinkGate()
+        XCTAssertFalse(gate.pass(timeout: 0))
+        gate.release()
+        XCTAssertTrue(gate.pass(timeout: 0))
+    }
+
     func testOldTicketAndCallbacksCannotQuiesceCloseOrFailNewRun() async throws {
         let worker = QuiescingTestWorker()
         let log = PressCaptureTestLog()
@@ -335,7 +358,9 @@ final class DesktopPressCaptureQuiescenceRaceTests: XCTestCase {
         try await lease.reserve(owned.token, identity: owned.identity, admission: pressCaptureAdmission())
         let entered = expectation(description: "Final partial sample reached synchronous sink")
         try await lease.adopt(owned.token, identity: owned.identity, admission: pressCaptureAdmission()) { data in
-            entered.fulfill(); gate.pass(); log.append(data); log.finish()
+            entered.fulfill()
+            XCTAssertTrue(gate.pass(), "Synthetic PCM gate did not release")
+            log.append(data); log.finish()
         }
         await worker.quiescing.release()
         let release = Task { try await owned.release() }

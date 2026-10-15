@@ -16,18 +16,11 @@ private actor RecordingGate {
     func release() { open = true; waiters.forEach { $0.resume() }; waiters.removeAll() }
 }
 
-private struct RecordingWriteGate: Sendable {
-    let entered = NSConditionLock(condition: 0)
-    let released = NSConditionLock(condition: 0)
-    func pass() throws {
-        entered.lock(); entered.unlock(withCondition: 1)
-        guard released.lock(whenCondition: 1, before: Date().addingTimeInterval(30)) else {
-            throw DesktopHostError(message: "Synthetic writer gate timed out.")
-        }
-        released.unlock(withCondition: 1)
-    }
-    func release() { released.lock(); released.unlock(withCondition: 1) }
-}
+// `RecordingWriteGate` lives in `DesktopHostRecordingWriteGateTests.swift`
+// (same test target, `internal` visibility) alongside its own dedicated
+// regression tests for the gate's blocking/release/timeout/concurrency
+// behaviour; this file only consumes it below, unchanged from its original
+// scenario and assertions otherwise.
 
 private actor RecordingWorker: DesktopPressCaptureWorker {
     let opening: RecordingGate
@@ -188,10 +181,10 @@ final class DesktopHostOwnedRecordingTests: XCTestCase {
         let owner = try await admit(dependency)
         try await promote(owner)
         await worker.emit(pcm(3_200))
-        for _ in 0..<1_500 where writes.entered.condition == 0 {
+        for _ in 0..<1_500 where writes.enteredCount == 0 {
             try await Task.sleep(for: .milliseconds(2))
         }
-        XCTAssertEqual(writes.entered.condition, 1)
+        XCTAssertEqual(writes.enteredCount, 1)
         await worker.emit(pcm(9_600))
         await worker.emit(pcm(2))
         let queue = DesktopSettingsQueue()

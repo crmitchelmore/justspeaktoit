@@ -143,6 +143,16 @@ static struct {
     GtkButton *button;
     AdwComboRow *voice_row;
     GtkStringList *voices;
+    AdwComboRow *favorite_row;
+    GtkStringList *favorite_names;
+    GtkButton *favorite_button;
+    GPtrArray *identifiers;
+    GArray *favorite_ranks;
+    GArray *favorite_indices;
+    JSTIVoicePickerCallback picker_callback;
+    void *picker_context;
+    gboolean favorite_pending;
+    gboolean favorite_executable;
 } read_aloud;
 
 static gint loop_running;
@@ -254,6 +264,10 @@ static void refresh_actions(void) {
     gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_sources), idle && voices);
     jsti_voice_credentials_set_idle(idle);
     gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.voice_row), idle);
+    gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.favorite_row),
+        idle && read_aloud.favorite_indices != NULL && read_aloud.favorite_indices->len > 0);
+    gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.favorite_button),
+        idle && read_aloud.favorite_executable && !read_aloud.favorite_pending);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.import_button), idle);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.history_import), idle);
     gtk_widget_set_sensitive(ui.history_filters, idle);
@@ -477,9 +491,46 @@ static void on_read_aloud(GtkButton *button, gpointer data) {
 
 static void on_voice(GObject *object, GParamSpec *spec, gpointer data) {
     (void)object; (void)spec; (void)data;
+    if (ui.suppress) return;
+    read_aloud.favorite_pending = TRUE;
+    gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.favorite_button), FALSE);
     if (!ui.suppress) jsti_voice_credentials_selection_pending();
     guint position = adw_combo_row_get_selected(read_aloud.voice_row);
+    if (read_aloud.picker_callback != NULL) {
+        if (read_aloud.identifiers != NULL && position < read_aloud.identifiers->len) {
+            const char *identifier = g_ptr_array_index(read_aloud.identifiers, position);
+            if (*identifier != '\0') read_aloud.picker_callback(0, identifier,
+                read_aloud.picker_context != NULL ? read_aloud.picker_context : ui.context);
+        }
+        return;
+    }
     if (position != GTK_INVALID_LIST_POSITION) emit(JSTI_EVENT_VOICE_OUTPUT, "", (gint32)position);
+}
+
+static void on_favorite_voice(GObject *object, GParamSpec *spec, gpointer data) {
+    (void)object; (void)spec; (void)data;
+    if (ui.suppress || read_aloud.favorite_indices == NULL) return;
+    guint position = adw_combo_row_get_selected(read_aloud.favorite_row);
+    if (position < read_aloud.favorite_indices->len) {
+        guint index = g_array_index(read_aloud.favorite_indices, guint, position);
+        if (adw_combo_row_get_selected(read_aloud.voice_row) != index) {
+            adw_combo_row_set_selected(read_aloud.voice_row, index);
+        }
+    }
+}
+
+static void on_favorite_toggle(GtkButton *button, gpointer data) {
+    (void)data;
+    guint position = adw_combo_row_get_selected(read_aloud.voice_row);
+    if (ui.suppress || read_aloud.picker_callback == NULL || read_aloud.identifiers == NULL ||
+        position >= read_aloud.identifiers->len) return;
+    const char *identifier = g_ptr_array_index(read_aloud.identifiers, position);
+    if (*identifier == '\0') return;
+    gint32 rank = g_array_index(read_aloud.favorite_ranks, gint32, position);
+    gtk_widget_set_sensitive(GTK_WIDGET(button), FALSE);
+    read_aloud.favorite_pending = TRUE;
+    read_aloud.picker_callback(rank >= 0 ? 2 : 1, identifier,
+        read_aloud.picker_context != NULL ? read_aloud.picker_context : ui.context);
 }
 
 static void on_open_audio(GtkButton *button, gpointer data) {
@@ -692,6 +743,24 @@ static GtkWidget *read_aloud_group(void) {
     adw_combo_row_set_enable_search(read_aloud.voice_row, TRUE);
     g_signal_connect(read_aloud.voice_row, "notify::selected", G_CALLBACK(on_voice), NULL);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(widget), GTK_WIDGET(read_aloud.voice_row));
+    read_aloud.favorite_names = gtk_string_list_new(NULL);
+    read_aloud.favorite_row = ADW_COMBO_ROW(adw_combo_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(read_aloud.favorite_row), "Favorites");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(read_aloud.favorite_row),
+        "Choose a saved voice. Unavailable saved IDs are retained, not substituted.");
+    adw_combo_row_set_model(read_aloud.favorite_row, G_LIST_MODEL(read_aloud.favorite_names));
+    adw_combo_row_set_enable_search(read_aloud.favorite_row, TRUE);
+    g_signal_connect(read_aloud.favorite_row, "notify::selected", G_CALLBACK(on_favorite_voice), NULL);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(widget), GTK_WIDGET(read_aloud.favorite_row));
+    GtkWidget *favorite_action = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(favorite_action), "Favorite selected voice");
+    read_aloud.favorite_button = GTK_BUTTON(gtk_button_new_with_label("Add to favorites"));
+    gtk_widget_set_valign(GTK_WIDGET(read_aloud.favorite_button), GTK_ALIGN_CENTER);
+    gtk_widget_set_size_request(GTK_WIDGET(read_aloud.favorite_button), -1, 36);
+    gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.favorite_button), FALSE);
+    g_signal_connect(read_aloud.favorite_button, "clicked", G_CALLBACK(on_favorite_toggle), NULL);
+    adw_action_row_add_suffix(ADW_ACTION_ROW(favorite_action), GTK_WIDGET(read_aloud.favorite_button));
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(widget), favorite_action);
     return widget;
 }
 
@@ -1561,6 +1630,13 @@ int32_t jsti_window_run(
     jsti_hands_free_guard_stop();
     close_posts();
     ui.callback = NULL;
+    read_aloud.picker_callback = NULL;
+    read_aloud.picker_context = NULL;
+    g_clear_pointer(&read_aloud.identifiers, g_ptr_array_unref);
+    g_clear_pointer(&read_aloud.favorite_ranks, g_array_unref);
+    g_clear_pointer(&read_aloud.favorite_indices, g_array_unref);
+    g_clear_object(&read_aloud.voices);
+    g_clear_object(&read_aloud.favorite_names);
     configuration.callback = NULL;
     configuration.context = NULL;
     g_clear_pointer(&configuration.rows, g_ptr_array_unref);
@@ -2766,18 +2842,40 @@ int32_t jsti_window_set_shortcut_style(int32_t index) {
 typedef struct Voices {
     GPtrArray *names;
     gint32 selected;
+    GPtrArray *identifiers;
+    GArray *favorite_ranks;
+    JSTIVoicePickerCallback callback;
+    void *context;
 } Voices;
 
 static void voices_free(gpointer pointer) {
     Voices *voices = pointer;
     g_ptr_array_unref(voices->names);
+    if (voices->identifiers != NULL) g_ptr_array_unref(voices->identifiers);
+    if (voices->favorite_ranks != NULL) g_array_unref(voices->favorite_ranks);
     g_free(voices);
 }
 
 static void voices_apply(gpointer pointer) {
     Voices *voices = pointer;
-    jsti_voice_credentials_selection_changed();
+    guint old = adw_combo_row_get_selected(read_aloud.voice_row);
+    const char *previous = read_aloud.identifiers != NULL && old < read_aloud.identifiers->len
+        ? g_ptr_array_index(read_aloud.identifiers, old) : NULL;
+    const char *next = voices->identifiers != NULL && voices->selected >= 0 &&
+        (guint)voices->selected < voices->identifiers->len
+        ? g_ptr_array_index(voices->identifiers, (guint)voices->selected) : NULL;
+    if (previous == NULL || next == NULL || g_strcmp0(previous, next) != 0) {
+        jsti_voice_credentials_selection_changed();
+    }
     ui.suppress = TRUE;
+    if (read_aloud.identifiers != NULL) g_ptr_array_unref(read_aloud.identifiers);
+    if (read_aloud.favorite_ranks != NULL) g_array_unref(read_aloud.favorite_ranks);
+    if (read_aloud.favorite_indices != NULL) g_array_unref(read_aloud.favorite_indices);
+    read_aloud.identifiers = voices->identifiers != NULL ? g_ptr_array_ref(voices->identifiers) : NULL;
+    read_aloud.favorite_ranks = voices->favorite_ranks != NULL ? g_array_ref(voices->favorite_ranks) : NULL;
+    read_aloud.picker_callback = voices->callback;
+    read_aloud.picker_context = voices->context;
+    read_aloud.favorite_indices = g_array_new(FALSE, FALSE, sizeof(guint));
     guint existing = g_list_model_get_n_items(G_LIST_MODEL(read_aloud.voices));
     g_ptr_array_add(voices->names, NULL);
     gtk_string_list_splice(read_aloud.voices, 0, existing, (const char *const *)voices->names->pdata);
@@ -2785,8 +2883,62 @@ static void voices_apply(gpointer pointer) {
     if (voices->selected >= 0 && (guint)voices->selected < voices->names->len) {
         adw_combo_row_set_selected(read_aloud.voice_row, (guint)voices->selected);
     }
+    gtk_string_list_splice(read_aloud.favorite_names, 0,
+        g_list_model_get_n_items(G_LIST_MODEL(read_aloud.favorite_names)), NULL);
+    guint favorite_selected = GTK_INVALID_LIST_POSITION;
+    for (guint rank = 0; rank < voices->names->len && voices->favorite_ranks != NULL; ++rank) {
+        for (guint index = 0; index < voices->names->len; ++index) {
+            if (g_array_index(voices->favorite_ranks, gint32, index) != (gint32)rank) continue;
+            if ((gint32)index == voices->selected) favorite_selected = read_aloud.favorite_indices->len;
+            g_array_append_val(read_aloud.favorite_indices, index);
+            gtk_string_list_append(read_aloud.favorite_names, g_ptr_array_index(voices->names, index));
+        }
+    }
+    gboolean has_favorites = read_aloud.favorite_indices->len > 0;
+    if (!has_favorites) gtk_string_list_append(read_aloud.favorite_names, "No available favorites - add a voice below");
+    adw_combo_row_set_selected(read_aloud.favorite_row, favorite_selected);
+    gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.favorite_row), has_favorites);
+    gboolean executable = next != NULL && *next != '\0';
+    read_aloud.favorite_executable = executable && voices->callback != NULL;
+    read_aloud.favorite_pending = FALSE;
+    gboolean favorite = executable &&
+        g_array_index(voices->favorite_ranks, gint32, voices->selected) >= 0;
+    gtk_button_set_label(read_aloud.favorite_button, favorite ? "Remove from favorites" : "Add to favorites");
+    gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.favorite_button), executable && voices->callback != NULL);
     ui.suppress = FALSE;
     refresh_actions();
+}
+
+int32_t jsti_window_set_voice_picker(const char *const *names, const char *const *ids,
+    const int32_t *favorite_ranks, size_t count, int32_t selected,
+    JSTIVoicePickerCallback callback, void *context) {
+    if (names == NULL || ids == NULL || favorite_ranks == NULL || callback == NULL ||
+        count == 0 || count > 1024 || selected < 0 || (size_t)selected >= count) return -1;
+    Voices *voices = g_new0(Voices, 1);
+    voices->names = g_ptr_array_new_with_free_func(g_free);
+    voices->identifiers = g_ptr_array_new_with_free_func(g_free);
+    voices->favorite_ranks = g_array_new(FALSE, FALSE, sizeof(gint32));
+    for (size_t index = 0; index < count; ++index) {
+        if (names[index] == NULL || ids[index] == NULL || !g_utf8_validate(names[index], -1, NULL) ||
+            !g_utf8_validate(ids[index], -1, NULL) || strlen(names[index]) > 1024 || strlen(ids[index]) > 260 ||
+            favorite_ranks[index] < -1 || favorite_ranks[index] >= (gint32)count ||
+            (*ids[index] == '\0' && favorite_ranks[index] != -1)) {
+            voices_free(voices); return -1;
+        }
+        for (size_t prior = 0; prior < index; ++prior) {
+            if (strcmp(ids[prior], ids[index]) == 0 ||
+                (favorite_ranks[index] >= 0 && favorite_ranks[prior] == favorite_ranks[index])) {
+                voices_free(voices); return -1;
+            }
+        }
+        g_ptr_array_add(voices->names, g_strdup(names[index]));
+        g_ptr_array_add(voices->identifiers, g_strdup(ids[index]));
+        g_array_append_val(voices->favorite_ranks, favorite_ranks[index]);
+    }
+    voices->selected = selected;
+    voices->callback = callback;
+    voices->context = context;
+    return post(voices_apply, voices, voices_free);
 }
 
 int32_t jsti_window_set_voices(const char *const *names, size_t count, int32_t selected) {
@@ -2882,6 +3034,8 @@ static int32_t read_aloud_self_test(const char *record, char *error, size_t capa
     }
     jsti_window_event_fn callback = ui.callback;
     ui.callback = observe_event;
+    JSTIVoicePickerCallback picker_callback = read_aloud.picker_callback;
+    read_aloud.picker_callback = NULL;
     observed.event = 0;
     g_signal_emit_by_name(read_aloud.button, "clicked");
     gboolean reported = observed.event == JSTI_EVENT_READ_ALOUD && g_strcmp0(observed.text, record) == 0;
@@ -2894,6 +3048,7 @@ static int32_t read_aloud_self_test(const char *record, char *error, size_t capa
     adw_combo_row_set_selected(read_aloud.voice_row, saved);
     ui.suppress = FALSE;
     ui.callback = callback;
+    read_aloud.picker_callback = picker_callback;
     g_clear_pointer(&observed.text, g_free);
     if (!reported) return fail(error, capacity, "Read aloud did not report the presented record");
     if (!chosen) return fail(error, capacity, "the voice picker did not report the chosen voice");
@@ -2904,6 +3059,74 @@ static int32_t read_aloud_self_test(const char *record, char *error, size_t capa
     update_apply(&idle);
     if (offered) return fail(error, capacity, "Read aloud stayed available while transcribing");
     return 0;
+}
+
+static struct { gint action; guint calls; gchar *identifier; } favorite_observed;
+static void observe_favorite(gint32 action, const char *identifier, void *context) {
+    (void)context;
+    favorite_observed.action = action;
+    ++favorite_observed.calls;
+    g_free(favorite_observed.identifier);
+    favorite_observed.identifier = g_strdup(identifier);
+}
+
+static int32_t voice_favorites_self_test(char *error, size_t capacity) {
+    Voices original = {0};
+    original.names = g_ptr_array_new_with_free_func(g_free);
+    for (guint index = 0; index < g_list_model_get_n_items(G_LIST_MODEL(read_aloud.voices)); ++index) {
+        g_ptr_array_add(original.names, g_strdup(gtk_string_list_get_string(read_aloud.voices, index)));
+    }
+    original.selected = (gint32)adw_combo_row_get_selected(read_aloud.voice_row);
+    original.identifiers = read_aloud.identifiers != NULL ? g_ptr_array_ref(read_aloud.identifiers) : NULL;
+    original.favorite_ranks = read_aloud.favorite_ranks != NULL ? g_array_ref(read_aloud.favorite_ranks) : NULL;
+    original.callback = read_aloud.picker_callback;
+    original.context = read_aloud.picker_context;
+    Voices fixture = {0};
+    fixture.names = g_ptr_array_new_with_free_func(g_free);
+    fixture.identifiers = g_ptr_array_new_with_free_func(g_free);
+    fixture.favorite_ranks = g_array_new(FALSE, FALSE, sizeof(gint32));
+    fixture.selected = 0;
+    fixture.callback = observe_favorite;
+    const gchar *ids[] = {"synthetic/alpha", "synthetic/beta", ""};
+    const gchar *names[] = {"Alpha voice", "Beta voice", "Unavailable stored voice"};
+    for (guint index = 0; index < 3; ++index) {
+        gint32 rank = index == 1 ? 0 : -1;
+        g_ptr_array_add(fixture.names, g_strdup(names[index]));
+        g_ptr_array_add(fixture.identifiers, g_strdup(ids[index]));
+        g_array_append_val(fixture.favorite_ranks, rank);
+    }
+    favorite_observed.calls = 0;
+    voices_apply(&fixture);
+    gboolean okay = favorite_observed.calls == 0 && read_aloud.favorite_indices->len == 1 &&
+        g_array_index(read_aloud.favorite_indices, guint, 0) == 1;
+    adw_combo_row_set_selected(read_aloud.favorite_row, 0);
+    okay = okay && favorite_observed.calls == 1 && favorite_observed.action == 0 &&
+        g_strcmp0(favorite_observed.identifier, ids[1]) == 0;
+    /* A host acknowledgement, not an optimistic UI write, updates button state. */
+    fixture.selected = 1;
+    voices_apply(&fixture);
+    g_signal_emit_by_name(read_aloud.favorite_button, "clicked");
+    okay = okay && favorite_observed.calls == 2 && favorite_observed.action == 2 &&
+        g_strcmp0(favorite_observed.identifier, ids[1]) == 0;
+    fixture.selected = 0;
+    voices_apply(&fixture);
+    g_signal_emit_by_name(read_aloud.favorite_button, "clicked");
+    okay = okay && favorite_observed.calls == 3 && favorite_observed.action == 1 &&
+        g_strcmp0(favorite_observed.identifier, ids[0]) == 0;
+    fixture.selected = 2;
+    g_array_index(fixture.favorite_ranks, gint32, 1) = -1;
+    voices_apply(&fixture);
+    okay = okay && !gtk_widget_get_sensitive(GTK_WIDGET(read_aloud.favorite_row)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(read_aloud.favorite_button)) && favorite_observed.calls == 3;
+    voices_apply(&original);
+    g_ptr_array_unref(original.names);
+    if (original.identifiers != NULL) g_ptr_array_unref(original.identifiers);
+    if (original.favorite_ranks != NULL) g_array_unref(original.favorite_ranks);
+    g_ptr_array_unref(fixture.names);
+    g_ptr_array_unref(fixture.identifiers);
+    g_array_unref(fixture.favorite_ranks);
+    g_clear_pointer(&favorite_observed.identifier, g_free);
+    return okay ? 0 : fail(error, capacity, "Favorite voices lost identity, empty state, or add/remove routing");
 }
 
 /* Launch at login shows what the host reports, is fixed while the system
@@ -3168,6 +3391,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
         return fail(error, capacity, "Copy or the version control stayed unavailable");
     }
     if (read_aloud_self_test(first, error, capacity) != 0) return -1;
+    if (voice_favorites_self_test(error, capacity) != 0) return -1;
     if (jsti_voice_credentials_self_test(error, capacity) != 0) return -1;
     if (jsti_voice_sources_self_test(ui.window, error, capacity) != 0) return -1;
     History *empty = history_copy(NULL, 0, "");

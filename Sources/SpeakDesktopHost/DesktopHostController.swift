@@ -212,6 +212,17 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
         } else {
             loadedSettings = Settings()
         }
+        let favoriteKey = VoiceFavoritePreference.key
+        if Platform.voiceConfigurationKeys.contains(favoriteKey),
+           let configuration = loadedSettings.configuration, configuration.values[favoriteKey] != nil {
+            let exported = try Platform.exportVoiceConfiguration(loadedSettings.voiceOutput, over: configuration)
+            var voice = loadedSettings.voiceOutput
+            _ = try Platform.importVoiceConfiguration(
+                from: DesktopConfiguration(values: exported.values.filter { $0.key == favoriteKey }), into: &voice)
+            loadedSettings.voiceOutput = voice
+            loadedSettings.configuration = try DesktopConfiguration(
+                values: configuration.values.filter { $0.key != favoriteKey })
+        }
         modelCatalog = try Self.prepareModelCatalog(directory: directory, settings: &loadedSettings)
         if let processing = loadedSettings.postProcessing {
             loadedSettings.postProcessing = DesktopPostProcessing.migrated(processing)

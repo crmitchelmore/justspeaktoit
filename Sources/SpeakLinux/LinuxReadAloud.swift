@@ -114,12 +114,20 @@ extension LinuxWindow {
     }
 
     static func voiceOutput(_ settings: LinuxVoiceOutputSettings, accountInventory: VoiceAccountInventory?) {
-        let presentation = settings.pickerPresentation(accountInventory: accountInventory)
+        let presentation = settings.favoritePicker(accountInventory: accountInventory)
         let strings = Strings()
         let names: [UnsafePointer<CChar>?] = presentation.labels.map { strings.add($0) }
+        let identifiers: [UnsafePointer<CChar>?] = presentation.identifiers.map { strings.add($0) }
         let selected = presentation.selected
         let result = withExtendedLifetime(strings) {
-            names.withUnsafeBufferPointer { jsti_window_set_voices($0.baseAddress, $0.count, Int32(selected)) }
+            names.withUnsafeBufferPointer { names in
+                identifiers.withUnsafeBufferPointer { identifiers in
+                    presentation.favoriteRanks.withUnsafeBufferPointer {
+                        jsti_window_set_voice_picker(names.baseAddress, identifiers.baseAddress, $0.baseAddress,
+                            names.count, Int32(selected), linuxVoicePickerEvent, nil)
+                    }
+                }
+            }
         }
 
         if result != 0 { LinuxHostPlatform.update("The Read aloud voices could not be shown.") }
@@ -141,6 +149,18 @@ extension LinuxWindow {
                 shown.minimumSpeed, shown.maximumSpeed)
         }
         if result != 0 { LinuxHostPlatform.update("The saved Voice synthesis controls could not be shown.") }
+    }
+}
+
+func linuxVoicePickerEvent(_ action: Int32, _ identifier: UnsafePointer<CChar>?, _ context: UnsafeMutableRawPointer?) {
+    // The window forwards its existing UI callback context, not a new native holder.
+    guard let identifier, let context else { return }
+    let voiceID = String(cString: identifier)
+    let holder = Unmanaged<LinuxEventContext>.fromOpaque(context).takeUnretainedValue()
+    holder.enqueueSettings {
+        await holder.controller.handleVoicePicker(voiceID: voiceID, action: action)
+        LinuxWindow.voiceOutput(await holder.controller.voiceOutputSettings(),
+            accountInventory: await holder.controller.selectedVoiceAccountInventory)
     }
 }
 

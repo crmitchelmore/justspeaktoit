@@ -69,6 +69,10 @@ on:
         description: Observe Linux anonymous-file capability without repairing or skipping tests
         type: boolean
         default: false
+      registry_supported_filesystem:
+        description: Qualify a fresh managed filesystem on an exclusive disposable hosted Ubuntu VM
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -583,3 +587,30 @@ jobs:
         run: |
           echo "Isolated Git diagnostic failed; no retry or checkout trust repair." >&2
           exit 1
+
+  registry-supported-filesystem:
+    name: Opt-in Linux managed-filesystem qualification
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.registry_supported_filesystem }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 50
+    env:
+      EXPECTED_HEAD: ${{ github.sha }}
+      JSTI_SUPPORTED_FS_EVIDENCE: ${{ runner.temp }}/jsti-registry-supported-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Observe supported-filesystem prerequisites and run unchanged tests
+        timeout-minutes: 45
+        shell: bash
+        run: bash scripts/registry-linux-supported-fs-host.sh
+      - name: Upload early failures and qualification evidence
+        if: always()
+        timeout-minutes: 5
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: registry-linux-supported-filesystem-${{ github.sha }}
+          path: ${{ env.JSTI_SUPPORTED_FS_EVIDENCE }}
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14

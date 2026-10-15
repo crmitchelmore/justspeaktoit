@@ -280,6 +280,38 @@ graph (SwiftNIO) rewrites it. Preserve the Apple lockfile: restore only
 that file from the starting revision after portable validation, provided it had
 no unrelated changes before the run. Do not commit its deletion.
 
+#### Opt-in registry filesystem qualification
+
+The existing `windows.yml` manual workflow has a separate, false-default
+`registry_supported_filesystem` input. It adds only a GitHub-hosted Ubuntu job;
+it does not replace the existing Linux/Windows jobs or their negative results.
+This lane is a local candidate pending a separately approved CI run, not
+production qualification or factory activation.
+
+The scripts refuse local/self-hosted use. On an exclusive disposable hosted VM,
+they allocate one fresh nonce/ticket-labelled Docker-managed local volume and
+use the same digest-pinned Swift 6.2.3 image, read-only checkout/recipe bindings,
+byte-verified regular source files and private 0700 source/HOME/TMP directories.
+The actual UID/GID 65534, zero effective capabilities and cgroup-enforced 4-GiB
+memory/no-swap limit must be observed. Admission requires at least 12 GiB free
+and 100,000 free inodes. The proposed 16-GiB disk quota is **waived on this
+exclusive disposable VM only**. No hard disk quota is claimed; disk
+exhaustion/OOM remain honest failures.
+
+The unchanged production C primitive must actually create anonymously and
+publish through procfs with its identity, mode/ownership and cleanup checks
+before the unchanged Swift suite is admitted. CLI exit 0 with unavailable
+capability is failure; unreached Swift is not a successful/skipped suite.
+Wrapper PID, native self-reported PID, native/gate/test/container/stop statuses,
+source/tool hashes and the preserved Apple lockfile are separate evidence.
+Every Docker RPC and test process is bounded. The always-upload step retains
+early failures too. Only the exact positively owned, stopped and joined
+container is exported; removal requires successful regular-file evidence
+export, unchanged tickets and an unreferenced owned volume. Unknown allocation,
+identity, state, timeout or export failures retain resources for VM disposal.
+There is no prune, alternate-filesystem retry, fallback, test weakening or
+change to Windows writer exclusion.
+
 The app and complete XCTest executable now **cross-compile from macOS** using a
 private, pinned official Swift 6.2.3 toolchain, LLVM 20, Microsoft SDK and MSVC
 libraries. The existing Xcode installation and normal Apple build graph stay

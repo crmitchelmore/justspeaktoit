@@ -68,6 +68,16 @@ func audioInputFormatIsUsable(_ format: AVAudioFormat) -> Bool {
   format.channelCount > 0 && format.sampleRate > 0
 }
 
+/// Returns `true` when a tap in `tapFormat` can be installed on an input node
+/// whose hardware currently delivers `hardwareFormat`. AVFAudio raises an
+/// Objective-C exception, which Swift cannot catch, when the tap's sample rate
+/// differs from the hardware's.
+func audioInputTapFormatMatchesHardware(_ tapFormat: AVAudioFormat, hardwareFormat: AVAudioFormat) -> Bool {
+  audioInputFormatIsUsable(hardwareFormat)
+    && tapFormat.sampleRate == hardwareFormat.sampleRate
+    && tapFormat.channelCount == hardwareFormat.channelCount
+}
+
 private let coreAudioBadDeviceErrorCode = 560_227_702
 private let avfaudioErrorDomain = "com.apple.coreaudio.avfaudio"
 private let staleInputDeviceRetryDelay: Duration = .milliseconds(200)

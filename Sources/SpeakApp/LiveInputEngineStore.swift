@@ -58,20 +58,26 @@ final class LiveInputEngineStore<Engine: AnyObject>: @unchecked Sendable {
   private let makeFreshEngine: () -> Engine
   private let primeInput: (Engine) -> Void
   private let currentInputDeviceID: () -> InputDeviceID?
+  private let canCapture: (Engine) -> Bool
   private var generation: UInt64 = 0
   private var prepared: Prepared?
   /// The prepared engine most recently handed out, kept so a controller whose
   /// start failed can give it back for a fallback controller (see ``restore(_:)``).
   private var claimed: Prepared?
 
+  /// - Parameter canCapture: whether a prepared engine's input node still
+  ///   matches the hardware. A controller installs its tap in the node's
+  ///   format, which the device may have changed since preparation.
   init(
     makeEngine: @escaping () -> Engine,
     primeInput: @escaping (Engine) -> Void,
-    currentInputDeviceID: @escaping () -> InputDeviceID?
+    currentInputDeviceID: @escaping () -> InputDeviceID?,
+    canCapture: @escaping (Engine) -> Bool = { _ in true }
   ) {
     self.makeFreshEngine = makeEngine
     self.primeInput = primeInput
     self.currentInputDeviceID = currentInputDeviceID
+    self.canCapture = canCapture
   }
 
   /// Starts a new preparation, retiring any earlier one and its engine.
@@ -140,10 +146,14 @@ final class LiveInputEngineStore<Engine: AnyObject>: @unchecked Sendable {
     lock.lock()
     let entry = prepared
     prepared = nil
-    let usable = entry.flatMap { entry in
+    let matching = entry.flatMap { entry in
       deviceID == entry.inputDeviceID && entry.generation == generation ? entry : nil
     }
-    claimed = usable
+    lock.unlock()
+    // Outside the lock: reading the input node's formats can block on Core Audio.
+    let usable = matching.flatMap { canCapture($0.engine) ? $0 : nil }
+    lock.lock()
+    claimed = usable.flatMap { $0.generation == generation ? $0 : nil }
     lock.unlock()
     if let usable {
       if !preservingAdoptedTap {
@@ -313,7 +323,13 @@ enum LiveInputEngines {
   static let shared = LiveInputEngineStore<AVAudioEngine>(
     makeEngine: { AVAudioEngine() },
     primeInput: { _ = $0.inputNode },
-    currentInputDeviceID: { defaultInputDeviceID() }
+    currentInputDeviceID: { defaultInputDeviceID() },
+    canCapture: { engine in
+      let input = engine.inputNode
+      return audioInputTapFormatMatchesHardware(
+        input.outputFormat(forBus: 0), hardwareFormat: input.inputFormat(forBus: 0)
+      )
+    }
   )
 
   /// The idle engine the key-down primer starts (see `PrimedLiveInput`).

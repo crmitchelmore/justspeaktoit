@@ -145,9 +145,10 @@ jobs:
           $source = Join-Path $env:GITHUB_WORKSPACE 'scripts\registry-native-boundary-diagnostic.cpp'
           $exe = Join-Path $folder.FullName 'registry-native-boundary-diagnostic.exe'
           $object = Join-Path $folder.FullName 'registry-native-boundary-diagnostic.obj'
-          $setup = Join-Path $folder.FullName 'sdk-environment.log'
-          $command = 'call "{0}" amd64 10.0.26100.0 > "{1}" 2>&1 && (set INCLUDE & set LIB & set WindowsSdkVersion & set VCToolsVersion) >> "{1}" && "{2}" /nologo /std:c++17 /EHsc /MD /W4 /WX /I"{3}" "{4}" /Fe:"{5}" /Fo:"{6}" /link ntdll.lib advapi32.lib ole32.lib' -f `
-            $vcvars, $setup, $compiler, (Join-Path $env:GITHUB_WORKSPACE 'Sources\CWindowsSupport\include'), $source, $exe, $object
+          $setup = Join-Path $folder.FullName 'vcvars-setup.log'
+          $environment = Join-Path $folder.FullName 'sdk-environment.log'
+          $command = 'call "{0}" amd64 10.0.26100.0 > "{1}" 2>&1 && (set INCLUDE & set LIB & set WindowsSdkVersion & set VCToolsVersion) > "{2}" && "{3}" /nologo /std:c++17 /EHsc /MD /W4 /WX /I"{4}" "{5}" /Fe:"{6}" /Fo:"{7}" /link ntdll.lib advapi32.lib ole32.lib' -f `
+            $vcvars, $setup, $environment, $compiler, (Join-Path $env:GITHUB_WORKSPACE 'Sources\CWindowsSupport\include'), $source, $exe, $object
           $records = [Collections.Generic.List[object]]::new()
           $inputs = @(
             $source, 'Sources\CWindowsSupport\WindowsFileSecurity.cpp',
@@ -446,7 +447,26 @@ jobs:
           command -v runuser
           umask 077
           work="$(mktemp -d /jsti-portable.XXXXXX)"
-          git -c safe.directory="$PWD" ls-files -z | tar --null -T - -cf - | tar --no-same-owner --no-same-permissions -xf - -C "$work"
+          paths="$(mktemp /jsti-portable-paths.XXXXXX)"
+          git --git-dir="$PWD/.git" --work-tree="$PWD" ls-files -z | tee "$paths" | tar --null -T - -cf - | tar --no-same-owner --no-same-permissions -xf - -C "$work"
+          verified=0
+          while IFS= read -r -d '' path; do
+            for file in "$PWD/$path" "$work/$path"; do
+              if [ -L "$file" ] || [ ! -f "$file" ]; then
+                printf 'Tracked source is not a regular non-link file: %s\n' "$file" >&2
+                exit 1
+              fi
+            done
+            cmp -- "$PWD/$path" "$work/$path"
+            verified=$((verified + 1))
+          done < "$paths"
+          if [ "$verified" -eq 0 ]; then
+            echo "No tracked source bytes were verified." >&2
+            exit 1
+          fi
+          printf 'Tracked source-byte equivalence: %s regular files; NUL-list SHA256: ' "$verified"
+          sha256sum < "$paths"
+          git --git-dir="$PWD/.git" --work-tree="$PWD" rev-parse HEAD 'HEAD^{tree}'
           chown -R "$test_user:$(id -gn "$test_user")" "$work"
           runuser -u "$test_user" -- env HOME="$work/.home" TMPDIR="$work/.runtime" bash -c '
             set -euo pipefail

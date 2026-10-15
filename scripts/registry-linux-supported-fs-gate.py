@@ -260,7 +260,8 @@ def volume_identity(value, labels):
     require(re.fullmatch(r"[0-9a-f]{64}", value["Name"]), "Invalid daemon-generated volume name")
     require(value["Driver"] == "local" and value["Scope"] == "local" and not value["Options"],
             "Custom volume driver/options/scope not admitted")
-    require(value["Labels"] == labels and value["CreatedAt"], "Volume ticket/nonce mismatch")
+    require((value["Labels"] == labels or value["Labels"] == {**labels, "com.docker.volume.anonymous": ""})
+            and value["CreatedAt"], "Volume ticket/nonce mismatch")
     return {key: value[key] for key in ("Name", "Driver", "Scope", "Labels", "Options", "CreatedAt")}
 
 

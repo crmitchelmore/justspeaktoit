@@ -408,7 +408,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | trackedKeyIdentifiers | Equivalent / Equivalent | Keys; provider credential names, not values; no full API-key management destination |
 | preferredLocale | Wired / Wired | Config + `DesktopProfileSession.swift`; provider language capability gates; automation language remains a separate gap |
 | postRecordingTailDuration | Wired / Wired | Config + `DesktopHostRecordingTail.swift`; owned 0...2 s capture buffer, immediate cancel/failure/shutdown cleanup, no stale finalisation |
-| deepgramStopGracePeriod | Missing legacy migration / Missing legacy migration | Portable JSON preserves this obsolete key but does not reinterpret it as new grace |
+| deepgramStopGracePeriod | Equivalent migration / Equivalent migration | Valid legacy value initializes absent liveStopGracePeriod; canonical value, including zero, wins; legacy retained for downgrade |
 | liveStopGracePeriod | Partial / Partial | Config; AssemblyAI/Cartesia only; range 0...2 s |
 | preferredAudioInputUID | Equivalent / Equivalent | Native device ID with missing-device warning, never Apple UID translation |
 | defaultTTSVoice | Partial / Partial | Voice; canonical Deepgram Read aloud voices only |

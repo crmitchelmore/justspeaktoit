@@ -128,6 +128,12 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
     public private(set) var values: [String: AnyCodable]
 
     public init(values: [String: AnyCodable] = [:]) throws {
+        var values = values
+        let graceKey = ApplicationPreferenceKey.liveStopGracePeriod.rawValue
+        if values[graceKey] == nil,
+           let legacy = values[ApplicationPreferenceKey.deepgramStopGracePeriod.rawValue] {
+            values[graceKey] = legacy
+        }
         try Self.validateFields(in: values)
         self.values = try Self.reconciledKeywords(in: values)
     }

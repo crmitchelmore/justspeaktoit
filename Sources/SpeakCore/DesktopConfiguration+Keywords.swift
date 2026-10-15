@@ -3,6 +3,7 @@ import Foundation
 extension DesktopConfiguration {
     public static var supportedKeys: Set<String> {
         Set(fields.map(\.key)).union([
+            ApplicationPreferenceKey.deepgramStopGracePeriod.rawValue,
             ApplicationPreferenceKey.transcriptionKeywordsLastReconciled.rawValue,
             ApplicationPreferenceKey.recoveredTranscriptionKeywords.rawValue
         ])

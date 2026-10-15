@@ -595,7 +595,6 @@ jobs:
     timeout-minutes: 50
     env:
       EXPECTED_HEAD: ${{ github.sha }}
-      JSTI_SUPPORTED_FS_EVIDENCE: ${{ runner.temp }}/jsti-registry-supported-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -603,6 +602,8 @@ jobs:
       - name: Observe supported-filesystem prerequisites and run unchanged tests
         timeout-minutes: 45
         shell: bash
+        env:
+          JSTI_SUPPORTED_FS_EVIDENCE: ${{ runner.temp }}/jsti-registry-supported-${{ github.run_id }}-${{ github.run_attempt }}
         run: bash scripts/registry-linux-supported-fs-host.sh
       - name: Upload early failures and qualification evidence
         if: always()
@@ -610,7 +611,7 @@ jobs:
         uses: actions/upload-artifact@v7.0.1
         with:
           name: registry-linux-supported-filesystem-${{ github.sha }}
-          path: ${{ env.JSTI_SUPPORTED_FS_EVIDENCE }}
+          path: ${{ runner.temp }}/jsti-registry-supported-${{ github.run_id }}-${{ github.run_attempt }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14

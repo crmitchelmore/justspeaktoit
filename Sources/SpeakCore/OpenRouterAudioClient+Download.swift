@@ -34,10 +34,16 @@ enum OpenRouterAudioDownload {
         let policy = OpenRouterAudioRedirectPolicy()
         defer { policy.cancel() }
         try Task.checkCancellation()
+        // Arm the redirect-policy cancellation latch for the header-acquisition await itself,
+        // closing the gap between Task cancellation and `bytes(for:)` creating its URLSessionTask.
+        let (bytes, response) = try await withTaskCancellationHandler {
+            try await session.bytes(for: request, delegate: policy)
+        } onCancel: {
+            policy.cancel()
+        }
         // The concrete response task is cancelled explicitly during body reads and on exit,
         // matching `OpenRouterBoundedResponseTransport.receiveApple`, rather than relying
         // only on the redirect policy's weakly-held `didCreateTask` task reference.
-        let (bytes, response) = try await session.bytes(for: request, delegate: policy)
         defer { bytes.task.cancel() }
         try Task.checkCancellation()
         try validate(response, limit: limit, speech: speech)

@@ -114,14 +114,16 @@ public final class IOSBatchTranscriber {
         let format = inputNode.outputFormat(forBus: 0)
         try audioRecorder.startRecording(format: format)
         let signal = firstInputSignal
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [audioRecorder, weak self] buffer, _ in
-            audioRecorder.writeBuffer(buffer)
-            guard buffer.frameLength > 0, signal.markObserved() else { return }
-            Task { @MainActor [weak self] in self?.reportFirstInputBuffer(captureID) }
-        }
-        hasInputTap = true
 
         do {
+            try inputNode.installTapSafely(
+                onBus: 0, bufferSize: 1024, format: format
+            ) { [audioRecorder, weak self] buffer, _ in
+                audioRecorder.writeBuffer(buffer)
+                guard buffer.frameLength > 0, signal.markObserved() else { return }
+                Task { @MainActor [weak self] in self?.reportFirstInputBuffer(captureID) }
+            }
+            hasInputTap = true
             audioEngine.prepare()
             try audioEngine.start()
             // Only after the engine actually returned.

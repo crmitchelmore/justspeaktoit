@@ -1,6 +1,7 @@
 @preconcurrency import AVFoundation
 import CoreAudio
 import Foundation
+import SpeakCore
 
 /// The primed microphone a hotkey gesture claims, awaited because the open may
 /// still be in flight when the gesture is recognised.
@@ -270,13 +271,14 @@ final class PrimedLiveInput {
     guard audioInputFormatIsUsable(format) else { throw TranscriptionManagerError.noUsableAudioInput }
     // An idle engine keeps the format its input node was built with, while the
     // device can change rate meanwhile (Bluetooth profile switch, sleep, Audio
-    // MIDI Setup). `installTap` raises an uncatchable NSException for a tap
-    // format the hardware no longer has, so reject the engine instead.
+    // MIDI Setup). AVFAudio rejects a tap format the hardware no longer has,
+    // so reject the engine up front; `installTapSafely` still catches anything
+    // this check misses.
     guard audioInputTapFormatMatchesHardware(format, hardwareFormat: input.inputFormat(forBus: 0)) else {
       throw TranscriptionManagerError.noUsableAudioInput
     }
     input.removeTap(onBus: 0)
-    input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+    try input.installTapSafely(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
       preRoll.append(buffer, at: ProcessInfo.processInfo.systemUptime)
     }
     engine.prepare()

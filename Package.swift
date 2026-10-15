@@ -39,6 +39,7 @@ let appleCoreSources: [String] = [
     "AppleSpeechDetector.swift",
     "AppleSpeechModelPreparation.swift",
     "AppleSpeechPreparationOperations.swift",
+    "AudioTapInstallation.swift",
     "AutoCorrectionEngine.swift",
     "AutoCorrectionStore.swift",
     "AutomationIntentSupport.swift",
@@ -458,9 +459,16 @@ let package = portableCoreBuild ? portablePackage : Package(
                 .enableExperimentalFeature("StrictConcurrency")
             ]
         ),
+        // Objective-C shim that turns AVFAudio's uncatchable tap exceptions
+        // into errors (Sentry 137083080). Apple-only, like its SpeakCore caller.
+        .target(
+            name: "CAppleAudioSupport",
+            path: "Sources/CAppleAudioSupport",
+            publicHeadersPath: "include"
+        ),
         .target(
             name: "SpeakCore",
-            dependencies: ["SpeakWatchCore"],
+            dependencies: ["SpeakWatchCore", "CAppleAudioSupport"],
             resources: [
                 // Bundled release notes so the in-app "What's New" screen works offline.
                 .process("Resources")

@@ -366,7 +366,7 @@ public final class iOSLiveTranscriber: ObservableObject {
                 targetFormat: session.audioFormat
             )
             let lossReport = recordingLoss.currentReport
-            installAnalyzerTap(
+            try installAnalyzerTap(
                 format: recordingFormat, converter: converter,
                 session: session, captureID: captureID, lossReport: lossReport
             )
@@ -400,9 +400,11 @@ public final class iOSLiveTranscriber: ObservableObject {
         session: AppleSpeechAnalyzerLiveSession,
         captureID: UUID,
         lossReport: RecordingLossReport
-    ) {
+    ) throws {
         let signal = firstInputSignal
-        audioEngine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
+        try audioEngine.inputNode.installTapSafely(
+            onBus: 0, bufferSize: 4096, format: recordingFormat
+        ) { [weak self] buffer, _ in
             // Copy the buffer and hop off the real-time audio thread —
             // heavy work in the tap makes CoreAudio drop mic buffers.
             guard let self,
@@ -462,7 +464,7 @@ public final class iOSLiveTranscriber: ObservableObject {
         // covers the very first buffers instead of starting a beat late
         // (issue #992); a writer failure is reported, never fatal (issue #950).
         recordingLoss.startWriter(audioRecorder, format: recordingFormat)
-        installTap(appendingTo: request)
+        try installTap(appendingTo: request)
         audioEngine.prepare()
         try audioEngine.start()
         // The legacy branch is the one that actually ran, and the engine has
@@ -476,7 +478,7 @@ public final class iOSLiveTranscriber: ObservableObject {
     /// main-actor `recognitionRequest` property, which is reassigned on
     /// stop/cancel/restart.
     @discardableResult
-    private func installTap(appendingTo request: SFSpeechAudioBufferRecognitionRequest) -> AVAudioFormat {
+    private func installTap(appendingTo request: SFSpeechAudioBufferRecognitionRequest) throws -> AVAudioFormat {
         let inputNode = audioEngine.inputNode
         let recordingFormat = inputNode.outputFormat(forBus: 0)
         let recorder = audioRecorder
@@ -485,7 +487,7 @@ public final class iOSLiveTranscriber: ObservableObject {
         let signal = firstInputSignal
         let captureID = activeCaptureID
         let lossReport = recordingLoss.currentReport
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
+        try inputNode.installTapSafely(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
             // Copy the buffer and hop off the real-time audio thread —
             // heavy work in the tap makes CoreAudio drop mic buffers.
             // `request` is captured immutably; the tap is reinstalled with the
@@ -886,7 +888,13 @@ public final class iOSLiveTranscriber: ObservableObject {
         // Reinstall the tap so its closure captures the new request; the old
         // tap holds the previous (cancelled) request immutably.
         removeInputTap()
-        installTap(appendingTo: newRequest)
+        do {
+            try installTap(appendingTo: newRequest)
+        } catch {
+            self.error = error
+            self.onError?(error)
+            return
+        }
 
         beginRecognitionTask(captureID: captureID, recognizer: recognizer, request: newRequest)
     }

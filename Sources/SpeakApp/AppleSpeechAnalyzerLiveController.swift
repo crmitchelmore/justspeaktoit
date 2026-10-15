@@ -138,7 +138,7 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
           inputNode.removeTap(onBus: 0)
         }
         for buffer in preRollBuffers { sendAudio(buffer) }
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
+        try inputNode.installTapSafely(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
           sendAudio(buffer)
         }
       }

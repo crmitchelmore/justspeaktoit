@@ -240,6 +240,7 @@ version/baseline authority. `VERSION` is a build hint only.
 - When adding guard-let error paths in transcription code, always clean up audio resources started before the guard point
 - Call `audioEngine.stop()` and `audioEngine.inputNode.removeTap(onBus: 0)` before throwing
 - Compare with existing cleanup paths in the same function to ensure consistency
+- Install taps with `installTapSafely` (SpeakCore), never `installTap`: AVFAudio rejects a tap by raising an Objective-C exception that aborts the app. Keep the call inside the block whose failure path removes the tap and stops the engine. SwiftLint `unsafe_audio_tap` enforces this.
 
 ## AssemblyAI Universal-3.5 Pro Streaming
 

@@ -293,7 +293,7 @@ def container_identity(value, labels, image_id, volume, source, recipe, created=
         require(actual[target]["Type"] == "bind" and actual[target]["Source"] == str(path)
                 and actual[target]["RW"] is False, "Readonly binding mismatch")
     return {"Id": value["Id"], "Image": value["Image"], "Config": config, "HostConfig": host,
-            "Mounts": mounts}
+            "Mounts": sorted(mounts, key=lambda mount: mount["Destination"])}
 
 
 def qualification_status(folder, container_exit):

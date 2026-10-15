@@ -95,6 +95,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package var settings: Settings
     var vocabularyLoad: Task<DesktopVocabulary, Error>?
     package var recording: Recording?
+    var ownedCaptureStartup: DesktopHostOwnedStartupHandle?
     package var recordingTail: (recordID: UUID, task: Task<Void, Never>)?
     var isReady = false
     package var busy = false

@@ -185,3 +185,113 @@ enum DesktopHostRecordingStop {
         )
     }
 }
+
+enum DesktopHostStartupRecord {
+    static func failed(_ record: DesktopRecordingStore.Record, message: String) -> DesktopRecordingStore.Record {
+        var record = record
+        record.failure = message
+        return record
+    }
+}
+
+package enum DesktopHostOwnedFileStep: Sendable {
+    case create, initialSave, finish, finalSave
+}
+
+/// The only writer handoff is a synchronous capability on the bounded relay drain.
+package actor DesktopHostOwnedStartupFile {
+    private let store: DesktopRecordingStore
+    private let url: URL
+    private let rate: Int
+    private let before: @Sendable (DesktopHostOwnedFileStep) async -> Void
+    private let afterFinish: @Sendable () throws -> Void
+    private var file: PCMRecordingFile?
+    private var finishAttempted = false
+    private var capturedStatus: String?
+    private var retained: DesktopRecordingStore.Record
+    package private(set) var finishCount = 0
+    package private(set) var audioFailure: String?
+    package private(set) var historyFailure: String?
+
+    package init(
+        store: DesktopRecordingStore, directory: URL, record: DesktopRecordingStore.Record, rate: Int,
+        before: @escaping @Sendable (DesktopHostOwnedFileStep) async -> Void = { _ in },
+        afterFinish: @escaping @Sendable () throws -> Void = {}
+    ) {
+        self.store = store
+        self.retained = record
+        self.url = directory.appendingPathComponent(record.audioFilename)
+        self.rate = rate
+        self.before = before
+        self.afterFinish = afterFinish
+    }
+
+    func prepare() async throws {
+        await before(.create)
+        do { file = try PCMRecordingFile(url: url, sampleRate: rate) } catch {
+            audioFailure = "Recording file creation failed: \(error.localizedDescription)"
+            throw error
+        }
+        await before(.initialSave)
+        do { try await store.save(retained) } catch {
+            throw DesktopHostError(message: "Initial History could not be saved: \(error.localizedDescription)")
+        }
+    }
+
+    func dispose(message: String, captured: Bool = false) async -> Bool {
+        let message = captured
+            ? "Audio captured. No dictation or transcription was requested. Audio retained for retry." : message
+        retained = DesktopHostStartupRecord.failed(retained, message: message)
+        if !finishAttempted {
+            finishAttempted = true
+            if let file {
+                await before(.finish)
+                finishCount += 1
+                do {
+                    let duration = try file.finish()
+                    if captured {
+                        retained.recordedDuration = duration
+                        capturedStatus = duration == 0 || file.isDigitalSilence
+                            ? "No audio signal captured. No dictation was requested. Audio retained." : message
+                    }
+                    try afterFinish()
+                } catch {
+                    audioFailure = error.localizedDescription
+                }
+            }
+        }
+        if let capturedStatus { retained.failure = capturedStatus }
+        if let audioFailure {
+            retained.failure = "\(message) Audio finalization failed: \(audioFailure)"
+        }
+        await before(.finalSave)
+        do {
+            try await store.save(retained)
+            historyFailure = nil
+            return true
+        } catch {
+            historyFailure = "History could not be saved: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    package func record() -> DesktopRecordingStore.Record { retained }
+
+    func delivery(
+        token: DesktopPressCaptureToken, identity: DesktopPressCaptureIdentity,
+        before: @escaping @Sendable (Int) throws -> Void, failure: @escaping @Sendable (String) -> Void
+    ) throws -> @Sendable (DesktopPressCapturePCMDelivery) -> Void {
+        guard !finishAttempted, let file else { throw DesktopPressCaptureError.invalidPhase }
+        let memory = try DesktopHostOwnedPCMMemory(sampleRate: rate)
+        let context = DesktopCaptureContext(file: file, sampleRate: rate, onFailure: failure)
+        return { delivery in
+            guard delivery.token == token, delivery.identity == identity else {
+                context.fail("Mismatched owned PCM delivery.")
+                return
+            }
+            memory.deliver(delivery.data, before: {
+                do { try before($0) } catch { context.fail(error.localizedDescription) }
+            }, receive: { context.receive($0, count: $1) })
+        }
+    }
+}

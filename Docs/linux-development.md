@@ -570,6 +570,66 @@ over the existing network permission. None of this is built or tested.
 
 ## CI
 
+The portable press-capture lease/PCM relay is currently fake-worker-qualified
+ownership scaffolding only, not a Linux microphone-on-key-press implementation.
+See the [shared ownership contract](windows-development.md) for admission,
+bounded RAM, late cleanup and delivery-join guarantees. No native worker,
+permission adapter, host handoff or settings row is installed. X11 press/release
+events and Wayland portal Activated/Deactivated have different timing semantics;
+portal activation is not physical-key-down or pre-recognition evidence. Native
+start/stop remains unqualified for bounded readiness/cleanup, and neither a saved
+preference nor a fake lifecycle result enables speculative capture.
+Package failure events preserve the generating token and immutable admitted
+identity across deferred delivery, with cleanup failure reported separately.
+Use `DesktopPressCaptureLease.observingFailures(worker:onFailureEvent:)` for
+correlated events; the original error-only initializer retains untyped,
+ignored-argument trailing-closure compatibility without an initializer overload.
+Optional `beginOwned` creates a package release ticket before queued opening
+can run. Its retained token/attempt result joins real cleanup independently of
+lease-global `settle()` and any later run. Cancelled waiters do not cancel IO;
+failed cleanup retains exclusion, and repeated release observes that failure
+until an explicit `retryRelease()` after it is observed. Owned runs reject
+legacy `lease.retryClose(token)` with `invalidPhase` before any state reset or IO;
+the exposed token is not legacy retry authority. Only the ticket's `retryRelease()`
+retries owned cleanup. Legacy `begin` runs retain their existing `retryClose` behavior,
+and the relay fence before worker close is unchanged. Retaining/releasing the
+ticket on every startup/record/shutdown terminal path, Host failure mapping,
+native ownership and WAV/context finalization remain separate prerequisites;
+this package API neither installs them nor enables microphone capture.
+The error-only observer remains a compatibility projection, not a second
+subscription or a native/Host failure adapter.
+Optional PCM deliveries preserve legacy Data batch projection while labeling
+mono PCM16 sample offsets before/after reservation under the relay state lock.
+The canonical `adoptDelivery` name keeps legacy `adopt` trailing closures
+source-compatible even when their Data argument is ignored.
+These are relay admission-order regions, not physical sample/gesture times or
+an approved Host silence clock; physically earlier PCM submitted later is after
+reservation. Native stop-time partial flush remains fenced and separately
+unqualified, not made lossless by span metadata.
+
+The injected package/internal Host startup transaction has no production factory
+and does not activate production capture or successful dictation. It retains the real
+owned ticket through early failure/ticket-delivery races, uses request-specific
+failure/barrier acknowledgement and joins actual native cleanup before WAV finish.
+Cleanup failure retains exclusion and permits only explicit owned retry, even
+after close. A separate actor owns file operations; neither Host admission nor
+settings queue waits on file/native IO. Finish is attempted once; independent
+audio/History errors remain visible, and failed save retains the record/file
+owner until explicit disposition retry. Closed persistence never presents UI.
+See the [shared startup contract](windows-development.md) for bounds and limits.
+An explicitly requested owned recording now uses that same owner's real Lease
+reserve/readiness/adoption, with a separate Host descriptor rather than a fake
+synchronous capture adapter. Its file-only PCM sink reuses the bounded relay
+drain and canonical Context.receive. The memory model includes BOTH aligned
+100 ms scratch and Context's temporary Data copy beyond the relay byte budget.
+No per-frame Task/second PCM queue, provider or positive cue is installed.
+Captured audio is annotated as non-dictation/retryable in real History; writer
+failure, actual native cleanup, WAV finish and History save remain distinct.
+This leaves synchronous normal/HF/comparison capture, canonical PCM ingestion,
+silence clocks and fence-before-close unchanged. Native owner/callback lifetime,
+permission/device/readiness, production recording handoff and final flush still
+require separate qualification and activation.
+
 `.github/workflows/linux.yml` (ubuntu-24.04, `swift:6.2.3-noble`, pinned by
 digest) installs the packages above, then runs the boundary check, the
 release build, `swift test` with `SPEAK_LINUX_TARGET=1`,

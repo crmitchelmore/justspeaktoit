@@ -110,6 +110,8 @@ extension DesktopHostController {
             return shutdownReport ?? DesktopHostShutdownReport()
         }
         closed = true
+        let ownedStartup = ownedCaptureStartup
+        requestOwnedStartupAbort()
         let deadline = ContinuousClock.now.advanced(by: shutdownGrace)
         await cancelInFlightWork(until: deadline)
         var report = DesktopHostShutdownReport()
@@ -129,6 +131,12 @@ extension DesktopHostController {
         if let open = takeRecordingOnClose() {
             let store = store
             report.recordingSaved = await DesktopHostShutdown.wait(until: deadline) { await open.save(in: store) }
+        }
+        if let ownedStartup {
+            let settled = await DesktopHostShutdown.wait(until: deadline) {
+                await ownedStartup.owner.waitForDisposition()
+            }
+            report.recordingSaved = report.recordingSaved && settled
         }
         // Includes admitted opens and every background release attempt.
         let playback = playback

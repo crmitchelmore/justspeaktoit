@@ -249,6 +249,95 @@ before the working one is released. Gesture styles report the native press and
 the release, observed by polling the key only while it is held, to the shared
 SpeakCore gesture machine and session policy that state the macOS rules; a
 gesture stops only the kind of session it started.
+The portable `DesktopPressCaptureLease` and `DesktopPressCapturePCMRelay` are
+**ownership scaffolding, not an enabled microphone-on-key-press feature**.
+No native worker, host handoff, preference control or permission adapter is
+installed. Explicit admission separates the enabled input from qualified
+capability, granted permission and idle capture ownership. Opaque tokens bind
+device, route, profile and PCM format at reserve/adopt. A closing lease excludes
+another open until real cleanup acknowledges; a failed close retains exclusion.
+Caller cancellation or a deadline does not prove native cleanup completed.
+The immutable PCM callback retains only bounded RAM before admission, switches
+from rolling pre-roll to lossless bounded reservation, and reports overflow
+once. One serial drain delivers outside the state lock; closing fences new PCM
+and joins previously admitted delivery before worker cleanup. No per-frame actor
+task, file, History record, provider, cue or insertion is introduced.
+The package failure-event observer carries the generating opaque token, admitted
+immutable capture identity and error, including distinct cleanup failures.
+Construct it with `DesktopPressCaptureLease.observingFailures(worker:onFailureEvent:)`;
+the original error-only initializer remains the only package initializer, so
+its ignored-argument unlabeled trailing closures stay source-compatible.
+The optional package `beginOwned` entry registers a structurally Sendable
+release ticket in the same actor turn, before queued opening can run. Its
+`release()` joins one token/attempt-specific result, including never-started
+cancellation, late open, admitted drain and actual worker cleanup; it does not
+read the global current run's failure. A cancelled waiter cannot cancel that
+owned IO. Failed release remains owned and repeated calls observe the same
+failure; after observing it, only explicit `retryRelease()` requests another
+attempt. Owned runs reject legacy `lease.retryClose(token)` with `invalidPhase`
+before any state reset or IO; the exposed token is not legacy retry authority.
+Use the ticket's `retryRelease()` for owned runs. Runs admitted by legacy `begin`
+retain their existing `retryClose` behavior. Callback fencing before close is unchanged.
+Owners must retain the ticket through every terminal path; this installs no
+Host startup event mapping, capture/file handoff or native worker. WAV finish
+and context release still require a separately reviewed actual cleanup join.
+Deferred receivers must retain that event's identity rather than tagging it with
+the current recording. The compatibility observer projects only its error from
+the same canonical event sink; this does not install a Host subscription.
+The optional immutable PCM delivery annotates each existing drain batch with
+token, identity and mono PCM16 sample-offset ranges before/after the atomic
+relay reservation through `adoptDelivery`. Legacy `adopt` Data sinks still
+receive that batch exactly once, including ignored-argument trailing closures.
+This classifies relay admission order only: physically earlier samples
+submitted later are after-reservation, not evidence of gesture/sample time.
+It is not an approved Host silence clock. Native close-time partial callbacks
+remain fenced; span metadata does not establish lossless native final flushing.
+Portable fake-worker/race tests do not establish native permission, readiness,
+keyboard timing or latency. Windows currently uses `RegisterHotKey` plus 15 ms
+release polling, not a low-level physical-key hook; toggle mode has no paired
+down/up events. macOS's `HotKeyPressPrimer` and its tests remain unchanged and
+unextracted. Native wiring requires separate reviewed permission/readiness and
+late-cleanup evidence before effective capability or settings exposure.
+
+The package/internal `admitOwnedCaptureStartup` seam is explicitly injected and
+has no production factory. It only prepares or abandons a startup: it never
+creates a legacy active recording, starts a provider or plays a positive cue.
+The separately requested `requestOwnedRecording` promotes its existing owner
+through reserve, real readiness and PCM adoption into a distinct Host
+`ownedRecording` descriptor, not a synchronous `Recording` adapter. The same
+Lease/ticket, file owner, failure inbox and busy slot survive handoff and stop.
+This capture-only route remains unavailable by default and is not production
+dictation/HF/comparison/hotkey integration. Its History annotation explicitly
+retains audio for retry without fabricating a transcript or completed dictation.
+PCM writes use the existing bounded relay's synchronous drain and canonical
+`DesktopCaptureContext.receive`, not per-frame Tasks or a second PCM queue.
+Memory is bounded by the relay budget plus TWO 100 ms blocks: aligned scratch
+and the canonical context's temporary Data copy, plus bounded bookkeeping.
+Producer/native allocations are separate. Latched PCM failure cannot become
+healthy capture; actual sink drain and native release precede single WAV finish
+and save. The file actor issues only a private writer capability to that drain.
+Phase revisions and release-attempt ordinals fence stale handoffs and notices.
+No positive cues, provider calls, insertion, physical timestamp inference or
+lossless native final-flush claim is enabled by this injected seam.
+An immutable request/record slot and dedicated lease failure sink precede
+`beginOwned`; the real returned ticket is retained even when failure/cancellation
+arrives before delivery. A bounded FIFO failure inbox and explicit acknowledgement
+barrier preserve canonical causes before disposition; unexpected overflow is
+reported, not treated as success. Native release is joined by ticket/attempt,
+never aggregate operation counts or legacy token retry. Failed cleanup keeps
+exclusion until an explicit owned retry, including after controller close.
+The file operation owns its WAV on a separate actor; file IO never runs on the
+Host actor/settings queue. WAV finish is attempted once after actual release;
+audio errors remain in the failed record. Failed History persistence retains
+the record/file owner and busy exclusion until explicit `retryDisposition`.
+Shutdown grace bounds observation only, not cleanup ownership. Closed persistence
+uses the captured store without presentation. Existing synchronous normal,
+hands-free and comparison capture paths and their PCM/silence behavior are unchanged.
+Synthetic Host/package tests and C-stub graphs do not qualify native ownership,
+permission, endpoint identity, readiness, physical timing or final-partial flush.
+Production owned recording, provider/tail/context handoff and native activation
+remain separately unselected.
+
 Automation is off by default. Settings → Allow automation starts a named-pipe
 server, `\\.\pipe\JustSpeakToIt-SpeakApp-automation-<user SID>`. It rejects
 remote clients, its DACL grants only the current user, and each client is

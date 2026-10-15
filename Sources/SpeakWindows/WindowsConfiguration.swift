@@ -27,7 +27,10 @@ extension WindowsNative {
                 is_boolean: { if case .boolean = field.kind { return 1 }; return 0 }(),
                 requires_hud_overlay: field.requiresHUDOverlay ? 1 : 0,
                 choices: field.serializedChoices.map { strings.add($0) },
-                requires_hands_free_guard: field.requiresHandsFreeGuard ? 1 : 0
+                requires_hands_free_guard: field.requiresHandsFreeGuard ? 1 : 0,
+                enabled_by_field: field.enabledBy.flatMap { key in
+                    DesktopConfiguration.fields.firstIndex { $0.key == key }.map { Int32($0 + 1) }
+                } ?? 0
             )
         }
         let recovered: [UnsafePointer<CChar>?] = preferences.recoveredKeywords.map { strings.add($0) }
@@ -42,6 +45,7 @@ extension WindowsNative {
             }
         }
         guard result == 0 else { throw WindowsNativeError(message: "Could not display dictation preferences.") }
+        try applyVisualDensity(preferences)
         let bindings = DesktopSidebarShortcut.allCases.map {
             JSTISidebarShortcut(
                 destination: strings.add($0.rawValue), digit: Int32($0.digit), hint: strings.add($0.chord)
@@ -55,6 +59,20 @@ extension WindowsNative {
             }
         }
         guard sidebar == 0 else { throw WindowsNativeError(message: "Could not display sidebar shortcuts.") }
+    }
+
+    private static func applyVisualDensity(_ preferences: DesktopConfiguration) throws {
+        let density = preferences.visualDensity
+        let layout = JSTIVisualDensity(
+            compact: density.isCompact ? 1 : 0,
+            page_padding: Int32(density.pagePadding), section_spacing: Int32(density.sectionSpacing),
+            card_padding: Int32(density.cardPadding), content_spacing: Int32(density.cardContentSpacing),
+            inline_spacing: Int32(density.inlineSpacing), group_spacing: Int32(density.groupSpacing),
+            minimum_row_height: Int32(density.minimumListRowHeight)
+        )
+        guard jsti_window_set_visual_density(layout) == 0 else {
+            throw WindowsNativeError(message: "Could not apply layout density.")
+        }
     }
 
     static func performConfigurationAction(

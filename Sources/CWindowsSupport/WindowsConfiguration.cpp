@@ -16,6 +16,7 @@ struct Field {
     bool boolean = false;
     std::vector<std::pair<std::wstring, std::wstring>> choices{};
     bool requiresHandsFreeGuard = false;
+    int enabledByField = 0;
 };
 struct Configuration {
     std::vector<Field> fields;
@@ -34,6 +35,16 @@ struct Dialog {
     int scrollOffset = 0;
 };
 int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
+
+void updateDependencies(HWND window, const Dialog &dialog) {
+    for (size_t i = 0; i < dialog.config.fields.size(); ++i) {
+        const int enabling = dialog.config.fields[i].enabledByField;
+        if (!enabling) continue;
+        const bool enabled = SendDlgItemMessageW(window, fieldBase + enabling - 1, BM_GETCHECK, 0, 0) == BST_CHECKED;
+        EnableWindow(GetDlgItem(window, fieldBase + static_cast<int>(i)), enabled);
+        EnableWindow(GetDlgItem(window, labelBase + static_cast<int>(i)), enabled);
+    }
+}
 
 std::wstring text(HWND window, int id) {
     HWND control = GetDlgItem(window, id);
@@ -180,6 +191,7 @@ bool controls(HWND window, Dialog &dialog) {
     if (dialog.font)
         for (HWND control : dialog.controls) SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(dialog.font), TRUE);
     layout(window, dialog);
+    updateDependencies(window, dialog);
     return true;
 }
 
@@ -299,6 +311,9 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             return 0;
         }
         if (HIWORD(wparam) != BN_CLICKED) break;
+        if (LOWORD(wparam) >= fieldBase &&
+            static_cast<size_t>(LOWORD(wparam) - fieldBase) < dialog->config.fields.size())
+            updateDependencies(window, *dialog);
         if (LOWORD(wparam) == IDCANCEL) { DestroyWindow(window); return 0; }
         if (LOWORD(wparam) == IDOK) { apply(window, *dialog, 0); return 0; }
         if (LOWORD(wparam) == importID) { apply(window, *dialog, 1); return 0; }
@@ -378,6 +393,10 @@ int jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t c
             if (fields[i].requires_hands_free_guard != 0 && fields[i].requires_hands_free_guard != 1) return -1;
             field.requiresHandsFreeGuard = fields[i].requires_hands_free_guard != 0;
             if (field.requiresHandsFreeGuard && !field.boolean) return -1;
+            field.enabledByField = fields[i].enabled_by_field;
+            if (field.enabledByField < 0 || static_cast<size_t>(field.enabledByField) > count ||
+                (field.enabledByField && (field.enabledByField == static_cast<int>(i + 1) ||
+                    fields[field.enabledByField - 1].is_boolean != 1))) return -1;
             if (fields[i].choices && fields[i].choices[0]) {
                 std::wstring choices;
                 if (field.boolean || !jsti::wide(fields[i].choices, choices) || choices.size() > 65535) return -1;
@@ -515,6 +534,26 @@ bool jsti_configuration_self_test(HWND owner, std::string &error) {
         return false;
     }
     Dialog overflow;
+    Dialog commands;
+    commands.config.fields = {
+        {L"Enable voice commands", L"0", L"General", true},
+        {L"Clipboard triggers", L"my snippet", L"General", false, {}, false, 1}
+    };
+    HWND commandWindow = createDialog(owner, commands);
+    if (!commandWindow) { error = "Could not create voice command preferences fixture."; return false; }
+    const bool commandsDisabled = !IsWindowEnabled(GetDlgItem(commandWindow, fieldBase + 1));
+    SendDlgItemMessageW(commandWindow, fieldBase, BM_SETCHECK, BST_CHECKED, 0);
+    SendMessageW(commandWindow, WM_COMMAND, MAKEWPARAM(fieldBase, BN_CLICKED), 0);
+    const bool enabled = IsWindowEnabled(GetDlgItem(commandWindow, fieldBase + 1));
+    SendDlgItemMessageW(commandWindow, fieldBase, BM_SETCHECK, BST_UNCHECKED, 0);
+    SendMessageW(commandWindow, WM_COMMAND, MAKEWPARAM(fieldBase, BN_CLICKED), 0);
+    const bool retained = !IsWindowEnabled(GetDlgItem(commandWindow, fieldBase + 1)) &&
+        text(commandWindow, fieldBase + 1) == L"my snippet";
+    DestroyWindow(commandWindow);
+    if (!commandsDisabled || !enabled || !retained) {
+        error = "Voice command toggle did not enable/disable its retained trigger editor.";
+        return false;
+    }
     overflow.group = L"Transcription";
     for (int i = 0; i < 12; ++i)
         overflow.config.fields.push_back({L"Preference", L"0.05", L"Transcription", false});

@@ -189,6 +189,7 @@ struct SonioxFile: Decodable, Sendable {
 }
 
 struct SonioxCreateTranscriptionPayload: Encodable, Sendable {
+    var context: [String: [String]]?
     let model: String
     let fileID: String
     let languageHints: [String]?
@@ -196,6 +197,7 @@ struct SonioxCreateTranscriptionPayload: Encodable, Sendable {
     let enableLanguageIdentification: Bool
 
     private enum CodingKeys: String, CodingKey {
+        case context
         case model
         case fileID = "file_id"
         case languageHints = "language_hints"

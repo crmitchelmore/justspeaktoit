@@ -27,9 +27,9 @@ extension WindowsNative {
         accountInventory: VoiceAccountInventory?
     ) -> Bool {
         voiceContext.set(context)
-        let presentation = settings.pickerPresentation(accountInventory: accountInventory)
+        let presentation = settings.favoritePicker(accountInventory: accountInventory)
         let selected = presentation.selected
-        let labels = presentation.labels.map { Array($0.utf8CString) }
+        let labels = (presentation.labels + presentation.identifiers).map { Array($0.utf8CString) }
         let pointers = labels.map { chars -> UnsafeMutablePointer<CChar> in
             let pointer = UnsafeMutablePointer<CChar>.allocate(capacity: chars.count)
             pointer.initialize(from: chars, count: chars.count)
@@ -37,8 +37,13 @@ extension WindowsNative {
         }
         defer { pointers.forEach { $0.deallocate() } }
         let borrowed: [UnsafePointer<CChar>?] = pointers.map { UnsafePointer($0) }
-        let configured = borrowed.withUnsafeBufferPointer {
-            jsti_window_set_voice_output($0.baseAddress, $0.count, Int32(selected), voiceOutputEvent, context) == 0
+        let configured = borrowed.withUnsafeBufferPointer { names in
+            presentation.favoriteRanks.withUnsafeBufferPointer { ranks in
+                jsti_window_set_voice_picker(
+                    names.baseAddress, names.baseAddress?.advanced(by: presentation.labels.count),
+                    ranks.baseAddress, presentation.labels.count, Int32(selected),
+                    windowsVoicePickerEvent, context) == 0
+            }
         }
         return configured && configureVoiceSources(context: context) &&
             jsti_window_set_voice_generation_options(settings.generationOptions.nativeFlags) == 0 &&
@@ -205,6 +210,22 @@ private final class WindowsVoiceContext: @unchecked Sendable {
     private var context: UnsafeMutableRawPointer?
     func set(_ value: UnsafeMutableRawPointer) { lock.withLock { context = value } }
     func get() -> UnsafeMutableRawPointer? { lock.withLock { context } }
+}
+
+func windowsVoicePickerEvent(
+    _ action: Int32, _ identifier: UnsafePointer<CChar>?, _ context: UnsafeMutableRawPointer?
+) {
+    guard let identifier, let context else { return }
+    let voiceID = String(cString: identifier)
+    let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
+    holder.enqueueSettings {
+        await holder.controller.handleVoicePicker(voiceID: voiceID, action: action)
+        if !WindowsNative.configureVoiceOutput(await holder.controller.voiceOutputSettings(),
+            context: Unmanaged.passUnretained(holder).toOpaque(),
+            accountInventory: await holder.controller.selectedVoiceAccountInventory) {
+            WindowsNative.update("The saved favorite voices could not be shown. Reopen Voice and try again.")
+        }
+    }
 }
 
 /// Apply from the native Voice output dialog, on the UI thread.

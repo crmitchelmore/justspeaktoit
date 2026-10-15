@@ -272,3 +272,67 @@ final class DesktopHostConfigurationTests: XCTestCase {
         XCTAssertEqual(FakeLog.shared.huds.last, .hidden)
     }
 }
+
+extension DesktopHostConfigurationTests {
+    func testVisualDensity_SaveRestartAndPortableJSONTransfer() async throws {
+        let file = directory.appendingPathComponent("density.json")
+        let unsupported = AnyCodable(.object(["appearance": .string("retained"), "enabled": .bool(false)]))
+        let original = try DesktopConfiguration(values: ["futureAppearance": unsupported])
+        try JSONEncoder().encode(DesktopConfigurationDocument(preferences: original)).write(to: file)
+        try await controller.importConfiguration(path: file.path)
+        let absent = try await controller.configuration()
+        XCTAssertEqual(absent.visualDensity, .normal)
+        XCTAssertNil(absent.values["visualDensity"])
+        var entries = absent.entries
+        entries[try index(.visualDensity)] = "compact"
+        try await controller.saveConfiguration(entries)
+        let saved = try await controller.configuration()
+        XCTAssertEqual(saved.visualDensity, .compact)
+        await controller.close()
+        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        let restarted = try await controller.configuration()
+        XCTAssertEqual(restarted.visualDensity, .compact)
+        XCTAssertEqual(restarted.values["futureAppearance"], unsupported)
+        try await controller.exportConfiguration(path: file.path)
+        let exported = try JSONDecoder().decode(DesktopConfigurationDocument.self, from: Data(contentsOf: file))
+        XCTAssertEqual(exported.preferences.visualDensity, .compact)
+        XCTAssertEqual(exported.preferences.values["futureAppearance"], unsupported)
+        entries[try index(.visualDensity)] = "normal"
+        try await controller.saveConfiguration(entries)
+        let normal = try await controller.configuration()
+        XCTAssertEqual(normal.visualDensity, .normal)
+        try await controller.importConfiguration(path: file.path)
+        let imported = try await controller.configuration()
+        XCTAssertEqual(imported.visualDensity, .compact)
+        XCTAssertEqual(imported.values["futureAppearance"], unsupported)
+    }
+
+    func testVisualDensity_RefusedWritesAndInvalidImportsPreserveAppliedValueAndDisk() async throws {
+        await controller.close()
+        let effects = SettingsWriteEffects()
+        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        var entries = try await controller.configuration().entries
+        entries[try index(.visualDensity)] = "compact"
+        try await controller.saveConfiguration(entries)
+        let settingsURL = directory.appendingPathComponent("settings.json")
+        let raw = try Data(contentsOf: settingsURL)
+        effects.refusesWrites = true
+        entries[try index(.visualDensity)] = "normal"
+        do { try await controller.saveConfiguration(entries); XCTFail("Failed density save accepted") } catch {
+            XCTAssertEqual((error as NSError).code, CocoaError.fileWriteOutOfSpace.rawValue)
+        }
+        let file = directory.appendingPathComponent("invalid-density.json")
+        try Data(#"{"version":1,"preferences":{"visualDensity":"normal"}}"#.utf8).write(to: file)
+        do { try await controller.importConfiguration(path: file.path); XCTFail("Failed import accepted") } catch {
+            XCTAssertEqual((error as NSError).code, CocoaError.fileWriteOutOfSpace.rawValue)
+        }
+        try Data(#"{"version":1,"preferences":{"visualDensity":"tight"}}"#.utf8).write(to: file)
+        do { try await controller.importConfiguration(path: file.path); XCTFail("Invalid density accepted") } catch {
+            XCTAssertTrue(error.localizedDescription.contains("Layout Density"))
+        }
+        let unchanged = try await controller.configuration()
+        XCTAssertEqual(unchanged.visualDensity, .compact)
+        XCTAssertEqual(try Data(contentsOf: settingsURL), raw)
+        XCTAssertEqual(effects.writes, 1)
+    }
+}

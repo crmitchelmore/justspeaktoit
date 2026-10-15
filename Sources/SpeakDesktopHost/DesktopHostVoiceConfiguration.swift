@@ -3,6 +3,8 @@ import SpeakCore
 extension DesktopVoiceOutputSettings {
     package func configurationProjection(over values: [String: AnyCodable]) -> [String: AnyCodable] {
         var projection = values
+        projection[VoiceFavoritePreference.key] = favoriteVoices.map(VoiceFavoritePreference.encoded)
+            ?? projection[VoiceFavoritePreference.key]
         projection[VoiceGenerationPreference.autoPlay.rawValue] = AnyCodable(.bool(generationOptions.autoPlay))
         projection[VoiceGenerationPreference.saveToRecordings.rawValue] =
             AnyCodable(.bool(generationOptions.saveToRecordings))
@@ -22,11 +24,13 @@ extension DesktopVoiceOutputSettings {
         let play = try VoiceGenerationPreference.autoPlay.value(in: values)
         let save = try VoiceGenerationPreference.saveToRecordings.value(in: values)
         let synthesis = try VoiceSynthesisPreferenceUpdate(preferences: values)
+        let favorites = try VoiceFavoritePreference.value(in: values)
         if let play { autoPlay = play }
         if let save { saveToRecordings = save }
         if let speed = synthesis.speed { self.speed = speed }
         if let pitch = synthesis.pitch { self.pitch = pitch }
         if let useSSML = synthesis.useSSML { self.useSSML = useSSML }
+        if let favorites { favoriteVoices = favorites }
     }
 
     package func validatedSynthesisOptions() throws -> VoiceSynthesisOptions {

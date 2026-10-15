@@ -13,6 +13,7 @@ package struct DesktopVoiceOutputSettings: Codable, Equatable, Sendable {
     package var pitch: Double?
     package var useSSML: Bool?
     package var trackUsage: Bool?
+    package var favoriteVoices: [String]?
 
     private enum CodingKeys: String, CodingKey {
         case modelID, voiceID
@@ -22,6 +23,7 @@ package struct DesktopVoiceOutputSettings: Codable, Equatable, Sendable {
         case pitch = "ttsPitch"
         case useSSML = "ttsUseSSML"
         case trackUsage = "ttsTrackUsage"
+        case favoriteVoices = "ttsFavoriteVoices"
     }
 
     package var generationOptions: VoiceGenerationOptions {

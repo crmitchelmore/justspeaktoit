@@ -21,16 +21,19 @@ public struct ElevenLabsBatchClient: TranscriptionProvider {
     private let baseURL = URL(string: "https://api.elevenlabs.io/v1")!
     private let session: URLSession
     private let staging: SharedMultipartUploadStaging?
+    private let keywords: [String]
 
     private let durationResolver: @Sendable (URL) async throws -> TimeInterval
 
     public init(
         session: URLSession = .shared,
         staging: SharedMultipartUploadStaging? = nil,
+        keywords: [String] = [],
         durationResolver: @escaping @Sendable (URL) async throws -> TimeInterval = { _ in 0 }
     ) {
         self.session = session
         self.staging = staging
+        self.keywords = keywords
         self.durationResolver = durationResolver
     }
 
@@ -51,6 +54,10 @@ public struct ElevenLabsBatchClient: TranscriptionProvider {
             .init(name: "timestamps_granularity", value: "word")
         ]
         if let language { fields.append(.init(name: "language_code", value: language.localeLanguageCode)) }
+        if extractModelID(from: model) == "scribe_v2" {
+            fields += ElevenLabsLiveProtocol.boundedKeyterms(keywords)
+                .map { .init(name: "keyterms", value: $0) }
+        }
         let mimeType = url.pathExtension.lowercased() == "m4a"
             ? "audio/m4a" : BatchTranscriptionJob.mimeType(for: url) ?? "audio/m4a"
         let (data, _) = try await OpenAICompatibleBatchTranscriptionClient(

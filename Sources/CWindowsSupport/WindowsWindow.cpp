@@ -9,6 +9,7 @@
 #include <dwmapi.h>
 #include <uxtheme.h>
 #include <mutex>
+#include <limits>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
@@ -211,12 +212,86 @@ constexpr int appearanceLabelID = 440, appearanceID = 441, automationID = 442, a
 constexpr UINT tourMessage = WM_APP + 18, appearanceMessage = WM_APP + 19, pageMessage = WM_APP + 20;
 constexpr UINT hudMessage = WM_APP + 21;
 constexpr UINT sidebarMessage = WM_APP + 30;
+constexpr UINT densityMessage = WM_APP + 31;
 struct SidebarBindings {
     int digits[pageCount];
     std::wstring hints[pageCount];
     bool showHints = false;
     SidebarBindings() { std::fill(std::begin(digits), std::end(digits), -1); }
 };
+
+// Delivery is protected by WindowState::mutex; applied bindings remain UI-thread-only.
+template<typename Payload, UINT Message>
+struct WindowDelivery {
+    std::unique_ptr<Payload> initial;
+    std::unordered_map<UINT_PTR, std::unique_ptr<Payload>> posted;
+    UINT_PTR sequence = 0;
+
+    int stage(HWND window, std::unique_ptr<Payload> update) {
+        if (!window) {
+            initial = std::move(update);
+            return 0;
+        }
+        if (sequence == std::numeric_limits<UINT_PTR>::max()) return -1;
+        const UINT_PTR token = ++sequence;
+        posted.emplace(token, std::move(update));
+        if (PostMessageW(window, Message, token, 0)) return 0;
+        posted.erase(token);
+        return -1;
+    }
+
+    std::unique_ptr<Payload> claimInitial() { return std::move(initial); }
+
+    std::unique_ptr<Payload> claim(UINT_PTR token) {
+        const auto found = posted.find(token);
+        if (found == posted.end()) return {};
+        auto update = std::move(found->second);
+        posted.erase(found);
+        return update;
+    }
+
+    void retire() { posted.clear(); }
+};
+
+using SidebarDelivery = WindowDelivery<SidebarBindings, sidebarMessage>;
+using DensityDelivery = WindowDelivery<JSTIVisualDensity, densityMessage>;
+
+int configureVisualDensity(DensityDelivery &delivery, HWND window, JSTIVisualDensity density) {
+    if ((density.compact != 0 && density.compact != 1) ||
+        density.minimum_row_height < 30 || density.minimum_row_height > 64) return -1;
+    const int spacing[] = {density.page_padding, density.section_spacing, density.card_padding,
+        density.content_spacing, density.inline_spacing, density.group_spacing};
+    for (int value : spacing) if (value < 0 || value > 128) return -1;
+    return delivery.stage(window, std::make_unique<JSTIVisualDensity>(density));
+}
+
+int configureSidebarShortcuts(SidebarDelivery &delivery, HWND window,
+                             const JSTISidebarShortcut *bindings, size_t count, int showHints) {
+    if (!bindings || count > 10 || (showHints != 0 && showHints != 1)) return -1;
+    auto update = std::make_unique<SidebarBindings>();
+    bool used[10]{};
+    for (size_t index = 0; index < count; ++index) {
+        const auto &binding = bindings[index];
+        std::wstring hint;
+        if (!binding.destination || binding.digit < 0 || binding.digit > 9 || used[binding.digit] ||
+            !binding.hint || !jsti::wide(binding.hint, hint) ||
+            hint != L"Ctrl+" + std::to_wstring(binding.digit)) return -1;
+        used[binding.digit] = true;
+        bool matched = false;
+        for (int page = 0; page < pageCount; ++page) {
+            if (std::strcmp(pageInfo[page].name, binding.destination) != 0) continue;
+            if (update->digits[page] != -1) return -1;
+            update->digits[page] = binding.digit;
+            update->hints[page] = hint;
+            matched = true;
+            break;
+        }
+        if (!matched) return -1;
+    }
+    update->showHints = showHints != 0;
+    return delivery.stage(window, std::move(update));
+}
+
 constexpr UINT_PTR tourTimerID = 90;
 // How each owner-drawn control is drawn.
 enum class Role { label, caption, status, detail, chipValue, statValue, tileValue, value, button, primary, record,
@@ -252,6 +327,8 @@ struct WindowState {
     // decides the switch.
     std::wstring loginItemNote;
     bool posted = false;
+    SidebarDelivery sidebarDelivery;
+    DensityDelivery densityDelivery;
     bool statusChanged = false;
     bool transcriptChanged = false;
     bool historyChanged = false;
@@ -739,6 +816,16 @@ struct Frame {
     std::vector<Paragraph> paragraphs;
 } frame;
 
+JSTIVisualDensity visualDensity{};
+
+int densitySpace(HWND window, int normal, int compact) {
+    return scale(window, visualDensity.compact ? compact : normal);
+}
+
+int cardHeaderHeight(HWND window) {
+    return densitySpace(window, 66, 36 + 2 * visualDensity.card_padding);
+}
+
 RECT box(int x, int y, int width, int height) { return RECT{x, y, x + width, y + height}; }
 int widthOf(const RECT &rect) { return rect.right - rect.left; }
 int heightOf(const RECT &rect) { return rect.bottom - rect.top; }
@@ -798,8 +885,9 @@ Card &addCard(RECT rect, wchar_t glyph, const std::wstring &title) {
 
 // The card's content area below its title row.
 RECT cardBody(HWND window, const RECT &card) {
-    return RECT{card.left + scale(window, 22), card.top + scale(window, 66), card.right - scale(window, 22),
-                card.bottom - scale(window, 20)};
+    const int inset = densitySpace(window, 22, visualDensity.card_padding);
+    return RECT{card.left + inset, card.top + cardHeaderHeight(window), card.right - inset,
+                card.bottom - densitySpace(window, 20, visualDensity.card_padding)};
 }
 
 // Sets a control's text only when it changes, so layout never repaints needlessly.
@@ -810,7 +898,7 @@ void setLabel(HWND window, int identifier, const wchar_t *text) {
 }
 
 void layoutDashboard(HWND window, const RECT &content) {
-    const int gap = scale(window, 18);
+    const int gap = densitySpace(window, 18, visualDensity.section_spacing);
     const int heroBottom = layoutHero(window, content, scale(window, 200), jsti::chrome::Gradient::brand);
     place(window, recordID, box(frame.hero.right - scale(window, 26) - scale(window, 196), frame.hero.top + scale(window, 26),
                                 scale(window, 196), scale(window, 50)));
@@ -857,7 +945,7 @@ void layoutDashboard(HWND window, const RECT &content) {
 }
 
 void layoutHistory(HWND window, const RECT &content) {
-    const int gap = scale(window, 18), row = scale(window, 34);
+    const int gap = densitySpace(window, 18, visualDensity.section_spacing), row = scale(window, 34);
     const int heroBottom = layoutHero(window, content, scale(window, 168), jsti::chrome::Gradient::brand);
     place(window, importID, box(frame.hero.right - scale(window, 26) - scale(window, 124), frame.hero.top + scale(window, 24),
                                 scale(window, 124), row));
@@ -980,23 +1068,27 @@ void layoutHistory(HWND window, const RECT &content) {
 // A settings card: `rows` controls, top to bottom, with a description.
 int layoutSettingsCard(HWND window, int top, const RECT &content, wchar_t glyph, const std::wstring &title,
                        const std::wstring &description, int contentHeight) {
-    const int inset = scale(window, 22);
+    const int inset = densitySpace(window, 22, visualDensity.card_padding);
     HDC dc = GetDC(window);
     const int textHeight = description.empty() ? 0 : jsti::chrome::measure(dc, description,
         widthOf(content) - 2 * inset, jsti::chrome::Font::body, GetDpiForWindow(window));
     ReleaseDC(window, dc);
-    const int height = scale(window, 66) + textHeight + (textHeight ? scale(window, 12) : 0) + contentHeight + scale(window, 20);
+    const int descriptionGap = densitySpace(window, 12, visualDensity.content_spacing);
+    const int height = cardHeaderHeight(window) + textHeight + (textHeight ? descriptionGap : 0) +
+        contentHeight + densitySpace(window, 20, visualDensity.card_padding);
     const RECT card = box(content.left, top, widthOf(content), height);
     addCard(card, glyph, title);
     if (!description.empty()) {
-        frame.paragraphs.push_back({box(card.left + inset, card.top + scale(window, 64), widthOf(card) - 2 * inset,
+        frame.paragraphs.push_back({box(card.left + inset, card.top + cardHeaderHeight(window) - scale(window, 2),
+                                        widthOf(card) - 2 * inset,
                                         textHeight), description, jsti::chrome::Font::body, true});
     }
-    return card.top + scale(window, 66) + textHeight + (textHeight ? scale(window, 12) : 0);
+    return card.top + cardHeaderHeight(window) + textHeight + (textHeight ? descriptionGap : 0);
 }
 
 void layoutSettings(HWND window, const RECT &content) {
-    const int gap = scale(window, 18), row = scale(window, 34), inset = scale(window, 22);
+    const int gap = densitySpace(window, 18, visualDensity.section_spacing), row = scale(window, 34);
+    const int inset = densitySpace(window, 22, visualDensity.card_padding);
     const bool voice = state.page == voicePage;
     int top = layoutHero(window, content, scale(window, voice ? 132 : 120),
                          voice ? jsti::chrome::Gradient::voice : jsti::chrome::Gradient::settings) + gap;
@@ -1031,13 +1123,14 @@ void layoutSettings(HWND window, const RECT &content) {
             L"Finished text goes to the app where dictation started, or the clipboard. "
             L"Backups include History text and optional audio, not settings, profiles or credentials.",
             2 * row + scale(window, 12));
-        place(window, configurationID, box(right - scale(window, 220), cardTop + scale(window, 16), scale(window, 220), row));
+        place(window, configurationID, box(right - scale(window, 220),
+            cardTop + densitySpace(window, 16, visualDensity.card_padding), scale(window, 220), row));
         label(94, y); control(microphoneID, y);
         const int backupY = y + row + scale(window, 12);
         place(window, textOutputID, box(left, backupY, scale(window, 170), row));
         place(window, backupAudioID, RECT{left + scale(window, 182), backupY, right - scale(window, 210), backupY + row});
         button(backupExportID, backupY, scale(window, 196));
-        top = y + 2 * row + scale(window, 32) + gap;
+        top = y + 2 * row + scale(window, 12) + densitySpace(window, 20, visualDensity.card_padding) + gap;
         // The Mac's App Behaviour card. The note appears only when the system
         // decides Launch at login, so the page still fits the minimum height.
         y = layoutSettingsCard(window, top, content, 0xE713, L"App behaviour", state.loginItemNote,
@@ -1073,7 +1166,7 @@ void layoutSettings(HWND window, const RECT &content) {
         y += row + scale(window, 12);
         place(window, azureID, box(left + scale(window, 188), y, scale(window, 240), row));
         place(window, configurationID, box(right - scale(window, 220), y, scale(window, 220), row));
-        top = y + row + scale(window, 20) + gap;
+        top = y + row + densitySpace(window, 20, visualDensity.card_padding) + gap;
         y = layoutSettingsCard(window, top, content, 0xE9D2, L"Compare Models",
             L"Run the same audio through several models, rank the raw results blind, and export the scoreboard.", row);
         place(window, comparisonID, box(left, y, scale(window, 220), row));
@@ -1128,7 +1221,7 @@ void layoutSettings(HWND window, const RECT &content) {
 }
 
 void layoutAbout(HWND window, const RECT &content) {
-    const int inset = scale(window, 22), row = scale(window, 34);
+    const int inset = densitySpace(window, 22, visualDensity.card_padding), row = scale(window, 34);
     const std::wstring note = L"Open source under the MIT licence. Your audio goes only to the provider you choose, "
         L"or stays on this PC with an on-device model.";
     int y = layoutSettingsCard(window, content.top, content, 0xE946, L"About", L"", scale(window, 96) + row +
@@ -1152,7 +1245,7 @@ void layout(HWND window) {
     GetClientRect(window, &client);
     frame = Frame{};
     const int sidebarWidth = scale(window, 232), headerHeight = scale(window, 64), statusHeight = scale(window, 44);
-    const int padding = scale(window, 24);
+    const int padding = densitySpace(window, 24, visualDensity.page_padding);
     frame.sidebar = RECT{0, 0, sidebarWidth, client.bottom};
     frame.header = RECT{sidebarWidth, 0, client.right, headerHeight};
     frame.status = RECT{sidebarWidth, client.bottom - statusHeight, client.right, client.bottom};
@@ -1162,12 +1255,13 @@ void layout(HWND window) {
     y += scale(window, 24);
     for (int page = 0; page < pageCount; ++page) {
         if (page == generalPage) {
-            y += scale(window, 10);
+            y += densitySpace(window, 10, visualDensity.section_spacing);
             frame.settingsHeading = box(scale(window, 22), y, sidebarWidth - scale(window, 44), scale(window, 20));
             y += scale(window, 24);
         }
-        place(window, navBaseID + page, box(scale(window, 10), y, sidebarWidth - scale(window, 20), scale(window, 36)));
-        y += scale(window, 38);
+        const int rowHeight = densitySpace(window, 36, std::max(36, visualDensity.minimum_row_height));
+        place(window, navBaseID + page, box(scale(window, 10), y, sidebarWidth - scale(window, 20), rowHeight));
+        y += rowHeight + densitySpace(window, 2, 0);
     }
     // Header: Import and Record on every page but those that carry their own.
     const int buttonTop = (headerHeight - scale(window, 36)) / 2;
@@ -1183,7 +1277,7 @@ void layout(HWND window) {
     place(window, statusID, RECT{sidebarWidth + padding, frame.status.top + scale(window, 12), client.right - padding,
                                  client.bottom - scale(window, 8)});
     const RECT content{sidebarWidth + padding, headerHeight + scale(window, 4), client.right - padding,
-                       client.bottom - statusHeight - scale(window, 18)};
+                       client.bottom - statusHeight - densitySpace(window, 18, visualDensity.section_spacing)};
     switch (state.page) {
     case dashboardPage: layoutDashboard(window, content); break;
     case historyPage: layoutHistory(window, content); break;
@@ -1256,10 +1350,12 @@ void paintFrame(HWND window, HDC dc) {
         chrome::shadow(dc, card.rect, s(24), chrome::accentDeep, s(10));
         chrome::fillRound(dc, card.rect, s(24), palette.card);
         chrome::strokeRound(dc, card.rect, s(24), chrome::accentDeep, chrome::dark() ? 70 : 40, 1.0f);
-        const RECT tile = box(card.rect.left + s(20), card.rect.top + s(18), s(36), s(36));
+        const RECT tile = box(card.rect.left + densitySpace(window, 20, visualDensity.card_padding),
+                              card.rect.top + densitySpace(window, 18, visualDensity.card_padding), s(36), s(36));
         chrome::fillRound(dc, tile, s(12), chrome::accent, chrome::dark() ? 60 : 38);
         chrome::glyph(dc, card.glyph, tile, chrome::dark() ? RGB(0xFF, 0x8A, 0x5C) : chrome::accentDeep, dpi);
-        chrome::text(dc, card.title, RECT{tile.right + s(12), tile.top, card.rect.right - s(20), tile.bottom},
+        chrome::text(dc, card.title, RECT{tile.right + densitySpace(window, 12, visualDensity.inline_spacing), tile.top,
+                     card.rect.right - densitySpace(window, 20, visualDensity.card_padding), tile.bottom},
                      chrome::Font::title, dpi, palette.text, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
     }
     for (const auto &stat : frame.stats) {
@@ -1637,16 +1733,18 @@ void showPage(HWND window, int page) {
     RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
 }
 
-void applySidebarBindings(HWND window) {
+void applySidebarBindings(HWND window, const SidebarBindings &bindings) {
     for (int page = 0; page < pageCount; ++page) {
         std::wstring label = pageInfo[page].title;
-        if (state.sidebar.showHints && !state.sidebar.hints[page].empty() &&
-            !jsti_hotkey_reserves_sidebar_digit(state.sidebar.digits[page]))
-            label += L" (" + state.sidebar.hints[page] + L")";
+        if (bindings.showHints && !bindings.hints[page].empty() &&
+            !jsti_hotkey_reserves_sidebar_digit(bindings.digits[page]))
+            label += L" (" + bindings.hints[page] + L")";
         SetWindowTextW(GetDlgItem(window, navBaseID + page), label.c_str());
         InvalidateRect(GetDlgItem(window, navBaseID + page), nullptr, TRUE);
     }
 }
+
+void applySidebarBindings(HWND window) { applySidebarBindings(window, state.sidebar); }
 
 bool navigateSidebar(HWND window, int digit, bool exactControl, HWND focused) {
     if (!exactControl || digit < 0 || digit > 9 || !IsWindowEnabled(window) ||
@@ -2476,8 +2574,15 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         showPage(window, static_cast<int>(wparam));
         return 0;
     case sidebarMessage: {
-        std::unique_ptr<SidebarBindings> bindings(reinterpret_cast<SidebarBindings *>(lparam));
+        std::unique_ptr<SidebarBindings> bindings;
+        { std::lock_guard<std::mutex> lock(state.mutex); bindings = state.sidebarDelivery.claim(wparam); }
         if (bindings) { state.sidebar = std::move(*bindings); applySidebarBindings(window); }
+        return 0;
+    }
+    case densityMessage: {
+        std::unique_ptr<JSTIVisualDensity> density;
+        { std::lock_guard<std::mutex> lock(state.mutex); density = state.densityDelivery.claim(wparam); }
+        if (density) { visualDensity = *density; layout(window); }
         return 0;
     }
     case hudMessage:
@@ -2834,10 +2939,114 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         {
             std::lock_guard<std::mutex> lock(state.mutex);
             state.window = nullptr; state.posted = false; state.audioCleanupToken.clear(); state.migrationReport.clear();
+            state.sidebarDelivery.retire();
+            state.densityDelivery.retire();
         }
         PostQuitMessage(0); return 0;
     }
     return DefWindowProcW(window, message, wparam, lparam);
+}
+
+struct SidebarStartupFixture {
+    SidebarDelivery delivery;
+    SidebarBindings applied;
+    HWND window = nullptr;
+};
+
+LRESULT CALLBACK sidebarStartupFixtureProcedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+    if (message == WM_NCCREATE) {
+        auto *create = reinterpret_cast<CREATESTRUCTW *>(lparam);
+        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(create->lpCreateParams));
+    }
+    auto *fixture = reinterpret_cast<SidebarStartupFixture *>(GetWindowLongPtrW(window, GWLP_USERDATA));
+    if (fixture && message == WM_CREATE) {
+        for (int page = 0; page < pageCount; ++page) {
+            if (!CreateWindowExW(0, L"BUTTON", L"", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 160, 36,
+                window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(navBaseID + page)),
+                GetModuleHandleW(nullptr), nullptr)) return -1;
+        }
+        fixture->window = window;
+        auto initial = fixture->delivery.claimInitial();
+        if (initial) fixture->applied = std::move(*initial);
+        applySidebarBindings(window, fixture->applied);
+        return 0;
+    }
+    if (fixture && message == sidebarMessage) {
+        auto update = fixture->delivery.claim(wparam);
+        if (update) {
+            fixture->applied = std::move(*update);
+            applySidebarBindings(window, fixture->applied);
+        }
+        return 0;
+    }
+    if (fixture && message == WM_DESTROY) {
+        fixture->window = nullptr;
+        fixture->delivery.retire();
+        return 0;
+    }
+    return DefWindowProcW(window, message, wparam, lparam);
+}
+
+bool sidebarStartupSelfTest() {
+    const HINSTANCE instance = GetModuleHandleW(nullptr);
+    WNDCLASSW type{};
+    type.lpfnWndProc = sidebarStartupFixtureProcedure;
+    type.hInstance = instance;
+    type.lpszClassName = L"JustSpeakToItSidebarStartupFixture";
+    if (!RegisterClassW(&type)) return false;
+    const JSTISidebarShortcut bindings[] = {{"dashboard", 1, "Ctrl+1"}, {"history", 2, "Ctrl+2"}};
+    SidebarStartupFixture fixture;
+    UINT_PTR lastRetired = 0;
+    bool okay = true;
+    for (int hints : {0, 1}) {
+        okay = configureSidebarShortcuts(fixture.delivery, nullptr, bindings, 2, hints) == 0 && okay;
+        const auto *retained = fixture.delivery.initial.get();
+        okay = okay && retained && retained->showHints == (hints != 0);
+        const JSTISidebarShortcut invalid[] = {
+            {"unknown-page", 3, "Ctrl+3"}, {"dashboard", 3, "Ctrl+Shift+3"},
+            {"dashboard", 10, "Ctrl+10"}, {"dashboard", 3, "\xFF"}, {nullptr, 3, "Ctrl+3"}
+        };
+        for (const auto &binding : invalid)
+            okay = configureSidebarShortcuts(fixture.delivery, nullptr, &binding, 1, hints) == -1 &&
+                fixture.delivery.initial.get() == retained && okay;
+        const JSTISidebarShortcut repeatedID[] = {{"dashboard", 1, "Ctrl+1"}, {"dashboard", 2, "Ctrl+2"}};
+        const JSTISidebarShortcut repeatedDigit[] = {{"dashboard", 1, "Ctrl+1"}, {"history", 1, "Ctrl+1"}};
+        okay = configureSidebarShortcuts(fixture.delivery, nullptr, repeatedID, 2, hints) == -1 &&
+            configureSidebarShortcuts(fixture.delivery, nullptr, repeatedDigit, 2, hints) == -1 &&
+            configureSidebarShortcuts(fixture.delivery, nullptr, bindings, 2, 2) == -1 &&
+            fixture.delivery.initial.get() == retained && okay;
+        HWND window = CreateWindowExW(0, type.lpszClassName, L"Sidebar startup fixture", WS_POPUP,
+            0, 0, 1, 1, nullptr, nullptr, instance, &fixture);
+        if (!window) { okay = false; break; }
+        const bool reserved = jsti_hotkey_reserves_sidebar_digit(1);
+        auto label = [&](bool shown) { return shown && !reserved ? L"Dashboard (Ctrl+1)" : L"Dashboard"; };
+        okay = okay && !fixture.delivery.initial && fixture.applied.digits[dashboardPage] == 1 &&
+            fixture.applied.digits[historyPage] == 2 && fixture.applied.showHints == (hints != 0) &&
+            controlText(GetDlgItem(window, navBaseID)) == label(hints != 0);
+        okay = configureSidebarShortcuts(fixture.delivery, window, bindings, 2, !hints) == 0 &&
+            fixture.delivery.posted.size() == 1 &&
+            fixture.delivery.sequence > lastRetired && !fixture.delivery.claim(lastRetired) &&
+            controlText(GetDlgItem(window, navBaseID)) == label(hints != 0) && okay;
+        MSG message{};
+        while (!fixture.delivery.posted.empty() &&
+               PeekMessageW(&message, window, sidebarMessage, sidebarMessage, PM_REMOVE)) {
+            if (message.message == WM_QUIT) { PostQuitMessage(static_cast<int>(message.wParam)); okay = false; break; }
+            DispatchMessageW(&message);
+        }
+        okay = okay && fixture.delivery.posted.empty() && fixture.applied.showHints == (hints == 0) &&
+            controlText(GetDlgItem(window, navBaseID)) == label(hints == 0);
+        okay = configureSidebarShortcuts(fixture.delivery, window, bindings, 2, hints) == 0 &&
+            fixture.delivery.posted.size() == 1 && okay;
+        const UINT_PTR retired = fixture.delivery.sequence;
+        DestroyWindow(window);
+        okay = okay && !fixture.window && fixture.delivery.posted.empty() && !fixture.delivery.claim(retired);
+        lastRetired = retired;
+        const HWND invalidWindow = reinterpret_cast<HWND>(static_cast<INT_PTR>(-2));
+        okay = configureSidebarShortcuts(fixture.delivery, invalidWindow, bindings, 2, hints) == -1 &&
+            fixture.delivery.posted.empty() && okay;
+    }
+    UnregisterClassW(type.lpszClassName, instance);
+    return okay;
 }
 }
 
@@ -3085,7 +3294,19 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
     if (!window) {
         if (!outcome) outcome = jsti::fail(jsti::systemError("Creating native desktop window"), error, capacity);
     } else {
-        { std::lock_guard<std::mutex> lock(state.mutex); state.window = window; }
+        std::unique_ptr<SidebarBindings> initialSidebar;
+        std::unique_ptr<JSTIVisualDensity> initialDensity;
+        {
+            std::lock_guard<std::mutex> lock(state.mutex);
+            state.window = window;
+            initialSidebar = state.sidebarDelivery.claimInitial();
+            initialDensity = state.densityDelivery.claimInitial();
+        }
+        if (initialSidebar) state.sidebar = std::move(*initialSidebar);
+        initialSidebar.reset();
+        if (initialDensity) { visualDensity = *initialDensity; layout(window); }
+        initialDensity.reset();
+        applySidebarBindings(window);
         // A login launch starts minimised and leaves the focus where it is.
         ShowWindow(window, jsti::login::launchedAtLogin() ? SW_SHOWMINNOACTIVE : SW_SHOWDEFAULT);
         UpdateWindow(window);
@@ -3115,7 +3336,12 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
     if (visualStyles) DeactivateActCtx(0, visualStyles);
     state.displayedHistory.clear();
     if (registered) UnregisterClassW(type.lpszClassName, instance);
-    { std::lock_guard<std::mutex> lock(state.mutex); state.running = false; state.window = nullptr; }
+    {
+        std::lock_guard<std::mutex> lock(state.mutex);
+        state.running = false; state.window = nullptr;
+        state.sidebarDelivery.retire();
+        state.densityDelivery.retire();
+    }
     return outcome;
 }
 
@@ -3381,29 +3607,17 @@ int jsti_window_show_page(int page) {
 }
 
 int jsti_window_set_sidebar_shortcuts(const JSTISidebarShortcut *bindings, size_t count, int showHints) {
-    if (!bindings || count > 10 || (showHints != 0 && showHints != 1)) return -1;
-    auto update = std::make_unique<SidebarBindings>();
-    bool used[10]{};
-    for (size_t index = 0; index < count; ++index) {
-        const auto &binding = bindings[index];
-        std::wstring hint;
-        if (!binding.destination || binding.digit < 0 || binding.digit > 9 || used[binding.digit] ||
-            !binding.hint || !jsti::wide(binding.hint, hint) ||
-            hint != L"Ctrl+" + std::to_wstring(binding.digit)) return -1;
-        used[binding.digit] = true;
-        for (int page = 0; page < pageCount; ++page) {
-            if (std::strcmp(pageInfo[page].name, binding.destination) != 0) continue;
-            if (update->digits[page] != -1) return -1;
-            update->digits[page] = binding.digit;
-            update->hints[page] = hint;
-        }
-    }
-    update->showHints = showHints != 0;
-    std::lock_guard<std::mutex> lock(state.mutex);
-    if (!state.window ||
-        !PostMessageW(state.window, sidebarMessage, 0, reinterpret_cast<LPARAM>(update.get()))) return -1;
-    update.release();
-    return 0;
+    try {
+        std::lock_guard<std::mutex> lock(state.mutex);
+        return configureSidebarShortcuts(state.sidebarDelivery, state.window, bindings, count, showHints);
+    } catch (const std::exception &) { return -1; }
+}
+
+int jsti_window_set_visual_density(JSTIVisualDensity density) {
+    try {
+        std::lock_guard<std::mutex> lock(state.mutex);
+        return configureVisualDensity(state.densityDelivery, state.window, density);
+    } catch (const std::exception &) { return -1; }
 }
 
 int jsti_window_screenshot_tour(const char *directory, char *error, size_t capacity) {
@@ -3603,6 +3817,85 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     { std::lock_guard<std::mutex> lock(state.mutex); window = state.window; }
     if (!window || GetWindowThreadProcessId(window, nullptr) != GetCurrentThreadId()) {
         return jsti::fail("Window checks must run on the UI thread after READY.", error, errorCapacity);
+    }
+    if (!sidebarStartupSelfTest())
+        return jsti::fail("Sidebar pre-window retention, real control application or delivery ownership failed.",
+                          error, errorCapacity);
+    const JSTISidebarShortcut unknownSidebar[] = {{"unknown-page", 1, "Ctrl+1"}};
+    if (jsti_window_set_sidebar_shortcuts(unknownSidebar, 1, 1) != -1)
+        return jsti::fail("An unrecognized sidebar destination was accepted.", error, errorCapacity);
+    {
+        const JSTIVisualDensity saved = visualDensity;
+        JSTIVisualDensity normal = saved;
+        normal.compact = 0;
+        const JSTIVisualDensity compact{1, 8, 6, 8, 6, 6, 8, 30};
+        DensityDelivery startup;
+        bool okay = true;
+        for (const auto &density : {normal, compact}) {
+            okay = configureVisualDensity(startup, nullptr, density) == 0 && okay;
+            const auto *retained = startup.initial.get();
+            JSTIVisualDensity invalid = density;
+            invalid.compact = 2;
+            okay = configureVisualDensity(startup, nullptr, invalid) == -1 &&
+                startup.initial.get() == retained && okay;
+            auto admitted = startup.claimInitial();
+            okay = okay && admitted && admitted->compact == density.compact &&
+                admitted->page_padding == density.page_padding && !startup.initial;
+        }
+        const int originalPage = state.page;
+        HWND originalFocus = GetFocus();
+        const LRESULT font = SendDlgItemMessageW(window, transcriptID, WM_GETFONT, 0, 0);
+        HWND edit = CreateWindowExW(0, L"EDIT", L"Unchanged density draft", WS_CHILD | WS_VISIBLE,
+            0, 0, 120, 34, window, nullptr, GetModuleHandleW(nullptr), nullptr);
+        auto apply = [&](const JSTIVisualDensity &density) {
+            UINT_PTR token = 0;
+            {
+                std::lock_guard<std::mutex> lock(state.mutex);
+                if (configureVisualDensity(state.densityDelivery, window, density) != 0) return false;
+                token = state.densityDelivery.sequence;
+            }
+            SendMessageW(window, densityMessage, token, 0);
+            return true;
+        };
+        okay = okay && edit != nullptr && font != 0;
+        for (int page = 0; page < pageCount; ++page) {
+            showPage(window, page);
+            okay = apply(normal) && okay;
+            const auto baseline = placed;
+            const auto cards = frame.cards;
+            const RECT hero = frame.hero;
+            const RECT lastRow = placed.at(navBaseID + pageCount - 1);
+            okay = okay && frame.sidebar.right == scale(window, 232) &&
+                heightOf(placed.at(navBaseID)) == scale(window, 36);
+            if (edit) SetFocus(edit);
+            okay = apply(compact) && okay;
+            okay = okay && heightOf(placed.at(navBaseID)) == scale(window, 36) &&
+                placed.at(navBaseID + pageCount - 1).top < lastRow.top &&
+                SendDlgItemMessageW(window, transcriptID, WM_GETFONT, 0, 0) == font &&
+                GetFocus() == edit && controlText(edit) == L"Unchanged density draft";
+            if (hero.right > hero.left) {
+                okay = okay && hero.left == frame.sidebar.right + scale(window, 24) &&
+                    frame.hero.left == frame.sidebar.right + scale(window, 8);
+            }
+            for (const auto &card : frame.cards) {
+                const RECT body = cardBody(window, card.rect);
+                okay = okay && body.left - card.rect.left == scale(window, 8) &&
+                    body.top - card.rect.top == scale(window, 52) &&
+                    card.rect.bottom - body.bottom == scale(window, 8);
+            }
+            okay = apply(normal) && okay;
+            okay = okay && cards.size() == frame.cards.size() && EqualRect(&hero, &frame.hero);
+            for (size_t index = 0; index < cards.size() && index < frame.cards.size(); ++index)
+                okay = okay && EqualRect(&cards[index].rect, &frame.cards[index].rect);
+            for (const auto &control : baseline)
+                okay = okay && EqualRect(&control.second, &placed.at(control.first));
+        }
+        okay = apply(saved) && okay;
+        if (edit) DestroyWindow(edit);
+        showPage(window, originalPage);
+        if (originalFocus && IsWindowVisible(originalFocus)) SetFocus(originalFocus);
+        if (!okay) return jsti::fail("Layout density geometry, Normal restoration or editing focus failed.",
+                                     error, errorCapacity);
     }
     {
         const auto saved = state.sidebar;

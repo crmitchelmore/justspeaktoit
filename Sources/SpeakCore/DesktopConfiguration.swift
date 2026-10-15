@@ -6,6 +6,8 @@ public enum SpeechDefaults {
     public static let outputLanguage = "English"
     public static let liveStopGracePeriod = 0.0
     public static let recordingTailDuration = 0.5
+    public static let voiceCommandsEnabled = true
+    public static let clipboardInsertionTriggers = ""
     public static let showHUD = true
     public static let liveTranscriptHUD = true
     public static let shortErrors = false
@@ -42,6 +44,7 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
         public let defaultValue: AnyCodable
         public internal(set) var requiresHUDOverlay = false
         public internal(set) var requiresHandsFreeGuard = false
+        public internal(set) var enabledBy: String?
 
         public var serializedChoices: String? {
             guard case .choice(let choices) = kind else { return nil }
@@ -50,6 +53,10 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
     }
 
     public static let fields: [Field] = [
+        .init(key: ApplicationPreferenceKey.visualDensity.rawValue, title: "Layout Density",
+              group: "General", kind: .choice(AppVisualDensity.allCases.map {
+                  Choice(value: $0.rawValue, title: $0.displayName)
+              }), defaultValue: AnyCodable(.string(AppVisualDensity.normal.rawValue))),
         .init(key: ApplicationPreferenceKey.preferredLocale.rawValue,
               title: "Spoken language (automatic or locale, e.g. en_GB)",
               group: "Transcription", kind: .text, defaultValue: AnyCodable(.string("automatic"))),
@@ -96,6 +103,13 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
         .init(key: ApplicationPreferenceKey.showSidebarShortcutHints.rawValue, title: "Show sidebar shortcut hints",
               group: "General", kind: .boolean,
               defaultValue: AnyCodable(.bool(DesktopSidebarShortcut.showHintsByDefault))),
+        .init(key: ApplicationPreferenceKey.voiceCommandsEnabled.rawValue, title: "Enable voice commands",
+              group: "General", kind: .boolean, defaultValue: AnyCodable(.bool(SpeechDefaults.voiceCommandsEnabled))),
+        .init(key: ApplicationPreferenceKey.clipboardInsertionTriggers.rawValue,
+              title: "Clipboard triggers (comma-separated; adds to built-in phrases)",
+              group: "General", kind: .text,
+              defaultValue: AnyCodable(.string(SpeechDefaults.clipboardInsertionTriggers)),
+              enabledBy: ApplicationPreferenceKey.voiceCommandsEnabled.rawValue),
         .init(key: ApplicationPreferenceKey.showLiveTranscriptInHUD.rawValue, title: "Show live transcript in HUD",
               group: "General", kind: .boolean,
               defaultValue: AnyCodable(.bool(SpeechDefaults.liveTranscriptHUD)), requiresHUDOverlay: true),
@@ -129,6 +143,13 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
     ]
 
     public private(set) var values: [String: AnyCodable]
+
+    public var visualDensity: AppVisualDensity {
+        guard let density = AppVisualDensity(rawValue: text(ApplicationPreferenceKey.visualDensity.rawValue)) else {
+            preconditionFailure("Validated layout density is invalid.")
+        }
+        return density
+    }
 
     public init(values: [String: AnyCodable] = [:]) throws {
         var values = values
@@ -251,9 +272,8 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
 
     public var liveOptions: LiveClientOptions {
         LiveClientOptions(
-            keywords: MetaMuseVoiceTranscribe.keywords(from: text("transcriptionKeywords")),
-            assemblyAIKeyterms: text("assemblyAIKeyterms").split(separator: ",")
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty },
+            keywords: TranscriptionKeywordPolicy.words(from: text("transcriptionKeywords")),
+            assemblyAIKeyterms: TranscriptionKeywordPolicy.words(from: text("assemblyAIKeyterms")),
             modulate: .none, postStopFinalizeBudget: nil, stopGracePeriod: number("liveStopGracePeriod")
         )
     }

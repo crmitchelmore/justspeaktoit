@@ -39,6 +39,88 @@ modifier/editable-focus refusal and disabled/unmapped destinations. They require
 execution in the actual Win32/GTK shells; portable tests and Windows C-stub Swift
 graphs alone are not native UI or installed-package acceptance.
 
+Windows retains valid bindings and the exact hint flag before its HWND exists.
+Creation claims that owned snapshot under the window mutex and applies it before
+READY; the existing post-hotkey refresh still suppresses reserved chords.
+Live updates retain FIFO asynchronous delivery and posting errors. Mutex-owned,
+monotonically identified payloads are released on delivery or teardown, so a
+destroyed window cannot leave an owned message pointer or reuse an old token.
+Unknown destinations, duplicate destinations/digits and malformed chords fail
+without changing the retained/applied configuration. The C ABI reports allocation
+or synchronization exceptions as its existing failure result.
+
+The existing native self-test now exercises the production delivery/validation
+helpers with both pre-window hint values, actual Win32 button creation, live
+message dispatch, failed posting and queued-update destruction. Its ordinary
+startup/settings path is not skipped; fixture compilation alone does not qualify
+that runtime path or erase earlier failed native runs.
+
+## Native layout density
+
+General's **Layout Density** choice uses the existing `visualDensity` key and
+canonical `AppVisualDensity` cases, names and metrics. The enum, geometry and
+API-key query helpers are portable; only Dynamic Type and environment APIs
+require SwiftUI. Apple metrics and behavior are unchanged.
+
+Absent means Normal without manufacturing a stored value. Only exact `normal`
+and `compact` strings are valid. Save, restart and portable JSON import/export
+use the sole `DesktopConfiguration` value and retain unrelated unsupported
+preferences. Selected-ID/kind replacement preserves uncovered density and
+resets an explicitly covered clear to absent/Normal. This covers the canonical
+planner and executable configuration projection, not a new native ZIP settings
+application: that archive UI still inspects backups without applying settings.
+
+Normal retains incumbent native geometry. Compact reduces page margins, card
+padding, section gaps and sidebar whitespace without scaling fonts or controls.
+Windows preserves its 36-DIP pointer-target baseline and removes inter-row gaps;
+GTK retains at least 44 logical pixels for sidebar targets. Native editor heights,
+DPI scaling, theme, shortcuts and focused text are unchanged. New GTK History
+rows inherit scoped compact padding.
+
+Windows retains pre-HWND density with the same mutex-owned, tokenized delivery
+policy as sidebar bindings. The UI thread applies the initial projection before
+READY, applies live messages asynchronously, and releases queued owners on
+teardown. Linux uses its existing owned pre-window/UI-context update queue.
+Native fixtures measure production layout functions, unchanged Normal geometry,
+Compact reductions, startup retention and editing focus. Fixture compilation
+does not establish runtime, multi-DPI or installed-product acceptance.
+## Clipboard voice commands
+
+General preferences expose `voiceCommandsEnabled` (default true, as on Mac) and
+`clipboardInsertionTriggers` (default empty, comma-separated). Both live solely
+in `DesktopConfiguration`; strict boolean/string validation also applies to
+portable import. Clearing custom phrases does not remove built-in commands.
+Native Win32 checkboxes/edit fields and GTK switch/entry rows retain custom
+phrases while the switch disables the entry. These are General/Output behavior,
+not shortcuts or permissions to control other applications.
+
+Successful batch recordings, imported audio, transcription retries and completed
+live recordings use the canonical `VoiceCommandProcessor`: expand clipboard
+commands, apply vocabulary, then optionally post-process. The provider transcript
+remains the Original variant. The expanded/corrected snapshot is saved before
+remote polish, and subsequent History selection, Copy and Export use saved
+variants without consulting the clipboard again. A transcription retry processes
+the new provider result once with a fresh clipboard snapshot, never its earlier
+expanded text. Live previews and failed live recovery text do not expand.
+Comparison results remain raw and never read the clipboard.
+
+As on Mac, **enabled remote post-processing receives the expanded clipboard text**
+when a trigger is spoken. Clipboard contents are not added to transcription
+requests, keyword hints or logs. Disabling voice commands, non-trigger text and
+empty transcripts do not read the clipboard. Empty/non-text clipboards leave the
+trigger unchanged. Read failures/timeouts retain raw text and audio, visibly fail
+that attempt and suppress automatic output; no clipboard contents or native-owner
+error details enter the failure message.
+
+Windows reads bounded CF_UNICODETEXT off the UI thread. GTK reads an asynchronous
+UTF-8 stream, capped at 1 MiB, with a 2.5-second native cancellation budget.
+The Host waits at most three seconds and cancels its wait on Cancel/close even
+when a native owner does not cooperate. Reads never write to the clipboard,
+request a portal session or synthesize keys. X11 uses the display selection;
+Wayland is limited to the clipboard access the compositor grants this client:
+denial is reported, not bypassed or described as supported background access.
+Portable fake tests and native header/syntax checks do not qualify real clipboard
+owners, Win32 UI, GTK/X11/Wayland runtime, accessibility or installed packages.
 ## Generated-speech coordination
 
 `SpeechGenerationDefaults` defines the Mac's existing `ttsAutoPlay` (true) and
@@ -283,11 +365,61 @@ Imports capture the language and retries keep the original recording's language.
 
 Language accepts Automatic or a provider locale, including existing custom locale
 identifiers not listed in the shared catalogue. Model capability gates still
-apply. Keyword bias is currently wired to xAI dedicated STT streaming; AssemblyAI
-projects the same shared list into its keyterms option. Stop grace is wired to AssemblyAI and
-Cartesia. Other live routes and batch providers do **not** gain keyword/grace
-support merely because these fields exist. Additional provider wiring belongs
-in the canonical streaming factory, not a platform-specific list.
+apply. Shared keyword delivery follows the executable route table below.
+Stop grace remains wired to AssemblyAI and Cartesia; vocabulary forwarding does
+not change readiness, finalization, locale, annotations or post-processing.
+
+Global terms are comma/newline separated, trimmed and stably deduplicated
+case-insensitively. Provider limits are applied by shared wire clients, not
+Meta's narrower parser applied globally. A recording freezes its keyword/options
+snapshot with its profile, before startup suspends; changing preferences cannot
+replace that snapshot. Imports and retries take the current active list once at
+attempt admission, then combine it with the existing personal-lexicon keyword
+projection. An explicit empty list stays empty; preserved recovery text is never
+an implicit fallback. Explicit AssemblyAI options remain independent of generic
+keywords for both batch and live requests, including an explicit empty override.
+
+| Existing desktop route | Batch vocabulary | Live vocabulary |
+|---|---|---|
+| OpenAI direct transcription | Glossary `prompt` for Whisper-1/GPT transcription, not diarize | Existing GA transcription `prompt`, only models accepting it; no Whisper prompt |
+| Groq Whisper | Shared compatible-client glossary `prompt` | No desktop route |
+| Deepgram | Repeated `keyterm` for Nova-3; `keywords` for legacy Nova/Enhanced/Base | Repeated `keyterm` for Nova-3/Flux |
+| AssemblyAI | Pro `keyterms_prompt`; Universal-2 `word_boost` | Existing `keyterms_prompt`, separate provider options preserved |
+| ElevenLabs Scribe v2 | Repeated multipart `keyterms` | Repeated query `keyterms` |
+| Speechmatics | `transcription_config.additional_vocab[].content` | Same vocabulary in existing StartRecognition config |
+| Soniox | `context.terms` | `context.terms` in existing session config |
+| Mistral Voxtral Mini latest | Repeated multipart `context_bias` | Explicit limitation; no qualified shared vocabulary mapping |
+| Meta Muse | Existing request `keywords` | Existing session `keywords` |
+| Dedicated xAI STT | Existing repeated multipart `keyterm` | Existing repeated query `keyterm` |
+| Azure Speech | Existing Fast Transcription `phraseList.phrases` | Voice Live: explicit limitation; no qualified shared mapping |
+| Gemini | **Not sent**: preserve word timestamps/diarization, mutually exclusive with custom vocabulary | Existing `customVocabulary` mapping |
+| Cartesia, Rev.ai, Gladia, Modulate, other file/OpenRouter routes | Explicit limitation where a desktop route exists | Explicit limitation where a desktop route exists |
+
+Unknown/unsupported mappings do not receive speculative request fields.
+Scribe Medical and other unmatched model variants retain an explicit limitation,
+rather than inheriting Scribe v2's vocabulary fields by provider name alone.
+Unsupported keyword delivery is surfaced in recording status/History notes;
+live notices use the effective run options after the lexicon merge, including
+lexicon-only terms, and persist with that run without rereading preferences.
+Normal transcription remains available. Gladia's custom vocabulary is
+post-transcription phoneme correction, not an acoustic glossary, and is not
+silently enabled. Vocabulary does not couple to clipboard/voice-command expansion.
+
+The app conservatively bounds OpenAI/Groq glossary text to 224 UTF-8 bytes.
+Individually oversized terms are omitted before the usable-term count/budget;
+valid terms retain prefix truncation when the combined budget is exhausted.
+Deepgram is bounded to 100 terms and a conservative 500-byte budget (without a provider
+tokenizer); AssemblyAI to 100 terms of at most 50 characters; Speechmatics to
+100 terms of at most 100 characters; Soniox to 100 terms/100 characters and
+7,500 UTF-8 term bytes; Mistral to 100 terms/100 characters. ElevenLabs uses
+at most 100 terms, each fewer than 50 characters, at most five words and without
+`<>{}[]\`; terms over those bounds are omitted. ElevenLabs documents a 20%
+keyterm surcharge; the app stays below its >100-term billing threshold.
+Mistral context bias is optimized for English; other languages are experimental.
+Existing xAI, Azure, Meta and Gemini client bounds remain authoritative.
+These are synthetic shared-wire/host contracts, **not live provider API, native
+Windows/ARM/Linux capture, Apple, device or installed-package acceptance**.
+No credential, audio-network probe or native activation is part of this slice.
 
 The keyword and legacy AssemblyAI fields are mirrors of one shared list, as on
 Mac. `TranscriptionKeywordPolicy` is the canonical pure reconciliation policy
@@ -413,7 +545,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | Mac key | Windows / Linux outcome | Evidence or remaining work |
 |---|---|---|
 | appearance | Equivalent / Equivalent | General; system/light/dark native schemes |
-| visualDensity | Missing / Missing | Fixed native layout, no density editor |
+| visualDensity | Wired; native acceptance pending / Wired; native acceptance pending | General Normal/Compact choice; strict shared configuration, JSON transfer and native page/card/sidebar spacing |
 | transcriptionMode | Equivalent / Equivalent | Models; Remote Batch/Live and Local batch |
 | liveTranscriptionModel | Partial / Partial | Models; implemented transport routes only; Apple Speech and unavailable providers are not substitutes |
 | batchTranscriptionModel | Equivalent / Equivalent | Models; independent remembered batch model |
@@ -476,9 +608,9 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | livePolishMinDeltaChars | Missing / Missing | No live-polish delta threshold |
 | livePolishTailWindowChars | Missing / Missing | No live-polish tail rewriting |
 | skipPostProcessingWithLivePolish | Missing / Missing | No live-polish pipeline |
-| voiceCommandsEnabled | Missing / Missing | No voice-command processing |
+| voiceCommandsEnabled | Implemented, native acceptance pending / Implemented, native acceptance pending | General toggle; canonical expansion before vocabulary and optional polish |
 | streamingInsertionEnabled | Missing / Missing | Final transcript insertion only |
-| clipboardInsertionTriggers | Missing / Missing | No keyword-controlled clipboard insertion |
+| clipboardInsertionTriggers | Implemented, native acceptance pending / Implemented, native acceptance pending | General trigger entry; bounded native snapshot, canonical matching, no History re-expansion |
 | enableSendToMac | Partial / Partial | iCloud web History sync is not Send-to-Mac transport/pairing |
 | enableAutomationServer | Equivalent / Missing | Automation; Windows per-user named pipe, Linux toggle only |
 | pasteRemoteTranscriptsAtCursor | Missing / Missing | No remote transcript delivery preference |
@@ -488,7 +620,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | recordingSoundProfile | Native qualified / Native qualified | Canonical four profiles + owned preload replacement and explicit previews; all eight production AACs decoded on Windows/Linux |
 | recordingSoundVolume | Native qualified / Native qualified | Strict 0...1 field + Mac volume-squared gain; native tests and queue bounds passed; installed-package acceptance pending |
 | assemblyAIKeyterms | Wired / Wired | Config + options-bearing live factory; provider enforces vocabulary bounds |
-| transcriptionKeywords | Partial / Partial | Config; xAI STT live only here, other provider/batch forwarding remains |
+| transcriptionKeywords | Route-dependent / Route-dependent | Shared immutable recording snapshot, batch/import/retry and live delivery below; unsupported routes report a limitation |
 | transcriptionKeywordsLastReconciled | Wired / Wired | Shared `TranscriptionKeywordPolicy` + Config; unchanged-mirror/deliberate-clear reconciliation, durable last mirror |
 | recoveredTranscriptionKeywords | Wired / Wired | Config; native selected-edit recovery with stale-selection and atomic-write guards |
 | assemblyAIIgnoredPronunciationTerms | Missing / Missing | No pronunciation keyword-suppression editor |

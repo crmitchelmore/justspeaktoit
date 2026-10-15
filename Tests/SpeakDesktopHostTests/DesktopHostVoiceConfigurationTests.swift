@@ -86,12 +86,15 @@ final class DesktopHostVoiceConfigurationTests: XCTestCase {
         let selected = try XCTUnwrap(DesktopVoiceOutputSettings.voices.first)
         await controller.selectVoiceOutput(selected)
         var entries = try await controller.configuration().entries
-        entries[0] = "fr_FR"
+        let localeIndex = try XCTUnwrap(DesktopConfiguration.fields.firstIndex { $0.key == "preferredLocale" })
+        entries[localeIndex] = "fr_FR"
         try await controller.saveConfiguration(entries)
         let saved = await controller.voiceOutputSettings()
         XCTAssertEqual(saved.generationOptions, .init(autoPlay: false, saveToRecordings: true))
         XCTAssertEqual(saved.voiceID, selected.id)
         XCTAssertEqual(entries.count, DesktopConfiguration.fields.count)
+        let configuration = try await controller.configuration()
+        XCTAssertEqual(configuration.language, "fr_FR")
     }
 
     func testInvalidImportOrWriteFailure_IsAtomicAcrossVoiceAndDictation() async throws {

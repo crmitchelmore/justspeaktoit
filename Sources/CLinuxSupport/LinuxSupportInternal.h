@@ -86,6 +86,8 @@ struct _cairo;
 void jsti_brand_icon_paint(struct _cairo *cr, double size);
 /* A scrolling page with centred content; `*content` receives its column. */
 struct _GtkWidget *jsti_page_new(struct _GtkWidget **content);
+void jsti_visual_density_apply(struct _GtkWidget *root, const JSTIVisualDensity *density);
+int32_t jsti_visual_density_self_test(struct _GtkWidget *root);
 /* A gradient header. `variant` is NULL (brand), "voice" or "settings".
  * `*chips` receives the row for jsti_chip_new; `*trailing` the top-right slot. */
 struct _GtkWidget *jsti_hero_new(const char *variant, const char *title, const char *subtitle,

@@ -95,6 +95,8 @@ typedef struct JSTIConfigurationField {
     /* Optional newline-separated choices: raw value, tab, display title. */
     const char *choices;
     int32_t requires_hands_free_guard;
+    /* Zero: independent. Otherwise the 1-based index of a boolean enabling field. */
+    int32_t enabled_by_field;
 } JSTIConfigurationField;
 typedef int32_t (*JSTIConfigurationCallback)(int32_t action, const char *const *values, size_t count,
                                             void *context, char *error, size_t capacity);
@@ -219,6 +221,13 @@ typedef struct {
     const char *hint;
 } JSTISidebarShortcut;
 int32_t jsti_window_set_sidebar_shortcuts(const JSTISidebarShortcut *bindings, size_t count, int32_t show_hints);
+
+typedef struct {
+    int32_t compact;
+    int32_t page_padding, section_spacing, card_padding, content_spacing, inline_spacing, group_spacing;
+    int32_t minimum_row_height;
+} JSTIVisualDensity;
+int32_t jsti_window_set_visual_density(JSTIVisualDensity density);
 /* variant: 0 processed, 1 original, -1 none. */
 int32_t jsti_window_set_history_presentation(
     const char *record_id, int32_t variant, int32_t switchable, const char *text, const char *status);
@@ -266,6 +275,9 @@ int32_t jsti_clipboard_restore(const char *text, uint64_t ownership, char *error
 int32_t jsti_clipboard_ownership_self_test(char *error, size_t error_capacity);
 /* Returns 1 when the clipboard holds no text. `*text` is malloc'ed. */
 int32_t jsti_clipboard_read(char **text, char *error, size_t error_capacity);
+/* Read-only, bounded GTK async stream with a 2.5 second cancellation budget.
+ * Must be called off the GTK thread. Returns 1 for non-text. Free with jsti_free. */
+int32_t jsti_voice_command_clipboard_read(char **text, char *error, size_t error_capacity);
 void jsti_free(void *pointer);
 
 /* ------------------------------------------------------------- credentials */

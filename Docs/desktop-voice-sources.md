@@ -1,6 +1,38 @@
 # Desktop Voice Output sources and WAV export
 
 Windows and Linux remain developer previews, not macOS-parity releases.
+
+## Favorite voices
+
+Both native pickers retain **Voice** (all available voices) and add a separate
+**Favorites** quick picker plus **Add to favorites / Remove from favorites**.
+Windows previews either picker choice and saves the voice only with **Apply**;
+favorite edits save immediately without changing the selected provider/voice.
+Linux applies an explicitly chosen row in settings order. Favorite actions and
+picker callbacks carry a copied stable ID, not the position in a filtered list.
+Unavailable selections cannot be favorited or silently replaced.
+
+The sole persisted Voice model owns `ttsFavoriteVoices`, using the Mac's ordered
+string-array representation and provider-prefixed IDs. Deepgram uses its canonical
+`providerVoiceID` here, not the unprefixed synthesis ID. Transfer retains unknown,
+retired, case-sensitive and duplicate entries verbatim; the visible projection
+deduplicates only available entries in saved order. Unsupported providers are not
+enabled by importing favorites. Account voices need their existing in-memory
+listing evidence; restarting does not fetch a list or a key automatically.
+Partial/unrelated imports retain favorites, an explicit empty array clears them,
+and legacy configuration mirrors move into the Voice model at startup. A live
+Voice list wins over a conflicting mirror. Failed writes leave the saved model
+unchanged and report an error. Favorite-only changes do not rotate credential
+selection epochs or reset provider-key forms.
+
+Targeted synthetic tests cover transfer, restart, stale IDs, identity routing and
+write failures. The native self-tests cover Favorites order, selection and
+add/remove/empty-state controls without provider or audio operations. Header
+compilation and synthetic widget/component checks are not installed/packaged
+application, native Swift-host, hardware or full-parity acceptance.
+
+## Synthesis and sources
+
 Voice Output uses shared Deepgram, Azure neural, Azure MAI, xAI and Cartesia REST speech contracts,
 canonical catalogue projections and native playback. `DesktopSpeechVoice` exposes only
 routes the host executes, not every provider in the macOS catalogue. The seven

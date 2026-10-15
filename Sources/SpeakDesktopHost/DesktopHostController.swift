@@ -143,6 +143,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package var selectedHistoryID: UUID?
     package var transcriptVariant: DesktopTranscriptVariant = .processed
     var transcriptionTask: Task<TranscriptionResult, Error>?
+    var voiceCommandTask: Task<String?, Error>?
     var postProcessingTask: Task<DesktopPostProcessing.Outcome, Error>?
     package var microphoneWarning: String?
     var cancellationRequested = false
@@ -211,6 +212,17 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
             loadedSettings = try JSONDecoder().decode(Settings.self, from: Data(contentsOf: settingsURL))
         } else {
             loadedSettings = Settings()
+        }
+        let favoriteKey = VoiceFavoritePreference.key
+        if Platform.voiceConfigurationKeys.contains(favoriteKey),
+           let configuration = loadedSettings.configuration, configuration.values[favoriteKey] != nil {
+            let exported = try Platform.exportVoiceConfiguration(loadedSettings.voiceOutput, over: configuration)
+            var voice = loadedSettings.voiceOutput
+            _ = try Platform.importVoiceConfiguration(
+                from: DesktopConfiguration(values: exported.values.filter { $0.key == favoriteKey }), into: &voice)
+            loadedSettings.voiceOutput = voice
+            loadedSettings.configuration = try DesktopConfiguration(
+                values: configuration.values.filter { $0.key != favoriteKey })
         }
         modelCatalog = try Self.prepareModelCatalog(directory: directory, settings: &loadedSettings)
         if let processing = loadedSettings.postProcessing {

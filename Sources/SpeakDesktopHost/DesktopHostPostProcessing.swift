@@ -60,11 +60,11 @@ extension DesktopHostController {
             )
             update("Polishing transcript… The original is saved in History.", state: 2)
             hud(record.id, .postProcessing)
+            let effects = effects
             let task = Task {
                 try Task.checkCancellation()
-                return try await DesktopPostProcessing.process(
-                    rawText: input, options: options, apiKey: key,
-                    lexiconDirectives: directives, lexiconContextTags: tags
+                return try await effects.postProcess(
+                    text: input, options: options, key: key, directives: directives, tags: tags
                 )
             }
             postProcessingTask = task

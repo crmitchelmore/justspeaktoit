@@ -57,9 +57,10 @@ extension DesktopHostController {
     /// Starts the live session and capture for an already-saved recording,
     /// saving a startup-failure record and rethrowing when either step fails.
     private func beginLiveRecording(_ start: LiveRecordingStart) async throws {
-        let (key, profile, id, record, file, rate) = (
-            start.key, start.profile, start.id, start.record, start.file, start.rate
+        let (key, profile, id, file, rate) = (
+            start.key, start.profile, start.id, start.file, start.rate
         )
+        var record = start.record
         let (target, deviceID, textOutput, trigger, handsFree) = (
             start.target, start.deviceID, start.textOutput, start.trigger, start.handsFree
         )
@@ -70,8 +71,10 @@ extension DesktopHostController {
             try await saveRecord(record)
             guard !closed, handsFree == nil || handsFreeRun?.id == handsFree?.id else { throw CancellationError() }
             live = try await makeLiveSession(
-                model: profile.modelIdentifier, key: key, id: id, language: profile.language
+                model: profile.modelIdentifier, key: key, id: id, language: profile.language,
+                options: profile.transcriptionOptions
             )
+            record = try await retainingLiveKeywordNotice(live?.keywordLimitation, in: record)
             guard !closed, handsFree == nil || handsFreeRun?.id == handsFree?.id else { throw CancellationError() }
             live?.start()
             let context = captureContext(file: file, live: live, rate: rate, id: id, handsFree: handsFree != nil)
@@ -99,6 +102,16 @@ extension DesktopHostController {
             try await saveStartupFailure(error, record: record, file: file)
             throw error
         }
+    }
+
+    private func retainingLiveKeywordNotice(
+        _ notice: String?, in original: DesktopRecordingStore.Record
+    ) async throws -> DesktopRecordingStore.Record {
+        guard let notice, !(original.profileNotes ?? []).contains(notice) else { return original }
+        var record = original
+        record.profileNotes = (record.profileNotes ?? []) + [notice]
+        try await saveRecord(record)
+        return record
     }
 
     private func captureContext(

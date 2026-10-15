@@ -31,7 +31,6 @@ let portableCoreBuild = true
 let appleCoreSources: [String] = [
     "AlibabaSpeechConfigurationFields.swift",
     "AppGroupAvailability.swift",
-    "AppVisualDensity.swift",
     "AppleSpeechAnalyzerLiveSession.swift",
     "AppleSpeechAnalyzerTranscriber.swift",
     "AppleSpeechAssets.swift",

@@ -36,8 +36,12 @@ extension SonioxLiveClient {
     /// `sample_rate` and `num_channels`; `language_hints` is optional and, when
     /// present, carries the ISO-639-1 code the provider expects. The API key is
     /// part of this frame and must never be logged.
-    static func configJSON(apiKey: String, model: String, language: String?, sampleRate: Int) -> String? {
-        let payload = configPayload(apiKey: apiKey, model: model, language: language, sampleRate: sampleRate)
+    static func configJSON(
+        apiKey: String, model: String, language: String?, sampleRate: Int, keywords: [String] = []
+    ) -> String? {
+        let payload = configPayload(
+            apiKey: apiKey, model: model, language: language, sampleRate: sampleRate, keywords: keywords
+        )
         guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) else {
             return nil
         }
@@ -46,7 +50,9 @@ extension SonioxLiveClient {
 
     /// Broken out from `configJSON` so tests can assert the exact configuration
     /// fields (model, sample rate, language hint) without decoding JSON.
-    static func configPayload(apiKey: String, model: String, language: String?, sampleRate: Int) -> [String: Any] {
+    static func configPayload(
+        apiKey: String, model: String, language: String?, sampleRate: Int, keywords: [String] = []
+    ) -> [String: Any] {
         var payload: [String: Any] = [
             "api_key": apiKey,
             "model": model,
@@ -57,6 +63,8 @@ extension SonioxLiveClient {
         if let language = TranscriptionLanguageCatalog.providerLanguage(for: language ?? "") {
             payload["language_hints"] = [language.localeLanguageCode]
         }
+        let terms = TranscriptionKeywordPolicy.budgeted(keywords, maximumBytes: 7_500)
+        if !terms.isEmpty { payload["context"] = ["terms": terms] }
         return payload
     }
 

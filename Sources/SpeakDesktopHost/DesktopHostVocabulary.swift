@@ -55,7 +55,7 @@ extension DesktopHostController {
 
     func applyVocabulary(_ original: DesktopRecordingStore.Record) async throws -> DesktopRecordingStore.Record {
         var record = original
-        guard let text = record.originalText else { return record }
+        guard let text = record.correctedText ?? record.originalText else { return record }
         let vocabulary = try await vocabularyStore()
         let application = await vocabulary.apply(text)
         record.correctedText = application.result.transformedText

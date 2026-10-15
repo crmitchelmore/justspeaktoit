@@ -21,6 +21,7 @@ final class FakeSpeech: @unchecked Sendable {
     private var log: [String] = []
     private var requests: [Spoken] = []
     private var gate = Gate(open: true)
+    private var playbackHook: (@Sendable () async throws -> Void)?
 
     var events: [String] { lock.withLock { log } }
     var spoken: [Spoken] { lock.withLock { requests } }
@@ -33,10 +34,15 @@ final class FakeSpeech: @unchecked Sendable {
             log = []
             requests = []
             gate = Gate(open: !holdingSegments)
+            playbackHook = nil
         }
     }
 
     func releaseSegments() { lock.withLock { gate }.release() }
+
+    func setPlaybackHook(_ hook: @escaping @Sendable () async throws -> Void) {
+        lock.withLock { playbackHook = hook }
+    }
 
     func begin(_ speech: FakePlayback.Speech) -> FakePlayback.Speech {
         lock.withLock {
@@ -52,12 +58,16 @@ final class FakeSpeech: @unchecked Sendable {
 
     /// Refuses segments of an ended speech, and stops when its task is cancelled.
     func play(_ speech: FakePlayback.Speech) async throws -> TimeInterval {
-        let gate = try lock.withLock { () -> Gate in
+        let (gate, hook) = try lock.withLock {
             guard active == speech else { throw CancellationError() }
             log.append("play")
-            return self.gate
+            return (self.gate, playbackHook)
         }
-        await gate.pass()
+        if let hook {
+            try await hook()
+        } else {
+            await gate.pass()
+        }
         try Task.checkCancellation()
         guard lock.withLock({ active == speech }) else { throw CancellationError() }
         return 1

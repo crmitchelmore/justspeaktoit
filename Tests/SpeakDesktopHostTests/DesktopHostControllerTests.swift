@@ -116,6 +116,54 @@ final class DesktopHostControllerTests: XCTestCase {
         ))
     }
 
+    func testRetryCancelledBeforeNewResultKeepsOldTranscriptAndAudioOnlyMessage() async throws {
+        await controller.toggle(
+            target: nil, modelIndex: batchIndex, deviceID: "", targetExecutablePath: nil, textOutput: FakeTextOutput()
+        )
+        await controller.toggle(
+            target: nil, modelIndex: batchIndex, deviceID: "", targetExecutablePath: nil, textOutput: FakeTextOutput()
+        )
+        let original = try await records()
+        let record = try XCTUnwrap(original.first)
+        XCTAssertEqual(record.result?.text, "Synthetic transcript")
+
+        // Retry with effects that only resolve once cancelled, so THIS invocation never
+        // receives a new provider result even though the original record already has one.
+        // A recreated controller never publishes `.transcribing` HUD for a retry (it has no
+        // `hudRecording`; see `DesktopHostHUD.hud:32-34`), so wait on the gated effects'
+        // own provider-entry signal instead of HUD state to prove the real path was reached.
+        let retryEffects = GatedEffects(gate: Gate(open: false))
+        await controller.close()
+        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: retryEffects)
+        await controller.markReadyForSelfTest()
+        // markReadyForSelfTest does not discover disk History; index the already-saved
+        // record explicitly so retryHistory can find it (as other History tests do).
+        await controller.indexHistory(record)
+        let retrying = Task { await self.controller.retryHistory(record.id.uuidString) }
+        try await waitFor("retry transcription to start") { retryEffects.entered.isOpen }
+        await controller.cancelTranscription()
+        await retrying.value
+        let saved = try await records()
+        let retried = try XCTUnwrap(saved.first)
+        XCTAssertEqual(retried.id, record.id, "retrying must update the original record, not create a new one")
+        XCTAssertEqual(retried.audioFilename, record.audioFilename, "the original audio file must be preserved")
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: directory.appendingPathComponent("History")
+                    .appendingPathComponent(retried.audioFilename).path
+            ),
+            "the retained audio file must still exist on disk"
+        )
+        XCTAssertEqual(
+            retried.result?.text, "Synthetic transcript",
+            "cancelling before this invocation's result arrives must not lose the prior transcript"
+        )
+        XCTAssertEqual(
+            retried.failure, "Transcription cancelled. Audio retained.",
+            "a stale original.result must not be mistaken for a result received by this invocation"
+        )
+    }
+
     func testClosingWhileRecordingKeepsTheAudio() async throws {
         await controller.toggle(
             target: nil, modelIndex: batchIndex, deviceID: "", targetExecutablePath: nil, textOutput: FakeTextOutput()

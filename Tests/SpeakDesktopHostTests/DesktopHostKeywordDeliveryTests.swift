@@ -1,0 +1,241 @@
+import Foundation
+import XCTest
+import SpeakCore
+import SpeakDesktop
+@testable import SpeakDesktopHost
+
+final class DesktopHostKeywordDeliveryTests: XCTestCase {
+    func testRecordingSnapshotImportRetryAndExplicitClearReachTheRealHostRequest() async throws {
+        FakeLog.shared.reset()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let effects = KeywordDeliveryEffects()
+        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        await controller.markReadyForSelfTest()
+        try await saveWords("Before", controller: controller)
+        let captured = await controller.resolvedProfile(executablePath: nil)
+        let model = captured.modelIdentifier
+        let index = try XCTUnwrap(DesktopHostModels.all.firstIndex { $0.id == model })
+        let credential = try XCTUnwrap(DesktopHostModels.provider(for: model)).apiKeyIdentifier
+        FakeLog.shared.setKey("synthetic", name: credential)
+        _ = try await controller.vocabularyEvent(kind: 0, payload: DesktopVocabularyWire.encode([
+            "save", "", "Lexicon", "Canonical", "Lexicon", "automatic", "", "high", ""
+        ]))
+        try await saveWords("After", controller: controller)
+        try await controller.startRecording(
+            target: nil, deviceID: "", profile: captured, textOutput: FakeTextOutput()
+        )
+        await controller.toggle(
+            target: nil, modelIndex: index, deviceID: "", targetExecutablePath: nil, textOutput: FakeTextOutput()
+        )
+        XCTAssertEqual(effects.requests.first?.keywords, ["Before", "Canonical"])
+        XCTAssertEqual(effects.requests.first?.language, captured.language)
+        let store = controller.store
+        let records = try await store.records()
+        let record = try XCTUnwrap(records.first)
+        let audio = try await store.audioURL(for: record)
+        await controller.importAudio(path: audio.path, modelIndex: index)
+        XCTAssertEqual(effects.requests.last?.keywords, ["After", "Canonical"])
+        try await saveWords("", controller: controller)
+        await controller.retryHistory(record.id.uuidString)
+        XCTAssertEqual(effects.requests.last?.keywords, ["Canonical"])
+        let retried = try await store.record(id: record.id)
+        XCTAssertEqual(retried.originalText, "Synthetic transcript")
+        XCTAssertEqual(effects.requests.count, 3)
+        await controller.close()
+    }
+
+    func testCapturedLiveOptionsReachEffectsEvenAfterConfigurationChanges() async throws {
+        FakeLog.shared.reset()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let effects = KeywordDeliveryEffects()
+        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        try await saveWords("Captured", controller: controller)
+        let profile = await controller.resolvedProfile(executablePath: nil)
+        try await saveWords("New configuration", controller: controller)
+        _ = try await controller.makeLiveSession(
+            model: XAISpeechToText.liveCatalogID, key: "synthetic", id: UUID(),
+            options: profile.transcriptionOptions
+        )
+        XCTAssertEqual(effects.options.last?.keywords, ["Captured"])
+        XCTAssertEqual(effects.options.last?.assemblyAIKeyterms, ["Captured"])
+        await controller.close()
+    }
+
+    func testUnsupportedRouteNoticeIsRetainedThenRemovedOnAnExplicitClearRetry() async throws {
+        FakeLog.shared.reset()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let effects = KeywordDeliveryEffects()
+        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        await controller.markReadyForSelfTest()
+        let model = CartesiaBatchClient.catalogID
+        let index = try XCTUnwrap(DesktopHostModels.all.firstIndex { $0.id == model })
+        let credential = try XCTUnwrap(DesktopHostModels.provider(for: model)).apiKeyIdentifier
+        FakeLog.shared.setKey("synthetic", name: credential)
+        let audio = root.appendingPathComponent("synthetic.wav")
+        try XCTUnwrap(PCMWaveWriter.wavData(pcm: Data([1, 0, 2, 0]), sampleRate: 16_000)).write(to: audio)
+        try await saveWords("Global", controller: controller)
+        await controller.importAudio(path: audio.path, modelIndex: index)
+        let store = controller.store
+        let records = try await store.records()
+        let record = try XCTUnwrap(records.first)
+        let notice = try XCTUnwrap(DesktopTranscription.keywordLimitation(model: model))
+        XCTAssertTrue(record.profileNotes?.contains(notice) == true)
+        try await saveWords("", controller: controller)
+        await controller.retryHistory(record.id.uuidString)
+        let retried = try await store.record(id: record.id)
+        XCTAssertFalse(retried.profileNotes?.contains(notice) == true)
+        XCTAssertEqual(effects.requests.last?.keywords, [])
+        await controller.close()
+    }
+
+    func testAssemblyBatchSnapshotHonorsIndependentOverrideAndExplicitEmpty() async throws {
+        FakeLog.shared.reset()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let effects = KeywordDeliveryEffects()
+        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        let model = try XCTUnwrap(DesktopTranscription.batchModels.first { $0.id.hasPrefix("assemblyai/") }).id
+        let credential = try XCTUnwrap(DesktopHostModels.provider(for: model)).apiKeyIdentifier
+        FakeLog.shared.setKey("synthetic", name: credential)
+        let audio = root.appendingPathComponent("History/fixture.wav")
+        try XCTUnwrap(PCMWaveWriter.wavData(pcm: Data([1, 0, 2, 0]), sampleRate: 16_000)).write(to: audio)
+        for words in [["Explicit"], []] {
+            let record = DesktopRecordingStore.Record(
+                id: UUID(), audioFilename: audio.lastPathComponent, modelIdentifier: model
+            )
+            let profile = DesktopProfileSession.defaults(modelIdentifier: model, postProcessing: .init())
+                .capturingTranscriptionOptions(.init(keywords: ["Global"], assemblyAIKeyterms: words))
+            await controller.transcribe(record, duration: 1, output: nil, profile: profile)
+            XCTAssertEqual(effects.requests.last?.keywords, words)
+        }
+        await controller.close()
+    }
+
+    private func saveWords(
+        _ words: String, controller: DesktopHostController<FakePlatform>
+    ) async throws {
+        var entries = try await controller.configuration().entries
+        let index = try XCTUnwrap(DesktopConfiguration.fields.firstIndex { $0.key == "transcriptionKeywords" })
+        entries[index] = words
+        try await controller.saveConfiguration(entries)
+    }
+
+    func testLiveLexiconOnlyNoticesFollowTheEffectiveRunThroughRecordingAndHistory() async throws {
+        DesktopHostModels.configure(streamingQualified: true)
+        let whisper = "openai/gpt-realtime-whisper-streaming"
+        let cartesia = try XCTUnwrap(DesktopLiveTranscription.liveModels.first {
+            DesktopLiveTranscription.route(forID: $0.id)?.provider == .cartesia
+        }).id
+        for model in [whisper, cartesia, XAISpeechToText.liveCatalogID] {
+            try await assertLiveNotice(model: model, lexicon: true)
+        }
+        for model in [whisper, cartesia] {
+            try await assertLiveNotice(model: model, lexicon: false)
+        }
+    }
+
+    private func assertLiveNotice(model: String, lexicon: Bool) async throws {
+        FakeLog.shared.reset()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let effects = KeywordDeliveryEffects(liveClient: KeywordLiveClient())
+        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        await controller.markReadyForSelfTest()
+        let index = try XCTUnwrap(DesktopHostModels.all.firstIndex { $0.id == model })
+        let credential = try XCTUnwrap(DesktopHostModels.provider(for: model)).apiKeyIdentifier
+        FakeLog.shared.setKey("synthetic", name: credential)
+        let selected = await controller.selectModel(index)
+        XCTAssertTrue(selected)
+        let profile = await controller.resolvedProfile(executablePath: nil)
+            .capturingTranscriptionOptions(.init(keywords: [], assemblyAIKeyterms: ["Explicit"]))
+        if lexicon {
+            _ = try await controller.vocabularyEvent(kind: 0, payload: DesktopVocabularyWire.encode([
+                "save", "", "Lexicon", "Canonical", "Lexicon", "automatic", "", "high", ""
+            ]))
+        }
+        try await saveWords("Later configuration", controller: controller)
+        try await controller.startRecording(
+            target: nil, deviceID: "", profile: profile, textOutput: FakeTextOutput()
+        )
+        let words = lexicon ? ["Canonical"] : []
+        let notice = words.isEmpty ? nil : DesktopTranscription.keywordLimitation(model: model)
+        let live = await controller.recording?.live
+        XCTAssertNotNil(live)
+        XCTAssertEqual(live?.keywordLimitation, notice)
+        XCTAssertEqual(effects.options.last?.keywords, words)
+        XCTAssertEqual(effects.options.last?.assemblyAIKeyterms, ["Explicit"] + words)
+        let status = try XCTUnwrap(FakeLog.shared.allStatuses.last { $0.hasPrefix("Recording") })
+        XCTAssertEqual(status.contains("Shared keywords are not sent"), notice != nil)
+        if let notice { XCTAssertTrue(status.contains(notice)) }
+        await controller.toggle(
+            target: nil, modelIndex: index, deviceID: "", targetExecutablePath: nil, textOutput: FakeTextOutput()
+        )
+        let store = try DesktopRecordingStore(directory: root.appendingPathComponent("History"))
+        let records = try await store.records()
+        let record = try XCTUnwrap(records.first)
+        XCTAssertEqual(record.id, live?.id)
+        XCTAssertEqual(record.result?.text, "Synthetic live transcript")
+        XCTAssertNil(record.failure)
+        XCTAssertTrue(effects.requests.isEmpty)
+        XCTAssertEqual(
+            record.profileNotes?.filter { $0.hasPrefix("Shared keywords are not sent") } ?? [],
+            notice.map { [$0] } ?? []
+        )
+        await controller.close()
+    }
+}
+
+private final class KeywordDeliveryEffects: DesktopHostEffects, @unchecked Sendable {
+    typealias Platform = FakePlatform
+    private let base = SyntheticEffects()
+    private let lock = NSLock()
+    private var capturedRequests: [DesktopHostTranscriptionRequest] = []
+    private var capturedOptions: [LiveClientOptions] = []
+    private let liveClient: (any FinalizingStreamingTranscriptionClient)?
+    var requests: [DesktopHostTranscriptionRequest] { lock.withLock { capturedRequests } }
+    var options: [LiveClientOptions] { lock.withLock { capturedOptions } }
+
+    init(liveClient: (any FinalizingStreamingTranscriptionClient)? = nil) {
+        self.liveClient = liveClient
+    }
+
+    func apiKey(name: String) throws -> String { try base.apiKey(name: name) }
+    func makeCapture(
+        context: DesktopCaptureContext, deviceID: String, sampleRate: Int, frameMilliseconds: Int
+    ) throws -> any DesktopRecordingCapture {
+        try base.makeCapture(
+            context: context, deviceID: deviceID, sampleRate: sampleRate, frameMilliseconds: frameMilliseconds
+        )
+    }
+    func makeLiveClient(
+        model: String, key: String, language: String?, azureEndpoint: String
+    ) -> (any FinalizingStreamingTranscriptionClient)? { nil }
+    func makeLiveClient(
+        model: String, key: String, language: String?, azureEndpoint: String, options: LiveClientOptions
+    ) -> (any FinalizingStreamingTranscriptionClient)? {
+        lock.withLock { capturedOptions.append(options) }
+        return liveClient
+    }
+
+    func transcribe(
+        _ request: DesktopHostTranscriptionRequest, with controller: DesktopHostController<FakePlatform>
+    ) async throws -> TranscriptionResult {
+        lock.withLock { capturedRequests.append(request) }
+        return try await base.transcribe(request, with: controller)
+    }
+    func perform(_ job: FakeJob, text: String) -> DesktopTextOutputResult { base.perform(job, text: text) }
+    func writeSettings(_ data: Data, to url: URL) throws { try base.writeSettings(data, to: url) }
+}
+
+private final class KeywordLiveClient: FinalizingStreamingTranscriptionClient, Sendable {
+    let finalShape = TranscriptFinalShape.cumulativeTranscript
+    func start(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {
+        onTranscript("Synthetic live transcript", true)
+    }
+    func sendAudio(_ audioData: Data) {}
+    func stop() {}
+    func finishAndWait() async -> String? { "Synthetic live transcript" }
+}

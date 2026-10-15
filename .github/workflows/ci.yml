@@ -40,7 +40,12 @@ jobs:
             ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-swift-
 
       - name: Build
-        run: make build
+        # Match the Test (Debug) step flag. A plain debug build here produces a
+        # cached .build that the coverage-enabled swift test below cannot reuse
+        # (coverage instrumentation changes compiler flags for every target),
+        # forcing a second full rebuild of the whole module graph inside the
+        # 30-minute job budget.
+        run: SWIFT_FLAGS=--enable-code-coverage make build
 
       - name: Verify brand asset sizes and appearance variants
         run: node --test scripts/tests/brand-assets.test.mjs

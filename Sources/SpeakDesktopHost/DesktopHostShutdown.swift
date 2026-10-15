@@ -192,6 +192,7 @@ extension DesktopHostController {
         voiceTextImportTask?.cancel()
         cancellationRequested = true
         transcriptionTask?.cancel()
+        voiceCommandTask?.cancel()
         historyDeletionTask?.cancel()
         folderRevealTask?.cancel()
         audioCleanupTask?.cancel()

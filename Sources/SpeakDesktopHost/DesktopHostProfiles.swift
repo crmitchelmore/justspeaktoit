@@ -17,6 +17,10 @@ extension DesktopHostController {
         record.profileName = profile.profileName
         record.languageIdentifier = profile.language
         record.profileNotes = profile.limitations.map(\.message)
+        if !(profile.transcriptionKeywords ?? []).isEmpty,
+           let notice = DesktopTranscription.keywordLimitation(model: profile.modelIdentifier) {
+            record.profileNotes?.append(notice)
+        }
         return record
     }
 
@@ -25,13 +29,20 @@ extension DesktopHostController {
             profile: ProfileResolver(profiles: profiles).profile(forWindowsExecutablePath: executablePath),
             defaultModel: settings.model, defaultPostProcessing: settings.postProcessing ?? .init(),
             capabilities: profileCapabilities, defaultLanguage: settings.configuration?.language
-        )
+        ).capturingTranscriptionOptions(settings.configuration?.liveOptions ?? .init())
     }
 
-    func profileRecordingStatus(_ profile: DesktopProfileSession, trigger: HotKeySessionTrigger) -> String {
+    func profileRecordingStatus(
+        _ profile: DesktopProfileSession, trigger: HotKeySessionTrigger, keywordLimitation: String? = nil
+    ) -> String {
         var status = "Recording… " + Platform.finishHint(hotKeySettings(), for: trigger)
         if let name = profile.profileName { status += " App profile: \(name)." }
         for limitation in profile.limitations { status += " " + limitation.message }
+        let notice = keywordLimitation ?? ((profile.transcriptionKeywords ?? []).isEmpty
+            ? nil : DesktopTranscription.keywordLimitation(model: profile.modelIdentifier))
+        if let notice {
+            status += " " + notice
+        }
         return status
     }
 

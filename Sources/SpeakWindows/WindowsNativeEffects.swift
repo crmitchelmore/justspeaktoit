@@ -50,6 +50,19 @@ struct WindowsNativeEffects: WindowsControllerEffects {
     }
 
     func writeSettings(_ data: Data, to url: URL) throws { try data.write(to: url, options: .atomic) }
+
+    func voiceCommandClipboardText() async throws -> String? {
+        try await Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
+            var pointer: UnsafeMutablePointer<CChar>?
+            var error = [CChar](repeating: 0, count: 256)
+            let result = jsti_voice_command_clipboard_read(&pointer, &error, error.count)
+            defer { jsti_voice_command_clipboard_free(pointer) }
+            guard result >= 0 else { throw WindowsNativeError(message: String(cString: error)) }
+            guard result == 0, let pointer else { return nil }
+            return String(cString: pointer)
+        }.value
+    }
 }
 
 /// WASAPI capture. Keeps the context its native callbacks borrow alive until

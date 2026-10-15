@@ -4,15 +4,18 @@ import SpeakDesktop
 
 extension DesktopHostController {
     func makeLiveSession(
-        model: String, key: String, id: UUID, language: String? = nil
+        model: String, key: String, id: UUID, language: String? = nil, options: LiveClientOptions? = nil
     ) async throws -> DesktopLiveSession? {
         guard DesktopHostModels.isLive(model) else { return nil }
-        let options = (settings.configuration?.liveOptions ?? .init())
+        let options = (options ?? settings.configuration?.liveOptions ?? .init())
             .includingVocabularyKeywords(try await vocabularyKeywords())
         guard let client = effects.makeLiveClient(
             model: model, key: key, language: language, azureEndpoint: azureResourceEndpoint(), options: options
         ) else { return nil }
-        return DesktopLiveSession(client: client, id: id)
+        return DesktopLiveSession(
+            client: client, id: id,
+            keywordLimitation: options.keywords.isEmpty ? nil : DesktopTranscription.keywordLimitation(model: model)
+        )
     }
 
     func monitorLive(_ session: DesktopLiveSession) {
@@ -63,6 +66,7 @@ extension DesktopHostController {
         do {
             try await saveRecord(record)
             if record.failure == nil {
+                record = try await applyVoiceCommands(record)
                 record = try await applyVocabulary(record)
                 record = await postProcess(record, options: options)
             }
@@ -70,8 +74,17 @@ extension DesktopHostController {
             try await saveRecord(record)
             if !closed { present(record, output: stopped.output) }
         } catch {
+            record.failure = cancellationRequested || closed
+                ? "Live transcription cancelled. Audio and received text retained."
+                : "Live transcript retained; voice commands or corrections failed. \(error.localizedDescription)"
+            do { try await saveRecord(record) } catch {
+                reportFailure(
+                    "Live recording retained; history could not be saved: \(error.localizedDescription)", for: record.id
+                )
+                return
+            }
             reportFailure(
-                "Live recording retained; history could not be saved: \(error.localizedDescription)", for: record.id
+                record.failure ?? "Live transcript retained.", for: record.id
             )
         }
     }

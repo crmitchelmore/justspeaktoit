@@ -12,6 +12,14 @@ extern "C" {
  * token, NEVER History ownership. path is the chosen export/import path. */
 typedef void (*JSTIVoiceSourceCallback)(int32_t action, int32_t source, const char *text,
                                       const char *record, const char *path, void *context);
+/* Atomic picker snapshot. IDs are canonical, "" is a non-executable stored
+ * selection. Favorite ranks are -1 or the saved order. Callback: 0 choose,
+ * 1 add favorite, 2 remove favorite; borrowed ID is copied before return.
+ * No favorite edit selects a voice. A new snapshot acknowledges persistence. */
+typedef void (*JSTIVoicePickerCallback)(int32_t action, const char *voice_id, void *context);
+int32_t jsti_window_set_voice_picker(const char *const *names, const char *const *ids,
+    const int32_t *favorite_ranks, size_t count, int32_t selected,
+    JSTIVoicePickerCallback callback, void *context);
 int32_t jsti_window_set_voice_sources(const char *const *names, size_t count,
                                       JSTIVoiceSourceCallback callback, void *context);
 /* Thread safe, borrowed strings copied. Empty error means success. Stale

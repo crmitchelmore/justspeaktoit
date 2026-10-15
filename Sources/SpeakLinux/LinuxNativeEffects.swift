@@ -59,6 +59,13 @@ struct LinuxNativeEffects: DesktopHostEffects {
     }
 
     func writeSettings(_ data: Data, to url: URL) throws { try data.write(to: url, options: .atomic) }
+
+    func voiceCommandClipboardText() async throws -> String? {
+        try await Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
+            return try LinuxClipboard.voiceCommandSnapshot()
+        }.value
+    }
 }
 
 /// libpulse capture feeding the shared recording context. Keeps the context

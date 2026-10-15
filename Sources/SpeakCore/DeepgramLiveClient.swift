@@ -17,6 +17,7 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
     private let apiKey: String
     private let model: String
     private let language: String?
+    private let keywords: [String]
     private let sampleRate: Int
     private let makeConnection: ConnectionFactory
     private let schedule: Scheduler
@@ -42,6 +43,7 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
 
     public init(
         apiKey: String, model: String = "nova-3", language: String? = nil, sampleRate: Int = 16000,
+        keywords: [String] = [],
         makeConnection: @escaping ConnectionFactory,
         schedule: @escaping Scheduler = { seconds, action in
             DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
@@ -50,6 +52,7 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
         self.apiKey = apiKey
         self.model = model
         self.language = language
+        self.keywords = keywords
         self.sampleRate = sampleRate
         self.makeConnection = makeConnection
         self.schedule = schedule
@@ -69,7 +72,9 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
             active.onError = onError
             let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !key.isEmpty else { fail(DeepgramLiveError.missingAPIKey, active); return }
-            guard let url = Self.webSocketURL(model: model, language: language, sampleRate: sampleRate) else {
+            guard let url = Self.webSocketURL(
+                model: model, language: language, sampleRate: sampleRate, keywords: keywords
+            ) else {
                 fail(DeepgramLiveError.invalidURL, active)
                 return
             }

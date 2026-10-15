@@ -148,6 +148,8 @@ public struct DesktopProfileSession: Equatable, Sendable {
     /// Provider language for the selected model; `nil` keeps its normal language behaviour.
     public let language: String?
     public let postProcessing: DesktopPostProcessing.Options
+    public let transcriptionOptions: LiveClientOptions?
+    public var transcriptionKeywords: [String]? { transcriptionOptions?.keywords }
     public let limitations: [DesktopProfileLimitation]
     /// Why polish was skipped for this session, for the host to record as the
     /// post-processing outcome so History explains the missing processed text.
@@ -159,9 +161,11 @@ public struct DesktopProfileSession: Equatable, Sendable {
         language: String?,
         postProcessing: DesktopPostProcessing.Options,
         limitations: [DesktopProfileLimitation] = [],
-        skippedPolishReason: String? = nil
+        skippedPolishReason: String? = nil,
+        transcriptionOptions: LiveClientOptions? = nil
     ) {
         self.profileName = profileName
+        self.transcriptionOptions = transcriptionOptions
         self.modelIdentifier = modelIdentifier
         self.language = language
         self.postProcessing = postProcessing
@@ -176,6 +180,14 @@ public struct DesktopProfileSession: Equatable, Sendable {
     ) -> DesktopProfileSession {
         DesktopProfileSession(
             profileName: nil, modelIdentifier: modelIdentifier, language: language, postProcessing: postProcessing
+        )
+    }
+
+    public func capturingTranscriptionOptions(_ options: LiveClientOptions) -> Self {
+        Self(
+            profileName: profileName, modelIdentifier: modelIdentifier, language: language,
+            postProcessing: postProcessing, limitations: limitations, skippedPolishReason: skippedPolishReason,
+            transcriptionOptions: options
         )
     }
 

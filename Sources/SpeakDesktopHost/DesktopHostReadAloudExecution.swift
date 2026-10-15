@@ -27,6 +27,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         } else {
             voiceOutput = nil
         }
+        stopReadAloud()
         let speech: Platform.Playback.Speech
         do {
             // Playback stops now, and the record's controls stay active until the speech ends.
@@ -41,9 +42,10 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         voiceOutputRecordID = recordID
         update("Reading aloud with \(voice.name)…")
         let usage = beginVoiceUsage(operation: .read, source: source, recordID: recordID)
+        let accountWork = beginAccountVoiceWork(selection, ticket: ticket)
         activeOperations += 1
         readAloudState.task = Task {
-            defer { self.finishVoiceUsage(usage); self.finishOperation() }
+            defer { self.finishAccountVoiceOperation(accountWork, usage: usage) }
             var outcome: String?
             do {
                 try await VoiceSynthesisUsage.$capture.withValue(usage?.capture) {
@@ -52,14 +54,21 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                     )
                 }
                 outcome = "Finished reading aloud."
-            } catch is CancellationError {
-                outcome = "Reading aloud stopped."
-            } catch DeepgramSpeechError.missingCredential {
-                outcome = "Save a Deepgram API key (\(Platform.deepgramKeyHint)) to read aloud."
             } catch {
-                outcome = "Read aloud failed: \(error.localizedDescription)"
+                outcome = self.readAloudFailureStatus(error)
             }
             self.finishReadAloud(ticket, status: outcome)
+        }
+    }
+
+    private func readAloudFailureStatus(_ error: Error) -> String {
+        switch error {
+        case is CancellationError:
+            return "Reading aloud stopped."
+        case DeepgramSpeechError.missingCredential:
+            return "Save a Deepgram API key (\(Platform.deepgramKeyHint)) to read aloud."
+        default:
+            return "Read aloud failed: \(error.localizedDescription)"
         }
     }
 
@@ -74,7 +83,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 try Task.checkCancellation()
                 let request = try DeepgramSpeechRequest(text: segment, voice: voice, speed: selection.options.speed)
                 _ = try await output.speak(request, credential: {
-                    try effects.apiKey(name: selection.voice.apiKeyIdentifier)
+                    try await Self.readVoiceSynthesisKey(effects: effects, name: selection.voice.apiKeyIdentifier)
                 }, through: { file in
                     try await playback.playToCompletion(speech, path: file.path)
                 })
@@ -84,7 +93,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 source: recordID == nil ? .typedText : .history, text: text, recordID: recordID
             )
             let wav = try await Platform.synthesizeVoiceOutput(source, selection: selection) {
-                try effects.apiKey(name: selection.voice.apiKeyIdentifier)
+                try await Self.readVoiceSynthesisKey(effects: effects, name: selection.voice.apiKeyIdentifier)
             }
             try await DesktopVoicePlaybackFile.play(
                 VoiceGeneratedAudio(validating: wav),

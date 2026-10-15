@@ -1327,11 +1327,12 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
 
     // Voice Commands Settings
     voiceCommandsEnabled =
-      defaults.object(forKey: DefaultsKey.voiceCommandsEnabled.rawValue) as? Bool ?? true
+      defaults.object(forKey: DefaultsKey.voiceCommandsEnabled.rawValue) as? Bool ?? SpeechDefaults.voiceCommandsEnabled
     streamingInsertionEnabled =
       defaults.object(forKey: DefaultsKey.streamingInsertionEnabled.rawValue) as? Bool ?? false
     clipboardInsertionTriggers =
-      defaults.string(forKey: DefaultsKey.clipboardInsertionTriggers.rawValue) ?? ""
+      defaults.string(forKey: DefaultsKey.clipboardInsertionTriggers.rawValue)
+        ?? SpeechDefaults.clipboardInsertionTriggers
 
     // Paid Access — both off by default so existing setups are untouched.
     paidAccessRoutingEnabled =

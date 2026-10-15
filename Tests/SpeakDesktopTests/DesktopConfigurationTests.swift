@@ -114,7 +114,10 @@ final class DesktopConfigurationTests: XCTestCase {
             }
         }
         var entries = try DesktopConfiguration().entries
-        entries[3] = "nan"
+        let graceIndex = try XCTUnwrap(DesktopConfiguration.fields.firstIndex {
+            $0.key == ApplicationPreferenceKey.liveStopGracePeriod.rawValue
+        })
+        entries[graceIndex] = "nan"
         XCTAssertThrowsError(try DesktopConfiguration().applying(entries))
         XCTAssertThrowsError(try DesktopConfiguration().applying([]))
     }

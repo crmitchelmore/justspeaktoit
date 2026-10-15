@@ -101,7 +101,10 @@ public enum DesktopTranscription {
         staging: SharedMultipartUploadStaging? = nil,
         keywords: [String] = [],
         session: URLSession,
-        xaiClient: XAIBatchTranscriptionClient? = nil
+        xaiClient: XAIBatchTranscriptionClient? = nil,
+        makeSpeechmaticsClient: @escaping @Sendable (URLSession, [String]) -> SpeechmaticsBatchClient = {
+            SpeechmaticsBatchClient(session: $0, keywords: $1)
+        }
     ) async throws -> TranscriptionResult {
         let identifier = model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let backend = backend(for: identifier) else {
@@ -115,7 +118,8 @@ public enum DesktopTranscription {
                 Request(
                     audioURL: audioURL, model: identifier, apiKey: key, duration: duration,
                     language: language, azureEndpoint: azureEndpoint,
-                    modulateFeatures: modulateFeatures, staging: staging, keywords: keywords, xaiClient: xaiClient
+                    modulateFeatures: modulateFeatures, staging: staging, keywords: keywords, xaiClient: xaiClient,
+                    makeSpeechmaticsClient: makeSpeechmaticsClient
                 ),
                 using: backend, session: session
             )
@@ -137,6 +141,7 @@ public enum DesktopTranscription {
         let staging: SharedMultipartUploadStaging?
         let keywords: [String]
         let xaiClient: XAIBatchTranscriptionClient?
+        let makeSpeechmaticsClient: @Sendable (URLSession, [String]) -> SpeechmaticsBatchClient
     }
 
     private static func transcribe( // swiftlint:disable:this cyclomatic_complexity function_body_length
@@ -151,20 +156,25 @@ public enum DesktopTranscription {
             return try await transcribePrepared(input, using: provider, session: session)
         case .openai:
             return try await OpenAIBatchClient(
-                session: session, staging: try secureStaging(input.staging), durationResolver: { _ in input.duration }
+                session: session, staging: try secureStaging(input.staging), keywords: input.keywords,
+                durationResolver: { _ in input.duration }
             )
                 .transcribeFile(at: input.audioURL, apiKey: input.apiKey, model: input.model, language: input.language)
         case .groq:
             return try await GroqBatchClient(
-                session: session, staging: try secureStaging(input.staging), durationResolver: { _ in input.duration }
+                session: session, staging: try secureStaging(input.staging), keywords: input.keywords,
+                durationResolver: { _ in input.duration }
             )
                 .transcribeFile(at: input.audioURL, apiKey: input.apiKey, model: input.model, language: input.language)
         case .deepgram:
-            return try await DeepgramBatchClient(session: session, durationResolver: { _ in input.duration })
+            return try await DeepgramBatchClient(
+                session: session, keywords: input.keywords, durationResolver: { _ in input.duration }
+            )
                 .transcribeFile(at: input.audioURL, apiKey: input.apiKey, model: input.model, language: input.language)
         case .elevenlabs:
             return try await ElevenLabsBatchClient(
-                session: session, staging: try secureStaging(input.staging), durationResolver: { _ in input.duration }
+                session: session, staging: try secureStaging(input.staging), keywords: input.keywords,
+                durationResolver: { _ in input.duration }
             )
                 .transcribeFile(at: input.audioURL, apiKey: input.apiKey, model: input.model, language: input.language)
         case .google:
@@ -182,7 +192,7 @@ public enum DesktopTranscription {
             return try await GladiaBatchClient(session: session)
                 .transcribeFile(at: input.audioURL, apiKey: input.apiKey, model: input.model, language: input.language)
         case .speechmatics:
-            return try await SpeechmaticsBatchClient(session: session)
+            return try await input.makeSpeechmaticsClient(session, input.keywords)
                 .transcribeFile(at: input.audioURL, apiKey: input.apiKey, model: input.model, language: input.language)
         case .openRouterInlineAudio:
             return try await OpenRouterInlineAudioTranscriptionClient(
@@ -206,7 +216,9 @@ public enum DesktopTranscription {
     ) async throws -> TranscriptionResult {
         switch provider {
         case .assemblyai:
-            return try await AssemblyAIBatchClient(session: session, durationResolver: { _ in input.duration })
+            return try await AssemblyAIBatchClient(
+                session: session, keywords: input.keywords, durationResolver: { _ in input.duration }
+            )
                 .transcribeFile(at: input.audioURL, apiKey: input.apiKey, model: input.model, language: input.language)
         case .modulate:
             return try await ModulateBatchClient(
@@ -218,16 +230,22 @@ public enum DesktopTranscription {
                 durationResolver: { _ in input.duration }
             ).transcribeFile(at: input.audioURL, apiKey: input.apiKey, model: input.model, language: input.language)
         case .soniox:
-            return try await SonioxBatchClient(session: session, multipartStaging: secureStaging(input.staging))
+            return try await SonioxBatchClient(
+                session: session, keywords: input.keywords, multipartStaging: secureStaging(input.staging)
+            )
                 .transcribeFile(at: input.audioURL, apiKey: input.apiKey, model: input.model, language: input.language)
         case .mistral:
             return try await MistralBatchClient(
                 session: session, multipartStaging: secureStaging(input.staging),
+                keywords: input.keywords,
                 durationResolver: { _ in input.duration }
             ).transcribeFile(at: input.audioURL, apiKey: input.apiKey, model: input.model, language: input.language)
         case .meta:
             return try await MetaMuseBatchClient(session: session)
-                .transcribeFile(at: input.audioURL, apiKey: input.apiKey, model: input.model, language: input.language)
+                .transcribeFile(
+                    at: input.audioURL, apiKey: input.apiKey, model: input.model,
+                    language: input.language, keywords: input.keywords
+                )
         case .azure:
             return try await AzureBatchTranscriptionClient(session: session).transcribeFile(
                 at: input.audioURL, credentials: input.apiKey, endpoint: input.azureEndpoint,

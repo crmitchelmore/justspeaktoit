@@ -4,6 +4,16 @@ import CLinuxSupport
 /// Thin Swift wrappers over the clipboard, file, X11 and portal parts of the
 /// C adapter.
 public enum LinuxClipboard {
+    public static func voiceCommandSnapshot() throws -> String? {
+        var pointer: UnsafeMutablePointer<CChar>?
+        let result = try LinuxNative.checked(accepting: [1]) {
+            jsti_voice_command_clipboard_read(&pointer, $0, $1)
+        }
+        defer { jsti_free(pointer) }
+        guard result == 0, let pointer else { return nil }
+        return String(cString: pointer)
+    }
+
     public static func write(_ text: String) throws {
         try text.withCString { text in try LinuxNative.call { jsti_clipboard_write(text, $0, $1) } }
     }

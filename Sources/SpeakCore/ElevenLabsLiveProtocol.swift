@@ -24,7 +24,9 @@ public enum ElevenLabsLiveProtocol {
     /// voice activity detection commit segments while recording, and an
     /// optional ISO-639 `language_code` is added only when the caller pins a
     /// language.
-    public static func webSocketURL(modelID: String, language: String?, sampleRate: Int) -> URL? {
+    public static func webSocketURL(
+        modelID: String, language: String?, sampleRate: Int, keywords: [String] = []
+    ) -> URL? {
         guard supportedSampleRates.contains(sampleRate) else { return nil }
         var components = URLComponents()
         components.scheme = "wss"
@@ -38,8 +40,20 @@ public enum ElevenLabsLiveProtocol {
         if let language = TranscriptionLanguageCatalog.providerLanguage(for: language ?? "") {
             items.append(URLQueryItem(name: "language_code", value: language.localeLanguageCode))
         }
+        if modelID == "scribe_v2_realtime" {
+            items += boundedKeyterms(keywords).map { URLQueryItem(name: "keyterms", value: $0) }
+        }
         components.queryItems = items
         return components.url
+    }
+
+    /// Stay below the >100-term billing threshold; Scribe requires <50 characters,
+    /// at most five words, and no angle/bracket/brace/backslash characters.
+    public static func boundedKeyterms(_ words: [String]) -> [String] {
+        let forbidden = CharacterSet(charactersIn: "<>{}[]\\")
+        return TranscriptionKeywordPolicy.bounded(words.filter {
+            $0.rangeOfCharacter(from: forbidden) == nil && $0.split(whereSeparator: \.isWhitespace).count <= 5
+        }, count: 100, length: 49)
     }
 
     /// One PCM frame as an `input_audio_chunk`. Base64 never needs JSON

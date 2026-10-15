@@ -65,11 +65,29 @@ package protocol DesktopHostEffects<Platform>: Sendable {
     func perform(_ job: Platform.OutputJob, text: String) -> DesktopTextOutputResult
     /// Captures the automatic utterance's destination away from PCM and the UI thread.
     func captureInsertionTarget() async throws -> Platform.InsertionTarget?
+    /// Read-only snapshot for a matched voice command; never called for other text.
+    func voiceCommandClipboardText() async throws -> String?
+    func postProcess(
+        text: String, options: DesktopPostProcessing.Options, key: String, directives: [String], tags: [String]
+    ) async throws -> DesktopPostProcessing.Outcome
     /// Replaces the settings file atomically.
     func writeSettings(_ data: Data, to url: URL) throws
 }
 
 package extension DesktopHostEffects {
+    func postProcess(
+        text: String, options: DesktopPostProcessing.Options, key: String, directives: [String], tags: [String]
+    ) async throws -> DesktopPostProcessing.Outcome {
+        try await DesktopPostProcessing.process(
+            rawText: text, options: options, apiKey: key,
+            lexiconDirectives: directives, lexiconContextTags: tags
+        )
+    }
+
+    func voiceCommandClipboardText() async throws -> String? {
+        throw DesktopHostError(message: "This host cannot read clipboard voice commands.")
+    }
+
     func captureInsertionTarget() async throws -> Platform.InsertionTarget? {
         throw DesktopHostError(message: "This host cannot capture a hands-free insertion destination.")
     }

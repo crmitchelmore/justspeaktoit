@@ -174,7 +174,7 @@ jobs:
         # consume the bounded process-execution window.
         timeout-minutes: 15
         run: |
-          swift build --build-tests --configuration release --jobs 4
+          swift test list --configuration release --jobs 4
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Capture owned-recording crash diagnostics (opt-in, read-only)

@@ -27,13 +27,6 @@ final class AutoCorrectionTracker: ObservableObject {
   private var insertedElement: AXUIElement?
   private var insertionApp: String?
 
-  /// Base monitoring duration in seconds
-  private let baseMonitorDuration: TimeInterval = 10.0
-  /// Additional seconds per sentence
-  private let perSentenceDuration: TimeInterval = 1.0
-  /// Maximum monitoring duration
-  private let maxMonitorDuration: TimeInterval = 30.0
-
   init(store: AutoCorrectionStoring, lexiconService: PersonalLexiconService, appSettings: AppSettings) {
     self.engine = AutoCorrectionEngine(
       store: store,
@@ -68,10 +61,7 @@ final class AutoCorrectionTracker: ObservableObject {
 
     // Calculate monitoring duration based on text length
     let sentenceCount = countSentences(in: insertedText)
-    let duration = min(
-      baseMonitorDuration + (Double(sentenceCount) * perSentenceDuration),
-      maxMonitorDuration
-    )
+    let duration = AutoCorrectionLearningPolicy.observationSeconds(for: insertedText)
 
     log.info(
       "Starting auto-correction monitoring for \(duration, privacy: .public)s (\(sentenceCount, privacy: .public) sentences)"
@@ -123,8 +113,7 @@ final class AutoCorrectionTracker: ObservableObject {
   // MARK: - Private Methods
 
   private func countSentences(in text: String) -> Int {
-    let sentenceEnders = CharacterSet(charactersIn: ".!?")
-    return text.unicodeScalars.filter { sentenceEnders.contains($0) }.count
+    AutoCorrectionLearningPolicy.sentenceCount(in: text)
   }
 
   private func checkForEdits() async {

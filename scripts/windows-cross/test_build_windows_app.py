@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Lightweight lockfile regression tests; no SDK download or compiler execution."""
+import hashlib
 import importlib.util
 import pathlib
 import stat
@@ -12,6 +13,10 @@ HERE = pathlib.Path(__file__).resolve().parent
 SPEC = importlib.util.spec_from_file_location("windows_app_build", HERE / "build-windows-app.py")
 BUILD = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(BUILD)
+PE_FIXTURE_SPEC = importlib.util.spec_from_file_location(
+    "windows_bundle_fixtures", HERE.parent / "windows-bundle" / "test_windows_bundle.py")
+PE_FIXTURES = importlib.util.module_from_spec(PE_FIXTURE_SPEC)
+PE_FIXTURE_SPEC.loader.exec_module(PE_FIXTURES)
 
 
 class PackageLockPreservationTests(unittest.TestCase):
@@ -105,6 +110,30 @@ class BuildInvocationTests(unittest.TestCase):
         self.assertEqual((args.configuration, args.scratch_path, args.jobs), ("release", None, 4))
         self.assertEqual(BUILD.build_locations(args), (self.cache, self.output, self.cache / "app-build"))
 
+    def test_both_products_are_built_copied_and_hashed_before_any_test_build(self):
+        built = self.root / "built"
+        events = []
+        def build(command, *args):
+            events.append(("build", command[-1]))
+        def retain(source, destination, *args):
+            events.append(("copy", source.name, destination.name))
+            return "sha-" + source.name
+        with mock.patch.object(BUILD, "run_package_build", side_effect=build), \
+                mock.patch.object(BUILD, "copy_executable", side_effect=retain):
+            hashes = BUILD.build_production(["swift", "build", "--configuration", "release"], {},
+                                            self.root / "log", self.root, built, self.output, self.root / "clang")
+        self.assertEqual(events, [("build", "SpeakWindows"), ("copy", "SpeakWindows.exe", "SpeakWindows.exe"),
+                                  ("build", "speak"), ("copy", "speak.exe", "speak.exe")])
+        self.assertEqual(hashes, {"SpeakWindows.exe": "sha-SpeakWindows.exe", "speak.exe": "sha-speak.exe"})
+
+    def test_cli_build_failure_prevents_a_successful_production_receipt(self):
+        with mock.patch.object(BUILD, "run_package_build", side_effect=[None, RuntimeError("CLI build failed")]), \
+                mock.patch.object(BUILD, "copy_executable", return_value="gui-sha") as retain:
+            with self.assertRaisesRegex(RuntimeError, "CLI build failed"):
+                BUILD.build_production(["swift", "build"], {}, self.root / "log", self.root,
+                                       self.root / "built", self.output, self.root / "clang")
+            self.assertEqual(retain.call_count, 1)
+
     def test_explicit_scratch_and_jobs_are_parsed(self):
         args = self.arguments("--scratch-path", str(self.root / "scratch dir é"), "--jobs", "2")
         self.assertEqual(args.jobs, 2)
@@ -172,6 +201,41 @@ class BuildInvocationTests(unittest.TestCase):
                           modules.format("XCTest") + "/x86_64", modules.format("Testing") + "/x86_64"]:
             expected += ["-Xlinker", "/libpath:" + directory]
         self.assertEqual([str(value) for value in command], expected)
+
+
+class ProductionImageTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = pathlib.Path(self.directory.name)
+        self.source = self.root / "build" / "speak.exe"
+        self.source.parent.mkdir()
+        self.destination = self.root / "speak.exe"
+
+    def test_cli_is_copied_byte_exact_hashed_and_inspected_by_llvm(self):
+        data = PE_FIXTURES.build_pe(imports=["swiftCore.dll"], delay_imports=["KERNEL32.dll"])
+        self.source.write_bytes(data)
+        with mock.patch.object(BUILD.BOOTSTRAP, "run") as inspect:
+            digest = BUILD.copy_executable(self.source, self.destination, self.root / "clang", self.root / "log")
+        self.assertEqual(self.destination.read_bytes(), data)
+        self.assertEqual(digest, hashlib.sha256(data).hexdigest())
+        self.assertEqual(inspect.call_args.args[0], [
+            self.root / "clang" / "llvm-readobj", "--file-headers", "--coff-imports", self.destination])
+
+    def test_cli_console_architecture_and_test_imports_are_checked_before_copy(self):
+        cases = [
+            (PE_FIXTURES.build_pe(subsystem=2), "console subsystem"),
+            (PE_FIXTURES.build_pe(machine=BUILD.windows_pe.IMAGE_FILE_MACHINE_ARM64), "Windows x64 executable"),
+            (PE_FIXTURES.build_pe(dll=True), "Windows x64 executable"),
+            (PE_FIXTURES.build_pe(delay_imports=["Testing.dll"]), "test library"),
+        ]
+        for data, message in cases:
+            self.source.write_bytes(data)
+            with self.subTest(message=message), mock.patch.object(BUILD.BOOTSTRAP, "run") as inspect:
+                with self.assertRaisesRegex(ValueError, message):
+                    BUILD.copy_executable(self.source, self.destination, self.root / "clang", self.root / "log")
+                self.assertFalse(self.destination.exists())
+                inspect.assert_not_called()
 
 
 if __name__ == "__main__":

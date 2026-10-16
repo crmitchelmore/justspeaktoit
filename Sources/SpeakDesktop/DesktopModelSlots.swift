@@ -21,7 +21,7 @@ public struct DesktopModelSlots: Sendable {
     public private(set) var entries: [Entry]
     public private(set) var visibleIndices: [Int]
     private var indices: [String: Int]
-    private let initial: [ModelCatalog.Option]
+    private var initial: [ModelCatalog.Option]
     private let maximumSlots: Int
 
     public init(live: [ModelCatalog.Option], local: [ModelCatalog.Option] = [], maximumSlots: Int = 10_000) {
@@ -69,5 +69,19 @@ public struct DesktopModelSlots: Sendable {
             if let index = indices[option.id] { entries[index].option = option }
         }
         visibleIndices = options.compactMap { indices[$0.id] }
+    }
+
+    /// Native callbacks retain their slot even when imports arrive. Never
+    /// rebuild the slot array to add an on-device model.
+    public mutating func appendLocal(_ options: [ModelCatalog.Option]) throws {
+        var seen = Set(entries.map { $0.option.id })
+        let additions = options.filter { seen.insert($0.id).inserted }
+        guard additions.count <= maximumSlots - entries.count else { throw Failure.capacityExceeded }
+        for option in additions {
+            indices[option.id] = entries.count
+            entries.append(Entry(option: option, isLive: false, isLocal: true, isAvailable: true))
+            initial.append(option)
+            visibleIndices.append(entries.count - 1)
+        }
     }
 }

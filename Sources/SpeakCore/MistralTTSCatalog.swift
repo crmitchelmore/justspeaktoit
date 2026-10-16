@@ -9,6 +9,7 @@ public enum MistralTTSModel: String, CaseIterable, Codable, Hashable, Identifiab
     case voxtralMiniTTSLatest = "voxtral-mini-tts-latest"
 
     public var id: String { rawValue }
+    public var desktopModelIdentifier: String { MistralTTSCatalog.voiceIDPrefix + rawValue }
 
     public var displayName: String {
         switch self {
@@ -63,6 +64,7 @@ public struct MistralTTSVoice: Identifiable, Codable, Hashable, Sendable {
 public enum MistralTTSCatalog {
     /// Prefix that routes a stored voice identifier back to this provider.
     public static let voiceIDPrefix = "mistral/"
+    public static let credentialIdentifier = "mistral.apiKey"
 
     public static let defaultModel: MistralTTSModel = .voxtralMiniTTS2603
     public static let models = MistralTTSModel.allCases

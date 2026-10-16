@@ -10,15 +10,16 @@ import SpeakCore
 public enum DesktopLiveTranscription {
     /// The live routes the shared desktop session implements. xAI serves two
     /// live products under one provider and only the dedicated speech-to-text
-    /// stream has a shared client, so that route is admitted by identifier;
-    /// the Grok Voice session stays unavailable on desktop hosts. Azure Voice
+    /// stream is qualified for desktop transcription, so it is admitted by
+    /// identifier; the portable Grok Voice client stays unexposed pending
+    /// live transcription-only/no-assistant acceptance. Azure Voice
     /// Live connects only to the user's own resource, whose endpoint the host
     /// stores and passes to `makeClient(model:apiKey:language:azureEndpoint:makeConnection:)`.
     public static let liveModels: [ModelCatalog.Option] = ModelCatalog.liveTranscription.filter {
         guard let route = LiveTranscriptionRouting.route(for: $0.id) else { return false }
         switch route.provider {
         case .deepgram, .assemblyai, .openai, .speechmatics, .soniox, .elevenlabs, .mistral, .gladia, .cartesia,
-             .revai, .azure, .reson8:
+             .revai, .azure, .reson8, .google, .meta, .modulate:
             return true
         case .xai: return route.modelID == XAISpeechToText.liveCatalogID
         default: return false
@@ -59,6 +60,16 @@ public enum DesktopLiveTranscription {
         )
     }
 
+    public static func makeClient( // swiftlint:disable:this function_parameter_count
+        model: String, apiKey: String, language: String?, azureEndpoint: String, options: LiveClientOptions,
+        makeConnection: @escaping @Sendable (URLRequest) -> any StreamingWebSocketConnection
+    ) -> (any FinalizingStreamingTranscriptionClient)? {
+        makeClient(
+            model: model, apiKey: apiKey, language: language, azureEndpoint: azureEndpoint,
+            initiateGladiaSession: nil, options: options, makeConnection: makeConnection
+        )
+    }
+
     /// The same mapping with Gladia's HTTPS session request injectable, so its
     /// request can be observed without a network; `nil` uses `URLSession.shared`.
     ///
@@ -68,6 +79,7 @@ public enum DesktopLiveTranscription {
     static func makeClient( // swiftlint:disable:this cyclomatic_complexity function_body_length
         model: String, apiKey: String, language: String?, azureEndpoint: String = "",
         initiateGladiaSession: GladiaLiveClient.SessionInitiator?,
+        options: LiveClientOptions = LiveClientOptions(),
         makeConnection: @escaping @Sendable (URLRequest) -> any StreamingWebSocketConnection
     ) -> (any FinalizingStreamingTranscriptionClient)? {
         guard let route = route(forID: model) else { return nil }
@@ -82,37 +94,46 @@ public enum DesktopLiveTranscription {
         case .openai:
             return OpenAIRealtimeLiveClient(
                 apiKey: apiKey, model: route.apiModelName, language: hint?.localeLanguageCode,
+                prompt: TranscriptionKeywordPolicy.prompt(options.keywords),
                 sampleRate: route.sampleRate,
                 makeConnection: makeConnection
             )
         case .deepgram:
             return DeepgramLiveClient(
                 apiKey: apiKey, model: route.apiModelName, language: hint, sampleRate: route.sampleRate,
+                keywords: options.keywords,
                 makeConnection: makeConnection
             )
         case .assemblyai:
             return AssemblyAILiveClient(
                 apiKey: apiKey, speechModel: route.apiModelName, sampleRate: route.sampleRate,
+                keyterms: options.assemblyAIKeyterms,
+                postStopFinalizeBudget: options.postStopFinalizeBudget
+                    ?? ModelCatalog.liveCapabilities(for: identifier).postStopFinalizeBudget,
+                stopGracePeriod: options.stopGracePeriod,
                 makeConnection: makeConnection
             )
         case .xai:
             // `route(forID:)` admits only the dedicated speech-to-text stream.
             return XAISpeechToTextLiveClient(
-                apiKey: apiKey, language: hint, sampleRate: route.sampleRate, makeConnection: makeConnection
+                apiKey: apiKey, language: hint, keywords: options.keywords,
+                sampleRate: route.sampleRate, makeConnection: makeConnection
             )
         case .speechmatics:
             return SpeechmaticsLiveClient(
                 apiKey: apiKey, model: route.apiModelName, language: hint, sampleRate: route.sampleRate,
+                keywords: options.keywords,
                 makeConnection: makeConnection
             )
         case .elevenlabs:
             return ElevenLabsLiveClient(
                 apiKey: apiKey, modelID: route.apiModelName, language: hint,
-                sampleRate: route.sampleRate, makeConnection: makeConnection
+                sampleRate: route.sampleRate, keywords: options.keywords, makeConnection: makeConnection
             )
         case .soniox:
             return SonioxLiveClient(
                 apiKey: apiKey, model: route.apiModelName, language: hint, sampleRate: route.sampleRate,
+                keywords: options.keywords,
                 makeConnection: makeConnection
             )
         case .mistral:
@@ -134,7 +155,10 @@ public enum DesktopLiveTranscription {
         case .cartesia:
             // Ink-2's canonical capability takes no language hint, so none is sent.
             return CartesiaLiveClient(
-                apiKey: apiKey, model: route.apiModelName, sampleRate: route.sampleRate, makeConnection: makeConnection
+                apiKey: apiKey, model: route.apiModelName, sampleRate: route.sampleRate,
+                postStopFinalizeBudget: options.postStopFinalizeBudget
+                    ?? ModelCatalog.liveCapabilities(for: identifier).postStopFinalizeBudget,
+                stopGracePeriod: options.stopGracePeriod, makeConnection: makeConnection
             )
         case .revai:
             // The client maps the selection to one of Rev.ai's documented codes
@@ -149,6 +173,22 @@ public enum DesktopLiveTranscription {
             return AzureVoiceLiveClient(
                 credentials: apiKey, endpoint: azureEndpoint, model: route.apiModelName, language: hint,
                 sampleRate: route.sampleRate, makeConnection: makeConnection
+            )
+        case .google:
+            return GeminiLiveClient(
+                apiKey: apiKey, model: route.apiModelName, language: hint?.localeLanguageCode,
+                customVocabulary: GeminiTranscribeModels.boundedCustomVocabulary(options.keywords),
+                sampleRate: route.sampleRate, makeConnection: makeConnection
+            )
+        case .meta:
+            return MetaMuseLiveClient(
+                apiKey: apiKey, model: route.apiModelName, language: hint,
+                keywords: options.keywords, sampleRate: route.sampleRate, makeConnection: makeConnection
+            )
+        case .modulate:
+            return ModulateLiveClient(
+                apiKey: apiKey, sampleRate: route.sampleRate, options: options.modulate,
+                makeConnection: makeConnection
             )
         default: return nil
         }

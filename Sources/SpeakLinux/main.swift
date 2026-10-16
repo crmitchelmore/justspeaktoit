@@ -37,49 +37,50 @@ func runSelfTest() throws {
         throw DesktopHostError(message: "Live models are offered without a qualified transport.")
     }
     print("Native Linux adapter and canonical model self-test passed.")
+    try blocking {
+        for profile in RecordingFeedbackProfile.allCases {
+            guard try await LinuxRecordingFeedbackLoader.checkAssets(profile: profile) == 2 else {
+                throw DesktopHostError(message: "Recording sound asset self-test did not decode both cues.")
+            }
+        }
+    }
+    print("All eight bundled Linux recording sounds decoded with the production decoder and bounds.")
+    try blocking { try await LinuxShortcutGestures.checkTimingForSelfTest() }
+    print("Native Linux shortcut timing self-test passed.")
     try blocking { try await LinuxLocalSelfTest.run() }
 }
 
 /// Configures the window from saved settings, runs GTK on this (main) thread
 /// until the window closes, then drains every queue and closes the controller.
 func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws {
+    try configureApplicationIcon()
+    let providerCallbacks = try LinuxWindow.beginVoiceProviderCallbacks(holder)
+    defer { LinuxWindow.endVoiceProviderCallbacks(providerCallbacks) }
     let selected = try blocking { () -> Int in
         let microphone = await controller.selectedMicrophone()
         let warning = LinuxWindow.configureMicrophones(selected: microphone, synthetic: holder.smokeTest)
         await controller.setMicrophoneWarning(warning)
         try await controller.configureModelCatalog()
         holder.applyShortcutStyle(await controller.hotKeySettings())
+        try await LinuxWindow.configureConfiguration(holder)
         LinuxWindow.postProcessing(await controller.postProcessingOptions())
         _ = jsti_window_set_azure_resource(await controller.azureResourceEndpoint())
         LinuxWindow.voiceOutput(await controller.voiceOutputSettings())
+        LinuxWindow.voiceSources(context: Unmanaged.passUnretained(holder).toOpaque())
         _ = jsti_window_set_appearance(Int32(await controller.appearance().rawValue))
         await controller.configureLocalModels()
+        await controller.configureLocalCleanup(presenter: Unmanaged.passUnretained(holder).toOpaque())
         return await controller.selectedIndex()
     }
     LinuxCloudSync.configure(holder)
-    let strings = LinuxWindow.Strings()
-    let rows = LinuxWindow.modelRows(strings)
     let context = Unmanaged.passUnretained(holder).toOpaque()
-    var arguments = CommandLine.arguments.map { strdup($0) }
-    defer { arguments.forEach { free($0) } }
-    var windowFailure: Error?
-    do {
-        try withExtendedLifetime(strings) {
-            try rows.withUnsafeBufferPointer { rows in
-                try LinuxNative.call { error, capacity in
-                    jsti_window_run(
-                        linuxApplicationID, Int32(arguments.count), &arguments, rows.baseAddress, rows.count,
-                        Int32(selected), linuxWindowEvent, context,
-                        holder.smokeTest ? Int32(JSTI_WINDOW_SMOKE_TEST) : 0, error, capacity
-                    )
-                }
-            }
-        }
-    } catch { windowFailure = error }
+    let windowFailure = runGTKEventLoop(selected: selected, context: context, holder: holder)
+    LinuxWindow.endVoiceProviderCallbacks(providerCallbacks)
     try blocking {
         holder.shortcuts.stop()
         if !holder.smokeTest { holder.microphones.stop() }
         await holder.finishSettings()
+        _ = await holder.automation.applyOffThread(enabled: false)
         await LinuxCloudSync.shutDown(holder)
         // Closing first cancels a shortcut's transcription instead of waiting
         // on its provider; queued shortcuts then find the controller closed.
@@ -94,6 +95,39 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
     if let smokeFailure = holder.smokeTestFailure { throw smokeFailure }
 }
 
+/// Runs the GTK event loop until the window closes, returning any error
+/// raised while marshalling arguments or running `jsti_window_run` instead
+/// of throwing, so the caller can still perform its own cleanup first.
+private func runGTKEventLoop(selected: Int, context: UnsafeMutableRawPointer, holder: LinuxEventContext) -> Error? {
+    let strings = LinuxWindow.Strings()
+    let rows = LinuxWindow.modelRows(strings)
+    var arguments = CommandLine.arguments.map { strdup($0) }
+    defer { arguments.forEach { free($0) } }
+    do {
+        try withExtendedLifetime(strings) {
+            try rows.withUnsafeBufferPointer { rows in
+                try LinuxNative.call { error, capacity in
+                    jsti_window_run(
+                        linuxApplicationID, Int32(arguments.count), &arguments, rows.baseAddress, rows.count,
+                        Int32(selected), linuxWindowEvent, context,
+                        holder.smokeTest ? Int32(JSTI_WINDOW_SMOKE_TEST) : 0, error, capacity
+                    )
+                }
+            }
+        }
+        return nil
+    } catch {
+        return error
+    }
+}
+
+func configureApplicationIcon() throws {
+    guard let theme = Bundle.module.url(forResource: "hicolor", withExtension: nil) else {
+        throw DesktopHostError(message: "The bundled application icon theme is missing.")
+    }
+    try LinuxNative.call { jsti_app_icon_configure(theme.deletingLastPathComponent().path, $0, $1) }
+}
+
 let arguments = CommandLine.arguments
 DesktopHostModels.configure(
     streamingQualified: LinuxLiveTransport.qualified, local: DesktopLocalTranscription.options(host: .linux)
@@ -104,6 +138,17 @@ if arguments.contains("--version") {
 }
 if arguments.contains("--self-test") {
     do { try runSelfTest() } catch { fail(error) }
+    exit(0)
+}
+if arguments.contains("--recording-feedback-self-test") {
+    do {
+        try blocking {
+            for profile in RecordingFeedbackProfile.allCases {
+                let latencies = try await LinuxRecordingFeedbackLoader.checkNativeOutput(profile: profile)
+                print("\(profile.rawValue) prepared recording sound queue latencies (seconds): \(latencies)")
+            }
+        }
+    } catch { fail(error) }
     exit(0)
 }
 if arguments.contains("--local-transcription-self-test") {

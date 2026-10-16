@@ -105,11 +105,16 @@ public enum SonioxTTSRegion: String, CaseIterable, Codable, Hashable, Identifiab
     public var webSocketEndpoint: URL { URL(string: "wss://\(ttsHost)/tts-websocket")! }
 
     public static func migrated(from identifier: String?) -> SonioxTTSRegion {
+        recognized(from: identifier) ?? .unitedStates
+    }
+
+    /// Operational callers can retain unknown imported values without sending a key to a guessed region.
+    public static func recognized(from identifier: String?) -> SonioxTTSRegion? {
         switch identifier?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case "eu", "europe", "european-union": .europe
         case "jp", "japan": .japan
         case "us", "usa", "united-states", "global", nil, "": .unitedStates
-        default: .unitedStates
+        default: nil
         }
     }
 }
@@ -151,12 +156,12 @@ public struct SonioxTTSAccountVoice: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
-public enum SonioxTTSVoiceFallbackReason: Equatable, Sendable {
+public enum SonioxTTSVoiceFallbackReason: Hashable, Sendable {
     case missingOrDeletedClone(lastKnownName: String?)
     case cloneNotReady(lastKnownName: String?)
 }
 
-public struct SonioxTTSResolvedVoice: Equatable, Sendable {
+public struct SonioxTTSResolvedVoice: Hashable, Sendable {
     public let apiVoiceID: String
     public let providerVoiceID: String
     public let displayName: String

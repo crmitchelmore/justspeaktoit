@@ -7,50 +7,12 @@ import os.log
 /// Uses `AVAudioPlayer` under the hood and expects the audio files to be bundled resources.
 @MainActor
 public final class RecordingSoundPlayer {
-  public enum RecordingSound: Sendable {
-    case start
-    case stop
-
-    var resourceName: String {
-      switch self {
-      case .start: return "recording_start"
-      case .stop: return "recording_stop"
-      }
-    }
-
-    var fileExtension: String { "m4a" }
-  }
-
-  public enum SoundProfile: String, CaseIterable, Identifiable, Sendable {
-    case classic
-    case bubbly
-    case futuristic
-    case soft
-
-    public var id: String { rawValue }
-
-    public var displayName: String {
-      switch self {
-      case .classic: return "Classic"
-      case .bubbly: return "Bubbly"
-      case .futuristic: return "Futuristic"
-      case .soft: return "Soft"
-      }
-    }
-
-    var suffix: String? {
-      switch self {
-      case .classic: return nil
-      case .bubbly: return "bubbly"
-      case .futuristic: return "futuristic"
-      case .soft: return "soft"
-      }
-    }
-  }
+  public typealias RecordingSound = RecordingFeedbackSound
+  public typealias SoundProfile = RecordingFeedbackProfile
 
   private let logger = SpeakLogger.logger(category: "RecordingSoundPlayer")
 
-  public var profile: SoundProfile = .classic {
+  public var profile: SoundProfile = RecordingFeedbackDefaults.profile {
     didSet {
       if profile != oldValue {
         players.removeAll()
@@ -75,14 +37,9 @@ public final class RecordingSoundPlayer {
       return
     }
 
-    // Apply exponential curve for more control at low volumes.
-    // volume² gives finer control in the quiet range while preserving full range.
-    let linearVolume = max(0, min(1, volume))
-    let curvedVolume = linearVolume * linearVolume
-
     // Restart from the beginning for reliable feedback.
     p.currentTime = 0
-    p.volume = curvedVolume
+    p.volume = RecordingFeedbackDefaults.gain(for: volume)
     p.prepareToPlay()
     p.play()
   }
@@ -109,9 +66,6 @@ public final class RecordingSoundPlayer {
   }
 
   private func resourceName(for sound: RecordingSound) -> String {
-    guard let suffix = profile.suffix else {
-      return sound.resourceName
-    }
-    return "\(sound.resourceName)_\(suffix)"
+    profile.resourceName(for: sound)
   }
 }

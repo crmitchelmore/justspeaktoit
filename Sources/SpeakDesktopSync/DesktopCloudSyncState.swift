@@ -46,6 +46,11 @@ public struct DesktopCloudSyncState: Codable, Equatable, Sendable {
     public var boundAccount: String?
     /// The History change-feed cursor (an opaque web `syncToken`).
     public var historyCursor: Data?
+    public var comparisonCursor: Data?
+    /// Optional for decoding state saved before comparison sync existed.
+    public var comparisonAcknowledgements: [UUID: Date]?
+    /// Provenance survives account changes; old-account tombstones never upload to a new account.
+    public var comparisonOwners: [UUID: String]?
     public var history: [UUID: HistoryEntry] = [:]
     public var importedKeys: [String: ImportedKey] = [:]
     public var lastSuccessfulSync: Date?
@@ -54,9 +59,11 @@ public struct DesktopCloudSyncState: Codable, Equatable, Sendable {
 
     public var consent: CloudKitWebSyncConsent { CloudKitWebSyncConsent(enabledFeatures: enabledFeatures) }
 
-    /// Forgets everything that belonged to the previously bound iCloud user.
+    /// Resets per-account progress, retaining comparison provenance so old deletions cannot transfer.
     public mutating func forgetAccountData() {
         historyCursor = nil
+        comparisonCursor = nil
+        comparisonAcknowledgements = nil
         history = [:]
         importedKeys = [:]
         lastSuccessfulSync = nil
@@ -72,6 +79,7 @@ public actor DesktopCloudSyncStateStore: SyncChangeTokenStore, CloudKitWebSyncAc
     /// on or off takes the next revision, and a step taken for an earlier one
     /// is refused. Not saved, because after a restart none is in progress.
     private var keyImportRevision: UInt64 = 0
+    var comparisonConsentRevision: UInt64 = 0
 
     public init(url: URL) throws {
         self.url = url
@@ -83,6 +91,34 @@ public actor DesktopCloudSyncStateStore: SyncChangeTokenStore, CloudKitWebSyncAc
     }
 
     public var current: DesktopCloudSyncState { state }
+
+    func setComparisonConsent(_ enabled: Bool) throws {
+        // Revocation stops current work even if saving fails; granting consent requires a durable write.
+        comparisonConsentRevision &+= 1
+        if enabled {
+            try update { $0.enabledFeatures.insert(.comparisonRounds) }
+        } else {
+            state.enabledFeatures.remove(.comparisonRounds)
+            do { try write(state) } catch {
+                throw DesktopComparisonConsentSaveFailure(detail: error.localizedDescription)
+            }
+        }
+    }
+
+    func requireComparisonConsent(revision: UInt64) throws {
+        try Task.checkCancellation()
+        guard state.enabledFeatures.contains(.comparisonRounds) else {
+            throw CloudKitWebServicesError.consentRequired(.comparisonRounds)
+        }
+        guard comparisonConsentRevision == revision else { throw DesktopComparisonConsentSuperseded() }
+    }
+
+    func updateComparison<Value>(
+        revision: UInt64, _ change: (inout DesktopCloudSyncState) throws -> Value
+    ) throws -> Value {
+        try requireComparisonConsent(revision: revision)
+        return try update(change)
+    }
 
     /// Applies a change and saves it before returning.
     public func update<T>(_ change: (inout DesktopCloudSyncState) throws -> T) throws -> T {

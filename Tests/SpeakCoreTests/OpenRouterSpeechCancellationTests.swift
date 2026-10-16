@@ -91,4 +91,112 @@ final class OpenRouterSpeechCancellationTests: XCTestCase {
 
         XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
     }
+
+    /// Cancels once headers have been delivered (`onStartLoading` fires) but the response body
+    /// is zero bytes — unlike `testCancellation_WhileAwaitingHeaders_...` (cancels before any
+    /// response) and `testCancellation_AfterPartialBody_...` (cancels after a flushed chunk).
+    /// `onStartLoading` only proves headers arrived, not which phase of body iteration follows.
+    func testCancellation_HeadersDeliveredNoBodyBytes_StopsTransportAndCompletesWithoutFiles() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openrouter-cancellation-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let session = StubURLProtocol.makeSession()
+        defer {
+            session.invalidateAndCancel()
+            StubURLProtocol.reset()
+        }
+        let headersDelivered = expectation(description: "Headers delivered, body not finished")
+        let stopped = expectation(description: "Request cancelled at header handoff")
+        let completed = expectation(description: "Cancelled synthesis completes")
+        let response = HTTPURLResponse(
+            url: URL(string: "https://stub.invalid")!, statusCode: 200, httpVersion: nil,
+            headerFields: ["Content-Type": "audio/mpeg", "Content-Length": "1000000"]
+        )!
+        // Headers arrive but the body is never finished and never flushed (zero bytes), unlike
+        // the flushed-chunk case in `testCancellation_AfterPartialBody_...`.
+        StubURLProtocol.handler = { _ in .respondWithoutFinishing(response, Data()) }
+        StubURLProtocol.onStartLoading = { headersDelivered.fulfill() }
+        StubURLProtocol.onStopLoading = { stopped.fulfill() }
+        let client = OpenRouterAudioClient(
+            apiKeyProvider: { "test-key" }, session: session, temporaryDirectory: directory
+        )
+        let task = Task {
+            defer { completed.fulfill() }
+            do {
+                _ = try await client.synthesize(text: "Hello", model: "provider/tts", voice: nil)
+                XCTFail("Expected cancellation")
+            } catch {
+                XCTAssertTrue(error is CancellationError, "Expected cancellation, got \(error)")
+            }
+        }
+        defer { task.cancel() }
+        await fulfillment(of: [headersDelivered], timeout: 2)
+
+        task.cancel()
+        await fulfillment(of: [stopped, completed], timeout: 2)
+
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
+    }
+
+    /// Cancels after a flushed 32 KiB body chunk has actually been written, covering the
+    /// post-header streaming phase the tests above do not exercise.
+    func testCancellation_AfterPartialBody_StopsTransportAndCompletesWithoutFiles() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openrouter-cancellation-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let session = StubURLProtocol.makeSession()
+        defer {
+            session.invalidateAndCancel()
+            StubURLProtocol.reset()
+        }
+        let stopped = expectation(description: "Request cancelled after partial body")
+        let completed = expectation(description: "Cancelled synthesis completes")
+        // `stream()` flushes to disk every full 32 KiB, so a chunk exactly this size lets the
+        // predicate below confirm the body-read loop actually ran, not just that the stub
+        // handed headers to the loading system.
+        let flushChunk = Data(repeating: 0x49, count: 32 * 1024)
+        let response = HTTPURLResponse(
+            url: URL(string: "https://stub.invalid")!, statusCode: 200, httpVersion: nil,
+            headerFields: ["Content-Type": "audio/mpeg", "Content-Length": "1000000"]
+        )!
+        StubURLProtocol.handler = { _ in .respondWithoutFinishing(response, flushChunk) }
+        StubURLProtocol.onStopLoading = { stopped.fulfill() }
+        let client = OpenRouterAudioClient(
+            apiKeyProvider: { "test-key" }, session: session, temporaryDirectory: directory
+        )
+        let task = Task {
+            defer { completed.fulfill() }
+            do {
+                _ = try await client.synthesize(text: "Hello", model: "provider/tts", voice: nil)
+                XCTFail("Expected cancellation")
+            } catch {
+                XCTAssertTrue(error is CancellationError, "Expected cancellation, got \(error)")
+            }
+        }
+        defer { task.cancel() }
+
+        // Wait for the owned destination file to actually contain the flushed chunk: real
+        // consumer progress through the body-read loop, before issuing the cancellation.
+        let wroteFlushedChunk = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                guard let names = try? FileManager.default.contentsOfDirectory(atPath: directory.path) else {
+                    return false
+                }
+                return names.contains { name in
+                    let path = directory.appendingPathComponent(name).path
+                    guard let attrs = try? FileManager.default.attributesOfItem(atPath: path) else { return false }
+                    return ((attrs[.size] as? Int) ?? 0) >= 32 * 1024
+                }
+            },
+            object: nil
+        )
+        await fulfillment(of: [wroteFlushedChunk], timeout: 2)
+
+        task.cancel()
+        await fulfillment(of: [stopped, completed], timeout: 2)
+
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
+    }
 }

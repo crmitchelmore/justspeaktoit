@@ -23,11 +23,38 @@ struct LinuxHotKeySettings: Codable, Equatable, Sendable {
 
 /// GTK 4/libadwaita, the Secret Service, libpulse and the X11 or portal
 /// output paths behind the shared desktop host.
-enum LinuxHostPlatform: DesktopHostPlatform {
+enum LinuxHostPlatform: DesktopHostAutomationPlatform {
+    static var correctionLearningUnavailable: String? {
+        "Automatic learning is unavailable on Linux: X11 retains only a top-level window, not an AT-SPI "
+            + "editable field/range; Wayland paste has no confirmed destination. Stored candidates remain reviewable."
+    }
+    static var defaultTextOutput: LinuxTextOutputOptions { .init() }
+    static func handsFreeReadinessFailure() -> String? {
+        jsti_window_hands_free_guard_ready() != 0 ? nil
+            : "Session lock/sleep monitoring is unavailable. Hands-free stays off; manual recording still works."
+    }
     typealias VoiceOutputSettings = LinuxVoiceOutputSettings
 
     package static let displayName = "Linux"
+    package static func matchProfile(_ profiles: [DictationProfile], executablePath: String?) -> DictationProfile? {
+        ProfileResolver(profiles: profiles).profile(forLinuxExecutablePath: executablePath)
+    }
     package static let credentialStoreName = "the desktop keyring (Secret Service)"
+    package static func makeRecordingFeedbackLoader() -> (any DesktopRecordingFeedbackLoader)? {
+        LinuxRecordingFeedbackLoader()
+    }
+
+    package static var voiceConfigurationKeys: Set<String> {     DesktopConfiguration.voiceTransferKeys }
+    package static func exportVoiceConfiguration(
+        _ voiceOutput: VoiceOutputSettings?, over configuration: DesktopConfiguration
+    ) throws -> DesktopConfiguration {
+        try VoiceOutputSettings.exportConfiguration(voiceOutput, over: configuration)
+    }
+    package static func importVoiceConfiguration(
+        from configuration: DesktopConfiguration, into voiceOutput: inout VoiceOutputSettings?
+    ) throws -> DesktopConfiguration {
+        try VoiceOutputSettings.importConfiguration(from: configuration, into: &voiceOutput)
+    }
 
     /// Facts discovered at startup that output planning needs.
     private final class Runtime: @unchecked Sendable {
@@ -69,8 +96,24 @@ enum LinuxHostPlatform: DesktopHostPlatform {
         LinuxWindow.insights(all: all, visible: visible)
     }
 
+    package static func historyManagement(identifiers: [UUID]) {
+        let value = identifiers.map(\.uuidString).joined(separator: "\n")
+        if jsti_window_set_history_management(value) != 0 {
+            update("History management could not be refreshed. Saved recordings remain on disk.")
+        }
+    }
+
+    package static func confirmAudioCleanup(id: UUID, count: Int) throws {
+        guard jsti_window_confirm_audio_cleanup(id.uuidString, count) == 0 else {
+            throw DesktopHostError(message: "Could not show the recording audio confirmation.")
+        }
+    }
+
     package static func hud(_ state: DesktopHUDState) {
-        _ = jsti_window_set_hud(state.phase.rawValue, state.headline, state.subheadline, state.liveText)
+        _ = jsti_window_set_hud_layout(
+            state.phase.rawValue, state.headline, state.subheadline, state.liveText,
+            Int32(((state.displayDuration ?? 0) * 1000).rounded()), state.compact ? 1 : 0, state.expanded ? 1 : 0
+        )
     }
 
     package static func historyPresentation(
@@ -123,6 +166,7 @@ enum LinuxHostPlatform: DesktopHostPlatform {
     }
 
     package static func openFile(_ url: URL) throws { try LinuxFiles.open(url) }
+    package static func revealDirectory(_ url: URL) throws { try LinuxFiles.open(url) }
 
     package static func copyToClipboard(_ text: String) throws { try LinuxClipboard.write(text) }
 
@@ -139,6 +183,10 @@ enum LinuxHostPlatform: DesktopHostPlatform {
     }
 
     package static func cancel(_ job: LinuxOutputJob) { job.cancel() }
+
+    package static func requiresInsertionTarget(_ options: LinuxTextOutputOptions) -> Bool {
+        options.method != .clipboardOnly
+    }
 
     package static func isClipboard(_ job: LinuxOutputJob) -> Bool { job.plan.isClipboard }
 

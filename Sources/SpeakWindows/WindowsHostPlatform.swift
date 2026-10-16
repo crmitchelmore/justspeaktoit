@@ -18,6 +18,10 @@ typealias WindowsNativeError = DesktopHostError
 /// Win32 window, Credential Manager, WASAPI, Media Foundation and UI Automation
 /// behind the shared desktop host.
 enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPlatform {
+    static func handsFreeReadinessFailure() -> String? {
+        jsti_window_hands_free_guard_ready() != 0 ? nil
+            : "Session lock/sleep monitoring is unavailable. Hands-free stays off; manual recording still works."
+    }
     typealias VoiceOutputSettings = WindowsVoiceOutputSettings
     typealias VoiceOutput = WindowsVoiceOutput
     typealias ReadAloudState = DesktopHostReadAloudState<WindowsAudioPlaybackController.Speech, WindowsVoiceOutput>
@@ -26,6 +30,21 @@ enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPla
 
     package static let displayName = "Windows"
     package static let credentialStoreName = "Windows Credential Manager"
+    package static func makeRecordingFeedbackLoader() -> (any DesktopRecordingFeedbackLoader)? {
+        WindowsRecordingFeedbackLoader()
+    }
+
+    package static var voiceConfigurationKeys: Set<String> {     DesktopConfiguration.voiceTransferKeys }
+    package static func exportVoiceConfiguration(
+        _ voiceOutput: VoiceOutputSettings?, over configuration: DesktopConfiguration
+    ) throws -> DesktopConfiguration {
+        try VoiceOutputSettings.exportConfiguration(voiceOutput, over: configuration)
+    }
+    package static func importVoiceConfiguration(
+        from configuration: DesktopConfiguration, into voiceOutput: inout VoiceOutputSettings?
+    ) throws -> DesktopConfiguration {
+        try VoiceOutputSettings.importConfiguration(from: configuration, into: &voiceOutput)
+    }
 
     package static func update(_ status: String, transcript: String?, state: Int32) {
         WindowsNative.update(status, transcript: transcript, state: state)
@@ -41,8 +60,18 @@ enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPla
         WindowsNative.insights(all: all, visible: visible)
     }
 
+    package static func historyManagement(identifiers: [UUID]) {
+        let value = identifiers.map(\.uuidString).joined(separator: "\n")
+        if jsti_window_set_history_management(value) != 0 {
+            update("History management could not be refreshed. Saved recordings remain on disk.")
+        }
+    }
+
     package static func hud(_ state: DesktopHUDState) {
-        _ = jsti_window_set_hud(state.phase.rawValue, state.headline, state.subheadline, state.liveText)
+        _ = jsti_window_set_hud_layout(
+            state.phase.rawValue, state.headline, state.subheadline, state.liveText,
+            Int32(((state.displayDuration ?? 0) * 1000).rounded()), state.compact ? 1 : 0, state.expanded ? 1 : 0
+        )
     }
 
     package static func historyPresentation(
@@ -83,6 +112,16 @@ enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPla
         }
     }
 
+    package static func revealDirectory(_ url: URL) throws {
+        try url.path.withCString { path in
+            try WindowsNative.checked { jsti_shell_open_directory(path, $0, $1) }
+        }
+    }
+
+    package static func confirmAudioCleanup(id: UUID, count: Int) throws {
+        try WindowsNative.checked { jsti_window_confirm_audio_cleanup(id.uuidString, count, $0, $1) }
+    }
+
     package static func copyToClipboard(_ text: String) throws {
         try text.withCString { text in
             try WindowsNative.checked { jsti_clipboard_write(text, $0, $1) }
@@ -101,11 +140,21 @@ enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPla
         return target.map { .insertion($0, options) }
     }
 
+    package static func requiresInsertionTarget(_ options: WindowsTextOutputOptions) -> Bool {
+        options.method != .clipboardOnly
+    }
+
     package static func cancel(_ job: WindowsOutputJob) { job.cancel() }
 
     package static func isClipboard(_ job: WindowsOutputJob) -> Bool {
         if case .clipboard = job { return true }
         return false
+    }
+
+    package static var correctionLearningUnavailable: String? { nil }
+    package static func correctionReadback(_ job: WindowsOutputJob) -> (any DesktopCorrectionReadback)? {
+        guard case .insertion(let target, _) = job else { return nil }
+        return WindowsCorrectionReadback(target: target)
     }
 
     /// Read aloud's engine, created on first use in the app's protected folder.
@@ -133,6 +182,12 @@ enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPla
             presenter: WindowsAudioPlaybackPresenter(show: { WindowsNative.playback($0) }, status: { _ in })
         )
     }
+}
+
+/// Default text output only; this does not opt Windows into automation
+/// consent/import/revocation behavior (see DesktopHostAutomationPlatform).
+extension WindowsHostPlatform: DesktopHostDefaultTextOutputPlatform {
+    static var defaultTextOutput: WindowsTextOutputOptions { .init() }
 }
 
 extension WindowsAppController {

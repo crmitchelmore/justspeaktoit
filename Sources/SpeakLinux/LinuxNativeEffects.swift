@@ -26,18 +26,47 @@ struct LinuxNativeEffects: DesktopHostEffects {
         LinuxLiveTransport.makeClient(model: model, key: key, language: language, azureEndpoint: azureEndpoint)
     }
 
+    func makeLiveClient(
+        model: String, key: String, language: String?, azureEndpoint: String, options: LiveClientOptions
+    ) -> (any FinalizingStreamingTranscriptionClient)? {
+        LinuxLiveTransport.makeClient(
+            model: model, key: key, language: language, azureEndpoint: azureEndpoint, options: options
+        )
+    }
+
     func transcribe(
         _ request: DesktopHostTranscriptionRequest, with controller: LinuxAppController
     ) async throws -> TranscriptionResult {
         try await controller.transcribePreparedAudio(
             request.audio, model: request.model, key: request.key, duration: request.duration,
-            language: request.language
+            language: request.language, keywords: request.keywords, azureEndpoint: request.azureEndpoint,
+            historySaved: request.historySaved
         )
     }
 
-    func perform(_ job: LinuxOutputJob, text: String) -> String { job.perform(text) }
+    func perform(_ job: LinuxOutputJob, text: String) -> DesktopTextOutputResult { job.performResult(text) }
+
+    func captureInsertionTarget() async throws -> LinuxInsertionTarget? {
+        guard LinuxHostPlatform.session.canUseX11Injection else {
+            throw DesktopHostError(
+                message: "This desktop cannot freeze an external insertion destination. "
+                    + "Use clipboard-only hands-free output or manual recording."
+            )
+        }
+        return try await Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
+            return try LinuxX11.captureTargetChecked()
+        }.value
+    }
 
     func writeSettings(_ data: Data, to url: URL) throws { try data.write(to: url, options: .atomic) }
+
+    func voiceCommandClipboardText() async throws -> String? {
+        try await Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
+            return try LinuxClipboard.voiceCommandSnapshot()
+        }.value
+    }
 }
 
 /// libpulse capture feeding the shared recording context. Keeps the context
@@ -70,10 +99,10 @@ enum LinuxLiveTransport {
     static let qualified = true
 
     static func makeClient(
-        model: String, key: String, language: String?, azureEndpoint: String
+        model: String, key: String, language: String?, azureEndpoint: String, options: LiveClientOptions = .init()
     ) -> (any FinalizingStreamingTranscriptionClient)? {
         DesktopLiveTranscription.makeClient(
-            model: model, apiKey: key, language: language, azureEndpoint: azureEndpoint,
+            model: model, apiKey: key, language: language, azureEndpoint: azureEndpoint, options: options,
             makeConnection: { NIOStreamingConnection(request: $0) }
         )
     }

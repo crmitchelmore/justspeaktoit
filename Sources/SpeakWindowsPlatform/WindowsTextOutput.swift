@@ -1,4 +1,5 @@
 import Foundation
+import SpeakDesktop
 import CWindowsSupport
 
 /// Text output preferences for the Windows host. These mirror the macOS
@@ -170,7 +171,7 @@ public final class WindowsInsertionTarget: @unchecked Sendable {
         }
     }
 
-    private let handle: OpaquePointer
+    let handle: OpaquePointer
     private let lock = NSLock()
     private var inserting = false
 
@@ -269,6 +270,14 @@ public final class WindowsInsertionTarget: @unchecked Sendable {
 /// User-facing status text for insertion outcomes. Never includes transcript
 /// or clipboard contents.
 public enum WindowsInsertionStatus {
+    public static func delivery(for outcome: WindowsInsertionTarget.Outcome) -> DesktopTextOutputResult {
+        DesktopTextOutputResult(
+            outcome.verified && (outcome.method == .nativeEdit || outcome.fieldIdentity)
+                ? .confirmedInsertion : .unconfirmedInsertion,
+            status: message(for: outcome)
+        )
+    }
+
     public static func message(for outcome: WindowsInsertionTarget.Outcome) -> String {
         var status: String
         switch outcome.method {
@@ -278,7 +287,10 @@ public enum WindowsInsertionStatus {
         case .paste:
             status = outcome.verified
                 ? "Pasted into the original text field and saved to History."
-                : "Pasted into the original text field; the result could not be confirmed. Saved to History."
+                : "Paste keys sent; insertion could not be confirmed. Saved to History."
+        }
+        if outcome.method != .nativeEdit, !outcome.fieldIdentity {
+            status = "Insertion attempted; the original field could not be confirmed. Saved to History."
         }
         if let note = clipboardNote(for: outcome.clipboard) { status += " " + note }
         return status

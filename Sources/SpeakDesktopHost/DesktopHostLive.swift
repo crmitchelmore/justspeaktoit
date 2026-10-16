@@ -3,11 +3,24 @@ import SpeakCore
 import SpeakDesktop
 
 extension DesktopHostController {
-    func makeLiveSession(model: String, key: String, id: UUID, language: String? = nil) -> DesktopLiveSession? {
-        guard DesktopHostModels.isLive(model), let client = effects.makeLiveClient(
-            model: model, key: key, language: language, azureEndpoint: azureResourceEndpoint()
+    func makeLiveSession(
+        model: String, key: String, id: UUID, language: String? = nil, options: LiveClientOptions? = nil,
+        input: DesktopHostRecordingInput? = nil, polish: DesktopHostLivePolishInput? = nil
+    ) async throws -> DesktopLiveSession? {
+        guard DesktopHostModels.isLive(model) else { return nil }
+        let baseOptions = options ?? settings.configuration?.liveOptions ?? .init()
+        let vocabulary: [String]
+        if let input { vocabulary = input.vocabulary } else { vocabulary = try await vocabularyKeywords() }
+        let options = baseOptions.includingVocabularyKeywords(vocabulary)
+        guard let client = effects.makeLiveClient(
+            model: model, key: key, language: language,
+            azureEndpoint: input?.azureEndpoint ?? azureResourceEndpoint(), options: options
         ) else { return nil }
-        return DesktopLiveSession(client: client, id: id)
+        return DesktopLiveSession(
+            client: client, id: id,
+            keywordLimitation: options.keywords.isEmpty ? nil : DesktopTranscription.keywordLimitation(model: model),
+            livePolish: makeLivePolish(polish, id: id)
+        )
     }
 
     func monitorLive(_ session: DesktopLiveSession) {
@@ -19,24 +32,51 @@ extension DesktopHostController {
         if let id = selectedHistoryID, let record = history[id] { showTranscriptVariant(.processed, for: record) }
         liveUpdates = Task {
             var revision: UInt64?
+            var displayed: String?
+            var polishFailure: String?
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
                 let snapshot = session.snapshot()
-                guard !closed, recording?.record.id == snapshot.id else { return }
+                guard !closed, recording?.record.id == snapshot.id || ownedDictation?.id == snapshot.id else { return }
                 if let error = snapshot.error {
                     await captureFailed(error, recordingID: snapshot.id)
                     return
                 }
-                guard revision != snapshot.revision else { continue }
+                let cleaned = session.livePolish?.snapshot()
+                let preview = cleaned?.succeeded == true && cleaned?.input == snapshot.text
+                    ? cleaned?.text ?? snapshot.text : snapshot.text
+                guard revision != snapshot.revision || displayed != preview
+                    || polishFailure != cleaned?.failure else { continue }
                 revision = snapshot.revision
-                transcript = snapshot.text
-                let hint = Platform.finishHint(hotKeySettings(), for: recording?.trigger ?? .other)
-                let status = "Live transcription… " + hint
-                    + (recording.map { profileContext($0.record) } ?? "")
-                update(status, transcript: snapshot.text, state: 1)
-                hud(snapshot.id, .recording(profile: recording?.profile.profileName, liveText: snapshot.text))
+                displayed = preview
+                polishFailure = cleaned?.failure
+                publishLivePreview(session)
             }
         }
+    }
+
+    /// Also permits deterministic presentation tests without driving a wall-clock poll.
+    func publishLivePreview(_ session: DesktopLiveSession) {
+        let snapshot = session.snapshot()
+        guard !closed, snapshot.phase == .recording || snapshot.phase == .finishing,
+              recording?.record.id == snapshot.id || ownedDictation?.id == snapshot.id else { return }
+        let cleaned = session.livePolish?.snapshot()
+        let preview = cleaned?.succeeded == true && cleaned?.input == snapshot.text
+            ? cleaned?.text ?? snapshot.text : snapshot.text
+        transcript = preview
+        let buffering = recordingTail?.recordID == snapshot.id
+        let hint = Platform.finishHint(
+            hotKeySettings(), for: recording?.trigger ?? ownedDictation?.request.trigger ?? .other
+        )
+        var status = buffering ? recordingBufferStatus : "Live transcription… " + hint
+            + (recording.map { profileContext($0.record) }
+                ?? ownedDictation.map { profileContext($0.request.record) } ?? "")
+        if let failure = cleaned?.failure { status += " Auto-Clean: \(failure)" }
+        update(status, transcript: preview, state: buffering ? 2 : 1)
+        hud(snapshot.id, .recording(
+            profile: recording?.profile.profileName ?? ownedDictation?.request.profile.profileName,
+            liveText: preview
+        ))
     }
 
     func finishLive(_ stopped: StoppedRecording, session: DesktopLiveSession) async {
@@ -56,13 +96,37 @@ extension DesktopHostController {
         }
         do {
             try await saveRecord(record)
-            if record.failure == nil { record = await postProcess(record, options: options) }
+            if record.failure == nil {
+                record = try await applyVoiceCommands(record)
+                record = try await applyVocabulary(record)
+                record = await applyLivePolish(record, session: session)
+                let skip = record.livePolishResult?.succeeded == true
+                    && session.livePolish?.preferences.skipPostProcessing == true
+                if !skip {
+                    record = await postProcess(record, options: options, inputText: record.processedText)
+                }
+            } else {
+                session.livePolish?.cancel()
+            }
             if cancellationRequested { record.failure = "Cancelled. Completed transcription and audio retained." }
             try await saveRecord(record)
-            if !closed { present(record, output: stopped.output) }
+            if cancellationRequested, record.failure == nil {
+                record.failure = "Cancelled. Completed transcription and audio retained."
+                try await saveRecord(record)
+            }
+            if !closed { present(record, output: cancellationRequested ? nil : stopped.output) }
         } catch {
+            record.failure = cancellationRequested || closed
+                ? "Live transcription cancelled. Audio and received text retained."
+                : "Live transcript retained; voice commands or corrections failed. \(error.localizedDescription)"
+            do { try await saveRecord(record) } catch {
+                reportFailure(
+                    "Live recording retained; history could not be saved: \(error.localizedDescription)", for: record.id
+                )
+                return
+            }
             reportFailure(
-                "Live recording retained; history could not be saved: \(error.localizedDescription)", for: record.id
+                record.failure ?? "Live transcript retained.", for: record.id
             )
         }
     }

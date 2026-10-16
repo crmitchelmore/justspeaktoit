@@ -42,6 +42,25 @@ public enum DesktopLocalTranscriptionError: LocalizedError, Equatable {
 /// `ModelCatalog.localTranscription`; `WhisperCppModels` adds only the pinned
 /// weights. Only entries the host's backends can execute are offered.
 public enum DesktopLocalTranscription {
+    private final class ImportedNames: @unchecked Sendable {
+        let lock = NSLock()
+        var values: [String: String] = [:]
+    }
+    private static let importedNames = ImportedNames()
+
+    /// Metadata supplies friendly History names, never runtime capability.
+    public static func rememberImportedNames(_ models: [HuggingFaceWhisperModel]) {
+        importedNames.lock.withLock {
+            for model in models { importedNames.values[model.id] = model.displayName + " (on-device)" }
+        }
+    }
+
+    public static func option(_ model: WhisperCppModel) -> ModelCatalog.Option {
+        ModelCatalog.Option(
+            id: model.catalogueID, displayName: model.displayName + " (on-device)",
+            description: model.summary, latencyTier: .medium, tags: [.privacy]
+        )
+    }
     /// Longest recording accepted: about 1.9 hours of 16 kHz mono PCM16.
     public static let maximumAudioBytes = 220_000_000
     public static let maximumMinutes = 110
@@ -76,7 +95,8 @@ public enum DesktopLocalTranscription {
     /// The friendly name of a whisper.cpp selection, or `nil` for any other
     /// identifier. History keeps showing it even if a host stops offering it.
     public static func displayName(for identifier: String) -> String? {
-        WhisperCppModels.model(forCatalogueID: identifier).map { $0.displayName + " (on-device)" }
+        importedNames.lock.withLock { importedNames.values[identifier] }
+            ?? WhisperCppModels.model(forCatalogueID: identifier).map { $0.displayName + " (on-device)" }
     }
 
     /// Whisper takes a bare ISO 639 code. Region and script subtags are

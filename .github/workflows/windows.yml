@@ -4,7 +4,12 @@ on:
   push:
     branches: [main]
     paths:
+      - .gitattributes
       - Package.swift
+      - Resources/Desktop/**
+      - Resources/AppIcon.iconset/**
+      - scripts/generate-desktop-icons.py
+      - scripts/tests/test_desktop_icons.py
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
       - Sources/SpeakDesktopHost/**
@@ -35,7 +40,12 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - .gitattributes
       - Package.swift
+      - Resources/Desktop/**
+      - Resources/AppIcon.iconset/**
+      - scripts/generate-desktop-icons.py
+      - scripts/tests/test_desktop_icons.py
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
       - Sources/SpeakDesktopHost/**
@@ -64,6 +74,16 @@ on:
       - .github/workflows/windows.yml
       - .github/workflows/windows-local-runtime.yml
   workflow_dispatch:
+    inputs:
+      owned_capture_diagnostics:
+        description: >-
+          Manual opt-in only: capture isolated DesktopHostOwnedRecordingTests
+          direct-executable exit/PID/WER evidence (read-only). Leaving this at
+          its default runs the job exactly as an ordinary push/pull_request/
+          manual dispatch always has.
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -130,10 +150,1362 @@ jobs:
 
       - name: Test shared core, desktop workflow and native adapters
         id: native-tests
+        # Runs exactly as before on every push/pull_request/default dispatch,
+        # INCLUDING the original implicit `success()` gate (this step must
+        # NOT run if an earlier step, e.g. the toolchain install or native
+        # build, already failed -- restoring default Actions behavior rather
+        # than the previously-introduced `!cancelled()`, which incorrectly
+        # let this step run after an earlier failure on every trigger, not
+        # just the opt-in one). Narrowly skipped ONLY for the explicit opt-in
+        # diagnostics dispatch below, so cold full-suite execution does not
+        # precede (and does not consume budget/time ahead of) the isolated
+        # single-class capture; every other trigger is completely unaffected.
+        if: ${{ success() && !(github.event_name == 'workflow_dispatch' && inputs.owned_capture_diagnostics == true) }}
         run: |
           swift test --configuration release --jobs 4 --xunit-output windows-tests.xml 2>&1 |
             Tee-Object -FilePath windows-native-tests.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build tests for owned-recording diagnostics (opt-in)
+        id: owned-capture-build
+        if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && inputs.owned_capture_diagnostics == true && steps.native-build.outcome == 'success' }}
+        # Separate, more generous budget for cold test compilation, kept out
+        # of the fault-observation step below so compile time can never
+        # consume the bounded process-execution window.
+        timeout-minutes: 15
+        run: |
+          swift test list --configuration release --jobs 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Capture owned-recording crash diagnostics (opt-in, read-only)
+        id: owned-capture-diagnostics
+        if: ${{ !cancelled() && steps.owned-capture-build.outcome == 'success' }}
+        timeout-minutes: 8
+        run: |
+          # Manual opt-in diagnostics only; does not alter the unconditional
+          # "Test shared core, desktop workflow and native adapters" step's
+          # assertions/budget on any push/pull_request/default-manual run
+          # (it only narrowly skips re-running the full suite during this
+          # explicit opt-in dispatch -- see that step's own condition).
+          # Invokes the already-compiled .xctest binary directly -- bypassing
+          # `swift test`, whose own exit code can mask the underlying child
+          # process's real exit/signal -- so the actual exit code, PID and
+          # raw stdout/stderr are captured unmodified. Every helper below is
+          # a pure, parameter-driven function with no hidden global state, so
+          # the exact same logic can be (and separately has been) exercised
+          # against synthetic/mocked inputs outside this workflow.
+          $ErrorActionPreference = 'Stop'
+
+          function Get-OwnedTestSelection {
+              param(
+                  [Parameter(Mandatory)][AllowEmptyString()][AllowEmptyCollection()][string[]]$ListLines,
+                  [Parameter(Mandatory)][string]$TargetClass
+              )
+              # swift-corelibs-xctest's direct --list-tests output format is
+              # "<Module>.<Class>/<method>" (confirmed against the pinned
+              # swift-6.2.3-RELEASE Sources/XCTest/Private/TestListing.swift
+              # and ArgumentParser.swift: there is no --filter flag on the
+              # raw binary -- only "--list-tests"/"-l", "--dump-tests-json",
+              # "--help"/"-h", or a positional "<Class>" / "<Class>/<method>"
+              # selector, per Sources/XCTest/Public/XCTestMain.swift's own
+              # usage text and Private/TestFiltering.swift's SelectedTest
+              # matching on String(reflecting: testCaseClass), i.e. the fully
+              # module-qualified class name).
+              $pattern = '^(?<fqcn>[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*\.' + [regex]::Escape($TargetClass) + ')/(?<method>[A-Za-z0-9_]+)$'
+              $fqcns = [System.Collections.Generic.HashSet[string]]::new()
+              $methods = [System.Collections.Generic.List[string]]::new()
+              foreach ($line in $ListLines) {
+                  $m = [regex]::Match($line.Trim(), $pattern)
+                  if ($m.Success) {
+                      [void]$fqcns.Add($m.Groups['fqcn'].Value)
+                      $methods.Add($m.Groups['method'].Value)
+                  }
+              }
+              if ($fqcns.Count -eq 0) {
+                  throw "Target class '$TargetClass' was not found in the built binary's own --list-tests output; refusing to guess a selector (zero-match)."
+              }
+              if ($fqcns.Count -gt 1) {
+                  throw "Target class '$TargetClass' is ambiguous across modules in --list-tests output ($([string]::Join(', ', $fqcns))); refusing to guess a selector."
+              }
+              [pscustomobject]@{
+                  QualifiedClassName = @($fqcns)[0]
+                  ExpectedMethods    = @($methods | Sort-Object -Unique)
+              }
+          }
+
+          function Invoke-BoundedProcess {
+              # Generic, reusable bounded child-process launcher: used for
+              # BOTH the --list-tests enumeration and the isolated test-class
+              # run below, so neither invocation can block indefinitely.
+              # Kill+join after a timeout is itself bounded (KillJoinTimeoutSeconds)
+              # rather than an unbounded WaitForExit(). Never throws for a
+              # Kill()/join failure -- the PID/start-time ledger captured
+              # immediately after a successful Start-Process is always
+              # returned, with KillError/unconfirmed-retirement reported
+              # alongside it, so a kill exception can never discard the one
+              # fact (PID/start time) needed to independently correlate this
+              # run against WER/Event Log evidence afterwards.
+              param(
+                  [Parameter(Mandatory)][string]$FilePath,
+                  [string[]]$ArgumentList = @(),
+                  [Parameter(Mandatory)][string]$StdOutPath,
+                  [Parameter(Mandatory)][string]$StdErrPath,
+                  [Parameter(Mandatory)][int]$WaitTimeoutSeconds,
+                  [int]$KillJoinTimeoutSeconds = 15
+              )
+              foreach ($path in @($StdOutPath, $StdErrPath)) {
+                  if (Test-Path -LiteralPath $path) {
+                      Remove-Item -LiteralPath $path -ErrorAction Stop
+                  }
+              }
+              $process = $null
+              $processId = $null
+              $exited = $false
+              $killed = $false
+              $killJoined = $null
+              $killError = $null
+              $observationError = $null
+              $exitCodeSigned = $null
+              $startUtc = [DateTime]::UtcNow
+              try {
+                  $process = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -PassThru -NoNewWindow `
+                      -RedirectStandardOutput $StdOutPath -RedirectStandardError $StdErrPath
+                  $processId = $process.Id
+                  try {
+                      $exited = $process.WaitForExit($WaitTimeoutSeconds * 1000)
+                  } catch {
+                      # The FIRST WaitForExit can itself throw (e.g. a
+                      # transient Win32 error reading process state) BEFORE
+                      # ever returning. A child may still be alive, and its
+                      # PID/start time are the one fact this function must
+                      # never lose to that exception -- they are retained in
+                      # the ledger returned below regardless, with this
+                      # observation failure recorded alongside (never
+                      # silently swallowed), and a FINITE best-effort cleanup
+                      # kill is still attempted so an unobserved-but-still-
+                      # running child is not leaked past this function's own
+                      # bounded lifetime.
+                      $observationError = $_.Exception.Message
+                      $exited = $false
+                  }
+                  if (-not $exited) {
+                      $killed = $true
+                      try {
+                          $process.Kill($true)
+                          $killJoined = $process.WaitForExit($KillJoinTimeoutSeconds * 1000)
+                      } catch {
+                          $killError = $_.Exception.Message
+                          $killJoined = $false
+                      }
+                  } else {
+                      try {
+                          $exitCodeSigned = $process.ExitCode
+                      } catch {
+                          # Exited=$true but reading ExitCode itself threw:
+                          # still an observation failure, never promoted to a
+                          # confirmed natural exit.
+                          $observationError = $_.Exception.Message
+                          $exited = $false
+                      }
+                  }
+              } catch {
+                  # Start-Process itself failed: no child ever started, so
+                  # there is no PID/start time to retain, but the failure
+                  # must still be visible to the caller rather than silently
+                  # returning an empty success-shaped ledger.
+                  $observationError = $_.Exception.Message
+              } finally {
+                  if ($null -ne $process) { $process.Dispose() }
+              }
+              [pscustomobject]@{
+                  ProcessId        = $processId
+                  StartUtc         = $startUtc.ToString('o')
+                  EndUtc           = [DateTime]::UtcNow.ToString('o')
+                  Exited           = $exited
+                  Killed           = $killed
+                  KillJoined       = $killJoined
+                  KillError        = $killError
+                  ObservationError = $observationError
+                  ExitCodeSigned   = $exitCodeSigned
+                  StdOutPath       = $StdOutPath
+                  StdErrPath       = $StdErrPath
+              }
+          }
+
+          function Format-ProcessRetirement {
+              # Pure, testable helper: turns an Invoke-BoundedProcess result
+              # into a precise, human-readable retirement statement -- NEVER
+              # equates "we never attempted/confirmed a kill" with "it is
+              # confirmed to have exited naturally" (that conflation would
+              # silently launder a startup/observation failure -- Killed
+              # stays $false whenever Start-Process itself failed -- into a
+              # false "exited on its own" claim). Only Exited=$true (a
+              # genuinely confirmed WaitForExit AND ExitCode read) is ever
+              # reported as a natural exit.
+              param([Parameter(Mandatory)]$BoundedProcessResult)
+              if ($BoundedProcessResult.Exited -eq $true) { return 'not-applicable (process exited on its own)' }
+              if (-not $BoundedProcessResult.Killed) {
+                  if ($null -ne $BoundedProcessResult.ObservationError) {
+                      return "unconfirmed (no kill attempted; observation error: $($BoundedProcessResult.ObservationError))"
+                  }
+                  return 'unconfirmed (process was never observed to start or exit)'
+              }
+              if ($BoundedProcessResult.KillJoined -eq $true) { return 'confirmed' }
+              if ($null -ne $BoundedProcessResult.KillError) { return "unconfirmed retirement (kill error: $($BoundedProcessResult.KillError))" }
+              return 'unconfirmed retirement (kill join timed out)'
+          }
+
+          function ConvertTo-ExitCodeHex {
+              param([Parameter(Mandatory)][int]$Signed)
+              '0x{0:X8}' -f [System.BitConverter]::ToUInt32([System.BitConverter]::GetBytes($Signed), 0)
+          }
+
+          function Test-OwnedCaptureIsolation {
+              # Proves (not assumes) that the positional selector actually
+              # restricted execution to the target class. Tracks STARTED and
+              # TERMINAL (passed|failed|skipped) method sets SEPARATELY,
+              # because the actual historical crash evidence shows only a
+              # "started" line for the method that crashed -- a parser that
+              # only recognizes terminal lines would wrongly treat that run
+              # as having executed zero observed methods. A crash/non-zero
+              # exit may legitimately show a partial started/terminal set
+              # (that truncation is itself the evidence of interest) PROVIDED
+              # every observed method (started OR terminal) belongs to the
+              # target class and to the expected method list -- an unknown
+              # method name under the correct class is still rejected, since
+              # the selector binds a class, not an arbitrary method set. Only
+              # a clean exit code 0 additionally requires the FULL expected
+              # method set in BOTH started and terminal, zero non-passed
+              # verdicts, and a terminal count that exactly matches the
+              # expected method count (a "nonempty subset" is insufficient).
+              param(
+                  [Parameter(Mandatory)][AllowEmptyString()][AllowEmptyCollection()][string[]]$StdOutLines,
+                  [Parameter(Mandatory)][string]$TargetClass,
+                  [Parameter(Mandatory)][string[]]$ExpectedMethods,
+                  [Parameter(Mandatory)][bool]$CleanExit
+              )
+              if ($StdOutLines.Count -gt 0 -and $StdOutLines[0] -match '^Usage: ') {
+                  throw 'Built binary printed CLI usage/help instead of running tests; the positional selector was rejected as an invalid option (invalid-CLI).'
+              }
+              $startedPattern  = "^Test Case '(?<class>[A-Za-z0-9_]+)\.(?<method>[A-Za-z0-9_]+)' started at "
+              $terminalPattern = "^Test Case '(?<class>[A-Za-z0-9_]+)\.(?<method>[A-Za-z0-9_]+)' (?<verb>passed|failed|skipped) "
+              $startedMethods = [System.Collections.Generic.HashSet[string]]::new()
+              $terminalMethods = [System.Collections.Generic.HashSet[string]]::new()
+              $terminalVerbs = [System.Collections.Generic.List[pscustomobject]]::new()
+              $foreign = [System.Collections.Generic.List[string]]::new()
+              foreach ($line in $StdOutLines) {
+                  $sm = [regex]::Match($line, $startedPattern)
+                  $tm = [regex]::Match($line, $terminalPattern)
+                  foreach ($match in @($sm, $tm)) {
+                      if (-not $match.Success) { continue }
+                      $class = $match.Groups['class'].Value
+                      $method = $match.Groups['method'].Value
+                      if ($class -ne $TargetClass) {
+                          $foreign.Add("$class.$method (foreign class)")
+                          continue
+                      }
+                      if ($method -notin $ExpectedMethods) {
+                          $foreign.Add("$class.$method (unknown method)")
+                          continue
+                      }
+                      if ($match -eq $sm) { [void]$startedMethods.Add($method) }
+                      else {
+                          [void]$terminalMethods.Add($method)
+                          $terminalVerbs.Add([pscustomobject]@{ Method = $method; Verb = $match.Groups['verb'].Value })
+                      }
+                  }
+              }
+              if ($foreign.Count -gt 0) {
+                  throw "Isolation violated: the run reported test case(s) outside the validated $TargetClass method set ($([string]::Join('; ', ($foreign | Sort-Object -Unique)))); the positional selector did not restrict execution as expected."
+              }
+              if ($CleanExit) {
+                  $missingStarted = @($ExpectedMethods | Where-Object { $_ -notin $startedMethods })
+                  $missingTerminal = @($ExpectedMethods | Where-Object { $_ -notin $terminalMethods })
+                  if ($missingStarted.Count -gt 0 -or $missingTerminal.Count -gt 0) {
+                      throw "Exit code 0 claimed success but expected method(s) did not fully start+complete: started-missing=$($missingStarted -join ', '); terminal-missing=$($missingTerminal -join ', ')."
+                  }
+                  $nonPassed = @($terminalVerbs | Where-Object { $_.Verb -ne 'passed' })
+                  if ($nonPassed.Count -gt 0) {
+                      throw "Exit code 0 claimed success but reported non-passed verdict(s): $(($nonPassed | ForEach-Object { "$($_.Method)=$($_.Verb)" }) -join ', ')."
+                  }
+                  if ($terminalVerbs.Count -ne $ExpectedMethods.Count) {
+                      throw "Exit code 0 claimed success but terminal count ($($terminalVerbs.Count)) does not exactly match the expected method count ($($ExpectedMethods.Count))."
+                  }
+              }
+              [pscustomobject]@{
+                  StartedMethods  = @($startedMethods | Sort-Object)
+                  TerminalMethods = @($terminalMethods | Sort-Object)
+              }
+          }
+
+          function ConvertFrom-WerHexPid {
+              param([Parameter(Mandatory)][string]$Value)
+              $clean = $Value.Trim()
+              if ($clean -match '^0[xX]') { $clean = $clean.Substring(2) }
+              [Convert]::ToInt64($clean, 16)
+          }
+
+          function Get-WerEventDataText {
+              # PowerShell's [xml] adapter applies a "leaf shortcut": a
+              # same-named repeated child element with no attributes and no
+              # children (exactly what classic, non-manifest WER <Data>
+              # elements are) is surfaced AS the plain InnerText string
+              # itself, not as an XmlElement -- so .InnerText on it silently
+              # resolves to $null (printed as ''), even though the real text
+              # IS present. Live-verified against a constructed classic
+              # Application-Error-shaped <EventData> block. This helper
+              # tolerates BOTH shapes defensively.
+              param($Node)
+              if ($null -eq $Node) { return '' }
+              if ($Node -is [string]) { return $Node }
+              return [string]$Node.InnerText
+          }
+
+          function Get-WerEventDataFieldMap {
+              # Determines whether THIS event's <EventData><Data> elements
+              # carry a Name= attribute (a named/reorderable template) or
+              # are the classic, unnamed, strictly-positional layout --
+              # live-verified: a named <Data Name="X"> element is surfaced
+              # as a real XmlElement whose .GetAttribute('Name') returns the
+              # attribute, while the classic no-attribute shape hits the
+              # leaf-shortcut (plain string) described above and therefore
+              # can NEVER itself carry a Name=. A MIXED layout (some named,
+              # some not) or duplicate Name= values makes either binding
+              # mode unsound and is rejected outright -- never guessed past.
+              param([Parameter(Mandatory)][object[]]$DataNodes)
+              $named = 0
+              $unnamed = 0
+              $map = [ordered]@{}
+              $duplicate = $false
+              $positional = [System.Collections.Generic.List[string]]::new()
+              foreach ($node in $DataNodes) {
+                  $positional.Add((Get-WerEventDataText $node))
+                  if ($node -is [string]) { $unnamed++; continue }
+                  $nameAttr = $node.GetAttribute('Name')
+                  if ([string]::IsNullOrEmpty($nameAttr)) {
+                      $unnamed++
+                  } else {
+                      $named++
+                      if ($map.Contains($nameAttr)) { $duplicate = $true }
+                      $map[$nameAttr] = Get-WerEventDataText $node
+                  }
+              }
+              if ($duplicate) {
+                  return [pscustomobject]@{ Mode = 'invalid'; Reason = 'duplicate Name= attribute values among EventData/Data elements' }
+              }
+              if ($named -gt 0 -and $unnamed -gt 0) {
+                  return [pscustomobject]@{ Mode = 'invalid'; Reason = "mixed named ($named) and unnamed ($unnamed) EventData/Data elements" }
+              }
+              if ($named -gt 0) {
+                  return [pscustomobject]@{ Mode = 'named'; Map = $map }
+              }
+              return [pscustomobject]@{ Mode = 'positional'; Positional = @($positional) }
+          }
+
+          function Find-OwnedCaptureWerEvidence {
+              # Strictly read-only Application-log (Event ID 1000) query,
+              # bounded to the actual process window. Whether this specific
+              # event's <EventData><Data> elements carry Name= attributes is
+              # NOT assumed from one local classic-provider observation --
+              # it is independently re-derived per event via
+              # Get-WerEventDataFieldMap. A NAMED layout is bound strictly
+              # by field name (ProcessId/AppPath/ModuleName/ExceptionCode/
+              # FaultingOffset/IntegratorReportId all required, by name) and
+              # only a named+complete match is ever reported as the fully
+              # verified "bound-evidence" outcome. A classic UNNAMED/
+              # positional layout has genuinely no source-bound authority
+              # establishing this hosted runner image's exact field
+              # ordering, so even an exact PID+path positional match is
+              # reported as an explicitly UNVERIFIED positional candidate --
+              # never promoted to "bound-evidence". Reads the raw per-field
+              # XML TEXT CONTENT via .ToXml() (the literal string Windows
+              # itself rendered) rather than trusting
+              # $event.Properties[n].Value (a CLR-boxed value whose type/
+              # formatting is provider-metadata-dependent and can silently
+              # diverge from that literal text). Provider name and EventID
+              # are independently re-validated from the same XML before any
+              # field is trusted; a genuinely out-of-window record (time
+              # only just outside the padded bound) is silently excluded as
+              # expected/normal, never logged as malformed. An event whose
+              # field layout cannot be bound at all (invalid named layout,
+              # too few positional fields, an unparseable PID) is reported
+              # as "unbound-invalid-layout" -- never silently skipped.
+              param(
+                  [Parameter(Mandatory)][int]$ExpectedProcessId,
+                  [Parameter(Mandatory)][string]$ExpectedExecutablePath,
+                  [Parameter(Mandatory)][datetime]$WindowStartUtc,
+                  [Parameter(Mandatory)][datetime]$WindowEndUtc
+              )
+              $result = [ordered]@{
+                  Outcome                       = 'none-found'
+                  QueryError                    = $null
+                  QueryErrorId                  = $null
+                  BoundEvidence                 = $null
+                  UnverifiedPositionalCandidates = @()
+                  AmbiguousCandidates           = @()
+                  UnknownLayoutEvents           = @()
+              }
+              $normalizedExpectedPath = $ExpectedExecutablePath.Trim().ToLowerInvariant()
+              $paddedStart = $WindowStartUtc.AddSeconds(-5)
+              $paddedEnd = $WindowEndUtc.AddSeconds(5)
+              try {
+                  $events = Get-WinEvent -FilterHashtable @{
+                      LogName   = 'Application'
+                      Id        = 1000
+                      StartTime = $paddedStart
+                      EndTime   = $paddedEnd
+                  } -ErrorAction Stop
+              } catch {
+                  $errorId = $_.FullyQualifiedErrorId
+                  if ($errorId -like 'NoMatchingEventsFound,*') {
+                      return [pscustomobject]$result
+                  }
+                  # Any other FullyQualifiedErrorId (e.g. NoMatchingLogsFound,
+                  # or an access-denied query failure) is a genuine query
+                  # problem, not a verified zero-match -- never conflated
+                  # with "none-found".
+                  $result.Outcome = 'query-error'
+                  $result.QueryError = $_.Exception.Message
+                  $result.QueryErrorId = $errorId
+                  return [pscustomobject]$result
+              }
+              foreach ($event in $events) {
+                  [xml]$xml = $event.ToXml()
+                  $providerName = [string]$xml.Event.System.Provider.Name
+                  $eventId = [string]$xml.Event.System.EventID.'#text'
+                  if ([string]::IsNullOrEmpty($eventId)) { $eventId = [string]$xml.Event.System.EventID }
+                  $timeCreated = [string]$xml.Event.System.TimeCreated.SystemTime
+                  $inWindow = $false
+                  $timeParsed = $false
+                  # Must be a typed (not untyped-$null) [datetime] so
+                  # [ref]$timeCreatedUtc below binds to DateTime.TryParse's
+                  # (string, IFormatProvider, DateTimeStyles, out DateTime)
+                  # overload -- an untyped-$null [ref] target fails .NET
+                  # overload resolution with a generic "argument count: 4"
+                  # MethodException on every real event examined
+                  # (live-verified while building this fixture).
+                  [datetime]$timeCreatedUtc = [datetime]::MinValue
+                  if ([DateTime]::TryParse($timeCreated, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AdjustToUniversal -bor [System.Globalization.DateTimeStyles]::AssumeUniversal, [ref]$timeCreatedUtc)) {
+                      $timeParsed = $true
+                      $inWindow = ($timeCreatedUtc -ge $paddedStart -and $timeCreatedUtc -le $paddedEnd)
+                  }
+                  if ($providerName -ne 'Application Error' -or $eventId -ne '1000') {
+                      $result.UnknownLayoutEvents += [ordered]@{
+                          reason      = 'provider/eventId re-validation failed (FilterHashtable match was not reproduced in the parsed XML)'
+                          provider    = $providerName
+                          eventId     = $eventId
+                          timeCreated = $timeCreated
+                      }
+                      continue
+                  }
+                  if (-not $timeParsed) {
+                      # A TimeCreated/SystemTime value that fails to parse is
+                      # itself an invalid/unbindable event shape -- NEVER the
+                      # same thing as a genuinely-parsed time that merely
+                      # falls outside the padded window. Recording it as
+                      # malformed (not silently excluded) is what lets a
+                      # caller distinguish "this event was excluded because
+                      # it is outside our window" from "this event's time
+                      # could not even be evaluated against the window".
+                      $result.UnknownLayoutEvents += [ordered]@{
+                          reason      = "TimeCreated/SystemTime value could not be parsed: '$timeCreated'"
+                          provider    = $providerName
+                          eventId     = $eventId
+                          timeCreated = $timeCreated
+                      }
+                      continue
+                  }
+                  if (-not $inWindow) {
+                      # Genuinely parsed but outside the +-5s pad: an
+                      # expected/normal exclusion, NOT a malformed/unknown
+                      # layout -- never recorded as such.
+                      continue
+                  }
+                  $dataNodes = @($xml.Event.EventData.Data)
+                  $fieldMap = Get-WerEventDataFieldMap -DataNodes $dataNodes
+                  if ($fieldMap.Mode -eq 'invalid') {
+                      $result.UnknownLayoutEvents += [ordered]@{
+                          reason      = $fieldMap.Reason
+                          timeCreated = $timeCreated
+                      }
+                      continue
+                  }
+                  if ($fieldMap.Mode -eq 'named') {
+                      $requiredNames = @('ProcessId', 'AppPath', 'ModuleName', 'ExceptionCode', 'FaultingOffset', 'IntegratorReportId')
+                      $missingNames = @($requiredNames | Where-Object { -not $fieldMap.Map.Contains($_) })
+                      if ($missingNames.Count -gt 0) {
+                          $result.UnknownLayoutEvents += [ordered]@{
+                              reason      = "named EventData layout is missing expected field(s): $($missingNames -join ', ')"
+                              timeCreated = $timeCreated
+                          }
+                          continue
+                      }
+                      $faultingPidHexRaw = $fieldMap.Map['ProcessId']
+                      $faultingPid = $null
+                      try { $faultingPid = ConvertFrom-WerHexPid -Value $faultingPidHexRaw } catch {
+                          $result.UnknownLayoutEvents += [ordered]@{
+                              reason      = "named ProcessId field '$faultingPidHexRaw' did not parse as hex"
+                              timeCreated = $timeCreated
+                          }
+                          continue
+                      }
+                      $faultingPath = $fieldMap.Map['AppPath']
+                      $pathMatches = $faultingPath.Trim().ToLowerInvariant() -eq $normalizedExpectedPath
+                      $pidMatches = $faultingPid -eq $ExpectedProcessId
+                      if ($pidMatches -and $pathMatches) {
+                          $result.Outcome = 'bound-evidence'
+                          $result.BoundEvidence = [ordered]@{
+                              timeCreated      = $timeCreatedUtc.ToString('o')
+                              faultingModule   = $fieldMap.Map['ModuleName']
+                              exceptionCodeHex = $fieldMap.Map['ExceptionCode']
+                              faultOffsetHex   = $fieldMap.Map['FaultingOffset']
+                              faultingPid      = $faultingPid
+                              faultingPath     = $faultingPath
+                              reportId         = $fieldMap.Map['IntegratorReportId']
+                              fieldBindingMode = 'named'
+                          }
+                          break
+                      } elseif ($pidMatches -or $pathMatches) {
+                          $result.AmbiguousCandidates += [ordered]@{
+                              timeCreated      = $timeCreatedUtc.ToString('o')
+                              faultingPid      = $faultingPid
+                              faultingPath     = $faultingPath
+                              fieldBindingMode = 'named'
+                          }
+                      }
+                      continue
+                  }
+                  # $fieldMap.Mode -eq 'positional': classic, unnamed layout.
+                  if ($dataNodes.Count -lt 13) {
+                      $result.UnknownLayoutEvents += [ordered]@{
+                          reason      = "positional EventData field count ($($dataNodes.Count)) does not match the documented 1000-template shape (>=13)"
+                          timeCreated = $timeCreated
+                      }
+                      continue
+                  }
+                  $positionalFields = $fieldMap.Positional
+                  $faultingPidHexRaw = $positionalFields[8]
+                  $faultingPid = $null
+                  try { $faultingPid = ConvertFrom-WerHexPid -Value $faultingPidHexRaw } catch {
+                      $result.UnknownLayoutEvents += [ordered]@{
+                          reason      = "positional faulting-PID field (index 8) '$faultingPidHexRaw' did not parse as hex"
+                          timeCreated = $timeCreated
+                      }
+                      continue
+                  }
+                  $faultingPath = $positionalFields[10]
+                  $pathMatches = $faultingPath.Trim().ToLowerInvariant() -eq $normalizedExpectedPath
+                  $pidMatches = $faultingPid -eq $ExpectedProcessId
+                  if ($pidMatches -and $pathMatches) {
+                      # Exact PID+path match, but there is no source-bound
+                      # authority establishing this exact runner image's
+                      # positional field ordering for this event template --
+                      # reported as an explicitly UNVERIFIED candidate, NOT
+                      # promoted to "bound-evidence". Scanning continues in
+                      # case a later event in the window yields a stronger
+                      # (named) binding.
+                      $result.UnverifiedPositionalCandidates += [ordered]@{
+                          timeCreated      = $timeCreatedUtc.ToString('o')
+                          faultingModule   = $positionalFields[3]
+                          exceptionCodeHex = $positionalFields[6]
+                          faultOffsetHex   = $positionalFields[7]
+                          faultingPid      = $faultingPid
+                          faultingPath     = $faultingPath
+                          reportId         = $positionalFields[12]
+                      }
+                  } elseif ($pidMatches -or $pathMatches) {
+                      $result.AmbiguousCandidates += [ordered]@{
+                          timeCreated      = $timeCreatedUtc.ToString('o')
+                          faultingPid      = $faultingPid
+                          faultingPath     = $faultingPath
+                          fieldBindingMode = 'positional'
+                      }
+                  }
+              }
+              if ($result.Outcome -eq 'none-found' -and $result.AmbiguousCandidates.Count -gt 0) {
+                  $result.Outcome = 'ambiguous-unbound'
+              } elseif ($result.Outcome -eq 'none-found' -and $result.UnverifiedPositionalCandidates.Count -gt 0) {
+                  $result.Outcome = 'unverified-positional-candidate'
+              } elseif ($result.Outcome -eq 'none-found' -and $result.UnknownLayoutEvents.Count -gt 0) {
+                  $result.Outcome = 'unbound-invalid-layout'
+              }
+              [pscustomobject]$result
+          }
+
+          # ---- Main flow -------------------------------------------------
+          $targetClass = 'DesktopHostOwnedRecordingTests'
+          $evidenceRoot = Join-Path $env:RUNNER_TEMP 'owned-capture-evidence'
+          $evidenceDir = Join-Path $evidenceRoot ([Guid]::NewGuid().ToString('n'))
+          $report = [ordered]@{
+              targetClass          = $targetClass
+              evidenceDir          = $evidenceDir
+              sourceCommit         = $null
+              sourceTree           = $null
+              compilerVersion      = $null
+              testExecutablePath   = $null
+              testExecutableSHA256 = $null
+              qualifiedClassName   = $null
+              expectedMethods      = @()
+              listTests            = $null
+              listTestsStdOutSHA256 = $null
+              listTestsStdErrSHA256 = $null
+              run                  = $null
+              isolation            = $null
+              wer                  = $null
+              failureMessage       = $null
+          }
+          $failed = $false
+          $failureMessage = $null
+          try {
+              New-Item -ItemType Directory -Path $evidenceDir -Force -ErrorAction Stop | Out-Null
+              if (-not (Test-Path -LiteralPath $evidenceDir)) { throw "Failed to create unique evidence directory: $evidenceDir" }
+
+              $sourceCommit = (git rev-parse HEAD 2>&1 | Out-String).Trim()
+              if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($sourceCommit)) { throw "git rev-parse HEAD failed or returned empty output (exit $LASTEXITCODE)." }
+              $sourceTree = (git rev-parse 'HEAD^{tree}' 2>&1 | Out-String).Trim()
+              if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($sourceTree)) { throw "git rev-parse HEAD^{tree} failed or returned empty output (exit $LASTEXITCODE)." }
+              $compilerVersion = (swift --version 2>&1 | Out-String).Trim()
+              if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($compilerVersion)) { throw "swift --version failed or returned empty output (exit $LASTEXITCODE)." }
+              $bin = (swift build --configuration release --show-bin-path 2>&1 | Out-String).Trim()
+              if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($bin)) { throw "swift build --show-bin-path failed or returned empty output (exit $LASTEXITCODE)." }
+              $testExe = Join-Path $bin 'SpeakAppPackageTests.xctest'
+              if (-not (Test-Path -LiteralPath $testExe)) { throw "Built test binary not found at expected SwiftPM bin path: $testExe" }
+              $report.sourceCommit = $sourceCommit
+              $report.sourceTree = $sourceTree
+              $report.compilerVersion = $compilerVersion
+              $report.testExecutablePath = $testExe
+              $report.testExecutableSHA256 = (Get-FileHash -LiteralPath $testExe -Algorithm SHA256).Hash.ToLowerInvariant()
+
+              # SwiftPM normally supplies these for `swift test`. Direct binary
+              # invocation bypasses that, so restore the already-installed
+              # pinned XCTest/Testing runtime DLL paths the same way the
+              # existing windows-cross-proof.yml execute job does; no new
+              # software/install.
+              $developer = Split-Path (Split-Path $env:SDKROOT -Parent) -Parent
+              foreach ($library in @('XCTest', 'Testing')) {
+                  $directory = Join-Path $developer "Library/$library-6.2.3/usr/bin64"
+                  if (-not (Test-Path -LiteralPath $directory)) { throw "Missing installed test runtime: $library" }
+                  $env:Path = "$directory;$env:Path"
+              }
+
+              $listStdOut = Join-Path $evidenceDir 'owned-capture-list-tests.log'
+              $listStdErr = Join-Path $evidenceDir 'owned-capture-list-tests-errors.log'
+              $listResult = Invoke-BoundedProcess -FilePath $testExe -ArgumentList @('--list-tests') `
+                  -StdOutPath $listStdOut -StdErrPath $listStdErr -WaitTimeoutSeconds 60 -KillJoinTimeoutSeconds 15
+              $report.listTests = $listResult
+              if ($null -ne $listResult.ObservationError) { throw "Built test binary --list-tests process could not be reliably observed: $($listResult.ObservationError); retirement: $(Format-ProcessRetirement $listResult)." }
+              if ($listResult.Killed) { throw "Built test binary --list-tests exceeded its 60-second bound (killed, retirement: $(Format-ProcessRetirement $listResult)); cannot bind a validated selector." }
+              if ($null -eq $listResult.ExitCodeSigned -or $listResult.ExitCodeSigned -ne 0) { throw "Built test binary --list-tests exited $($listResult.ExitCodeSigned); cannot bind a validated selector." }
+
+              if (-not (Test-Path -LiteralPath $listStdOut)) { throw "Expected --list-tests stdout log is missing: $listStdOut" }
+              if (-not (Test-Path -LiteralPath $listStdErr)) { throw "Expected --list-tests stderr log is missing: $listStdErr" }
+              $report.listTestsStdOutSHA256 = (Get-FileHash -LiteralPath $listStdOut -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+              $report.listTestsStdErrSHA256 = (Get-FileHash -LiteralPath $listStdErr -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+              $listLines = @(Get-Content -LiteralPath $listStdOut -ErrorAction Stop)
+              # Listing stderr too (even though the selector is parsed from
+              # stdout) proves the required stream is actually readable, not
+              # merely present as a zero-byte/locked file -- the same
+              # required-both-streams discipline the isolated run below
+              # applies, now also enforced here before class selection.
+              $null = Get-Content -LiteralPath $listStdErr -ErrorAction Stop
+              $selection = Get-OwnedTestSelection -ListLines $listLines -TargetClass $targetClass
+              $report.qualifiedClassName = $selection.QualifiedClassName
+              $report.expectedMethods = $selection.ExpectedMethods
+
+              $stdoutPath = Join-Path $evidenceDir 'owned-capture-stdout.log'
+              $stderrPath = Join-Path $evidenceDir 'owned-capture-stderr.log'
+              $budgetSeconds = 180
+              # Positional qualified-class selector (NOT "--filter", which the
+              # raw XCTest CLI does not implement -- see Get-OwnedTestSelection
+              # above). Running the whole class (not a single method) keeps
+              # every one of its existing test methods as evidence surface.
+              $runResult = Invoke-BoundedProcess -FilePath $testExe -ArgumentList @($selection.QualifiedClassName) `
+                  -StdOutPath $stdoutPath -StdErrPath $stderrPath -WaitTimeoutSeconds $budgetSeconds -KillJoinTimeoutSeconds 15
+              $report.run = [ordered]@{
+                  argv              = @($testExe, $selection.QualifiedClassName)
+                  pid               = $runResult.ProcessId
+                  startUtc          = $runResult.StartUtc
+                  endUtc            = $runResult.EndUtc
+                  budgetSeconds     = $budgetSeconds
+                  killed            = $runResult.Killed
+                  killJoined        = $runResult.KillJoined
+                  killError         = $runResult.KillError
+                  observationError  = $runResult.ObservationError
+                  retirement        = Format-ProcessRetirement $runResult
+                  exitCodeSigned    = $runResult.ExitCodeSigned
+                  exitCodeHex       = if ($null -ne $runResult.ExitCodeSigned) { ConvertTo-ExitCodeHex -Signed $runResult.ExitCodeSigned } else { $null }
+                  stdoutPath        = $stdoutPath
+                  stdoutSHA256      = $null
+                  stdoutHashError   = $null
+                  stderrPath        = $stderrPath
+                  stderrSHA256      = $null
+                  stderrHashError   = $null
+              }
+              # The object literal above is DELIBERATELY free of any
+              # file-system operation (Test-Path/Get-FileHash/Get-Content):
+              # if a hash/read on either stream threw from inside that one
+              # expression, the WHOLE assignment would never complete and
+              # $report.run would silently remain $null, discarding the
+              # PID/exit ledger that WER correlation below depends on. Every
+              # field above is a pure in-memory read of $runResult. Stream
+              # existence/hash/read happen afterwards as individually-
+              # guarded property SETS on the already-assigned $report.run,
+              # so a failure in one of them can never retroactively lose
+              # this metadata.
+
+              # Post-run VALIDATION (a missing required stream, an isolation
+              # violation, or a zero-tests result) is deliberately isolated
+              # into its OWN try/catch so that a loader/selector/output-
+              # format validation failure can NEVER discard WER fault
+              # correlation for an actually-started child: WER is gathered
+              # immediately below regardless of whether this validation
+              # threw, as long as the child process actually started
+              # (ProcessId is non-null). BOTH stdout AND stderr are
+              # explicit required artifacts here -- not merely "the upload
+              # glob matched something" -- because a missing/deleted stream
+              # on an otherwise-clean exit must be an explicit validation
+              # failure, never silent success.
+              $validationError = $null
+              $isolation = $null
+              try {
+                  if (-not (Test-Path -LiteralPath $stdoutPath)) { throw "Expected isolated-run stdout log is missing: $stdoutPath" }
+                  if (-not (Test-Path -LiteralPath $stderrPath)) { throw "Expected isolated-run stderr log is missing: $stderrPath" }
+                  # Each hash below is its OWN guarded property SET on the
+                  # already-assigned $report.run (never a reconstruction of
+                  # the whole object): a hashing failure on one stream
+                  # records its own error and fails validation honestly,
+                  # but can never retroactively erase the PID/exit ledger
+                  # set above, and WER collection below still proceeds
+                  # regardless of this try block's outcome.
+                  try {
+                      $report.run.stdoutSHA256 = (Get-FileHash -LiteralPath $stdoutPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+                  } catch {
+                      $report.run.stdoutHashError = $_.Exception.Message
+                      throw "Failed to hash isolated-run stdout log ${stdoutPath}: $($_.Exception.Message)"
+                  }
+                  try {
+                      $report.run.stderrSHA256 = (Get-FileHash -LiteralPath $stderrPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+                  } catch {
+                      $report.run.stderrHashError = $_.Exception.Message
+                      throw "Failed to hash isolated-run stderr log ${stderrPath}: $($_.Exception.Message)"
+                  }
+                  $stdoutLines = @(Get-Content -LiteralPath $stdoutPath -ErrorAction Stop)
+                  # Listing stderr too (even though isolation is parsed from
+                  # stdout) proves the required stream is actually readable,
+                  # not merely present as a zero-byte/locked file.
+                  $null = Get-Content -LiteralPath $stderrPath -ErrorAction Stop
+                  # Not killed AND claims exit 0 is the only case entitled to
+                  # the strict "fully started+completed, zero non-passed,
+                  # exact count" clean-run check; a killed run or a claimed-
+                  # nonzero exit is still isolation-checked (foreign/unknown
+                  # methods still reject) but is allowed a partial started/
+                  # terminal set.
+                  $cleanExit = (-not $runResult.Killed) -and ($null -eq $runResult.ObservationError) -and ($null -ne $runResult.ExitCodeSigned) -and ($runResult.ExitCodeSigned -eq 0)
+                  $isolation = Test-OwnedCaptureIsolation -StdOutLines $stdoutLines -TargetClass $targetClass `
+                      -ExpectedMethods $selection.ExpectedMethods -CleanExit $cleanExit
+                  $report.isolation = $isolation
+                  if ($isolation.StartedMethods.Count -eq 0 -and $isolation.TerminalMethods.Count -eq 0) {
+                      throw 'Zero tests were started or completed by the built binary for the selected class (zero-tests); the selection produced an empty run.'
+                  }
+              } catch {
+                  $validationError = $_.Exception.Message
+                  $report.isolation = $isolation
+              }
+
+              # WER evidence is gathered for every code path where a child
+              # process actually started (killed-by-timeout, an
+              # observation error, a genuine nonzero exit, OR the post-run
+              # validation above failing, alike) -- capturing the fault is
+              # the point of this diagnostic, and a validation problem
+              # UNRELATED to the target binary's own exit must never be
+              # allowed to discard fault correlation for a child that did
+              # start.
+              $wer = $null
+              if ($null -ne $runResult.ProcessId) {
+                  $wer = Find-OwnedCaptureWerEvidence -ExpectedProcessId $runResult.ProcessId -ExpectedExecutablePath $testExe `
+                      -WindowStartUtc ([DateTime]::Parse($runResult.StartUtc)) -WindowEndUtc ([DateTime]::Parse($runResult.EndUtc))
+              }
+              $report.wer = $wer
+              $werOutcomeText = if ($null -ne $wer) { $wer.Outcome } else { 'not-collected (process never started)' }
+
+              if ($null -ne $validationError) {
+                  throw "$validationError WER outcome: $werOutcomeText."
+              }
+              if ($null -ne $runResult.ObservationError) {
+                  throw "DesktopHostOwnedRecordingTests process could not be reliably observed: $($runResult.ObservationError); retirement: $($report.run.retirement). WER outcome: $werOutcomeText."
+              }
+              if ($runResult.Killed) {
+                  throw "DesktopHostOwnedRecordingTests exceeded the existing $budgetSeconds-second cross-proof budget (no retry); PID $($runResult.ProcessId), retirement: $($report.run.retirement). WER outcome: $werOutcomeText."
+              }
+              if ($null -eq $runResult.ExitCodeSigned) {
+                  throw "Process was not killed but reported no exit code (unexpected); treated as an infra failure, not a clean pass. WER outcome: $werOutcomeText."
+              }
+              if ($runResult.ExitCodeSigned -ne 0) {
+                  throw "DesktopHostOwnedRecordingTests exited $($runResult.ExitCodeSigned) ($($report.run.exitCodeHex)); WER outcome: $werOutcomeText. A crash/nonzero exit is the evidence this diagnostic exists to capture, but it is reported as a FAILED diagnostic (full evidence above/uploaded as an artifact), never as green qualification."
+              }
+          } catch {
+              $failed = $true
+              $failureMessage = $_.Exception.Message
+              $report.failureMessage = $failureMessage
+          } finally {
+              $reportPath = Join-Path $evidenceDir 'owned-capture-report.json'
+              if (Test-Path -LiteralPath $evidenceDir) {
+                  $report | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $reportPath -Encoding utf8
+                  Get-Content -LiteralPath $reportPath
+              } else {
+                  Write-Warning "Evidence directory '$evidenceDir' is unavailable; report could not be persisted to it."
+                  $report | ConvertTo-Json -Depth 6
+              }
+          }
+          # Every failure mode above -- infra/validation problems (missing
+          # binary, invalid/ambiguous selector, isolation violated,
+          # zero-tests, claimed-success-but-incomplete) AND a genuine
+          # crash/timeout/nonzero exit from the TARGET binary itself -- is
+          # raised as a step failure: evidence is always fully captured
+          # FIRST (stdout/stderr/report/WER lookup), but a captured fault is
+          # never reported as a passing diagnostic. The unconditional "Test
+          # shared core, desktop workflow and native adapters" step remains
+          # the separate, sole pass/fail gate for every ordinary
+          # push/pull_request/default-manual run (its own success()-gated
+          # condition is untouched by this opt-in step's outcome either way).
+          if ($failed) { throw $failureMessage }
+
+      - name: Upload owned-recording crash diagnostics
+        # Runs whenever the diagnostics step actually executed (opted in),
+        # regardless of whether it ultimately succeeded or failed, so partial
+        # logs/reports are never lost to a validation failure; "skipped"
+        # (the ordinary, non-opted-in case) is excluded. Required evidence
+        # missing errors the upload (rather than warning) because this
+        # artifact is the mandatory record of an opt-in diagnostic run.
+        if: ${{ !cancelled() && steps.owned-capture-diagnostics.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: windows-owned-capture-diagnostics-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/owned-capture-evidence/**
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Probe Windows NSConditionLock reuse-after-unlock hypothesis (opt-in, read-only)
+        id: condition-lock-probe
+        # Gated on the SAME opt-in build step as the diagnostics capture
+        # above, but intentionally NOT on that diagnostics step's own
+        # outcome: this is a wholly separate SDK-observation probe for the
+        # Round29 hypothesis (pinned swift-6.2.3-RELEASE
+        # Sources/Foundation/NSLock.swift) and must run (or fail) on its own
+        # regardless of whether the real native class run above passed,
+        # failed, or crashed -- and the real native class run above always
+        # executes regardless of this probe's own outcome. This step's own
+        # budget is a separate, small <=2-minute cap (compile<=60s, each
+        # mode<=10s, each kill/join<=10s, leaving headroom for version/
+        # source/report bookkeeping) that sits ALONGSIDE the existing
+        # unchanged 8-minute diagnostics-capture step and unchanged
+        # 30-minute job budget -- neither of which this step enlarges.
+        if: ${{ !cancelled() && steps.owned-capture-build.outcome == 'success' }}
+        timeout-minutes: 2
+        run: |
+          # Entirely separate SDK-observation report: compiler+child
+          # PID/argv/UTC/exit/stdout/stderr/hash ledgers below are stored in
+          # their OWN evidence directory/report file and are never merged
+          # into, or read by, the owned-test $report/isolation/WER logic
+          # above -- and never fed into Get-OwnedTestSelection. A broken
+          # probe capability (toolchain/compile/observation/stream failure)
+          # FAILS this step after retaining evidence; it is never
+          # success-shaped. An unbounded-mode child that does not reach its
+          # completion marker is diagnostic evidence consistent with (not
+          # proof of) the hypothesized trap, and ALSO fails this step
+          # (a trap is not a passing SDK qualification either) -- but is
+          # reported and classified distinctly from an unrelated/unknown
+          # failure that occurs before the required pre-call marker. A
+          # healthy, fully-completed unbounded run is the only result that
+          # does not fail this step, and does not itself prove the
+          # hypothesis false. A finite-mode `false` reacquire result is
+          # reported as-is, never reinterpreted as pass/fail either way.
+          $ErrorActionPreference = 'Stop'
+
+          function Invoke-BoundedProcess {
+              # Reused byte-for-byte from the owned-recording diagnostics
+              # step above (same generic bounded child-process launcher,
+              # now also reused below for the compiler itself);
+              # PowerShell `run:` blocks do not share function scope across
+              # steps, so it is duplicated here rather than extracted.
+              param(
+                  [Parameter(Mandatory)][string]$FilePath,
+                  [string[]]$ArgumentList = @(),
+                  [Parameter(Mandatory)][string]$StdOutPath,
+                  [Parameter(Mandatory)][string]$StdErrPath,
+                  [Parameter(Mandatory)][int]$WaitTimeoutSeconds,
+                  [int]$KillJoinTimeoutSeconds = 15
+              )
+              foreach ($path in @($StdOutPath, $StdErrPath)) {
+                  if (Test-Path -LiteralPath $path) {
+                      Remove-Item -LiteralPath $path -ErrorAction Stop
+                  }
+              }
+              $process = $null
+              $processId = $null
+              $exited = $false
+              $killed = $false
+              $killJoined = $null
+              $killError = $null
+              $observationError = $null
+              $exitCodeSigned = $null
+              $startUtc = [DateTime]::UtcNow
+              try {
+                  $process = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -PassThru -NoNewWindow `
+                      -RedirectStandardOutput $StdOutPath -RedirectStandardError $StdErrPath
+                  $processId = $process.Id
+                  try {
+                      $exited = $process.WaitForExit($WaitTimeoutSeconds * 1000)
+                  } catch {
+                      $observationError = $_.Exception.Message
+                      $exited = $false
+                  }
+                  if (-not $exited) {
+                      $killed = $true
+                      try {
+                          $process.Kill($true)
+                          $killJoined = $process.WaitForExit($KillJoinTimeoutSeconds * 1000)
+                      } catch {
+                          $killError = $_.Exception.Message
+                          $killJoined = $false
+                      }
+                  } else {
+                      try {
+                          $exitCodeSigned = $process.ExitCode
+                      } catch {
+                          $observationError = $_.Exception.Message
+                          $exited = $false
+                      }
+                  }
+              } catch {
+                  $observationError = $_.Exception.Message
+              } finally {
+                  if ($null -ne $process) { $process.Dispose() }
+              }
+              [pscustomobject]@{
+                  ProcessId        = $processId
+                  StartUtc         = $startUtc.ToString('o')
+                  EndUtc           = [DateTime]::UtcNow.ToString('o')
+                  Exited           = $exited
+                  Killed           = $killed
+                  KillJoined       = $killJoined
+                  KillError        = $killError
+                  ObservationError = $observationError
+                  ExitCodeSigned   = $exitCodeSigned
+                  StdOutPath       = $StdOutPath
+                  StdErrPath       = $StdErrPath
+              }
+          }
+
+          function Get-PhaseObservation {
+              # Parses the GIVEN stream (stderr for this script) line-by-line
+              # in emitted order. Each expected marker must appear exactly
+              # once, in order; a duplicate, an out-of-order marker, a
+              # marker belonging to the OTHER mode, or any other line
+              # sharing the controlled diagnostic prefix is a violation and
+              # invalidates the observation -- only lines WITHOUT the
+              # controlled prefix are treated as ordinary runtime noise.
+              param(
+                  [Parameter(Mandatory)][string]$StreamPath,
+                  [Parameter(Mandatory)][string]$Mode,
+                  [Parameter(Mandatory)][hashtable]$AllPhaseMarkers,
+                  [Parameter(Mandatory)][int]$AcquiredValueMarkerIndex
+              )
+              # Gate on the whole diagnostic namespace FIRST -- a line with
+              # an unknown/missing mode token (e.g. "mystery:", "usage:"),
+              # or even a bare/malformed namespace line with no following
+              # separator at all, still belongs to this namespace and must
+              # fall through to the unrecognized-marker violation below,
+              # not be mistaken for ordinary unrelated runtime noise. Do
+              # not require a trailing separator/space here -- that would
+              # re-bake an assumed mode/format into the noise filter.
+              $namespacePrefix = '^\[windows-condition-lock-diagnostic\]'
+              $expected = $AllPhaseMarkers[$Mode]
+              $otherExpected = $AllPhaseMarkers[$(if ($Mode -eq 'finite') { 'unbounded' } else { 'finite' })]
+              $hits = New-Object 'bool[]' $expected.Count
+              $nextIndex = 0
+              $acquiredValue = $null
+              $violations = New-Object System.Collections.Generic.List[string]
+              foreach ($line in (Get-Content -LiteralPath $StreamPath)) {
+                  if ($line -notmatch $namespacePrefix) { continue }
+                  $ownIndex = -1
+                  for ($i = 0; $i -lt $expected.Count; $i++) {
+                      if ($line -match $expected[$i]) { $ownIndex = $i; break }
+                  }
+                  if ($ownIndex -ge 0) {
+                      if ($ownIndex -eq $nextIndex) {
+                          $hits[$ownIndex] = $true
+                          if ($ownIndex -eq $AcquiredValueMarkerIndex) {
+                              $valueMatch = [regex]::Match($line, 'acquired=(true|false)')
+                              if ($valueMatch.Success) { $acquiredValue = [bool]::Parse($valueMatch.Groups[1].Value) }
+                          }
+                          $nextIndex++
+                      } elseif ($ownIndex -lt $nextIndex) {
+                          $violations.Add("duplicate marker for already-reached phase ${ownIndex}: $line")
+                      } else {
+                          $violations.Add("out-of-order marker (expected phase $nextIndex next, saw phase ${ownIndex}): $line")
+                      }
+                      continue
+                  }
+                  $isForeign = $false
+                  foreach ($pattern in $otherExpected) {
+                      if ($line -match $pattern) { $isForeign = $true; break }
+                  }
+                  if ($isForeign) {
+                      $violations.Add("foreign-mode marker unexpected in $Mode stream: $line")
+                  } else {
+                      $violations.Add("unrecognized controlled-prefix marker: $line")
+                  }
+              }
+              [pscustomobject]@{
+                  MarkerHits    = $hits
+                  PhaseReached  = $nextIndex
+                  PhaseCount    = $expected.Count
+                  AcquiredValue = $acquiredValue
+                  Violations    = @($violations)
+              }
+          }
+
+          # ---- Main flow -------------------------------------------------
+          # Ordered, per-mode phase markers the script actually writes to
+          # STDERR (never stdout -- `emit()` in the script writes exclusively
+          # to `FileHandle.standardError`). Index 3 (0-based) is the
+          # required marker immediately BEFORE the unbounded mode's
+          # suspected trap site; its presence/absence (together with the
+          # child's own exit/signal outcome) is what distinguishes
+          # trap-consistent evidence from an unrelated/unknown failure --
+          # never an absent final marker alone.
+          $expectedPhaseMarkers = @{
+              finite    = @(
+                  '^\[windows-condition-lock-diagnostic\] finite: creating NSConditionLock\(condition: 0\)$'
+                  '^\[windows-condition-lock-diagnostic\] finite: first lock\(\)$'
+                  '^\[windows-condition-lock-diagnostic\] finite: unlock\(withCondition: 1\)$'
+                  '^\[windows-condition-lock-diagnostic\] finite: second lock\(before: now\+0\.25s\) -- about to reacquire$'
+                  '^\[windows-condition-lock-diagnostic\] finite: second lock\(before:\) returned acquired=(true|false)$'
+                  '^\[windows-condition-lock-diagnostic\] finite: completed without trapping$'
+              )
+              unbounded = @(
+                  '^\[windows-condition-lock-diagnostic\] unbounded: creating NSConditionLock\(condition: 0\)$'
+                  '^\[windows-condition-lock-diagnostic\] unbounded: first lock\(\)$'
+                  '^\[windows-condition-lock-diagnostic\] unbounded: unlock\(withCondition: 1\)$'
+                  '^\[windows-condition-lock-diagnostic\] unbounded: about to call second lock\(\) \(suspected trap site\)$'
+                  '^\[windows-condition-lock-diagnostic\] unbounded: second lock\(\) returned \(did not trap in this run\)$'
+                  '^\[windows-condition-lock-diagnostic\] unbounded: completed without trapping$'
+              )
+          }
+          # 0-based index of the required pre-call marker (unbounded mode
+          # only). "trap-consistent-evidence" requires BOTH phaseReached to
+          # equal exactly this index + 1 (stopped immediately after this
+          # marker, not before, not after reaching a later one) AND the
+          # exact signed exit code below -- anything else is classified as
+          # an unrelated/unknown failure, never inferred from timing alone.
+          $requiredPreCallMarkerIndex = 3
+          # Signed 32-bit value of 0xC000001D (STATUS_ILLEGAL_INSTRUCTION).
+          $requiredTrapExitCodeSigned = -1073741795
+
+          $scriptPath = 'scripts/windows-condition-lock-diagnostic.swift'
+          $evidenceRoot = Join-Path $env:RUNNER_TEMP 'condition-lock-probe-evidence'
+          $evidenceDir = Join-Path $evidenceRoot ([Guid]::NewGuid().ToString('n'))
+          $report = [ordered]@{
+              scriptPath            = $scriptPath
+              evidenceDir           = $evidenceDir
+              sourceCommit          = $null
+              sourceCommitError     = $null
+              sourceTree            = $null
+              sourceTreeError       = $null
+              scriptSHA256          = $null
+              scriptHashError       = $null
+              compilerVersion       = $null
+              compile               = $null
+              probeExecutable       = $null
+              probeExecutableSHA256 = $null
+              finite                = $null
+              unbounded             = $null
+              failures              = @()
+              failureMessage        = $null
+          }
+          $failures = New-Object System.Collections.Generic.List[string]
+          try {
+              New-Item -ItemType Directory -Path $evidenceDir -Force -ErrorAction Stop | Out-Null
+
+              try {
+                  $report.sourceCommit = (& git rev-parse HEAD 2>&1 | Out-String).Trim()
+                  if ($LASTEXITCODE -ne 0) { throw "git rev-parse HEAD exited $LASTEXITCODE" }
+              } catch {
+                  $report.sourceCommitError = $_.Exception.Message
+                  $failures.Add("sourceCommit observation failed: $($report.sourceCommitError)")
+              }
+              try {
+                  $report.sourceTree = (& git rev-parse 'HEAD^{tree}' 2>&1 | Out-String).Trim()
+                  if ($LASTEXITCODE -ne 0) { throw "git rev-parse HEAD^{tree} exited $LASTEXITCODE" }
+              } catch {
+                  $report.sourceTreeError = $_.Exception.Message
+                  $failures.Add("sourceTree observation failed: $($report.sourceTreeError)")
+              }
+              try {
+                  $report.scriptSHA256 = (Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256 -ErrorAction Stop).Hash
+              } catch {
+                  $report.scriptHashError = $_.Exception.Message
+                  $failures.Add("scriptSHA256 observation failed: $($report.scriptHashError)")
+              }
+
+              $report.compilerVersion = (& swift --version 2>&1 | Out-String).Trim()
+              if ($LASTEXITCODE -ne 0) {
+                  throw "swift --version failed (exit $LASTEXITCODE); probe's own toolchain observation is unavailable, reported as a broken-capability failure."
+              }
+
+              $probeExe = Join-Path $evidenceDir 'windows-condition-lock-diagnostic.exe'
+              $compileStdOutPath = Join-Path $evidenceDir 'compile.stdout.log'
+              $compileStdErrPath = Join-Path $evidenceDir 'compile.stderr.log'
+              $compileArgv = @('-O', $scriptPath, '-o', $probeExe)
+              $compileResult = Invoke-BoundedProcess -FilePath 'swiftc' -ArgumentList $compileArgv `
+                  -StdOutPath $compileStdOutPath -StdErrPath $compileStdErrPath `
+                  -WaitTimeoutSeconds 60 -KillJoinTimeoutSeconds 10
+              # Ledger assigned IMMEDIATELY, before any hash/read/parse call
+              # below that can throw and lose the compiler's own PID/exit
+              # observation.
+              $report.compile = [ordered]@{
+                  argv             = @('swiftc') + $compileArgv
+                  processId        = $compileResult.ProcessId
+                  startUtc         = $compileResult.StartUtc
+                  endUtc           = $compileResult.EndUtc
+                  exited           = $compileResult.Exited
+                  killed           = $compileResult.Killed
+                  killJoined       = $compileResult.KillJoined
+                  killError        = $compileResult.KillError
+                  observationError = $compileResult.ObservationError
+                  exitCodeSigned   = $compileResult.ExitCodeSigned
+                  stdOutPath       = $compileStdOutPath
+                  stdErrPath       = $compileStdErrPath
+                  stdOutSHA256     = $null
+                  stdOutReadError  = $null
+                  stdErrSHA256     = $null
+                  stdErrReadError  = $null
+                  executableProduced = $null
+              }
+              try {
+                  $report.compile.stdOutSHA256 = (Get-FileHash -LiteralPath $compileStdOutPath -Algorithm SHA256 -ErrorAction Stop).Hash
+              } catch {
+                  $report.compile.stdOutReadError = $_.Exception.Message
+                  $failures.Add("compile stdout stream unavailable: $($report.compile.stdOutReadError)")
+              }
+              try {
+                  $report.compile.stdErrSHA256 = (Get-FileHash -LiteralPath $compileStdErrPath -Algorithm SHA256 -ErrorAction Stop).Hash
+              } catch {
+                  $report.compile.stdErrReadError = $_.Exception.Message
+                  $failures.Add("compile stderr stream unavailable: $($report.compile.stdErrReadError)")
+              }
+              $report.compile.executableProduced = Test-Path -LiteralPath $probeExe
+              if (-not $compileResult.Exited -or $compileResult.Killed -or $compileResult.ObservationError -or $compileResult.KillError) {
+                  throw "swiftc -O did not complete normally compiling '$scriptPath' (exited=$($compileResult.Exited), killed=$($compileResult.Killed), observationError=$($compileResult.ObservationError), killError=$($compileResult.KillError)); children not run -- reported as a broken-capability probe failure, not evidence either way."
+              }
+              if ($compileResult.ExitCodeSigned -ne 0) {
+                  throw "swiftc -O failed to compile '$scriptPath' (exit $($compileResult.ExitCodeSigned)); children not run -- reported as a broken-capability probe failure, not evidence either way."
+              }
+              if (-not $report.compile.executableProduced) {
+                  throw "swiftc -O exited 0 but '$probeExe' was not produced; children not run."
+              }
+              $report.probeExecutable = $probeExe
+              try {
+                  $report.probeExecutableSHA256 = (Get-FileHash -LiteralPath $probeExe -Algorithm SHA256 -ErrorAction Stop).Hash
+              } catch {
+                  $failures.Add("Could not hash produced executable '$probeExe': $($_.Exception.Message)")
+              }
+
+              $priorModeRetired = $true
+              $priorModeLabel = $null
+              foreach ($mode in @('finite', 'unbounded')) {
+                  if (-not $priorModeRetired) {
+                      # The PRIOR mode's child was never positively confirmed
+                      # retired (clean exit, or killed AND join confirmed) --
+                      # launching another child on top of that uncertainty is
+                      # a safety hazard, so this mode is skipped with an
+                      # explicit reason and no new process is started.
+                      $entry = [ordered]@{
+                          launched       = $false
+                          skipped        = $true
+                          skipReason     = "previous mode ('$priorModeLabel') was not positively retired (clean exit, or killed with confirmed join) before this mode could safely launch; no new child process was started."
+                          classification = 'skipped-unretired-predecessor'
+                      }
+                      $report[$mode] = $entry
+                      $failures.Add("$mode mode skipped: $($entry.skipReason)")
+                      continue
+                  }
+
+                  $stdOutPath = Join-Path $evidenceDir "$mode.stdout.log"
+                  $stdErrPath = Join-Path $evidenceDir "$mode.stderr.log"
+                  $result = Invoke-BoundedProcess -FilePath $probeExe -ArgumentList @($mode) `
+                      -StdOutPath $stdOutPath -StdErrPath $stdErrPath -WaitTimeoutSeconds 10 -KillJoinTimeoutSeconds 10
+                  # Ledger assigned IMMEDIATELY, before any hash/marker-parse
+                  # call below that can throw and lose this child's own
+                  # PID/exit observation.
+                  $entry = [ordered]@{
+                      argv                 = @($probeExe, $mode)
+                      launched             = $true
+                      skipped              = $false
+                      processId            = $result.ProcessId
+                      startUtc             = $result.StartUtc
+                      endUtc               = $result.EndUtc
+                      exited               = $result.Exited
+                      killed               = $result.Killed
+                      killJoined           = $result.KillJoined
+                      killError            = $result.KillError
+                      observationError     = $result.ObservationError
+                      exitCodeSigned       = $result.ExitCodeSigned
+                      stdOutPath           = $stdOutPath
+                      stdOutSHA256         = $null
+                      stdOutReadError      = $null
+                      stdErrPath           = $stdErrPath
+                      stdErrSHA256         = $null
+                      stdErrReadError      = $null
+                      expectedPhaseMarkers = $expectedPhaseMarkers[$mode]
+                      phaseMarkerHits      = $null
+                      phaseReached         = $null
+                      phaseCount           = $expectedPhaseMarkers[$mode].Count
+                      markerViolations     = $null
+                      finiteAcquiredValue  = $null
+                      requiredPreCallMarkerReached = $null
+                      classification       = $null
+                  }
+                  $report[$mode] = $entry
+
+                  $streamError = $false
+                  try {
+                      $entry.stdOutSHA256 = (Get-FileHash -LiteralPath $stdOutPath -Algorithm SHA256 -ErrorAction Stop).Hash
+                  } catch {
+                      $entry.stdOutReadError = $_.Exception.Message
+                      $streamError = $true
+                  }
+                  try {
+                      $entry.stdErrSHA256 = (Get-FileHash -LiteralPath $stdErrPath -Algorithm SHA256 -ErrorAction Stop).Hash
+                  } catch {
+                      $entry.stdErrReadError = $_.Exception.Message
+                      $streamError = $true
+                  }
+
+                  $phaseObservation = $null
+                  if (-not $entry.stdErrReadError) {
+                      try {
+                          # The script's markers are on STDERR, never stdout
+                          # (`emit()` writes exclusively to
+                          # `FileHandle.standardError`).
+                          $acquiredMarkerIndex = if ($mode -eq 'finite') { 4 } else { -1 }
+                          $phaseObservation = Get-PhaseObservation -StreamPath $stdErrPath -Mode $mode `
+                              -AllPhaseMarkers $expectedPhaseMarkers -AcquiredValueMarkerIndex $acquiredMarkerIndex
+                      } catch {
+                          $entry.stdErrReadError = "phase-marker parse failed: $($_.Exception.Message)"
+                          $streamError = $true
+                      }
+                  }
+                  if ($null -ne $phaseObservation) {
+                      $entry.phaseMarkerHits = $phaseObservation.MarkerHits
+                      $entry.phaseReached = $phaseObservation.PhaseReached
+                      $entry.markerViolations = $phaseObservation.Violations
+                      $entry.finiteAcquiredValue = $phaseObservation.AcquiredValue
+                      $entry.requiredPreCallMarkerReached = $phaseObservation.PhaseReached -gt $requiredPreCallMarkerIndex
+                  }
+
+                  $violationCount = @($entry.markerViolations).Count
+                  $fullyCompleted = ($entry.phaseReached -eq $entry.phaseCount)
+                  $healthyExit = ($entry.exited -and -not $entry.killed -and -not $entry.observationError -and -not $entry.killError -and $entry.exitCodeSigned -eq 0)
+
+                  if ($streamError) {
+                      $entry.classification = 'stream-read-or-parse-failure'
+                      $failures.Add("$mode mode: stdout/stderr read, hash, or marker-parse failure (stdOutReadError=$($entry.stdOutReadError), stdErrReadError=$($entry.stdErrReadError)).")
+                  } elseif ($entry.observationError -or $entry.killError) {
+                      $entry.classification = 'observation-failure'
+                      $failures.Add("$mode mode: process observation/kill failure (observationError=$($entry.observationError), killError=$($entry.killError)).")
+                  } elseif ($violationCount -gt 0) {
+                      # Duplicate/out-of-order/foreign-mode/unrecognized
+                      # controlled markers invalidate the observation
+                      # outright, regardless of exit code or marker count.
+                      $entry.classification = 'marker-validation-failure'
+                      $failures.Add("$mode mode: $violationCount controlled-marker violation(s): $(($entry.markerViolations) -join '; ').")
+                  } elseif ($entry.killed) {
+                      # A timeout (forcibly killed) is never trap-consistent
+                      # evidence, regardless of how far phaseReached got.
+                      $entry.classification = 'timeout'
+                      $failures.Add("$mode mode timed out and was killed (phaseReached=$($entry.phaseReached)/$($entry.phaseCount)).")
+                  } elseif ($healthyExit -and $fullyCompleted) {
+                      if ($mode -eq 'finite' -and $entry.finiteAcquiredValue -eq $false) {
+                          # A healthy, fully-marked finite run that reports
+                          # acquired=false is an unsupported/broken capability
+                          # observation, never a passing SDK qualification.
+                          $entry.classification = 'broken-capability'
+                          $failures.Add('finite mode completed healthily but reported acquired=false on reacquire; reported as an unsupported/broken capability observation.')
+                      } else {
+                          # A healthy, fully-completed unbounded run means the
+                          # hypothesized trap did NOT occur in this run; this
+                          # does not itself disprove the hypothesis for other
+                          # runs/environments.
+                          $entry.classification = 'healthy-complete'
+                      }
+                  } elseif ($mode -eq 'finite') {
+                      $entry.classification = 'broken-capability'
+                      $failures.Add("finite mode did not reach a healthy, fully-marked completion (exited=$($entry.exited), exitCodeSigned=$($entry.exitCodeSigned), phaseReached=$($entry.phaseReached)/$($entry.phaseCount)); reported as a broken-capability probe failure.")
+                  } elseif ($healthyExit -and -not $fullyCompleted) {
+                      # Clean exit code but markers don't support full
+                      # completion: an internal inconsistency, not evidence
+                      # either way for the hypothesized trap.
+                      $entry.classification = 'inconsistent-incomplete'
+                      $failures.Add("unbounded mode exited 0 but only reached phase $($entry.phaseReached)/$($entry.phaseCount); inconsistent observation, not treated as trap-consistent evidence.")
+                  } elseif ($entry.exitCodeSigned -eq $requiredTrapExitCodeSigned -and $entry.phaseReached -eq ($requiredPreCallMarkerIndex + 1)) {
+                      # Diagnostic evidence consistent with (never proof of)
+                      # the hypothesized trap REQUIRES the exact signed exit
+                      # code AND stopping exactly at the pre-call marker (not
+                      # before, not after reaching a later marker). This
+                      # still fails the step: evidence is not a passing
+                      # qualification.
+                      $entry.classification = 'trap-consistent-evidence'
+                      $failures.Add("unbounded mode exited with the exact hypothesized trap code ($requiredTrapExitCodeSigned / 0xC000001D) immediately after the required pre-call marker (phaseReached=$($entry.phaseReached)/$($entry.phaseCount)); reported as trap-consistent diagnostic evidence, not proof, and not a passing SDK qualification.")
+                  } else {
+                      # Any other abnormal exit -- wrong exit code, or
+                      # progressed past/stopped short of the exact pre-call
+                      # marker -- is never inferred as the hypothesized trap
+                      # from timing or an absent marker alone.
+                      $entry.classification = 'unrelated-or-unknown-failure'
+                      $failures.Add("unbounded mode exited abnormally (exitCodeSigned=$($entry.exitCodeSigned), phaseReached=$($entry.phaseReached)/$($entry.phaseCount)) that does not match the exact hypothesized trap signature; reported as an unrelated/unknown failure, not trap-consistent evidence.")
+                  }
+
+                  $priorModeRetired = (($entry.exited) -and (-not $entry.observationError) -and (-not $entry.killError)) -or (($entry.killed) -and ($entry.killJoined -eq $true))
+                  $priorModeLabel = $mode
+              }
+          } catch {
+              $failures.Add($_.Exception.Message)
+          } finally {
+              $report.failures = @($failures)
+              $report.failureMessage = if ($failures.Count -gt 0) { ($failures -join ' | ') } else { $null }
+              $reportPath = Join-Path $evidenceDir 'condition-lock-probe-report.json'
+              if (Test-Path -LiteralPath $evidenceDir) {
+                  $report | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $reportPath -Encoding utf8
+                  Get-Content -LiteralPath $reportPath
+              } else {
+                  Write-Warning "Evidence directory '$evidenceDir' is unavailable; report could not be persisted to it."
+                  $report | ConvertTo-Json -Depth 8
+              }
+          }
+          # ANY accumulated failure -- broken-capability (toolchain/compile/
+          # observation/stream), finite mode's own non-completion, an
+          # internally inconsistent unbounded exit, an unrelated/unknown
+          # unbounded failure, OR trap-consistent unbounded evidence --
+          # fails this step after the report above has already persisted
+          # every ledger and classification. A trap is diagnostic evidence,
+          # never a green/passing SDK qualification.
+          if ($report.failures.Count -gt 0) { throw $report.failureMessage }
+
+      - name: Upload Windows NSConditionLock reuse-after-unlock probe evidence
+        # Mirrors the owned-recording upload above: runs whenever the probe
+        # step actually executed (opted in), regardless of its own outcome,
+        # so a broken-capability failure's partial logs are never lost.
+        if: ${{ !cancelled() && steps.condition-lock-probe.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: windows-condition-lock-probe-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/condition-lock-probe-evidence/**
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Verify native WinHTTP WebSocket transport against loopback peer
         id: websocket-probe
@@ -229,10 +1601,15 @@ jobs:
           Get-Content windows-ui-screenshots-errors.log
           if ($process.ExitCode -ne 0) { throw "The screenshot tour failed: $($process.ExitCode)" }
           $expected = 'dashboard', 'history', 'voice-output', 'general', 'transcription', 'post-processing',
-            'profiles', 'keyboard', 'icloud-sync', 'about', 'dashboard-dark', 'history-dark', 'dashboard-recording',
-            'hud-recording', 'hud-completed'
+            'corrections', 'pronunciation', 'profiles', 'keyboard', 'icloud-sync', 'about', 'dashboard-dark',
+            'history-dark', 'dashboard-recording', 'hud-recording', 'hud-completed', 'history-filters',
+            'history-filters-dark', 'hud-expanded-recording', 'hud-compact-recording', 'hud-compact-completed'
           for ($index = 0; $index -lt $expected.Count; $index++) {
             $file = Join-Path $folder ('{0:D2}-{1}.bmp' -f ($index + 1), $expected[$index])
+            if (-not (Test-Path $file)) { throw "Missing screenshot $file" }
+          }
+          foreach ($name in @('comparison-blind-light', 'comparison-revealed-dark')) {
+            $file = Join-Path $folder ($name + '.bmp')
             if (-not (Test-Path $file)) { throw "Missing screenshot $file" }
           }
 
@@ -311,6 +1688,11 @@ jobs:
             windows-self-test*.log
             windows-ui-smoke*.log
             windows-ui-smoke.bmp
+            windows-ui-smoke.bmp.voice-sources.bmp
+            windows-ui-smoke.bmp.file-source.bmp
+            windows-ui-smoke.bmp.voice-controls.bmp
+            windows-ui-smoke.bmp.voice-usage.bmp
+            windows-ui-smoke.bmp.voice-discovery.bmp
             windows-websocket-tests.xml
             windows-websocket-*.log
             windows-local-transcription.log
@@ -329,10 +1711,30 @@ jobs:
           persist-credentials: false
       - name: Verify portable source boundary
         run: python3 scripts/verify-portable-core-boundary.py
+      - name: Verify additional provider loopback peer contracts
+        run: python3 -B -m unittest discover -s scripts/tests -p test_additional_provider_loopback.py
       - name: Test portable graph with Xcode Apple Swift
         run: |
           xcrun swift --version
           xcrun swift test --configuration release --jobs 4
+      - name: Probe additional shared providers over native Apple WebSockets
+        shell: bash
+        run: |
+          set -euo pipefail
+          ready="$RUNNER_TEMP/additional-provider-peer.json"
+          python3 scripts/websocket-loopback-probe.py --ready-file "$ready" --max-seconds 60 \
+            > "$RUNNER_TEMP/additional-provider-peer.log" 2>&1 &
+          peer=$!
+          trap 'kill "$peer" 2>/dev/null || true; cat "$RUNNER_TEMP/additional-provider-peer.log"' EXIT
+          for attempt in $(seq 1 100); do
+            if [ -s "$ready" ]; then break; fi
+            kill -0 "$peer"
+            sleep 0.05
+          done
+          export JSTI_WEBSOCKET_PROBE_PORT
+          JSTI_WEBSOCKET_PROBE_PORT=$(python3 -c \
+            'import json,sys; p=json.load(open(sys.argv[1])); assert p["host"]=="127.0.0.1"; print(p["port"])' "$ready")
+          xcrun swift test --configuration release --skip-build --filter AdditionalProviderLoopbackTests
       - name: Preserve Apple dependency lockfile
         if: always()
         # The dependency-free graph removes pins it does not need. It must not
@@ -349,6 +1751,24 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
+      - name: Normalize container workspace ownership
+        # actions/checkout runs against a host bind-mount (/__w) owned by the
+        # runner host user, while this job's container runs as its image's
+        # default user. The owned capture-writer tests verify a real
+        # ownership+mode chain (not just writability) up to the checkout
+        # root, so a mismatched host-mount owner/mode trips that check as an
+        # environment artifact rather than a security finding. Align
+        # ownership and drop any group/other write bit on just the ancestor
+        # chain the checkout actually needs (not the sibling /__w/_temp,
+        # /__w/_actions mounts) instead of weakening the check.
+        run: |
+          owner="$(id -u):$(id -g)"
+          chown "$owner" /__w
+          chmod 0755 /__w
+          chown "$owner" "$(dirname "$GITHUB_WORKSPACE")"
+          chmod 0755 "$(dirname "$GITHUB_WORKSPACE")"
+          chown -R "$owner" "$GITHUB_WORKSPACE"
+          chmod 0755 "$GITHUB_WORKSPACE"
       - name: Verify portable source boundary
         run: python3 scripts/verify-portable-core-boundary.py
       - name: Test portable graph with native Linux Swift

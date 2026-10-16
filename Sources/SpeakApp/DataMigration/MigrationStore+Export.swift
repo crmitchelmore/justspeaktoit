@@ -13,10 +13,14 @@ extension MigrationStore {
                   let value = defaults.object(forKey: key) else {
                 continue
             }
-            snapshot.records[category, default: []].append(try MigrationCatalog.defaultsRecord(
+            let record = try MigrationCatalog.defaultsRecord(
                 key: key,
                 value: value
-            ))
+            )
+            let scope = snapshot.manifest.scopes[category.rawValue] ?? MigrationScope()
+            if scope.selectedKinds == nil || scope.contains(id: record.id, date: record.date, kind: record.kind) {
+                snapshot.records[category, default: []].append(record)
+            }
         }
     }
 
@@ -42,7 +46,7 @@ extension MigrationStore {
             if let data {
                 let scope = scopes[collection.category.rawValue] ?? MigrationScope()
                 let records = try MigrationCatalog.collectionRecords(collection, data: data)
-                    .filter { scope.contains(id: $0.id, date: $0.date) }
+                    .filter { scope.contains(id: $0.id, date: $0.date, kind: $0.kind) }
                 snapshot.records[collection.category, default: []].append(contentsOf: records)
             }
         }
@@ -50,12 +54,14 @@ extension MigrationStore {
 
     func collectCredentials(_ snapshot: inout MigrationSnapshot) async throws {
         let categories = Set(snapshot.manifest.categories)
-        if categories.contains(.credentials) {
+        let scope = snapshot.manifest.scopes[MigrationCategory.credentials.rawValue] ?? MigrationScope()
+        if categories.contains(.credentials), scope.contains(kind: "secret") {
             guard await secrets.preloadAndReportSuccess()
             else {
                 throw MigrationError.invalid("Cannot read the credential vault.")
             }
-            for id in await secrets.knownIdentifiers() {
+            for id in await secrets.knownIdentifiers()
+                where scope.selectedKinds == nil || scope.contains(id: id, date: nil, kind: "secret") {
                 snapshot.records[.credentials, default: []].append(
                     .init(
                         id: id,
@@ -74,7 +80,7 @@ extension MigrationStore {
         if categories.contains(.history), history.item(id: item.id) != nil,
            (scopes["history"] ?? MigrationScope()).contains(
                id: item.id.uuidString,
-               date: item.createdAt
+               date: item.createdAt, kind: "history"
            ) {
             snapshot.records[.history, default: []].append(.init(id: item.id.uuidString, kind: "history",
                                                                  value: try item.migrationValue(),
@@ -93,7 +99,7 @@ extension MigrationStore {
         if categories.contains(.recordings), let url = item.audioFileURL,
            (scopes["recordings"] ?? MigrationScope()).contains(
                id: item.id.uuidString,
-               date: item.createdAt
+               date: item.createdAt, kind: "audio"
            ) {
             do {
                 let digest = try await Task.detached { try MigrationCoding.fileDigest(url) }.value

@@ -53,6 +53,14 @@ package enum DesktopHostModels {
         storage.lock.withLock { storage.localLabels = labels }
     }
 
+    package static func appendLocal(_ options: [ModelCatalog.Option]) throws {
+        try storage.lock.withLock {
+            try storage.slots.appendLocal(options)
+            let known = Set(storage.local.map(\.id))
+            storage.local += options.filter { !known.contains($0.id) }
+        }
+    }
+
     package static func update(discovered: [OpenRouterAudioModel], retaining: [String]) throws {
         try storage.lock.withLock { try storage.slots.update(discovered: discovered, retaining: retaining) }
     }

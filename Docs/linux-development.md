@@ -21,14 +21,36 @@ The Linux targets are opt-in with `SPEAK_LINUX_TARGET=1`, like
 `SPEAK_WINDOWS_TARGET=1`, so the `portable-linux` job (which has no GTK
 packages) is unchanged.
 
+Gemini Transcribe Live, Meta Muse realtime ASR and Modulate Velma now use the
+shared injected provider clients through Linux's NIO WebSocket adapter, with
+the same canonical route/options projection as Windows. Audio is bounded and
+single-flight, readiness is provider-specific, and a finish without the
+documented terminal event is an error, not a successful recovered transcript.
+The native NIO loopback probe suite checks generated PCM, production request
+shapes, completion and early closure for these clients and the portable Grok
+Voice client. Grok Voice remains unavailable for selection until a live
+transcription-only/no-assistant service acceptance receipt exists. Synthetic
+transport evidence does not establish provider-account or hardware parity;
+see [Windows shared streaming details](windows-development.md).
+
+The shared desktop live session uses macOS's canonical authoritative transcript
+projection for replacement, empty retraction, confirmed/interim composition and
+healthy final folding. Cancelled or failed sessions keep recovery text and
+ignore late projections. Providers without projected text retain legacy folding.
+This does not implement clipboard voice commands or live LLM polishing.
+
 ## Build and run
+
+Voice Output also offers a native text editor, explicit clipboard snapshots and
+user-chosen lossless WAV export. See [Desktop Voice Output sources](desktop-voice-sources.md)
+for source ownership and honest external-selection/Wayland capability limits.
 
 Ubuntu 24.04 (or any distribution with GTK 4.14+, libadwaita 1.5+) and Swift 6.2.3:
 
 ```sh
-sudo apt install libgtk-4-dev libadwaita-1-dev libpulse-dev libsecret-1-dev \
+sudo apt install g++ libgtk-4-dev libadwaita-1-dev libpulse-dev libsecret-1-dev \
   libx11-dev libxtst-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-  gstreamer1.0-plugins-good libssl-dev pkg-config
+  gstreamer1.0-plugins-good gstreamer1.0-libav libssl-dev pkg-config
 export SPEAK_LINUX_TARGET=1
 swift build --product SpeakLinux
 swift test                                  # portable, host and Linux tests
@@ -37,6 +59,10 @@ scripts/linux-desktop-checks.sh             # self-test + Xvfb window smoke test
 scripts/linux-integration-checks.sh         # keyring, PipeWire, portals, X11 paste
 .build/debug/SpeakLinux                     # the app
 ```
+
+Portable builds also compile the in-process local-model C++ adapter. They need
+the C++ standard-library development headers and linker files supplied by `g++`,
+even when no downloaded model or inference runtime is installed.
 
 The smoke test needs `xvfb` and `dbus`; the integration checks also need
 `gnome-keyring pipewire pipewire-pulse wireplumber pulseaudio-utils openbox
@@ -51,11 +77,179 @@ then the dashboard and History in dark mode and the dashboard while recording.
 `scripts/linux-desktop-checks.sh` runs it when `JSTI_UI_SCREENSHOT_DIR` is set,
 and CI uploads the pictures as `linux-ui-screenshots`.
 
+Recording feedback uses a dedicated, warmed libpulse channel and the bundled
+AAC cues. `SpeakLinux --self-test` decodes all eight cues with the production
+GStreamer path; missing codecs or resource bundles fail explicitly.
+`SpeakLinux --recording-feedback-self-test` requires a real Pulse endpoint and
+checks both cues for every profile, reusable stop and joined close. It reports
+first-buffer queue admission (at most 100 ms), not audible hardware latency.
+The integration script runs this against its private PipeWire null sink.
+An installed package must pass `--self-test` as well; a source-tree pass does
+not establish resource placement or codec availability in a Flatpak runtime.
+
+### Local automation (`speak`)
+
+Source wiring, authored synthetic regressions and packaging are present; this
+integration successor has **not** been compiled, tested, linked or run. This is
+not native or feature-parity qualification.
+
+Build `speak` with `swift build --product speak` alongside the app. The native
+General > Automation switch is off by default. Explicitly enabling **Allow local
+automation** grants access on this computer; the subtitle reports actual listener
+readiness or failure, not just the saved request. Imported or upgraded
+`enableAutomationServer=true` (including legacy `automationEnabled=true`) is
+preserved as requested intent but cannot grant approval. Imported false and local
+disable stop access; a failed revocation save explicitly warns that restart may
+restore the previous saved grant. Export never transfers local approval. This
+permission is independent of Auto-Clean approval.
+
+The existing CLI grammar is reused: `speak status --json`, `speak history`,
+`speak transcribe <file>`, and `speak listen` / `speak stop`. Consult `speak --help`
+for supported options; language flags are not invented. File transcription uses
+the selected canonical batch/profile snapshot and the normal preparation and
+inference adapters, without creating History, inserting text, reading the
+clipboard or authorizing post-processing. The caller's input remains unchanged;
+transient conversion cleanup failures are errors, not successful read-only
+results. Start/stop use current captured-profile recording/live/finalization and
+History pathways. No focus target is manufactured: Wayland capabilities and
+unsupported-output errors remain real. The existing `--toggle` journey remains.
+
+`CLinuxAutomation` owns a private user-owned 0700 endpoint directory and 0600
+socket, authenticates same-user peers using `SO_PEERCRED`, rejects linked,
+foreign-owned or insecure paths and refuses existing competing endpoints. The
+default is below `XDG_RUNTIME_DIR`, or a private train/user directory below
+`/tmp`; `SPEAK_AUTOMATION_SOCKET` overrides both client and server paths subject
+to the same checks. It never changes shared-parent permissions, the process
+umask or signal handlers. Socket cleanup checks the retained directory and
+device/inode identity; it preserves observed replacements. Linux has no atomic
+compare-and-unlink namespace operation: uncooperative concurrent same-user
+namespace mutation is not claimed to be atomically protected.
+
+Frames, connections (four), replay/in-flight work and actual I/O deadlines are
+bounded. Shutdown interrupts and joins owned transport workers off GTK and the
+settings executor; long commands are separately cancellable Host work.
+Control-plane socket I/O is not part of capture, inference or insertion.
+`stage-linux-desktop.py --cli <built-speak>` stages the CLI without changing the
+existing local-runtime staging contract. Flatpak builds/stages `speak` inside
+its sandbox; cross-sandbox host access is not established by this source.
+
+### Canonical application icons
+
+The Linux application uses the canonical Mac icon exports, not a separately
+drawn approximation. `scripts/generate-icon.swift` invokes the dependency-free
+`scripts/generate-desktop-icons.py`, producing a private hicolor theme with
+16, 24, 32, 48, 64, 128, 256 and 512px PNGs and transparent corners. SwiftPM
+bundles that theme in `SpeakApp_SpeakLinux.resources`; it is loaded via
+`Bundle.module`, not the current working directory. GTK sets the window icon
+name to the desktop entry's `com.justspeaktoit.JustSpeakToIt`. The in-app brand
+marks and StatusNotifier pixmaps read the same artwork; panel exports include
+64/96px variants and preserve the recording dot. The coloured app icon is
+identical in light/dark themes, not a symbolic icon; Wayland compositors use
+the matching application/desktop identity rather than a client-supplied
+title-bar bitmap.
+
+Flatpak ships both the private runtime theme and installed hicolor PNGs.
+For a native developer layout, stage (do not install) the executable, resource
+bundles, desktop entry, metainfo and icons with:
+
+```sh
+python3 scripts/stage-linux-desktop.py --binary .build/release/SpeakLinux \
+  --output .build/linux-desktop-layout --prefix /usr/local
+```
+
+The output contains `bin/` and `share/`, intended for the stated prefix.
+It still requires the matching Swift/native libraries; this is not a
+self-contained Linux release. The stager never changes the running system and
+refuses an existing output directory. Installed icons do not overwrite the
+system hicolor `index.theme`; the private bundle retains its own index.
+The stager collects every non-test sibling `.resources` bundle, including future
+production modules, while still requiring the core and Linux icon bundles.
+Linked bundles, linked entries and non-regular resource content are refused
+before creating output. Flatpak uses this same stager with `/app` as its prefix
+instead of maintaining a separate resource list.
+Spaces, quotes, backslashes, dollar signs and backticks in prefixes use the two
+Desktop Entry escaping layers. Percent/equal-sign prefixes are refused before
+writing because they are not portable executable paths for desktop launchers.
+
+`python3 scripts/generate-desktop-icons.py --check` verifies exact exports;
+`python3 -B -m unittest discover -s scripts/tests -p test_desktop_icons.py`
+checks native resource wiring and a synthetic staged layout. The GTK window
+self-test requires the canonical name to resolve in the theme. The Python
+checks are not proof of GTK/Wayland/panel rendering or an installed Flatpak;
+those remain native CI and desktop validation gates.
+
+## Model comparison
+
+**Transcription > Compare Models** opens a native GTK/libadwaita editor with
+wrapped, accessibly named model checkboxes, File/Batch and Live input modes,
+language hint, saved rounds, raw blind results, ranking/reveal, scoreboard,
+sample playback and JSON/Markdown exports. File selection accepts one to 32
+local samples; save dialogs use the desktop's native file chooser. Picker errors
+appear in the comparison editor instead of being hidden behind its modal window.
+The export scope chooses **All rounds** or **Selected round** for both
+**Save JSON / Markdown** and explicit **Copy JSON / Markdown**. Save requests
+freeze the selected round when the chooser opens, independently of later
+selection changes; a deleted/missing round is an error, never an all-round fallback.
+Clipboard export does not insert text or mutate normal History.
+Closing a picker/editor invalidates that picker request, so a late selection
+cannot start a replacement editor's run.
+
+Windows and Linux share `DesktopComparisonRunner`, `DesktopComparisonLive`,
+`DesktopComparisonStore` and `DesktopHostComparison`: all file snapshots are
+prepared before provider work, one native microphone capture fans out to the
+qualified live routes, and raw results never reach insertion, post-processing,
+dictation settings or normal History. Failed candidates remain independently
+judgeable. Complete distinct ranks 1...N reveal models; canonical persisted
+rounds determine standings and exports.
+Fewer than two usable results reveal unranked evidence, matching Mac, rather than
+inventing rankings or scoreboard credit. See the
+[Windows comparison workflow](windows-development.md#model-comparison) for the
+shared 120-second file, 12-second readiness and 30-second finalization budgets.
+Native **Select all ready / Select none** and remembered per-mode candidate
+selection use canonical credential readiness plus local-runtime/Azure endpoint
+checks. Unavailable qualified models have explicit reasons in the detail pane;
+their saved selections survive ready-only edits and relaunch. Credential writes,
+cloud-key imports and endpoint changes refresh readiness. Keys/settings are read
+again after the final admission suspension, before audio/provider work, and
+admitted runs keep immutable snapshots. Readiness does not validate a key with
+the real service. Cancel/editor close invalidates pending admission across
+editor reopen.
+`DesktopSettingsQueue` admits File/Live work without waiting for playback:
+separately owned admission tasks are cancelled on Cancel/editor close/shutdown.
+A blind **Diff against** dropdown uses the shared
+`TranscriptWordDiff`, with accessible `[+added]` / `[-removed]` text annotations
+instead of colour-only edits; original transcripts and persisted ranks stay unchanged.
+
+`Comparisons/rounds.json` and app-owned `Comparisons/Samples/` live in the private
+data directory. Interrupted rounds retain their audio; interrupted live metadata
+can remain unknown until normal finalization. Native confirmed delete/discard
+persists a canonical tombstone before cleaning up its app-owned sample, while
+startup prunes orphan samples. Original imports and normal History are untouched.
+The shared comparison capture safety limit is 600 seconds, not an age/count
+retention policy. The editor's separate explicit iCloud consent and **Sync now /
+retry** use the same canonical, account/consent-fenced metadata-only comparison
+sync as Windows. Sign in from the existing iCloud Sync settings; local changes,
+manual retry and the existing 300-second web heartbeat reconcile rounds and
+tombstones. Comparison owns a separate cursor/acknowledgements and preserves
+original-account provenance. Active capture/queued batch revisions are excluded
+and protected against remote deletion; remote metadata never supplies audio.
+Automatic interrupted/failed provider retry is not a Mac comparison feature and
+is not added here.
+The GTK window self-test checks wrapped labels, model and language payloads,
+ranking, playback, scoped export payloads, explicit sync consent/retry and
+busy/recording controls with synthetic fixtures only.
+The screenshot tour adds `comparison-blind-light.png` and
+`comparison-revealed-dark.png`, plus `-full.png` views including the below-fold
+ranking/export controls, without changing page ordinals. Native execution
+at the final head, physical PulseAudio/PipeWire devices, screen-reader/keyboard
+acceptance, small-screen behavior, live-provider and real-account CloudKit receipts are separate gates;
+portable tests and syntax/type checks do not establish those gates.
+
 ## Window
 
 The window follows the Mac app's layout and look. A sidebar lists **Speak**
 (Dashboard, History, Voice Output) and **Settings** (General, Transcription,
-Post-processing, Keyboard, iCloud Sync, About), and collapses to one pane below
+Post-processing, Keyboard, Corrections, Pronunciation, iCloud Sync, About), and collapses to one pane below
 640 px. The header carries Import audio, the page title with the selected model,
 and Record; the status line sits at the bottom of every page.
 
@@ -64,11 +258,21 @@ and Record; the status line sits at the bottom of every page.
   displayed transcript with Copy (and Cancel while transcribing); Insights
   (Sessions, Recording Time, Average Length, Spend) and a Setup card echoing the
   microphone, model, shortcut and text output.
-- **History**: search and Import in the hero with Sessions, Errors, Average
+- **History**: search, Filters and Import in the hero with Sessions, Errors, Average
   Length and Spend for the recordings the search shows; each recording is a card
   with Created, Audio, Cost and Context badges, the transcript preview and the
   models used. The selected card expands with its transcript, version, Play,
   Stop, Copy, Read aloud, Retry, Export and Open audio.
+- **History filters**: the native GTK popover combines any recorded transcription
+  or post-processing models, errors only, and optional From/Through calendar
+  dates with the existing Unicode/profile search. Apply and Reset change only
+  visibility; hidden selections stop playback and Read aloud. Dates use the
+  shared `HistorySearchQuery` day policy in the local time zone. This does not
+  add History deletion, retention, or migration. Long model names wrap without
+  losing their full labels, and date buttons distinguish From/Through in their
+  accessible names. The screenshot tour requires light/dark filter-popover
+  artifacts; source assertions and snapshots do not replace physical accessibility
+  acceptance.
 - Totals and row wording come from the shared `DesktopHistoryInsights` and
   `DesktopHistoryRowSummary` (SpeakDesktop), counted and formatted as the Mac
   counts them, so Windows shows the same figures.
@@ -125,6 +329,31 @@ Flatpak: `~/.var/app/com.justspeaktoit.JustSpeakToIt/data/JustSpeakToIt`):
 private to the user (0700/0600). API keys are in the Secret Service keyring
 under the same canonical identifiers as Windows Credential Manager. iCloud
 sync keeps its state in `CloudSync/state.json` there (see below).
+
+### Vocabulary and pronunciation
+
+The **Corrections** and **Pronunciation** pages use real GTK entries, multiline
+variant/preview fields, dropdowns, check buttons and filtered saved-entry lists.
+Both support durable editing, deletion confirmation, explicit ordering,
+validation and saved-entry preview; pronunciation also supports canonical
+defaults and local JSON merge/replace/import/export. **History > Correction
+results** shows the retained applied corrections, unapplied suggestions,
+confidence, reasons and context in a native read-only scrolling dialog.
+
+Windows and Linux use the same portable domain/store machinery and apply
+corrections at recording/import/retry/live-finalisation before post-processing,
+without replacing the original provider transcript. Read aloud runs the
+canonical pronunciation replacement renderer once before segmenting expanded
+text to Deepgram's request limit. IPA-only entries are retained but not claimed
+as supported by Deepgram. Context tags are explicit input; there is no OS-wide
+edit observation, permission request or fabricated learning. Candidate
+management logic is shared, but a desktop candidate-management UI is not yet
+implemented. Data remains in the existing private XDG application directory.
+
+See [the shared desktop journey](windows-development.md#vocabulary-and-pronunciation-journey)
+for rule semantics, storage files, supported provider hints and remaining
+physical/native acceptance. Native syntax checks and synthetic form-event
+self-tests do not replace target-platform runtime evidence.
 
 ### Flatpak
 
@@ -255,7 +484,7 @@ proven on a physical desktop.
 | `--toggle` / app action | Built on GApplication | Forwarding **unverified** by an automated check |
 | Import and conversion | Verified for WAV (44.1 kHz stereo to 16 kHz mono) | `LinuxAudioConversionTests` through GStreamer; MP3, M4A and Opus depend on installed plugins and are **unverified**; conversion runs only for 16 kHz-WAV-only models (Meta, Azure) |
 | Live transcription transport (SwiftNIO, `SpeakLinuxWebSocket`) | Verified against the loopback probe | `SpeakLinuxWebSocketTests`: echo, PCM frames, ping/pong payload, peer close code and reason with acknowledgement, 2 × 2 MiB through a slow peer, fragmented Unicode and binary, cancellation of pending receive and pre-handshake send, abrupt disconnect, oversize, refused upgrade, and the shared Mistral client's four Voxtral scenarios. TLS (`wss`) to real providers, and live providers other than Mistral's protocol peer, **unverified**; HTTP(S) proxies are **not** honoured by this transport |
-| Live transcription in the app | Wired to the same shared live clients as Windows (OpenAI, Deepgram, AssemblyAI, Speechmatics, Soniox, ElevenLabs, xAI, Mistral, Gladia, Cartesia, Rev.ai and Azure Voice Live) | No provider receipt yet: **unverified** with real keys |
+| Live transcription in the app | Wired to the same shared live clients as Windows (OpenAI, Deepgram, AssemblyAI, Speechmatics, Soniox, ElevenLabs, xAI dedicated speech-to-text, Mistral, Gladia, Cartesia, Rev.ai, Azure Voice Live, Reson8, Google Gemini, Meta Muse and Modulate); Grok Voice remains unexposed | Final-head native transport and real-provider acceptance remain **unverified**; source wiring and protocol fixtures do not establish provider receipts |
 | Azure Speech resource endpoint | Settings shows an entry row while an Azure model is selected; entries are checked with the shared `DesktopHostAzureResource` rules before saving, and live Azure refuses to start without one | `DesktopHostAzureResourceTests`; the window self-test checks the row follows the picker |
 | iCloud sync: History with the Mac, API-key import | Same shared flow as Windows (`DesktopHostCloudSync`); the flow, the adapters and the group verified against the fake CloudKit server | `DesktopHostCloudSyncTests` (sign-in, History both ways, deletion, sign-out, timeout, shutdown); `LinuxCloudKitTransportTests` and `LinuxLoopbackListenerTests` (fake server over a real loopback socket through URLSession and OpenSSL, callback, idle connections, cancellation); `LinuxEnvelopeCryptographyTests` (the CryptoKit/CNG vectors); window self-test; keyring integration check. A live CloudKit receipt, the Console setup (API token, callback URL, Production schema), a real Apple ID sign-in in a browser and the OpenURI portal inside Flatpak are **unverified** |
 | Shortcut styles (press, hold, double-tap, both) | Session rules verified in the shared host | `SpeakDesktopHostTests`; the X11 grab reports press and release (integration check); portal Deactivated on real desktops **unverified** |
@@ -266,6 +495,7 @@ proven on a physical desktop.
 | Status notifier (panel icon and menu, like the Mac's menu bar extra) | Verified against a fake `org.kde.StatusNotifierWatcher`: registration, icon pixmaps, tooltip, menu layout and a Quit click that closes the app | Integration check; how KDE Plasma, the GNOME AppIndicator extension (Ubuntu) and other panels draw it **unverified** |
 | Launch at login | Outside Flatpak: an XDG autostart entry (`$XDG_CONFIG_HOME/autostart/com.justspeaktoit.JustSpeakToIt.desktop`, quoted `Exec` with `--background`) that the switch writes and removes, read back so a desktop's own startup settings (removal, `Hidden=true`, `X-GNOME-Autostart-enabled=false`) show here. Inside Flatpak: the Background portal's `RequestBackground` with `autostart` and the same command line, a refusal shown as off by the desktop, and the state last granted recorded in `settings.json`, because the sandbox cannot read the entry. A login launch creates the window minimised without asking for focus. Shared state, wording and status with Windows (`DesktopHostLoginItem`) | `LinuxLoginItemTests` (entry text and quoting, the desktop's switches, a dangling link); the window self-test (the switch follows the host and reports one click); the integration check (the fake portal grants, removes and refuses; `--background` starts minimised under Openbox). Real GNOME, KDE and XFCE sessions, the GNOME background-app dialog, and Wayland minimise-before-map **unverified** |
 | IBus insertion | **Not implemented** | Later phases |
+| Hands-free and silence | Shared sound-activation/utterance loop, bounded RAM pre-roll and manual silence auto-stop; fresh frozen X11 target per utterance; record-bound output evidence; logind and an existing screen service required with fail-closed absence/service-loss handling | Not Apple's ML classifier. X11 paste keys are unconfirmed text delivery and stop listening; Wayland automatic utterances require clipboard-only output. Profile/model/device remain fixed per armed run. Physical microphones/noise/latency, actual lock/sleep and installed Flatpak monitoring remain **unverified**; exact-head receipts and [settings coverage](desktop-settings-parity.md) qualify each slice separately |
 | Flatpak | Built with `flatpak-builder` (GNOME 50, Swift 6.3.3); self-test and window smoke test pass in its environment | Installed `flatpak run`, portals from inside the sandbox and Flathub offline build **unverified** |
 
 ### Needs a physical desktop
@@ -290,6 +520,12 @@ proven on a physical desktop.
    Mac, and key import with a real passphrase.
 
 ## On-device transcription
+
+The source now also provides explicit public Hugging Face GGML reference import,
+separate verified Download, and native Local/Remote then Batch/Live filtering.
+See [desktop Hugging Face imports](desktop-huggingface-import.md) for supported
+formats, provenance, persistence and the **unexecuted** regression/native-control
+evidence boundary. The earlier pinned-model receipts below do not qualify imports.
 
 Linux transcribes recordings and imported files on this computer with the same
 whisper.cpp 1.9.4 runtime and pinned GGML models as Windows
@@ -389,6 +625,81 @@ would download into
 over the existing network permission. None of this is built or tested.
 
 ## CI
+
+The portable press-capture lease/PCM relay is currently fake-worker-qualified
+ownership scaffolding only, not a Linux microphone-on-key-press implementation.
+See the [shared ownership contract](windows-development.md) for admission,
+bounded RAM, late cleanup and delivery-join guarantees. No native worker,
+permission adapter, host handoff or settings row is installed. X11 press/release
+events and Wayland portal Activated/Deactivated have different timing semantics;
+portal activation is not physical-key-down or pre-recognition evidence. Native
+start/stop remains unqualified for bounded readiness/cleanup, and neither a saved
+preference nor a fake lifecycle result enables speculative capture.
+Package failure events preserve the generating token and immutable admitted
+identity across deferred delivery, with cleanup failure reported separately.
+Use `DesktopPressCaptureLease.observingFailures(worker:onFailureEvent:)` for
+correlated events; the original error-only initializer retains untyped,
+ignored-argument trailing-closure compatibility without an initializer overload.
+Optional `beginOwned` creates a package release ticket before queued opening
+can run. Its retained token/attempt result joins real cleanup independently of
+lease-global `settle()` and any later run. Cancelled waiters do not cancel IO;
+failed cleanup retains exclusion, and repeated release observes that failure
+until an explicit `retryRelease()` after it is observed. Owned runs reject
+legacy `lease.retryClose(token)` with `invalidPhase` before any state reset or IO;
+the exposed token is not legacy retry authority. Only the ticket's `retryRelease()`
+retries owned cleanup. Legacy `begin` runs retain their existing `retryClose` behavior,
+and workers without producer quiescence retain their relay fence before close. Retaining/releasing the
+ticket on every startup/record/shutdown terminal path, Host failure mapping,
+native ownership and WAV/context finalization remain separate prerequisites;
+this package API neither installs them nor enables microphone capture.
+The error-only observer remains a compatibility projection, not a second
+subscription or a native/Host failure adapter.
+Optional PCM deliveries preserve legacy Data batch projection while labeling
+mono PCM16 sample offsets before/after reservation under the relay state lock.
+The canonical `adoptDelivery` name keeps legacy `adopt` trailing closures
+source-compatible even when their Data argument is ignored.
+These are relay admission-order regions, not physical sample/gesture times or
+an approved Host silence clock; physically earlier PCM submitted later is after
+reservation. Legacy worker stop-time partial flush remains fenced and separately
+unqualified, not made lossless by span metadata.
+The additive `DesktopPressCaptureQuiescingWorker` contract requires an explicit
+`quiesce(id:)` acknowledgement: after producer shutdown ALL final PCM/error
+callbacks must have returned. An adopted, non-failed run continues admitting
+those samples through its SAME bounded relay until acknowledgement, then fences,
+settles admitted delivery and retires native resources before WAV finish/save.
+Closing still excludes a new run throughout; there is no second PCM queue or
+per-frame Task. Failed quiescence records the first capture cause, fences safely
+and still attempts retirement; failed retirement retains the same owner for
+explicit cleanup retry without replaying final PCM. A native failure arriving
+after the fence remains latched and is published with its original token/identity
+before release completion/Host disposition, without replacing an earlier relay cause.
+Non-adopted and non-quiescing workers preserve fence-before-close. This is a
+synthetic package/injected-Host stop contract, not native libpulse/driver evidence
+or production activation; the production dependency stays unavailable. No native
+adapter, permission grant, source identity, readiness or physical timing is inferred.
+
+The injected package/internal Host startup transaction has no production factory
+and does not activate production capture or successful dictation. It retains the real
+owned ticket through early failure/ticket-delivery races, uses request-specific
+failure/barrier acknowledgement and joins actual native cleanup before WAV finish.
+Cleanup failure retains exclusion and permits only explicit owned retry, even
+after close. A separate actor owns file operations; neither Host admission nor
+settings queue waits on file/native IO. Finish is attempted once; independent
+audio/History errors remain visible, and failed save retains the record/file
+owner until explicit disposition retry. Closed persistence never presents UI.
+See the [shared startup contract](windows-development.md) for bounds and limits.
+An explicitly requested owned recording now uses that same owner's real Lease
+reserve/readiness/adoption, with a separate Host descriptor rather than a fake
+synchronous capture adapter. Its file-only PCM sink reuses the bounded relay
+drain and canonical Context.receive. The memory model includes BOTH aligned
+100 ms scratch and Context's temporary Data copy beyond the relay byte budget.
+No per-frame Task/second PCM queue, provider or positive cue is installed.
+Captured audio is annotated as non-dictation/retryable in real History; writer
+failure, actual native cleanup, WAV finish and History save remain distinct.
+This leaves synchronous normal/HF/comparison capture, canonical PCM ingestion,
+silence clocks and fence-before-close unchanged. Native owner/callback lifetime,
+permission/device/readiness, production recording handoff and final flush still
+require separate qualification and activation.
 
 `.github/workflows/linux.yml` (ubuntu-24.04, `swift:6.2.3-noble`, pinned by
 digest) installs the packages above, then runs the boundary check, the

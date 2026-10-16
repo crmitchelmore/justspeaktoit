@@ -8,6 +8,7 @@ builder's own policy, path and PE checks rather than a second dependency list.
 The package's processor architecture is the bundle's.
 """
 import base64
+import functools
 import hashlib
 import importlib.util
 import io
@@ -135,7 +136,24 @@ def package_identity(identity, version, publisher, architecture="x64"):
             "applicationId": identity["application"]["id"],
             "appUserModelId": family + "!" + identity["application"]["id"],
             "executionAlias": identity["application"]["executionAlias"],
+            "cliApplicationId": identity["cli"]["id"],
+            "cliAppUserModelId": family + "!" + identity["cli"]["id"],
+            "cliExecutionAlias": identity["cli"]["executionAlias"],
             "displayName": identity["presentation"]["displayName"]}
+
+
+def check_execution_identity(data):
+    application = data["application"]
+    for key in ("executable", "executionAlias"):
+        value = application.get(key)
+        if not isinstance(value, str) or not EXECUTABLE_PATTERN.fullmatch(value) or FILE_NAME_FORBIDDEN.search(value):
+            raise PackageError(key + " must be an .exe file name without a directory")
+    if data.get("cli") != {"id": "JustSpeakToItCLI", "executable": BUNDLE.CLI,
+                           "executionAlias": "JustSpeakToItDeveloperCLI.exe"}:
+        raise PackageError("cli must declare exactly JustSpeakToItCLI, speak.exe and the developer CLI execution alias")
+    if (application["id"] != "JustSpeakToIt" or application["executable"] != BUNDLE.APPLICATION
+            or application["executionAlias"] != "JustSpeakToItDeveloper.exe"):
+        raise PackageError("the existing GUI application id, executable and developer alias must not be retargeted")
 
 
 def load_identity(path=IDENTITY_PATH):
@@ -160,9 +178,7 @@ def load_identity(path=IDENTITY_PATH):
     application = data["application"]
     if not APPLICATION_ID_PATTERN.fullmatch(application["id"]) or len(application["id"]) > 64:
         raise PackageError("application id is not a valid ST_AsciiWindowsId")
-    for key in ("executable", "executionAlias"):
-        if not EXECUTABLE_PATTERN.fullmatch(application[key]):
-            raise PackageError(key + " must be an .exe file name without a directory")
+    check_execution_identity(data)
     startup = application.get("startupTask")
     if (not isinstance(startup, dict) or set(startup) != {"id", "parameters"}
             or not APPLICATION_ID_PATTERN.fullmatch(startup["id"]) or len(startup["id"]) > 64):
@@ -326,18 +342,29 @@ def resample_rgba(width, height, rgba, target_width, target_height):
     return bytes(output)
 
 
+@functools.lru_cache(maxsize=64)
+def _render_asset(data, size):
+    width, height, rgba = _decode_asset(data)
+    return encode_png(size, size, resample_rgba(width, height, rgba, size, size))
+
+
+@functools.lru_cache(maxsize=4)
+def _decode_asset(data):
+    return decode_png(data)
+
+
 def render_assets(identity, source_root=REPOSITORY):
     """Derive the package logos from the canonical app icon export."""
     source = identity["assets"]["source"]
     data = (pathlib.Path(source_root) / source).read_bytes()
-    width, height, rgba = decode_png(data)
+    width, height, _ = _decode_asset(data)
     if width != height:
         raise PackageError("the icon source must be square")
     assets = {}
     for path, size in sorted(identity["assets"]["images"].items()):
         if size > width:
             raise PackageError("the icon source is smaller than " + path)
-        assets[path] = encode_png(size, size, resample_rgba(width, height, rgba, size, size))
+        assets[path] = _render_asset(data, size)
     record = {"source": source, "sourceSHA256": sha256(data), "sourceSize": [width, height],
               "method": "exact integer area average of premultiplied RGBA; unfiltered 8-bit RGBA PNG output",
               "images": dict(sorted(identity["assets"]["images"].items()))}
@@ -349,6 +376,7 @@ NAMESPACES = {
     "f": "http://schemas.microsoft.com/appx/manifest/foundation/windows10",
     "uap": "http://schemas.microsoft.com/appx/manifest/uap/windows10",
     "uap3": "http://schemas.microsoft.com/appx/manifest/uap/windows10/3",
+    "uap5": "http://schemas.microsoft.com/appx/manifest/uap/windows10/5",
     "uap10": "http://schemas.microsoft.com/appx/manifest/uap/windows10/10",
     "desktop": "http://schemas.microsoft.com/appx/manifest/desktop/windows10",
     "desktop6": "http://schemas.microsoft.com/appx/manifest/desktop/windows10/6",
@@ -368,6 +396,8 @@ def render_manifest(identity, version, publisher, template_path=TEMPLATE_PATH, a
         "deviceFamily": family["name"], "minVersion": family["minVersion"],
         "maxVersionTested": family["maxVersionTested"], "applicationId": application["id"],
         "executable": application["executable"], "executionAlias": application["executionAlias"],
+        "cliApplicationId": identity["cli"]["id"],
+        "cliExecutable": identity["cli"]["executable"], "cliExecutionAlias": identity["cli"]["executionAlias"],
         "startupTaskId": application["startupTask"]["id"],
         "startupTaskParameters": application["startupTask"]["parameters"],
     }
@@ -379,6 +409,7 @@ def render_manifest(identity, version, publisher, template_path=TEMPLATE_PATH, a
 
 def check_manifest(data, identity, version, publisher, architecture="x64"):
     """Check the rendered manifest states exactly the reviewed identity and policy."""
+    check_execution_identity(identity)
     try:
         root = ET.fromstring(data)
     except ET.ParseError as error:
@@ -397,15 +428,68 @@ def check_manifest(data, identity, version, publisher, architecture="x64"):
         raise PackageError("manifest must disable file-system write virtualisation")
     applications = root.findall("f:Applications/f:Application", ns)
     application = identity["application"]
-    if (len(applications) != 1 or applications[0].get("Id") != application["id"]
-            or applications[0].get("Executable") != application["executable"]
-            or applications[0].get("{%s}TrustLevel" % ns["uap10"]) != "mediumIL"
-            or applications[0].get("{%s}RuntimeBehavior" % ns["uap10"]) != "packagedClassicApp"):
-        raise PackageError("manifest must declare exactly the full-trust packaged desktop application")
-    aliases = [element.get("Alias") for element in applications[0].iter("{%s}ExecutionAlias" % ns["desktop"])]
-    if aliases != [application["executionAlias"]]:
-        raise PackageError("manifest must declare exactly the reviewed execution alias")
-    tasks = [element for element in applications[0].iter("{%s}Extension" % ns["desktop"])
+    if len(applications) != 2:
+        raise PackageError("manifest must declare exactly the reviewed GUI and hidden CLI applications")
+    for index, (element, expected_application) in enumerate(zip(applications, (application, identity["cli"]))):
+        expected_attributes = {
+            "Id": expected_application["id"], "Executable": expected_application["executable"],
+            "{%s}TrustLevel" % ns["uap10"]: "mediumIL",
+            "{%s}RuntimeBehavior" % ns["uap10"]: "packagedClassicApp",
+        }
+        if index == 1:
+            # The CLI alias extension declares uap10:Subsystem="console"; the schema requires its own
+            # Application to also declare uap10:SupportsMultipleInstances="true". The GUI Application has
+            # no console alias and must not carry this attribute.
+            expected_attributes["{%s}SupportsMultipleInstances" % ns["uap10"]] = "true"
+        if element.attrib != expected_attributes:
+            raise PackageError("manifest application identity and activation must match the reviewed GUI and CLI")
+        visual = element.find("uap:VisualElements", ns)
+        app_extensions = element.find("f:Extensions", ns)
+        if visual is None or app_extensions is None or list(element) != [visual, app_extensions]:
+            raise PackageError("each application must contain exactly its visual elements and reviewed extensions")
+        expected_visual = {
+            "DisplayName": identity["presentation"]["displayName"],
+            "Description": identity["presentation"]["description"], "BackgroundColor": "transparent",
+            "Square150x150Logo": "Assets\\Square150x150Logo.png",
+            "Square44x44Logo": "Assets\\Square44x44Logo.png",
+        }
+        if index == 1:
+            expected_visual["AppListEntry"] = "none"
+            categories = ["windows.appExecutionAlias"]
+        else:
+            categories = ["windows.appExecutionAlias", "windows.startupTask"]
+        if visual.attrib != expected_visual or list(visual):
+            raise PackageError("manifest must keep canonical GUI visuals and a hidden CLI with the same icons")
+        if ([child.get("Category") for child in app_extensions] != categories
+                or app_extensions.attrib):
+            raise PackageError("each application must declare exactly one alias extension and only the GUI startup")
+    extensions = [element for element in root.iter() if element.get("Category") == "windows.appExecutionAlias"]
+    expected_aliases = [
+        ("uap3", application["executable"], "desktop", application["executionAlias"], {}),
+        ("uap5", identity["cli"]["executable"], "uap5", identity["cli"]["executionAlias"],
+         {"{%s}Subsystem" % ns["uap10"]: "console"}),
+    ]
+    if len(extensions) != len(expected_aliases):
+        raise PackageError("manifest must declare exactly the reviewed GUI and CLI alias extensions")
+    for index, (extension, (prefix, executable, alias_prefix, alias, attributes)) in enumerate(
+            zip(extensions, expected_aliases)):
+        expected_extension = {
+            "Category": "windows.appExecutionAlias", "Executable": executable,
+            "{%s}RuntimeBehavior" % ns["uap10"]: "packagedClassicApp",
+            "{%s}TrustLevel" % ns["uap10"]: "mediumIL",
+        }
+        children = list(extension)
+        if (extension not in list(applications[index].find("f:Extensions", ns))
+                or extension.tag != "{%s}Extension" % ns[prefix] or extension.attrib != expected_extension
+                or len(children) != 1 or children[0].tag != "{%s}AppExecutionAlias" % ns[prefix]
+                or children[0].attrib != attributes or len(list(children[0])) != 1
+                or children[0][0].tag != "{%s}ExecutionAlias" % ns[alias_prefix]
+                or children[0][0].attrib != {"Alias": alias} or list(children[0][0])):
+            raise PackageError("manifest execution alias must match its reviewed executable and console attributes")
+    aliases = [element for element in root.iter() if element.tag.rsplit("}", 1)[-1] == "ExecutionAlias"]
+    if len(aliases) != 2:
+        raise PackageError("manifest must contain exactly the reviewed execution aliases")
+    tasks = [element for element in root.iter("{%s}Extension" % ns["desktop"])
              if element.get("Category") == "windows.startupTask"]
     startup = application["startupTask"]
     declared = [(element.get("Executable"), element.get("EntryPoint"), element.get("{%s}Parameters" % ns["uap10"]),
@@ -427,7 +511,12 @@ def check_manifest(data, identity, version, publisher, architecture="x64"):
     logos = {root.findtext("f:Properties/f:Logo", namespaces=ns)}
     visual = applications[0].find("uap:VisualElements", ns)
     logos |= {visual.get("Square150x150Logo"), visual.get("Square44x44Logo")}
-    declared = {path.replace("/", "\\") for path in identity["assets"]["images"]}
+    # MRT resolves qualifier siblings automatically; only the unqualified
+    # roots belong in VisualElements. Every generated variant must have a root.
+    declared = {path.split(".", 1)[0] + ".png" for path in identity["assets"]["images"]}
+    if not declared.issubset(identity["assets"]["images"]):
+        raise PackageError("qualified logo families must include their generated unqualified assets")
+    declared = {path.replace("/", "\\") for path in declared}
     if logos != declared:
         raise PackageError("manifest logos differ from the generated assets")
     return root
@@ -435,11 +524,10 @@ def check_manifest(data, identity, version, publisher, architecture="x64"):
 
 # --- runtime bundle input ---------------------------------------------------------------------
 def pe_subsystem(data):
-    offset = struct.unpack_from("<I", data, 0x3c)[0]
-    optional = offset + 24
-    if struct.unpack_from("<H", data, optional)[0] != 0x20b:
+    image = windows_pe.PEImage(data)
+    if image.optional_magic != 0x20b:
         raise PackageError("expected a PE32+ executable")
-    value = struct.unpack_from("<H", data, optional + 68)[0]
+    value = image.subsystem
     return {2: "windows", 3: "console"}.get(value, "subsystem-%d" % value)
 
 
@@ -491,10 +579,13 @@ def verify_bundle(bundle_dir, expected_commit=None):
     manifest = json.loads(manifest_bytes)
     application = manifest.get("application") or {}
     executable = entries.get(BUNDLE.APPLICATION)
+    hashes = {name: sha256(entries[name]) for name in BUNDLE.EXECUTABLES if name in entries}
     if (application.get("configuration") != "release" or application.get("appBuiltForTesting") is not False
             or application.get("sourceCommit") != commit or executable is None
             or application.get("executableSHA256") != sha256(executable)
-            or (evidence.get("application") or {}).get("executableSHA256") != sha256(executable)):
+            or (evidence.get("application") or {}).get("executableSHA256") != sha256(executable)
+            or set(hashes) != set(BUNDLE.EXECUTABLES) or application.get("executables") != hashes
+            or (evidence.get("application") or {}).get("executables") != hashes):
         raise PackageError("bundle does not hold the recorded optimised production executable")
     policy = BUNDLE.Policy.load()
     if manifest.get("policy") != policy.data:
@@ -522,21 +613,57 @@ def verify_bundle(bundle_dir, expected_commit=None):
     except ValueError as error:
         raise PackageError(str(error))
     architecture = target["name"]
-    image = windows_pe.PEImage(executable, BUNDLE.APPLICATION)
-    if not image.runs_natively_on(architecture) or image.is_dll:
-        raise PackageError("SpeakWindows.exe is not a Windows %s executable (it is %s)" % (
-            target["displayName"], image.architecture))
-    for module in image.imports() + image.delay_imports():
-        if policy.classify(module) == BUNDLE.TEST_MODULE:
-            raise PackageError("SpeakWindows.exe imports the test library " + module)
-    # Every image the package installs must load natively on the architecture it declares.
-    for path, data in sorted(entries.items()):
-        if path.lower().endswith(".dll") and not windows_pe.PEImage(data, path).runs_natively_on(architecture):
-            raise PackageError("%s is not a native %s DLL (it is %s)" % (
-                path, architecture, windows_pe.PEImage(data, path).architecture))
-    for module in (manifest.get("dependencies") or {}).get("bundled", {}).values():
-        if module.get("name") not in entries:
-            raise PackageError("bundled runtime module is missing: %r" % (module.get("name"),))
+    if (application.get("target") != target["swiftTriple"]
+            or application.get("buildHost") != BUNDLE.APPLICATION_HOSTS[architecture]):
+        raise PackageError("bundle production source provenance differs from the architecture's build")
+    try:
+        images = {name: BUNDLE.validate_executable(entries[name], name, architecture, policy)
+                  for name in BUNDLE.EXECUTABLES}
+        for name in BUNDLE.EXECUTABLES:
+            if rows[name].get("source") != "application":
+                raise PackageError(name + " must be attributed to the production application build")
+        local = (manifest.get("sources") or {}).get("localInferenceRuntime")
+        local_names = local.get("modules", []) if local else []
+        if local:
+            pins = json.loads(BUNDLE.LOCAL_RUNTIME_PINS.read_text(encoding="utf-8"))
+            pinned = pins["architectures"][architecture]
+            variant = re.compile(pinned["cpuVariantPattern"]) if pinned["cpuVariantPattern"] else None
+            if (local.get("architecture") != architecture or local.get("commit") != pins["whisperCpp"]["commit"]
+                    or not set(pinned["requiredModules"]).issubset(local_names)
+                    or len(set(local_names)) != len(local_names)
+                    or any(name not in pinned["requiredModules"] and not (variant and variant.fullmatch(name))
+                           for name in local_names)):
+                raise PackageError("bundle local runtime differs from the architecture's pinned modules")
+        local_llm = BUNDLE.verify_local_llm_payload(
+            entries, (manifest.get("sources") or {}).get("localLLMRuntime"), architecture)
+        local_names = list(local_names) + (["llama.dll"] if local_llm else [])
+        closure_policy = BUNDLE.Policy(policy.data, local_names)
+
+        def read_imports(name, category):
+            path = BUNDLE.local_llm_library_path(name, local_llm)
+            if path not in entries:
+                raise PackageError("bundled runtime module is missing: " + name)
+            image = images.get(name) or windows_pe.PEImage(entries[path], name)
+            if category != "application":
+                if not image.runs_natively_on(architecture) or not image.is_dll:
+                    raise PackageError("%s is not a native %s DLL (it is %s)" % (
+                        name, architecture, image.architecture))
+                if rows[path].get("source") != category:
+                    raise PackageError("runtime source attribution differs for " + name)
+            return image.imports(), image.delay_imports()
+
+        closure = BUNDLE.resolve_closure(BUNDLE.EXECUTABLES, read_imports, closure_policy, sorted(local_names))
+        dependencies = manifest.get("dependencies") or {}
+        if (any(dependencies.get(key) != closure[key] for key in ("bundled", "system", "roots"))
+                or dependencies.get("additionalRuntimeModules") != policy.additional):
+            raise PackageError("bundle multi-root dependency closure or importer attribution differs from its PEs")
+        expected_images = set(BUNDLE.EXECUTABLES) | {
+            BUNDLE.local_llm_library_path(entry["name"], local_llm) for entry in closure["bundled"].values()}
+        shipped_images = {name for name in entries if name.lower().endswith((".exe", ".dll"))}
+        if shipped_images != expected_images:
+            raise PackageError("bundle images differ from the exact production multi-root closure")
+    except BUNDLE.BundleError as error:
+        raise PackageError(str(error)) from error
     return {"evidence": evidence, "manifest": manifest, "manifestSHA256": sha256(manifest_bytes),
             "entries": entries, "rows": rows, "commit": commit, "architecture": architecture,
             "archive": {"name": name, "sha256": archive_record["sha256"], "bytes": archive_record["bytes"]},
@@ -598,6 +725,8 @@ def build_layout(bundle_dir, output_dir, version, publisher=None, expected_commi
         "capabilities": identity["capabilities"],
         "targetDeviceFamily": identity["targetDeviceFamily"],
         "executable": {"path": executable, "sha256": bundle["executableSHA256"], "subsystem": bundle["subsystem"]},
+        "executables": {name: {"sha256": sha256(bundle["entries"][name]),
+                               "subsystem": pe_subsystem(bundle["entries"][name])} for name in BUNDLE.EXECUTABLES},
         "bundle": {"archive": bundle["archive"], "manifestSHA256": bundle["manifestSHA256"],
                    "sourceCommit": bundle["commit"], "runtimeModules": sorted(
                        module["name"] for module in bundle["manifest"]["dependencies"]["bundled"].values())},

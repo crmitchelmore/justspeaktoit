@@ -1,4 +1,5 @@
 import Foundation
+import SpeakCore
 import SpeakTestSupport
 import XCTest
 

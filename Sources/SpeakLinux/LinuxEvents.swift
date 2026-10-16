@@ -24,6 +24,7 @@ final class LinuxEventContext: @unchecked Sendable {
     private var readyTask: Task<Void, Never>?
     private var shortcutTail: Task<Void, Never>?
     let shortcuts: LinuxShortcuts
+    let automation: LinuxAutomationSwitch
     private(set) var gestures: LinuxShortcutGestures!
     lazy var microphones = LinuxMicrophoneMonitor(controller: controller)
     /// Set before the window opens, when iCloud sync is configured.
@@ -33,18 +34,12 @@ final class LinuxEventContext: @unchecked Sendable {
         self.controller = controller
         self.smokeTest = smokeTest
         self.shortcuts = LinuxShortcuts()
+        self.automation = LinuxAutomationSwitch(controller: controller)
         defer {
             gestures = LinuxShortcutGestures(style: .pressToToggle) { [weak self] request in
                 guard let self else { return }
                 await self.ready?.value
-                // Model and microphone are the saved ones, read in settings order.
-                let index = await controller.selectedIndex()
-                let device = await controller.selectedMicrophone()
-                await controller.shortcut(.init(
-                    input: request.input, style: request.style, recognisedAt: request.recognisedAt,
-                    target: request.target, targetExecutablePath: request.targetExecutablePath,
-                    textOutput: request.textOutput, modelIndex: index, deviceID: device
-                ))
+                await controller.admitShortcut(request)
             }
         }
         self.searches = DesktopEventDispatcher { query in await controller.searchHistory(query) }
@@ -59,6 +54,12 @@ final class LinuxEventContext: @unchecked Sendable {
             case .playPause(let identifier): await controller.playbackToggle(identifier)
             case .stop: await controller.playbackStop()
             case .readAloud(let identifier, let text): await controller.readAloud(identifier, text: text)
+            case .filter(let payload): await controller.applyHistoryFilters(payload)
+            case .voiceRead, .voiceExport, .voiceImport, .voiceImportCancel,
+                 .voiceGenerate, .voiceGeneratedPlay, .voiceGeneratedExport:
+                await controller.performVoiceEvent(event) {
+                    LinuxWindow.voiceTextImported($1, requestID: $0)
+                }
             }
         }
     }
@@ -70,9 +71,21 @@ final class LinuxEventContext: @unchecked Sendable {
 
     /// Text output as of this event in settings order, however late the
     /// recording task runs.
-    func recordingTextOutput() -> Task<LinuxTextOutputOptions, Never> {
+    func recordingSettings(
+        modelIndex: Int? = nil, target: LinuxInsertionTarget? = nil
+    ) -> Task<LinuxRecordingSettings, Never> {
         let controller = controller
-        return settings.read { await controller.textOutputOptions() }
+        return settings.read {
+            let index: Int
+            if let modelIndex, modelIndex >= 0 { index = modelIndex } else {
+                index = await controller.selectedIndex()
+            }
+            return LinuxRecordingSettings(
+                modelIndex: index, deviceID: await controller.selectedMicrophone(),
+                profile: await controller.captureProfile(modelIndex: index, executablePath: target?.executablePath),
+                textOutput: await controller.textOutputOptions()
+            )
+        }
     }
 
     func markReady(_ task: Task<Void, Never>) { lock.withLock { readyTask = task } }
@@ -82,7 +95,7 @@ final class LinuxEventContext: @unchecked Sendable {
     /// before anything else can take focus; toggles run one at a time.
     func shortcutToggle(modelIndex: Int?, deviceID: String?) {
         let target = LinuxEventContext.captureTarget()
-        let textOutput = recordingTextOutput()
+        let selection = recordingSettings(modelIndex: modelIndex, target: target)
         let controller = controller
         let ready = ready
         lock.withLock {
@@ -90,17 +103,10 @@ final class LinuxEventContext: @unchecked Sendable {
             shortcutTail = Task {
                 await previous?.value
                 await ready?.value
-                let index: Int
-                if let modelIndex, modelIndex >= 0 {
-                    index = modelIndex
-                } else {
-                    index = await controller.selectedIndex()
-                }
-                let device: String
-                if let deviceID { device = deviceID } else { device = await controller.selectedMicrophone() }
-                await controller.toggle(
-                    target: target, modelIndex: index, deviceID: device,
-                    targetExecutablePath: target?.executablePath, textOutput: await textOutput.value, trigger: .press
+                let saved = await selection.value
+                await controller.admitCaptured(
+                    target: target, modelIndex: saved.modelIndex, deviceID: deviceID ?? saved.deviceID,
+                    textOutput: saved.textOutput, profile: saved.profile, trigger: .press
                 )
             }
         }
@@ -115,7 +121,11 @@ final class LinuxEventContext: @unchecked Sendable {
     /// target and text output are captured at the press.
     func shortcutKey(pressed: Bool) {
         if pressed {
-            gestures.keyDown(target: Self.captureTarget(), textOutput: recordingTextOutput())
+            let target = Self.captureTarget()
+            let selection = recordingSettings(target: target)
+            gestures.keyDown(
+                target: target, textOutput: Task { await selection.value.textOutput }, selection: selection
+            )
         } else {
             gestures.keyUp()
         }
@@ -160,18 +170,34 @@ final class LinuxEventContext: @unchecked Sendable {
 }
 
 /// The GTK window's event callback, on the GTK main thread.
-func linuxWindowEvent(
+func linuxWindowEvent( // swiftlint:disable:this cyclomatic_complexity
     _ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, _ context: UnsafeMutableRawPointer?
 ) {
+    // exhaustive native GTK event-code dispatch; no behavior change.
     guard let context else { return }
     let holder = Unmanaged<LinuxEventContext>.fromOpaque(context).takeUnretainedValue()
     let value = text.map(String.init(cString:)) ?? ""
     let slot = Int(index)
     let event = Int(event)
+    if event == Int(JSTI_EVENT_PROFILES) {
+        linuxProfilesEvent(value, holder: holder)
+        return
+    }
+    if event == 70 || event == 71 || event == 72 {
+        linuxVocabularyEvent(Int32(event), payload: value, kind: slot, holder: holder)
+        return
+    }
+    if (100...109).contains(event) || (120...129).contains(event) {
+        holder.enqueueSettings {
+            await holder.controller.enqueueComparisonEvent(Int32(event), text: value, index: index)
+        }
+        return
+    }
     if linuxSessionEvent(event, value: value, slot: slot, holder: holder) { return }
+    if linuxHistoryManagementEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxHistoryEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxReadAloudEvent(event, value: value, slot: slot, holder: holder) { return }
-    if linuxLocalModelEvent(event, slot: slot, holder: holder) { return }
+    if linuxLocalModelEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxCloudSyncEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxAppearanceEvent(event, slot: slot, holder: holder) { return }
     _ = linuxSettingsEvent(event, value: value, slot: slot, holder: holder)
@@ -184,11 +210,12 @@ private func linuxSessionEvent(_ event: Int, value: String, slot: Int, holder: L
     case Int(JSTI_EVENT_TOGGLE_RECORDING):
         // Record in this window: its own window is focused, so there is no
         // field to paste into. The transcript is saved and offered for Copy.
-        let textOutput = holder.recordingTextOutput()
+        let selection = holder.recordingSettings(modelIndex: slot)
         Task {
-            await controller.toggle(
-                target: nil, modelIndex: slot, deviceID: value, targetExecutablePath: nil,
-                textOutput: await textOutput.value
+            let saved = await selection.value
+            await controller.toggleCaptured(
+                target: nil, modelIndex: slot, deviceID: value,
+                textOutput: saved.textOutput, profile: saved.profile
             )
         }
     case Int(JSTI_EVENT_COMMAND_TOGGLE):
@@ -202,6 +229,7 @@ private func linuxSessionEvent(_ event: Int, value: String, slot: Int, holder: L
     case Int(JSTI_EVENT_COPY): holder.copyDisplayed()
     case Int(JSTI_EVENT_READY): linuxReady(holder)
     case Int(JSTI_EVENT_CANCEL): Task { await controller.cancelTranscription() }
+    case Int(JSTI_EVENT_USER_ABSENT): Task { await controller.handsFreeUserAbsent(value) }
     case Int(JSTI_EVENT_REFRESH_MODELS): Task { await controller.refreshModels(force: true) }
     default: return false
     }
@@ -209,6 +237,30 @@ private func linuxSessionEvent(_ event: Int, value: String, slot: Int, holder: L
 }
 
 /// History list, export and playback events. Returns false for others.
+private func linuxHistoryManagementEvent(_ event: Int, value: String, slot: Int, holder: LinuxEventContext) -> Bool {
+    switch event {
+    case Int(JSTI_EVENT_HISTORY_FILTERS): holder.submitHistoryPlayback(.filter(value))
+    case Int(JSTI_EVENT_HISTORY_DELETE):
+        let controller = holder.controller
+        holder.enqueueSettings { await controller.beginHistoryDeletion(value, deleteAudio: slot == 1) }
+    case Int(JSTI_EVENT_RECORDINGS_FOLDER): Task { await holder.controller.revealRecordingsDirectory() }
+    case Int(JSTI_EVENT_AUDIO_CLEANUP):
+        holder.enqueueSettings { await holder.controller.beginAudioCleanupConfirmation() }
+    case Int(JSTI_EVENT_AUDIO_CLEANUP_RESPONSE):
+        holder.enqueueSettings { await holder.controller.answerAudioCleanup(value, delete: slot == 1) }
+    case Int(JSTI_EVENT_MIGRATION_INSPECT):
+        holder.enqueueSettings {
+            await holder.controller.beginMigrationInspection(URL(fileURLWithPath: value))
+        }
+    case Int(JSTI_EVENT_MIGRATION_EXPORT):
+        holder.enqueueSettings {
+            await holder.controller.beginMigrationExport(URL(fileURLWithPath: value), includeAudio: slot == 1)
+        }
+    default: return false
+    }
+    return true
+}
+
 private func linuxHistoryEvent(_ event: Int, value: String, slot: Int, holder: LinuxEventContext) -> Bool {
     let controller = holder.controller
     switch event {
@@ -244,6 +296,8 @@ private func linuxAppearanceEvent(_ event: Int, slot: Int, holder: LinuxEventCon
             holder.enqueueSettings { await controller.saveAppearance(appearance) }
         }
     case Int(JSTI_EVENT_LOGIN_ITEM): holder.enqueueSettings { await controller.setLaunchAtLogin(slot == 1) }
+    case Int(JSTI_EVENT_AUTOMATION):
+        holder.enqueueSettings { await LinuxAutomationSwitch.setEnabled(slot == 1, holder: holder) }
     default: return false
     }
     return true
@@ -264,15 +318,7 @@ private func linuxSettingsEvent(_ event: Int, value: String, slot: Int, holder: 
             LinuxWindow.textOutput(await controller.textOutputOptions(), hint: holder.shortcuts.hint)
         }
     case Int(JSTI_EVENT_POST_PROCESSING):
-        let enabled = slot >= 0
-        let model = enabled ? slot : -1 - slot
-        let parts = value.split(separator: "\u{1F}", maxSplits: 1, omittingEmptySubsequences: false)
-        let prompt = parts.first.map(String.init) ?? ""
-        let key = parts.count > 1 ? String(parts[1]) : ""
-        holder.enqueueSettings {
-            await controller.savePostProcessing(enabled: enabled, modelIndex: model, prompt: prompt, key: key)
-            LinuxWindow.postProcessing(await controller.postProcessingOptions())
-        }
+        linuxPostProcessingEvent(value, slot: slot, holder: holder)
     case Int(JSTI_EVENT_AZURE_RESOURCE):
         // Checked before it is queued, with the shared rules the live clients
         // apply, so a saved endpoint can never fail later.
@@ -297,7 +343,8 @@ private func linuxSettingsEvent(_ event: Int, value: String, slot: Int, holder: 
     return true
 }
 
-private func linuxReady(_ holder: LinuxEventContext) {
+// Startup dispatch keeps smoke-test/screenshot/ready paths in one lifecycle function.
+private func linuxReady(_ holder: LinuxEventContext) { // swiftlint:disable:this function_body_length
     if let check = holder.windowCheck {
         Thread.detachNewThread {
             do { try check() } catch { holder.smokeTestFailure = error }
@@ -310,6 +357,10 @@ private func linuxReady(_ holder: LinuxEventContext) {
         Task {
             await controller.ready()
             await controller.refreshLoginItem()
+            LinuxWindow.textOutput(
+                await controller.textOutputOptions(),
+                hint: LinuxHostPlatform.session.shortcutAdvice(command: "justspeaktoit")
+            )
             do {
                 try directory.withCString { path in
                     try LinuxNative.call { jsti_window_screenshot_tour(path, $0, $1) }
@@ -325,7 +376,11 @@ private func linuxReady(_ holder: LinuxEventContext) {
         let controller = holder.controller
         let ready = Task { await controller.ready() }
         holder.markReady(ready)
-        holder.enqueueSettings { await controller.refreshLoginItem() }
+        holder.enqueueSettings {
+            await ready.value
+            await controller.refreshLoginItem()
+            await LinuxAutomationSwitch.restore(holder)
+        }
         LinuxCloudSync.start(holder, after: ready)
         holder.shortcuts.start(holder)
         do { try holder.microphones.start() } catch {
@@ -334,6 +389,7 @@ private func linuxReady(_ holder: LinuxEventContext) {
         return
     }
     do {
+        LinuxWindow.textOutput(.init(), hint: LinuxHostPlatform.session.shortcutAdvice(command: "justspeaktoit"))
         // Capture the laid-out startup window before the self-test changes it.
         if let path = ProcessInfo.processInfo.environment["JSTI_UI_SNAPSHOT_PATH"] {
             try path.withCString { path in try LinuxNative.call { jsti_window_save_snapshot(path, $0, $1) } }

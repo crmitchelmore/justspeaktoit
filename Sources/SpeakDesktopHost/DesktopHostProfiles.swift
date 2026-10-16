@@ -17,27 +17,37 @@ extension DesktopHostController {
         record.profileName = profile.profileName
         record.languageIdentifier = profile.language
         record.profileNotes = profile.limitations.map(\.message)
+        if !(profile.transcriptionKeywords ?? []).isEmpty,
+           let notice = DesktopTranscription.keywordLimitation(model: profile.modelIdentifier) {
+            record.profileNotes?.append(notice)
+        }
         return record
     }
 
     func resolvedProfile(executablePath: String?) -> DesktopProfileSession {
-        DesktopProfileSessionResolver.resolve(
-            profile: ProfileResolver(profiles: profiles).profile(forWindowsExecutablePath: executablePath),
-            defaultModel: settings.model, defaultPostProcessing: settings.postProcessing ?? .init(),
-            capabilities: profileCapabilities
-        )
+        resolveSelectedProfile(defaultModel: settings.model, executablePath: executablePath)
     }
 
-    func profileRecordingStatus(_ profile: DesktopProfileSession, trigger: HotKeySessionTrigger) -> String {
+    func profileRecordingStatus(
+        _ profile: DesktopProfileSession, trigger: HotKeySessionTrigger, keywordLimitation: String? = nil
+    ) -> String {
         var status = "Recording… " + Platform.finishHint(hotKeySettings(), for: trigger)
         if let name = profile.profileName { status += " App profile: \(name)." }
         for limitation in profile.limitations { status += " " + limitation.message }
+        let notice = keywordLimitation ?? ((profile.transcriptionKeywords ?? []).isEmpty
+            ? nil : DesktopTranscription.keywordLimitation(model: profile.modelIdentifier))
+        if let notice {
+            status += " " + notice
+        }
         return status
     }
 
     func profileContext(_ record: DesktopRecordingStore.Record) -> String {
         var details = record.profileName.map { " App profile: \($0)." } ?? ""
         for note in record.profileNotes ?? [] { details += " " + note }
+        if let summary = record.lexiconSummary, !summary.applied.isEmpty || !summary.suggestions.isEmpty {
+            details += " Corrections: \(summary.applied.count) applied, \(summary.suggestions.count) suggested."
+        }
         return details
     }
 
@@ -68,8 +78,10 @@ extension DesktopHostController {
             batchModels: DesktopHostModels.visible.filter {
                 !DesktopHostModels.isLive($0.id) && !DesktopHostModels.isLocal($0.id)
             },
-            liveModels: DesktopHostModels.live, polishModels: DesktopPostProcessing.remoteModels,
+            liveModels: DesktopHostModels.live,
+            polishModels: localCleanup == nil ? DesktopPostProcessing.models : DesktopPostProcessing.nativeModels(),
             localModels: DesktopHostModels.local,
+            supportsPersonalLexicon: true,
             liveLanguageModelIDs: DesktopLiveTranscription.languageHintModelIDs
         )
     }

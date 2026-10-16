@@ -10,12 +10,13 @@
 
 namespace {
 enum Control {
-    introID = 1000, listLabelID, listID, aboutID, downloadID, cancelDownloadID, removeID, gpuID, runtimeID
+    introID = 1000, listLabelID, listID, aboutID, downloadID, cancelDownloadID, removeID, gpuID, runtimeID,
+    repositoryLabelID, repositoryID, filenameLabelID, filenameID, importID, cancelImportID, importHintID
 };
 constexpr UINT refreshMessage = WM_APP + 41;
 constexpr DWORD windowStyle = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME;
 constexpr DWORD windowExStyle = WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT;
-constexpr int minimumClientWidth = 560, minimumClientHeight = 440;
+constexpr int minimumClientWidth = 560, minimumClientHeight = 620;
 
 struct Row {
     std::wstring name, detail, about;
@@ -27,6 +28,7 @@ struct Configuration {
     std::wstring runtime;
     bool useGPU = true;
     JSTILocalModelCallback callback = nullptr;
+    JSTILocalModelImportCallback importCallback = nullptr;
     void *context = nullptr;
     uint64_t revision = 0;
 };
@@ -58,8 +60,15 @@ void layout(HWND window) {
     const int bottom = static_cast<int>(bounds.bottom) - margin;
     auto move = [&](int id, int x, int y, int w, int h) { MoveWindow(GetDlgItem(window, id), x, y, w, h, TRUE); };
     move(introID, margin, at(14), width, at(40));
-    move(listLabelID, margin, at(58), width, at(22));
-    const int listTop = at(82);
+    move(repositoryLabelID, margin, at(58), at(170), at(24));
+    move(repositoryID, margin + at(180), at(58), width - at(180), at(28));
+    move(filenameLabelID, margin, at(92), at(170), at(24));
+    move(filenameID, margin + at(180), at(92), width - at(180), at(28));
+    move(importID, margin, at(126), at(150), button);
+    move(cancelImportID, margin + at(160), at(126), at(150), button);
+    move(importHintID, margin, at(164), width, at(40));
+    move(listLabelID, margin, at(210), width, at(22));
+    const int listTop = at(234);
     const int actionsTop = bottom - button - gap - at(44) - gap - at(24) - gap - button;
     const int aboutHeight = at(64);
     const int listHeight = std::max(at(96), actionsTop - gap - aboutHeight - gap - listTop);
@@ -127,6 +136,14 @@ bool createControls(HWND window, Dialog &dialog) {
     const bool okay =
         add(L"STATIC", L"Local models transcribe on this PC: audio never leaves it. Download a model once, then choose "
             L"Source: Local in the main window.", SS_LEFT, introID) &&
+        add(L"STATIC", L"Hugging Face &repository", 0, repositoryLabelID) &&
+        add(L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP, repositoryID) &&
+        add(L"STATIC", L"GGML &filename", 0, filenameLabelID) &&
+        add(L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP, filenameID) &&
+        add(L"BUTTON", L"&Import reference", BS_PUSHBUTTON | WS_TABSTOP, importID) &&
+        add(L"BUTTON", L"Cancel &import", BS_PUSHBUTTON | WS_TABSTOP, cancelImportID) &&
+        add(L"STATIC", L"Enter owner/repo and e.g. ggml-medium.bin. Import pins metadata; Download installs weights. "
+            L"Batch only; Core ML, ONNX, GGUF and distilled formats are unsupported.", SS_LEFT, importHintID) &&
         add(L"STATIC", L"&Models", 0, listLabelID) &&
         add(L"LISTBOX", L"", LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP, listID) &&
         add(L"STATIC", L"", SS_LEFT, aboutID) &&
@@ -138,6 +155,8 @@ bool createControls(HWND window, Dialog &dialog) {
         add(L"STATIC", L"", SS_LEFT, runtimeID) &&
         add(L"BUTTON", L"Close", BS_DEFPUSHBUTTON | WS_TABSTOP, IDCANCEL);
     if (!okay) return false;
+    SendDlgItemMessageW(window, repositoryID, EM_SETLIMITTEXT, 193, 0);
+    SendDlgItemMessageW(window, filenameID, EM_SETLIMITTEXT, 96, 0);
     refreshFont(window, dialog);
     layout(window);
     return populate(window, dialog);
@@ -158,6 +177,15 @@ void act(Dialog &dialog, int action) {
         action == JSTI_LOCAL_MODEL_REMOVE;
     if (rowAction && (dialog.selected < 0 || static_cast<size_t>(dialog.selected) >= dialog.config.rows.size())) return;
     if (dialog.config.callback) dialog.config.callback(action, rowAction ? dialog.selected : -1, dialog.config.context);
+}
+
+void importModel(HWND window, Dialog &dialog, bool cancel) {
+    if (!dialog.config.importCallback) return;
+    wchar_t repository[194] = {}, filename[97] = {};
+    GetDlgItemTextW(window, repositoryID, repository, 194);
+    GetDlgItemTextW(window, filenameID, filename, 97);
+    const std::string repo = jsti::utf8(repository), file = jsti::utf8(filename);
+    dialog.config.importCallback(repo.c_str(), file.c_str(), cancel ? 1 : 0, dialog.config.context);
 }
 
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
@@ -207,6 +235,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case downloadID: if (HIWORD(wparam) == BN_CLICKED) act(*dialog, JSTI_LOCAL_MODEL_DOWNLOAD); return 0;
         case cancelDownloadID: if (HIWORD(wparam) == BN_CLICKED) act(*dialog, JSTI_LOCAL_MODEL_CANCEL); return 0;
         case removeID: if (HIWORD(wparam) == BN_CLICKED) act(*dialog, JSTI_LOCAL_MODEL_REMOVE); return 0;
+        case importID: if (HIWORD(wparam) == BN_CLICKED) importModel(window, *dialog, false); return 0;
+        case cancelImportID: if (HIWORD(wparam) == BN_CLICKED) importModel(window, *dialog, true); return 0;
         case gpuID:
             if (HIWORD(wparam) == BN_CLICKED) {
                 act(*dialog, IsDlgButtonChecked(window, gpuID) == BST_CHECKED ? JSTI_LOCAL_MODEL_GPU_ON
@@ -233,7 +263,7 @@ HWND createDialog(HWND owner, Dialog &dialog) {
     type.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     type.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
     if (!RegisterClassW(&type) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return nullptr;
-    RECT frame{0, 0, scale(owner, 620), scale(owner, 500)};
+    RECT frame{0, 0, scale(owner, 640), scale(owner, 700)};
     AdjustWindowRectExForDpi(&frame, windowStyle, FALSE, windowExStyle, GetDpiForWindow(owner));
     RECT bounds{};
     GetWindowRect(owner, &bounds);
@@ -303,6 +333,7 @@ int jsti_window_set_local_models(const JSTILocalModelRow *rows, size_t count, co
         updated.callback = callback;
         updated.context = context;
         std::lock_guard<std::mutex> lock(configurationMutex);
+        updated.importCallback = configuration.importCallback;
         updated.revision = configuration.revision + 1;
         configuration = std::move(updated);
         dialog = openDialog;
@@ -310,6 +341,11 @@ int jsti_window_set_local_models(const JSTILocalModelRow *rows, size_t count, co
     if (dialog) PostMessageW(dialog, refreshMessage, 0, 0);
     jsti_window_update(nullptr, nullptr, -1);
     return 0;
+}
+
+void jsti_window_set_local_model_import_callback(JSTILocalModelImportCallback callback) {
+    std::lock_guard<std::mutex> lock(configurationMutex);
+    configuration.importCallback = callback;
 }
 
 void jsti_window_clear_local_models(void) {
@@ -320,9 +356,16 @@ void jsti_window_clear_local_models(void) {
 // ---- self-test -------------------------------------------------------------
 
 namespace {
-struct Actions { std::vector<std::pair<int, int>> calls; };
+struct Actions {
+    std::vector<std::pair<int, int>> calls;
+    std::vector<std::string> imports;
+};
 void recordAction(int action, int index, void *context) {
     static_cast<Actions *>(context)->calls.emplace_back(action, index);
+}
+void recordImport(const char *repository, const char *filename, int cancel, void *context) {
+    static_cast<Actions *>(context)->imports.push_back(
+        std::string(cancel ? "cancel\n" : "import\n") + repository + "\n" + filename);
 }
 } // namespace
 
@@ -346,6 +389,7 @@ bool jsti_local_models_self_test(HWND owner, std::string &error) {
             !jsti_local_models_available() || jsti_local_models_summary() != L"Runtime fixture") {
             error = "Local model configuration accepted an invalid row or rejected a valid one.";
         } else {
+            jsti_window_set_local_model_import_callback(recordImport);
             Dialog dialog;
             dialog.config = snapshot();
             HWND window = createDialog(owner, dialog);
@@ -378,6 +422,10 @@ bool jsti_local_models_self_test(HWND owner, std::string &error) {
                 click(cancelDownloadID);
                 CheckDlgButton(window, gpuID, BST_CHECKED);
                 click(gpuID);
+                SetDlgItemTextW(window, repositoryID, L"fixture/whisper");
+                SetDlgItemTextW(window, filenameID, L"ggml-tiny.bin");
+                click(importID);
+                click(cancelImportID);
                 const size_t beforeClose = actions.calls.size();
                 click(IDCANCEL);
                 const bool closed = !IsWindow(window) && actions.calls.size() == beforeClose;
@@ -386,8 +434,11 @@ bool jsti_local_models_self_test(HWND owner, std::string &error) {
                     {JSTI_LOCAL_MODEL_DOWNLOAD, 0}, {JSTI_LOCAL_MODEL_REMOVE, 1}, {JSTI_LOCAL_MODEL_CANCEL, 2},
                     {JSTI_LOCAL_MODEL_GPU_ON, -1}
                 };
+                const std::vector<std::string> expectedImports = {
+                    "import\nfixture/whisper\nggml-tiny.bin", "cancel\nfixture/whisper\nggml-tiny.bin"
+                };
                 passed = listed && notInstalled && installed && partial && downloading && closed &&
-                    actions.calls == expected;
+                    actions.calls == expected && actions.imports == expectedImports;
                 if (!passed) error = "The Local models dialog did not match its row states or reported the wrong action.";
             }
         }

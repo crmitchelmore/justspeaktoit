@@ -8,6 +8,8 @@ import CLinuxSupport
 /// Builds the C rows the GTK window displays. Every string is copied by the
 /// adapter before the call returns.
 enum LinuxWindow {
+    private static let postProcessingPicker = DesktopPostProcessingPicker()
+
     /// Owns C strings for the duration of one call.
     final class Strings {
         private var owned: [UnsafeMutablePointer<CChar>] = []
@@ -145,23 +147,47 @@ enum LinuxWindow {
     }
 
     static func postProcessing(_ options: DesktopPostProcessing.Options) {
-        let models = DesktopPostProcessing.remoteModels
+        postProcessingPicker.publish([])
+        let models = DesktopPostProcessing.nativeModels(selected: options.modelIdentifier)
+        guard let local = models.firstIndex(where: { $0.id == LocalPostProcessingModel.builtInRulesModelID }) else {
+            _ = jsti_window_update("Built-in Local Cleanup is missing from the shared catalogue.", nil, -1)
+            return
+        }
         let strings = Strings()
         let names: [UnsafePointer<CChar>?] = models.map { strings.add(DesktopHostModels.uiText($0.displayName)) }
-        let selected = models.firstIndex { $0.id == options.modelIdentifier } ?? 0
-        withExtendedLifetime(strings) {
+        let selected = models.firstIndex { $0.id == options.modelIdentifier } ?? -1
+        let result = withExtendedLifetime(strings) {
             names.withUnsafeBufferPointer {
-                _ = jsti_window_set_post_processing(
-                    $0.baseAddress, $0.count, options.mode == .remote ? 1 : 0, Int32(selected),
+                jsti_window_set_post_processing(
+                    $0.baseAddress, $0.count, options.mode != .disabled ? 1 : 0, Int32(selected),
+                    Int32(local), Int32(DesktopPostProcessing.remoteSelection(for: options) ?? -1),
+                    DesktopPostProcessing.localRulesNotice,
+                    options.includeLexiconDirectives ? 1 : 0, options.includeContextTags ? 1 : 0,
                     options.customPrompt ?? ""
                 )
             }
         }
+        if result != 0 {
+            _ = jsti_window_update(
+                "Post-processing controls could not be refreshed. Saved choices are unchanged.", nil, -1
+            )
+            return
+        }
+        if jsti_window_set_cleanup_sources(DesktopPostProcessing.remoteModels.count) != 0 {
+            LinuxHostPlatform.update("Could not configure local/remote cleanup sources.")
+            return
+        }
+        postProcessingPicker.publish(models)
+    }
+
+    static func postProcessingModelIdentifier(forSelection index: Int) -> String? {
+        postProcessingPicker.modelIdentifier(forSelection: index)
     }
 
     static func textOutput(_ options: LinuxTextOutputOptions, hint: String) {
         _ = jsti_window_set_text_output(
-            options.method == .clipboardOnly ? 1 : 0, options.restoreClipboard ? 1 : 0, hint
+            options.method == .clipboardOnly ? 1 : 0, options.restoreClipboard ? 1 : 0,
+            LinuxHostPlatform.session.canUseX11Injection ? 1 : 0, hint
         )
     }
 }

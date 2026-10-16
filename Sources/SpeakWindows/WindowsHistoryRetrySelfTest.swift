@@ -14,7 +14,7 @@ enum WindowsHistoryRetrySelfTest {
     static func run() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("JSTI history retry self-test \(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try WindowsNative.createSyntheticDirectory(root)
         defer { try? FileManager.default.removeItem(at: root) }
         let effects = SyntheticEffects()
         let controller = try WindowsAppController(directory: root, effects: effects)

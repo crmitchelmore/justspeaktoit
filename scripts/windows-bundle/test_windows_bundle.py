@@ -25,6 +25,7 @@ def load(name, file_name):
 PE = load("windows_pe", "windows_pe.py")
 REDIST = load("redistributables", "redistributables.py")
 BUILD = load("build_windows_bundle", "build-windows-bundle.py")
+MIGRATION = load("migration_dependency", "../migration/migration_dependency.py")
 
 
 # --- synthetic PE images ----------------------------------------------------------
@@ -51,7 +52,8 @@ def version_block(file_version, strings):
 
 
 def build_pe(imports=(), delay_imports=(), machine=PE.IMAGE_FILE_MACHINE_AMD64, dll=False, version=None,
-             legacy_delay=False, wixburn=None, image_base=0x140000000, hybrid_metadata=None, load_config_size=0x140):
+             legacy_delay=False, wixburn=None, image_base=0x140000000, hybrid_metadata=None, load_config_size=0x140,
+             subsystem=PE.IMAGE_SUBSYSTEM_WINDOWS_CUI):
     """Build a minimal PE32+ image with import, delay-load, resource and optional .wixburn sections.
 
     ``hybrid_metadata`` adds a load configuration whose CHPE metadata pointer
@@ -121,7 +123,7 @@ def build_pe(imports=(), delay_imports=(), machine=PE.IMAGE_FILE_MACHINE_AMD64, 
     file_alignment, headers_size = 0x200, 0x400
     optional = struct.pack("<HBBIIIIIQIIHHHHHHIIIIHHQQQQII", 0x20B, 14, 0, 0x1000, 0, 0, 0x1000, 0x1000, image_base,
                            0x1000, file_alignment, 6, 0, 0, 0, 6, 0, 0,
-                           0x1000 * (len(sections) + 4), headers_size, 0, 3, 0x8160, 0x100000, 0x1000, 0x100000, 0x1000, 0, 16)
+                           0x1000 * (len(sections) + 4), headers_size, 0, subsystem, 0x8160, 0x100000, 0x1000, 0x100000, 0x1000, 0, 16)
     optional += b"".join(struct.pack("<II", rva, size) for rva, size in directories)
     characteristics = 0x22 | (0x2000 if dll else 0)
     coff = struct.pack("<HHIIIHH", machine, len(sections), 0, 0, 0, len(optional), characteristics)
@@ -436,6 +438,37 @@ class ClosureTests(unittest.TestCase):
         with self.assertRaisesRegex(BUILD.BundleError, "swiftCore.dll imports libcurl.dll"):
             BUILD.resolve_closure("SpeakWindows.exe", self.read(graph), self.policy)
 
+    def test_multiple_roots_keep_shared_cli_only_and_delay_import_attribution(self):
+        graph = dict(self.GRAPH, **{
+            "speak.exe": (["swiftCore.dll", "swiftWinSDK.dll"], ["Foundation.dll"]),
+            "swiftWinSDK.dll": (["swiftCore.dll"], []),
+        })
+        closure = BUILD.resolve_closure(BUILD.EXECUTABLES, self.read(graph), self.policy)
+        self.assertEqual(closure["bundled"]["swiftwinsdk.dll"]["importedBy"],
+                         [{"importer": "speak.exe", "kind": "static"}])
+        self.assertIn({"importer": "speak.exe", "kind": "static"},
+                      closure["bundled"]["swiftcore.dll"]["importedBy"])
+        self.assertIn({"importer": "speak.exe", "kind": "delay"},
+                      closure["bundled"]["foundation.dll"]["importedBy"])
+        self.assertNotIn("swiftWinSDK.dll", closure["roots"]["SpeakWindows.exe"]["staticModules"])
+        self.assertIn("swiftWinSDK.dll", closure["roots"]["speak.exe"]["staticModules"])
+        for root in BUILD.EXECUTABLES:
+            self.assertNotIn("FoundationNetworking.dll", closure["roots"][root]["staticModules"])
+            self.assertNotIn("Foundation.dll", closure["roots"][root]["staticModules"])
+            self.assertIn("vcruntime140.dll", closure["roots"][root]["staticModules"])
+
+    def test_cli_root_unknown_and_transitive_test_imports_are_refused(self):
+        for imports in (["libcurl.dll"], ["Testing.dll"]):
+            graph = dict(self.GRAPH, **{"speak.exe": ([], ["swiftWinSDK.dll"]),
+                                      "swiftWinSDK.dll": (imports, [])})
+            with self.assertRaisesRegex(BUILD.BundleError, "swiftWinSDK.dll imports"):
+                BUILD.resolve_closure(BUILD.EXECUTABLES, self.read(graph), self.policy)
+
+    def test_empty_and_duplicate_roots_are_refused(self):
+        for roots in ([], ["speak.exe", "Speak.EXE"]):
+            with self.assertRaisesRegex(BUILD.BundleError, "distinct"):
+                BUILD.resolve_closure(roots, self.read({}), self.policy)
+
     def test_test_library_import_is_refused_even_transitively(self):
         graph = dict(self.GRAPH)
         graph["Foundation.dll"] = (["swiftCore.dll"], ["XCTest.dll"])
@@ -511,6 +544,8 @@ class ApplicationInputTests(unittest.TestCase):
         self.policy = BUILD.Policy.load()
         self.executable = build_pe(["KERNEL32.dll", "swiftCore.dll"])
         (self.app / "SpeakWindows.exe").write_bytes(self.executable)
+        self.cli = build_pe(["KERNEL32.dll", "swiftCore.dll"], ["Foundation.dll"])
+        (self.app / "speak.exe").write_bytes(self.cli)
         (self.app / "SpeakAppPackageTests.exe").write_bytes(build_pe(["XCTest.dll"]))
         (self.app / "SpeakApp_SpeakCore.resources").mkdir()
         (self.app / "SpeakApp_SpeakCore.resources/Info.plist").write_bytes(b"<plist/>")
@@ -518,7 +553,8 @@ class ApplicationInputTests(unittest.TestCase):
         (self.app / "SpeakApp_SpeakWindowsPlatformTests.resources/Fixtures/tone.m4a").write_bytes(b"audio")
         self.metadata = {"host": "Darwin", "target": "x86_64-unknown-windows-msvc", "configuration": "release",
                          "appBuiltForTesting": False, "sourceCommit": "abc",
-                         "executables": {"SpeakWindows.exe": hashlib.sha256(self.executable).hexdigest()}}
+                         "executables": {"SpeakWindows.exe": hashlib.sha256(self.executable).hexdigest(),
+                                         "speak.exe": hashlib.sha256(self.cli).hexdigest()}}
         self.write_metadata()
 
     def write_metadata(self):
@@ -526,8 +562,31 @@ class ApplicationInputTests(unittest.TestCase):
 
     def test_production_executable_and_non_test_resources_are_loaded(self):
         application = BUILD.load_application(self.app, self.policy)
-        self.assertEqual(application["executable"], self.executable)
+        self.assertEqual(application["executables"], {"SpeakWindows.exe": self.executable, "speak.exe": self.cli})
         self.assertEqual(list(application["resources"]), ["SpeakApp_SpeakCore.resources/Info.plist"])
+
+    def test_all_eight_recording_feedback_assets_are_collected_byte_exact(self):
+        sounds = HERE.parent.parent / "Resources" / "Sounds"
+        expected_names = {
+            "recording_start.m4a", "recording_stop.m4a",
+            "recording_start_bubbly.m4a", "recording_stop_bubbly.m4a",
+            "recording_start_futuristic.m4a", "recording_stop_futuristic.m4a",
+            "recording_start_soft.m4a", "recording_stop_soft.m4a",
+        }
+        self.assertEqual({path.name for path in sounds.iterdir()}, expected_names)
+        directory = self.app / "SpeakApp_SpeakFeedbackResources.resources" / "Sounds"
+        directory.mkdir(parents=True)
+        expected = {}
+        for name in sorted(expected_names):
+            body = (sounds / name).read_bytes()
+            self.assertEqual(body[4:8], b"ftyp")
+            self.assertGreater(len(body), 12)
+            self.assertLessEqual(len(body), 1_048_576)
+            (directory / name).write_bytes(body)
+            expected["SpeakApp_SpeakFeedbackResources.resources/Sounds/" + name] = body
+        resources = BUILD.load_application(self.app, self.policy)["resources"]
+        expected["SpeakApp_SpeakCore.resources/Info.plist"] = b"<plist/>"
+        self.assertEqual(resources, expected)
 
     def test_debug_or_test_enabled_metadata_is_refused(self):
         for key, value in [("configuration", "debug"), ("appBuiltForTesting", True), ("host", "Windows")]:
@@ -554,6 +613,39 @@ class ApplicationInputTests(unittest.TestCase):
         (self.app / "SpeakApp_SpeakCore.resources/link.txt").symlink_to(target)
         with self.assertRaisesRegex(BUILD.BundleError, "symbolic link"):
             BUILD.load_application(self.app, self.policy)
+
+    def test_cli_missing_hash_drift_wrong_architecture_tests_and_gui_subsystem_are_refused(self):
+        path = self.app / "speak.exe"
+        path.unlink()
+        with self.assertRaisesRegex(BUILD.BundleError, "missing production executable.*speak.exe"):
+            BUILD.load_application(self.app, self.policy)
+        path.write_bytes(self.cli + b"tamper")
+        with self.assertRaisesRegex(BUILD.BundleError, "speak.exe.*hash"):
+            BUILD.load_application(self.app, self.policy)
+        for data, reason in (
+            (build_pe(machine=PE.IMAGE_FILE_MACHINE_ARM64), "not a Windows x64 executable"),
+            (build_pe(delay_imports=["Testing.dll"]), "test-enabled"),
+            (build_pe(dll=True), "not a Windows x64 executable"),
+        ):
+            path.write_bytes(data)
+            self.metadata["executables"]["speak.exe"] = hashlib.sha256(data).hexdigest()
+            self.write_metadata()
+            with self.assertRaisesRegex(BUILD.BundleError, reason):
+                BUILD.load_application(self.app, self.policy)
+        data = bytearray(self.cli)
+        struct.pack_into("<H", data, struct.unpack_from("<I", data, 0x3c)[0] + 24 + 68, 2)
+        path.write_bytes(data)
+        self.metadata["executables"]["speak.exe"] = hashlib.sha256(data).hexdigest()
+        self.write_metadata()
+        with self.assertRaisesRegex(BUILD.BundleError, "console subsystem"):
+            BUILD.load_application(self.app, self.policy)
+
+    def test_future_production_resource_bundles_are_preserved(self):
+        path = self.app / "SpeakApp_FutureFeature.resources" / "nested"
+        path.mkdir(parents=True)
+        (path / "catalog.json").write_bytes(b'{"future": true}')
+        resources = BUILD.load_application(self.app, self.policy)["resources"]
+        self.assertEqual(resources["SpeakApp_FutureFeature.resources/nested/catalog.json"], b'{"future": true}')
 
 
 class SwiftRuntimeSourceTests(unittest.TestCase):
@@ -847,10 +939,14 @@ class AssemblyTests(unittest.TestCase):
             self.microsoft["modules"][name] = {"name": name, "bytes": data, "provenance": {"fileVersion": "14.51.36247.0", "fileKey": name + "_amd64"}}
         self.executable = build_pe(["USER32.dll", "swiftCore.dll", "MSVCP140.dll"], ["Foundation.dll"], machine=machine)
         self.application = {"metadata": {"sourceCommit": "0123456789abcdef", "configuration": "release",
+                                         "host": BUILD.APPLICATION_HOSTS[architecture],
                                          "target": BUILD.windows_targets.target(architecture)["swiftTriple"],
                                          "appBuiltForTesting": False, "swiftCompiler": "swift", "nativeCompiler": "clang"},
-                            "executable": self.executable,
+                            "executables": {"SpeakWindows.exe": self.executable,
+                                            "speak.exe": build_pe(["swiftCore.dll", "KERNEL32.dll"], machine=machine)},
                             "resources": {"SpeakApp_SpeakCore.resources/Info.plist": b"<plist/>"}}
+        self.application["metadata"]["executables"] = {
+            name: hashlib.sha256(data).hexdigest() for name, data in self.application["executables"].items()}
         self.licenses = [{"name": "LICENSE-swift.txt", "url": "https://x/swift", "sha256": "d", "bytes": 5,
                           "license": "Apache License 2.0 with Runtime Library Exception", "covers": "Swift", "data": b"Apache"},
                          {"name": "LICENSE-icu.txt", "url": "https://x/icu", "sha256": "e", "bytes": 6,
@@ -868,13 +964,23 @@ class AssemblyTests(unittest.TestCase):
         arguments.update(overrides)
         return BUILD.assemble(**arguments)
 
+    def test_native_zip_license_and_provenance_are_bundled(self):
+        license_entry = MIGRATION.license_entry(HERE.parents[1])
+        entries, manifest = self.assemble(licenses=self.licenses + [license_entry])
+        self.assertEqual(entries["licenses/LICENSE-miniz.txt"], license_entry["data"])
+        self.assertIn("LICENSE-miniz.txt", entries["THIRD-PARTY-NOTICES.txt"].decode())
+        self.assertIn("miniz 3.1.2", entries["THIRD-PARTY-NOTICES.txt"].decode())
+        row = next(item for item in manifest["sources"]["licenses"] if item["name"] == "LICENSE-miniz.txt")
+        self.assertEqual(row["sha256"], hashlib.sha256(license_entry["data"]).hexdigest())
+        self.assertEqual(row["license"], "MIT")
+
     def test_bundle_contains_only_the_closure_resources_licences_and_notices(self):
         entries, manifest = self.assemble()
         self.assertEqual(sorted(entries), [
             "Foundation.dll", "README.txt", "SpeakApp_SpeakCore.resources/Info.plist", "SpeakWindows.exe",
             "THIRD-PARTY-NOTICES.txt", "_FoundationICU.dll", "licenses/LICENSE-JustSpeakToIt.txt",
             "licenses/LICENSE-icu.txt", "licenses/LICENSE-swift.txt", "licenses/NOTICE-microsoft-visual-cpp-runtime.txt",
-            "msvcp140.dll", "swiftCore.dll", "vcruntime140.dll"])
+            "msvcp140.dll", "speak.exe", "swiftCore.dll", "vcruntime140.dll"])
         self.assertNotIn("swiftWinSDK.dll", entries)
         self.assertNotIn("concrt140.dll", entries)
         self.assertEqual([item["path"] for item in manifest["files"]], sorted(entries))
@@ -891,6 +997,30 @@ class AssemblyTests(unittest.TestCase):
         self.assertIn("LICENSE-icu.txt", entries["THIRD-PARTY-NOTICES.txt"].decode())
         self.assertIn("0123456789abcdef", entries["README.txt"].decode())
         self.assertEqual(manifest["application"]["executableSHA256"], hashlib.sha256(self.executable).hexdigest())
+        self.assertEqual(manifest["application"]["executables"], self.application["metadata"]["executables"])
+        self.assertEqual(entries["speak.exe"], self.application["executables"]["speak.exe"])
+
+    def test_cli_only_runtime_is_in_union_but_not_required_by_gui(self):
+        architecture = PE.PEImage(self.executable).architecture
+        cli = build_pe(["swiftWinSDK.dll", "swiftCore.dll"], ["Foundation.dll"], machine=MACHINES[architecture])
+        self.application["executables"]["speak.exe"] = cli
+        self.application["metadata"]["executables"]["speak.exe"] = hashlib.sha256(cli).hexdigest()
+        entries, manifest = self.assemble()
+        self.assertIn("swiftWinSDK.dll", entries)
+        deps = manifest["dependencies"]
+        self.assertEqual(deps["bundled"]["swiftwinsdk.dll"]["importedBy"],
+                         [{"importer": "speak.exe", "kind": "static"}])
+        self.assertNotIn("swiftWinSDK.dll", deps["roots"]["SpeakWindows.exe"]["staticModules"])
+        self.assertIn("swiftWinSDK.dll", deps["roots"]["speak.exe"]["staticModules"])
+        self.assertNotIn("Foundation.dll", deps["roots"]["speak.exe"]["staticModules"])
+
+    def test_assembly_refuses_missing_or_unauthenticated_cli(self):
+        cli = self.application["executables"].pop("speak.exe")
+        with self.assertRaisesRegex(BUILD.BundleError, "requires exactly"):
+            self.assemble()
+        self.application["executables"]["speak.exe"] = cli + b"tampered"
+        with self.assertRaisesRegex(BUILD.BundleError, "speak.exe.*hash"):
+            self.assemble()
 
     def test_pinned_licences_cover_embedded_networking_dependencies(self):
         lock = json.loads((HERE / "dependencies.json").read_text(encoding="utf-8"))
@@ -936,6 +1066,10 @@ class AssemblyTests(unittest.TestCase):
             self.assertIn(name, entries)
             row = next(item for item in manifest["files"] if item["path"] == name)
             self.assertEqual(row["source"], BUILD.LOCAL_RUNTIME)
+            self.assertIn({"importer": "SpeakWindows.exe", "kind": "runtime-loaded"},
+                          manifest["dependencies"]["bundled"][name.lower()]["importedBy"])
+            self.assertFalse(any(ref["importer"] == "speak.exe" for ref in
+                                 manifest["dependencies"]["bundled"][name.lower()]["importedBy"]))
         self.assertIn("concrt140.dll", entries)
         self.assertIn("licenses/LICENSE-whisper.cpp.txt", entries)
         notices = entries["THIRD-PARTY-NOTICES.txt"].decode()
@@ -1024,7 +1158,7 @@ class ARM64AssemblyTests(AssemblyTests):
         with self.assertRaisesRegex(BUILD.BundleError, "msvcp140.dll is not a native arm64 DLL \\(it is arm64ec\\)"):
             self.assemble()
         self.setUp()
-        self.application["executable"] = build_pe(["USER32.dll", "swiftCore.dll"])
+        self.application["executables"]["SpeakWindows.exe"] = build_pe(["USER32.dll", "swiftCore.dll"])
         with self.assertRaisesRegex(BUILD.BundleError, "not a Windows ARM64 executable \\(it is x64\\)"):
             self.assemble()
 

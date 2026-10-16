@@ -1,0 +1,79 @@
+#ifndef JSTI_VOICE_SOURCES_H
+#define JSTI_VOICE_SOURCES_H
+#include <stddef.h>
+#include <stdint.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
+/* UI-thread callback; all strings are borrowed immutable snapshots.
+ * action 110 read, 111 export, 112 stop, 113 import, 114 cancel import.
+ * source: canonical VoiceOutputSource. record is History ownership for read/
+ * export, empty for other sources; for import/cancel it is an opaque request
+ * token, NEVER History ownership. path is the chosen export/import path. */
+typedef void (*JSTIVoiceSourceCallback)(int32_t action, int32_t source, const char *text,
+                                      const char *record, const char *path, void *context);
+/* Atomic picker snapshot. IDs are canonical, "" is a non-executable stored
+ * selection. Favorite ranks are -1 or the saved order. Callback: 0 choose,
+ * 1 add favorite, 2 remove favorite; borrowed ID is copied before return.
+ * No favorite edit selects a voice. A new snapshot acknowledges persistence. */
+typedef void (*JSTIVoicePickerCallback)(int32_t action, const char *voice_id, void *context);
+int32_t jsti_window_set_voice_picker(const char *const *names, const char *const *ids,
+    const int32_t *favorite_ranks, size_t count, int32_t selected,
+    JSTIVoicePickerCallback callback, void *context);
+int32_t jsti_window_set_voice_sources(const char *const *names, size_t count,
+                                      JSTIVoiceSourceCallback callback, void *context);
+typedef struct { const char *text; const char *description; } JSTIVoiceMarkupExample;
+/* Pure UI-thread editing, never a speech/settings action. On success writes
+ * NUL-terminated UTF-8 and leading selection offsets in UTF-16/scalar units.
+ * Failure leaves draft/selection unchanged. All buffers are borrowed. */
+typedef int32_t (*JSTIVoiceMarkupWrapCallback)(const char *input, char *output, size_t capacity,
+                                             int32_t *leading_utf16, int32_t *leading_scalars);
+/* Copies canonical examples; enabled requires executable SSML and Use SSML.
+ * Native entry also requires an editable Typed/File draft. Updates never
+ * reload text or settings; old source/action119 contracts are unchanged. */
+int32_t jsti_window_set_voice_markup_helper(int32_t enabled, const JSTIVoiceMarkupExample *examples,
+                                           size_t count, JSTIVoiceMarkupWrapCallback wrap);
+/* Thread safe, borrowed strings copied. Empty error means success. Stale
+ * request tokens cannot replace text or revive a closed editor. */
+int32_t jsti_window_set_voice_text_import(const char *token, const char *text, const char *error);
+/* 115 Generate: path is snapshotted flags (bit 0 auto-play, bit 1 save).
+ * 116 Play result / 117 Export result: record is an opaque result ID, not a
+ * History owner. 118 saves both preference flags atomically via source.
+ * Setters copy borrowed strings and dispatch to the native editor. */
+int32_t jsti_window_set_voice_generation_options(int32_t flags);
+int32_t jsti_window_set_voice_generated_result(const char *result_id, int32_t working, const char *message);
+/* 119 saves {"speed":number,"pitch":number,"useSSML":bool} through text;
+ * record carries an opaque acknowledgement token, never a History owner.
+ * Capabilities: bit 0 speed, bit 1 pitch, bit 2 SSML. Unsupported stored values
+ * remain visible; only explicit Normal controls resets them. */
+int32_t jsti_window_set_voice_synthesis_options(double speed, double pitch, int32_t ssml,
+                                               int32_t capabilities, const char *voice);
+/* Atomic route-specific limits from shared capabilities; the original setter
+ * remains a wrapper using the established generic range. */
+int32_t jsti_window_set_voice_synthesis_options_with_limits(double speed, double pitch, int32_t ssml,
+    int32_t capabilities, const char *voice, double minimum_speed, double maximum_speed);
+/* Same captured route plus bounded, read-only shared quality/SSML guidance. */
+int32_t jsti_window_set_voice_synthesis_options_with_details(double speed, double pitch, int32_t ssml,
+    int32_t capabilities, const char *voice, double minimum_speed, double maximum_speed, const char *guidance);
+/* Completes the pending Save only after persistence; 0 keeps the editor open
+ * with an error, 1 closes it. Closed/replaced request tokens are ignored. */
+int32_t jsti_window_finish_voice_synthesis_options(const char *request_id, int32_t success);
+/* Tagged 118 actions: path "usage-report", source -1, text snapshot; or path
+ * "usage-tracking", source strict 0/1, empty text. record is an opaque dialog
+ * token, never History ownership. Results/acknowledgements ignore closed tokens. */
+int32_t jsti_window_set_voice_usage(const char *request_id, const char *text, int32_t tracking);
+/* Tagged 118 account-open/refresh/choose/close: source -1; text is empty,
+ * except choose carries the stable prefixed voice ID. record is the dialog
+ * token, never History ownership. Lists use newline-separated UTF-8 rows.
+ * Stale/closed tokens are ignored; loading disables selection. */
+int32_t jsti_window_set_voice_account_inventory(const char *request_id, const char *labels,
+    const char *identifiers, int32_t selected, const char *status, int32_t loading);
+/* Modern open: tagged118 account-open-modern, source-1, empty text, session36.
+ * Provider transition: account-provider, text providerID + newline + epoch36.
+ * Refresh/Pick use acknowledged epoch; Close uses session. Never History IDs. */
+int32_t jsti_window_set_voice_account_providers(const char *request_id, const char *discovery_epoch,
+    const char *provider_ids, const char *labels, int32_t selected);
+#ifdef __cplusplus
+}
+#endif
+#endif

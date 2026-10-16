@@ -7,7 +7,7 @@ extension SpeechmaticsLiveClient {
     func connect(_ active: SpeechmaticsLiveRun) {
         guard let url = Self.webSocketURL() else { fail(StreamingClientError.invalidURL, active); return }
         guard let payload = Self.startRecognitionPayload(
-            language: language, accuracyModel: accuracyModel, sampleRate: sampleRate
+            language: language, accuracyModel: accuracyModel, sampleRate: sampleRate, keywords: keywords
         ) else {
             fail(StreamingClientError.invalidURL, active)
             return

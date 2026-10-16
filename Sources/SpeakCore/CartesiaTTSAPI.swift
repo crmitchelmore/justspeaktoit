@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Errors surfaced by the shared Cartesia Sonic speech-generation transport.
 ///
@@ -196,6 +199,8 @@ public struct CartesiaTTSAPI: Sendable {
     /// plan buys 1,250,000 credits for $49, so a thousand characters costs about
     /// $0.0392. Used for the pre-synthesis estimate only.
     public static let estimatedCostPerThousandCharacters = Decimal(string: "0.0392")!
+    public static let pricingEstimateBasis =
+        "Cartesia Startup-plan character-rate estimate; your plan and actual charges may differ."
     /// Safety bound for voice-library pagination.
     private static let maxVoicePages = 20
     private static let voicePageSize = 100
@@ -226,15 +231,7 @@ public struct CartesiaTTSAPI: Sendable {
         apiKey: String,
         request: CartesiaTTSRequest
     ) async throws -> Data {
-        var urlRequest = URLRequest(url: Self.bytesEndpoint)
-        urlRequest.httpMethod = "POST"
-        urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        urlRequest.setValue(Self.apiVersion, forHTTPHeaderField: Self.versionHeaderField)
-        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.httpBody = try JSONSerialization.data(
-            withJSONObject: request.jsonBody(transcript: transcript)
-        )
-
+        let urlRequest = try Self.synthesisRequest(transcript: transcript, apiKey: apiKey, request: request)
         let (data, response) = try await session.data(for: urlRequest)
 
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -244,6 +241,22 @@ public struct CartesiaTTSAPI: Sendable {
             throw Self.error(from: data, statusCode: httpResponse.statusCode)
         }
         return data
+    }
+
+    /// Shared request construction for callers with their own bounded transport.
+    public static func synthesisRequest(
+        transcript: String, apiKey: String, request: CartesiaTTSRequest
+    ) throws -> URLRequest {
+        var urlRequest = URLRequest(url: Self.bytesEndpoint)
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        urlRequest.setValue(Self.apiVersion, forHTTPHeaderField: Self.versionHeaderField)
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.httpBody = try JSONSerialization.data(
+            withJSONObject: request.jsonBody(transcript: transcript)
+        )
+
+        return urlRequest
     }
 
     /// Validates a Cartesia API key with a one-voice `GET /voices` probe.

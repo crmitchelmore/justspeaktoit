@@ -321,3 +321,7 @@ public final class AzureVoiceLiveClient: FinalizingStreamingTranscriptionClient,
         #endif
     }
 }
+
+extension AzureVoiceLiveClient: StreamingAudioReadyProviding {
+    public var isReadyForAudio: Bool { isSessionReady }
+}

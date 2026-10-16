@@ -33,7 +33,7 @@ $verifier = Join-Path $PSScriptRoot 'verify-windows-package.py'
 $tools = Get-JstiPackagingTools -CacheDirectory $ToolCache
 $pack = Invoke-JstiTool -FilePath $tools.MakeAppx -LogPath $log `
     -Arguments @('pack', '/v', '/o', '/h', 'SHA256', '/d', $layout, '/p', $output)
-if ($pack.ExitCode -ne 0) { throw "MakeAppx pack failed with exit code $($pack.ExitCode); see $log" }
+Assert-JstiMakeAppxPackSucceeded -Result $pack -LogPath $log
 $evidencePath = Join-Path $directory "$stem.verification.json"
 Invoke-JstiPython -Python $Python -LogPath $log -Arguments @(
     $verifier, '--package', $output, '--layout', $layout, '--unsigned', '--evidence', $evidencePath) | Out-Null

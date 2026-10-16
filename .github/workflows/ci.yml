@@ -29,6 +29,35 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
 
+      - name: Test installed sample contract collector
+        continue-on-error: true
+        run: python3 -B -m unittest discover -s scripts/tests -p test_macos_sample_contract.py -v
+
+      - name: Collect installed sample manual contract evidence (no sampling)
+        id: sample_contract
+        continue-on-error: true
+        run: |
+          status=0
+          python3 scripts/collect-macos-sample-contract.py || status=$?
+          if [ "$status" -eq 0 ] || [ "$status" -eq 3 ]; then
+            echo "artifact_ready=true" >> "$GITHUB_OUTPUT"
+          fi
+          exit "$status"
+
+      - name: Upload installed sample contract evidence (not runtime qualification)
+        if: always() && steps.sample_contract.outputs.artifact_ready == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-installed-sample-contract
+          path: ${{ runner.temp }}/jsti-installed-sample-contract-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          include-hidden-files: false
+          retention-days: 7
+
+      - name: Test XCTest crash-report collector
+        run: python3 -B -m unittest discover -s scripts/tests -p test_macos_xctest_crashes.py -v
+
       # Swift build state embeds absolute paths. Scope both exact and fallback
       # keys to the architecture, stable host identity and checkout workspace.
       - name: Cache Swift packages
@@ -40,7 +69,12 @@ jobs:
             ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-swift-
 
       - name: Build
-        run: make build
+        # Match the Test (Debug) step flag. A plain debug build here produces a
+        # cached .build that the coverage-enabled swift test below cannot reuse
+        # (coverage instrumentation changes compiler flags for every target),
+        # forcing a second full rebuild of the whole module graph inside the
+        # 30-minute job budget.
+        run: SWIFT_FLAGS=--enable-code-coverage make build
 
       - name: Verify brand asset sizes and appearance variants
         run: node --test scripts/tests/brand-assets.test.mjs
@@ -50,8 +84,142 @@ jobs:
         # tooling pins live separately in Tooling/Package.resolved (issue #677).
         run: git diff --exit-code Package.resolved
 
+      - name: Record Debug XCTest crash-report boundary
+        id: debug_crash_boundary
+        # Diagnostics must not prevent the original test from running.
+        continue-on-error: true
+        run: python3 scripts/collect-macos-xctest-crashes.py boundary
+
       - name: Test (Debug)
+        id: debug_tests
         run: python3 scripts/with-test-keychain.py swift test --enable-code-coverage
+
+      - name: Collect existing Debug XCTest crash reports
+        id: debug_crash_collection
+        if: failure() && steps.debug_tests.outcome == 'failure'
+        env:
+          JSTI_XCTEST_BOUNDARY_OUTCOME: ${{ steps.debug_crash_boundary.outcome }}
+        run: |
+          status=0
+          python3 scripts/collect-macos-xctest-crashes.py collect || status=$?
+          if [ "$status" -eq 0 ] || [ "$status" -eq 3 ]; then
+            echo "artifact_ready=true" >> "$GITHUB_OUTPUT"
+          fi
+          exit "$status"
+
+      - name: Upload Debug XCTest crash diagnostics
+        if: failure() && steps.debug_tests.outcome == 'failure' && steps.debug_crash_collection.outputs.artifact_ready == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-debug-xctest-crash-diagnostics
+          path: ${{ runner.temp }}/jsti-xctest-debug-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          include-hidden-files: false
+          retention-days: 7
+
+      - name: Isolate History fixture after full-suite failure (diagnostic only)
+        id: history_isolated
+        if: failure() && steps.debug_tests.outcome == 'failure'
+        continue-on-error: true
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          directory="$RUNNER_TEMP/jsti-history-isolated-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -m 700 "$directory"
+          printf '%s\n' \
+            '{"purpose":"isolated_history_fixture_diagnostic","status":"not_completed",' \
+            '"command":["python3","scripts/with-test-keychain.py","swift","test","--skip-build","--enable-code-coverage","--filter","DesktopLivePolishHistoryTests"],' \
+            '"expected_case":"SpeakDesktopTests.DesktopLivePolishHistoryTests.testNativeAndPortableHistory_RoundTripRawAndSuccessfulPolishWithoutRerunningClient",' \
+            '"command_exit_code":null,"expected_case_count":1,"observed_case_event_counts":null,' \
+            '"selection_verified":false,"parity_qualification":false}' > "$directory/result.json"
+          echo "artifact_ready=true" >> "$GITHUB_OUTPUT"
+          set +e
+          python3 scripts/with-test-keychain.py swift test --skip-build --enable-code-coverage --filter DesktopLivePolishHistoryTests 2>&1 |
+            python3 -c '
+          import json, pathlib, sys
+          directory = pathlib.Path(sys.argv[1])
+          limit = 1024 * 1024
+          received = saved = 0
+          with (directory / "output.log").open("xb") as output:
+              while data := sys.stdin.buffer.read1(65536):
+                  received += len(data)
+                  kept = data[:max(0, limit - saved)]
+                  output.write(kept)
+                  output.flush()
+                  saved += len(kept)
+          (directory / "capture.json").write_text(json.dumps({
+              "received_bytes": received, "saved_bytes": saved,
+              "truncated": received > saved
+          }) + "\n", encoding="ascii")
+          ' "$directory"
+          statuses=("${PIPESTATUS[@]}")
+          set -e
+          python3 - "$directory" "${statuses[0]}" "${statuses[1]}" <<'PY'
+          import json
+          from pathlib import Path
+          import re
+          import sys
+
+          directory = Path(sys.argv[1])
+          command_status, capture_status = map(int, sys.argv[2:])
+          command = ["python3", "scripts/with-test-keychain.py", "swift", "test",
+                     "--skip-build", "--enable-code-coverage", "--filter",
+                     "DesktopLivePolishHistoryTests"]
+          method = "testNativeAndPortableHistory_RoundTripRawAndSuccessfulPolishWithoutRerunningClient"
+          expected = "SpeakDesktopTests.DesktopLivePolishHistoryTests." + method
+          accepted = {
+              expected, "DesktopLivePolishHistoryTests." + method,
+              "-[SpeakDesktopTests.DesktopLivePolishHistoryTests " + method + "]",
+          }
+          capture_file = directory / "capture.json"
+          capture = (json.loads(capture_file.read_text(encoding="ascii")) if capture_file.exists()
+                     else {"status": "unavailable", "truncated": True})
+          log_file = directory / "output.log"
+          data = log_file.read_bytes() if log_file.exists() else b""
+          pattern = rb"(?m)^Test Case '([^'\r\n]{1,512})' (started|passed|failed|skipped)(?=[ .])"
+          events = [(identity.decode("utf-8", errors="replace"), state.decode("ascii"))
+                    for identity, state in re.findall(pattern, data)]
+          unparsed = len(re.findall(rb"(?m)^Test Case ", data)) - len(events)
+          counts = {state: sum(event == state for _, event in events)
+                    for state in ("started", "passed", "failed", "skipped")}
+          complete = capture_status == 0 and capture_file.exists() and not capture["truncated"]
+          selection_verified = (complete and unparsed == 0 and counts["started"] == 1
+                                and sum(counts[state] for state in ("passed", "failed", "skipped")) == 1
+                                and all(identity in accepted for identity, _ in events))
+          passed = command_status == 0 and selection_verified and counts["passed"] == 1
+          result = {
+              "purpose": "isolated_history_fixture_diagnostic",
+              "command": command, "command_exit_code": command_status,
+              "capture_exit_code": capture_status, "capture": capture,
+              "expected_case": expected, "expected_case_count": 1,
+              "observed_case_event_counts": counts,
+              "unparsed_test_case_lines": unparsed,
+              "observed_case_events": events[:16], "case_counts_complete": complete,
+              "selection_verified": selection_verified, "parity_qualification": False,
+              "status": ("isolated_pass" if passed else
+                         "isolated_failure" if command_status else "selection_or_capture_unverified"),
+          }
+          text = json.dumps(result, indent=2, sort_keys=True) + "\n"
+          temporary = directory / ".result.json.tmp"
+          temporary.write_text(text, encoding="ascii")
+          temporary.replace(directory / "result.json")
+          print(text, end="")
+          if not selection_verified:
+              print("Isolated diagnostic: exact-case execution or complete capture NOT established.",
+                    file=sys.stderr)
+          sys.exit(0 if passed else 1)
+          PY
+
+      - name: Upload isolated History fixture diagnostic
+        if: always() && steps.debug_tests.outcome == 'failure' && steps.history_isolated.outputs.artifact_ready == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-history-isolated-${{ steps.history_isolated.outcome }}
+          path: ${{ runner.temp }}/jsti-history-isolated-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          include-hidden-files: false
+          retention-days: 7
 
       # Snapshot mismatches write the freshly rendered PNG to the process
       # temporary directory. Publishing it is the only way to inspect a CI-only
@@ -156,8 +324,11 @@ jobs:
               - 'Tests/SpeakHotKeysTests/**'
               - 'scripts/run-core-journey-e2e.sh'
               - 'scripts/run-core-journey-e2e.py'
+              - 'scripts/run-core-journey-stages.py'
               - 'scripts/verify-core-journey-ui.py'
               - 'scripts/tests/test_core_journey_gate.py'
+              - 'scripts/tests/test_core_journey_stages.py'
+              - 'scripts/tests/verify-ci-gates.test.mjs'
               - '.github/workflows/ci.yml'
 
       - name: Select gate outputs
@@ -185,11 +356,13 @@ jobs:
     if: needs.release-paths.outputs.core-journey == 'true'
     steps:
       - uses: actions/checkout@v7.0.1
+        timeout-minutes: 2
 
       # Debug CI populates the shared cache. This gate only restores; uploading
       # gigabytes afterwards would only lengthen it. The hosted runner matches
       # build-macos's (macos-26-intel) because the key is architecture-scoped.
       - name: Restore Swift packages
+        timeout-minutes: 3
         uses: actions/cache/restore@v6
         with:
           path: .build
@@ -209,6 +382,7 @@ jobs:
 
       - name: Upload stage diagnostics
         if: always()
+        timeout-minutes: 3
         uses: actions/upload-artifact@v7.0.1
         with:
           name: core-journey-e2e-${{ github.run_attempt }}
@@ -219,45 +393,38 @@ jobs:
     name: Core Journey Fixture UI
     # Hosted ARM has the UI automation entitlement; the native pool does not.
     runs-on: macos-latest
-    timeout-minutes: 10
+    # 2m checkout + 6m setup + 12m build/receipts + 12m UI/receipts + 3m upload.
+    # The former 600s job spent ~505s preparing before UI tests. Setup now has a
+    # separate 300s command budget; build has 600s, as do actual UI tests (unchanged).
+    # Each product/source receipt is separately bounded to 60s, not hidden setup.
+    timeout-minutes: 35
     needs: release-paths
     if: needs.release-paths.outputs.core-journey == 'true'
     steps:
       - uses: actions/checkout@v7.0.1
+        timeout-minutes: 2
 
-      - name: Install Tuist
-        run: brew install tuist
+      - name: Prepare Tuist and macOS project
+        timeout-minutes: 6
+        run: python3 scripts/run-core-journey-stages.py ui --phase setup
 
-      - name: Generate macOS project
-        run: tuist generate --no-open
+      - name: Build launched fixture test products
+        timeout-minutes: 12
+        run: python3 scripts/run-core-journey-stages.py ui --phase build
 
       - name: Test Speak bootstrap, global hotkey, and launched fixture
-        run: |
-          set -euo pipefail
-          mkdir -p .artifacts/core-journey-fixture-ui
-          xcodebuild test \
-            -workspace "Just Speak to It.xcworkspace" \
-            -scheme SpeakApp \
-            -configuration Debug \
-            -destination "platform=macOS" \
-            -only-testing:SpeakAppUITests/LaunchUITests \
-            -only-testing:SpeakAppUITests/CoreJourneyFixtureUITests \
-            -only-testing:SpeakAppUITests/CoreJourneyHotKeyUITests \
-            -only-testing:SpeakAppUITests/CoreJourneyBatchUITests \
-            -resultBundlePath .artifacts/core-journey-fixture-ui/CoreJourneyFixture.xcresult \
-            -skipPackagePluginValidation \
-            CODE_SIGN_IDENTITY="-" \
-            DEVELOPMENT_TEAM="" \
-            CODE_SIGN_STYLE=Manual \
-            | tee .artifacts/core-journey-fixture-ui/xcodebuild.log
-          python3 scripts/verify-core-journey-ui.py .artifacts/core-journey-fixture-ui/xcodebuild.log
+        timeout-minutes: 12
+        run: python3 scripts/run-core-journey-stages.py ui --phase test
 
       - name: Upload launched-app diagnostics
         if: always()
+        timeout-minutes: 3
         uses: actions/upload-artifact@v7.0.1
         with:
           name: core-journey-fixture-ui-${{ github.run_attempt }}
-          path: .artifacts/core-journey-fixture-ui
+          path: |
+            .artifacts/core-journey-fixture-ui
+            !.artifacts/core-journey-fixture-ui/DerivedData
           include-hidden-files: true
           if-no-files-found: error
 
@@ -615,6 +782,9 @@ jobs:
       # public symbols without a declared migration (issue #680). A PR title
       # carrying the conventional '!' marker permits the reported break;
       # Stable version selection and publication remain explicit decisions.
+      - name: Test public API compatibility fixtures
+        run: python3 -B -m unittest discover -s scripts/tests -p test_api_compatibility.py -v
+
       - name: Diagnose breaking public API changes
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}

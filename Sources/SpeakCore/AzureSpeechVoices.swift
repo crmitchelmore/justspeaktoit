@@ -71,6 +71,7 @@ public struct AzureSpeechSynthesisError: LocalizedError, Sendable, Equatable {
 }
 
 public struct AzureSpeechVoiceAPI: Sendable {
+    public static let speedRange: ClosedRange<Double> = 0.5...2
     private let session: URLSession
     public init(session: URLSession = .shared) { self.session = session }
 
@@ -123,6 +124,21 @@ public struct AzureSpeechVoiceAPI: Sendable {
         speed: Double = 1, pitch: Double = 0, useSSML: Bool = false
     ) throws -> URLRequest {
         let config = try AzureSpeechConfiguration(credentials: credentials)
+        let content = try ssmlBody(text: text, voice: voice, speed: speed, pitch: pitch, useSSML: useSSML)
+        var request = URLRequest(url: config.synthesisURL, timeoutInterval: 120)
+        request.httpMethod = "POST"
+        request.setValue(config.apiKey, forHTTPHeaderField: "Ocp-Apim-Subscription-Key")
+        request.setValue("application/ssml+xml", forHTTPHeaderField: "Content-Type")
+        request.setValue(format, forHTTPHeaderField: "X-Microsoft-OutputFormat")
+        request.setValue("JustSpeakToIt", forHTTPHeaderField: "User-Agent")
+        request.httpBody = Data(content.utf8)
+        return request
+    }
+
+    /// The exact request body, without credentials, endpoint resolution or IO.
+    public static func ssmlBody(
+        text: String, voice: String, speed: Double = 1, pitch: Double = 0, useSSML: Bool = false
+    ) throws -> String {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw AzureSpeechError.emptyInput
         }
@@ -137,8 +153,8 @@ public struct AzureSpeechVoiceAPI: Sendable {
         if useSSML && text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("<speak") {
             content = text
         } else {
-            let spoken = useSSML ? text : escapeXML(text)
-            let rate = Int((min(max(speed, 0.5), 2) - 1) * 100)
+            let spoken = useSSML ? text : VoiceSynthesisMarkup.escapeXML(text)
+            let rate = Int((min(max(speed, Self.speedRange.lowerBound), Self.speedRange.upperBound) - 1) * 100)
             let semitones = Int(min(max(pitch, -12), 12))
             let rateValue = rate >= 0 ? "+\(rate)%" : "\(rate)%"
             let pitchValue = semitones >= 0 ? "+\(semitones)st" : "\(semitones)st"
@@ -147,23 +163,9 @@ public struct AzureSpeechVoiceAPI: Sendable {
             let body = isMAI ? spoken
                 : "<prosody rate='\(rateValue)' pitch='\(pitchValue)'>\(spoken)</prosody>"
             content = "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' "
-                + "xml:lang='\(escapeXML(locale))'><voice name='\(escapeXML(name))'>\(body)</voice></speak>"
+                + "xml:lang='\(VoiceSynthesisMarkup.escapeXML(locale))'>"
+                + "<voice name='\(VoiceSynthesisMarkup.escapeXML(name))'>\(body)</voice></speak>"
         }
-        var request = URLRequest(url: config.synthesisURL, timeoutInterval: 120)
-        request.httpMethod = "POST"
-        request.setValue(config.apiKey, forHTTPHeaderField: "Ocp-Apim-Subscription-Key")
-        request.setValue("application/ssml+xml", forHTTPHeaderField: "Content-Type")
-        request.setValue(format, forHTTPHeaderField: "X-Microsoft-OutputFormat")
-        request.setValue("JustSpeakToIt", forHTTPHeaderField: "User-Agent")
-        request.httpBody = Data(content.utf8)
-        return request
-    }
-
-    private static func escapeXML(_ value: String) -> String {
-        value.replacingOccurrences(of: "&", with: "&amp;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
-            .replacingOccurrences(of: "\"", with: "&quot;")
-            .replacingOccurrences(of: "'", with: "&apos;")
+        return content
     }
 }

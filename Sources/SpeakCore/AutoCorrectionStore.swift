@@ -1,5 +1,4 @@
 import Foundation
-import os.log
 
 /// Persists auto-correction candidates to disk.
 public actor AutoCorrectionStore {
@@ -10,10 +9,9 @@ public actor AutoCorrectionStore {
   private let encoder: JSONEncoder
   private let decoder: JSONDecoder
   private let fileManager: FileManager
-  private let log = SpeakLogger.logger(category: "AutoCorrectionStore")
+  private var directory: VocabularyStoreDirectory
 
   public init(fileManager: FileManager = .default, baseDirectory: URL? = nil) {
-    self.fileManager = fileManager
     let supportURL: URL
     if let baseDirectory {
       supportURL = baseDirectory
@@ -21,13 +19,16 @@ public actor AutoCorrectionStore {
       supportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
         ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
     }
-    let appFolder = supportURL.appendingPathComponent(ReleaseTrain.current.supportDirectory, isDirectory: true)
-    let autoCorrectionFolder = appFolder.appendingPathComponent("AutoCorrections", isDirectory: true)
+    self.init(
+      fileManager: fileManager,
+      appDirectory: supportURL.appendingPathComponent(ReleaseTrain.current.supportDirectory, isDirectory: true)
+    )
+  }
 
-    if !fileManager.fileExists(atPath: autoCorrectionFolder.path) {
-      try? fileManager.createDirectory(at: autoCorrectionFolder, withIntermediateDirectories: true)
-    }
-
+  public init(fileManager: FileManager = .default, appDirectory: URL) {
+    self.fileManager = fileManager
+    let autoCorrectionFolder = appDirectory.appendingPathComponent("AutoCorrections", isDirectory: true)
+    directory = VocabularyStoreDirectory(fileManager: fileManager, url: autoCorrectionFolder)
     fileURL = autoCorrectionFolder.appendingPathComponent("candidates.json")
 
     encoder = JSONEncoder()
@@ -37,6 +38,7 @@ public actor AutoCorrectionStore {
   }
 
   public func load() throws -> [AutoCorrectionCandidate] {
+    try directory.prepare()
     guard fileManager.fileExists(atPath: fileURL.path) else {
       return []
     }
@@ -52,6 +54,7 @@ public actor AutoCorrectionStore {
   }
 
   public func save(_ candidates: [AutoCorrectionCandidate]) throws {
+    try directory.prepare()
     if candidates.isEmpty {
       if fileManager.fileExists(atPath: fileURL.path) {
         try fileManager.removeItem(at: fileURL)
@@ -64,6 +67,7 @@ public actor AutoCorrectionStore {
   }
 
   public func deleteAll() throws {
+    try directory.prepare()
     if fileManager.fileExists(atPath: fileURL.path) {
       try fileManager.removeItem(at: fileURL)
     }

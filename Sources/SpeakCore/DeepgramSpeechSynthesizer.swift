@@ -8,7 +8,7 @@ import FoundationNetworking
 ///
 /// The request is built by `DeepgramTTSAPI.speakRequest`, the same shape the
 /// Apple clients send, and asks for lossless linear16 in a WAV container at
-/// Deepgram's native 24 kHz, as the macOS client's WAV path does. The body
+/// the captured quality's supported sample rate (24 kHz by default). The body
 /// streams through `OpenRouterBoundedResponseTransport`: a declared or
 /// received size above the limit stops the transfer, a wall-clock deadline
 /// bounds the exchange, redirects and caching are refused, and task
@@ -77,15 +77,33 @@ struct DeepgramSpeechSynthesizer: Sendable {
         return utterance
     }
 
-    func synthesize(_ utterance: Utterance, apiKey: String) async throws -> DeepgramSpeechAudio {
+    func synthesize(
+        _ utterance: Utterance, apiKey: String, sampleRate: Int = DeepgramSpeechSynthesizer.sampleRate
+    ) async throws -> DeepgramSpeechAudio {
         try Task.checkCancellation()
+        guard VoiceSynthesisQuality.allCases.contains(where: { $0.sampleRate == sampleRate }) else {
+            throw DeepgramSpeechError.unsupportedAudioFormat
+        }
         let request: URLRequest
         do {
             request = try DeepgramTTSAPI.speakRequest(
-                text: utterance.text, apiKey: apiKey, queryItems: Self.queryItems(for: utterance.voice)
+                text: utterance.text, apiKey: apiKey,
+                queryItems: Self.queryItems(for: utterance.voice, sampleRate: sampleRate)
             )
         } catch {
             throw DeepgramSpeechError.invalidResponse
+        }
+        try Task.checkCancellation()
+        let capture = VoiceSynthesisUsage.capture
+        let usageID = capture?.begin(
+            voice: .deepgram(utterance.voice), inputCharacters: utterance.characterCount, usesSSML: false
+        )
+        var completed = false
+        var failedOutcome = VoiceSynthesisUsage.Outcome.failed
+        defer {
+            if !completed, let usageID {
+                capture?.finish(usageID, outcome: Task.isCancelled ? .cancelled : failedOutcome)
+            }
         }
         let body: Data
         do {
@@ -100,13 +118,20 @@ struct DeepgramSpeechSynthesizer: Sendable {
                 }
             }.body
         } catch {
-            throw Self.speechError(from: error)
+            let failure = Self.speechError(from: error)
+            if failure is CancellationError { failedOutcome = .cancelled }
+            throw failure
         }
         try Task.checkCancellation()
-        return try DeepgramSpeechWAV.canonical(body, sampleRate: Self.sampleRate)
+        let audio = try DeepgramSpeechWAV.canonical(body, sampleRate: sampleRate)
+        if let usageID { capture?.finish(usageID, outcome: .completed, audioDuration: audio.duration) }
+        completed = true
+        return audio
     }
 
-    static func queryItems(for voice: DeepgramSpeechCatalog.Voice) -> [URLQueryItem] {
+    static func queryItems(
+        for voice: DeepgramSpeechCatalog.Voice, sampleRate: Int = DeepgramSpeechSynthesizer.sampleRate
+    ) -> [URLQueryItem] {
         [
             URLQueryItem(name: "model", value: voice.id),
             URLQueryItem(name: "encoding", value: "linear16"),

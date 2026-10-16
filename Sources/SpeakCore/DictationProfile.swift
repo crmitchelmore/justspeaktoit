@@ -6,9 +6,10 @@ import Foundation
 ///
 /// `bundleID` matchers are evaluated on macOS (frontmost-app matching) and
 /// `windowsExecutablePath` matchers on Windows (the captured application's
-/// full executable path). Each platform evaluates only its own kind and keeps
+/// full executable path), with exact `linuxExecutablePath` matching on X11.
+/// Each platform evaluates only its own kind and keeps
 /// the others untouched when it edits a profile, so one profile list can carry
-/// both. `urlPattern` is reserved so browser URL matching (Safari/Chrome via AX)
+/// all three. `urlPattern` is reserved so browser URL matching (Safari/Chrome via AX)
 /// can be added later without a storage or sync format change; unknown kinds
 /// written by newer clients are dropped on decode instead of failing the whole
 /// profile list.
@@ -24,6 +25,9 @@ public struct DictationProfileMatcher: Codable, Equatable, Hashable, Sendable {
         /// no `\\?\` prefix). A bare file name or a bundle identifier never
         /// matches; nothing is inferred from a process name.
         case windowsExecutablePath
+        /// Exact, case-sensitive executable path captured from an X11 target
+        /// process. Never inferred from WM_CLASS or from a window title.
+        case linuxExecutablePath
     }
 
     public var kind: Kind
@@ -120,6 +124,9 @@ public struct DictationProfile: Codable, Equatable, Identifiable, Sendable {
     public var transcriptionModelID: String?
     /// How `transcriptionModelID` is applied. `nil` for profiles saved by older builds.
     public var transcriptionRouting: DictationProfileTranscriptionRouting?
+    /// Newer routing metadata is preserved, never guessed as a cloud route
+    /// by the desktop resolver.
+    public var unsupportedTranscriptionRouting: String?
 
     /// Whether LLM polish (post-processing) runs for this profile.
     public var polishEnabled: Bool?
@@ -156,6 +163,7 @@ public struct DictationProfile: Codable, Equatable, Identifiable, Sendable {
         self.matchers = matchers
         self.transcriptionModelID = transcriptionModelID
         self.transcriptionRouting = transcriptionRouting
+        self.unsupportedTranscriptionRouting = nil
         self.polishEnabled = polishEnabled
         self.polishModelID = polishModelID
         self.polishPrompt = polishPrompt
@@ -200,7 +208,7 @@ public struct DictationProfile: Codable, Equatable, Identifiable, Sendable {
         )
     }
 
-    private enum CodingKeys: String, CodingKey {
+    enum CodingKeys: String, CodingKey {
         case id
         case name
         case matchers
@@ -232,11 +240,15 @@ public struct DictationProfile: Codable, Equatable, Identifiable, Sendable {
         let lossyMatchers = try container.decodeIfPresent([LossyMatcher].self, forKey: .matchers) ?? []
         matchers = lossyMatchers.compactMap(\.matcher)
         transcriptionModelID = try container.decodeIfPresent(String.self, forKey: .transcriptionModelID)
-        // A routing written by a newer build is dropped rather than failing the profile;
-        // the legacy derivation then applies.
+        // Keep a newer route for round-trip and explicit desktop refusal,
+        // rather than treating it as permission to infer a cloud route.
         transcriptionRouting = try? container.decodeIfPresent(
             DictationProfileTranscriptionRouting.self, forKey: .transcriptionRouting
         )
+        let rawRouting = try? container.decodeIfPresent(String.self, forKey: .transcriptionRouting)
+        unsupportedTranscriptionRouting = rawRouting.flatMap {
+            DictationProfileTranscriptionRouting(rawValue: $0) == nil ? $0 : nil
+        }
         polishEnabled = try container.decodeIfPresent(Bool.self, forKey: .polishEnabled)
         polishModelID = try container.decodeIfPresent(String.self, forKey: .polishModelID)
         polishPrompt = try container.decodeIfPresent(String.self, forKey: .polishPrompt)

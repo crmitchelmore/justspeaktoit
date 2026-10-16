@@ -66,7 +66,8 @@ def describe_image(path, architecture):
     path = pathlib.Path(path)
     image = windows_pe.PEImage.load(path)
     return {"path": str(path), "name": path.name, "bytes": path.stat().st_size, "sha256": sha256_file(path),
-            "architecture": image.architecture, "dll": image.is_dll, "native": image.runs_natively_on(architecture)}
+            "architecture": image.architecture, "dll": image.is_dll, "subsystem": image.subsystem,
+            "native": image.runs_natively_on(architecture)}
 
 
 # --- Windows process inspection ------------------------------------------------------

@@ -6,112 +6,19 @@ import SpeakDesktopHost
 
 // The shared Read aloud controller, driven through the fake platform with a
 // scripted engine and player: no network, audio device or native window.
-
-/// What Read aloud asked of the fake player and engine.
-final class FakeSpeech: @unchecked Sendable {
-    static let shared = FakeSpeech()
-    struct Spoken: Equatable {
-        let text: String
-        let voice: String
-    }
-
-    private let lock = NSLock()
-    private var active: FakePlayback.Speech?
-    private var log: [String] = []
-    private var requests: [Spoken] = []
-    private var gate = Gate(open: true)
-
-    var events: [String] { lock.withLock { log } }
-    var spoken: [Spoken] { lock.withLock { requests } }
-
-    /// With `holdingSegments`, each segment plays until `releaseSegments`, so
-    /// a test can act while one is audible.
-    func reset(holdingSegments: Bool = false) {
-        lock.withLock {
-            active = nil
-            log = []
-            requests = []
-            gate = Gate(open: !holdingSegments)
-        }
-    }
-
-    func releaseSegments() { lock.withLock { gate }.release() }
-
-    func begin(_ speech: FakePlayback.Speech) -> FakePlayback.Speech {
-        lock.withLock {
-            active = speech
-            log.append("begin")
-        }
-        return speech
-    }
-
-    func spoke(_ request: DeepgramSpeechRequest) {
-        lock.withLock { requests.append(Spoken(text: request.text, voice: request.voice.id)) }
-    }
-
-    /// Refuses segments of an ended speech, and stops when its task is cancelled.
-    func play(_ speech: FakePlayback.Speech) async throws -> TimeInterval {
-        let gate = try lock.withLock { () -> Gate in
-            guard active == speech else { throw CancellationError() }
-            log.append("play")
-            return self.gate
-        }
-        await gate.pass()
-        try Task.checkCancellation()
-        guard lock.withLock({ active == speech }) else { throw CancellationError() }
-        return 1
-    }
-
-    func end(_ speech: FakePlayback.Speech) {
-        lock.withLock {
-            guard active == speech else { return }
-            active = nil
-            log.append("end")
-        }
-    }
-}
-
-extension FakePlayback: DesktopHostSpeechPlayback {
-    struct Speech: Hashable, Sendable {
-        let recordID: UUID
-        let id = UUID()
-    }
-
-    func beginSpeech(recordID: UUID) throws -> Speech { FakeSpeech.shared.begin(Speech(recordID: recordID)) }
-    func playToCompletion(_ speech: Speech, path: String) async throws -> TimeInterval {
-        try await FakeSpeech.shared.play(speech)
-    }
-    func endSpeech(_ speech: Speech) { FakeSpeech.shared.end(speech) }
-}
-
-/// Behaves like the shared engine at its boundaries: an empty key stops it
-/// before anything is spoken, and each request plays once through `play`.
-struct FakeVoiceOutput: DesktopHostVoiceOutput {
-    func speak(
-        _ request: DeepgramSpeechRequest,
-        credential: @Sendable () async throws -> String,
-        through play: @escaping @Sendable (URL) async throws -> TimeInterval
-    ) async throws -> DeepgramVoiceOutput.Outcome {
-        guard !(try await credential()).isEmpty else { throw DeepgramSpeechError.missingCredential }
-        FakeSpeech.shared.spoke(request)
-        _ = try await play(URL(fileURLWithPath: "/speech/segment.wav"))
-        return .nothingToSpeak
-    }
-}
-
-extension FakePlatform: DesktopHostReadAloudPlatform {
-    typealias ReadAloudState = DesktopHostReadAloudState<FakePlayback.Speech, FakeVoiceOutput>
-    static func makeVoiceOutput(stagingDirectory directory: URL) throws -> FakeVoiceOutput { FakeVoiceOutput() }
-    static let deepgramKeyHint = "save it in the test"
-}
+// Fixtures live in DesktopHostReadAloudTestFixtures.swift; the remaining cases
+// are in DesktopHostReadAloudTestsVoiceSources.swift, to keep this type under
+// the pinned type-length limit.
 
 final class DesktopHostReadAloudTests: XCTestCase {
-    private var directory: URL!
-    private var controller: DesktopHostController<FakePlatform>!
-    private var record: UUID!
-    private let deepgramKey = VoiceOutputProvider.deepgram.apiKeyIdentifier
+    // Internal (not private): the voice-source test cases in
+    // DesktopHostReadAloudTestsVoiceSources.swift share these across files.
+    var directory: URL!
+    var controller: DesktopHostController<FakePlatform>!
+    var record: UUID!
+    let deepgramKey = VoiceOutputProvider.deepgram.apiKeyIdentifier
     /// Over Deepgram's 2,000-character request limit, so it is spoken in segments.
-    private let longText = String(
+    let longText = String(
         repeating: String(repeating: "Read aloud speaks this sentence ", count: 30) + "to the end. ", count: 3
     )
 
@@ -142,7 +49,9 @@ final class DesktopHostReadAloudTests: XCTestCase {
         DesktopHostModels.configure(streamingQualified: true)
     }
 
-    private func waitFor(_ description: String, _ condition: () async throws -> Bool) async throws {
+    // Internal: shared with the voice-source cases in
+    // DesktopHostReadAloudTestsVoiceSources.swift.
+    func waitFor(_ description: String, _ condition: () async throws -> Bool) async throws {
         for _ in 0..<500 {
             if try await condition() { return }
             try await Task.sleep(nanoseconds: 10_000_000)
@@ -150,7 +59,78 @@ final class DesktopHostReadAloudTests: XCTestCase {
         XCTFail("Timed out waiting for \(description)")
     }
 
-    private var statuses: [String] { FakeLog.shared.allStatuses }
+    var statuses: [String] { FakeLog.shared.allStatuses }
+
+    func testAzureRead_UsesNativePlaybackWithRealHistoryOwnershipAndCleansTemporaryAudioOnStop() async throws {
+        try await assertAzureRead(
+            voice: .azureNeural(AzureNeuralVoiceCatalog.voices[0]),
+            options: VoiceSynthesisOptions(speed: 1.25, pitch: -2)
+        )
+    }
+
+    func testMAIRead_UsesSharedAzureCredentialAndPreservesRealHistoryOwnershipThroughStop() async throws {
+        try await assertAzureRead(
+            voice: .azureMAI(AzureMAIVoiceCatalog.voices[0]), options: VoiceSynthesisOptions(useSSML: true)
+        )
+    }
+
+    private func assertAzureRead(voice: DesktopSpeechVoice, options: VoiceSynthesisOptions) async throws {
+        FakeSpeech.shared.reset(holdingSegments: true)
+        FakeLog.shared.setKey("synthetic-key:eastus", name: AzureSpeechConfiguration.credentialIdentifier)
+        await controller.selectVoiceOutput(voice)
+        let saved = await controller.saveVoiceSynthesisOptions(options)
+        XCTAssertTrue(saved)
+        await controller.readAloud(record.uuidString, text: "Synthetic Azure speech.")
+        try await waitFor("native synthetic playback") { FakeSpeech.shared.events.contains("play") }
+        let owner = await controller.voiceOutputRecordID
+        XCTAssertEqual(owner, record)
+        let task = await controller.readAloudState.task
+        await controller.playbackStop()
+        FakeSpeech.shared.releaseSegments()
+        await task?.value
+        let stoppedOwner = await controller.voiceOutputRecordID
+        XCTAssertNil(stoppedOwner)
+        XCTAssertEqual(FakeSpeech.shared.events, ["begin", "play", "end"])
+        let files = try FileManager.default.contentsOfDirectory(atPath:
+            directory.appendingPathComponent("VoiceGeneratedPlayback").path)
+        XCTAssertTrue(files.isEmpty)
+    }
+
+    func testReadAloud_RefusesUnsupportedOrInvalidSavedControlsBeforePlayback() async throws {
+        FakeLog.shared.setKey("deepgram-key", name: deepgramKey)
+        for (speed, pitch, ssml) in [(1.25, 0.0, false), (1.0, 2.0, false), (1.0, 0.0, true),
+                                    (9.0, 0.0, false), (1.0, 0.5, false)] {
+            var stored = DesktopVoiceOutputSettings()
+            stored.speed = speed
+            stored.pitch = pitch
+            stored.useSSML = ssml
+            await controller.saveVoiceOutput(stored)
+            await controller.readAloud(record.uuidString, text: "This must not be silently normalized.")
+            XCTAssertTrue(statuses.last?.hasPrefix("Read aloud failed:") == true)
+            XCTAssertTrue(FakeSpeech.shared.events.isEmpty)
+            XCTAssertTrue(FakeSpeech.shared.spoken.isEmpty)
+            let retained = await controller.voiceOutputSettings()
+            XCTAssertEqual(retained, stored)
+        }
+    }
+
+    func testVoiceSelection_RetainsIncompatibleOptionsWithoutImplicitReset() async throws {
+        let first = try XCTUnwrap(DesktopVoiceOutputSettings.voices.first)
+        let last = try XCTUnwrap(DesktopVoiceOutputSettings.voices.last)
+        var stored = DesktopVoiceOutputSettings(voice: first)
+        stored.speed = 1.25
+        await controller.saveVoiceOutput(stored)
+        let file = directory.appendingPathComponent("settings.json")
+        let before = try Data(contentsOf: file)
+        await controller.selectVoiceOutput(last)
+        XCTAssertNotEqual(try Data(contentsOf: file), before)
+        let retained = await controller.voiceOutputSettings()
+        XCTAssertEqual(retained.modelID, last.model.id)
+        XCTAssertEqual(retained.voiceID, last.id)
+        XCTAssertEqual(retained.speed, stored.speed)
+        XCTAssertEqual(retained.pitch, stored.pitch)
+        XCTAssertEqual(retained.useSSML, stored.useSSML)
+    }
 
     func testReadAloud_SpeaksEachSegmentWithTheSavedVoiceThenFinishes() async throws {
         FakeLog.shared.setKey("deepgram-key", name: deepgramKey)
@@ -179,70 +159,22 @@ final class DesktopHostReadAloudTests: XCTestCase {
         XCTAssertTrue(FakeSpeech.shared.spoken.isEmpty)
     }
 
-    /// Stop ends the speech while a segment plays: nothing more is spoken and
-    /// the stop is reported once, by Stop, never overwritten by the reader.
-    func testStop_WhileASegmentPlays_ReportsOneStopAndSpeaksNothingMore() async throws {
+    func testPronunciationRendersOnceBeforeDeepgramRequestSegmentation() async throws {
         FakeLog.shared.setKey("deepgram-key", name: deepgramKey)
-        FakeSpeech.shared.reset(holdingSegments: true)
-        await controller.readAloud(record.uuidString, text: longText)
-        try await waitFor("the first segment") { FakeSpeech.shared.events.contains("play") }
-        await controller.playbackStop()
-        FakeSpeech.shared.releaseSegments()
-        try await Task.sleep(nanoseconds: 100_000_000)
-        XCTAssertEqual(statuses.filter { $0 == "Reading aloud stopped." }.count, 1)
-        XCTAssertEqual(statuses.last, "Reading aloud stopped.")
-        XCTAssertEqual(FakeSpeech.shared.events, ["begin", "play", "end"])
-        let state = await controller.readAloudState
-        XCTAssertFalse(FakePlatform.isReadingAloud(state))
-    }
-
-    /// History playback and recording each end Read aloud and own the status
-    /// line; the ended reader reports nothing.
-    func testHistoryPlaybackAndRecording_EndReadAloudSilently() async throws {
-        FakeLog.shared.setKey("deepgram-key", name: deepgramKey)
-        FakeSpeech.shared.reset(holdingSegments: true)
-        await controller.readAloud(record.uuidString, text: longText)
-        try await waitFor("the first segment") { FakeSpeech.shared.events.contains("play") }
-        await controller.playbackToggle(record.uuidString)
-        XCTAssertEqual(FakeSpeech.shared.events, ["begin", "play", "end"])
-
-        FakeSpeech.shared.reset(holdingSegments: true)
-        await controller.readAloud(record.uuidString, text: longText)
-        try await waitFor("the next speech") { FakeSpeech.shared.events.contains("play") }
-        let index = await controller.selectedIndex()
-        await controller.toggle(
-            target: nil, modelIndex: index, deviceID: "", targetExecutablePath: nil, textOutput: FakeTextOutput()
-        )
-        XCTAssertEqual(FakeSpeech.shared.events, ["begin", "play", "end"])
-        FakeSpeech.shared.releaseSegments()
-        try await Task.sleep(nanoseconds: 100_000_000)
-        XCTAssertFalse(statuses.contains("Reading aloud stopped."))
-        XCTAssertFalse(statuses.contains("Finished reading aloud."))
-        await controller.toggle(
-            target: nil, modelIndex: index, deviceID: "", targetExecutablePath: nil, textOutput: FakeTextOutput()
-        )
-    }
-
-    func testReadAloud_RefusesOtherRecordsHiddenRecordsAndEmptyText() async throws {
-        FakeLog.shared.setKey("deepgram-key", name: deepgramKey)
-        await controller.readAloud(UUID().uuidString, text: "Hello.")
-        await controller.readAloud(record.uuidString, text: " \n\t ")
-        XCTAssertEqual(statuses.last, "There is no transcript to read aloud.")
-        await controller.searchHistory("no recording matches this")
-        await controller.readAloud(record.uuidString, text: "Hello.")
-        XCTAssertTrue(FakeSpeech.shared.events.isEmpty)
-    }
-
-    func testVoiceSetting_PersistsAndRetiredVoicesResolveThroughTheCatalogue() async throws {
-        let unset = await controller.voiceOutputSettings()
-        XCTAssertEqual(unset.voice, DeepgramSpeechCatalog.resolvedSelection(modelID: nil, voiceID: nil).voice)
-        let voice = try XCTUnwrap(DesktopVoiceOutputSettings.voices.last)
-        await controller.saveVoiceOutput(DesktopVoiceOutputSettings(voice: voice))
-        await controller.close()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
-        let saved = await controller.voiceOutputSettings()
-        XCTAssertEqual(saved.voice, voice)
-        let retired = DesktopVoiceOutputSettings(modelID: "aura-0", voiceID: "deepgram/retired-voice")
-        XCTAssertTrue(DesktopVoiceOutputSettings.voices.contains(retired.voice))
+        let replacement = "LongToken " + String(repeating: "expanded ", count: 200)
+        _ = try await controller.vocabularyEvent(kind: 1, payload: DesktopVocabularyWire.encode([
+            "save", "", "LongToken", "fixture pronunciation", replacement, "Custom", "false", "true", ""
+        ]))
+        let input = "LongToken LongToken LongToken."
+        let entries = [PronunciationEntry(
+            word: "LongToken", pronunciation: "fixture pronunciation", replacement: replacement, caseSensitive: true
+        )]
+        let rendered = PronunciationRenderer().applyReplacements(to: input, entries: entries)
+        let expected = SpeechTextSegmenter.segments(rendered)
+        XCTAssertGreaterThan(expected.count, 1)
+        await controller.readAloud(record.uuidString, text: input)
+        try await waitFor("the pronunciation finish") { self.statuses.last == "Finished reading aloud." }
+        XCTAssertEqual(FakeSpeech.shared.spoken.map(\.text), expected)
+        XCTAssertTrue(FakeSpeech.shared.spoken.allSatisfy { $0.text.count <= 2_000 })
     }
 }

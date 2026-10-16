@@ -462,6 +462,9 @@ std::string checkPureHelpers() {
     if (jsti_insertion_insert(nullptr, "text", 0, &result, error, sizeof(error)) != -1 || result.method != JSTI_INSERTION_METHOD_NONE) {
         return describe("null target", "a missing target was not rejected");
     }
+    if (jsti_insertion_learning(nullptr, "text", nullptr, 0, error, sizeof(error)) != -1) {
+        return describe("learning null target", "a missing owned range was not rejected");
+    }
     jsti_insertion_destroy(nullptr);
     return {};
 }
@@ -1033,6 +1036,94 @@ std::string checkDeferredFocusAndUncertainTimeout(Fixture &state) {
     return {};
 }
 
+std::string checkCorrectionLearning(Fixture &state) {
+    setEnvironment(testEnvironment(true));
+    SyntheticHost &host = state.host;
+    Target target;
+    std::string reason;
+    char error[512]{}, edited[32769]{};
+    auto arm = [&] {
+        return jsti_insertion_learning(target.value, "Susie", nullptr, 0, error, sizeof(error));
+    };
+    auto sample = [&] {
+        return jsti_insertion_learning(target.value, nullptr, edited, sizeof(edited), error, sizeof(error));
+    };
+    auto prepare = [&] {
+        setText(host.richEdit, L"Left  right");
+        if (!host.focus(host.richEdit)) return false;
+        select(host.richEdit, 5, 5);
+        return capture(target, reason);
+    };
+    if (!prepare()) return describe("learning capture", "synthetic capture failed", reason.c_str());
+    if (arm() != -1) return describe("learning acknowledgement", "an unacknowledged target was observed");
+    Attempt attempt = insert(target, "Susie");
+    if (attempt.status != 0 || attempt.result.verified != 1) {
+        return describe("learning insertion", "synthetic native insertion was not confirmed", attempt.error);
+    }
+    const int supported = supportsTextPattern(host.richEdit);
+    if (supported < 0) return describe("learning capability", "TextPattern capability could not be established");
+    if (!supported) {
+        if (arm() != -1) return describe("learning unsupported", "a field without TextPattern was observed");
+        return {};
+    }
+    if (arm() != 0) return describe("learning range", "the acknowledged span was not retained", error);
+    select(host.richEdit, 7, 8);
+    SendMessageW(host.richEdit, EM_REPLACESEL, TRUE, reinterpret_cast<LPARAM>(L"z"));
+    if (sample() != 0 || std::strcmp(edited, "Suzie") != 0) {
+        return describe("learning exact span", "readback included unrelated field content or lost its range", error);
+    }
+    if (sample() != -1 || arm() != -1) return describe("learning one-shot", "a consumed lease was reused");
+
+    if (!prepare() || insert(target, "Susie").status != 0 || arm() != 0) {
+        return describe("learning password", "setup failed", error);
+    }
+    const LONG_PTR savedStyle = GetWindowLongPtrW(host.richEdit, GWL_STYLE);
+    SetWindowLongPtrW(host.richEdit, GWL_STYLE, savedStyle | ES_PASSWORD);
+    const int sensitive = sample();
+    SetWindowLongPtrW(host.richEdit, GWL_STYLE, savedStyle);
+    if (sensitive != -1) return describe("learning password", "a password control was observed");
+
+    if (!prepare() || insert(target, "Susie").status != 0) return describe("learning caret", "setup failed");
+    select(host.richEdit, 5, 5);
+    if (arm() != -1) return describe("learning caret", "a moved caret was mistaken for the insertion receipt");
+
+    if (!prepare() || insert(target, "Susie").status != 0 || arm() != 0) {
+        return describe("learning context", "setup failed", error);
+    }
+    select(host.richEdit, 0, 1);
+    SendMessageW(host.richEdit, EM_REPLACESEL, TRUE, reinterpret_cast<LPARAM>(L"R"));
+    if (sample() != -1) return describe("learning context", "an unrelated prefix edit was learned");
+
+    if (!prepare() || insert(target, "Susie").status != 0 || arm() != 0) {
+        return describe("learning focus", "setup failed", error);
+    }
+    ++state.focusRevision;
+    if (sample() != -1) return describe("learning focus", "a focus transition retained observation authority");
+
+    if (!prepare() || insert(target, "Susie").status != 0 || arm() != 0) {
+        return describe("learning identity", "setup failed", error);
+    }
+    state.resolveOverride = host.edit;
+    const int otherControl = sample();
+    state.resolveOverride = nullptr;
+    if (otherControl != -1) return describe("learning identity", "another UIA control was read");
+
+    if (!prepare() || insert(target, "Susie").status != 0 || arm() != 0) {
+        return describe("learning window", "setup failed", error);
+    }
+    state.foreground = GetDesktopWindow();
+    const int otherWindow = sample();
+    state.foreground = host.window;
+    if (otherWindow != -1) return describe("learning window", "another foreground window retained authority");
+
+    if (!prepare() || insert(target, "Susie").status != 0 || arm() != 0) {
+        return describe("learning cancellation", "setup failed", error);
+    }
+    jsti_insertion_cancel(target.value);
+    if (sample() != -1) return describe("learning cancellation", "a cancelled target returned text");
+    return {};
+}
+
 } // namespace
 
 int jsti_text_output_self_test(char *error, size_t capacity) {
@@ -1046,6 +1137,7 @@ int jsti_text_output_self_test(char *error, size_t capacity) {
         if (!state->host.start(failure)) { fixture = nullptr; return jsti::fail(failure, error, capacity); }
         state->foreground = state->host.window;
         failure = checkNativePaths(*state);
+        if (failure.empty()) failure = checkCorrectionLearning(*state);
         if (failure.empty()) failure = checkAutomationPaths(*state);
         if (failure.empty()) failure = checkLifetimes(*state);
         if (failure.empty()) failure = checkClipboardRacesAndCancellation(*state);

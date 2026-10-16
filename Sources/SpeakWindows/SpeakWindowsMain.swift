@@ -15,6 +15,7 @@ final class WindowsEventContext {
     private let historyEvents: DesktopEventDispatcher<DesktopHistoryEvent>
     private let copies: DesktopTranscriptCopyDispatcher
     private let settings = DesktopSettingsQueue()
+    let postProcessingPicker = DesktopPostProcessingPicker()
     lazy var hotKeys = WindowsHotKeyGestures { [controller] request in await controller.hotKey(request) }
     lazy var automation = WindowsAutomationSwitch(controller: controller)
     lazy var profiles = WindowsProfilesCoordinator { [weak self] profiles in
@@ -37,6 +38,12 @@ final class WindowsEventContext {
             case .playPause(let identifier): await controller.playbackToggle(identifier)
             case .stop: await controller.playbackStop()
             case .readAloud(let identifier, let text): await controller.readAloud(identifier, text: text)
+            case .filter(let payload): await controller.applyHistoryFilters(payload)
+            case .voiceRead, .voiceExport, .voiceImport, .voiceImportCancel,
+                 .voiceGenerate, .voiceGeneratedPlay, .voiceGeneratedExport:
+                await controller.performVoiceEvent(event) {
+                    WindowsNative.voiceTextImported($1, requestID: $0)
+                }
             }
         }
     }
@@ -70,6 +77,15 @@ final class WindowsEventContext {
         let controller = controller
         return settings.read { await controller.textOutputOptions() }
     }
+
+    func recordingEvent(
+        modelIndex: Int, executablePath: String?
+    ) -> Task<DesktopHostRecordingEvent<WindowsHostPlatform>, Never> {
+        let controller = controller
+        return settings.read {
+            await controller.captureRecordingEvent(modelIndex: modelIndex, executablePath: executablePath)
+        }
+    }
 }
 
 func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, _ context: UnsafeMutableRawPointer?) {
@@ -84,7 +100,9 @@ func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, 
         // still saved and offered for Copy.
         let captured = try? WindowsInsertionTarget.capture()
         toggleRecording(
-            controller, target: captured, textOutput: holder.recordingTextOutput(), modelIndex: Int(index),
+            controller, target: captured,
+            event: holder.recordingEvent(modelIndex: Int(index), executablePath: captured?.executablePath),
+            modelIndex: Int(index),
             deviceID: value
         )
     case 2:
@@ -118,30 +136,15 @@ private func hotKeyWindowEvent(_ event: Int32, value: String, index: Int, holder
     switch event {
     case 21:
         // As at the Record event: capture the focused field before anything else can change it.
+        let captured = try? WindowsInsertionTarget.capture()
+        let event = holder.recordingEvent(modelIndex: index, executablePath: captured?.executablePath)
         holder.hotKeys.keyDown(
-            target: try? WindowsInsertionTarget.capture(), textOutput: holder.recordingTextOutput(),
-            modelIndex: index, deviceID: value
+            target: captured, textOutput: Task { await event.value.textOutput },
+            modelIndex: index, deviceID: value, event: event
         )
     case 22: holder.hotKeys.keyUp()
     case 23: holder.hotKeys.deadlineReached()
     default: break
-    }
-}
-
-/// Starts or stops recording with the text output read at the Record event.
-/// That read also waits for every earlier settings change. The toggle runs
-/// outside the settings queue, so draining settings never waits on transcription.
-@discardableResult
-func toggleRecording(
-    _ controller: WindowsAppController, target: WindowsInsertionTarget?,
-    textOutput: Task<WindowsTextOutputOptions, Never>, modelIndex: Int, deviceID: String
-) -> Task<Void, Never> {
-    Task {
-        let options = await textOutput.value
-        await controller.toggle(
-            target: target, modelIndex: modelIndex, deviceID: deviceID, targetExecutablePath: target?.executablePath,
-            textOutput: options
-        )
     }
 }
 
@@ -193,26 +196,11 @@ private func ready(_ holder: WindowsEventContext) {
     jsti_window_request_close()
 }
 
-func postProcessingEvent(
-    _ enabled: Int32, _ index: Int32, _ prompt: UnsafePointer<CChar>?,
-    _ newKey: UnsafePointer<CChar>?, _ context: UnsafeMutableRawPointer?
-) {
-    guard let context else { return }
-    let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
-    let prompt = prompt.map(String.init(cString:)) ?? ""
-    let key = newKey.map(String.init(cString:)) ?? ""
-    holder.enqueueSettings {
-        await holder.controller.savePostProcessing(
-            enabled: enabled != 0, modelIndex: Int(index), prompt: prompt, key: key
-        )
-        let saved = await holder.controller.postProcessingOptions()
-        do {
-            try WindowsNative.configurePostProcessing(saved, context: Unmanaged.passUnretained(holder).toOpaque())
-        } catch { WindowsNative.update(error.localizedDescription) }
-    }
-}
-
 private func secondaryWindowEvent(_ event: Int32, value: String, index: Int, holder: WindowsEventContext) {
+    if windowsHistoryManagementEvent(event, value: value, index: index, holder: holder) { return }
+    if (70...72).contains(event) {
+        return windowsVocabularyEvent(event, payload: value, kind: index, holder: holder)
+    }
     if (21...23).contains(event) { return hotKeyWindowEvent(event, value: value, index: index, holder: holder) }
     if event == 24 { return readAloudEvent(value, holder: holder) }
     if event == 25 { return automationEvent(requested: value == "1", holder: holder) }
@@ -230,22 +218,25 @@ private func otherWindowEvent(_ event: Int32, value: String, holder: WindowsEven
     case 17: holder.openProfiles()
     case 9: holder.selectHistory(value)
     case 10: Task { await controller.retryHistory(value) }
-    case 11:
-        // The dialog runs on the UI thread. Capture the record ID and displayed
-        // version and text before opening it. Its nested message loop may
-        // receive a replacement for the same record while the dialog is open.
-        let variant = WindowsNative.displayedTranscriptVariant() ?? .processed
-        do {
-            let text = try WindowsNative.displayedTranscript()
-            if let path = try WindowsNative.chooseExportPath(identifier: value) {
-                Task { await controller.exportHistory(text: text, variant: variant, path: path) }
-            }
-        } catch { WindowsNative.update(error.localizedDescription) }
+    case 11: exportHistoryWindowEvent(value, holder: holder)
     case 12: Task { await controller.openHistoryAudio(value) }
     case 14: Task { await controller.cancelTranscription() }
+    case 120: Task { await controller.handsFreeUserAbsent(value) }
     case 20: Task { await controller.refreshModels(force: true) }
     default: break
     }
+}
+
+private func exportHistoryWindowEvent(_ value: String, holder: WindowsEventContext) {
+    // Snapshot before the dialog's nested loop can replace the displayed record.
+    let controller = holder.controller
+    let variant = WindowsNative.displayedTranscriptVariant() ?? .processed
+    do {
+        let text = try WindowsNative.displayedTranscript()
+        if let path = try WindowsNative.chooseExportPath(identifier: value) {
+            Task { await controller.exportHistory(text: text, variant: variant, path: path) }
+        }
+    } catch { WindowsNative.update(error.localizedDescription) }
 }
 
 @main
@@ -253,32 +244,13 @@ enum SpeakWindowsMain {
     static func main() async {
         WindowsModels.configureForWindows()
         do {
-            if CommandLine.arguments.contains("--bundle-self-test") {
-                try await WindowsBundleSelfTest.run()
-                return
-            }
-            if try await WindowsLocalSelfTest.handle(CommandLine.arguments) { return }
-            if CommandLine.arguments.contains("--self-test") {
-                try WindowsNative.checked { jsti_native_self_test($0, $1) }
-                try WindowsNative.checked { jsti_text_output_self_test($0, $1) }
-                try WindowsNative.checked { jsti_clipboard_output_self_test($0, $1) }
-                try await WindowsTextOutputSelfTest.run()
-                try await WindowsHotKeySelfTest.run()
-                try await WindowsHistoryRetrySelfTest.run()
-                try await WindowsPostProcessingSelfTest.run()
-                try WindowsNative.storageMediaAndAutomationSelfTests()
-                try await WindowsLocalSelfTest.run()
-                guard !DesktopTranscription.batchModels.isEmpty else {
-                    throw WindowsNativeError(message: "No canonical desktop models available.")
-                }
-                print("Native Windows adapter and canonical model self-test passed.")
-                return
-            }
+            if try await WindowsCommandLineSelfTests.handle(CommandLine.arguments) { return }
             let screenshots = WindowsPresentation.screenshotDirectory(CommandLine.arguments)
             let smokeTest = CommandLine.arguments.contains("--ui-smoke-test") || screenshots != nil
             let directory: URL
             if smokeTest {
                 directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+                try WindowsNative.createSyntheticDirectory(directory)
             } else {
                 guard let local = ProcessInfo.processInfo.environment["LOCALAPPDATA"] else {
                     throw WindowsNativeError(message: "Windows did not provide the local app data directory.")
@@ -300,8 +272,7 @@ enum SpeakWindowsMain {
         }
     }
 
-    /// A hand-edited or corrupt shortcut falls back to the default rather than
-    /// none; the Read aloud voice resolves through the canonical catalogue.
+    /// Restores the shortcut fallback and canonical Read aloud voice before launch.
     private static func configureHotKey(_ holder: WindowsEventContext) async throws {
         var hotKey = await holder.controller.hotKeySettings()
         let context = Unmanaged.passUnretained(holder).toOpaque()
@@ -327,8 +298,7 @@ enum SpeakWindowsMain {
         }
     }
 
-    /// Hands every dialog its saved state and restores services before the
-    /// window opens.
+    /// Restores native dialog state and services before the window opens.
     private static func configureWindow(controller: WindowsAppController, holder: WindowsEventContext) async throws {
         let microphone = await controller.selectedMicrophone()
         let smokeTest = holder.smokeTest
@@ -343,6 +313,7 @@ enum SpeakWindowsMain {
         let textOutput = await controller.textOutputOptions()
         try WindowsNative.configureTextOutput(textOutput, context: Unmanaged.passUnretained(holder).toOpaque())
         try await configureHotKey(holder)
+        try await WindowsNative.configureConfiguration(holder)
         try await configureAzureResource(holder)
         await restoreServices(holder)
         try await configureModelPickers(controller, holder: holder)
@@ -351,6 +322,8 @@ enum SpeakWindowsMain {
     }
 
     private static func runWindow(controller: WindowsAppController, holder: WindowsEventContext) async throws {
+        let providerCallbacks = try WindowsNative.beginVoiceProviderCallbacks(holder)
+        defer { WindowsNative.endVoiceProviderCallbacks(providerCallbacks) }
         try await configureWindow(controller: controller, holder: holder)
         let strings = WindowsModels.all.map { Array($0.displayName.utf8CString) }
         let pointers = strings.map { chars -> UnsafeMutablePointer<CChar> in
@@ -366,7 +339,7 @@ enum SpeakWindowsMain {
             try names.withUnsafeBufferPointer { buffer in
                 try WindowsNative.checked { error, capacity in
                     jsti_window_run(
-                        buffer.baseAddress, buffer.count, Int32(selected), windowEvent,
+                        buffer.baseAddress, buffer.count, Int32(selected), comparisonWindowEvent,
                         Unmanaged.passUnretained(holder).toOpaque(), error, capacity
                     )
                 }
@@ -375,12 +348,14 @@ enum SpeakWindowsMain {
         let monitor = holder.microphoneMonitor
         await Task.detached { monitor?.stop() }.value
         holder.microphoneMonitor = nil
+        WindowsNative.endVoiceProviderCallbacks(providerCallbacks)
         await holder.finishSettings()
         // A drained Apply may have refreshed the dialog; never leave it holding
         // this context once the holder can be released.
         jsti_window_clear_text_output()
         jsti_window_clear_hotkey()
         jsti_window_clear_azure_resource()
+        jsti_window_clear_configuration()
         await releaseServices(holder)
         await WindowsAutomationSwitch.shutDown(holder)
         // Closing first cancels a shortcut's transcription instead of waiting

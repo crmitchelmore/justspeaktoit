@@ -28,6 +28,8 @@ import os.log
 /// `.cumulativeTranscript`: every `onTranscript` delivery restates the whole
 /// transcript so far, so finals replace rather than append.
 public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
+    // swiftlint:disable:previous type_body_length
+    // existing owned WebSocket lifecycle/state surface; no behavior change.
     public let finalShape: TranscriptFinalShape = .cumulativeTranscript
     public typealias ConnectionFactory = @Sendable (URLRequest) -> any StreamingWebSocketConnection
     public typealias Scheduler = @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void
@@ -45,6 +47,7 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
     private let apiKey: String
     private let model: String
     private let language: String?
+    private let keywords: [String]
     private let sampleRate: Int
     let makeConnection: ConnectionFactory
     private let schedule: Scheduler
@@ -80,6 +83,7 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
         model: String = "stt-rt-v5",
         language: String? = nil,
         sampleRate: Int = 16_000,
+        keywords: [String],
         makeConnection: @escaping ConnectionFactory,
         schedule: @escaping Scheduler = { seconds, action in
             DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
@@ -89,6 +93,32 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
         self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         self.model = model
         self.language = language
+        self.keywords = keywords
+        self.sampleRate = sampleRate
+        self.makeConnection = makeConnection
+        self.schedule = schedule
+        self.ownedSession = ownedSession
+        self.run = SonioxLiveRun(sampleRate: sampleRate)
+        self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
+        queue.setSpecific(key: queueKey, value: true)
+    }
+
+    /// Source-compatible overload preserved for callers predating keyword hints.
+    public init(
+        apiKey: String,
+        model: String = "stt-rt-v5",
+        language: String? = nil,
+        sampleRate: Int = 16_000,
+        makeConnection: @escaping ConnectionFactory,
+        schedule: @escaping Scheduler = { seconds, action in
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
+        },
+        ownedSession: URLSession? = nil
+    ) {
+        self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.model = model
+        self.language = language
+        self.keywords = []
         self.sampleRate = sampleRate
         self.makeConnection = makeConnection
         self.schedule = schedule
@@ -149,7 +179,7 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
             }
             guard sampleRate > 0 else { fail(SonioxStreamingError.invalidSampleRate(sampleRate), active); return }
             guard let config = Self.configJSON(
-                apiKey: apiKey, model: model, language: language, sampleRate: sampleRate
+                apiKey: apiKey, model: model, language: language, sampleRate: sampleRate, keywords: keywords
             ), let request = Self.webSocketRequest() else {
                 fail(StreamingClientError.invalidURL, active); return
             }
@@ -352,4 +382,8 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
 extension SonioxLiveClient {
     /// A finish drains every admitted frame before `finalize` and end-of-stream.
     public var finishFlushesBufferedAudio: Bool { true }
+}
+
+extension SonioxLiveClient: StreamingAudioReadyProviding {
+    public var isReadyForAudio: Bool { isConnected }
 }

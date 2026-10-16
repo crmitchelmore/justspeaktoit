@@ -5,7 +5,11 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - .gitattributes
       - Package.swift
+      - Resources/Desktop/**
+      - scripts/generate-desktop-icons.py
+      - scripts/tests/test_desktop_icons.py
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
       - Sources/SpeakDesktopHost/**
@@ -36,7 +40,11 @@ on:
   push:
     branches: [main]
     paths:
+      - .gitattributes
       - Package.swift
+      - Resources/Desktop/**
+      - scripts/generate-desktop-icons.py
+      - scripts/tests/test_desktop_icons.py
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
       - Sources/SpeakDesktopHost/**
@@ -324,6 +332,7 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/windows-bundle/test-bundle-environment.ps1
+          ./scripts/windows-bundle/test-bundle-cli.ps1
           $pins = Get-Content scripts/windows-local-runtime/dependencies.json -Raw | ConvertFrom-Json
           ./scripts/windows-bundle/verify-windows-bundle.ps1 -BundleDirectory bundle `
             -Workspace (Join-Path $env:RUNNER_TEMP 'bundle-run') -ExpectedCommit $env:GITHUB_SHA `
@@ -364,6 +373,7 @@ jobs:
           python -B -X warn_default_encoding -W error::EncodingWarning -m unittest discover -s scripts/windows-package -p 'test_*.py'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./scripts/windows-package/test-lifecycle-ownership.ps1
+          ./scripts/windows-package/test-pack-diagnostics.ps1
           foreach ($kind in 'base', 'upgrade') {
             $version = if ($kind -eq 'base') { $env:BASE_VERSION } else { $env:UPGRADE_VERSION }
             python -B scripts/windows-package/build-windows-package-layout.py --bundle bundle `
@@ -381,6 +391,16 @@ jobs:
               -Output (Join-Path $root "JustSpeakToIt-Developer_${version}_x64_unsigned.msix") `
               -ToolCache (Join-Path $env:RUNNER_TEMP 'packaging-tools')
           }
+      - name: Upload MakeAppx pack diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: windows-developer-msix-pack-diagnostics
+          path: |
+            ${{ runner.temp }}/package-base/*.pack.log
+            ${{ runner.temp }}/package-upgrade/*.pack.log
+          if-no-files-found: warn
+          retention-days: 14
       - name: Upload the unsigned developer package
         uses: actions/upload-artifact@v7.0.1
         with:
@@ -515,6 +535,15 @@ jobs:
             -Output (Join-Path $root "JustSpeakToIt-Developer_$($env:SIGNED_VERSION)_x64.msix") `
             -Layout (Join-Path $root 'layout') -Metadata (Join-Path $env:RUNNER_TEMP 'artifact-signing-metadata.json') `
             -ToolCache (Join-Path $env:RUNNER_TEMP 'packaging-tools')
+      - name: Upload signed-job MakeAppx pack diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-developer-msix-signed-pack-diagnostics
+          path: |
+            ${{ runner.temp }}/package-signed/*.pack.log
+          if-no-files-found: warn
+          retention-days: 14
       - name: Upload the signed developer package
         if: ${{ steps.config.outputs.enabled == 'true' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

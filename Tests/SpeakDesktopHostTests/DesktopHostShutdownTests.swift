@@ -2,7 +2,7 @@ import Foundation
 import XCTest
 import SpeakCore
 import SpeakDesktop
-import SpeakDesktopHost
+@testable import SpeakDesktopHost
 
 // Closing is bounded: a provider, recogniser or playback that ignores
 // cancellation cannot hold the window open, and whatever finishes afterwards
@@ -134,9 +134,9 @@ final class StubbornEffects: DesktopHostEffects, @unchecked Sendable {
             modelIdentifier: request.model, cost: nil, rawPayload: nil, debugInfo: nil
         )
     }
-    func perform(_ job: FakeJob, text: String) -> String {
+    func perform(_ job: FakeJob, text: String) -> DesktopTextOutputResult {
         lock.withLock { performed.append(text) }
-        return "Delivered."
+        return DesktopTextOutputResult(.confirmedInsertion, status: "Delivered.")
     }
     func writeSettings(_ data: Data, to url: URL) throws { try data.write(to: url, options: .atomic) }
 }
@@ -154,6 +154,14 @@ final class DesktopHostShutdownTests: XCTestCase {
     private var effects: StubbornEffects!
     private var controller: DesktopHostController<FakePlatform>!
     private var batchIndex = 0
+
+    func testUnclosedLocalCleanupIsReportedAsIncomplete() {
+        var report = DesktopHostShutdownReport()
+        XCTAssertTrue(report.isComplete)
+        report.localCleanupClosed = false
+        XCTAssertFalse(report.isComplete)
+        XCTAssertTrue(report.summary.contains("local cleanup still stopping"))
+    }
 
     override func setUp() async throws {
         FakeLog.shared.reset()

@@ -56,6 +56,7 @@ test-tooling: ## Run all Node, Ruby, Python and release-config tooling tests
 	python3 -B -m unittest discover -s scripts/windows-cross -p 'test_*.py' -v
 	python3 -B -m unittest discover -s scripts/windows-cloudkit -p 'test_*.py' -v
 	python3 -B -m unittest discover -s scripts/windows-package -p 'test_*.py' -v
+	python3 -B -m unittest discover -s scripts/migration -p 'test_*.py' -v
 	python3 scripts/generate-release-train-config.py --check
 
 .PHONY: release

@@ -51,6 +51,7 @@ $name = $base.name
 $dataDirectory = Join-Path $env:LOCALAPPDATA $settings.fileSystem.dataDirectoryName
 $packageDataDirectory = Join-Path $env:LOCALAPPDATA ('Packages\' + $base.packageFamilyName)
 $aliasPath = Join-Path $env:LOCALAPPDATA ('Microsoft\WindowsApps\' + $base.executionAlias)
+$cliAliasPath = Join-Path $env:LOCALAPPDATA ('Microsoft\WindowsApps\' + $base.cliExecutionAlias)
 $expectationsPath = Join-Path $workspace 'fixture-expectations.json'
 $childWorkspace = Join-Path $workspace 'refused-lifecycle'
 $childEvidencePath = Join-Path $childWorkspace 'evidence\package-lifecycle-evidence.json'
@@ -78,7 +79,8 @@ function Get-ObservedState {
         registrations = @(Get-AppxPackage -Name $name -AllUsers | ForEach-Object { $_.PackageFullName })
         packageData = Test-Path -LiteralPath $packageDataDirectory
         alias = Test-Path -LiteralPath $aliasPath
-        processes = @(Get-Process -Name SpeakWindows -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
+        cliAlias = Test-Path -LiteralPath $cliAliasPath
+        processes = @(Get-Process -Name SpeakWindows, speak -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
         publisherCertificates = @(Get-ChildItem Cert:\CurrentUser\My, Cert:\LocalMachine\TrustedPeople |
             Where-Object { $_.Subject -eq $base.publisher } | ForEach-Object { $_.PSPath } | Sort-Object)
     }
@@ -108,6 +110,7 @@ function Get-ExistingState($Process, [IntPtr] $Window) {
         transcript = $null
         data = Get-UserData $(if ($script:report.existing) { 'after' } else { 'before' })
         alias = Test-Path -LiteralPath $aliasPath
+        cliAlias = Test-Path -LiteralPath $cliAliasPath
         packageData = Test-Path -LiteralPath $packageDataDirectory
         publisherCertificates = (Get-ObservedState).publisherCertificates
     }
@@ -204,7 +207,8 @@ try {
     Add-Check 'The existing user data is unchanged' ($after.data.passed -and
         (($before.data.files | ConvertTo-Json -Compress) -eq ($after.data.files | ConvertTo-Json -Compress))) $after.data
     Add-Check 'The existing alias, package data and certificates are unchanged' (
-        $after.alias -eq $before.alias -and $after.packageData -eq $before.packageData -and
+        $after.alias -eq $before.alias -and $after.cliAlias -eq $before.cliAlias -and
+        $after.packageData -eq $before.packageData -and
         (@($after.publisherCertificates) -join ',') -eq (@($before.publisherCertificates) -join ',')) $after
 } catch {
     $failures.Add("$($_.Exception.Message) (line $($_.InvocationInfo.ScriptLineNumber))")

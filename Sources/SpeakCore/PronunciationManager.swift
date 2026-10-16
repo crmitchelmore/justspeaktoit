@@ -1,16 +1,5 @@
 import Foundation
 
-// MARK: - Phoneme Capability
-
-/// Describes a TTS provider's SSML phoneme support so pronunciation processing
-/// can stay platform- and provider-agnostic.
-public protocol PronunciationPhonemeCapable {
-    /// Whether this provider supports SSML phoneme tags.
-    var supportsSSMLPhonemes: Bool { get }
-    /// The phoneme alphabet to use for SSML tags.
-    var phonemeAlphabet: String { get }
-}
-
 /// Manages the pronunciation dictionary for TTS processing.
 /// Handles loading, saving, applying replacements, and import/export.
 @MainActor
@@ -35,19 +24,16 @@ public final class PronunciationManager: ObservableObject {
     // MARK: - Entry Management
 
     public func addEntry(_ entry: PronunciationEntry) {
-        // Check for duplicates
-        guard !entries.contains(where: { $0.word.lowercased() == entry.word.lowercased() }) else {
-            return
-        }
-        entries.append(entry)
+        let updated = PronunciationDictionary.adding(entry, to: entries)
+        guard updated.count != entries.count else { return }
+        entries = updated
         saveEntries()
     }
 
     public func updateEntry(_ entry: PronunciationEntry) {
-        if let index = entries.firstIndex(where: { $0.id == entry.id }) {
-            entries[index] = entry
-            saveEntries()
-        }
+        guard entries.contains(where: { $0.id == entry.id }) else { return }
+        entries = PronunciationDictionary.updating(entry, in: entries)
+        saveEntries()
     }
 
     public func deleteEntry(_ entry: PronunciationEntry) {
@@ -105,57 +91,9 @@ public final class PronunciationManager: ObservableObject {
     /// Generate SSML with phoneme tags for providers that support it.
     /// Uses IPA (International Phonetic Alphabet) when available.
     public func generateSSML(for text: String, provider: PronunciationPhonemeCapable) -> String {
-        guard provider.supportsSSMLPhonemes else {
-            // For providers without phoneme support, just use text replacement
-            return applyReplacements(to: text)
-        }
-
-        var result = text
-
-        for entry in entries {
-            let phonemeTag = buildPhonemeTag(
-                word: entry.word,
-                pronunciation: entry.pronunciation,
-                provider: provider
-            )
-
-            if entry.isRegex {
-                // For regex entries, we can't easily apply phoneme tags
-                // Fall back to simple replacement
-                if let replacement = entry.replacement {
-                    result = renderer.applyRegexReplacement(
-                        text: result,
-                        pattern: entry.word,
-                        replacement: replacement,
-                        caseSensitive: entry.caseSensitive
-                    )
-                }
-            } else {
-                result = renderer.applySimpleReplacement(
-                    text: result,
-                    word: entry.word,
-                    replacement: phonemeTag,
-                    caseSensitive: entry.caseSensitive
-                )
-            }
-        }
-
-        return result
-    }
-
-    private func buildPhonemeTag(
-        word: String,
-        pronunciation: String,
-        provider: PronunciationPhonemeCapable
-    ) -> String {
-        // Different providers use different phoneme alphabets
-        let alphabet = provider.phonemeAlphabet
-        let escapedPronunciation = pronunciation
-            .replacingOccurrences(of: "\"", with: "&quot;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
-
-        return "<phoneme alphabet=\"\(alphabet)\" ph=\"\(escapedPronunciation)\">\(word)</phoneme>"
+        guard provider.supportsSSMLPhonemes else { return applyReplacements(to: text) }
+        if VoiceSynthesisMarkup.containsAuthoredMarkup(in: text) { return text }
+        return renderer.generateSSML(for: text, entries: entries, provider: provider)
     }
 
     // MARK: - Category Filtering
@@ -197,16 +135,7 @@ public final class PronunciationManager: ObservableObject {
         let decoder = JSONDecoder()
         let importedEntries = try decoder.decode([PronunciationEntry].self, from: data)
 
-        if merge {
-            // Merge: add new entries, skip duplicates
-            for entry in importedEntries
-            where !entries.contains(where: { $0.word.lowercased() == entry.word.lowercased() }) {
-                entries.append(entry)
-            }
-        } else {
-            // Replace all entries
-            entries = importedEntries
-        }
+        entries = PronunciationDictionary.importing(importedEntries, into: entries, merge: merge)
 
         saveEntries()
     }

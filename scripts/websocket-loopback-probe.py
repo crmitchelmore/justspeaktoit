@@ -296,7 +296,8 @@ class ProbeHandler(socketserver.BaseRequestHandler):
         # credentials, arbitrary request headers or WebSocket keys enter logs,
         # and the query of a Gladia route (its session token) or a Rev.ai route
         # (its access token) is dropped.
-        logged_path = route if gladia or route == REVAI_ROUTE else path
+        additional_provider = headers.get("x-jsti-provider")
+        logged_path = route if gladia or route == REVAI_ROUTE or additional_provider else path
         log("handshake-request", method=method, path=logged_path, version=version,
             connection=headers.get("connection"), upgrade=headers.get("upgrade"),
             websocketVersion=headers.get("sec-websocket-version"),
@@ -317,7 +318,21 @@ class ProbeHandler(socketserver.BaseRequestHandler):
         if len(base64.b64decode(key, validate=True)) != 16:
             raise ValueError("invalid handshake key")
         scenario = None
-        if route == MISTRAL_PATH:
+        if additional_provider:
+            self.additional_provider = additional_provider
+            self.additional_scenario = headers.get("x-jsti-provider-scenario")
+            expected_paths = {
+                "gemini": "/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent",
+                "meta": "/v1/asr/realtime",
+                "modulate": "/api/velma-2-stt-streaming",
+                "grok": "/v1/realtime",
+            }
+            if route != expected_paths.get(additional_provider) or self.additional_scenario not in ("complete", "early"):
+                raise ValueError("unexpected additional provider route/scenario")
+            self.additional_query = urllib.parse.parse_qs(query)
+            self.additional_headers = headers
+            path = route
+        elif route == MISTRAL_PATH:
             self.mistral_scenario = self.verify_mistral_request(query, headers)
             path = route
         elif gladia:
@@ -498,10 +513,121 @@ class ProbeHandler(socketserver.BaseRequestHandler):
         self.send_frame(8, struct.pack("!H", 1000) + b"transcription-complete")
         log("mistral-done", scenario=scenario)
 
+    def run_additional_provider(self):
+        provider = self.additional_provider
+        query = self.additional_query
+        headers = self.additional_headers
+        key = "synthetic-loopback-key"
+        rate = 24000 if provider in ("meta", "grok") else 16000
+
+        def require(condition):
+            if not condition:
+                raise ValueError("additional provider protocol mismatch")
+
+        def read_json():
+            opcode, payload = self.read_message()
+            require(opcode == 1)
+            return json.loads(payload)
+
+        def send_json(event):
+            self.send_mistral(event, fragmented=True)
+
+        def final(text, identity):
+            if provider == "gemini":
+                return {"serverContent": {"inputTranscription": {"text": text}}}
+            if provider == "meta":
+                return {"type": "speechComplete", "turnId": identity, "transcript": text}
+            if provider == "modulate":
+                return {"type": "utterance", "utterance": {"utterance_uuid": str(identity), "text": text}}
+            return {"type": "conversation.item.input_audio_transcription.completed", "transcript": text}
+
+        if provider == "gemini":
+            require(query.get("key") == [key])
+            setup = read_json()["setup"]
+            require(setup["model"] == "models/gemini-3.5-transcribe-live")
+            require(setup["generationConfig"] == {"responseModalities": ["TEXT"]})
+            require(setup["inputAudioTranscription"]["mode"] == "VERBATIM")
+            require(setup["realtimeInputConfig"]["automaticActivityDetection"]["disabled"] is False)
+            ready = {"setupComplete": {}}
+        elif provider == "meta":
+            require(len(query.get("sessionId", [])) == 1 and bool(query["sessionId"][0]))
+            setup = read_json()
+            require(setup["authorization"]["accessToken"] == key)
+            require(setup["model"] == "muse-voice-transcribe-1.0")
+            require(setup["audioEncoding"] == "PCM_24KHZ" and setup["partialMode"] == "CUMULATIVE")
+            ready = {"sessionId": "synthetic"}
+        elif provider == "grok":
+            require(query.get("model") == ["grok-voice-think-fast-2.0"])
+            require(headers.get("authorization") == "Bearer " + key)
+            setup = read_json()
+            require(setup["type"] == "session.update")
+            session = setup["session"]
+            require(session["turn_detection"] is None and session["reasoning"] == {"effort": "none"})
+            require(session["audio"]["input"]["format"] == {"type": "audio/pcm", "rate": rate})
+            require(session["audio"]["input"]["transcription"]["model"] == "grok-transcribe")
+            ready = {"type": "session.updated"}
+        else:
+            require(query.get("api_key") == [key])
+            ready = None
+        if ready:
+            # A setup send completion is not permission to stream PCM.
+            require(not self.pending and not select.select([self.request], [], [], 0.05)[0])
+            send_json(ready)
+
+        for index in range(3):
+            opcode, payload = self.read_message()
+            expected = bytes((index * 31 + offset * 7) & 0xFF for offset in range(rate // 5))
+            if provider in ("meta", "modulate"):
+                require(opcode == 2)
+                if provider == "modulate" and index == 0:
+                    require(payload[:4] == b"RIFF" and payload[8:12] == b"WAVE" and len(payload) == len(expected) + 44)
+                    require(payload[12:16] == b"fmt " and payload[36:40] == b"data")
+                    require(struct.unpack("<HHI", payload[20:28]) == (1, 1, rate))
+                    require(struct.unpack("<IHH", payload[28:36]) == (rate * 2, 2, 16))
+                    payload = payload[44:]
+                require(payload == expected)
+            else:
+                require(opcode == 1)
+                event = json.loads(payload)
+                if provider == "gemini":
+                    audio = event["realtimeInput"]["audio"]
+                    require(audio["mimeType"] == "audio/pcm;rate=16000")
+                    encoded = audio["data"]
+                else:
+                    require(event["type"] == "input_audio_buffer.append")
+                    encoded = event["audio"]
+                require(base64.b64decode(encoded, validate=True) == expected)
+        send_json(final("Before.", 1))
+        opcode, payload = self.read_message()
+        require(opcode == 1)
+        if provider == "modulate":
+            require(payload == b"")
+        else:
+            end = json.loads(payload)
+            expected = {
+                "gemini": {"realtimeInput": {"audioStreamEnd": True}},
+                "meta": {"type": "endStream"},
+                "grok": {"type": "input_audio_buffer.commit"},
+            }[provider]
+            require(end == expected)
+        log("additional-provider-audio", provider=provider, scenario=self.additional_scenario,
+            frames=3, bytes=3 * rate // 5, endVerified=True)
+        if self.additional_scenario == "complete":
+            send_json(final("Tail.", 2))
+            if provider == "modulate":
+                send_json({"type": "done", "duration_ms": 300})
+        else:
+            self.send_frame(8, struct.pack("!H", 1000))
+        # In particular, a Grok caption must never be followed by response.create.
+        opcode, _ = self.read_message(close_ends=False)
+        require(opcode == 8)
+
     def run_connection(self):
         path, scenario = self.handshake()
         if path is None:
             return
+        if getattr(self, "additional_provider", None):
+            return self.run_additional_provider()
         if path == MISTRAL_PATH:
             return self.run_mistral(self.mistral_scenario)
         if path == CARTESIA_ROUTE:

@@ -39,18 +39,7 @@ final class LivePolishManager: ObservableObject {
   /// Callback when polish completes
   var onPolishComplete: ((String) -> Void)?
 
-  static let polishPrompt = """
-    You are a real-time transcription cleaner. You receive raw speech-to-text output.
-
-    YOUR TASK: Fix only obvious errors in spelling, punctuation, and capitalization.
-
-    RULES:
-    - Output ONLY the cleaned text, nothing else
-    - Preserve meaning exactly
-    - Keep it fast - minimal changes only
-    - Do not add or remove words
-    - Do not add commentary
-    """
+  static let polishPrompt = LivePolishPolicy.systemPrompt
 
   init(client: ChatLLMClient, settings: AppSettings) {
     self.client = client
@@ -142,12 +131,7 @@ final class LivePolishManager: ObservableObject {
 
   private func performPolish(stableContext: String, tailText: String) async throws -> String {
     // Build minimal prompt with context
-    var userMessage = ""
-    if !stableContext.isEmpty {
-      userMessage = "[Context: ...\(stableContext)]\n\nClean this text:\n\(tailText)"
-    } else {
-      userMessage = "Clean this text:\n\(tailText)"
-    }
+    let userMessage = LivePolishPolicy.userMessage(stableContext: stableContext, text: tailText)
 
     // Use fast model for polish
     let model = resolveModel()
@@ -165,16 +149,6 @@ final class LivePolishManager: ObservableObject {
 
   private func resolveModel() -> String {
     // Use fast polish model if set, otherwise fall back to post-processing model
-    let configured = settings.livePolishModel.trimmingCharacters(in: .whitespacesAndNewlines)
-    if !configured.isEmpty {
-      return configured
-    }
-
-    let postProcessing = settings.postProcessingModel.trimmingCharacters(in: .whitespacesAndNewlines)
-    if !postProcessing.isEmpty {
-      return postProcessing
-    }
-
-    return ModelCatalog.defaultFastTextModel
+    LivePolishPolicy.model(configured: settings.livePolishModel, postProcessing: settings.postProcessingModel)
   }
 }

@@ -8,19 +8,19 @@ import SpeakCore
 extension TTSProvider: PronunciationPhonemeCapable {
   /// Whether this provider supports SSML phoneme tags.
   var supportsSSMLPhonemes: Bool {
+    phonemeCapability.supportsSSMLPhonemes
+  }
+
+  private var phonemeCapability: PronunciationPhonemeCapability {
     switch self {
-    case .azure, .system: return true
+    case .azure, .system: return .ipa
     case .elevenlabs, .openai, .deepgram, .soniox, .cartesia, .openrouter,
-         .groq, .gemini, .mistral, .speechmatics, .xai: return false
+         .groq, .gemini, .mistral, .speechmatics, .xai: return .unsupported
     }
   }
 
   /// The phoneme alphabet to use for SSML tags.
   var phonemeAlphabet: String {
-    switch self {
-    case .azure: return "ipa"
-    case .system: return "ipa"
-    default: return "ipa"
-    }
+    phonemeCapability.phonemeAlphabet
   }
 }

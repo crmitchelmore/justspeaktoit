@@ -14,6 +14,7 @@ public struct MistralBatchClient: TranscriptionProvider {
 
   private let baseURL: URL
   private let session: URLSession
+  private let keywords: [String]
   private let multipartStaging: SharedMultipartUploadStaging
   private let durationResolver: @Sendable (URL) async -> TimeInterval
 
@@ -21,12 +22,27 @@ public struct MistralBatchClient: TranscriptionProvider {
     session: URLSession = .shared,
     baseURL: URL = URL(string: "https://api.mistral.ai/v1")!,
     multipartStaging: SharedMultipartUploadStaging,
+    keywords: [String],
     durationResolver: @escaping @Sendable (URL) async -> TimeInterval = { _ in 0 }
   ) {
     self.session = session
+    self.keywords = keywords
     self.baseURL = baseURL
     self.multipartStaging = multipartStaging
     self.durationResolver = durationResolver
+  }
+
+  /// Source-compatible overload preserved for callers predating keyword hints.
+  public init(
+    session: URLSession = .shared,
+    baseURL: URL = URL(string: "https://api.mistral.ai/v1")!,
+    multipartStaging: SharedMultipartUploadStaging,
+    durationResolver: @escaping @Sendable (URL) async -> TimeInterval = { _ in 0 }
+  ) {
+    self.init(
+      session: session, baseURL: baseURL, multipartStaging: multipartStaging,
+      keywords: [], durationResolver: durationResolver
+    )
   }
 
   public func transcribeFile(
@@ -55,7 +71,7 @@ public struct MistralBatchClient: TranscriptionProvider {
       staging: multipartStaging,
       boundary: boundary,
       model: modelName,
-      language: languageCode(from: language)
+      language: languageCode(from: language), keywords: keywords
     )
     defer { self.multipartStaging.removeUploadBodyFile(at: uploadBodyURL) }
 
@@ -90,6 +106,10 @@ public struct MistralBatchClient: TranscriptionProvider {
     ModelCatalog.batchTranscriptionOptions(forProvider: metadata.id)
   }
 
+  public static func supportsKeywords(model: String) -> Bool {
+    (model.split(separator: "/").last.map(String.init) ?? model) == "voxtral-mini-latest"
+  }
+
   private func modelID(from model: String) -> String {
     model.split(separator: "/").last.map(String.init) ?? model
   }
@@ -103,6 +123,30 @@ public struct MistralBatchClient: TranscriptionProvider {
     return String(code).lowercased()
   }
 
+  // existing owned multipart-upload surface; no behavior change.
+  // swiftlint:disable:next function_parameter_count
+  public nonisolated static func makeMultipartUploadBody(
+    sourceURL: URL,
+    staging: SharedMultipartUploadStaging,
+    boundary: String,
+    model: String,
+    language: String?,
+    keywords: [String]
+  ) throws -> URL {
+    var fields = [(name: "model", value: model)]
+    if let language { fields.append((name: "language", value: language)) }
+    if supportsKeywords(model: model) {
+      fields += TranscriptionKeywordPolicy.bounded(keywords, count: 100, length: 100)
+        .map { (name: "context_bias", value: $0) }
+    }
+    let mimeType = sourceURL.pathExtension.lowercased() == "m4a"
+      ? "audio/m4a" : BatchTranscriptionJob.mimeType(for: sourceURL) ?? "audio/m4a"
+    return try staging.writeMultipart(
+      sourceURL: sourceURL, providerID: "mistral", boundary: boundary, fields: fields, mimeType: mimeType
+    )
+  }
+
+  /// Source-compatible overload preserved for callers predating keyword hints.
   public nonisolated static func makeMultipartUploadBody(
     sourceURL: URL,
     staging: SharedMultipartUploadStaging,
@@ -110,12 +154,8 @@ public struct MistralBatchClient: TranscriptionProvider {
     model: String,
     language: String?
   ) throws -> URL {
-    var fields = [(name: "model", value: model)]
-    if let language { fields.append((name: "language", value: language)) }
-    let mimeType = sourceURL.pathExtension.lowercased() == "m4a"
-      ? "audio/m4a" : BatchTranscriptionJob.mimeType(for: sourceURL) ?? "audio/m4a"
-    return try staging.writeMultipart(
-      sourceURL: sourceURL, providerID: "mistral", boundary: boundary, fields: fields, mimeType: mimeType
+    try makeMultipartUploadBody(
+      sourceURL: sourceURL, staging: staging, boundary: boundary, model: model, language: language, keywords: []
     )
   }
 

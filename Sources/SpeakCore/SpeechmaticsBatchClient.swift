@@ -26,9 +26,13 @@ public struct SpeechmaticsBatchClient: Sendable {
     var pollInterval: TimeInterval = 2
     var timeout: TimeInterval = 900
     let baseURL: URL
+    private let keywords: [String]
 
-    public init(session: URLSession = .shared, baseURL: URL = SpeechmaticsBatchClient.defaultBaseURL) {
+    public init(
+        session: URLSession = .shared, baseURL: URL = SpeechmaticsBatchClient.defaultBaseURL, keywords: [String]
+    ) {
         self.baseURL = baseURL
+        self.keywords = keywords
         // The bearer key must not follow a redirect off the Speechmatics
         // origin; declining the hop delivers the 3xx, which `validate` rejects.
         let redirects = BatchTranscriptionJob.OriginBoundRedirects(origin: baseURL)
@@ -36,6 +40,13 @@ public struct SpeechmaticsBatchClient: Sendable {
             try await session.upload(for: request, fromFile: file, delegate: redirects)
         }
         self.send = { request in try await session.data(for: request, delegate: redirects) }
+    }
+
+    /// Source-compatible overload preserved for callers predating keyword hints.
+    public init(
+        session: URLSession = .shared, baseURL: URL = SpeechmaticsBatchClient.defaultBaseURL
+    ) {
+        self.init(session: session, baseURL: baseURL, keywords: [])
     }
 
     public func transcribeFile(
@@ -82,7 +93,9 @@ public struct SpeechmaticsBatchClient: Sendable {
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         let file = try BatchTranscriptionJob.writeMultipart(
-            fields: [(name: "config", value: try Self.configJSON(model: model, language: language))],
+            fields: [
+                (name: "config", value: try Self.configJSON(model: model, language: language, keywords: keywords))
+            ],
             file: .init(
                 field: "data_file", filename: "recording.\(url.pathExtension.lowercased())",
                 mimeType: mimeType, source: url),
@@ -161,14 +174,16 @@ public struct SpeechmaticsBatchClient: Sendable {
     /// `operating_point` selects the quality tier. Speechmatics documents
     /// `auto` as the language-identification value, which is what "Automatic"
     /// in the picker maps to.
-    static func configJSON(model: String, language: String?) throws -> String {
+    static func configJSON(model: String, language: String?, keywords: [String] = []) throws -> String {
         let tier = model == Self.standardCatalogID ? "standard" : "enhanced"
+        var transcription: [String: Any] = [
+            "language": BatchTranscriptionJob.languageCode(from: language) ?? "auto", "operating_point": tier
+        ]
+        let terms = TranscriptionKeywordPolicy.bounded(keywords, count: 100, length: 100)
+        if !terms.isEmpty { transcription["additional_vocab"] = terms.map { ["content": $0] } }
         let config: [String: Any] = [
             "type": "transcription",
-            "transcription_config": [
-                "language": BatchTranscriptionJob.languageCode(from: language) ?? "auto",
-                "operating_point": tier
-            ]
+            "transcription_config": transcription
         ]
         let data = try JSONSerialization.data(withJSONObject: config)
         guard let json = String(data: data, encoding: .utf8) else {

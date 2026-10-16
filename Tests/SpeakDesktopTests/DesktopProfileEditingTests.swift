@@ -5,6 +5,8 @@ import XCTest
 
 /// What the native desktop editor stores, preserves and refuses.
 final class DesktopProfileEditingTests: XCTestCase {
+    // swiftlint:disable:previous type_body_length
+    // existing owned test suite covering the full editor contract; no behavior change.
     private let catalogue = DesktopProfileEditing.Catalogue(capabilities: .shared)
     private let notepad = #"C:\Windows\System32\notepad.exe"#
     private let code = #"C:\Users\Alex\AppData\Local\Programs\Microsoft VS Code\Code.exe"#
@@ -46,7 +48,7 @@ final class DesktopProfileEditingTests: XCTestCase {
             matchers: [DictationProfileMatcher(kind: .urlPattern, value: "github.com")],
             transcriptionModelID: "local/whisperkit/tiny",
             polishEnabled: true,
-            polishModelID: "local/post-processing/rules",
+            polishModelID: "local/post-processing/downloaded",
             languageIdentifier: "xx_YY",
             transcriptionRouting: .localBatch
         )
@@ -96,8 +98,8 @@ final class DesktopProfileEditingTests: XCTestCase {
 
         XCTAssertEqual(saved.id, stored.id)
         XCTAssertEqual(saved.matchers, [
-            .bundleID("com.apple.mail"), .bundleID("com.microsoft.Outlook"), .windowsExecutablePath(notepad)
-        ], "macOS matchers survive; Windows matchers are regrouped after them")
+            .bundleID("com.apple.mail"), .windowsExecutablePath(notepad), .bundleID("com.microsoft.Outlook")
+        ], "An untouched draft leaves the stored matcher order exactly as it was")
         XCTAssertEqual(saved.transcriptionModelID, "local/whisperkit/tiny")
         XCTAssertEqual(saved.transcriptionRouting, .localBatch)
         XCTAssertEqual(saved.polishModelID, "local/post-processing/rules")
@@ -108,14 +110,35 @@ final class DesktopProfileEditingTests: XCTestCase {
         XCTAssertEqual(saved.languageIdentifier, "xx_YY")
         XCTAssertEqual(
             try DictationProfile.encodeList([saved]),
-            try DictationProfile.encodeList([stored.replacingWindowsExecutablePaths([notepad])])
+            try DictationProfile.encodeList([stored]),
+            "Nothing changed, so saving must reproduce the stored profile byte for byte"
         )
+    }
+
+    func testChangingTheWindowsExecutablePathRegroupsMatchersAfterOtherMatchers() {
+        let stored = DictationProfile(
+            name: "Imported",
+            matchers: [.bundleID("com.apple.mail"), .windowsExecutablePath(notepad),
+            .bundleID("com.microsoft.Outlook")],
+            transcriptionModelID: "local/whisperkit/tiny",
+            transcriptionRouting: .localBatch
+        )
+        var draft = DesktopProfileEditing.draft(for: stored, catalogue: catalogue)
+        XCTAssertEqual(draft.executablePaths, [notepad], "The draft starts from the stored Windows path")
+        draft.executablePaths = [code]
+
+        let saved = DesktopProfileEditing.profile(from: draft, original: stored, catalogue: catalogue)
+
+        XCTAssertEqual(saved.matchers, [
+            .bundleID("com.apple.mail"), .bundleID("com.microsoft.Outlook"), .windowsExecutablePath(code)
+        ], "A genuinely changed Windows path is regrouped after the other matchers it was edited alongside")
     }
 
     func testChangingAPreservedChoiceReplacesItWithTheCatalogueValue() {
         let stored = DictationProfile(
             name: "Imported", transcriptionModelID: "local/whisperkit/tiny", polishEnabled: true,
-            polishModelID: "local/post-processing/rules", languageIdentifier: "xx_YY", transcriptionRouting: .localBatch
+            polishModelID: "local/post-processing/downloaded", languageIdentifier: "xx_YY",
+            transcriptionRouting: .localBatch
         )
         var draft = DesktopProfileEditing.draft(for: stored, catalogue: catalogue)
         draft.transcription = .live(index: 0)
@@ -203,9 +226,25 @@ final class DesktopProfileEditingTests: XCTestCase {
         XCTAssertEqual(merged.map(\.name), ["Second renamed", "Added", "First"])
         XCTAssertEqual(merged[0].id, second.id)
         XCTAssertEqual(merged[2].id, first.id)
-        XCTAssertEqual(merged[2].matchers, [.bundleID("a.b.c"), .windowsExecutablePath(notepad)])
+        XCTAssertEqual(
+            merged[2].matchers, [.windowsExecutablePath(notepad), .bundleID("a.b.c")],
+            "The untouched row for First keeps its stored matcher order exactly as it was"
+        )
         XCTAssertFalse(merged.contains { $0.id == third.id }, "A profile absent from the rows is removed")
         XCTAssertEqual(merged[1].windowsExecutablePaths, [#"D:\Tools\tool.exe"#])
+    }
+
+    func testMergeRegroupsMatchersOnlyForRowsWhoseWindowsPathActuallyChanged() throws {
+        let first = DictationProfile(name: "First", matchers: [.windowsExecutablePath(notepad), .bundleID("a.b.c")])
+        var editedFirst = DesktopProfileEditing.draft(for: first, catalogue: catalogue)
+        editedFirst.executablePaths = [code]
+
+        let merged = try DesktopProfileEditing.merge([editedFirst], into: [first], catalogue: catalogue).get()
+
+        XCTAssertEqual(
+            merged[0].matchers, [.bundleID("a.b.c"), .windowsExecutablePath(code)],
+            "A row whose Windows path was actually edited is regrouped after its other matchers"
+        )
     }
 
     func testMergeRejectsNewIssuesButToleratesPreExistingImportedOnes() {

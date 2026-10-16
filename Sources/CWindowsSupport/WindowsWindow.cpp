@@ -5,30 +5,39 @@
 #include <cstdio>
 #include <objbase.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <dwmapi.h>
 #include <uxtheme.h>
 #include <mutex>
+#include <limits>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <atomic>
+#include <wtsapi32.h>
 
 #include "WindowsHUD.hpp"
 #include "WindowsTray.hpp"
 #include "WindowsLoginItem.hpp"
 #include "WindowsWindowChrome.hpp"
+#include "WindowsHistoryFilters.hpp"
+#include "WindowsAppIcon.hpp"
 
 bool jsti_postprocessing_available();
 void jsti_show_postprocessing(HWND owner);
 bool jsti_settings_self_test(HWND owner, std::string &error);
 bool jsti_profiles_self_test(HWND owner, std::string &error);
 void jsti_show_profiles(HWND owner);
+void jsti_show_comparison(HWND owner, JSTIWindowCallback callback, void *context);
+bool jsti_comparison_self_test(HWND owner, std::string &error, const std::string &directory = {});
 void jsti_cancel_profiles_request();
 bool jsti_text_output_available();
 void jsti_show_text_output(HWND owner);
 bool jsti_text_output_settings_self_test(HWND owner, int button, void (*setRecording)(HWND, int),
                                          bool (*recordingBlocked)(HWND, void *), void *context, std::string &error);
 bool jsti_hotkey_available();
+bool jsti_hotkey_reserves_sidebar_digit(int digit);
 std::wstring jsti_hotkey_label();
 bool jsti_hotkey_start(HWND window, std::string &failure);
 void jsti_hotkey_stop(HWND window);
@@ -38,9 +47,17 @@ bool jsti_hotkey_self_test(HWND owner, int (*observe)(void *), void *context, st
 bool jsti_voice_output_available();
 void jsti_show_voice_settings(HWND owner);
 bool jsti_voice_settings_self_test(HWND owner, std::string &error);
+void jsti_show_voice_sources(HWND owner, const char *record, const char *history);
+bool jsti_voice_sources_self_test(HWND owner, std::string &error);
+void jsti_voice_sources_stop();
+bool jsti_voice_credentials_available();
+void jsti_show_voice_credentials(HWND owner);
+bool jsti_voice_credentials_self_test(HWND owner, std::string &error);
 bool jsti_azure_resource_available();
+void jsti_show_configuration(HWND owner, const wchar_t *group);
 void jsti_show_azure_resource_settings(HWND owner);
 bool jsti_azure_resource_settings_self_test(HWND owner, std::string &error);
+bool jsti_configuration_self_test(HWND owner, std::string &error);
 bool jsti_local_models_available();
 std::wstring jsti_local_models_summary();
 void jsti_show_local_models(HWND owner);
@@ -49,10 +66,70 @@ bool jsti_cloud_sync_available();
 void jsti_show_cloud_sync_settings(HWND owner);
 bool jsti_cloud_sync_settings_self_test(HWND owner, std::string &error);
 int jsti_window_recording_state();
+void jsti_show_vocabulary(HWND owner, int kind, void (*emit)(int, const char *, int));
+void jsti_show_vocabulary_result(HWND owner, const char *record, void (*emit)(int, const char *, int));
+bool jsti_vocabulary_self_test(HWND owner, std::string &error);
+
+int jsti_owned_window_save_snapshot(HWND window, const char *path, char *error, size_t errorCapacity);
 
 namespace {
+HMODULE handsFreeWts = nullptr;
+using HandsFreeRegister = BOOL (WINAPI *)(HWND, DWORD);
+using HandsFreeUnregister = BOOL (WINAPI *)(HWND);
+HandsFreeUnregister handsFreeUnregister = nullptr;
+std::atomic<bool> handsFreeGuardRegistered{false};
+std::atomic<unsigned> handsFreeAbsence{0};
+
+void startHandsFreeGuard(HWND window) {
+    handsFreeAbsence = 0;
+    handsFreeWts = LoadLibraryExW(L"Wtsapi32.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (!handsFreeWts) {
+        std::fprintf(stderr, "Hands-free unavailable: native session monitoring could not load.\n");
+        return;
+    }
+    auto subscribe = reinterpret_cast<HandsFreeRegister>(GetProcAddress(handsFreeWts, "WTSRegisterSessionNotification"));
+    handsFreeUnregister = reinterpret_cast<HandsFreeUnregister>(GetProcAddress(handsFreeWts, "WTSUnRegisterSessionNotification"));
+    handsFreeGuardRegistered = subscribe && handsFreeUnregister && subscribe(window, NOTIFY_FOR_THIS_SESSION);
+    if (handsFreeGuardRegistered) {
+        using Query = BOOL (WINAPI *)(HANDLE, DWORD, WTS_INFO_CLASS, LPWSTR *, DWORD *);
+        using Release = void (WINAPI *)(PVOID);
+        auto query = reinterpret_cast<Query>(GetProcAddress(handsFreeWts, "WTSQuerySessionInformationW"));
+        auto release = reinterpret_cast<Release>(GetProcAddress(handsFreeWts, "WTSFreeMemory"));
+        LPWSTR buffer = nullptr;
+        DWORD bytes = 0;
+        bool known = query && release &&
+            query(WTS_CURRENT_SERVER_HANDLE, WTS_CURRENT_SESSION, WTSConnectState, &buffer, &bytes);
+        if (known && buffer && bytes >= sizeof(WTS_CONNECTSTATE_CLASS)) {
+            if (*reinterpret_cast<WTS_CONNECTSTATE_CLASS *>(buffer) != WTSActive) handsFreeAbsence.fetch_or(4u);
+        } else known = false;
+        if (buffer && release) release(buffer);
+        HDESK desktop = OpenInputDesktop(0, FALSE, DESKTOP_READOBJECTS);
+        if (desktop) {
+            wchar_t name[128]{};
+            DWORD length = 0;
+            known = known && GetUserObjectInformationW(desktop, UOI_NAME, name, sizeof(name), &length);
+            if (known && wcscmp(name, L"Default") != 0) handsFreeAbsence.fetch_or(1u);
+            CloseDesktop(desktop);
+        } else known = false;
+        if (!known) {
+            handsFreeUnregister(window);
+            handsFreeGuardRegistered = false;
+        }
+    }
+    if (!handsFreeGuardRegistered)
+        std::fprintf(stderr, "Hands-free unavailable: session notification registration failed. Manual recording is unaffected.\n");
+}
+
+void stopHandsFreeGuard(HWND window) {
+    if (handsFreeGuardRegistered && handsFreeUnregister) handsFreeUnregister(window);
+    handsFreeGuardRegistered = false;
+    handsFreeUnregister = nullptr;
+    if (handsFreeWts) { FreeLibrary(handsFreeWts); handsFreeWts = nullptr; }
+}
+
 constexpr UINT updateMessage = WM_APP + 1;
 constexpr UINT profilesMessage = WM_APP + 17;
+constexpr UINT audioCleanupMessage = WM_APP + 23;
 constexpr int hotkeyID = 1;
 constexpr int modelRefreshID = 140;
 constexpr int modelStatusID = 141;
@@ -77,31 +154,44 @@ constexpr int transcriptLabelID = 92;
 // Read aloud emits an event; Voice… opens the native Voice output dialog.
 constexpr int readAloudID = 172;
 constexpr int voiceSettingsID = 173;
+constexpr int correctionsID = 180, pronunciationID = 181;
+constexpr int historyCorrectionsID = 182;
+constexpr int voiceSourcesID = 184;
+constexpr int voiceCredentialID = 185;
 // The Source picker (Remote/Local) and the Local models dialog button, which
 // takes the place of Refresh models while the Local source is selected.
 constexpr int sourceLabelID = 89;
 constexpr int localModelsID = 174;
+constexpr int historyFiltersID = 460;
+constexpr int historyDeleteID = 461, historyClearID = 462;
+constexpr int recordingsFolderLabelID = 463, recordingsFolderID = 464;
+constexpr int audioCleanupID = 465;
+constexpr int backupAudioID = 466, backupExportID = 467;
+constexpr int backupInspectID = 468;
 constexpr int sourceID = 175;
+constexpr int comparisonID = 183;
 // Model modes: bit 0 is live, bit 1 is local (on-device).
 constexpr int modeCount = 4;
 constexpr int playbackIdle = 0, playbackPreparing = 1, playbackPlaying = 2, playbackPaused = 3;
 const wchar_t *const playbackIdleText = L"00:00.00 / --:--";
 // Pages, in sidebar order, as on the Mac: Speak, then Settings.
 enum Page { dashboardPage, historyPage, voicePage, generalPage, transcriptionPage, postProcessingPage,
-            profilesPage, keyboardPage, cloudSyncPage, aboutPage, pageCount };
+            correctionsPage, pronunciationPage, profilesPage, keyboardPage, cloudSyncPage, aboutPage, pageCount };
 struct PageInfo { const wchar_t *title; const wchar_t *subtitle; wchar_t glyph; const char *name; };
 const PageInfo pageInfo[pageCount] = {
     {L"Dashboard", L"Ready to capture ideas instantly. Check your setup, follow your usage, and pick up your latest "
                    L"session.", 0xE80F, "dashboard"},
     {L"History", L"Search, replay and reuse past recordings and their transcripts.", 0xE81C, "history"},
-    {L"Voice Output", L"Hear any History transcript read back in a Deepgram Aura voice, through your own Deepgram "
-                      L"key.", 0xE767, "voice-output"},
+    {L"Voice Output", L"Read History, typed text, clipboard snapshots or imported text with your selected voice. "
+                      L"Export lossless WAV audio.", 0xE767, "voice-output"},
     {L"General", L"Choose the microphone, where finished text goes, whether the app starts at login, and how it "
                  L"looks.", 0xE713, "general"},
     {L"Transcription", L"Pick the speech model for new recordings, on this PC or with your own provider key.", 0xE720,
      "transcription"},
     {L"Post-processing", L"Optionally polish transcripts with an OpenRouter model. The original is always kept.", 0xE734,
      "post-processing"},
+    {L"Corrections", L"Your preferred spellings, applied before optional post-processing.", 0xE8D2, "corrections"},
+    {L"Pronunciation", L"Your dictionary for Read aloud. Entries stay on this device.", 0xE82D, "pronunciation"},
     {L"Profiles", L"Give specific apps their own model, language and clean-up prompt.", 0xE77B, "profiles"},
     {L"Keyboard", L"Start and stop dictation from anywhere with a global shortcut.", 0xE765, "keyboard"},
     {L"iCloud Sync", L"Keep History in step with your Mac, through your own iCloud account.", 0xE753, "icloud-sync"},
@@ -117,9 +207,91 @@ constexpr int setupMicrophoneID = 431, setupModelID = 432, setupShortcutID = 433
 // Settings that were menu commands: the automation switch emits
 // AUTOMATION_TOGGLED; the others open the same dialogs as before.
 constexpr int appearanceLabelID = 440, appearanceID = 441, automationID = 442, azureID = 443, cloudSyncID = 444,
-    shortcutValueID = 445, githubID = 446, issueID = 447, privacyID = 448, loginItemID = 449;
+    shortcutValueID = 445, githubID = 446, issueID = 447, privacyID = 448, loginItemID = 449,
+    configurationID = 450;
 constexpr UINT tourMessage = WM_APP + 18, appearanceMessage = WM_APP + 19, pageMessage = WM_APP + 20;
 constexpr UINT hudMessage = WM_APP + 21;
+constexpr UINT sidebarMessage = WM_APP + 30;
+constexpr UINT densityMessage = WM_APP + 31;
+struct SidebarBindings {
+    int digits[pageCount];
+    std::wstring hints[pageCount];
+    bool showHints = false;
+    SidebarBindings() { std::fill(std::begin(digits), std::end(digits), -1); }
+};
+
+// Delivery is protected by WindowState::mutex; applied bindings remain UI-thread-only.
+template<typename Payload, UINT Message>
+struct WindowDelivery {
+    std::unique_ptr<Payload> initial;
+    std::unordered_map<UINT_PTR, std::unique_ptr<Payload>> posted;
+    UINT_PTR sequence = 0;
+
+    int stage(HWND window, std::unique_ptr<Payload> update) {
+        if (!window) {
+            initial = std::move(update);
+            return 0;
+        }
+        if (sequence == std::numeric_limits<UINT_PTR>::max()) return -1;
+        const UINT_PTR token = ++sequence;
+        posted.emplace(token, std::move(update));
+        if (PostMessageW(window, Message, token, 0)) return 0;
+        posted.erase(token);
+        return -1;
+    }
+
+    std::unique_ptr<Payload> claimInitial() { return std::move(initial); }
+
+    std::unique_ptr<Payload> claim(UINT_PTR token) {
+        const auto found = posted.find(token);
+        if (found == posted.end()) return {};
+        auto update = std::move(found->second);
+        posted.erase(found);
+        return update;
+    }
+
+    void retire() { posted.clear(); }
+};
+
+using SidebarDelivery = WindowDelivery<SidebarBindings, sidebarMessage>;
+using DensityDelivery = WindowDelivery<JSTIVisualDensity, densityMessage>;
+
+int configureVisualDensity(DensityDelivery &delivery, HWND window, JSTIVisualDensity density) {
+    if ((density.compact != 0 && density.compact != 1) ||
+        density.minimum_row_height < 30 || density.minimum_row_height > 64) return -1;
+    const int spacing[] = {density.page_padding, density.section_spacing, density.card_padding,
+        density.content_spacing, density.inline_spacing, density.group_spacing};
+    for (int value : spacing) if (value < 0 || value > 128) return -1;
+    return delivery.stage(window, std::make_unique<JSTIVisualDensity>(density));
+}
+
+int configureSidebarShortcuts(SidebarDelivery &delivery, HWND window,
+                             const JSTISidebarShortcut *bindings, size_t count, int showHints) {
+    if (!bindings || count > 10 || (showHints != 0 && showHints != 1)) return -1;
+    auto update = std::make_unique<SidebarBindings>();
+    bool used[10]{};
+    for (size_t index = 0; index < count; ++index) {
+        const auto &binding = bindings[index];
+        std::wstring hint;
+        if (!binding.destination || binding.digit < 0 || binding.digit > 9 || used[binding.digit] ||
+            !binding.hint || !jsti::wide(binding.hint, hint) ||
+            hint != L"Ctrl+" + std::to_wstring(binding.digit)) return -1;
+        used[binding.digit] = true;
+        bool matched = false;
+        for (int page = 0; page < pageCount; ++page) {
+            if (std::strcmp(pageInfo[page].name, binding.destination) != 0) continue;
+            if (update->digits[page] != -1) return -1;
+            update->digits[page] = binding.digit;
+            update->hints[page] = hint;
+            matched = true;
+            break;
+        }
+        if (!matched) return -1;
+    }
+    update->showHints = showHints != 0;
+    return delivery.stage(window, std::move(update));
+}
+
 constexpr UINT_PTR tourTimerID = 90;
 // How each owner-drawn control is drawn.
 enum class Role { label, caption, status, detail, chipValue, statValue, tileValue, value, button, primary, record,
@@ -155,6 +327,8 @@ struct WindowState {
     // decides the switch.
     std::wstring loginItemNote;
     bool posted = false;
+    SidebarDelivery sidebarDelivery;
+    DensityDelivery densityDelivery;
     bool statusChanged = false;
     bool transcriptChanged = false;
     bool historyChanged = false;
@@ -189,6 +363,10 @@ struct WindowState {
     std::vector<HistoryRow> pendingHistory;
     std::string pendingHistorySelection;
     std::string selectedHistoryID;
+    std::string allHistoryIDs;
+    std::string audioCleanupToken;
+    std::wstring migrationReport;
+    size_t audioCleanupCount = 0;
     JSTIWindowCallback callback = nullptr;
     void *context = nullptr;
     HFONT font = nullptr;
@@ -210,6 +388,7 @@ struct WindowState {
     std::wstring remoteModelStatus;
     // Pages and presentation (UI thread).
     int page = dashboardPage;
+    SidebarBindings sidebar;
     std::unordered_map<int, bool> wanted;
     std::wstring headerSubtitle;
     int displayedRecording = 0;
@@ -221,6 +400,11 @@ struct WindowState {
     std::wstring tourDirectory;
     int tourStep = -1;
 } state;
+
+std::string historyManagementIDs() {
+    std::lock_guard<std::mutex> lock(state.mutex);
+    return state.allHistoryIDs;
+}
 
 int selection(HWND window) {
     const LRESULT index = SendDlgItemMessageW(window, modelID, CB_GETCURSEL, 0, 0);
@@ -436,7 +620,7 @@ void updatePlaybackControls(HWND window, bool selected, int recording) {
     SetDlgItemTextW(window, playPauseID,
         state.displayedPlayback == playbackPreparing || state.displayedPlayback == playbackPlaying ? L"Pause" : L"Play");
     EnableWindow(GetDlgItem(window, playPauseID), (selected && recording == 0) || active);
-    EnableWindow(GetDlgItem(window, stopPlaybackID), active);
+    EnableWindow(GetDlgItem(window, stopPlaybackID), active || (state.page == voicePage && recording == 0));
 }
 
 // The playback display never infers progress: it shows only what the host
@@ -450,21 +634,33 @@ void applyPlayback(HWND window, int playback, const std::wstring &text, bool sel
 void updateHistoryControls(HWND window, int recording) {
     const LRESULT index = SendDlgItemMessageW(window, historyID, LB_GETCURSEL, 0, 0);
     const bool selected = index != LB_ERR && static_cast<size_t>(index) < state.displayedHistory.size();
-    const bool filtering = searching(window);
+    const bool filtering = searching(window) || jsti_history_filters_active();
     if (!selected && state.displayedPlayback != playbackIdle) applyPlayback(window, playbackIdle, L"", false, recording);
     else updatePlaybackControls(window, selected, recording);
     SetDlgItemTextW(window, historyDetailID, selected ? state.displayedHistory[static_cast<size_t>(index)].detail.c_str()
         : (state.displayedHistory.empty()
-            ? (filtering ? L"No saved recordings match this search." : L"Your saved recordings will appear here.")
+            ? (filtering ? L"No saved recordings match this search or filter." : L"Your saved recordings will appear here.")
             : L"Select a saved recording."));
     EnableWindow(GetDlgItem(window, historyID), recording == 0);
     EnableWindow(GetDlgItem(window, searchID), recording == 0);
-    EnableWindow(GetDlgItem(window, clearSearchID), recording == 0 && filtering);
+    EnableWindow(GetDlgItem(window, historyFiltersID), recording == 0);
+    EnableWindow(GetDlgItem(window, historyDeleteID), recording == 0 && selected);
+    EnableWindow(GetDlgItem(window, historyClearID), recording == 0 && !historyManagementIDs().empty());
+    EnableWindow(GetDlgItem(window, audioCleanupID), recording == 0);
+    EnableWindow(GetDlgItem(window, backupAudioID), recording == 0);
+    EnableWindow(GetDlgItem(window, backupExportID), recording == 0);
+    EnableWindow(GetDlgItem(window, backupInspectID), recording == 0);
+    jsti_history_filters_enabled(recording == 0);
+    SetDlgItemTextW(window, historyFiltersID, jsti_history_filters_label().c_str());
+    EnableWindow(GetDlgItem(window, clearSearchID), recording == 0 && searching(window));
     for (int id : {retryID, openAudioID}) EnableWindow(GetDlgItem(window, id), selected && recording == 0);
+    EnableWindow(GetDlgItem(window, historyCorrectionsID), selected && recording == 0 && state.historyPresentationReady);
     EnableWindow(GetDlgItem(window, exportID), selected && recording == 0 && state.historyPresentationReady);
     EnableWindow(GetDlgItem(window, readAloudID), selected && recording == 0 && state.historyPresentationReady &&
         jsti_voice_output_available());
     EnableWindow(GetDlgItem(window, voiceSettingsID), recording == 0 && jsti_voice_output_available());
+    EnableWindow(GetDlgItem(window, voiceSourcesID), recording == 0 && jsti_voice_output_available());
+    EnableWindow(GetDlgItem(window, voiceCredentialID), recording == 0 && jsti_voice_credentials_available());
     EnableWindow(GetDlgItem(window, copyID), state.historyPresentationReady && (!selected || recording == 0));
     if (!selected) applyVariant(window, -1, false, recording);
     else EnableWindow(GetDlgItem(window, variantID), state.variantSwitchable && recording == 0);
@@ -537,18 +733,25 @@ unsigned pagesOf(int identifier) {
     case insightSessionsID: case insightTimeID: case insightAverageID: case insightSpendID:
     case setupMicrophoneID: case setupModelID: case setupShortcutID: case setupOutputID:
         return page(dashboardPage);
-    case searchLabelID: case searchID: case clearSearchID: case 93: case historyID: case historyDetailID:
+    case searchLabelID: case searchID: case clearSearchID: case historyFiltersID:
+    case historyDeleteID: case historyClearID: case 93: case historyID: case historyDetailID:
     case variantLabelID: case variantID: case retryID: case exportID: case openAudioID: case playbackLabelID:
     case playbackTimeID: case playPauseID: case historySessionsID: case historyErrorsID: case historyAverageID:
-    case historySpendID:
+    case historySpendID: case historyCorrectionsID:
         return page(historyPage);
     case readAloudID: case stopPlaybackID: return page(historyPage) | page(voicePage);
-    case voiceSettingsID: return page(voicePage);
+    case voiceSettingsID: case voiceSourcesID: case voiceCredentialID: return page(voicePage);
+    case configurationID:
+        return page(generalPage) | page(transcriptionPage) | page(postProcessingPage) | page(keyboardPage);
     case 94: case microphoneID: case textOutputID: case appearanceLabelID: case appearanceID: case automationID:
-    case loginItemID:
+    case loginItemID: case recordingsFolderLabelID: case recordingsFolderID: case audioCleanupID:
+    case backupAudioID: case backupExportID: case backupInspectID:
         return page(generalPage);
     case processingID: return page(postProcessingPage);
     case profilesID: return page(profilesPage);
+    case correctionsID: return page(correctionsPage);
+    case pronunciationID: return page(pronunciationPage);
+    case comparisonID: return page(transcriptionPage);
     case shortcutValueID: case shortcutID: return page(keyboardPage);
     case cloudSyncID: return page(cloudSyncPage);
     case githubID: case issueID: case privacyID: return page(aboutPage);
@@ -613,6 +816,16 @@ struct Frame {
     std::vector<Paragraph> paragraphs;
 } frame;
 
+JSTIVisualDensity visualDensity{};
+
+int densitySpace(HWND window, int normal, int compact) {
+    return scale(window, visualDensity.compact ? compact : normal);
+}
+
+int cardHeaderHeight(HWND window) {
+    return densitySpace(window, 66, 36 + 2 * visualDensity.card_padding);
+}
+
 RECT box(int x, int y, int width, int height) { return RECT{x, y, x + width, y + height}; }
 int widthOf(const RECT &rect) { return rect.right - rect.left; }
 int heightOf(const RECT &rect) { return rect.bottom - rect.top; }
@@ -672,8 +885,9 @@ Card &addCard(RECT rect, wchar_t glyph, const std::wstring &title) {
 
 // The card's content area below its title row.
 RECT cardBody(HWND window, const RECT &card) {
-    return RECT{card.left + scale(window, 22), card.top + scale(window, 66), card.right - scale(window, 22),
-                card.bottom - scale(window, 20)};
+    const int inset = densitySpace(window, 22, visualDensity.card_padding);
+    return RECT{card.left + inset, card.top + cardHeaderHeight(window), card.right - inset,
+                card.bottom - densitySpace(window, 20, visualDensity.card_padding)};
 }
 
 // Sets a control's text only when it changes, so layout never repaints needlessly.
@@ -684,7 +898,7 @@ void setLabel(HWND window, int identifier, const wchar_t *text) {
 }
 
 void layoutDashboard(HWND window, const RECT &content) {
-    const int gap = scale(window, 18);
+    const int gap = densitySpace(window, 18, visualDensity.section_spacing);
     const int heroBottom = layoutHero(window, content, scale(window, 200), jsti::chrome::Gradient::brand);
     place(window, recordID, box(frame.hero.right - scale(window, 26) - scale(window, 196), frame.hero.top + scale(window, 26),
                                 scale(window, 196), scale(window, 50)));
@@ -731,37 +945,105 @@ void layoutDashboard(HWND window, const RECT &content) {
 }
 
 void layoutHistory(HWND window, const RECT &content) {
-    const int gap = scale(window, 18), row = scale(window, 34);
+    const int gap = densitySpace(window, 18, visualDensity.section_spacing), row = scale(window, 34);
     const int heroBottom = layoutHero(window, content, scale(window, 168), jsti::chrome::Gradient::brand);
     place(window, importID, box(frame.hero.right - scale(window, 26) - scale(window, 124), frame.hero.top + scale(window, 24),
                                 scale(window, 124), row));
+    place(window, historyClearID, box(frame.hero.right - scale(window, 294), frame.hero.top + scale(window, 24),
+                                     scale(window, 136), row));
     layoutChips(window, {{historySessionsID, L"Sessions"}, {historyErrorsID, L"Errors"},
                          {historyAverageID, L"Average Length"}, {historySpendID, L"Spend"}});
-    const int searchTop = heroBottom + scale(window, 14);
+
+    // The detail card stacks a header row, a variant picker, the transcript and four
+    // rows of action buttons, with the search row above it all. At the window's
+    // minimum size there used to be no slack left for any of that, which collapsed
+    // the transcript to zero height (#1218). Every row and every painted region
+    // keeps its full, non-overlapping size always; only pure whitespace -- between
+    // the search row and its neighbours, and inside the detail card -- compresses,
+    // and only by as much as is needed to guarantee a readable (three-line)
+    // transcript, so normal and larger windows render exactly as before -- this
+    // only engages once the card is genuinely too short. Both the search-row gaps
+    // and the detail card's internal gaps share one global shrink factor, derived
+    // below from the two end states (everything full-size vs. everything at its
+    // floor), so the result stays a simple linear interpolation with no circular
+    // dependency even though squeezing the search-row gaps also changes how much
+    // vertical space the detail card itself gets.
+    struct Gap { int full, floor; };
+    const Gap beforeSearch{scale(window, 14), scale(window, 4)};
+    const Gap afterSearch{scale(window, 14), scale(window, 4)};
+    // The card's painted title/icon tile occupies its top scale(18)..scale(54);
+    // beforeHeader must never shrink below that or historyDetailID paints over it,
+    // so it keeps its full spacing and contributes nothing to the squeeze budget.
+    const Gap beforeHeader{scale(window, 58), scale(window, 58)};
+    const Gap afterHeader{scale(window, 40), row + scale(window, 2)};
+    const Gap afterVariant{row + scale(window, 10), row + scale(window, 4)};
+    const Gap beforeActions{scale(window, 10), scale(window, 3)};
+    const Gap actionRowGap{scale(window, 8), scale(window, 3)};
+    const Gap playbackGap{scale(window, 26), scale(window, 20)};
+    const Gap insetV{scale(window, 20), scale(window, 8)};
+
+    const int listWidth = (widthOf(content) - gap) * 13 / 25;
+    const int detailLeft = content.left + listWidth + gap, detailRight = content.right;
+    const int left = detailLeft + scale(window, 20), right = detailRight - scale(window, 20);
+
+    const int localFull = beforeHeader.full + afterHeader.full + afterVariant.full + beforeActions.full +
+                          4 * row + 3 * actionRowGap.full + playbackGap.full + insetV.full;
+    const int localFloor = beforeHeader.floor + afterHeader.floor + afterVariant.floor + beforeActions.floor +
+                           4 * row + 3 * actionRowGap.floor + playbackGap.floor + insetV.floor;
+    const int upstreamFull = beforeSearch.full + row + afterSearch.full;
+    const int upstreamFloor = beforeSearch.floor + row + afterSearch.floor;
+
+    // transcriptID's font is set to Font::mono in refreshFont(), not Font::body;
+    // measuring with the actual control font keeps this guarantee honest (#1218).
+    HDC metricsDC = GetDC(window);
+    const int lineHeight = jsti::chrome::measure(metricsDC, L"Ag", right - left, jsti::chrome::Font::mono, GetDpiForWindow(window));
+    ReleaseDC(window, metricsDC);
+    const int minTranscript = 3 * lineHeight + scale(window, 16);
+
+    const int availableFull = content.bottom - (heroBottom + upstreamFull);
+    const int availableFloor = content.bottom - (heroBottom + upstreamFloor);
+    const int transcriptAtFull = availableFull - localFull;
+    const int transcriptAtFloor = availableFloor - localFloor;
+    const int compressibleTotal = transcriptAtFloor - transcriptAtFull;
+    const double shrink = transcriptAtFull >= minTranscript || compressibleTotal <= 0
+                             ? 0.0
+                             : std::min(1.0, double(minTranscript - transcriptAtFull) / compressibleTotal);
+    // Rounds the reduction up (not down) so every squeezed gap is never larger than
+    // its continuous target -- otherwise truncation could leave the transcript a
+    // few pixels short of minTranscript even though shrink reached 1.0.
+    auto squeeze = [&](Gap g) {
+        const double reduction = (g.full - g.floor) * shrink;
+        const int truncated = static_cast<int>(reduction);
+        return g.full - (truncated < reduction ? truncated + 1 : truncated);
+    };
+
+    const int searchTop = heroBottom + squeeze(beforeSearch);
     place(window, searchLabelID, box(content.left, searchTop + scale(window, 8), scale(window, 112), scale(window, 20)));
     placeField(window, searchID, RECT{content.left + scale(window, 116), searchTop,
-                                      content.right - scale(window, 88), searchTop + row});
+                                      content.right - scale(window, 216), searchTop + row});
+    place(window, historyFiltersID, box(content.right - scale(window, 208), searchTop, scale(window, 120), row));
     place(window, clearSearchID, box(content.right - scale(window, 80), searchTop, scale(window, 80), row));
-    const int top = searchTop + row + scale(window, 14);
-    const int listWidth = (widthOf(content) - gap) * 13 / 25;
+    const int top = searchTop + row + squeeze(afterSearch);
     place(window, 93, box(content.left, top, listWidth, scale(window, 20)));
     place(window, historyID, RECT{content.left, top + scale(window, 22), content.left + listWidth, content.bottom});
-    const RECT detail{content.left + listWidth + gap, top, content.right, content.bottom};
+    const RECT detail{detailLeft, top, detailRight, content.bottom};
     addCard(detail, 0xE8A5, L"Selected recording");
-    const int inset = scale(window, 20);
-    const int left = detail.left + inset, right = detail.right - inset;
-    int y = detail.top + scale(window, 58);
-    place(window, historyDetailID, RECT{left, y, right, y + scale(window, 34)});
-    y += scale(window, 40);
+
+    const int squeezedActionRowGap = squeeze(actionRowGap), squeezedPlaybackGap = squeeze(playbackGap);
+    const int actionsHeight = 4 * row + 3 * squeezedActionRowGap + squeezedPlaybackGap;
+    const int squeezedInsetV = squeeze(insetV);
+
+    int y = detail.top + squeeze(beforeHeader);
+    place(window, historyDetailID, RECT{left, y, right, y + row});
+    y += squeeze(afterHeader);
     place(window, variantLabelID, box(left, y + scale(window, 7), scale(window, 128), scale(window, 20)));
     place(window, variantID, RECT{left + scale(window, 132), y, right, y + scale(window, 200)});
-    y += row + scale(window, 10);
-    const int actionsHeight = 3 * row + 2 * scale(window, 8) + scale(window, 26);
-    placeField(window, transcriptID, RECT{left, y, right, detail.bottom - inset - actionsHeight - scale(window, 10)}, true);
-    int actions = detail.bottom - inset - actionsHeight;
+    y += squeeze(afterVariant);
+    placeField(window, transcriptID, RECT{left, y, right, detail.bottom - squeezedInsetV - actionsHeight - squeeze(beforeActions)}, true);
+    int actions = detail.bottom - squeezedInsetV - actionsHeight;
     place(window, playbackLabelID, box(left, actions, scale(window, 80), scale(window, 20)));
     place(window, playbackTimeID, RECT{left + scale(window, 84), actions, right, actions + scale(window, 20)});
-    actions += scale(window, 26);
+    actions += squeezedPlaybackGap;
     auto cell = [&](int index, int top, int columns) {
         const int width = (right - left - (columns - 1) * scale(window, 8)) / columns;
         return box(left + index * (width + scale(window, 8)), top, width, row);
@@ -771,34 +1053,42 @@ void layoutHistory(HWND window, const RECT &content) {
     place(window, copyID, cell(2, actions, 3));
     // A third of the card is too narrow for "Copy transcript"; the Mac says Copy here too.
     setLabel(window, copyID, L"&Copy");
-    actions += row + scale(window, 8);
+    actions += row + squeezedActionRowGap;
     place(window, readAloudID, cell(0, actions, 2));
     place(window, retryID, cell(1, actions, 2));
-    actions += row + scale(window, 8);
-    place(window, exportID, cell(0, actions, 2));
-    place(window, openAudioID, cell(1, actions, 2));
+    actions += row + squeezedActionRowGap;
+    place(window, exportID, cell(0, actions, 3));
+    place(window, openAudioID, cell(1, actions, 3));
+    place(window, historyCorrectionsID, cell(2, actions, 3));
+    setLabel(window, exportID, L"&Export...");
+    actions += row + squeezedActionRowGap;
+    place(window, historyDeleteID, cell(0, actions, 3));
 }
 
 // A settings card: `rows` controls, top to bottom, with a description.
 int layoutSettingsCard(HWND window, int top, const RECT &content, wchar_t glyph, const std::wstring &title,
                        const std::wstring &description, int contentHeight) {
-    const int inset = scale(window, 22);
+    const int inset = densitySpace(window, 22, visualDensity.card_padding);
     HDC dc = GetDC(window);
     const int textHeight = description.empty() ? 0 : jsti::chrome::measure(dc, description,
         widthOf(content) - 2 * inset, jsti::chrome::Font::body, GetDpiForWindow(window));
     ReleaseDC(window, dc);
-    const int height = scale(window, 66) + textHeight + (textHeight ? scale(window, 12) : 0) + contentHeight + scale(window, 20);
+    const int descriptionGap = densitySpace(window, 12, visualDensity.content_spacing);
+    const int height = cardHeaderHeight(window) + textHeight + (textHeight ? descriptionGap : 0) +
+        contentHeight + densitySpace(window, 20, visualDensity.card_padding);
     const RECT card = box(content.left, top, widthOf(content), height);
     addCard(card, glyph, title);
     if (!description.empty()) {
-        frame.paragraphs.push_back({box(card.left + inset, card.top + scale(window, 64), widthOf(card) - 2 * inset,
+        frame.paragraphs.push_back({box(card.left + inset, card.top + cardHeaderHeight(window) - scale(window, 2),
+                                        widthOf(card) - 2 * inset,
                                         textHeight), description, jsti::chrome::Font::body, true});
     }
-    return card.top + scale(window, 66) + textHeight + (textHeight ? scale(window, 12) : 0);
+    return card.top + cardHeaderHeight(window) + textHeight + (textHeight ? descriptionGap : 0);
 }
 
 void layoutSettings(HWND window, const RECT &content) {
-    const int gap = scale(window, 18), row = scale(window, 34), inset = scale(window, 22);
+    const int gap = densitySpace(window, 18, visualDensity.section_spacing), row = scale(window, 34);
+    const int inset = densitySpace(window, 22, visualDensity.card_padding);
     const bool voice = state.page == voicePage;
     int top = layoutHero(window, content, scale(window, voice ? 132 : 120),
                          voice ? jsti::chrome::Gradient::voice : jsti::chrome::Gradient::settings) + gap;
@@ -813,29 +1103,47 @@ void layoutSettings(HWND window, const RECT &content) {
     switch (state.page) {
     case voicePage: {
         int y = layoutSettingsCard(window, top, content, 0xE767, L"Read aloud",
-            L"Choose a recording in History, then read its transcript aloud here or from History. Recording, choosing "
-            L"another recording or Stop ends it. Read aloud uses the Deepgram key saved under Transcription.", row);
+            L"Read the selected History transcript, or open Text and export for typed/pasted text and an explicit "
+            L"clipboard snapshot. The selected voice provider uses its saved key. External selected text is unavailable.", 2 * row + gap);
         place(window, voiceSettingsID, box(left, y, scale(window, 150), row));
         button(readAloudID, y, scale(window, 196));
         place(window, stopPlaybackID, box(right - scale(window, 196) - scale(window, 8) - scale(window, 96), y,
                                           scale(window, 96), row));
+        place(window, voiceSourcesID, box(left, y + row + gap, scale(window, 260), row));
+        place(window, voiceCredentialID, box(right - scale(window, 190), y + row + gap, scale(window, 190), row));
         break;
     }
     case generalPage: {
-        int y = layoutSettingsCard(window, top, content, 0xE720, L"Microphone", L"", row);
+        // Output used to have its own card; it now shares this card's header
+        // (the configuration action) and backup row (the text-output button),
+        // so the page fits the minimum height without the App behaviour card
+        // falling outside the window bounds.
+        const int cardTop = top;
+        int y = layoutSettingsCard(window, top, content, 0xE720, L"Audio, output and backup",
+            L"Finished text goes to the app where dictation started, or the clipboard. "
+            L"Backups include History text and optional audio, not settings, profiles or credentials.",
+            2 * row + scale(window, 12));
+        place(window, configurationID, box(right - scale(window, 220),
+            cardTop + densitySpace(window, 16, visualDensity.card_padding), scale(window, 220), row));
         label(94, y); control(microphoneID, y);
-        top = y + row + scale(window, 20) + gap;
-        y = layoutSettingsCard(window, top, content, 0xE8C8, L"Output",
-            L"Finished text goes back into the app you were in when dictation started, or to the clipboard.", row);
-        place(window, textOutputID, box(left, y, scale(window, 170), row));
-        top = y + row + scale(window, 20) + gap;
+        const int backupY = y + row + scale(window, 12);
+        place(window, textOutputID, box(left, backupY, scale(window, 170), row));
+        place(window, backupAudioID, RECT{left + scale(window, 182), backupY, right - scale(window, 210), backupY + row});
+        button(backupExportID, backupY, scale(window, 196));
+        top = y + 2 * row + scale(window, 12) + densitySpace(window, 20, visualDensity.card_padding) + gap;
         // The Mac's App Behaviour card. The note appears only when the system
         // decides Launch at login, so the page still fits the minimum height.
         y = layoutSettingsCard(window, top, content, 0xE713, L"App behaviour", state.loginItemNote,
-                               2 * row + scale(window, 12));
+                               3 * row + scale(window, 24));
         label(appearanceLabelID, y); control(appearanceID, y, scale(window, 220));
         place(window, loginItemID, RECT{left + scale(window, 188 + 220 + 24), y, right, y + row});
         place(window, automationID, RECT{left, y + row + scale(window, 12), right, y + 2 * row + scale(window, 12)});
+        label(recordingsFolderLabelID, y + 2 * row + scale(window, 24));
+        control(recordingsFolderID, y + 2 * row + scale(window, 24), scale(window, 110));
+        place(window, audioCleanupID, RECT{
+            left + scale(window, 188 + 110 + 12), y + 2 * row + scale(window, 24),
+            right - scale(window, 172), y + 3 * row + scale(window, 24)});
+        button(backupInspectID, y + 2 * row + scale(window, 24), scale(window, 160));
         break;
     }
     case transcriptionPage: {
@@ -857,6 +1165,11 @@ void layoutSettings(HWND window, const RECT &content) {
         button(saveID, y, scale(window, 112));
         y += row + scale(window, 12);
         place(window, azureID, box(left + scale(window, 188), y, scale(window, 240), row));
+        place(window, configurationID, box(right - scale(window, 220), y, scale(window, 220), row));
+        top = y + row + densitySpace(window, 20, visualDensity.card_padding) + gap;
+        y = layoutSettingsCard(window, top, content, 0xE9D2, L"Compare Models",
+            L"Run the same audio through several models, rank the raw results blind, and export the scoreboard.", row);
+        place(window, comparisonID, box(left, y, scale(window, 220), row));
         break;
     }
     case postProcessingPage: {
@@ -864,6 +1177,20 @@ void layoutSettings(HWND window, const RECT &content) {
             L"Send finished transcripts to an OpenRouter model to fix punctuation and filler, or follow your own "
             L"instructions. Empty recordings stay empty, and History keeps the original beside the result.", row);
         place(window, processingID, box(left, y, scale(window, 230), row));
+        place(window, configurationID, box(left + scale(window, 242), y, scale(window, 220), row));
+        break;
+    }
+    case correctionsPage: case pronunciationPage: {
+        const bool corrections = state.page == correctionsPage;
+        const int y = layoutSettingsCard(window, top, content, 0xE8D2,
+            corrections ? L"Personal corrections" : L"Pronunciation dictionary",
+            corrections
+                ? L"Add canonical spellings and spoken variants, choose automatic, context or manual rules, "
+                  L"and preview applied corrections and suggestions. Original provider text stays in History. "
+                  L"Automatic observation of edits in other apps is not available on this platform."
+                : L"Edit words, phonetic pronunciations and text replacements. Regular expressions, case sensitivity "
+                  L"and entry order use the same matching as the Mac. Deepgram uses text replacements, not IPA tags.", row);
+        place(window, corrections ? correctionsID : pronunciationID, box(left, y, scale(window, 230), row));
         break;
     }
     case profilesPage: {
@@ -879,6 +1206,7 @@ void layoutSettings(HWND window, const RECT &content) {
             row + scale(window, 40));
         place(window, shortcutValueID, RECT{left, y, right, y + scale(window, 28)});
         place(window, shortcutID, box(left, y + scale(window, 40), scale(window, 200), row));
+        place(window, configurationID, box(left + scale(window, 212), y + scale(window, 40), scale(window, 220), row));
         break;
     }
     case cloudSyncPage: {
@@ -893,7 +1221,7 @@ void layoutSettings(HWND window, const RECT &content) {
 }
 
 void layoutAbout(HWND window, const RECT &content) {
-    const int inset = scale(window, 22), row = scale(window, 34);
+    const int inset = densitySpace(window, 22, visualDensity.card_padding), row = scale(window, 34);
     const std::wstring note = L"Open source under the MIT licence. Your audio goes only to the provider you choose, "
         L"or stays on this PC with an on-device model.";
     int y = layoutSettingsCard(window, content.top, content, 0xE946, L"About", L"", scale(window, 96) + row +
@@ -917,7 +1245,7 @@ void layout(HWND window) {
     GetClientRect(window, &client);
     frame = Frame{};
     const int sidebarWidth = scale(window, 232), headerHeight = scale(window, 64), statusHeight = scale(window, 44);
-    const int padding = scale(window, 24);
+    const int padding = densitySpace(window, 24, visualDensity.page_padding);
     frame.sidebar = RECT{0, 0, sidebarWidth, client.bottom};
     frame.header = RECT{sidebarWidth, 0, client.right, headerHeight};
     frame.status = RECT{sidebarWidth, client.bottom - statusHeight, client.right, client.bottom};
@@ -927,12 +1255,13 @@ void layout(HWND window) {
     y += scale(window, 24);
     for (int page = 0; page < pageCount; ++page) {
         if (page == generalPage) {
-            y += scale(window, 10);
+            y += densitySpace(window, 10, visualDensity.section_spacing);
             frame.settingsHeading = box(scale(window, 22), y, sidebarWidth - scale(window, 44), scale(window, 20));
             y += scale(window, 24);
         }
-        place(window, navBaseID + page, box(scale(window, 10), y, sidebarWidth - scale(window, 20), scale(window, 36)));
-        y += scale(window, 38);
+        const int rowHeight = densitySpace(window, 36, std::max(36, visualDensity.minimum_row_height));
+        place(window, navBaseID + page, box(scale(window, 10), y, sidebarWidth - scale(window, 20), rowHeight));
+        y += rowHeight + densitySpace(window, 2, 0);
     }
     // Header: Import and Record on every page but those that carry their own.
     const int buttonTop = (headerHeight - scale(window, 36)) / 2;
@@ -948,7 +1277,7 @@ void layout(HWND window) {
     place(window, statusID, RECT{sidebarWidth + padding, frame.status.top + scale(window, 12), client.right - padding,
                                  client.bottom - scale(window, 8)});
     const RECT content{sidebarWidth + padding, headerHeight + scale(window, 4), client.right - padding,
-                       client.bottom - statusHeight - scale(window, 18)};
+                       client.bottom - statusHeight - densitySpace(window, 18, visualDensity.section_spacing)};
     switch (state.page) {
     case dashboardPage: layoutDashboard(window, content); break;
     case historyPage: layoutHistory(window, content); break;
@@ -1021,10 +1350,12 @@ void paintFrame(HWND window, HDC dc) {
         chrome::shadow(dc, card.rect, s(24), chrome::accentDeep, s(10));
         chrome::fillRound(dc, card.rect, s(24), palette.card);
         chrome::strokeRound(dc, card.rect, s(24), chrome::accentDeep, chrome::dark() ? 70 : 40, 1.0f);
-        const RECT tile = box(card.rect.left + s(20), card.rect.top + s(18), s(36), s(36));
+        const RECT tile = box(card.rect.left + densitySpace(window, 20, visualDensity.card_padding),
+                              card.rect.top + densitySpace(window, 18, visualDensity.card_padding), s(36), s(36));
         chrome::fillRound(dc, tile, s(12), chrome::accent, chrome::dark() ? 60 : 38);
         chrome::glyph(dc, card.glyph, tile, chrome::dark() ? RGB(0xFF, 0x8A, 0x5C) : chrome::accentDeep, dpi);
-        chrome::text(dc, card.title, RECT{tile.right + s(12), tile.top, card.rect.right - s(20), tile.bottom},
+        chrome::text(dc, card.title, RECT{tile.right + densitySpace(window, 12, visualDensity.inline_spacing), tile.top,
+                     card.rect.right - densitySpace(window, 20, visualDensity.card_padding), tile.bottom},
                      chrome::Font::title, dpi, palette.text, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
     }
     for (const auto &stat : frame.stats) {
@@ -1177,9 +1508,15 @@ void drawControl(HWND window, const DRAWITEMSTRUCT &item) {
         if (selected) chrome::fillRound(dc, rect, s(10), chrome::accent, chrome::dark() ? 58 : 40);
         else if (pressed) chrome::fillRound(dc, rect, s(10), palette.text, 20);
         chrome::glyph(dc, pageInfo[page].glyph, box(rect.left + s(8), rect.top, s(28), heightOf(rect)), navTint(page), dpi);
-        chrome::text(dc, label, RECT{rect.left + s(42), rect.top, rect.right - s(8), rect.bottom},
+        const auto &hint = state.sidebar.hints[page];
+        const bool showHint = state.sidebar.showHints && !hint.empty() &&
+            !jsti_hotkey_reserves_sidebar_digit(state.sidebar.digits[page]);
+        chrome::text(dc, pageInfo[page].title,
+                     RECT{rect.left + s(42), rect.top, rect.right - s(showHint ? 62 : 8), rect.bottom},
                      selected ? chrome::Font::bodySemibold : chrome::Font::body, dpi, palette.text,
-                     DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+                     DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        if (showHint) chrome::text(dc, hint, RECT{rect.right - s(60), rect.top, rect.right - s(8), rect.bottom},
+                                  chrome::Font::caption, dpi, palette.secondary, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
         break;
     }
     case Role::record: {
@@ -1189,7 +1526,7 @@ void drawControl(HWND window, const DRAWITEMSTRUCT &item) {
         if (pressed) chrome::fillRound(dc, rect, heightOf(rect) / 2, RGB(0, 0, 0), 30);
         const bool large = heightOf(rect) > s(44);
         const std::wstring shown = recording == 1 ? (large ? L"Stop Recording" : L"Stop")
-            : recording == 2 ? (large ? L"Cancel Transcription" : L"Cancel") : (large ? L"Start Recording" : L"Record");
+            : recording == 2 ? (large ? L"Cancel operation" : L"Cancel") : (large ? L"Start Recording" : L"Record");
         HGDIOBJ previous = SelectObject(dc, chrome::font(chrome::Font::bodySemibold, dpi));
         SIZE extent{};
         GetTextExtentPoint32W(dc, shown.c_str(), static_cast<int>(shown.size()), &extent);
@@ -1350,6 +1687,9 @@ void applyTheme(HWND window) {
         wchar_t kind[16] = {};
         GetClassNameW(control, kind, 16);
         if (_wcsicmp(kind, L"COMBOBOX") == 0) SetWindowTheme(control, dark ? L"DarkMode_CFD" : nullptr, nullptr);
+        else if (GetDlgCtrlID(control) == backupAudioID) {
+            SetWindowTheme(control, dark ? L"DarkMode_Explorer" : L"Explorer", nullptr);
+        }
         else if (_wcsicmp(kind, L"EDIT") == 0 || _wcsicmp(kind, L"LISTBOX") == 0) {
             SetWindowTheme(control, dark ? L"DarkMode_Explorer" : L"Explorer", nullptr);
         }
@@ -1357,6 +1697,7 @@ void applyTheme(HWND window) {
     backdrop.dirty = true;
     RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME);
     jsti::hud::refresh();
+    jsti_history_filters_refresh_theme();
 }
 
 void refreshFont(HWND window) {
@@ -1390,6 +1731,48 @@ void showPage(HWND window, int page) {
     if (focus && IsChild(window, focus) && !IsWindowVisible(focus)) SetFocus(GetDlgItem(window, navBaseID + page));
     for (int index : {previous, page}) InvalidateRect(GetDlgItem(window, navBaseID + index), nullptr, TRUE);
     RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
+}
+
+void applySidebarBindings(HWND window, const SidebarBindings &bindings) {
+    for (int page = 0; page < pageCount; ++page) {
+        std::wstring label = pageInfo[page].title;
+        if (bindings.showHints && !bindings.hints[page].empty() &&
+            !jsti_hotkey_reserves_sidebar_digit(bindings.digits[page]))
+            label += L" (" + bindings.hints[page] + L")";
+        SetWindowTextW(GetDlgItem(window, navBaseID + page), label.c_str());
+        InvalidateRect(GetDlgItem(window, navBaseID + page), nullptr, TRUE);
+    }
+}
+
+void applySidebarBindings(HWND window) { applySidebarBindings(window, state.sidebar); }
+
+bool navigateSidebar(HWND window, int digit, bool exactControl, HWND focused) {
+    if (!exactControl || digit < 0 || digit > 9 || !IsWindowEnabled(window) ||
+        jsti_hotkey_reserves_sidebar_digit(digit)) return false;
+    for (HWND focus = focused; focus && focus != window; focus = GetParent(focus)) {
+        wchar_t name[128]{};
+        GetClassNameW(focus, name, 128);
+        if (_wcsicmp(name, L"Edit") == 0 || _wcsicmp(name, L"ComboBox") == 0 ||
+            _wcsnicmp(name, L"RichEdit", 8) == 0) return false;
+    }
+    for (int page = 0; page < pageCount; ++page) {
+        HWND row = GetDlgItem(window, navBaseID + page);
+        if (state.sidebar.digits[page] == digit && IsWindowEnabled(row) && IsWindowVisible(row)) {
+            showPage(window, page);
+            return true;
+        }
+
+    }
+    return false;
+}
+
+bool sidebarKeyMessage(HWND window, const MSG &message) {
+    if (message.message != WM_KEYDOWN || message.wParam < '0' || message.wParam > '9' ||
+        !(message.hwnd == window || IsChild(window, message.hwnd))) return false;
+    const bool exactControl = (GetKeyState(VK_CONTROL) & 0x8000) &&
+        !(GetKeyState(VK_MENU) & 0x8000) && !(GetKeyState(VK_SHIFT) & 0x8000) &&
+        !(GetKeyState(VK_LWIN) & 0x8000) && !(GetKeyState(VK_RWIN) & 0x8000);
+    return navigateSidebar(window, static_cast<int>(message.wParam - '0'), exactControl, GetFocus());
 }
 
 // The dashboard's Setup card and the header subtitle echo the settings.
@@ -1451,6 +1834,9 @@ bool createControls(HWND window) {
         add(L"STATIC", L"&Find in history", 0, searchLabelID) &&
         add(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, searchID) &&
         add(L"BUTTON", L"C&lear", BS_PUSHBUTTON | WS_TABSTOP, clearSearchID) &&
+        add(L"BUTTON", L"Fil&ters...", BS_PUSHBUTTON | WS_TABSTOP, historyFiltersID) &&
+        add(L"BUTTON", L"Delete...", BS_PUSHBUTTON | WS_TABSTOP, historyDeleteID) &&
+        add(L"BUTTON", L"Clear history...", BS_PUSHBUTTON | WS_TABSTOP, historyClearID) &&
         add(L"STATIC", L"&History", 0, 93) &&
         add(L"LISTBOX", L"", LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP,
             historyID) &&
@@ -1461,6 +1847,7 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"&Export text", BS_PUSHBUTTON | WS_TABSTOP, exportID) &&
         add(L"BUTTON", L"&Open audio", BS_PUSHBUTTON | WS_TABSTOP, openAudioID) &&
         add(L"BUTTON", L"Rea&d aloud", BS_PUSHBUTTON | WS_TABSTOP, readAloudID) &&
+        add(L"BUTTON", L"Co&rrections...", BS_PUSHBUTTON | WS_TABSTOP, historyCorrectionsID) &&
         // The label carries the mnemonic and precedes Play/Pause, so Alt+B
         // and assistive technology reach the playback controls.
         add(L"STATIC", L"Play&back", 0, playbackLabelID) &&
@@ -1468,7 +1855,12 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"Play", BS_PUSHBUTTON | WS_TABSTOP, playPauseID) &&
         add(L"BUTTON", L"Stop", BS_PUSHBUTTON | WS_TABSTOP, stopPlaybackID) &&
         add(L"BUTTON", L"Choose &voice…", BS_PUSHBUTTON | WS_TABSTOP, voiceSettingsID) &&
+        add(L"BUTTON", L"&Text and export...", BS_PUSHBUTTON | WS_TABSTOP, voiceSourcesID) &&
+        add(L"BUTTON", L"Provider &key...", BS_PUSHBUTTON | WS_TABSTOP, voiceCredentialID) &&
         add(L"BUTTON", L"Edit app &profiles…", BS_PUSHBUTTON | WS_TABSTOP, profilesID) &&
+        add(L"BUTTON", L"Edit &corrections...", BS_PUSHBUTTON | WS_TABSTOP, correctionsID) &&
+        add(L"BUTTON", L"Edit &pronunciations...", BS_PUSHBUTTON | WS_TABSTOP, pronunciationID) &&
+        add(L"BUTTON", L"Compare &Models...", BS_PUSHBUTTON | WS_TABSTOP, comparisonID) &&
         add(L"STATIC", L"&Source", 0, sourceLabelID) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP, sourceID) &&
         add(L"STATIC", L"&Mode", 0, 95) &&
@@ -1488,10 +1880,17 @@ bool createControls(HWND window) {
         add(L"STATIC", L"&Microphone", 0, 94) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, microphoneID) &&
         add(L"BUTTON", L"Text o&utput…", BS_PUSHBUTTON | WS_TABSTOP, textOutputID) &&
+        add(L"BUTTON", L"Dictation &preferences...", BS_PUSHBUTTON | WS_TABSTOP, configurationID) &&
         add(L"STATIC", L"&Theme", 0, appearanceLabelID) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP, appearanceID) &&
         add(L"BUTTON", L"Launch at &login", BS_PUSHBUTTON | WS_TABSTOP, loginItemID) &&
         add(L"BUTTON", L"Allow &automation (speak command and MCP)", BS_PUSHBUTTON | WS_TABSTOP, automationID) &&
+        add(L"STATIC", L"Recording storage", 0, recordingsFolderLabelID) &&
+        add(L"BUTTON", L"Open &folder", BS_PUSHBUTTON | WS_TABSTOP, recordingsFolderID) &&
+        add(L"BUTTON", L"Delete all a&udio...", BS_PUSHBUTTON | WS_TABSTOP, audioCleanupID) &&
+        add(L"BUTTON", L"Include &backup audio", BS_AUTOCHECKBOX | WS_TABSTOP, backupAudioID) &&
+        add(L"BUTTON", L"Save History &backup...", BS_PUSHBUTTON | WS_TABSTOP, backupExportID) &&
+        add(L"BUTTON", L"&Inspect backup...", BS_PUSHBUTTON | WS_TABSTOP, backupInspectID) &&
         add(L"BUTTON", L"i&Cloud sync settings…", BS_PUSHBUTTON | WS_TABSTOP, cloudSyncID) &&
         add(L"BUTTON", L"View on &GitHub", BS_PUSHBUTTON | WS_TABSTOP, githubID) &&
         add(L"BUTTON", L"Report an iss&ue", BS_PUSHBUTTON | WS_TABSTOP, issueID) &&
@@ -1499,6 +1898,7 @@ bool createControls(HWND window) {
         add(L"STATIC", jsti_hotkey_label().c_str(), 0, transcriptLabelID) &&
         add(L"EDIT", L"", ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL | WS_TABSTOP, transcriptID) &&
         add(L"BUTTON", L"&Copy transcript", BS_PUSHBUTTON | WS_TABSTOP, copyID);
+    SendDlgItemMessageW(window, backupAudioID, BM_SETCHECK, BST_CHECKED, 0);
     for (int identifier : {chipSessionsID, chipTimeID, chipSpendID, insightSessionsID, insightTimeID, insightAverageID,
                            insightSpendID, historySessionsID, historyErrorsID, historyAverageID, historySpendID,
                            setupMicrophoneID, setupModelID, setupShortcutID, setupOutputID}) {
@@ -1600,6 +2000,7 @@ bool applyMicrophones(HWND window, std::vector<MicrophoneRow> rows) {
 // Settings that were menu commands follow their dialogs' idle rules; the
 // automation switch shows the state the host reported.
 void updateSettingsButtons(HWND window, int recording) {
+    EnableWindow(GetDlgItem(window, configurationID), recording == 0);
     EnableWindow(GetDlgItem(window, voiceSettingsID), recording == 0 && jsti_voice_output_available());
     EnableWindow(GetDlgItem(window, localModelsID), recording == 0 && jsti_local_models_available());
     EnableWindow(GetDlgItem(window, cloudSyncID), recording == 0 && jsti_cloud_sync_available());
@@ -1662,7 +2063,7 @@ void applyInsights(HWND window) {
 }
 
 void applyUpdate(HWND window) {
-    std::wstring status, transcript;
+    std::wstring status, transcript, migrationReport;
     bool microphonesChanged;
     std::vector<MicrophoneRow> microphones;
     std::wstring microphoneError;
@@ -1679,6 +2080,7 @@ void applyUpdate(HWND window) {
     {
         std::lock_guard<std::mutex> lock(state.mutex);
         status.swap(state.status); transcript.swap(state.transcript);
+        migrationReport.swap(state.migrationReport);
         presentationChanged = state.presentationChanged;
         if (presentationChanged) presentation = std::move(state.pendingPresentation);
         state.presentationChanged = false;
@@ -1731,7 +2133,7 @@ void applyUpdate(HWND window) {
     if (statusChanged) SetDlgItemTextW(window, statusID, status.c_str());
     applyInsights(window);
 
-    SetDlgItemTextW(window, recordID, recording == 1 ? L"&Stop recording" : (recording == 2 ? L"&Cancel transcription" : L"&Record"));
+    SetDlgItemTextW(window, recordID, recording == 1 ? L"&Stop recording" : (recording == 2 ? L"&Cancel" : L"&Record"));
     EnableWindow(GetDlgItem(window, recordID), TRUE);
     if (state.displayedRecording != recording) {
         state.displayedRecording = recording;
@@ -1826,6 +2228,36 @@ void applyUpdate(HWND window) {
     }
     updateHistoryControls(window, recording);
     refreshSetup(window);
+    if (!migrationReport.empty() && IsWindow(window)) {
+        MessageBoxW(window, migrationReport.c_str(), L"Backup inspection (read only)", MB_OK | MB_ICONINFORMATION);
+    }
+}
+
+void emitMigrationInspection(const std::string &path) {
+    if (state.callback) state.callback(JSTI_EVENT_MIGRATION_INSPECT, path.c_str(), 0, state.context);
+}
+
+void inspectMigrationBackup(HWND window) {
+    std::vector<wchar_t> path(32768);
+    OPENFILENAMEW chooser{};
+    chooser.lStructSize = sizeof(chooser);
+    chooser.hwndOwner = window;
+    chooser.lpstrFile = path.data();
+    chooser.nMaxFile = static_cast<DWORD>(path.size());
+    chooser.lpstrFilter = L"ZIP backups (*.zip)\0*.zip\0\0";
+    chooser.lpstrTitle = L"Inspect backup (no data will be imported)";
+    chooser.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_EXPLORER;
+    if (!GetOpenFileNameW(&chooser)) {
+        const DWORD code = CommDlgExtendedError();
+        if (code) showFailure(window, jsti::systemError("Choosing backup for inspection", code));
+        return;
+    }
+    const std::string selected = jsti::utf8(path.data());
+    if (selected.empty()) {
+        showFailure(window, "Windows returned an invalid backup path. Choose a local ZIP file.");
+        return;
+    }
+    emitMigrationInspection(selected);
 }
 
 void importAudio(HWND window) {
@@ -1847,34 +2279,115 @@ void importAudio(HWND window) {
     }
 }
 
+void emitMigrationBackup(HWND window, const std::string &path) {
+    const int audio = SendDlgItemMessageW(window, backupAudioID, BM_GETCHECK, 0, 0) == BST_CHECKED ? 1 : 0;
+    if (state.callback) state.callback(JSTI_EVENT_MIGRATION_EXPORT, path.c_str(), audio, state.context);
+}
+
+void exportMigrationBackup(HWND window) {
+    std::vector<wchar_t> path(32768);
+    const std::wstring name = L"JustSpeakToIt-History.zip";
+    std::copy(name.begin(), name.end(), path.begin());
+    OPENFILENAMEW chooser{};
+    chooser.lStructSize = sizeof(chooser);
+    chooser.hwndOwner = window;
+    chooser.lpstrFilter = L"ZIP backups (*.zip)\0*.zip\0\0";
+    chooser.lpstrFile = path.data();
+    chooser.nMaxFile = static_cast<DWORD>(path.size());
+    chooser.lpstrDefExt = L"zip";
+    chooser.lpstrTitle = L"Save History backup (existing files are never replaced)";
+    chooser.Flags = OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_EXPLORER | OFN_DONTADDTORECENT;
+    if (!GetSaveFileNameW(&chooser)) {
+        const DWORD code = CommDlgExtendedError();
+        if (code) showFailure(window, jsti::systemError("Choosing History backup destination", code));
+        return;
+    }
+    const DWORD attributes = GetFileAttributesW(path.data());
+    if (attributes != INVALID_FILE_ATTRIBUTES) {
+        showFailure(window, "A file or folder already exists at that destination. "
+                    "Choose a new backup filename; existing files are never replaced.");
+        return;
+    }
+    const DWORD code = GetLastError();
+    if (code != ERROR_FILE_NOT_FOUND) {
+        showFailure(window, jsti::systemError("Checking History backup destination", code));
+        return;
+    }
+    const std::string selected = jsti::utf8(path.data());
+    if (selected.empty()) {
+        showFailure(window, "Windows returned an invalid History backup path. Choose another filename.");
+        return;
+    }
+    emitMigrationBackup(window, selected);
+}
+
 // The screenshot tour: every page, then the dashboard and History in dark
-// mode, then the dashboard while recording. Each step is shown, drawn, then
-// saved as NN-name.bmp beside the others; the window closes afterwards.
-constexpr int tourSteps = pageCount + 5;
+// mode, then recording/HUD states, the light/dark filter editors, the
+// expanded/compact HUD variants, and the General page in dark mode. Each
+// step is saved as NN-name.bmp; the window closes afterwards.
+enum TourStep { tourDarkDashboard = pageCount, tourDarkHistory, tourDashboardRecording, tourHUDRecording,
+                tourHUDCompleted, tourHistoryFilters, tourDarkHistoryFilters, tourExpandedRecording,
+                tourCompactRecording, tourCompactCompleted, tourGeneralDark, tourSteps };
 
 std::string tourName(int step) {
     if (step < pageCount) return pageInfo[step].name;
     const char *const extra[] = {"dashboard-dark", "history-dark", "dashboard-recording", "hud-recording",
-                                 "hud-completed"};
+                                 "hud-completed", "history-filters", "history-filters-dark",
+                                 "hud-expanded-recording", "hud-compact-recording", "hud-compact-completed",
+                                 "general-dark"};
     return extra[step - pageCount];
 }
 
 void tourShow(HWND window, int step) {
     if (step < pageCount) {
         showPage(window, step);
-    } else if (step == pageCount) {
+    } else if (step == tourDarkDashboard) {
         jsti::chrome::setAppearance(2);
         SendDlgItemMessageW(window, appearanceID, CB_SETCURSEL, 2, 0);
         applyTheme(window);
         showPage(window, dashboardPage);
-    } else if (step == pageCount + 1) {
+    } else if (step == tourDarkHistory) {
         showPage(window, historyPage);
-    } else if (step == pageCount + 3) {
+    } else if (step == tourGeneralDark) {
+        state.displayedRecording = 0;
+        jsti::chrome::setAppearance(2);
+        applyTheme(window);
+        updateHistoryControls(window, 0);
+        updateSettingsButtons(window, 0);
+        showPage(window, generalPage);
+    } else if (step == tourHistoryFilters || step == tourDarkHistoryFilters) {
+        const JSTIHistoryFilterModel models[] = {
+            {"model/sample", "Sample transcription model", 0},
+            {"model/long", "An imported transcription model with a long descriptive name and vocabulary context", 0}
+        };
+        if (jsti_window_set_history_filters(models, 2, 0, "", "") != 0) {
+            emit(window, JSTI_EVENT_ERROR, "Could not prepare the sample History filter editor.");
+            PostMessageW(window, WM_CLOSE, 0, 0);
+            return;
+        }
+        state.displayedRecording = 0;
+        jsti::chrome::setAppearance(step == tourHistoryFilters ? 1 : 2);
+        applyTheme(window);
+        showPage(window, historyPage);
+        jsti_show_history_filters(window, [](const std::string &) {});
+    } else if (step == tourHUDRecording) {
         jsti::hud::stage(1, L"Recording", L"Capturing audio",
                          L"Could we move the catch-up to Friday? That gives us a little more time");
         jsti::hud::apply();
-    } else if (step == pageCount + 4) {
+    } else if (step == tourHUDCompleted) {
         jsti::hud::stage(5, L"Completed", L"Saved. Inserted into the original text field.", L"");
+        jsti::hud::apply();
+    } else if (step == tourExpandedRecording) {
+        jsti::hud::stage(1, L"Recording", L"Capturing audio",
+                         L"Could we move the catch-up to Friday? That gives us a little more time to finish "
+                         L"the proposal and review the notes together before sending them to the team.", 0, false, true);
+        jsti::hud::apply();
+    } else if (step == tourCompactRecording) {
+        jsti::hud::stage(1, L"Recording", L"Capturing audio",
+                         L"Could we move the catch-up to Friday? That gives us a little more time", 0, true);
+        jsti::hud::apply();
+    } else if (step == tourCompactCompleted) {
+        jsti::hud::stage(5, L"Completed", L"Saved. Inserted into the original text field.", L"", 2400, true);
         jsti::hud::apply();
     } else {
         // Late, because it replaces the displayed transcript.
@@ -1895,7 +2408,13 @@ void tourStep(HWND window) {
     char error[512] = {};
     std::string hudError;
     std::wstring widePath;
-    if (state.tourStep >= pageCount + 3) {
+    if (state.tourStep == tourHistoryFilters || state.tourStep == tourDarkHistoryFilters) {
+        HWND filters = jsti_history_filters_window();
+        if (jsti_owned_window_save_snapshot(filters, path.c_str(), error, sizeof error) != 0) {
+            emit(window, JSTI_EVENT_ERROR, error);
+        }
+        if (filters) DestroyWindow(filters);
+    } else if (state.tourStep >= tourHUDRecording && state.tourStep <= tourCompactCompleted) {
         // The HUD is its own layered window; it is drawn straight to the file.
         if (!jsti::wide(path.c_str(), widePath) || !jsti::hud::saveSnapshot(widePath, hudError)) {
             emit(window, JSTI_EVENT_ERROR, hudError.empty() ? "The HUD snapshot path is invalid." : hudError.c_str());
@@ -1905,13 +2424,37 @@ void tourStep(HWND window) {
     }
     ++state.tourStep;
     if (state.tourStep < tourSteps) tourShow(window, state.tourStep);
-    else PostMessageW(window, WM_CLOSE, 0, 0);
+    else {
+        std::string comparisonError;
+        if (!jsti_comparison_self_test(window, comparisonError, jsti::utf8(state.tourDirectory)))
+            emit(window, JSTI_EVENT_ERROR, comparisonError.c_str());
+        PostMessageW(window, WM_CLOSE, 0, 0);
+    }
 }
 
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     switch (message) {
     case WM_CREATE:
-        return createControls(window) ? 0 : -1;
+        if (!createControls(window)) return -1;
+        startHandsFreeGuard(window);
+        return 0;
+    case WM_WTSSESSION_CHANGE:
+        if (wparam == WTS_SESSION_LOCK || wparam == WTS_SESSION_LOGOFF ||
+            wparam == WTS_CONSOLE_DISCONNECT || wparam == WTS_REMOTE_DISCONNECT) {
+            handsFreeAbsence.fetch_or(wparam == WTS_SESSION_LOCK ? 1u : 4u);
+            emit(window, JSTI_EVENT_USER_ABSENT, "session locked or disconnected");
+        } else if (wparam == WTS_SESSION_UNLOCK || wparam == WTS_CONSOLE_CONNECT || wparam == WTS_REMOTE_CONNECT) {
+            handsFreeAbsence.fetch_and(wparam == WTS_SESSION_UNLOCK ? ~1u : ~4u);
+        }
+        return 0;
+    case WM_POWERBROADCAST:
+        if (wparam == PBT_APMSUSPEND) {
+            handsFreeAbsence.fetch_or(2u);
+            emit(window, JSTI_EVENT_USER_ABSENT, "computer suspended");
+        } else if (wparam == PBT_APMRESUMEAUTOMATIC || wparam == PBT_APMRESUMESUSPEND) {
+            handsFreeAbsence.fetch_and(~2u);
+        }
+        return TRUE;
     case WM_GETMINMAXINFO: {
         auto info = reinterpret_cast<MINMAXINFO *>(lparam);
         info->ptMinTrackSize = {minimumWindowWidth(window), minimumWindowHeight(window)};
@@ -1920,6 +2463,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     case WM_SIZE:
         layout(window); return 0;
     case WM_DPICHANGED: {
+        std::string iconFailure;
+        if (!jsti::appIcon::refresh(window, HIWORD(wparam), iconFailure)) showFailure(window, iconFailure);
         auto bounds = reinterpret_cast<RECT *>(lparam);
         SetWindowPos(window, nullptr, bounds->left, bounds->top, bounds->right - bounds->left,
             bounds->bottom - bounds->top, SWP_NOZORDER | SWP_NOACTIVATE);
@@ -1968,7 +2513,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         const auto &palette = jsti::chrome::palette();
         HDC dc = reinterpret_cast<HDC>(wparam);
         const int identifier = GetDlgCtrlID(reinterpret_cast<HWND>(lparam));
-        const COLORREF surface = message == WM_CTLCOLORLISTBOX && identifier == historyID ? palette.window : palette.field;
+        COLORREF surface = message == WM_CTLCOLORLISTBOX && identifier == historyID ? palette.window : palette.field;
+        if (identifier == backupAudioID) surface = palette.card;
         SetTextColor(dc, palette.text);
         SetBkColor(dc, surface);
         return reinterpret_cast<LRESULT>(brushFor(surface));
@@ -1983,6 +2529,28 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         return 0;
     case updateMessage:
         applyUpdate(window); return 0;
+    case audioCleanupMessage: {
+        std::string token;
+        size_t count;
+        {
+            std::lock_guard<std::mutex> lock(state.mutex);
+            token.swap(state.audioCleanupToken);
+            count = state.audioCleanupCount;
+        }
+        if (token.empty()) return 0;
+        bool confirmed = false;
+        if (idleControl(window, audioCleanupID) && IsWindowEnabled(window)) {
+            const std::wstring body = L"Permanently delete " + std::to_wstring(count) +
+                L" saved audio file(s), including audio kept after deleting History entries?\n\n"
+                L"History entries and transcripts will be kept. Recordings saved after this "
+                L"confirmation will not be deleted. This cannot be undone.";
+            confirmed = MessageBoxW(window, body.c_str(), L"Delete saved recordings?",
+                MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) == IDYES;
+        }
+        if (state.callback) state.callback(JSTI_EVENT_AUDIO_CLEANUP_RESPONSE, token.c_str(),
+            confirmed ? 1 : 0, state.context);
+        return 0;
+    }
     case WM_HOTKEY:
         jsti_hotkey_message(window, message, wparam);
         return 0;
@@ -2005,6 +2573,18 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     case pageMessage:
         showPage(window, static_cast<int>(wparam));
         return 0;
+    case sidebarMessage: {
+        std::unique_ptr<SidebarBindings> bindings;
+        { std::lock_guard<std::mutex> lock(state.mutex); bindings = state.sidebarDelivery.claim(wparam); }
+        if (bindings) { state.sidebar = std::move(*bindings); applySidebarBindings(window); }
+        return 0;
+    }
+    case densityMessage: {
+        std::unique_ptr<JSTIVisualDensity> density;
+        { std::lock_guard<std::mutex> lock(state.mutex); density = state.densityDelivery.claim(wparam); }
+        if (density) { visualDensity = *density; layout(window); }
+        return 0;
+    }
     case hudMessage:
         jsti::hud::apply();
         return 0;
@@ -2017,8 +2597,28 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             return 0;
         }
         switch (LOWORD(wparam)) {
+        case historyCorrectionsID:
+            if (HIWORD(wparam) == BN_CLICKED && IsWindowEnabled(GetDlgItem(window, historyCorrectionsID))) {
+                const std::string record = selectedHistory(window);
+                if (!record.empty()) jsti_show_vocabulary_result(window, record.c_str(),
+                    [](int event, const char *payload, int kind) {
+                        if (state.callback) state.callback(event, payload, kind, state.context);
+                    });
+            }
+            return 0;
+        case correctionsID: case pronunciationID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, LOWORD(wparam))) {
+                jsti_show_vocabulary(window, LOWORD(wparam) == correctionsID ? 0 : 1,
+                    [](int event, const char *payload, int kind) {
+                        if (state.callback) state.callback(event, payload, kind, state.context);
+                    });
+            }
+            return 0;
         case profilesID:
             if (idleControl(window, profilesID)) emit(window, 17);
+            return 0;
+        case comparisonID:
+            if (idleControl(window, comparisonID)) jsti_show_comparison(window, state.callback, state.context);
             return 0;
         case recordID: emitRecording(window); return 0;
         case importID:
@@ -2031,6 +2631,12 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             return 0;
         }
         case processingID: jsti_show_postprocessing(window); return 0;
+        case configurationID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, configurationID) && IsWindowEnabled(window))
+                jsti_show_configuration(window, state.page == transcriptionPage ? L"Transcription" :
+                    state.page == postProcessingPage ? L"Post-processing" :
+                    state.page == keyboardPage ? L"Keyboard" : L"General");
+            return 0;
         case azureID:
             if (HIWORD(wparam) == BN_CLICKED && idleControl(window, azureID) && IsWindowEnabled(window)) {
                 jsti_show_azure_resource_settings(window);
@@ -2065,6 +2671,20 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             emit(window, JSTI_EVENT_LOGIN_ITEM, requested ? "1" : "0");
             return 0;
         }
+        case recordingsFolderID:
+            if (HIWORD(wparam) == BN_CLICKED) emit(window, JSTI_EVENT_RECORDINGS_FOLDER, "");
+            return 0;
+        case audioCleanupID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, audioCleanupID)) {
+                emit(window, JSTI_EVENT_AUDIO_CLEANUP, "");
+            }
+            return 0;
+        case backupExportID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, backupExportID)) exportMigrationBackup(window);
+            return 0;
+        case backupInspectID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, backupInspectID)) inspectMigrationBackup(window);
+            return 0;
         case githubID: case issueID: case privacyID: {
             if (HIWORD(wparam) != BN_CLICKED) return 0;
             const wchar_t *address = LOWORD(wparam) == githubID ? L"https://github.com/crmitchelmore/justspeaktoit"
@@ -2093,6 +2713,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case shortcutID:
             if (HIWORD(wparam) == BN_CLICKED && idleControl(window, shortcutID) && IsWindowEnabled(window)) {
                 jsti_show_hotkey_settings(window);
+                applySidebarBindings(window);
                 SetDlgItemTextW(window, transcriptLabelID, jsti_hotkey_label().c_str());
                 refreshSetup(window);
             }
@@ -2112,6 +2733,19 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
                 jsti_show_voice_settings(window);
             }
             return 0;
+        case voiceSourcesID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, voiceSourcesID) && IsWindowEnabled(window)) {
+                const std::string transcript = state.historyPresentationReady
+                    ? jsti::utf8(controlText(GetDlgItem(window, transcriptID))) : "";
+                const std::string record = state.historyPresentationReady ? state.selectedHistoryID : "";
+                jsti_show_voice_sources(window, record.c_str(), transcript.c_str());
+            }
+            return 0;
+        case voiceCredentialID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, voiceCredentialID) && IsWindowEnabled(window)) {
+                jsti_show_voice_credentials(window);
+            }
+            return 0;
         case playPauseID:
             if (HIWORD(wparam) == BN_CLICKED && IsWindowEnabled(GetDlgItem(window, playPauseID))) {
                 emitHistory(window, JSTI_EVENT_HISTORY_PLAY_PAUSE);
@@ -2119,7 +2753,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             return 0;
         case stopPlaybackID:
             if (HIWORD(wparam) == BN_CLICKED && IsWindowEnabled(GetDlgItem(window, stopPlaybackID))) {
-                emitHistory(window, JSTI_EVENT_HISTORY_STOP);
+                if (state.page == voicePage) jsti_voice_sources_stop();
+                else emitHistory(window, JSTI_EVENT_HISTORY_STOP);
             }
             return 0;
         case historyID:
@@ -2146,6 +2781,44 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case clearSearchID:
             if (idleControl(window, clearSearchID)) clearSearch(window);
             return 0;
+        case historyFiltersID:
+            if (idleControl(window, historyFiltersID)) {
+                jsti_show_history_filters(window, [window](const std::string &value) {
+                    emit(window, JSTI_EVENT_HISTORY_FILTERS, value.c_str());
+                });
+            }
+            return 0;
+        case historyDeleteID: {
+            if (!idleControl(window, historyDeleteID)) return 0;
+            const LRESULT selected = SendDlgItemMessageW(window, historyID, LB_GETCURSEL, 0, 0);
+            if (selected == LB_ERR || static_cast<size_t>(selected) >= state.displayedHistory.size()) return 0;
+            const std::string id = state.displayedHistory[static_cast<size_t>(selected)].id;
+            const int answer = MessageBoxW(window,
+                L"Delete this History entry? Its saved recording file will be kept.\n\n"
+                L"This cannot be undone. If History sync is enabled, its synced text will also be deleted.",
+                L"Delete History entry", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
+            if (answer == IDYES && state.callback) {
+                state.callback(JSTI_EVENT_HISTORY_DELETE, id.c_str(), 0, state.context);
+            }
+            return 0;
+        }
+        case historyClearID: {
+            if (!idleControl(window, historyClearID)) return 0;
+            const std::string ids = historyManagementIDs();
+            if (ids.empty()) return 0;
+            const size_t count = 1 + static_cast<size_t>(std::count(ids.begin(), ids.end(), '\n'));
+            const std::wstring prompt = L"Clear all " + std::to_wstring(count)
+                + L" History entries, including hidden and filtered entries?\n\n"
+                L"Yes: delete History and its owned recording files.\n"
+                L"No: delete History but keep recording files.\nCancel: keep everything.\n\n"
+                L"This cannot be undone. If History sync is enabled, synced text will also be deleted.";
+            const int answer = MessageBoxW(window, prompt.c_str(), L"Clear History",
+                MB_YESNOCANCEL | MB_ICONWARNING | MB_DEFBUTTON3);
+            if ((answer == IDYES || answer == IDNO) && state.callback) {
+                state.callback(JSTI_EVENT_HISTORY_DELETE, ids.c_str(), answer == IDYES ? 1 : 0, state.context);
+            }
+            return 0;
+        }
         case IDCANCEL:
             // Escape inside the search box is a keyboard clear affordance.
             if (GetFocus() == GetDlgItem(window, searchID) && idleControl(window, searchID)) clearSearch(window);
@@ -2259,14 +2932,126 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         emit(window, JSTI_EVENT_CLOSING);
         DestroyWindow(window); return 0;
     case WM_DESTROY:
+        stopHandsFreeGuard(window);
         jsti::tray::remove();
         backdrop.release();
         jsti_hotkey_stop(window);
-        { std::lock_guard<std::mutex> lock(state.mutex); state.window = nullptr; state.posted = false; }
+        {
+            std::lock_guard<std::mutex> lock(state.mutex);
+            state.window = nullptr; state.posted = false; state.audioCleanupToken.clear(); state.migrationReport.clear();
+            state.sidebarDelivery.retire();
+            state.densityDelivery.retire();
+        }
         PostQuitMessage(0); return 0;
     }
     return DefWindowProcW(window, message, wparam, lparam);
 }
+
+struct SidebarStartupFixture {
+    SidebarDelivery delivery;
+    SidebarBindings applied;
+    HWND window = nullptr;
+};
+
+LRESULT CALLBACK sidebarStartupFixtureProcedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+    if (message == WM_NCCREATE) {
+        auto *create = reinterpret_cast<CREATESTRUCTW *>(lparam);
+        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(create->lpCreateParams));
+    }
+    auto *fixture = reinterpret_cast<SidebarStartupFixture *>(GetWindowLongPtrW(window, GWLP_USERDATA));
+    if (fixture && message == WM_CREATE) {
+        for (int page = 0; page < pageCount; ++page) {
+            if (!CreateWindowExW(0, L"BUTTON", L"", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 160, 36,
+                window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(navBaseID + page)),
+                GetModuleHandleW(nullptr), nullptr)) return -1;
+        }
+        fixture->window = window;
+        auto initial = fixture->delivery.claimInitial();
+        if (initial) fixture->applied = std::move(*initial);
+        applySidebarBindings(window, fixture->applied);
+        return 0;
+    }
+    if (fixture && message == sidebarMessage) {
+        auto update = fixture->delivery.claim(wparam);
+        if (update) {
+            fixture->applied = std::move(*update);
+            applySidebarBindings(window, fixture->applied);
+        }
+        return 0;
+    }
+    if (fixture && message == WM_DESTROY) {
+        fixture->window = nullptr;
+        fixture->delivery.retire();
+        return 0;
+    }
+    return DefWindowProcW(window, message, wparam, lparam);
+}
+
+bool sidebarStartupSelfTest() {
+    const HINSTANCE instance = GetModuleHandleW(nullptr);
+    WNDCLASSW type{};
+    type.lpfnWndProc = sidebarStartupFixtureProcedure;
+    type.hInstance = instance;
+    type.lpszClassName = L"JustSpeakToItSidebarStartupFixture";
+    if (!RegisterClassW(&type)) return false;
+    const JSTISidebarShortcut bindings[] = {{"dashboard", 1, "Ctrl+1"}, {"history", 2, "Ctrl+2"}};
+    SidebarStartupFixture fixture;
+    UINT_PTR lastRetired = 0;
+    bool okay = true;
+    for (int hints : {0, 1}) {
+        okay = configureSidebarShortcuts(fixture.delivery, nullptr, bindings, 2, hints) == 0 && okay;
+        const auto *retained = fixture.delivery.initial.get();
+        okay = okay && retained && retained->showHints == (hints != 0);
+        const JSTISidebarShortcut invalid[] = {
+            {"unknown-page", 3, "Ctrl+3"}, {"dashboard", 3, "Ctrl+Shift+3"},
+            {"dashboard", 10, "Ctrl+10"}, {"dashboard", 3, "\xFF"}, {nullptr, 3, "Ctrl+3"}
+        };
+        for (const auto &binding : invalid)
+            okay = configureSidebarShortcuts(fixture.delivery, nullptr, &binding, 1, hints) == -1 &&
+                fixture.delivery.initial.get() == retained && okay;
+        const JSTISidebarShortcut repeatedID[] = {{"dashboard", 1, "Ctrl+1"}, {"dashboard", 2, "Ctrl+2"}};
+        const JSTISidebarShortcut repeatedDigit[] = {{"dashboard", 1, "Ctrl+1"}, {"history", 1, "Ctrl+1"}};
+        okay = configureSidebarShortcuts(fixture.delivery, nullptr, repeatedID, 2, hints) == -1 &&
+            configureSidebarShortcuts(fixture.delivery, nullptr, repeatedDigit, 2, hints) == -1 &&
+            configureSidebarShortcuts(fixture.delivery, nullptr, bindings, 2, 2) == -1 &&
+            fixture.delivery.initial.get() == retained && okay;
+        HWND window = CreateWindowExW(0, type.lpszClassName, L"Sidebar startup fixture", WS_POPUP,
+            0, 0, 1, 1, nullptr, nullptr, instance, &fixture);
+        if (!window) { okay = false; break; }
+        const bool reserved = jsti_hotkey_reserves_sidebar_digit(1);
+        auto label = [&](bool shown) { return shown && !reserved ? L"Dashboard (Ctrl+1)" : L"Dashboard"; };
+        okay = okay && !fixture.delivery.initial && fixture.applied.digits[dashboardPage] == 1 &&
+            fixture.applied.digits[historyPage] == 2 && fixture.applied.showHints == (hints != 0) &&
+            controlText(GetDlgItem(window, navBaseID)) == label(hints != 0);
+        okay = configureSidebarShortcuts(fixture.delivery, window, bindings, 2, !hints) == 0 &&
+            fixture.delivery.posted.size() == 1 &&
+            fixture.delivery.sequence > lastRetired && !fixture.delivery.claim(lastRetired) &&
+            controlText(GetDlgItem(window, navBaseID)) == label(hints != 0) && okay;
+        MSG message{};
+        while (!fixture.delivery.posted.empty() &&
+               PeekMessageW(&message, window, sidebarMessage, sidebarMessage, PM_REMOVE)) {
+            if (message.message == WM_QUIT) { PostQuitMessage(static_cast<int>(message.wParam)); okay = false; break; }
+            DispatchMessageW(&message);
+        }
+        okay = okay && fixture.delivery.posted.empty() && fixture.applied.showHints == (hints == 0) &&
+            controlText(GetDlgItem(window, navBaseID)) == label(hints == 0);
+        okay = configureSidebarShortcuts(fixture.delivery, window, bindings, 2, hints) == 0 &&
+            fixture.delivery.posted.size() == 1 && okay;
+        const UINT_PTR retired = fixture.delivery.sequence;
+        DestroyWindow(window);
+        okay = okay && !fixture.window && fixture.delivery.posted.empty() && !fixture.delivery.claim(retired);
+        lastRetired = retired;
+        const HWND invalidWindow = reinterpret_cast<HWND>(static_cast<INT_PTR>(-2));
+        okay = configureSidebarShortcuts(fixture.delivery, invalidWindow, bindings, 2, hints) == -1 &&
+            fixture.delivery.posted.empty() && okay;
+    }
+    UnregisterClassW(type.lpszClassName, instance);
+    return okay;
+}
+}
+
+int jsti_window_hands_free_guard_ready(void) {
+    return handsFreeGuardRegistered && handsFreeAbsence == 0 ? 1 : 0;
 }
 
 // Shortcut events from WindowsHotKey.cpp, on the UI thread. A press-to-toggle
@@ -2286,6 +3071,56 @@ void jsti_window_hotkey_event(HWND window, int event) {
     case JSTI_EVENT_HOTKEY_DEADLINE: emit(window, event); break;
     default: break;
     }
+}
+
+int jsti_window_set_history_management(const char *identifiers) {
+    std::wstring checked;
+    if (!identifiers || !jsti::wide(identifiers, checked)) return -1;
+    std::lock_guard<std::mutex> lock(state.mutex);
+    state.allHistoryIDs = identifiers;
+    if (state.window && !state.posted) {
+        state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
+        if (!state.posted) return -1;
+    }
+    return 0;
+}
+
+int jsti_window_confirm_audio_cleanup(const char *token, size_t count, char *error, size_t capacity) {
+    std::wstring checked;
+    if (!token || !jsti::wide(token, checked) || checked.empty() || count == 0) {
+        return jsti::fail("The recording audio confirmation is invalid.", error, capacity);
+    }
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (!state.window || !state.audioCleanupToken.empty()) {
+        return jsti::fail("The recording audio confirmation is unavailable.", error, capacity);
+    }
+    state.audioCleanupToken = token;
+    state.audioCleanupCount = count;
+    if (!PostMessageW(state.window, audioCleanupMessage, 0, 0)) {
+        state.audioCleanupToken.clear();
+        return jsti::fail("Could not show the recording audio confirmation.", error, capacity);
+    }
+    return 0;
+}
+
+int jsti_window_show_migration_report(const char *text, char *error, size_t capacity) {
+    std::wstring report;
+    if (!text || !jsti::wide(text, report) || report.empty()) {
+        return jsti::fail("The backup inspection report is invalid.", error, capacity);
+    }
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (!state.window || !state.migrationReport.empty()) {
+        return jsti::fail("The backup inspection report is unavailable.", error, capacity);
+    }
+    state.migrationReport = std::move(report);
+    if (!state.posted) {
+        state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
+        if (!state.posted) {
+            state.migrationReport.clear();
+            return jsti::fail("Could not show the backup inspection report.", error, capacity);
+        }
+    }
+    return 0;
 }
 
 int jsti_window_set_automation(int enabled) {
@@ -2355,41 +3190,6 @@ ULONG_PTR activateVisualStyles() {
     return cookie;
 }
 
-// The app icon at `size` pixels, drawn from the brand geometry.
-// `recording` adds a red dot, as the Mac's menu bar icon shows while recording.
-HICON brandIcon(int size, bool recording = false) {
-    if (size <= 0 || !jsti::chrome::startup()) return nullptr;
-    BITMAPINFO info{};
-    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    info.bmiHeader.biWidth = size;
-    info.bmiHeader.biHeight = -size;
-    info.bmiHeader.biPlanes = 1;
-    info.bmiHeader.biBitCount = 32;
-    info.bmiHeader.biCompression = BI_RGB;
-    void *pixels = nullptr;
-    HDC screen = GetDC(nullptr);
-    HBITMAP colour = CreateDIBSection(screen, &info, DIB_RGB_COLORS, &pixels, nullptr, 0);
-    ReleaseDC(nullptr, screen);
-    if (!colour || !pixels) return nullptr;
-    std::memset(pixels, 0, static_cast<size_t>(size) * size * 4);
-    HDC dc = CreateCompatibleDC(nullptr);
-    HGDIOBJ previous = SelectObject(dc, colour);
-    jsti::chrome::brandIcon(dc, RECT{0, 0, size, size});
-    if (recording) {
-        const int dot = std::max(6, size * 7 / 16);
-        jsti::chrome::fillRound(dc, RECT{size - dot, size - dot, size, size}, dot / 2, RGB(0xFF, 0xFF, 0xFF));
-        jsti::chrome::fillRound(dc, RECT{size - dot + 1, size - dot + 1, size - 1, size - 1}, dot / 2 - 1,
-                                jsti::chrome::red);
-    }
-    SelectObject(dc, previous);
-    DeleteDC(dc);
-    HBITMAP mask = CreateBitmap(size, size, 1, 1, nullptr);
-    ICONINFO parts{TRUE, 0, 0, mask, colour};
-    HICON icon = CreateIconIndirect(&parts);
-    DeleteObject(mask);
-    DeleteObject(colour);
-    return icon;
-}
 } // namespace
 
 int jsti_window_run(const char *const *models, size_t count, int selected,
@@ -2457,6 +3257,7 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
         state.pendingPlaybackState = playbackIdle;
         state.pendingPlaybackText.clear();
         state.pendingHistory.clear(); state.pendingHistorySelection.clear(); state.selectedHistoryID.clear();
+        state.allHistoryIDs.clear();
         state.status.clear(); state.transcript.clear();
     }
     state.callback = callback; state.context = context;
@@ -2479,39 +3280,49 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
     type.lpszClassName = L"JustSpeakToItWindows";
     type.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     type.hbrBackground = nullptr;
-    HICON icon = brandIcon(GetSystemMetrics(SM_CXICON)), smallIcon = brandIcon(GetSystemMetrics(SM_CXSMICON));
-    HICON recordingIcon = brandIcon(GetSystemMetrics(SM_CXSMICON), true);
-    type.hIcon = icon ? icon : LoadIconW(nullptr, IDI_APPLICATION);
     const ATOM registered = RegisterClassW(&type);
     HWND window = registered ? CreateWindowExW(WS_EX_CONTROLPARENT, type.lpszClassName,
         L"Just Speak to It", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT,
         1180, 820, nullptr, nullptr, instance, nullptr) : nullptr;
-    if (window && smallIcon) SendMessageW(window, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(smallIcon));
     int outcome = 0;
-    if (!window) outcome = jsti::fail(jsti::systemError("Creating native desktop window"), error, capacity);
-    else {
-        { std::lock_guard<std::mutex> lock(state.mutex); state.window = window; }
+    std::string iconFailure;
+    if (window && !jsti::appIcon::refresh(window, GetDpiForWindow(window), iconFailure)) {
+        outcome = jsti::fail(iconFailure, error, capacity);
+        DestroyWindow(window);
+        window = nullptr;
+    }
+    if (!window) {
+        if (!outcome) outcome = jsti::fail(jsti::systemError("Creating native desktop window"), error, capacity);
+    } else {
+        std::unique_ptr<SidebarBindings> initialSidebar;
+        std::unique_ptr<JSTIVisualDensity> initialDensity;
+        {
+            std::lock_guard<std::mutex> lock(state.mutex);
+            state.window = window;
+            initialSidebar = state.sidebarDelivery.claimInitial();
+            initialDensity = state.densityDelivery.claimInitial();
+        }
+        if (initialSidebar) state.sidebar = std::move(*initialSidebar);
+        initialSidebar.reset();
+        if (initialDensity) { visualDensity = *initialDensity; layout(window); }
+        initialDensity.reset();
+        applySidebarBindings(window);
         // A login launch starts minimised and leaves the focus where it is.
         ShowWindow(window, jsti::login::launchedAtLogin() ? SW_SHOWMINNOACTIVE : SW_SHOWDEFAULT);
         UpdateWindow(window);
         // Optional: without a notification area the app works the same.
-        jsti::tray::add(window, smallIcon ? smallIcon : type.hIcon, recordingIcon);
+        jsti::tray::add(window, jsti::appIcon::smallHandle(), jsti::appIcon::recordingHandle());
         emit(window, JSTI_EVENT_READY);
         std::string shortcutFailure;
         if (IsWindow(window) && !jsti_hotkey_start(window, shortcutFailure)) showFailure(window, shortcutFailure);
+        if (IsWindow(window)) applySidebarBindings(window);
         MSG message{};
         BOOL result;
         while ((result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
-            // Ctrl+1 to Ctrl+0 open the pages in sidebar order, as the Mac's
-            // Command shortcuts do.
-            if (message.message == WM_KEYDOWN && (GetKeyState(VK_CONTROL) & 0x8000) &&
-                !(GetKeyState(VK_MENU) & 0x8000) && message.wParam >= '0' && message.wParam <= '9' &&
-                (message.hwnd == window || IsChild(window, message.hwnd)) && IsWindowEnabled(window)) {
-                const int digit = static_cast<int>(message.wParam - '0');
-                showPage(window, digit == 0 ? pageCount - 1 : digit - 1);
-                continue;
+            if (sidebarKeyMessage(window, message)) continue;
+            if (!jsti_history_filters_message(&message) && !IsDialogMessageW(window, &message)) {
+                TranslateMessage(&message); DispatchMessageW(&message);
             }
-            if (!IsDialogMessageW(window, &message)) { TranslateMessage(&message); DispatchMessageW(&message); }
         }
         if (result < 0) {
             outcome = jsti::fail(jsti::systemError("Reading desktop messages"), error, capacity);
@@ -2521,13 +3332,16 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
     jsti::hud::destroy();
     state.font = nullptr;
     state.controls.clear(); state.callback = nullptr; state.context = nullptr;
-    if (icon) DestroyIcon(icon);
-    if (smallIcon) DestroyIcon(smallIcon);
-    if (recordingIcon) DestroyIcon(recordingIcon);
+    jsti::appIcon::destroy();
     if (visualStyles) DeactivateActCtx(0, visualStyles);
     state.displayedHistory.clear();
     if (registered) UnregisterClassW(type.lpszClassName, instance);
-    { std::lock_guard<std::mutex> lock(state.mutex); state.running = false; state.window = nullptr; }
+    {
+        std::lock_guard<std::mutex> lock(state.mutex);
+        state.running = false; state.window = nullptr;
+        state.sidebarDelivery.retire();
+        state.densityDelivery.retire();
+    }
     return outcome;
 }
 
@@ -2757,12 +3571,20 @@ int jsti_window_set_insights(const JSTIInsights *all, const JSTIInsights *visibl
     } catch (const std::exception &) { return -1; }
 }
 
-int jsti_window_set_hud(int phase, const char *headline, const char *subheadline, const char *live_text) {
+int jsti_window_set_hud(int phase, const char *headline, const char *subheadline, const char *live_text,
+                        int display_milliseconds, int compact) {
+    return jsti_window_set_hud_layout(phase, headline, subheadline, live_text, display_milliseconds, compact, 0);
+}
+
+int jsti_window_set_hud_layout(int phase, const char *headline, const char *subheadline, const char *live_text,
+                               int display_milliseconds, int compact, int expanded) {
     try {
+        if ((compact != 0 && compact != 1) || (expanded != 0 && expanded != 1)) return -1;
         std::wstring title, detail, live;
         if (!jsti::wide(headline ? headline : "", title) || !jsti::wide(subheadline ? subheadline : "", detail) ||
             !jsti::wide(live_text ? live_text : "", live) ||
-            !jsti::hud::stage(phase, std::move(title), std::move(detail), std::move(live))) {
+            !jsti::hud::stage(phase, std::move(title), std::move(detail), std::move(live),
+                              display_milliseconds, compact != 0, expanded != 0)) {
             return -1;
         }
         std::lock_guard<std::mutex> lock(state.mutex);
@@ -2782,6 +3604,20 @@ int jsti_window_show_page(int page) {
     if (page < 0 || page >= pageCount) return -1;
     std::lock_guard<std::mutex> lock(state.mutex);
     return state.window && PostMessageW(state.window, pageMessage, static_cast<WPARAM>(page), 0) ? 0 : -1;
+}
+
+int jsti_window_set_sidebar_shortcuts(const JSTISidebarShortcut *bindings, size_t count, int showHints) {
+    try {
+        std::lock_guard<std::mutex> lock(state.mutex);
+        return configureSidebarShortcuts(state.sidebarDelivery, state.window, bindings, count, showHints);
+    } catch (const std::exception &) { return -1; }
+}
+
+int jsti_window_set_visual_density(JSTIVisualDensity density) {
+    try {
+        std::lock_guard<std::mutex> lock(state.mutex);
+        return configureVisualDensity(state.densityDelivery, state.window, density);
+    } catch (const std::exception &) { return -1; }
 }
 
 int jsti_window_screenshot_tour(const char *directory, char *error, size_t capacity) {
@@ -2955,11 +3791,153 @@ int jsti_shell_open_file(const char *path, char *error, size_t errorCapacity) {
     return 0;
 }
 
+int jsti_shell_open_directory(const char *path, char *error, size_t errorCapacity) {
+    std::wstring folder;
+    if (!jsti::wide(path, folder) || folder.empty()) {
+        return jsti::fail("No valid recording folder supplied.", error, errorCapacity);
+    }
+    const DWORD attributes = GetFileAttributesW(folder.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES || !(attributes & FILE_ATTRIBUTE_DIRECTORY)) {
+        return jsti::fail("The recording folder does not exist or is not a directory.", error, errorCapacity);
+    }
+    const HRESULT apartment = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    if (FAILED(apartment) && apartment != RPC_E_CHANGED_MODE) {
+        return jsti::fail("Windows could not initialize the folder launcher.", error, errorCapacity);
+    }
+    PIDLIST_ABSOLUTE item = ILCreateFromPathW(folder.c_str());
+    const HRESULT opened = item ? SHOpenFolderAndSelectItems(item, 0, nullptr, 0) : E_INVALIDARG;
+    CoTaskMemFree(item);
+    if (SUCCEEDED(apartment)) CoUninitialize();
+    if (FAILED(opened)) return jsti::fail("Windows could not reveal the recording folder.", error, errorCapacity);
+    return 0;
+}
+
 int jsti_window_self_test(char *error, size_t errorCapacity) {
     HWND window;
     { std::lock_guard<std::mutex> lock(state.mutex); window = state.window; }
     if (!window || GetWindowThreadProcessId(window, nullptr) != GetCurrentThreadId()) {
         return jsti::fail("Window checks must run on the UI thread after READY.", error, errorCapacity);
+    }
+    if (!sidebarStartupSelfTest())
+        return jsti::fail("Sidebar pre-window retention, real control application or delivery ownership failed.",
+                          error, errorCapacity);
+    const JSTISidebarShortcut unknownSidebar[] = {{"unknown-page", 1, "Ctrl+1"}};
+    if (jsti_window_set_sidebar_shortcuts(unknownSidebar, 1, 1) != -1)
+        return jsti::fail("An unrecognized sidebar destination was accepted.", error, errorCapacity);
+    {
+        const JSTIVisualDensity saved = visualDensity;
+        JSTIVisualDensity normal = saved;
+        normal.compact = 0;
+        const JSTIVisualDensity compact{1, 8, 6, 8, 6, 6, 8, 30};
+        DensityDelivery startup;
+        bool okay = true;
+        for (const auto &density : {normal, compact}) {
+            okay = configureVisualDensity(startup, nullptr, density) == 0 && okay;
+            const auto *retained = startup.initial.get();
+            JSTIVisualDensity invalid = density;
+            invalid.compact = 2;
+            okay = configureVisualDensity(startup, nullptr, invalid) == -1 &&
+                startup.initial.get() == retained && okay;
+            auto admitted = startup.claimInitial();
+            okay = okay && admitted && admitted->compact == density.compact &&
+                admitted->page_padding == density.page_padding && !startup.initial;
+        }
+        const int originalPage = state.page;
+        HWND originalFocus = GetFocus();
+        const LRESULT font = SendDlgItemMessageW(window, transcriptID, WM_GETFONT, 0, 0);
+        HWND edit = CreateWindowExW(0, L"EDIT", L"Unchanged density draft", WS_CHILD | WS_VISIBLE,
+            0, 0, 120, 34, window, nullptr, GetModuleHandleW(nullptr), nullptr);
+        auto apply = [&](const JSTIVisualDensity &density) {
+            UINT_PTR token = 0;
+            {
+                std::lock_guard<std::mutex> lock(state.mutex);
+                if (configureVisualDensity(state.densityDelivery, window, density) != 0) return false;
+                token = state.densityDelivery.sequence;
+            }
+            SendMessageW(window, densityMessage, token, 0);
+            return true;
+        };
+        okay = okay && edit != nullptr && font != 0;
+        for (int page = 0; page < pageCount; ++page) {
+            showPage(window, page);
+            okay = apply(normal) && okay;
+            const auto baseline = placed;
+            const auto cards = frame.cards;
+            const RECT hero = frame.hero;
+            const RECT lastRow = placed.at(navBaseID + pageCount - 1);
+            okay = okay && frame.sidebar.right == scale(window, 232) &&
+                heightOf(placed.at(navBaseID)) == scale(window, 36);
+            if (edit) SetFocus(edit);
+            okay = apply(compact) && okay;
+            okay = okay && heightOf(placed.at(navBaseID)) == scale(window, 36) &&
+                placed.at(navBaseID + pageCount - 1).top < lastRow.top &&
+                SendDlgItemMessageW(window, transcriptID, WM_GETFONT, 0, 0) == font &&
+                GetFocus() == edit && controlText(edit) == L"Unchanged density draft";
+            if (hero.right > hero.left) {
+                okay = okay && hero.left == frame.sidebar.right + scale(window, 24) &&
+                    frame.hero.left == frame.sidebar.right + scale(window, 8);
+            }
+            for (const auto &card : frame.cards) {
+                const RECT body = cardBody(window, card.rect);
+                okay = okay && body.left - card.rect.left == scale(window, 8) &&
+                    body.top - card.rect.top == scale(window, 52) &&
+                    card.rect.bottom - body.bottom == scale(window, 8);
+            }
+            okay = apply(normal) && okay;
+            okay = okay && cards.size() == frame.cards.size() && EqualRect(&hero, &frame.hero);
+            for (size_t index = 0; index < cards.size() && index < frame.cards.size(); ++index)
+                okay = okay && EqualRect(&cards[index].rect, &frame.cards[index].rect);
+            for (const auto &control : baseline)
+                okay = okay && EqualRect(&control.second, &placed.at(control.first));
+        }
+        okay = apply(saved) && okay;
+        if (edit) DestroyWindow(edit);
+        showPage(window, originalPage);
+        if (originalFocus && IsWindowVisible(originalFocus)) SetFocus(originalFocus);
+        if (!okay) return jsti::fail("Layout density geometry, Normal restoration or editing focus failed.",
+                                     error, errorCapacity);
+    }
+    {
+        const auto saved = state.sidebar;
+        const int page = state.page;
+        HWND focus = GetFocus();
+        state.sidebar = SidebarBindings();
+        state.sidebar.digits[dashboardPage] = 1;
+        state.sidebar.hints[dashboardPage] = L"Ctrl+1";
+        state.sidebar.showHints = true;
+        applySidebarBindings(window);
+        const bool reserved = jsti_hotkey_reserves_sidebar_digit(1);
+        const std::wstring expected = reserved ? L"Dashboard" : L"Dashboard (Ctrl+1)";
+        bool okay = controlText(GetDlgItem(window, navBaseID)) == expected;
+        showPage(window, historyPage);
+        okay = okay && !navigateSidebar(window, 9, true, window) && state.page == historyPage &&
+            !navigateSidebar(window, 1, false, window) && state.page == historyPage;
+        HWND edit = CreateWindowExW(0, L"EDIT", L"Unchanged", WS_CHILD, 0, 0, 10, 10,
+                                    window, nullptr, GetModuleHandleW(nullptr), nullptr);
+        okay = okay && edit && !navigateSidebar(window, 1, true, edit) && state.page == historyPage;
+        if (edit) DestroyWindow(edit);
+        HWND row = GetDlgItem(window, navBaseID);
+        EnableWindow(row, FALSE);
+        okay = okay && !navigateSidebar(window, 1, true, window) && state.page == historyPage;
+        EnableWindow(row, TRUE);
+        state.sidebar.showHints = false;
+        applySidebarBindings(window);
+        okay = okay && controlText(row) == L"Dashboard";
+        const bool routed = navigateSidebar(window, 1, true, window);
+        okay = okay && (reserved ? !routed && state.page == historyPage : routed && state.page == dashboardPage);
+        state.sidebar = saved;
+        applySidebarBindings(window);
+        showPage(window, page);
+        if (focus && IsWindowVisible(focus)) SetFocus(focus);
+        if (!okay) return jsti::fail("Sidebar hints, focus guards or window-local navigation failed.", error, errorCapacity);
+    }
+    char folderError[256] = {};
+    if (!GetDlgItem(window, recordingsFolderID) || !GetDlgItem(window, audioCleanupID) ||
+        !GetDlgItem(window, backupExportID) || !GetDlgItem(window, backupAudioID) ||
+        SendDlgItemMessageW(window, backupAudioID, BM_GETCHECK, 0, 0) != BST_CHECKED ||
+        jsti_window_confirm_audio_cleanup(nullptr, 1, folderError, sizeof(folderError)) == 0 ||
+        jsti_shell_open_directory(nullptr, folderError, sizeof(folderError)) == 0) {
+        return jsti::fail("Recording folder control or invalid-path refusal failed.", error, errorCapacity);
     }
     const std::vector<MicrophoneRow> originalMicrophones = state.microphones;
     const std::string originalMicrophoneID = state.microphoneSelection;
@@ -2998,6 +3976,20 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         observed.event = event; observed.id = id ? id : ""; observed.model = model;
     };
     state.context = &observed;
+    const unsigned originalAbsence = handsFreeAbsence.exchange(0);
+    SendMessageW(window, WM_WTSSESSION_CHANGE, WTS_SESSION_LOCK, 0);
+    SendMessageW(window, WM_POWERBROADCAST, PBT_APMSUSPEND, 0);
+    SendMessageW(window, WM_WTSSESSION_CHANGE, WTS_SESSION_UNLOCK, 0);
+    const bool stayedSuspended = handsFreeAbsence == 2u && !jsti_window_hands_free_guard_ready();
+    SendMessageW(window, WM_POWERBROADCAST, PBT_APMRESUMEAUTOMATIC, 0);
+    const bool guardCleared = handsFreeAbsence == 0;
+    handsFreeAbsence = originalAbsence;
+    observed = {};
+    if (!stayedSuspended || !guardCleared) {
+        state.callback = originalCallback;
+        state.context = originalContext;
+        return jsti::fail("Session unlock incorrectly cleared the hands-free suspend guard.", error, errorCapacity);
+    }
     std::string failure;
     auto checkBounds = [&]() -> bool {
         SetWindowPos(window, nullptr, 0, 0, minimumWindowWidth(window), minimumWindowHeight(window),
@@ -3012,13 +4004,51 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             MapWindowPoints(nullptr, window, reinterpret_cast<POINT *>(&bounds), 2);
             if (bounds.left < 0 || bounds.top < 0 || bounds.right > client.right || bounds.bottom > client.bottom ||
                 bounds.right <= bounds.left || bounds.bottom <= bounds.top) {
-                failure = "A native control falls outside the minimum desktop window bounds.";
+                failure = "Native control " + std::to_string(GetDlgCtrlID(control)) +
+                    " falls outside the minimum desktop window bounds (" +
+                    std::to_string(bounds.left) + "," + std::to_string(bounds.top) + "-" +
+                    std::to_string(bounds.right) + "," + std::to_string(bounds.bottom) + ").";
                 return false;
             }
         }
         return true;
     };
     auto check = [&]() -> bool {
+        emitMigrationBackup(window, "synthetic-backup.zip");
+        const bool includesAudio = observed.event == JSTI_EVENT_MIGRATION_EXPORT &&
+            observed.id == "synthetic-backup.zip" && observed.model == 1;
+        SendDlgItemMessageW(window, backupAudioID, BM_SETCHECK, BST_UNCHECKED, 0);
+        emitMigrationBackup(window, "synthetic-history-only.zip");
+        const bool historyOnly = observed.event == JSTI_EVENT_MIGRATION_EXPORT &&
+            observed.id == "synthetic-history-only.zip" && observed.model == 0;
+        emitMigrationInspection("synthetic-review.zip");
+        const bool inspection = observed.event == JSTI_EVENT_MIGRATION_INSPECT &&
+            observed.id == "synthetic-review.zip" && observed.model == 0;
+        SendDlgItemMessageW(window, backupAudioID, BM_SETCHECK, BST_CHECKED, 0);
+        updateHistoryControls(window, 2);
+        const bool backupLocked = !IsWindowEnabled(GetDlgItem(window, backupAudioID)) &&
+            !IsWindowEnabled(GetDlgItem(window, backupExportID)) && !IsWindowEnabled(GetDlgItem(window, backupInspectID));
+        updateHistoryControls(window, 0);
+        if (!includesAudio || !historyOnly || !inspection || !backupLocked ||
+            !IsWindowEnabled(GetDlgItem(window, backupAudioID)) || !IsWindowEnabled(GetDlgItem(window, backupExportID)) ||
+            !IsWindowEnabled(GetDlgItem(window, backupInspectID))) {
+            failure = "History backup lost its explicit audio choice or idle-only controls."; return false;
+        }
+        char reportError[256]{};
+        std::string report = "Synthetic read-only report.";
+        if (jsti_window_show_migration_report(nullptr, reportError, sizeof(reportError)) == 0 ||
+            jsti_window_show_migration_report(report.c_str(), reportError, sizeof(reportError)) != 0) {
+            failure = "Backup inspection report validation or dispatch failed."; return false;
+        }
+        report.assign("Changed caller storage");
+        bool reportOwned;
+        {
+            std::lock_guard<std::mutex> lock(state.mutex);
+            reportOwned = state.migrationReport == L"Synthetic read-only report.";
+            state.migrationReport.clear(); // Do not open a modal report in the automated fixture.
+        }
+        if (!reportOwned) { failure = "Backup inspection report did not own its posted text."; return false; }
+        observed = {};
         // Deliberately interleaved global rows prove callbacks do not leak the
         // filtered combo index. These are never sent to the real Swift host.
         state.modelNames = {L"Batch Alpha", L"Live One", L"Batch Beta", L"Live Two"};
@@ -3249,10 +4279,21 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             failure = "No active microphones did not retain the dynamic default without emitting a user change."; return false;
         }
         const JSTIHistoryRow first[] = {{"one", "First recording", "Completed"}, {"two", "Second recording", "Failed"}};
+        if (jsti_window_set_history_management(nullptr) != -1 ||
+            jsti_window_set_history_management("\xff") != -1) {
+            failure = "Invalid History management input was accepted."; return false;
+        }
+        if (jsti_window_set_history_management("one\ntwo") != 0) {
+            failure = "Complete History management snapshot was refused."; return false;
+        }
         if (jsti_window_set_history(first, 2, "two") != 0) { failure = "Initial history update failed."; return false; }
         applyUpdate(window);
         if (SendDlgItemMessageW(window, historyID, LB_GETCOUNT, 0, 0) != 2 || selectedHistory(window) != "two") {
             failure = "History rows or explicit selection were not rendered."; return false;
+        }
+        if (!IsWindowEnabled(GetDlgItem(window, historyDeleteID)) ||
+            !IsWindowEnabled(GetDlgItem(window, historyClearID)) || historyManagementIDs() != "one\ntwo") {
+            failure = "History deletion controls did not use the retained snapshot."; return false;
         }
         const JSTIHistoryRow reordered[] = {first[1], first[0]};
         if (jsti_window_set_history(reordered, 2, nullptr) != 0) { failure = "History replacement failed."; return false; }
@@ -3423,7 +4464,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         applyUpdate(window);
         wchar_t detail[64] = {};
         GetDlgItemTextW(window, historyDetailID, detail, 64);
-        if (std::wstring(detail) != L"No saved recordings match this search.") {
+        if (std::wstring(detail) != L"No saved recordings match this search or filter.") {
             failure = "An empty search result did not explain the missing rows."; return false;
         }
         // A fresh launch sends its empty History and Ready status together; the
@@ -3740,10 +4781,14 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         };
         auto observe = [](void *context) { return static_cast<Event *>(context)->event; };
         return jsti_settings_self_test(window, failure) && jsti_profiles_self_test(window, failure) &&
+            jsti_history_filters_self_test(window, failure) &&
+            jsti_vocabulary_self_test(window, failure) &&
             jsti_text_output_settings_self_test(window, textOutputID, setRecording, recordingBlocked, &observed, failure) &&
             jsti_hotkey_self_test(window, observe, &observed, failure) && jsti_voice_settings_self_test(window, failure) &&
+            jsti_voice_sources_self_test(window, failure) && jsti_voice_credentials_self_test(window, failure) &&
             jsti_local_models_self_test(window, failure) && jsti_cloud_sync_settings_self_test(window, failure) &&
-            jsti_azure_resource_settings_self_test(window, failure);
+            jsti_azure_resource_settings_self_test(window, failure) && jsti_configuration_self_test(window, failure)
+            && jsti_comparison_self_test(window, failure);
     };
     bool passed = false;
     try { passed = check(); }
@@ -3799,6 +4844,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         SWP_NOZORDER | SWP_NOACTIVATE);
     showPage(window, originalPage);
     if (passed) passed = jsti::hud::selfTest(failure);
+    if (passed) passed = jsti::appIcon::selfTest(window, failure);
     if (passed) passed = jsti::tray::selfTest(failure);
     return passed ? 0 : jsti::fail(failure, error, errorCapacity);
 }
@@ -3806,6 +4852,16 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
 int jsti_window_save_snapshot(const char *path, char *error, size_t errorCapacity) {
     HWND window;
     { std::lock_guard<std::mutex> lock(state.mutex); window = state.window; }
+    extern int jsti_owned_window_save_snapshot(HWND, const char *, char *, size_t);
+    return jsti_owned_window_save_snapshot(window, path, error, errorCapacity);
+}
+
+int jsti_owned_window_save_snapshot(HWND window, const char *path, char *error, size_t errorCapacity) {
+    DWORD process = 0;
+    GetWindowThreadProcessId(window, &process);
+    if (process != GetCurrentProcessId()) {
+        return jsti::fail("Only an app-owned native window can be captured.", error, errorCapacity);
+    }
     if (!window || GetWindowThreadProcessId(window, nullptr) != GetCurrentThreadId()) {
         return jsti::fail("The native snapshot must run on the UI thread after READY.", error, errorCapacity);
     }
@@ -3824,7 +4880,7 @@ int jsti_window_save_snapshot(const char *path, char *error, size_t errorCapacit
         return jsti::fail("Native snapshot dimensions exceed the 64 MiB diagnostic limit.", error, errorCapacity);
     }
     // Only this app's own client DC is acquired. Never use GetDC(nullptr),
-    // desktop BitBlt, or a caller-supplied window handle here.
+    // desktop BitBlt, or another process's window handle here.
     struct BitmapResources {
         HWND window;
         HDC source = nullptr;

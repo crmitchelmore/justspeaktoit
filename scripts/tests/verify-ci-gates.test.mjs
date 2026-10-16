@@ -19,6 +19,62 @@ const jobBodies = Object.fromEntries([...workflow.matchAll(/^  ([a-z][a-z0-9-]+)
 const nativeEligibleJobs = [
   'build-macos', 'release-validation', 'api-compatibility', 'lint', 'core-journey-e2e',
 ];
+const journeyStages = readFileSync(new URL('../run-core-journey-stages.py', import.meta.url), 'utf8');
+
+test('journey cold preparation and actual runtime have separate finite budgets and always-uploaded evidence', () => {
+  const swift = jobBodies['core-journey-e2e'];
+  const ui = jobBodies['core-journey-fixture-ui'];
+  assert.match(swift, /^\s+timeout-minutes: 30$/m);
+  assert.match(ui, /^\s+timeout-minutes: 35$/m);
+  assert.match(swift, /timeout-minutes: 12\n\s+run: scripts\/run-core-journey-e2e.sh --phase build/);
+  assert.match(swift, /timeout-minutes: 10\n\s+run: scripts\/run-core-journey-e2e.sh --phase test/);
+  assert.ok(swift.indexOf('--phase build') < swift.indexOf('--phase test'));
+  for (const phase of ['setup', 'build', 'test']) {
+    assert.match(ui, new RegExp(`run: python3 scripts/run-core-journey-stages.py ui --phase ${phase}`));
+  }
+  assert.ok(ui.indexOf('--phase setup') < ui.indexOf('--phase build'));
+  assert.ok(ui.indexOf('--phase build') < ui.indexOf('--phase test'));
+  for (const body of [swift, ui]) {
+    assert.doesNotMatch(body, /continue-on-error:|if:.*(?:failure|cancelled)/);
+    assert.match(body, /if: always\(\)\n\s+timeout-minutes: 3\n\s+uses: actions\/upload-artifact@v7.0.1/);
+    assert.match(body, /if-no-files-found: error/);
+    assert.match(body, /uses: actions\/checkout@v7.0.1/);
+    assert.doesNotMatch(body, /ref:.*head|workflow_dispatch|retry|--skip.*test/);
+  }
+  assert.match(ui, /include-hidden-files: true/);
+  assert.match(ui, /path: \|\n\s+\.artifacts\/core-journey-fixture-ui\n\s+!\.artifacts\/core-journey-fixture-ui\/DerivedData/);
+  assert.match(journeyStages, /BUILD_BUDGET = 600/);
+  assert.match(journeyStages, /SETUP_BUDGET = 300/);
+  assert.match(journeyStages, /RUNTIME_BUDGET = \{"swift": 480, "ui": 600\}/);
+  assert.match(journeyStages, /RECEIPT_BUDGET = 60/);
+  assert.match(journeyStages, /"swift", "build", "--build-tests"/);
+  assert.match(journeyStages, /"swift", "test", "--skip-build", "--disable-automatic-resolution"/);
+  assert.match(journeyStages, /"xcodebuild", "build-for-testing"/);
+  assert.match(journeyStages, /"xcodebuild", "test-without-building", "-xctestrun"/);
+  assert.match(journeyStages, /"GITHUB_SHA"/);
+  assert.match(journeyStages, /"Apple Swift"/);
+  assert.doesNotMatch(journeyStages, /CORE_JOURNEY_BUDGET_SECONDS|--skip-test|--skip-testing/);
+  for (const path of ['scripts/run-core-journey-stages.py', 'scripts/tests/test_core_journey_stages.py',
+    'scripts/tests/verify-ci-gates.test.mjs']) {
+    assert.ok(jobBodies['release-paths'].includes(`- '${path}'`), `path filter must include ${path}`);
+  }
+});
+
+test('macOS Debug build and test stages share one code-coverage instrumentation to avoid a duplicate full rebuild', () => {
+  const body = jobBodies['build-macos'];
+  assert.match(body, /^\s+timeout-minutes: 30$/m);
+  assert.match(body, /name: Build\n(?:\s+#[^\n]*\n)*\s+run: SWIFT_FLAGS=--enable-code-coverage make build/);
+  assert.match(body, /name: Test \(Debug\)\n\s+run: python3 scripts\/with-test-keychain.py swift test --enable-code-coverage/);
+  assert.ok(body.indexOf('name: Build') < body.indexOf('name: Test (Debug)'),
+    'Build must run before Test (Debug) so the coverage-enabled cache is already warm');
+  assert.ok(body.indexOf('name: Test (Debug)') < body.indexOf('name: Build SpeakCore (App Store flavour)'),
+    'App Store flavour rebuild must stay after tests, not before');
+  assert.doesNotMatch(body, /\n\s+run: make build\n/, 'Build step must not regress to an uninstrumented build');
+  // Non-test steps unaffected: still a real build, no dropped checks.
+  assert.match(body, /name: Verify brand asset sizes and appearance variants/);
+  assert.match(body, /name: Check Package.resolved drift/);
+  assert.match(body, /name: Report Coverage/);
+});
 
 function route(id, github, vars = {}) {
   const expression = jobBodies[id].match(/runs-on: \$\{\{ (.+) \}\}/)?.[1];
@@ -241,7 +297,7 @@ test('tooling gate delegates to the complete local discovery target', () => {
 
 const platformPythonTestRoots = [
   'scripts/linux-local-runtime', 'scripts/windows-local-runtime', 'scripts/windows-bundle',
-  'scripts/windows-cross', 'scripts/windows-cloudkit', 'scripts/windows-package',
+  'scripts/windows-cross', 'scripts/windows-cloudkit', 'scripts/windows-package', 'scripts/migration',
 ];
 const platformPythonCommand = root => `\tpython3 -B -m unittest discover -s ${root} -p 'test_*.py' -v\n`;
 

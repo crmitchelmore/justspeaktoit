@@ -3,6 +3,8 @@
 #include <adwaita.h>
 #include <string.h>
 
+#define JSTI_MAXIMUM_CONFIGURATION_FIELDS 64
+
 /*
  * The GTK 4 / libadwaita window. It owns no application state: every control
  * reports an event to Swift, and Swift pushes display state back through the
@@ -14,7 +16,12 @@
 typedef struct Slot {
     gchar *id;
     gint32 global;
+    gboolean live;
 } Slot;
+
+typedef struct Models Models;
+static void models_free(gpointer pointer);
+static void on_model_filter(gboolean local, gboolean live);
 
 typedef struct UI {
     AdwApplication *application;
@@ -29,6 +36,8 @@ typedef struct UI {
     /* Models: picker position -> global slot. */
     GtkStringList *model_names;
     GArray *model_slots;
+    Models *model_catalog;
+    gint32 preferred_model_slots[3];
     AdwComboRow *model_row;
     GtkLabel *catalog_status;
     GtkButton *catalog_refresh;
@@ -40,16 +49,27 @@ typedef struct UI {
     GPtrArray *microphone_ids;
     AdwComboRow *microphone_row;
     /* Text output */
+    AdwPreferencesGroup *output_group;
     AdwComboRow *output_row;
     AdwSwitchRow *restore_row;
+    gboolean can_restore_clipboard;
     AdwActionRow *shortcut_row;
     AdwComboRow *style_row;
     /* Post-processing */
     AdwSwitchRow *polish_row;
     AdwComboRow *polish_model_row;
     GtkStringList *polish_models;
-    AdwEntryRow *polish_prompt_row;
+    AdwComboRow *polish_location_row;
+    GPtrArray *polish_catalog;
+    GArray *polish_slots;
+    gint32 polish_local_index;
+    gint32 polish_remote_selected;
+    gint32 polish_local_selected;
+    gchar *polish_local_notice;
+    GtkTextView *polish_prompt_row;
     AdwPasswordEntryRow *polish_key_row;
+    AdwSwitchRow *polish_directives_row;
+    AdwSwitchRow *polish_tags_row;
     /* Recording */
     GtkButton *record;
     GtkButton *cancel;
@@ -61,6 +81,10 @@ typedef struct UI {
     gchar *tray_summary; /* Sessions, Recording Time and Spend for the status notifier */
     /* History */
     GtkSearchEntry *search;
+    GtkWidget *history_filters;
+    GtkButton *history_delete;
+    GtkButton *history_clear;
+    gchar *all_history_ids;
     GtkListBox *history;
     GPtrArray *history_ids;
     gchar *selected_id;
@@ -68,8 +92,16 @@ typedef struct UI {
     gint32 presented_variant;
     gboolean presented_switchable;
     GtkButton *retry;
+    GtkButton *correction_results;
     GtkButton *export_button;
     GtkButton *open_audio;
+    GtkButton *recordings_folder;
+    GtkButton *audio_cleanup;
+    AdwSwitchRow *backup_audio;
+    GtkButton *backup_export;
+    GtkButton *backup_inspect;
+    GCancellable *backup_chooser;
+    gboolean closing;
     GtkButton *import_button;
     GtkButton *play;
     GtkButton *stop_play;
@@ -101,17 +133,48 @@ typedef struct UI {
     /* Voice Output page actions. */
     GtkButton *voice_read;
     GtkButton *voice_stop;
+    GtkButton *voice_sources;
     AdwComboRow *appearance_row;
     AdwSwitchRow *login_row;
+    AdwSwitchRow *automation_row;
+    GtkWidget *configuration_columns[4];
 } UI;
 
 static UI ui;
+static guint polish_remote_count = G_MAXUINT;
+static GtkWidget *polish_local_group;
+GtkWidget *jsti_vocabulary_page_new(int kind);
+int32_t jsti_vocabulary_self_test(char *error, size_t capacity);
+
+static struct {
+    GPtrArray *rows;
+    GPtrArray *choices;
+    GArray *booleans;
+    GArray *overlay_settings;
+    GArray *hands_free_settings;
+    GArray *enabled_by_fields;
+    GtkWidget *recovery_group;
+    AdwComboRow *recovery_row;
+    guint recovery_count;
+    JSTIConfigurationCallback callback;
+    void *context;
+} configuration;
 
 /* Read aloud: its History action and the voice picker in its own group. */
 static struct {
     GtkButton *button;
     AdwComboRow *voice_row;
     GtkStringList *voices;
+    AdwComboRow *favorite_row;
+    GtkStringList *favorite_names;
+    GtkButton *favorite_button;
+    GPtrArray *identifiers;
+    GArray *favorite_ranks;
+    GArray *favorite_indices;
+    JSTIVoicePickerCallback picker_callback;
+    void *picker_context;
+    gboolean favorite_pending;
+    gboolean favorite_executable;
 } read_aloud;
 
 static gint loop_running;
@@ -167,7 +230,8 @@ static void refresh_setup(void) {
     gtk_label_set_text(ui.setup_model, model != NULL ? model : "No model selected");
     adw_window_title_set_subtitle(ui.title, model != NULL ? model : "");
     const char *output = combo_text(ui.output_row);
-    gboolean restores = adw_combo_row_get_selected(ui.output_row) == 0 && adw_switch_row_get_active(ui.restore_row);
+    gboolean restores = ui.can_restore_clipboard && adw_combo_row_get_selected(ui.output_row) == 0 &&
+                        adw_switch_row_get_active(ui.restore_row);
     gchar *text = g_strdup_printf("%s%s", output != NULL ? output : "", restores ? " · clipboard restored" : "");
     gtk_label_set_text(ui.setup_output, text);
     g_free(text);
@@ -190,7 +254,7 @@ static void refresh_actions(void) {
     gtk_widget_set_sensitive(GTK_WIDGET(ui.record), ui.state != JSTI_STATE_WORKING);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.header_record), ui.state != JSTI_STATE_WORKING);
     gtk_button_set_label(ui.record, recording ? "Stop Recording"
-                                    : ui.state == JSTI_STATE_WORKING ? "Transcribing…" : "Start Recording");
+                                    : ui.state == JSTI_STATE_WORKING ? "Working…" : "Start Recording");
     adw_button_content_set_label(ADW_BUTTON_CONTENT(gtk_button_get_child(ui.header_record)),
                                  recording ? "Stop" : "Record");
     adw_button_content_set_icon_name(ADW_BUTTON_CONTENT(gtk_button_get_child(ui.header_record)),
@@ -208,6 +272,7 @@ static void refresh_actions(void) {
     gtk_widget_set_visible(GTK_WIDGET(ui.live_preview), recording);
     g_free(preview);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.retry), idle && has_record);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.correction_results), idle && presented);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.export_button), idle && presented && has_text);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.open_audio), has_record);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.play), has_record && (idle || ui.playback_state != 0));
@@ -217,11 +282,28 @@ static void refresh_actions(void) {
     gboolean voices = g_list_model_get_n_items(G_LIST_MODEL(read_aloud.voices)) > 0;
     gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.button), idle && presented && has_text && voices);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_read), idle && presented && has_text && voices);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), has_record && ui.playback_state != 0);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), idle);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_sources), idle && voices);
+    jsti_voice_credentials_set_idle(idle);
     gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.voice_row), idle);
+    gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.favorite_row),
+        idle && read_aloud.favorite_indices != NULL && read_aloud.favorite_indices->len > 0);
+    gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.favorite_button),
+        idle && read_aloud.favorite_executable && !read_aloud.favorite_pending);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.import_button), idle);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.history_import), idle);
+    gtk_widget_set_sensitive(ui.history_filters, idle);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.history_delete), idle && has_record);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.history_clear),
+        idle && ui.all_history_ids != NULL && ui.all_history_ids[0] != '\0');
+    if (ui.audio_cleanup != NULL) gtk_widget_set_sensitive(GTK_WIDGET(ui.audio_cleanup), idle);
+    if (ui.backup_audio != NULL) {
+        gtk_widget_set_sensitive(GTK_WIDGET(ui.backup_audio), idle && ui.backup_chooser == NULL);
+        gtk_widget_set_sensitive(GTK_WIDGET(ui.backup_export), idle && ui.backup_chooser == NULL);
+        gtk_widget_set_sensitive(GTK_WIDGET(ui.backup_inspect), idle && ui.backup_chooser == NULL);
+    }
     gtk_widget_set_sensitive(GTK_WIDGET(ui.model_row), idle);
+    jsti_model_filters_set_idle(idle);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.microphone_row), idle);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.version), presented && ui.presented_switchable && idle);
     gtk_widget_set_visible(GTK_WIDGET(ui.version), presented && ui.presented_switchable);
@@ -278,6 +360,10 @@ static void on_model(GObject *object, GParamSpec *spec, gpointer data) {
     refresh_azure_row();
     refresh_setup();
     gint32 slot = selected_model_slot();
+    if (!ui.suppress && slot >= 0) {
+        guint mode = jsti_model_filters_local() ? 2 : (jsti_model_filters_live() ? 1 : 0);
+        ui.preferred_model_slots[mode] = slot;
+    }
     if (slot >= 0) emit(JSTI_EVENT_SELECT_MODEL, "", slot);
 }
 
@@ -303,7 +389,7 @@ static void on_text_output(GObject *object, GParamSpec *spec, gpointer data) {
     (void)object; (void)spec; (void)data;
     guint method = adw_combo_row_get_selected(ui.output_row);
     gboolean restore = adw_switch_row_get_active(ui.restore_row);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.restore_row), method == 0);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.restore_row), method == 0 && ui.can_restore_clipboard);
     refresh_setup();
     emit(JSTI_EVENT_TEXT_OUTPUT, restore ? "restore" : "", (gint32)method);
 }
@@ -332,19 +418,144 @@ static void on_login_item(GObject *object, GParamSpec *spec, gpointer data) {
     emit(JSTI_EVENT_LOGIN_ITEM, "", adw_switch_row_get_active(ui.login_row) ? 1 : 0);
 }
 
+static void on_automation(GObject *object, GParamSpec *spec, gpointer data) {
+    (void)object; (void)spec; (void)data;
+    if (ui.suppress) return;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.automation_row), FALSE);
+    emit(JSTI_EVENT_AUTOMATION, "", adw_switch_row_get_active(ui.automation_row) ? 1 : 0);
+}
+
 static void on_style(GObject *object, GParamSpec *spec, gpointer data) {
     (void)object; (void)spec; (void)data;
     emit(JSTI_EVENT_SHORTCUT_STYLE, "", (gint32)adw_combo_row_get_selected(ui.style_row));
 }
 
+static guint polish_remote_boundary(void) {
+    guint count = ui.polish_catalog != NULL ? ui.polish_catalog->len : 0;
+    guint remote = polish_remote_count == G_MAXUINT
+        ? (ui.polish_local_index >= 0 ? (guint)ui.polish_local_index : count) : polish_remote_count;
+    return MIN(count, remote);
+}
+
+static gint32 polish_selected_model(void) {
+    guint row = adw_combo_row_get_selected(ui.polish_model_row);
+    return ui.polish_slots != NULL && row < ui.polish_slots->len
+        ? g_array_index(ui.polish_slots, gint32, row) : -1;
+}
+
+static gchar *polish_prompt_text(void) {
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(ui.polish_prompt_row);
+    GtkTextIter first, last;
+    gtk_text_buffer_get_bounds(buffer, &first, &last);
+    return gtk_text_buffer_get_text(buffer, &first, &last, FALSE);
+}
+
+static void polish_update_model_controls(void) {
+    guint location = adw_combo_row_get_selected(ui.polish_location_row);
+    gint32 selected = polish_selected_model();
+    gboolean local = location == 0;
+    gboolean available = selected >= 0 && ui.polish_catalog != NULL &&
+        (guint)selected < ui.polish_catalog->len && ((guint)selected >= polish_remote_boundary()) == local;
+    gboolean rules = available && selected == ui.polish_local_index;
+    gboolean instructions = available && !rules && location <= 1;
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(ui.polish_location_row), location > 1
+        ? "The stored model is unavailable. Choose Local or Remote and a supported model before applying."
+        : !available ? (local ? "Choose a supported local model before applying."
+        : "The remembered remote model is unavailable. Choose a supported remote model before applying.")
+        : rules ? ui.polish_local_notice
+        : local ? "Runs privately in process. A verified GGUF model and pinned native runtime are required; no cloud or rules fallback."
+        : "When enabled, transcript text and custom instructions are sent to OpenRouter. Charges may apply.");
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.polish_model_row), location <= 1);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.polish_prompt_row), instructions);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.polish_key_row), available && location == 1);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.polish_directives_row), instructions);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.polish_tags_row), instructions);
+    gtk_widget_set_visible(GTK_WIDGET(ui.polish_key_row), location == 1);
+    if (polish_local_group != NULL) gtk_widget_set_visible(polish_local_group, local);
+    if (location != 1) gtk_editable_set_text(GTK_EDITABLE(ui.polish_key_row), "");
+}
+
+static void polish_select_location(gint32 desired, gboolean choose_first) {
+    gboolean suppressed = ui.suppress;
+    ui.suppress = TRUE;
+    guint location = adw_combo_row_get_selected(ui.polish_location_row);
+    gboolean local = location == 0;
+    guint count = g_list_model_get_n_items(G_LIST_MODEL(ui.polish_models));
+    gtk_string_list_splice(ui.polish_models, 0, count, NULL);
+    g_array_set_size(ui.polish_slots, 0);
+    guint selected = GTK_INVALID_LIST_POSITION;
+    if (location <= 1 && ui.polish_catalog != NULL) {
+        for (guint index = 0; index < ui.polish_catalog->len; index++) {
+            if ((index >= polish_remote_boundary()) != local) continue;
+            gint32 slot = (gint32)index;
+            g_array_append_val(ui.polish_slots, slot);
+            gtk_string_list_append(ui.polish_models, g_ptr_array_index(ui.polish_catalog, index));
+            if (slot == desired || (choose_first && selected == GTK_INVALID_LIST_POSITION)) {
+                selected = ui.polish_slots->len - 1;
+            }
+        }
+    }
+    adw_combo_row_set_selected(ui.polish_model_row, selected);
+    if (selected < ui.polish_slots->len) {
+        gint32 full = g_array_index(ui.polish_slots, gint32, selected);
+        if (local) ui.polish_local_selected = full;
+        else ui.polish_remote_selected = full;
+    }
+    polish_update_model_controls();
+    ui.suppress = suppressed;
+}
+
+static void on_polish_location(GObject *object, GParamSpec *spec, gpointer data) {
+    (void)object; (void)spec; (void)data;
+    if (!ui.suppress) polish_select_location(adw_combo_row_get_selected(ui.polish_location_row) == 0
+        ? ui.polish_local_selected : ui.polish_remote_selected, FALSE);
+}
+
+static void on_polish_model(GObject *object, GParamSpec *spec, gpointer data) {
+    (void)object; (void)spec; (void)data;
+    if (ui.suppress) return;
+    gint32 selected = polish_selected_model();
+    if (selected >= 0) {
+        if ((guint)selected >= polish_remote_boundary()) ui.polish_local_selected = selected;
+        else ui.polish_remote_selected = selected;
+    }
+    polish_update_model_controls();
+}
+
 static void on_polish_apply(GtkButton *button, gpointer data) {
     (void)button; (void)data;
-    gint32 model = (gint32)adw_combo_row_get_selected(ui.polish_model_row);
+    guint row = adw_combo_row_get_selected(ui.polish_model_row);
+    guint location = adw_combo_row_get_selected(ui.polish_location_row);
+    if (row >= ui.polish_slots->len || location > 1) {
+        adw_action_row_set_subtitle(ADW_ACTION_ROW(ui.polish_location_row),
+            "Choose Local or Remote and a supported post-processing model before applying.");
+        return;
+    }
+    gint32 model = g_array_index(ui.polish_slots, gint32, row);
+    if (model < 0 || ui.polish_catalog == NULL || (guint)model >= ui.polish_catalog->len ||
+        (((guint)model >= polish_remote_boundary()) != (location == 0))) {
+        adw_action_row_set_subtitle(ADW_ACTION_ROW(ui.polish_location_row),
+            "Choose a supported model in the selected source before applying.");
+        return;
+    }
     gint32 index = adw_switch_row_get_active(ui.polish_row) ? model : -1 - model;
-    gchar *text = g_strdup_printf("%s\x1f%s", gtk_editable_get_text(GTK_EDITABLE(ui.polish_prompt_row)),
-                                  gtk_editable_get_text(GTK_EDITABLE(ui.polish_key_row)));
+    gchar *raw_prompt = polish_prompt_text();
+    if (strlen(raw_prompt) > 65535) {
+        g_free(raw_prompt);
+        jsti_window_update("Instructions must be at most 65535 UTF-8 bytes.", NULL, -1);
+        return;
+    }
+    gchar *prompt = g_uri_escape_string(raw_prompt, NULL, TRUE);
+    g_free(raw_prompt);
+    gchar *key = g_uri_escape_string(location == 1
+        ? gtk_editable_get_text(GTK_EDITABLE(ui.polish_key_row)) : "", NULL, TRUE);
+    gchar *text = g_strdup_printf("%s\t%s\t%d\t%d", prompt, key,
+        adw_switch_row_get_active(ui.polish_directives_row) ? 1 : 0,
+        adw_switch_row_get_active(ui.polish_tags_row) ? 1 : 0);
     emit(JSTI_EVENT_POST_PROCESSING, text, index);
     g_free(text);
+    g_free(prompt);
+    g_free(key);
     gtk_editable_set_text(GTK_EDITABLE(ui.polish_key_row), "");
 }
 
@@ -406,6 +617,12 @@ static void on_retry(GtkButton *button, gpointer data) {
     if (ui.selected_id != NULL) emit(JSTI_EVENT_RETRY_HISTORY, ui.selected_id, 0);
 }
 
+static void on_correction_results(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    if (ui.selected_id != NULL && g_strcmp0(ui.presented_id, ui.selected_id) == 0)
+        emit(72, ui.selected_id, 2);
+}
+
 static void on_play(GtkButton *button, gpointer data) {
     (void)button; (void)data;
     if (ui.selected_id != NULL) emit(JSTI_EVENT_PLAYBACK_TOGGLE, ui.selected_id, 0);
@@ -426,13 +643,165 @@ static void on_read_aloud(GtkButton *button, gpointer data) {
 
 static void on_voice(GObject *object, GParamSpec *spec, gpointer data) {
     (void)object; (void)spec; (void)data;
+    if (ui.suppress) return;
+    read_aloud.favorite_pending = TRUE;
+    gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.favorite_button), FALSE);
+    if (!ui.suppress) jsti_voice_credentials_selection_pending();
     guint position = adw_combo_row_get_selected(read_aloud.voice_row);
+    if (read_aloud.picker_callback != NULL) {
+        if (read_aloud.identifiers != NULL && position < read_aloud.identifiers->len) {
+            const char *identifier = g_ptr_array_index(read_aloud.identifiers, position);
+            if (*identifier != '\0') read_aloud.picker_callback(0, identifier,
+                read_aloud.picker_context != NULL ? read_aloud.picker_context : ui.context);
+        }
+        return;
+    }
     if (position != GTK_INVALID_LIST_POSITION) emit(JSTI_EVENT_VOICE_OUTPUT, "", (gint32)position);
+}
+
+static void on_favorite_voice(GObject *object, GParamSpec *spec, gpointer data) {
+    (void)object; (void)spec; (void)data;
+    if (ui.suppress || read_aloud.favorite_indices == NULL) return;
+    guint position = adw_combo_row_get_selected(read_aloud.favorite_row);
+    if (position < read_aloud.favorite_indices->len) {
+        guint index = g_array_index(read_aloud.favorite_indices, guint, position);
+        if (adw_combo_row_get_selected(read_aloud.voice_row) != index) {
+            adw_combo_row_set_selected(read_aloud.voice_row, index);
+        }
+    }
+}
+
+static void on_favorite_toggle(GtkButton *button, gpointer data) {
+    (void)data;
+    guint position = adw_combo_row_get_selected(read_aloud.voice_row);
+    if (ui.suppress || read_aloud.picker_callback == NULL || read_aloud.identifiers == NULL ||
+        position >= read_aloud.identifiers->len) return;
+    const char *identifier = g_ptr_array_index(read_aloud.identifiers, position);
+    if (*identifier == '\0') return;
+    gint32 rank = g_array_index(read_aloud.favorite_ranks, gint32, position);
+    gtk_widget_set_sensitive(GTK_WIDGET(button), FALSE);
+    read_aloud.favorite_pending = TRUE;
+    read_aloud.picker_callback(rank >= 0 ? 2 : 1, identifier,
+        read_aloud.picker_context != NULL ? read_aloud.picker_context : ui.context);
 }
 
 static void on_open_audio(GtkButton *button, gpointer data) {
     (void)button; (void)data;
     if (ui.selected_id != NULL) emit(JSTI_EVENT_OPEN_AUDIO, ui.selected_id, 0);
+}
+
+static void on_recordings_folder(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    emit(JSTI_EVENT_RECORDINGS_FOLDER, "", 0);
+}
+
+static void on_audio_cleanup(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    emit(JSTI_EVENT_AUDIO_CLEANUP, "", 0);
+}
+
+typedef struct BackupChoice {
+    GWeakRef parent;
+    GCancellable *cancelled;
+    gint32 include_audio;
+    gboolean inspect;
+} BackupChoice;
+
+static gboolean backup_choice_active(const BackupChoice *choice, GObject *parent) {
+    return parent != NULL && parent == G_OBJECT(ui.window) && !ui.closing &&
+        ui.backup_chooser == choice->cancelled && !g_cancellable_is_cancelled(choice->cancelled);
+}
+
+static void backup_emit_path(const BackupChoice *choice, const char *path) {
+    emit(choice->inspect ? JSTI_EVENT_MIGRATION_INSPECT : JSTI_EVENT_MIGRATION_EXPORT,
+         path, choice->inspect ? 0 : choice->include_audio);
+}
+
+static void backup_chosen(GObject *source, GAsyncResult *result, gpointer data) {
+    BackupChoice *choice = data;
+    GError *error = NULL;
+    GFile *file = choice->inspect ? gtk_file_dialog_open_finish(GTK_FILE_DIALOG(source), result, &error)
+                                : gtk_file_dialog_save_finish(GTK_FILE_DIALOG(source), result, &error);
+    GObject *parent = g_weak_ref_get(&choice->parent);
+    gboolean active = backup_choice_active(choice, parent);
+    if (ui.backup_chooser == choice->cancelled) g_clear_object(&ui.backup_chooser);
+    if (active) {
+        if (file != NULL) {
+            gchar *path = g_file_get_path(file);
+            if (path != NULL) backup_emit_path(choice, path);
+            else jsti_window_update("Choose a local ZIP file. This portal did not provide a local path.", NULL, -1);
+            g_free(path);
+        } else if (error == NULL) {
+            jsti_window_update("The backup picker returned no file or error. Choose a local ZIP path.",
+                               NULL, -1);
+        } else if (!g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED) &&
+                   !g_error_matches(error, GTK_DIALOG_ERROR, GTK_DIALOG_ERROR_DISMISSED) &&
+                   !g_error_matches(error, GTK_DIALOG_ERROR, GTK_DIALOG_ERROR_CANCELLED)) {
+            gchar *message = g_strdup_printf("Could not choose backup file: %s", error->message);
+            jsti_window_update(message, NULL, -1);
+            g_free(message);
+        }
+        refresh_actions();
+    }
+    g_clear_error(&error);
+    g_clear_object(&file);
+    g_clear_object(&parent);
+    g_weak_ref_clear(&choice->parent);
+    g_object_unref(choice->cancelled);
+    g_free(choice);
+}
+
+static void on_backup(GtkButton *button, gpointer data) {
+    (void)button;
+    if (ui.closing || ui.state != 0 || ui.backup_chooser != NULL) return;
+    BackupChoice *choice = g_new0(BackupChoice, 1);
+    g_weak_ref_init(&choice->parent, G_OBJECT(ui.window));
+    choice->cancelled = g_cancellable_new();
+    choice->include_audio = adw_switch_row_get_active(ui.backup_audio) ? 1 : 0;
+    choice->inspect = GPOINTER_TO_INT(data) != 0;
+    ui.backup_chooser = g_object_ref(choice->cancelled);
+    refresh_actions();
+    GtkFileDialog *dialog = gtk_file_dialog_new();
+    gtk_file_dialog_set_title(dialog, choice->inspect ? "Inspect backup (no data will be imported)"
+                                                    : "Save History backup (existing files are never replaced)");
+    if (!choice->inspect) gtk_file_dialog_set_initial_name(dialog, "JustSpeakToIt-History.zip");
+    GtkFileFilter *filter = gtk_file_filter_new();
+    gtk_file_filter_set_name(filter, "ZIP backups");
+    gtk_file_filter_add_pattern(filter, "*.zip");
+    GListStore *filters = g_list_store_new(GTK_TYPE_FILE_FILTER);
+    g_list_store_append(filters, filter);
+    gtk_file_dialog_set_filters(dialog, G_LIST_MODEL(filters));
+    gtk_file_dialog_set_default_filter(dialog, filter);
+    if (choice->inspect) gtk_file_dialog_open(dialog, ui.window, choice->cancelled, backup_chosen, choice);
+    else gtk_file_dialog_save(dialog, ui.window, choice->cancelled, backup_chosen, choice);
+    g_object_unref(filters);
+    g_object_unref(filter);
+    g_object_unref(dialog);
+}
+
+static void audio_cleanup_response(AdwMessageDialog *dialog, const char *response, gpointer data) {
+    (void)data;
+    const char *token = g_object_get_data(G_OBJECT(dialog), "jsti-audio-cleanup-token");
+    emit(JSTI_EVENT_AUDIO_CLEANUP_RESPONSE, token, g_strcmp0(response, "delete") == 0 ? 1 : 0);
+    gtk_window_destroy(GTK_WINDOW(dialog));
+}
+
+static GtkWidget *audio_cleanup_dialog(const char *token, size_t count) {
+    gchar *body = g_strdup_printf(
+        "Permanently delete %zu saved audio file(s), including audio kept after deleting History entries? "
+        "History entries and transcripts will be kept. Recordings saved after this confirmation "
+        "will not be deleted. This cannot be undone.", count);
+    GtkWidget *dialog = adw_message_dialog_new(ui.window, "Delete saved recordings?", body);
+    g_free(body);
+    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+    gtk_window_set_destroy_with_parent(GTK_WINDOW(dialog), TRUE);
+    g_object_set_data_full(G_OBJECT(dialog), "jsti-audio-cleanup-token", g_strdup(token), g_free);
+    adw_message_dialog_add_responses(ADW_MESSAGE_DIALOG(dialog), "cancel", "Cancel", "delete", "Delete audio", NULL);
+    adw_message_dialog_set_response_appearance(ADW_MESSAGE_DIALOG(dialog), "delete", ADW_RESPONSE_DESTRUCTIVE);
+    adw_message_dialog_set_default_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
+    adw_message_dialog_set_close_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
+    g_signal_connect(dialog, "response", G_CALLBACK(audio_cleanup_response), NULL);
+    return dialog;
 }
 
 static void export_chosen(GObject *source, GAsyncResult *result, gpointer data) {
@@ -491,10 +860,17 @@ static void on_import(GtkButton *button, gpointer data) {
 
 static gboolean on_close_request(GtkWindow *window, gpointer data) {
     (void)window; (void)data;
+    jsti_voice_sources_close();
+    jsti_voice_credentials_close();
+    ui.closing = TRUE;
+    if (ui.backup_chooser != NULL) g_cancellable_cancel(ui.backup_chooser);
+    g_clear_object(&ui.backup_chooser);
     jsti_hud_destroy();
     jsti_tray_stop();
     emit(JSTI_EVENT_CLOSING, "", 0);
     close_posts();
+    if (ui.model_catalog != NULL) { models_free(ui.model_catalog); ui.model_catalog = NULL; }
+    g_clear_pointer(&ui.all_history_ids, g_free);
     return FALSE;
 }
 
@@ -511,8 +887,8 @@ static GtkWidget *read_aloud_group(void) {
     GtkWidget *widget = group("Voice");
     adw_preferences_group_set_description(
         ADW_PREFERENCES_GROUP(widget),
-        "Read aloud speaks the transcript shown for the selected recording with a Deepgram voice, using the "
-        "saved Deepgram API key. Play, Pause and Stop control it.");
+        "Read aloud sends the displayed History transcript to the selected voice provider using its saved key. "
+        "Play, Pause and Stop control playback.");
     read_aloud.voices = gtk_string_list_new(NULL);
     read_aloud.voice_row = ADW_COMBO_ROW(adw_combo_row_new());
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(read_aloud.voice_row), "Voice");
@@ -520,6 +896,24 @@ static GtkWidget *read_aloud_group(void) {
     adw_combo_row_set_enable_search(read_aloud.voice_row, TRUE);
     g_signal_connect(read_aloud.voice_row, "notify::selected", G_CALLBACK(on_voice), NULL);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(widget), GTK_WIDGET(read_aloud.voice_row));
+    read_aloud.favorite_names = gtk_string_list_new(NULL);
+    read_aloud.favorite_row = ADW_COMBO_ROW(adw_combo_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(read_aloud.favorite_row), "Favorites");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(read_aloud.favorite_row),
+        "Choose a saved voice. Unavailable saved IDs are retained, not substituted.");
+    adw_combo_row_set_model(read_aloud.favorite_row, G_LIST_MODEL(read_aloud.favorite_names));
+    adw_combo_row_set_enable_search(read_aloud.favorite_row, TRUE);
+    g_signal_connect(read_aloud.favorite_row, "notify::selected", G_CALLBACK(on_favorite_voice), NULL);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(widget), GTK_WIDGET(read_aloud.favorite_row));
+    GtkWidget *favorite_action = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(favorite_action), "Favorite selected voice");
+    read_aloud.favorite_button = GTK_BUTTON(gtk_button_new_with_label("Add to favorites"));
+    gtk_widget_set_valign(GTK_WIDGET(read_aloud.favorite_button), GTK_ALIGN_CENTER);
+    gtk_widget_set_size_request(GTK_WIDGET(read_aloud.favorite_button), -1, 36);
+    gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.favorite_button), FALSE);
+    g_signal_connect(read_aloud.favorite_button, "clicked", G_CALLBACK(on_favorite_toggle), NULL);
+    adw_action_row_add_suffix(ADW_ACTION_ROW(favorite_action), GTK_WIDGET(read_aloud.favorite_button));
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(widget), favorite_action);
     return widget;
 }
 
@@ -537,14 +931,26 @@ static const struct {
     [JSTI_PAGE_TRANSCRIPTION] = { "transcription", "Transcription", "audio-input-microphone-symbolic",
                                   "jsti-tint-warm" },
     [JSTI_PAGE_POST_PROCESSING] = { "post-processing", "Post-processing", "starred-symbolic", "jsti-tint-warm" },
+    [JSTI_PAGE_CORRECTIONS] = { "corrections", "Corrections", "document-edit-symbolic", "jsti-tint-warm" },
+    [JSTI_PAGE_PRONUNCIATION] = { "pronunciation", "Pronunciation", "accessories-dictionary-symbolic", "jsti-tint-warm" },
+    [JSTI_PAGE_PROFILES] = { "profiles", "Profiles", "system-users-symbolic", "jsti-tint-warm" },
     [JSTI_PAGE_KEYBOARD] = { "keyboard", "Keyboard", "input-keyboard-symbolic", "jsti-tint-warm" },
     [JSTI_PAGE_CLOUD_SYNC] = { "icloud-sync", "iCloud Sync", "emblem-synchronizing-symbolic", "jsti-tint-warm" },
     [JSTI_PAGE_ABOUT] = { "about", "About", "help-about-symbolic", "jsti-tint-warm" },
 };
 
+static struct {
+    gint digits[JSTI_PAGE_COUNT];
+    GtkWidget *hints[JSTI_PAGE_COUNT];
+    gboolean configured;
+} sidebar_shortcuts;
+
 static void show_page(gint32 page) {
     if (page < 0 || page >= JSTI_PAGE_COUNT) return;
     ui.page = page;
+    if (page == JSTI_PAGE_CORRECTIONS || page == JSTI_PAGE_PRONUNCIATION)
+        emit(71, "", page == JSTI_PAGE_CORRECTIONS ? 0 : 1);
+    if (page == JSTI_PAGE_PROFILES) emit(JSTI_EVENT_PROFILES, "refresh", 0);
     gtk_stack_set_visible_child_name(ui.pages, page_info[page].name);
     adw_window_title_set_title(ui.title, page_info[page].title);
     GtkListBoxRow *row = gtk_list_box_get_row_at_index(ui.sidebar, page);
@@ -555,6 +961,31 @@ static void show_page(gint32 page) {
 static void on_sidebar(GtkListBox *box, GtkListBoxRow *row, gpointer data) {
     (void)box; (void)data;
     if (row != NULL) show_page(gtk_list_box_row_get_index(row));
+}
+
+static gboolean sidebar_navigate(guint keyval, GdkModifierType modifiers, GtkWidget *focused) {
+    GdkModifierType relevant = modifiers & (GDK_CONTROL_MASK | GDK_SHIFT_MASK | GDK_ALT_MASK |
+                                            GDK_SUPER_MASK | GDK_HYPER_MASK | GDK_META_MASK);
+    if (relevant != GDK_CONTROL_MASK || keyval < GDK_KEY_0 || keyval > GDK_KEY_9 ||
+        !sidebar_shortcuts.configured || !gtk_widget_is_sensitive(GTK_WIDGET(ui.window))) return FALSE;
+    for (GtkWidget *focus = focused; focus != NULL; focus = gtk_widget_get_parent(focus)) {
+        if (GTK_IS_EDITABLE(focus) || GTK_IS_TEXT_VIEW(focus) || GTK_IS_DROP_DOWN(focus)) return FALSE;
+    }
+    for (gint page = 0; page < JSTI_PAGE_COUNT; ++page) {
+        GtkWidget *row = GTK_WIDGET(gtk_list_box_get_row_at_index(ui.sidebar, page));
+        if (sidebar_shortcuts.digits[page] == (gint)(keyval - GDK_KEY_0) &&
+            gtk_widget_is_sensitive(row) && gtk_widget_get_visible(row)) {
+            show_page(page);
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+static gboolean sidebar_key_pressed(GtkEventControllerKey *controller, guint keyval, guint keycode,
+                                    GdkModifierType modifiers, gpointer data) {
+    (void)controller; (void)keycode; (void)data;
+    return sidebar_navigate(keyval, modifiers, gtk_window_get_focus(ui.window));
 }
 
 static void sidebar_header(GtkListBoxRow *row, GtkListBoxRow *before, gpointer data) {
@@ -583,8 +1014,16 @@ static GtkWidget *build_sidebar(void) {
         gtk_box_append(GTK_BOX(line), image);
         GtkWidget *label = gtk_label_new(page_info[page].title);
         gtk_label_set_xalign(GTK_LABEL(label), 0);
+        gtk_widget_set_hexpand(label, TRUE);
         gtk_box_append(GTK_BOX(line), label);
+        GtkWidget *hint = gtk_label_new("");
+        gtk_widget_add_css_class(hint, "dim-label");
+        gtk_accessible_update_state(GTK_ACCESSIBLE(hint), GTK_ACCESSIBLE_STATE_HIDDEN, TRUE, -1);
+        sidebar_shortcuts.hints[page] = hint;
+        gtk_widget_set_visible(hint, FALSE);
+        gtk_box_append(GTK_BOX(line), hint);
         GtkWidget *row = gtk_list_box_row_new();
+        gtk_accessible_update_property(GTK_ACCESSIBLE(row), GTK_ACCESSIBLE_PROPERTY_LABEL, page_info[page].title, -1);
         gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), line);
         if (page >= JSTI_PAGE_GENERAL) gtk_widget_add_css_class(row, "jsti-settings-row");
         gtk_list_box_append(ui.sidebar, row);
@@ -738,6 +1177,50 @@ static GtkWidget *build_dashboard(GtkTextBuffer *buffer) {
     return page;
 }
 
+static void history_delete_response(AdwMessageDialog *dialog, const char *response, gpointer data) {
+    (void)data;
+    const char *identifiers = g_object_get_data(G_OBJECT(dialog), "jsti-history-delete-ids");
+    if (g_strcmp0(response, "keep-audio") == 0 || g_strcmp0(response, "delete-audio") == 0) {
+        emit(JSTI_EVENT_HISTORY_DELETE, identifiers, g_strcmp0(response, "delete-audio") == 0 ? 1 : 0);
+    }
+    gtk_window_destroy(GTK_WINDOW(dialog));
+}
+
+static GtkWidget *history_delete_dialog(const char *identifiers, gboolean clear) {
+    guint count = 1;
+    for (const char *cursor = identifiers; *cursor != '\0'; cursor++) if (*cursor == '\n') count++;
+    gchar *body = clear ? g_strdup_printf(
+        "Remove all %u History entries, including hidden and filtered entries? "
+        "You can keep their saved audio or delete owned recording files too. "
+        "This cannot be undone. If History sync is enabled, synced text will also be deleted.", count)
+        : g_strdup("Remove this History entry? Its saved audio will be kept. "
+                   "This cannot be undone. If History sync is enabled, its synced text will also be deleted.");
+    GtkWidget *dialog = adw_message_dialog_new(ui.window, clear ? "Clear History?" : "Delete History entry?", body);
+    g_free(body);
+    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+    gtk_window_set_destroy_with_parent(GTK_WINDOW(dialog), TRUE);
+    g_object_set_data_full(G_OBJECT(dialog), "jsti-history-delete-ids", g_strdup(identifiers), g_free);
+    adw_message_dialog_add_responses(ADW_MESSAGE_DIALOG(dialog),
+        "cancel", "Cancel", "keep-audio", clear ? "Clear History" : "Delete entry", NULL);
+    adw_message_dialog_set_response_appearance(ADW_MESSAGE_DIALOG(dialog), "keep-audio", ADW_RESPONSE_DESTRUCTIVE);
+    if (clear) {
+        adw_message_dialog_add_response(ADW_MESSAGE_DIALOG(dialog), "delete-audio", "Clear History and recordings");
+        adw_message_dialog_set_response_appearance(ADW_MESSAGE_DIALOG(dialog), "delete-audio", ADW_RESPONSE_DESTRUCTIVE);
+    }
+    adw_message_dialog_set_default_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
+    adw_message_dialog_set_close_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
+    g_signal_connect(dialog, "response", G_CALLBACK(history_delete_response), NULL);
+    return dialog;
+}
+
+static void on_history_delete(GtkButton *button, gpointer data) {
+    (void)data;
+    gboolean clear = button == ui.history_clear;
+    const char *identifiers = clear ? ui.all_history_ids : ui.selected_id;
+    if (ui.state != 0 || identifiers == NULL || identifiers[0] == '\0') return;
+    gtk_window_present(GTK_WINDOW(history_delete_dialog(identifiers, clear)));
+}
+
 static GtkWidget *build_history(GtkTextBuffer *buffer) {
     GtkWidget *column, *page = jsti_page_new(&column);
     GtkWidget *chips, *trailing;
@@ -748,6 +1231,11 @@ static GtkWidget *build_history(GtkTextBuffer *buffer) {
     gtk_widget_add_css_class(GTK_WIDGET(ui.history_import), "jsti-hero-button");
     g_signal_connect(ui.history_import, "clicked", G_CALLBACK(on_import), NULL);
     gtk_box_append(GTK_BOX(trailing), GTK_WIDGET(ui.history_import));
+    ui.history_clear = GTK_BUTTON(gtk_button_new_with_label("Clear History…"));
+    g_signal_connect(ui.history_clear, "clicked", G_CALLBACK(on_history_delete), NULL);
+    gtk_box_prepend(GTK_BOX(trailing), GTK_WIDGET(ui.history_clear));
+    ui.history_filters = jsti_history_filters_button_new();
+    gtk_box_prepend(GTK_BOX(trailing), ui.history_filters);
     ui.search = GTK_SEARCH_ENTRY(gtk_search_entry_new());
     gtk_search_entry_set_placeholder_text(ui.search, "Search transcripts, models and profiles");
     g_signal_connect(ui.search, "search-changed", G_CALLBACK(on_search), NULL);
@@ -822,21 +1310,40 @@ static GtkWidget *build_history(GtkTextBuffer *buffer) {
     gtk_box_append(GTK_BOX(actions), GTK_WIDGET(ui.export_button));
     gtk_box_append(GTK_BOX(actions), GTK_WIDGET(ui.open_audio));
     gtk_box_append(GTK_BOX(ui.detail), actions);
+    GtkWidget *management = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_widget_set_halign(management, GTK_ALIGN_END);
+    ui.correction_results = GTK_BUTTON(gtk_button_new_with_label("Correction results"));
+    g_signal_connect(ui.correction_results, "clicked", G_CALLBACK(on_correction_results), NULL);
+    ui.history_delete = GTK_BUTTON(gtk_button_new_with_label("Delete…"));
+    g_signal_connect(ui.history_delete, "clicked", G_CALLBACK(on_history_delete), NULL);
+    gtk_box_append(GTK_BOX(management), GTK_WIDGET(ui.correction_results));
+    gtk_box_append(GTK_BOX(management), GTK_WIDGET(ui.history_delete));
+    gtk_box_append(GTK_BOX(ui.detail), management);
     return page;
+}
+
+static void on_voice_sources(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    gboolean presented = ui.selected_id != NULL && g_strcmp0(ui.presented_id, ui.selected_id) == 0;
+    gchar *snapshot = presented ? displayed_transcript() : g_strdup("");
+    jsti_show_voice_sources(ui.window, presented ? ui.selected_id : "", snapshot);
+    g_free(snapshot);
 }
 
 static GtkWidget *build_voice_output(void) {
     GtkWidget *column, *page = jsti_page_new(&column);
     gtk_box_append(GTK_BOX(column), jsti_hero_new(
         "voice", "Voice Output",
-        "Hear any History transcript read back in a Deepgram Aura voice, through your own Deepgram key.", NULL,
+        "Read History, typed text, clipboard snapshots or imported text with your selected voice. "
+        "Export lossless WAV audio.", NULL,
         NULL));
     GtkWidget *body;
     GtkWidget *card = jsti_card_new("audio-speakers-symbolic", "Read aloud", &body);
     gtk_box_append(GTK_BOX(body), read_aloud_group());
+    gtk_box_append(GTK_BOX(body), jsti_voice_credentials_group_new());
     GtkWidget *note = gtk_label_new(
-        "Choose a recording in History, then read its transcript aloud here or from its card. Starting a "
-        "recording, choosing another recording or pressing Stop ends it.");
+        "Choose a recording in History, or open Text and export for typed/pasted text and an explicit clipboard "
+        "snapshot. External selected text is unavailable. Recording, another playback or Stop ends voice output.");
     gtk_label_set_wrap(GTK_LABEL(note), TRUE);
     gtk_label_set_xalign(GTK_LABEL(note), 0);
     gtk_widget_add_css_class(note, "dim-label");
@@ -846,9 +1353,12 @@ static GtkWidget *build_voice_output(void) {
     ui.voice_stop = GTK_BUTTON(gtk_button_new_with_label("Stop"));
     g_signal_connect(ui.voice_stop, "clicked", G_CALLBACK(on_stop_play), NULL);
     ui.voice_read = GTK_BUTTON(gtk_button_new_with_label("Read Selected Recording"));
+    ui.voice_sources = GTK_BUTTON(gtk_button_new_with_label("Text and export..."));
+    g_signal_connect(ui.voice_sources, "clicked", G_CALLBACK(on_voice_sources), NULL);
     gtk_widget_add_css_class(GTK_WIDGET(ui.voice_read), "suggested-action");
     g_signal_connect(ui.voice_read, "clicked", G_CALLBACK(on_read_aloud), NULL);
     gtk_box_append(GTK_BOX(actions), GTK_WIDGET(ui.voice_stop));
+    gtk_box_append(GTK_BOX(actions), GTK_WIDGET(ui.voice_sources));
     gtk_box_append(GTK_BOX(actions), GTK_WIDGET(ui.voice_read));
     gtk_box_append(GTK_BOX(body), actions);
     gtk_box_append(GTK_BOX(column), card);
@@ -857,6 +1367,7 @@ static GtkWidget *build_voice_output(void) {
 
 static GtkWidget *build_general(void) {
     GtkWidget *column, *page = jsti_page_new(&column);
+    ui.configuration_columns[0] = column;
     gtk_box_append(GTK_BOX(column), settings_hero(
         "General", "Choose the microphone, where finished text goes, whether the app starts at login, and how "
         "it looks."));
@@ -871,10 +1382,10 @@ static GtkWidget *build_general(void) {
     gtk_box_append(GTK_BOX(column), microphone);
 
     GtkWidget *output = group("Output");
+    ui.output_group = ADW_PREFERENCES_GROUP(output);
     adw_preferences_group_set_description(
         ADW_PREFERENCES_GROUP(output),
-        "Finished text goes to the app you were in when dictation started. Recording in this window offers "
-        "Copy instead.");
+        "Checking paste and clipboard support for this desktop.");
     const char *methods[] = { "Paste into the focused app", "Copy to the clipboard only", NULL };
     ui.output_row = ADW_COMBO_ROW(adw_combo_row_new());
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.output_row), "Text output");
@@ -884,6 +1395,9 @@ static GtkWidget *build_general(void) {
     ui.restore_row = ADW_SWITCH_ROW(adw_switch_row_new());
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.restore_row), "Restore the clipboard after pasting");
     adw_switch_row_set_active(ui.restore_row, TRUE);
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(ui.restore_row),
+                               "Previous text only, while Just Speak to It still owns the X11 selection.");
+    gtk_widget_set_visible(GTK_WIDGET(ui.restore_row), FALSE);
     g_signal_connect(ui.restore_row, "notify::active", G_CALLBACK(on_text_output), NULL);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(output), GTK_WIDGET(ui.restore_row));
     gtk_box_append(GTK_BOX(column), output);
@@ -897,6 +1411,17 @@ static GtkWidget *build_general(void) {
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(startup), GTK_WIDGET(ui.login_row));
     gtk_box_append(GTK_BOX(column), startup);
 
+    GtkWidget *automation = group("Automation");
+    adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(automation),
+        "The speak command uses a private, same-user local socket. Off by default. "
+        "Imported preferences cannot grant access on this computer.");
+    ui.automation_row = ADW_SWITCH_ROW(adw_switch_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.automation_row), "Allow local automation");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(ui.automation_row), "Automation is off.");
+    g_signal_connect(ui.automation_row, "notify::active", G_CALLBACK(on_automation), NULL);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(automation), GTK_WIDGET(ui.automation_row));
+    gtk_box_append(GTK_BOX(column), automation);
+
     GtkWidget *appearance = group("Appearance");
     const char *schemes[] = { "Follow the system", "Light", "Dark", NULL };
     ui.appearance_row = ADW_COMBO_ROW(adw_combo_row_new());
@@ -905,14 +1430,66 @@ static GtkWidget *build_general(void) {
     g_signal_connect(ui.appearance_row, "notify::selected", G_CALLBACK(on_appearance), NULL);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(appearance), GTK_WIDGET(ui.appearance_row));
     gtk_box_append(GTK_BOX(column), appearance);
+    GtkWidget *housekeeping = group("Housekeeping");
+    GtkWidget *folder = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(folder), "Recording storage");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(folder), "Open the folder containing saved audio and History data.");
+    ui.recordings_folder = GTK_BUTTON(gtk_button_new_with_mnemonic("_Open folder"));
+    gtk_widget_set_valign(GTK_WIDGET(ui.recordings_folder), GTK_ALIGN_CENTER);
+    g_signal_connect(ui.recordings_folder, "clicked", G_CALLBACK(on_recordings_folder), NULL);
+    adw_action_row_add_suffix(ADW_ACTION_ROW(folder), GTK_WIDGET(ui.recordings_folder));
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(housekeeping), folder);
+    GtkWidget *cleanup = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(cleanup), "Saved recordings");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(cleanup), "Delete saved audio without removing History entries.");
+    ui.audio_cleanup = GTK_BUTTON(gtk_button_new_with_mnemonic("Delete _audio…"));
+    gtk_widget_add_css_class(GTK_WIDGET(ui.audio_cleanup), "destructive-action");
+    gtk_widget_set_valign(GTK_WIDGET(ui.audio_cleanup), GTK_ALIGN_CENTER);
+    g_signal_connect(ui.audio_cleanup, "clicked", G_CALLBACK(on_audio_cleanup), NULL);
+    adw_action_row_add_suffix(ADW_ACTION_ROW(cleanup), GTK_WIDGET(ui.audio_cleanup));
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(housekeeping), cleanup);
+    gtk_box_append(GTK_BOX(column), housekeeping);
+    GtkWidget *backup = group("History backup");
+    adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(backup),
+        "Save History text and optional saved recording audio in a ZIP backup. "
+        "Settings, profiles and credentials are not included. Existing files are never replaced.");
+    ui.backup_audio = ADW_SWITCH_ROW(adw_switch_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.backup_audio), "Include saved recording audio");
+    adw_switch_row_set_active(ui.backup_audio, TRUE);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(backup), GTK_WIDGET(ui.backup_audio));
+    GtkWidget *backup_row = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(backup_row), "Save a ZIP backup");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(backup_row), "Turn off audio for a History-only backup.");
+    ui.backup_export = GTK_BUTTON(gtk_button_new_with_mnemonic("Save _backup…"));
+    gtk_widget_set_valign(GTK_WIDGET(ui.backup_export), GTK_ALIGN_CENTER);
+    g_signal_connect(ui.backup_export, "clicked", G_CALLBACK(on_backup), NULL);
+    adw_action_row_add_suffix(ADW_ACTION_ROW(backup_row), GTK_WIDGET(ui.backup_export));
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(backup), backup_row);
+    GtkWidget *inspect_row = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(inspect_row), "Inspect a ZIP backup");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(inspect_row),
+        "Review categories and archive notices without importing any data.");
+    ui.backup_inspect = GTK_BUTTON(gtk_button_new_with_mnemonic("_Inspect…"));
+    gtk_widget_set_valign(GTK_WIDGET(ui.backup_inspect), GTK_ALIGN_CENTER);
+    g_signal_connect(ui.backup_inspect, "clicked", G_CALLBACK(on_backup), GINT_TO_POINTER(1));
+    adw_action_row_add_suffix(ADW_ACTION_ROW(inspect_row), GTK_WIDGET(ui.backup_inspect));
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(backup), inspect_row);
+    gtk_box_append(GTK_BOX(column), backup);
     return page;
+}
+
+static void open_comparison(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    if (ui.state == JSTI_STATE_IDLE) jsti_comparison_open(ui.window);
 }
 
 static GtkWidget *build_transcription(void) {
     GtkWidget *column, *page = jsti_page_new(&column);
+    ui.configuration_columns[1] = column;
     gtk_box_append(GTK_BOX(column), settings_hero(
         "Transcription", "Pick the speech model for new recordings, on this computer or with your own provider key."));
     GtkWidget *models = group("Model");
+    jsti_model_filters_add(models, on_model_filter);
     ui.model_names = gtk_string_list_new(NULL);
     ui.model_row = ADW_COMBO_ROW(adw_combo_row_new());
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.model_row), "Transcription model");
@@ -951,28 +1528,74 @@ static GtkWidget *build_transcription(void) {
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(models), catalog);
     gtk_box_append(GTK_BOX(column), models);
     gtk_box_append(GTK_BOX(column), jsti_local_models_group_new());
+    GtkWidget *comparison = group("Compare Models");
+    GtkWidget *compare = gtk_button_new_with_label("Compare Models…");
+    g_signal_connect(compare, "clicked", G_CALLBACK(open_comparison), NULL);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(comparison), compare);
+    gtk_box_append(GTK_BOX(column), comparison);
     return page;
 }
 
 static GtkWidget *build_post_processing(void) {
     GtkWidget *column, *page = jsti_page_new(&column);
+    ui.configuration_columns[2] = column;
     gtk_box_append(GTK_BOX(column), settings_hero(
-        "Post-processing", "Optionally polish transcripts with an OpenRouter model. The original is always kept."));
+        "Post-processing", "Clean up transcripts locally or through OpenRouter. The original is always kept."));
     GtkWidget *polish = group("Clean-up");
     ui.polish_row = ADW_SWITCH_ROW(adw_switch_row_new());
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.polish_row), "Send transcripts to OpenRouter for polishing");
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.polish_row), "Enable post-processing");
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(ui.polish_row));
+    ui.polish_location_row = ADW_COMBO_ROW(adw_combo_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.polish_location_row), "Model source");
+    const char *locations[] = {"Local", "Remote", NULL};
+    GtkStringList *location_names = gtk_string_list_new(locations);
+    adw_combo_row_set_model(ui.polish_location_row, G_LIST_MODEL(location_names));
+    g_object_unref(location_names);
+    adw_combo_row_set_selected(ui.polish_location_row, GTK_INVALID_LIST_POSITION);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(ui.polish_location_row));
+    AdwActionRow *mode = ADW_ACTION_ROW(adw_action_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(mode), "Batch");
+    adw_action_row_set_subtitle(mode, "Post-processing has no streaming route");
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(mode));
     ui.polish_models = gtk_string_list_new(NULL);
+    ui.polish_slots = g_array_new(FALSE, FALSE, sizeof(gint32));
+    ui.polish_local_index = -1;
+    ui.polish_remote_selected = -1;
+    ui.polish_local_selected = -1;
     ui.polish_model_row = ADW_COMBO_ROW(adw_combo_row_new());
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.polish_model_row), "Polishing model");
     adw_combo_row_set_model(ui.polish_model_row, G_LIST_MODEL(ui.polish_models));
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(ui.polish_model_row));
-    ui.polish_prompt_row = ADW_ENTRY_ROW(adw_entry_row_new());
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.polish_prompt_row), "Custom instructions (optional)");
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(ui.polish_prompt_row));
+    ui.polish_directives_row = ADW_SWITCH_ROW(adw_switch_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.polish_directives_row), "Include personal lexicon directives");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(ui.polish_directives_row),
+        "Use saved spelling and name instructions with downloaded or remote language models.");
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(ui.polish_directives_row));
+    ui.polish_tags_row = ADW_SWITCH_ROW(adw_switch_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.polish_tags_row), "Include lexicon context tags");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(ui.polish_tags_row),
+        "Use saved context tags with downloaded or remote language models.");
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(ui.polish_tags_row));
+    GtkWidget *prompt_label = gtk_label_new("Custom system instructions (optional)");
+    gtk_label_set_xalign(GTK_LABEL(prompt_label), 0);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), prompt_label);
+    ui.polish_prompt_row = GTK_TEXT_VIEW(gtk_text_view_new());
+    gtk_text_view_set_wrap_mode(ui.polish_prompt_row, GTK_WRAP_WORD_CHAR);
+    gtk_text_view_set_top_margin(ui.polish_prompt_row, 10);
+    gtk_text_view_set_bottom_margin(ui.polish_prompt_row, 10);
+    gtk_text_view_set_left_margin(ui.polish_prompt_row, 10);
+    gtk_text_view_set_right_margin(ui.polish_prompt_row, 10);
+    gtk_accessible_update_property(GTK_ACCESSIBLE(ui.polish_prompt_row),
+        GTK_ACCESSIBLE_PROPERTY_LABEL, "Custom system instructions", -1);
+    GtkWidget *prompt_scroll = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(prompt_scroll), 140);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(prompt_scroll), GTK_WIDGET(ui.polish_prompt_row));
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), prompt_scroll);
     ui.polish_key_row = ADW_PASSWORD_ENTRY_ROW(adw_password_entry_row_new());
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.polish_key_row), "New OpenRouter key (leave empty to keep)");
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(ui.polish_key_row));
+    g_signal_connect(ui.polish_location_row, "notify::selected", G_CALLBACK(on_polish_location), NULL);
+    g_signal_connect(ui.polish_model_row, "notify::selected", G_CALLBACK(on_polish_model), NULL);
     GtkWidget *polish_apply = gtk_button_new_with_label("Apply");
     gtk_widget_add_css_class(polish_apply, "suggested-action");
     gtk_widget_set_halign(polish_apply, GTK_ALIGN_END);
@@ -980,11 +1603,15 @@ static GtkWidget *build_post_processing(void) {
     g_signal_connect(polish_apply, "clicked", G_CALLBACK(on_polish_apply), NULL);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), polish_apply);
     gtk_box_append(GTK_BOX(column), polish);
+    polish_local_group = jsti_local_cleanup_group_new();
+    gtk_widget_set_visible(polish_local_group, FALSE);
+    gtk_box_append(GTK_BOX(column), polish_local_group);
     return page;
 }
 
 static GtkWidget *build_keyboard(void) {
     GtkWidget *column, *page = jsti_page_new(&column);
+    ui.configuration_columns[3] = column;
     gtk_box_append(GTK_BOX(column), settings_hero(
         "Keyboard", "Start and stop dictation from anywhere with a global shortcut."));
     GtkWidget *shortcut = group("Shortcut");
@@ -1070,6 +1697,10 @@ static void build_window(void) {
     gtk_window_set_default_size(ui.window, 1080, 760);
     gtk_widget_set_size_request(window, 360, 480);
     g_signal_connect(window, "close-request", G_CALLBACK(on_close_request), NULL);
+    GtkEventController *navigation_keys = gtk_event_controller_key_new();
+    gtk_event_controller_set_propagation_phase(navigation_keys, GTK_PHASE_BUBBLE);
+    g_signal_connect(navigation_keys, "key-pressed", G_CALLBACK(sidebar_key_pressed), NULL);
+    gtk_widget_add_controller(window, navigation_keys);
 
     /* One transcript buffer: the dashboard and the selected History card show
      * the same displayed text, which Copy, Export and Read aloud act on. */
@@ -1083,6 +1714,9 @@ static void build_window(void) {
     add_page(JSTI_PAGE_GENERAL, build_general());
     add_page(JSTI_PAGE_TRANSCRIPTION, build_transcription());
     add_page(JSTI_PAGE_POST_PROCESSING, build_post_processing());
+    add_page(JSTI_PAGE_CORRECTIONS, jsti_vocabulary_page_new(0));
+    add_page(JSTI_PAGE_PRONUNCIATION, jsti_vocabulary_page_new(1));
+    add_page(JSTI_PAGE_PROFILES, jsti_profiles_page_new());
     add_page(JSTI_PAGE_KEYBOARD, build_keyboard());
     add_page(JSTI_PAGE_CLOUD_SYNC, build_cloud_sync());
     add_page(JSTI_PAGE_ABOUT, build_about());
@@ -1172,7 +1806,10 @@ static void on_activate(GApplication *application, gpointer data) {
         gtk_window_present(ui.window);
         return;
     }
+    jsti_app_icon_install();
     build_window();
+    gtk_window_set_icon_name(ui.window, "com.justspeaktoit.JustSpeakToIt");
+    jsti_hands_free_guard_start();
     jsti_tray_start();
     ui.suppress = TRUE;
     apply_models(initial_models.rows, initial_models.count, initial_models.selected);
@@ -1244,10 +1881,32 @@ int32_t jsti_window_run(
     g_signal_connect(ui.application, "activate", G_CALLBACK(on_activate), NULL);
     g_signal_connect(ui.application, "command-line", G_CALLBACK(on_command_line), NULL);
     int status = g_application_run(G_APPLICATION(ui.application), argc, argv);
+    jsti_hands_free_guard_stop();
     close_posts();
     ui.callback = NULL;
+    read_aloud.picker_callback = NULL;
+    read_aloud.picker_context = NULL;
+    g_clear_pointer(&read_aloud.identifiers, g_ptr_array_unref);
+    g_clear_pointer(&read_aloud.favorite_ranks, g_array_unref);
+    g_clear_pointer(&read_aloud.favorite_indices, g_array_unref);
+    g_clear_object(&read_aloud.voices);
+    g_clear_object(&read_aloud.favorite_names);
+    configuration.callback = NULL;
+    configuration.context = NULL;
+    g_clear_pointer(&configuration.rows, g_ptr_array_unref);
+    g_clear_pointer(&configuration.choices, g_ptr_array_unref);
+    g_clear_pointer(&configuration.booleans, g_array_unref);
+    g_clear_pointer(&configuration.overlay_settings, g_array_unref);
+    g_clear_pointer(&configuration.hands_free_settings, g_array_unref);
+    configuration.recovery_group = NULL;
+    configuration.recovery_row = NULL;
+    configuration.recovery_count = 0;
+    g_clear_pointer(&ui.polish_catalog, g_ptr_array_unref);
+    g_clear_pointer(&ui.polish_slots, g_array_unref);
+    g_clear_pointer(&ui.polish_local_notice, g_free);
     g_clear_object(&ui.application);
     ui.window = NULL;
+    jsti_app_icon_clear();
     if (status != 0) {
         jsti_set_error(error, capacity, "The window exited with status %d.", status);
         return -1;
@@ -1367,13 +2026,13 @@ int32_t jsti_window_update(const char *status, const char *transcript, int32_t s
     return post(update_apply, update, update_free);
 }
 
-typedef struct Models {
+struct Models {
     GArray *slots;
     GPtrArray *names;
     gint32 selected;
     gchar *status;
     gboolean refreshing;
-} Models;
+};
 
 static gint compare_order(gconstpointer left, gconstpointer right, gpointer orders) {
     gint32 a = g_array_index((GArray *)orders, gint32, ((const Slot *)left)->global);
@@ -1390,7 +2049,7 @@ static Models *models_copy(const JSTIModelRow *rows, size_t count, gint32 select
     for (size_t index = 0; index < count; index++) {
         g_array_append_val(orders, rows[index].display_order);
         if (rows[index].display_order < 0) continue;
-        Slot slot = { .id = g_strdup(rows[index].id), .global = (gint32)index };
+        Slot slot = { .id = g_strdup(rows[index].id), .global = (gint32)index, .live = rows[index].is_live != 0 };
         g_array_append_val(models->slots, slot);
     }
     g_array_sort_with_data(models->slots, compare_order, orders);
@@ -1411,32 +2070,68 @@ static void models_free(gpointer pointer) {
     g_free(models);
 }
 
-static void models_apply(gpointer pointer) {
-    Models *models = pointer;
-    gint32 keep = models->selected >= 0 ? models->selected : selected_model_slot();
+static void filter_models(gint32 keep) {
+    Models *models = ui.model_catalog;
+    if (models == NULL) return;
+    gboolean local = jsti_model_filters_local(), live = jsti_model_filters_live();
     ui.suppress = TRUE;
     if (ui.model_slots != NULL) {
         for (guint index = 0; index < ui.model_slots->len; index++) g_free(g_array_index(ui.model_slots, Slot, index).id);
         g_array_unref(ui.model_slots);
     }
     ui.model_slots = g_array_new(FALSE, TRUE, sizeof(Slot));
+    GPtrArray *names = g_ptr_array_new();
     guint position = GTK_INVALID_LIST_POSITION;
     for (guint index = 0; index < models->slots->len; index++) {
         Slot slot = g_array_index(models->slots, Slot, index);
-        Slot copy = { .id = g_strdup(slot.id), .global = slot.global };
+        if (g_str_has_prefix(slot.id, "local/") != local || slot.live != live) continue;
+        Slot copy = { .id = g_strdup(slot.id), .global = slot.global, .live = slot.live };
         g_array_append_val(ui.model_slots, copy);
-        if (slot.global == keep) position = index;
+        g_ptr_array_add(names, g_ptr_array_index(models->names, index));
+        if (slot.global == keep) position = ui.model_slots->len - 1;
     }
     guint existing = g_list_model_get_n_items(G_LIST_MODEL(ui.model_names));
-    g_ptr_array_add(models->names, NULL);
-    gtk_string_list_splice(ui.model_names, 0, existing, (const char *const *)models->names->pdata);
-    g_ptr_array_set_size(models->names, models->names->len - 1);
-    if (position != GTK_INVALID_LIST_POSITION) adw_combo_row_set_selected(ui.model_row, position);
+    g_ptr_array_add(names, NULL);
+    gtk_string_list_splice(ui.model_names, 0, existing, (const char *const *)names->pdata);
+    g_ptr_array_unref(names);
+    adw_combo_row_set_selected(ui.model_row, position != GTK_INVALID_LIST_POSITION ? position :
+                               (ui.model_slots->len > 0 ? 0 : GTK_INVALID_LIST_POSITION));
     refresh_azure_row();
-    if (models->status != NULL) gtk_label_set_text(ui.catalog_status, models->status);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.catalog_refresh), !models->refreshing);
     ui.suppress = FALSE;
     refresh_setup();
+}
+
+static void on_model_filter(gboolean local, gboolean live) {
+    guint mode = local ? 2 : (live ? 1 : 0);
+    filter_models(ui.preferred_model_slots[mode]);
+    gint32 selected = selected_model_slot();
+    if (selected >= 0) {
+        ui.preferred_model_slots[mode] = selected;
+        emit(JSTI_EVENT_SELECT_MODEL, "", selected);
+    }
+}
+
+static void models_apply(gpointer pointer) {
+    Models *models = pointer;
+    gint32 keep = models->selected >= 0 ? models->selected : selected_model_slot();
+    if (ui.model_catalog != NULL) models_free(ui.model_catalog);
+    ui.model_catalog = g_new0(Models, 1);
+    ui.model_catalog->slots = g_array_new(FALSE, TRUE, sizeof(Slot));
+    ui.model_catalog->names = g_ptr_array_new_with_free_func(g_free);
+    for (guint index = 0; index < models->slots->len; index++) {
+        Slot slot = g_array_index(models->slots, Slot, index);
+        Slot copy = { .id = g_strdup(slot.id), .global = slot.global, .live = slot.live };
+        g_array_append_val(ui.model_catalog->slots, copy);
+        g_ptr_array_add(ui.model_catalog->names, g_strdup(g_ptr_array_index(models->names, index)));
+        if (slot.global == keep) {
+            gboolean local = g_str_has_prefix(slot.id, "local/");
+            jsti_model_filters_select(local, slot.live);
+            ui.preferred_model_slots[local ? 2 : (slot.live ? 1 : 0)] = keep;
+        }
+    }
+    filter_models(keep);
+    if (models->status != NULL) gtk_label_set_text(ui.catalog_status, models->status);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.catalog_refresh), !models->refreshing);
 }
 
 static void apply_models(const JSTIModelRow *rows, size_t count, gint32 selected) {
@@ -1593,6 +2288,10 @@ static void history_apply(gpointer pointer) {
         if (g_strcmp0(keep, entry->id) == 0) selected = GTK_LIST_BOX_ROW(row);
     }
     gtk_widget_set_visible(ui.history_empty, history->entries->len == 0);
+    const char *query = gtk_editable_get_text(GTK_EDITABLE(ui.search));
+    gtk_label_set_text(GTK_LABEL(ui.history_empty), query[0] || jsti_history_filters_active()
+        ? "No saved recordings match this search or filter."
+        : "No history yet. Press Record to capture your first session.");
     if (history->select) {
         g_free(ui.selected_id);
         ui.selected_id = g_strdup(history->selected != NULL && history->selected[0] != '\0' ? history->selected : NULL);
@@ -1630,6 +2329,64 @@ static History *history_copy(const JSTIHistoryRow *rows, size_t count, const cha
 
 int32_t jsti_window_set_history(const JSTIHistoryRow *rows, size_t count, const char *selected_id) {
     return post(history_apply, history_copy(rows, count, selected_id), history_free);
+}
+
+static void history_management_apply(gpointer pointer) {
+    g_free(ui.all_history_ids);
+    ui.all_history_ids = g_strdup(pointer);
+    refresh_actions();
+}
+
+int32_t jsti_window_set_history_management(const char *identifiers) {
+    if (identifiers == NULL || !g_utf8_validate(identifiers, -1, NULL)) return -1;
+    return post(history_management_apply, g_strdup(identifiers), g_free);
+}
+
+typedef struct AudioCleanupConfirmation {
+    gchar *token;
+    size_t count;
+} AudioCleanupConfirmation;
+
+static void audio_cleanup_confirmation_free(gpointer pointer) {
+    AudioCleanupConfirmation *confirmation = pointer;
+    g_free(confirmation->token);
+    g_free(confirmation);
+}
+
+static void audio_cleanup_confirmation_apply(gpointer pointer) {
+    AudioCleanupConfirmation *confirmation = pointer;
+    if (ui.window == NULL) return;
+    if (!gtk_widget_get_sensitive(GTK_WIDGET(ui.audio_cleanup))) {
+        emit(JSTI_EVENT_AUDIO_CLEANUP_RESPONSE, confirmation->token, 0);
+        return;
+    }
+    gtk_window_present(GTK_WINDOW(audio_cleanup_dialog(confirmation->token, confirmation->count)));
+}
+
+int32_t jsti_window_confirm_audio_cleanup(const char *token, size_t count) {
+    if (token == NULL || !g_uuid_string_is_valid(token) || count == 0) return -1;
+    AudioCleanupConfirmation *confirmation = g_new0(AudioCleanupConfirmation, 1);
+    confirmation->token = g_strdup(token);
+    confirmation->count = count;
+    return post(audio_cleanup_confirmation_apply, confirmation, audio_cleanup_confirmation_free);
+}
+
+static GtkWidget *migration_report_dialog(const char *text) {
+    GtkWidget *dialog = adw_message_dialog_new(ui.window, "Backup inspection (read only)", text);
+    adw_message_dialog_add_response(ADW_MESSAGE_DIALOG(dialog), "close", "Close");
+    adw_message_dialog_set_default_response(ADW_MESSAGE_DIALOG(dialog), "close");
+    adw_message_dialog_set_close_response(ADW_MESSAGE_DIALOG(dialog), "close");
+    g_signal_connect_swapped(dialog, "response", G_CALLBACK(gtk_window_destroy), dialog);
+    return dialog;
+}
+
+static void migration_report_apply(gpointer pointer) {
+    if (ui.window != NULL && !ui.closing) gtk_window_present(GTK_WINDOW(migration_report_dialog(pointer)));
+}
+
+int32_t jsti_window_show_migration_report(const char *text) {
+    if (text == NULL || text[0] == '\0' || !g_utf8_validate(text, -1, NULL)) return -1;
+    return post(migration_report_apply, g_strdup(text), g_free);
 }
 
 typedef struct Insights {
@@ -1731,8 +2488,29 @@ int32_t jsti_window_set_login_item(int32_t state, const char *detail) {
     return post(login_item_apply, item, login_item_free);
 }
 
+static void automation_apply(gpointer pointer) {
+    LoginItem *item = pointer;
+    gboolean suppressed = ui.suppress;
+    ui.suppress = TRUE;
+    adw_switch_row_set_active(ui.automation_row, item->state != 0);
+    ui.suppress = suppressed;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.automation_row), TRUE);
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(ui.automation_row), item->detail);
+}
+
+int32_t jsti_window_set_automation(int32_t enabled, const char *detail) {
+    if ((enabled != 0 && enabled != 1) || detail == NULL || !g_utf8_validate(detail, -1, NULL)) return -1;
+    LoginItem *item = g_new0(LoginItem, 1);
+    item->state = enabled;
+    item->detail = g_strdup(detail);
+    return post(automation_apply, item, login_item_free);
+}
+
 typedef struct HUD {
     gint32 phase;
+    gint32 display_milliseconds;
+    gboolean compact;
+    gboolean expanded;
     gchar *headline, *subheadline, *live;
 } HUD;
 
@@ -1746,17 +2524,28 @@ static void hud_free(gpointer pointer) {
 
 static void hud_apply(gpointer pointer) {
     HUD *state = pointer;
-    jsti_hud_show(state->phase, state->headline, state->subheadline, state->live);
+    jsti_hud_show_layout(state->phase, state->headline, state->subheadline, state->live,
+                          state->display_milliseconds, state->compact, state->expanded);
 }
 
-int32_t jsti_window_set_hud(int32_t phase, const char *headline, const char *subheadline, const char *live_text) {
-    if (phase < 0 || phase > 6) return -1;
+int32_t jsti_window_set_hud(int32_t phase, const char *headline, const char *subheadline, const char *live_text,
+                            int32_t display_milliseconds, int32_t compact) {
+    return jsti_window_set_hud_layout(phase, headline, subheadline, live_text, display_milliseconds, compact, 0);
+}
+
+int32_t jsti_window_set_hud_layout(int32_t phase, const char *headline, const char *subheadline, const char *live_text,
+                                   int32_t display_milliseconds, int32_t compact, int32_t expanded) {
+    if (phase < 0 || phase > 6 || display_milliseconds < 0 || display_milliseconds > 60000 ||
+        (compact != 0 && compact != 1) || (expanded != 0 && expanded != 1)) return -1;
     const char *texts[] = { headline, subheadline, live_text };
     for (size_t index = 0; index < G_N_ELEMENTS(texts); ++index) {
         if (texts[index] != NULL && !g_utf8_validate(texts[index], -1, NULL)) return -1;
     }
     HUD *state = g_new0(HUD, 1);
     state->phase = phase;
+    state->display_milliseconds = display_milliseconds;
+    state->compact = compact != 0;
+    state->expanded = expanded != 0 && compact == 0;
     state->headline = g_strdup(headline != NULL ? headline : "");
     state->subheadline = g_strdup(subheadline != NULL ? subheadline : "");
     state->live = g_strdup(live_text != NULL ? live_text : "");
@@ -1764,6 +2553,77 @@ int32_t jsti_window_set_hud(int32_t phase, const char *headline, const char *sub
 }
 
 static void page_apply(gpointer data) { show_page(GPOINTER_TO_INT(data)); }
+
+typedef struct {
+    gint digits[JSTI_PAGE_COUNT];
+    gchar *hints[JSTI_PAGE_COUNT];
+    gboolean show_hints;
+} SidebarUpdate;
+
+static void sidebar_update_free(gpointer pointer) {
+    SidebarUpdate *update = pointer;
+    for (gint page = 0; page < JSTI_PAGE_COUNT; ++page) g_free(update->hints[page]);
+    g_free(update);
+}
+
+static void sidebar_update_apply(gpointer pointer) {
+    SidebarUpdate *update = pointer;
+    for (gint page = 0; page < JSTI_PAGE_COUNT; ++page) {
+        sidebar_shortcuts.digits[page] = update->digits[page];
+        GtkWidget *hint = sidebar_shortcuts.hints[page];
+        const gchar *text = update->hints[page] != NULL ? update->hints[page] : "";
+        gtk_label_set_text(GTK_LABEL(hint), text);
+        gtk_widget_set_visible(hint, update->show_hints && text[0] != '\0');
+        GtkListBoxRow *row = gtk_list_box_get_row_at_index(ui.sidebar, page);
+        gchar *description = update->show_hints && text[0] != '\0' ? g_strdup_printf("Shortcut: %s.", text) : g_strdup("");
+        gtk_accessible_update_property(GTK_ACCESSIBLE(row),
+            GTK_ACCESSIBLE_PROPERTY_DESCRIPTION, description, -1);
+        g_free(description);
+    }
+    sidebar_shortcuts.configured = TRUE;
+}
+
+static void density_apply(gpointer pointer) {
+    jsti_visual_density_apply(GTK_WIDGET(ui.window), pointer);
+}
+
+int32_t jsti_window_set_visual_density(JSTIVisualDensity density) {
+    if ((density.compact != 0 && density.compact != 1) ||
+        density.minimum_row_height < 30 || density.minimum_row_height > 64) return -1;
+    const gint spacing[] = { density.page_padding, density.section_spacing, density.card_padding,
+        density.content_spacing, density.inline_spacing, density.group_spacing };
+    for (guint index = 0; index < G_N_ELEMENTS(spacing); ++index)
+        if (spacing[index] < 0 || spacing[index] > 128) return -1;
+    JSTIVisualDensity *update = g_new(JSTIVisualDensity, 1);
+    *update = density;
+    return post(density_apply, update, g_free);
+}
+
+int32_t jsti_window_set_sidebar_shortcuts(const JSTISidebarShortcut *bindings, size_t count, int32_t show_hints) {
+    if (bindings == NULL || count > 10 || (show_hints != 0 && show_hints != 1)) return -1;
+    SidebarUpdate *update = g_new0(SidebarUpdate, 1);
+    for (gint page = 0; page < JSTI_PAGE_COUNT; ++page) update->digits[page] = -1;
+    gboolean used[10] = { FALSE };
+    for (size_t index = 0; index < count; ++index) {
+        const JSTISidebarShortcut *binding = &bindings[index];
+        gchar expected[8];
+        g_snprintf(expected, sizeof(expected), "Ctrl+%d", binding->digit);
+        if (binding->destination == NULL || binding->digit < 0 || binding->digit > 9 ||
+            used[binding->digit] || g_strcmp0(binding->hint, expected) != 0) {
+            sidebar_update_free(update);
+            return -1;
+        }
+        used[binding->digit] = TRUE;
+        for (gint page = 0; page < JSTI_PAGE_COUNT; ++page) {
+            if (g_strcmp0(page_info[page].name, binding->destination) != 0) continue;
+            if (update->digits[page] != -1) { sidebar_update_free(update); return -1; }
+            update->digits[page] = binding->digit;
+            update->hints[page] = g_strdup(binding->hint);
+        }
+    }
+    update->show_hints = show_hints != 0;
+    return post(sidebar_update_apply, update, sidebar_update_free);
+}
 
 int32_t jsti_window_show_page(int32_t page) {
     if (page < 0 || page >= JSTI_PAGE_COUNT) return -1;
@@ -1832,6 +2692,7 @@ int32_t jsti_window_set_transcript_variant(const char *record_id, int32_t varian
 typedef struct TextOutput {
     gint32 method;
     gboolean restore;
+    gboolean can_restore;
     gchar *hint;
 } TextOutput;
 
@@ -1844,18 +2705,28 @@ static void text_output_free(gpointer pointer) {
 static void text_output_apply(gpointer pointer) {
     TextOutput *output = pointer;
     ui.suppress = TRUE;
+    ui.can_restore_clipboard = output->can_restore;
     adw_combo_row_set_selected(ui.output_row, output->method == 1 ? 1 : 0);
     adw_switch_row_set_active(ui.restore_row, output->restore);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.restore_row), output->method != 1);
+    gtk_widget_set_visible(GTK_WIDGET(ui.restore_row), output->can_restore);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.restore_row), output->method != 1 && output->can_restore);
+    adw_preferences_group_set_description(ui.output_group, output->can_restore ?
+        "Finished text goes to the app you were in when dictation started. Recording in this window offers "
+        "Copy instead." :
+        "Wayland pastes into the app focused at delivery and cannot confirm when it consumes the paste, "
+        "so the transcript stays on the clipboard. Your X11 restoration preference is retained. "
+        "Recording in this window offers Copy instead.");
     if (output->hint != NULL) adw_action_row_set_subtitle(ui.shortcut_row, output->hint);
     ui.suppress = FALSE;
     refresh_setup();
 }
 
-int32_t jsti_window_set_text_output(int32_t method, int32_t restore_clipboard, const char *shortcut_hint) {
+int32_t jsti_window_set_text_output(int32_t method, int32_t restore_clipboard,
+                                   int32_t can_restore_clipboard, const char *shortcut_hint) {
     TextOutput *output = g_new0(TextOutput, 1);
     output->method = method;
     output->restore = restore_clipboard != 0;
+    output->can_restore = can_restore_clipboard != 0;
     output->hint = g_strdup(shortcut_hint);
     return post(text_output_apply, output, text_output_free);
 }
@@ -1911,7 +2782,12 @@ int32_t jsti_window_set_playback(const char *record_id, int32_t state, const cha
 typedef struct Polish {
     GPtrArray *models;
     gboolean enabled;
+    gboolean include_directives;
+    gboolean include_tags;
     gint32 selected;
+    gint32 local_index;
+    gint32 remembered_remote_index;
+    gchar *local_notice;
     gchar *prompt;
 } Polish;
 
@@ -1919,27 +2795,82 @@ static void polish_free(gpointer pointer) {
     Polish *polish = pointer;
     g_ptr_array_unref(polish->models);
     g_free(polish->prompt);
+    g_free(polish->local_notice);
     g_free(polish);
 }
 
 static void polish_apply(gpointer pointer) {
     Polish *polish = pointer;
-    guint existing = g_list_model_get_n_items(G_LIST_MODEL(ui.polish_models));
-    g_ptr_array_add(polish->models, NULL);
-    gtk_string_list_splice(ui.polish_models, 0, existing, (const char *const *)polish->models->pdata);
-    if (polish->selected >= 0) adw_combo_row_set_selected(ui.polish_model_row, (guint)polish->selected);
+    gboolean suppressed = ui.suppress;
+    ui.suppress = TRUE;
+    gint32 local_selected = ui.polish_local_selected;
+    gboolean retain_local = local_selected >= polish->local_index && ui.polish_catalog != NULL &&
+        (guint)local_selected < ui.polish_catalog->len && (guint)local_selected < polish->models->len &&
+        g_strcmp0(g_ptr_array_index(ui.polish_catalog, local_selected),
+                  g_ptr_array_index(polish->models, local_selected)) == 0;
+    g_clear_pointer(&ui.polish_catalog, g_ptr_array_unref);
+    ui.polish_catalog = g_ptr_array_ref(polish->models);
+    ui.polish_local_index = polish->local_index;
+    polish_remote_count = (guint)polish->local_index;
+    g_free(ui.polish_local_notice);
+    ui.polish_local_notice = g_strdup(polish->local_notice);
+    ui.polish_remote_selected = polish->selected >= 0 && polish->selected < polish->local_index
+        ? polish->selected : polish->remembered_remote_index;
+    ui.polish_local_selected = polish->selected >= polish->local_index ? polish->selected
+        : retain_local ? local_selected : polish->local_index;
+    adw_combo_row_set_selected(ui.polish_location_row, polish->selected < 0
+        ? GTK_INVALID_LIST_POSITION : (guint)polish->selected >= polish_remote_boundary() ? 0 : 1);
+    polish_select_location(polish->selected, FALSE);
     adw_switch_row_set_active(ui.polish_row, polish->enabled);
-    gtk_editable_set_text(GTK_EDITABLE(ui.polish_prompt_row), polish->prompt != NULL ? polish->prompt : "");
+    adw_switch_row_set_active(ui.polish_directives_row, polish->include_directives);
+    adw_switch_row_set_active(ui.polish_tags_row, polish->include_tags);
+    gtk_text_buffer_set_text(gtk_text_view_get_buffer(ui.polish_prompt_row),
+        polish->prompt != NULL ? polish->prompt : "", -1);
+    ui.suppress = suppressed;
+}
+
+static void cleanup_sources_apply(gpointer pointer) {
+    const guint count = GPOINTER_TO_UINT(pointer);
+    if (ui.polish_catalog == NULL || count > ui.polish_catalog->len ||
+        ui.polish_local_index < 0 || count != (guint)ui.polish_local_index) {
+        jsti_window_update("The post-processing source boundary is inconsistent with its model choices.", NULL, -1);
+        return;
+    }
+    gint32 selected = polish_selected_model();
+    polish_remote_count = count;
+    polish_select_location(selected, FALSE);
+}
+
+int32_t jsti_window_set_cleanup_sources(size_t count) {
+    if (count > 10000) return -1;
+    return post(cleanup_sources_apply, GUINT_TO_POINTER((guint)count), NULL);
 }
 
 int32_t jsti_window_set_post_processing(
-    const char *const *models, size_t count, int32_t enabled, int32_t selected, const char *prompt) {
+    const char *const *models, size_t count, int32_t enabled, int32_t selected,
+    int32_t local_index, int32_t remembered_remote_index, const char *local_notice,
+    int32_t include_directives, int32_t include_tags, const char *prompt) {
+    if (models == NULL || count == 0 || count > 10000 || (enabled != 0 && enabled != 1) ||
+        selected < -1 || (selected >= 0 && (size_t)selected >= count) ||
+        local_index < 0 || (size_t)local_index >= count || local_notice == NULL || *local_notice == '\0' ||
+        remembered_remote_index < -1 || remembered_remote_index >= local_index ||
+        !g_utf8_validate(local_notice, -1, NULL) || prompt == NULL ||
+        !g_utf8_validate(prompt, -1, NULL) || strlen(prompt) > 65535 ||
+        (include_directives != 0 && include_directives != 1) || (include_tags != 0 && include_tags != 1)) return -1;
+    for (size_t index = 0; index < count; index++) {
+        if (models[index] == NULL || !g_utf8_validate(models[index], -1, NULL)) return -1;
+    }
     Polish *polish = g_new0(Polish, 1);
     polish->models = g_ptr_array_new_with_free_func(g_free);
     for (size_t index = 0; index < count; index++) g_ptr_array_add(polish->models, g_strdup(models[index]));
     polish->enabled = enabled != 0;
+    polish->include_directives = include_directives != 0;
+    polish->include_tags = include_tags != 0;
     polish->selected = selected;
     polish->prompt = g_strdup(prompt);
+    polish->local_index = local_index;
+    polish->remembered_remote_index = remembered_remote_index;
+    polish->local_notice = g_strdup(local_notice);
     return post(polish_apply, polish, polish_free);
 }
 
@@ -1951,6 +2882,603 @@ static void azure_apply(gpointer data) {
 
 int32_t jsti_window_set_azure_resource(const char *endpoint) {
     return post(azure_apply, g_strdup(endpoint != NULL ? endpoint : ""), g_free);
+}
+
+typedef struct ConfigurationUpdate {
+    GPtrArray *titles, *values, *groups, *recovered, *choices;
+    GArray *booleans;
+    GArray *overlay_settings;
+    GArray *hands_free_settings;
+    GArray *enabled_by_fields;
+    JSTIConfigurationCallback callback;
+    void *context;
+} ConfigurationUpdate;
+
+static void configuration_problem(const char *message) {
+    gtk_label_set_text(ui.status, message);
+}
+
+static void configuration_submit(gint32 action, const char *const *values, gsize count) {
+    char error[1024] = {0};
+    if (configuration.callback == NULL) {
+        configuration_problem("Configuration controls are unavailable.");
+    } else if (configuration.callback(action, values, count, configuration.context, error, sizeof(error)) != 0) {
+        configuration_problem(error[0] ? error : "Configuration could not be applied.");
+    }
+}
+
+static void on_configuration_apply(GtkButton *button, gpointer data) {
+    (void)button;
+    if (ui.state != JSTI_STATE_IDLE) {
+        configuration_problem("Finish dictation before changing configuration.");
+        return;
+    }
+    GPtrArray *values = g_ptr_array_new_with_free_func(g_free);
+    gint32 action = GPOINTER_TO_INT(data);
+    for (guint i = 0; i < configuration.rows->len; ++i) {
+        GtkWidget *row = g_ptr_array_index(configuration.rows, i);
+        gboolean boolean = g_array_index(configuration.booleans, gboolean, i);
+        const char *choices = g_ptr_array_index(configuration.choices, i);
+        if (choices[0] != '\0') {
+            gchar **lines = g_strsplit(choices, "\n", -1);
+            guint selected = adw_combo_row_get_selected(ADW_COMBO_ROW(row));
+            if (selected >= g_strv_length(lines)) {
+                g_strfreev(lines);
+                g_ptr_array_unref(values);
+                configuration_problem("Choose a value for each preference first.");
+                return;
+            }
+            g_ptr_array_add(values, g_strndup(lines[selected], strchr(lines[selected], '\t') - lines[selected]));
+            g_strfreev(lines);
+            continue;
+        }
+        g_ptr_array_add(values, g_strdup(boolean
+            ? (adw_switch_row_get_active(ADW_SWITCH_ROW(row)) ? "1" : "0")
+            : gtk_editable_get_text(GTK_EDITABLE(row))));
+    }
+    if (action == 3) {
+        guint selected = adw_combo_row_get_selected(configuration.recovery_row);
+        if (selected >= configuration.recovery_count) {
+            configuration_problem("Choose a recovered keyword edit first.");
+            g_ptr_array_unref(values);
+            return;
+        }
+        GtkStringList *model = GTK_STRING_LIST(adw_combo_row_get_model(configuration.recovery_row));
+        g_ptr_array_add(values, g_strdup(gtk_string_list_get_string(model, selected)));
+    }
+    configuration_submit(action, (const char *const *)values->pdata, values->len);
+    g_ptr_array_unref(values);
+}
+
+static void configuration_file_chosen(GObject *source, GAsyncResult *result, gpointer data) {
+    gint32 action = GPOINTER_TO_INT(data);
+    GError *error = NULL;
+    GFile *file = action == 1 ? gtk_file_dialog_open_finish(GTK_FILE_DIALOG(source), result, &error)
+                             : gtk_file_dialog_save_finish(GTK_FILE_DIALOG(source), result, &error);
+    if (file != NULL) {
+        gchar *path = g_file_get_path(file);
+        if (path != NULL) {
+            const char *values[] = {path};
+            configuration_submit(action, values, 1);
+        } else configuration_problem("Choose a local configuration file.");
+        g_free(path);
+        g_object_unref(file);
+    } else if (error != NULL && !g_error_matches(error, GTK_DIALOG_ERROR, GTK_DIALOG_ERROR_DISMISSED)) {
+        configuration_problem(error->message);
+    }
+    g_clear_error(&error);
+}
+
+static void on_configuration_file(GtkButton *button, gpointer data) {
+    (void)button;
+    gint32 action = GPOINTER_TO_INT(data);
+    GtkFileDialog *dialog = gtk_file_dialog_new();
+    gtk_file_dialog_set_title(dialog, action == 1 ? "Import portable preferences" : "Export portable preferences");
+    if (action == 2) gtk_file_dialog_set_initial_name(dialog, "Dictation-preferences.json");
+    if (action == 1) gtk_file_dialog_open(dialog, ui.window, NULL, configuration_file_chosen, data);
+    else gtk_file_dialog_save(dialog, ui.window, NULL, configuration_file_chosen, data);
+    g_object_unref(dialog);
+}
+
+static void configuration_update_free(gpointer data) {
+    ConfigurationUpdate *update = data;
+    g_ptr_array_unref(update->titles);
+    g_ptr_array_unref(update->values);
+    g_ptr_array_unref(update->groups);
+    g_ptr_array_unref(update->recovered);
+    g_ptr_array_unref(update->choices);
+    g_array_unref(update->booleans);
+    g_array_unref(update->overlay_settings);
+    g_array_unref(update->hands_free_settings);
+    g_array_unref(update->enabled_by_fields);
+    g_free(update);
+}
+
+static void configuration_hands_free_availability(GtkWidget *row, gboolean enabled) {
+    gboolean ready = jsti_window_hands_free_guard_ready() != 0;
+    gtk_widget_set_sensitive(row, ready || enabled);
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(row), ready ? NULL : enabled ?
+        "Monitoring unavailable. Turn off saved hands-free mode to restore manual shortcuts." :
+        "Unavailable: native session lock/sleep monitoring is required. Manual recording still works.");
+}
+
+static void configuration_dependencies(GObject *object, GParamSpec *spec, gpointer data) {
+    (void)object; (void)spec; (void)data;
+    for (guint i = 0; i < configuration.rows->len; ++i) {
+        gint32 enabling = g_array_index(configuration.enabled_by_fields, gint32, i);
+        if (enabling == -1) {
+            GtkWidget *row = g_ptr_array_index(configuration.rows, i);
+            gtk_widget_set_sensitive(row, FALSE);
+            adw_action_row_set_subtitle(ADW_ACTION_ROW(row),
+                "Unavailable on this host: no confirmed editable field/span readback. Retained for transfer.");
+            continue;
+        }
+        if (!enabling) continue;
+        AdwSwitchRow *control = ADW_SWITCH_ROW(g_ptr_array_index(configuration.rows, enabling - 1));
+        gtk_widget_set_sensitive(g_ptr_array_index(configuration.rows, i), adw_switch_row_get_active(control));
+    }
+}
+
+static void configuration_apply(gpointer data) {
+    ConfigurationUpdate *update = data;
+    configuration.callback = update->callback;
+    configuration.context = update->context;
+    if (configuration.rows == NULL) {
+        configuration.rows = g_ptr_array_new();
+        configuration.choices = g_ptr_array_ref(update->choices);
+        configuration.booleans = g_array_ref(update->booleans);
+        configuration.overlay_settings = g_array_ref(update->overlay_settings);
+        configuration.hands_free_settings = g_array_ref(update->hands_free_settings);
+        configuration.enabled_by_fields = g_array_ref(update->enabled_by_fields);
+        GtkWidget *groups[4];
+        for (guint i = 0; i < 4; ++i) {
+            groups[i] = group("Dictation preferences");
+            adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(groups[i]),
+                "Apply saves all preference fields. Provider-specific options only affect supported routes.");
+            gtk_box_append(GTK_BOX(ui.configuration_columns[i]), groups[i]);
+        }
+        if (!jsti_hud_overlay_supported())
+            adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(groups[0]),
+                "Wayland uses desktop notifications, not a positioned recording overlay. "
+                "Overlay-only preferences are retained for X11 but hidden here; your desktop controls notification expiry.");
+        for (guint i = 0; i < update->titles->len; ++i) {
+            const char *section = g_ptr_array_index(update->groups, i);
+            guint slot = g_strcmp0(section, "Transcription") == 0 ? 1 :
+                g_strcmp0(section, "Post-processing") == 0 ? 2 : g_strcmp0(section, "Keyboard") == 0 ? 3 : 0;
+            gboolean boolean = g_array_index(update->booleans, gboolean, i);
+            const char *choices = g_ptr_array_index(update->choices, i);
+            GtkWidget *row = boolean ? adw_switch_row_new() :
+                choices[0] != '\0' ? adw_combo_row_new() : adw_entry_row_new();
+            if (choices[0] != '\0') {
+                gchar **lines = g_strsplit(choices, "\n", -1);
+                GtkStringList *model = gtk_string_list_new(NULL);
+                for (guint choice = 0; lines[choice] != NULL; ++choice)
+                    gtk_string_list_append(model, strchr(lines[choice], '\t') + 1);
+                adw_combo_row_set_model(ADW_COMBO_ROW(row), G_LIST_MODEL(model));
+                g_object_unref(model);
+                g_strfreev(lines);
+            }
+            adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), g_ptr_array_index(update->titles, i));
+            adw_preferences_group_add(ADW_PREFERENCES_GROUP(groups[slot]), row);
+            if (g_array_index(update->overlay_settings, gboolean, i) && !jsti_hud_overlay_supported())
+                gtk_widget_set_visible(row, FALSE);
+            g_ptr_array_add(configuration.rows, row);
+            if (boolean) g_signal_connect(row, "notify::active", G_CALLBACK(configuration_dependencies), NULL);
+        }
+        for (guint i = 0; i < 4; ++i) {
+            GtkWidget *apply = gtk_button_new_with_label("Apply preferences");
+            gtk_widget_set_halign(apply, GTK_ALIGN_END);
+            g_signal_connect(apply, "clicked", G_CALLBACK(on_configuration_apply), NULL);
+            adw_preferences_group_add(ADW_PREFERENCES_GROUP(groups[i]), apply);
+        }
+        GtkWidget *sound_previews = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+        GtkWidget *preview_start = gtk_button_new_with_label("Save & preview start");
+        GtkWidget *preview_stop = gtk_button_new_with_label("Save & preview stop");
+        g_signal_connect(preview_start, "clicked", G_CALLBACK(on_configuration_apply), GINT_TO_POINTER(4));
+        g_signal_connect(preview_stop, "clicked", G_CALLBACK(on_configuration_apply), GINT_TO_POINTER(5));
+        gtk_box_append(GTK_BOX(sound_previews), preview_start);
+        gtk_box_append(GTK_BOX(sound_previews), preview_stop);
+        adw_preferences_group_add(ADW_PREFERENCES_GROUP(groups[0]), sound_previews);
+        configuration.recovery_group = group("Recovered keyword edits");
+        adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(configuration.recovery_group),
+            "A deliberate clear remains active. Restore only the edit you choose; it is added to your current list.");
+        configuration.recovery_row = ADW_COMBO_ROW(adw_combo_row_new());
+        adw_preferences_row_set_title(ADW_PREFERENCES_ROW(configuration.recovery_row), "Recovered keyword edit");
+        adw_preferences_group_add(ADW_PREFERENCES_GROUP(configuration.recovery_group),
+            GTK_WIDGET(configuration.recovery_row));
+        GtkWidget *restore = gtk_button_new_with_label("Restore selected keywords");
+        gtk_widget_set_halign(restore, GTK_ALIGN_END);
+        g_signal_connect(restore, "clicked", G_CALLBACK(on_configuration_apply), GINT_TO_POINTER(3));
+        adw_preferences_group_add(ADW_PREFERENCES_GROUP(configuration.recovery_group), restore);
+        gtk_box_append(GTK_BOX(ui.configuration_columns[1]), configuration.recovery_group);
+        GtkWidget *transfer = group("Portable configuration");
+        adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(transfer),
+            "Transfers portable preferences, not keys, models, device paths or service permissions. "
+            "This JSON format is not a macOS backup archive. Unsupported entries are preserved, not applied.");
+        GtkWidget *buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+        GtkWidget *import = gtk_button_new_with_label("Import preferences...");
+        GtkWidget *export = gtk_button_new_with_label("Export preferences...");
+        g_signal_connect(import, "clicked", G_CALLBACK(on_configuration_file), GINT_TO_POINTER(1));
+        g_signal_connect(export, "clicked", G_CALLBACK(on_configuration_file), GINT_TO_POINTER(2));
+        gtk_box_append(GTK_BOX(buttons), import);
+        gtk_box_append(GTK_BOX(buttons), export);
+        adw_preferences_group_add(ADW_PREFERENCES_GROUP(transfer), buttons);
+        gtk_box_append(GTK_BOX(ui.configuration_columns[0]), transfer);
+    }
+    for (guint i = 0; i < update->values->len && i < configuration.rows->len; ++i) {
+        GtkWidget *row = g_ptr_array_index(configuration.rows, i);
+        adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), g_ptr_array_index(update->titles, i));
+        const char *value = g_ptr_array_index(update->values, i);
+        if (g_array_index(configuration.booleans, gboolean, i))
+            adw_switch_row_set_active(ADW_SWITCH_ROW(row), g_strcmp0(value, "1") == 0);
+        else if (ADW_IS_COMBO_ROW(row)) {
+            gchar **lines = g_strsplit(g_ptr_array_index(configuration.choices, i), "\n", -1);
+            for (guint choice = 0; lines[choice] != NULL; ++choice) {
+                const char *tab = strchr(lines[choice], '\t');
+                if (strlen(value) == (size_t)(tab - lines[choice]) && strncmp(value, lines[choice], tab - lines[choice]) == 0)
+                    adw_combo_row_set_selected(ADW_COMBO_ROW(row), choice);
+            }
+            g_strfreev(lines);
+        } else gtk_editable_set_text(GTK_EDITABLE(row), value);
+        if (g_array_index(configuration.hands_free_settings, gboolean, i))
+            configuration_hands_free_availability(row, g_strcmp0(value, "1") == 0);
+    }
+    configuration_dependencies(NULL, NULL, NULL);
+    GtkStringList *recovered = gtk_string_list_new(NULL);
+    for (guint i = 0; i < update->recovered->len; ++i)
+        gtk_string_list_append(recovered, g_ptr_array_index(update->recovered, i));
+    adw_combo_row_set_model(configuration.recovery_row, G_LIST_MODEL(recovered));
+    g_object_unref(recovered);
+    configuration.recovery_count = update->recovered->len;
+    gtk_widget_set_visible(configuration.recovery_group, configuration.recovery_count > 0);
+}
+
+int32_t jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t count,
+                                      const char *const *recovered_keywords, size_t recovered_count,
+                                      JSTIConfigurationCallback callback, void *context) {
+    if (fields == NULL || count == 0 || count > JSTI_MAXIMUM_CONFIGURATION_FIELDS ||
+        callback == NULL || recovered_count > 1000 ||
+        (recovered_count > 0 && recovered_keywords == NULL)) return -1;
+    ConfigurationUpdate *update = g_new0(ConfigurationUpdate, 1);
+    update->titles = g_ptr_array_new_with_free_func(g_free);
+    update->values = g_ptr_array_new_with_free_func(g_free);
+    update->groups = g_ptr_array_new_with_free_func(g_free);
+    update->recovered = g_ptr_array_new_with_free_func(g_free);
+    update->choices = g_ptr_array_new_with_free_func(g_free);
+    update->booleans = g_array_new(FALSE, FALSE, sizeof(gboolean));
+    update->overlay_settings = g_array_new(FALSE, FALSE, sizeof(gboolean));
+    update->hands_free_settings = g_array_new(FALSE, FALSE, sizeof(gboolean));
+    update->enabled_by_fields = g_array_new(FALSE, FALSE, sizeof(gint32));
+    update->callback = callback;
+    update->context = context;
+    for (size_t i = 0; i < recovered_count; ++i) {
+        if (recovered_keywords[i] == NULL || !g_utf8_validate(recovered_keywords[i], -1, NULL) ||
+            strlen(recovered_keywords[i]) > 65535) {
+            configuration_update_free(update);
+            return -1;
+        }
+        g_ptr_array_add(update->recovered, g_strdup(recovered_keywords[i]));
+    }
+    for (size_t i = 0; i < count; ++i) {
+        const gint32 enabling = fields[i].enabled_by_field;
+        if (enabling < -1 || (enabling > 0 && ((size_t)enabling > count ||
+            (size_t)enabling == i + 1 || fields[enabling - 1].is_boolean != 1))) {
+            configuration_update_free(update);
+            return -1;
+        }
+        g_array_append_val(update->enabled_by_fields, enabling);
+        if (!fields[i].title || !fields[i].value || !fields[i].group ||
+            !g_utf8_validate(fields[i].value, -1, NULL) || strlen(fields[i].value) > 65535 ||
+            (fields[i].requires_hud_overlay != 0 && fields[i].requires_hud_overlay != 1) ||
+            (fields[i].requires_hands_free_guard != 0 && fields[i].requires_hands_free_guard != 1) ||
+            (fields[i].requires_hands_free_guard && fields[i].is_boolean != 1)) {
+            configuration_update_free(update);
+            return -1;
+        }
+        const char *choices = fields[i].choices != NULL ? fields[i].choices : "";
+        if (!g_utf8_validate(choices, -1, NULL) || strlen(choices) > 65535 ||
+            (choices[0] != '\0' && fields[i].is_boolean != 0)) {
+            configuration_update_free(update);
+            return -1;
+        }
+        if (choices[0] != '\0') {
+            gchar **lines = g_strsplit(choices, "\n", -1);
+            gboolean valid = g_strv_length(lines) <= 32, found = FALSE;
+            for (guint choice = 0; lines[choice] != NULL; ++choice) {
+                const char *tab = strchr(lines[choice], '\t');
+                if (tab == NULL || tab == lines[choice] || tab[1] == '\0' || strchr(tab + 1, '\t') != NULL) {
+                    valid = FALSE;
+                    break;
+                }
+                found |= strlen(fields[i].value) == (size_t)(tab - lines[choice]) &&
+                    strncmp(fields[i].value, lines[choice], tab - lines[choice]) == 0;
+            }
+            g_strfreev(lines);
+            if (!valid || !found) {
+                configuration_update_free(update);
+                return -1;
+            }
+        }
+        g_ptr_array_add(update->choices, g_strdup(choices));
+        g_ptr_array_add(update->titles, g_strdup(fields[i].title));
+        g_ptr_array_add(update->values, g_strdup(fields[i].value));
+        g_ptr_array_add(update->groups, g_strdup(fields[i].group));
+        gboolean boolean = fields[i].is_boolean != 0;
+        g_array_append_val(update->booleans, boolean);
+        gboolean overlay_setting = fields[i].requires_hud_overlay != 0;
+        g_array_append_val(update->overlay_settings, overlay_setting);
+        gboolean hands_free_setting = fields[i].requires_hands_free_guard != 0;
+        g_array_append_val(update->hands_free_settings, hands_free_setting);
+    }
+    return post(configuration_apply, update, configuration_update_free);
+}
+
+typedef struct {
+    size_t index;
+    gchar *title;
+} ConfigurationTitleUpdate;
+
+static void configuration_title_free(gpointer data) {
+    ConfigurationTitleUpdate *update = data;
+    g_free(update->title);
+    g_free(update);
+}
+
+static void configuration_title_apply(gpointer data) {
+    ConfigurationTitleUpdate *update = data;
+    if (configuration.rows == NULL) return;
+    if (update->index >= configuration.rows->len) {
+        configuration_problem("The Voice language field could not be found.");
+        return;
+    }
+    adw_preferences_row_set_title(
+        ADW_PREFERENCES_ROW(g_ptr_array_index(configuration.rows, update->index)), update->title);
+}
+
+int32_t jsti_window_set_configuration_field_title(size_t index, const char *title) {
+    if (index >= JSTI_MAXIMUM_CONFIGURATION_FIELDS || title == NULL || title[0] == '\0' ||
+        !g_utf8_validate(title, -1, NULL) || strlen(title) > 256) return -1;
+    ConfigurationTitleUpdate *update = g_new0(ConfigurationTitleUpdate, 1);
+    update->index = index;
+    update->title = g_strdup(title);
+    return post(configuration_title_apply, update, configuration_title_free);
+}
+
+typedef struct { size_t index; gboolean enabled; } ConfigurationAvailabilityUpdate;
+static void configuration_availability_apply(gpointer data) {
+    ConfigurationAvailabilityUpdate *update = data;
+    if (configuration.rows == NULL) return;
+    if (update->index >= configuration.rows->len ||
+        g_array_index(configuration.enabled_by_fields, gint32, update->index) != 0) {
+        configuration_problem("The Voice quality field availability could not be updated.");
+        return;
+    }
+    gtk_widget_set_sensitive(g_ptr_array_index(configuration.rows, update->index), update->enabled);
+}
+int32_t jsti_window_set_configuration_field_enabled(size_t index, int32_t enabled) {
+    if (index >= JSTI_MAXIMUM_CONFIGURATION_FIELDS || (enabled != 0 && enabled != 1)) return -1;
+    ConfigurationAvailabilityUpdate *update = g_new0(ConfigurationAvailabilityUpdate, 1);
+    update->index = index; update->enabled = enabled;
+    return post(configuration_availability_apply, update, g_free);
+}
+
+/* The locale/language field is no longer guaranteed to occupy row 0 (visual
+ * density can precede it); the self-test discovers the real index and
+ * threads it through here via the existing untyped context pointer. */
+typedef struct {
+    gint calls;
+    guint language_index;
+} ConfigurationSelfTestContext;
+
+static const char auto_clean_choices[] = "instant\tInstant\nlivePolish\tAuto-Clean";
+
+typedef struct { guint index; guint calls; } AutoCleanConfigurationTest;
+
+static int32_t configuration_auto_clean_callback(
+    int32_t action, const char *const *values, size_t count, void *context, char *error, size_t capacity
+) {
+    (void)error; (void)capacity;
+    AutoCleanConfigurationTest *test = context;
+    const guint index = test->index;
+    if (action != 0 || count != configuration.rows->len || index + 4 >= count ||
+        g_strcmp0(values[index], "instant") != 0 ||
+        g_strcmp0(values[index + 1], "fixture/model") != 0 ||
+        g_strcmp0(values[index + 2], "250") != 0 ||
+        g_strcmp0(values[index + 3], "3") != 0 ||
+        g_strcmp0(values[index + 4], "0") != 0) return -1;
+    ++test->calls;
+    return 0;
+}
+
+static gboolean configuration_auto_clean_self_test(void) {
+    guint index = configuration.rows->len;
+    for (guint i = 0; i < configuration.rows->len; ++i)
+        if (g_strcmp0(g_ptr_array_index(configuration.choices, i), auto_clean_choices) == 0) {
+            index = i;
+            break;
+        }
+    if (index + 4 >= configuration.rows->len || configuration.rows->len <= 32) return FALSE;
+    AdwComboRow *speed = ADW_COMBO_ROW(g_ptr_array_index(configuration.rows, index));
+    GtkWidget *model = g_ptr_array_index(configuration.rows, index + 1);
+    GtkWidget *debounce = g_ptr_array_index(configuration.rows, index + 2);
+    GtkWidget *delta = g_ptr_array_index(configuration.rows, index + 3);
+    GtkWidget *skip = g_ptr_array_index(configuration.rows, index + 4);
+    if (!ADW_IS_ENTRY_ROW(model) || !ADW_IS_ENTRY_ROW(debounce) ||
+        !ADW_IS_ENTRY_ROW(delta) || !ADW_IS_SWITCH_ROW(skip) ||
+        g_list_model_get_n_items(adw_combo_row_get_model(speed)) != 2) return FALSE;
+    const guint saved_speed = adw_combo_row_get_selected(speed);
+    gchar *saved_model = g_strdup(gtk_editable_get_text(GTK_EDITABLE(model)));
+    gchar *saved_debounce = g_strdup(gtk_editable_get_text(GTK_EDITABLE(debounce)));
+    gchar *saved_delta = g_strdup(gtk_editable_get_text(GTK_EDITABLE(delta)));
+    const gboolean saved_skip = adw_switch_row_get_active(ADW_SWITCH_ROW(skip));
+    JSTIConfigurationCallback callback = configuration.callback;
+    void *context = configuration.context;
+    AutoCleanConfigurationTest test = { .index = index, .calls = 0 };
+    configuration.callback = configuration_auto_clean_callback;
+    configuration.context = &test;
+    adw_combo_row_set_selected(speed, 0);
+    gtk_editable_set_text(GTK_EDITABLE(model), "fixture/model");
+    gtk_editable_set_text(GTK_EDITABLE(debounce), "250");
+    gtk_editable_set_text(GTK_EDITABLE(delta), "3");
+    adw_switch_row_set_active(ADW_SWITCH_ROW(skip), FALSE);
+    on_configuration_apply(NULL, NULL);
+    adw_combo_row_set_selected(speed, saved_speed);
+    gtk_editable_set_text(GTK_EDITABLE(model), saved_model);
+    gtk_editable_set_text(GTK_EDITABLE(debounce), saved_debounce);
+    gtk_editable_set_text(GTK_EDITABLE(delta), saved_delta);
+    adw_switch_row_set_active(ADW_SWITCH_ROW(skip), saved_skip);
+    g_free(saved_model); g_free(saved_debounce); g_free(saved_delta);
+    configuration.callback = callback;
+    configuration.context = context;
+    return test.calls == 1;
+}
+
+static int32_t configuration_test_callback(int32_t action, const char *const *values, size_t count,
+                                          void *context, char *error, size_t capacity) {
+    (void)error; (void)capacity;
+    ConfigurationSelfTestContext *test_context = context;
+    if (test_context->language_index >= count) return -1;
+    if (g_strcmp0(values[test_context->language_index], "fr_FR") != 0) return -1;
+    if ((action == 0 || action == 4 || action == 5) && count != configuration.rows->len) return -1;
+    if (action == 3 && (count != configuration.rows->len + 1 ||
+        g_strcmp0(values[count - 1], "Second recoverable edit") != 0)) return -1;
+    if (action != 0 && action != 3 && action != 4 && action != 5) return -1;
+    for (guint i = 0; i < configuration.rows->len; ++i)
+        if (((const char *)g_ptr_array_index(configuration.choices, i))[0] != '\0') {
+            if (g_strcmp0(g_ptr_array_index(configuration.choices, i), auto_clean_choices) == 0) {
+                if (g_strcmp0(values[i], "livePolish") != 0) return -1;
+            } else if (g_strcmp0(values[i], "expanded") != 0 && g_strcmp0(values[i], "bubbly") != 0) return -1;
+        }
+    ++test_context->calls;
+    return 0;
+}
+
+static gboolean configuration_self_test(void) {
+    if (configuration.rows == NULL || configuration.rows->len < 10 ||
+        configuration.rows->len != configuration.booleans->len ||
+        configuration.rows->len != configuration.overlay_settings->len ||
+        configuration.rows->len != configuration.hands_free_settings->len) return FALSE;
+    gboolean found_dependency = FALSE;
+    for (guint i = 0; i < configuration.rows->len; ++i) {
+        gint32 enabling = g_array_index(configuration.enabled_by_fields, gint32, i);
+        if (enabling == -1 && gtk_widget_get_sensitive(g_ptr_array_index(configuration.rows, i)))
+            return -1;
+        if (enabling <= 0) continue;
+        found_dependency = TRUE;
+        AdwSwitchRow *control = ADW_SWITCH_ROW(g_ptr_array_index(configuration.rows, enabling - 1));
+        GtkWidget *dependent = g_ptr_array_index(configuration.rows, i);
+        gboolean saved = adw_switch_row_get_active(control);
+        gchar *text = g_strdup(gtk_editable_get_text(GTK_EDITABLE(dependent)));
+        adw_switch_row_set_active(control, FALSE);
+        gboolean disabled = !gtk_widget_get_sensitive(dependent);
+        adw_switch_row_set_active(control, TRUE);
+        gboolean enabled = gtk_widget_get_sensitive(dependent);
+        gboolean retained = g_strcmp0(text, gtk_editable_get_text(GTK_EDITABLE(dependent))) == 0;
+        adw_switch_row_set_active(control, saved);
+        g_free(text);
+        if (!disabled || !enabled || !retained) return FALSE;
+    }
+    if (!found_dependency) return FALSE;
+    for (guint i = 0; i < configuration.rows->len; ++i) {
+        if (g_array_index(configuration.overlay_settings, gboolean, i) &&
+            gtk_widget_get_visible(g_ptr_array_index(configuration.rows, i)) != jsti_hud_overlay_supported())
+            return FALSE;
+        if (g_array_index(configuration.hands_free_settings, gboolean, i)) {
+            GtkWidget *row = g_ptr_array_index(configuration.rows, i);
+            gboolean enabled = adw_switch_row_get_active(ADW_SWITCH_ROW(row));
+            if (gtk_widget_get_sensitive(row) != (jsti_window_hands_free_guard_ready() != 0 || enabled))
+                return FALSE;
+            configuration_hands_free_availability(row, TRUE);
+            if (!gtk_widget_get_sensitive(row)) return FALSE;
+            configuration_hands_free_availability(row, FALSE);
+            if (gtk_widget_get_sensitive(row) != (jsti_window_hands_free_guard_ready() != 0)) return FALSE;
+            configuration_hands_free_availability(row, enabled);
+        }
+    }
+    JSTIConfigurationCallback callback = configuration.callback;
+    void *context = configuration.context;
+    /* Row ordering mirrors DesktopConfiguration.fields, which can insert
+     * non-editable rows (e.g. visual density) ahead of the locale entry row;
+     * find the real AdwEntryRow rather than assuming it is always row 0. */
+    guint language_index = configuration.rows->len;
+    for (guint i = 0; i < configuration.rows->len; ++i) {
+        if (ADW_IS_ENTRY_ROW(g_ptr_array_index(configuration.rows, i))) { language_index = i; break; }
+    }
+    if (language_index >= configuration.rows->len) return FALSE;
+    AdwEntryRow *language = ADW_ENTRY_ROW(g_ptr_array_index(configuration.rows, language_index));
+    gchar *saved = g_strdup(gtk_editable_get_text(GTK_EDITABLE(language)));
+    ConfigurationSelfTestContext test_context = { .calls = 0, .language_index = language_index };
+    AdwComboRow *choice_row = NULL;
+    GArray *original_choices = g_array_new(FALSE, FALSE, sizeof(guint));
+    for (guint i = 0; i < configuration.rows->len; ++i) {
+        if (((const char *)g_ptr_array_index(configuration.choices, i))[0] == '\0') continue;
+        choice_row = ADW_COMBO_ROW(g_ptr_array_index(configuration.rows, i));
+        guint count = g_list_model_get_n_items(adw_combo_row_get_model(choice_row));
+        const gboolean auto_clean = g_strcmp0(
+            g_ptr_array_index(configuration.choices, i), auto_clean_choices) == 0;
+        if (auto_clean ? count != 2 : (count != 3 && count != 4)) {
+            g_array_unref(original_choices); return FALSE;
+        }
+        guint original_choice = adw_combo_row_get_selected(choice_row);
+        g_array_append_val(original_choices, original_choice);
+        adw_combo_row_set_selected(choice_row, 1);
+    }
+    if (choice_row == NULL) { g_array_unref(original_choices); return FALSE; }
+    configuration.callback = configuration_test_callback;
+    configuration.context = &test_context;
+    gtk_editable_set_text(GTK_EDITABLE(language), "fr_FR");
+    gchar *saved_title = g_strdup(adw_preferences_row_get_title(ADW_PREFERENCES_ROW(language)));
+    gchar gemini_title[] = "Gemini voice language";
+    ConfigurationTitleUpdate title_update = { .index = language_index, .title = gemini_title };
+    configuration_title_apply(&title_update);
+    const gboolean title_preserved =
+        g_strcmp0(adw_preferences_row_get_title(ADW_PREFERENCES_ROW(language)), gemini_title) == 0 &&
+        g_strcmp0(gtk_editable_get_text(GTK_EDITABLE(language)), "fr_FR") == 0 &&
+        jsti_window_set_configuration_field_title(JSTI_MAXIMUM_CONFIGURATION_FIELDS, "Invalid") < 0 &&
+        jsti_window_set_configuration_field_title(language_index, NULL) < 0 &&
+        jsti_window_set_configuration_field_title(language_index, "") < 0 &&
+        jsti_window_set_configuration_field_enabled(JSTI_MAXIMUM_CONFIGURATION_FIELDS, 1) < 0 &&
+        jsti_window_set_configuration_field_enabled(language_index, 2) < 0;
+    ConfigurationAvailabilityUpdate availability = { .index = language_index, .enabled = FALSE };
+    configuration_availability_apply(&availability);
+    gboolean availability_preserved = !gtk_widget_get_sensitive(GTK_WIDGET(language)) &&
+        g_strcmp0(gtk_editable_get_text(GTK_EDITABLE(language)), "fr_FR") == 0;
+    availability.enabled = TRUE; configuration_availability_apply(&availability);
+    availability_preserved = availability_preserved && gtk_widget_get_sensitive(GTK_WIDGET(language)) &&
+        g_strcmp0(gtk_editable_get_text(GTK_EDITABLE(language)), "fr_FR") == 0;
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(language), saved_title);
+    g_free(saved_title);
+    on_configuration_apply(NULL, NULL);
+    on_configuration_apply(NULL, GINT_TO_POINTER(4));
+    on_configuration_apply(NULL, GINT_TO_POINTER(5));
+    GListModel *saved_model = adw_combo_row_get_model(configuration.recovery_row);
+    g_object_ref(saved_model);
+    guint saved_count = configuration.recovery_count;
+    guint saved_selection = adw_combo_row_get_selected(configuration.recovery_row);
+    const char *edits[] = {"First recoverable edit", "Second recoverable edit", NULL};
+    GtkStringList *recovered = gtk_string_list_new(edits);
+    adw_combo_row_set_model(configuration.recovery_row, G_LIST_MODEL(recovered));
+    g_object_unref(recovered);
+    configuration.recovery_count = 2;
+    adw_combo_row_set_selected(configuration.recovery_row, 1);
+    on_configuration_apply(NULL, GINT_TO_POINTER(3));
+    adw_combo_row_set_model(configuration.recovery_row, saved_model);
+    adw_combo_row_set_selected(configuration.recovery_row, saved_selection);
+    configuration.recovery_count = saved_count;
+    guint choice_index = 0;
+    for (guint i = 0; i < configuration.rows->len; ++i) {
+        if (((const char *)g_ptr_array_index(configuration.choices, i))[0] == '\0') continue;
+        adw_combo_row_set_selected(ADW_COMBO_ROW(g_ptr_array_index(configuration.rows, i)),
+            g_array_index(original_choices, guint, choice_index++));
+    }
+    g_array_unref(original_choices);
+    g_object_unref(saved_model);
+    gtk_editable_set_text(GTK_EDITABLE(language), saved);
+    g_free(saved);
+    configuration.callback = callback;
+    configuration.context = context;
+    return test_context.calls == 4 && title_preserved && availability_preserved &&
+        configuration_auto_clean_self_test();
 }
 
 static void style_apply(gpointer data) {
@@ -1967,17 +3495,40 @@ int32_t jsti_window_set_shortcut_style(int32_t index) {
 typedef struct Voices {
     GPtrArray *names;
     gint32 selected;
+    GPtrArray *identifiers;
+    GArray *favorite_ranks;
+    JSTIVoicePickerCallback callback;
+    void *context;
 } Voices;
 
 static void voices_free(gpointer pointer) {
     Voices *voices = pointer;
     g_ptr_array_unref(voices->names);
+    if (voices->identifiers != NULL) g_ptr_array_unref(voices->identifiers);
+    if (voices->favorite_ranks != NULL) g_array_unref(voices->favorite_ranks);
     g_free(voices);
 }
 
 static void voices_apply(gpointer pointer) {
     Voices *voices = pointer;
+    guint old = adw_combo_row_get_selected(read_aloud.voice_row);
+    const char *previous = read_aloud.identifiers != NULL && old < read_aloud.identifiers->len
+        ? g_ptr_array_index(read_aloud.identifiers, old) : NULL;
+    const char *next = voices->identifiers != NULL && voices->selected >= 0 &&
+        (guint)voices->selected < voices->identifiers->len
+        ? g_ptr_array_index(voices->identifiers, (guint)voices->selected) : NULL;
+    if (previous == NULL || next == NULL || g_strcmp0(previous, next) != 0) {
+        jsti_voice_credentials_selection_changed();
+    }
     ui.suppress = TRUE;
+    if (read_aloud.identifiers != NULL) g_ptr_array_unref(read_aloud.identifiers);
+    if (read_aloud.favorite_ranks != NULL) g_array_unref(read_aloud.favorite_ranks);
+    if (read_aloud.favorite_indices != NULL) g_array_unref(read_aloud.favorite_indices);
+    read_aloud.identifiers = voices->identifiers != NULL ? g_ptr_array_ref(voices->identifiers) : NULL;
+    read_aloud.favorite_ranks = voices->favorite_ranks != NULL ? g_array_ref(voices->favorite_ranks) : NULL;
+    read_aloud.picker_callback = voices->callback;
+    read_aloud.picker_context = voices->context;
+    read_aloud.favorite_indices = g_array_new(FALSE, FALSE, sizeof(guint));
     guint existing = g_list_model_get_n_items(G_LIST_MODEL(read_aloud.voices));
     g_ptr_array_add(voices->names, NULL);
     gtk_string_list_splice(read_aloud.voices, 0, existing, (const char *const *)voices->names->pdata);
@@ -1985,8 +3536,62 @@ static void voices_apply(gpointer pointer) {
     if (voices->selected >= 0 && (guint)voices->selected < voices->names->len) {
         adw_combo_row_set_selected(read_aloud.voice_row, (guint)voices->selected);
     }
+    gtk_string_list_splice(read_aloud.favorite_names, 0,
+        g_list_model_get_n_items(G_LIST_MODEL(read_aloud.favorite_names)), NULL);
+    guint favorite_selected = GTK_INVALID_LIST_POSITION;
+    for (guint rank = 0; rank < voices->names->len && voices->favorite_ranks != NULL; ++rank) {
+        for (guint index = 0; index < voices->names->len; ++index) {
+            if (g_array_index(voices->favorite_ranks, gint32, index) != (gint32)rank) continue;
+            if ((gint32)index == voices->selected) favorite_selected = read_aloud.favorite_indices->len;
+            g_array_append_val(read_aloud.favorite_indices, index);
+            gtk_string_list_append(read_aloud.favorite_names, g_ptr_array_index(voices->names, index));
+        }
+    }
+    gboolean has_favorites = read_aloud.favorite_indices->len > 0;
+    if (!has_favorites) gtk_string_list_append(read_aloud.favorite_names, "No available favorites - add a voice below");
+    adw_combo_row_set_selected(read_aloud.favorite_row, favorite_selected);
+    gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.favorite_row), has_favorites);
+    gboolean executable = next != NULL && *next != '\0';
+    read_aloud.favorite_executable = executable && voices->callback != NULL;
+    read_aloud.favorite_pending = FALSE;
+    gboolean favorite = executable &&
+        g_array_index(voices->favorite_ranks, gint32, voices->selected) >= 0;
+    gtk_button_set_label(read_aloud.favorite_button, favorite ? "Remove from favorites" : "Add to favorites");
+    gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.favorite_button), executable && voices->callback != NULL);
     ui.suppress = FALSE;
     refresh_actions();
+}
+
+int32_t jsti_window_set_voice_picker(const char *const *names, const char *const *ids,
+    const int32_t *favorite_ranks, size_t count, int32_t selected,
+    JSTIVoicePickerCallback callback, void *context) {
+    if (names == NULL || ids == NULL || favorite_ranks == NULL || callback == NULL ||
+        count == 0 || count > 1024 || selected < 0 || (size_t)selected >= count) return -1;
+    Voices *voices = g_new0(Voices, 1);
+    voices->names = g_ptr_array_new_with_free_func(g_free);
+    voices->identifiers = g_ptr_array_new_with_free_func(g_free);
+    voices->favorite_ranks = g_array_new(FALSE, FALSE, sizeof(gint32));
+    for (size_t index = 0; index < count; ++index) {
+        if (names[index] == NULL || ids[index] == NULL || !g_utf8_validate(names[index], -1, NULL) ||
+            !g_utf8_validate(ids[index], -1, NULL) || strlen(names[index]) > 1024 || strlen(ids[index]) > 260 ||
+            favorite_ranks[index] < -1 || favorite_ranks[index] >= (gint32)count ||
+            (*ids[index] == '\0' && favorite_ranks[index] != -1)) {
+            voices_free(voices); return -1;
+        }
+        for (size_t prior = 0; prior < index; ++prior) {
+            if (strcmp(ids[prior], ids[index]) == 0 ||
+                (favorite_ranks[index] >= 0 && favorite_ranks[prior] == favorite_ranks[index])) {
+                voices_free(voices); return -1;
+            }
+        }
+        g_ptr_array_add(voices->names, g_strdup(names[index]));
+        g_ptr_array_add(voices->identifiers, g_strdup(ids[index]));
+        g_array_append_val(voices->favorite_ranks, favorite_ranks[index]);
+    }
+    voices->selected = selected;
+    voices->callback = callback;
+    voices->context = context;
+    return post(voices_apply, voices, voices_free);
 }
 
 int32_t jsti_window_set_voices(const char *const *names, size_t count, int32_t selected) {
@@ -2082,6 +3687,8 @@ static int32_t read_aloud_self_test(const char *record, char *error, size_t capa
     }
     jsti_window_event_fn callback = ui.callback;
     ui.callback = observe_event;
+    JSTIVoicePickerCallback picker_callback = read_aloud.picker_callback;
+    read_aloud.picker_callback = NULL;
     observed.event = 0;
     g_signal_emit_by_name(read_aloud.button, "clicked");
     gboolean reported = observed.event == JSTI_EVENT_READ_ALOUD && g_strcmp0(observed.text, record) == 0;
@@ -2094,6 +3701,7 @@ static int32_t read_aloud_self_test(const char *record, char *error, size_t capa
     adw_combo_row_set_selected(read_aloud.voice_row, saved);
     ui.suppress = FALSE;
     ui.callback = callback;
+    read_aloud.picker_callback = picker_callback;
     g_clear_pointer(&observed.text, g_free);
     if (!reported) return fail(error, capacity, "Read aloud did not report the presented record");
     if (!chosen) return fail(error, capacity, "the voice picker did not report the chosen voice");
@@ -2104,6 +3712,74 @@ static int32_t read_aloud_self_test(const char *record, char *error, size_t capa
     update_apply(&idle);
     if (offered) return fail(error, capacity, "Read aloud stayed available while transcribing");
     return 0;
+}
+
+static struct { gint action; guint calls; gchar *identifier; } favorite_observed;
+static void observe_favorite(gint32 action, const char *identifier, void *context) {
+    (void)context;
+    favorite_observed.action = action;
+    ++favorite_observed.calls;
+    g_free(favorite_observed.identifier);
+    favorite_observed.identifier = g_strdup(identifier);
+}
+
+static int32_t voice_favorites_self_test(char *error, size_t capacity) {
+    Voices original = {0};
+    original.names = g_ptr_array_new_with_free_func(g_free);
+    for (guint index = 0; index < g_list_model_get_n_items(G_LIST_MODEL(read_aloud.voices)); ++index) {
+        g_ptr_array_add(original.names, g_strdup(gtk_string_list_get_string(read_aloud.voices, index)));
+    }
+    original.selected = (gint32)adw_combo_row_get_selected(read_aloud.voice_row);
+    original.identifiers = read_aloud.identifiers != NULL ? g_ptr_array_ref(read_aloud.identifiers) : NULL;
+    original.favorite_ranks = read_aloud.favorite_ranks != NULL ? g_array_ref(read_aloud.favorite_ranks) : NULL;
+    original.callback = read_aloud.picker_callback;
+    original.context = read_aloud.picker_context;
+    Voices fixture = {0};
+    fixture.names = g_ptr_array_new_with_free_func(g_free);
+    fixture.identifiers = g_ptr_array_new_with_free_func(g_free);
+    fixture.favorite_ranks = g_array_new(FALSE, FALSE, sizeof(gint32));
+    fixture.selected = 0;
+    fixture.callback = observe_favorite;
+    const gchar *ids[] = {"synthetic/alpha", "synthetic/beta", ""};
+    const gchar *names[] = {"Alpha voice", "Beta voice", "Unavailable stored voice"};
+    for (guint index = 0; index < 3; ++index) {
+        gint32 rank = index == 1 ? 0 : -1;
+        g_ptr_array_add(fixture.names, g_strdup(names[index]));
+        g_ptr_array_add(fixture.identifiers, g_strdup(ids[index]));
+        g_array_append_val(fixture.favorite_ranks, rank);
+    }
+    favorite_observed.calls = 0;
+    voices_apply(&fixture);
+    gboolean okay = favorite_observed.calls == 0 && read_aloud.favorite_indices->len == 1 &&
+        g_array_index(read_aloud.favorite_indices, guint, 0) == 1;
+    adw_combo_row_set_selected(read_aloud.favorite_row, 0);
+    okay = okay && favorite_observed.calls == 1 && favorite_observed.action == 0 &&
+        g_strcmp0(favorite_observed.identifier, ids[1]) == 0;
+    /* A host acknowledgement, not an optimistic UI write, updates button state. */
+    fixture.selected = 1;
+    voices_apply(&fixture);
+    g_signal_emit_by_name(read_aloud.favorite_button, "clicked");
+    okay = okay && favorite_observed.calls == 2 && favorite_observed.action == 2 &&
+        g_strcmp0(favorite_observed.identifier, ids[1]) == 0;
+    fixture.selected = 0;
+    voices_apply(&fixture);
+    g_signal_emit_by_name(read_aloud.favorite_button, "clicked");
+    okay = okay && favorite_observed.calls == 3 && favorite_observed.action == 1 &&
+        g_strcmp0(favorite_observed.identifier, ids[0]) == 0;
+    fixture.selected = 2;
+    g_array_index(fixture.favorite_ranks, gint32, 1) = -1;
+    voices_apply(&fixture);
+    okay = okay && !gtk_widget_get_sensitive(GTK_WIDGET(read_aloud.favorite_row)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(read_aloud.favorite_button)) && favorite_observed.calls == 3;
+    voices_apply(&original);
+    g_ptr_array_unref(original.names);
+    if (original.identifiers != NULL) g_ptr_array_unref(original.identifiers);
+    if (original.favorite_ranks != NULL) g_array_unref(original.favorite_ranks);
+    g_ptr_array_unref(fixture.names);
+    g_ptr_array_unref(fixture.identifiers);
+    g_array_unref(fixture.favorite_ranks);
+    g_clear_pointer(&favorite_observed.identifier, g_free);
+    return okay ? 0 : fail(error, capacity, "Favorite voices lost identity, empty state, or add/remove routing");
 }
 
 /* Launch at login shows what the host reports, is fixed while the system
@@ -2137,9 +3813,387 @@ static int32_t login_item_self_test(char *error, size_t capacity) {
     return 0;
 }
 
+static void text_output_capture(int32_t event, const char *text, int32_t index, void *context) {
+    if (event == JSTI_EVENT_TEXT_OUTPUT && index == 1 && g_strcmp0(text, "restore") == 0)
+        ++*(guint *)context;
+}
+
+static int32_t automation_self_test(char *error, size_t capacity) {
+    LoginItem off = { .state = 0, .detail = (gchar *)"Imported request pending local consent." };
+    automation_apply(&off);
+    jsti_window_event_fn callback = ui.callback;
+    ui.callback = observe_event;
+    observed.event = 0;
+    adw_switch_row_set_active(ui.automation_row, TRUE);
+    gboolean pending = observed.event == JSTI_EVENT_AUTOMATION && observed.index == 1
+        && !gtk_widget_get_sensitive(GTK_WIDGET(ui.automation_row));
+    observed.event = 0;
+    LoginItem failed = { .state = 0, .detail = (gchar *)"Automation could not start." };
+    automation_apply(&failed);
+    gboolean actual = observed.event == 0 && !adw_switch_row_get_active(ui.automation_row)
+        && gtk_widget_get_sensitive(GTK_WIDGET(ui.automation_row))
+        && g_strcmp0(adw_action_row_get_subtitle(ADW_ACTION_ROW(ui.automation_row)), failed.detail) == 0;
+    ui.callback = callback;
+    g_clear_pointer(&observed.text, g_free);
+    automation_apply(&off);
+    return pending && actual ? 0 : fail(error, capacity, "Automation did not show its actual state or failure");
+}
+
+static gboolean text_output_self_test(void) {
+    TextOutput original = {
+        .method = (gint32)adw_combo_row_get_selected(ui.output_row),
+        .restore = adw_switch_row_get_active(ui.restore_row),
+        .can_restore = ui.can_restore_clipboard,
+        .hint = g_strdup(adw_action_row_get_subtitle(ui.shortcut_row))
+    };
+    TextOutput unsupported = { .method = 0, .restore = TRUE, .can_restore = FALSE };
+    text_output_apply(&unsupported);
+    gboolean valid = !gtk_widget_get_visible(GTK_WIDGET(ui.restore_row)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.restore_row)) && adw_switch_row_get_active(ui.restore_row) &&
+        gtk_widget_get_visible(GTK_WIDGET(ui.output_group)) &&
+        strstr(adw_preferences_group_get_description(ui.output_group), "Wayland") != NULL &&
+        strstr(gtk_label_get_text(ui.setup_output), "restored") == NULL;
+    guint calls = 0;
+    jsti_window_event_fn callback = ui.callback;
+    void *context = ui.context;
+    ui.callback = text_output_capture;
+    ui.context = &calls;
+    adw_combo_row_set_selected(ui.output_row, 1);
+    valid = valid && calls == 1 && adw_switch_row_get_active(ui.restore_row);
+    ui.callback = callback;
+    ui.context = context;
+    TextOutput supported = { .method = 0, .restore = TRUE, .can_restore = TRUE };
+    text_output_apply(&supported);
+    valid = valid && gtk_widget_get_visible(GTK_WIDGET(ui.restore_row)) &&
+        gtk_widget_get_sensitive(GTK_WIDGET(ui.restore_row)) &&
+        strstr(gtk_label_get_text(ui.setup_output), "restored") != NULL;
+    supported.method = 1;
+    text_output_apply(&supported);
+    valid = valid && !gtk_widget_get_sensitive(GTK_WIDGET(ui.restore_row)) &&
+        adw_switch_row_get_active(ui.restore_row) && strstr(gtk_label_get_text(ui.setup_output), "restored") == NULL;
+    text_output_apply(&original);
+    g_free(original.hint);
+    return valid;
+}
+
+static gboolean sidebar_navigation_self_test(void) {
+    SidebarUpdate saved = { 0 }, fixture = { 0 };
+    const gint original_page = ui.page;
+    const gboolean configured = sidebar_shortcuts.configured;
+    for (gint page = 0; page < JSTI_PAGE_COUNT; ++page) {
+        saved.digits[page] = sidebar_shortcuts.digits[page];
+        saved.hints[page] = g_strdup(gtk_label_get_text(GTK_LABEL(sidebar_shortcuts.hints[page])));
+        fixture.digits[page] = -1;
+    }
+    saved.show_hints = gtk_widget_get_visible(sidebar_shortcuts.hints[JSTI_PAGE_DASHBOARD]);
+    fixture.digits[JSTI_PAGE_DASHBOARD] = 1;
+    fixture.hints[JSTI_PAGE_DASHBOARD] = (gchar *)"Ctrl+1";
+    fixture.digits[JSTI_PAGE_PROFILES] = 9;
+    fixture.hints[JSTI_PAGE_PROFILES] = (gchar *)"Ctrl+9";
+    fixture.show_hints = TRUE;
+    sidebar_update_apply(&fixture);
+    GtkWidget *hint = sidebar_shortcuts.hints[JSTI_PAGE_DASHBOARD];
+    gboolean okay = gtk_widget_get_visible(hint) &&
+        g_strcmp0(gtk_label_get_text(GTK_LABEL(hint)), "Ctrl+1") == 0;
+    show_page(JSTI_PAGE_HISTORY);
+    okay = okay && sidebar_navigate(GDK_KEY_9, GDK_CONTROL_MASK, NULL) && ui.page == JSTI_PAGE_PROFILES;
+    show_page(JSTI_PAGE_HISTORY);
+    const GdkModifierType blocked[] = { 0, GDK_CONTROL_MASK | GDK_SHIFT_MASK, GDK_CONTROL_MASK | GDK_ALT_MASK,
+                                       GDK_CONTROL_MASK | GDK_SUPER_MASK };
+    for (guint i = 0; i < G_N_ELEMENTS(blocked); ++i)
+        okay = okay && !sidebar_navigate(GDK_KEY_1, blocked[i], NULL) && ui.page == JSTI_PAGE_HISTORY;
+    GtkWidget *entry = gtk_entry_new();
+    g_object_ref_sink(entry);
+    okay = okay && !sidebar_navigate(GDK_KEY_1, GDK_CONTROL_MASK, entry) && ui.page == JSTI_PAGE_HISTORY;
+    g_object_unref(entry);
+    okay = okay && !sidebar_navigate(GDK_KEY_1, GDK_CONTROL_MASK, GTK_WIDGET(ui.transcript));
+    GtkWidget *row = GTK_WIDGET(gtk_list_box_get_row_at_index(ui.sidebar, JSTI_PAGE_DASHBOARD));
+    gtk_widget_set_sensitive(row, FALSE);
+    okay = okay && !sidebar_navigate(GDK_KEY_1, GDK_CONTROL_MASK, NULL) && ui.page == JSTI_PAGE_HISTORY;
+    gtk_widget_set_sensitive(row, TRUE);
+    fixture.show_hints = FALSE;
+    sidebar_update_apply(&fixture);
+    okay = okay && !gtk_widget_get_visible(hint) &&
+        sidebar_navigate(GDK_KEY_1, GDK_CONTROL_MASK, NULL) && ui.page == JSTI_PAGE_DASHBOARD;
+    const JSTISidebarShortcut invalid[] = { { "dashboard", 1, "Ctrl+1" }, { "history", 1, "Ctrl+1" } };
+    okay = okay && jsti_window_set_sidebar_shortcuts(invalid, 2, 1) == -1;
+    sidebar_update_apply(&saved);
+    sidebar_shortcuts.configured = configured;
+    for (gint page = 0; page < JSTI_PAGE_COUNT; ++page) g_free(saved.hints[page]);
+    show_page(original_page);
+    return okay;
+}
+
+static gboolean post_processing_self_test(void) {
+    if (ui.polish_catalog == NULL || ui.polish_local_notice == NULL) return FALSE;
+    guint row = adw_combo_row_get_selected(ui.polish_model_row);
+    Polish saved = {
+        .models = g_ptr_array_ref(ui.polish_catalog),
+        .enabled = adw_switch_row_get_active(ui.polish_row),
+        .include_directives = adw_switch_row_get_active(ui.polish_directives_row),
+        .include_tags = adw_switch_row_get_active(ui.polish_tags_row),
+        .selected = row < ui.polish_slots->len ? g_array_index(ui.polish_slots, gint32, row) : -1,
+        .local_index = ui.polish_local_index,
+        .remembered_remote_index = ui.polish_remote_selected,
+        .local_notice = g_strdup(ui.polish_local_notice),
+        .prompt = polish_prompt_text()
+    };
+    guint saved_location = adw_combo_row_get_selected(ui.polish_location_row);
+    guint saved_remote = polish_remote_count;
+    gint32 saved_local = ui.polish_local_selected;
+    GPtrArray *names = g_ptr_array_new();
+    g_ptr_array_add(names, (gpointer)"Remote first");
+    g_ptr_array_add(names, (gpointer)"Remote second");
+    g_ptr_array_add(names, (gpointer)"Local Cleanup (Offline)");
+    Polish fixture = {
+        .models = names, .enabled = TRUE, .selected = 1, .local_index = 2,
+        .remembered_remote_index = 1,
+        .include_directives = FALSE, .include_tags = TRUE,
+        .local_notice = (gchar *)"Built-in rules ignore custom instructions. No API key is needed.",
+        .prompt = (gchar *)"Keep remote instructions."
+    };
+    jsti_window_event_fn callback = ui.callback;
+    ui.callback = observe_event;
+    polish_apply(&fixture);
+    gboolean okay = adw_combo_row_get_selected(ui.polish_location_row) == 1 &&
+        adw_combo_row_get_selected(ui.polish_model_row) == 1 &&
+        g_list_model_get_n_items(G_LIST_MODEL(ui.polish_models)) == 2 &&
+        gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_key_row)) &&
+        !adw_switch_row_get_active(ui.polish_directives_row) && adw_switch_row_get_active(ui.polish_tags_row) &&
+        g_strcmp0(adw_preferences_row_get_title(ADW_PREFERENCES_ROW(ui.polish_directives_row)),
+            "Include personal lexicon directives") == 0 &&
+        g_strcmp0(adw_preferences_row_get_title(ADW_PREFERENCES_ROW(ui.polish_tags_row)),
+            "Include lexicon context tags") == 0;
+    gtk_editable_set_text(GTK_EDITABLE(ui.polish_key_row), "synthetic-key");
+    on_polish_apply(NULL, NULL);
+    okay = okay && observed.event == JSTI_EVENT_POST_PROCESSING && observed.index == 1 &&
+        g_strcmp0(observed.text, "Keep%20remote%20instructions.\tsynthetic-key\t0\t1") == 0;
+    observed.event = 0;
+    adw_combo_row_set_selected(ui.polish_location_row, 0);
+    okay = okay && observed.event == 0 &&
+        g_list_model_get_n_items(G_LIST_MODEL(ui.polish_models)) == 1 &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_prompt_row)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_key_row)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_directives_row)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_tags_row)) &&
+        g_strcmp0(adw_action_row_get_subtitle(ADW_ACTION_ROW(ui.polish_location_row)), fixture.local_notice) == 0;
+    gtk_editable_set_text(GTK_EDITABLE(ui.polish_key_row), "must-not-reach-callback");
+    on_polish_apply(NULL, NULL);
+    okay = okay && observed.index == 2 &&
+        g_strcmp0(observed.text, "Keep%20remote%20instructions.\t\t0\t1") == 0;
+    adw_switch_row_set_active(ui.polish_row, FALSE);
+    on_polish_apply(NULL, NULL);
+    okay = okay && observed.index == -3;
+    fixture.selected = 2;
+    polish_apply(&fixture);
+    adw_combo_row_set_selected(ui.polish_location_row, 1);
+    row = adw_combo_row_get_selected(ui.polish_model_row);
+    okay = okay && row < ui.polish_slots->len && g_array_index(ui.polish_slots, gint32, row) == 1;
+    fixture.remembered_remote_index = -1;
+    polish_apply(&fixture);
+    adw_combo_row_set_selected(ui.polish_location_row, 1);
+    observed.event = 0;
+    on_polish_apply(NULL, NULL);
+    okay = okay && observed.event == 0 &&
+        adw_combo_row_get_selected(ui.polish_model_row) == GTK_INVALID_LIST_POSITION;
+    fixture.selected = -1;
+    polish_apply(&fixture);
+    observed.event = 0;
+    on_polish_apply(NULL, NULL);
+    okay = okay && observed.event == 0 &&
+        adw_combo_row_get_selected(ui.polish_model_row) == GTK_INVALID_LIST_POSITION;
+    const char *labels[] = {"Remote", "Local"};
+    okay = okay && jsti_window_set_post_processing(labels, 2, 1, 0, 2, -1, fixture.local_notice, 1, 1, "") == -1 &&
+        jsti_window_set_post_processing(labels, 2, 2, 0, 1, -1, fixture.local_notice, 1, 1, "") == -1 &&
+        jsti_window_set_post_processing(labels, 2, 1, 0, 1, -1, fixture.local_notice, 2, 1, "") == -1 &&
+        jsti_window_set_post_processing(labels, 2, 1, 0, 1, 1, fixture.local_notice, 1, 1, "") == -1;
+    polish_apply(&saved);
+    polish_remote_count = saved_remote;
+    ui.suppress = TRUE;
+    adw_combo_row_set_selected(ui.polish_location_row, saved_location);
+    polish_select_location(saved.selected, FALSE);
+    ui.polish_local_selected = saved_local;
+    ui.suppress = FALSE;
+    ui.callback = callback;
+    g_clear_pointer(&observed.text, g_free);
+    g_ptr_array_unref(names);
+    g_ptr_array_unref(saved.models);
+    g_free(saved.local_notice);
+    g_free(saved.prompt);
+    return okay;
+}
+
+static int32_t local_cleanup_sources_self_test(char *error, size_t capacity) {
+    if (ui.polish_catalog == NULL || ui.polish_local_notice == NULL)
+        return fail(error, capacity, "post-processing was not configured before its source fixture");
+    Polish saved = {
+        .models = g_ptr_array_ref(ui.polish_catalog),
+        .enabled = adw_switch_row_get_active(ui.polish_row),
+        .include_directives = adw_switch_row_get_active(ui.polish_directives_row),
+        .include_tags = adw_switch_row_get_active(ui.polish_tags_row),
+        .selected = polish_selected_model(), .local_index = ui.polish_local_index,
+        .remembered_remote_index = ui.polish_remote_selected,
+        .local_notice = g_strdup(ui.polish_local_notice), .prompt = polish_prompt_text()
+    };
+    const guint saved_location = adw_combo_row_get_selected(ui.polish_location_row);
+    const guint saved_remote = polish_remote_count;
+    const gint32 saved_local = ui.polish_local_selected;
+    Polish fixture = {.models = g_ptr_array_new_with_free_func(g_free), .enabled = TRUE,
+        .selected = 4, .local_index = 2, .remembered_remote_index = 1,
+        .include_directives = FALSE, .include_tags = TRUE,
+        .local_notice = "Built-in rules ignore custom instructions and context.",
+        .prompt = "One stop after each word.\nExact\tsecond line."};
+    const char *names[] = {"Remote A", "Remote B", "Built-in rules", "Local A", "Local B"};
+    for (size_t i = 0; i < G_N_ELEMENTS(names); ++i) g_ptr_array_add(fixture.models, g_strdup(names[i]));
+    polish_apply(&fixture);
+    polish_remote_count = G_MAXUINT;
+    cleanup_sources_apply(GUINT_TO_POINTER(2));
+    gboolean okay = adw_combo_row_get_selected(ui.polish_location_row) == 0
+        && adw_combo_row_get_selected(ui.polish_model_row) == 2 && polish_selected_model() == 4
+        && g_list_model_get_n_items(G_LIST_MODEL(ui.polish_models)) == 3
+        && !gtk_widget_get_visible(GTK_WIDGET(ui.polish_key_row))
+        && gtk_widget_get_visible(polish_local_group)
+        && gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_prompt_row))
+        && gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_directives_row))
+        && gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_tags_row));
+    gchar *actual_prompt = polish_prompt_text();
+    okay = okay && g_strcmp0(actual_prompt, fixture.prompt) == 0;
+    jsti_window_event_fn saved_callback = ui.callback;
+    ui.callback = observe_event;
+    gtk_editable_set_text(GTK_EDITABLE(ui.polish_key_row), "must-not-reach-local-callback");
+    observed.event = 0;
+    on_polish_apply(NULL, NULL);
+    okay = okay && observed.event == JSTI_EVENT_POST_PROCESSING && observed.index == 4
+        && g_strcmp0(observed.text, "One%20stop%20after%20each%20word.%0AExact%09second%20line.\t\t0\t1") == 0;
+    observed.event = 0;
+    adw_combo_row_set_selected(ui.polish_location_row, 1);
+    okay = okay && gtk_widget_get_visible(GTK_WIDGET(ui.polish_key_row))
+        && !gtk_widget_get_visible(polish_local_group)
+        && polish_selected_model() == 1 && observed.event == 0;
+    gtk_editable_set_text(GTK_EDITABLE(ui.polish_key_row), "clear-on-local-switch");
+    adw_combo_row_set_selected(ui.polish_location_row, 0);
+    okay = okay && polish_selected_model() == 4 &&
+        g_strcmp0(gtk_editable_get_text(GTK_EDITABLE(ui.polish_key_row)), "") == 0;
+    adw_combo_row_set_selected(ui.polish_model_row, 0);
+    okay = okay && polish_selected_model() == 2 &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_prompt_row)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_directives_row)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_tags_row));
+    adw_combo_row_set_selected(ui.polish_model_row, 1);
+    okay = okay && polish_selected_model() == 3 &&
+        gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_prompt_row)) &&
+        gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_directives_row)) &&
+        gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_tags_row)) &&
+        !adw_switch_row_get_active(ui.polish_directives_row) && adw_switch_row_get_active(ui.polish_tags_row);
+    on_polish_apply(NULL, NULL);
+    okay = okay && observed.index == 3 &&
+        g_strcmp0(observed.text, "One%20stop%20after%20each%20word.%0AExact%09second%20line.\t\t0\t1") == 0;
+    fixture.remembered_remote_index = -1;
+    polish_apply(&fixture);
+    adw_combo_row_set_selected(ui.polish_location_row, 1);
+    observed.event = 0;
+    on_polish_apply(NULL, NULL);
+    okay = okay && observed.event == 0 && polish_selected_model() == -1;
+    adw_combo_row_set_selected(ui.polish_location_row, 0);
+    okay = okay && polish_selected_model() == 4;
+    okay = okay && jsti_window_set_cleanup_sources(10001) == -1;
+    polish_apply(&saved);
+    polish_remote_count = saved_remote;
+    ui.suppress = TRUE;
+    adw_combo_row_set_selected(ui.polish_location_row, saved_location);
+    polish_select_location(saved.selected, FALSE);
+    ui.polish_local_selected = saved_local;
+    ui.suppress = FALSE;
+    ui.callback = saved_callback;
+    g_clear_pointer(&observed.text, g_free);
+    g_free(saved.local_notice); g_free(saved.prompt); g_free(actual_prompt);
+    g_ptr_array_unref(saved.models); g_ptr_array_unref(fixture.models);
+    return okay ? 0 : fail(error, capacity, "local cleanup source/index/prompt/privacy controls failed");
+}
+
 int32_t jsti_window_self_test(char *error, size_t capacity) {
+    if (jsti_hands_free_guard_self_test(error, capacity) != 0) return -1;
     if (ui.window == NULL) return fail(error, capacity, "the window was not created");
+    if (local_cleanup_sources_self_test(error, capacity) != 0) return -1;
+    if (jsti_visual_density_self_test(GTK_WIDGET(ui.window)) != 0)
+        return fail(error, capacity, "layout density geometry, Normal restoration or editing focus failed");
+    if (!sidebar_navigation_self_test())
+        return fail(error, capacity, "sidebar hints, focus guards or window-local navigation failed");
+    if (!post_processing_self_test())
+        return fail(error, capacity, "Local/Remote post-processing controls, key isolation or callback indexes failed");
+    if (ui.recordings_folder == NULL || ui.audio_cleanup == NULL ||
+        ui.backup_audio == NULL || ui.backup_export == NULL || ui.backup_inspect == NULL ||
+        !adw_switch_row_get_active(ui.backup_audio) ||
+        jsti_window_confirm_audio_cleanup(NULL, 1) != -1 ||
+        g_strcmp0(gtk_button_get_label(ui.recordings_folder), "_Open folder") != 0) {
+        return fail(error, capacity, "the recording folder control was not created");
+    }
+    BackupChoice choice = {0};
+    g_weak_ref_init(&choice.parent, G_OBJECT(ui.window));
+    choice.cancelled = g_cancellable_new();
+    ui.backup_chooser = g_object_ref(choice.cancelled);
+    GObject *choice_parent = g_weak_ref_get(&choice.parent);
+    refresh_actions();
+    gboolean backup_ok = backup_choice_active(&choice, choice_parent) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.backup_audio)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.backup_export)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.backup_inspect));
+    jsti_window_event_fn backup_callback = ui.callback;
+    ui.callback = observe_event;
+    choice.inspect = TRUE;
+    choice.include_audio = 1;
+    backup_emit_path(&choice, "synthetic-review.zip");
+    backup_ok = backup_ok && observed.event == JSTI_EVENT_MIGRATION_INSPECT && observed.index == 0 &&
+        g_strcmp0(observed.text, "synthetic-review.zip") == 0;
+    ui.callback = backup_callback;
+    g_clear_pointer(&observed.text, g_free);
+    ui.closing = TRUE;
+    backup_ok = backup_ok && !backup_choice_active(&choice, choice_parent);
+    ui.closing = FALSE;
+    g_cancellable_cancel(choice.cancelled);
+    backup_ok = backup_ok && !backup_choice_active(&choice, choice_parent);
+    g_clear_object(&ui.backup_chooser);
+    g_clear_object(&choice_parent);
+    g_weak_ref_clear(&choice.parent);
+    g_object_unref(choice.cancelled);
+    refresh_actions();
+    if (!backup_ok) return fail(error, capacity, "History backup chooser cancellation or late-close fence failed");
+    gchar report_text[] = "Synthetic read-only report.";
+    GtkWidget *report_dialog = migration_report_dialog(report_text);
+    g_object_ref_sink(report_dialog);
+    report_text[0] = 'x';
+    gboolean report_ok = jsti_window_show_migration_report(NULL) == -1 &&
+        g_strcmp0(adw_message_dialog_get_body(ADW_MESSAGE_DIALOG(report_dialog)), "Synthetic read-only report.") == 0 &&
+        g_strcmp0(adw_message_dialog_get_default_response(ADW_MESSAGE_DIALOG(report_dialog)), "close") == 0 &&
+        g_strcmp0(adw_message_dialog_get_close_response(ADW_MESSAGE_DIALOG(report_dialog)), "close") == 0;
+    gtk_window_destroy(GTK_WINDOW(report_dialog));
+    g_object_unref(report_dialog);
+    if (!report_ok) return fail(error, capacity, "Backup inspection report text ownership or close defaults changed");
+    gchar audio_token[] = "00000000-0000-0000-0000-000000000093";
+    GtkWidget *audio_confirmation = audio_cleanup_dialog(audio_token, 2);
+    g_object_ref_sink(audio_confirmation);
+    audio_token[0] = 'x';
+    gboolean audio_confirmation_ok =
+        g_strcmp0(adw_message_dialog_get_default_response(ADW_MESSAGE_DIALOG(audio_confirmation)), "cancel") == 0 &&
+        g_strcmp0(adw_message_dialog_get_close_response(ADW_MESSAGE_DIALOG(audio_confirmation)), "cancel") == 0 &&
+        g_strcmp0(g_object_get_data(G_OBJECT(audio_confirmation), "jsti-audio-cleanup-token"),
+                  "00000000-0000-0000-0000-000000000093") == 0;
+    g_signal_handlers_block_by_func(audio_confirmation, G_CALLBACK(audio_cleanup_response), NULL);
+    gtk_window_destroy(GTK_WINDOW(audio_confirmation));
+    g_object_unref(audio_confirmation);
+    if (!audio_confirmation_ok) return fail(error, capacity, "recording audio confirmation defaults or snapshot changed");
+    if (!configuration_self_test())
+        return fail(error, capacity, "configuration rows did not populate and emit a complete Apply");
+    if (!text_output_self_test())
+        return fail(error, capacity, "clipboard restoration did not follow the session capability and saved choice");
+    const char *icon_name = gtk_window_get_icon_name(ui.window);
+    GtkIconTheme *theme = gtk_icon_theme_get_for_display(gtk_widget_get_display(GTK_WIDGET(ui.window)));
+    if (g_strcmp0(icon_name, "com.justspeaktoit.JustSpeakToIt") != 0 ||
+        !gtk_icon_theme_has_icon(theme, "com.justspeaktoit.JustSpeakToIt")) {
+        return fail(error, capacity, "the canonical application icon is not available in the window's theme");
+    }
     if (login_item_self_test(error, capacity) != 0) return -1;
+    if (automation_self_test(error, capacity) != 0) return -1;
     if (g_list_model_get_n_items(G_LIST_MODEL(ui.model_names)) == 0) {
         return fail(error, capacity, "no models are offered");
     }
@@ -2175,7 +4229,11 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
         break;
     }
     if (jsti_local_models_self_test(error, capacity) != 0) return -1;
+    if (jsti_model_filters_self_test(error, capacity) != 0) return -1;
     if (jsti_cloud_sync_self_test(error, capacity) != 0) return -1;
+    if (jsti_history_filters_self_test(error, capacity) != 0) return -1;
+    if (jsti_vocabulary_self_test(error, capacity) != 0) return -1;
+    if (jsti_profiles_self_test(error, capacity) != 0) return -1;
     const char *first = "00000000-0000-0000-0000-000000000001";
     const char *second = "00000000-0000-0000-0000-000000000002";
     JSTIHistoryRow rows[] = {
@@ -2188,6 +4246,27 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (ui.history_ids->len != 2 || g_strcmp0(ui.selected_id, first) != 0) {
         return fail(error, capacity, "History rows or selection were not applied");
     }
+    gchar *all_ids = g_strdup_printf("%s\n%s", first, second);
+    if (jsti_window_set_history_management(NULL) != -1 || jsti_window_set_history_management("\xff") != -1) {
+        g_free(all_ids);
+        return fail(error, capacity, "invalid History management input was accepted");
+    }
+    history_management_apply(all_ids);
+    GtkWidget *confirmation = history_delete_dialog(all_ids, TRUE);
+    g_object_ref_sink(confirmation);
+    gboolean management_ok = gtk_widget_get_sensitive(GTK_WIDGET(ui.history_delete))
+        && gtk_widget_get_sensitive(GTK_WIDGET(ui.history_clear))
+        && adw_message_dialog_has_response(ADW_MESSAGE_DIALOG(confirmation), "keep-audio")
+        && adw_message_dialog_has_response(ADW_MESSAGE_DIALOG(confirmation), "delete-audio")
+        && g_strcmp0(adw_message_dialog_get_default_response(ADW_MESSAGE_DIALOG(confirmation)), "cancel") == 0;
+    history_management_apply((gpointer)first);
+    management_ok = management_ok && g_strcmp0(
+        g_object_get_data(G_OBJECT(confirmation), "jsti-history-delete-ids"), all_ids) == 0;
+    gtk_window_destroy(GTK_WINDOW(confirmation));
+    g_object_unref(confirmation);
+    history_management_apply(all_ids);
+    g_free(all_ids);
+    if (!management_ok) return fail(error, capacity, "History confirmation choices or frozen IDs were not retained");
     /* The selected card holds the transcript and its actions. */
     GtkListBoxRow *first_row = gtk_list_box_get_row_at_index(ui.history, 0);
     if (gtk_widget_get_parent(ui.detail) != gtk_list_box_row_get_child(first_row)) {
@@ -2231,6 +4310,9 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
         return fail(error, capacity, "Copy or the version control stayed unavailable");
     }
     if (read_aloud_self_test(first, error, capacity) != 0) return -1;
+    if (voice_favorites_self_test(error, capacity) != 0) return -1;
+    if (jsti_voice_credentials_self_test(error, capacity) != 0) return -1;
+    if (jsti_voice_sources_self_test(ui.window, error, capacity) != 0) return -1;
     History *empty = history_copy(NULL, 0, "");
     history_apply(empty);
     history_free(empty);
@@ -2241,6 +4323,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
         return fail(error, capacity, "clearing History left record actions enabled");
     }
     if (jsti_hud_self_test(error, capacity) != 0) return -1;
+    if (jsti_comparison_self_test(ui.window, error, capacity) != 0) return -1;
     return jsti_tray_self_test(error, capacity);
 }
 
@@ -2248,7 +4331,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
 
 /* Renders `widget` at its allocated size into a PNG, over the window's
  * background colour when `opaque`. */
-static int32_t save_widget_png(GtkWidget *widget, const char *path, gboolean opaque) {
+int32_t jsti_widget_save_snapshot(GtkWidget *widget, const char *path, gboolean opaque) {
     int width = gtk_widget_get_width(widget), height = gtk_widget_get_height(widget);
     if (width <= 0 || height <= 0) return -1;
     GtkSnapshot *snapshot = gtk_snapshot_new();
@@ -2262,7 +4345,7 @@ static int32_t save_widget_png(GtkWidget *widget, const char *path, gboolean opa
     GskRenderNode *node = gtk_snapshot_free_to_node(snapshot);
     int32_t result = -1;
     if (node != NULL) {
-        GskRenderer *renderer = gtk_native_get_renderer(GTK_NATIVE(ui.window));
+        GskRenderer *renderer = gtk_native_get_renderer(gtk_widget_get_native(widget));
         GdkTexture *texture = gsk_renderer_render_texture(
             renderer, node, &GRAPHENE_RECT_INIT(0, 0, (float)width, (float)height));
         if (texture != NULL && gdk_texture_save_to_png(texture, path)) result = 0;
@@ -2276,26 +4359,67 @@ static int32_t save_widget_png(GtkWidget *widget, const char *path, gboolean opa
 typedef struct Tour {
     gchar *directory;
     gint32 step;
+    TextOutput output;
 } Tour;
 
-enum { TOUR_DARK_DASHBOARD = JSTI_PAGE_COUNT, TOUR_DARK_HISTORY, TOUR_RECORDING, TOUR_HUD_RECORDING,
-       TOUR_HUD_COMPLETED, TOUR_DONE };
+void jsti_voice_discovery_show_fixture(GtkWindow *owner);
+int32_t jsti_voice_discovery_save_snapshot(const char *path);
+enum { TOUR_PORTAL_OUTPUT = JSTI_PAGE_COUNT, TOUR_DARK_DASHBOARD, TOUR_DARK_HISTORY, TOUR_RECORDING, TOUR_HUD_RECORDING,
+       TOUR_HUD_COMPLETED, TOUR_HISTORY_FILTERS, TOUR_DARK_HISTORY_FILTERS, TOUR_DARK_GENERAL, TOUR_EXPANDED_RECORDING,
+       TOUR_COMPACT_RECORDING, TOUR_COMPACT_COMPLETED, TOUR_VOICE_SOURCES, TOUR_VOICE_CONTROLS, TOUR_VOICE_USAGE,
+       TOUR_VOICE_DISCOVERY, TOUR_DONE };
 
 static gboolean tour_capture(gpointer data);
 
 static void tour_show(Tour *tour) {
     if (tour->step < JSTI_PAGE_COUNT) {
         show_page(tour->step);
+    } else if (tour->step == TOUR_PORTAL_OUTPUT) {
+        TextOutput portal = { .method = 0, .restore = TRUE, .can_restore = FALSE };
+        text_output_apply(&portal);
+        show_page(JSTI_PAGE_GENERAL);
     } else if (tour->step == TOUR_DARK_DASHBOARD) {
+        text_output_apply(&tour->output);
         adw_style_manager_set_color_scheme(adw_style_manager_get_default(), ADW_COLOR_SCHEME_FORCE_DARK);
         show_page(JSTI_PAGE_DASHBOARD);
     } else if (tour->step == TOUR_DARK_HISTORY) {
         show_page(JSTI_PAGE_HISTORY);
+    } else if (tour->step == TOUR_DARK_GENERAL) {
+        Update idle = { .state = JSTI_STATE_IDLE };
+        update_apply(&idle);
+        adw_style_manager_set_color_scheme(adw_style_manager_get_default(), ADW_COLOR_SCHEME_FORCE_DARK);
+        show_page(JSTI_PAGE_GENERAL);
+    } else if (tour->step == TOUR_HISTORY_FILTERS || tour->step == TOUR_DARK_HISTORY_FILTERS) {
+        Update idle = { .state = JSTI_STATE_IDLE };
+        update_apply(&idle);
+        adw_style_manager_set_color_scheme(adw_style_manager_get_default(),
+            tour->step == TOUR_HISTORY_FILTERS ? ADW_COLOR_SCHEME_FORCE_LIGHT : ADW_COLOR_SCHEME_FORCE_DARK);
+        show_page(JSTI_PAGE_HISTORY);
+        gtk_menu_button_popup(GTK_MENU_BUTTON(ui.history_filters));
     } else if (tour->step == TOUR_HUD_RECORDING) {
         jsti_hud_show(1, "Recording", "Capturing audio",
                       "Could we move the catch-up to Friday? That gives us a little more time");
     } else if (tour->step == TOUR_HUD_COMPLETED) {
         jsti_hud_show(5, "Completed", "Saved. Pasted into the original window.", "");
+    } else if (tour->step == TOUR_EXPANDED_RECORDING) {
+        jsti_hud_show_layout(1, "Recording", "Capturing audio",
+                              "Could we move the catch-up to Friday? That gives us a little more time to finish "
+                              "the proposal and review the notes together before sending them to the team.", 0, FALSE, TRUE);
+    } else if (tour->step == TOUR_COMPACT_RECORDING) {
+        jsti_hud_show_presentation(1, "Recording", "Capturing audio",
+                                    "Could we move the catch-up to Friday? That gives us a little more time", 0, TRUE);
+    } else if (tour->step == TOUR_COMPACT_COMPLETED) {
+        jsti_hud_show_presentation(5, "Completed", "Saved. Pasted into the original window.", "", 2400, TRUE);
+    } else if (tour->step == TOUR_VOICE_SOURCES) {
+        jsti_hud_destroy();
+        jsti_voice_sources_show_fixture(ui.window);
+    } else if (tour->step == TOUR_VOICE_CONTROLS) {
+        jsti_voice_sources_close();
+        jsti_voice_controls_show_fixture(ui.window);
+    } else if (tour->step == TOUR_VOICE_USAGE) {
+        jsti_voice_usage_show_fixture(ui.window);
+    } else if (tour->step == TOUR_VOICE_DISCOVERY) {
+        jsti_voice_discovery_show_fixture(ui.window);
     } else {
         /* Late, because it replaces the displayed transcript. */
         Update recording = { .transcript = (gchar *)"Could we move the catch-up to Friday? That gives us a little",
@@ -2309,11 +4433,22 @@ static void tour_show(Tour *tour) {
 
 static const char *tour_name(gint32 step) {
     switch (step) {
+    case TOUR_PORTAL_OUTPUT: return "general-portal-output";
     case TOUR_RECORDING: return "dashboard-recording";
     case TOUR_HUD_RECORDING: return "hud-recording";
     case TOUR_HUD_COMPLETED: return "hud-completed";
+    case TOUR_EXPANDED_RECORDING: return "hud-expanded-recording";
+    case TOUR_COMPACT_RECORDING: return "hud-compact-recording";
+    case TOUR_COMPACT_COMPLETED: return "hud-compact-completed";
     case TOUR_DARK_DASHBOARD: return "dashboard-dark";
     case TOUR_DARK_HISTORY: return "history-dark";
+    case TOUR_HISTORY_FILTERS: return "history-filters";
+    case TOUR_DARK_HISTORY_FILTERS: return "history-filters-dark";
+    case TOUR_VOICE_SOURCES: return "voice-sources";
+    case TOUR_VOICE_CONTROLS: return "voice-controls";
+    case TOUR_VOICE_USAGE: return "voice-usage";
+    case TOUR_DARK_GENERAL: return "general-dark";
+    case TOUR_VOICE_DISCOVERY: return "voice-discovery";
     default: return page_info[step].name;
     }
 }
@@ -2328,19 +4463,67 @@ static gboolean tour_capture(gpointer data) {
     gchar *file = g_strdup_printf("%02d-%s.png", tour->step + 1, tour_name(tour->step));
     gchar *path = g_build_filename(tour->directory, file, NULL);
     char message[256] = { 0 };
-    if (tour->step == TOUR_HUD_RECORDING || tour->step == TOUR_HUD_COMPLETED) {
+    if (tour->step == TOUR_HISTORY_FILTERS || tour->step == TOUR_DARK_HISTORY_FILTERS) {
+        GtkPopover *popover = gtk_menu_button_get_popover(GTK_MENU_BUTTON(ui.history_filters));
+        if (!popover || jsti_widget_save_snapshot(GTK_WIDGET(popover), path, TRUE) != 0) {
+            g_printerr("The History filter editor %s could not be saved.\n", file);
+        }
+        gtk_menu_button_set_popover(GTK_MENU_BUTTON(ui.history_filters), NULL);
+        g_free(path); g_free(file);
+        tour->step++;
+        if (tour->step < TOUR_DONE) tour_show(tour);
+        else {
+            g_free(tour->directory); g_free(tour);
+            gtk_window_close(ui.window);
+        }
+        return G_SOURCE_REMOVE;
+    }
+    if (tour->step == TOUR_VOICE_CONTROLS) {
+        if (jsti_voice_controls_save_snapshot(path) != 0) g_printerr("The Voice controls snapshot failed.\n");
+        g_free(path); g_free(file);
+        tour->step++; tour_show(tour);
+        return G_SOURCE_REMOVE;
+    }
+    if (tour->step == TOUR_VOICE_USAGE) {
+        if (jsti_voice_usage_save_snapshot(path) != 0) g_printerr("The Voice usage snapshot failed.\n");
+        g_free(path); g_free(file);
+        tour->step++; tour_show(tour);
+        return G_SOURCE_REMOVE;
+    }
+    if (tour->step == TOUR_VOICE_DISCOVERY) {
+        if (jsti_voice_discovery_save_snapshot(path) != 0) g_printerr("The account voice snapshot failed.\n");
+        g_free(path); g_free(file);
+        jsti_comparison_screenshot_tour(ui.window, tour->directory);
+        g_free(tour->directory); g_free(tour);
+        return G_SOURCE_REMOVE;
+    }
+    if (tour->step == TOUR_VOICE_SOURCES) {
+        if (jsti_voice_sources_save_snapshot(path) != 0) g_printerr("The Voice Output editor snapshot failed.\n");
+        g_free(path); g_free(file);
+        tour->step++;
+        if (tour->step < TOUR_DONE) {
+            tour_show(tour);
+        } else {
+            jsti_comparison_screenshot_tour(ui.window, tour->directory);
+            g_free(tour->directory);
+            g_free(tour);
+        }
+        return G_SOURCE_REMOVE;
+    }
+    if ((tour->step >= TOUR_HUD_RECORDING && tour->step <= TOUR_HUD_COMPLETED) ||
+        (tour->step >= TOUR_EXPANDED_RECORDING && tour->step <= TOUR_COMPACT_COMPLETED)) {
         /* The HUD is its own window; X11 only. */
         GtkWidget *card = jsti_hud_card();
-        if (card != NULL && save_widget_png(card, path, TRUE) != 0) g_printerr("The HUD %s could not be saved.\n", file);
+        if (card != NULL && jsti_widget_save_snapshot(card, path, TRUE) != 0) g_printerr("The HUD %s could not be saved.\n", file);
         g_free(path);
         g_free(file);
         tour->step++;
         if (tour->step < TOUR_DONE) {
             tour_show(tour);
         } else {
+            jsti_comparison_screenshot_tour(ui.window, tour->directory);
             g_free(tour->directory);
             g_free(tour);
-            gtk_window_close(ui.window);
         }
         return G_SOURCE_REMOVE;
     }
@@ -2355,7 +4538,7 @@ static gboolean tour_capture(gpointer data) {
     if (column != NULL) {
         file = g_strdup_printf("%02d-%s-full.png", tour->step + 1, tour_name(tour->step));
         path = g_build_filename(tour->directory, file, NULL);
-        if (save_widget_png(column, path, TRUE) != 0) g_printerr("The full page %s could not be saved.\n", file);
+        if (jsti_widget_save_snapshot(column, path, TRUE) != 0) g_printerr("The full page %s could not be saved.\n", file);
         g_free(path);
         g_free(file);
     }
@@ -2363,14 +4546,32 @@ static gboolean tour_capture(gpointer data) {
     if (tour->step < TOUR_DONE) {
         tour_show(tour);
     } else {
+        jsti_comparison_screenshot_tour(ui.window, tour->directory);
         g_free(tour->directory);
         g_free(tour);
-        gtk_window_close(ui.window);
     }
     return G_SOURCE_REMOVE;
 }
 
-static void tour_start(gpointer data) { tour_show(data); }
+static void tour_start(gpointer data) {
+    Tour *tour = data;
+    const JSTIHistoryFilterModel models[] = {
+        {"model/sample", "Sample transcription model", 0},
+        {"model/long", "An imported transcription model with a long descriptive name and vocabulary context", 0}
+    };
+    if (jsti_window_set_history_filters(models, 2, 0, "", "") != 0) {
+        g_printerr("Could not prepare the sample History filter editor.\n");
+        g_free(tour->directory); g_free(tour);
+        gtk_window_close(ui.window);
+        return;
+    }
+    tour->output = (TextOutput){
+        .method = (gint32)adw_combo_row_get_selected(ui.output_row),
+        .restore = adw_switch_row_get_active(ui.restore_row),
+        .can_restore = ui.can_restore_clipboard
+    };
+    tour_show(tour);
+}
 
 int32_t jsti_window_screenshot_tour(const char *directory, char *error, size_t capacity) {
     if (directory == NULL || g_mkdir_with_parents(directory, 0700) != 0) {

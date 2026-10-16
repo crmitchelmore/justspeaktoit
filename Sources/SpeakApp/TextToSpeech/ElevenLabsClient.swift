@@ -2,52 +2,9 @@ import SpeakCore
 import Foundation
 import AVFoundation
 
-/// Current ElevenLabs text-to-speech models, plus the deprecated identifiers
-/// they replace. ElevenLabs deprecated `eleven_turbo_v2_5` in favour of
-/// `eleven_flash_v2_5`. `eleven_v4` is now the most expressive model, but
-/// ElevenLabs only serves it through the Text to Dialogue API, so it has its
-/// own request path and `eleven_v3` stays as its text-to-speech fallback.
-enum ElevenLabsTTSModels {
-  struct Model: Equatable {
-    let id: String
-    let displayName: String
-  }
-
-  static let elevenV4 = Model(id: "eleven_v4", displayName: "Eleven v4 (most expressive)")
-  static let elevenV3 = Model(id: "eleven_v3", displayName: "Eleven v3")
-  static let multilingualV2 = Model(id: "eleven_multilingual_v2", displayName: "Eleven Multilingual v2")
-  static let flashV25 = Model(id: "eleven_flash_v2_5", displayName: "Eleven Flash v2.5 (fastest)")
-
-  static let all: [Model] = [elevenV4, elevenV3, multilingualV2, flashV25]
-
-  /// Models ElevenLabs serves only through `POST /v1/text-to-dialogue`.
-  static let dialogueOnlyModelIDs: Set<String> = [elevenV4.id]
-
-  /// ElevenLabs' guidance for reliable Text to Dialogue generation is at most
-  /// 2,000 characters across all inputs; longer text goes to the fallback.
-  static let dialogueCharacterLimit = 2_000
-
-  /// Text-to-speech model used when a dialogue-only model cannot take the request.
-  static let dialogueFallback = elevenV3
-
-  /// Deprecated identifiers mapped onto the model ElevenLabs recommends instead.
-  static let deprecatedReplacements: [String: String] = [
-    "eleven_turbo_v2_5": flashV25.id,
-    "eleven_turbo_v2": flashV25.id,
-    "eleven_multilingual_v1": multilingualV2.id
-  ]
-
-  /// Maps a persisted or caller-supplied identifier onto a model ElevenLabs
-  /// still serves. Unknown identifiers pass through so custom models keep working.
-  static func current(_ identifier: String) -> String {
-    let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
-    return deprecatedReplacements[trimmed] ?? trimmed
-  }
-}
-
 actor ElevenLabsClient: TextToSpeechClient {
   let provider: TTSProvider = .elevenlabs
-  private let baseURL = URL(string: "https://api.elevenlabs.io/v1")!
+  private let baseURL = ElevenLabsTTSAPI.baseURL
   private let session: URLSession
   private let secureStorage: SecureAppStorage
 
@@ -72,7 +29,7 @@ actor ElevenLabsClient: TextToSpeechClient {
     let duration = try await getAudioDuration(url: outputURL)
 
     // Estimate cost (ElevenLabs pricing: ~$0.30 per 1000 characters for standard)
-    let cost = Decimal(text.count) * 0.30 / 1000.0
+    let cost = Decimal(text.count) * ElevenLabsTTSAPI.estimatedCostPerThousandCharacters / 1000
 
     return TTSResult(
       audioURL: outputURL,
@@ -153,29 +110,17 @@ actor ElevenLabsClient: TextToSpeechClient {
   private func synthesizeSpeech(
     text: String, voiceID: String, modelID: String, apiKey: String
   ) async throws -> Data {
-    let url = baseURL.appendingPathComponent("text-to-speech").appendingPathComponent(voiceID)
-    let body: [String: Any] = [
-      "text": text,
-      "model_id": modelID,
-      "voice_settings": [
-        "stability": 0.5,
-        "similarity_boost": 0.75,
-        "style": 0.0,
-        "use_speaker_boost": true,
-      ],
-    ]
-    return try await send(body: body, to: url, apiKey: apiKey, fallbackOnRejection: false)
+    let request = try ElevenLabsTTSAPI.speechRequest(
+      text: text, voiceID: voiceID, modelID: modelID, apiKey: apiKey)
+    return try await send(request, fallbackOnRejection: false)
   }
 
   private func synthesizeDialogue(
     text: String, voiceID: String, modelID: String, apiKey: String
   ) async throws -> Data {
-    let url = baseURL.appendingPathComponent("text-to-dialogue")
-    let body: [String: Any] = [
-      "inputs": [["text": text, "voice_id": voiceID]],
-      "model_id": modelID
-    ]
-    return try await send(body: body, to: url, apiKey: apiKey, fallbackOnRejection: true)
+    let request = try ElevenLabsTTSAPI.dialogueRequest(
+      text: text, voiceID: voiceID, modelID: modelID, apiKey: apiKey)
+    return try await send(request, fallbackOnRejection: true)
   }
 
   private enum ElevenLabsRequestError: Error {
@@ -183,14 +128,8 @@ actor ElevenLabsClient: TextToSpeechClient {
   }
 
   private func send(
-    body: [String: Any], to url: URL, apiKey: String, fallbackOnRejection: Bool
+    _ request: URLRequest, fallbackOnRejection: Bool
   ) async throws -> Data {
-    var request = URLRequest(url: url)
-    request.httpMethod = "POST"
-    request.setValue(apiKey, forHTTPHeaderField: "xi-api-key")
-    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
     let (data, response) = try await session.data(for: request)
 
     guard let httpResponse = response as? HTTPURLResponse else {
@@ -203,7 +142,7 @@ actor ElevenLabsClient: TextToSpeechClient {
 
     // 400/403/404/422 mean the model or endpoint refused this request; rate
     // limits and server errors surface unchanged rather than switching models.
-    if fallbackOnRejection, [400, 403, 404, 422].contains(httpResponse.statusCode) {
+    if fallbackOnRejection, ElevenLabsTTSAPI.permitsDialogueFallback(status: httpResponse.statusCode) {
       throw ElevenLabsRequestError.rejected
     }
 
@@ -215,17 +154,7 @@ actor ElevenLabsClient: TextToSpeechClient {
   }
 
   private func modelID(for quality: TTSQuality) -> String {
-    switch quality {
-    case .standard:
-      // Flash v2.5 - fastest, ~75ms latency, great for real-time
-      return ElevenLabsTTSModels.flashV25.id
-    case .high:
-      // Multilingual v2 - best quality for most use cases
-      return ElevenLabsTTSModels.multilingualV2.id
-    case .highest:
-      // Eleven v4 - most expressive, best for narration and emotive speech
-      return ElevenLabsTTSModels.elevenV4.id
-    }
+    ElevenLabsTTSModels.model(for: quality).id
   }
 
   private func saveAudioData(_ data: Data, format: AudioFormat) async throws -> URL {

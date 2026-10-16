@@ -6,6 +6,16 @@ import SpeakWindowsPlatform
 import CWindowsSupport
 
 struct WindowsNativeEffects: WindowsControllerEffects {
+    /// Deliberately not selected by Main. The caller must supply actual native
+    /// qualification and permission evidence, not a saved setting.
+    static func ownedDictationCapability(
+        capability: DesktopPressCaptureCapability, permission: DesktopPressCapturePermission
+    ) -> DesktopHostOwnedDictationCapability {
+        DesktopHostOwnedDictationCapability(capability: capability, permission: permission) {
+            DesktopOwnedCaptureWorker(factory: WindowsOwnedCaptureDriverFactory())
+        }
+    }
+
     func apiKey(name: String) throws -> String { try WindowsNative.apiKey(name: name) }
 
     func makeCapture(
@@ -19,8 +29,14 @@ struct WindowsNativeEffects: WindowsControllerEffects {
     func makeLiveClient(
         model: String, key: String, language: String?, azureEndpoint: String
     ) -> (any FinalizingStreamingTranscriptionClient)? {
+        makeLiveClient(model: model, key: key, language: language, azureEndpoint: azureEndpoint, options: .init())
+    }
+
+    func makeLiveClient(
+        model: String, key: String, language: String?, azureEndpoint: String, options: LiveClientOptions
+    ) -> (any FinalizingStreamingTranscriptionClient)? {
         DesktopLiveTranscription.makeClient(
-            model: model, apiKey: key, language: language, azureEndpoint: azureEndpoint,
+            model: model, apiKey: key, language: language, azureEndpoint: azureEndpoint, options: options,
             makeConnection: { WinHTTPStreamingConnection(request: $0) }
         )
     }
@@ -30,13 +46,33 @@ struct WindowsNativeEffects: WindowsControllerEffects {
     ) async throws -> TranscriptionResult {
         try await controller.transcribePreparedAudio(
             request.audio, model: request.model, key: request.key, duration: request.duration,
-            language: request.language
+            language: request.language, keywords: request.keywords, azureEndpoint: request.azureEndpoint
         )
     }
 
-    func perform(_ job: WindowsOutputJob, text: String) -> String { job.perform(text) }
+    func perform(_ job: WindowsOutputJob, text: String) -> DesktopTextOutputResult { job.performResult(text) }
+
+    func captureInsertionTarget() async throws -> WindowsInsertionTarget? {
+        try await Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
+            return try WindowsInsertionTarget.capture()
+        }.value
+    }
 
     func writeSettings(_ data: Data, to url: URL) throws { try data.write(to: url, options: .atomic) }
+
+    func voiceCommandClipboardText() async throws -> String? {
+        try await Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
+            var pointer: UnsafeMutablePointer<CChar>?
+            var error = [CChar](repeating: 0, count: 256)
+            let result = jsti_voice_command_clipboard_read(&pointer, &error, error.count)
+            defer { jsti_voice_command_clipboard_free(pointer) }
+            guard result >= 0 else { throw WindowsNativeError(message: String(cString: error)) }
+            guard result == 0, let pointer else { return nil }
+            return String(cString: pointer)
+        }.value
+    }
 }
 
 /// WASAPI capture. Keeps the context its native callbacks borrow alive until

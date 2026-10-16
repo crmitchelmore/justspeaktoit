@@ -54,6 +54,9 @@ public struct SpeechmaticsTTSVoice: Identifiable, Codable, Hashable, Sendable {
 /// is the whole choice. Speaking rate, pitch and language are not request
 /// parameters, so the app's speed/pitch controls have nothing to send.
 public enum SpeechmaticsTTSCatalog {
+    public static let providerIdentifier = "speechmatics"
+    public static let credentialIdentifier = "speechmatics.apiKey"
+
     /// Prefix that routes a stored voice identifier back to this provider.
     public static let voiceIDPrefix = "speechmatics/"
 

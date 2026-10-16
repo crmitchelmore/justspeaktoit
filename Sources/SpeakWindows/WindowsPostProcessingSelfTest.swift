@@ -14,7 +14,7 @@ enum WindowsPostProcessingSelfTest {
     static func run() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("JSTI post-processing self-test \(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try WindowsNative.createSyntheticDirectory(root)
         defer { try? FileManager.default.removeItem(at: root) }
         guard let model = DesktopPostProcessing.remoteModels.first?.id,
               case .apiKey(let identifier, _) = ModelCredentialResolver.requirement(
@@ -26,7 +26,29 @@ enum WindowsPostProcessingSelfTest {
         try await checkAppliesKeepTheirOrder(PostProcessingBench.make(root, "Order"))
         try await checkFailedSavesChangeNoChoice(PostProcessingBench.make(root, "Failures"))
         try await checkClosingDuringTheKeySave(PostProcessingBench.make(root, "Closing"))
-        print("Post-processing key and settings checks passed.")
+        try await checkLocalRulesDoNotSaveKeys(PostProcessingBench.make(root, "Local"))
+        print("Remote and local post-processing key and settings checks passed.")
+    }
+
+    private static func checkLocalRulesDoNotSaveKeys(_ bench: PostProcessingBench) async throws {
+        bench.apply(enabled: true, prompt: "Keep remote instructions.", key: "")
+        await bench.settle()
+        try bench.applyLocal(enabled: true, key: "must-not-save")
+        await bench.settle()
+        let options = await bench.controller.postProcessingOptions()
+        try require(options.mode == .local, "local Apply did not select built-in rules")
+        try require(options.modelIdentifier == LocalPostProcessingModel.builtInRulesModelID, "local ID was shifted")
+        try require(options.customPrompt == "Keep remote instructions.", "local Apply discarded the remote prompt")
+        try require(!options.includeLexiconDirectives && options.includeContextTags, "context switches were lost")
+        try require(bench.hook.savedValues.isEmpty, "local Apply tried to save a remote key")
+        try bench.applyLocal(enabled: false, key: "still-must-not-save")
+        await bench.settle()
+        await bench.close()
+        let restored = try await bench.reopen()
+        try require(restored.postProcessing.mode == .disabled, "disabled local Apply activated after restart")
+        try require(restored.postProcessing.modelIdentifier == options.modelIdentifier, "local ID was not persisted")
+        try require(!restored.postProcessing.includeLexiconDirectives, "context switch changed after restart")
+        try require(bench.hook.savedValues.isEmpty, "disabled local Apply tried to save a remote key")
     }
 
     private static func checkTypedAndBlankKeys(_ bench: PostProcessingBench, identifier: String) async throws {
@@ -131,7 +153,7 @@ private final class PostProcessingBench: @unchecked Sendable {
 
     static func make(_ root: URL, _ name: String) async throws -> PostProcessingBench {
         let directory = root.appendingPathComponent(name, isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try WindowsNative.createSyntheticDirectory(directory)
         let effects = SyntheticEffects()
         let controller = try WindowsAppController(directory: directory, effects: effects)
         let bench = PostProcessingBench(directory: directory, effects: effects, controller: controller)
@@ -144,6 +166,27 @@ private final class PostProcessingBench: @unchecked Sendable {
         let controller = controller
         holder.enqueueSettings {
             await controller.savePostProcessing(enabled: enabled, modelIndex: 0, prompt: prompt, key: key)
+        }
+    }
+
+    func applyLocal(enabled: Bool, key: String) throws {
+        let models = DesktopPostProcessing.nativeModels()
+        guard let index = models.firstIndex(where: {
+            $0.id == LocalPostProcessingModel.builtInRulesModelID
+        }) else { throw failure("the shared rules route is missing") }
+        // The real dialog publishes its displayed identifiers before callbacks.
+        holder.postProcessingPicker.publish(models)
+        let builtInRulesModelID = LocalPostProcessingModel.builtInRulesModelID
+        try require(
+            holder.postProcessingPicker.modelIdentifier(forSelection: index) == builtInRulesModelID,
+            "the native picker snapshot lost the local rules identifier"
+        )
+        "".withCString { prompt in
+            key.withCString { key in
+                postProcessingEvent(
+                    enabled ? 1 : 0, Int32(index), 0, 1, prompt, key, Unmanaged.passUnretained(holder).toOpaque()
+                )
+            }
         }
     }
 

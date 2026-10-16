@@ -723,18 +723,9 @@ struct SSMLHelperView: View {
 
       ScrollView {
         VStack(alignment: .leading, spacing: 12) {
-          ssmlExample("<speak>Your text here</speak>", description: "Root tag (required)")
-          ssmlExample("<break time='500ms'/>", description: "Pause for duration")
-          ssmlExample("<emphasis level='strong'>text</emphasis>", description: "Emphasize text")
-          ssmlExample(
-            "<prosody rate='slow' pitch='+2st'>text</prosody>",
-            description: "Control rate and pitch"
-          )
-          ssmlExample("<say-as interpret-as='digits'>123</say-as>", description: "Number format")
-          ssmlExample(
-            "<phoneme alphabet='ipa' ph='təˈmeɪtoʊ'>tomato</phoneme>",
-            description: "Pronunciation"
-          )
+          ForEach(VoiceSynthesisMarkup.examples, id: \.text) { example in
+            ssmlExample(example.text, description: example.description)
+          }
         }
       }
       .frame(height: 200)
@@ -748,9 +739,7 @@ struct SSMLHelperView: View {
         Spacer()
 
         Button("Wrap with <speak>") {
-          if !text.contains("<speak>") {
-            text = "<speak>\(text)</speak>"
-          }
+          text = VoiceSynthesisMarkup.wrapping(text)
           dismiss()
         }
         .buttonStyle(.borderedProminent)

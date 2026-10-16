@@ -16,15 +16,26 @@ public struct DeepgramBatchClient: TranscriptionProvider {
 
     private let baseURL = URL(string: "https://api.deepgram.com/v1")!
     private let session: URLSession
+    private let keywords: [String]
 
     private let durationResolver: @Sendable (URL) async throws -> TimeInterval
 
     public init(
         session: URLSession = .shared,
+        keywords: [String],
         durationResolver: @escaping @Sendable (URL) async throws -> TimeInterval = { _ in 0 }
     ) {
         self.session = session
+        self.keywords = keywords
         self.durationResolver = durationResolver
+    }
+
+    /// Source-compatible overload preserved for callers predating keyword hints.
+    public init(
+        session: URLSession = .shared,
+        durationResolver: @escaping @Sendable (URL) async throws -> TimeInterval = { _ in 0 }
+    ) {
+        self.init(session: session, keywords: [], durationResolver: durationResolver)
     }
 
     public func transcribeFile(
@@ -49,6 +60,7 @@ public struct DeepgramBatchClient: TranscriptionProvider {
             queryItems.append(URLQueryItem(name: "language", value: languageCode))
         }
 
+        queryItems += TranscriptionKeywordPolicy.deepgramQuery(model: extractModelName(from: model), words: keywords)
         urlComponents.queryItems = queryItems
 
         guard let requestURL = urlComponents.url else {

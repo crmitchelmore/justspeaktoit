@@ -54,6 +54,15 @@ provider you select. It is off until you turn it on, and no other provider in th
 | macOS | Soniox | The text to speak, plus the selected voice, speed, language and region |
 | macOS | Cartesia Sonic | The text to speak, plus the selected model and voice |
 | macOS | macOS System voices | Nothing leaves the device — synthesis is performed by macOS |
+| Windows / Linux (source candidate; qualification pending) | Soniox completed-audio TTS | Only explicitly submitted Voice source text, selected voice/model, speed, language and sample rate go to the selected US/EU/JP processing host; the project key stays in its authorization header |
+
+The desktop Soniox candidate does not transmit Clipboard or History content merely by
+opening Voice, preferences or account discovery. Refresh sends the matching regional
+project key to that region's voice-list endpoint, without source text. Read, Generate
+or source Export explicitly submit their immutable source snapshot; replay and export
+of retained audio make no synthesis request. A failed regional request is not retried
+against another region. This source wiring is not a native, installed or live-service
+acceptance receipt.
 
 The in-app iOS disclosure derives this list from the same `VoiceOutputProvider` catalogue the provider picker uses, so
 a newly supported voice-output provider is disclosed automatically. The macOS list is `TTSProvider` minus the built-in

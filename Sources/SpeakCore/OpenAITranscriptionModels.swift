@@ -42,6 +42,12 @@ public enum OpenAITranscriptionModels {
         usesLanguageHintsArray(apiModelName) ? "languages[]" : "language"
     }
 
+    public static func supportsBatchPrompt(_ model: String) -> Bool {
+        let name = apiModelName(from: model)
+        return name == "whisper-1" || name == "whisper-large-v3" || name == "whisper-large-v3-turbo"
+            || name == gptTranscribeAPIName || name == "gpt-4o-transcribe" || name == "gpt-4o-mini-transcribe"
+    }
+
     /// Builds the GA Realtime transcription-session update used on both
     /// platforms, including each model family's language and prompt semantics.
     public static func realtimeSessionUpdatePayload(

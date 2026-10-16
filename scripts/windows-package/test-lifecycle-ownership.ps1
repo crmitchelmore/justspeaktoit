@@ -79,6 +79,15 @@ function New-AdmittedLedger {
     return $ledger
 }
 
+# A CLI alias by itself is user-owned state, even without GUI data or a registration.
+$cliLedger = New-JstiLifecycleLedger
+$cliAdmission = Test-JstiLifecycleAdmission $cliLedger ([ordered]@{ alias = $false; cliAlias = $true })
+Assert-That (-not $cliAdmission.admitted -and (@($cliAdmission.blocking) -join ',') -eq 'cliAlias') `
+    'An existing CLI-only alias blocks lifecycle admission'
+$cliMachine = New-FakeMachine
+$cliCleanup = Invoke-JstiLifecycleCleanup $cliLedger (Get-FakeOperations $cliMachine)
+Assert-That ($cliCleanup.skipped -and $cliMachine.Calls.Count -eq 0) 'A CLI-only refusal changes nothing'
+
 # --- a machine with an existing installation is refused and left untouched ---------
 $machine = New-FakeMachine -Registrations @($existing) -Certificates @('USERCERT') -Directories @($data)
 $userApp = New-FakeProcess 4242
@@ -155,3 +164,4 @@ foreach ($case in $cases) {
 
 if ($script:failed) { throw "$($script:failed) lifecycle ownership checks failed." }
 Write-Host 'Lifecycle ownership rules passed: a refused run changes nothing and cleanup removes only owned state.'
+& (Join-Path $PSScriptRoot 'test-recording-feedback-readiness.ps1')

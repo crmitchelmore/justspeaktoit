@@ -142,7 +142,7 @@ public struct SonioxTTSAPI: Sendable {
     /// Soniox rejects requests above this length.
     public static let maxTextLength = 5000
     /// Safety bound for account-voice pagination.
-    private static let maxVoicePages = 20
+    public static let maxVoicePages = 20
     /// Speaking rates Soniox accepts.
     public static let speedRange: ClosedRange<Double> = 0.7...1.3
     /// Output sample rates Soniox accepts.
@@ -173,6 +173,21 @@ public struct SonioxTTSAPI: Sendable {
         apiKey: String,
         request: SonioxTTSRequest
     ) async throws -> Data {
+        let urlRequest = try Self.synthesisRequest(text: text, apiKey: apiKey, request: request, region: region)
+        let (data, response) = try await session.data(for: urlRequest)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw SonioxTTSAPIError.invalidResponse
+        }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            throw SonioxTTSAPIError.apiFailure(Self.failure(from: data, statusCode: httpResponse.statusCode))
+        }
+        return data
+    }
+
+    /// Shared wire contract; desktop supplies its bounded, redirect-refusing transport.
+    public static func synthesisRequest(
+        text: String, apiKey: String, request: SonioxTTSRequest, region: SonioxTTSRegion
+    ) throws -> URLRequest {
         guard text.count <= Self.maxTextLength else {
             throw SonioxTTSAPIError.textTooLong(limit: Self.maxTextLength, characterCount: text.count)
         }
@@ -183,17 +198,7 @@ public struct SonioxTTSAPI: Sendable {
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         urlRequest.httpBody = try JSONSerialization.data(withJSONObject: request.jsonBody(text: text))
 
-        let (data, response) = try await session.data(for: urlRequest)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw SonioxTTSAPIError.invalidResponse
-        }
-
-        guard (200..<300).contains(httpResponse.statusCode) else {
-            throw SonioxTTSAPIError.apiFailure(Self.failure(from: data, statusCode: httpResponse.statusCode))
-        }
-
-        return data
+        return urlRequest
     }
 
     /// Validates a Soniox API key against the TTS models endpoint.
@@ -234,19 +239,7 @@ public struct SonioxTTSAPI: Sendable {
         repeat {
             guard pageCount < Self.maxVoicePages else { break }
             pageCount += 1
-            guard var components = URLComponents(
-                url: region.voicesEndpoint,
-                resolvingAgainstBaseURL: false
-            ) else {
-                throw SonioxTTSAPIError.invalidResponse
-            }
-            var queryItems = [URLQueryItem(name: "limit", value: "1000")]
-            if let cursor { queryItems.append(URLQueryItem(name: "cursor", value: cursor)) }
-            components.queryItems = queryItems
-            guard let url = components.url else { throw SonioxTTSAPIError.invalidResponse }
-
-            var request = URLRequest(url: url)
-            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            let request = try Self.voiceListRequest(apiKey: apiKey, region: region, cursor: cursor)
             let (data, response) = try await session.data(for: request)
             guard let response = response as? HTTPURLResponse else {
                 throw SonioxTTSAPIError.invalidResponse
@@ -269,6 +262,21 @@ public struct SonioxTTSAPI: Sendable {
         return voices
     }
 
+    public static func voiceListRequest(
+        apiKey: String, region: SonioxTTSRegion, cursor: String? = nil
+    ) throws -> URLRequest {
+        guard var components = URLComponents(url: region.voicesEndpoint, resolvingAgainstBaseURL: false) else {
+            throw SonioxTTSAPIError.invalidResponse
+        }
+        var items = [URLQueryItem(name: "limit", value: "1000")]
+        if let cursor { items.append(URLQueryItem(name: "cursor", value: cursor)) }
+        components.queryItems = items
+        guard let url = components.url else { throw SonioxTTSAPIError.invalidResponse }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        return request
+    }
+
     /// Soniox reports failures as JSON. Unknown payloads are deliberately not echoed,
     /// because a proxy response could contain submitted text or credentials.
     static func errorMessage(from data: Data) -> String {
@@ -286,7 +294,7 @@ public struct SonioxTTSAPI: Sendable {
     }
 }
 
-private struct AccountVoicePage: Decodable {
+struct AccountVoicePage: Decodable {
     let voices: [SonioxTTSAccountVoice]
     let nextPageCursor: String?
 

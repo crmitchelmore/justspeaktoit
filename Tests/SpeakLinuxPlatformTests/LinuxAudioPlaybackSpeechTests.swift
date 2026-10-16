@@ -66,6 +66,17 @@ final class LinuxAudioPlaybackSpeechTests: XCTestCase {
         playback.endSpeech(speech)
     }
 
+    func testAudioHousekeeping_DoesNotStopSpeechOrItsNextSegment() async throws {
+        let speech = try playback.beginSpeech(recordID: UUID())
+        try await playback.stopSavedAudioAndWait()
+        let (operation, player) = try await segment(speech)
+        try await playback.stopSavedAudioAndWait()
+        XCTAssertFalse(player.destroyed)
+        player.finish()
+        _ = try await operation.value
+        playback.endSpeech(speech)
+    }
+
     /// The user's Stop ends speech while it is synthesized or playing, and
     /// refuses every segment still queued behind it.
     func testStop_EndsSpeechAndRefusesItsQueuedSegments() async throws {

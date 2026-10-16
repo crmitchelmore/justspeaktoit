@@ -233,6 +233,22 @@ final class DesktopHostReadAloudTests: XCTestCase {
         XCTAssertTrue(FakeSpeech.shared.events.isEmpty)
     }
 
+    func testReadAloud_FilteringStopsSegmentsAndRefusesHiddenRecord() async throws {
+        FakeLog.shared.setKey("deepgram-key", name: deepgramKey)
+        FakeSpeech.shared.reset(holdingSegments: true)
+        await controller.readAloud(record.uuidString, text: longText)
+        try await waitFor("the first segment") { FakeSpeech.shared.events.contains("play") }
+        let filter = try JSONEncoder().encode(DesktopHistoryFilter(errorsOnly: true))
+        await controller.applyHistoryFilters(String(decoding: filter, as: UTF8.self))
+        XCTAssertEqual(FakeSpeech.shared.events, ["begin", "play", "end"])
+        let selected = await controller.selectedHistoryID
+        XCTAssertNil(selected)
+        FakeSpeech.shared.releaseSegments()
+        try await Task.sleep(nanoseconds: 100_000_000)
+        await controller.readAloud(record.uuidString, text: longText)
+        XCTAssertEqual(FakeSpeech.shared.events, ["begin", "play", "end"])
+    }
+
     func testVoiceSetting_PersistsAndRetiredVoicesResolveThroughTheCatalogue() async throws {
         let unset = await controller.voiceOutputSettings()
         XCTAssertEqual(unset.voice, DeepgramSpeechCatalog.resolvedSelection(modelID: nil, voiceID: nil).voice)

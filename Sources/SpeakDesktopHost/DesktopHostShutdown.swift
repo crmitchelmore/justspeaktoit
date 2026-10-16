@@ -110,6 +110,14 @@ extension DesktopHostController {
         cancelOutput()
         cancellationRequested = true
         transcriptionTask?.cancel()
+        historyDeletionTask?.cancel()
+        folderRevealTask?.cancel()
+        audioCleanupTask?.cancel()
+        migrationExportWorker?.cancel()
+        migrationExportTask?.cancel()
+        migrationInspectionWorker?.cancel()
+        migrationInspectionTask?.cancel()
+        audioCleanupConfirmation = nil
         postProcessingTask?.cancel()
         liveFinalisation?.cancel()
         var report = DesktopHostShutdownReport()

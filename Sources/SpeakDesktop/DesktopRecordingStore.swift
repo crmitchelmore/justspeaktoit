@@ -5,6 +5,13 @@ import SpeakCore
 /// Audio is written before a network request and retained after any failure.
 public actor DesktopRecordingStore {
     public struct Record: Codable, Identifiable, Sendable {
+        // swiftlint:disable:next nesting
+        enum CodingKeys: String, CodingKey, CaseIterable {
+            case id, createdAt, audioFilename, modelIdentifier, result, failure, processedText
+            case postProcessingModelIdentifier, postProcessingFailure, languageIdentifier, profileName, profileNotes
+            case originPlatform, migrationMetadata, recordedDuration, importedCost, importedModelIdentifiers
+        }
+
         public let id: UUID
         public let createdAt: Date
         public let audioFilename: String
@@ -25,6 +32,16 @@ public actor DesktopRecordingStore {
         /// as `macos`. `nil` for a recording made on this device. A synced copy
         /// has no audio here: its audio never leaves the device that recorded it.
         public var originPlatform: String?
+        /// Original imported wire metadata, including fields this host cannot edit.
+        public var migrationMetadata: AnyCodable?
+        public var recordedDuration: TimeInterval?
+        public var importedCost: ApplicationHistoryCost?
+        public var importedModelIdentifiers: [String]?
+
+        public var recordingDuration: TimeInterval? { result?.duration ?? recordedDuration }
+        public var recordingCost: ApplicationHistoryCost? {
+            result?.cost.map { .init(total: $0.totalCost, currency: $0.currency, breakdown: $0) } ?? importedCost
+        }
 
         /// True for a transcript that arrived through History sync.
         public var isSyncedCopy: Bool { originPlatform != nil }
@@ -66,24 +83,29 @@ public actor DesktopRecordingStore {
     }
 
     public let directory: URL
+    var deletionLedger: DesktopHistoryDeletionLedger
 
     public init(directory: URL) throws {
         self.directory = directory
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        deletionLedger = try DesktopHistoryDeletionLedger.load(from: directory)
     }
 
     public func save(_ record: Record) throws {
+        try requireRetained(record.id)
         try write(record, to: directory.appendingPathComponent(record.id.uuidString + ".json"))
     }
 
     public func records() throws -> [Record] {
         let files = try metadataFiles()
         // Surface corrupt records rather than silently hiding user history.
-        return try files.map { try loadRecord(at: $0) }.sorted { $0.createdAt > $1.createdAt }
+        return try files.filter { !isDeletedMetadata($0) }.map { try loadRecord(at: $0) }
+            .sorted { $0.createdAt > $1.createdAt }
     }
 
     public func record(id: UUID) throws -> Record {
-        try loadRecord(at: directory.appendingPathComponent(id.uuidString + ".json"))
+        try requireRetained(id)
+        return try loadRecord(at: directory.appendingPathComponent(id.uuidString + ".json"))
     }
 
     /// Every record that reads cleanly, newest first. Sync uses this so one
@@ -91,7 +113,8 @@ public actor DesktopRecordingStore {
     /// itself is still reported by `records()` and recovery, never touched.
     public func readableRecords() throws -> [Record] {
         let files = try metadataFiles()
-        return files.compactMap { try? loadRecord(at: $0) }.sorted { $0.createdAt > $1.createdAt }
+        return files.filter { !isDeletedMetadata($0) }.compactMap { try? loadRecord(at: $0) }
+            .sorted { $0.createdAt > $1.createdAt }
     }
 
     /// The record with this identity if it exists and reads cleanly.
@@ -118,6 +141,11 @@ public actor DesktopRecordingStore {
     /// what a path check can detect; a native handle-based boundary would be
     /// needed for those.
     public func audioURL(for record: Record) throws -> URL {
+        try requireRetained(record.id)
+        return try ownedAudioURL(for: record)
+    }
+
+    func ownedAudioURL(for record: Record) throws -> URL {
         let name = record.audioFilename
         guard !name.isEmpty, name != ".", name != "..",
               !name.contains("/"), !name.contains("\\"), !name.contains(":") else {
@@ -143,7 +171,7 @@ public actor DesktopRecordingStore {
     /// Metadata lives at `<UUID>.json`. Every read ties the decoded identity to
     /// that basename, so a corrupt or foreign file can never be saved over, or
     /// reported as, another record. Only regular, non-symlinked files are read.
-    private func loadRecord(at url: URL) throws -> Record {
+    func loadRecord(at url: URL) throws -> Record {
         guard let expected = Self.recordID(ofMetadataFile: url) else { throw CocoaError(.fileReadCorruptFile) }
         let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
         guard values.isRegularFile == true, values.isSymbolicLink != true else {
@@ -159,7 +187,7 @@ public actor DesktopRecordingStore {
     /// swift-corelibs-foundation reports a path that is not a folder, or (on
     /// Linux) one it cannot open, as empty, which would show, sync and recover
     /// an unreadable History as one with no recordings.
-    private func metadataFiles() throws -> [URL] {
+    func metadataFiles() throws -> [URL] {
         try FileManager.default.contentsOfDirectory(atPath: directory.path)
             .map { directory.appendingPathComponent($0, isDirectory: false) }
             .filter { $0.pathExtension == "json" }
@@ -212,7 +240,7 @@ public actor DesktopRecordingStore {
         let files = try metadataFiles()
         var recovered: [Record] = []
         var unreadable: [String] = []
-        for file in files {
+        for file in files where !isDeletedMetadata(file) {
             do {
                 var record = try loadRecord(at: file)
                 // A synced copy is complete as received; it has no audio to recover.

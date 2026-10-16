@@ -39,7 +39,7 @@ extension DesktopHostController {
             // Re-check after the suspension: the selection, a recording or
             // shutdown may have changed while the store resolved the file.
             guard playbackRequests.isCurrent(ticket), !closed, canUseHistory, selectedHistoryID == id else { return }
-            try playback.play(recordID: id, path: audio.path, knownDuration: record.result?.duration)
+            try playback.play(recordID: id, path: audio.path, knownDuration: record.recordingDuration)
         } catch {
             guard playbackRequests.isCurrent(ticket), !busy, recording == nil else { return }
             update("Could not play recording: \(error.localizedDescription)")

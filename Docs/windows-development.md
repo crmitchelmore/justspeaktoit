@@ -475,6 +475,293 @@ not measured latency or microphone-device acceptance.
 
 ## Feature parity matrix
 
+History's Filters button opens a modeless native editor with multi-selection
+of the models used in saved transcription and post-processing, errors only,
+and optional From/Through date pickers. The dates use the shared
+`HistorySearchQuery` day policy in the local time zone; model/error/date
+constraints compose with existing Unicode/profile search. Apply and Reset
+change visibility, never recordings or transcripts. Hiding the selected row
+clears its actions and stops playback and Read aloud. Native UI/device
+acceptance remains required. Filtering changes no stored data; History
+migration remains outstanding.
+
+Native Delete removes the selected History entry while keeping its saved audio,
+as on the Mac. Clear History confirms the complete retained-ID snapshot,
+including filtered-out rows, and offers keeping audio or removing owned recording
+files. Cancel is the safe default; entries arriving after confirmation are not
+added to that snapshot. Delete and Clear are disabled during recording/work.
+Cancelling a clear finishes the already-admitted journalled deletion and keeps
+the remaining entries. Native event queues admit deletion without awaiting its
+cloud request; shutdown cancels the separately owned task and uses the existing
+bounded operation deadline. Selected playback, Read aloud and record-bound automatic
+output are cancelled before deletion; late results cannot recreate the row.
+
+An atomic `.history-deletions` journal is persisted before
+owned audio and metadata are removed. Permanent local tombstones reject late
+transcription results and synced snapshots after relaunch. Cleanup refuses
+linked, shared, ambiguous or changed audio ownership; interrupted cleanup is
+retried at startup, with explicit warnings while unaffected History stays visible.
+Cloud deletion tickets retain their original verified account and attempt
+revision. Opted-in sync drains them before reconciliation and after uploads;
+failed, cancelled or consent-disabled attempts remain pending. Deleting while
+History sync is disabled is local-only, even after a later opt-in. Account
+rebinding never transfers an old deletion ticket to a new account.
+The original keep/remove-audio choice survives cleanup retries; a later retry
+cannot gain authority to remove files the user chose to keep. Audio-only
+housekeeping (including previously kept files), migration/import and
+custom-directory controls remain outstanding. No automatic History expiry is
+introduced: the Mac has explicit audio housekeeping, not a retention limit.
+Native dialog,
+keyboard, accessibility, DPI and live CloudKit acceptance still require
+target-platform evidence; portable tests and syntax checks alone are insufficient.
+
+General now opens the actual recording storage folder through Explorer or the
+desktop file manager. This read-only action does not alter History, expose a
+different folder as a fallback, or drain a blocking shell request on the native
+settings queue. Launch errors are displayed and closing bounds outstanding work.
+The desktop folder contains both audio and metadata. General also confirms
+deletion of saved recording audio without changing History entries, transcripts
+or the History deletion journal. The confirmation freezes flat app-owned
+captured/imported audio, including canonical orphan files and audio kept after a
+History deletion; synthesis/conversion/comparison staging and unrelated files
+are excluded. Later arrivals cannot expand its authority. Starting another
+operation invalidates an outstanding confirmation.
+
+Cleanup checks regular-file/link status and the captured size, timestamps and
+available filesystem identifiers again before each removal. Detectably replaced
+files are kept and individual failures are reported; cancellation leaves
+unadmitted files. These are path-based checks, not an atomic native-handle
+conditional deletion guarantee: identical replacements and changes between the
+final check and removal remain outside that boundary. There is no automatic
+cleanup retry or expiry policy; retry requires a new explicit confirmation.
+Raw History playback is stopped independently of spoken/typed Voice output.
+History metadata stays byte-for-byte intact; intentionally removed audio is no
+longer available for playback, opening or transcription retry. A retry checks
+audio ownership/availability before entering transcription, so unavailable audio
+does not replace a saved transcript with a new failure. Changing the
+recording location and lossless migration remain outstanding.
+
+The existing Mac migration wire contract now lives in `SpeakCore`:
+`DataMigrationFormat` retains the `JustSpeakToIt` version-1 manifest, eight
+categories, explicit credential opt-in, record identities and date/selection
+scopes. The Mac uses aliases to those types without changing its archive JSON.
+Native migration UI, conflict previews, transactional apply/recovery and
+credential installation remain separate unfinished work.
+
+`DataMigrationCoding` and `DataMigrationPlanner` now also share the Mac codec,
+conflict identities, scoped replacement, text-over-audio-only preference,
+partial-category preservation and deterministic linked History/audio variants.
+Mac import and `DesktopMigrationPlanner` execute this single policy; native hosts
+inject the existing CNG/GLib/CryptoKit SHA-256 provider. Planning is cancellable
+and fails explicitly on malformed digest output or unencodable variant values,
+instead of deriving an identifier from empty-data fallback. The internal Mac
+planner now throws; the import controller surfaces that error before recovery
+creation or data application. A shared plan is not a native preview UI, category
+validation, credential installer or durable rollback transaction.
+
+`ApplicationPreferenceKey` is the canonical 91-key persisted application
+inventory; `AppSettings.DefaultsKey` remains a Mac alias. The exhaustive
+`DataMigrationPreferenceCatalog` assigns each portable key its archive value
+type and category, excludes key-tracking/reconciliation markers, and includes
+the existing consent, remembered-selection and credential-default auxiliaries.
+Its numeric bounds and strict Boolean/string collection rules are shared;
+platform shortcut/JSON validation is explicitly delegated, not silently skipped.
+This also fixes Mac migration rejecting valid Boolean values for
+`paidAccessRoutingEnabled`, `simpleModelChoices` and
+`pasteRemoteTranscriptsAtCursor`. Archive acceptance metadata is not host
+execution support: imported directories, credentials, hotkeys and unsupported
+preferences still need their native validators and application adapters.
+
+History wire values now live once in `SpeakCore` (`ApplicationHistoryItem` and
+its event, error, network, trigger, prompt and diagnostic metadata). Mac keeps
+source-compatible aliases and its platform-specific placeholder/presentation
+extensions. Existing JSON keys, enum raw values, required arrays and optional
+fields are unchanged; immutable values are `Sendable`.
+`DataMigrationHistorySchema` validates the exact History/audio payload,
+identifier, creation date and duration used by Mac. The shared
+`DataMigrationRecordValidation` also enforces exported History/audio scopes and
+emits category-prefixed preservation notices, without converting a missing
+category into an empty one. Every caller must supply its real record validator;
+this is not a permissive native category validator or an import/apply UI.
+
+`DesktopMigrationHistory` maps that wire model to durable native History.
+Imported duration, scalar costs without invented token counts, all model
+identifiers and original Mac metadata remain available to native History,
+filters, insights and playback. An optional `desktopHistory` carrier preserves
+native language, profile and result metadata through Mac decode/re-export;
+unknown carrier fields survive native round-trips. Canonical transcripts and
+costs override stale embedded results. Imports are not CloudKit synced copies.
+Shared redaction removes audio paths, network/debug payloads and recursive
+carriers; audio-only values also remove transcript, prompt, correction and
+failure content. JSON numbers are normalized before computing revisions, and
+sub-second native timestamps remain in the carrier for stable re-export.
+Record-envelope dates use the existing whole-second version-1 codec. The
+collector rejects fractional scope boundaries rather than silently changing
+inclusive starts/exclusive ends; native day-based selectors remain unchanged.
+
+The actor-owned `DesktopRecordingStore.migrationSnapshot` now collects real
+History and owned recording files, with exact selection/date scopes and active
+audio exclusion. It fences file identity around native hashing, represents
+shared audio for each retained History identity, and assigns stable separate
+identities to standalone or deletion-kept audio without reviving tombstoned
+History. Identifier collisions, cancellation and changed files fail explicitly.
+Missing referenced audio emits preservation notices that block destructive
+archive export. This collector owns only History/audio; it does not claim
+settings, vocabulary, profiles, Voice or credential collection/application.
+
+`DataMigrationArchivePolicy` also centralizes the existing Mac archive path,
+entry/total/JSON-size, duplicate-path, manifest and staging-capacity rules.
+Mac ZIP reads use this policy; portable tests exercise exact limits without
+allocating multi-gigabyte fixtures.
+
+`DesktopMigrationArchive` reads stored, DEFLATE and ZIP64 Mac-format exports
+in process with miniz 3.1.2, pinned to commit
+`77d0dce8627735138c51770d1799a1ef48f2117d`. The vendored MIT codec is compiled
+with the app, with no runtime download, external archive process or handwritten
+ZIP parser. `scripts/migration/verify-miniz.py` verifies LF-normalized source and
+licence hashes; Windows bundles and Flatpak include its licence.
+Native index allocations are capped at 128 MiB. The reader rejects duplicate
+paths, unsupported manifests and malformed names, never truncates Unicode paths,
+and streams only declared regular audio to generated UUID staging files.
+CRC and the existing platform SHA-256 provider both verify extracted audio.
+Malformed categories/items produce explicit preservation notices; cancellation
+removes private staging, and failed cleanup or an unavailable digest provider
+aborts explicitly. These are archive-read guarantees, not an implemented native
+preview, lossless data application or recovery transaction.
+
+`DesktopMigrationArchive.export` now writes canonical version-1 JSON and
+stored ZIP64 entries through the same pinned miniz dependency. Audio is copied
+in bounded chunks while its native SHA-256 is checked against the frozen
+record digest; changed, linked, missing or mismatched sources abort the export.
+The writer uses the reader's bounded allocator and shared incremental entry
+budget, including the exact 100,000-entry, 20-GB-entry and 50-GB-total limits;
+JSON retains its 128-MB limit. Incremental admission is linear, not repeated
+whole-archive preflight. The required unmodified `miniz_tdef.c` comes from the
+same pinned upstream commit and is included in source/licence verification;
+exports intentionally use stored entries rather than recompressing audio.
+
+The export API requires an explicit credential opt-in and refuses missing or
+damaged category snapshots rather than emitting a destructive empty category.
+It returns a new app-owned private staging ZIP, not a successfully published
+user destination. Cancellation, I/O, hashing and cleanup failures are surfaced
+and partial staging is removed. On POSIX the folder/file modes are 0700/0600.
+`WindowsMigrationArchive` supplies the existing native current-user/SYSTEM ACL
+adapter for both read and export. The shared Windows API refuses staging without
+an explicit storage policy; inherited parent ACLs are not a privacy guarantee.
+`LinuxMigrationArchive` supplies the existing native private-directory and
+exclusive 0600-file adapters. Each operation owns a fresh staging directory,
+creates it exclusively with private permissions and owner from the outset
+(including an elevated Windows process), and creates protected empty files before
+writing archive or audio bytes. Directory/file protection failures abort the
+whole operation rather than becoming a successful partial import. Cancellation
+after directory protection removes it before any file creation. The policy
+never secures or changes the caller-selected parent folder. Hosts must use
+exclusive native publication before reporting a saved export and then clean up
+the owned staging folder.
+
+`WindowsMigrationArchive.publish` and `LinuxMigrationArchive.publish` copy the
+private source into protected staging on the selected destination filesystem,
+using a frozen source length and 64-KiB buffers, then publish without replacing
+any existing file or link. The source remains available after success,
+cancellation or failure. Windows pins ancestor handles, refuses reparse paths,
+denies concurrent source writers and applies the current-user/SYSTEM descriptor
+before writing bytes. Linux refuses linked/nonregular/nonprivate sources and
+checks source size and modification/change timestamps after copying. It prefers
+anonymous `O_TMPFILE` staging; named fallback requires a current-user-owned folder
+that other accounts cannot modify and `RENAME_NOREPLACE` support. Unsupported
+filesystem/portal semantics fail explicitly; ordinary Linux acceptance does not
+establish Flatpak destination-grant support. Both adapters check cancellation
+between chunks and immediately before commit and remove only their owned
+uncommitted staging. A native post-commit cleanup/durability error has a distinct
+`CopyCompletionFailure`: the destination already exists and must not be deleted
+or retried. Successful publication is never relabelled as cancellation.
+These synchronous APIs require an owned cancellable worker, not the UI actor or
+settings admission queue.
+
+General > History backup uses a separate native ZIP save picker and an explicit
+include-saved-audio choice, enabled by default. Turning it off exports History
+text only; a complete History/audio export refuses missing audio rather than
+silently omitting it. Settings, profiles and credentials are not included.
+Settings queues admit the backup without awaiting archive I/O: an owned
+cancellable off-actor worker collects the actual store, builds the archive,
+publishes exclusively and removes only its owned private staging directory.
+Cancel and bounded app close cancel this worker; late results cannot update a
+closed window, and cancellation after commit still reports the saved backup.
+GTK's chooser snapshots its audio choice, weakly holds its parent, is cancelled
+on close and distinguishes dismissal from real picker failures.
+Windows keeps the backup controls together in the existing Audio and output
+card rather than adding an overflowing third card at its 980-by-760 minimum;
+GTK uses a separate History backup preferences group in its scrollable page.
+
+General also offers **Inspect backup** through a separate native ZIP open
+picker. This is read-only archive inspection, not import approval or application:
+the bounded native reader checks the envelope and extracted audio CRC/digests,
+then reports canonical category counts and the number of archive notices.
+History/audio records also pass cancellable canonical identity/date/scope
+validation and native desktop decoding; the report separately counts
+structurally valid and rejected records. Other categories are counted but
+their record values are not validated. Cancellation before, between or after
+records aborts validation rather than returning partial data or treating
+cancellation as an invalid-item notice. The existing non-cancellable validation
+API retains its behavior for other callers.
+An unreadable declared category is shown as unreadable, never as an empty
+successful category. Credential values and record contents are not displayed.
+Native reports also include a read-only **History/audio merge preview** against
+the current store, using the canonical planner and native SHA-256 adapter on the
+same owned off-actor worker. Counts distinguish existing, added, updated and
+retained items; conflicting versions follow the canonical non-overwriting
+History/audio rules. Invalid incoming items are excluded; unreadable categories
+remain unavailable rather than looking like empty merges. Missing, invalid,
+duplicate or damaged current data and collector failures explicitly fail the
+preview. No other category or credential is collected for this comparison.
+Preview counts are not a reserved transaction or application approval:
+deletion-tombstone eligibility, stale-state checks and transactional application
+remain required before a future import can change data.
+New exports use format version 2, with explicit record-kind coverage.
+The recording-store collector selects only `history` records: the separate
+native per-attempt Voice usage ledger is **not** included or converted into
+Mac successful `ttsUsage` entries, and saved standalone Voice WAVs remain
+independent recording-only files with no fabricated usage/History linkage.
+The inspector discloses this limitation. Kind-scoped replacement preserves
+unselected kinds even when their identifiers coincide; preference projections
+can also restrict covered keys without clearing unsupported defaults or
+uncollected vocabulary collections. Shared validation and both platform
+collectors honour these selections. Legacy version-1 ZIPs remain readable.
+Older version-1-only applications reject version-2 exports explicitly rather
+than silently ignoring the narrower destructive scope; update the receiving
+Mac app before restoring a new scoped export.
+The report explicitly states that record values are not yet approved for import
+and import/apply is unavailable. Its separately owned cancellable worker removes
+only its reader-created private staging directory, preserves the selected ZIP
+and application state, and cannot present a late report after close. The GTK
+open/save chooser shares cancellation and weak-parent lifetime fencing while
+keeping the selected operation and audio choice frozen. Windows posts owned
+report text through its existing window dispatcher; GTK posts a native report
+dialog with a single Close response.
+
+Complete category collection, selectable configuration conflicts/application, credential recovery
+and recording-location changes are not yet wired. Native CNG/GLib and Mac
+ZIPFoundation interoperability tests, picker lifecycle and paired light/dark
+layout acceptance remain separate required receipts. Ordinary Linux local-path
+checks do not establish Flatpak destination-grant support.
+
+Canonical History merging compares content independently of both the
+application item ID and the optional `desktopHistory.id`: application of a
+planned version reidentifies both through `DataMigrationHistoryValue`. A later
+export/reimport must not create another version solely because that native
+carrier now contains the assigned version ID. Other native/unknown carrier
+fields remain significant, and raw record/schema validation still rejects a
+mismatched envelope identity before planning.
+
+The filter editor scrolls vertically when the available work area is too short;
+keyboard traversal reveals the focused control. Long model names have native
+horizontal scrolling, and an open editor follows application appearance changes.
+Focus reveal does not relayout already-visible controls or ordinary paint
+messages, so painting cannot starve timers. Native self-tests cover these paths
+and verify that handling a child paint leaves its update region clean. The CI screenshot tour
+requires separate light/dark filter-editor snapshots; those artifacts still need
+visual review before claiming UI acceptance.
+
 “Implemented” below describes source wiring, not completed device acceptance.
 The exact CI run and target-device evidence must accompany any promotion in
 status. A platform-specific replacement may provide the same user capability,

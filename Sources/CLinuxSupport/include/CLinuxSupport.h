@@ -47,7 +47,14 @@ enum {
      * disabled; text: prompt, U+001F, then a new OpenRouter key or nothing. */
     JSTI_EVENT_POST_PROCESSING = 33,
     /* Apply in Azure Speech resource. text: the endpoint as typed ("" clears). */
-    JSTI_EVENT_AZURE_RESOURCE = 34
+    JSTI_EVENT_AZURE_RESOURCE = 34,
+    JSTI_EVENT_HISTORY_FILTERS = 90, /* text: DesktopHistoryFilter JSON */
+    JSTI_EVENT_HISTORY_DELETE = 91, /* text: frozen newline-separated UUIDs; index: 1 removes owned audio */
+    JSTI_EVENT_RECORDINGS_FOLDER = 93,
+    JSTI_EVENT_AUDIO_CLEANUP = 94,
+    JSTI_EVENT_AUDIO_CLEANUP_RESPONSE = 95, /* text: confirmation UUID; index: 1 confirms, 0 cancels */
+    JSTI_EVENT_MIGRATION_EXPORT = 96, /* text: selected ZIP destination; index: 1 includes saved audio */
+    JSTI_EVENT_MIGRATION_INSPECT = 97 /* text: selected ZIP source; no application changes */
 };
 
 /* Read aloud, Appearance and Launch at login. Linux-only numbers 40-46. */
@@ -94,6 +101,14 @@ typedef struct JSTIHistoryRow {
     int32_t tone;
 } JSTIHistoryRow;
 
+typedef struct JSTIHistoryFilterModel {
+    const char *id;
+    const char *name;
+    int32_t selected;
+} JSTIHistoryFilterModel;
+int32_t jsti_window_set_history_filters(const JSTIHistoryFilterModel *models, size_t count,
+                                        int32_t errors_only, const char *from_day, const char *through_day);
+
 /* Preformatted History totals, as the Mac dashboard shows them. */
 typedef struct JSTIInsights {
     const char *sessions;
@@ -135,6 +150,10 @@ int32_t jsti_window_set_model_catalog(
 int32_t jsti_window_set_microphones(
     const char *const *ids, const char *const *names, size_t count, const char *selected);
 int32_t jsti_window_set_history(const JSTIHistoryRow *rows, size_t count, const char *selected_id);
+/* Complete retained IDs, including filtered-out rows. Copied for Clear confirmation. */
+int32_t jsti_window_set_history_management(const char *identifiers);
+int32_t jsti_window_confirm_audio_cleanup(const char *token, size_t count);
+int32_t jsti_window_show_migration_report(const char *text);
 /* The dashboard totals (`all` saved records) and the History header totals
  * (`visible`, the records the search shows). */
 int32_t jsti_window_set_insights(const JSTIInsights *all, const JSTIInsights *visible);
@@ -344,8 +363,17 @@ int32_t jsti_window_set_playback(const char *record_id, int32_t state, const cha
 /* Creates a directory (and parents) readable only by the current user, or
  * tightens an existing one. Refuses symbolic links. */
 int32_t jsti_private_directory_prepare(const char *path, char *error, size_t error_capacity);
+int32_t jsti_private_directory_create(const char *path, char *error, size_t error_capacity);
 /* Creates a new empty file with mode 0600; refuses existing paths and links. */
 int32_t jsti_private_file_create(const char *path, char *error, size_t error_capacity);
+/* Private bounded copy and exclusive publication; source retained.
+ * Returns 0 committed, 2 cancelled before commit, -1 failed, or 3 committed
+ * with a cleanup/durability error. Never retry or remove a result-3 destination.
+ * A filesystem without exclusive publication support fails explicitly. */
+typedef int (*jsti_file_publication_cancelled_fn)(void *context);
+int32_t jsti_private_file_publish(const char *source, const char *destination,
+                                  jsti_file_publication_cancelled_fn cancelled, void *context,
+                                  char *error, size_t error_capacity);
 int32_t jsti_open_path(const char *path, char *error, size_t error_capacity);
 
 /* ------------------------------------------------------------ local models */

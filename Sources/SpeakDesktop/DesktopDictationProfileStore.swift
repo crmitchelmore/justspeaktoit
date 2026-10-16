@@ -8,8 +8,10 @@ import SpeakCore
 /// decoder's tolerance for unknown matcher kinds and newer routing values
 /// applies unchanged. Profiles are stored in precedence order with their
 /// identifiers exactly as given; the store never reorders, renames or drops.
+/// Raw migration must read the original file bytes: runtime decoding can discard
+/// unknown matcher/routing members that `DataMigrationProfileCatalog` preserves.
 public struct DesktopDictationProfileStore: Sendable {
-    public static let filename = "profiles.json"
+    public static let filename = DataMigrationProfileCatalog.desktopFilename
 
     public let fileURL: URL
 

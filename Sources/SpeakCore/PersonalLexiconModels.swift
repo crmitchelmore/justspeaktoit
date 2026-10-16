@@ -96,7 +96,7 @@ public enum PersonalLexiconConfidence: String, Codable, CaseIterable, Sendable {
   case low
 }
 
-public struct PersonalLexiconCorrectionRecord: Codable, Hashable, Identifiable {
+public struct PersonalLexiconCorrectionRecord: Codable, Hashable, Identifiable, Sendable {
   public let id: UUID
   public let ruleID: UUID
   public let alias: String
@@ -143,7 +143,7 @@ public struct PersonalLexiconApplicationResult {
   }
 }
 
-public struct PersonalLexiconHistorySummary: Codable, Hashable {
+public struct PersonalLexiconHistorySummary: Codable, Hashable, Sendable {
   public let applied: [PersonalLexiconCorrectionRecord]
   public let suggestions: [PersonalLexiconCorrectionRecord]
   public let contextTags: [String]

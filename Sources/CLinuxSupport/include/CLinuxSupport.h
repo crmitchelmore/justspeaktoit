@@ -113,6 +113,8 @@ int32_t jsti_window_set_configuration(const JSTIConfigurationField *fields, size
                                       JSTIConfigurationCallback callback, void *context);
 /* Queues a label-only update without replacing an unsaved entry value. */
 int32_t jsti_window_set_configuration_field_title(size_t index, const char *title);
+/* Queues route availability for a field with no enabling-field dependency. */
+int32_t jsti_window_set_configuration_field_enabled(size_t index, int32_t enabled);
 /* False when logind/screen-lock observation is unavailable; manual capture is unaffected. */
 int32_t jsti_window_hands_free_guard_ready(void);
 

@@ -142,7 +142,7 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
         .init(key: ApplicationPreferenceKey.recordingSoundVolume.rawValue, title: "Recording sound volume (0 to 1)",
               group: "General", kind: .number(0...1),
               defaultValue: AnyCodable(.double(RecordingFeedbackDefaults.volume)))
-    ] + SonioxVoicePreference.fields
+    ] + [VoiceSynthesisPreference.quality.field] + SonioxVoicePreference.fields + LivePolishPreference.fields
 
     public private(set) var values: [String: AnyCodable]
 
@@ -173,7 +173,9 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
                 valid = text.utf8.count <= 65_535 && !text.contains("\0")
             case (.choice(let choices), .string(let text)):
                 valid = choices.contains { $0.value == text }
-                    || (field.key == SonioxVoicePreference.regionKey
+                    || ((field.key == SonioxVoicePreference.regionKey
+                            || field.key == VoiceSynthesisPreference.quality.key.rawValue
+                            || field.key == ApplicationPreferenceKey.speedMode.rawValue)
                         && text.utf8.count <= 256
                         && !text.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains))
             case (.boolean, .bool): valid = true
@@ -182,6 +184,11 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
             default: valid = false
             }
             guard valid else { throw DesktopConfigurationError.invalidField(field.title) }
+            if field.key == ApplicationPreferenceKey.livePolishDebounceMs.rawValue
+                || field.key == ApplicationPreferenceKey.livePolishMinDeltaChars.rawValue,
+               case .double(let number) = value.storage, number.rounded() != number {
+                throw DesktopConfigurationError.invalidField(field.title)
+            }
         }
     }
 

@@ -1,13 +1,14 @@
 import Foundation
 
 public enum VoiceSynthesisPreference: CaseIterable, Sendable {
-    case speed, pitch, useSSML
+    case speed, pitch, useSSML, quality
 
     public var key: ApplicationPreferenceKey {
         switch self {
         case .speed: return .ttsSpeed
         case .pitch: return .ttsPitch
         case .useSSML: return .ttsUseSSML
+        case .quality: return .ttsQuality
         }
     }
 
@@ -24,6 +25,11 @@ public enum VoiceSynthesisPreference: CaseIterable, Sendable {
         case .useSSML:
             return .init(key: key.rawValue, title: "Use SSML", group: "Voice Output", kind: .boolean,
                          defaultValue: AnyCodable(.bool(VoiceSynthesisOptions.defaultUseSSML)))
+        case .quality:
+            return .init(key: key.rawValue, title: "Speech quality (provider-specific)", group: "Voice Output",
+                         kind: .choice(VoiceSynthesisQuality.allCases.map {
+                             .init(value: $0.rawValue, title: $0.displayName)
+                         }), defaultValue: AnyCodable(.string(VoiceSynthesisQuality.defaultValue.rawValue)))
         }
     }
 }
@@ -33,10 +39,12 @@ public struct VoiceSynthesisPreferenceUpdate: Sendable {
     public let speed: Double?
     public let pitch: Double?
     public let useSSML: Bool?
+    public let quality: String?
 
     public init(preferences: [String: AnyCodable]) throws {
         speed = try Self.number(.speed, in: preferences)
         pitch = try Self.number(.pitch, in: preferences)
+        quality = try SonioxVoicePreference.string(VoiceSynthesisPreference.quality.key.rawValue, in: preferences)
         if let value = preferences[VoiceSynthesisPreference.useSSML.key.rawValue] {
             guard case .bool(let enabled) = value.storage else {
                 throw DesktopConfigurationError.invalidField(VoiceSynthesisPreference.useSSML.field.title)

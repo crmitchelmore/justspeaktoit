@@ -3,6 +3,8 @@
 #include <adwaita.h>
 #include <string.h>
 
+#define JSTI_MAXIMUM_CONFIGURATION_FIELDS 64
+
 /*
  * The GTK 4 / libadwaita window. It owns no application state: every control
  * reports an event to Swift, and Swift pushes display state back through the
@@ -3090,7 +3092,8 @@ static void configuration_apply(gpointer data) {
 int32_t jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t count,
                                       const char *const *recovered_keywords, size_t recovered_count,
                                       JSTIConfigurationCallback callback, void *context) {
-    if (fields == NULL || count == 0 || count > 32 || callback == NULL || recovered_count > 1000 ||
+    if (fields == NULL || count == 0 || count > JSTI_MAXIMUM_CONFIGURATION_FIELDS ||
+        callback == NULL || recovered_count > 1000 ||
         (recovered_count > 0 && recovered_keywords == NULL)) return -1;
     ConfigurationUpdate *update = g_new0(ConfigurationUpdate, 1);
     update->titles = g_ptr_array_new_with_free_func(g_free);
@@ -3189,12 +3192,30 @@ static void configuration_title_apply(gpointer data) {
 }
 
 int32_t jsti_window_set_configuration_field_title(size_t index, const char *title) {
-    if (index >= 32 || title == NULL || title[0] == '\0' ||
+    if (index >= JSTI_MAXIMUM_CONFIGURATION_FIELDS || title == NULL || title[0] == '\0' ||
         !g_utf8_validate(title, -1, NULL) || strlen(title) > 256) return -1;
     ConfigurationTitleUpdate *update = g_new0(ConfigurationTitleUpdate, 1);
     update->index = index;
     update->title = g_strdup(title);
     return post(configuration_title_apply, update, configuration_title_free);
+}
+
+typedef struct { size_t index; gboolean enabled; } ConfigurationAvailabilityUpdate;
+static void configuration_availability_apply(gpointer data) {
+    ConfigurationAvailabilityUpdate *update = data;
+    if (configuration.rows == NULL) return;
+    if (update->index >= configuration.rows->len ||
+        g_array_index(configuration.enabled_by_fields, gint32, update->index) != 0) {
+        configuration_problem("The Voice quality field availability could not be updated.");
+        return;
+    }
+    gtk_widget_set_sensitive(g_ptr_array_index(configuration.rows, update->index), update->enabled);
+}
+int32_t jsti_window_set_configuration_field_enabled(size_t index, int32_t enabled) {
+    if (index >= JSTI_MAXIMUM_CONFIGURATION_FIELDS || (enabled != 0 && enabled != 1)) return -1;
+    ConfigurationAvailabilityUpdate *update = g_new0(ConfigurationAvailabilityUpdate, 1);
+    update->index = index; update->enabled = enabled;
+    return post(configuration_availability_apply, update, g_free);
 }
 
 /* The locale/language field is no longer guaranteed to occupy row 0 (visual
@@ -3204,6 +3225,69 @@ typedef struct {
     gint calls;
     guint language_index;
 } ConfigurationSelfTestContext;
+
+static const char auto_clean_choices[] = "instant\tInstant\nlivePolish\tAuto-Clean";
+
+typedef struct { guint index; guint calls; } AutoCleanConfigurationTest;
+
+static int32_t configuration_auto_clean_callback(
+    int32_t action, const char *const *values, size_t count, void *context, char *error, size_t capacity
+) {
+    (void)error; (void)capacity;
+    AutoCleanConfigurationTest *test = context;
+    const guint index = test->index;
+    if (action != 0 || count != configuration.rows->len || index + 4 >= count ||
+        g_strcmp0(values[index], "instant") != 0 ||
+        g_strcmp0(values[index + 1], "fixture/model") != 0 ||
+        g_strcmp0(values[index + 2], "250") != 0 ||
+        g_strcmp0(values[index + 3], "3") != 0 ||
+        g_strcmp0(values[index + 4], "0") != 0) return -1;
+    ++test->calls;
+    return 0;
+}
+
+static gboolean configuration_auto_clean_self_test(void) {
+    guint index = configuration.rows->len;
+    for (guint i = 0; i < configuration.rows->len; ++i)
+        if (g_strcmp0(g_ptr_array_index(configuration.choices, i), auto_clean_choices) == 0) {
+            index = i;
+            break;
+        }
+    if (index + 4 >= configuration.rows->len || configuration.rows->len <= 32) return FALSE;
+    AdwComboRow *speed = ADW_COMBO_ROW(g_ptr_array_index(configuration.rows, index));
+    GtkWidget *model = g_ptr_array_index(configuration.rows, index + 1);
+    GtkWidget *debounce = g_ptr_array_index(configuration.rows, index + 2);
+    GtkWidget *delta = g_ptr_array_index(configuration.rows, index + 3);
+    GtkWidget *skip = g_ptr_array_index(configuration.rows, index + 4);
+    if (!ADW_IS_ENTRY_ROW(model) || !ADW_IS_ENTRY_ROW(debounce) ||
+        !ADW_IS_ENTRY_ROW(delta) || !ADW_IS_SWITCH_ROW(skip) ||
+        g_list_model_get_n_items(adw_combo_row_get_model(speed)) != 2) return FALSE;
+    const guint saved_speed = adw_combo_row_get_selected(speed);
+    gchar *saved_model = g_strdup(gtk_editable_get_text(GTK_EDITABLE(model)));
+    gchar *saved_debounce = g_strdup(gtk_editable_get_text(GTK_EDITABLE(debounce)));
+    gchar *saved_delta = g_strdup(gtk_editable_get_text(GTK_EDITABLE(delta)));
+    const gboolean saved_skip = adw_switch_row_get_active(ADW_SWITCH_ROW(skip));
+    JSTIConfigurationCallback callback = configuration.callback;
+    void *context = configuration.context;
+    AutoCleanConfigurationTest test = { .index = index, .calls = 0 };
+    configuration.callback = configuration_auto_clean_callback;
+    configuration.context = &test;
+    adw_combo_row_set_selected(speed, 0);
+    gtk_editable_set_text(GTK_EDITABLE(model), "fixture/model");
+    gtk_editable_set_text(GTK_EDITABLE(debounce), "250");
+    gtk_editable_set_text(GTK_EDITABLE(delta), "3");
+    adw_switch_row_set_active(ADW_SWITCH_ROW(skip), FALSE);
+    on_configuration_apply(NULL, NULL);
+    adw_combo_row_set_selected(speed, saved_speed);
+    gtk_editable_set_text(GTK_EDITABLE(model), saved_model);
+    gtk_editable_set_text(GTK_EDITABLE(debounce), saved_debounce);
+    gtk_editable_set_text(GTK_EDITABLE(delta), saved_delta);
+    adw_switch_row_set_active(ADW_SWITCH_ROW(skip), saved_skip);
+    g_free(saved_model); g_free(saved_debounce); g_free(saved_delta);
+    configuration.callback = callback;
+    configuration.context = context;
+    return test.calls == 1;
+}
 
 static int32_t configuration_test_callback(int32_t action, const char *const *values, size_t count,
                                           void *context, char *error, size_t capacity) {
@@ -3216,8 +3300,11 @@ static int32_t configuration_test_callback(int32_t action, const char *const *va
         g_strcmp0(values[count - 1], "Second recoverable edit") != 0)) return -1;
     if (action != 0 && action != 3 && action != 4 && action != 5) return -1;
     for (guint i = 0; i < configuration.rows->len; ++i)
-        if (((const char *)g_ptr_array_index(configuration.choices, i))[0] != '\0' &&
-            g_strcmp0(values[i], "expanded") != 0 && g_strcmp0(values[i], "bubbly") != 0) return -1;
+        if (((const char *)g_ptr_array_index(configuration.choices, i))[0] != '\0') {
+            if (g_strcmp0(g_ptr_array_index(configuration.choices, i), auto_clean_choices) == 0) {
+                if (g_strcmp0(values[i], "livePolish") != 0) return -1;
+            } else if (g_strcmp0(values[i], "expanded") != 0 && g_strcmp0(values[i], "bubbly") != 0) return -1;
+        }
     ++test_context->calls;
     return 0;
 }
@@ -3281,7 +3368,11 @@ static gboolean configuration_self_test(void) {
         if (((const char *)g_ptr_array_index(configuration.choices, i))[0] == '\0') continue;
         choice_row = ADW_COMBO_ROW(g_ptr_array_index(configuration.rows, i));
         guint count = g_list_model_get_n_items(adw_combo_row_get_model(choice_row));
-        if (count != 3 && count != 4) { g_array_unref(original_choices); return FALSE; }
+        const gboolean auto_clean = g_strcmp0(
+            g_ptr_array_index(configuration.choices, i), auto_clean_choices) == 0;
+        if (auto_clean ? count != 2 : (count != 3 && count != 4)) {
+            g_array_unref(original_choices); return FALSE;
+        }
         guint original_choice = adw_combo_row_get_selected(choice_row);
         g_array_append_val(original_choices, original_choice);
         adw_combo_row_set_selected(choice_row, 1);
@@ -3297,9 +3388,18 @@ static gboolean configuration_self_test(void) {
     const gboolean title_preserved =
         g_strcmp0(adw_preferences_row_get_title(ADW_PREFERENCES_ROW(language)), gemini_title) == 0 &&
         g_strcmp0(gtk_editable_get_text(GTK_EDITABLE(language)), "fr_FR") == 0 &&
-        jsti_window_set_configuration_field_title(32, "Invalid") < 0 &&
+        jsti_window_set_configuration_field_title(JSTI_MAXIMUM_CONFIGURATION_FIELDS, "Invalid") < 0 &&
         jsti_window_set_configuration_field_title(language_index, NULL) < 0 &&
-        jsti_window_set_configuration_field_title(language_index, "") < 0;
+        jsti_window_set_configuration_field_title(language_index, "") < 0 &&
+        jsti_window_set_configuration_field_enabled(JSTI_MAXIMUM_CONFIGURATION_FIELDS, 1) < 0 &&
+        jsti_window_set_configuration_field_enabled(language_index, 2) < 0;
+    ConfigurationAvailabilityUpdate availability = { .index = language_index, .enabled = FALSE };
+    configuration_availability_apply(&availability);
+    gboolean availability_preserved = !gtk_widget_get_sensitive(GTK_WIDGET(language)) &&
+        g_strcmp0(gtk_editable_get_text(GTK_EDITABLE(language)), "fr_FR") == 0;
+    availability.enabled = TRUE; configuration_availability_apply(&availability);
+    availability_preserved = availability_preserved && gtk_widget_get_sensitive(GTK_WIDGET(language)) &&
+        g_strcmp0(gtk_editable_get_text(GTK_EDITABLE(language)), "fr_FR") == 0;
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(language), saved_title);
     g_free(saved_title);
     on_configuration_apply(NULL, NULL);
@@ -3331,7 +3431,8 @@ static gboolean configuration_self_test(void) {
     g_free(saved);
     configuration.callback = callback;
     configuration.context = context;
-    return test_context.calls == 4 && title_preserved;
+    return test_context.calls == 4 && title_preserved && availability_preserved &&
+        configuration_auto_clean_self_test();
 }
 
 static void style_apply(gpointer data) {

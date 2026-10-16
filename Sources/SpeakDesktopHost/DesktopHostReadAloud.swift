@@ -16,6 +16,7 @@ package struct DesktopVoiceOutputSettings: Codable, Equatable, Sendable {
     package var favoriteVoices: [String]?
     package var sonioxRegion: String?
     package var language: String?
+    package var quality: String?
 
     private enum CodingKeys: String, CodingKey {
         case modelID, voiceID
@@ -28,6 +29,7 @@ package struct DesktopVoiceOutputSettings: Codable, Equatable, Sendable {
         case favoriteVoices = "ttsFavoriteVoices"
         case sonioxRegion = "sonioxTTSRegion"
         case language = "ttsLanguage"
+        case quality = "ttsQuality"
     }
 
     package var generationOptions: VoiceGenerationOptions {
@@ -48,8 +50,7 @@ package struct DesktopVoiceOutputSettings: Codable, Equatable, Sendable {
     }
 
     package func synthesisSelection(accountInventory: VoiceAccountInventory?) throws -> DesktopSpeechSelection {
-        let voice = try DesktopSpeechVoice.resolved(
-            modelID: modelID, voiceID: voiceID, accountInventory: accountInventory)
+        let voice = try resolvedVoice(accountInventory: accountInventory)
         let region: SonioxTTSRegion
         if case .soniox = voice {
             region = try validatedSonioxRegion()
@@ -57,12 +58,14 @@ package struct DesktopVoiceOutputSettings: Codable, Equatable, Sendable {
         } else { region = .unitedStates }
         return try .init(
             voice: voice,
-            options: VoiceSynthesisOptions(
-                speed: speed ?? VoiceSynthesisOptions.defaultSpeed,
-                pitch: pitch ?? VoiceSynthesisOptions.defaultPitch,
-                useSSML: useSSML ?? VoiceSynthesisOptions.defaultUseSSML
-            ), accountInventory: accountInventory, sonioxRegion: region, language: language
+            options: validatedSynthesisOptions(), accountInventory: accountInventory,
+            sonioxRegion: region, language: language
         )
+    }
+
+    package func resolvedVoice(accountInventory: VoiceAccountInventory?) throws -> DesktopSpeechVoice {
+        try DesktopSpeechVoice.resolved(modelID: modelID, voiceID: voiceID, accountInventory: accountInventory)
+            .applyingQuality(VoiceSynthesisQuality.storedValue(quality))
     }
 
     package func validatedSonioxRegion() throws -> SonioxTTSRegion {
@@ -83,8 +86,7 @@ package struct DesktopVoiceOutputSettings: Codable, Equatable, Sendable {
     package func pickerPresentation(accountInventory: VoiceAccountInventory?) -> (labels: [String], selected: Int) {
         var labels = DesktopSpeechVoice.voices.map(\.label)
         do {
-            let voice = try DesktopSpeechVoice.resolved(
-                modelID: modelID, voiceID: voiceID, accountInventory: accountInventory)
+            let voice = try resolvedVoice(accountInventory: accountInventory)
             if let selected = DesktopSpeechVoice.voices.firstIndex(of: voice) { return (labels, selected) }
             labels.append(String(voice.label.prefix(220)))
             return (labels, labels.count - 1)
@@ -104,20 +106,20 @@ package struct DesktopVoiceOutputSettings: Codable, Equatable, Sendable {
 
     package func controlsPresentation(accountInventory: VoiceAccountInventory?) -> DesktopVoiceControlsPresentation {
         do {
-            let voice = try DesktopSpeechVoice.resolved(
-                modelID: modelID, voiceID: voiceID, accountInventory: accountInventory)
+            let voice = try resolvedVoice(accountInventory: accountInventory)
             return .init(speed: speed ?? VoiceSynthesisOptions.defaultSpeed,
                          pitch: pitch ?? VoiceSynthesisOptions.defaultPitch, ssml: useSSML == true ? 1 : 0,
                          capabilities: voice.capabilities.nativeFlags, label: voice.label,
                          minimumSpeed: voice.capabilities.speedRange.lowerBound,
-                         maximumSpeed: voice.capabilities.speedRange.upperBound)
+                         maximumSpeed: voice.capabilities.speedRange.upperBound, guidance: voice.deliveryGuidance)
         } catch {
             return .init(speed: speed ?? VoiceSynthesisOptions.defaultSpeed,
                          pitch: pitch ?? VoiceSynthesisOptions.defaultPitch,
                          ssml: useSSML == true ? 1 : 0, capabilities: 0,
                          label: "Stored voice unavailable. Choices are retained; select a compatible voice.",
                          minimumSpeed: VoiceSynthesisOptions.speedRange.lowerBound,
-                         maximumSpeed: VoiceSynthesisOptions.speedRange.upperBound)
+                         maximumSpeed: VoiceSynthesisOptions.speedRange.upperBound,
+                         guidance: "The stored voice or quality is unavailable. Choose a compatible voice and quality.")
         }
     }
 
@@ -149,6 +151,8 @@ package struct DesktopVoiceControlsPresentation: Sendable {
     package let label: String
     package let minimumSpeed: Double
     package let maximumSpeed: Double
+    package let guidance: String
+    package var markupHelperEnabled: Bool { capabilities & 4 != 0 && ssml == 1 }
 }
 
 /// History playback that can also speak a record's Read aloud as consecutive
@@ -224,6 +228,8 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         var changed = voiceOutputSettings()
         changed.modelID = voice.modelID
         changed.voiceID = voice.id
+        if case .openai = voice { changed.quality = voice.defaultQuality.rawValue }
+        if case .elevenlabs = voice { changed.quality = voice.defaultQuality.rawValue }
         saveVoiceOutput(changed)
     }
 
@@ -233,6 +239,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         changed.speed = options.speed
         changed.pitch = options.pitch
         changed.useSSML = options.useSSML
+        if let quality = options.quality { changed.quality = quality.rawValue }
         return persistVoiceOutput(changed, message: "Voice synthesis controls saved.")
     }
 
@@ -256,7 +263,8 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             )
             settings = changed
             reconcileSonioxRegionChange(previous)
-            if previous.modelID != voiceOutput.modelID || previous.voiceID != voiceOutput.voiceID {
+            if previous.modelID != voiceOutput.modelID || previous.voiceID != voiceOutput.voiceID
+                || previous.quality != voiceOutput.quality {
                 voiceCredentialEpoch = UUID()
             }
             if wasTracking != voiceUsageTrackingEnabled { voiceUsage.epoch = UUID() }

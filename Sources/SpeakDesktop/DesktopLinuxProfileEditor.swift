@@ -159,10 +159,13 @@ public enum DesktopLinuxProfileEditor {
     }
 
     private static func polishMode(_ value: String) throws -> DesktopProfileEditing.PolishMode {
+        // Explicit .none/.some(_) patterns (rather than implicit nil/true/false literals)
+        // so every Swift compiler recognizes this switch over Bool? as exhaustive; no
+        // behavioral change versus the prior equivalent pattern matching.
         switch try boolean(value) {
-        case nil: return .appSetting
-        case true: return .enabled
-        case false: return .disabled
+        case .none: return .appSetting
+        case .some(true): return .enabled
+        case .some(false): return .disabled
         }
     }
 

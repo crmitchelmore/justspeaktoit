@@ -105,4 +105,24 @@ final class DesktopLinuxProfileEditorTests: XCTestCase {
         XCTAssertThrowsError(try DesktopLinuxProfileEditor.fields("broken%ZZ"))
         XCTAssertThrowsError(try DesktopLinuxProfileEditor.edit([], original: nil, catalogue: catalogue))
     }
+
+    func testPolishModeCoversAppSettingEnabledDisabledAndRejectsInvalidValue() throws {
+        // field index 3 is polishMode's wire value, surfaced on the edited profile as
+        // polishEnabled (nil/false/true). Only "1" (enabled) was previously exercised
+        // anywhere in this file, leaving the appSetting/disabled branches and the
+        // invalid-value error path unverified.
+        var values = fields()
+        values[3] = ""
+        XCTAssertNil(try DesktopLinuxProfileEditor.edit(values, original: nil, catalogue: catalogue).polishEnabled)
+        values[3] = "1"
+        XCTAssertEqual(
+            try DesktopLinuxProfileEditor.edit(values, original: nil, catalogue: catalogue).polishEnabled, true
+        )
+        values[3] = "0"
+        XCTAssertEqual(
+            try DesktopLinuxProfileEditor.edit(values, original: nil, catalogue: catalogue).polishEnabled, false
+        )
+        values[3] = "invalid"
+        XCTAssertThrowsError(try DesktopLinuxProfileEditor.edit(values, original: nil, catalogue: catalogue))
+    }
 }

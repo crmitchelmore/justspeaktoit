@@ -18,7 +18,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         }
         let staging = directory.appendingPathComponent("VoiceOutput")
         let voiceOutput: Platform.VoiceOutput?
-        if case .deepgram = selection.voice {
+        if case .deepgram = selection.voice, selection.sampleRate == VoiceSynthesisQuality.high.sampleRate {
             guard let output = readAloudState.output({ try Platform.makeVoiceOutput(stagingDirectory: staging) }) else {
                 update("Read aloud is unavailable: its private audio folder could not be prepared.")
                 return
@@ -96,7 +96,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 try await Self.readVoiceSynthesisKey(effects: effects, name: selection.voice.apiKeyIdentifier)
             }
             try await DesktopVoicePlaybackFile.play(
-                VoiceGeneratedAudio(validating: wav, sampleRate: selection.voice.sampleRate),
+                VoiceGeneratedAudio(validating: wav, sampleRate: selection.sampleRate),
                 directory: directory.appendingPathComponent("VoiceGeneratedPlayback"),
                 prepare: { try Platform.preparePrivateDirectory($0) },
                 through: { try await playback.playToCompletion(speech, path: $0.path) }

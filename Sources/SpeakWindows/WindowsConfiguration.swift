@@ -11,7 +11,19 @@ extension WindowsNative {
         }) else { return false }
         return settings.languageTitle(accountInventory: accountInventory).withCString {
             jsti_window_set_configuration_field_title(index, $0) >= 0
-        }
+        } && configureVoiceQualityTitle(settings, accountInventory: accountInventory)
+    }
+
+    private static func configureVoiceQualityTitle(
+        _ settings: WindowsVoiceOutputSettings, accountInventory: VoiceAccountInventory?
+    ) -> Bool {
+        guard let index = DesktopConfiguration.fields.firstIndex(where: {
+            $0.key == VoiceSynthesisPreference.quality.key.rawValue
+        }) else { return false }
+        return settings.qualityTitle(accountInventory: accountInventory).withCString {
+            jsti_window_set_configuration_field_title(index, $0) >= 0
+        } && jsti_window_set_configuration_field_enabled(index,
+            settings.qualityControlsAvailable(accountInventory: accountInventory) ? 1 : 0) >= 0
     }
 
     final class ConfigurationStrings {
@@ -35,7 +47,8 @@ extension WindowsNative {
         let strings = ConfigurationStrings()
         let rows = zip(DesktopConfiguration.fields, preferences.entries).map { field, value in
             JSTIConfigurationField(
-                title: strings.add(field.key == VoiceOutputLanguagePreference.key ? snapshot.languageTitle : field.title),
+                title: strings.add(field.key == VoiceOutputLanguagePreference.key ? snapshot.languageTitle
+                    : field.key == VoiceSynthesisPreference.quality.key.rawValue ? snapshot.qualityTitle : field.title),
                 value: strings.add(value), group: strings.add(field.group),
                 is_boolean: { if case .boolean = field.kind { return 1 }; return 0 }(),
                 requires_hud_overlay: field.requiresHUDOverlay ? 1 : 0,
@@ -58,6 +71,11 @@ extension WindowsNative {
             }
         }
         guard result == 0 else { throw WindowsNativeError(message: "Could not display dictation preferences.") }
+        guard let qualityIndex = DesktopConfiguration.fields.firstIndex(where: {
+            $0.key == VoiceSynthesisPreference.quality.key.rawValue
+        }), jsti_window_set_configuration_field_enabled(qualityIndex, snapshot.qualityEnabled ? 1 : 0) >= 0 else {
+            throw WindowsNativeError(message: "Could not display Voice quality availability.")
+        }
         try configureConfigurationLayout(preferences, strings: strings)
     }
 
@@ -94,7 +112,7 @@ extension WindowsNative {
         _ action: Int32, values: [String], holder: WindowsEventContext
     ) async throws {
         switch action {
-        case 0: try await holder.controller.saveConfiguration(values)
+        case 0: try await holder.controller.saveConfiguration(values, intent: .apply)
         case 1: try await holder.controller.importConfiguration(path: values[0])
         case 2: try await holder.controller.exportConfiguration(path: values[0])
         case 3:
@@ -103,11 +121,17 @@ extension WindowsNative {
             }
             try await holder.controller.recoverConfigurationKeywords(Array(values.dropLast()), selected: selected)
         case 4, 5:
-            try await holder.controller.saveConfiguration(values)
-            try await holder.controller.previewRecordingFeedback(action == 4 ? .start : .stop)
+            try await holder.controller.previewRecordingFeedback(
+                action == 4 ? .start : .stop, configurationEntries: values
+            )
         default: throw DesktopConfigurationError.invalidField("Configuration action")
         }
         try await configureConfiguration(holder)
+        guard configureVoiceOutput(await holder.controller.voiceOutputSettings(),
+            context: Unmanaged.passUnretained(holder).toOpaque(),
+            accountInventory: await holder.controller.selectedVoiceAccountInventory) else {
+            throw WindowsNativeError(message: "Could not display the saved Voice quality and model.")
+        }
         if action == 1 {
             try configurePostProcessing(
                 await holder.controller.postProcessingOptions(), context: Unmanaged.passUnretained(holder).toOpaque()

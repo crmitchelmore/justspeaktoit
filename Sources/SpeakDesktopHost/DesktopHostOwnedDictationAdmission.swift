@@ -12,6 +12,7 @@ struct DesktopHostOwnedDictationStart<Platform: DesktopHostPlatform>: Sendable {
     let key: String
     let endpoint: String
     let configuration: DesktopConfiguration?
+    var polish: DesktopHostLivePolishInput? = nil
 }
 
 struct DesktopHostOwnedDictationAdmission<Platform: DesktopHostPlatform>: Sendable {
@@ -62,7 +63,7 @@ extension DesktopHostController {
                 profile.transcriptionOptions ?? configuration?.liveOptions ?? .init()
             ),
             textOutput: textOutput, trigger: trigger, key: key, endpoint: azureResourceEndpoint(),
-            configuration: configuration
+            configuration: configuration, polish: captureLivePolish(profile)
         )
     }
 

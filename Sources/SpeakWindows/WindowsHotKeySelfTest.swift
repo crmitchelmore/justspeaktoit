@@ -12,7 +12,7 @@ enum WindowsHotKeySelfTest {
         try await checkClassifier()
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("JSTI shortcut self-test \(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try WindowsNative.createSyntheticDirectory(root)
         defer { try? FileManager.default.removeItem(at: root) }
         let controller = try WindowsAppController(directory: root, effects: SyntheticEffects())
         await controller.markReadyForSelfTest()

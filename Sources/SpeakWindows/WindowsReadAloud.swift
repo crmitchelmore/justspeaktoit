@@ -61,12 +61,28 @@ extension WindowsNative {
         _ settings: WindowsVoiceOutputSettings, accountInventory: VoiceAccountInventory?
     ) -> Bool {
         let shown = settings.controlsPresentation(accountInventory: accountInventory)
-        return shown.label.withCString {
-            jsti_window_set_voice_synthesis_options_with_limits(
-                shown.speed, shown.pitch, shown.ssml, shown.capabilities, $0,
-                shown.minimumSpeed, shown.maximumSpeed) == 0
+        let configured = shown.label.withCString { label in
+            shown.guidance.withCString {
+                jsti_window_set_voice_synthesis_options_with_details(
+                    shown.speed, shown.pitch, shown.ssml, shown.capabilities, label,
+                    shown.minimumSpeed, shown.maximumSpeed, $0) == 0
+            }
         }
-
+        let strings = ConfigurationStrings()
+        let examples = VoiceSynthesisMarkup.examples.map {
+            JSTIVoiceMarkupExample(text: strings.add($0.text), description: strings.add($0.description))
+        }
+        let helper = withExtendedLifetime(strings) {
+            examples.withUnsafeBufferPointer {
+                jsti_window_set_voice_markup_helper(
+                    shown.markupHelperEnabled ? 1 : 0, $0.baseAddress, $0.count
+                ) { input, output, capacity, utf16, scalars in
+                    VoiceSynthesisMarkup.writeWrappedText(input, output: output, capacity: capacity,
+                        leadingUTF16: utf16, leadingScalars: scalars)
+                }
+            }
+        }
+        return configured && helper == 0
     }
 
     static func voiceDiscovery(_ shown: DesktopVoiceDiscoveryPresentation) {

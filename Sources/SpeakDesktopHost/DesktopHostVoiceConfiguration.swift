@@ -3,6 +3,8 @@ import SpeakCore
 extension DesktopVoiceOutputSettings {
     package func configurationProjection(over values: [String: AnyCodable]) -> [String: AnyCodable] {
         var projection = values
+        projection[VoiceSynthesisPreference.quality.key.rawValue] =
+            quality.map { AnyCodable(.string($0)) } ?? projection[VoiceSynthesisPreference.quality.key.rawValue]
         projection[VoiceFavoritePreference.key] = favoriteVoices.map(VoiceFavoritePreference.encoded)
             ?? projection[VoiceFavoritePreference.key]
         projection[SonioxVoicePreference.regionKey] = sonioxRegion.map { AnyCodable(.string($0)) }
@@ -39,20 +41,46 @@ extension DesktopVoiceOutputSettings {
         if let favorites { favoriteVoices = favorites }
         if let region { sonioxRegion = region }
         if let language { self.language = language }
+        if let quality = synthesis.quality { self.quality = quality }
     }
 
     package func validatedSynthesisOptions() throws -> VoiceSynthesisOptions {
         try .init(speed: speed ?? VoiceSynthesisOptions.defaultSpeed,
                   pitch: pitch ?? VoiceSynthesisOptions.defaultPitch,
-                  useSSML: useSSML ?? VoiceSynthesisOptions.defaultUseSSML)
+                  useSSML: useSSML ?? VoiceSynthesisOptions.defaultUseSSML,
+                  quality: VoiceSynthesisQuality.storedValue(quality))
     }
 
     package func languageTitle(accountInventory: VoiceAccountInventory?) -> String {
         do {
-            return VoiceOutputLanguagePreference.title(for: try DesktopSpeechVoice.resolved(
-                modelID: modelID, voiceID: voiceID, accountInventory: accountInventory))
+            return VoiceOutputLanguagePreference.title(for: try resolvedVoice(accountInventory: accountInventory))
         } catch {
             return VoiceOutputLanguagePreference.title(for: nil)
+        }
+    }
+
+    package func qualityTitle(accountInventory: VoiceAccountInventory?) -> String {
+        do { return try resolvedVoice(accountInventory: accountInventory).qualityTitle } catch {
+            return "Quality (stored; selected voice or quality is unavailable)"
+        }
+    }
+
+    package func qualityControlsAvailable(accountInventory: VoiceAccountInventory?) -> Bool {
+        do {
+            let voice = try DesktopSpeechVoice.resolved(modelID: modelID, voiceID: voiceID,
+                accountInventory: accountInventory)
+            return voice.supportsQualityControls
+                || quality.map { VoiceSynthesisQuality(rawValue: $0) == nil } == true
+        } catch { return false }
+    }
+
+    package var qualityForNativeEditor: String {
+        if let quality { return quality }
+        do {
+            return try resolvedVoice(accountInventory: nil).defaultQuality.rawValue
+        } catch {
+            // Display-only default: the unavailable selection still refuses synthesis.
+            return VoiceSynthesisQuality.defaultValue.rawValue
         }
     }
 }
@@ -80,14 +108,17 @@ extension DesktopVoiceOutputSettings {
 
 extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     package func voiceConfigurationEditorSnapshot() throws -> (
-        preferences: DesktopConfiguration, languageTitle: String
+        preferences: DesktopConfiguration, languageTitle: String, qualityTitle: String, qualityEnabled: Bool
     ) {
         let preferences = try configurationForNativeEditor()
         let saved = voiceOutputSettings()
         let inventory = voiceDiscovery.inventories.values.first {
             $0.desktopVoices.contains { $0.id == saved.voiceID && $0.modelID == saved.modelID }
         }
-        return (preferences, saved.languageTitle(accountInventory: inventory))
+        return (
+            preferences, saved.languageTitle(accountInventory: inventory),
+            saved.qualityTitle(accountInventory: inventory),
+            saved.qualityControlsAvailable(accountInventory: inventory))
     }
 }
 

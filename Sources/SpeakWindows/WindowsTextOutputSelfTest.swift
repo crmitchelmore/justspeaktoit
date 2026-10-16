@@ -15,7 +15,7 @@ enum WindowsTextOutputSelfTest {
     static func run() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("JSTI text output self-test \(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try WindowsNative.createSyntheticDirectory(root)
         defer { try? FileManager.default.removeItem(at: root) }
         try await checkStoredSettings(in: root)
         let workflow = try TextOutputWorkflow(directory: root.appendingPathComponent("Workflow", isDirectory: true))
@@ -42,7 +42,7 @@ enum WindowsTextOutputSelfTest {
         ]
         for (index, file) in files.enumerated() {
             let directory = root.appendingPathComponent("Stored \(index)", isDirectory: true)
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try WindowsNative.createSyntheticDirectory(directory)
             try Data(file.json.utf8).write(to: directory.appendingPathComponent("settings.json"))
             let controller = try WindowsAppController(directory: directory, effects: SyntheticEffects())
             let options = await controller.textOutputOptions()
@@ -63,7 +63,7 @@ private final class TextOutputWorkflow {
     private var context: UnsafeMutableRawPointer { Unmanaged.passUnretained(holder).toOpaque() }
 
     init(directory: URL) throws {
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try WindowsNative.createSyntheticDirectory(directory)
         let effects = SyntheticEffects()
         let controller = try WindowsAppController(directory: directory, effects: effects)
         guard let batch = WindowsModels.all.firstIndex(where: { DesktopTranscription.provider(for: $0.id) != nil }),

@@ -35,13 +35,24 @@ public enum SonioxVoicePreference {
 }
 
 extension DesktopConfiguration {
-    /// Supply an explicit preserved row instead of letting a native combo guess the first region.
+    /// Preserve unknown choice values rather than letting a native combo select a default.
     public func serializedChoices(for field: Field) -> String? {
         guard let choices = field.serializedChoices else { return nil }
-        guard field.key == SonioxVoicePreference.regionKey,
+        guard field.key == SonioxVoicePreference.regionKey
+                || field.key == VoiceSynthesisPreference.quality.key.rawValue
+                || field.key == ApplicationPreferenceKey.speedMode.rawValue,
               case .string(let saved) = value(for: field).storage,
               case .choice(let options) = field.kind,
               !options.contains(where: { $0.value == saved }) else { return choices }
-        return choices + "\n\(saved)\tUnsupported stored region (preserved; choose a supported region to use Soniox)"
+        let reason: String
+        switch field.key {
+        case SonioxVoicePreference.regionKey:
+            reason = "Unsupported stored region (preserved; choose a supported region to use Soniox)"
+        case ApplicationPreferenceKey.speedMode.rawValue:
+            reason = "Unsupported stored speed mode (preserved; choose Instant or Auto-Clean)"
+        default:
+            reason = "Unsupported stored quality (preserved; choose a supported quality to synthesize)"
+        }
+        return choices + "\n\(saved)\t\(reason)"
     }
 }

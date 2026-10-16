@@ -11,6 +11,8 @@ constexpr int groupLabelID = 598, groupID = 599, fieldBase = 600, labelBase = 70
 constexpr int problemID = 800, importID = 801, exportID = 802;
 constexpr int recoveryLabelID = 803, recoveryID = 804, restoreID = 805;
 constexpr int previewStartID = 806, previewStopID = 807;
+constexpr size_t maximumConfigurationFields = 64;
+static_assert(maximumConfigurationFields <= labelBase - fieldBase);
 constexpr UINT refreshTitleMessage = WM_APP + 85;
 struct Field {
     std::wstring title, value, group;
@@ -18,6 +20,7 @@ struct Field {
     std::vector<std::pair<std::wstring, std::wstring>> choices{};
     bool requiresHandsFreeGuard = false;
     int enabledByField = 0;
+    int availability = -1;
 };
 struct Configuration {
     std::vector<Field> fields;
@@ -41,8 +44,10 @@ int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpi
 void updateDependencies(HWND window, const Dialog &dialog) {
     for (size_t i = 0; i < dialog.config.fields.size(); ++i) {
         const int enabling = dialog.config.fields[i].enabledByField;
-        if (!enabling) continue;
-        const bool enabled = SendDlgItemMessageW(window, fieldBase + enabling - 1, BM_GETCHECK, 0, 0) == BST_CHECKED;
+        const int availability = dialog.config.fields[i].availability;
+        if (!enabling && availability < 0) continue;
+        const bool enabled = availability != 0 && (!enabling ||
+            SendDlgItemMessageW(window, fieldBase + enabling - 1, BM_GETCHECK, 0, 0) == BST_CHECKED);
         EnableWindow(GetDlgItem(window, fieldBase + static_cast<int>(i)), enabled);
         EnableWindow(GetDlgItem(window, labelBase + static_cast<int>(i)), enabled);
     }
@@ -328,13 +333,17 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     case refreshTitleMessage: {
         const size_t index = static_cast<size_t>(wparam);
         std::wstring title;
+        int availability;
         {
             std::lock_guard<std::mutex> lock(configurationMutex);
             if (index >= configuration.fields.size() || index >= dialog->config.fields.size()) return 0;
             title = configuration.fields[index].title;
+            availability = configuration.fields[index].availability;
         }
         dialog->config.fields[index].title = title;
         SetDlgItemTextW(window, labelBase + static_cast<int>(index), title.c_str());
+        dialog->config.fields[index].availability = availability;
+        updateDependencies(window, *dialog);
         return 0;
     }
     case WM_DESTROY:
@@ -401,7 +410,7 @@ void jsti_show_configuration(HWND owner, const wchar_t *group) {
 int jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t count,
                                   const char *const *recovered_keywords, size_t recovered_count,
                                   JSTIConfigurationCallback callback, void *context) {
-    if (!fields || !count || count > 32 || !callback || recovered_count > 1000 ||
+    if (!fields || !count || count > maximumConfigurationFields || !callback || recovered_count > 1000 ||
         (recovered_count && !recovered_keywords)) return -1;
     Configuration updated;
     try {
@@ -455,7 +464,7 @@ void jsti_window_clear_configuration(void) {
 }
 
 int jsti_window_set_configuration_field_title(size_t index, const char *title) {
-    if (index >= 32 || !title) return -1;
+    if (index >= maximumConfigurationFields || !title) return -1;
     try {
         std::wstring updated;
         if (!jsti::wide(title, updated) || updated.empty() || updated.size() > 256) return -1;
@@ -466,6 +475,16 @@ int jsti_window_set_configuration_field_title(size_t index, const char *title) {
         if (activeConfiguration && !PostMessageW(activeConfiguration, refreshTitleMessage, index, 0)) return -1;
         return 0;
     } catch (const std::exception &) { return -1; }
+}
+
+int jsti_window_set_configuration_field_enabled(size_t index, int32_t enabled) {
+    if (index >= maximumConfigurationFields || (enabled != 0 && enabled != 1)) return -1;
+    std::lock_guard<std::mutex> lock(configurationMutex);
+    if (configuration.fields.empty()) return 1;
+    if (index >= configuration.fields.size() || configuration.fields[index].boolean ||
+        configuration.fields[index].enabledByField != 0) return -1;
+    configuration.fields[index].availability = enabled;
+    return activeConfiguration && !PostMessageW(activeConfiguration, refreshTitleMessage, index, 0) ? -1 : 0;
 }
 
 static bool configurationTitleSelfTest(HWND owner, std::string &error) {
@@ -490,15 +509,88 @@ static bool configurationTitleSelfTest(HWND owner, std::string &error) {
         text(window, fieldBase) == L"fr_FR";
     const bool refused = jsti_window_set_configuration_field_title(32, "Invalid") < 0 &&
         jsti_window_set_configuration_field_title(0, nullptr) < 0 &&
-        jsti_window_set_configuration_field_title(0, "") < 0;
+        jsti_window_set_configuration_field_title(0, "") < 0 &&
+        jsti_window_set_configuration_field_enabled(32, 1) < 0 &&
+        jsti_window_set_configuration_field_enabled(0, 2) < 0;
+    bool availabilityPreserved = jsti_window_set_configuration_field_enabled(0, 0) == 0;
+    SendMessageW(window, refreshTitleMessage, 0, 0);
+    availabilityPreserved = availabilityPreserved && !IsWindowEnabled(GetDlgItem(window, fieldBase)) &&
+        text(window, fieldBase) == L"fr_FR" && jsti_window_set_configuration_field_enabled(0, 1) == 0;
+    SendMessageW(window, refreshTitleMessage, 0, 0);
+    availabilityPreserved = availabilityPreserved && IsWindowEnabled(GetDlgItem(window, fieldBase)) &&
+        text(window, fieldBase) == L"fr_FR";
     DestroyWindow(window);
     {
         std::lock_guard<std::mutex> lock(configurationMutex);
         configuration = std::move(previous);
         activeConfiguration = previousWindow;
     }
-    if (!queued || !preserved || !refused) {
+    if (!queued || !preserved || !refused || !availabilityPreserved) {
         error = "Voice language label update replaced an unsaved value or accepted invalid metadata.";
+        return false;
+    }
+    return true;
+}
+
+static bool configurationAutoCleanSelfTest(HWND owner, std::string &error) {
+    Configuration previous;
+    {
+        std::lock_guard<std::mutex> lock(configurationMutex);
+        previous = configuration;
+    }
+    struct Applied { int calls = 0; bool correct = false; } applied;
+    const auto callback = [](int action, const char *const *values, size_t count, void *context,
+                              char *, size_t) -> int {
+        auto &result = *static_cast<Applied *>(context);
+        ++result.calls;
+        result.correct = action == 0 && count == 33 &&
+            std::string(values[0]) == "preserved" && std::string(values[28]) == "instant" &&
+            std::string(values[29]) == "fixture/model" && std::string(values[30]) == "250" &&
+            std::string(values[31]) == "3" && std::string(values[32]) == "0";
+        return result.correct ? 0 : -1;
+    };
+    std::vector<JSTIConfigurationField> fields(33);
+    for (auto &field : fields) {
+        field.title = "Existing setting"; field.value = "preserved"; field.group = "General";
+    }
+    fields[28].title = "Live processing speed"; fields[28].value = "livePolish";
+    fields[28].choices = "instant\tInstant\nlivePolish\tAuto-Clean";
+    fields[29].title = "Auto-Clean model"; fields[29].value = "captured/model";
+    fields[30].title = "Auto-Clean debounce"; fields[30].value = "500";
+    fields[31].title = "Auto-Clean minimum delta"; fields[31].value = "20";
+    fields[32].title = "Skip ordinary cleanup"; fields[32].value = "1"; fields[32].is_boolean = 1;
+    for (size_t index = 28; index < fields.size(); ++index) fields[index].group = "Transcription";
+    const bool registered = jsti_window_set_configuration(
+        fields.data(), fields.size(), nullptr, 0, callback, &applied) == 0;
+    Dialog fixture;
+    {
+        std::lock_guard<std::mutex> lock(configurationMutex);
+        fixture.config = configuration;
+    }
+    fixture.group = L"Transcription";
+    HWND window = registered ? createDialog(owner, fixture) : nullptr;
+    bool accepted = false;
+    if (window) {
+        const bool populated = IsWindow(GetDlgItem(window, fieldBase + 32)) &&
+            SendDlgItemMessageW(window, fieldBase + 28, CB_GETCOUNT, 0, 0) == 2 &&
+            SendDlgItemMessageW(window, fieldBase + 28, CB_GETCURSEL, 0, 0) == 1;
+        SendDlgItemMessageW(window, fieldBase + 28, CB_SETCURSEL, 0, 0);
+        SetDlgItemTextW(window, fieldBase + 29, L"fixture/model");
+        SetDlgItemTextW(window, fieldBase + 30, L"250");
+        SetDlgItemTextW(window, fieldBase + 31, L"3");
+        SendDlgItemMessageW(window, fieldBase + 32, BM_SETCHECK, BST_UNCHECKED, 0);
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
+        accepted = populated && !IsWindow(window) && applied.calls == 1 && applied.correct;
+        if (IsWindow(window)) DestroyWindow(window);
+    }
+    const bool bounded = jsti_window_set_configuration(
+        fields.data(), maximumConfigurationFields + 1, nullptr, 0, callback, &applied) < 0;
+    {
+        std::lock_guard<std::mutex> lock(configurationMutex);
+        configuration = std::move(previous);
+    }
+    if (!registered || !accepted || !bounded) {
+        error = "Auto-Clean preferences did not register or apply past the former 32-field limit.";
         return false;
     }
     return true;
@@ -506,6 +598,7 @@ static bool configurationTitleSelfTest(HWND owner, std::string &error) {
 
 bool jsti_configuration_self_test(HWND owner, std::string &error) {
     if (!configurationTitleSelfTest(owner, error)) return false;
+    if (!configurationAutoCleanSelfTest(owner, error)) return false;
     struct Applied { int calls = 0; bool correct = false; } applied;
     Dialog dialog;
     dialog.config.fields = {{L"Language", L"en_GB", L"Transcription", false}, {L"HUD", L"1", L"General", true}};

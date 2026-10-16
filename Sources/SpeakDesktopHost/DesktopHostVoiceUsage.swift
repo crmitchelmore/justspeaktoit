@@ -167,6 +167,9 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         if records.contains(where: { $0.voiceID.hasPrefix(CartesiaTTSCatalog.voiceIDPrefix) }) {
             lines.append(CartesiaTTSAPI.pricingEstimateBasis)
         }
+        if records.contains(where: { $0.voiceID.hasPrefix(ElevenLabsTTSCatalog.voiceIDPrefix) }) {
+            lines.append(ElevenLabsTTSAPI.pricingEstimateBasis)
+        }
         let gemini = records.filter { GeminiTTSCatalog.model(forID: $0.modelID) != nil }
         if !gemini.isEmpty {
             lines.append(Self.geminiUsageSummary(gemini))

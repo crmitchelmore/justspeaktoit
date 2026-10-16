@@ -14,6 +14,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
     case groq(GroqTTSVoice)
     case speechmatics(SpeechmaticsTTSVoice)
     case openai(OpenAITTSModel, OpenAITTSVoice)
+    case elevenlabs(ElevenLabsTTSModels.Model, ElevenLabsTTSVoice)
 
     public var id: String {
         switch self {
@@ -28,6 +29,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .groq(let voice): voice.providerVoiceID
         case .speechmatics(let voice): voice.providerVoiceID
         case .openai(_, let voice): voice.providerVoiceID
+        case .elevenlabs(_, let voice): voice.providerVoiceID
         }
     }
 
@@ -44,6 +46,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .groq(let voice): voice.displayName
         case .speechmatics(let voice): voice.displayName
         case .openai(_, let voice): voice.name
+        case .elevenlabs(_, let voice): voice.displayName
         }
     }
 
@@ -60,6 +63,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .groq(let voice): voice.model.desktopModelIdentifier
         case .speechmatics: SpeechmaticsTTSCatalog.providerIdentifier
         case .openai(let model, _): model.desktopModelIdentifier
+        case .elevenlabs(let model, _): model.desktopModelIdentifier
         }
     }
 
@@ -77,6 +81,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .groq(let voice): "\(voice.displayName) — Groq"
         case .speechmatics(let voice): "\(voice.displayName) — Speechmatics English"
         case .openai(let model, let voice): "\(voice.name) — OpenAI \(model.displayName)"
+        case .elevenlabs(let model, let voice): "\(voice.displayName) — \(model.displayName)"
         }
     }
 
@@ -92,6 +97,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .groq: GroqTTSCatalog.credentialIdentifier
         case .speechmatics: SpeechmaticsTTSCatalog.credentialIdentifier
         case .openai: OpenAITTSCatalog.credentialIdentifier
+        case .elevenlabs: ElevenLabsTTSCatalog.credentialIdentifier
         }
     }
 
@@ -106,6 +112,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .soniox: .soniox
         case .gemini, .groq, .speechmatics: .naturalSpeech
         case .openai: .openai
+        case .elevenlabs: .naturalSpeech
         }
     }
 
@@ -131,6 +138,9 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         for model in OpenAITTSCatalog.models {
             voices.append(contentsOf: OpenAITTSCatalog.voices(for: model).map { Self.openai(model, $0) })
         }
+        for model in ElevenLabsTTSModels.all {
+            voices.append(contentsOf: ElevenLabsTTSCatalog.voices.map { Self.elevenlabs(model, $0) })
+        }
         return voices
     }
 
@@ -151,6 +161,10 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
     ) throws -> Self {
         let model = modelID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let identifier = voiceID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let voice = try elevenLabsSelection(
+            model: model, identifier: voiceID?.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            return voice
+        }
         if let voice = try sonioxSelection(model: model, identifier: voiceID, inventory: accountInventory) {
             return voice
         }
@@ -202,7 +216,28 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
             let identifier, let voice = CartesiaTTSCatalog.voice(forID: identifier) else {
             throw VoiceSynthesisConfigurationError.unsupportedVoice
         }
+
         return .cartesia(voice)
+    }
+
+    private static func elevenLabsSelection(model: String?, identifier: String?) throws -> Self? {
+        guard model == ElevenLabsTTSCatalog.providerIdentifier || model?.hasPrefix("elevenlabs/") == true
+            || model?.hasPrefix("eleven_") == true
+            || identifier?.lowercased().hasPrefix("elevenlabs/") == true else { return nil }
+        let selected: ElevenLabsTTSModels.Model
+        if model == nil || model == ElevenLabsTTSCatalog.providerIdentifier {
+            selected = ElevenLabsTTSCatalog.defaultModel
+        } else {
+            guard let model, let found = ElevenLabsTTSModels.model(forID: model) else {
+                throw VoiceSynthesisConfigurationError.unsupportedVoice
+            }
+            selected = found
+        }
+        // ElevenLabs voice IDs are case-sensitive. Never lowercase an API path.
+        guard let identifier, let voice = ElevenLabsTTSCatalog.voice(forID: identifier) else {
+            throw VoiceSynthesisConfigurationError.unsupportedVoice
+        }
+        return .elevenlabs(selected, voice)
     }
 
     private static func sonioxSelection(

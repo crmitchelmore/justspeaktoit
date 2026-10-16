@@ -4,6 +4,16 @@ import SpeakCore
 import SpeakDesktop
 import SpeakWindowsPlatform
 
+extension WindowsNative {
+    /// Fresh synthetic leaves must name their token user as owner even when
+    /// an elevated token's default owner is a group. Never repairs an existing path.
+    static func createSyntheticDirectory(_ directory: URL) throws {
+        try directory.path.withCString { path in
+            try checked { jsti_private_directory_create(path, $0, $1) }
+        }
+    }
+}
+
 enum WindowsCommandLineSelfTests {
     static func handle(_ arguments: [String]) async throws -> Bool {
         if arguments.contains("--bundle-self-test") {

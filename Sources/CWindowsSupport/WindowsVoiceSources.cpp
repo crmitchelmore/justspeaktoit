@@ -13,7 +13,14 @@ void jsti_show_voice_discovery(HWND owner, JSTIVoiceSourceCallback callback, voi
 
 namespace {
 enum { sourceLabel = 920, sourceID, textLabel, textID, loadID, noticeID, readID, exportID, stopID };
-enum { autoPlayID = 940, saveID, generateID, playResultID, exportResultID, controlsID, usageID, discoveryID };
+enum { autoPlayID = 940, saveID, generateID, playResultID, exportResultID, controlsID, usageID, discoveryID, helperID };
+enum { markupListID = 990, markupTextID, markupCopyID, markupNoticeID, markupWrapID };
+struct MarkupExample { std::wstring text, description; };
+struct MarkupConfiguration {
+    bool enabled = false;
+    std::vector<MarkupExample> examples;
+    JSTIVoiceMarkupWrapCallback wrap = nullptr;
+};
 struct Configuration {
     std::vector<std::wstring> names;
     JSTIVoiceSourceCallback callback = nullptr;
@@ -21,6 +28,7 @@ struct Configuration {
 };
 std::mutex mutex;
 Configuration configuration;
+MarkupConfiguration markupConfiguration;
 struct GenerationState {
     int flags = 0;
     bool working = false;
@@ -31,6 +39,7 @@ GenerationState generationState;
 HWND generationWindow = nullptr;
 constexpr UINT generationMessage = WM_APP + 25;
 constexpr UINT importResultMessage = WM_APP + 24;
+constexpr UINT markupMessage = WM_APP + 28;
 struct ImportResult {
     HWND window = nullptr;
     std::string token;
@@ -46,6 +55,7 @@ struct Dialog {
     GenerationState generation;
     int source = 0;
     HFONT font = nullptr;
+    HWND markupWindow = nullptr;
     std::vector<HWND> controls;
 };
 
@@ -61,6 +71,11 @@ std::wstring text(HWND window) {
 bool hasText(const std::wstring &value) {
     return value.find_first_not_of(L" \r\n\t") != std::wstring::npos;
 }
+bool canEditMarkup(const Dialog &dialog) {
+    std::lock_guard<std::mutex> lock(mutex);
+    return markupConfiguration.enabled && markupConfiguration.wrap && dialog.importToken.empty() &&
+        (dialog.source == 1 || dialog.source == 3);
+}
 void refresh(HWND window, Dialog &dialog) {
     const bool ready = !dialog.generation.working && dialog.importToken.empty() && hasText(text(window)) &&
         (dialog.source != 0 || !dialog.record.empty());
@@ -73,6 +88,188 @@ void refresh(HWND window, Dialog &dialog) {
     EnableWindow(GetDlgItem(window, loadID), dialog.importToken.empty() && dialog.source >= 2);
     SetDlgItemTextW(window, loadID, dialog.source == 3 ? L"&Choose file..." : L"&Load clipboard");
     SendDlgItemMessageW(window, textID, EM_SETREADONLY, dialog.source != 1 && dialog.source != 3, 0);
+    const bool markup = canEditMarkup(dialog);
+    EnableWindow(GetDlgItem(window, helperID), markup);
+    if (IsWindow(dialog.markupWindow)) EnableWindow(GetDlgItem(dialog.markupWindow, markupWrapID), markup);
+}
+struct MarkupDialog {
+    HWND owner = nullptr;
+    Dialog *source = nullptr;
+    MarkupConfiguration config;
+    HFONT font = nullptr;
+    bool (*copy)(HWND, const std::wstring &, void *) = nullptr;
+    void *copyContext = nullptr;
+};
+bool copyMarkup(HWND window, const std::wstring &value, void *) {
+    const size_t bytes = (value.size() + 1) * sizeof(wchar_t);
+    HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, bytes);
+    if (!memory) return false;
+    void *target = GlobalLock(memory);
+    if (!target) { GlobalFree(memory); return false; }
+    memcpy(target, value.c_str(), bytes); GlobalUnlock(memory);
+    if (!OpenClipboard(window)) { GlobalFree(memory); return false; }
+    const bool copied = EmptyClipboard() && SetClipboardData(CF_UNICODETEXT, memory);
+    CloseClipboard();
+    if (!copied) GlobalFree(memory);
+    return copied;
+}
+void selectMarkupExample(HWND window, const MarkupDialog &dialog) {
+    const LRESULT index = SendDlgItemMessageW(window, markupListID, LB_GETCURSEL, 0, 0);
+    if (index < 0 || static_cast<size_t>(index) >= dialog.config.examples.size()) return;
+    SetDlgItemTextW(window, markupTextID, dialog.config.examples[static_cast<size_t>(index)].text.c_str());
+}
+bool applyMarkup(HWND window, MarkupDialog &dialog) {
+    if (!IsWindow(dialog.owner) || !canEditMarkup(*dialog.source)) {
+        SetDlgItemTextW(window, markupNoticeID, L"Choose an editable draft and enable SSML for a compatible voice.");
+        return false;
+    }
+    const std::wstring original = text(dialog.owner);
+    const std::string input = jsti::utf8(original);
+    if (input.size() > 1'000'000) {
+        SetDlgItemTextW(window, markupNoticeID, L"The draft is too large to wrap. Its text and selection are unchanged.");
+        return false;
+    }
+    std::vector<char> result(input.size() + 1024, 0);
+    int32_t leadingUTF16 = 0, leadingScalars = 0;
+    std::wstring wrapped;
+    if (!dialog.config.wrap || dialog.config.wrap(input.c_str(), result.data(), result.size(),
+            &leadingUTF16, &leadingScalars) != 0 ||
+        !memchr(result.data(), 0, result.size()) || !jsti::wide(result.data(), wrapped) ||
+        wrapped.size() > 200000 || leadingUTF16 < 0 || static_cast<size_t>(leadingUTF16) > wrapped.size()) {
+        SetDlgItemTextW(window, markupNoticeID, L"The draft could not be wrapped within the editor limit. Nothing changed.");
+        return false;
+    }
+    HWND editor = GetDlgItem(dialog.owner, textID);
+    DWORD start = 0, end = 0;
+    SendMessageW(editor, EM_GETSEL, reinterpret_cast<WPARAM>(&start), reinterpret_cast<LPARAM>(&end));
+    if (wrapped != original) {
+        SendMessageW(editor, EM_SETSEL, 0, -1);
+        SendMessageW(editor, EM_REPLACESEL, TRUE, reinterpret_cast<LPARAM>(wrapped.c_str()));
+        SendMessageW(editor, EM_SETSEL, std::min<size_t>(start + leadingUTF16, wrapped.size()),
+            static_cast<LPARAM>(std::min<size_t>(end + leadingUTF16, wrapped.size())));
+    }
+    SetDlgItemTextW(dialog.owner, noticeID, L"SSML draft updated. No speech was generated or settings saved.");
+    return true;
+}
+void layoutMarkup(HWND window) {
+    auto move = [&](int id, int x, int y, int w, int h) {
+        MoveWindow(GetDlgItem(window, id), scale(window, x), scale(window, y), scale(window, w), scale(window, h), TRUE);
+    };
+    move(985, 20, 18, 450, 44); move(986, 20, 70, 450, 22);
+    move(markupListID, 20, 96, 450, 125); move(987, 20, 222, 315, 22);
+    move(markupTextID, 20, 248, 315, 54);
+    move(markupCopyID, 345, 248, 125, 34); move(markupNoticeID, 20, 314, 450, 44);
+    move(IDCANCEL, 20, 370, 90, 34); move(markupWrapID, 270, 370, 200, 34);
+}
+LRESULT CALLBACK markupProcedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+    auto dialog = reinterpret_cast<MarkupDialog *>(GetWindowLongPtrW(window, GWLP_USERDATA));
+    if (message == WM_NCCREATE) {
+        dialog = static_cast<MarkupDialog *>(reinterpret_cast<CREATESTRUCTW *>(lparam)->lpCreateParams);
+        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(dialog));
+    }
+    if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
+    if (message == DM_GETDEFID) return MAKELRESULT(markupWrapID, DC_HASDEFID);
+    if (message == WM_CREATE) {
+        dialog->source->markupWindow = window;
+        auto add = [&](const wchar_t *kind, const wchar_t *value, DWORD style, int id) {
+            return CreateWindowExW(0, kind, value, WS_CHILD | WS_VISIBLE | style, 0, 0, 10, 10, window,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), GetModuleHandleW(nullptr), nullptr) != nullptr;
+        };
+        if (!add(L"STATIC", L"Wrap the entire draft with SSML tags. Copy examples to edit manually; "
+                L"copying does not insert or replace text.", SS_LEFT, 985) ||
+            !add(L"STATIC", L"Common &tags", 0, 986) ||
+            !add(L"LISTBOX", L"", LBS_NOTIFY | WS_TABSTOP | WS_VSCROLL | WS_BORDER, markupListID) ||
+            !add(L"STATIC", L"Example &markup", 0, 987) ||
+            !add(L"EDIT", L"", ES_MULTILINE | ES_READONLY | WS_VSCROLL | WS_TABSTOP, markupTextID) ||
+            !add(L"BUTTON", L"&Copy example", BS_PUSHBUTTON | WS_TABSTOP, markupCopyID) ||
+            !add(L"STATIC", L"Closing leaves the draft and its selection unchanged.", SS_LEFT, markupNoticeID) ||
+            !add(L"BUTTON", L"Close", BS_PUSHBUTTON | WS_TABSTOP, IDCANCEL) ||
+            !add(L"BUTTON", L"&Wrap with <speak>", BS_DEFPUSHBUTTON | WS_TABSTOP, markupWrapID)) return -1;
+        for (const auto &example : dialog->config.examples) {
+            if (SendDlgItemMessageW(window, markupListID, LB_ADDSTRING, 0,
+                reinterpret_cast<LPARAM>(example.description.c_str())) < 0) return -1;
+        }
+        SendDlgItemMessageW(window, markupListID, LB_SETCURSEL, 0, 0);
+        selectMarkupExample(window, *dialog);
+        SendMessageW(window, WM_DPICHANGED, MAKEWPARAM(GetDpiForWindow(window), GetDpiForWindow(window)), 0);
+        return 0;
+    }
+    if (message == WM_DPICHANGED) {
+        HFONT font = CreateFontW(-MulDiv(10, GetDpiForWindow(window), 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+        if (font) {
+            for (HWND child = GetWindow(window, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT))
+                SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+            if (dialog->font) DeleteObject(dialog->font);
+            dialog->font = font;
+        }
+        if (lparam) {
+            const RECT &position = *reinterpret_cast<const RECT *>(lparam);
+            RECT bounds{0, 0, scale(window, 490), scale(window, 425)};
+            AdjustWindowRectExForDpi(&bounds, WS_CAPTION | WS_SYSMENU, FALSE,
+                WS_EX_CONTROLPARENT | WS_EX_DLGMODALFRAME, GetDpiForWindow(window));
+            SetWindowPos(window, nullptr, position.left, position.top, bounds.right - bounds.left,
+                bounds.bottom - bounds.top, SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+        layoutMarkup(window); return 0;
+    }
+    if (message == WM_SIZE) { layoutMarkup(window); return 0; }
+    if (message == WM_COMMAND) {
+        if (LOWORD(wparam) == markupListID && HIWORD(wparam) == LBN_SELCHANGE) {
+            selectMarkupExample(window, *dialog); return 0;
+        }
+        if (HIWORD(wparam) == BN_CLICKED) {
+            if (LOWORD(wparam) == IDCANCEL) DestroyWindow(window);
+            if ((LOWORD(wparam) == markupWrapID || LOWORD(wparam) == IDOK) && applyMarkup(window, *dialog))
+                DestroyWindow(window);
+            if (LOWORD(wparam) == markupCopyID) {
+                const LRESULT index = SendDlgItemMessageW(window, markupListID, LB_GETCURSEL, 0, 0);
+                const bool copied = index >= 0 && static_cast<size_t>(index) < dialog->config.examples.size() &&
+                    dialog->copy && dialog->copy(window, dialog->config.examples[static_cast<size_t>(index)].text,
+                        dialog->copyContext);
+                SetDlgItemTextW(window, markupNoticeID, copied ? L"Example copied. The draft is unchanged."
+                    : L"The example could not be copied. Try again.");
+            }
+            return 0;
+        }
+    }
+    if (message == WM_CLOSE) { DestroyWindow(window); return 0; }
+    if (message == WM_DESTROY) {
+        dialog->source->markupWindow = nullptr;
+        if (dialog->font) DeleteObject(dialog->font);
+        dialog->font = nullptr; return 0;
+    }
+    return DefWindowProcW(window, message, wparam, lparam);
+}
+HWND makeMarkupDialog(MarkupDialog &dialog) {
+    WNDCLASSW type{};
+    type.lpfnWndProc = markupProcedure; type.hInstance = GetModuleHandleW(nullptr);
+    type.lpszClassName = L"JustSpeakToItSSMLHelper"; type.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    type.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    if (!RegisterClassW(&type) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return nullptr;
+    RECT bounds{0, 0, scale(dialog.owner, 490), scale(dialog.owner, 425)};
+    AdjustWindowRectExForDpi(&bounds, WS_CAPTION | WS_SYSMENU, FALSE,
+        WS_EX_CONTROLPARENT | WS_EX_DLGMODALFRAME, GetDpiForWindow(dialog.owner));
+    return CreateWindowExW(WS_EX_CONTROLPARENT | WS_EX_DLGMODALFRAME, type.lpszClassName, L"SSML Helper",
+        WS_CAPTION | WS_SYSMENU, CW_USEDEFAULT, CW_USEDEFAULT, bounds.right - bounds.left, bounds.bottom - bounds.top,
+        dialog.owner, nullptr, type.hInstance, &dialog);
+}
+void showMarkup(HWND owner, Dialog &source) {
+    if (!canEditMarkup(source)) return;
+    MarkupDialog dialog; dialog.owner = owner; dialog.source = &source; dialog.copy = copyMarkup;
+    { std::lock_guard<std::mutex> lock(mutex); dialog.config = markupConfiguration; }
+    HWND window = makeMarkupDialog(dialog);
+    if (!window) { SetDlgItemTextW(owner, noticeID, L"The SSML Helper could not be opened."); return; }
+    source.markupWindow = window;
+    EnableWindow(owner, FALSE); ShowWindow(window, SW_SHOW); SetFocus(GetDlgItem(window, markupListID));
+    MSG message{}; BOOL result = 1;
+    while (IsWindow(window) && (result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
+        if (!IsDialogMessageW(window, &message)) { TranslateMessage(&message); DispatchMessageW(&message); }
+    }
+    if (IsWindow(window)) DestroyWindow(window);
+    if (IsWindow(owner)) { EnableWindow(owner, TRUE); SetActiveWindow(owner); SetFocus(GetDlgItem(owner, textID)); }
+    if (result == 0) PostQuitMessage(static_cast<int>(message.wParam));
+    if (result < 0) SetDlgItemTextW(owner, noticeID, L"Reading SSML Helper messages failed. The draft is retained.");
 }
 void cancelImport(HWND window, Dialog &dialog) {
     if (dialog.importToken.empty()) return;
@@ -203,11 +400,12 @@ void layout(HWND window) {
     move(sourceLabel, margin, margin, width, scale(window, 22));
     move(sourceID, margin, margin + scale(window, 26), width - scale(window, 170), scale(window, 240));
     move(loadID, bounds.right - margin - scale(window, 160), margin + scale(window, 26), scale(window, 160), height);
-    move(textLabel, margin, margin + scale(window, 70), width, scale(window, 22));
+    move(textLabel, margin, margin + scale(window, 70), width - scale(window, 180), scale(window, 22));
+    move(helperID, bounds.right - margin - scale(window, 170), margin + scale(window, 64), scale(window, 170), height);
     const int resultRow = bottom - height - gap;
     const int optionsRow = resultRow - scale(window, 44) - gap;
     const int usageRow = optionsRow - height - gap;
-    const int top = margin + scale(window, 96), note = usageRow - gap - scale(window, 90);
+    const int top = margin + scale(window, 104), note = usageRow - gap - scale(window, 90);
     move(textID, margin, top, width, std::max(scale(window, 110), note - gap - top));
     move(noticeID, margin, note, width, scale(window, 90));
     move(usageID, margin, usageRow, (width - gap) / 2, height);
@@ -238,6 +436,7 @@ bool create(HWND window, Dialog &dialog) {
         !add(L"STATIC", L"&Text snapshot", 0, textLabel) ||
         !add(L"EDIT", L"", ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL | WS_TABSTOP,
              textID, WS_EX_CLIENTEDGE) ||
+        !add(L"BUTTON", L"SSML &Helper...", BS_PUSHBUTTON | WS_TABSTOP, helperID) ||
         !add(L"STATIC", L"", SS_LEFT, noticeID) ||
         !add(L"BUTTON", L"&Usage and input estimate...", BS_PUSHBUTTON | WS_TABSTOP, usageID) ||
         !add(L"BUTTON", L"&Account voices...", BS_PUSHBUTTON | WS_TABSTOP, discoveryID) ||
@@ -273,6 +472,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     }
     if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
     switch (message) {
+    case markupMessage: refresh(window, *dialog); return 0;
     case generationMessage: {
         GenerationState current;
         { std::lock_guard<std::mutex> lock(mutex); current = generationState; }
@@ -337,6 +537,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         }
         if (HIWORD(wparam) != BN_CLICKED) break;
         switch (LOWORD(wparam)) {
+        case helperID: showMarkup(window, *dialog); return 0;
         case discoveryID:
             jsti_show_voice_discovery(window, dialog->config.callback, dialog->config.context); return 0;
         case usageID: {
@@ -412,6 +613,23 @@ int32_t jsti_window_set_voice_sources(const char *const *names, size_t count,
     return 0;
 }
 
+int32_t jsti_window_set_voice_markup_helper(int32_t enabled, const JSTIVoiceMarkupExample *examples,
+                                           size_t count, JSTIVoiceMarkupWrapCallback wrap) {
+    if ((enabled != 0 && enabled != 1) || !examples || count == 0 || count > 32 || !wrap) return -1;
+    MarkupConfiguration changed; changed.enabled = enabled != 0; changed.wrap = wrap;
+    for (size_t index = 0; index < count; ++index) {
+        MarkupExample example;
+        if (!examples[index].text || !examples[index].description ||
+            strlen(examples[index].text) > 8192 || strlen(examples[index].description) > 256 ||
+            !jsti::wide(examples[index].text, example.text) || example.text.empty() ||
+            !jsti::wide(examples[index].description, example.description) || example.description.empty()) return -1;
+        changed.examples.push_back(std::move(example));
+    }
+    std::lock_guard<std::mutex> lock(mutex);
+    markupConfiguration = std::move(changed);
+    return generationWindow && !PostMessageW(generationWindow, markupMessage, 0, 0) ? -1 : 0;
+}
+
 int32_t jsti_window_set_voice_text_import(const char *token, const char *text, const char *error) {
     std::wstring value, failure;
     if (!token || !token[0] || std::strlen(token) > 64 ||
@@ -469,6 +687,97 @@ void jsti_voice_sources_stop() {
 bool jsti_voice_controls_self_test(HWND owner, std::string &error);
 bool jsti_voice_usage_self_test(HWND owner, std::string &error);
 bool jsti_voice_discovery_self_test(HWND owner, std::string &error);
+namespace {
+bool markupSelfTest(HWND window, Dialog &source) {
+    MarkupConfiguration original;
+    { std::lock_guard<std::mutex> lock(mutex); original = markupConfiguration; }
+    const auto originalText = text(window);
+    const int originalSource = source.source;
+    MarkupConfiguration fixture;
+    fixture.enabled = true;
+    fixture.examples = {{L"Synthetic & <tag>", L"First synthetic example"},
+        {L"Synthetic \u0259 & <other>", L"Second synthetic example"}};
+    fixture.wrap = [](const char *input, char *output, size_t capacity, int32_t *utf16, int32_t *scalars) -> int32_t {
+        if (!strcmp(input, "Reject")) return -1;
+        const std::string text(input);
+        const bool wrapped = text.find("<fixture>") != std::string::npos;
+        const std::string result = wrapped ? text : "<fixture>" + text + "</fixture>";
+        if (result.size() + 1 > capacity) return -1;
+        memcpy(output, result.c_str(), result.size() + 1); *utf16 = *scalars = wrapped ? 0 : 9;
+        return 0;
+    };
+    { std::lock_guard<std::mutex> lock(mutex); markupConfiguration = fixture; }
+    source.source = 3; refresh(window, source);
+    MarkupDialog helper; helper.owner = window; helper.source = &source; helper.config = fixture;
+    std::wstring copied;
+    helper.copyContext = &copied;
+    helper.copy = [](HWND, const std::wstring &value, void *context) -> bool {
+        *static_cast<std::wstring *>(context) = value; return true;
+    };
+    const std::wstring draft = L"\u03A9 \U0001F600 & <";
+    SetDlgItemTextW(window, textID, draft.c_str());
+    SendDlgItemMessageW(window, textID, EM_SETSEL, 2, 4);
+    HWND popup = makeMarkupDialog(helper);
+    bool passed = popup != nullptr;
+    if (popup) {
+        SendDlgItemMessageW(popup, markupListID, LB_SETCURSEL, 1, 0);
+        SendMessageW(popup, WM_COMMAND, MAKEWPARAM(markupListID, LBN_SELCHANGE), 0);
+        SendMessageW(popup, WM_COMMAND, MAKEWPARAM(markupCopyID, BN_CLICKED), 0);
+        passed = passed && copied == fixture.examples[1].text && text(window) == draft &&
+            (GetWindowLongW(GetDlgItem(popup, markupWrapID), GWL_STYLE) & WS_TABSTOP) &&
+            LOWORD(SendMessageW(popup, DM_GETDEFID, 0, 0)) == markupWrapID;
+        SendMessageW(popup, WM_COMMAND, MAKEWPARAM(IDCANCEL, BN_CLICKED), 0);
+        DWORD start = 0, end = 0;
+        SendDlgItemMessageW(window, textID, EM_GETSEL,
+            reinterpret_cast<WPARAM>(&start), reinterpret_cast<LPARAM>(&end));
+        passed = passed && text(window) == draft && start == 2 && end == 4;
+    }
+    popup = makeMarkupDialog(helper);
+    if (popup) {
+        // The Mac binding wraps the current draft at apply, not a stale open snapshot.
+        const std::wstring current = draft + L" newer";
+        SetDlgItemTextW(window, textID, current.c_str());
+        SendDlgItemMessageW(window, textID, EM_SETSEL, 2, 4);
+        SendMessageW(popup, WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
+        DWORD start = 0, end = 0;
+        SendDlgItemMessageW(window, textID, EM_GETSEL,
+            reinterpret_cast<WPARAM>(&start), reinterpret_cast<LPARAM>(&end));
+        passed = passed && !IsWindow(popup) && text(window) == L"<fixture>" + current + L"</fixture>" &&
+            start == 11 && end == 13;
+        SendDlgItemMessageW(window, textID, EM_UNDO, 0, 0);
+        passed = passed && text(window) == current;
+    } else passed = false;
+    SetDlgItemTextW(window, textID, L"<fixture>Already wrapped</fixture>");
+    SendDlgItemMessageW(window, textID, EM_SETSEL, 9, 16);
+    popup = makeMarkupDialog(helper);
+    if (popup) {
+        passed = applyMarkup(popup, helper) && passed;
+        DWORD start = 0, end = 0;
+        SendDlgItemMessageW(window, textID, EM_GETSEL,
+            reinterpret_cast<WPARAM>(&start), reinterpret_cast<LPARAM>(&end));
+        passed = passed && text(window) == L"<fixture>Already wrapped</fixture>" && start == 9 && end == 16;
+        SetDlgItemTextW(window, textID, L"Reject");
+        passed = !applyMarkup(popup, helper) && text(window) == L"Reject" && passed;
+        { std::lock_guard<std::mutex> lock(mutex); markupConfiguration.enabled = false; }
+        refresh(window, source);
+        passed = !IsWindowEnabled(GetDlgItem(window, helperID)) &&
+            !IsWindowEnabled(GetDlgItem(popup, markupWrapID)) && !applyMarkup(popup, helper) && passed;
+        DestroyWindow(popup);
+    } else passed = false;
+    { std::lock_guard<std::mutex> lock(mutex); markupConfiguration.enabled = true; }
+    for (int readOnlySource : {0, 2}) {
+        source.source = readOnlySource; refresh(window, source);
+        passed = !IsWindowEnabled(GetDlgItem(window, helperID)) && !canEditMarkup(source) && passed;
+    }
+    source.source = 3; source.importToken = "synthetic-helper-import"; refresh(window, source);
+    passed = !IsWindowEnabled(GetDlgItem(window, helperID)) && passed;
+    source.importToken.clear();
+    passed = jsti_window_set_voice_markup_helper(2, nullptr, 0, nullptr) == -1 && passed;
+    { std::lock_guard<std::mutex> lock(mutex); markupConfiguration = std::move(original); }
+    source.source = originalSource; SetDlgItemTextW(window, textID, originalText.c_str()); refresh(window, source);
+    return passed;
+}
+}
 bool jsti_voice_sources_self_test(HWND owner, std::string &error) {
     struct Received {
         int calls = 0, source = -1, generated = 0, flags = -1;
@@ -566,6 +875,8 @@ bool jsti_voice_sources_self_test(HWND owner, std::string &error) {
     SendMessageW(window, WM_COMMAND, MAKEWPARAM(playResultID, BN_CLICKED), 0);
     const bool retainedResult = received.playedResult == "synthetic-result" &&
         IsWindowEnabled(GetDlgItem(window, exportResultID));
+    const bool markup = markupSelfTest(window, dialog) &&
+        received.calls == 4 && received.generated == 1 && received.flags == 2;
     RECT minimum{0, 0, scale(window, 620), scale(window, 540)};
     AdjustWindowRectExForDpi(&minimum, WS_OVERLAPPEDWINDOW, FALSE, WS_EX_CONTROLPARENT, GetDpiForWindow(window));
     SetWindowPos(window, nullptr, 0, 0, minimum.right - minimum.left, minimum.bottom - minimum.top,
@@ -582,7 +893,7 @@ bool jsti_voice_sources_self_test(HWND owner, std::string &error) {
     { std::lock_guard<std::mutex> lock(mutex); generationState = std::move(originalGeneration); }
     const bool passed = history && typed && unavailable && historySnapshot && typedSnapshot &&
         clipboardSnapshot && fileSnapshot && staleImport && failedImport && editedImport &&
-        generatedSnapshot && busyResult && retainedResult && boundedControls;
+        generatedSnapshot && busyResult && retainedResult && boundedControls && markup;
     if (!passed) {
         error = "Voice sources fixture failed: history=" + std::to_string(history) +
             ", typed=" + std::to_string(typed) + ", unloadedClipboard=" + std::to_string(unavailable) +
@@ -593,7 +904,7 @@ bool jsti_voice_sources_self_test(HWND owner, std::string &error) {
             ", failedImport=" + std::to_string(failedImport) + ", editedImport=" + std::to_string(editedImport) +
             ", generatedSnapshot=" + std::to_string(generatedSnapshot) + ", busyResult=" + std::to_string(busyResult) +
             ", retainedResult=" + std::to_string(retainedResult) +
-            ", boundedControls=" + std::to_string(boundedControls) + ".";
+            ", boundedControls=" + std::to_string(boundedControls) + ", markup=" + std::to_string(markup) + ".";
     }
     return passed && captured && jsti_voice_controls_self_test(owner, error) &&
         jsti_voice_usage_self_test(owner, error) && jsti_voice_discovery_self_test(owner, error);

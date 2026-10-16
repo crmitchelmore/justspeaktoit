@@ -71,6 +71,7 @@ public struct AzureSpeechSynthesisError: LocalizedError, Sendable, Equatable {
 }
 
 public struct AzureSpeechVoiceAPI: Sendable {
+    public static let speedRange: ClosedRange<Double> = 0.5...2
     private let session: URLSession
     public init(session: URLSession = .shared) { self.session = session }
 
@@ -138,7 +139,7 @@ public struct AzureSpeechVoiceAPI: Sendable {
             content = text
         } else {
             let spoken = useSSML ? text : escapeXML(text)
-            let rate = Int((min(max(speed, 0.5), 2) - 1) * 100)
+            let rate = Int((min(max(speed, Self.speedRange.lowerBound), Self.speedRange.upperBound) - 1) * 100)
             let semitones = Int(min(max(pitch, -12), 12))
             let rateValue = rate >= 0 ? "+\(rate)%" : "\(rate)%"
             let pitchValue = semitones >= 0 ? "+\(semitones)st" : "\(semitones)st"

@@ -119,7 +119,7 @@ extension FakePlatform: DesktopHostReadAloudPlatform {
     ) async throws -> Data {
         _ = try await credential()
         try Task.checkCancellation()
-        return try XCTUnwrap(PCMWaveWriter.wavData(pcm: Data([1, 0, 2, 0]), sampleRate: selection.voice.sampleRate))
+        return try XCTUnwrap(PCMWaveWriter.wavData(pcm: Data([1, 0, 2, 0]), sampleRate: selection.sampleRate))
     }
     static let deepgramKeyHint = "save it in the test"
 }

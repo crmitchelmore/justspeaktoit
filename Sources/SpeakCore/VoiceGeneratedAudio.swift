@@ -11,7 +11,7 @@ public struct VoiceGeneratedAudio: Sendable {
             throw DeepgramSpeechError.responseTooLarge
         }
 
-        guard sampleRate == 16_000 || sampleRate == 24_000 else {
+        guard VoiceSynthesisQuality.allCases.contains(where: { $0.sampleRate == sampleRate }) else {
             throw DeepgramSpeechError.unsupportedAudioFormat
         }
         let audio = try DeepgramSpeechWAV.canonical(wav, sampleRate: sampleRate)

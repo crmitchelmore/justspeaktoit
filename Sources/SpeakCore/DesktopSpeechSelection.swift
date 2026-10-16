@@ -7,6 +7,7 @@ public struct DesktopSpeechSelection: Equatable, Sendable {
     public let sonioxRegion: SonioxTTSRegion
     public let language: String?
     public var xaiInventory: XAIAccountVoiceInventory? { accountInventory?.xai }
+    public var sampleRate: Int { voice.sampleRate(quality: options.quality) }
 
     public init(voice: DesktopSpeechVoice, options: VoiceSynthesisOptions) throws {
         try self.init(voice: voice, options: options, xaiInventory: nil)
@@ -21,6 +22,7 @@ public struct DesktopSpeechSelection: Equatable, Sendable {
         voice: DesktopSpeechVoice, options: VoiceSynthesisOptions, accountInventory: VoiceAccountInventory?,
         sonioxRegion: SonioxTTSRegion = .unitedStates, language: String? = nil
     ) throws {
+        let voice = try voice.applyingQuality(options.quality)
         guard DesktopSpeechVoice.voices.contains(voice) || accountInventory?.contains(voice) == true else {
             throw VoiceSynthesisConfigurationError.unsupportedVoice
         }

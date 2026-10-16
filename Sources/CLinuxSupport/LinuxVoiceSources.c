@@ -10,6 +10,12 @@ typedef struct {
     void *context;
 } Configuration;
 static Configuration configuration;
+typedef struct {
+    gboolean enabled;
+    gchar **texts, **descriptions;
+    JSTIVoiceMarkupWrapCallback wrap;
+} MarkupConfiguration;
+static MarkupConfiguration markup_configuration;
 static guint generation_flags;
 static gboolean generation_working;
 static gchar *generated_result;
@@ -23,6 +29,8 @@ typedef struct {
     GtkButton *read, *export_button, *load;
     GtkButton *generate, *play_result, *export_result;
     GtkCheckButton *auto_play, *save;
+    GtkWidget *helper, *markup_apply;
+    GtkWindow *markup_window;
     gchar *result_id;
     guint generation_flags;
     gboolean working, applying_options;
@@ -49,6 +57,10 @@ static gchar *text(Dialog *dialog) {
     GtkTextIter start, end; gtk_text_buffer_get_bounds(buffer, &start, &end);
     return gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
 }
+static gboolean can_edit_markup(Dialog *dialog) {
+    return markup_configuration.enabled && markup_configuration.wrap != NULL &&
+        dialog->window != NULL && dialog->import_token == NULL && (dialog->selected == 1 || dialog->selected == 3);
+}
 static void refresh(Dialog *dialog) {
     gchar *value = text(dialog);
     gboolean ready = !dialog->working && dialog->import_token == NULL && g_strstrip(value)[0] != '\0' &&
@@ -62,7 +74,182 @@ static void refresh(Dialog *dialog) {
     gtk_widget_set_sensitive(GTK_WIDGET(dialog->load), dialog->import_token == NULL && dialog->selected >= 2);
     gtk_button_set_label(dialog->load, dialog->selected == 3 ? "Choose file..." : "Load clipboard");
     gtk_text_view_set_editable(dialog->editor, dialog->selected == 1 || dialog->selected == 3);
+    gtk_widget_set_sensitive(dialog->helper, can_edit_markup(dialog));
+    if (dialog->markup_apply != NULL) gtk_widget_set_sensitive(dialog->markup_apply, can_edit_markup(dialog));
     g_free(value);
+}
+static GtkWidget *label(const char *value);
+static void clear_markup(MarkupConfiguration *config) {
+    g_strfreev(config->texts); g_strfreev(config->descriptions);
+    *config = (MarkupConfiguration){0};
+}
+typedef struct {
+    Dialog *source;
+    GtkWindow *window;
+    GtkDropDown *examples;
+    GtkTextView *example;
+    GtkLabel *notice;
+    GtkWidget *copy_button;
+    MarkupConfiguration config;
+    gboolean (*copy)(GtkWidget *, const char *, gpointer);
+    gpointer copy_context;
+} MarkupHelper;
+static gboolean copy_markup(GtkWidget *widget, const char *value, gpointer data) {
+    (void)data;
+    GdkClipboard *clipboard = gtk_widget_get_clipboard(widget);
+    if (clipboard == NULL) return FALSE;
+    gdk_clipboard_set_text(clipboard, value);
+    return TRUE;
+}
+static void markup_destroyed(gpointer data) {
+    MarkupHelper *helper = data;
+    if (helper->source->markup_window == helper->window) {
+        helper->source->markup_window = NULL; helper->source->markup_apply = NULL;
+    }
+    clear_markup(&helper->config); release(helper->source); g_free(helper);
+}
+static void close_markup(GtkButton *button, gpointer data) {
+    (void)button;
+    MarkupHelper *helper = data;
+    if (helper->source->markup_window == helper->window) {
+        helper->source->markup_window = NULL; helper->source->markup_apply = NULL;
+    }
+    if (helper->source->window != NULL) gtk_widget_grab_focus(GTK_WIDGET(helper->source->editor));
+    gtk_window_destroy(helper->window);
+}
+static gboolean markup_close_request(GtkWindow *window, gpointer data) {
+    (void)window; close_markup(NULL, data); return TRUE;
+}
+static gboolean markup_key(GtkEventControllerKey *controller, guint key, guint code,
+                            GdkModifierType state, gpointer data) {
+    (void)controller; (void)code; (void)state;
+    if (key != GDK_KEY_Escape) return FALSE;
+    close_markup(NULL, data); return TRUE;
+}
+static void select_markup_example(GObject *object, GParamSpec *spec, gpointer data) {
+    (void)object; (void)spec;
+    MarkupHelper *helper = data;
+    guint index = gtk_drop_down_get_selected(helper->examples);
+    if (index >= g_strv_length(helper->config.texts)) return;
+    gtk_text_buffer_set_text(gtk_text_view_get_buffer(helper->example), helper->config.texts[index], -1);
+}
+static void copy_markup_example(GtkButton *button, gpointer data) {
+    MarkupHelper *helper = data;
+    guint index = gtk_drop_down_get_selected(helper->examples);
+    gboolean copied = index < g_strv_length(helper->config.texts) && helper->copy != NULL &&
+        helper->copy(GTK_WIDGET(button), helper->config.texts[index], helper->copy_context);
+    gtk_label_set_text(helper->notice, copied ? "Example copied. The draft is unchanged."
+        : "The example could not be copied. Try again.");
+}
+static gboolean apply_markup(MarkupHelper *helper) {
+    Dialog *dialog = helper->source;
+    if (!can_edit_markup(dialog)) {
+        gtk_label_set_text(helper->notice, "Choose an editable draft and enable SSML for a compatible voice.");
+        return FALSE;
+    }
+    gchar *original = text(dialog);
+    gsize bytes = strlen(original);
+    if (bytes > 1000000) {
+        gtk_label_set_text(helper->notice, "The draft is too large to wrap. Its text and selection are unchanged.");
+        g_free(original); return FALSE;
+    }
+    gchar *wrapped = g_malloc0(bytes + 1024);
+    int32_t leading_utf16 = 0, leading_scalars = 0;
+    gboolean valid = helper->config.wrap != NULL &&
+        helper->config.wrap(original, wrapped, bytes + 1024, &leading_utf16, &leading_scalars) == 0 &&
+        memchr(wrapped, 0, bytes + 1024) != NULL && g_utf8_validate(wrapped, -1, NULL) &&
+        leading_scalars >= 0 && leading_scalars <= g_utf8_strlen(wrapped, -1);
+    if (!valid) {
+        gtk_label_set_text(helper->notice, "The draft could not be wrapped. Its text and selection are unchanged.");
+        g_free(original); g_free(wrapped); return FALSE;
+    }
+    if (strcmp(original, wrapped) != 0) {
+        GtkTextBuffer *buffer = gtk_text_view_get_buffer(dialog->editor);
+        GtkTextIter insert, bound, start, end;
+        gtk_text_buffer_get_iter_at_mark(buffer, &insert, gtk_text_buffer_get_insert(buffer));
+        gtk_text_buffer_get_iter_at_mark(buffer, &bound, gtk_text_buffer_get_selection_bound(buffer));
+        gint insert_offset = gtk_text_iter_get_offset(&insert) + leading_scalars;
+        gint bound_offset = gtk_text_iter_get_offset(&bound) + leading_scalars;
+        gtk_text_buffer_begin_user_action(buffer);
+        gtk_text_buffer_get_bounds(buffer, &start, &end); gtk_text_buffer_delete(buffer, &start, &end);
+        gtk_text_buffer_get_start_iter(buffer, &start); gtk_text_buffer_insert(buffer, &start, wrapped, -1);
+        gtk_text_buffer_end_user_action(buffer);
+        gtk_text_buffer_get_iter_at_offset(buffer, &insert, insert_offset);
+        gtk_text_buffer_get_iter_at_offset(buffer, &bound, bound_offset);
+        gtk_text_buffer_select_range(buffer, &insert, &bound);
+    }
+    gtk_label_set_text(dialog->notice, "SSML draft updated. No speech was generated or settings saved.");
+    g_free(original); g_free(wrapped); return TRUE;
+}
+static void wrap_markup(GtkButton *button, gpointer data) {
+    if (apply_markup(data)) close_markup(button, data);
+}
+static MarkupHelper *make_markup_helper(Dialog *dialog) {
+    if (!can_edit_markup(dialog)) return NULL;
+    MarkupHelper *helper = g_new0(MarkupHelper, 1);
+    helper->source = retain(dialog); helper->copy = copy_markup;
+    helper->config = markup_configuration;
+    helper->config.texts = g_strdupv(markup_configuration.texts);
+    helper->config.descriptions = g_strdupv(markup_configuration.descriptions);
+    helper->window = GTK_WINDOW(gtk_window_new());
+    dialog->markup_window = helper->window;
+    g_object_set_data_full(G_OBJECT(helper->window), "ssml-helper", helper, markup_destroyed);
+    gtk_window_set_title(helper->window, "SSML Helper");
+    gtk_window_set_transient_for(helper->window, dialog->window);
+    gtk_window_set_modal(helper->window, TRUE); gtk_window_set_destroy_with_parent(helper->window, TRUE);
+    gtk_window_set_default_size(helper->window, 510, 425);
+    g_signal_connect(helper->window, "close-request", G_CALLBACK(markup_close_request), helper);
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+    gtk_widget_set_margin_start(box, 20); gtk_widget_set_margin_end(box, 20);
+    gtk_widget_set_margin_top(box, 20); gtk_widget_set_margin_bottom(box, 20);
+    gtk_window_set_child(helper->window, box);
+    gtk_box_append(GTK_BOX(box), label("Wrap the entire draft with SSML tags. Copy examples to edit manually; "
+        "copying does not insert or replace text."));
+    gtk_box_append(GTK_BOX(box), label("Common tags"));
+    helper->examples = GTK_DROP_DOWN(gtk_drop_down_new_from_strings(
+        (const char *const *)helper->config.descriptions));
+    gtk_accessible_update_property(GTK_ACCESSIBLE(helper->examples),
+        GTK_ACCESSIBLE_PROPERTY_LABEL, "Common SSML tags", -1);
+    gtk_box_append(GTK_BOX(box), GTK_WIDGET(helper->examples));
+    helper->example = GTK_TEXT_VIEW(gtk_text_view_new());
+    gtk_text_view_set_editable(helper->example, FALSE);
+    gtk_text_view_set_wrap_mode(helper->example, GTK_WRAP_WORD_CHAR);
+    gtk_accessible_update_property(GTK_ACCESSIBLE(helper->example),
+        GTK_ACCESSIBLE_PROPERTY_LABEL, "SSML example markup", -1);
+    GtkWidget *scroll = gtk_scrolled_window_new();
+    gtk_widget_set_size_request(scroll, -1, 90);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), GTK_WIDGET(helper->example));
+    gtk_box_append(GTK_BOX(box), scroll);
+    GtkWidget *copy = gtk_button_new_with_mnemonic("_Copy example");
+    helper->copy_button = copy;
+    gtk_box_append(GTK_BOX(box), copy);
+    helper->notice = GTK_LABEL(label("Closing leaves the draft and its selection unchanged."));
+    gtk_box_append(GTK_BOX(box), GTK_WIDGET(helper->notice));
+    GtkWidget *actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    GtkWidget *close = gtk_button_new_with_label("Close");
+    GtkWidget *wrap = gtk_button_new_with_mnemonic("_Wrap with <speak>");
+    dialog->markup_apply = wrap;
+    gtk_widget_set_size_request(close, -1, 36); gtk_widget_set_size_request(wrap, -1, 36);
+    GtkWidget *spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0); gtk_widget_set_hexpand(spacer, TRUE);
+    gtk_box_append(GTK_BOX(actions), close); gtk_box_append(GTK_BOX(actions), spacer);
+    gtk_box_append(GTK_BOX(actions), wrap); gtk_box_append(GTK_BOX(box), actions);
+    gtk_widget_add_css_class(wrap, "suggested-action"); gtk_window_set_default_widget(helper->window, wrap);
+    g_signal_connect(helper->examples, "notify::selected", G_CALLBACK(select_markup_example), helper);
+    g_signal_connect(copy, "clicked", G_CALLBACK(copy_markup_example), helper);
+    g_signal_connect(close, "clicked", G_CALLBACK(close_markup), helper);
+    g_signal_connect(wrap, "clicked", G_CALLBACK(wrap_markup), helper);
+    GtkEventController *keys = gtk_event_controller_key_new();
+    g_signal_connect(keys, "key-pressed", G_CALLBACK(markup_key), helper);
+    gtk_widget_add_controller(GTK_WIDGET(helper->window), keys);
+    select_markup_example(NULL, NULL, helper);
+    return helper;
+}
+static void show_markup(GtkButton *button, gpointer data) {
+    (void)button;
+    Dialog *dialog = data;
+    if (dialog->markup_window != NULL) { gtk_window_present(dialog->markup_window); return; }
+    MarkupHelper *helper = make_markup_helper(dialog);
+    if (helper != NULL) gtk_window_present(helper->window);
 }
 static void cancel_import(Dialog *dialog) {
     if (dialog->import_token == NULL) return;
@@ -387,7 +574,13 @@ static Dialog *make_dialog(GtkWindow *owner, const char *record, const char *his
     dialog->load = GTK_BUTTON(gtk_button_new_with_label("Load clipboard"));
     gtk_box_append(GTK_BOX(source_row), GTK_WIDGET(dialog->load));
     gtk_box_append(GTK_BOX(box), source_row);
-    gtk_box_append(GTK_BOX(box), label("Text snapshot"));
+    GtkWidget *text_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    GtkWidget *text_label = label("Text snapshot"); gtk_widget_set_hexpand(text_label, TRUE);
+    dialog->helper = gtk_button_new_with_mnemonic("SSML _Helper...");
+    gtk_widget_set_tooltip_text(dialog->helper,
+        "Enable Use SSML for a compatible voice, then choose an editable Typed text or File draft.");
+    gtk_box_append(GTK_BOX(text_row), text_label); gtk_box_append(GTK_BOX(text_row), dialog->helper);
+    gtk_box_append(GTK_BOX(box), text_row);
     dialog->editor = GTK_TEXT_VIEW(gtk_text_view_new());
     gtk_text_view_set_wrap_mode(dialog->editor, GTK_WRAP_WORD_CHAR);
     gtk_accessible_update_property(GTK_ACCESSIBLE(dialog->editor), GTK_ACCESSIBLE_PROPERTY_LABEL, "Voice text snapshot", -1);
@@ -440,6 +633,7 @@ static Dialog *make_dialog(GtkWindow *owner, const char *record, const char *his
     g_signal_connect(dialog->source, "notify::selected", G_CALLBACK(select_source), dialog);
     g_signal_connect(gtk_text_view_get_buffer(dialog->editor), "changed", G_CALLBACK(changed), dialog);
     g_signal_connect(dialog->load, "clicked", G_CALLBACK(load_clipboard), dialog);
+    g_signal_connect(dialog->helper, "clicked", G_CALLBACK(show_markup), dialog);
     g_signal_connect(dialog->read, "clicked", G_CALLBACK(read_aloud), dialog);
     g_signal_connect(dialog->export_button, "clicked", G_CALLBACK(export_audio), dialog);
     g_signal_connect(dialog->generate, "clicked", G_CALLBACK(generate_audio), dialog);
@@ -466,6 +660,7 @@ void jsti_voice_sources_close(void) {
     }
     active = NULL;
     configuration.callback = NULL; configuration.context = NULL;
+    clear_markup(&markup_configuration);
 }
 void jsti_voice_sources_show_fixture(GtkWindow *owner) {
     jsti_show_voice_sources(owner, "", "");
@@ -498,6 +693,35 @@ int32_t jsti_window_set_voice_sources(const char *const *names, size_t count,
     }
     return jsti_window_post(apply_sources, set, free_sources);
 }
+static void apply_markup_configuration(gpointer data) {
+    MarkupConfiguration *changed = data;
+    clear_markup(&markup_configuration);
+    markup_configuration = *changed;
+    changed->texts = NULL; changed->descriptions = NULL;
+    if (active != NULL && active->window != NULL) refresh(active);
+}
+static void free_markup_configuration(gpointer data) {
+    MarkupConfiguration *config = data; clear_markup(config); g_free(config);
+}
+int32_t jsti_window_set_voice_markup_helper(int32_t enabled, const JSTIVoiceMarkupExample *examples,
+                                           size_t count, JSTIVoiceMarkupWrapCallback wrap) {
+    if ((enabled != 0 && enabled != 1) || examples == NULL || count == 0 || count > 32 || wrap == NULL) return -1;
+    MarkupConfiguration *config = g_new0(MarkupConfiguration, 1);
+    config->enabled = enabled != 0; config->wrap = wrap;
+    config->texts = g_new0(gchar *, count + 1); config->descriptions = g_new0(gchar *, count + 1);
+    for (size_t index = 0; index < count; ++index) {
+        if (examples[index].text == NULL || examples[index].description == NULL ||
+            examples[index].text[0] == '\0' || examples[index].description[0] == '\0' ||
+            strlen(examples[index].text) > 8192 || strlen(examples[index].description) > 256 ||
+            !g_utf8_validate(examples[index].text, -1, NULL) ||
+            !g_utf8_validate(examples[index].description, -1, NULL)) {
+            free_markup_configuration(config); return -1;
+        }
+        config->texts[index] = g_strdup(examples[index].text);
+        config->descriptions[index] = g_strdup(examples[index].description);
+    }
+    return jsti_window_post(apply_markup_configuration, config, free_markup_configuration);
+}
 typedef struct {
     gint calls, source, generated, flags;
     gchar *text, *record, *generate_flags, *played_result;
@@ -516,6 +740,104 @@ static void receive_fixture(int32_t action, int32_t source, const char *value,
 int32_t jsti_voice_controls_self_test(GtkWindow *owner, char *error, size_t capacity);
 int32_t jsti_voice_usage_self_test(GtkWindow *owner, char *error, size_t capacity);
 int32_t jsti_voice_discovery_self_test(GtkWindow *owner, char *error, size_t capacity);
+static int32_t markup_fixture_wrap(const char *input, char *output, size_t capacity,
+                                   int32_t *utf16, int32_t *scalars) {
+    if (strcmp(input, "Reject") == 0) return -1;
+    gboolean wrapped = strstr(input, "<fixture>") != NULL;
+    gchar *result = wrapped ? g_strdup(input) : g_strconcat("<fixture>", input, "</fixture>", NULL);
+    if (strlen(result) + 1 > capacity) { g_free(result); return -1; }
+    memcpy(output, result, strlen(result) + 1); *utf16 = *scalars = wrapped ? 0 : 9;
+    g_free(result); return 0;
+}
+static gboolean markup_fixture_copy(GtkWidget *widget, const char *value, gpointer data) {
+    (void)widget;
+    gchar **captured = data; g_free(*captured); *captured = g_strdup(value); return TRUE;
+}
+static gboolean markup_self_test(Dialog *dialog) {
+    MarkupConfiguration original = markup_configuration;
+    gchar *original_text = text(dialog);
+    guint original_source = dialog->selected;
+    const gchar *fixture_texts[] = {"Synthetic & <tag>", "Synthetic \xC9\x99 & <other>", NULL};
+    const gchar *fixture_descriptions[] = {"First synthetic example", "Second synthetic example", NULL};
+    markup_configuration = (MarkupConfiguration){TRUE, g_strdupv((gchar **)fixture_texts),
+        g_strdupv((gchar **)fixture_descriptions), markup_fixture_wrap};
+    dialog->selected = 3; refresh(dialog);
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(dialog->editor);
+    const gchar *draft = "\xCE\xA9 \xF0\x9F\x98\x80 & <";
+    gtk_text_buffer_set_text(buffer, draft, -1);
+    GtkTextIter insert, bound;
+    gtk_text_buffer_get_iter_at_offset(buffer, &insert, 3);
+    gtk_text_buffer_get_iter_at_offset(buffer, &bound, 2);
+    gtk_text_buffer_select_range(buffer, &insert, &bound);
+    MarkupHelper *helper = make_markup_helper(dialog);
+    gboolean passed = helper != NULL;
+    gchar *copied = NULL;
+    if (helper != NULL) {
+        helper->copy = markup_fixture_copy; helper->copy_context = &copied;
+        gtk_drop_down_set_selected(helper->examples, 1);
+        g_signal_emit_by_name(helper->copy_button, "clicked");
+        gchar *unchanged = text(dialog);
+        passed = g_strcmp0(copied, fixture_texts[1]) == 0 && strcmp(unchanged, draft) == 0 &&
+            gtk_widget_get_focusable(dialog->markup_apply) &&
+            gtk_button_get_use_underline(GTK_BUTTON(dialog->markup_apply)) &&
+            gtk_window_get_default_widget(helper->window) == dialog->markup_apply && passed;
+        g_free(unchanged);
+        passed = markup_key(NULL, GDK_KEY_Escape, 0, 0, helper) && passed;
+        gtk_text_buffer_get_iter_at_mark(buffer, &insert, gtk_text_buffer_get_insert(buffer));
+        gtk_text_buffer_get_iter_at_mark(buffer, &bound, gtk_text_buffer_get_selection_bound(buffer));
+        passed = gtk_text_iter_get_offset(&insert) == 3 && gtk_text_iter_get_offset(&bound) == 2 && passed;
+    }
+    helper = make_markup_helper(dialog);
+    if (helper != NULL) {
+        gchar *current = g_strconcat(draft, " newer", NULL);
+        gtk_text_buffer_set_text(buffer, current, -1);
+        gtk_text_buffer_get_iter_at_offset(buffer, &insert, 3);
+        gtk_text_buffer_get_iter_at_offset(buffer, &bound, 2);
+        gtk_text_buffer_select_range(buffer, &insert, &bound);
+        g_signal_emit_by_name(dialog->markup_apply, "clicked");
+        gchar *actual = text(dialog);
+        gchar *expected = g_strconcat("<fixture>", current, "</fixture>", NULL);
+        gtk_text_buffer_get_iter_at_mark(buffer, &insert, gtk_text_buffer_get_insert(buffer));
+        gtk_text_buffer_get_iter_at_mark(buffer, &bound, gtk_text_buffer_get_selection_bound(buffer));
+        passed = strcmp(actual, expected) == 0 && gtk_text_iter_get_offset(&insert) == 12 &&
+            gtk_text_iter_get_offset(&bound) == 11 && passed;
+        gtk_text_buffer_undo(buffer);
+        gchar *undone = text(dialog);
+        passed = strcmp(undone, current) == 0 && passed;
+        g_free(actual); g_free(expected); g_free(undone); g_free(current);
+    } else passed = FALSE;
+    gtk_text_buffer_set_text(buffer, "<fixture>Already wrapped</fixture>", -1);
+    gtk_text_buffer_get_iter_at_offset(buffer, &insert, 16);
+    gtk_text_buffer_get_iter_at_offset(buffer, &bound, 9);
+    gtk_text_buffer_select_range(buffer, &insert, &bound);
+    helper = make_markup_helper(dialog);
+    if (helper != NULL) {
+        passed = apply_markup(helper) && passed;
+        gtk_text_buffer_get_iter_at_mark(buffer, &insert, gtk_text_buffer_get_insert(buffer));
+        gtk_text_buffer_get_iter_at_mark(buffer, &bound, gtk_text_buffer_get_selection_bound(buffer));
+        passed = gtk_text_iter_get_offset(&insert) == 16 && gtk_text_iter_get_offset(&bound) == 9 && passed;
+        gtk_text_buffer_set_text(buffer, "Reject", -1);
+        passed = !apply_markup(helper) && passed;
+        gchar *unchanged = text(dialog); passed = strcmp(unchanged, "Reject") == 0 && passed; g_free(unchanged);
+        markup_configuration.enabled = FALSE; refresh(dialog);
+        passed = !gtk_widget_get_sensitive(dialog->helper) &&
+            !gtk_widget_get_sensitive(dialog->markup_apply) && !apply_markup(helper) && passed;
+        close_markup(NULL, helper);
+    } else passed = FALSE;
+    markup_configuration.enabled = TRUE;
+    for (guint source = 0; source <= 2; source += 2) {
+        dialog->selected = source; refresh(dialog);
+        passed = !gtk_widget_get_sensitive(dialog->helper) && !can_edit_markup(dialog) && passed;
+    }
+    dialog->selected = 3; dialog->import_token = g_strdup("synthetic-helper-import"); refresh(dialog);
+    passed = !gtk_widget_get_sensitive(dialog->helper) && passed;
+    g_clear_pointer(&dialog->import_token, g_free);
+    passed = jsti_window_set_voice_markup_helper(2, NULL, 0, NULL) == -1 && passed;
+    clear_markup(&markup_configuration); markup_configuration = original;
+    dialog->selected = original_source; gtk_text_buffer_set_text(buffer, original_text, -1); refresh(dialog);
+    g_free(original_text); g_free(copied);
+    return passed;
+}
 int32_t jsti_voice_sources_self_test(GtkWindow *owner, char *error, size_t capacity) {
     Dialog *dialog = make_dialog(owner, "synthetic-record", "Synthetic History snapshot");
     if (dialog == NULL) { jsti_set_error(error, capacity, "Voice sources fixture could not open."); return -1; }
@@ -575,12 +897,14 @@ int32_t jsti_voice_sources_self_test(GtkWindow *owner, char *error, size_t capac
     play_result(NULL, dialog);
     gboolean retained_result = g_strcmp0(received.played_result, "synthetic-result") == 0 &&
         gtk_widget_get_sensitive(GTK_WIDGET(dialog->export_result));
+    gboolean markup = markup_self_test(dialog) &&
+        received.calls == 4 && received.generated == 1 && received.flags == 2;
     gtk_window_destroy(dialog->window);
     g_free(received.text); g_free(received.record);
     g_free(received.generate_flags); g_free(received.played_result);
     gboolean passed = history && typed && unavailable && history_snapshot && typed_snapshot &&
         clipboard_snapshot && file_snapshot && stale_import && failed_import && edited_import &&
-        generated_snapshot && busy_result && retained_result;
+        generated_snapshot && busy_result && retained_result && markup;
     if (!passed) jsti_set_error(error, capacity, "Voice sources state/snapshot checks failed.");
     return passed && jsti_voice_controls_self_test(owner, error, capacity) == 0 &&
         jsti_voice_usage_self_test(owner, error, capacity) == 0

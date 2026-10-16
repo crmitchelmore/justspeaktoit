@@ -177,13 +177,15 @@ final class DesktopHostVoiceConfigurationTests: XCTestCase {
         XCTAssertFalse(saved.generationOptions.autoPlay)
         let configuration = try await controller.configuration()
         XCTAssertTrue(DesktopConfiguration.voiceTransferKeys.isDisjoint(with: configuration.values.keys))
-        XCTAssertEqual(configuration.values["ttsQuality"], AnyCodable(.string("future-quality")))
+        XCTAssertEqual(saved.quality, "future-quality")
+        XCTAssertNil(configuration.values["ttsQuality"])
         XCTAssertThrowsError(try saved.validatedSynthesisOptions().validate(for: .naturalSpeech))
         let file = directory.appendingPathComponent("synthesis-export.json")
         try await controller.exportConfiguration(path: file.path)
         let document = try JSONDecoder().decode(DesktopConfigurationDocument.self, from: Data(contentsOf: file))
         XCTAssertEqual(document.preferences.values["ttsSpeed"], AnyCodable(.double(1.25)))
         XCTAssertEqual(document.preferences.values["ttsPitch"], AnyCodable(.int(-3)))
+        XCTAssertEqual(document.preferences.values["ttsQuality"], AnyCodable(.string("future-quality")))
         await controller.close()
         controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
         let restored = await controller.voiceOutputSettings()
@@ -216,7 +218,7 @@ final class DesktopHostVoiceConfigurationTests: XCTestCase {
         let before = try Data(contentsOf: path)
         let writes = effects.writes
         for (key, value) in [
-            ("ttsSpeed", AnyCodable(.double(0.49))), ("ttsPitch", AnyCodable(.double(0.5))),
+            ("ttsSpeed", AnyCodable(.double(0.24))), ("ttsPitch", AnyCodable(.double(0.5))),
             ("ttsUseSSML", AnyCodable(.string("true")))
         ] {
             do {

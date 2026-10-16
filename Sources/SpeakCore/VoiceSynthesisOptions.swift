@@ -3,7 +3,7 @@ import Foundation
 /// Immutable synthesis controls. Hosts retain unsupported stored choices, but
 /// must validate them against the actual route before reading credentials.
 public struct VoiceSynthesisOptions: Codable, Equatable, Sendable {
-    public static let speedRange: ClosedRange<Double> = 0.5...2
+    public static let speedRange = OpenAITTSAPI.speedRange
     public static let pitchRange: ClosedRange<Double> = -12...12
     public static let defaultSpeed = 1.0
     public static let defaultPitch = 0.0
@@ -12,11 +12,14 @@ public struct VoiceSynthesisOptions: Codable, Equatable, Sendable {
     public let speed: Double
     public let pitch: Double
     public let useSSML: Bool
+    /// Nil retains an explicitly selected legacy model and its existing PCM default.
+    public let quality: VoiceSynthesisQuality?
 
     public init(
         speed: Double = VoiceSynthesisOptions.defaultSpeed,
         pitch: Double = VoiceSynthesisOptions.defaultPitch,
-        useSSML: Bool = VoiceSynthesisOptions.defaultUseSSML
+        useSSML: Bool = VoiceSynthesisOptions.defaultUseSSML,
+        quality: VoiceSynthesisQuality? = nil
     ) throws {
         guard speed.isFinite, Self.speedRange.contains(speed),
               pitch.isFinite, Self.pitchRange.contains(pitch), pitch.rounded() == pitch else {
@@ -25,6 +28,7 @@ public struct VoiceSynthesisOptions: Codable, Equatable, Sendable {
         self.speed = speed
         self.pitch = pitch
         self.useSSML = useSSML
+        self.quality = quality
     }
 
     public init(from decoder: Decoder) throws {
@@ -33,7 +37,8 @@ public struct VoiceSynthesisOptions: Codable, Equatable, Sendable {
             try self.init(
                 speed: values.decode(Double.self, forKey: .speed),
                 pitch: values.decode(Double.self, forKey: .pitch),
-                useSSML: values.decode(Bool.self, forKey: .useSSML)
+                useSSML: values.decode(Bool.self, forKey: .useSSML),
+                quality: values.decodeIfPresent(VoiceSynthesisQuality.self, forKey: .quality)
             )
         } catch let error as VoiceSynthesisConfigurationError {
             throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath,
@@ -71,30 +76,36 @@ public struct VoiceSynthesisCapabilities: Equatable, Sendable {
     }
 
     public static let naturalSpeech = Self(speed: false, pitch: false, ssml: false)
-    public static let azureNeural = Self(speed: true, pitch: true, ssml: true)
+    public static let azureNeural = Self(
+        speed: true, pitch: true, ssml: true, speedRange: AzureSpeechVoiceAPI.speedRange)
     public static let azureMAI = Self(speed: false, pitch: false, ssml: true)
     public static let xai = Self(speed: true, pitch: false, ssml: false, speedRange: XAITTSAPI.speedRange)
     public static let cartesia = Self(speed: true, pitch: false, ssml: false, speedRange: CartesiaTTSAPI.speedRange)
     public static let soniox = Self(speed: true, pitch: false, ssml: false, speedRange: SonioxTTSAPI.speedRange)
-    public static let openai = Self(speed: true, pitch: false, ssml: false)
+    public static let openai = Self(speed: true, pitch: false, ssml: false, speedRange: OpenAITTSAPI.speedRange)
 }
 
 public enum VoiceSynthesisConfigurationError: LocalizedError, Equatable {
     case invalidControls
     case unsupportedControls
     case unsupportedVoice
+    case unsupportedQuality
     case unsupportedSpeed(minimum: Double, maximum: Double)
 
     public var errorDescription: String? {
         switch self {
         case .invalidControls:
-            "Choose speed between 0.5 and 2, and a whole-number pitch between -12 and 12 semitones."
+            "Choose speed between \(VoiceSynthesisOptions.speedRange.lowerBound) and "
+                + "\(VoiceSynthesisOptions.speedRange.upperBound), "
+                + "and a whole-number pitch between -12 and 12 semitones."
         case .unsupportedControls:
             "This voice cannot apply the saved speed, pitch or SSML choices. "
                 + "Choose a compatible voice or normal controls."
         case .unsupportedVoice:
             "The stored voice is not available on this host. "
                 + "Choose an executable voice; stored choices are unchanged."
+        case .unsupportedQuality:
+            "The stored speech quality is unavailable. Choose a supported quality; stored choices are unchanged."
         case .unsupportedSpeed(let minimum, let maximum):
             "This voice supports speed between \(minimum) and \(maximum). "
                 + "Choose a supported speed or normal controls; stored choices are unchanged."

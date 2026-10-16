@@ -8,10 +8,14 @@ public enum OpenAITTSModel: String, CaseIterable, Codable, Hashable, Sendable {
     public var desktopModelIdentifier: String { OpenAITTSCatalog.voiceIDPrefix + rawValue }
 
     public var qualityIdentifier: String {
+        quality.rawValue
+    }
+
+    public var quality: VoiceSynthesisQuality {
         switch self {
-        case .mini: "standard"
-        case .standard: "high"
-        case .highDefinition: "highest"
+        case .mini: .standard
+        case .standard: .high
+        case .highDefinition: .highest
         }
     }
 

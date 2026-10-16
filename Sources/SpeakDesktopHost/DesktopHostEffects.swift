@@ -70,11 +70,20 @@ package protocol DesktopHostEffects<Platform>: Sendable {
     func postProcess(
         text: String, options: DesktopPostProcessing.Options, key: String, directives: [String], tags: [String]
     ) async throws -> DesktopPostProcessing.Outcome
+    func polishLive(
+        text: String, model: String, key: String, localLLM: (any DesktopLocalLLMEngine)?
+    ) async throws -> String
     /// Replaces the settings file atomically.
     func writeSettings(_ data: Data, to url: URL) throws
 }
 
 package extension DesktopHostEffects {
+    func polishLive(
+        text: String, model: String, key: String, localLLM: (any DesktopLocalLLMEngine)?
+    ) async throws -> String {
+        try await DesktopPostProcessing.polishLive(text: text, model: model, apiKey: key, localLLM: localLLM)
+    }
+
     func postProcess(
         text: String, options: DesktopPostProcessing.Options, key: String, directives: [String], tags: [String]
     ) async throws -> DesktopPostProcessing.Outcome {

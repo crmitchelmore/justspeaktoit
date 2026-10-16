@@ -45,6 +45,7 @@ public enum DesktopMigrationHistory {
         record.failure = native?.failure ?? item.errors.first(where: { $0.phase != .postProcessing })?.message
         record.postProcessingFailure = native?.postProcessingFailure
             ?? item.errors.first(where: { $0.phase == .postProcessing })?.message
+        record.livePolishResult = native?.livePolishResult
         if let text = item.rawTranscription {
             let result = native?.result
             record.result = TranscriptionResult(

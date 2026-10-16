@@ -65,6 +65,7 @@ final class DesktopHostVoiceProviderCompositionTests: XCTestCase {
     }
 
     func testUnknownSettings_RoundTripWithoutCoercionAndRemainVisibleAfterProviderChoice() async throws {
+        FakeLog.shared.installKeyReadHook { _ in XCTFail("Picker repair read a credential") }
         var unknown = DesktopVoiceOutputSettings(modelID: "future/model", voiceID: "future/Voice")
         unknown.autoPlay = false
         unknown.saveToRecordings = true
@@ -89,10 +90,15 @@ final class DesktopHostVoiceProviderCompositionTests: XCTestCase {
         var expected = unknown
         expected.modelID = voice.modelID
         expected.voiceID = voice.id
+        expected.quality = "highest"
         let chosen = await controller.voiceOutputSettings()
         XCTAssertEqual(chosen, expected)
+        XCTAssertEqual(chosen.quality, VoiceSynthesisQuality.highest.rawValue)
+        XCTAssertEqual(try VoiceOutputCredentialSlot(voice: voice).identifier, "openai.tts.apiKey")
         XCTAssertEqual(chosen.controlsPresentation.capabilities, 1)
-        XCTAssertThrowsError(try chosen.synthesisSelection())
+        XCTAssertThrowsError(try chosen.synthesisSelection()) {
+            XCTAssertEqual($0 as? VoiceSynthesisConfigurationError, .unsupportedControls)
+        }
         XCTAssertTrue(StubURLProtocol.recordedRequests.isEmpty)
     }
 

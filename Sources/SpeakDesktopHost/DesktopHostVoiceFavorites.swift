@@ -18,8 +18,7 @@ extension DesktopVoiceOutputSettings {
             favoriteRanks: favoriteRanks,
             selected: 0)
         do {
-            let voice = try DesktopSpeechVoice.resolved(
-                modelID: modelID, voiceID: voiceID, accountInventory: accountInventory)
+            let voice = try resolvedVoice(accountInventory: accountInventory)
             if let index = picker.voices.firstIndex(of: voice) { shown.selected = index; return shown }
         } catch {
             // Keep the stored identity unavailable rather than selecting another provider.

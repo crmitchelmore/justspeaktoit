@@ -37,7 +37,7 @@ struct DesktopSonioxSpeechSynthesis: Sendable {
             pcm.append(contentsOf: payload)
         }
         try Task.checkCancellation()
-        guard !pcm.isEmpty, let wav = PCMWaveWriter.wavData(pcm: pcm, sampleRate: selection.voice.sampleRate) else {
+        guard !pcm.isEmpty, let wav = PCMWaveWriter.wavData(pcm: pcm, sampleRate: selection.sampleRate) else {
             throw DesktopSpeechSynthesisError.invalidAudio
         }
         return wav
@@ -49,13 +49,13 @@ struct DesktopSonioxSpeechSynthesis: Sendable {
         let language = SonioxTTSCatalog.languageCode(forVoiceOutputIdentifier: selection.language, content: text)
         if let account = voice.accountVoice {
             return .init(language: language, accountVoice: account, audioFormat: .wav,
-                         sampleRate: selection.voice.sampleRate, speed: selection.options.speed)
+                         sampleRate: selection.sampleRate, speed: selection.options.speed)
         }
         guard let builtIn = SonioxTTSCatalog.voice(forID: voice.providerVoiceID) else {
             throw VoiceSynthesisConfigurationError.unsupportedVoice
         }
         return .init(language: language, voice: builtIn, audioFormat: .wav,
-                     sampleRate: selection.voice.sampleRate, speed: selection.options.speed)
+                     sampleRate: selection.sampleRate, speed: selection.options.speed)
     }
 
     private func synthesizeSegment(
@@ -74,7 +74,7 @@ struct DesktopSonioxSpeechSynthesis: Sendable {
             let audio: DeepgramSpeechAudio
             do {
                 audio = try DeepgramSpeechWAV.canonical(
-                    received, sampleRate: selection.voice.sampleRate, requireComplete: true)
+                    received, sampleRate: selection.sampleRate, requireComplete: true)
             } catch {
                 throw DesktopSpeechSynthesisError.invalidAudio
             }

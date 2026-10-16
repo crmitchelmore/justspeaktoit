@@ -87,7 +87,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             guard voiceTicketIsCurrent(ticket) else { return }
             let result = try DesktopGeneratedVoiceResult(
                 source: snapshot, voice: selection.voice, options: selection.options,
-                audio: VoiceGeneratedAudio(validating: wav, sampleRate: selection.voice.sampleRate)
+                audio: VoiceGeneratedAudio(validating: wav, sampleRate: selection.sampleRate)
             )
             saveWarning = try await archiveGeneratedAudio(result.audio, enabled: options.saveToRecordings)
             try Task.checkCancellation()

@@ -19,6 +19,7 @@ public final class DesktopLiveSession: @unchecked Sendable {
 
     public let id: UUID
     public let keywordLimitation: String?
+    public let livePolish: LivePolishSession?
     private let client: any FinalizingStreamingTranscriptionClient
     /// Lifecycle/audio calls cannot overtake each other. Provider callbacks
     /// read provider projections before acquiring stateLock, so synchronous
@@ -42,10 +43,25 @@ public final class DesktopLiveSession: @unchecked Sendable {
         self.client = client
         self.id = id
         self.keywordLimitation = keywordLimitation
+        self.livePolish = nil
         self.accumulator = TranscriptAccumulator(shape: client.finalShape)
     }
 
-    deinit { if !stopped { client.cancel() } }
+    public init(
+        client: any FinalizingStreamingTranscriptionClient, id: UUID, keywordLimitation: String?,
+        livePolish: LivePolishSession?
+    ) {
+        self.client = client
+        self.id = id
+        self.keywordLimitation = keywordLimitation
+        self.livePolish = livePolish
+        self.accumulator = TranscriptAccumulator(shape: client.finalShape)
+    }
+
+    deinit {
+        livePolish?.cancel()
+        if !stopped { client.cancel() }
+    }
 
     public func snapshot() -> Snapshot { stateLock.withLock { currentSnapshot() } }
 
@@ -81,6 +97,7 @@ public final class DesktopLiveSession: @unchecked Sendable {
     /// Unprojected nil/blank success is empty. Errors and cancellation retain
     /// the best display text instead of inventing a completed result.
     public func finish() async -> Snapshot {
+        livePolish?.pause()
         if Task.isCancelled { return cancel() }
         let task = beginFinish()
         guard let task else { return snapshot() }
@@ -92,7 +109,8 @@ public final class DesktopLiveSession: @unchecked Sendable {
 
     @discardableResult
     public func cancel() -> Snapshot {
-        calls.withLock {
+        livePolish?.cancel()
+        return calls.withLock {
             let task = stateLock.withLock {
                 if phase == .idle || phase == .recording || phase == .finishing {
                     phase = .cancelled
@@ -168,6 +186,7 @@ public final class DesktopLiveSession: @unchecked Sendable {
                 next = accumulator.append(final: transcript)
             } else { next = accumulator.display(withInterim: transcript) }
             if next != text { text = next; revision += 1 }
+            livePolish?.submit(text, immediately: isFinal)
         }
     }
 
@@ -178,6 +197,7 @@ public final class DesktopLiveSession: @unchecked Sendable {
             error = message
             phase = .failed
             revision += 1
+            livePolish?.cancel()
         }
     }
 

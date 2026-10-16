@@ -15,8 +15,9 @@ struct DesktopCartesiaSpeechSynthesis: Sendable {
         let key = try await credential().trimmingCharacters(in: .whitespacesAndNewlines)
         try Task.checkCancellation()
         guard !key.isEmpty else { throw DesktopCartesiaSpeechError.missingCredential }
+        let sampleRate = voice.sampleRate(quality: options.quality)
         let selection = CartesiaTTSRequest(
-            voiceID: voice.id, outputFormat: .wav(sampleRate: 24_000),
+            voiceID: voice.id, outputFormat: .wav(sampleRate: sampleRate),
             languageIdentifier: nil, content: source.text, speed: options.speed)
         var pcm = Data()
         for segment in segments {
@@ -29,7 +30,7 @@ struct DesktopCartesiaSpeechSynthesis: Sendable {
             pcm.append(contentsOf: payload)
         }
         try Task.checkCancellation()
-        guard !pcm.isEmpty, let wav = PCMWaveWriter.wavData(pcm: pcm, sampleRate: 24_000) else {
+        guard !pcm.isEmpty, let wav = PCMWaveWriter.wavData(pcm: pcm, sampleRate: sampleRate) else {
             throw DesktopSpeechSynthesisError.invalidAudio
         }
         return wav
@@ -45,7 +46,9 @@ struct DesktopCartesiaSpeechSynthesis: Sendable {
             let received = try await receive(request)
             try Task.checkCancellation()
             let audio: DeepgramSpeechAudio
-            do { audio = try DeepgramSpeechWAV.canonical(received, sampleRate: 24_000) } catch {
+            do {
+                audio = try DeepgramSpeechWAV.canonical(received, sampleRate: selection.outputFormat.sampleRate)
+            } catch {
                 throw DesktopSpeechSynthesisError.invalidAudio
             }
             if let ticket { capture?.finish(ticket, outcome: .completed, audioDuration: audio.duration) }

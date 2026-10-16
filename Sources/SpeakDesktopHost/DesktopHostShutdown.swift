@@ -112,6 +112,8 @@ extension DesktopHostController {
             return shutdownReport ?? DesktopHostShutdownReport()
         }
         closed = true
+        recording?.live?.livePolish?.cancel()
+        liveFinalisation?.livePolish?.cancel()
         Platform.cancelLocalModels(controller: self)
         let ownedAdmission = ownedDictationAdmission
         let ownedDictationID = ownedDictation?.id

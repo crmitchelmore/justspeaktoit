@@ -14,7 +14,7 @@ enum WindowsPostProcessingSelfTest {
     static func run() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("JSTI post-processing self-test \(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try WindowsNative.createSyntheticDirectory(root)
         defer { try? FileManager.default.removeItem(at: root) }
         guard let model = DesktopPostProcessing.remoteModels.first?.id,
               case .apiKey(let identifier, _) = ModelCredentialResolver.requirement(
@@ -153,7 +153,7 @@ private final class PostProcessingBench: @unchecked Sendable {
 
     static func make(_ root: URL, _ name: String) async throws -> PostProcessingBench {
         let directory = root.appendingPathComponent(name, isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try WindowsNative.createSyntheticDirectory(directory)
         let effects = SyntheticEffects()
         let controller = try WindowsAppController(directory: directory, effects: effects)
         let bench = PostProcessingBench(directory: directory, effects: effects, controller: controller)

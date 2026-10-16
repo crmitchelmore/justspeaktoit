@@ -17,6 +17,20 @@ extension LinuxWindow {
             jsti_window_set_configuration_field_title(index, $0)
         }
         if result < 0 { LinuxHostPlatform.update("The Voice language label could not be shown.") }
+        guard let qualityIndex = DesktopConfiguration.fields.firstIndex(where: {
+            $0.key == VoiceSynthesisPreference.quality.key.rawValue
+        }) else {
+            LinuxHostPlatform.update("The canonical Voice quality field is unavailable.")
+            return
+        }
+        let qualityResult = settings.qualityTitle(accountInventory: accountInventory).withCString {
+            jsti_window_set_configuration_field_title(qualityIndex, $0)
+        }
+        if qualityResult < 0 { LinuxHostPlatform.update("The Voice quality label could not be shown.") }
+        if jsti_window_set_configuration_field_enabled(qualityIndex,
+            settings.qualityControlsAvailable(accountInventory: accountInventory) ? 1 : 0) < 0 {
+            LinuxHostPlatform.update("The Voice quality availability could not be shown.")
+        }
     }
 
     static func configureConfiguration(_ holder: LinuxEventContext) async throws {
@@ -28,7 +42,8 @@ extension LinuxWindow {
         let strings = Strings()
         let rows = zip(DesktopConfiguration.fields, preferences.entries).map { field, value in
             JSTIConfigurationField(
-                title: strings.add(field.key == VoiceOutputLanguagePreference.key ? snapshot.languageTitle : field.title),
+                title: strings.add(field.key == VoiceOutputLanguagePreference.key ? snapshot.languageTitle
+                    : field.key == VoiceSynthesisPreference.quality.key.rawValue ? snapshot.qualityTitle : field.title),
                 value: strings.add(value), group: strings.add(field.group),
                 is_boolean: { if case .boolean = field.kind { return 1 }; return 0 }(),
                 requires_hud_overlay: field.requiresHUDOverlay ? 1 : 0,
@@ -51,6 +66,11 @@ extension LinuxWindow {
             }
         }
         guard result == 0 else { throw DesktopConfigurationError.invalidField("Native preferences") }
+        guard let qualityIndex = DesktopConfiguration.fields.firstIndex(where: {
+            $0.key == VoiceSynthesisPreference.quality.key.rawValue
+        }), jsti_window_set_configuration_field_enabled(qualityIndex, snapshot.qualityEnabled ? 1 : 0) >= 0 else {
+            throw DesktopConfigurationError.invalidField("Voice quality availability")
+        }
         try configureConfigurationLayout(preferences, strings: strings)
     }
 
@@ -85,7 +105,7 @@ extension LinuxWindow {
         _ action: Int32, values: [String], holder: LinuxEventContext
     ) async throws {
         switch action {
-        case 0: try await holder.controller.saveConfiguration(values)
+        case 0: try await holder.controller.saveConfiguration(values, intent: .apply)
         case 1: try await holder.controller.importConfiguration(path: values[0])
         case 2: try await holder.controller.exportConfiguration(path: values[0])
         case 3:
@@ -94,11 +114,14 @@ extension LinuxWindow {
             }
             try await holder.controller.recoverConfigurationKeywords(Array(values.dropLast()), selected: selected)
         case 4, 5:
-            try await holder.controller.saveConfiguration(values)
-            try await holder.controller.previewRecordingFeedback(action == 4 ? .start : .stop)
+            try await holder.controller.previewRecordingFeedback(
+                action == 4 ? .start : .stop, configurationEntries: values
+            )
         default: throw DesktopConfigurationError.invalidField("Configuration action")
         }
         try await configureConfiguration(holder)
+        voiceOutput(await holder.controller.voiceOutputSettings(),
+            accountInventory: await holder.controller.selectedVoiceAccountInventory)
         if action == 1 { postProcessing(await holder.controller.postProcessingOptions()) }
     }
 }

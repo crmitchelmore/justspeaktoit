@@ -100,6 +100,7 @@ extension DesktopHostController {
         record.lexiconContextTags = nil
         record.postProcessingModelIdentifier = nil
         record.postProcessingFailure = skippedPolishReason
+        record.livePolishResult = nil
         return record
     }
 

@@ -160,6 +160,7 @@ public struct DesktopProfileSession: Equatable, Sendable {
     /// Why polish was skipped for this session, for the host to record as the
     /// post-processing outcome so History explains the missing processed text.
     public let skippedPolishReason: String?
+    public private(set) var livePolish: DesktopLivePolishSelection?
 
     public init(
         profileName: String?,
@@ -190,11 +191,19 @@ public struct DesktopProfileSession: Equatable, Sendable {
     }
 
     public func capturingTranscriptionOptions(_ options: LiveClientOptions) -> Self {
-        Self(
+        var captured = Self(
             profileName: profileName, modelIdentifier: modelIdentifier, language: language,
             postProcessing: postProcessing, limitations: limitations, skippedPolishReason: skippedPolishReason,
             transcriptionOptions: options
         )
+        captured.livePolish = livePolish
+        return captured
+    }
+
+    public func capturingLivePolish(_ selection: DesktopLivePolishSelection) -> Self {
+        var captured = self
+        captured.livePolish = selection
+        return captured
     }
 
     public var blockingLimitation: DesktopProfileLimitation? {

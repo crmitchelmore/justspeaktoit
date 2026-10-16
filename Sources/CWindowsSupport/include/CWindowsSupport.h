@@ -100,6 +100,8 @@ int jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t c
 void jsti_window_clear_configuration(void);
 /* Changes only a label, never an unsaved value. 1 means no editor snapshot exists yet. */
 int jsti_window_set_configuration_field_title(size_t index, const char *title);
+/* Explicit route availability, without replacing a value or changing dependencies. */
+int jsti_window_set_configuration_field_enabled(size_t index, int32_t enabled);
 
 /* Comparison actions 100-107. Model rows: id TAB name TAB live(0/1), round rows:
  * id TAB name. Run payload: language LF tab-separated model ids LF file paths.

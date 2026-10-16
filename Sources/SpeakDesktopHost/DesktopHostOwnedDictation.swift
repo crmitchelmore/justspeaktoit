@@ -71,7 +71,7 @@ extension DesktopHostController {
             guard !closed, !cancellationRequested, !Task.isCancelled else { throw CancellationError() }
             live = try await makeLiveSession(
                 model: profile.modelIdentifier, key: key, id: id, language: profile.language,
-                options: profile.transcriptionOptions, input: input
+                options: profile.transcriptionOptions, input: input, polish: snapshot.polish
             )
             if let notice = live?.keywordLimitation, !(record.profileNotes ?? []).contains(notice) {
                 record.profileNotes = (record.profileNotes ?? []) + [notice]
@@ -126,6 +126,7 @@ extension DesktopHostController {
             if active.abortReason == nil { active.abortReason = reason }
             cancelRecordingTail()
             active.owner.abort(reason)
+            active.request.live?.livePolish?.cancel()
         }
         guard active.stop == nil, active.failure == nil else { ownedDictation = active; return }
         active.stop = Task { await self.finishOwnedDictation(requestID: requestID, retry: false) }
@@ -157,6 +158,7 @@ extension DesktopHostController {
         if let reason = ownedDictation?.abortReason { active.owner.abort(reason) }
         liveUpdates?.cancel()
         liveUpdates = nil
+        active.request.live?.livePolish?.pause()
         guard var stopped = await active.owner.stop(retry: retry) else {
             ownedDictation?.failure = .retirement
             let message = await active.owner.cleanupFailure ?? "Owned recording is still awaiting safe retirement."

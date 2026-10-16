@@ -36,10 +36,10 @@ extension DesktopSpeechVoice {
     }
 
     /// Favorites remain Mac-compatible voice IDs; an executable picker row
-    /// also distinguishes OpenAI and Gemini models that share that same voice.
+    /// also distinguishes OpenAI, Gemini and ElevenLabs models sharing that voice.
     public var pickerIdentifier: String {
         switch self {
-        case .openai, .gemini: modelID + "|" + favoriteIdentifier
+        case .openai, .gemini, .elevenlabs: modelID + "|" + favoriteIdentifier
         default: favoriteIdentifier
         }
     }

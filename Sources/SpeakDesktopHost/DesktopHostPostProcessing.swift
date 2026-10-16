@@ -52,6 +52,7 @@ extension DesktopHostController {
             if let configuration = changed.configuration {
                 changed.configuration = try DesktopPostProcessingConfiguration.removingMirrors(from: configuration)
             }
+            changed.livePolishApproved = try retainedLivePolishApproval(after: changed)
             try effects.writeSettings(
                 JSONEncoder().encode(changed), to: directory.appendingPathComponent("settings.json")
             )
@@ -81,6 +82,12 @@ extension DesktopHostController {
     func postProcess(
         _ original: DesktopRecordingStore.Record, options: DesktopPostProcessing.Options
     ) async -> DesktopRecordingStore.Record {
+        await postProcess(original, options: options, inputText: nil)
+    }
+
+    func postProcess(
+        _ original: DesktopRecordingStore.Record, options: DesktopPostProcessing.Options, inputText: String?
+    ) async -> DesktopRecordingStore.Record {
         var record = original
         guard let result = record.result else { return record }
         if TranscriptPostProcessingPolicy.isEffectivelyEmptyTranscript(result.text) {
@@ -88,7 +95,7 @@ extension DesktopHostController {
             return record
         }
         guard !closed, !cancellationRequested, options.mode != .disabled else { return record }
-        let input = record.correctedText ?? result.text
+        let input = inputText ?? record.correctedText ?? result.text
         let context = options.lexiconContext(
             directives: record.lexiconDirectives ?? [], tags: record.lexiconContextTags ?? []
         )

@@ -104,7 +104,7 @@ actor AzureSpeechClient: TextToSpeechClient {
     case .m4a:
       return "audio-24khz-48kbitrate-mono-mp3"  // Azure doesn't support AAC directly
     case .wav:
-      return settings.quality == .highest ? "riff-48khz-16bit-mono-pcm" : "riff-24khz-16bit-mono-pcm"
+      return "riff-\(settings.quality.neuralSampleRate / 1000)khz-16bit-mono-pcm"
     }
   }
 

@@ -17,6 +17,7 @@ extension DesktopHostController {
         }
         let key = try requireCredentialOrLocalModel(profile.modelIdentifier)
         try requireAzureResource(forLive: profile.modelIdentifier)
+        let polish = captureLivePolish(profile)
         // Holds a profile's or the app's on-device model while startup suspends;
         // the recording holds it once capture starts.
         let localModel = beginLocalUse(profile.modelIdentifier)
@@ -37,7 +38,8 @@ extension DesktopHostController {
         try await beginLiveRecording(
             LiveRecordingStart(
                 key: key, profile: profile, id: id, record: record, file: file, rate: rate,
-                target: target, deviceID: deviceID, textOutput: textOutput, trigger: trigger, handsFree: handsFree
+                target: target, deviceID: deviceID, textOutput: textOutput, trigger: trigger, handsFree: handsFree,
+                polish: polish
             )
         )
         guard !closed, recording?.record.id == id else { return }
@@ -59,6 +61,7 @@ extension DesktopHostController {
         let textOutput: Platform.TextOutputOptions
         let trigger: HotKeySessionTrigger
         let handsFree: DesktopHandsFreeRun<Platform>?
+        let polish: DesktopHostLivePolishInput?
     }
 
     /// Starts the live session and capture for an already-saved recording,
@@ -79,7 +82,7 @@ extension DesktopHostController {
             guard !closed, handsFree == nil || handsFreeRun?.id == handsFree?.id else { throw CancellationError() }
             live = try await makeLiveSession(
                 model: profile.modelIdentifier, key: key, id: id, language: profile.language,
-                options: profile.transcriptionOptions
+                options: profile.transcriptionOptions, polish: start.polish
             )
             record = try await retainingLiveKeywordNotice(live?.keywordLimitation, in: record)
             guard !closed, handsFree == nil || handsFreeRun?.id == handsFree?.id else { throw CancellationError() }
@@ -160,6 +163,7 @@ extension DesktopHostController {
         cancelRecordingTail()
         liveUpdates?.cancel()
         liveUpdates = nil
+        active.live?.livePolish?.pause()
         let duration: TimeInterval
         do { duration = try DesktopHostRecordingStop.stop(active.capture, file: active.file) } catch {
             active.live?.cancel()

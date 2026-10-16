@@ -34,6 +34,7 @@ public struct DesktopSpeechSynthesis: Sendable {
         credential: @Sendable () async throws -> String
     ) async throws -> Data {
         try Task.checkCancellation()
+        let voice = try voice.applyingQuality(options.quality)
         guard DesktopSpeechVoice.voices.contains(voice) || accountInventory?.contains(voice) == true else {
             throw VoiceSynthesisConfigurationError.unsupportedVoice
         }
@@ -41,7 +42,9 @@ public struct DesktopSpeechSynthesis: Sendable {
         switch voice {
         case .deepgram(let voice):
             return try await DeepgramSpeechExport(session: session).synthesize(
-                source, voice: voice, credential: credential
+                source, voice: voice,
+                sampleRate: DesktopSpeechVoice.deepgram(voice).sampleRate(quality: options.quality),
+                credential: credential
             )
         case .azureNeural, .azureMAI:
             return try await synthesizeAzure(source.text, voice: voice, options: options, credential: credential)
@@ -72,6 +75,9 @@ public struct DesktopSpeechSynthesis: Sendable {
         case .openai:
             return try await DesktopOpenAISpeechSynthesis(session: session).synthesize(
                 source, voice: voice, options: options, credential: credential)
+        case .elevenlabs:
+            return try await DesktopElevenLabsSpeechSynthesis(session: session).synthesize(
+                source, voice: voice, credential: credential)
         }
     }
 
@@ -90,6 +96,7 @@ public struct DesktopSpeechSynthesis: Sendable {
         let segments = options.useSSML ? [text] : SpeechTextSegmenter.segments(text)
         let supplied = try await credential()
         try Task.checkCancellation()
+        let sampleRate = voice.sampleRate(quality: options.quality)
         var pcm = Data()
         for segment in segments {
             let audio = try await azureSegment(segment, voice: voice, options: options, credential: supplied)
@@ -100,7 +107,7 @@ public struct DesktopSpeechSynthesis: Sendable {
             pcm.append(contentsOf: payload)
         }
         try Task.checkCancellation()
-        guard !pcm.isEmpty, let wav = PCMWaveWriter.wavData(pcm: pcm, sampleRate: 24_000) else {
+        guard !pcm.isEmpty, let wav = PCMWaveWriter.wavData(pcm: pcm, sampleRate: sampleRate) else {
             throw DesktopSpeechSynthesisError.invalidAudio
         }
         return wav
@@ -110,8 +117,9 @@ public struct DesktopSpeechSynthesis: Sendable {
         _ text: String, voice: DesktopSpeechVoice, options: VoiceSynthesisOptions, credential: String
     ) async throws -> DeepgramSpeechAudio {
         try Task.checkCancellation()
+        let sampleRate = voice.sampleRate(quality: options.quality)
         let request = try AzureSpeechVoiceAPI.synthesisRequest(
-            credentials: credential, text: text, voice: voice.id, format: "riff-24khz-16bit-mono-pcm",
+            credentials: credential, text: text, voice: voice.id, format: "riff-\(sampleRate / 1000)khz-16bit-mono-pcm",
             speed: options.speed, pitch: options.pitch, useSSML: options.useSSML
         )
         guard let body = request.httpBody, body.count <= Self.maximumSSMLBytes else {
@@ -123,7 +131,7 @@ public struct DesktopSpeechSynthesis: Sendable {
             let received = try await receive(request)
             try Task.checkCancellation()
             let audio: DeepgramSpeechAudio
-            do { audio = try DeepgramSpeechWAV.canonical(received, sampleRate: 24_000) } catch {
+            do { audio = try DeepgramSpeechWAV.canonical(received, sampleRate: sampleRate) } catch {
                 throw DesktopSpeechSynthesisError.invalidAudio
             }
             if let id { capture?.finish(id, outcome: .completed, audioDuration: audio.duration) }

@@ -22,6 +22,17 @@ int32_t jsti_window_set_voice_picker(const char *const *names, const char *const
     JSTIVoicePickerCallback callback, void *context);
 int32_t jsti_window_set_voice_sources(const char *const *names, size_t count,
                                       JSTIVoiceSourceCallback callback, void *context);
+typedef struct { const char *text; const char *description; } JSTIVoiceMarkupExample;
+/* Pure UI-thread editing, never a speech/settings action. On success writes
+ * NUL-terminated UTF-8 and leading selection offsets in UTF-16/scalar units.
+ * Failure leaves draft/selection unchanged. All buffers are borrowed. */
+typedef int32_t (*JSTIVoiceMarkupWrapCallback)(const char *input, char *output, size_t capacity,
+                                             int32_t *leading_utf16, int32_t *leading_scalars);
+/* Copies canonical examples; enabled requires executable SSML and Use SSML.
+ * Native entry also requires an editable Typed/File draft. Updates never
+ * reload text or settings; old source/action119 contracts are unchanged. */
+int32_t jsti_window_set_voice_markup_helper(int32_t enabled, const JSTIVoiceMarkupExample *examples,
+                                           size_t count, JSTIVoiceMarkupWrapCallback wrap);
 /* Thread safe, borrowed strings copied. Empty error means success. Stale
  * request tokens cannot replace text or revive a closed editor. */
 int32_t jsti_window_set_voice_text_import(const char *token, const char *text, const char *error);
@@ -41,6 +52,9 @@ int32_t jsti_window_set_voice_synthesis_options(double speed, double pitch, int3
  * remains a wrapper using the established generic range. */
 int32_t jsti_window_set_voice_synthesis_options_with_limits(double speed, double pitch, int32_t ssml,
     int32_t capabilities, const char *voice, double minimum_speed, double maximum_speed);
+/* Same captured route plus bounded, read-only shared quality/SSML guidance. */
+int32_t jsti_window_set_voice_synthesis_options_with_details(double speed, double pitch, int32_t ssml,
+    int32_t capabilities, const char *voice, double minimum_speed, double maximum_speed, const char *guidance);
 /* Completes the pending Save only after persistence; 0 keeps the editor open
  * with an error, 1 closes it. Closed/replaced request tokens are ignored. */
 int32_t jsti_window_finish_voice_synthesis_options(const char *request_id, int32_t success);

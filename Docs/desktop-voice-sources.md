@@ -33,7 +33,8 @@ application, native Swift-host, hardware or full-parity acceptance.
 
 ## Synthesis and sources
 
-Voice Output uses shared Deepgram, Azure neural, Azure MAI, xAI and Cartesia REST speech contracts,
+Voice Output uses shared Deepgram, Azure neural/MAI, xAI, Cartesia, Mistral, Soniox,
+OpenAI, Groq, Gemini, Speechmatics and ElevenLabs completed-speech contracts,
 canonical catalogue projections and native playback. `DesktopSpeechVoice` exposes only
 routes the host executes, not every provider in the macOS catalogue. The seven
 built-in Azure neural catalogue entries now have one `AzureNeuralVoiceCatalog` definition
@@ -54,7 +55,7 @@ provider access or installed application.
 
 | Route | Executable source projection | Credential | Desktop audio and controls |
 |---|---|---|---|
-| OpenAI | TTS-1, TTS-1 HD and mini; 29 compatible model/voice tuples | Separate `openai.tts.apiKey`, never the transcription key | 24 kHz mono PCM16 WAV; speed 0.5-2; no pitch/SSML |
+| OpenAI | TTS-1, TTS-1 HD and mini; 29 compatible model/voice tuples | Separate `openai.tts.apiKey`, never the transcription key | 24 kHz mono PCM16 WAV; full canonical speed 0.25-4; no pitch/SSML |
 | Groq | 12 canonical English/Saudi Arabic Orpheus personas paired with their actual model | Shared `groq.apiKey` | 24 kHz mono PCM16 WAV; normal controls only |
 | Gemini | Every `GeminiTTSCatalog.models` / voice tuple; currently 30 voices with Gemini 3.1 Flash TTS | Shared `google.apiKey` | 24 kHz mono PCM16 WAV, or validated raw L16 wrapped without resampling; normal controls only |
 | Speechmatics | Four canonical English voices | Shared `speechmatics.apiKey` | Actual 16 kHz mono PCM16 WAV; normal controls only |
@@ -125,21 +126,184 @@ OpenAI mini binary WAV reports neither text/audio token counts nor billing:
 its charges stay unestimated. Optional usage fields preserve older ledger
 decoding; non-Gemini routes do not acquire invented token measurements.
 
+### ElevenLabs completed speech (source-only successor)
+
+The shared catalogue now owns the Mac's four models, eight offline presets,
+case-sensitive voice IDs, three legacy voice aliases and existing model
+migrations. The Mac adapter projects those same voices/traits and uses the same
+request builders; its provider-default output and existing routing stay intact.
+Windows/GTK expose all 32 actual model/preset tuples through the existing native
+Voice and Favorites pickers. Rows are model-qualified; saved favorites stay
+voice-only. Unknown preferences remain stored and unavailable, never coerced into
+a supported voice. Explicit selection records the matching model/quality.
+
+Fast/Balanced/Best Quality select Flash v2.5 / Multilingual v2 / Eleven v4,
+respectively, as on the Mac. Explicit Eleven v3 is a fixed-model route rather
+than an invented fourth quality; unrelated saves, later stored quality values
+and restarts retain it. All ElevenLabs routes use normal speed/pitch, no SSML
+and fixed 24 kHz audio. Unsupported controls fail before key access. This slice
+does not expose provider tuning parameters as new settings.
+
+The canonical credential is **`elevenlabs.apiKey`**, shared with this provider's
+transcription as on the Mac, not a new TTS key or another provider's key. One
+captured source/voice/model/quality and one validated key cover each job.
+Request plans, fallback plans, text limits and 64 KiB JSON bounds are validated
+before credentials; local admission permits at most 60 segments. Speech model
+limits are the canonical 5,000 / 10,000 / 40,000 characters, with conservative
+Unicode-scalar segmentation that never splits a grapheme.
+
+Eleven v4 uses **Text to Dialogue**, with one actual text/voice input, not a v4
+single-speaker speech request. The Mac's reliable 2,000-grapheme boundary is
+checked against the whole source before segmentation: longer input chooses
+Eleven v3 speech. Dialogue HTTP 400/403/404/422 alone permit the same v3 fallback.
+Both attempts retain their actual model in local usage. Authentication, rate
+limits, server/transport errors, malformed audio and cancellation never trigger
+an unrelated retry/model switch.
+
+Desktop explicitly requests documented **`output_format=wav_24000`** on both
+endpoints. It requires complete, nonempty, nonsilent mono PCM16 WAV at exactly
+24 kHz, including byte rate/alignment and declared lengths. Raw `pcm_24000`,
+MP3, wrong-rate/stereo/depth/truncated responses are errors, not relabelled WAV.
+Responses and aggregate PCM retain the existing bounded transport/export limits.
+A later failure or cancellation publishes no partial result. Existing owned
+Read, Generate, native playback, archival and user-chosen atomic WAV export are
+reused; replay/export retain captured validated bytes and never fetch a key.
+
+Usage retains observed Unicode scalars and validated duration separately from
+the Mac's preserved approximate USD0.30/1,000 submitted-grapheme estimate.
+Preflight estimates use the same segmentation plan; fallback attempts are
+separate observations. These are not current plan/model quotations, invoices,
+provider token counts or proof of billing. No newer price is invented.
+
+Official contracts: [speech conversion](https://elevenlabs.io/docs/api-reference/text-to-speech/convert),
+[dialogue conversion](https://elevenlabs.io/docs/api-reference/text-to-dialogue/convert)
+and [model definitions](https://elevenlabs.io/docs/models). WAV/PCM are distinct;
+44.1 kHz account-tier requirements do not establish 24 kHz access for any actual
+account. Catalogue presets are not account entitlement evidence.
+
+This successor and its regression sources are **uncompiled and unexecuted**.
+ElevenLabs account/custom-voice discovery, models outside the current Mac
+catalogue, additional output rates/codecs, progressive playback and actual
+account/native/device acceptance remain gaps. The separate high-rate
+generated-audio admission repair must accompany 48 kHz quality composition;
+it is deliberately not folded into this R4-based provider successor.
+
+### Quality, models and actual delivery controls (source-only successor)
+
+`VoiceSynthesisQuality` now owns the Mac's existing `standard`, `high` and
+`highest` identifiers, labels and defaults. Mac adapters retain their behavior
+through this shared definition; it is not a new list of provider quality modes.
+The native configuration form adds one canonical `ttsQuality` choice, persisted
+in the sole Voice settings model and captured in each admitted job.
+
+| Route | What quality actually changes | Actual speed range |
+|---|---|---|
+| OpenAI | Fast selects mini, Balanced TTS-1, Best Quality TTS-1 HD; audio remains 24 kHz | 0.25-4 |
+| Cartesia / Soniox | Requested and strictly validated WAV rate: 16 / 24 / 48 kHz | Canonical Cartesia 0.6-1.5 / Soniox 0.7-1.3 |
+| Deepgram | 24 kHz; Best Quality requests and validates 48 kHz | Normal speed only |
+| Azure neural | 24 kHz; Best Quality requests and validates 48 kHz | 0.5-2 |
+| Azure MAI | The same 24 / 48 kHz WAV selection; no numeric prosody added | Normal speed only |
+| ElevenLabs | Fast Flash v2.5 / Balanced Multilingual v2 / Best v4 dialogue with explicit v3 fallback; explicit v3 stays fixed | Normal speed only; fixed 24 kHz |
+| Gemini / Groq / Speechmatics / Mistral / xAI | Fixed existing format/rate; no quality request parameter invented | xAI 0.7-1.5; the others normal speed only |
+
+Quality labels describe the selected provider's mechanism, not a latency
+guarantee. Fixed-format providers normally disable the unused quality control
+while retaining its value. An unknown stored choice enables the field for
+explicit repair, not as a claim that the provider gained quality controls.
+Provider changes update titles/availability without overwriting unsaved values.
+Unknown qualities remain explicit unsupported rows; execution refuses them
+before key access. Partial imports, restarts and old numeric-control callbacks
+preserve quality rather than clearing it.
+
+Old settings and callbacks with no quality retain the explicitly selected model
+and previous PCM defaults. The editor derives the initial OpenAI quality from
+that model, including legacy model aliases, so saving unrelated preferences does
+not turn mini into TTS-1. An explicit quality overrides the retained raw OpenAI
+model through the canonical compatibility map. The picker, captured request
+and usage record use that effective model/voice tuple; the credential remains
+in the dedicated canonical TTS slot.
+Choosing a model-qualified picker row explicitly records its matching quality.
+Ballad/Verse cannot silently become a different voice to satisfy TTS-1/HD.
+Favorites remain voice-scoped; regional/account evidence remains unchanged.
+
+Read, Generate and text export carry the captured rate end-to-end: request,
+strict WAV decoding, exact header and native playback staging must agree.
+Wrong-rate PCM is rejected, never relabelled or resampled. Deepgram's existing
+24 kHz segmented Read remains unchanged; its new 48 kHz choice uses the existing
+bounded complete-audio/native-player path. Retained playback/export still uses
+the original validated bytes without consulting later settings or credentials.
+
+The current Mac settings and executable client contracts do **not** define a
+separate provider style/instructions preference or request field. Their actual
+delivery controls are speed, pitch, editable source text and SSML. Native
+controls keep the same per-route gating and now show scrollable, selectable
+quality/delivery guidance using the Mac helper's shared SSML examples. Only
+SSML-capable Azure routes show those examples; tag support still depends on the
+provider. Complete documents retain their own prosody and fragments use the
+supported sliders. No Gemini prompt/style field is inferred from a comment.
+The native SSML Helper interaction is described below.
+
+This successor, its focused regression sources and native fixture extensions
+are **uncompiled and unexecuted**. Earlier receipts do not qualify it.
+
 **Remaining scope gaps:** desktop export is WAV-only, without Mac MP3/M4A
-format controls or additional decoders. OpenAI quality is represented by the
-actual model tuple, not a second generic quality selector; the native speed
-range remains 0.5-2 even though its API can accept 0.25-4. Gemini models excluded
-from the canonical catalogue are not advertised. Provider-native style/instruction
-surfaces and progressive playback are not implemented here. ElevenLabs,
-OpenRouter and system speech are outside this slice. No new provider probe,
+format controls or additional decoders. Other canonical provider models remain
+unavailable unless their desktop engine explicitly implements them (for example,
+the current Cartesia default-model projection). Gemini models excluded from the
+canonical catalogue are not advertised. Separate style/instruction controls are
+not implemented on either inspected path; additional format controls and
+progressive playback remain gaps. ElevenLabs account/custom-voice discovery,
+OpenRouter and system speech remain outside this slice. No new provider probe,
 native runtime, device, packaged-app or full-product parity acceptance is
 claimed by this source composition.
+
+### Native SSML Helper (source-only successor)
+
+The existing Windows and GTK source editors add **SSML Helper** beside the text
+snapshot. It is available only for an executable SSML-capable route with saved
+**Use SSML** enabled, and only for editable **Typed text / Text file** drafts
+without a pending import. History and explicit clipboard snapshots remain
+read-only; the helper does not silently switch sources or modify History.
+
+Like the actual Mac sheet, the helper shows the canonical common-tag examples.
+**Copy example** copies exactly the selected example, including Unicode IPA,
+without inserting it, replacing a selection or reading clipboard contents.
+**Close / Escape** leaves the draft and selection unchanged. **Wrap with
+`<speak>`** wraps the entire current draft and closes the helper. It reads the
+draft at apply time, not a stale snapshot captured when opening the helper.
+The exact Mac literal-marker rule is retained: a literal `<speak>` anywhere
+leaves the text unchanged; attribute-bearing, uppercase or self-closing variants
+are not treated as that marker. The helper neither escapes text/entities nor
+validates XML, and does not invent selected-words-only wrapping.
+
+The native editors retain the original selected span after inserting the
+opening tag, using UTF-16 offsets on Windows and Unicode-scalar offsets on GTK.
+A changed draft is one undoable edit; an already-wrapped draft is not rewritten.
+The helper uses native modal controls, labelled selectable examples, keyboard
+navigation, a primary/default Wrap action and focus restoration to the source
+editor. Availability updates disable Wrap without reloading draft text or
+unsaved controls. Apply rechecks capability and import state; a rejected or
+oversized edit leaves the draft and selection intact with an explicit notice.
+
+Editing alone never generates speech, accesses credentials, saves preferences
+or changes an already captured job or retained result. The existing Read,
+Generate and Export actions capture the edited draft only when explicitly
+invoked. Action 119 and its legacy numeric-control payload remain unchanged.
+There is no new page, provider, codec or progressive playback path.
+
+Focused shared/host regression sources and both native source self-test
+extensions cover these semantics. Native fixtures inject a synthetic wrapper
+and in-memory example-copy sink, not a real clipboard/provider/key operation.
+All new sources and fixtures remain **uncompiled and unexecuted** under HOLD;
+source authentication is not native keyboard, DPI, accessibility, packaged-app
+or provider acceptance. The format/model/progressive gaps above remain open.
 
 **Cartesia Sonic 3.6** executes the five existing `CartesiaTTSCatalog` presets,
 not the entire account library or older stored Sonic models. Read, Generate and
 text export reuse `CartesiaTTSAPI` request construction, API version and the
 shared `cartesia.apiKey` used for Ink transcription. Audio is actual mono PCM16
-WAV at 24 kHz; no compressed or progressive transport is advertised.
+WAV at the captured 16/24/48 kHz quality rate (24 kHz when absent); no compressed
+or progressive transport is advertised.
 The existing native Voice controls execute the canonical 0.6-1.5 speed range.
 Pitch and SSML are disabled but preserved; incompatible controls refuse synthesis
 before key access instead of letting the shared request builder clamp them.
@@ -156,7 +320,7 @@ audio. Existing native playback, retained replay/export and publication helpers
 are unchanged. Actual requests and validated PCM feed local usage with the
 canonical USD0.0392/thousand-character **Startup-plan estimate**, not a billed
 charge or a guarantee of the user's plan. Cartesia account discovery, explicit
-language, format/quality selection and physical/service acceptance remain gaps.
+language, non-WAV format selection and physical/service acceptance remain gaps.
 
 xAI's documented Eve and Ara presets come from `XAITTSCatalog`. Read, Generate
 and text export use the shared `/v1/tts` request contract with automatic language,
@@ -338,16 +502,19 @@ Empty/whitespace-only text, nulls and more than 100,000 Unicode scalars are refu
 before provider work.
 
 **Voice controls** opens native synthesis settings without adding a window page.
-The sole voice model persists optional `ttsSpeed`, `ttsPitch` and `ttsUseSSML`;
+The sole voice model persists optional `ttsSpeed`, `ttsPitch`, `ttsUseSSML` and `ttsQuality`;
 absent values mean speed 1, pitch 0 and plain text. Shared `VoiceSynthesisOptions`
-validates finite speed 0.5-2 and whole-number pitch -12 to 12 semitones.
+admits finite speed 0.25-4 and whole-number pitch -12 to 12 semitones, then
+validates speed against the captured provider's canonical, usually narrower range.
 Azure neural voices execute speed, pitch and SSML through the existing shared
 Azure request builder. Deepgram supports only normal controls: unsupported
 controls are disabled but their stored values remain visible and unchanged.
 Read/Generate/text export explicitly refuse incompatible choices before reading
 a credential, rather than silently ignoring them or changing provider.
-**Normal controls** is an explicit reset; selecting another voice preserves
-all controls. Unknown provider choices appear as unavailable, not Deepgram.
+**Normal controls** explicitly resets numeric speed/pitch and SSML, not quality;
+an absent quality in its legacy callback preserves the saved choice. Selecting
+another voice preserves these controls; an explicit OpenAI model tuple records
+its matching quality. Unknown provider choices appear as unavailable, not Deepgram.
 MAI supports normal speed/pitch only: the native fields are disabled while
 retaining stored non-default values, and execution refuses those values before
 reading credentials. Choose **Normal controls** explicitly to reset them.
@@ -367,11 +534,13 @@ SSML input and complete request bodies are limited to 64 KiB. A full `<speak>`
 document defines its own prosody, so non-normal sliders are refused rather than
 silently bypassed; use normal sliders or an SSML fragment. Azure Read prepares
 one bounded validated WAV before native playback; Deepgram Read retains its
-existing segmented playback. No independent playback engine or IPC is added.
+existing segmented playback at 24 kHz and uses that same bounded generic player
+at 48 kHz. No independent playback engine or IPC is added.
 
 Long text uses the canonical segmenter. Export validates each provider response,
-joins decoded mono PCM16 at the route's actual rate (16 kHz for Speechmatics,
-24 kHz for the other routes), and writes exactly one RIFF/WAVE header, with
+joins decoded mono PCM16 at the captured actual rate (16 kHz for Speechmatics;
+quality-selectable 16/24/48 kHz where supported; otherwise the existing 24 kHz),
+and writes exactly one RIFF/WAVE header, with
 a 64 MiB PCM limit. A failed segment produces no partial destination. The native
 save chooser confirms replacement; only after synthesis succeeds does an atomic
 write replace the chosen file. Destinations inside the app's data folder are
@@ -551,7 +720,8 @@ identities, legacy v1 migrations and canonical regional endpoints. The shared
 `SonioxTTSAPI` request builders serve both the unchanged Apple HTTP API and the
 desktop bounded transport; there is no copied regional protocol or preset list.
 Although the canonical model name contains "Real-time", this desktop route
-requests complete 24 kHz mono 16-bit PCM WAV, not progressive delivery.
+requests complete mono 16-bit PCM WAV at the captured 16/24/48 kHz quality rate
+(24 kHz when absent), not progressive delivery.
 `SonioxTTSRealtime` remains unavailable on Windows/Linux.
 
 The existing native Voice picker exposes canonical built-ins. Account providers
@@ -616,7 +786,7 @@ models now execute Read, Generate and text export through that same bounded
 Azure engine, with retained replay/export independent of later settings.
 The documented xAI Eve/Ara presets now execute the REST/WAV journey with
 canonical speed and true request accounting, not account discovery or progressive delivery.
-System and wider providers, selectable export format/quality and broader
+System and wider providers, non-WAV export formats and broader
 Voice workspace parity remain gaps. Advanced configuration transfer is a
 separately coordinated settings integration; this PR does not create another
 configuration authority.

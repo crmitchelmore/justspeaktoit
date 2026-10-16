@@ -12,6 +12,7 @@ public actor DesktopRecordingStore {
             case postProcessingModelIdentifier, postProcessingFailure, languageIdentifier, profileName, profileNotes
             case originPlatform, migrationMetadata, recordedDuration, importedCost, importedModelIdentifiers
             case localAudio
+            case livePolishResult
         }
 
         public let id: UUID
@@ -29,6 +30,7 @@ public actor DesktopRecordingStore {
         public var lexiconContextTags: [String]?
         public var postProcessingModelIdentifier: String?
         public var postProcessingFailure: String?
+        public var livePolishResult: LivePolishSession.Result?
         /// Provider language the recording was transcribed with (`nil` means
         /// detection), so a retry repeats the original request exactly.
         public var languageIdentifier: String?

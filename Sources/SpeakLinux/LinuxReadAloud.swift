@@ -144,12 +144,29 @@ extension LinuxWindow {
 
     static func voiceControls(_ settings: LinuxVoiceOutputSettings, accountInventory: VoiceAccountInventory?) {
         let shown = settings.controlsPresentation(accountInventory: accountInventory)
-        let result = shown.label.withCString {
-            jsti_window_set_voice_synthesis_options_with_limits(
-                shown.speed, shown.pitch, shown.ssml, shown.capabilities, $0,
-                shown.minimumSpeed, shown.maximumSpeed)
+        let result = shown.label.withCString { label in
+            shown.guidance.withCString {
+                jsti_window_set_voice_synthesis_options_with_details(
+                    shown.speed, shown.pitch, shown.ssml, shown.capabilities, label,
+                    shown.minimumSpeed, shown.maximumSpeed, $0)
+            }
         }
         if result != 0 { LinuxHostPlatform.update("The saved Voice synthesis controls could not be shown.") }
+        let strings = Strings()
+        let examples = VoiceSynthesisMarkup.examples.map {
+            JSTIVoiceMarkupExample(text: strings.add($0.text), description: strings.add($0.description))
+        }
+        let helper = withExtendedLifetime(strings) {
+            examples.withUnsafeBufferPointer {
+                jsti_window_set_voice_markup_helper(
+                    shown.markupHelperEnabled ? 1 : 0, $0.baseAddress, $0.count
+                ) { input, output, capacity, utf16, scalars in
+                    VoiceSynthesisMarkup.writeWrappedText(input, output: output, capacity: capacity,
+                        leadingUTF16: utf16, leadingScalars: scalars)
+                }
+            }
+        }
+        if helper != 0 { LinuxHostPlatform.update("The Voice SSML helper could not be configured.") }
     }
 }
 

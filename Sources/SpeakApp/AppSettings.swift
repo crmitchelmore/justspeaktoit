@@ -249,12 +249,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     var id: String { rawValue }
 
     var displayName: String {
-      switch self {
-      case .instant:
-        return "Instant"
-      case .livePolish:
-        return "Auto-Clean"
-      }
+      coreID.displayName
     }
 
     var description: String {
@@ -1317,13 +1312,17 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       defaults.string(forKey: DefaultsKey.livePolishModel.rawValue)
         ?? ""
     livePolishDebounceMs =
-      defaults.object(forKey: DefaultsKey.livePolishDebounceMs.rawValue) as? Int ?? 500
+      defaults.object(forKey: DefaultsKey.livePolishDebounceMs.rawValue) as? Int
+        ?? LivePolishPolicy.debounceMilliseconds
     livePolishMinDeltaChars =
-      defaults.object(forKey: DefaultsKey.livePolishMinDeltaChars.rawValue) as? Int ?? 20
+      defaults.object(forKey: DefaultsKey.livePolishMinDeltaChars.rawValue) as? Int
+        ?? LivePolishPolicy.minimumDeltaCharacters
     livePolishTailWindowChars =
-      defaults.object(forKey: DefaultsKey.livePolishTailWindowChars.rawValue) as? Int ?? 600
+      defaults.object(forKey: DefaultsKey.livePolishTailWindowChars.rawValue) as? Int
+        ?? LivePolishPolicy.tailWindowCharacters
     skipPostProcessingWithLivePolish =
-      defaults.object(forKey: DefaultsKey.skipPostProcessingWithLivePolish.rawValue) as? Bool ?? true
+      defaults.object(forKey: DefaultsKey.skipPostProcessingWithLivePolish.rawValue) as? Bool
+        ?? LivePolishPolicy.skipPostProcessing
 
     // Voice Commands Settings
     voiceCommandsEnabled =

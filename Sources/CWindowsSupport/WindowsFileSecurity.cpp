@@ -1196,13 +1196,15 @@ bool registryFile(HANDLE file, const PrivateSecurity &security, bool immutable, 
     return true;
 }
 
-bool registryRename(HANDLE file, HANDLE directory, const std::wstring &name, std::string &error) {
-    // Same held-root NT rename form used by protected backup publication; never a Win32 absolute-path rename.
+bool registryRename(HANDLE file, const std::wstring &name, std::string &error) {
+    // FILE_RENAME_INFORMATION: a simple name and NULL root rename within the
+    // source handle's directory, without reopening our DELETE-held namespace.
+    // https://learn.microsoft.com/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_file_rename_information
     const size_t bytes = name.size() * sizeof(wchar_t);
     std::vector<BYTE> storage(std::max(sizeof(FILE_RENAME_INFO), offsetof(FILE_RENAME_INFO, FileName) + bytes), 0);
     auto *rename = reinterpret_cast<FILE_RENAME_INFO *>(storage.data());
     rename->ReplaceIfExists = FALSE;
-    rename->RootDirectory = directory;
+    rename->RootDirectory = nullptr;
     rename->FileNameLength = static_cast<DWORD>(bytes);
     std::memcpy(rename->FileName, name.data(), bytes);
     const auto setInformation = heldRootSetInformation();
@@ -1517,7 +1519,7 @@ int jsti_recording_registry_append(JSTIRecordingRegistry *registry, const char *
             }
             if (result == 0 && publicationCancelled(cancelled, context)) result = 2;
             if (result == 0) {
-                if (registryRename(file.value, registry->directory.value, leaf, detail)) *published = 1;
+                if (registryRename(file.value, leaf, detail)) *published = 1;
                 else result = -1;
             }
             if (*published && publicationCancelled(cancelled, context)) result = 2;
@@ -2212,7 +2214,9 @@ int jsti_recording_registry_append_v2(JSTIRecordingRegistryV2 *registry, const u
             alignas(RegistryRenameInformationV2) std::array<BYTE, 512> renameBytes{};
             auto *rename = reinterpret_cast<RegistryRenameInformationV2 *>(renameBytes.data());
             rename->ReplaceIfExists = FALSE;
-            rename->RootDirectory = registry->resources[registry->directory].value;
+            // The pending handle was created in the held namespace. Keep the
+            // same-directory contract above, including its no-delete-share fence.
+            rename->RootDirectory = nullptr;
             rename->FileNameLength = static_cast<ULONG>(leaf.size() * sizeof(wchar_t));
             std::memcpy(rename->FileName, leaf.data(), rename->FileNameLength);
             const ULONG renameSize = static_cast<ULONG>(std::max(sizeof(*rename),

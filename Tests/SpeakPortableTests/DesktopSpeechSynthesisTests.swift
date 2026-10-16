@@ -88,14 +88,14 @@ final class DesktopSpeechSynthesisTests: DeepgramSpeechStubTestCase {
             pitch: VoiceSynthesisOptions.pitchRange.lowerBound))
         XCTAssertNoThrow(try VoiceSynthesisOptions(speed: VoiceSynthesisOptions.speedRange.upperBound,
             pitch: VoiceSynthesisOptions.pitchRange.upperBound))
-        for speed in [Double.nan, .infinity, 0.49, 2.01] {
+        for speed in [Double.nan, .infinity, 0.24, 4.01] {
             XCTAssertThrowsError(try VoiceSynthesisOptions(speed: speed))
         }
         for pitch in [Double.nan, 1.2, -13, 13] {
             XCTAssertThrowsError(try VoiceSynthesisOptions(pitch: pitch))
         }
         XCTAssertThrowsError(try JSONDecoder().decode(VoiceSynthesisOptions.self,
-            from: Data(#"{"speed":4,"pitch":0,"useSSML":false}"#.utf8)))
+            from: Data(#"{"speed":4.01,"pitch":0,"useSSML":false}"#.utf8)))
         XCTAssertThrowsError(try DesktopSpeechVoice.resolved(modelID: nil, voiceID: "system/Alex"))
         XCTAssertThrowsError(try DesktopSpeechVoice.resolved(modelID: nil, voiceID: "azure/unknown"))
         XCTAssertEqual(DesktopSpeechVoice.voices.count,
@@ -104,7 +104,8 @@ final class DesktopSpeechSynthesisTests: DeepgramSpeechStubTestCase {
                            + CartesiaTTSCatalog.voices.count + SonioxTTSCatalog.voices.count
                            + GeminiTTSCatalog.models.count * GeminiTTSCatalog.voices.count + GroqTTSCatalog.voices.count
                            + SpeechmaticsTTSCatalog.voices.count
-                           + OpenAITTSCatalog.models.reduce(0) { $0 + OpenAITTSCatalog.voices(for: $1).count })
+                           + OpenAITTSCatalog.models.reduce(0) { $0 + OpenAITTSCatalog.voices(for: $1).count }
+                           + ElevenLabsTTSModels.all.count * ElevenLabsTTSCatalog.voices.count)
         XCTAssertEqual(Set(DesktopSpeechVoice.voices.map(\.pickerIdentifier)).count, DesktopSpeechVoice.voices.count)
         for voice in AzureNeuralVoiceCatalog.voices {
             XCTAssertEqual(

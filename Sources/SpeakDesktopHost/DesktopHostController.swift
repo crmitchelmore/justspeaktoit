@@ -22,6 +22,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
         /// Last reached registration for hosts that cannot read it back.
         package var runAtLogin: Bool?
         package var configuration: DesktopConfiguration?
+        /// Device-local approval; portable imports cannot grant service access.
+        package var livePolishApproved: Bool?
     }
 
     @dynamicMemberLookup
@@ -42,7 +44,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
             let known: Set<String> = [
                 "model", "postProcessing", "microphoneDeviceID", "batchModel", "liveModel", "textOutput",
                 "hotKey", "voiceOutput", "automationEnabled", "localModel", "localUseGPU",
-                "azureSpeechResourceEndpoint", "appearance", "runAtLogin", "configuration"
+                "azureSpeechResourceEndpoint", "appearance", "runAtLogin", "configuration", "livePolishApproved"
             ]
             preserved = all.filter { !known.contains($0.key) }
         }

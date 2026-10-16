@@ -124,11 +124,7 @@ actor CartesiaTTSClient: TextToSpeechClient {
   }
 
   static func sampleRate(for quality: TTSQuality) -> Int {
-    switch quality {
-    case .standard: return 16_000
-    case .high: return 24_000
-    case .highest: return 48_000
-    }
+    quality.sampleRate
   }
 
   private func saveAudioData(_ data: Data, format: AudioFormat) throws -> URL {

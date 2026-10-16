@@ -6,6 +6,75 @@ macOS `AppSettings.DefaultsKey` aliases the shared 91-key
 plus preferences and collections
 outside that enum. Track remaining product acceptance in #1157.
 
+## Auto-Clean candidate (source only; validation on HOLD)
+
+Windows and Linux share a per-recording Auto-Clean lane in `LivePolishSession`,
+fed by the authoritative full `DesktopLiveSession` text, not by PCM. The existing
+native **Transcription** preferences render Instant/Auto-Clean, cleanup model ID,
+debounce, minimum added characters and skip-ordinary-post-processing fields.
+Both native configuration adapters raise their former 32-field limit to 64 so
+the expanded canonical form can actually be registered. Added native fixture
+source covers Auto-Clean controls and the expanded field boundary; it is NOT_RUN.
+`DesktopConfiguration` remains their sole preference authority; approval to run
+the lane is device-local, separate from portable preferences. Imports preserve
+the requested mode but revoke that approval. Review and Apply preferences on
+this device before an imported Auto-Clean choice may read a cleanup credential
+or transmit text. Instant remains the default and adds no cleanup key read,
+request or network activity.
+
+Only native Apply grants Auto-Clean approval. Start/stop sound Preview still
+saves the form's sound settings and plays the selected cue, but never grants
+approval. Non-Apply persistence (including keyword recovery) retains prior
+approval only when Auto-Clean's effective model and processing preferences are
+unchanged; changing them revokes approval until Apply. An ordinary cleanup-model
+change also revokes approval when Auto-Clean uses that fallback, but not when an
+explicit Auto-Clean model keeps its effective route unchanged. Both native
+handlers use this shared preview path. These R2 regressions are source-only and
+NOT_RUN pending admission.
+
+The lane uses the canonical `ModelCatalog.liveCapabilities` speed-mode contract
+only for implemented desktop live routes. It captures the model, profile
+fallback, configuration and dedicated cleanup credential at admission. Model
+resolution is explicit Auto-Clean model, then the resolved profile/post-processing
+model, then `ModelCatalog.defaultFastTextModel`. Existing OpenRouter and native
+downloaded-LLM adapters execute the shared minimal cleanup prompt at temperature
+zero; built-in rules and unsupported routes are not advertised as LLMs and do not
+fall back to another provider. Missing credentials/configuration/runtime and
+invalid/empty responses are explicit failures retaining the original.
+
+The shared defaults are 500 ms debounce and 20 added Unicode characters.
+Replacements, same-length edits and retractions invalidate the previous request
+without relying on length growth. Utterance finals bypass debounce. Recording
+stop pauses previews; finalization awaits the authoritative provider transcript,
+applies existing voice-command and vocabulary policies, and cleans that resulting
+full text. Only an exact-input successful cache is reused. Cancellation, close,
+provider failure and request timeout retire request identity before cancelling
+workers, so a non-cooperative late response cannot overwrite a newer recording.
+No LLM await or extra audio queue is added to the PCM path. Preview updates stay
+inside the native window/HUD; external insertion remains the existing
+captured-field-at-completion operation.
+
+History keeps provider `result.text`, corrections, `processedText` and a distinct
+`livePolishResult` (input/model/result/failure). Portable native History metadata
+retains that result. Ordinary post-processing is skipped only after actual
+successful final Auto-Clean when the skip preference is true; otherwise it
+receives the successful cleaned text, or the corrected original on failure.
+An Auto-Clean failure remains visible even if ordinary cleanup succeeds.
+
+`livePolishTailWindowChars` is preserved but has no desktop control or consumer:
+the Mac stores it in `AppSettings`, but `LivePolishManager` uses full `tailText`
+and does not consume this preference either. No tail-window behavior is claimed.
+Mac prompt/default/model definitions now refer to the same shared policy;
+its existing manager lifecycle is not replaced by this desktop candidate.
+
+New regression **sources** cover the injected client/scheduler, exact prompts,
+Unicode/edit/retraction behavior, raw/polished history and transfer, profile and
+credential capture, approval/import/restart, both legacy and owned stop paths,
+native presentation, cancellation/close and malformed responses. **All are
+NOT_RUN.** Compiler, lint, automated fixtures, native UI/provider/runtime/device
+acceptance and safe live external insertion remain unqualified. This source
+candidate is not a claim of complete Windows/Linux or macOS behavior parity.
+
 ## Window-local sidebar shortcuts
 
 The shared `DesktopSidebarShortcut` catalogue supplies stable destination IDs and
@@ -720,12 +789,12 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | showCompactHUD | Wired / Partial | Config + native compact Windows/X11 renderer; hidden on Wayland, where notifications are compositor-owned |
 | shortenErrorDisplay | Wired / Partial | Config + HUD; native Windows/X11 timer; Wayland notification lifetime is desktop-owned |
 | showSidebarShortcutHints | Wired; native acceptance pending / Wired; native acceptance pending | General strict Boolean/default true; shared Ctrl-number bindings, live sidebar/accessibility hints; hints off preserves navigation. This separate source-only candidate adds Linux Profiles with Ctrl+9; native acceptance remains pending. |
-| speedMode | Missing / Missing | No Instant/Live Polish setting; no live-polish engine |
-| livePolishModel | Missing / Missing | No live-polish model execution |
-| livePolishDebounceMs | Missing / Missing | No live-polish scheduler |
-| livePolishMinDeltaChars | Missing / Missing | No live-polish delta threshold |
-| livePolishTailWindowChars | Missing / Missing | No live-polish tail rewriting |
-| skipPostProcessingWithLivePolish | Missing / Missing | No live-polish pipeline |
+| speedMode | Source only / Source only | Native Instant/Auto-Clean choice and per-recording engine; supported live routes only; validation NOT_RUN |
+| livePolishModel | Source only / Source only | Captured explicit/profile/default model through existing OpenRouter/downloaded-LLM adapters; no rules-as-LLM fallback; NOT_RUN |
+| livePolishDebounceMs | Source only / Source only | Canonical 500 ms default; injected scheduler, whole-millisecond validation; NOT_RUN |
+| livePolishMinDeltaChars | Source only / Source only | Canonical 20-character default; edits/retractions invalidate stale output independently of growth; NOT_RUN |
+| livePolishTailWindowChars | Preserved, inactive / Preserved, inactive | Mac stores but does not consume it in LivePolishManager; full-transcript cleaning, no inert native control |
+| skipPostProcessingWithLivePolish | Source only / Source only | Skips ordinary processing only after successful authoritative-final cleanup; raw/failure metadata retained; NOT_RUN |
 | voiceCommandsEnabled | Implemented, native acceptance pending / Implemented, native acceptance pending | General toggle; canonical expansion before vocabulary and optional polish |
 | streamingInsertionEnabled | Missing / Missing | Final transcript insertion only |
 | clipboardInsertionTriggers | Implemented, native acceptance pending / Implemented, native acceptance pending | General trigger entry; bounded native snapshot, canonical matching, no History re-expansion |

@@ -254,6 +254,7 @@ enum SpeakWindowsMain {
             let directory: URL
             if smokeTest {
                 directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+                try WindowsNative.createSyntheticDirectory(directory)
             } else {
                 guard let local = ProcessInfo.processInfo.environment["LOCALAPPDATA"] else {
                     throw WindowsNativeError(message: "Windows did not provide the local app data directory.")

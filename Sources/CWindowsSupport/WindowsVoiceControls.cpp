@@ -1,6 +1,7 @@
 #include "include/CWindowsSupport.h"
 #include "WindowsSupportInternal.hpp"
 #include <cmath>
+#include <cstring>
 #include <iomanip>
 #include <locale>
 #include <mutex>
@@ -11,12 +12,13 @@
 int32_t jsti_owned_window_save_snapshot(HWND window, const char *path, char *error, size_t capacity);
 
 namespace {
-enum { speedLabel = 960, speedID, pitchLabel, pitchID, ssmlID, noticeID, saveID, normalID };
+enum { speedLabel = 960, speedID, pitchLabel, pitchID, ssmlID, noticeID, saveID, normalID, guidanceID };
 struct Options {
     double speed = 1, pitch = 0;
     int ssml = 0, capabilities = 0;
     std::wstring voice = L"Deepgram";
     double minimumSpeed = 0.5, maximumSpeed = 2;
+    std::wstring guidance;
 };
 std::mutex mutex;
 Options saved;
@@ -118,10 +120,14 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             !add(L"BUTTON", L"Use &SSML", WS_TABSTOP | BS_AUTOCHECKBOX, ssmlID, 20, 150, 430, 34) ||
             !add(L"STATIC", L"Unsupported controls stay stored. Normal controls resets them explicitly. "
                 L"Full SSML documents define their own prosody; use normal sliders or a fragment.", SS_LEFT,
-                noticeID, 20, 195, 450, 76) ||
-            !add(L"BUTTON", L"&Normal controls", WS_TABSTOP | BS_PUSHBUTTON, normalID, 20, 285, 150, 34) ||
-            !add(L"BUTTON", L"&Save", WS_TABSTOP | BS_DEFPUSHBUTTON, saveID, 285, 285, 80, 34) ||
-            !add(L"BUTTON", L"Cancel", WS_TABSTOP | BS_PUSHBUTTON, IDCANCEL, 375, 285, 95, 34)) return -1;
+                noticeID, 20, 195, 450, 55) ||
+            !add(L"STATIC", L"Quality and delivery guidance", SS_LEFT, 981, 20, 260, 450, 24) ||
+            !add(L"EDIT", dialog->options.guidance.c_str(),
+                WS_TABSTOP | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL,
+                guidanceID, 20, 290, 450, 105) ||
+            !add(L"BUTTON", L"&Normal controls", WS_TABSTOP | BS_PUSHBUTTON, normalID, 20, 415, 150, 34) ||
+            !add(L"BUTTON", L"&Save", WS_TABSTOP | BS_DEFPUSHBUTTON, saveID, 285, 415, 80, 34) ||
+            !add(L"BUTTON", L"Cancel", WS_TABSTOP | BS_PUSHBUTTON, IDCANCEL, 375, 415, 95, 34)) return -1;
         fill(window, dialog->options);
         { std::lock_guard<std::mutex> lock(mutex); active = window; activeRequest.clear(); }
         return 0;
@@ -140,7 +146,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         }
         if (font) { DeleteObject(dialog->font); dialog->font = font; }
         dialog->dpi = dpi;
-        RECT client{0, 0, MulDiv(490, dpi, 96), MulDiv(340, dpi, 96)};
+        RECT client{0, 0, MulDiv(490, dpi, 96), MulDiv(470, dpi, 96)};
         AdjustWindowRectExForDpi(&client, WS_CAPTION | WS_SYSMENU, FALSE,
             WS_EX_CONTROLPARENT | WS_EX_DLGMODALFRAME, dpi);
         const RECT &suggested = *reinterpret_cast<const RECT *>(lparam);
@@ -184,7 +190,7 @@ HWND makeDialog(HWND owner, Dialog &dialog) {
     type.lpszClassName = L"JustSpeakToItVoiceControls"; type.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     type.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
     if (!RegisterClassW(&type) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return nullptr;
-    RECT bounds{0, 0, scale(owner, 490), scale(owner, 340)};
+    RECT bounds{0, 0, scale(owner, 490), scale(owner, 470)};
     AdjustWindowRectExForDpi(&bounds, WS_CAPTION | WS_SYSMENU, FALSE, WS_EX_CONTROLPARENT, GetDpiForWindow(owner));
     return CreateWindowExW(WS_EX_CONTROLPARENT | WS_EX_DLGMODALFRAME, type.lpszClassName, L"Voice synthesis controls",
         WS_CAPTION | WS_SYSMENU, CW_USEDEFAULT, CW_USEDEFAULT, bounds.right - bounds.left, bounds.bottom - bounds.top,
@@ -198,13 +204,24 @@ int32_t jsti_window_set_voice_synthesis_options(double speed, double pitch, int3
 }
 int32_t jsti_window_set_voice_synthesis_options_with_limits(double speed, double pitch, int32_t ssml,
     int32_t capabilities, const char *voice, double minimumSpeed, double maximumSpeed) {
-    std::wstring name;
+    return jsti_window_set_voice_synthesis_options_with_details(
+        speed, pitch, ssml, capabilities, voice, minimumSpeed, maximumSpeed, "");
+}
+int32_t jsti_window_set_voice_synthesis_options_with_details(double speed, double pitch, int32_t ssml,
+    int32_t capabilities, const char *voice, double minimumSpeed, double maximumSpeed, const char *guidance) {
+    std::wstring name, help;
     if (!std::isfinite(speed) || !std::isfinite(pitch) || ssml < 0 || ssml > 1 || capabilities < 0 || capabilities > 7 ||
         !std::isfinite(minimumSpeed) || !std::isfinite(maximumSpeed) ||
-        minimumSpeed < 0.5 || minimumSpeed > 1 || maximumSpeed < 1 || maximumSpeed > 2 ||
-        !jsti::wide(voice ? voice : "", name)) return -1;
+        minimumSpeed < 0.25 || minimumSpeed > 1 || maximumSpeed < 1 || maximumSpeed > 4 ||
+        !jsti::wide(voice ? voice : "", name) || !guidance || strlen(guidance) > 8192 ||
+        !jsti::wide(guidance, help)) return -1;
+    size_t newline = 0;
+    while ((newline = help.find(L'\n', newline)) != std::wstring::npos) {
+        if (newline == 0 || help[newline - 1] != L'\r') { help.insert(newline, 1, L'\r'); ++newline; }
+        ++newline;
+    }
     std::lock_guard<std::mutex> lock(mutex);
-    saved = {speed, pitch, ssml, capabilities, std::move(name), minimumSpeed, maximumSpeed};
+    saved = {speed, pitch, ssml, capabilities, std::move(name), minimumSpeed, maximumSpeed, std::move(help)};
     return 0;
 }
 int32_t jsti_window_finish_voice_synthesis_options(const char *request, int32_t success) {
@@ -346,6 +363,31 @@ bool jsti_voice_controls_self_test(HWND owner, std::string &error) {
             if (failure[0]) error = failure;
         }
         passed = save(window, dialog) && passed && receipt.calls == 6;
+        passed = jsti_window_finish_voice_synthesis_options(receipt.request.c_str(), 1) == 0 && passed;
+        drain(); passed = passed && !IsWindow(window);
+        if (IsWindow(window)) DestroyWindow(window);
+        passed = jsti_window_set_voice_synthesis_options_with_details(
+            0.25, 0, 0, 1, "Synthetic OpenAI", 0.25, 4, "Synthetic quality\nPlain text") == 0 && passed;
+        passed = jsti_window_set_voice_synthesis_options_with_limits(
+            1, 0, 0, 1, "Invalid lower range", 0.24, 4) == -1 && passed;
+        passed = jsti_window_set_voice_synthesis_options_with_limits(
+            1, 0, 0, 1, "Invalid upper range", 0.25, 4.01) == -1 && passed;
+        { std::lock_guard<std::mutex> lock(mutex); dialog.options = saved; saved = original; }
+        dialog.saving = false;
+        window = makeDialog(owner, dialog);
+        if (!window) { error = "OpenAI Voice controls fixture could not open."; return false; }
+        GetDlgItemTextW(window, speedLabel, rangeCaption, 64);
+        wchar_t guidance[128]{};
+        GetDlgItemTextW(window, guidanceID, guidance, 128);
+        passed = passed && std::wstring(rangeCaption) == L"&Speed (0.25 to 4)" &&
+            std::wstring(guidance) == L"Synthetic quality\r\nPlain text" &&
+            (GetWindowLongPtrW(GetDlgItem(window, guidanceID), GWL_STYLE) & ES_READONLY) != 0 &&
+            save(window, dialog) && receipt.calls == 7 &&
+            receipt.json == "{\"speed\":0.25,\"pitch\":0,\"useSSML\":false}";
+        passed = jsti_window_finish_voice_synthesis_options(receipt.request.c_str(), 0) == 0 && passed;
+        drain(); SetDlgItemTextW(window, speedID, L"4");
+        passed = save(window, dialog) && passed && receipt.calls == 8 &&
+            receipt.json == "{\"speed\":4,\"pitch\":0,\"useSSML\":false}";
         passed = jsti_window_finish_voice_synthesis_options(receipt.request.c_str(), 1) == 0 && passed;
         drain(); passed = passed && !IsWindow(window);
         if (IsWindow(window)) DestroyWindow(window);

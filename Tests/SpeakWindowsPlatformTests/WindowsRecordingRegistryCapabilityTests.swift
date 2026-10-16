@@ -2,6 +2,9 @@ import CWindowsSupport
 import Foundation
 @testable import SpeakWindowsPlatform
 import XCTest
+#if os(Windows)
+import WinSDK
+#endif
 
 final class WindowsRecordingRegistryCapabilityTests: XCTestCase {
     func testFullIdentityBytesRemainDistinct() throws {
@@ -134,6 +137,121 @@ final class WindowsRecordingRegistryCapabilityTests: XCTestCase {
         throw XCTSkip("Native NTFS C/Swift runtime is not qualified by this stub build.")
         #endif
     }
+
+    func testNativeV2PublicationPreservesBytesAndRefusesReplacement() throws {
+        #if os(Windows)
+        try self.withNativeHistory { history in
+            let writer = try WindowsRecordingRegistryCapability(history: history, initialize: true)
+            defer {
+                do { try writer.close() } catch { XCTFail("Writer cleanup failed: \(error)") }
+            }
+            let identity = try writer.identity()
+            let payload = Data("immutable native publication".utf8)
+            let outcome = try writer.append("registry.jloc", data: payload, checkCancellation: {})
+            XCTAssertTrue(outcome.published)
+            XCTAssertTrue(outcome.causes.isEmpty)
+            XCTAssertFalse(outcome.poisoned)
+            XCTAssertEqual(outcome.unconfirmedReleases, 0)
+            XCTAssertThrowsError(try writer.append("registry.jloc", data: Data([92]), checkCancellation: {})) {
+                guard let failure = $0 as? WindowsRegistryFailure else {
+                    return XCTFail("Expected native no-replacement failure")
+                }
+                XCTAssertFalse(failure.published)
+            }
+            XCTAssertEqual(try writer.names(), ["registry.jloc"])
+            XCTAssertEqual(try writer.read("registry.jloc"), payload)
+            try writer.close()
+            let reader = try WindowsRecordingRegistryCapability(history: history, initialize: false)
+            defer {
+                do { try reader.close() } catch { XCTFail("Reader cleanup failed: \(error)") }
+            }
+            let reloadedIdentity = try reader.identity()
+            XCTAssertEqual(reloadedIdentity.0, identity.0)
+            XCTAssertEqual(reloadedIdentity.1, identity.1)
+            XCTAssertEqual(try reader.read("registry.jloc"), payload)
+        }
+        #else
+        throw XCTSkip("Requires native NTFS publication.")
+        #endif
+    }
+
+    func testNativeV2WriterFenceAndAncestryFenceAreIndependentOfPublication() throws {
+        #if os(Windows)
+        try self.withNativeHistory { history in
+            let writer = try WindowsRecordingRegistryCapability(history: history, initialize: true)
+            defer {
+                do { try writer.close() } catch { XCTFail("Writer cleanup failed: \(error)") }
+            }
+            XCTAssertThrowsError(try WindowsRecordingRegistryCapability(history: history, initialize: false)) {
+                guard let failure = $0 as? WindowsRegistryFailure else {
+                    return XCTFail("Expected native sharing fence")
+                }
+                XCTAssertTrue(failure.outcomes.flatMap(\.causes).contains {
+                    $0.domain == JSTI_REGISTRY_DOMAIN_NTSTATUS_V2 &&
+                        $0.code == 0xC000_0043 && $0.stage == JSTI_REGISTRY_STAGE_OPEN_V2
+                })
+            }
+            for source in [history.appendingPathComponent(".recording-locations"), history] {
+                let oldName = Array(source.path.utf16) + [UInt16(0)]
+                let newName = Array((source.path + ".moved").utf16) + [UInt16(0)]
+                oldName.withUnsafeBufferPointer { old in
+                    newName.withUnsafeBufferPointer { new in
+                        XCTAssertEqual(MoveFileW(old.baseAddress, new.baseAddress), 0)
+                    }
+                }
+                XCTAssertFalse(FileManager.default.fileExists(atPath: source.path + ".moved"))
+            }
+            try writer.validate()
+            XCTAssertTrue(try writer.names().isEmpty)
+            try writer.close()
+            let reopened = try WindowsRecordingRegistryCapability(history: history, initialize: false)
+            try reopened.validate()
+            try reopened.close()
+        }
+        #else
+        throw XCTSkip("Requires native NTFS sharing and ancestry fences.")
+        #endif
+    }
+
+    func testNativeExplicitOwnerSyntheticDirectoryAcceptsPrivatePreparationButNotRecreation() throws {
+        #if os(Windows)
+        try self.withNativeHistory { history in
+            var error = [CChar](repeating: 0, count: 1_024)
+            let prepared = error.withUnsafeMutableBufferPointer {
+                jsti_private_directory_prepare(history.path, $0.baseAddress, $0.count)
+            }
+            XCTAssertEqual(prepared, 0, String(cString: error))
+            let recreated = error.withUnsafeMutableBufferPointer {
+                jsti_private_directory_create(history.path, $0.baseAddress, $0.count)
+            }
+            XCTAssertEqual(recreated, -1)
+            XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: history.path).isEmpty)
+        }
+        #else
+        throw XCTSkip("Requires native token-owner and ACL verification.")
+        #endif
+    }
+
+    #if os(Windows)
+    private func withNativeHistory(_ body: (URL) throws -> Void) throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        var error = [CChar](repeating: 0, count: 1_024)
+        let created = error.withUnsafeMutableBufferPointer {
+            jsti_private_directory_create(root.path, $0.baseAddress, $0.count)
+        }
+        guard created == 0 else {
+            throw NSError(domain: "JSTIWindowsRecordingRegistry", code: Int(created), userInfo: [
+                NSLocalizedDescriptionKey: String(cString: error)
+            ])
+        }
+        defer {
+            do { try FileManager.default.removeItem(at: root) } catch {
+                XCTFail("Synthetic fixture cleanup failed: \(error)")
+            }
+        }
+        try body(root)
+    }
+    #endif
 
     private static func empty() -> JSTIRegistryOutcomeV2 {
         var native = JSTIRegistryOutcomeV2()

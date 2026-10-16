@@ -31,7 +31,7 @@ extension TTSProvider {
     switch self {
     case .elevenlabs:
       // ~$0.30 per 1000 characters on the standard plan.
-      return Decimal(string: "0.30")
+      return ElevenLabsTTSAPI.estimatedCostPerThousandCharacters
     case .openai:
       // gpt-4o-mini-tts / tts-1 / tts-1-hd, priced per 1M characters.
       switch quality {

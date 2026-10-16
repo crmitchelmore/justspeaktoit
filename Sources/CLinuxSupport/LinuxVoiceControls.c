@@ -2,13 +2,16 @@
 #include <gtk/gtk.h>
 #include <math.h>
 
-typedef struct { double speed, pitch; gint ssml, capabilities; gchar *voice; double minimum, maximum; } Options;
-static Options saved = {1, 0, 0, 0, NULL, 0.5, 2};
+typedef struct {
+    double speed, pitch; gint ssml, capabilities; gchar *voice; double minimum, maximum; gchar *guidance;
+} Options;
+static Options saved = {1, 0, 0, 0, NULL, 0.5, 2, NULL};
 typedef struct {
     GtkWindow *window;
     GtkEntry *speed, *pitch;
     GtkCheckButton *ssml;
     GtkLabel *notice;
+    GtkTextView *guidance;
     GtkWidget *apply, *reset, *cancel;
     gboolean saving;
     gint capabilities;
@@ -103,7 +106,7 @@ static Controls *make_controls(GtkWindow *owner, JSTIVoiceSourceCallback callbac
     gtk_window_set_transient_for(controls->window, owner); gtk_window_set_modal(controls->window, TRUE);
     gtk_window_set_destroy_with_parent(controls->window, TRUE);
     g_signal_connect(controls->window, "close-request", G_CALLBACK(close_request), controls);
-    gtk_window_set_default_size(controls->window, 510, 350);
+    gtk_window_set_default_size(controls->window, 510, 470);
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
     gtk_widget_set_margin_start(box, 20); gtk_widget_set_margin_end(box, 20);
     gtk_widget_set_margin_top(box, 20); gtk_widget_set_margin_bottom(box, 20);
@@ -120,6 +123,20 @@ static Controls *make_controls(GtkWindow *owner, JSTIVoiceSourceCallback callbac
     controls->notice = GTK_LABEL(label("Unsupported controls stay stored. Normal controls resets them explicitly. "
         "Full SSML documents define their own prosody; use normal sliders or a fragment."));
     gtk_box_append(GTK_BOX(box), GTK_WIDGET(controls->notice));
+    gtk_box_append(GTK_BOX(box), label("Quality and delivery guidance"));
+    GtkWidget *guidance = gtk_text_view_new();
+    controls->guidance = GTK_TEXT_VIEW(guidance);
+    gtk_text_view_set_editable(GTK_TEXT_VIEW(guidance), FALSE);
+    gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(guidance), GTK_WRAP_WORD_CHAR);
+    gtk_text_buffer_set_text(gtk_text_view_get_buffer(GTK_TEXT_VIEW(guidance)),
+        saved.guidance != NULL ? saved.guidance : "", -1);
+    gtk_accessible_update_property(GTK_ACCESSIBLE(guidance),
+        GTK_ACCESSIBLE_PROPERTY_LABEL, "Quality and delivery guidance", -1);
+    GtkWidget *scroll = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_widget_set_size_request(scroll, -1, 105);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), guidance);
+    gtk_box_append(GTK_BOX(box), scroll);
     GtkWidget *actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     GtkWidget *reset = gtk_button_new_with_label("Normal controls");
     GtkWidget *spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0); gtk_widget_set_hexpand(spacer, TRUE);
@@ -147,22 +164,31 @@ void jsti_show_voice_controls(GtkWindow *owner, JSTIVoiceSourceCallback callback
 }
 static void apply_options(gpointer data) {
     Options *options = data;
-    g_free(saved.voice); saved = *options; options->voice = NULL;
+    g_free(saved.voice); g_free(saved.guidance); saved = *options; options->voice = NULL; options->guidance = NULL;
 }
-static void free_options(gpointer data) { Options *options = data; g_free(options->voice); g_free(options); }
+static void free_options(gpointer data) {
+    Options *options = data; g_free(options->voice); g_free(options->guidance); g_free(options);
+}
 int32_t jsti_window_set_voice_synthesis_options(double speed, double pitch, int32_t ssml,
                                                int32_t capabilities, const char *voice) {
     return jsti_window_set_voice_synthesis_options_with_limits(speed, pitch, ssml, capabilities, voice, 0.5, 2);
 }
 int32_t jsti_window_set_voice_synthesis_options_with_limits(double speed, double pitch, int32_t ssml,
     int32_t capabilities, const char *voice, double minimum, double maximum) {
+    return jsti_window_set_voice_synthesis_options_with_details(
+        speed, pitch, ssml, capabilities, voice, minimum, maximum, "");
+}
+int32_t jsti_window_set_voice_synthesis_options_with_details(double speed, double pitch, int32_t ssml,
+    int32_t capabilities, const char *voice, double minimum, double maximum, const char *guidance) {
     if (!isfinite(speed) || !isfinite(pitch) || ssml < 0 || ssml > 1 || capabilities < 0 || capabilities > 7 ||
-        !isfinite(minimum) || !isfinite(maximum) || minimum < 0.5 || minimum > 1 || maximum < 1 || maximum > 2 ||
-        !g_utf8_validate(voice != NULL ? voice : "", -1, NULL)) return -1;
+        !isfinite(minimum) || !isfinite(maximum) || minimum < 0.25 || minimum > 1 || maximum < 1 || maximum > 4 ||
+        !g_utf8_validate(voice != NULL ? voice : "", -1, NULL) || guidance == NULL || strlen(guidance) > 8192 ||
+        !g_utf8_validate(guidance, -1, NULL)) return -1;
     Options *options = g_new0(Options, 1);
     options->speed = speed; options->pitch = pitch; options->ssml = ssml; options->capabilities = capabilities;
     options->voice = g_strdup(voice != NULL ? voice : "");
     options->minimum = minimum; options->maximum = maximum;
+    options->guidance = g_strdup(guidance);
     return jsti_window_post(apply_options, options, free_options);
 }
 typedef struct { gchar *request; gint success; } Completion;
@@ -196,7 +222,7 @@ static void receive_fixture(int32_t action, int32_t source, const char *text,
 }
 int32_t jsti_voice_controls_self_test(GtkWindow *owner, char *error, size_t capacity) {
     Options original = saved;
-    saved = (Options){1.2345678901234567, -2, 1, 0, g_strdup("Synthetic compatible voice"), 0.5, 2};
+    saved = (Options){1.2345678901234567, -2, 1, 0, g_strdup("Synthetic compatible voice"), 0.5, 2, NULL};
     Receipt receipt = {0};
     Controls *controls = make_controls(owner, receive_fixture, &receipt); active = controls;
     double speed = 0;
@@ -230,7 +256,7 @@ int32_t jsti_voice_controls_self_test(GtkWindow *owner, char *error, size_t capa
         jsti_window_set_voice_synthesis_options_with_limits(1, 0, 0, 1, "Synthetic xAI", 1.1, 1.5) == -1 &&
         jsti_window_set_voice_synthesis_options_with_limits(1, 0, 0, 1, "Synthetic xAI", 0.7, 0.9) == -1;
     g_free(saved.voice);
-    saved = (Options){0.5, 0, 0, 1, g_strdup("Synthetic xAI Eve"), 0.7, 1.5};
+    saved = (Options){0.5, 0, 0, 1, g_strdup("Synthetic xAI Eve"), 0.7, 1.5, NULL};
     controls = make_controls(owner, receive_fixture, &receipt); active = controls;
     passed = number(controls->speed, &speed) && speed == 0.5 && passed &&
         gtk_widget_get_sensitive(GTK_WIDGET(controls->speed)) &&
@@ -245,7 +271,7 @@ int32_t jsti_voice_controls_self_test(GtkWindow *owner, char *error, size_t capa
     passed = passed && active == NULL;
     if (active != NULL) close_controls(NULL, active);
     g_free(saved.voice);
-    saved = (Options){0.5, 0, 0, 1, g_strdup("Synthetic Cartesia Sonic 3.6"), 0.6, 1.5};
+    saved = (Options){0.5, 0, 0, 1, g_strdup("Synthetic Cartesia Sonic 3.6"), 0.6, 1.5, NULL};
     controls = make_controls(owner, receive_fixture, &receipt); active = controls;
     passed = number(controls->speed, &speed) && speed == 0.5 && passed &&
         gtk_widget_get_sensitive(GTK_WIDGET(controls->speed)) &&
@@ -259,8 +285,31 @@ int32_t jsti_voice_controls_self_test(GtkWindow *owner, char *error, size_t capa
     Completion cartesia_upper = {receipt.request, 1}; finish_options(&cartesia_upper);
     passed = passed && active == NULL;
     if (active != NULL) close_controls(NULL, active);
+    passed = jsti_window_set_voice_synthesis_options_with_limits(
+        1, 0, 0, 1, "Invalid lower range", 0.24, 4) == -1 && passed;
+    passed = jsti_window_set_voice_synthesis_options_with_limits(
+        1, 0, 0, 1, "Invalid upper range", 0.25, 4.01) == -1 && passed;
+    g_free(saved.voice);
+    saved = (Options){0.25, 0, 0, 1, g_strdup("Synthetic OpenAI"), 0.25, 4,
+        g_strdup("Synthetic quality\nPlain text")};
+    controls = make_controls(owner, receive_fixture, &receipt); active = controls;
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(controls->guidance);
+    GtkTextIter begin, end; gtk_text_buffer_get_bounds(buffer, &begin, &end);
+    gchar *help = gtk_text_buffer_get_text(buffer, &begin, &end, FALSE);
+    passed = passed && !gtk_text_view_get_editable(controls->guidance) &&
+        g_strcmp0(help, saved.guidance) == 0 && controls->minimum == 0.25 && controls->maximum == 4;
+    g_free(help);
+    passed = emit(controls) && passed && receipt.calls == 7 &&
+        g_strcmp0(receipt.json, "{\"speed\":0.25,\"pitch\":0,\"useSSML\":false}") == 0;
+    Completion openai_retry = {receipt.request, 0}; finish_options(&openai_retry);
+    fill(controls, 4, 0, FALSE);
+    passed = emit(controls) && passed && receipt.calls == 8 &&
+        g_strcmp0(receipt.json, "{\"speed\":4,\"pitch\":0,\"useSSML\":false}") == 0;
+    Completion openai_upper = {receipt.request, 1}; finish_options(&openai_upper);
+    passed = passed && active == NULL;
+    if (active != NULL) close_controls(NULL, active);
     g_free(receipt.json); g_free(receipt.request);
-    g_free(saved.voice); saved = original;
+    g_free(saved.voice); g_free(saved.guidance); saved = original;
     if (!passed) jsti_set_error(error, capacity, "Voice controls capabilities, precision or save ownership failed.");
     return passed ? 0 : -1;
 }
@@ -271,7 +320,7 @@ static void snapshot_callback(int32_t action, int32_t source, const char *text,
 }
 void jsti_voice_controls_show_fixture(GtkWindow *owner) {
     Options original = saved;
-    saved = (Options){1.25, 0, 0, 1, g_strdup("Synthetic Cartesia Sonic 3.6"), 0.6, 1.5};
+    saved = (Options){1.25, 0, 0, 1, g_strdup("Synthetic Cartesia Sonic 3.6"), 0.6, 1.5, NULL};
     Controls *controls = make_controls(owner, snapshot_callback, NULL);
     snapshot_window = controls->window;
     g_object_add_weak_pointer(G_OBJECT(snapshot_window), (gpointer *)&snapshot_window);

@@ -6,6 +6,7 @@ public enum VoiceSynthesisPricing {
 
     public static func estimateBasis(for voice: DesktopSpeechVoice) -> String? {
         switch voice {
+        case .elevenlabs: return ElevenLabsTTSAPI.pricingEstimateBasis
         case .cartesia: return CartesiaTTSAPI.pricingEstimateBasis
         case .gemini: return GeminiTTSCatalog.pricingEstimateBasis
         case .groq: return GroqTTSCatalog.pricingEstimateBasis
@@ -51,6 +52,7 @@ public enum VoiceSynthesisPricing {
         case .groq(let voice): return voice.model.costPerThousandCharacters
         case .speechmatics: return SpeechmaticsTTSAPI.estimatedCostPerThousandCharacters
         case .openai(let model, _): return model.costPerThousandCharacters
+        case .elevenlabs: return ElevenLabsTTSAPI.estimatedCostPerThousandCharacters
         case .deepgram(let voice):
             return voice.model == DeepgramSpeechCatalog.flux ? nil : DeepgramTTSAPI.costPerThousandCharacters
         }
@@ -86,6 +88,8 @@ public enum VoiceSynthesisPricing {
             count = SpeechTextSegmenter.segments(text).reduce(0) { $0 + $1.count }
         } else if case .openai = voice {
             count = try OpenAITTSAPI.synthesisSegments(text).reduce(0) { $0 + $1.count }
+        } else if case .elevenlabs(let model, let preset) = voice {
+            count = try DesktopElevenLabsSpeechSynthesis.pricingCharacterCount(text: text, model: model, voice: preset)
         } else {
             count = text.unicodeScalars.count
         }

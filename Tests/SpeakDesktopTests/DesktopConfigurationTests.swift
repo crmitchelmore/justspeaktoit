@@ -4,6 +4,18 @@ import SpeakCore
 import SpeakDesktop
 
 final class DesktopConfigurationTests: XCTestCase {
+    /// Choice fields that intentionally preserve an unrecognized stored string across
+    /// transfer instead of rejecting it outright (for example a future Soniox region
+    /// identifier, or a speech quality/speed mode this build does not yet recognize),
+    /// rather than letting a native combo silently fall back to a default. Any field
+    /// key here still goes through the shared canonical overlength/control-character
+    /// refusal in `DesktopConfiguration.validateFields`; it is not an unconditional skip.
+    private static let forwardCompatibleChoiceKeys: Set<String> = [
+        SonioxVoicePreference.regionKey,
+        ApplicationPreferenceKey.ttsQuality.rawValue,
+        ApplicationPreferenceKey.speedMode.rawValue
+    ]
+
     func testChoiceMetadataIsUnambiguousBoundedAndIncludesItsDefault() {
         for field in DesktopConfiguration.fields {
             guard case .choice(let choices) = field.kind else { continue }
@@ -109,13 +121,44 @@ final class DesktopConfigurationTests: XCTestCase {
                 for choice in choices {
                     XCTAssertNoThrow(try DesktopConfiguration(values: [field.key: AnyCodable(.string(choice.value))]))
                 }
-                // The Soniox region field intentionally preserves unknown strings (e.g. a future
-                // region identifier) across transfer instead of rejecting them; see
-                // SonioxVoicePreference. Assert that forward-compatible acceptance explicitly,
-                // rather than only omitting the rejection check.
-                if field.key == SonioxVoicePreference.regionKey {
+                // Forward-compatible choice fields intentionally preserve an unrecognized
+                // stored string (e.g. a future region identifier, or quality/speed mode this
+                // build does not yet recognize) across transfer instead of rejecting it; see
+                // SonioxVoicePreference and Self.forwardCompatibleChoiceKeys. Assert that
+                // round-trip acceptance explicitly, and that the shared canonical
+                // overlength/control-character refusal still applies rather than accepting
+                // every unknown value unconditionally.
+                if Self.forwardCompatibleChoiceKeys.contains(field.key) {
                     let accepted = try DesktopConfiguration(values: [field.key: AnyCodable(.string("invalid"))])
                     XCTAssertEqual(accepted.values[field.key], AnyCodable(.string("invalid")))
+                    // The unknown string must survive not just construction but an edit/apply
+                    // cycle and a full JSON encode/decode round trip, since that is the actual
+                    // transfer path a stored preference travels through.
+                    let editedAccepted = try accepted.applying(accepted.entries)
+                    let restoredAccepted = try JSONDecoder().decode(
+                        DesktopConfiguration.self, from: JSONEncoder().encode(editedAccepted)
+                    )
+                    XCTAssertEqual(restoredAccepted.values[field.key], AnyCodable(.string("invalid")))
+                    let maxLength = String(repeating: "a", count: 256)
+                    XCTAssertNoThrow(try DesktopConfiguration(values: [field.key: AnyCodable(.string(maxLength))]))
+                    let overlength = String(repeating: "a", count: 257)
+                    XCTAssertThrowsError(try DesktopConfiguration(values: [field.key: AnyCodable(.string(overlength))]))
+                    // The 256-byte bound is a UTF-8 byte count, not a character count: a
+                    // multi-byte character must be measured in bytes so this does not regress
+                    // to silently counting characters instead.
+                    let maxLengthMultibyte = String(repeating: "\u{00E9}", count: 128)
+                    XCTAssertEqual(maxLengthMultibyte.utf8.count, 256)
+                    XCTAssertNoThrow(
+                        try DesktopConfiguration(values: [field.key: AnyCodable(.string(maxLengthMultibyte))])
+                    )
+                    let overlengthMultibyte = String(repeating: "\u{00E9}", count: 129)
+                    XCTAssertEqual(overlengthMultibyte.utf8.count, 258)
+                    XCTAssertThrowsError(
+                        try DesktopConfiguration(values: [field.key: AnyCodable(.string(overlengthMultibyte))])
+                    )
+                    XCTAssertThrowsError(
+                        try DesktopConfiguration(values: [field.key: AnyCodable(.string("bad\u{0001}control"))])
+                    )
                 } else {
                     XCTAssertThrowsError(try DesktopConfiguration(values: [field.key: AnyCodable(.string("invalid"))]))
                 }

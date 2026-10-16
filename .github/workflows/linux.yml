@@ -104,6 +104,21 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Normalize container checkout ancestry
+        # Native registry/capture fixtures live under the checkout's .build.
+        # Match their owner/mode contract, not just container-root writability.
+        # Do not touch sibling action/temp mounts or weaken runtime admission.
+        run: |
+          set -eu
+          test "$(dirname "$(dirname "$GITHUB_WORKSPACE")")" = /__w
+          owner="$(id -u):$(id -g)"
+          for directory in /__w "$(dirname "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE"; do
+            test -d "$directory"
+            test ! -L "$directory"
+            chown "$owner" "$directory"
+            chmod go-w "$directory"
+          done
+
       - name: Install GTK 4, libadwaita, PipeWire, keyring and X11 test tools
         run: |
           apt-get update -q

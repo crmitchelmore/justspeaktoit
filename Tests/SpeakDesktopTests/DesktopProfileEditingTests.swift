@@ -4,9 +4,9 @@ import SpeakCore
 import XCTest
 
 /// What the native desktop editor stores, preserves and refuses.
-// existing owned test suite covering the full editor contract; no behavior change.
-// swiftlint:disable:next type_body_length
 final class DesktopProfileEditingTests: XCTestCase {
+    // swiftlint:disable:previous type_body_length
+    // existing owned test suite covering the full editor contract; no behavior change.
     private let catalogue = DesktopProfileEditing.Catalogue(capabilities: .shared)
     private let notepad = #"C:\Windows\System32\notepad.exe"#
     private let code = #"C:\Users\Alex\AppData\Local\Programs\Microsoft VS Code\Code.exe"#

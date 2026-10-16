@@ -4,13 +4,12 @@ import SpeakDesktop
 
 extension DesktopHostController {
     /// Output is the recording's own authority; imports and retries pass nil.
-    // existing owned transcription orchestration; no behavior change.
-    // swiftlint:disable:next function_body_length
-    package func transcribe(
+    package func transcribe( // swiftlint:disable:this function_body_length
         _ original: DesktopRecordingStore.Record, duration: TimeInterval, output: DesktopHostRecordingOutput<Platform>?,
         profile: DesktopProfileSession? = nil, azureEndpoint: String? = nil,
         input: DesktopHostRecordingInput? = nil
     ) async {
+        // existing owned transcription orchestration; no behavior change.
         var record = original
         cancellationRequested = false
         // The record's on-device model, a profile's or the app's, stays in use until this finishes.

@@ -176,8 +176,9 @@ private final class PostProcessingBench: @unchecked Sendable {
         }) else { throw failure("the shared rules route is missing") }
         // The real dialog publishes its displayed identifiers before callbacks.
         holder.postProcessingPicker.publish(models)
+        let builtInRulesModelID = LocalPostProcessingModel.builtInRulesModelID
         try require(
-            holder.postProcessingPicker.modelIdentifier(forSelection: index) == LocalPostProcessingModel.builtInRulesModelID,
+            holder.postProcessingPicker.modelIdentifier(forSelection: index) == builtInRulesModelID,
             "the native picker snapshot lost the local rules identifier"
         )
         "".withCString { prompt in

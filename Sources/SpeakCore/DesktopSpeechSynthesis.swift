@@ -83,17 +83,34 @@ public struct DesktopSpeechSynthesis: Sendable {
         }
     }
 
-    private func synthesizeAzure(
-        _ text: String, voice: DesktopSpeechVoice, options: VoiceSynthesisOptions,
-        credential: @Sendable () async throws -> String
-    ) async throws -> Data {
+    /// Preflights the same final Azure body the transport sends, before key
+    /// access. This does not validate XML or resolve credentials/endpoints.
+    public static func validateSSMLInput(
+        _ text: String, voice: DesktopSpeechVoice, options: VoiceSynthesisOptions
+    ) throws {
+        guard options.useSSML else { return }
+        try options.validate(for: voice.capabilities)
+        switch voice {
+        case .azureNeural, .azureMAI: break
+        default: throw VoiceSynthesisConfigurationError.unsupportedControls
+        }
         let isDocument = options.useSSML && text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("<speak")
         if isDocument && (options.speed != 1 || options.pitch != 0) {
             throw DesktopSpeechSynthesisError.documentControls
         }
-        if options.useSSML && text.utf8.count > Self.maximumSSMLBytes {
+        if text.utf8.count > Self.maximumSSMLBytes {
             throw DesktopSpeechSynthesisError.ssmlTooLarge
         }
+        let body = try AzureSpeechVoiceAPI.ssmlBody(
+            text: text, voice: voice.id, speed: options.speed, pitch: options.pitch, useSSML: true)
+        guard body.utf8.count <= Self.maximumSSMLBytes else { throw DesktopSpeechSynthesisError.ssmlTooLarge }
+    }
+
+    private func synthesizeAzure(
+        _ text: String, voice: DesktopSpeechVoice, options: VoiceSynthesisOptions,
+        credential: @Sendable () async throws -> String
+    ) async throws -> Data {
+        try Self.validateSSMLInput(text, voice: voice, options: options)
         // Never split XML through a tag or lose a document's prosody.
         let segments = options.useSSML ? [text] : SpeechTextSegmenter.segments(text)
         let supplied = try await credential()

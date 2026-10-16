@@ -32,7 +32,7 @@ extension DesktopHostController {
         await publishLocalCleanup()
     }
 
-    package func localCleanupAction(
+    package func localCleanupAction( // swiftlint:disable:this cyclomatic_complexity
         _ action: Int32, identifier: String, repository: String = "", filename: String = ""
     ) {
         guard !closed else { return }
@@ -59,6 +59,9 @@ extension DesktopHostController {
         localCleanupTask = Task { [self] in
             defer { localCleanupTask = nil; localCleanupOperationID = nil; finishOperation() }
             do {
+                // One captured cancellable model transaction per action keeps the
+                // install/remove/import branches and their progress callback in a
+                // single Task scope, so splitting them raises params, not clarity.
                 switch action {
                 case 1:
                     // Recommended references use exactly the same metadata
@@ -106,8 +109,8 @@ extension DesktopHostController {
         if let directory = DesktopHostLocalCleanup.runtimeDirectory {
             do {
                 _ = try NativeLocalLLMProvisioning.read(directory: directory)
-                runtime = "Pinned native CPU runtime provisioned; library digest and model compatibility are checked on use. "
-                    + "Provisioning alone does not establish model compatibility."
+                runtime = "Pinned native CPU runtime provisioned; library digest and model compatibility are "
+                    + "checked on use. Provisioning alone does not establish model compatibility."
             } catch { runtime = error.localizedDescription }
         } else { runtime = "The app's native-runtime directory could not be resolved." }
         Platform.presentLocalCleanup(

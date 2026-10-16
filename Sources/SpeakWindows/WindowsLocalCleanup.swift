@@ -10,8 +10,11 @@ extension WindowsHostPlatform {
         _ options: DesktopPostProcessing.Options, presenter: UnsafeMutableRawPointer?
     ) {
         guard let presenter else { return }
-        do { try WindowsNative.configurePostProcessing(options, context: presenter) }
-        catch { update(error.localizedDescription) }
+        do {
+            try WindowsNative.configurePostProcessing(options, context: presenter)
+        } catch {
+            update(error.localizedDescription)
+        }
     }
     package static func makeLocalCleanup(directory: URL) throws -> DesktopLocalLLMStore? {
         try DesktopHostLocalCleanup.makeStore(

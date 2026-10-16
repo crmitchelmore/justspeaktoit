@@ -6,6 +6,8 @@ import XCTest
 
 @MainActor
 final class DesktopOwnedEventSnapshotTests: XCTestCase {
+    // existing owned test covering captured-profile/cleanup/consent/configuration delivery; no behavior change.
+    // swiftlint:disable:next function_body_length
     func testHeldNativeDelivery_ExecutesCapturedProfileEffectiveCleanupConsentAndConfiguration() async throws {
         let fixture = AutoCleanHostFixture()
         try await fixture.prepare(owned: true)

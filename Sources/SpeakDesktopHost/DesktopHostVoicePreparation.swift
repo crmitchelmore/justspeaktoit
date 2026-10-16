@@ -13,9 +13,14 @@ extension DesktopHostController {
         guard !TranscriptPostProcessingPolicy.isEffectivelyEmptyTranscript(original.text) else {
             throw VoiceOutputSourceSnapshot.Failure.emptyText
         }
-        // Explicit markup is authored input, not an invitation to rewrite tags
-        // or infer the Mac's provider-specific phoneme/IPA branch.
-        guard !selection.options.useSSML else { return original }
+        let phonemes = selection.options.useSSML && selection.voice.supportsSSMLPhonemes
+        if selection.options.useSSML &&
+            (!phonemes || VoiceSynthesisMarkup.containsAuthoredMarkup(in: original.text)) {
+            try DesktopSpeechSynthesis.validateSSMLInput(
+                original.text, voice: selection.voice, options: selection.options)
+            try checkVoicePreparation(ticket)
+            return original
+        }
         let entries: [PronunciationEntry]
         do {
             let vocabulary = try await vocabularyStore()
@@ -29,12 +34,16 @@ extension DesktopHostController {
                 + error.localizedDescription)
         }
         try checkVoicePreparation(ticket)
-        let text = PronunciationRenderer().applyReplacements(to: original.text, entries: entries)
+        let renderer = PronunciationRenderer()
+        let text = phonemes
+            ? renderer.generateSSML(for: original.text, entries: entries, provider: selection.voice)
+            : renderer.applyReplacements(to: original.text, entries: entries)
         guard !TranscriptPostProcessingPolicy.isEffectivelyEmptyTranscript(text) else {
             throw VoiceOutputSourceSnapshot.Failure.emptyText
         }
         let prepared = try VoiceOutputSourceSnapshot(
             source: original.source, text: text, recordID: original.recordID)
+        try DesktopSpeechSynthesis.validateSSMLInput(text, voice: selection.voice, options: selection.options)
         try checkVoicePreparation(ticket)
         return prepared
     }

@@ -68,7 +68,9 @@ public actor DesktopLocalLLMStore: DesktopLocalLLMEngine {
         guard !closed else { throw LocalLLMError.closed }
         if let previous = models.first(where: { $0.id == model.id }) {
             guard previous == model else {
-                throw LocalLLMError.inference("This reference is already pinned to another revision. Remove its reference first.")
+                throw LocalLLMError.inference(
+                    "This reference is already pinned to another revision. Remove its reference first."
+                )
             }
             return previous
         }
@@ -80,7 +82,9 @@ public actor DesktopLocalLLMStore: DesktopLocalLLMEngine {
         return model
     }
 
-    public func install(_ identifier: String, progress: @escaping LocalModelInstaller.Progress = { _, _ in }) async throws {
+    public func install(
+        _ identifier: String, progress: @escaping LocalModelInstaller.Progress = { _, _ in }
+    ) async throws {
         guard !closed else { throw LocalLLMError.closed }
         let model = try spec(identifier)
         let owner = model.storageIdentifier

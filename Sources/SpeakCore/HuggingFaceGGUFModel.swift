@@ -85,8 +85,10 @@ public enum LocalLLMError: LocalizedError, Equatable, Sendable {
         case .unsupportedArtifact: return "Choose one unsplit GGUF language-model file, not a path or multipart model."
         case .metadataRequired:
             return "Resolve this GGUF model's immutable Hugging Face metadata on this device before downloading or using it."
+            // swiftlint:disable:previous line_length
         case .runtimeUnavailable(let detail): return "The native local cleanup runtime is unavailable. \(detail)"
-        case .busy: return "This local cleanup model is in use, downloading or being removed. Try again when it finishes."
+        case .busy:
+            return "This local cleanup model is in use, downloading or being removed. Try again when it finishes."
         case .closed: return "Local cleanup is closing; no new work can start."
         case .invalidOutput: return "The local model did not return a complete, non-empty cleanup response."
         case .inference(let detail): return "Local cleanup failed: \(detail)"

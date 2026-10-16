@@ -117,48 +117,60 @@ extension DesktopHostController {
         ) else { return }
         switch command {
         case .start(let trigger):
-            guard canStartFromShortcut(request) else { return }
-            if ownedDictationCapability != nil {
-                await admitOwnedDictation(
-                    target: request.target, modelIndex: request.modelIndex, deviceID: request.deviceID,
-                    targetExecutablePath: request.targetExecutablePath, textOutput: request.textOutput,
-                    trigger: trigger, wait: waitForOwnedStartup, profile: request.profile, event: request.event
-                )
-                return
-            }
-            let textOutput = await request.textOutput.value
-            guard canStartFromShortcut(request) else { return }
-            if let event = request.event {
-                await toggleCaptured(
-                    event, target: request.target, modelIndex: request.modelIndex,
-                    deviceID: request.deviceID, trigger: trigger
-                )
-            } else if let profile = request.profile {
-                await toggleCaptured(
-                    target: request.target, modelIndex: request.modelIndex, deviceID: request.deviceID,
-                    textOutput: textOutput, profile: profile, trigger: trigger
-                )
-            } else {
-                await toggle(
-                    target: request.target, modelIndex: request.modelIndex, deviceID: request.deviceID,
-                    targetExecutablePath: request.targetExecutablePath, textOutput: textOutput, trigger: trigger
-                )
-            }
+            await startFromShortcut(request, trigger: trigger, waitForOwnedStartup: waitForOwnedStartup)
         case .stop:
-            if ownedDictation != nil || ownedDictationAdmission != nil {
-                await stopOwnedDictationAdmission(wait: waitForOwnedStartup)
-                hotKeySession.startsAfter = ProcessInfo.processInfo.systemUptime
-                return
-            }
-            guard let active = recording?.record.id, !busy else { return }
-            let textOutput = await request.textOutput.value
-            guard !closed, recording?.record.id == active, !busy else { return }
+            await stopFromShortcut(request, waitForOwnedStartup: waitForOwnedStartup)
+        }
+    }
+
+    private func startFromShortcut(
+        _ request: DesktopHostShortcutRequest<Platform>, trigger: HotKeySessionTrigger, waitForOwnedStartup: Bool
+    ) async {
+        guard canStartFromShortcut(request) else { return }
+        if ownedDictationCapability != nil {
+            await admitOwnedDictation(
+                target: request.target, modelIndex: request.modelIndex, deviceID: request.deviceID,
+                targetExecutablePath: request.targetExecutablePath, textOutput: request.textOutput,
+                trigger: trigger, wait: waitForOwnedStartup, profile: request.profile, event: request.event
+            )
+            return
+        }
+        let textOutput = await request.textOutput.value
+        guard canStartFromShortcut(request) else { return }
+        if let event = request.event {
+            await toggleCaptured(
+                event, target: request.target, modelIndex: request.modelIndex,
+                deviceID: request.deviceID, trigger: trigger
+            )
+        } else if let profile = request.profile {
+            await toggleCaptured(
+                target: request.target, modelIndex: request.modelIndex, deviceID: request.deviceID,
+                textOutput: textOutput, profile: profile, trigger: trigger
+            )
+        } else {
             await toggle(
                 target: request.target, modelIndex: request.modelIndex, deviceID: request.deviceID,
-                targetExecutablePath: request.targetExecutablePath, textOutput: textOutput
+                targetExecutablePath: request.targetExecutablePath, textOutput: textOutput, trigger: trigger
             )
-            hotKeySession.startsAfter = ProcessInfo.processInfo.systemUptime
         }
+    }
+
+    private func stopFromShortcut(
+        _ request: DesktopHostShortcutRequest<Platform>, waitForOwnedStartup: Bool
+    ) async {
+        if ownedDictation != nil || ownedDictationAdmission != nil {
+            await stopOwnedDictationAdmission(wait: waitForOwnedStartup)
+            hotKeySession.startsAfter = ProcessInfo.processInfo.systemUptime
+            return
+        }
+        guard let active = recording?.record.id, !busy else { return }
+        let textOutput = await request.textOutput.value
+        guard !closed, recording?.record.id == active, !busy else { return }
+        await toggle(
+            target: request.target, modelIndex: request.modelIndex, deviceID: request.deviceID,
+            targetExecutablePath: request.targetExecutablePath, textOutput: textOutput
+        )
+        hotKeySession.startsAfter = ProcessInfo.processInfo.systemUptime
     }
 
     private func canStartFromShortcut(_ request: DesktopHostShortcutRequest<Platform>) -> Bool {

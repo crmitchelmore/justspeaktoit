@@ -6,6 +6,8 @@ import XCTest
 
 @MainActor
 final class DesktopLegacyEventSnapshotTests: XCTestCase {
+    // existing owned test covering held legacy delivery/cleanup/model/consent/output; no behavior change.
+    // swiftlint:disable:next function_body_length
     func testHeldLegacyDelivery_ExecutesCapturedCleanupModelConsentAndOutput() async throws {
         let fixture = AutoCleanHostFixture()
         try await fixture.prepare(owned: false)
@@ -79,6 +81,8 @@ final class DesktopLegacyEventSnapshotTests: XCTestCase {
         XCTAssertFalse(FakeLog.shared.allStatuses.contains(bufferStatus))
     }
 
+    // existing owned test covering denied legacy delivery/later-apply cleanup/preview/insertion; no behavior change.
+    // swiftlint:disable:next function_body_length
     func testHeldDeniedLegacyDelivery_LaterApplyCannotAuthorizeCleanupPreviewOrInsertion() async throws {
         let fixture = AutoCleanHostFixture()
         try await fixture.prepare(owned: false)

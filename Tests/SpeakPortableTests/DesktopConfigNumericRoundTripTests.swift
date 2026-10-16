@@ -2,7 +2,7 @@ import Foundation
 import SpeakCore
 import XCTest
 
-final class DesktopConfigurationNumericRoundTripTests: XCTestCase {
+final class DesktopConfigNumericRoundTripTests: XCTestCase {
     func testNumericDefaults_KeepExactNativeEntriesThroughApplyAndJSON() throws {
         let defaults = try DesktopConfiguration()
         let applied = try defaults.applying(defaults.entries)

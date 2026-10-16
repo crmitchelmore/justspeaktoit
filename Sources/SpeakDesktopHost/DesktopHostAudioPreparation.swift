@@ -43,11 +43,13 @@ extension DesktopHostController {
             audio: output, model: model, key: key, duration: convertedDuration,
             language: language, keywords: keywords, azureEndpoint: endpoint
         )
-        return try await transcribeConvertedAudio(request, local: local, historySaved: historySaved)
+        return try await transcribeConvertedAudio(
+            request, endpoint: endpoint, local: local, historySaved: historySaved
+        )
     }
 
     private func transcribeConvertedAudio(
-        _ request: DesktopHostTranscriptionRequest, local: Bool, historySaved: Bool
+        _ request: DesktopHostTranscriptionRequest, endpoint: String, local: Bool, historySaved: Bool
     ) async throws -> TranscriptionResult {
         let result: TranscriptionResult
         do {
@@ -60,7 +62,7 @@ extension DesktopHostController {
                 if historySaved { update("Transcribing… Your original file is saved in History.", state: 2) }
                 result = try await DesktopTranscription.transcribe(
                     audioURL: request.audio, model: request.model, apiKey: request.key, duration: request.duration,
-                    language: request.language, azureEndpoint: request.azureEndpoint,
+                    language: request.language, azureEndpoint: endpoint,
                     staging: uploadStaging, keywords: request.keywords
                 )
             }

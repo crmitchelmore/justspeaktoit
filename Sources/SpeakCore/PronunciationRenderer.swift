@@ -106,10 +106,13 @@ public final class PronunciationRenderer: @unchecked Sendable {
     }
 
     var cachedExpressionCount: Int { lock.withLock { regexCache.count } }
+    func finishSSMLDictionaryPass(_ entries: [PronunciationEntry]) {
+        if case .activeDictionary = retention { retainExpressions(of: entries) }
+    }
     /// Expressions compiled so far; unchanged by warm passes.
     var compilationCount: Int { lock.withLock { compilations } }
 
-    private func cachedRegex(pattern: String, options: NSRegularExpression.Options) -> NSRegularExpression? {
+    func cachedRegex(pattern: String, options: NSRegularExpression.Options) -> NSRegularExpression? {
         let key = Self.cacheKey(pattern: pattern, options: options)
         if let cached = lock.withLock({ regexCache[key] }) {
             return cached
@@ -143,11 +146,11 @@ public final class PronunciationRenderer: @unchecked Sendable {
         return entry.caseSensitive ? nil : cacheKey(pattern: wordPattern(entry.word), options: .caseInsensitive)
     }
 
-    private static func wordPattern(_ word: String) -> String {
+    static func wordPattern(_ word: String) -> String {
         "\\b\(NSRegularExpression.escapedPattern(for: word))\\b"
     }
 
-    private static func regexOptions(caseSensitive: Bool) -> NSRegularExpression.Options {
+    static func regexOptions(caseSensitive: Bool) -> NSRegularExpression.Options {
         var options: NSRegularExpression.Options = []
         if !caseSensitive {
             options.insert(.caseInsensitive)

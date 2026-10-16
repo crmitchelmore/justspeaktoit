@@ -3,9 +3,9 @@ import Foundation
 /// Ownership only: gesture recognition/timers stay with their canonical state machines.
 /// No native adapter is installed by this type. An external capture must also honor the lease
 /// arbitration before opening a microphone; an `.idle` admission is not OS ownership proof.
-// existing owned capture-lease arbitration state machine; no behavior change.
-// swiftlint:disable:next type_body_length
 package actor DesktopPressCaptureLease {
+    // swiftlint:disable:previous type_body_length
+    // existing owned capture-lease arbitration state machine; no behavior change.
     private struct Run {
         let token: DesktopPressCaptureToken
         let identity: DesktopPressCaptureIdentity

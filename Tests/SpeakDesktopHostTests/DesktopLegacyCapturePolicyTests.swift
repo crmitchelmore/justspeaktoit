@@ -6,6 +6,8 @@ import XCTest
 
 @MainActor
 final class DesktopLegacyCapturePolicyTests: XCTestCase {
+    // existing owned test covering held legacy event/silence-stop/zero-tail captured configuration; no behavior change.
+    // swiftlint:disable:next function_body_length
     func testHeldLegacyEvent_ActualSilenceStopAndZeroTailUseCapturedConfiguration() async throws {
         FakeLog.shared.reset()
         DesktopHostModels.configure(streamingQualified: true)

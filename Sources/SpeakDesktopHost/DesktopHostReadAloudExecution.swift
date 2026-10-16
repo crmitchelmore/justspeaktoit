@@ -9,7 +9,12 @@ import SpeakDesktop
 /// so they are module-internal rather than `private` only because Swift's
 /// `private` is scoped to a single file and cannot span this split.
 extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
+    // swiftlint:disable:next function_body_length
     func startVoiceRead(text: String, source: VoiceOutputSource, owner: UUID, recordID: UUID?) {
+        // One cohesive playback-lifecycle body: voice selection, optional
+        // Deepgram output staging, speech start, and the read-aloud Task all
+        // share local state (`speech`, `voiceOutput`, `ticket`) that would
+        // otherwise need threading through several extracted helpers.
         let selection: DesktopSpeechSelection
         do {
             selection = try currentVoiceSelection()

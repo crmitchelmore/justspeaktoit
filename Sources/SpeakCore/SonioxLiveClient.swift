@@ -27,9 +27,9 @@ import os.log
 /// Conforms to ``FinalizingStreamingTranscriptionClient``. `finalShape` is
 /// `.cumulativeTranscript`: every `onTranscript` delivery restates the whole
 /// transcript so far, so finals replace rather than append.
-// existing owned WebSocket lifecycle/state surface; no behavior change.
-// swiftlint:disable:next type_body_length
 public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
+    // swiftlint:disable:previous type_body_length
+    // existing owned WebSocket lifecycle/state surface; no behavior change.
     public let finalShape: TranscriptFinalShape = .cumulativeTranscript
     public typealias ConnectionFactory = @Sendable (URLRequest) -> any StreamingWebSocketConnection
     public typealias Scheduler = @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void

@@ -24,6 +24,24 @@ public enum VoiceSynthesisMarkup {
         return prefix.isEmpty ? text : prefix + text + closingTag
     }
 
+    /// Detects authored XML intent, including tags and entity-only fragments.
+    /// Not XML validation or entity expansion: unknown named references remain
+    /// the author's input. Ordinary "a < b" and unescaped ampersands are text.
+    public static func containsAuthoredMarkup(in text: String) -> Bool {
+        let name = #"[\p{L}_:][\p{L}\p{N}\p{M}_.:-]*"#
+        let tag = #"<(?:/?\#(name)(?=[\s/>]|$)|[!?])"#
+        let entity = #"&(?:#[0-9]+|#x[0-9A-Fa-f]+|\#(name));"#
+        return text.range(of: tag + "|" + entity, options: .regularExpression) != nil
+    }
+
+    static func escapeXML(_ text: String) -> String {
+        text.replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "'", with: "&apos;")
+    }
+
     private static func wrappingPrefix(_ text: String) -> String { text.contains(openingTag) ? "" : openingTag }
 
     /// Pure native-editor bridge. Wraps the whole draft, exactly like the Mac

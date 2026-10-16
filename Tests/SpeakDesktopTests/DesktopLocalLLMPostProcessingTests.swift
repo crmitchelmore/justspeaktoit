@@ -75,7 +75,9 @@ final class DesktopLocalLLMPostProcessingTests: XCTestCase {
             .disabled, ModelCatalog.defaultPostProcessingModel, nil, nil, SpeechDefaults.temperature
         )
         XCTAssertEqual(defaults, explicit)
-        XCTAssertEqual(DesktopPostProcessing.Options(customPrompt: "Keep punctuation.").customPrompt, "Keep punctuation.")
+        XCTAssertEqual(
+            DesktopPostProcessing.Options(customPrompt: "Keep punctuation.").customPrompt, "Keep punctuation."
+        )
         let installerInitializer = LocalModelInstaller.init(root:digests:transport:prepareDirectory:)
         let item = installerInitializer(
             URL(fileURLWithPath: NSTemporaryDirectory()), TestSHA256.provider,

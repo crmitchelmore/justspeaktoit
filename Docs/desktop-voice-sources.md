@@ -68,12 +68,39 @@ remain unchanged; usage observes the actual rendered request with the original
 source/model ownership. Retained **Play** and **Export** reuse their captured
 audio bytes without rereading the dictionary, a key or a provider.
 
-Explicit user-authored SSML remains byte-for-byte unchanged and subject to the
-existing provider/control validation. This text-replacement slice does **not**
-implement the Mac's capability-dependent phoneme/IPA-to-SSML branch, infer tags
-or add providers/controls. The new Host regression sources are **NOT_RUN**:
-source-only authoring and metadata reconstruction are not compiler, provider,
-native-device or full-parity acceptance.
+With **Use SSML** enabled, plain-text sources on the executable **Azure neural**
+route now use the same portable pronunciation-to-SSML renderer as the Mac
+manager. Non-regex entries emit IPA phoneme tags; regex entries retain ordered
+replacement-template semantics rather than inferring phonemes. Generated nodes
+are protected from later entries. Text, word bodies, IPA and alphabet attributes
+are XML-escaped once; `$` and backslashes inside phoneme literals are not regex
+templates. These deliberately correct the old Mac builder's unsafe ampersand/
+literal escaping and later-entry tag/attribute rewriting. Regex-produced markup
+is spoken as escaped text, not executed as SSML.
+
+Explicit user-authored SSML documents, fragments, inline tags and entity-only
+XML text remain byte-for-byte unchanged at both the native Desktop preparation
+and supported Mac manager entrypoints, using the same intent detector.
+Desktop bypasses dictionary access; the direct shared renderer remains a
+plain-text-to-SSML API. Unsupported Mac providers keep ordinary replacements.
+Named references (including unknown names), decimal
+`&#38;` and hexadecimal `&#x26;` references signal authored intent; raw ampersands
+and ordinary comparisons remain plain text and are escaped once.
+Intent detection does not parse/validate XML or expand entities: unknown
+references and malformed authored markup remain subject to the existing provider
+validation. Complete `<speak>`
+documents retain the existing normal-speed/pitch requirement. The final Azure
+body, including its existing wrapper, must fit **65,536 UTF-8 bytes** before any
+key access; markup is never segmented. The request and preflight share one pure
+body builder, independent of credentials, endpoint or requested audio quality.
+
+SSML support alone does not imply IPA support: **Azure MAI does not infer
+phonemes**, and no other desktop route gains this capability. Mac Apple-system
+IPA is not Windows SAPI/eSpeak support; that native parity gap remains. No
+phonetic conversion engine, new provider, control or audio format is added.
+All new shared/Mac/Host regression sources are **NOT_RUN**: this incremental
+successor is source-only, uncompiled and unqualified. Metadata reconstruction is
+not provider, native-device, installed-application or full-parity acceptance.
 
 ### Recovered OpenAI, Groq, Gemini and Speechmatics routes
 

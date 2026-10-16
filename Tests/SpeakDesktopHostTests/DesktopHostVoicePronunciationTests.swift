@@ -148,8 +148,9 @@ final class DesktopHostVoicePronunciationTests: XCTestCase {
                 url: try XCTUnwrap(request.url), statusCode: 200, httpVersion: nil, headerFields: nil)), wav)
         }
         let source = try VoiceOutputSourceSnapshot(source: .clipboard, text: "Token")
-        await controller.generateVoiceSource(source, options: .init(autoPlay: false, saveToRecordings: false)) {
-            input, selection, credential in
+        await controller.generateVoiceSource(
+            source, options: .init(autoPlay: false, saveToRecordings: false)
+        ) { input, selection, credential in
             try await DesktopSpeechSynthesis(session: session).synthesize(
                 input, voice: selection.voice, options: selection.options, credential: credential)
         }
@@ -230,8 +231,9 @@ extension DesktopHostVoicePronunciationTests {
     }
 
     func generate(_ source: VoiceOutputSourceSnapshot) async {
-        await controller.generateVoiceSource(source, options: .init(autoPlay: false, saveToRecordings: false)) {
-            input, selection, credential in
+        await controller.generateVoiceSource(
+            source, options: .init(autoPlay: false, saveToRecordings: false)
+        ) { input, selection, credential in
             try await PronunciationVoicePlatform.synthesizeVoiceOutput(
                 input, selection: selection, credential: credential)
         }

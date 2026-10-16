@@ -170,11 +170,10 @@ final class LinuxEventContext: @unchecked Sendable {
 }
 
 /// The GTK window's event callback, on the GTK main thread.
-// exhaustive native GTK event-code dispatch; no behavior change.
-// swiftlint:disable:next cyclomatic_complexity
-func linuxWindowEvent(
+func linuxWindowEvent( // swiftlint:disable:this cyclomatic_complexity
     _ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, _ context: UnsafeMutableRawPointer?
 ) {
+    // exhaustive native GTK event-code dispatch; no behavior change.
     guard let context else { return }
     let holder = Unmanaged<LinuxEventContext>.fromOpaque(context).takeUnretainedValue()
     let value = text.map(String.init(cString:)) ?? ""
@@ -388,6 +387,11 @@ private func linuxReady(_ holder: LinuxEventContext) {
         }
         return
     }
+    linuxRunSelfTestAndClose(holder)
+}
+
+/// Runs the headless UI self-test, then requests the window close.
+private func linuxRunSelfTestAndClose(_ holder: LinuxEventContext) {
     do {
         LinuxWindow.textOutput(.init(), hint: LinuxHostPlatform.session.shortcutAdvice(command: "justspeaktoit"))
         // Capture the laid-out startup window before the self-test changes it.

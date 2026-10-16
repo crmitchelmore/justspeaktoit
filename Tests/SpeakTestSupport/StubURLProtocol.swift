@@ -64,13 +64,13 @@ public final class StubURLProtocol: URLProtocol, @unchecked Sendable {
         lock.withLock { _recordedRequests.last }
     }
 
-    /// Called after a request has been recorded and its outcome delivered.
+    /// Captured at request start; called after its outcome is delivered unless stopped.
     public static var onStartLoading: (@Sendable () -> Void)? {
         get { lock.withLock { _onStartLoading } }
         set { lock.withLock { _onStartLoading = newValue } }
     }
 
-    /// Called when the loading system cancels a request.
+    /// Captured at request start; called once when the loading system cancels it.
     public static var onStopLoading: (@Sendable () -> Void)? {
         get { lock.withLock { _onStopLoading } }
         set { lock.withLock { _onStopLoading = newValue } }
@@ -94,7 +94,8 @@ public final class StubURLProtocol: URLProtocol, @unchecked Sendable {
         lock.withLock { _recordedRequests = [] }
     }
 
-    /// Clears the handler, the recorded requests and both callbacks.
+    /// Clears the configured handler, recorded requests and callbacks for future requests.
+    /// Already-started requests keep their captured handler and callbacks.
     public static func reset() {
         lock.withLock {
             _handler = nil
@@ -130,8 +131,11 @@ public final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     }
 
     private let stopLock = NSRecursiveLock()
+    private var started = false
     private var stopped = false
     private var loadTask: Task<Void, Never>?
+    private var startCallback: (@Sendable () -> Void)?
+    private var stopCallback: (@Sendable () -> Void)?
 
     override public static func canInit(with request: URLRequest) -> Bool { true }
 
@@ -144,24 +148,30 @@ public final class StubURLProtocol: URLProtocol, @unchecked Sendable {
         // and draining here would consume the stream before the client reads
         // it. Call `body(of:)` when a test wants the bytes.
         let sent = request
-        let handler: Handler? = Self.lock.withLock {
-            Self._recordedRequests.append(sent)
-            return Self._handler
-        }
+        stopLock.withLock {
+            guard !started, !stopped else { return }
+            started = true
+            let configuration = Self.lock.withLock {
+                Self._recordedRequests.append(sent)
+                return (Self._handler, Self._onStartLoading, Self._onStopLoading)
+            }
+            startCallback = configuration.1
+            stopCallback = configuration.2
 
-        guard let handler else {
-            deliver(.fail(Error.noHandler), for: sent)
-            return
-        }
+            guard let handler = configuration.0 else {
+                deliver(.fail(Error.noHandler), for: sent)
+                return
+            }
 
-        loadTask = Task { [weak self] in
-            guard let self else { return }
-            do {
-                let outcome = try await handler(sent)
-                try Task.checkCancellation()
-                self.deliver(outcome, for: sent)
-            } catch {
-                self.deliver(.fail(error), for: sent)
+            loadTask = Task { [weak self] in
+                guard let self else { return }
+                do {
+                    let outcome = try await handler(sent)
+                    try Task.checkCancellation()
+                    self.deliver(outcome, for: sent)
+                } catch {
+                    self.deliver(.fail(error), for: sent)
+                }
             }
         }
     }
@@ -170,10 +180,17 @@ public final class StubURLProtocol: URLProtocol, @unchecked Sendable {
         // Cancelling matters: the deadline tests assert that tearing down an
         // in-flight request actually cancels the work behind it.
         stopLock.withLock {
+            guard !stopped else { return }
             stopped = true
             loadTask?.cancel()
+            stopCallback?()
         }
-        Self.onStopLoading?()
+    }
+
+    // Direct lifecycle tests drain the owned task before asserting no late callbacks.
+    func waitForLoadingTask() async {
+        let task = stopLock.withLock { loadTask }
+        await task?.value
     }
 
     private func deliver(_ outcome: Outcome, for request: URLRequest) {
@@ -182,18 +199,22 @@ public final class StubURLProtocol: URLProtocol, @unchecked Sendable {
             switch outcome {
             case let .respond(response, data):
                 client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                guard !stopped else { return }
                 client?.urlProtocol(self, didLoad: data)
+                guard !stopped else { return }
                 client?.urlProtocolDidFinishLoading(self)
             case let .respondWithoutFinishing(response, data):
                 client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                guard !stopped else { return }
                 client?.urlProtocol(self, didLoad: data)
             case let .fail(error):
                 client?.urlProtocol(self, didFailWithError: error)
             case .hang:
                 break
             }
+            guard !stopped else { return }
+            startCallback?()
         }
-        Self.onStartLoading?()
     }
 }
 

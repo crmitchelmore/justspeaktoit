@@ -72,7 +72,8 @@ public struct LinuxAutomationStream: AutomationByteStream {
     }
 
     public static func check(_ status: Int32) throws {
-        switch status {
+        // Anonymous C enum constants import as `Int`; widen the Int32 status to match for pattern matching.
+        switch Int(status) {
         case JSTI_AUTOMATION_OK: return
         case JSTI_AUTOMATION_TIMEOUT:
             throw AutomationError(code: .timedOut, message: "The local automation exchange timed out.")

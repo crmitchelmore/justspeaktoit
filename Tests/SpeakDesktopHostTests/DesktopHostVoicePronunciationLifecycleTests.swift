@@ -5,6 +5,8 @@ import SpeakDesktop
 import XCTest
 
 extension DesktopHostVoicePronunciationTests {
+    // existing owned test covering generation-mid-flight dictionary/voice edits; no behavior change.
+    // swiftlint:disable:next function_body_length
     func testLaterDictionaryAndVoiceEdits_DoNotRetagCapturedJobOrRetainedPlaybackAndExport() async throws {
         let entered = expectation(description: "Prepared provider input is captured")
         let gate = VoicePronunciationGate()
@@ -16,8 +18,9 @@ extension DesktopHostVoicePronunciationTests {
             return wav
         }
         let source = try VoiceOutputSourceSnapshot(source: .clipboard, text: "Token")
-        await controller.generateVoiceSource(source, options: .init(autoPlay: false, saveToRecordings: false)) {
-            input, selection, credential in
+        await controller.generateVoiceSource(
+            source, options: .init(autoPlay: false, saveToRecordings: false)
+        ) { input, selection, credential in
             try await PronunciationVoicePlatform.synthesizeVoiceOutput(
                 input, selection: selection, credential: credential)
         }
@@ -273,8 +276,9 @@ private extension DesktopHostVoicePronunciationTests {
             return try XCTUnwrap(read)
         }
         if action == 1 {
-            await controller.generateVoiceSource(source, options: .init(autoPlay: false, saveToRecordings: false)) {
-                input, selection, credential in
+            await controller.generateVoiceSource(
+                source, options: .init(autoPlay: false, saveToRecordings: false)
+            ) { input, selection, credential in
                 try await PronunciationVoicePlatform.synthesizeVoiceOutput(
                     input, selection: selection, credential: credential)
             }

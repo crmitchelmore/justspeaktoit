@@ -15,7 +15,7 @@ extension DesktopHostController {
     ) -> DesktopHostRecordingEvent<Platform> {
         .init(
             profile: captureProfile(modelIndex: modelIndex, executablePath: executablePath),
-            textOutput: textOutputOptions(), configuration: settings.configuration
+            textOutput: settings.textOutput ?? Platform.defaultTextOutput, configuration: settings.configuration
         )
     }
 

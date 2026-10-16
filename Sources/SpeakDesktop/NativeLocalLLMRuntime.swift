@@ -53,7 +53,9 @@ public struct NativeLocalLLMProvisioning: Codable, Equatable, Sendable {
                   manifest.platform == hostPlatform, manifest.architecture == hostArchitecture,
                   manifest.library == libraryName,
                   HuggingFaceWhisperModel.isHex(manifest.sha256, count: 64) else {
-                throw LocalLLMError.runtimeUnavailable("Install the pinned native CPU runtime for this platform and ABI.")
+                throw LocalLLMError.runtimeUnavailable(
+                    "Install the pinned native CPU runtime for this platform and ABI."
+                )
             }
             let library = directory.appendingPathComponent(manifest.library)
             let binary = try library.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
@@ -107,8 +109,11 @@ public final class NativeLocalLLMRuntime: DesktopLocalLLMRuntime, @unchecked Sen
                         try run.verifyLibrary(library, expected: manifest.sha256)
                         try run.checkCancellation()
                         let result = try run.complete(
-                            library: library, model: model, file: file, system: systemPrompt,
-                            user: userPrompt, temperature: temperature
+                            library: library,
+                            request: NativeLLMCompletionRequest(
+                                model: model, file: file, system: systemPrompt,
+                                user: userPrompt, temperature: temperature
+                            )
                         )
                         continuation.resume(returning: result)
                     } catch { continuation.resume(throwing: error) }
@@ -116,6 +121,17 @@ public final class NativeLocalLLMRuntime: DesktopLocalLLMRuntime, @unchecked Sen
             }
         } onCancel: { run.cancel() }
     }
+}
+
+/// Bundles the prompt inputs for one native completion so the native run's
+/// entry point stays within SwiftLint's parameter-count limit without losing
+/// any of the pinned library/model/file/system/user/temperature identities.
+private struct NativeLLMCompletionRequest {
+    let model: HuggingFaceGGUFModel
+    let file: URL
+    let system: String
+    let user: String
+    let temperature: Double
 }
 
 private final class NativeLLMRun: @unchecked Sendable {
@@ -150,9 +166,12 @@ private final class NativeLLMRun: @unchecked Sendable {
         }
     }
 
-    func complete(
-        library: URL, model: HuggingFaceGGUFModel, file: URL, system: String, user: String, temperature: Double
-    ) throws -> String {
+    func complete(library: URL, request: NativeLLMCompletionRequest) throws -> String {
+        let model = request.model
+        let file = request.file
+        let system = request.system
+        let user = request.user
+        let temperature = request.temperature
         var output: UnsafeMutablePointer<CChar>?
         var error = [CChar](repeating: 0, count: 2_048)
         let errorCapacity = error.count

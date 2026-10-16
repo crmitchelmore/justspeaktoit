@@ -7,10 +7,15 @@ final class DesktopLegacyStopGraceTests: XCTestCase {
     private let graceKey = ApplicationPreferenceKey.liveStopGracePeriod.rawValue
 
     func testLegacyOnlyConfiguration_MigratesValidatedValueAndRetainsOriginal() throws {
-        for value in [AnyCodable(.int(0)), AnyCodable(.double(0.35)), AnyCodable(.int(2))] {
+        let cases: [(input: AnyCodable, expectedCanonical: AnyCodable)] = [
+            (AnyCodable(.int(0)), AnyCodable(.double(0))),
+            (AnyCodable(.double(0.35)), AnyCodable(.double(0.35))),
+            (AnyCodable(.int(2)), AnyCodable(.double(2)))
+        ]
+        for (value, expectedCanonical) in cases {
             let configuration = try DesktopConfiguration(values: [legacyKey: value])
             XCTAssertEqual(configuration.values[legacyKey], value)
-            XCTAssertEqual(configuration.values[graceKey], value)
+            XCTAssertEqual(configuration.values[graceKey], expectedCanonical)
             XCTAssertEqual(configuration.liveOptions.stopGracePeriod, configuration.number(graceKey))
             let restored = try JSONDecoder().decode(
                 DesktopConfiguration.self, from: JSONEncoder().encode(configuration)
@@ -21,10 +26,15 @@ final class DesktopLegacyStopGraceTests: XCTestCase {
     }
 
     func testCanonicalValueIncludingZero_TakesPrecedenceOverLegacy() throws {
-        for value in [AnyCodable(.double(0)), AnyCodable(.double(0.75)), AnyCodable(.int(2))] {
+        let cases: [(input: AnyCodable, expectedCanonical: AnyCodable)] = [
+            (AnyCodable(.double(0)), AnyCodable(.double(0))),
+            (AnyCodable(.double(0.75)), AnyCodable(.double(0.75))),
+            (AnyCodable(.int(2)), AnyCodable(.double(2)))
+        ]
+        for (value, expectedCanonical) in cases {
             for legacy in [AnyCodable(.double(1.5)), AnyCodable(.string("opaque legacy value"))] {
                 let configuration = try DesktopConfiguration(values: [graceKey: value, legacyKey: legacy])
-                XCTAssertEqual(configuration.values[graceKey], value)
+                XCTAssertEqual(configuration.values[graceKey], expectedCanonical)
                 XCTAssertEqual(configuration.values[legacyKey], legacy)
             }
         }

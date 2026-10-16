@@ -66,6 +66,9 @@ jobs:
 
       - name: Test (Debug)
         id: debug_tests
+        # Request a non-interactive Swift runtime crash trace on the allocator abort.
+        env:
+          SWIFT_BACKTRACE: enable=yes,interactive=no,color=no,sanitize=yes
         run: python3 scripts/with-test-keychain.py swift test --enable-code-coverage
 
       - name: Collect existing Debug XCTest crash reports

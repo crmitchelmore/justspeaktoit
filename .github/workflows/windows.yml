@@ -1751,6 +1751,24 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
+      - name: Normalize container workspace ownership
+        # actions/checkout runs against a host bind-mount (/__w) owned by the
+        # runner host user, while this job's container runs as its image's
+        # default user. The owned capture-writer tests verify a real
+        # ownership+mode chain (not just writability) up to the checkout
+        # root, so a mismatched host-mount owner/mode trips that check as an
+        # environment artifact rather than a security finding. Align
+        # ownership and drop any group/other write bit on just the ancestor
+        # chain the checkout actually needs (not the sibling /__w/_temp,
+        # /__w/_actions mounts) instead of weakening the check.
+        run: |
+          owner="$(id -u):$(id -g)"
+          chown "$owner" /__w
+          chmod 0755 /__w
+          chown "$owner" "$(dirname "$GITHUB_WORKSPACE")"
+          chmod 0755 "$(dirname "$GITHUB_WORKSPACE")"
+          chown -R "$owner" "$GITHUB_WORKSPACE"
+          chmod 0755 "$GITHUB_WORKSPACE"
       - name: Verify portable source boundary
         run: python3 scripts/verify-portable-core-boundary.py
       - name: Test portable graph with native Linux Swift

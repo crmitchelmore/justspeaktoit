@@ -55,7 +55,8 @@ final class DesktopHostProfileEditorTests: XCTestCase {
         FakeLog.shared.installKeyReadHook { _ in probe.read() }
         FakeLog.shared.installKeyWriteHook { _, _ in probe.write() }
         let opened = try await controller.profileEditorEvent("refresh")
-        let created = try await controller.profileEditorEvent(event(token(opened), "save", nil, fields: values("First")))
+        let created = try await controller.profileEditorEvent(
+            event(token(opened), "save", nil, fields: values("First")))
         let savedProfiles = await controller.profiles
         let original = try XCTUnwrap(savedProfiles.first)
         let duplicated = try await controller.profileEditorEvent(event(token(created), "duplicate", original.id))

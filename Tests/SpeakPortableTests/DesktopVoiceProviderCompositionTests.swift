@@ -131,7 +131,7 @@ final class DesktopVoiceProviderCompositionTests: DeepgramSpeechStubTestCase {
         XCTAssertNil(record.estimatedInputCostUSD)
         XCTAssertNil(record.estimatedAudioCostUSD)
         let json = try JSONEncoder().encode(capture.records)
-        XCTAssertFalse(String(decoding: json, as: UTF8.self).contains("reportedInputTokens"))
+        XCTAssertFalse(try XCTUnwrap(String(bytes: json, encoding: .utf8)).contains("reportedInputTokens"))
         XCTAssertEqual(try JSONDecoder().decode([VoiceSynthesisUsage.Record].self, from: json), capture.records)
     }
 

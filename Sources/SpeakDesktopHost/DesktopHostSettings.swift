@@ -41,6 +41,7 @@ package struct DesktopHostShortcutRequest<Platform: DesktopHostPlatform>: Sendab
     package let modelIndex: Int
     package let deviceID: String
     package let profile: DesktopProfileSession?
+    let event: DesktopHostRecordingEvent<Platform>?
 
     package init(
         input: HotKeySessionPolicy.Input, style: HotKeyActivationStyle, recognisedAt: TimeInterval,
@@ -57,6 +58,24 @@ package struct DesktopHostShortcutRequest<Platform: DesktopHostPlatform>: Sendab
         self.modelIndex = modelIndex
         self.deviceID = deviceID
         self.profile = profile
+        self.event = nil
+    }
+
+    func capturing(_ event: DesktopHostRecordingEvent<Platform>) -> Self {
+        .init(capturing: event, request: self)
+    }
+
+    private init(capturing event: DesktopHostRecordingEvent<Platform>, request: Self) {
+        self.input = request.input
+        self.style = request.style
+        self.recognisedAt = request.recognisedAt
+        self.target = request.target
+        self.targetExecutablePath = request.targetExecutablePath
+        self.textOutput = Task { event.textOutput }
+        self.modelIndex = request.modelIndex
+        self.deviceID = request.deviceID
+        self.profile = event.profile
+        self.event = event
     }
 }
 
@@ -103,13 +122,18 @@ extension DesktopHostController {
                 await admitOwnedDictation(
                     target: request.target, modelIndex: request.modelIndex, deviceID: request.deviceID,
                     targetExecutablePath: request.targetExecutablePath, textOutput: request.textOutput,
-                    trigger: trigger, wait: waitForOwnedStartup, profile: request.profile
+                    trigger: trigger, wait: waitForOwnedStartup, profile: request.profile, event: request.event
                 )
                 return
             }
             let textOutput = await request.textOutput.value
             guard canStartFromShortcut(request) else { return }
-            if let profile = request.profile {
+            if let event = request.event {
+                await toggleCaptured(
+                    event, target: request.target, modelIndex: request.modelIndex,
+                    deviceID: request.deviceID, trigger: trigger
+                )
+            } else if let profile = request.profile {
                 await toggleCaptured(
                     target: request.target, modelIndex: request.modelIndex, deviceID: request.deviceID,
                     textOutput: textOutput, profile: profile, trigger: trigger

@@ -327,6 +327,8 @@ struct VoiceCatalog {
       traits: voice.traits.map(elevenLabsTrait), previewURL: nil)
   }
 
+  // exhaustive 1:1 enum-case mapping across the existing provider trait catalogue.
+  // swiftlint:disable:next cyclomatic_complexity
   private static func elevenLabsTrait(_ trait: ElevenLabsTTSVoice.Trait) -> TTSVoice.VoiceTrait {
     switch trait {
     case .female: .female
@@ -650,7 +652,7 @@ struct VoiceCatalog {
 
   // Migrate old voice IDs to new ones
   private static func migrateLegacyVoiceID(_ id: String) -> String {
-    return ElevenLabsTTSCatalog.legacyVoiceIdentifiers[id] ?? id
+    ElevenLabsTTSCatalog.legacyVoiceIdentifiers[id] ?? id
   }
 
   private static func deepgramTraits(for voice: DeepgramSpeechCatalog.Voice) -> [TTSVoice.VoiceTrait] {

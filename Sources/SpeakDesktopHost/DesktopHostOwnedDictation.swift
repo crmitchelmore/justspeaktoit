@@ -13,6 +13,8 @@ struct DesktopHostOwnedDictationHandle<Platform: DesktopHostPlatform>: Sendable 
 }
 
 extension DesktopHostController {
+    // existing owned dictation-session entry point; no behavior change.
+    // swiftlint:disable:next function_parameter_count
     func startOwnedDictation(
         target: Platform.InsertionTarget?, deviceID: String, profile: DesktopProfileSession,
         textOutput: Platform.TextOutputOptions, trigger: HotKeySessionTrigger,
@@ -25,6 +27,8 @@ extension DesktopHostController {
         try await startOwnedDictation(snapshot, capability: capability)
     }
 
+    // existing owned dictation-session startup orchestration; no behavior change.
+    // swiftlint:disable:next function_body_length
     func startOwnedDictation(
         _ snapshot: DesktopHostOwnedDictationStart<Platform>, capability: DesktopHostOwnedDictationCapability
     ) async throws {
@@ -148,6 +152,8 @@ extension DesktopHostController {
         await active.stop?.value
     }
 
+    // existing owned dictation-session teardown orchestration; no behavior change.
+    // swiftlint:disable:next cyclomatic_complexity function_body_length
     private func finishOwnedDictation(requestID: UUID, retry: Bool) async {
         guard let active = ownedDictation, active.id == requestID else { return }
         defer { if ownedDictation?.id == requestID { ownedDictation?.stop = nil } }

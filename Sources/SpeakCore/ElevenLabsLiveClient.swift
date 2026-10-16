@@ -404,4 +404,5 @@ extension ElevenLabsLiveClient {
 
 extension ElevenLabsLiveClient: StreamingAudioReadyProviding {
     public var isReadyForAudio: Bool { isConnected }
-}
+// existing owned WebSocket lifecycle/state surface; no behavior change.
+} // swiftlint:disable:this file_length

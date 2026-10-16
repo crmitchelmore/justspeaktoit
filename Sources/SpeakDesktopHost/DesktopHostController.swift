@@ -14,6 +14,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
         package var hotKey: Platform.HotKeySettings?
         package var voiceOutput: Platform.VoiceOutputSettings?
         package var automationEnabled: Bool?
+        /// Device-local approval, never included in portable configuration.
+        package var automationLocalConsent: Bool?
         package var localModel: String?
         package var localUseGPU: Bool?
         /// Device-local Azure resource, under the Apple apps' key.
@@ -43,10 +45,27 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
             let all = try container.decode([String: AnyCodable].self)
             let known: Set<String> = [
                 "model", "postProcessing", "microphoneDeviceID", "batchModel", "liveModel", "textOutput",
-                "hotKey", "voiceOutput", "automationEnabled", "localModel", "localUseGPU",
+                "hotKey", "voiceOutput", "automationEnabled", "automationLocalConsent", "localModel", "localUseGPU",
                 "azureSpeechResourceEndpoint", "appearance", "runAtLogin", "configuration", "livePolishApproved"
             ]
             preserved = all.filter { !known.contains($0.key) }
+            guard Platform.self is any DesktopHostAutomationPlatform.Type else { return }
+            let key = ApplicationPreferenceKey.enableAutomationServer.rawValue
+            preserved.removeValue(forKey: key)
+            if let canonical = values.configuration?.values[key] {
+                guard case .bool = canonical.storage else {
+                    throw DesktopConfigurationError.invalidField("Automation")
+                }
+            }
+            let desired = all[key] ?? values.automationEnabled.map { AnyCodable(.bool($0)) }
+            if values.configuration?.values[key] == nil, let desired {
+                guard case .bool = desired.storage else {
+                    throw DesktopConfigurationError.invalidField("Automation")
+                }
+                var configuration = values.configuration?.values ?? [:]
+                configuration[key] = desired
+                values.configuration = try DesktopConfiguration(values: configuration)
+            }
         }
 
         package func encode(to encoder: Encoder) throws {
@@ -81,7 +100,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
         package let live: DesktopLiveSession?
         package let profile: DesktopProfileSession
         package let textOutput: Platform.TextOutputOptions
-        package var input: DesktopHostRecordingInput? = nil
+        package var input: DesktopHostRecordingInput?
         package var output: DesktopHostRecordingOutput<Platform> { .init(options: textOutput, target: target) }
     }
 
@@ -100,6 +119,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package var settings: Settings
     var vocabularyLoad: Task<DesktopVocabulary, Error>?
     package var recording: Recording?
+    var recordingCapturePolicy: (recordID: UUID, value: DesktopHostCapturePolicy)?
     var ownedCaptureStartup: DesktopHostOwnedStartupHandle?
     let ownedDictationCapability: DesktopHostOwnedDictationCapability?
     var ownedDictation: DesktopHostOwnedDictationHandle<Platform>?
@@ -151,6 +171,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package var selectedHistoryID: UUID?
     package var transcriptVariant: DesktopTranscriptVariant = .processed
     var transcriptionTask: Task<TranscriptionResult, Error>?
+    var automationTranscriptions: [UUID: Task<TranscriptionResult, Error>] = [:]
+    var automationPreferenceChanged: (@Sendable () async -> Void)?
     var voiceCommandTask: Task<String?, Error>?
     var postProcessingTask: Task<DesktopPostProcessing.Outcome, Error>?
     package let localCleanup: DesktopLocalLLMStore?

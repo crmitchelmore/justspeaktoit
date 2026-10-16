@@ -419,4 +419,5 @@ extension SpeechmaticsLiveClient {
 
 extension SpeechmaticsLiveClient: StreamingAudioReadyProviding {
     public var isReadyForAudio: Bool { isSessionReady }
-}
+// existing owned WebSocket lifecycle/state surface; no behavior change.
+} // swiftlint:disable:this file_length

@@ -56,6 +56,7 @@ final class FakeLog: @unchecked Sendable {
     private var folders: [URL] = []
     private var directoryLauncher: (@Sendable (URL) throws -> Void)?
     private var savedAudioStopper: (@Sendable () async -> Void)?
+    private var audioConverter: (@Sendable (URL, URL) async throws -> TimeInterval)?
     private var presentationStates: [Int32] = []
     private var displayedTranscriptValues: [String] = []
     private var transcriptValues: [String] = []
@@ -71,6 +72,7 @@ final class FakeLog: @unchecked Sendable {
             folders = []
             directoryLauncher = nil
             savedAudioStopper = nil
+            audioConverter = nil
             keys = [:]
             presentationStates = []
             displayedTranscriptValues = []
@@ -113,6 +115,15 @@ final class FakeLog: @unchecked Sendable {
     func setSavedAudioStopper(_ stopper: (@Sendable () async -> Void)?) {
         lock.withLock { savedAudioStopper = stopper }
     }
+    func setAudioConverter(_ converter: (@Sendable (URL, URL) async throws -> TimeInterval)?) {
+        lock.withLock { audioConverter = converter }
+    }
+    func convertAudio(input: URL, output: URL) async throws -> TimeInterval {
+        guard let converter = lock.withLock({ audioConverter }) else {
+            throw DesktopHostError(message: "No converter in tests.")
+        }
+        return try await converter(input, output)
+    }
     func stopSavedAudio() async {
         let stopper = lock.withLock { savedAudioStopper }
         await stopper?()
@@ -143,7 +154,8 @@ final class FakeLog: @unchecked Sendable {
     func setKey(_ key: String, name: String) { lock.withLock { keys[name] = key } }
 }
 
-enum FakePlatform: DesktopHostPlatform {
+enum FakePlatform: DesktopHostAutomationPlatform {
+    static var defaultTextOutput: FakeTextOutput { .init() }
     static func handsFreeReadinessFailure() -> String? { nil }
     typealias VoiceOutputSettings = DesktopVoiceOutputSettings
     static let displayName = "Test"
@@ -179,7 +191,7 @@ enum FakePlatform: DesktopHostPlatform {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
     static func convertAudio(input: URL, output: URL) async throws -> TimeInterval {
-        throw DesktopHostError(message: "No converter in tests.")
+        try await FakeLog.shared.convertAudio(input: input, output: output)
     }
     static func openFile(_ url: URL) throws {}
     static func revealDirectory(_ url: URL) throws { try FakeLog.shared.reveal(url) }

@@ -26,10 +26,14 @@ def resource_bundles(directory):
     return bundles
 
 
-def stage(binary, output, prefix="/usr/local", local_llm_runtime=None):
+def stage(binary, output, prefix="/usr/local", local_llm_runtime=None, *, cli=None):
     binary, output = pathlib.Path(binary), pathlib.Path(output)
     if not binary.is_file() or binary.is_symlink():
         raise ValueError("the built SpeakLinux executable must be a regular file")
+    if cli is not None:
+        cli = pathlib.Path(cli)
+        if not cli.is_file() or cli.is_symlink():
+            raise ValueError("the built speak executable must be a regular file")
     if not prefix.startswith("/") or any(value in prefix for value in ("\n", "\r", "\0")):
         raise ValueError("the install prefix must be an absolute Linux path without controls")
     if any(value in prefix for value in ("%", "=")):
@@ -57,6 +61,9 @@ def stage(binary, output, prefix="/usr/local", local_llm_runtime=None):
     destination.mkdir()
     shutil.copy2(binary, destination / "justspeaktoit")
     (destination / "justspeaktoit").chmod(0o755)
+    if cli is not None:
+        shutil.copy2(cli, destination / "speak")
+        (destination / "speak").chmod(0o755)
     for bundle in bundles:
         shutil.copytree(bundle, destination / bundle.name)
     if runtime is not None:
@@ -88,8 +95,9 @@ def main():
     parser.add_argument("--prefix", default="/usr/local", help="eventual install prefix; staging remains under --output")
     parser.add_argument("--local-llm-runtime", type=pathlib.Path,
                         help="pinned offline native cleanup build's LocalLLMRuntime directory; no acquisition")
+    parser.add_argument("--cli", type=pathlib.Path, help="built speak executable to stage alongside the app")
     args = parser.parse_args()
-    stage(args.binary, args.output, args.prefix, args.local_llm_runtime)
+    stage(args.binary, args.output, args.prefix, args.local_llm_runtime, cli=args.cli)
 
 
 if __name__ == "__main__":

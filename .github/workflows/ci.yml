@@ -29,6 +29,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
 
+      - name: Test XCTest crash-report collector
+        run: python3 -B -m unittest discover -s scripts/tests -p test_macos_xctest_crashes.py -v
+
       # Swift build state embeds absolute paths. Scope both exact and fallback
       # keys to the architecture, stable host identity and checkout workspace.
       - name: Cache Swift packages
@@ -55,8 +58,38 @@ jobs:
         # tooling pins live separately in Tooling/Package.resolved (issue #677).
         run: git diff --exit-code Package.resolved
 
+      - name: Record Debug XCTest crash-report boundary
+        id: debug_crash_boundary
+        # Diagnostics must not prevent the original test from running.
+        continue-on-error: true
+        run: python3 scripts/collect-macos-xctest-crashes.py boundary
+
       - name: Test (Debug)
+        id: debug_tests
         run: python3 scripts/with-test-keychain.py swift test --enable-code-coverage
+
+      - name: Collect existing Debug XCTest crash reports
+        id: debug_crash_collection
+        if: failure() && steps.debug_tests.outcome == 'failure'
+        env:
+          JSTI_XCTEST_BOUNDARY_OUTCOME: ${{ steps.debug_crash_boundary.outcome }}
+        run: |
+          status=0
+          python3 scripts/collect-macos-xctest-crashes.py collect || status=$?
+          if [ "$status" -eq 0 ] || [ "$status" -eq 3 ]; then
+            echo "artifact_ready=true" >> "$GITHUB_OUTPUT"
+          fi
+          exit "$status"
+
+      - name: Upload Debug XCTest crash diagnostics
+        if: failure() && steps.debug_tests.outcome == 'failure' && steps.debug_crash_collection.outputs.artifact_ready == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-debug-xctest-crash-diagnostics
+          path: ${{ runner.temp }}/jsti-xctest-debug-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          include-hidden-files: false
+          retention-days: 7
 
       # Snapshot mismatches write the freshly rendered PNG to the process
       # temporary directory. Publishing it is the only way to inspect a CI-only
@@ -619,6 +652,9 @@ jobs:
       # public symbols without a declared migration (issue #680). A PR title
       # carrying the conventional '!' marker permits the reported break;
       # Stable version selection and publication remain explicit decisions.
+      - name: Test public API compatibility fixtures
+        run: python3 -B -m unittest discover -s scripts/tests -p test_api_compatibility.py -v
+
       - name: Diagnose breaking public API changes
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}

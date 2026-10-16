@@ -205,6 +205,8 @@ public enum DesktopPostProcessing {
         )
     }
 
+    // existing owned post-processing dispatch surface; no behavior change.
+    // swiftlint:disable:next function_body_length
     public static func process(
         rawText: String, options: Options, apiKey: String,
         lexiconDirectives: [String] = [], lexiconContextTags: [String] = [],

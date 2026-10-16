@@ -46,7 +46,9 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 let wav: Data
                 if let retainedAudio { wav = retainedAudio } else if let selection {
                     wav = try await VoiceSynthesisUsage.$capture.withValue(usage?.capture) {
-                        try await synthesize(snapshot, selection) {
+                        let prepared = try await self.prepareVoiceSynthesisSource(
+                            snapshot, selection: selection, ticket: ticket)
+                        return try await synthesize(prepared, selection) {
                             try await Self.readVoiceSynthesisKey(
                                 effects: effects, name: selection.voice.apiKeyIdentifier)
                         }

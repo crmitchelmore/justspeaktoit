@@ -43,6 +43,10 @@ fall back to another provider. Missing credentials/configuration/runtime and
 invalid/empty responses are explicit failures retaining the original.
 
 The shared defaults are 500 ms debounce and 20 added Unicode characters.
+Known native numeric fields use one validated `Double` representation, including
+whole-number JSON input and Auto-Clean defaults, so Apply and decode/encode retain
+the same numeric entries and configuration equality. Unknown and dormant values
+are not coerced, and Auto-Clean timing fields still reject fractions.
 Replacements, same-length edits and retractions invalidate the previous request
 without relying on length growth. Utterance finals bypass debounce. Recording
 stop pauses previews; finalization awaits the authoritative provider transcript,
@@ -684,12 +688,21 @@ General's Import/Export preferences actions use a bounded, versioned JSON object
 Both transfers enforce a 1 MB limit. An oversized export is refused before
 replacing its destination, rather than producing a file the importer cannot read.
 
-This transfers the portable preferences above and projects five Voice scalar
-preferences when a Voice model has been saved. A legacy document with no Voice
-keys leaves existing options unchanged. Hosts without the transfer contract
-preserve those keys without applying them. Provider compatibility is checked
-before execution, not inferred from successful transfer. Other Voice options
-such as quality, language and pronunciation remain opaque and unapplied here.
+This transfers the portable preferences above and, when a Voice model has been
+saved, projects nine Voice preferences: speed, pitch, SSML, autoplay,
+save-to-recordings, quality, favorite voices, and the Soniox region/language
+pair (`DesktopHostVoiceConfiguration.swift:4-44`). A legacy document with no
+Voice keys leaves existing options unchanged. Hosts without the transfer
+contract preserve those keys without applying them. Provider compatibility is
+checked before execution, not inferred from successful transfer. Quality now
+has a real native provider-gated choice editor on both hosts (see `ttsQuality`
+below), and three separate facts apply to it: an absent stored override
+remains nil, not a resolved value; HIGH is the editor's own canonical
+preference/metadata default shown when nothing is stored, a distinct fact
+from execution; and which quality value is actually executable depends on
+the selected provider's own tiers. Preserving an unrecognised stored string
+is forward compatibility, not proof that string is executable. Pronunciation
+remains unimplemented and opaque here.
 It does not read credential stores
 or transfer native model selections, hotkey codes, microphone IDs, device paths,
 startup registration or automation permission. Imported unknown/unsupported
@@ -723,7 +736,7 @@ parity. Evidence labels refer to executable surfaces:
 | Shortcuts | `Sources/SpeakWindows/WindowsHotKey.swift`, `Sources/SpeakLinux/LinuxShortcutGestures.swift`, `SpeakCore/HotKeyGestureMachine.swift` |
 | Voice | `Sources/SpeakDesktopHost/DesktopHostReadAloud.swift`, `SpeakWindows/WindowsReadAloud.swift`, `SpeakLinux/LinuxReadAloud.swift` |
 | General | `Sources/SpeakDesktopHost/DesktopHostSettings.swift`, `DesktopHostLoginItem.swift`, `SpeakWindows/WindowsLoginItemHost.swift`, `SpeakLinux/LinuxLoginItemHost.swift` |
-| Automation | `Sources/SpeakWindows/WindowsAutomation.swift`; Linux currently has `--toggle`, not the Mac automation server |
+| Automation | Windows per-user named pipe; Linux `LinuxAutomation.swift`, shared Host commands and `SpeakLinuxAutomation` private Unix socket/`speak` journey (source-only, native qualification pending); `--toggle` remains |
 
 Paths named relative to `Sources` in a cell inherit the preceding `Sources/`
 prefix. Missing rows cite the canonical Mac definition above and their native
@@ -763,18 +776,18 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | deepgramStopGracePeriod | Equivalent migration / Equivalent migration | Valid legacy value initializes absent liveStopGracePeriod; canonical value, including zero, wins; legacy retained for downgrade |
 | liveStopGracePeriod | Partial / Partial | Config; AssemblyAI/Cartesia only; range 0...2 s |
 | preferredAudioInputUID | Equivalent / Equivalent | Native device ID with missing-device warning, never Apple UID translation |
-| defaultTTSVoice | Partial / Partial | Voice; canonical Deepgram Read aloud voices only |
+| defaultTTSVoice | Partial / Partial | Voice; native picker resolves through the canonical `modelID`/`voiceID` catalogue plus account-discovered inventory, not Deepgram-only, subject to actual host/provider capability gates; catalogue membership alone does not establish host support; still a pair distinct from the Mac's single string key |
 | ttsLanguage | Wired candidate; qualification pending / Same | Native preferences project the sole Voice language; Soniox completed-audio requests capture it independently of dictation profiles. Other providers are not newly language-enabled |
 | sonioxTTSRegion | Wired candidate; qualification pending / Same | Canonical US/EU/JP native choices, sole-model transfer/restart, regional-key/context fences and bounded Soniox v2 completed WAV. Unknown regions remain stored but cannot send a key; no host fallback or portable realtime TTS |
 | ttsSpeed | Transfer wired; workflow separate / Same | Canonical validation and sole-model transfer; incompatible Read aloud explicitly refused; native advanced editor/Azure execution in #1217 |
 | ttsPitch | Transfer wired; workflow separate / Same | Shared integer/range validation, raw recovery export and partial-import preservation; no native pitch editor in this slice |
-| ttsQuality | Missing / Missing | No quality editor/provider options |
+| ttsQuality | Source wired; qualification pending / Source wired; qualification pending | Native provider-gated `Speech quality (provider-specific)` choice editor (`VoiceSynthesisPreference.swift:4,28-30`, `WindowsConfiguration.swift`, `LinuxConfiguration.swift`), disabled when the selected provider has no quality tiers; transfer/apply confirmed above. Absent stored override remains nil; HIGH is the editor's own canonical default metadata shown when nothing is stored, a separate fact from which value is actually executable for the selected provider; native/provider qualification on this exact head is not separately captured here |
 | ttsOutputFormat | Missing / Missing | Read aloud uses native staging format |
 | ttsAutoPlay | Transfer wired; workflow pending / Same | Strict canonical boolean projects to the sole Voice model; explicit Read aloud remains playback; Generate acceptance belongs to #1217 |
 | ttsSaveToDirectory | Transfer wired; workflow pending / Same | Strict boolean projects to sole Voice model; generated WAV archival uses actual owned recordings directory in #1217, never an imported foreign path |
 | ttsUseSSML | Transfer wired; workflow separate / Same | Strict boolean transfer; existing Deepgram Read aloud refuses SSML before credentials/playback; executable Azure/native editor in #1217 |
-| ttsFavoriteVoices | Missing / Missing | No voice favourites |
-| ttsPronunciationDictionary | Missing / Missing | No TTS pronunciation editor/pipeline |
+| ttsFavoriteVoices | Source wired; qualification pending / Source wired; qualification pending | Native voice picker ranks and toggles favorites in Read aloud (`DesktopHostVoiceFavorites.swift`, `WindowsReadAloud.swift:30-41`, `LinuxReadAloud.swift:117-125`); transfer/apply confirmed above. No separate standalone favourites-management page; native/provider qualification on this exact head is not separately captured here |
+| ttsPronunciationDictionary | Missing / Missing | This specific legacy preference value may be retained opaquely by generic import/export round-trips, but is not applied/mapped to the native device-local `pronunciation.json` store; Desktop has its own native pronunciation editor/pipeline (`DesktopVocabulary`/`PronunciationDictionary`: CRUD, defaults seeding, import/export, preview) independent of this preference. `PronunciationRenderer` now applies replacements across all four Read aloud/Generate/fresh Export voice-output sources (History, typed text, clipboard, text file), byte-exact on SSML; Mac IPA/phoneme and provider SSML differences remain open |
 | historyFlushInterval | Missing selector / Missing selector | History is durable per operation, not configurable timed flush |
 | silenceDetectionEnabled | Executable; qualification pending / Same | Native switch; initial quiet and configured silence stop the existing manual recording/finalization pipeline |
 | handsFreeDictationEnabled | Sound-activation replacement; qualification pending / Same | Fresh frozen target per utterance, record-bound acknowledged output; unconfirmed paste stops, Wayland requires clipboard-only; profile/model still fixed per run; not Apple's classifier |
@@ -799,10 +812,10 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | streamingInsertionEnabled | Missing / Missing | Final transcript insertion only |
 | clipboardInsertionTriggers | Implemented, native acceptance pending / Implemented, native acceptance pending | General trigger entry; bounded native snapshot, canonical matching, no History re-expansion |
 | enableSendToMac | Partial / Partial | iCloud web History sync is not Send-to-Mac transport/pairing |
-| enableAutomationServer | Equivalent / Missing | Automation; Windows per-user named pipe, Linux toggle only |
+| enableAutomationServer | Equivalent / Source wired, unqualified | Automation; Windows per-user named pipe unchanged. Linux native opt-in starts a bounded same-user Unix socket and `speak`; imported/legacy true preserves intent but never grants device-local approval. False revokes. No native/runtime qualification claimed. |
 | pasteRemoteTranscriptsAtCursor | Missing / Missing | No remote transcript delivery preference |
-| autoCorrectionsEnabled | Missing / Missing | No correction capture/promotion/preview pipeline in baseline |
-| autoCorrectionsPromotionThreshold | Missing / Missing | No correction promotion policy/editor |
+| autoCorrectionsEnabled | Missing / Missing | This specific legacy toggle value may be retained opaquely, but is not applied/mapped to Desktop's native candidate pipeline; Desktop has a native candidate review pipeline (promote/dismiss/remove/clear via `DesktopVocabularyCandidates`/`AutoCorrectionDomain`) for already-stored candidates, but lacks Mac's Accessibility-based automatic external-app edit observation (`AutoCorrectionTracker`/`recordEdit`) that populates new candidates |
+| autoCorrectionsPromotionThreshold | Missing / Missing | This specific legacy threshold value may be retained opaquely, but is not applied/mapped; Desktop's candidate pipeline uses its own fixed promotion threshold independent of this preference, still gated on the missing automatic capture above for new candidates |
 | recordingSoundsEnabled | Native qualified / Native qualified | General + owned native channel; normal readiness/finish cues only; installed-package acceptance pending |
 | recordingSoundProfile | Native qualified / Native qualified | Canonical four profiles + owned preload replacement and explicit previews; all eight production AACs decoded on Windows/Linux |
 | recordingSoundVolume | Native qualified / Native qualified | Strict 0...1 field + Mac volume-squared gain; native tests and queue bounds passed; installed-package acceptance pending |
@@ -840,11 +853,22 @@ Permissions, Compare Models, Data & Migration and About
 General/Transcription/Post-processing/Voice Output/Keyboard/About and iCloud sync;
 Windows also exposes Profiles; the GTK Profiles destination is added by this
 unqualified source-only candidate. Provider keys are embedded under Transcription,
-not a complete API Keys management page. Pronunciation, permission
-troubleshooting/remediation, comparison and full archive migration remain
-missing journeys; Linux profile editing still needs compilation and native acceptance. Corrections and Troubleshooting
-destinations outside `SettingsTab` likewise remain unimplemented. No placeholder
-destination or inert switch is added for those gaps.
+not a complete API Keys management page. Comparison is implemented as a
+separate native window outside this `SettingsTab` list — live/file multi-model
+capture, blind judging/ranking, playback and scoreboard export
+(`DesktopHostComparison.swift`, `WindowsComparison.swift`,
+`LinuxComparison.swift`'s `jsti_comparison_present`) — not a missing journey;
+it has portable test coverage but no native device/CI acceptance evidence
+captured in this document. No dedicated `SettingsTab`-equivalent Pronunciation or
+Corrections page exists on native desktops; Desktop's separate `DesktopVocabulary`/
+`WindowsVocabulary` editor window already provides an equivalent lexicon, pronunciation.json
+CRUD and auto-correction candidate review journey, reused from Read aloud/Generate above — not
+a missing journey, just not a `SettingsTab` destination. Permission troubleshooting/remediation
+and full archive migration remain missing journeys; Linux profile editing still needs
+compilation and native acceptance. Automatic external-app edit capture for new correction
+candidates, legacy preference value execution and Mac IPA/phoneme/SSML parity remain the real
+pronunciation/corrections gaps (see table above). No placeholder destination or inert switch is
+added for those gaps.
 
 Local model discovery/import/preparation, lexicon/corrections/pronunciation,
 TTS usage/history, audio-only housekeeping/text-file import, profile archive merge, paid access,

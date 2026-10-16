@@ -22,7 +22,8 @@ final class DesktopGeminiConfigurationTests: DeepgramSpeechStubTestCase {
             XCTAssertEqual(try DesktopSpeechVoice.resolved(modelID: voice.modelID, voiceID: voice.id), voice)
             XCTAssertEqual(voice.favoriteIdentifier, voice.id)
             XCTAssertEqual(voice.pickerIdentifier, voice.modelID + "|" + voice.id)
-            XCTAssertEqual(try VoiceOutputCredentialSlot(voice: voice).identifier, GeminiTTSCatalog.credentialIdentifier)
+            XCTAssertEqual(
+                try VoiceOutputCredentialSlot(voice: voice).identifier, GeminiTTSCatalog.credentialIdentifier)
             guard case .gemini(_, let model) = voice else { return XCTFail("Wrong projected provider") }
             XCTAssertEqual(try DesktopSpeechVoice.resolved(modelID: model.rawValue, voiceID: voice.id), voice)
             XCTAssertTrue(voice.label.contains(model.displayName))
@@ -92,7 +93,8 @@ final class DesktopGeminiConfigurationTests: DeepgramSpeechStubTestCase {
             let captured = try DesktopSpeechSelection(
                 voice: voice, options: VoiceSynthesisOptions(), accountInventory: nil, language: identifier)
             XCTAssertEqual(captured.language, identifier)
-            XCTAssertEqual(GeminiTTSRequest(voiceID: voice.id, languageIdentifier: captured.language).languageTag, "en-GB")
+            XCTAssertEqual(
+                GeminiTTSRequest(voiceID: voice.id, languageIdentifier: captured.language).languageTag, "en-GB")
         }
         for identifier in [nil, "", "automatic", "en"] {
             XCTAssertNil(GeminiTTSRequest(voiceID: voice.id, languageIdentifier: identifier).languageTag)
@@ -108,8 +110,17 @@ final class DesktopGeminiConfigurationTests: DeepgramSpeechStubTestCase {
         XCTAssertTrue(field.title.contains("Gemini / Soniox"))
         guard case .text = field.kind else { return XCTFail("Language became a lossy native choice") }
         XCTAssertEqual(field.defaultValue, AnyCodable(.string(VoiceOutputLanguageCatalog.automaticIdentifier)))
-        XCTAssertEqual(DesktopConfiguration.fields.last?.key, VoiceOutputLanguagePreference.key)
-        XCTAssertEqual(DesktopConfiguration.fields.dropLast().last?.key, SonioxVoicePreference.regionKey)
+        let keys = DesktopConfiguration.fields.map(\.key)
+        let regionIndex = try XCTUnwrap(keys.firstIndex(of: SonioxVoicePreference.regionKey))
+        let languageIndex = try XCTUnwrap(keys.firstIndex(of: VoiceOutputLanguagePreference.key))
+        XCTAssertEqual(keys.filter { $0 == SonioxVoicePreference.regionKey }.count, 1)
+        XCTAssertEqual(languageIndex, regionIndex + 1)
+        XCTAssertEqual(
+            Array(keys.dropFirst(regionIndex).prefix(SonioxVoicePreference.fields.count)),
+            SonioxVoicePreference.fields.map(\.key)
+        )
+        XCTAssertEqual(Array(keys.suffix(LivePolishPreference.fields.count)), LivePolishPreference.fields.map(\.key))
+        XCTAssertLessThan(languageIndex, keys.count - LivePolishPreference.fields.count)
         XCTAssertTrue(VoiceOutputLanguagePreference.title(for: .gemini(GeminiTTSCatalog.defaultVoice))
             .hasPrefix("Gemini"))
         let soniox = try DesktopSpeechVoice.resolved(

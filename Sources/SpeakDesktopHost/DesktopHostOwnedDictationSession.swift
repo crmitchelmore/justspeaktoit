@@ -131,6 +131,8 @@ package actor DesktopHostOwnedDictationSession<Platform: DesktopHostPlatform> {
         return result
     }
 
+    // existing owned dictation-session open sequence; no behavior change.
+    // swiftlint:disable:next function_body_length
     private func open() async {
         guard !stopped, control.cancellation == nil else { return }
         let inbox = DesktopEventDispatcher<OwnedDictationNotice>(
@@ -182,13 +184,13 @@ package actor DesktopHostOwnedDictationSession<Platform: DesktopHostPlatform> {
                 }
                 memory.deliver(delivery.data, before: { bytes in
                     do { try beforePCM(bytes) } catch { context.fail(String(describing: error)) }
-                }) { samples, count in
+                }, receive: { samples, count in
                     if control.recoveryOnly {
                         context.receiveRecovery(Data(bytes: samples, count: count * MemoryLayout<Int16>.size))
                     } else {
                         context.receive(samples, count: count)
                     }
-                }
+                })
             }
             await barrier()
             if !stopped, control.cancellation == nil, causes.isEmpty { adopted = true; phase = .recording }

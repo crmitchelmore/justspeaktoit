@@ -354,6 +354,26 @@ if windowsTargetBuild {
     portablePackage.cxxLanguageStandard = .cxx17
 }
 
+#if os(Linux)
+if !windowsTargetBuild {
+    portablePackage.products.append(.executable(name: "speak", targets: ["SpeakCLI"]))
+    portablePackage.targets.append(contentsOf: [
+        .target(
+            name: "CLinuxAutomation", publicHeadersPath: "include",
+            linkerSettings: [.linkedLibrary("pthread")]
+        ),
+        .target(name: "SpeakAutomationKit", dependencies: ["SpeakCore", "CLinuxAutomation"]),
+        .target(name: "SpeakLinuxAutomation", dependencies: ["SpeakCore", "SpeakAutomationKit", "CLinuxAutomation"]),
+        .executableTarget(name: "SpeakCLI", dependencies: ["SpeakCore", "SpeakAutomationKit"]),
+        .testTarget(name: "SpeakAutomationKitTests", dependencies: ["SpeakAutomationKit", "SpeakCore"]),
+        .testTarget(
+            name: "SpeakLinuxAutomationTests",
+            dependencies: ["SpeakLinuxAutomation", "SpeakAutomationKit", "SpeakCore", "CLinuxAutomation"]
+        )
+    ])
+}
+#endif
+
 if linuxTargetBuild {
     // System libraries resolved with pkg-config. Only the C adapter includes
     // their headers; Swift sees the narrow jsti_* ABI in CLinuxSupport.h.
@@ -412,7 +432,7 @@ if linuxTargetBuild {
             name: "SpeakLinux",
             dependencies: [
                 "SpeakCore", "SpeakDesktop", "SpeakDesktopHost", "SpeakLinuxPlatform", "SpeakLinuxWebSocket",
-                "CLinuxSupport", "SpeakDesktopSync", "SpeakSync"
+                "CLinuxSupport", "SpeakDesktopSync", "SpeakSync", "SpeakLinuxAutomation"
             ],
             resources: [.copy("Resources/hicolor")]
         ),

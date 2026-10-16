@@ -80,6 +80,7 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
         holder.shortcuts.stop()
         if !holder.smokeTest { holder.microphones.stop() }
         await holder.finishSettings()
+        _ = await holder.automation.applyOffThread(enabled: false)
         await LinuxCloudSync.shutDown(holder)
         // Closing first cancels a shortcut's transcription instead of waiting
         // on its provider; queued shortcuts then find the controller closed.

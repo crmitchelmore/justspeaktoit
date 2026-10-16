@@ -141,12 +141,16 @@ func assertDictationWAV(_ url: URL, samples: [Int16], file: StaticString = #file
     func little(_ offset: Int) -> UInt32 {
         (0..<4).reduce(0) { $0 | UInt32(data[offset + $1]) << ($1 * 8) }
     }
-    XCTAssertEqual(String(decoding: data[0..<4], as: UTF8.self), "RIFF", file: file, line: line)
-    XCTAssertEqual(String(decoding: data[8..<12], as: UTF8.self), "WAVE", file: file, line: line)
-    XCTAssertEqual(String(decoding: data[36..<40], as: UTF8.self), "data", file: file, line: line)
+    XCTAssertEqual(
+        try XCTUnwrap(String(bytes: data[0..<4], encoding: .utf8)), "RIFF", file: file, line: line)
+    XCTAssertEqual(
+        try XCTUnwrap(String(bytes: data[8..<12], encoding: .utf8)), "WAVE", file: file, line: line)
+    XCTAssertEqual(
+        try XCTUnwrap(String(bytes: data[36..<40], encoding: .utf8)), "data", file: file, line: line)
     XCTAssertEqual(little(4), UInt32(36 + pcm.count), file: file, line: line)
     XCTAssertEqual(little(40), UInt32(pcm.count), file: file, line: line)
-    XCTAssertEqual(String(decoding: data[12..<16], as: UTF8.self), "fmt ", file: file, line: line)
+    XCTAssertEqual(
+        try XCTUnwrap(String(bytes: data[12..<16], encoding: .utf8)), "fmt ", file: file, line: line)
     XCTAssertEqual(little(16), 16, file: file, line: line)
     XCTAssertEqual(Array(data[20..<24]), [1, 0, 1, 0], file: file, line: line)
     XCTAssertEqual(Array(data[32..<36]), [2, 0, 16, 0], file: file, line: line)

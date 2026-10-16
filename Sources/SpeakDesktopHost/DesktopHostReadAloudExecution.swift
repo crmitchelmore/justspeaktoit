@@ -49,8 +49,15 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             var outcome: String?
             do {
                 try await VoiceSynthesisUsage.$capture.withValue(usage?.capture) {
+                    let original = try VoiceOutputSourceSnapshot(source: source, text: text, recordID: recordID)
+                    let prepared = try await self.prepareVoiceSynthesisSource(
+                        original, selection: selection, ticket: ticket)
+                    if let recordID {
+                        guard self.canUseHistory, self.selectedHistoryID == recordID,
+                              self.isVisible(recordID) else { throw CancellationError() }
+                    }
                     try await self.executeVoiceRead(
-                        text: text, recordID: recordID, selection: selection, output: voiceOutput, speech: speech
+                        source: prepared, selection: selection, output: voiceOutput, speech: speech
                     )
                 }
                 outcome = "Finished reading aloud."
@@ -73,13 +80,13 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     }
 
     func executeVoiceRead(
-        text: String, recordID: UUID?, selection: DesktopSpeechSelection,
+        source: VoiceOutputSourceSnapshot, selection: DesktopSpeechSelection,
         output: Platform.VoiceOutput?, speech: Platform.Playback.Speech
     ) async throws {
         let effects = effects
         let playback = playback
         if case .deepgram(let voice) = selection.voice, let output {
-            for segment in SpeechTextSegmenter.segments(text) {
+            for segment in SpeechTextSegmenter.segments(source.text) {
                 try Task.checkCancellation()
                 let request = try DeepgramSpeechRequest(text: segment, voice: voice, speed: selection.options.speed)
                 _ = try await output.speak(request, credential: {
@@ -89,9 +96,6 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 })
             }
         } else {
-            let source = try VoiceOutputSourceSnapshot(
-                source: recordID == nil ? .typedText : .history, text: text, recordID: recordID
-            )
             let wav = try await Platform.synthesizeVoiceOutput(source, selection: selection) {
                 try await Self.readVoiceSynthesisKey(effects: effects, name: selection.voice.apiKeyIdentifier)
             }

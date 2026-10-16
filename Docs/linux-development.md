@@ -87,6 +87,52 @@ The integration script runs this against its private PipeWire null sink.
 An installed package must pass `--self-test` as well; a source-tree pass does
 not establish resource placement or codec availability in a Flatpak runtime.
 
+### Local automation (`speak`)
+
+Source wiring, authored synthetic regressions and packaging are present; this
+integration successor has **not** been compiled, tested, linked or run. This is
+not native or feature-parity qualification.
+
+Build `speak` with `swift build --product speak` alongside the app. The native
+General > Automation switch is off by default. Explicitly enabling **Allow local
+automation** grants access on this computer; the subtitle reports actual listener
+readiness or failure, not just the saved request. Imported or upgraded
+`enableAutomationServer=true` (including legacy `automationEnabled=true`) is
+preserved as requested intent but cannot grant approval. Imported false and local
+disable stop access; a failed revocation save explicitly warns that restart may
+restore the previous saved grant. Export never transfers local approval. This
+permission is independent of Auto-Clean approval.
+
+The existing CLI grammar is reused: `speak status --json`, `speak history`,
+`speak transcribe <file>`, and `speak listen` / `speak stop`. Consult `speak --help`
+for supported options; language flags are not invented. File transcription uses
+the selected canonical batch/profile snapshot and the normal preparation and
+inference adapters, without creating History, inserting text, reading the
+clipboard or authorizing post-processing. The caller's input remains unchanged;
+transient conversion cleanup failures are errors, not successful read-only
+results. Start/stop use current captured-profile recording/live/finalization and
+History pathways. No focus target is manufactured: Wayland capabilities and
+unsupported-output errors remain real. The existing `--toggle` journey remains.
+
+`CLinuxAutomation` owns a private user-owned 0700 endpoint directory and 0600
+socket, authenticates same-user peers using `SO_PEERCRED`, rejects linked,
+foreign-owned or insecure paths and refuses existing competing endpoints. The
+default is below `XDG_RUNTIME_DIR`, or a private train/user directory below
+`/tmp`; `SPEAK_AUTOMATION_SOCKET` overrides both client and server paths subject
+to the same checks. It never changes shared-parent permissions, the process
+umask or signal handlers. Socket cleanup checks the retained directory and
+device/inode identity; it preserves observed replacements. Linux has no atomic
+compare-and-unlink namespace operation: uncooperative concurrent same-user
+namespace mutation is not claimed to be atomically protected.
+
+Frames, connections (four), replay/in-flight work and actual I/O deadlines are
+bounded. Shutdown interrupts and joins owned transport workers off GTK and the
+settings executor; long commands are separately cancellable Host work.
+Control-plane socket I/O is not part of capture, inference or insertion.
+`stage-linux-desktop.py --cli <built-speak>` stages the CLI without changing the
+existing local-runtime staging contract. Flatpak builds/stages `speak` inside
+its sandbox; cross-sandbox host access is not established by this source.
+
 ### Canonical application icons
 
 The Linux application uses the canonical Mac icon exports, not a separately

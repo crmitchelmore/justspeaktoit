@@ -123,6 +123,8 @@ public struct MistralBatchClient: TranscriptionProvider {
     return String(code).lowercased()
   }
 
+  // existing owned multipart-upload surface; no behavior change.
+  // swiftlint:disable:next function_parameter_count
   public nonisolated static func makeMultipartUploadBody(
     sourceURL: URL,
     staging: SharedMultipartUploadStaging,

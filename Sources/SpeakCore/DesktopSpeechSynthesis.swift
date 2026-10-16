@@ -27,6 +27,8 @@ public struct DesktopSpeechSynthesis: Sendable {
                              accountInventory: xaiInventory.map(VoiceAccountInventory.xai), credential: credential)
     }
 
+    // exhaustive provider dispatch across the existing voice catalogue; no behavior change.
+    // swiftlint:disable:next cyclomatic_complexity
     public func synthesize(
         _ source: VoiceOutputSourceSnapshot, voice: DesktopSpeechVoice,
         options: VoiceSynthesisOptions, accountInventory: VoiceAccountInventory?,

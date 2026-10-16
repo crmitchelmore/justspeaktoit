@@ -20,7 +20,8 @@ extension DesktopDictationProfileStore {
     ) throws {
         let document = try rawDocument()
         if let expectedDocument, expectedDocument != document {
-            throw DesktopLinuxProfileEditor.Failure("Profiles changed outside this editor. Reopen Profiles before saving.")
+            throw DesktopLinuxProfileEditor.Failure(
+                "Profiles changed outside this editor. Reopen Profiles before saving.")
         }
         let original: [[String: Any]]
         if !document.isEmpty || FileManager.default.fileExists(atPath: fileURL.path) {

@@ -6,6 +6,8 @@ import XCTest
 import WinSDK
 #endif
 
+// existing owned test suite covering the full native registry-identity capability surface; no behavior change.
+// swiftlint:disable:next type_body_length
 final class WindowsRecordingRegistryCapabilityTests: XCTestCase {
     func testFullIdentityBytesRemainDistinct() throws {
         var first = JSTIRegistryIdentityV2()
@@ -196,7 +198,7 @@ final class WindowsRecordingRegistryCapabilityTests: XCTestCase {
                 let newName = Array((source.path + ".moved").utf16) + [UInt16(0)]
                 oldName.withUnsafeBufferPointer { old in
                     newName.withUnsafeBufferPointer { new in
-                        XCTAssertEqual(MoveFileW(old.baseAddress, new.baseAddress), 0)
+                        XCTAssertFalse(MoveFileW(old.baseAddress, new.baseAddress))
                     }
                 }
                 XCTAssertFalse(FileManager.default.fileExists(atPath: source.path + ".moved"))

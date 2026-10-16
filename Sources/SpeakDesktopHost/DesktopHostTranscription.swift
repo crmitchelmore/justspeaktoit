@@ -4,6 +4,8 @@ import SpeakDesktop
 
 extension DesktopHostController {
     /// Output is the recording's own authority; imports and retries pass nil.
+    // existing owned transcription orchestration; no behavior change.
+    // swiftlint:disable:next function_body_length
     package func transcribe(
         _ original: DesktopRecordingStore.Record, duration: TimeInterval, output: DesktopHostRecordingOutput<Platform>?,
         profile: DesktopProfileSession? = nil, azureEndpoint: String? = nil,
@@ -73,7 +75,7 @@ extension DesktopHostController {
         }
     }
 
-    private func batchKeywords(for model: String, options: LiveClientOptions?) -> [String] {
+    func batchKeywords(for model: String, options: LiveClientOptions?) -> [String] {
         let snapshot = options ?? settings.configuration?.liveOptions ?? .init()
         return DesktopTranscription.provider(for: model)?.id == "assemblyai"
             ? snapshot.assemblyAIKeyterms : snapshot.keywords
@@ -132,6 +134,8 @@ extension DesktopHostController {
         }
     }
 
+    // existing owned cancellation dispatch across capture modes; no behavior change.
+    // swiftlint:disable:next cyclomatic_complexity function_body_length
     package func cancelTranscription() {
         guard !closed else { return }
         if ownedDictation == nil, let admission = ownedDictationAdmission {

@@ -14,7 +14,7 @@ extension DesktopHostController {
         do {
             guard let id = pending?.id else { return }
             cancellationRequested = false
-            await waitForRecordingTail(recordID: id)
+            await waitForRecordingTail(recordID: id, seconds: recordingTailSeconds(recordID: id))
             guard !closed, recording?.record.id == id else { return }
             guard let stopped = try stopCapture() else { return }
             if cancellationRequested || Task.isCancelled {

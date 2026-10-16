@@ -10,6 +10,7 @@ package final class DesktopHostShortcutGestures<Platform: DesktopHostPlatform>: 
     package private(set) var style: HotKeyActivationStyle = .windowsDefault
     private var target: Platform.InsertionTarget?
     private var textOutput: Task<Platform.TextOutputOptions, Never>?
+    private var event: Task<DesktopHostRecordingEvent<Platform>, Never>?
     private var modelIndex = 0
     private var deviceID = ""
     private let clock: () -> TimeInterval
@@ -49,17 +50,18 @@ package final class DesktopHostShortcutGestures<Platform: DesktopHostPlatform>: 
 
     package func keyDown(
         target: Platform.InsertionTarget?, textOutput: Task<Platform.TextOutputOptions, Never>,
-        modelIndex: Int, deviceID: String
+        modelIndex: Int, deviceID: String, event: Task<DesktopHostRecordingEvent<Platform>, Never>? = nil
     ) {
         let timing = lock.withLock { self.timing }
         if !machine.isKeyDown {
             machine.holdThreshold = timing.0
             machine.doubleTapWindow = timing.1
+            self.target = target
+            self.textOutput = textOutput
+            self.modelIndex = modelIndex
+            self.deviceID = deviceID
+            self.event = event
         }
-        self.target = target
-        self.textOutput = textOutput
-        self.modelIndex = modelIndex
-        self.deviceID = deviceID
         submit(machine.keyDown(at: clock()))
     }
 
@@ -86,11 +88,16 @@ package final class DesktopHostShortcutGestures<Platform: DesktopHostPlatform>: 
                 modelIndex: modelIndex, deviceID: deviceID
             )
             let deliver = deliver
+            let event = event
             lock.withLock {
                 let previous = tail
                 tail = Task {
                     await previous?.value
-                    await deliver(request)
+                    if let captured = await event?.value {
+                        await deliver(request.capturing(captured))
+                    } else {
+                        await deliver(request)
+                    }
                 }
             }
         }

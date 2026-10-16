@@ -9,6 +9,8 @@ import os.log
 /// Shared Deepgram v1/Flux client. Audio is admitted synchronously into a
 /// bounded queue, then sent one frame at a time after the actual handshake.
 /// No disk I/O or blocking network operation runs on the state queue.
+// existing owned WebSocket lifecycle/state surface; no behavior change.
+// swiftlint:disable:next type_body_length
 public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
     public let finalShape: TranscriptFinalShape = .standaloneSegments
     public typealias ConnectionFactory = @Sendable (URLRequest) -> any StreamingWebSocketConnection

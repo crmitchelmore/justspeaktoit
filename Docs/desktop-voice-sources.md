@@ -44,6 +44,37 @@ The current MAI-Voice-2.1 and Flash speakers come directly from the existing
 same regional Azure request builder, saved `key:region` credential and native
 WAV decoding/playback, not a second provider client or credential store.
 
+### Pronunciation replacements for captured text sources
+
+Ordinary (non-SSML) History, typed/pasted, explicit clipboard and imported-file
+**Read**, **Generate** and fresh **Export** use one Host preparation path and the
+existing canonical `PronunciationRenderer` / `PronunciationEntry` text-replacement
+rules. Entry order, regex capture templates, case handling and Unicode matching
+are not reimplemented by the host. The History Read entrypoint no longer renders
+before entering that path: even a non-idempotent replacement runs once.
+
+Preparation runs inside the existing tracked operation, before any provider or
+credential await. It captures the dictionary entries and load-error state
+together on `VocabularyActor`; stop, close and newer playback tickets fence
+suspended loading and late work. A later dictionary or voice edit cannot retag
+the already prepared request. Dictionary load/reload errors are explicit, never
+an empty/default-dictionary fallback or an overwrite of corrupt storage.
+Empty/blank-audio input, empty rendered speech, oversized expansion and embedded
+nulls refuse synthesis before credential access.
+
+Only the per-operation provider input is replaced. The original source text,
+source kind, History owner/transcripts and retained generated-result provenance
+remain unchanged; usage observes the actual rendered request with the original
+source/model ownership. Retained **Play** and **Export** reuse their captured
+audio bytes without rereading the dictionary, a key or a provider.
+
+Explicit user-authored SSML remains byte-for-byte unchanged and subject to the
+existing provider/control validation. This text-replacement slice does **not**
+implement the Mac's capability-dependent phoneme/IPA-to-SSML branch, infer tags
+or add providers/controls. The new Host regression sources are **NOT_RUN**:
+source-only authoring and metadata reconstruction are not compiler, provider,
+native-device or full-parity acceptance.
+
 ### Recovered OpenAI, Groq, Gemini and Speechmatics routes
 
 The four-provider source composition reuses the existing shared catalogues,

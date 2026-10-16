@@ -11,11 +11,16 @@ final class AutoCleanEffects: DesktopHostEffects, @unchecked Sendable {
         let model: String
         let key: String
     }
+    struct LiveClientCall: Equatable {
+        let model: String
+        let key: String
+    }
     let client = AutoCleanStreamingClient()
     private let base = SyntheticEffects()
     private let lock = NSLock()
     private var key = "cleanup-key-at-start"
     private var reads: [String] = []
+    private var liveClients: [LiveClientCall] = []
     private var cleaned: [Call] = []
     private var ordinary: [String] = []
     private var failure = false
@@ -23,6 +28,9 @@ final class AutoCleanEffects: DesktopHostEffects, @unchecked Sendable {
     private var held: CheckedContinuation<String, Error>?
     private var hold = false
     var keyReads: [String] { lock.withLock { reads } }
+    var primaryKeyReads: [String] { lock.withLock { reads.filter { $0 == "assemblyai.apiKey" } } }
+    var cleanupKeyReads: [String] { lock.withLock { reads.filter { $0 == "openrouter.apiKey" } } }
+    var liveClientCalls: [LiveClientCall] { lock.withLock { liveClients } }
     var cleanups: [Call] { lock.withLock { cleaned } }
     var postProcesses: [String] { lock.withLock { ordinary } }
     var outputs: [(FakeJob, String)] { base.outputs }
@@ -40,7 +48,9 @@ final class AutoCleanEffects: DesktopHostEffects, @unchecked Sendable {
         waiter?.resume(returning: "Too late.")
     }
     func apiKey(name: String) throws -> String {
-        lock.withLock { reads.append(name); return key }
+        let cleanupKey = lock.withLock { reads.append(name); return key }
+        if name == "openrouter.apiKey" { return cleanupKey }
+        return try base.apiKey(name: name)
     }
     func makeCapture(
         context: DesktopCaptureContext, deviceID: String, sampleRate: Int, frameMilliseconds: Int
@@ -51,7 +61,10 @@ final class AutoCleanEffects: DesktopHostEffects, @unchecked Sendable {
     }
     func makeLiveClient(
         model: String, key: String, language: String?, azureEndpoint: String
-    ) -> (any FinalizingStreamingTranscriptionClient)? { client }
+    ) -> (any FinalizingStreamingTranscriptionClient)? {
+        lock.withLock { liveClients.append(.init(model: model, key: key)) }
+        return client
+    }
     func transcribe(
         _ request: DesktopHostTranscriptionRequest, with controller: DesktopHostController<FakePlatform>
     ) async throws -> TranscriptionResult {

@@ -11,6 +11,7 @@ private struct DesktopHostRecordingRequest<Platform: DesktopHostPlatform>: Senda
     let trigger: HotKeySessionTrigger
     let profile: DesktopProfileSession?
     let waitForOwnedStartup: Bool
+    let event: DesktopHostRecordingEvent<Platform>?
 }
 
 extension DesktopHostController {
@@ -23,7 +24,7 @@ extension DesktopHostController {
     ) async {
         await toggleRecording(.init(
             target: target, modelIndex: modelIndex, deviceID: deviceID, executablePath: targetExecutablePath,
-            textOutput: textOutput, trigger: trigger, profile: nil, waitForOwnedStartup: true
+            textOutput: textOutput, trigger: trigger, profile: nil, waitForOwnedStartup: true, event: nil
         ))
     }
 
@@ -34,7 +35,7 @@ extension DesktopHostController {
     ) async {
         await toggleRecording(.init(
             target: target, modelIndex: modelIndex, deviceID: deviceID, executablePath: nil,
-            textOutput: textOutput, trigger: trigger, profile: profile, waitForOwnedStartup: true
+            textOutput: textOutput, trigger: trigger, profile: profile, waitForOwnedStartup: true, event: nil
         ))
     }
 
@@ -45,7 +46,18 @@ extension DesktopHostController {
     ) async {
         await toggleRecording(.init(
             target: target, modelIndex: modelIndex, deviceID: deviceID, executablePath: nil,
-            textOutput: textOutput, trigger: trigger, profile: profile, waitForOwnedStartup: false
+            textOutput: textOutput, trigger: trigger, profile: profile, waitForOwnedStartup: false, event: nil
+        ))
+    }
+
+    package func toggleCaptured(
+        _ event: DesktopHostRecordingEvent<Platform>, target: Platform.InsertionTarget?,
+        modelIndex: Int, deviceID: String, trigger: HotKeySessionTrigger = .other
+    ) async {
+        await toggleRecording(.init(
+            target: target, modelIndex: modelIndex, deviceID: deviceID, executablePath: nil,
+            textOutput: event.textOutput, trigger: trigger, profile: event.profile,
+            waitForOwnedStartup: true, event: event
         ))
     }
 
@@ -59,7 +71,8 @@ extension DesktopHostController {
             await admitOwnedDictation(
                 target: request.target, modelIndex: request.modelIndex, deviceID: request.deviceID,
                 targetExecutablePath: request.executablePath, textOutput: Task { request.textOutput },
-                trigger: request.trigger, wait: request.waitForOwnedStartup, profile: request.profile
+                trigger: request.trigger, wait: request.waitForOwnedStartup, profile: request.profile,
+                event: request.event
             )
             return
         }
@@ -81,10 +94,11 @@ extension DesktopHostController {
             guard !closed else { return }
             let profile = request.profile ?? resolvedProfile(executablePath: request.executablePath)
             if let limitation = profile.blockingLimitation { throw DesktopHostError(message: limitation.message) }
-            try await startRecording(
+            try await startRecording(.init(
                 target: request.target, deviceID: request.deviceID, profile: profile,
-                textOutput: request.textOutput, trigger: request.trigger
-            )
+                textOutput: request.textOutput, trigger: request.trigger, handsFree: nil,
+                capturePolicy: request.event.map { DesktopHostCapturePolicy(configuration: $0.configuration) }
+            ))
         } catch {
             update(error.localizedDescription, state: 0)
             failHUDStart(error.localizedDescription)

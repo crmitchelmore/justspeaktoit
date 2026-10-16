@@ -77,6 +77,15 @@ final class WindowsEventContext {
         let controller = controller
         return settings.read { await controller.textOutputOptions() }
     }
+
+    func recordingEvent(
+        modelIndex: Int, executablePath: String?
+    ) -> Task<DesktopHostRecordingEvent<WindowsHostPlatform>, Never> {
+        let controller = controller
+        return settings.read {
+            await controller.captureRecordingEvent(modelIndex: modelIndex, executablePath: executablePath)
+        }
+    }
 }
 
 func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, _ context: UnsafeMutableRawPointer?) {
@@ -91,7 +100,9 @@ func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, 
         // still saved and offered for Copy.
         let captured = try? WindowsInsertionTarget.capture()
         toggleRecording(
-            controller, target: captured, textOutput: holder.recordingTextOutput(), modelIndex: Int(index),
+            controller, target: captured,
+            event: holder.recordingEvent(modelIndex: Int(index), executablePath: captured?.executablePath),
+            modelIndex: Int(index),
             deviceID: value
         )
     case 2:
@@ -125,30 +136,15 @@ private func hotKeyWindowEvent(_ event: Int32, value: String, index: Int, holder
     switch event {
     case 21:
         // As at the Record event: capture the focused field before anything else can change it.
+        let captured = try? WindowsInsertionTarget.capture()
+        let event = holder.recordingEvent(modelIndex: index, executablePath: captured?.executablePath)
         holder.hotKeys.keyDown(
-            target: try? WindowsInsertionTarget.capture(), textOutput: holder.recordingTextOutput(),
-            modelIndex: index, deviceID: value
+            target: captured, textOutput: Task { await event.value.textOutput },
+            modelIndex: index, deviceID: value, event: event
         )
     case 22: holder.hotKeys.keyUp()
     case 23: holder.hotKeys.deadlineReached()
     default: break
-    }
-}
-
-/// Starts or stops recording with the text output read at the Record event.
-/// That read also waits for every earlier settings change. The toggle runs
-/// outside the settings queue, so draining settings never waits on transcription.
-@discardableResult
-func toggleRecording(
-    _ controller: WindowsAppController, target: WindowsInsertionTarget?,
-    textOutput: Task<WindowsTextOutputOptions, Never>, modelIndex: Int, deviceID: String
-) -> Task<Void, Never> {
-    Task {
-        let options = await textOutput.value
-        await controller.toggle(
-            target: target, modelIndex: modelIndex, deviceID: deviceID, targetExecutablePath: target?.executablePath,
-            textOutput: options
-        )
     }
 }
 

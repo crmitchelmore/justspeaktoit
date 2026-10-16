@@ -48,7 +48,8 @@ final class DesktopHostGeminiConfigurationTests: XCTestCase {
         await controller.selectVoiceOutput(soniox)
         let sonioxSnapshot = try await controller.voiceConfigurationEditorSnapshot()
         XCTAssertTrue(sonioxSnapshot.languageTitle.hasPrefix("Soniox"))
-        XCTAssertEqual(sonioxSnapshot.preferences.values[VoiceOutputLanguagePreference.key], AnyCodable(.string("en_GB")))
+        XCTAssertEqual(
+            sonioxSnapshot.preferences.values[VoiceOutputLanguagePreference.key], AnyCodable(.string("en_GB")))
         await controller.selectVoiceOutput(.deepgram(DeepgramSpeechCatalog.voices[0]))
         let unused = try await controller.voiceConfigurationEditorSnapshot()
         XCTAssertTrue(unused.languageTitle.contains("not used"))
@@ -96,7 +97,8 @@ final class DesktopHostGeminiConfigurationTests: XCTestCase {
         XCTAssertEqual(restored, actual)
         let restoredSnapshot = try await controller.voiceConfigurationEditorSnapshot()
         XCTAssertTrue(restoredSnapshot.languageTitle.hasPrefix("Gemini"))
-        XCTAssertEqual(restoredSnapshot.preferences.values[VoiceOutputLanguagePreference.key], AnyCodable(.string("pt_BR")))
+        XCTAssertEqual(
+            restoredSnapshot.preferences.values[VoiceOutputLanguagePreference.key], AnyCodable(.string("pt_BR")))
     }
 
     func testEveryCanonicalModel_NativePickerPersistsTupleWhileFavoritesRemainVoiceScoped() async throws {
@@ -123,6 +125,8 @@ final class DesktopHostGeminiConfigurationTests: XCTestCase {
         XCTAssertTrue(StubURLProtocol.recordedRequests.isEmpty)
     }
 
+    // existing owned test covering generation-before-later-editor-change ordering; no behavior change.
+    // swiftlint:disable:next function_body_length
     func testGeneration_CapturesModelAndRegionalLanguageBeforeLaterEditorChanges() async throws {
         let voice = DesktopSpeechVoice.gemini(
             GeminiTTSCatalog.defaultVoice, model: try XCTUnwrap(GeminiTTSCatalog.models.last))
@@ -144,8 +148,10 @@ final class DesktopHostGeminiConfigurationTests: XCTestCase {
         let (stream, continuation) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         defer { continuation.finish() }
         let transport = try XCTUnwrap(session)
-        await controller.generateVoiceSource(source, options: .init(autoPlay: false, saveToRecordings: false)) {
-            snapshot, selection, credential in
+        await controller.generateVoiceSource(
+            source,
+            options: .init(autoPlay: false, saveToRecordings: false)
+        ) { snapshot, selection, credential in
             XCTAssertEqual(selection.voice, voice)
             XCTAssertEqual(selection.language, "en_GB")
             admitted.fulfill()

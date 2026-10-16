@@ -69,7 +69,10 @@ extension DesktopHostController {
     ) async throws {
         var changed = settings
         var voice = changed.voiceOutput
-        changed.configuration = try Platform.importVoiceConfiguration(from: configuration, into: &voice)
+        changed.configuration = try importingAutomationPreferences(
+            Platform.importVoiceConfiguration(from: configuration, into: &voice)
+        )
+        applyingAutomationRevocation(to: &changed)
         changed.voiceOutput = voice
         var polish = changed.postProcessing ?? .init()
         polish.temperature = configuration.number("postProcessingTemperature")
@@ -81,9 +84,8 @@ extension DesktopHostController {
         case .persistOnly:
             changed.livePolishApproved = try retainedLivePolishApproval(after: changed)
         }
-        try effects.writeSettings(JSONEncoder().encode(changed), to: directory.appendingPathComponent("settings.json"))
         let previousVoice = settings.voiceOutput
-        settings = changed
+        try await persistAutomationAwareSettings(changed)
         reconcileSonioxRegionChange(previousVoice)
         reconcileVoiceQualityChange(previousVoice)
         let cleanup = await disarmHandsFreeForConfiguration()
@@ -129,7 +131,11 @@ extension DesktopHostController {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let voice = try Platform.exportVoiceConfiguration(settings.voiceOutput, over: configuration())
-        let preferences = try DesktopPostProcessingConfiguration.exportOptions(settings.postProcessing, over: voice)
+        let projected = try DesktopPostProcessingConfiguration.exportOptions(settings.postProcessing, over: voice)
+        var values = projected.values
+        values.removeValue(forKey: "automationLocalConsent")
+        values.removeValue(forKey: "automationEnabled")
+        let preferences = try DesktopConfiguration(values: values)
         let document = DesktopConfigurationDocument(preferences: preferences)
         let data = try encoder.encode(document)
         guard data.count <= DesktopConfigurationDocument.maximumBytes else { throw DesktopConfigurationError.tooLarge }
@@ -138,14 +144,21 @@ extension DesktopHostController {
     }
 
     package func importConfiguration(path: String) async throws {
-        guard !closed, !busy, recording == nil else {
+        guard !closed else { throw DesktopHostError(message: "The app is closing.") }
+        let document = try readConfigurationDocument(path: path)
+        if busy || recording != nil || (automationUsesLocalConsent && dictationSessionID != nil) {
+            if automationUsesLocalConsent,
+               document.preferences.values["enableAutomationServer"]?.storage == .bool(false) {
+                try await persistAutomationAwareSettings(automationSettings(enabled: false))
+                throw DesktopHostError(
+                    message: "Automation access revoked. Finish dictation before importing the remaining configuration."
+                )
+            }
             throw DesktopHostError(message: "Finish dictation before importing configuration.")
         }
-        let document = try readConfigurationDocument(path: path)
         let changed = try prepareConfigurationImport(document)
-        try effects.writeSettings(JSONEncoder().encode(changed), to: directory.appendingPathComponent("settings.json"))
         let previousVoice = settings.voiceOutput
-        settings = changed
+        try await persistAutomationAwareSettings(changed)
         reconcileSonioxRegionChange(previousVoice)
         reconcileVoiceQualityChange(previousVoice)
         let cleanup = await disarmHandsFreeForConfiguration()
@@ -179,7 +192,10 @@ extension DesktopHostController {
     private func prepareConfigurationImport(_ document: DesktopConfigurationDocument) throws -> Settings {
         var changed = settings
         var voice = changed.voiceOutput
-        changed.configuration = try Platform.importVoiceConfiguration(from: document.preferences, into: &voice)
+        changed.configuration = try importingAutomationPreferences(
+            Platform.importVoiceConfiguration(from: document.preferences, into: &voice)
+        )
+        applyingAutomationRevocation(to: &changed)
         changed.voiceOutput = voice
         if !LivePolishPreference.keys.isDisjoint(with: document.preferences.values.keys) {
             changed.livePolishApproved = false
@@ -226,7 +242,7 @@ extension DesktopHostController {
         let autoClean = document.preferences.text("speedMode") == SpeedModeID.livePolish.rawValue
             ? " Auto-Clean is retained but not authorized: review and Apply preferences to allow cleanup requests."
             : ""
-        return status + autoClean
+        return status + autoClean + automationImportNotice()
             + (unknown.isEmpty ? "" : " Preserved but not applied: \(unknown.joined(separator: ", ")).")
     }
 

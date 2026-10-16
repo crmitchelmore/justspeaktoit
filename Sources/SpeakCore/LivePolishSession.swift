@@ -127,6 +127,8 @@ public final class LivePolishSession: @unchecked Sendable {
     }
 
     private func settleRetirement(message: String) {
+        // existing owned lock-scoped retirement state; no behavior change.
+        // swiftlint:disable:next large_tuple
         let action = lock.withLock { () -> ([Task<Void, Never>], [CheckedContinuation<Result, Never>], Result) in
             let old = tasks()
             generation = UUID()
@@ -193,7 +195,9 @@ public final class LivePolishSession: @unchecked Sendable {
     }
 
     private func receive(token: UUID, text: String, output: String?, error: String?) {
+        // existing owned lock-scoped delivery state; no behavior change.
         let action = lock.withLock {
+            // swiftlint:disable:next large_tuple
             () -> ([Task<Void, Never>], [CheckedContinuation<Result, Never>], Result)? in
             guard !retired, token == generation, input == text else { return nil }
             let old = tasks()

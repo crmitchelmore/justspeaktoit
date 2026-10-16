@@ -96,23 +96,30 @@ extension WindowsAppController {
         guard canStopDictationSession, let id = dictationSessionID else {
             throw AutomationError.noDictationRunning
         }
+        let owned = ownedDictation != nil || ownedDictationAdmission != nil
         await toggle(
             target: nil, modelIndex: selectedIndex(), deviceID: selectedMicrophone(), targetExecutablePath: nil,
             textOutput: textOutputOptions()
         )
-        guard dictationSessionID != id else {
-            throw AutomationError(
-                code: .internalError, message: "Capture retirement is incomplete; audio remains owned."
-            )
-        }
-        guard let record = history[id] else {
-            throw AutomationError(
-                code: .transcriptionFailed,
-                message: "Dictation ended before capture was ready; no transcript was produced."
-            )
-        }
-        if let failure = record.failure, record.displayText == nil {
-            throw AutomationError(code: .transcriptionFailed, message: failure)
+        let record: DesktopRecordingStore.Record
+        if owned {
+            record = try completedDictationRecord(id)
+        } else {
+            guard dictationSessionID != id else {
+                throw AutomationError(
+                    code: .internalError, message: "Capture retirement is incomplete; audio remains owned."
+                )
+            }
+            guard let saved = history[id] else {
+                throw AutomationError(
+                    code: .transcriptionFailed,
+                    message: "Dictation ended before capture was ready; no transcript was produced."
+                )
+            }
+            if let failure = saved.failure, saved.displayText == nil {
+                throw AutomationError(code: .transcriptionFailed, message: failure)
+            }
+            record = saved
         }
         return AutomationResult(
             text: record.displayText ?? "", model: record.modelIdentifier, durationSeconds: record.result?.duration

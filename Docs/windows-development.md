@@ -438,10 +438,37 @@ without releasing late ownership. The unchanged Main composition still closes
 the Host before draining hotkey delivery and still selects legacy capture.
 The legacy serializer path retains its awaited Record/stop behavior.
 
+Windows Record and key-down events now read a typed `DesktopHostRecordingEvent`
+in settings order. It carries the resolved profile (including the effective
+Auto-Clean configuration and device-local approval), output options and capture
+configuration. The existing gesture tail joins that short read before Host
+admission; it never waits for native readiness. A repeated key-down cannot
+replace the original press's target/device/event. Owned startup uses that
+configuration for silence/tail policy and the captured profile for the canonical
+Auto-Clean selection, not later mutable approval or fallback-model settings.
+The default legacy path consumes the same event configuration when constructing
+its silence monitor, even after suspended startup work. Its tail snapshot is
+bound to the committed recording ID and cleared at stop/close; a stale ID cannot
+retag another recording. A present event with nil configuration means defaults,
+not a fallback to later settings. Old no-event callers keep the existing
+startup-time silence and stop-time tail lookup. `Recording` and its initializer
+shape are unchanged, as is the original `startRecording` declaration.
+Neither event capture nor preview/recovery authorizes imported preferences.
+Existing profile-only and nil-event callers retain their signatures and behavior.
+
 Windows automation status identifies an actual correlated recording/admission,
 not arbitrary busy work. Start acknowledges success only after genuine owned
 readiness; stop can address owned startup despite busy bookkeeping and refuses
-to report success when retirement still retains that session.
+to report success when retirement still retains that session. For owned
+dictation, retained recovery text or a failed cleanup is an explicit automation
+error, not successful completion. The legacy automation result policy is unchanged.
+Synthetic held-delivery/profile/approval and completion-authority regressions
+cover both injected owned and actual legacy capture. New default-route cases
+assert executed cleanup credentials/model/History, denied-lane non-insertion,
+actual silence-triggered stop, captured tail, explicit nil and no-event controls.
+Credential assertions distinguish required transcription reads from optional
+cleanup reads. All remain source-only, **NOT_RUN**; no native qualification or
+factory activation is implied.
 
 `DesktopPressCaptureLease.recoveringOwned` installs a narrow recovery sink before
 native open. It is separate from recording adoption and is not a file-path

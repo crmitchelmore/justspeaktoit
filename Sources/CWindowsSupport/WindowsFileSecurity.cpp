@@ -1670,15 +1670,16 @@ struct RegistryRenameInformationV2 {
 static_assert(sizeof(BOOLEAN) == 1 && sizeof(ULONG) == 4 && sizeof(WCHAR) == 2);
 static_assert(sizeof(HANDLE) == 4 || sizeof(HANDLE) == 8);
 static_assert(alignof(RegistryRenameInformationV2) == alignof(HANDLE));
-static_assert(offsetof(RegistryRenameInformationV2, ReplaceIfExists) == 0);
-static_assert(offsetof(RegistryRenameInformationV2, RootDirectory) == sizeof(HANDLE));
-static_assert(offsetof(RegistryRenameInformationV2, FileNameLength) == 2 * sizeof(HANDLE));
-static_assert(offsetof(RegistryRenameInformationV2, FileName) == 2 * sizeof(HANDLE) + sizeof(ULONG));
+// Clang's builtin stays constant-evaluable when UCRT offsetof expands to reinterpret_cast.
+static_assert(__builtin_offsetof(RegistryRenameInformationV2, ReplaceIfExists) == 0);
+static_assert(__builtin_offsetof(RegistryRenameInformationV2, RootDirectory) == sizeof(HANDLE));
+static_assert(__builtin_offsetof(RegistryRenameInformationV2, FileNameLength) == 2 * sizeof(HANDLE));
+static_assert(__builtin_offsetof(RegistryRenameInformationV2, FileName) == 2 * sizeof(HANDLE) + sizeof(ULONG));
 static_assert(sizeof(RegistryRenameInformationV2) == (sizeof(HANDLE) == 8 ? 24 : 16));
 
 bool registryOutcome(JSTIRegistryOutcomeV2 *outcome) {
-    static_assert(offsetof(JSTIRegistryOutcomeV2, abi_version) == 0);
-    static_assert(offsetof(JSTIRegistryOutcomeV2, struct_size) == sizeof(uint32_t));
+    static_assert(__builtin_offsetof(JSTIRegistryOutcomeV2, abi_version) == 0);
+    static_assert(__builtin_offsetof(JSTIRegistryOutcomeV2, struct_size) == sizeof(uint32_t));
     if (!outcome) return false;
     uint32_t header[2]{};
     std::memcpy(header, outcome, sizeof(header));

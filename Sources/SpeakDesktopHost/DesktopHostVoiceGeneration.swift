@@ -80,7 +80,8 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         var saveWarning: String?
         var published = false
         do {
-            let wav = try await synthesize(snapshot, selection) {
+            let prepared = try await prepareVoiceSynthesisSource(snapshot, selection: selection, ticket: ticket)
+            let wav = try await synthesize(prepared, selection) {
                 try await Self.readVoiceSynthesisKey(effects: effects, name: selection.voice.apiKeyIdentifier)
             }
             try Task.checkCancellation()

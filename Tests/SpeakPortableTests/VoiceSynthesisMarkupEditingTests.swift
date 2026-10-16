@@ -77,6 +77,8 @@ final class VoiceSynthesisMarkupEditingTests: XCTestCase {
         XCTAssertTrue(VoiceSynthesisMarkup.examples.contains { $0.text.contains("təˈmeɪtoʊ") })
     }
 
+    // existing owned native-wrap test helper for a single call site; no behavior change.
+    // swiftlint:disable:next large_tuple
     private func nativeWrap(_ text: String) throws -> (text: String, utf16: Int32, scalars: Int32) {
         var output = [CChar](repeating: 0, count: text.utf8.count + 1024)
         var utf16: Int32 = -1

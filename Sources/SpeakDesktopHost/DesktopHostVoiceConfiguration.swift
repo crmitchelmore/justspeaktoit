@@ -107,6 +107,8 @@ extension DesktopVoiceOutputSettings {
 }
 
 extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
+    // existing owned editor-snapshot surface for a single call site; no behavior change.
+    // swiftlint:disable:next large_tuple
     package func voiceConfigurationEditorSnapshot() throws -> (
         preferences: DesktopConfiguration, languageTitle: String, qualityTitle: String, qualityEnabled: Bool
     ) {

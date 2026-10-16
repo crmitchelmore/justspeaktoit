@@ -36,7 +36,7 @@ public final class AutomationRequestCoordinator: @unchecked Sendable {
 
     private enum Admission {
         case answered(AutomationResponse)
-        case running(Task<AutomationResponse, Never>)
+        case running(AutomationCompletion)
     }
 
     private let lock = NSLock()
@@ -49,8 +49,16 @@ public final class AutomationRequestCoordinator: @unchecked Sendable {
     private var completed: [Key: AutomationResponse] = [:]
     private var completionOrder: [Key] = []
     private var inFlight: [Key: Task<AutomationResponse, Never>] = [:]
+    private var completions: [Key: AutomationCompletion] = [:]
+    private let maxInFlightRequests: Int
 
-    public init() {}
+    public init() {
+        self.maxInFlightRequests = 64
+    }
+
+    public init(maxInFlightRequests: Int) {
+        self.maxInFlightRequests = max(1, maxInFlightRequests)
+    }
 
     /// Whether commands are currently being answered.
     public var isActive: Bool {
@@ -67,17 +75,26 @@ public final class AutomationRequestCoordinator: @unchecked Sendable {
     /// Running commands are cancelled, not awaited: they own app state and finish
     /// on their own, but their replies are dropped rather than cached.
     public func deactivate() {
+        var stopped: [(Key, AutomationCompletion)] = []
         let orphaned: [Task<AutomationResponse, Never>] = self.lock.withLock {
             self.generation &+= 1
             self.handler = nil
             let running = Array(self.inFlight.values)
+            stopped = self.completions.map { ($0.key, $0.value) }
             self.inFlight.removeAll()
+            self.completions.removeAll()
             self.completed.removeAll()
             self.completionOrder.removeAll()
             return running
         }
         for work in orphaned {
             work.cancel()
+        }
+        for (key, completion) in stopped {
+            completion.finish(.failure(
+                id: key.id, command: key.command,
+                error: AutomationError(code: .appUnavailable, message: "Automation stopped.")
+            ))
         }
     }
 
@@ -106,7 +123,7 @@ public final class AutomationRequestCoordinator: @unchecked Sendable {
             }
             // A retry of a command that is still running joins the original run
             // rather than starting a second dictation session.
-            if let existing = self.inFlight[key] {
+            if let existing = self.completions[key] {
                 return .running(existing)
             }
             let validated: AutomationRequest
@@ -127,23 +144,38 @@ public final class AutomationRequestCoordinator: @unchecked Sendable {
                     error: AutomationError(code: .internalError, message: "Automation is not wired up in this build.")
                 ))
             }
-            let generation = self.generation
-            // Created under the lock, so the command's completion cannot reach
-            // `finish` before the run is registered as in flight.
-            let work = Task { [weak self] () -> AutomationResponse in
-                let response = await handler(validated)
-                self?.finish(key: key, response: response, generation: generation)
-                return response
+            guard self.inFlight.count < self.maxInFlightRequests else {
+                return .answered(.failure(
+                    id: request.id, command: request.command,
+                    error: AutomationError(
+                        code: .internalError, message: "Automation is busy. Retry an existing request."
+                    )
+                ))
             }
-            self.inFlight[key] = work
-            return .running(work)
+            return self.startCommand(validated, key: key, handler: handler)
         }
+    }
+
+    /// Caller holds the lock until the run is registered, before `finish` can reach it.
+    private func startCommand(_ request: AutomationRequest, key: Key, handler: @escaping Handler) -> Admission {
+        let generation = self.generation
+        let completion = AutomationCompletion()
+        let work = Task { [weak self] () -> AutomationResponse in
+            let response = await handler(request)
+            self?.finish(key: key, response: response, generation: generation)
+            completion.finish(response)
+            return response
+        }
+        self.inFlight[key] = work
+        self.completions[key] = completion
+        return .running(completion)
     }
 
     private func finish(key: Key, response: AutomationResponse, generation: UInt64) {
         self.lock.withLock {
             guard generation == self.generation else { return }
             self.inFlight.removeValue(forKey: key)
+            self.completions.removeValue(forKey: key)
             self.completed[key] = response
             self.completionOrder.append(key)
             while self.completionOrder.count > Self.maxRememberedRequests {

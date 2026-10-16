@@ -63,7 +63,7 @@ final class DesktopHostLivePolishConfigurationTests: XCTestCase {
         let data = try Data(contentsOf: exported)
         let document = try JSONDecoder().decode(DesktopConfigurationDocument.self, from: data)
         for key in preferences.values.keys { XCTAssertEqual(document.preferences.values[key], preferences.values[key]) }
-        let encoded = String(decoding: data, as: UTF8.self)
+        let encoded = try XCTUnwrap(String(bytes: data, encoding: .utf8))
         XCTAssertFalse(encoded.contains("livePolishApproved"))
         XCTAssertFalse(encoded.contains("cleanup-key-at-start"))
         let entries = try await fixture.host.configurationForNativeEditor().entries

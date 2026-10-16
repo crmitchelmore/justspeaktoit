@@ -24,6 +24,7 @@ final class LinuxEventContext: @unchecked Sendable {
     private var readyTask: Task<Void, Never>?
     private var shortcutTail: Task<Void, Never>?
     let shortcuts: LinuxShortcuts
+    let automation: LinuxAutomationSwitch
     private(set) var gestures: LinuxShortcutGestures!
     lazy var microphones = LinuxMicrophoneMonitor(controller: controller)
     /// Set before the window opens, when iCloud sync is configured.
@@ -33,6 +34,7 @@ final class LinuxEventContext: @unchecked Sendable {
         self.controller = controller
         self.smokeTest = smokeTest
         self.shortcuts = LinuxShortcuts()
+        self.automation = LinuxAutomationSwitch(controller: controller)
         defer {
             gestures = LinuxShortcutGestures(style: .pressToToggle) { [weak self] request in
                 guard let self else { return }
@@ -168,6 +170,8 @@ final class LinuxEventContext: @unchecked Sendable {
 }
 
 /// The GTK window's event callback, on the GTK main thread.
+// exhaustive native GTK event-code dispatch; no behavior change.
+// swiftlint:disable:next cyclomatic_complexity
 func linuxWindowEvent(
     _ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, _ context: UnsafeMutableRawPointer?
 ) {
@@ -293,6 +297,8 @@ private func linuxAppearanceEvent(_ event: Int, slot: Int, holder: LinuxEventCon
             holder.enqueueSettings { await controller.saveAppearance(appearance) }
         }
     case Int(JSTI_EVENT_LOGIN_ITEM): holder.enqueueSettings { await controller.setLaunchAtLogin(slot == 1) }
+    case Int(JSTI_EVENT_AUTOMATION):
+        holder.enqueueSettings { await LinuxAutomationSwitch.setEnabled(slot == 1, holder: holder) }
     default: return false
     }
     return true
@@ -370,7 +376,11 @@ private func linuxReady(_ holder: LinuxEventContext) {
         let controller = holder.controller
         let ready = Task { await controller.ready() }
         holder.markReady(ready)
-        holder.enqueueSettings { await controller.refreshLoginItem() }
+        holder.enqueueSettings {
+            await ready.value
+            await controller.refreshLoginItem()
+            await LinuxAutomationSwitch.restore(holder)
+        }
         LinuxCloudSync.start(holder, after: ready)
         holder.shortcuts.start(holder)
         do { try holder.microphones.start() } catch {

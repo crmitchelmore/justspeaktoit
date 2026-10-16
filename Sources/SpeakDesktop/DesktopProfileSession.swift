@@ -311,7 +311,7 @@ public enum DesktopProfileSessionResolver {
             }
         }
         applyPolishContext(profile, to: &options)
-        if (options.mode == .remote || options.mode == .localLLM), !capabilities.supportsPersonalLexicon {
+        if options.mode == .remote || options.mode == .localLLM, !capabilities.supportsPersonalLexicon {
             if profile.polishIncludeLexiconDirectives == true { limitations.append(.lexiconDirectivesUnavailable) }
             if profile.polishIncludeContextTags == true { limitations.append(.contextTagsUnavailable) }
         }

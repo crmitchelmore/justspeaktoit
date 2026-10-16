@@ -121,8 +121,10 @@ final class DesktopHostVoiceProviderCompositionTests: XCTestCase {
         let (stream, continuation) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         defer { continuation.finish() }
         let transport = try XCTUnwrap(session)
-        await controller.generateVoiceSource(source, options: .init(autoPlay: false, saveToRecordings: false)) {
-            snapshot, selection, credential in
+        await controller.generateVoiceSource(
+            source,
+            options: .init(autoPlay: false, saveToRecordings: false)
+        ) { snapshot, selection, credential in
             admitted.fulfill()
             for await _ in stream { break }
             return try await DesktopSpeechSynthesis(session: transport).synthesize(

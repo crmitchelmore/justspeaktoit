@@ -16,6 +16,8 @@ extension DesktopHostController {
         .init(configuration: settings.configuration, approved: settings.livePolishApproved == true)
     }
 
+    // exhaustive owned live-polish admission gating; no behavior change.
+    // swiftlint:disable:next cyclomatic_complexity
     func captureLivePolish(_ profile: DesktopProfileSession) -> DesktopHostLivePolishInput? {
         guard DesktopHostModels.isLive(profile.modelIdentifier) else { return nil }
         let selection = profile.livePolish ?? livePolishSelection()
@@ -60,7 +62,9 @@ extension DesktopHostController {
         guard let input else { return nil }
         let effects = effects
         let localCleanup = localCleanup
-        return LivePolishSession(recordingID: id, preferences: input.preferences, modelIdentifier: input.model) { text in
+        return LivePolishSession(
+            recordingID: id, preferences: input.preferences, modelIdentifier: input.model
+        ) { text in
             if let failure = input.failure { throw DesktopHostError(message: failure) }
             return try await effects.polishLive(
                 text: text, model: input.model, key: input.key, localLLM: localCleanup

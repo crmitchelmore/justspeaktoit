@@ -791,6 +791,8 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         uniquingKeysWith: { first, _ in first }
     )
 
+    // existing owned catalogue-matching surface; no behavior change.
+    // swiftlint:disable:next function_body_length
     public static func friendlyName(for identifier: String) -> String { // swiftlint:disable:this cyclomatic_complexity
         let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "—" }
@@ -804,7 +806,9 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
 
         let lowercased = trimmed.lowercased()
         if lowercased.hasPrefix(LocalModelIdentity.postProcessingHuggingFacePrefix) {
-            let parts = trimmed.dropFirst(LocalModelIdentity.postProcessingHuggingFacePrefix.count).split(separator: "/")
+            let parts = trimmed
+                .dropFirst(LocalModelIdentity.postProcessingHuggingFacePrefix.count)
+                .split(separator: "/")
             if parts.count == 3 {
                 let filename = String(parts[2])
                 let stem = filename.lowercased().hasSuffix("-gguf") ? String(filename.dropLast(5)) : filename

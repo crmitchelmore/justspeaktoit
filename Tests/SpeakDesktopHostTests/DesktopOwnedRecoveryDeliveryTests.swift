@@ -74,7 +74,8 @@ final class DesktopOwnedRecoveryDeliveryTests: XCTestCase {
         XCTAssertTrue(recovery.data.isEmpty)
         await opening.release()
         try await lease.waitUntilReady(ticket.token)
-        try await lease.adoptDelivery(ticket.token, identity: identity, admission: admission, onPCMDelivery: normal.append)
+        try await lease.adoptDelivery(
+            ticket.token, identity: identity, admission: admission, onPCMDelivery: normal.append)
         try await ticket.release()
         XCTAssertEqual(normal.data, dictationPCM([91, 92] + Array(Int16(1)...Int16(73))))
         XCTAssertTrue(recovery.data.isEmpty)

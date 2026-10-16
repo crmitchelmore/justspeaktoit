@@ -16,7 +16,10 @@ final class DesktopHostLivePolishTests: XCTestCase {
         let record = try await fixture.record()
         XCTAssertEqual(record.originalText, "authoritative raw")
         XCTAssertNil(record.livePolishResult)
-        XCTAssertTrue(fixture.effects.keyReads.isEmpty)
+        XCTAssertEqual(fixture.effects.keyReads, ["assemblyai.apiKey"])
+        XCTAssertEqual(fixture.effects.primaryKeyReads, ["assemblyai.apiKey"])
+        XCTAssertTrue(fixture.effects.cleanupKeyReads.isEmpty)
+        XCTAssertEqual(fixture.effects.liveClientCalls, [.init(model: fixture.model, key: "transcription-key")])
         XCTAssertTrue(fixture.effects.cleanups.isEmpty)
     }
 
@@ -37,7 +40,10 @@ final class DesktopHostLivePolishTests: XCTestCase {
             XCTAssertEqual(fixture.effects.cleanups, [.init(
                 text: "authoritative raw", model: ModelCatalog.defaultFastTextModel, key: "cleanup-key-at-start"
             )])
-            XCTAssertEqual(fixture.effects.keyReads, ["openrouter.apiKey"])
+            XCTAssertEqual(fixture.effects.keyReads, ["assemblyai.apiKey", "openrouter.apiKey"])
+            XCTAssertEqual(fixture.effects.primaryKeyReads, ["assemblyai.apiKey"])
+            XCTAssertEqual(fixture.effects.cleanupKeyReads, ["openrouter.apiKey"])
+            XCTAssertEqual(fixture.effects.liveClientCalls, [.init(model: fixture.model, key: "transcription-key")])
             XCTAssertTrue(fixture.effects.postProcesses.isEmpty)
             let reloaded = try await fixture.host.store.record(id: record.id)
             XCTAssertEqual(reloaded.livePolishResult, record.livePolishResult)
@@ -100,8 +106,38 @@ final class DesktopHostLivePolishTests: XCTestCase {
             XCTAssertNil(record.livePolishResult?.text)
             XCTAssertNotNil(record.postProcessingFailure)
             XCTAssertTrue(fixture.effects.cleanups.isEmpty)
-            XCTAssertEqual(fixture.effects.keyReads.count, missing ? 1 : 0)
+            XCTAssertEqual(
+                fixture.effects.keyReads, missing ? ["assemblyai.apiKey", "openrouter.apiKey"] : ["assemblyai.apiKey"]
+            )
+            XCTAssertEqual(fixture.effects.primaryKeyReads, ["assemblyai.apiKey"])
+            XCTAssertEqual(fixture.effects.cleanupKeyReads, missing ? ["openrouter.apiKey"] : [])
+            XCTAssertEqual(fixture.effects.liveClientCalls, [.init(model: fixture.model, key: "transcription-key")])
             try await fixture.cleanup()
+        }
+    }
+
+    func testUnapprovedActualCapture_UsesOnlyPrimaryCredentialAndRetainsRawHistory() async throws {
+        for owned in [false, true] {
+            let fixture = AutoCleanHostFixture()
+            try await fixture.prepare(owned: owned)
+            addTeardownBlock { try await fixture.cleanup() }
+            await fixture.host.autoCleanFixtureSettings(approved: false)
+            XCTAssertTrue(fixture.effects.keyReads.isEmpty)
+            XCTAssertTrue(fixture.effects.liveClientCalls.isEmpty)
+            await fixture.toggle()
+            await fixture.toggle()
+            let record = try await fixture.record()
+            XCTAssertEqual(record.originalText, "authoritative raw")
+            XCTAssertFalse(record.livePolishResult?.succeeded ?? true)
+            XCTAssertNil(record.livePolishResult?.text)
+            XCTAssertTrue(record.postProcessingFailure?.contains("not authorized") == true)
+            XCTAssertEqual(fixture.effects.keyReads, ["assemblyai.apiKey"])
+            XCTAssertEqual(fixture.effects.primaryKeyReads, ["assemblyai.apiKey"])
+            XCTAssertTrue(fixture.effects.cleanupKeyReads.isEmpty)
+            XCTAssertTrue(fixture.effects.cleanups.isEmpty)
+            XCTAssertTrue(fixture.effects.postProcesses.isEmpty)
+            XCTAssertTrue(fixture.effects.outputs.isEmpty)
+            XCTAssertEqual(fixture.effects.liveClientCalls, [.init(model: fixture.model, key: "transcription-key")])
         }
     }
 

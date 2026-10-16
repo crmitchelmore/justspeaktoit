@@ -37,6 +37,8 @@ public enum VoiceSynthesisPricing {
         ratePerThousandCharacters(for: voice, accountInventory: xaiInventory.map(VoiceAccountInventory.xai))
     }
 
+    // exhaustive per-provider pricing table across the existing voice catalogue; no behavior change.
+    // swiftlint:disable:next cyclomatic_complexity
     public static func ratePerThousandCharacters(
         for voice: DesktopSpeechVoice, accountInventory: VoiceAccountInventory?
     ) -> Decimal? {

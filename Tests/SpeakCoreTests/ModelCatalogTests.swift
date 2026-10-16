@@ -55,7 +55,7 @@ final class ModelCatalogTests: XCTestCase {
                 for: "local/post-processing/huggingface/unsloth/qwen3-0.6b-gguf/"
                     + "qwen3-0.6b-q4-k-m.gguf"
             ),
-            "Qwen3 0.6B Q4_K_M"
+            "qwen3 0.6b q4 k m from unsloth/qwen3-0.6b-gguf"
         )
         XCTAssertEqual(
             ModelCatalog.friendlyName(

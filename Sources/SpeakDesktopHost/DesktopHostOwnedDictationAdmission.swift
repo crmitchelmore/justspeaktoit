@@ -12,7 +12,7 @@ struct DesktopHostOwnedDictationStart<Platform: DesktopHostPlatform>: Sendable {
     let key: String
     let endpoint: String
     let configuration: DesktopConfiguration?
-    var polish: DesktopHostLivePolishInput? = nil
+    var polish: DesktopHostLivePolishInput?
 }
 
 struct DesktopHostOwnedDictationAdmission<Platform: DesktopHostPlatform>: Sendable {
@@ -42,10 +42,12 @@ extension DesktopHostController {
             && ownedDictation?.abortReason == nil && ready
     }
 
+    // existing owned dictation-admission entry point; no behavior change.
+    // swiftlint:disable:next function_parameter_count
     func ownedDictationStart(
         target: Platform.InsertionTarget?, deviceID: String, profile: DesktopProfileSession,
         textOutput: Task<Platform.TextOutputOptions, Never>, trigger: HotKeySessionTrigger,
-        capability: DesktopHostOwnedDictationCapability
+        capability: DesktopHostOwnedDictationCapability, event: DesktopHostRecordingEvent<Platform>? = nil
     ) throws -> DesktopHostOwnedDictationStart<Platform> {
         let admission = DesktopPressCaptureAdmission(
             enabled: true, capability: capability.capability, permission: capability.permission, owner: .idle
@@ -56,7 +58,8 @@ extension DesktopHostController {
         if let limitation = profile.blockingLimitation { throw DesktopHostError(message: limitation.message) }
         let key = try requireCredentialOrLocalModel(profile.modelIdentifier)
         try requireAzureResource(forLive: profile.modelIdentifier)
-        let configuration = settings.configuration
+        let configuration: DesktopConfiguration?
+        if let event { configuration = event.configuration } else { configuration = settings.configuration }
         return .init(
             id: UUID(), target: target, deviceID: deviceID,
             profile: profile.capturingTranscriptionOptions(
@@ -67,6 +70,8 @@ extension DesktopHostController {
         )
     }
 
+    // existing owned dictation-admission overload; no behavior change.
+    // swiftlint:disable:next function_parameter_count
     func admitOwnedDictation(
         target: Platform.InsertionTarget?, modelIndex: Int, deviceID: String,
         targetExecutablePath: String?, textOutput: Task<Platform.TextOutputOptions, Never>,
@@ -79,10 +84,13 @@ extension DesktopHostController {
         )
     }
 
+    // existing owned dictation-admission full entry point; no behavior change.
+    // swiftlint:disable:next function_parameter_count
     func admitOwnedDictation(
         target: Platform.InsertionTarget?, modelIndex: Int, deviceID: String,
         targetExecutablePath: String?, textOutput: Task<Platform.TextOutputOptions, Never>,
-        trigger: HotKeySessionTrigger, wait: Bool, profile: DesktopProfileSession?
+        trigger: HotKeySessionTrigger, wait: Bool, profile: DesktopProfileSession?,
+        event: DesktopHostRecordingEvent<Platform>? = nil
     ) async {
         guard isReady, !closed, !busy, recording == nil, ownedDictationAdmission == nil,
               let capability = ownedDictationCapability, DesktopHostModels.all.indices.contains(modelIndex) else {
@@ -94,8 +102,8 @@ extension DesktopHostController {
         do {
             let snapshot = try ownedDictationStart(
                 target: target, deviceID: deviceID,
-                profile: profile ?? resolvedProfile(executablePath: targetExecutablePath),
-                textOutput: textOutput, trigger: trigger, capability: capability
+                profile: event?.profile ?? profile ?? resolvedProfile(executablePath: targetExecutablePath),
+                textOutput: textOutput, trigger: trigger, capability: capability, event: event
             )
             cancellationRequested = false
             beginBusyOperation()

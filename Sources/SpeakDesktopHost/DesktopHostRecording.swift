@@ -8,6 +8,16 @@ extension DesktopHostController {
         textOutput: Platform.TextOutputOptions, trigger: HotKeySessionTrigger = .other,
         handsFree: DesktopHandsFreeRun<Platform>? = nil
     ) async throws {
+        try await startRecording(.init(
+            target: target, deviceID: deviceID, profile: profile, textOutput: textOutput,
+            trigger: trigger, handsFree: handsFree, capturePolicy: nil
+        ))
+    }
+
+    func startRecording(_ request: DesktopHostRecordingStart<Platform>) async throws {
+        let (target, deviceID, profile, textOutput, trigger, handsFree) = (
+            request.target, request.deviceID, request.profile, request.textOutput, request.trigger, request.handsFree
+        )
         if handsFree == nil, let capability = ownedDictationCapability {
             try await startOwnedDictation(
                 target: target, deviceID: deviceID, profile: profile,
@@ -39,7 +49,7 @@ extension DesktopHostController {
             LiveRecordingStart(
                 key: key, profile: profile, id: id, record: record, file: file, rate: rate,
                 target: target, deviceID: deviceID, textOutput: textOutput, trigger: trigger, handsFree: handsFree,
-                polish: polish
+                polish: polish, capturePolicy: request.capturePolicy
             )
         )
         guard !closed, recording?.record.id == id else { return }
@@ -62,6 +72,7 @@ extension DesktopHostController {
         let trigger: HotKeySessionTrigger
         let handsFree: DesktopHandsFreeRun<Platform>?
         let polish: DesktopHostLivePolishInput?
+        let capturePolicy: DesktopHostCapturePolicy?
     }
 
     /// Starts the live session and capture for an already-saved recording,
@@ -87,7 +98,7 @@ extension DesktopHostController {
             record = try await retainingLiveKeywordNotice(live?.keywordLimitation, in: record)
             guard !closed, handsFree == nil || handsFreeRun?.id == handsFree?.id else { throw CancellationError() }
             live?.start()
-            let context = captureContext(file: file, live: live, rate: rate, id: id, handsFree: handsFree != nil)
+            let context = captureContext(start, live: live)
             let capture = try handsFree.map { run -> any DesktopRecordingCapture in
                 DesktopHandsFreeUtteranceCapture(audio: run.audio, context: context)
             }
@@ -104,6 +115,7 @@ extension DesktopHostController {
                 record: record, target: target, live: live, profile: profile,
                 textOutput: textOutput, trigger: trigger
             )
+            recordingCapturePolicy = start.capturePolicy.map { (recordID: id, value: $0) }
             if let live { monitorLive(live) }
             await notifyRecordingFeedback(id, handsFree: handsFree != nil, captureReady: true)
         } catch {
@@ -124,17 +136,19 @@ extension DesktopHostController {
         return record
     }
 
-    private func captureContext(
-        file: PCMRecordingFile, live: DesktopLiveSession?, rate: Int, id: UUID, handsFree: Bool
-    ) -> DesktopCaptureContext {
-        let configuration = settings.configuration
-        let silence = !handsFree && configuration?.enabled("silenceDetectionEnabled") == true
+    private func captureContext(_ start: LiveRecordingStart, live: DesktopLiveSession?) -> DesktopCaptureContext {
+        let configuration: DesktopConfiguration?
+        if let policy = start.capturePolicy {
+            configuration = policy.configuration
+        } else { configuration = settings.configuration }
+        let silence = start.handsFree == nil && configuration?.enabled("silenceDetectionEnabled") == true
             ? DictationSilenceMonitor(
                 threshold: configuration?.number("silenceThreshold") ?? DictationSilencePolicy.defaultThreshold,
                 duration: configuration?.number("silenceDuration") ?? DictationSilencePolicy.defaultDuration
             ) : nil
+        let id = start.id
         return DesktopCaptureContext(
-            file: file, live: live, sampleRate: rate, silence: silence,
+            file: start.file, live: live, sampleRate: start.rate, silence: silence,
             onSilence: { Task { await self.stopForSilence(recordingID: id) } },
             onFailure: { message in Task { await self.captureFailed(message, recordingID: id) } }
         )
@@ -160,6 +174,7 @@ extension DesktopHostController {
     func stopCapture() throws -> StoppedRecording? {
         guard let active = recording else { return nil }
         recording = nil
+        recordingCapturePolicy = nil
         cancelRecordingTail()
         liveUpdates?.cancel()
         liveUpdates = nil

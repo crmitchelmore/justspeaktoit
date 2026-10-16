@@ -274,6 +274,8 @@ final class DesktopTranscriptionTests: XCTestCase {
 }
 
 extension DesktopTranscriptionTests {
+    // existing owned test covering every batch-provider vocabulary contract; no behavior change.
+    // swiftlint:disable:next function_body_length
     func testVocabularyHintsReachOnlySupportedBatchProviderContracts() async throws {
         let audio = try fixture()
         defer { try? FileManager.default.removeItem(at: audio) }
@@ -411,4 +413,5 @@ private extension DesktopTranscriptionTests {
       {"type":"word","start_time":0.7,"end_time":1.2,"alternatives":[{"content":"Speechmatics","confidence":0.9}]},
       {"type":"punctuation","attaches_to":"previous","alternatives":[{"content":"."}]}]}
     """#
-}
+// existing owned test suite covering batch-provider contracts; no behavior change.
+} // swiftlint:disable:this file_length

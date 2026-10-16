@@ -45,3 +45,8 @@ API breakage: enumelement AnalyticsProviderType.stepfun has been added as a new 
 API breakage: enumelement OpenRouterInlineAudioTranscriptionClient.InputError.inklingAudioLimit has been added as a new enum case
 API breakage: enumelement ConfigTransferError.compressionFailed has been added as a new enum case
 API breakage: enumelement ConfigTransferError.payloadTooLarge has been added as a new enum case
+# Linux profile matching gains an X11 executable-path route; Groq TTS adds a
+# bounded fan-out error. Existing cases and signatures are retained; both are
+# consumed by the in-repository clients rebuilt in this run.
+API breakage: enumelement DictationProfileMatcher.Kind.linuxExecutablePath has been added as a new enum case
+API breakage: enumelement GroqTTSAPIError.excessiveFanOut has been added as a new enum case

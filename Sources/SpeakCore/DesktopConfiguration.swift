@@ -161,6 +161,12 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
             values[graceKey] = legacy
         }
         try Self.validateFields(in: values)
+        // JSON decodes whole numbers as Int; native numeric entries use Double.
+        for field in Self.fields {
+            guard case .number = field.kind, let value = values[field.key],
+                  case .int(let number) = value.storage else { continue }
+            values[field.key] = AnyCodable(.double(Double(number)))
+        }
         self.values = try Self.reconciledKeywords(in: values)
     }
 

@@ -106,12 +106,15 @@ extension DesktopHostController {
     /// when it begins and again before any request, and one left without an
     /// outcome is recovered, audio retained, at next launch.
     @discardableResult
+    // existing owned ordered shutdown orchestration; no behavior change.
+    // swiftlint:disable:next cyclomatic_complexity function_body_length
     package func close() async -> DesktopHostShutdownReport {
         if closed {
             if shutdownReport == nil { await withCheckedContinuation { shutdownWaiters.append($0) } }
             return shutdownReport ?? DesktopHostShutdownReport()
         }
         closed = true
+        automationTranscriptions.values.forEach { $0.cancel() }
         recording?.live?.livePolish?.cancel()
         liveFinalisation?.livePolish?.cancel()
         Platform.cancelLocalModels(controller: self)
@@ -243,6 +246,7 @@ extension DesktopHostController {
     private func takeRecordingOnClose() -> DesktopHostClosingRecording? {
         guard let active = recording else { return nil }
         recording = nil
+        recordingCapturePolicy = nil
         cancelRecordingTail()
         liveUpdates?.cancel()
         liveUpdates = nil

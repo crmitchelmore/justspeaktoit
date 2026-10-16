@@ -86,7 +86,7 @@ final class HuggingFaceWhisperModelTests: XCTestCase {
             XCTAssertThrowsError(try model(bytes: bytes))
         }
         let encoded = try JSONEncoder().encode(model())
-        let tampered = String(decoding: encoded, as: UTF8.self)
+        let tampered = try XCTUnwrap(String(bytes: encoded, encoding: .utf8))
             .replacingOccurrences(of: String(repeating: "a", count: 40), with: "main")
         XCTAssertThrowsError(try JSONDecoder().decode(HuggingFaceWhisperModel.self, from: Data(tampered.utf8)))
     }

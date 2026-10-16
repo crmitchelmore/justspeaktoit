@@ -21,6 +21,8 @@ extension DesktopHostController {
         )
     }
 
+    // existing owned post-processing persistence surface; no behavior change.
+    // swiftlint:disable:next cyclomatic_complexity
     package func savePostProcessing(
         enabled: Bool, modelIdentifier model: String, prompt: String, key: String,
         includeLexiconDirectives: Bool? = nil, includeContextTags: Bool? = nil

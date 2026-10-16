@@ -93,6 +93,8 @@ final class DesktopHostElevenLabsVoiceTests: XCTestCase {
         XCTAssertEqual(try restored.synthesisSelection().voice, explicit)
     }
 
+    // existing owned test covering sequential voice/provider churn; no behavior change.
+    // swiftlint:disable:next function_body_length
     func testCanonicalCredentialAndCapturedGeneration_SurviveLaterVoiceAndProviderChanges() async throws {
         let original = DesktopSpeechVoice.elevenlabs(ElevenLabsTTSModels.elevenV4, ElevenLabsTTSCatalog.voices[0])
         await controller.selectVoiceOutput(original)
@@ -111,8 +113,10 @@ final class DesktopHostElevenLabsVoiceTests: XCTestCase {
         let (stream, continuation) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         defer { continuation.finish() }
         let transport = try XCTUnwrap(session)
-        await controller.generateVoiceSource(source, options: .init(autoPlay: false, saveToRecordings: false)) {
-            snapshot, selection, credential in
+        await controller.generateVoiceSource(
+            source,
+            options: .init(autoPlay: false, saveToRecordings: false)
+        ) { snapshot, selection, credential in
             entered.fulfill()
             for await _ in stream { break }
             return try await DesktopSpeechSynthesis(session: transport).synthesize(
@@ -131,15 +135,44 @@ final class DesktopHostElevenLabsVoiceTests: XCTestCase {
         let request = try XCTUnwrap(StubURLProtocol.recordedRequests.first)
         XCTAssertEqual(request.url?.path, "/v1/text-to-dialogue")
         XCTAssertEqual(request.value(forHTTPHeaderField: "xi-api-key"), "synthetic-eleven")
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: try XCTUnwrap(request.httpBody)) as? [String: Any])
+        XCTAssertEqual(body["model_id"] as? String, ElevenLabsTTSModels.elevenV4.id)
+        let inputs = try XCTUnwrap(body["inputs"] as? [[String: String]])
+        XCTAssertEqual(inputs, [["text": source.text, "voice_id": ElevenLabsTTSCatalog.voices[0].id]])
+        let usageBeforeReplay = await controller.voiceUsage.records
+        let usage = try XCTUnwrap(usageBeforeReplay?.first)
+        XCTAssertEqual(usageBeforeReplay?.count, 1)
+        XCTAssertEqual(usage.modelID, original.modelID)
+        XCTAssertEqual(usage.voiceID, original.id)
+        XCTAssertEqual(usage.operation, .generate)
+        XCTAssertEqual(usage.outcome, .completed)
+        XCTAssertNil(usage.historyRecordID)
+        XCTAssertEqual(usage.audioDuration, result.audio.duration)
         FakeLog.shared.installKeyReadHook { _ in XCTFail("Retained playback/export read a key") }
         await controller.playGeneratedVoice(result.id.uuidString)
         await controller.voiceGenerationTask?.value
         XCTAssertEqual(FakeSpeech.shared.events, ["begin", "play", "end"])
-        let export = directory.appendingPathComponent("synthetic-eleven.wav")
+        let protectedExport = directory.appendingPathComponent("synthetic-eleven.wav")
+        await controller.exportGeneratedVoice(result.id.uuidString, path: protectedExport.path)
+        XCTAssertEqual(FakeLog.shared.allStatuses.last, "Choose an export location outside the app's data folder.")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: protectedExport.path))
+        let export = directory.deletingLastPathComponent()
+            .appendingPathComponent("synthetic-eleven-\(UUID()).wav")
+        defer { try? FileManager.default.removeItem(at: export) }
         await controller.exportGeneratedVoice(result.id.uuidString, path: export.path)
         await controller.readAloudState.exportTask?.value
+        XCTAssertEqual(FakeLog.shared.allStatuses.last,
+                       "Retained voice audio exported as WAV; no synthesis request was sent.")
         XCTAssertEqual(try Data(contentsOf: export), wav)
         XCTAssertEqual(StubURLProtocol.recordedRequests.count, 1)
+        let usageAfterExport = await controller.voiceUsage.records
+        XCTAssertEqual(usageAfterExport, usageBeforeReplay)
+        let retained = await controller.generatedVoice
+        XCTAssertEqual(retained?.id, result.id)
+        XCTAssertEqual(retained?.audio.wav, wav)
+        let records = try await controller.store.records()
+        XCTAssertTrue(records.isEmpty)
         let summary = await controller.voiceUsageSummary()
         XCTAssertTrue(summary.contains(ElevenLabsTTSAPI.pricingEstimateBasis))
         let stale = await controller.saveVoiceCredential(
@@ -208,8 +241,10 @@ final class DesktopHostElevenLabsVoiceTests: XCTestCase {
                 statusCode: 200, httpVersion: nil, headerFields: nil)), wav)
         }
         let source = try VoiceOutputSourceSnapshot(source: .typedText, text: "Synthetic opt-out.")
-        await controller.generateVoiceSource(source, options: .init(autoPlay: false, saveToRecordings: false)) {
-            snapshot, selection, credential in
+        await controller.generateVoiceSource(
+            source,
+            options: .init(autoPlay: false, saveToRecordings: false)
+        ) { snapshot, selection, credential in
             try await DesktopSpeechSynthesis(session: transport).synthesize(
                 snapshot, voice: selection.voice, options: selection.options, credential: credential)
         }

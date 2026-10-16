@@ -207,6 +207,7 @@ class APICompatibilityTests(unittest.TestCase):
             "AnalyticsProviderType.reson8", "AnalyticsProviderType.stepfun",
             "OpenRouterInlineAudioTranscriptionClient.InputError.inklingAudioLimit",
             "ConfigTransferError.compressionFailed", "ConfigTransferError.payloadTooLarge",
+            "DictationProfileMatcher.Kind.linuxExecutablePath", "GroqTTSAPIError.excessiveFanOut",
         ]
         diagnostic = "\n".join(
             f"  💔 API breakage: enumelement {symbol} has been added as a new enum case"
@@ -223,6 +224,18 @@ class APICompatibilityTests(unittest.TestCase):
             "API breakage: enumelement ConfigTransferError.payloadTooLarge has been removed",
             "API breakage: enumelement ConfigTransferError.unreviewed has been added as a new enum case",
             "API breakage: func seal() has been removed",
+        ]:
+            with self.subTest(finding=finding):
+                result, _ = self.run_gate(diagnose_status=1, diagnostic=allowed + "\n" + finding)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn(finding, result.stderr)
+
+    def test_linux_and_groq_allowlist_entries_do_not_allow_removals_or_unknown_cases(self):
+        allowed = "API breakage: enumelement GroqTTSAPIError.excessiveFanOut has been added as a new enum case"
+        for finding in [
+            "API breakage: enumelement DictationProfileMatcher.Kind.linuxExecutablePath has been removed",
+            "API breakage: enumelement GroqTTSAPIError.unknownCase has been added as a new enum case",
+            "error: failed to read API digester output for SpeakCore",
         ]:
             with self.subTest(finding=finding):
                 result, _ = self.run_gate(diagnose_status=1, diagnostic=allowed + "\n" + finding)

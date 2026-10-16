@@ -85,12 +85,22 @@ final class DesktopVoiceSourceMessageTests: XCTestCase {
         XCTAssertEqual(try DesktopVoiceSourceMessage(action: 119, source: 0, text: payload,
             record: "opaque-preferences-request", path: ""),
             .synthesisPreferences(options, requestID: "opaque-preferences-request"))
+        for speed in [0.25, 4.0] {
+            let supported = try VoiceSynthesisOptions(speed: speed, quality: .highest)
+            try supported.validate(for: .openai)
+            let supportedPayload = #"{"speed":\#(speed),"pitch":0,"useSSML":false,"quality":"highest"}"#
+            XCTAssertEqual(try DesktopVoiceSourceMessage(action: 119, source: 0, text: supportedPayload,
+                record: "opaque-preferences-request", path: ""),
+                .synthesisPreferences(supported, requestID: "opaque-preferences-request"))
+        }
         for record in ["", String(repeating: "x", count: 65), "request\n"] {
             XCTAssertThrowsError(try DesktopVoiceSourceMessage(action: 119, source: 0,
                 text: payload, record: record, path: ""))
         }
         for payload in [
-            #"{"speed":4,"pitch":0,"useSSML":false}"#,
+            #"{"speed":4.01,"pitch":0,"useSSML":false}"#,
+            #"{"speed":0.24,"pitch":0,"useSSML":false}"#,
+            #"{"speed":1,"pitch":0,"useSSML":false,"quality":"future-quality"}"#,
             #"{"speed":1,"pitch":1.5,"useSSML":false}"#,
             #"{"speed":1,"pitch":0,"useSSML":"true"}"#,
             String(repeating: " ", count: 1_025)

@@ -39,7 +39,8 @@ struct LinuxNativeEffects: DesktopHostEffects {
     ) async throws -> TranscriptionResult {
         try await controller.transcribePreparedAudio(
             request.audio, model: request.model, key: request.key, duration: request.duration,
-            language: request.language, keywords: request.keywords, azureEndpoint: request.azureEndpoint
+            language: request.language, keywords: request.keywords, azureEndpoint: request.azureEndpoint,
+            historySaved: request.historySaved
         )
     }
 

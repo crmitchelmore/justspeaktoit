@@ -20,7 +20,7 @@ final class HuggingFaceWhisperStoreTests: XCTestCase {
         let imported = try WhisperImportFixtures.model()
         try store.save([imported])
         XCTAssertEqual(try store.load(), [imported])
-        let saved = String(decoding: try Data(contentsOf: store.url), as: UTF8.self)
+        let saved = try XCTUnwrap(String(bytes: try Data(contentsOf: store.url), encoding: .utf8))
         XCTAssertFalse(saved.contains("credential"))
         XCTAssertFalse(saved.contains("CoreML"))
     }

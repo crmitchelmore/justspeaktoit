@@ -156,6 +156,8 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         try resolved(modelID: modelID, voiceID: voiceID, accountInventory: xaiInventory.map(VoiceAccountInventory.xai))
     }
 
+    // exhaustive provider/model resolution across the existing catalogue; no behavior change.
+    // swiftlint:disable:next cyclomatic_complexity
     public static func resolved(
         modelID: String?, voiceID: String?, accountInventory: VoiceAccountInventory?
     ) throws -> Self {

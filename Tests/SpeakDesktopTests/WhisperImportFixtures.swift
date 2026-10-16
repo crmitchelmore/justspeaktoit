@@ -23,8 +23,8 @@ enum WhisperImportFixtures {
     }
 
     static func metadata(
-        revision: String = WhisperImportFixtures.revision, digest: String = WhisperImportFixtures.digest, size: Int64 = 48,
-        filename: String = "ggml-tiny.bin", duplicate: Bool = false, hasLFS: Bool = true
+        revision: String = WhisperImportFixtures.revision, digest: String = WhisperImportFixtures.digest,
+        size: Int64 = 48, filename: String = "ggml-tiny.bin", duplicate: Bool = false, hasLFS: Bool = true
     ) throws -> Data {
         var file: [String: Any] = ["rfilename": filename, "size": size]
         if hasLFS { file["lfs"] = ["sha256": digest, "size": size] }

@@ -136,6 +136,7 @@ typedef struct UI {
     GtkButton *voice_sources;
     AdwComboRow *appearance_row;
     AdwSwitchRow *login_row;
+    AdwSwitchRow *automation_row;
     GtkWidget *configuration_columns[4];
 } UI;
 
@@ -415,6 +416,13 @@ static void on_login_item(GObject *object, GParamSpec *spec, gpointer data) {
     if (ui.suppress) return;
     gtk_widget_set_sensitive(GTK_WIDGET(ui.login_row), FALSE);
     emit(JSTI_EVENT_LOGIN_ITEM, "", adw_switch_row_get_active(ui.login_row) ? 1 : 0);
+}
+
+static void on_automation(GObject *object, GParamSpec *spec, gpointer data) {
+    (void)object; (void)spec; (void)data;
+    if (ui.suppress) return;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.automation_row), FALSE);
+    emit(JSTI_EVENT_AUTOMATION, "", adw_switch_row_get_active(ui.automation_row) ? 1 : 0);
 }
 
 static void on_style(GObject *object, GParamSpec *spec, gpointer data) {
@@ -1402,6 +1410,17 @@ static GtkWidget *build_general(void) {
     g_signal_connect(ui.login_row, "notify::active", G_CALLBACK(on_login_item), NULL);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(startup), GTK_WIDGET(ui.login_row));
     gtk_box_append(GTK_BOX(column), startup);
+
+    GtkWidget *automation = group("Automation");
+    adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(automation),
+        "The speak command uses a private, same-user local socket. Off by default. "
+        "Imported preferences cannot grant access on this computer.");
+    ui.automation_row = ADW_SWITCH_ROW(adw_switch_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.automation_row), "Allow local automation");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(ui.automation_row), "Automation is off.");
+    g_signal_connect(ui.automation_row, "notify::active", G_CALLBACK(on_automation), NULL);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(automation), GTK_WIDGET(ui.automation_row));
+    gtk_box_append(GTK_BOX(column), automation);
 
     GtkWidget *appearance = group("Appearance");
     const char *schemes[] = { "Follow the system", "Light", "Dark", NULL };
@@ -2467,6 +2486,24 @@ int32_t jsti_window_set_login_item(int32_t state, const char *detail) {
     item->state = state;
     item->detail = g_strdup(detail);
     return post(login_item_apply, item, login_item_free);
+}
+
+static void automation_apply(gpointer pointer) {
+    LoginItem *item = pointer;
+    gboolean suppressed = ui.suppress;
+    ui.suppress = TRUE;
+    adw_switch_row_set_active(ui.automation_row, item->state != 0);
+    ui.suppress = suppressed;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.automation_row), TRUE);
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(ui.automation_row), item->detail);
+}
+
+int32_t jsti_window_set_automation(int32_t enabled, const char *detail) {
+    if ((enabled != 0 && enabled != 1) || detail == NULL || !g_utf8_validate(detail, -1, NULL)) return -1;
+    LoginItem *item = g_new0(LoginItem, 1);
+    item->state = enabled;
+    item->detail = g_strdup(detail);
+    return post(automation_apply, item, login_item_free);
 }
 
 typedef struct HUD {
@@ -3772,6 +3809,27 @@ static void text_output_capture(int32_t event, const char *text, int32_t index, 
         ++*(guint *)context;
 }
 
+static int32_t automation_self_test(char *error, size_t capacity) {
+    LoginItem off = { .state = 0, .detail = (gchar *)"Imported request pending local consent." };
+    automation_apply(&off);
+    jsti_window_event_fn callback = ui.callback;
+    ui.callback = observe_event;
+    observed.event = 0;
+    adw_switch_row_set_active(ui.automation_row, TRUE);
+    gboolean pending = observed.event == JSTI_EVENT_AUTOMATION && observed.index == 1
+        && !gtk_widget_get_sensitive(GTK_WIDGET(ui.automation_row));
+    observed.event = 0;
+    LoginItem failed = { .state = 0, .detail = (gchar *)"Automation could not start." };
+    automation_apply(&failed);
+    gboolean actual = observed.event == 0 && !adw_switch_row_get_active(ui.automation_row)
+        && gtk_widget_get_sensitive(GTK_WIDGET(ui.automation_row))
+        && g_strcmp0(adw_action_row_get_subtitle(ADW_ACTION_ROW(ui.automation_row)), failed.detail) == 0;
+    ui.callback = callback;
+    g_clear_pointer(&observed.text, g_free);
+    automation_apply(&off);
+    return pending && actual ? 0 : fail(error, capacity, "Automation did not show its actual state or failure");
+}
+
 static gboolean text_output_self_test(void) {
     TextOutput original = {
         .method = (gint32)adw_combo_row_get_selected(ui.output_row),
@@ -4126,6 +4184,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
         return fail(error, capacity, "the canonical application icon is not available in the window's theme");
     }
     if (login_item_self_test(error, capacity) != 0) return -1;
+    if (automation_self_test(error, capacity) != 0) return -1;
     if (g_list_model_get_n_items(G_LIST_MODEL(ui.model_names)) == 0) {
         return fail(error, capacity, "no models are offered");
     }

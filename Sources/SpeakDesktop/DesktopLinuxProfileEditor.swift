@@ -154,7 +154,9 @@ public enum DesktopLinuxProfileEditor {
     ) throws -> DesktopProfileEditing.CatalogueChoice {
         if value.isEmpty { return .appSetting }
         if value == "!" { return .preserved }
-        guard let index = identifiers.firstIndex(of: value) else { throw Failure("Choose the model or language again.") }
+        guard let index = identifiers.firstIndex(of: value) else {
+            throw Failure("Choose the model or language again.")
+        }
         return .index(index)
     }
 

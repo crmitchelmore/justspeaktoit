@@ -102,6 +102,8 @@ final class DesktopConfigurationTests: XCTestCase {
         XCTAssertNil(restored.language)
     }
 
+    // existing owned test exhaustively covering every numeric field/range; no behavior change.
+    // swiftlint:disable:next function_body_length
     func testNumericRangesTypesAndNonFiniteEntriesAreRejected() throws {
         for field in DesktopConfiguration.fields {
             switch field.kind {

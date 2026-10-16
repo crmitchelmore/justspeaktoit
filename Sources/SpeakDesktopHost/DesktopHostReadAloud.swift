@@ -280,23 +280,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         guard !SpeechTextSegmenter.segments(text).isEmpty else {
             update("There is no transcript to read aloud."); return
         }
-        stopReadAloud()
-        let ticket = playbackRequests.begin()
-        let pronunciations: [PronunciationEntry]
-        do {
-            let vocabulary = try await vocabularyStore()
-            pronunciations = await vocabulary.entries
-        } catch {
-            guard playbackRequests.isCurrent(ticket), !closed else { return }
-            update("Pronunciation dictionary could not be loaded: \(error.localizedDescription)")
-            return
-        }
-        guard playbackRequests.isCurrent(ticket), !closed, canUseHistory, selectedHistoryID == id,
-              isVisible(id) else { return }
-        let rendered = PronunciationRenderer().applyReplacements(to: text, entries: pronunciations)
-        let segments = SpeechTextSegmenter.segments(rendered)
-        guard !segments.isEmpty else { update("There is no transcript to read aloud."); return }
-        startVoiceRead(text: rendered, source: .history, owner: id, recordID: id)
+        startVoiceRead(text: text, source: .history, owner: id, recordID: id)
     }
 
     package func readVoiceSource(_ snapshot: VoiceOutputSourceSnapshot) async {

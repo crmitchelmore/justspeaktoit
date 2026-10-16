@@ -128,8 +128,12 @@ final class DesktopHostVoiceQualityTests: XCTestCase {
         let document = try JSONDecoder().decode(DesktopConfigurationDocument.self, from: Data(contentsOf: destination))
         XCTAssertEqual(document.preferences.values["ttsQuality"], AnyCodable(.string("future-quality")))
         let source = try VoiceOutputSourceSnapshot(source: .typedText, text: "Synthetic unavailable quality.")
-        await controller.generateVoiceSource(source, options: .init(autoPlay: false, saveToRecordings: false)) {
-            _, _, _ in XCTFail("Unsupported quality reached synthesis"); return Data()
+        await controller.generateVoiceSource(
+            source,
+            options: .init(autoPlay: false, saveToRecordings: false)
+        ) { _, _, _ in
+            XCTFail("Unsupported quality reached synthesis")
+            return Data()
         }
         let result = await controller.generatedVoice
         XCTAssertNil(result)
@@ -197,8 +201,10 @@ extension DesktopHostVoiceQualityTests {
         let (stream, continuation) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         defer { continuation.finish() }
         let transport = try XCTUnwrap(session)
-        await controller.generateVoiceSource(source, options: .init(autoPlay: false, saveToRecordings: false)) {
-            snapshot, selection, credential in
+        await controller.generateVoiceSource(
+            source,
+            options: .init(autoPlay: false, saveToRecordings: false)
+        ) { snapshot, selection, credential in
             XCTAssertEqual(selection.voice, .openai(.highDefinition, preset))
             XCTAssertEqual(selection.options.quality, .highest)
             XCTAssertEqual(selection.options.speed, 4)

@@ -170,9 +170,16 @@ private final class PostProcessingBench: @unchecked Sendable {
     }
 
     func applyLocal(enabled: Bool, key: String) throws {
-        guard let index = DesktopPostProcessing.models.firstIndex(where: {
+        let models = DesktopPostProcessing.nativeModels()
+        guard let index = models.firstIndex(where: {
             $0.id == LocalPostProcessingModel.builtInRulesModelID
         }) else { throw failure("the shared rules route is missing") }
+        // The real dialog publishes its displayed identifiers before callbacks.
+        holder.postProcessingPicker.publish(models)
+        try require(
+            holder.postProcessingPicker.modelIdentifier(forSelection: index) == LocalPostProcessingModel.builtInRulesModelID,
+            "the native picker snapshot lost the local rules identifier"
+        )
         "".withCString { prompt in
             key.withCString { key in
                 postProcessingEvent(

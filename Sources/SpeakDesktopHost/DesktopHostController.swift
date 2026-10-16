@@ -106,6 +106,28 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     /// At most one audible native History playback; its status presenter is
     /// installed by preparePlayback once this actor exists.
     package let playback = Platform.makePlayback()
+    package var comparisons: DesktopComparisonStore?
+    var comparisonSync: DesktopHostComparisonSyncHooks?
+    var comparisonVisible = false
+    var comparisonInitialization: DesktopComparisonStoreLoading?
+    var comparisonAdmissionTask: Task<Void, Never>?
+    var comparisonBatch: DesktopComparisonBatch?
+    let comparisonOperations = DesktopComparisonOperations()
+    let comparisonStaging = DesktopComparisonStaging()
+    package var comparisonTask: Task<Void, Never>?
+    package var comparisonFinalization: Task<Void, Never>?
+    var comparisonUpdates: Task<Void, Never>?
+    package var comparisonCapture: DesktopHostComparisonCapture?
+    package var comparisonLive: DesktopComparisonLive?
+    package var comparisonSelection: UUID?
+    var comparisonReference: UUID?
+    var comparisonPresentationRevision: UInt64 = 0
+    let comparisonWords = DesktopComparisonWordPresentation()
+    package var comparisonGeneration = UUID()
+    var comparisonOwnedRoundIDs: Set<UUID> = []
+    package var comparisonLanguage: String?
+    package var comparisonPending: ModelComparisonRound?
+    package var comparisonNotice = "Select models and an input to begin."
 
     package init(
         directory: URL, effects: any DesktopHostEffects<Platform>, shutdownGrace: Duration = DesktopHostShutdown.grace
@@ -320,6 +342,10 @@ extension DesktopHostController {
             transcriptVariant = .processed
             refreshHistory(selectRecord: true)
             var status = try readyStatus(savedRecordings: records.count)
+            do { _ = try await loadComparisonStore() } catch {
+                status += " Saved comparisons could not be opened: \(error.localizedDescription)"
+            }
+            guard !closed else { return }
             if !recovery.unreadableFiles.isEmpty {
                 status += " \(recovery.unreadableFiles.count) history records could not be read."
             }

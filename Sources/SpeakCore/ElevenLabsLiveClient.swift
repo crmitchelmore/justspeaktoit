@@ -380,3 +380,7 @@ extension ElevenLabsLiveClient {
         #endif
     }
 }
+
+extension ElevenLabsLiveClient: StreamingAudioReadyProviding {
+    public var isReadyForAudio: Bool { isConnected }
+}

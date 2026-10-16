@@ -204,6 +204,59 @@ The existing Compare Models feature is another capture consumer. `CompareModelsC
 through per-candidate `ComparisonLiveLane` instances, retains the common PCM capture, and stores blinded rounds in
 `ComparisonRoundStore`. File comparison has its own runner, and `MacComparisonSyncAdapter` bridges rounds to `SpeakSync`.
 
+Windows/Linux comparison is another isolated capture consumer:
+`SpeakDesktop/DesktopComparisonRunner` runs immutable file snapshots through
+injected raw providers; `DesktopComparisonLive` gates one native capture on
+synchronized shared-client readiness and fans out bounded common PCM with a
+single rate projection. `DesktopComparisonStore` persists the canonical
+SpeakCore revision/round shape and derives its scoreboard; completion preserves
+the initially persisted blind identities/order. `SpeakDesktopHost/DesktopHostComparison`
+owns admission, cancellation, capture, raw provider execution, judging and
+exports without using normal History, post-processing or insertion.
+`DesktopHostComparisonReadiness` projects only qualified, credential/local-ready
+routes into native selection, retains unavailable saved choices and names their
+recovery reasons. Canonical credential resolution and fresh post-suspension
+admission prevent stale readiness from starting audio/provider work.
+`DesktopHostComparisonAdmission` keeps File/Live admission out of the native
+settings queue as separately owned cancellable work, so Cancel and shutdown do
+not wait behind pending playback admission.
+`DesktopHostComparisonBatch` snapshots the queue before the first request, then
+pauses after every round. Judging never starts another sample: explicit Next file
+is required, including after an unranked failure reveal. Queued execution leases
+protect snapshots from sync/deletion; Cancel, discard, editor close and shutdown
+release them without starting providers. Relaunch retains evidence but never
+automatically resumes billable work.
+`DesktopComparisonOperations` limits File/Batch to eight actual provider operations:
+deadline/cancellation ends the UI wait, not ownership. Independent operation-token
+store leases and staging reservations survive until actual exit, including after
+Cancel, editor reopen or Next file. Sliding workers remove the File model-count
+ceiling without creating one waiting task per selection. `DesktopComparisonStaging`
+preflights and incrementally bounds newly owned audio/revision metadata to
+800,000,000 bytes, with separate single 25 MB scratch ownership and serial import.
+File/Batch has no sample-count ceiling; bounded preparation rolls back unused files
+and reservations. These are deliberate native safety policies, not Mac equivalence:
+per-file import/conversion stays 25 MB (Mac comparison: 100 MiB), and Live retains
+eight simultaneous lanes and its existing PCM/provider budgets.
+`WindowsComparison.cpp` and `LinuxComparison.c` own their native editors and
+file/save pickers, connected by small host adapters. `DesktopHostComparisonExports`
+uses canonical all-round/selected-round JSON/Markdown documents for saves and
+explicit native clipboard copies. Picker-scoped round identities survive later
+selection changes; missing rounds fail explicitly. Separate comparison hooks
+connect the store to the existing owned desktop iCloud service and its explicit
+native consent/retry controls. `DesktopComparisonSyncPass` wraps the canonical
+`ComparisonSyncCoordinator` and web transport with frozen-session requests
+outside the non-reentrant gate and conditional local commits inside it.
+Independent comparison cursors/acknowledgements and retained account provenance
+prevent stale commits and original-account tombstone transfer. In-memory
+execution leases keep active captures/queued batch snapshots out of sync and
+protect their audio from remote deletion. Sync never transfers audio; the
+existing Mac sync adapter and native History/key-import journeys are unchanged.
+Confirmed delete/discard commits canonical tombstones before removing owned
+samples. Startup shares one owned comparison-store initialization and prunes
+orphan samples; original imports and normal History are never deleted. The
+shared capture safety limit matches Mac's 600 seconds, without adding an
+age/count retention policy or automatic failed-run retry.
+
 ## iOS runtime
 
 [SpeakiOSApp.swift](../SpeakiOSApp/SpeakiOSApp.swift) and `SpeakiOSAppDelegate` are the app/launch roots. The delegate

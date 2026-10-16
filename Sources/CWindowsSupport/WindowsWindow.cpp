@@ -23,6 +23,8 @@ void jsti_show_postprocessing(HWND owner);
 bool jsti_settings_self_test(HWND owner, std::string &error);
 bool jsti_profiles_self_test(HWND owner, std::string &error);
 void jsti_show_profiles(HWND owner);
+void jsti_show_comparison(HWND owner, JSTIWindowCallback callback, void *context);
+bool jsti_comparison_self_test(HWND owner, std::string &error, const std::string &directory = {});
 void jsti_cancel_profiles_request();
 bool jsti_text_output_available();
 void jsti_show_text_output(HWND owner);
@@ -82,6 +84,7 @@ constexpr int voiceSettingsID = 173;
 constexpr int sourceLabelID = 89;
 constexpr int localModelsID = 174;
 constexpr int sourceID = 175;
+constexpr int comparisonID = 183;
 // Model modes: bit 0 is live, bit 1 is local (on-device).
 constexpr int modeCount = 4;
 constexpr int playbackIdle = 0, playbackPreparing = 1, playbackPlaying = 2, playbackPaused = 3;
@@ -549,6 +552,7 @@ unsigned pagesOf(int identifier) {
         return page(generalPage);
     case processingID: return page(postProcessingPage);
     case profilesID: return page(profilesPage);
+    case comparisonID: return page(transcriptionPage);
     case shortcutValueID: case shortcutID: return page(keyboardPage);
     case cloudSyncID: return page(cloudSyncPage);
     case githubID: case issueID: case privacyID: return page(aboutPage);
@@ -857,6 +861,10 @@ void layoutSettings(HWND window, const RECT &content) {
         button(saveID, y, scale(window, 112));
         y += row + scale(window, 12);
         place(window, azureID, box(left + scale(window, 188), y, scale(window, 240), row));
+        top = y + row + scale(window, 20) + gap;
+        y = layoutSettingsCard(window, top, content, 0xE9D2, L"Compare Models",
+            L"Run the same audio through several models, rank the raw results blind, and export the scoreboard.", row);
+        place(window, comparisonID, box(left, y, scale(window, 220), row));
         break;
     }
     case postProcessingPage: {
@@ -1469,6 +1477,7 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"Stop", BS_PUSHBUTTON | WS_TABSTOP, stopPlaybackID) &&
         add(L"BUTTON", L"Choose &voice…", BS_PUSHBUTTON | WS_TABSTOP, voiceSettingsID) &&
         add(L"BUTTON", L"Edit app &profiles…", BS_PUSHBUTTON | WS_TABSTOP, profilesID) &&
+        add(L"BUTTON", L"Compare &Models...", BS_PUSHBUTTON | WS_TABSTOP, comparisonID) &&
         add(L"STATIC", L"&Source", 0, sourceLabelID) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP, sourceID) &&
         add(L"STATIC", L"&Mode", 0, 95) &&
@@ -1905,7 +1914,12 @@ void tourStep(HWND window) {
     }
     ++state.tourStep;
     if (state.tourStep < tourSteps) tourShow(window, state.tourStep);
-    else PostMessageW(window, WM_CLOSE, 0, 0);
+    else {
+        std::string comparisonError;
+        if (!jsti_comparison_self_test(window, comparisonError, jsti::utf8(state.tourDirectory)))
+            emit(window, JSTI_EVENT_ERROR, comparisonError.c_str());
+        PostMessageW(window, WM_CLOSE, 0, 0);
+    }
 }
 
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
@@ -2019,6 +2033,9 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         switch (LOWORD(wparam)) {
         case profilesID:
             if (idleControl(window, profilesID)) emit(window, 17);
+            return 0;
+        case comparisonID:
+            if (idleControl(window, comparisonID)) jsti_show_comparison(window, state.callback, state.context);
             return 0;
         case recordID: emitRecording(window); return 0;
         case importID:
@@ -3743,7 +3760,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             jsti_text_output_settings_self_test(window, textOutputID, setRecording, recordingBlocked, &observed, failure) &&
             jsti_hotkey_self_test(window, observe, &observed, failure) && jsti_voice_settings_self_test(window, failure) &&
             jsti_local_models_self_test(window, failure) && jsti_cloud_sync_settings_self_test(window, failure) &&
-            jsti_azure_resource_settings_self_test(window, failure);
+            jsti_azure_resource_settings_self_test(window, failure) && jsti_comparison_self_test(window, failure);
     };
     bool passed = false;
     try { passed = check(); }
@@ -3806,6 +3823,16 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
 int jsti_window_save_snapshot(const char *path, char *error, size_t errorCapacity) {
     HWND window;
     { std::lock_guard<std::mutex> lock(state.mutex); window = state.window; }
+    extern int jsti_owned_window_save_snapshot(HWND, const char *, char *, size_t);
+    return jsti_owned_window_save_snapshot(window, path, error, errorCapacity);
+}
+
+int jsti_owned_window_save_snapshot(HWND window, const char *path, char *error, size_t errorCapacity) {
+    DWORD process = 0;
+    GetWindowThreadProcessId(window, &process);
+    if (process != GetCurrentProcessId()) {
+        return jsti::fail("Only an app-owned native window can be captured.", error, errorCapacity);
+    }
     if (!window || GetWindowThreadProcessId(window, nullptr) != GetCurrentThreadId()) {
         return jsti::fail("The native snapshot must run on the UI thread after READY.", error, errorCapacity);
     }
@@ -3824,7 +3851,7 @@ int jsti_window_save_snapshot(const char *path, char *error, size_t errorCapacit
         return jsti::fail("Native snapshot dimensions exceed the 64 MiB diagnostic limit.", error, errorCapacity);
     }
     // Only this app's own client DC is acquired. Never use GetDC(nullptr),
-    // desktop BitBlt, or a caller-supplied window handle here.
+    // desktop BitBlt. The internal handle must belong to this process/thread.
     struct BitmapResources {
         HWND window;
         HDC source = nullptr;

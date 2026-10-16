@@ -60,6 +60,18 @@ enum JSTIWindowEvent {
  * selected record ID after the user chose a transcript version; pair it with
  * jsti_window_transcript_variant() synchronously inside the callback. */
 typedef void (*JSTIWindowCallback)(int event, const char *text, int model_index, void *context);
+
+/* Comparison actions 100-107. Model rows: id TAB name TAB live(0/1), round rows:
+ * id TAB name. Run payload: language LF tab-separated model ids LF file paths.
+ * Rank payload: round id LF comma-separated ranks in persisted blind order. */
+int jsti_comparison_present(const char *models, const char *rounds, const char *detail,
+                           const char *selected, int busy, int recording, int judgeable,
+                           int sync_enabled, int sync_available, const char *references, const char *reference);
+/* Next-file action 128 carries the paused round ID; batch fields share the same presentation snapshot. */
+int jsti_comparison_present_batch(const char *models, const char *rounds, const char *detail,
+                                 const char *selected, int busy, int recording, int judgeable,
+                                 int sync_enabled, int sync_available, const char *references, const char *reference,
+                                 const char *batch_round, int batch_remaining, int can_next);
 int jsti_window_run(const char *const *model_names, size_t model_count, int selected_index,
                     JSTIWindowCallback callback, void *context, char *error, size_t error_capacity);
 /* Optional pre-run mode catalogue with the same count/order as window_run's

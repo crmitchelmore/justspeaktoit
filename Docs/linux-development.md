@@ -51,6 +51,93 @@ then the dashboard and History in dark mode and the dashboard while recording.
 `scripts/linux-desktop-checks.sh` runs it when `JSTI_UI_SCREENSHOT_DIR` is set,
 and CI uploads the pictures as `linux-ui-screenshots`.
 
+## Model comparison
+
+**Transcription > Compare Models** opens a native GTK/libadwaita editor with
+wrapped, accessibly named model checkboxes, File/Batch and Live input modes,
+language hint, saved rounds, raw blind results, ranking/reveal, scoreboard,
+sample playback and JSON/Markdown exports. File selection accepts one or more
+local samples without a sample-count ceiling; save dialogs use the desktop's native
+file chooser. Picker errors appear in the comparison editor instead of being hidden
+behind its modal window.
+The export scope chooses **All rounds** or **Selected round** for both
+**Save JSON / Markdown** and explicit **Copy JSON / Markdown**. Save requests
+freeze the selected round when the chooser opens, independently of later
+selection changes; a deleted/missing round is an error, never an all-round fallback.
+Clipboard export does not insert text or mutate normal History.
+Closing a picker/editor invalidates that picker request, so a late selection
+cannot start a replacement editor's run.
+
+Windows and Linux share `DesktopComparisonRunner`, `DesktopComparisonLive`,
+`DesktopComparisonStore` and `DesktopHostComparison`: all file snapshots are
+prepared before provider work, one native microphone capture fans out to the
+qualified live routes, and raw results never reach insertion, post-processing,
+dictation settings or normal History. Failed candidates remain independently
+judgeable. Complete distinct ranks 1...N reveal models; canonical persisted
+rounds determine standings and exports.
+Fewer than two usable results reveal unranked evidence, matching Mac, rather than
+inventing rankings or scoreboard credit. See the
+[Windows comparison workflow](windows-development.md#model-comparison) for the
+shared 120-second file, 12-second readiness and 30-second finalization budgets.
+Native **Select all ready / Select none** and remembered per-mode candidate
+selection use canonical credential readiness plus local-runtime/Azure endpoint
+checks. Unavailable qualified models have explicit reasons in the detail pane;
+their saved selections survive ready-only edits and relaunch. Credential writes,
+cloud-key imports and endpoint changes refresh readiness. Keys/settings are read
+again after the final admission suspension, before audio/provider work, and
+admitted runs keep immutable snapshots. Readiness does not validate a key with
+the real service. Cancel/editor close invalidates pending admission across
+editor reopen.
+`DesktopSettingsQueue` admits File/Live work without waiting for playback:
+separately owned admission tasks are cancelled on Cancel/editor close/shutdown.
+Batch freezes all sample/model/language snapshots before its first request and
+pauses after each round for judging. Saving ranks only reveals: **Next file** must
+explicitly start the next sample, including after an unranked failure reveal.
+Queued rounds retain sync/deletion leases. Cancel, discarding the current round,
+editor close and shutdown retain recovery evidence but never resume requests on
+relaunch. File/Batch has no model-count ceiling and uses a sliding set of at most
+eight underlying provider operations. Deadlines/cancellation do not release an
+uncooperative operation's slot, audio lease or accounted bytes before actual exit;
+exhausted capacity is an explicit error, not replacement admission. Close does not
+join those operations. Sync and local deletion cannot remove their samples.
+Preflight and incremental accounting bound newly owned staged audio plus canonical
+revision metadata to 800,000,000 bytes, with a separate single 25,000,000-byte scratch
+slot and serial preparation. Unused reservations roll back; queued/still-running
+operations retain theirs. See the Windows workflow for the common ownership policy.
+This bounds active staging ownership, not the lifetime size of persisted comparison history.
+The staging budget is a deliberate resource limit, not Mac equivalence or hardware
+acceptance. Per-file import/conversion remains 25 MB versus Mac comparison's 100 MiB.
+Live still admits two to eight simultaneous lanes; no waves or replay stand in for
+live comparison.
+A blind **Diff against** dropdown uses the shared
+`TranscriptWordDiff`, with accessible `[+added]` / `[-removed]` text annotations
+instead of colour-only edits; original transcripts and persisted ranks stay unchanged.
+
+`Comparisons/rounds.json` and app-owned `Comparisons/Samples/` live in the private
+data directory. Interrupted rounds retain their audio; interrupted live metadata
+can remain unknown until normal finalization. Native confirmed delete/discard
+persists a canonical tombstone before cleaning up its app-owned sample, while
+startup prunes orphan samples. Original imports and normal History are untouched.
+The shared comparison capture safety limit is 600 seconds, not an age/count
+retention policy. The editor's separate explicit iCloud consent and **Sync now /
+retry** use the same canonical, account/consent-fenced metadata-only comparison
+sync as Windows. Sign in from the existing iCloud Sync settings; local changes,
+manual retry and the existing 300-second web heartbeat reconcile rounds and
+tombstones. Comparison owns a separate cursor/acknowledgements and preserves
+original-account provenance. Active capture/queued batch revisions are excluded
+and protected against remote deletion; remote metadata never supplies audio.
+Automatic interrupted/failed provider retry is not a Mac comparison feature and
+is not added here.
+The GTK window self-test checks wrapped labels, model and language payloads,
+ranking, playback, scoped export payloads, explicit sync consent/retry and
+busy/recording controls with synthetic fixtures only.
+The screenshot tour adds `comparison-blind-light.png` and
+`comparison-revealed-dark.png`, plus `-full.png` views including the below-fold
+ranking/export controls, without changing page ordinals. Native execution
+at the final head, physical PulseAudio/PipeWire devices, screen-reader/keyboard
+acceptance, small-screen behavior, live-provider and real-account CloudKit receipts are separate gates;
+portable tests and syntax/type checks do not establish those gates.
+
 ## Window
 
 The window follows the Mac app's layout and look. A sidebar lists **Speak**

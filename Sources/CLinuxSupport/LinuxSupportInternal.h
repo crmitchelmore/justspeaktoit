@@ -26,6 +26,9 @@ gboolean jsti_window_loop_running(void);
 typedef void (*jsti_window_apply_fn)(gpointer data);
 int32_t jsti_window_post(jsti_window_apply_fn apply, gpointer data, GDestroyNotify destroy);
 void jsti_window_emit(gint32 event, const char *text, gint32 index);
+void jsti_hands_free_guard_start(void);
+void jsti_hands_free_guard_stop(void);
+int32_t jsti_hands_free_guard_self_test(char *error, size_t capacity);
 
 /* LinuxLocalModels.c: the Local models group, built once with the window,
  * and its part of the window self-test. */
@@ -36,15 +39,36 @@ int32_t jsti_local_models_self_test(char *error, size_t capacity);
  * iCloud sync page, and exercised by the window self-test. */
 struct _GtkWidget *jsti_cloud_sync_group_new(void);
 int32_t jsti_cloud_sync_self_test(char *error, size_t capacity);
+struct _GtkWidget *jsti_history_filters_button_new(void);
+int32_t jsti_history_filters_self_test(char *error, size_t capacity);
+gboolean jsti_history_filters_active(void);
+
+struct _GtkWindow;
+void jsti_show_voice_sources(struct _GtkWindow *owner, const char *record, const char *history);
+int32_t jsti_voice_sources_self_test(struct _GtkWindow *owner, char *error, size_t capacity);
+void jsti_voice_sources_close(void);
+void jsti_voice_sources_show_fixture(struct _GtkWindow *owner);
+int32_t jsti_voice_sources_save_snapshot(const char *path);
+void jsti_voice_controls_show_fixture(struct _GtkWindow *owner);
+int32_t jsti_voice_controls_save_snapshot(const char *path);
+void jsti_voice_usage_show_fixture(struct _GtkWindow *owner);
+int32_t jsti_voice_usage_save_snapshot(const char *path);
 
 struct _GtkWidget;
 struct _GtkLabel;
+struct _GtkWindow;
+void jsti_comparison_open(struct _GtkWindow *parent);
+int32_t jsti_comparison_self_test(struct _GtkWindow *parent, char *error, size_t capacity);
+void jsti_comparison_screenshot_tour(struct _GtkWindow *parent, const char *directory);
+int32_t jsti_widget_save_snapshot(struct _GtkWidget *widget, const char *path, gboolean opaque);
 
 /* LinuxWindowStyle.c: the app's look, shared by every page. Colours follow
  * the Mac app's brand tokens and switch with the desktop's light or dark
  * style. Each builder returns a new floating widget. */
 void jsti_style_install(void);
-/* The app icon, drawn rather than loaded so it needs no image loader. */
+/* Canonical Mac artwork loaded once from the bundled hicolor theme. */
+void jsti_app_icon_install(void);
+void jsti_app_icon_clear(void);
 struct _GtkWidget *jsti_brand_icon_new(int size);
 /* Paints the app icon into a size x size square at the origin. */
 struct _cairo;
@@ -73,6 +97,13 @@ double jsti_capture_level(void);
 /* LinuxHUD.c: the recording HUD, on the main thread. `phase` is the shared
  * DesktopHUDState.Phase; `live` shows while recording. */
 void jsti_hud_show(int phase, const char *headline, const char *subheadline, const char *live);
+void jsti_hud_show_duration(int phase, const char *headline, const char *subheadline, const char *live,
+                            int display_milliseconds);
+void jsti_hud_show_presentation(int phase, const char *headline, const char *subheadline, const char *live,
+                                int display_milliseconds, gboolean compact);
+void jsti_hud_show_layout(int phase, const char *headline, const char *subheadline, const char *live,
+                          int display_milliseconds, gboolean compact, gboolean expanded);
+gboolean jsti_hud_overlay_supported(void);
 /* Redraws after a light or dark change; destroys the HUD with the window. */
 void jsti_hud_destroy(void);
 /* The HUD's card and shadow, when on screen, for snapshots; NULL otherwise. */

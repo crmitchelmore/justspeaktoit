@@ -37,21 +37,34 @@ func runSelfTest() throws {
         throw DesktopHostError(message: "Live models are offered without a qualified transport.")
     }
     print("Native Linux adapter and canonical model self-test passed.")
+    try blocking {
+        for profile in RecordingFeedbackProfile.allCases {
+            guard try await LinuxRecordingFeedbackLoader.checkAssets(profile: profile) == 2 else {
+                throw DesktopHostError(message: "Recording sound asset self-test did not decode both cues.")
+            }
+        }
+    }
+    print("All eight bundled Linux recording sounds decoded with the production decoder and bounds.")
+    try blocking { try await LinuxShortcutGestures.checkTimingForSelfTest() }
+    print("Native Linux shortcut timing self-test passed.")
     try blocking { try await LinuxLocalSelfTest.run() }
 }
 
 /// Configures the window from saved settings, runs GTK on this (main) thread
 /// until the window closes, then drains every queue and closes the controller.
 func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws {
+    try configureApplicationIcon()
     let selected = try blocking { () -> Int in
         let microphone = await controller.selectedMicrophone()
         let warning = LinuxWindow.configureMicrophones(selected: microphone, synthetic: holder.smokeTest)
         await controller.setMicrophoneWarning(warning)
         try await controller.configureModelCatalog()
         holder.applyShortcutStyle(await controller.hotKeySettings())
+        try await LinuxWindow.configureConfiguration(holder)
         LinuxWindow.postProcessing(await controller.postProcessingOptions())
         _ = jsti_window_set_azure_resource(await controller.azureResourceEndpoint())
         LinuxWindow.voiceOutput(await controller.voiceOutputSettings())
+        LinuxWindow.voiceSources(context: Unmanaged.passUnretained(holder).toOpaque())
         _ = jsti_window_set_appearance(Int32(await controller.appearance().rawValue))
         await controller.configureLocalModels()
         return await controller.selectedIndex()
@@ -94,6 +107,13 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
     if let smokeFailure = holder.smokeTestFailure { throw smokeFailure }
 }
 
+func configureApplicationIcon() throws {
+    guard let theme = Bundle.module.url(forResource: "hicolor", withExtension: nil) else {
+        throw DesktopHostError(message: "The bundled application icon theme is missing.")
+    }
+    try LinuxNative.call { jsti_app_icon_configure(theme.deletingLastPathComponent().path, $0, $1) }
+}
+
 let arguments = CommandLine.arguments
 DesktopHostModels.configure(
     streamingQualified: LinuxLiveTransport.qualified, local: DesktopLocalTranscription.options(host: .linux)
@@ -104,6 +124,17 @@ if arguments.contains("--version") {
 }
 if arguments.contains("--self-test") {
     do { try runSelfTest() } catch { fail(error) }
+    exit(0)
+}
+if arguments.contains("--recording-feedback-self-test") {
+    do {
+        try blocking {
+            for profile in RecordingFeedbackProfile.allCases {
+                let latencies = try await LinuxRecordingFeedbackLoader.checkNativeOutput(profile: profile)
+                print("\(profile.rawValue) prepared recording sound queue latencies (seconds): \(latencies)")
+            }
+        }
+    } catch { fail(error) }
     exit(0)
 }
 if arguments.contains("--local-transcription-self-test") {

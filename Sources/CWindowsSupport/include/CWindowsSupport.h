@@ -3,10 +3,16 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "VoiceSources.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* Corrections/pronunciation editor; events 70 (action), 71 (load), index 0/1;
+ * event 72 reads a selected recording's correction snapshot (kind 2).
+ * Escaped UTF-8 field contract lives in DesktopVocabularyWire. */
+int32_t jsti_vocabulary_set(int32_t kind, const char *payload, int32_t refresh);
 
 /* UTF-8 strings throughout. Zero is success; -1 is failure with a caller-owned
  * error buffer. No API logs credential or transcript contents. Windows only. */
@@ -47,7 +53,15 @@ enum JSTIWindowEvent {
     JSTI_EVENT_APPEARANCE = 26,
     /* General's Launch at login switch: text "1" on, "0" off. The switch stays
      * disabled until jsti_window_set_login_item reports the state reached. */
-    JSTI_EVENT_LOGIN_ITEM = 27
+    JSTI_EVENT_LOGIN_ITEM = 27,
+    JSTI_EVENT_HISTORY_FILTERS = 90, /* text: DesktopHistoryFilter JSON */
+    JSTI_EVENT_HISTORY_DELETE = 91, /* text: frozen newline-separated UUIDs; index: 1 removes owned audio */
+    JSTI_EVENT_RECORDINGS_FOLDER = 93,
+    JSTI_EVENT_AUDIO_CLEANUP = 94,
+    JSTI_EVENT_AUDIO_CLEANUP_RESPONSE = 95, /* text: confirmation UUID; index: 1 confirms, 0 cancels */
+    JSTI_EVENT_MIGRATION_EXPORT = 96, /* text: selected ZIP destination; index: 1 includes saved audio */
+    JSTI_EVENT_MIGRATION_INSPECT = 97, /* text: selected ZIP source; no application changes */
+    JSTI_EVENT_USER_ABSENT = 120
 };
 
 /* Runs on the UI thread. text is borrowed until callback returns. model_index
@@ -60,6 +74,35 @@ enum JSTIWindowEvent {
  * selected record ID after the user chose a transcript version; pair it with
  * jsti_window_transcript_variant() synchronously inside the callback. */
 typedef void (*JSTIWindowCallback)(int event, const char *text, int model_index, void *context);
+typedef struct JSTIConfigurationField {
+    const char *title;
+    const char *value;
+    const char *group;
+    int is_boolean;
+    int requires_hud_overlay;
+    /* Optional newline-separated choices: raw value, tab, display title. */
+    const char *choices;
+    int requires_hands_free_guard;
+} JSTIConfigurationField;
+/* action 0 applies fields; 1 imports and 2 exports a path in values[0].
+ * action 3 applies fields plus the selected recovered-keyword text in the final
+ * value; the host verifies that exact edit still exists before restoring it.
+ * The callback validates synchronously; persistence is ordered by Swift. */
+typedef int (*JSTIConfigurationCallback)(int action, const char *const *values, size_t count,
+                                        void *context, char *error, size_t capacity);
+int jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t count,
+                                  const char *const *recovered_keywords, size_t recovered_count,
+                                  JSTIConfigurationCallback callback, void *context);
+void jsti_window_clear_configuration(void);
+
+/* Comparison actions 100-107. Model rows: id TAB name TAB live(0/1), round rows:
+ * id TAB name. Run payload: language LF tab-separated model ids LF file paths.
+ * Rank payload: round id LF comma-separated ranks in persisted blind order. */
+int jsti_comparison_present(const char *models, const char *rounds, const char *detail,
+                           const char *selected, int busy, int recording, int judgeable,
+                           int sync_enabled, int sync_available, const char *references, const char *reference);
+/* Thread-safe; false refuses hands-free if native lock/sleep observation failed. */
+int jsti_window_hands_free_guard_ready(void);
 int jsti_window_run(const char *const *model_names, size_t model_count, int selected_index,
                     JSTIWindowCallback callback, void *context, char *error, size_t error_capacity);
 /* Optional pre-run mode catalogue with the same count/order as window_run's
@@ -148,6 +191,16 @@ typedef struct JSTIHistoryRow {
     int tone;
 } JSTIHistoryRow;
 
+typedef struct JSTIHistoryFilterModel {
+    const char *id;
+    const char *name;
+    int selected;
+} JSTIHistoryFilterModel;
+/* Copies the complete used-model catalogue and current filter. Dates are
+ * Gregorian YYYY-MM-DD, or empty for no boundary. Safe from any thread. */
+int jsti_window_set_history_filters(const JSTIHistoryFilterModel *models, size_t count,
+                                    int errors_only, const char *from_day, const char *through_day);
+
 /* Preformatted History totals, as the Mac dashboard shows them. */
 typedef struct JSTIInsights {
     const char *sessions;
@@ -177,7 +230,10 @@ int jsti_window_set_appearance(int appearance);
  * 2 transcribing, 3 post-processing, 4 delivering, 5 success (hides after
  * 2.4 s), 6 failure (hides after 6 s). Each new phase restarts its clock.
  * Thread safe and latest-only; -1 for invalid UTF-8, phase or length. */
-int jsti_window_set_hud(int phase, const char *headline, const char *subheadline, const char *live_text);
+int jsti_window_set_hud(int phase, const char *headline, const char *subheadline, const char *live_text,
+                        int display_milliseconds, int compact);
+int jsti_window_set_hud_layout(int phase, const char *headline, const char *subheadline, const char *live_text,
+                               int display_milliseconds, int compact, int expanded);
 /* Shows every page, then the dashboard and History in dark mode, then the
  * dashboard while recording, saving each as `directory`\NN-name.bmp once
  * drawn, then closes the window. Thread safe. */
@@ -192,6 +248,8 @@ int jsti_window_screenshot_tour(const char *directory, char *error, size_t error
  * or changing the selected row also resets the displayed transcript variant
  * until the host reports one. */
 int jsti_window_set_history(const JSTIHistoryRow *rows, size_t count, const char *selected_id);
+/* Complete retained IDs, including filtered-out rows. Copied for Clear confirmation. */
+int jsti_window_set_history_management(const char *identifiers);
 /* Which retained transcript the window shows for record_id. It is applied only
  * while that record is still the selected row, so a late report can never
  * describe a different record; null/empty record_id clears the control.
@@ -234,6 +292,10 @@ int jsti_window_choose_export_path(const char *suggested_filename, char *path, s
  * Only recognised audio filename extensions are accepted; never executes an
  * arbitrary imported file. Shell activation errors are returned. */
 int jsti_shell_open_file(const char *path, char *error, size_t error_capacity);
+/* Reveals an existing directory in Explorer; never opens a file association. */
+int jsti_shell_open_directory(const char *path, char *error, size_t error_capacity);
+int jsti_window_confirm_audio_cleanup(const char *token, size_t count, char *error, size_t error_capacity);
+int jsti_window_show_migration_report(const char *text, char *error, size_t error_capacity);
 
 /* Atomic Apply callback from the native settings dialog, on the UI thread.
  * prompt/new_key are borrowed until return. Empty new_key means keep the saved
@@ -608,7 +670,7 @@ int jsti_credential_read(const char *name, uint8_t *bytes, size_t capacity, size
                          char *error, size_t error_capacity);
 int jsti_credential_delete(const char *name, char *error, size_t error_capacity);
 
-/* App-owned multipart staging only. Absolute local paths; relative paths,
+/* App-owned sensitive-file staging only. Absolute local paths; relative paths,
  * alternate data streams and all reparse points in the path are rejected.
  * Directory preparation creates/repairs only the supplied leaf directory; its
  * parent must exist and an existing leaf must belong to the current user.
@@ -616,7 +678,19 @@ int jsti_credential_delete(const char *name, char *error, size_t error_capacity)
  * and SYSTEM full control. File creation is exclusive: existing files are
  * never opened, truncated or followed. No parent ACL is changed. */
 int jsti_private_directory_prepare(const char *path, char *error, size_t error_capacity);
+/* Exclusive private leaf creation, including explicit current-user ownership
+ * when the process is elevated. An existing directory is never changed. */
+int jsti_private_directory_create(const char *path, char *error, size_t error_capacity);
 int jsti_private_file_create(const char *path, char *error, size_t error_capacity);
+/* Copies a private regular source into private destination-side staging, then
+ * publishes exclusively. The source is retained. 0 committed, 2 cancelled
+ * before commit, -1 failed, 3 committed with a handle-cleanup error (never
+ * retry or delete that destination). Cancellation is checked between bounded chunks.
+ * Existing destinations and reparse paths are never replaced or followed. */
+typedef int (*jsti_file_publication_cancelled_fn)(void *context);
+int jsti_private_file_publish(const char *source, const char *destination,
+                              jsti_file_publication_cancelled_fn cancelled, void *context,
+                              char *error, size_t error_capacity);
 /* Uses a unique temporary directory and synthetic bytes only; verifies ACLs,
  * directory repair, existing-file preservation and junction refusal. */
 int jsti_private_storage_self_test(char *error, size_t error_capacity);
@@ -950,6 +1024,49 @@ void jsti_whisper_runtime_release_model(JSTIWhisperRuntime *runtime);
  * already be deleted. Returns 1 when that model was freed, 0 when another model
  * or none is cached, and -1 for an invalid argument. */
 int jsti_whisper_runtime_release_model_at(JSTIWhisperRuntime *runtime, const char *model_path);
+
+/* Independent predecoded recording-feedback channel. No History/TTS state is shared.
+ * create does not open files/devices. prepare runs off UI, once; cancellation may
+ * run concurrently. play/stop enqueue commands only. cue: 0=start, 1=stop;
+ * gain is finite 0...1 and applied to PCM, never endpoint volume.
+ * failure is borrowed during callback on the owned worker; context must outlive
+ * destroy. Callback must not destroy or block waiting for this channel.
+ * The stream stays warm with silence; stop discards the pending cue and
+ * emits silence on the next render event. Already submitted audio is bounded
+ * by the negotiated 50 ms-or-smaller buffer (plus endpoint hardware latency).
+ * destroy joins off UI, after prepare returns; it reports cleanup failures.
+ * Command functions return 0 on success, -1 with an explicit error on failure;
+ * diagnostic getters/checks document their own success values below. */
+typedef struct JSTIRecordingFeedback JSTIRecordingFeedback;
+typedef void (*JSTIRecordingFeedbackFailure)(const char *error, void *context);
+JSTIRecordingFeedback *jsti_recording_feedback_create(JSTIRecordingFeedbackFailure failure, void *context,
+                                                      char *error, size_t error_capacity);
+int jsti_recording_feedback_prepare(JSTIRecordingFeedback *feedback, const char *start_path, const char *stop_path,
+                                    char *error, size_t error_capacity);
+void jsti_recording_feedback_cancel_preparation(JSTIRecordingFeedback *feedback);
+int jsti_recording_feedback_play(JSTIRecordingFeedback *feedback, int cue, float gain,
+                                 char *error, size_t error_capacity);
+/* Diagnostic only: 0 before the current play's first PCM buffer is released,
+ * -1 with error if failed/cancelled, otherwise command-admission-to-ReleaseBuffer
+ * seconds. A superseded play cannot publish into a newer play's measurement.
+ * This is queue latency, NOT audible or hardware latency. No endpoint calls. */
+double jsti_recording_feedback_first_buffer_latency(JSTIRecordingFeedback *feedback,
+                                                   char *error, size_t error_capacity);
+void jsti_recording_feedback_stop(JSTIRecordingFeedback *feedback);
+/* 1 once this stop's first silence buffer is released, 0 while pending, -1
+ * with error on failure. Old submitted audio may still be in hardware. */
+int jsti_recording_feedback_stop_acknowledged(JSTIRecordingFeedback *feedback,
+                                             char *error, size_t error_capacity);
+int jsti_recording_feedback_destroy(JSTIRecordingFeedback *feedback, char *error, size_t error_capacity);
+/* Codec-only installed-MF validation: exactly eight actual asset paths. No
+ * endpoint is opened. Also checks the production PCM fill/gain/restart seam. */
+int jsti_recording_feedback_self_test(const char *const *paths, size_t count, char *error, size_t error_capacity);
+/* Same resident-renderer seam, independent of optional MF and audio hardware. */
+int jsti_recording_feedback_renderer_self_test(char *error, size_t error_capacity);
+/* Device-free installed-codec check of a profile's start/stop AAC assets.
+ * Returns 2 after both bounded decodes and cleanup, -1 with an explicit error. */
+int jsti_recording_feedback_check_assets(const char *start_path, const char *stop_path,
+                                        char *error, size_t error_capacity);
 
 #ifdef __cplusplus
 }

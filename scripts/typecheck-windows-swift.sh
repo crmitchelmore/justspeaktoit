@@ -12,7 +12,7 @@ set -euo pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 work="${SPEAK_WINDOWS_TYPECHECK_DIR:-${TMPDIR:-/tmp}/speak-windows-typecheck}"
 mkdir -p "$work"
-rm -rf "$work/Sources" "$work/Tests" "$work/Package.swift"
+rm -rf "$work/Sources" "$work/Tests" "$work/Resources" "$work/Package.swift"
 mkdir -p "$work/Sources/CWindowsSupport/include" "$work/Tests"
 
 for source in "$repo"/Sources/*; do
@@ -31,6 +31,7 @@ for tests in "$repo"/Tests/*; do
     ln -s "$tests" "$work/Tests/$(basename "$tests")"
 done
 cp "$repo/Package.swift" "$work/Package.swift"
+ln -s "$repo/Resources" "$work/Resources"
 
 cd "$work"
 # Building individual targets compiles modules without linking, so the Win32

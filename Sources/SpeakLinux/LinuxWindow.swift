@@ -161,7 +161,8 @@ enum LinuxWindow {
 
     static func textOutput(_ options: LinuxTextOutputOptions, hint: String) {
         _ = jsti_window_set_text_output(
-            options.method == .clipboardOnly ? 1 : 0, options.restoreClipboard ? 1 : 0, hint
+            options.method == .clipboardOnly ? 1 : 0, options.restoreClipboard ? 1 : 0,
+            LinuxHostPlatform.session.canUseX11Injection ? 1 : 0, hint
         )
     }
 }

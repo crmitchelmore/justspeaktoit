@@ -4,6 +4,25 @@ import XCTest
 @testable import SpeakWindowsPlatform
 
 final class WindowsTextOutputTests: XCTestCase {
+    func testDeliveryRequiresBothFieldIdentityAndVerifiedInsertion() {
+        for verified in [false, true] {
+            for identity in [false, true] {
+                let outcome = WindowsInsertionTarget.Outcome(
+                    method: .paste, verified: verified, fieldIdentity: identity, clipboard: .transcriptLeft
+                )
+                let result = WindowsInsertionStatus.delivery(for: outcome)
+                XCTAssertEqual(result.permitsAutomaticResume, verified && identity)
+            }
+        }
+    }
+
+    func testVerifiedNativeEditAcknowledgesItsCapturedControlWithoutUIAIdentity() {
+        let outcome = WindowsInsertionTarget.Outcome(
+            method: .nativeEdit, verified: true, fieldIdentity: false, clipboard: .untouched
+        )
+        XCTAssertTrue(WindowsInsertionStatus.delivery(for: outcome).permitsAutomaticResume)
+    }
+
     /// Synthetic hidden controls, an in-memory clipboard and a keystroke stub:
     /// caret/selection insertion, surrogate pairs, stale identity, password and
     /// read-only refusal, UI Automation value/paste paths, timeouts and worker

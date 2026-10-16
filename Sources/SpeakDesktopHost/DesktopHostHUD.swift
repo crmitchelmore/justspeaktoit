@@ -23,18 +23,19 @@ extension DesktopHostController {
     func beginHUD(_ recordID: UUID, _ state: DesktopHUDState) {
         guard !closed else { return }
         hudRecording = recordID
-        Platform.hud(state)
+        hudExpanded = false
+        Platform.hud(hudPresentation(state))
     }
 
     func hud(_ recordID: UUID, _ state: DesktopHUDState) {
         guard !closed, hudRecording == recordID else { return }
-        Platform.hud(state)
+        Platform.hud(hudPresentation(state))
     }
 
     func finishHUD(_ recordID: UUID, _ state: DesktopHUDState) {
         guard !closed, hudRecording == recordID else { return }
         hudRecording = nil
-        Platform.hud(state)
+        Platform.hud(hudPresentation(state))
     }
 
     /// A dictation that could not start has no record; it replaces whatever
@@ -42,7 +43,21 @@ extension DesktopHostController {
     func failHUDStart(_ message: String) {
         guard !closed else { return }
         hudRecording = nil
-        Platform.hud(.failure(message, headline: "Recording could not start"))
+        hudExpanded = false
+        Platform.hud(hudPresentation(.failure(message, headline: "Recording could not start")))
+    }
+
+    private func hudPresentation(_ state: DesktopHUDState) -> DesktopHUDState {
+        let configuration = settings.configuration
+        guard configuration?.enabled("showHUD") != false else { return .hidden }
+        var presentation = state
+        presentation.shortenErrorDisplay = configuration?.enabled("shortenErrorDisplay") ?? SpeechDefaults.shortErrors
+        presentation.compact = configuration?.enabled("showCompactHUD") ?? SpeechDefaults.compactHUD
+        if configuration?.enabled("showLiveTranscriptInHUD") == false { presentation.liveText = "" }
+        let policy = configuration?.hudExpansion ?? HUDExpansionPreference.defaultValue
+        hudExpanded = policy.expanded(previous: hudExpanded, transcriptCount: presentation.liveText?.count ?? 0)
+        presentation.expanded = !presentation.compact && hudExpanded
+        return presentation
     }
 
     /// The HUD's last word on a presented record: delivering while its output

@@ -27,11 +27,23 @@ identity in the repository.
 | Architecture | The runtime bundle's: x64, or arm64 from the ARM64 bundle (`processorArchitectures` lists both) |
 | Target | `Windows.Desktop`, minimum 10.0.19041.0, tested 10.0.20348.0 (the CI runner build) |
 | Capabilities | `runFullTrust`, `unvirtualizedResources` (restricted), `microphone` (device) |
-| Payload | Every file of the verified runtime bundle, byte for byte (including its `README.txt`, which describes the portable bundle), plus `AppxManifest.xml`, three logos and `package-manifest.json` |
+| Payload | Every file of the verified runtime bundle, byte for byte (including its `README.txt`, which describes the portable bundle), plus `AppxManifest.xml`, canonical logos and scale/target-size variants, and `package-manifest.json` |
 
 The family name is Windows' hash of the publisher. The builder computes it
 (checked against Microsoft's published `8wekyb3d8bbwe` and `cw5n1h2txyewy`
 IDs) and the lifecycle test requires Windows to report the same value.
+
+Package logos come from the canonical Mac 1024px export with transparent
+corners. The three manifest roots (`StoreLogo`, `Square44x44Logo` and
+`Square150x150Logo`) include high-DPI scale variants up to 400%; the 44px logo
+also has unplated and light-unplated target-size variants for Start/search and
+the taskbar. Both shell appearances retain the same coloured brand, rather
+than treating the full application icon as a symbolic glyph. Windows resolves
+these qualified siblings through MRT without extra manifest entries. The
+executable's embedded native icon travels unchanged in the verified bundle
+and package. Asset/package tests cover exact sizes, alpha and layout membership;
+installed rendering and resource linkage still need the native lifecycle and
+window checks. No new signed Stable distribution is implied.
 
 **Release trains.** [Alpha and Stable](alpha-stable-release-trains.md) define
 Mac and iOS surfaces only; `ReleaseTrains.json` has no Windows identity and

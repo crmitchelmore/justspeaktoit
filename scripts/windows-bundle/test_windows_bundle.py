@@ -25,6 +25,7 @@ def load(name, file_name):
 PE = load("windows_pe", "windows_pe.py")
 REDIST = load("redistributables", "redistributables.py")
 BUILD = load("build_windows_bundle", "build-windows-bundle.py")
+MIGRATION = load("migration_dependency", "../migration/migration_dependency.py")
 
 
 # --- synthetic PE images ----------------------------------------------------------
@@ -529,6 +530,29 @@ class ApplicationInputTests(unittest.TestCase):
         self.assertEqual(application["executable"], self.executable)
         self.assertEqual(list(application["resources"]), ["SpeakApp_SpeakCore.resources/Info.plist"])
 
+    def test_all_eight_recording_feedback_assets_are_collected_byte_exact(self):
+        sounds = HERE.parent.parent / "Resources" / "Sounds"
+        expected_names = {
+            "recording_start.m4a", "recording_stop.m4a",
+            "recording_start_bubbly.m4a", "recording_stop_bubbly.m4a",
+            "recording_start_futuristic.m4a", "recording_stop_futuristic.m4a",
+            "recording_start_soft.m4a", "recording_stop_soft.m4a",
+        }
+        self.assertEqual({path.name for path in sounds.iterdir()}, expected_names)
+        directory = self.app / "SpeakApp_SpeakFeedbackResources.resources" / "Sounds"
+        directory.mkdir(parents=True)
+        expected = {}
+        for name in sorted(expected_names):
+            body = (sounds / name).read_bytes()
+            self.assertEqual(body[4:8], b"ftyp")
+            self.assertGreater(len(body), 12)
+            self.assertLessEqual(len(body), 1_048_576)
+            (directory / name).write_bytes(body)
+            expected["SpeakApp_SpeakFeedbackResources.resources/Sounds/" + name] = body
+        resources = BUILD.load_application(self.app, self.policy)["resources"]
+        expected["SpeakApp_SpeakCore.resources/Info.plist"] = b"<plist/>"
+        self.assertEqual(resources, expected)
+
     def test_debug_or_test_enabled_metadata_is_refused(self):
         for key, value in [("configuration", "debug"), ("appBuiltForTesting", True), ("host", "Windows")]:
             metadata = dict(self.metadata)
@@ -867,6 +891,16 @@ class AssemblyTests(unittest.TestCase):
                          cross_check=None, log=self.messages.append)
         arguments.update(overrides)
         return BUILD.assemble(**arguments)
+
+    def test_native_zip_license_and_provenance_are_bundled(self):
+        license_entry = MIGRATION.license_entry(HERE.parents[1])
+        entries, manifest = self.assemble(licenses=self.licenses + [license_entry])
+        self.assertEqual(entries["licenses/LICENSE-miniz.txt"], license_entry["data"])
+        self.assertIn("LICENSE-miniz.txt", entries["THIRD-PARTY-NOTICES.txt"].decode())
+        self.assertIn("miniz 3.1.2", entries["THIRD-PARTY-NOTICES.txt"].decode())
+        row = next(item for item in manifest["sources"]["licenses"] if item["name"] == "LICENSE-miniz.txt")
+        self.assertEqual(row["sha256"], hashlib.sha256(license_entry["data"]).hexdigest())
+        self.assertEqual(row["license"], "MIT")
 
     def test_bundle_contains_only_the_closure_resources_licences_and_notices(self):
         entries, manifest = self.assemble()

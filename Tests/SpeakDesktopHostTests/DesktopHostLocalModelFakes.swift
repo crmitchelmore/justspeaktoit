@@ -215,6 +215,7 @@ final class HeldTransport: LocalModelDownloadTransport, @unchecked Sendable {
 }
 
 enum FakeLocalPlatform: DesktopHostLocalModelPlatform {
+    static func requiresInsertionTarget(_ options: FakeTextOutput) -> Bool { options.label != "copy" }
     typealias VoiceOutputSettings = FakeHotKey
     typealias LocalRuntime = FakeRuntime
     typealias LocalModelsState = DesktopHostLocalModelsState<FakeRuntime>
@@ -289,7 +290,9 @@ final class LocalEffects: DesktopHostEffects, @unchecked Sendable {
             language: request.language
         )
     }
-    func perform(_ job: FakeJob, text: String) -> String { "Delivered." }
+    func perform(_ job: FakeJob, text: String) -> DesktopTextOutputResult {
+        DesktopTextOutputResult(.confirmedInsertion, status: "Delivered.")
+    }
     func writeSettings(_ data: Data, to url: URL) throws { try data.write(to: url, options: .atomic) }
 }
 

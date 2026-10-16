@@ -24,7 +24,7 @@ public enum DesktopPostProcessing {
             modelIdentifier: String = ModelCatalog.defaultPostProcessingModel,
             customPrompt: String? = nil,
             outputLanguage: String? = nil,
-            temperature: Double = 0.2
+            temperature: Double = SpeechDefaults.temperature
         ) {
             self.mode = mode
             self.modelIdentifier = modelIdentifier
@@ -67,6 +67,8 @@ public enum DesktopPostProcessing {
         rawText: String,
         options: Options,
         apiKey: String,
+        lexiconDirectives: [String] = [],
+        lexiconContextTags: [String] = [],
         session: URLSession = .shared
     ) async throws -> Outcome {
         try Task.checkCancellation()
@@ -83,7 +85,9 @@ public enum DesktopPostProcessing {
         }
         let systemPrompt = TranscriptCleanupPolicy.systemPrompt(
             customBasePrompt: options.customPrompt,
-            outputLanguage: options.outputLanguage
+            outputLanguage: options.outputLanguage,
+            lexiconDirectives: lexiconDirectives,
+            lexiconContextTags: lexiconContextTags
         )
         let userPrompt = TranscriptCleanupPolicy.userMessage(transcript: rawText)
         let response = try await OpenRouterChatClient(apiKey: apiKey, session: session).sendChat(

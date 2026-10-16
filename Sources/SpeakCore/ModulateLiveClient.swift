@@ -1,172 +1,128 @@
 import Foundation
-import os.log
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
-// MARK: - Modulate Live Client (Cross-platform WebSocket)
-
-/// Cross-platform Modulate Velma streaming speech-to-text client.
-///
-/// Shared by macOS and iOS. Modulate emits discrete utterance messages; this
-/// client accumulates them into a running transcript and emits clean
-/// `(text, isFinal)` so it can drive the generic iOS transcriber directly.
-/// The first audio frame is prefixed with a streaming WAV header, as the API
-/// requires. Conforms to ``StreamingTranscriptionClient``.
-public final class ModulateLiveClient: StreamingTranscriptionClient, @unchecked Sendable {
-    /// Final shape: the done emit joins every utterance seen in the session.
+/// Velma streaming: WAV-prefixed binary PCM, an empty text end frame, then
+/// `done`. Closing without `done` is a failure, even if utterances were received.
+/// Contract: https://docs.modulate.ai/get-started/stt (2026-10-13).
+public final class ModulateLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
     public let finalShape: TranscriptFinalShape = .cumulativeTranscript
+    public let finishFlushesBufferedAudio = true
+    public typealias ConnectionFactory = @Sendable (URLRequest) -> any StreamingWebSocketConnection
+    public typealias Scheduler = @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void
 
     private let apiKey: String
-    private let sampleRate: Int
-    private let session: URLSession
     private let options: ModulateLiveOptions
-    private let logger = SpeakLogger.logger(category: "ModulateLiveClient")
-    private let stateLock = NSLock()
-
-    private var webSocketTask: URLSessionWebSocketTask?
-    private var onTranscript: ((String, Bool) -> Void)?
-    private var onError: ((Error) -> Void)?
-    private var isStopping = false
-    private var hasSentWAVHeader = false
-    private var utteranceTexts: [String] = []
+    private let lifecycle: StreamingProviderSession
+    var preroll: StreamingAudioPreroll { lifecycle.preroll }
 
     public convenience init(apiKey: String, sampleRate: Int = 16_000, session: URLSession = .shared) {
         self.init(apiKey: apiKey, sampleRate: sampleRate, session: session, options: .none)
     }
 
+    public convenience init(
+        apiKey: String, sampleRate: Int = 16_000, session: URLSession = .shared, options: ModulateLiveOptions
+    ) {
+        self.init(
+            apiKey: apiKey, sampleRate: sampleRate, options: options,
+            makeConnection: { URLSessionStreamingConnection(session: session, request: $0) }
+        )
+    }
+
     public init(
-        apiKey: String,
-        sampleRate: Int = 16_000,
-        session: URLSession = .shared,
-        options: ModulateLiveOptions
+        apiKey: String, sampleRate: Int = 16_000, options: ModulateLiveOptions = .none,
+        makeConnection: @escaping ConnectionFactory,
+        schedule: @escaping Scheduler = { seconds, action in
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
+        }
     ) {
-        self.apiKey = apiKey
-        self.sampleRate = sampleRate
-        self.session = session
+        let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.apiKey = key
         self.options = options
+        var configuration = StreamingProviderSession.Configuration(
+            provider: "Modulate", sampleRate: sampleRate, shape: .standaloneSegments, finishBudget: 5,
+            request: {
+                guard !key.isEmpty else { throw StreamingClientError.missingAPIKey(provider: "Modulate") }
+                guard sampleRate > 0 else { throw ModulateStreamingError.unsupportedSampleRate(sampleRate) }
+                guard let request = Self.request(apiKey: key, options: options) else {
+                    throw StreamingClientError.invalidURL
+                }
+                return request
+            },
+            setup: nil,
+            audio: { audio, first in
+                var payload = first ? Self.makeStreamingWAVHeader(sampleRate: sampleRate) : Data()
+                payload.append(audio)
+                return .binary(payload)
+            },
+            end: .text(""),
+            decode: Self.events
+        )
+        configuration.cumulativeSegmentUpdates = true
+        configuration.unsolicitedCompletionFails = true
+        lifecycle = StreamingProviderSession(
+            configuration: configuration, makeConnection: makeConnection, schedule: schedule
+        )
     }
 
-    public func start(
-        onTranscript: @escaping (String, Bool) -> Void,
-        onError: @escaping (Error) -> Void
-    ) {
-        guard let request = makeRequest() else {
-            onError(StreamingClientError.invalidURL)
-            return
-        }
-
-        let task = session.webSocketTask(with: request)
-        withStateLock {
-            isStopping = false
-            hasSentWAVHeader = false
-            utteranceTexts = []
-            self.onTranscript = onTranscript
-            self.onError = onError
-            webSocketTask = task
-        }
-        task.resume()
-        receiveMessages()
+    public func start(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {
+        lifecycle.start(onTranscript: onTranscript, onError: onError)
     }
+    public func sendAudio(_ audioData: Data) { lifecycle.sendAudio(audioData) }
+    public func stop() { lifecycle.stop() }
+    public func finishAndWait() async -> String? { await lifecycle.finishAndWait() }
 
-    func makeRequest() -> URLRequest? {
-        var components = URLComponents(url: ModulateTranscriptionService.streamingURL, resolvingAgainstBaseURL: false)!
-        components.queryItems = [
+    func makeRequest() -> URLRequest? { Self.request(apiKey: apiKey, options: options) }
+
+    private static func request(apiKey: String, options: ModulateLiveOptions) -> URLRequest? {
+        var components = URLComponents(url: ModulateTranscriptionService.streamingURL, resolvingAgainstBaseURL: false)
+        components?.queryItems = [
             URLQueryItem(name: "api_key", value: apiKey),
             URLQueryItem(name: "speaker_diarization", value: String(options.speakerDiarization)),
             URLQueryItem(name: "emotion_signal", value: String(options.emotionSignal)),
             URLQueryItem(name: "accent_signal", value: String(options.accentSignal)),
             URLQueryItem(name: "pii_phi_tagging", value: String(options.piiPhiTagging))
         ]
-        guard let url = components.url else { return nil }
-
+        guard let url = components?.url else { return nil }
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
         return request
     }
 
-    public func sendAudio(_ audioData: Data) {
-        guard let task = currentWebSocketTask(), task.state == .running else { return }
-        let prefixHeader = withStateLock { () -> Bool in
-            if hasSentWAVHeader { return false }
-            hasSentWAVHeader = true
-            return true
-        }
-        var payload = prefixHeader ? Self.makeStreamingWAVHeader(sampleRate: sampleRate) : Data()
-        payload.append(audioData)
-        task.send(.data(payload)) { [weak self] error in
-            guard let self, let error else { return }
-            if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
-            self.currentOnError()?(error)
-        }
-    }
+    public enum ModulateStreamingError: LocalizedError {
+        case unsupportedSampleRate(Int)
 
-    public func stop() {
-        // Signal end-of-stream (empty text frame) so Modulate flushes, then close.
-        if let task = currentWebSocketTask(), task.state == .running {
-            task.send(.string("")) { _ in }
-        }
-        let task = withStateLock { () -> URLSessionWebSocketTask? in
-            guard !isStopping else { return nil }
-            isStopping = true
-            let current = webSocketTask
-            webSocketTask = nil
-            return current
-        }
-        task?.cancel(with: .normalClosure, reason: nil)
-    }
-
-    // MARK: - Private
-
-    private func receiveMessages() {
-        guard let task = currentWebSocketTask() else { return }
-        task.receive { [weak self] result in
-            guard let self else { return }
-            switch result {
-            case .success(let message):
-                self.handleMessage(message)
-                if self.currentWebSocketTask() != nil { self.receiveMessages() }
-            case .failure(let error):
-                if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
-                self.currentOnError()?(error)
+        public var errorDescription: String? {
+            switch self {
+            case .unsupportedSampleRate(let rate):
+                return "Modulate requires a positive PCM sample rate, not \(rate) Hz."
             }
         }
     }
 
-    // swiftlint:disable:next cyclomatic_complexity
-    private func handleMessage(_ message: URLSessionWebSocketTask.Message) {
-        let text: String?
-        switch message {
-        case .string(let payload): text = payload
-        case .data(let data): text = String(data: data, encoding: .utf8)
-        @unknown default: text = nil
-        }
-        guard let text, let data = text.data(using: .utf8) else { return }
-
-        guard let envelope = try? JSONDecoder().decode(ModulateEnvelope.self, from: data) else { return }
-        switch envelope.type {
+    private static func events(_ text: String) -> [StreamingProviderSession.Event] {
+        guard let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any],
+              let type = object["type"] as? String else { return [] }
+        switch type {
         case "utterance":
-            if let message = try? JSONDecoder().decode(ModulateUtteranceMessage.self, from: data) {
-                let transcript = withStateLock { () -> String in
-                    utteranceTexts.append(message.utterance.text)
-                    return utteranceTexts.joined(separator: " ")
-                }
-                currentOnTranscript()?(transcript, false)
+            guard let utterance = object["utterance"] as? [String: Any], let text = utterance["text"] as? String else {
+                return []
             }
-        case "done":
-            let transcript = withStateLock { utteranceTexts.joined(separator: " ") }
-            if !transcript.isEmpty { currentOnTranscript()?(transcript, true) }
-            stop()
+            return [.final(text, id: utterance["utterance_uuid"] as? String)]
+        case "done": return [.complete]
         case "error":
-            let message = (try? JSONDecoder().decode(ModulateErrorMessage.self, from: data))?.error
-            currentOnError()?(NSError(domain: "Modulate", code: 500,
-                                      userInfo: [NSLocalizedDescriptionKey: message ?? "Modulate error"]))
-            stop()
-        default:
-            break
+            return [.failure(NSError(
+                domain: "Modulate", code: 500,
+                userInfo: [NSLocalizedDescriptionKey: object["error"] as? String ?? "Modulate error"]
+            ))]
+        default: return []
         }
     }
 
     private static func makeStreamingWAVHeader(sampleRate: Int) -> Data {
         var data = Data()
-        func append(_ string: String) { data.append(string.data(using: .ascii)!) }
+        func append(_ string: String) { data.append(Data(string.utf8)) }
         func append(_ value: UInt16) {
             var littleEndian = value.littleEndian
             data.append(Data(bytes: &littleEndian, count: MemoryLayout<UInt16>.size))
@@ -175,38 +131,9 @@ public final class ModulateLiveClient: StreamingTranscriptionClient, @unchecked 
             var littleEndian = value.littleEndian
             data.append(Data(bytes: &littleEndian, count: MemoryLayout<UInt32>.size))
         }
-        let channels: UInt16 = 1
-        let bitsPerSample: UInt16 = 16
-        let bytesPerSample = UInt32(bitsPerSample / 8)
-        let byteRate = UInt32(sampleRate) * UInt32(channels) * bytesPerSample
-        let blockAlign = channels * bitsPerSample / 8
         append("RIFF"); append(UInt32.max); append("WAVE"); append("fmt ")
-        append(UInt32(16)); append(UInt16(1)); append(channels); append(UInt32(sampleRate))
-        append(byteRate); append(blockAlign); append(bitsPerSample); append("data"); append(UInt32.max)
+        append(UInt32(16)); append(UInt16(1)); append(UInt16(1)); append(UInt32(sampleRate))
+        append(UInt32(sampleRate) * 2); append(UInt16(2)); append(UInt16(16)); append("data"); append(UInt32.max)
         return data
     }
-
-    private func withStateLock<T>(_ block: () -> T) -> T {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        return block()
-    }
-
-    private func currentWebSocketTask() -> URLSessionWebSocketTask? { withStateLock { webSocketTask } }
-    private func isStoppingState() -> Bool { withStateLock { isStopping } }
-    private func currentOnTranscript() -> ((String, Bool) -> Void)? { withStateLock { onTranscript } }
-    private func currentOnError() -> ((Error) -> Void)? { withStateLock { onError } }
-}
-
-private struct ModulateEnvelope: Decodable {
-    let type: String
-}
-
-private struct ModulateUtteranceMessage: Decodable {
-    struct Utterance: Decodable { let text: String }
-    let utterance: Utterance
-}
-
-private struct ModulateErrorMessage: Decodable {
-    let error: String
 }

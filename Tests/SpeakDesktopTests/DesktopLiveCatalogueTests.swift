@@ -12,7 +12,8 @@ final class DesktopLiveCatalogueTests: XCTestCase {
         let canonical = ModelCatalog.liveTranscription.filter {
             guard let route = LiveTranscriptionRouting.route(for: $0.id) else { return false }
             return [.deepgram, .assemblyai, .openai, .speechmatics, .soniox, .elevenlabs, .mistral, .gladia, .cartesia,
-                    .revai, .azure, .reson8].contains(route.provider) || route.modelID == XAISpeechToText.liveCatalogID
+                    .revai, .azure, .reson8, .google, .meta, .modulate].contains(route.provider)
+                || route.modelID == XAISpeechToText.liveCatalogID
         }
         XCTAssertFalse(canonical.isEmpty)
         XCTAssertTrue(canonical.contains { $0.id == XAISpeechToText.liveCatalogID })
@@ -40,6 +41,9 @@ final class DesktopLiveCatalogueTests: XCTestCase {
             if route.provider == .revai { XCTAssertTrue(client is RevAILiveClient) }
             if route.provider == .reson8 { XCTAssertTrue(client is Reson8LiveClient) }
             if route.provider == .azure { XCTAssertTrue(client is AzureVoiceLiveClient) }
+            if route.provider == .google { XCTAssertTrue(client is GeminiLiveClient) }
+            if route.provider == .meta { XCTAssertTrue(client is MetaMuseLiveClient) }
+            if route.provider == .modulate { XCTAssertTrue(client is ModulateLiveClient) }
             if route.provider == .openai {
                 XCTAssertTrue(client is OpenAIRealtimeLiveClient)
                 XCTAssertEqual(route.sampleRate, OpenAIRealtimeProtocol.sampleRate)
@@ -57,8 +61,8 @@ final class DesktopLiveCatalogueTests: XCTestCase {
 
     /// Grok Voice shares the xAI provider prefix and credential with the
     /// dedicated speech-to-text stream but speaks a different protocol with no
-    /// shared client, so admitting the provider wholesale would expose the
-    /// wrong engine. Only the dedicated stream's identifier is a desktop route.
+    /// qualified native transcription-only receipt, so admitting the provider
+    /// wholesale would expose an unqualified conversation engine.
     func testGrokVoiceRouteStaysUnavailableInTheDesktopFactory() {
         let grokVoice = XAIVoiceModels.thinkFast2CatalogID
         XCTAssertEqual(LiveTranscriptionRouting.route(for: grokVoice)?.provider, .xai)

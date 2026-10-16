@@ -178,13 +178,9 @@ final class StreamingAudioPrerollTests: XCTestCase {
     /// | Gladia | bespoke `pendingAudio`, private, 5s inline cap | not asserted — no visible seam |
     /// | AssemblyAI | queued frames, newest five seconds kept before `Begin` | `AssemblyAILiveClientTests` |
     /// | Cartesia | provider-local framed two-second cap | `CartesiaLiveClientTests` |
-    /// | Gemini | bespoke `pendingAudio`, private, trimmed | not asserted — no visible seam |
-    /// | xAI | bespoke `pendingAudio`, private, trimmed | not asserted — no visible seam |
-    /// | **Modulate** | **none — `sendAudio` returns early with no socket** | **gap, tracked by #947** |
-    ///
-    /// Modulate is the only shared live client that drops pre-socket audio
-    /// outright. That is a production defect, not a test gap, and it is fixed
-    /// under issue #947; when it adopts the shared buffer, add its row below.
+    /// | Gemini | shared provider session preroll | rows below |
+    /// | xAI Grok Voice | shared provider session preroll | rows below |
+    /// | Modulate | shared provider session preroll | rows below |
     ///
     /// `SonioxLiveTranscriber` in `SpeakApp` owns the same shared buffer, so it
     /// is in the table above, but it is a macOS-only provider that this target
@@ -210,6 +206,15 @@ final class StreamingAudioPrerollTests: XCTestCase {
             ),
             PrerollClientRow(
                 name: "MetaMuse", sampleRate: 24_000, client: MetaMuseLiveClient(apiKey: "k")
+            ),
+            PrerollClientRow(
+                name: "Gemini", sampleRate: 16_000, client: GeminiLiveClient(apiKey: "k")
+            ),
+            PrerollClientRow(
+                name: "GrokVoice", sampleRate: 24_000, client: XAILiveClient(apiKey: "k")
+            ),
+            PrerollClientRow(
+                name: "Modulate", sampleRate: 16_000, client: ModulateLiveClient(apiKey: "k")
             )
         ]
     }
@@ -317,3 +322,6 @@ extension DeepgramLiveClient: PrerollHoldingClient {}
 extension ElevenLabsLiveClient: PrerollHoldingClient {}
 extension SonioxLiveClient: PrerollHoldingClient {}
 extension MetaMuseLiveClient: PrerollHoldingClient {}
+extension GeminiLiveClient: PrerollHoldingClient {}
+extension XAILiveClient: PrerollHoldingClient {}
+extension ModulateLiveClient: PrerollHoldingClient {}

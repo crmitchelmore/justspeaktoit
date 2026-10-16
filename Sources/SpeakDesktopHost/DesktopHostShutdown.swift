@@ -43,10 +43,13 @@ package struct DesktopHostShutdownReport: Equatable, Sendable {
     /// the audio and marks the record interrupted at the next launch.
     package var unfinishedOperations = 0
     package var playbackClosed = true
+    package var recordingFeedbackClosed = true
+    package var handsFreeClosed = true
     package var discoveryEnded = true
 
     package var isComplete: Bool {
-        recordingSaved && unfinishedOperations == 0 && playbackClosed && discoveryEnded
+        recordingSaved && unfinishedOperations == 0 && playbackClosed && recordingFeedbackClosed
+            && handsFreeClosed && discoveryEnded
     }
 
     package init() {}
@@ -56,6 +59,8 @@ package struct DesktopHostShutdownReport: Equatable, Sendable {
         if !recordingSaved { parts.append("the open recording still stopping") }
         if unfinishedOperations > 0 { parts.append("\(unfinishedOperations) background operation(s) still running") }
         if !playbackClosed { parts.append("audio playback still stopping") }
+        if !recordingFeedbackClosed { parts.append("recording sounds still stopping") }
+        if !handsFreeClosed { parts.append("hands-free microphone still stopping") }
         if !discoveryEnded { parts.append("model discovery still running") }
         return "Closed after the shutdown grace period with " + parts.joined(separator: ", ")
             + ". Saved recordings are kept; an interrupted one is recovered at the next launch.\n"
@@ -106,13 +111,47 @@ extension DesktopHostController {
         }
         closed = true
         let deadline = ContinuousClock.now.advanced(by: shutdownGrace)
+        comparisonAdmissionTask?.cancel()
+        comparisonTask?.cancel()
+        comparisonInitialization?.task.cancel()
+        comparisonFinalization?.cancel()
+        comparisonUpdates?.cancel()
+        comparisonLive?.cancel()
+        if let active = comparisonCapture {
+            comparisonCapture = nil
+            let captured = DesktopHostComparisonClosingCapture(active)
+            await DesktopHostShutdown.wait(until: deadline) { captured.stop() }
+        }
         modelDiscoveryTask?.cancel()
+        voiceDiscovery.requestID = nil
+        voiceDiscovery.task?.cancel()
+        voiceDiscovery.inventory = nil
         cancelOutput()
+        generatedVoice = nil
+        voiceTextImportTask?.cancel()
         cancellationRequested = true
         transcriptionTask?.cancel()
+        historyDeletionTask?.cancel()
+        folderRevealTask?.cancel()
+        audioCleanupTask?.cancel()
+        migrationExportWorker?.cancel()
+        migrationExportTask?.cancel()
+        migrationInspectionWorker?.cancel()
+        migrationInspectionTask?.cancel()
+        audioCleanupConfirmation = nil
         postProcessingTask?.cancel()
         liveFinalisation?.cancel()
         var report = DesktopHostShutdownReport()
+        recordingFeedbackPreview?.cancel()
+        async let feedbackClosed = closeRecordingFeedback(until: deadline)
+        let detector = handsFreeRun
+        handsFreeRun = nil
+        _ = handsFreeMachine.handle(.userDisarmed)
+        async let detectorClosed = DesktopHostShutdown.wait(until: deadline) {
+            do { try detector?.stopDetector() } catch {
+                FileHandle.standardError.write(Data("Hands-free cleanup failed: \(error.localizedDescription)\n".utf8))
+            }
+        }
         // Ending the live session, stopping capture and writing the WAV and
         // record run off this actor, so a provider, device or file system that
         // stalls cannot hold closing past its deadline.
@@ -137,8 +176,15 @@ extension DesktopHostController {
             report.discoveryEnded = await DesktopHostShutdown.wait(until: deadline) { await discovery.value }
         }
         modelDiscoveryTask = nil
+        report.recordingFeedbackClosed = await feedbackClosed
+        report.handsFreeClosed = await detectorClosed
         finishShutdown(report)
         return report
+    }
+
+    private func closeRecordingFeedback(until deadline: ContinuousClock.Instant) async -> Bool {
+        guard let feedback = recordingFeedback else { return true }
+        return await DesktopHostShutdown.wait(until: deadline) { await feedback.close() }
     }
 
     /// Hands the open recording over for closing to end, stop and save; the
@@ -146,10 +192,11 @@ extension DesktopHostController {
     private func takeRecordingOnClose() -> DesktopHostClosingRecording? {
         guard let active = recording else { return nil }
         recording = nil
+        cancelRecordingTail()
         liveUpdates?.cancel()
         liveUpdates = nil
         return DesktopHostClosingRecording(
-            capture: active.capture, file: active.context.file, live: active.live, record: active.record
+            capture: active.capture, file: active.file, live: active.live, record: active.record
         )
     }
 

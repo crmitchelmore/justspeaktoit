@@ -373,3 +373,7 @@ extension MistralVoxtralLiveClient {
         #endif
     }
 }
+
+extension MistralVoxtralLiveClient: StreamingAudioReadyProviding {
+    public var isReadyForAudio: Bool { isSessionReady }
+}

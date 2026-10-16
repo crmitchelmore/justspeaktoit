@@ -10,9 +10,7 @@ public enum AutomationIntentSupport {
     /// Audio container extensions the Transcribe Audio File intent accepts.
     /// The union of formats the batch providers can ingest; the provider still
     /// has the final say and reports its own error for an unsupported codec.
-    public static let supportedAudioExtensions: Set<String> = [
-        "aac", "aif", "aiff", "caf", "flac", "m4a", "mp3", "mp4", "ogg", "opus", "wav", "webm"
-    ]
+    public static let supportedAudioExtensions = RecordingAudioFormats.importExtensions
 
     /// Upper bound on the audio payload a file-transcription intent will
     /// stage. Well above every provider's own upload limit (OpenRouter caps

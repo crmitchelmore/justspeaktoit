@@ -1,3 +1,7 @@
 .github/workflows/*.lock.yml linguist-generated=true merge=ours
 # Vendored upstream files are hashed byte for byte (PROVENANCE.md); never convert their line endings.
 Sources/CWindowsSupport/whisper-cpp/** -text
+# Native desktop exports are byte-verified on Windows and Linux.
+Resources/Desktop/*.ico -text
+Resources/Desktop/*.res -text
+Sources/SpeakLinux/Resources/hicolor/index.theme text eol=lf

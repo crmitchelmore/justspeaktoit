@@ -146,4 +146,10 @@ for (appearance, name) in [(Appearance.standard, "LaunchMark.svg"), (.dark, "Lau
     </svg>
     """.utf8), to: "SpeakiOSApp/Assets.xcassets/LaunchMark.imageset/\(name)")
 }
-print("Generated Mac iconset/ICNS, iOS appearances, watch icon, web icons and launch marks.")
+let desktopIcons = Process()
+desktopIcons.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+desktopIcons.arguments = ["python3", "scripts/generate-desktop-icons.py"]
+try desktopIcons.run()
+desktopIcons.waitUntilExit()
+guard desktopIcons.terminationStatus == 0 else { fatalError("desktop icon export failed") }
+print("Generated Mac, iOS, watch, web and native desktop icons and launch marks.")

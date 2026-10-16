@@ -4,7 +4,12 @@ on:
   push:
     branches: [main]
     paths:
+      - .gitattributes
       - Package.swift
+      - Resources/Desktop/**
+      - Resources/AppIcon.iconset/**
+      - scripts/generate-desktop-icons.py
+      - scripts/tests/test_desktop_icons.py
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
       - Sources/SpeakDesktopHost/**
@@ -35,7 +40,12 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - .gitattributes
       - Package.swift
+      - Resources/Desktop/**
+      - Resources/AppIcon.iconset/**
+      - scripts/generate-desktop-icons.py
+      - scripts/tests/test_desktop_icons.py
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
       - Sources/SpeakDesktopHost/**

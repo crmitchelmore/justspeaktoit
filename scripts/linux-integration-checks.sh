@@ -151,7 +151,9 @@ seen = json.load(open(sys.argv[1], encoding="utf-8"))
 item, menu = seen["item"], seen["menu"]
 assert seen["registered"], "the app never registered its status notifier"
 assert item["Id"] == "com.justspeaktoit.JustSpeakToIt" and item["Title"] == "Just Speak to It", item
-assert [size[:2] for size in item["IconPixmap"]] == [[22, 22], [32, 32], [48, 48]], item["IconPixmap"]
+assert [size[:2] for size in item["IconPixmap"]] == [
+    [22, 22], [32, 32], [48, 48], [64, 64], [96, 96]
+], item["IconPixmap"]
 assert all(size[2] == size[0] * size[1] * 4 for size in item["IconPixmap"]), item["IconPixmap"]
 labels = [entry["label"] for entry in menu if entry["type"] != "separator"]
 assert labels == ["Ready to dictate", "No sessions yet", "Start Recording", "Open Just Speak to It", "Settings…",

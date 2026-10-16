@@ -245,6 +245,15 @@ class ManifestTests(unittest.TestCase):
         with self.assertRaisesRegex(windows_msix.PackageError, "does not allow the arm64"):
             windows_msix.render_manifest(x64_only, "0.0.7.1", "CN=Just Speak to It Developer", architecture="arm64")
 
+    def test_qualified_logo_families_require_generated_unqualified_assets(self):
+        for root in ("Assets/StoreLogo.png", "Assets/Square44x44Logo.png", "Assets/Square150x150Logo.png"):
+            with self.subTest(root=root):
+                identity = copy.deepcopy(self.identity)
+                del identity["assets"]["images"][root]
+                self.assertTrue(any(path.startswith(root[:-4] + ".") for path in identity["assets"]["images"]))
+                with self.assertRaisesRegex(windows_msix.PackageError, "generated unqualified assets"):
+                    windows_msix.render_manifest(identity, "0.0.7.1", "CN=Just Speak to It Developer")
+
     def test_text_values_are_escaped(self):
         identity = copy.deepcopy(self.identity)
         identity["presentation"]["displayName"] = 'Speak <It> & "Quote"'
@@ -345,10 +354,9 @@ class LayoutTests(unittest.TestCase):
                 self.assertEqual((layout / name).read_bytes(), archive.read(name), name)
                 self.assertEqual(hashes[name], sha256(archive.read(name)))
         generated = {row["path"]: row["origin"] for row in package_manifest["files"] if row["origin"] != "bundle"}
-        self.assertEqual(generated, {"AppxManifest.xml": "generated-manifest",
-                                     "Assets/Square150x150Logo.png": "generated-asset",
-                                     "Assets/Square44x44Logo.png": "generated-asset",
-                                     "Assets/StoreLogo.png": "generated-asset"})
+        expected = {path: "generated-asset" for path in windows_msix.load_identity()["assets"]["images"]}
+        expected["AppxManifest.xml"] = "generated-manifest"
+        self.assertEqual(generated, expected)
         self.assertEqual(package_manifest["package"]["packageFamilyName"],
                          "com.justspeaktoit.windows.developer_" + windows_msix.publisher_id(
                              "CN=Just Speak to It Developer"))

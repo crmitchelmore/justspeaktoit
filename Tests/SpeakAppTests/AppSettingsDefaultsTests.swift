@@ -25,6 +25,62 @@ final class AppSettingsDefaultsTests: XCTestCase {
         super.tearDown()
     }
 
+    @MainActor
+    func testPortablePreferenceDefaultsMatchCanonicalMacSettings() throws {
+        let settings = AppSettings(defaults: defaults)
+        let portable = try DesktopConfiguration()
+        XCTAssertEqual(settings.postProcessingTemperature, portable.number("postProcessingTemperature"))
+        XCTAssertEqual(settings.postProcessingOutputLanguage, portable.text("postProcessingOutputLanguage"))
+        XCTAssertEqual(settings.showHUDDuringSessions, portable.enabled("showHUD"))
+        XCTAssertEqual(settings.showLiveTranscriptInHUD, portable.enabled("showLiveTranscriptInHUD"))
+        XCTAssertEqual(settings.shortenErrorDisplay, portable.enabled("shortenErrorDisplay"))
+        XCTAssertEqual(settings.showCompactHUD, portable.enabled("showCompactHUD"))
+        XCTAssertEqual(settings.hudSizePreference, portable.hudExpansion)
+        XCTAssertEqual(settings.liveStopGracePeriod, portable.number("liveStopGracePeriod"))
+        XCTAssertEqual(settings.postRecordingTailDuration, portable.number("postRecordingTailDuration"))
+        XCTAssertEqual(settings.holdThreshold, portable.number("holdThreshold"))
+        XCTAssertEqual(settings.doubleTapWindow, portable.number("doubleTapWindow"))
+        XCTAssertEqual(settings.preferredLocaleIdentifier, portable.text("preferredLocale"))
+        XCTAssertEqual(settings.transcriptionKeywords, portable.text("transcriptionKeywords"))
+        XCTAssertEqual(settings.assemblyAIKeyterms, portable.text("assemblyAIKeyterms"))
+    }
+
+    @MainActor
+    func testGeneratedSpeechDefaults_MatchSharedDefaultsWithoutChangingSavedValues() {
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertEqual(settings.ttsAutoPlay, SpeechGenerationDefaults.autoPlay)
+        XCTAssertEqual(settings.ttsSaveToDirectory, SpeechGenerationDefaults.saveToRecordings)
+        defaults.set(false, forKey: "ttsAutoPlay")
+        defaults.set(true, forKey: "ttsSaveToDirectory")
+        let reloaded = AppSettings(defaults: defaults)
+        XCTAssertFalse(reloaded.ttsAutoPlay)
+        XCTAssertTrue(reloaded.ttsSaveToDirectory)
+    }
+
+    @MainActor
+    func testRecordingFeedbackDefaultsAndAliases_MatchTheCanonicalPortableCatalogue() {
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertEqual(settings.recordingSoundsEnabled, RecordingFeedbackDefaults.enabled)
+        XCTAssertEqual(settings.recordingSoundProfile, RecordingFeedbackDefaults.profile)
+        XCTAssertEqual(settings.recordingSoundVolume, Float(RecordingFeedbackDefaults.volume))
+        XCTAssertEqual(RecordingSoundPlayer.SoundProfile.allCases, RecordingFeedbackProfile.allCases)
+        XCTAssertEqual(RecordingSoundPlayer.RecordingSound.start, RecordingFeedbackSound.start)
+        XCTAssertEqual(RecordingSoundPlayer.RecordingSound.stop, RecordingFeedbackSound.stop)
+    }
+
+    @MainActor
+    func testRecordingFeedbackStoredPreferences_SurviveCatalogueExtraction() {
+        defaults.set(false, forKey: "recordingSoundsEnabled")
+        defaults.set("futuristic", forKey: "recordingSoundProfile")
+        defaults.set(0.34, forKey: "recordingSoundVolume")
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertFalse(settings.recordingSoundsEnabled)
+        XCTAssertEqual(settings.recordingSoundProfile, .futuristic)
+        XCTAssertEqual(settings.recordingSoundVolume, Float(0.34))
+        settings.recordingSoundProfile = .soft
+        XCTAssertEqual(AppSettings(defaults: defaults).recordingSoundProfile, .soft)
+    }
+
     // MARK: - Transcription keywords
 
     /// Issue #849: macOS stored the keyword list under `assemblyAIKeyterms`

@@ -24,6 +24,14 @@ public final class VoiceCommandProcessor {
             self.customTriggers = customTriggers
             self.clipboardText = clipboardText
         }
+
+        public init(policy: ClipboardVoiceCommandPolicy, clipboardText: @escaping () -> String?) {
+            self.init(
+                isEnabled: { policy.isEnabled },
+                customTriggers: { policy.customTriggers },
+                clipboardText: clipboardText
+            )
+        }
     }
 
     private let configuration: Configuration
@@ -65,6 +73,11 @@ public final class VoiceCommandProcessor {
         return result
     }
 
+    /// Recognizes a command without querying the clipboard.
+    public func recognizesClipboardCommand(in text: String) -> Bool {
+        configuration.isEnabled() && Self.triggerRange(in: text, triggers: resolvedTriggers()) != nil
+    }
+
     /// Expand clipboard insertion triggers ("copy pasta" etc.) with actual clipboard content
     private func expandClipboardCommands(in text: String) -> String {
         expandClipboardCommands(in: text, depth: 0)
@@ -74,10 +87,10 @@ public final class VoiceCommandProcessor {
     private func expandClipboardCommands(in text: String, depth: Int) -> String {
         guard depth < Self.maxClipboardExpansionDepth else { return text }
 
+        guard let range = Self.triggerRange(in: text, triggers: resolvedTriggers()) else { return text }
+
         let clipboardContent = configuration.clipboardText() ?? ""
         guard !clipboardContent.isEmpty else { return text }
-
-        guard let range = Self.triggerRange(in: text, triggers: resolvedTriggers()) else { return text }
 
         var result = text
         result.replaceSubrange(range, with: clipboardContent)

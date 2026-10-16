@@ -9,6 +9,7 @@ public struct DesktopCloudSyncStatus: Equatable, Sendable {
     public var isSignedIn: Bool
     public var historyEnabled: Bool
     public var apiKeyImportEnabled: Bool
+    public var comparisonEnabled: Bool = false
     public var isSyncing: Bool
     public var lastSuccessfulSync: Date?
     public var lastError: String?
@@ -18,7 +19,9 @@ public struct DesktopCloudSyncStatus: Equatable, Sendable {
         if !isSignedIn { return "iCloud sync is off. Sign in with your Apple ID to sync History with your Mac." }
         if isSyncing { return "Syncing with iCloud…" }
         if let lastError { return "iCloud sync: \(lastError)" }
-        if !historyEnabled && !apiKeyImportEnabled { return "Signed in to iCloud. Nothing is selected to sync." }
+        if !historyEnabled && !apiKeyImportEnabled && !comparisonEnabled {
+            return "Signed in to iCloud. Nothing is selected to sync."
+        }
         if let lastSuccessfulSync {
             let formatter = DateFormatter()
             formatter.dateStyle = .none
@@ -92,6 +95,7 @@ public actor DesktopCloudSyncService {
     let client: CloudKitWebServicesClient?
     let state: DesktopCloudSyncStateStore
     private let historyStore: DesktopHistorySyncStore
+    var comparisonStore: DesktopComparisonStore?
     let vault: any DesktopCredentialVault
     let envelope: EncryptedSecretEnvelope?
     private var signedIn = false
@@ -133,11 +137,19 @@ public actor DesktopCloudSyncService {
         signedIn = (try? await client.hasWebAuthToken()) ?? false
     }
 
+    /// Deletes locally first. A previously validated account receives a
+    /// durable cloud-delete ticket only while History sync is opted in.
+    public func deleteHistory(id: UUID, deleteAudio: Bool = true) async throws {
+        let current = await state.current
+        let account = current.enabledFeatures.contains(.history) ? current.boundAccount : nil
+        try await historyStore.deleteLocal(id: id, deleteAudio: deleteAudio, cloudAccount: account)
+    }
+
     public func status() async -> DesktopCloudSyncStatus {
         let current = await state.current
         var reason: String?
         if case .unavailable(let why) = resolution { reason = why }
-        return DesktopCloudSyncStatus(
+        var status = DesktopCloudSyncStatus(
             unavailableReason: reason,
             isSignedIn: signedIn,
             historyEnabled: current.enabledFeatures.contains(.history),
@@ -146,6 +158,8 @@ public actor DesktopCloudSyncService {
             lastSuccessfulSync: current.lastSuccessfulSync,
             lastError: lastError
         )
+        status.comparisonEnabled = current.enabledFeatures.contains(.comparisonRounds)
+        return status
     }
 
     // MARK: - Sign-in
@@ -242,6 +256,9 @@ public actor DesktopCloudSyncService {
                 let consent = CloudKitWebSyncConsent(enabledFeatures: features)
                 try await syncHistory(client: client, fence: fence, consent: consent)
             }
+            if features.contains(.comparisonRounds) {
+                try await syncComparisons(client: client, fence: fence, features: features)
+            }
             if features.contains(.apiKeys), let envelope {
                 try await importKeys(client: client, fence: fence, revision: nil, envelope: envelope, report: &report)
             }
@@ -278,14 +295,21 @@ public actor DesktopCloudSyncService {
             for: .history, client: client, consent: consent, in: fence.session
         )
         let transport = try CloudKitWebHistorySyncTransport(client: client, consent: consent, session: fence.session)
+        let historyFence = DesktopHistoryPassFence(session: fence, state: state)
         let coordinator = HistorySyncCoordinator(
             transport: transport,
             tokenStore: state,
             cloudAvailable: true,
-            fence: DesktopHistoryPassFence(session: fence, state: state)
+            fence: historyFence
         )
+        let account = try await admitted(historyFence) { await state.current.boundAccount }
+        guard let account else { throw CloudKitWebServicesError.authenticationRequired(redirectURL: nil) }
+        try await historyStore.synchronizeDeletions(account: account, transport: transport, fence: historyFence)
         await historyStore.beginPass()
         await coordinator.sync(store: historyStore)
+        // A deletion admitted while a snapshot upload was in flight must win
+        // after that upload, not wait for a later launch to remove its server copy.
+        try await historyStore.synchronizeDeletions(account: account, transport: transport, fence: historyFence)
         if let error = coordinator.status.error {
             throw error
         }

@@ -71,6 +71,11 @@ extension DesktopHostController {
             guard interval >= HotKeyGestureTiming.doubleTapCommandInterval else { return }
             hotKeySession.lastDoubleTap = request.recognisedAt
         }
+        if await handsFreeShortcut(request) { return }
+        await manualShortcut(request)
+    }
+
+    private func manualShortcut(_ request: DesktopHostShortcutRequest<Platform>) async {
         guard let command = HotKeySessionPolicy.command(
             for: request.input, style: request.style, active: recording?.trigger
         ) else { return }
@@ -107,6 +112,13 @@ extension DesktopHostController {
     /// resolving its audio never starts. The ended request reports nothing,
     /// because whatever ended it owns the status.
     package func stopReadAloud() {
+        if let requestID = voiceTextImportRequestID { cancelVoiceTextImport(requestID: requestID) }
+        voiceGenerationTask?.cancel()
+        Platform.voiceGenerated(.init(
+            resultID: generatedVoice?.id.uuidString ?? "", working: false,
+            message: "Stopped. Completed generated audio remains available."
+        ))
+        voiceOutputRecordID = nil
         playbackRequests.end()
         Platform.stopReadAloud(&readAloudState, playback: playback)
     }

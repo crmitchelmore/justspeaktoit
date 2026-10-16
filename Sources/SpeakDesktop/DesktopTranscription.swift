@@ -6,7 +6,7 @@ import SpeakCore
 
 /// A projection of the canonical catalogue, limited to transports wired into
 /// the desktop host. Adding a catalogue entry does not claim OS/runtime support.
-public enum DesktopTranscription { // swiftlint:disable:this type_body_length
+public enum DesktopTranscription {
     public static var batchModels: [ModelCatalog.Option] {
         ModelCatalog.batchTranscription.filter { backend(for: $0.id) != nil }
     }
@@ -78,16 +78,17 @@ public enum DesktopTranscription { // swiftlint:disable:this type_body_length
         language: String? = nil,
         azureEndpoint: String = "",
         modulateFeatures: ModulateTranscriptionFeatures = .init(),
-        staging: SharedMultipartUploadStaging? = nil
+        staging: SharedMultipartUploadStaging? = nil,
+        keywords: [String] = []
     ) async throws -> TranscriptionResult {
         try await transcribe(
             audioURL: audioURL, model: model, apiKey: apiKey, duration: duration,
             language: language, azureEndpoint: azureEndpoint, modulateFeatures: modulateFeatures,
-            staging: staging, session: .shared
+            staging: staging, keywords: keywords, session: .shared
         )
     }
 
-    /// Session injection exercises the real provider clients in contract tests;
+    /// Session and file-upload injection exercise the real clients in contract tests;
     /// endpoint, request, response and job-cleanup logic remain in SpeakCore.
     static func transcribe(
         audioURL: URL,
@@ -98,7 +99,9 @@ public enum DesktopTranscription { // swiftlint:disable:this type_body_length
         azureEndpoint: String = "",
         modulateFeatures: ModulateTranscriptionFeatures = .init(),
         staging: SharedMultipartUploadStaging? = nil,
-        session: URLSession
+        keywords: [String] = [],
+        session: URLSession,
+        xaiClient: XAIBatchTranscriptionClient? = nil
     ) async throws -> TranscriptionResult {
         let identifier = model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let backend = backend(for: identifier) else {
@@ -112,7 +115,7 @@ public enum DesktopTranscription { // swiftlint:disable:this type_body_length
                 Request(
                     audioURL: audioURL, model: identifier, apiKey: key, duration: duration,
                     language: language, azureEndpoint: azureEndpoint,
-                    modulateFeatures: modulateFeatures, staging: staging
+                    modulateFeatures: modulateFeatures, staging: staging, keywords: keywords, xaiClient: xaiClient
                 ),
                 using: backend, session: session
             )
@@ -132,6 +135,8 @@ public enum DesktopTranscription { // swiftlint:disable:this type_body_length
         let azureEndpoint: String
         let modulateFeatures: ModulateTranscriptionFeatures
         let staging: SharedMultipartUploadStaging?
+        let keywords: [String]
+        let xaiClient: XAIBatchTranscriptionClient?
     }
 
     private static func transcribe( // swiftlint:disable:this cyclomatic_complexity function_body_length
@@ -166,8 +171,10 @@ public enum DesktopTranscription { // swiftlint:disable:this type_body_length
             return try await GeminiInteractionsClient(session: session, durationResolver: { _ in input.duration })
                 .transcribeFile(at: input.audioURL, apiKey: input.apiKey, model: input.model, language: input.language)
         case .xai:
-            return try await XAIBatchTranscriptionClient(session: session)
-                .transcribeFile(at: input.audioURL, apiKey: input.apiKey, language: input.language)
+            return try await (input.xaiClient ?? XAIBatchTranscriptionClient(session: session))
+                .transcribeFile(
+                    at: input.audioURL, apiKey: input.apiKey, language: input.language, keywords: input.keywords
+                )
         case .cartesia:
             return try await CartesiaBatchClient(session: session)
                 .transcribeFile(at: input.audioURL, apiKey: input.apiKey, language: input.language)
@@ -224,7 +231,7 @@ public enum DesktopTranscription { // swiftlint:disable:this type_body_length
         case .azure:
             return try await AzureBatchTranscriptionClient(session: session).transcribeFile(
                 at: input.audioURL, credentials: input.apiKey, endpoint: input.azureEndpoint,
-                model: input.model, language: input.language
+                model: input.model, language: input.language, keywords: input.keywords
             )
         }
     }
@@ -242,6 +249,9 @@ public enum DesktopTranscription { // swiftlint:disable:this type_body_length
         #endif
     }
 
+}
+
+private extension DesktopTranscription {
     private enum Backend: Sendable {
         case fileSpeech(FileSpeechProvider)
         case prepared(PreparedProvider)

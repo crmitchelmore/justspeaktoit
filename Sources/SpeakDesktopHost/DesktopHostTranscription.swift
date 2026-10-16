@@ -6,7 +6,8 @@ extension DesktopHostController {
     /// Output is the recording's own authority; imports and retries pass nil.
     package func transcribe(
         _ original: DesktopRecordingStore.Record, duration: TimeInterval, output: DesktopHostRecordingOutput<Platform>?,
-        profile: DesktopProfileSession? = nil
+        profile: DesktopProfileSession? = nil, azureEndpoint: String? = nil,
+        recordingOptions: DesktopHostRecordingConfiguration? = nil
     ) async {
         var record = original
         cancellationRequested = false
@@ -26,7 +27,9 @@ extension DesktopHostController {
             update(transcribingStatus(for: record.modelIdentifier), state: 2)
             hud(record.id, .transcribing())
             let request = DesktopHostTranscriptionRequest(
-                audio: audio, model: record.modelIdentifier, key: key, duration: duration, language: session.language
+                audio: audio, model: record.modelIdentifier, key: key, duration: duration, language: session.language,
+                azureEndpoint: recordingOptions?.azureEndpoint ?? azureEndpoint ?? azureResourceEndpoint(),
+                keywords: try await vocabularyKeywords()
             )
             let effects = self.effects
             let task = Task {
@@ -38,13 +41,11 @@ extension DesktopHostController {
             // A Cancel while the audio was being found had no request to cancel yet.
             if cancellationRequested { task.cancel() }
             let result = try await task.value
-            record.result = result
-            record.failure = nil
-            record.processedText = nil
-            record.postProcessingModelIdentifier = nil
-            record.postProcessingFailure = session.skippedPolishReason
+            record = recordWithResult(result, replacing: record, skippedPolishReason: session.skippedPolishReason)
             try await saveRecord(record)
-            record = await postProcess(record, options: session.postProcessing)
+            record = try await transformFinalTranscript(
+                record, options: recordingOptions, postProcessing: session.postProcessing
+            )
             if cancellationRequested { record.failure = "Cancelled. Completed transcription and audio retained." }
             try await saveRecord(record)
             // A response already received is still durably saved during shutdown,
@@ -61,6 +62,22 @@ extension DesktopHostController {
             let failure = record.failure ?? "Audio retained in History."
             reportFailure(failure, for: record.id, headline: "Transcription failed")
         }
+    }
+
+    private func recordWithResult(
+        _ result: TranscriptionResult, replacing original: DesktopRecordingStore.Record, skippedPolishReason: String?
+    ) -> DesktopRecordingStore.Record {
+        var record = original
+        record.result = result
+        record.failure = nil
+        record.processedText = nil
+        record.correctedText = nil
+        record.lexiconSummary = nil
+        record.lexiconDirectives = nil
+        record.lexiconContextTags = nil
+        record.postProcessingModelIdentifier = nil
+        record.postProcessingFailure = skippedPolishReason
+        return record
     }
 
     /// Shows a saved record. Work finishing after `close()` never reaches the
@@ -93,11 +110,40 @@ extension DesktopHostController {
 
     package func cancelTranscription() {
         guard !closed else { return }
+        if let inspection = migrationInspectionWorker {
+            inspection.cancel()
+            update("Stopping backup inspection... No application data will be changed.", state: 2)
+            return
+        }
+        if let export = migrationExportWorker {
+            export.cancel()
+            update("Stopping History backup... Existing files will be kept.", state: 2)
+            return
+        }
+        if let cleanup = audioCleanupTask {
+            cleanup.cancel()
+            update("Stopping audio cleanup... Remaining audio and History will be kept.", state: 2)
+            return
+        }
+        if historyDeletionInProgress {
+            cancellationRequested = true
+            update("Stopping History deletion… Remaining recordings will be kept.", state: 2)
+            return
+        }
+        if let runID = handsFreeRun?.id {
+            Task {
+                guard self.handsFreeRun?.id == runID else { return }
+                await self.disarmHandsFree()
+            }
+        } else if handsFreeMachine.isArmed {
+            _ = handsFreeMachine.handle(.userDisarmed)
+        }
         cancelOutput()
         guard busy else { return }
         cancellationRequested = true
+        recordingTail?.task.cancel()
         transcriptionTask?.cancel()
-        postProcessingTask?.cancel()
+        finalTranscriptTasks.cancel()
         liveFinalisation?.cancel()
         update("Cancelling… Saved audio and completed results will be retained.", state: 2)
     }

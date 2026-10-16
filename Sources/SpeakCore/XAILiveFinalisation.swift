@@ -1,5 +1,4 @@
 import Foundation
-import os
 
 // MARK: - xAI bounded finalisation (issue #716)
 
@@ -34,16 +33,13 @@ extension XAILiveClient {
         send: (@escaping @Sendable (Error?) -> Void) -> Void
     ) async -> CommitSendResult {
         await withCheckedContinuation { continuation in
-            let didResume = OSAllocatedUnfairLock(initialState: false)
+            let didResume = XAILiveSendResolution()
             let resumeOnce: @Sendable (CommitSendResult) -> Void = { result in
-                let shouldResume = didResume.withLock { alreadyResumed -> Bool in
-                    guard !alreadyResumed else { return false }
-                    alreadyResumed = true
-                    return true
-                }
+                let shouldResume = didResume.claim()
                 guard shouldResume else { return }
                 continuation.resume(returning: result)
             }
+
             send { error in
                 if let error {
                     resumeOnce(.failed(error))
@@ -55,6 +51,19 @@ extension XAILiveClient {
             DispatchQueue.global().asyncAfter(deadline: .now() + remaining) {
                 resumeOnce(.timedOut)
             }
+        }
+    }
+}
+
+private final class XAILiveSendResolution: @unchecked Sendable {
+    private let lock = NSLock()
+    private var resolved = false
+
+    func claim() -> Bool {
+        lock.withLock {
+            guard !self.resolved else { return false }
+            self.resolved = true
+            return true
         }
     }
 }

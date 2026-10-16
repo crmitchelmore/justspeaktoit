@@ -50,6 +50,8 @@ wireplumber >"$work/wireplumber.log" 2>&1 & pids+=($!)
 pipewire-pulse >"$work/pipewire-pulse.log" 2>&1 & pids+=($!)
 for _ in $(seq 1 100); do pactl info >/dev/null 2>&1 && break; sleep 0.1; done
 pactl load-module module-null-sink sink_name=jsti_test >/dev/null
+step "recording feedback (all profiles, dedicated warmed libpulse channel)"
+PULSE_SINK=jsti_test "$binary" --recording-feedback-self-test
 "$python" - "$work/tone.raw" <<'PY'
 import math, struct, sys
 with open(sys.argv[1], "wb") as tone:
@@ -151,7 +153,9 @@ seen = json.load(open(sys.argv[1], encoding="utf-8"))
 item, menu = seen["item"], seen["menu"]
 assert seen["registered"], "the app never registered its status notifier"
 assert item["Id"] == "com.justspeaktoit.JustSpeakToIt" and item["Title"] == "Just Speak to It", item
-assert [size[:2] for size in item["IconPixmap"]] == [[22, 22], [32, 32], [48, 48]], item["IconPixmap"]
+assert [size[:2] for size in item["IconPixmap"]] == [
+    [22, 22], [32, 32], [48, 48], [64, 64], [96, 96]
+], item["IconPixmap"]
 assert all(size[2] == size[0] * size[1] * 4 for size in item["IconPixmap"]), item["IconPixmap"]
 labels = [entry["label"] for entry in menu if entry["type"] != "separator"]
 assert labels == ["Ready to dictate", "No sessions yet", "Start Recording", "Open Just Speak to It", "Settings…",

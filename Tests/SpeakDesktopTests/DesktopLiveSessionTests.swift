@@ -69,6 +69,16 @@ final class DesktopLiveSessionTests: XCTestCase {
         XCTAssertEqual(session.snapshot(), snapshot)
     }
 
+    func testUnprojectedEmptyInterimRetainsLegacyConfirmedText() {
+        let client = DesktopLiveTestClient()
+        let session = DesktopLiveSession(client: client)
+        session.start()
+        client.emit("Confirmed.", final: true)
+        client.emit("Draft", final: false)
+        client.emit("", final: false)
+        XCTAssertEqual(session.snapshot().text, "Confirmed.")
+    }
+
     func testFinishReplacesWithWholeTranscriptAndRejectsLaterAudioAndCallbacks() async {
         let client = DesktopLiveTestClient()
         let session = DesktopLiveSession(client: client)

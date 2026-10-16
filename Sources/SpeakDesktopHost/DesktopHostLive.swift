@@ -3,9 +3,16 @@ import SpeakCore
 import SpeakDesktop
 
 extension DesktopHostController {
-    func makeLiveSession(model: String, key: String, id: UUID, language: String? = nil) -> DesktopLiveSession? {
-        guard DesktopHostModels.isLive(model), let client = effects.makeLiveClient(
-            model: model, key: key, language: language, azureEndpoint: azureResourceEndpoint()
+    func makeLiveSession(
+        model: String, key: String, id: UUID, language: String? = nil,
+        options: DesktopHostRecordingConfiguration
+    ) async throws -> DesktopLiveSession? {
+        guard DesktopHostModels.isLive(model) else { return nil }
+        let liveOptions = (options.configuration?.liveOptions ?? .init())
+            .includingVocabularyKeywords(try await vocabularyKeywords())
+        guard let client = effects.makeLiveClient(
+            model: model, key: key, language: language, azureEndpoint: options.azureEndpoint,
+            options: liveOptions
         ) else { return nil }
         return DesktopLiveSession(client: client, id: id)
     }
@@ -30,10 +37,11 @@ extension DesktopHostController {
                 guard revision != snapshot.revision else { continue }
                 revision = snapshot.revision
                 transcript = snapshot.text
+                let buffering = recordingTail?.recordID == snapshot.id
                 let hint = Platform.finishHint(hotKeySettings(), for: recording?.trigger ?? .other)
-                let status = "Live transcription… " + hint
+                let status = buffering ? recordingBufferStatus : "Live transcription… " + hint
                     + (recording.map { profileContext($0.record) } ?? "")
-                update(status, transcript: snapshot.text, state: 1)
+                update(status, transcript: snapshot.text, state: buffering ? 2 : 1)
                 hud(snapshot.id, .recording(profile: recording?.profile.profileName, liveText: snapshot.text))
             }
         }
@@ -56,7 +64,11 @@ extension DesktopHostController {
         }
         do {
             try await saveRecord(record)
-            if record.failure == nil { record = await postProcess(record, options: options) }
+            if record.failure == nil {
+                record = try await transformFinalTranscript(
+                    record, options: stopped.options, postProcessing: options
+                )
+            }
             if cancellationRequested { record.failure = "Cancelled. Completed transcription and audio retained." }
             try await saveRecord(record)
             if !closed { present(record, output: stopped.output) }

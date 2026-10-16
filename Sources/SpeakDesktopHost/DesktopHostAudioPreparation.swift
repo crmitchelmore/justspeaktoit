@@ -4,9 +4,11 @@ import SpeakDesktop
 
 extension DesktopHostController {
     package func transcribePreparedAudio(
-        _ audio: URL, model: String, key: String, duration: TimeInterval, language: String? = nil
+        _ audio: URL, model: String, key: String, duration: TimeInterval,
+        language: String? = nil, azureEndpoint: String? = nil, keywords: [String] = []
     ) async throws -> TranscriptionResult {
         try Task.checkCancellation()
+        let endpoint = azureEndpoint ?? azureResourceEndpoint()
         let canonicalDuration = try? NativePCM16WAVReader.canonicalDuration(at: audio)
         let local = DesktopHostModels.isLocal(model)
         if local, canonicalDuration != nil {
@@ -15,7 +17,7 @@ extension DesktopHostController {
         guard local || DesktopTranscription.requiresCanonicalPCM16WAV(model: model), canonicalDuration == nil else {
             return try await DesktopTranscription.transcribe(
                 audioURL: audio, model: model, apiKey: key, duration: canonicalDuration ?? duration,
-                language: language, azureEndpoint: azureResourceEndpoint(), staging: uploadStaging
+                language: language, azureEndpoint: endpoint, staging: uploadStaging, keywords: keywords
             )
         }
         update("Preparing audio… Your original file is saved in History.", state: 2)
@@ -33,7 +35,7 @@ extension DesktopHostController {
         update("Transcribing… Your original file is saved in History.", state: 2)
         return try await DesktopTranscription.transcribe(
             audioURL: output, model: model, apiKey: key, duration: convertedDuration,
-            language: language, azureEndpoint: azureResourceEndpoint(), staging: uploadStaging
+            language: language, azureEndpoint: endpoint, staging: uploadStaging, keywords: keywords
         )
     }
 }

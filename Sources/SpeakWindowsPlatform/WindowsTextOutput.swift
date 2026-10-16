@@ -1,4 +1,5 @@
 import Foundation
+import SpeakDesktop
 import CWindowsSupport
 
 /// Text output preferences for the Windows host. These mirror the macOS
@@ -198,15 +199,31 @@ public final class WindowsInsertionTarget: @unchecked Sendable {
     /// Full executable path from the process retained at capture. This performs
     /// no focus lookup or accessibility query, including after focus has moved.
     public var executablePath: String? {
+        try? executablePathChecked()
+    }
+
+    public func executablePathChecked() throws -> String {
         var required = 0
         var error = [CChar](repeating: 0, count: 512)
         let status = jsti_insertion_executable_path(handle, nil, 0, &required, &error, error.count)
-        guard status == 2, required > 1, required <= 131_073 else { return nil }
+        guard status == 2, required > 1, required <= 131_073 else {
+            throw WindowsTextOutputError(String(cString: error))
+        }
         var path = [CChar](repeating: 0, count: required)
         guard jsti_insertion_executable_path(
             handle, &path, path.count, &required, &error, error.count
-        ) == 0 else { return nil }
+        ) == 0 else { throw WindowsTextOutputError(String(cString: error)) }
         return String(cString: path)
+    }
+
+    public static func foregroundExecutablePath() throws -> String? {
+        var path = [CChar](repeating: 0, count: 131_073)
+        var error = [CChar](repeating: 0, count: 512)
+        guard jsti_foreground_executable_path(&path, path.count, &error, error.count) == 0 else {
+            throw WindowsTextOutputError(String(cString: error))
+        }
+        let value = String(cString: path)
+        return value.isEmpty ? nil : value
     }
 
     /// Copies for an explicit clipboard-only output request. Native cancellation
@@ -269,6 +286,14 @@ public final class WindowsInsertionTarget: @unchecked Sendable {
 /// User-facing status text for insertion outcomes. Never includes transcript
 /// or clipboard contents.
 public enum WindowsInsertionStatus {
+    public static func delivery(for outcome: WindowsInsertionTarget.Outcome) -> DesktopTextOutputResult {
+        DesktopTextOutputResult(
+            outcome.verified && (outcome.method == .nativeEdit || outcome.fieldIdentity)
+                ? .confirmedInsertion : .unconfirmedInsertion,
+            status: message(for: outcome)
+        )
+    }
+
     public static func message(for outcome: WindowsInsertionTarget.Outcome) -> String {
         var status: String
         switch outcome.method {
@@ -278,7 +303,10 @@ public enum WindowsInsertionStatus {
         case .paste:
             status = outcome.verified
                 ? "Pasted into the original text field and saved to History."
-                : "Pasted into the original text field; the result could not be confirmed. Saved to History."
+                : "Paste keys sent; insertion could not be confirmed. Saved to History."
+        }
+        if outcome.method != .nativeEdit, !outcome.fieldIdentity {
+            status = "Insertion attempted; the original field could not be confirmed. Saved to History."
         }
         if let note = clipboardNote(for: outcome.clipboard) { status += " " + note }
         return status

@@ -388,3 +388,7 @@ extension SpeechmaticsLiveClient {
         return ([pending], Data())
     }
 }
+
+extension SpeechmaticsLiveClient: StreamingAudioReadyProviding {
+    public var isReadyForAudio: Bool { isSessionReady }
+}

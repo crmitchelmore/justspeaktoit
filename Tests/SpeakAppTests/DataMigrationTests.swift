@@ -1,11 +1,36 @@
 import Foundation
 import Security
 import SpeakCore
+import SpeakDesktop
 import XCTest
 @testable import SpeakApp
 
 @MainActor
 final class DataMigrationTests: XCTestCase {
+    func testSharedWireAliases_PreserveMacCodecAndCredentialDefault() throws {
+        let record: DataMigrationRecord = MigrationRecord(
+            id: "fixture", kind: "default", value: AnyCodable(.bool(true)), date: Date(timeIntervalSince1970: 0)
+        )
+        let scope: DataMigrationScope = MigrationScope(selectedIDs: ["fixture"])
+        let manifest: DataMigrationManifest = MigrationManifest(
+            createdAt: Date(timeIntervalSince1970: 0), categories: [.settings], scopes: ["settings": scope]
+        )
+        let snapshot: DataMigrationSnapshot = MigrationSnapshot(
+            manifest: manifest, records: [.settings: [record]]
+        )
+        let encoded = try MigrationCoding.encoder.encode(snapshot.manifest)
+        let restored = try MigrationCoding.decoder.decode(DataMigrationManifest.self, from: encoded)
+        XCTAssertEqual(restored.format, DataMigrationFormat.identifier)
+        XCTAssertEqual(restored.version, DataMigrationFormat.version)
+        XCTAssertEqual(restored.scopes["settings"], scope)
+        XCTAssertEqual(
+            try MigrationCoding.decoder.decode(DataMigrationRecord.self, from: MigrationCoding.encoder.encode(record)),
+            record
+        )
+        XCTAssertFalse(MigrationCategory.defaults.contains(.credentials))
+        XCTAssertEqual(MigrationError.invalid("fixture").localizedDescription, "fixture")
+    }
+
     private func snapshot(_ category: MigrationCategory, _ records: [MigrationRecord],
                           scope: MigrationScope = .init()) -> MigrationSnapshot {
         .init(
@@ -20,51 +45,51 @@ final class DataMigrationTests: XCTestCase {
     ) -> MigrationRecord {
         .init(id: id, kind: "history", value: AnyCodable(.string(value)), date: date, revision: value)
     }
-    func testMergeHistory_SkipsDuplicatesAndPreservesDifferentVersionsIdempotently() {
+    func testMergeHistory_SkipsDuplicatesAndPreservesDifferentVersionsIdempotently() throws {
         let first = text()
         var changed = first
         changed.value = AnyCodable(.string("Changed"))
         changed.revision = "changed"
         let current = snapshot(.history, [first])
-        XCTAssertEqual(MigrationPlanner.plan(current: current, incoming: current,
+        XCTAssertEqual(try MigrationPlanner.plan(current: current, incoming: current,
                                              modes: [.history: .merge],
                                              useImported: []).records[.history]?.count, 1)
         let incoming = snapshot(.history, [changed])
-        let merged = MigrationPlanner.plan(current: current, incoming: incoming,
+        let merged = try MigrationPlanner.plan(current: current, incoming: incoming,
                                            modes: [.history: .merge], useImported: [])
         XCTAssertEqual(merged.records[.history]?.count, 2)
         XCTAssertNotEqual(merged.records[.history]?[0].id, merged.records[.history]?[1].id)
-        XCTAssertEqual(MigrationPlanner.plan(current: merged, incoming: incoming,
+        XCTAssertEqual(try MigrationPlanner.plan(current: merged, incoming: incoming,
                                              modes: [.history: .merge],
                                              useImported: []).records[.history]?.count, 2)
     }
-    func testReplaceDateRange_PreservesOutsideRange() {
+    func testReplaceDateRange_PreservesOutsideRange() throws {
         let outside = text(date: Date(timeIntervalSince1970: 1))
         let inside = text(date: Date(timeIntervalSince1970: 100))
         let replacement = text(date: Date(timeIntervalSince1970: 101))
         let incoming = snapshot(.history, [replacement], scope: .init(start: Date(timeIntervalSince1970: 50),
                                                                       end: Date(timeIntervalSince1970: 150)))
-        let plan = MigrationPlanner.plan(current: snapshot(.history, [outside, inside]), incoming: incoming,
+        let plan = try MigrationPlanner.plan(current: snapshot(.history, [outside, inside]), incoming: incoming,
                                          modes: [.history: .replace], useImported: [])
         XCTAssertEqual(Set(plan.records[.history, default: []].map(\.id)), [outside.id, replacement.id])
     }
-    func testSelectedReplacement_RespectsExplicitSelectionEvenWhenEmpty() {
+    func testSelectedReplacement_RespectsExplicitSelectionEvenWhenEmpty() throws {
         let old = text()
         let other = text()
         let incoming = snapshot(.history, [], scope: .init(selectedIDs: [old.id]))
-        let plan = MigrationPlanner.plan(current: snapshot(.history, [old, other]), incoming: incoming,
+        let plan = try MigrationPlanner.plan(current: snapshot(.history, [old, other]), incoming: incoming,
                                          modes: [.history: .replace], useImported: [])
         XCTAssertEqual(plan.records[.history], [other])
     }
-    func testInvalidItems_DoNotCauseReplacementDataLoss() {
+    func testInvalidItems_DoNotCauseReplacementDataLoss() throws {
         let old = text()
         var incoming = snapshot(.history, [])
         incoming.notices = ["History text & speech usage, item 1: skipped invalid item."]
-        let plan = MigrationPlanner.plan(current: snapshot(.history, [old]), incoming: incoming,
+        let plan = try MigrationPlanner.plan(current: snapshot(.history, [old]), incoming: incoming,
                                          modes: [.history: .replace], useImported: [])
         XCTAssertEqual(plan.records[.history], [old])
     }
-    func testConfigurationMerge_RequiresExplicitConflictChoice() {
+    func testConfigurationMerge_RequiresExplicitConflictChoice() throws {
         let old = MigrationRecord(id: "appearance", kind: "default", value: AnyCodable(.string("light")))
         var changed = old
         changed.value = AnyCodable(.string("dark"))
@@ -76,10 +101,10 @@ final class DataMigrationTests: XCTestCase {
             modes: [.settings: .merge]
         )
         XCTAssertEqual(conflicts.count, 1)
-        XCTAssertEqual(MigrationPlanner.plan(current: current, incoming: incoming,
+        XCTAssertEqual(try MigrationPlanner.plan(current: current, incoming: incoming,
                                              modes: [.settings: .merge],
                                              useImported: []).records[.settings], [old])
-        XCTAssertEqual(MigrationPlanner.plan(current: current, incoming: incoming,
+        XCTAssertEqual(try MigrationPlanner.plan(current: current, incoming: incoming,
                                              modes: [.settings: .merge],
                                              useImported: [conflicts[0].id]).records[.settings], [changed])
     }
@@ -133,6 +158,16 @@ final class DataMigrationTests: XCTestCase {
         XCTAssertEqual(restored.records[.recordings], [record])
         XCTAssertEqual(try Data(contentsOf: XCTUnwrap(restored.files[record.file!])), bytes)
         XCTAssertTrue(restored.notices.isEmpty)
+        let digests = try XCTUnwrap(LocalModelDigestProvider.platformDefault)
+        let portable = try DesktopMigrationArchive.read(archive, digests: digests, stagingRoot: root)
+        defer {
+            if let directory = portable.directory {
+                try? FileManager.default.removeItem(at: directory)
+            }
+        }
+        XCTAssertEqual(portable.records[.recordings], [record])
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(portable.files[record.file!])), bytes)
+        XCTAssertTrue(portable.notices.isEmpty)
     }
     func testArchive_RepeatedRecordingPathDoesNotMaterialiseExtraFiles() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

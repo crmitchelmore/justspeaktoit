@@ -108,6 +108,8 @@ final class CloudKitWebComparisonTransportTests: XCTestCase {
 
     private func makeTransport(_ transport: ScriptedCloudKitTransport) throws -> CloudKitWebComparisonSyncTransport {
         let client = try makeTestClient(store: HeldTokenStore(token: "synthetic-session"), transport: transport)
-        return try CloudKitWebComparisonSyncTransport(client: client, consent: consent)
+        let initialize: (CloudKitWebServicesClient, CloudKitWebSyncConsent) throws -> CloudKitWebComparisonSyncTransport
+            = CloudKitWebComparisonSyncTransport.init(client:consent:)
+        return try initialize(client, consent)
     }
 }

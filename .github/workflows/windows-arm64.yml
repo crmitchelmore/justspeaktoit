@@ -9,7 +9,11 @@ on:
   push:
     branches: [main]
     paths:
+      - .gitattributes
       - Package.swift
+      - Resources/Desktop/**
+      - scripts/generate-desktop-icons.py
+      - scripts/tests/test_desktop_icons.py
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
       - Sources/SpeakDesktopHost/**
@@ -41,7 +45,11 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - .gitattributes
       - Package.swift
+      - Resources/Desktop/**
+      - scripts/generate-desktop-icons.py
+      - scripts/tests/test_desktop_icons.py
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
       - Sources/SpeakDesktopHost/**
@@ -329,6 +337,11 @@ jobs:
             windows-arm64-self-test*.log
             windows-arm64-ui-smoke*.log
             windows-arm64-ui-smoke.bmp
+            windows-arm64-ui-smoke.bmp.voice-sources.bmp
+            windows-arm64-ui-smoke.bmp.file-source.bmp
+            windows-arm64-ui-smoke.bmp.voice-controls.bmp
+            windows-arm64-ui-smoke.bmp.voice-usage.bmp
+            windows-arm64-ui-smoke.bmp.voice-discovery.bmp
             windows-arm64-websocket-tests.xml
             windows-arm64-websocket-*.log
             windows-arm64-local-transcription*.log

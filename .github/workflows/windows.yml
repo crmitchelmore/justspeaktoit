@@ -4,7 +4,12 @@ on:
   push:
     branches: [main]
     paths:
+      - .gitattributes
       - Package.swift
+      - Resources/Desktop/**
+      - Resources/AppIcon.iconset/**
+      - scripts/generate-desktop-icons.py
+      - scripts/tests/test_desktop_icons.py
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
       - Sources/SpeakDesktopHost/**
@@ -35,7 +40,12 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - .gitattributes
       - Package.swift
+      - Resources/Desktop/**
+      - Resources/AppIcon.iconset/**
+      - scripts/generate-desktop-icons.py
+      - scripts/tests/test_desktop_icons.py
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
       - Sources/SpeakDesktopHost/**
@@ -229,10 +239,15 @@ jobs:
           Get-Content windows-ui-screenshots-errors.log
           if ($process.ExitCode -ne 0) { throw "The screenshot tour failed: $($process.ExitCode)" }
           $expected = 'dashboard', 'history', 'voice-output', 'general', 'transcription', 'post-processing',
-            'profiles', 'keyboard', 'icloud-sync', 'about', 'dashboard-dark', 'history-dark', 'dashboard-recording',
-            'hud-recording', 'hud-completed'
+            'corrections', 'pronunciation', 'profiles', 'keyboard', 'icloud-sync', 'about', 'dashboard-dark',
+            'history-dark', 'dashboard-recording', 'hud-recording', 'hud-completed', 'history-filters',
+            'history-filters-dark', 'hud-expanded-recording', 'hud-compact-recording', 'hud-compact-completed'
           for ($index = 0; $index -lt $expected.Count; $index++) {
             $file = Join-Path $folder ('{0:D2}-{1}.bmp' -f ($index + 1), $expected[$index])
+            if (-not (Test-Path $file)) { throw "Missing screenshot $file" }
+          }
+          foreach ($name in @('comparison-blind-light', 'comparison-revealed-dark')) {
+            $file = Join-Path $folder ($name + '.bmp')
             if (-not (Test-Path $file)) { throw "Missing screenshot $file" }
           }
 
@@ -311,6 +326,11 @@ jobs:
             windows-self-test*.log
             windows-ui-smoke*.log
             windows-ui-smoke.bmp
+            windows-ui-smoke.bmp.voice-sources.bmp
+            windows-ui-smoke.bmp.file-source.bmp
+            windows-ui-smoke.bmp.voice-controls.bmp
+            windows-ui-smoke.bmp.voice-usage.bmp
+            windows-ui-smoke.bmp.voice-discovery.bmp
             windows-websocket-tests.xml
             windows-websocket-*.log
             windows-local-transcription.log
@@ -329,10 +349,30 @@ jobs:
           persist-credentials: false
       - name: Verify portable source boundary
         run: python3 scripts/verify-portable-core-boundary.py
+      - name: Verify additional provider loopback peer contracts
+        run: python3 -B -m unittest discover -s scripts/tests -p test_additional_provider_loopback.py
       - name: Test portable graph with Xcode Apple Swift
         run: |
           xcrun swift --version
           xcrun swift test --configuration release --jobs 4
+      - name: Probe additional shared providers over native Apple WebSockets
+        shell: bash
+        run: |
+          set -euo pipefail
+          ready="$RUNNER_TEMP/additional-provider-peer.json"
+          python3 scripts/websocket-loopback-probe.py --ready-file "$ready" --max-seconds 60 \
+            > "$RUNNER_TEMP/additional-provider-peer.log" 2>&1 &
+          peer=$!
+          trap 'kill "$peer" 2>/dev/null || true; cat "$RUNNER_TEMP/additional-provider-peer.log"' EXIT
+          for attempt in $(seq 1 100); do
+            if [ -s "$ready" ]; then break; fi
+            kill -0 "$peer"
+            sleep 0.05
+          done
+          export JSTI_WEBSOCKET_PROBE_PORT
+          JSTI_WEBSOCKET_PROBE_PORT=$(python3 -c \
+            'import json,sys; p=json.load(open(sys.argv[1])); assert p["host"]=="127.0.0.1"; print(p["port"])' "$ready")
+          xcrun swift test --configuration release --skip-build --filter AdditionalProviderLoopbackTests
       - name: Preserve Apple dependency lockfile
         if: always()
         # The dependency-free graph removes pins it does not need. It must not

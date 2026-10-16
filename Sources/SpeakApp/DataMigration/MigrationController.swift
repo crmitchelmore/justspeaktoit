@@ -170,7 +170,7 @@ final class MigrationController: ObservableObject {
                     )
             }
             let useImported = Set(self.conflictChoices.filter(\.value).map(\.key))
-            let plan = MigrationPlanner.plan(
+            let plan = try MigrationPlanner.plan(
                 current: latest,
                 incoming: incoming,
                 modes: self.modes,

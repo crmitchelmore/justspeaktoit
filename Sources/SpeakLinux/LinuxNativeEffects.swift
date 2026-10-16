@@ -26,16 +26,67 @@ struct LinuxNativeEffects: DesktopHostEffects {
         LinuxLiveTransport.makeClient(model: model, key: key, language: language, azureEndpoint: azureEndpoint)
     }
 
+    func makeLiveClient(
+        model: String, key: String, language: String?, azureEndpoint: String, options: LiveClientOptions
+    ) -> (any FinalizingStreamingTranscriptionClient)? {
+        LinuxLiveTransport.makeClient(
+            model: model, key: key, language: language, azureEndpoint: azureEndpoint, options: options
+        )
+    }
+
     func transcribe(
         _ request: DesktopHostTranscriptionRequest, with controller: LinuxAppController
     ) async throws -> TranscriptionResult {
         try await controller.transcribePreparedAudio(
             request.audio, model: request.model, key: request.key, duration: request.duration,
-            language: request.language
+            language: request.language, azureEndpoint: request.azureEndpoint, keywords: request.keywords
         )
     }
 
-    func perform(_ job: LinuxOutputJob, text: String) -> String { job.perform(text) }
+    func perform(_ job: LinuxOutputJob, text: String) -> DesktopTextOutputResult { job.performResult(text) }
+
+    func readClipboardText() async throws -> String? { try await LinuxClipboardRead.readText() }
+
+    func captureInsertionTarget() async throws -> LinuxInsertionTarget? {
+        guard LinuxHostPlatform.session.canUseX11Injection else {
+            throw DesktopHostError(
+                message: "This desktop cannot freeze an external insertion destination. "
+                    + "Use clipboard-only hands-free output or manual recording."
+            )
+        }
+        return try await Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
+            return try LinuxX11.captureTargetChecked()
+        }.value
+    }
+
+    func captureUtteranceContext(
+        requiresInsertionTarget: Bool
+    ) async throws -> DesktopHostUtteranceContext<LinuxInsertionTarget> {
+        guard LinuxHostPlatform.session.canUseX11Injection else {
+            if requiresInsertionTarget {
+                throw DesktopHostError(message: "This desktop cannot freeze an external insertion destination.")
+            }
+            return .init(
+                target: nil, executablePath: nil,
+                profileNotice: "Wayland does not expose the external app identity. Normal app settings apply."
+            )
+        }
+        guard requiresInsertionTarget else {
+            return .init(
+                target: nil, executablePath: nil,
+                profileNotice: "Linux executable profile matchers are not available. Normal app settings apply."
+            )
+        }
+        return try await Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
+            let target = try LinuxX11.captureTargetChecked()
+            return DesktopHostUtteranceContext(
+                target: target, executablePath: nil,
+                profileNotice: "Linux executable profile matchers are not available. Normal app settings apply."
+            )
+        }.value
+    }
 
     func writeSettings(_ data: Data, to url: URL) throws { try data.write(to: url, options: .atomic) }
 }
@@ -70,10 +121,10 @@ enum LinuxLiveTransport {
     static let qualified = true
 
     static func makeClient(
-        model: String, key: String, language: String?, azureEndpoint: String
+        model: String, key: String, language: String?, azureEndpoint: String, options: LiveClientOptions = .init()
     ) -> (any FinalizingStreamingTranscriptionClient)? {
         DesktopLiveTranscription.makeClient(
-            model: model, apiKey: key, language: language, azureEndpoint: azureEndpoint,
+            model: model, apiKey: key, language: language, azureEndpoint: azureEndpoint, options: options,
             makeConnection: { NIOStreamingConnection(request: $0) }
         )
     }

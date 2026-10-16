@@ -574,6 +574,17 @@ def readme_text(metadata, closure_names, microsoft, local_runtime=None, architec
         "stored under %LOCALAPPDATA%\\JustSpeakToIt. Because the executable is not",
         "code-signed, Windows SmartScreen may ask for confirmation before it runs.",
         "",
+        "The canonical app icon is embedded in SpeakWindows.exe. To create a",
+        "per-user Start menu shortcut after extracting to a permanent folder, run:",
+        "$shell = New-Object -ComObject WScript.Shell",
+        "$link = $shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Programs')) 'Just Speak to It Developer.lnk'))",
+        "$link.TargetPath = (Resolve-Path .\\SpeakWindows.exe).Path",
+        "$link.WorkingDirectory = Split-Path $link.TargetPath",
+        "$link.IconLocation = $link.TargetPath + ',0'",
+        "$link.Save()",
+        "Run those commands in PowerShell from the extracted bundle folder.",
+        "This shortcut is optional; the bundle does not install or enable autostart.",
+        "",
         "Bundled runtime: Swift 6.2.3 (" + ", ".join(name for name in closure_names if not name.lower().startswith(("msvcp", "vcruntime", "concrt", "vccorlib", "vcamp", "vcomp"))) + ")",
         "and " + microsoft_runtime_name(microsoft, architecture) + ".",
         "",
@@ -611,7 +622,7 @@ def notices_text(app_license_name, swift_files, microsoft_files, microsoft, lock
         lines += ["_FoundationICU.dll additionally contains " + icu["covers"].split(" compiled")[0] + ":",
                   "  Licence: " + icu["license"] + " (licenses/LICENSE-icu.txt)", ""]
     for entry in licenses:
-        if entry["name"] in ("LICENSE-curl.txt", "LICENSE-zlib.txt"):
+        if entry["name"] in ("LICENSE-curl.txt", "LICENSE-zlib.txt", "LICENSE-miniz.txt"):
             lines += [entry["covers"], "  Licence: " + entry["license"] + " (licenses/" + entry["name"] + ")", ""]
     lines += [microsoft["displayName"] + ": " + ", ".join(microsoft_files),
               "  Files are unmodified copies from Microsoft's official " + lock["name"] + " (" + microsoft["productName"] + ").",
@@ -843,6 +854,12 @@ def main():
     for entry in lock["licenses"]:
         path = download(entry, downloads)
         licenses.append(dict(entry, data=path.read_bytes()))
+    sys.path.insert(0, str(HERE.parent / "migration"))
+    from migration_dependency import license_entry
+    try:
+        licenses.append(license_entry(args.source_root))
+    except (ValueError, OSError, KeyError) as error:
+        raise BundleError("Cannot verify the native migration dependency: " + str(error)) from error
     app_license_path = args.source_root / "LICENSE"
     app_license = app_license_path.read_bytes()
     if b"MIT License" not in app_license:

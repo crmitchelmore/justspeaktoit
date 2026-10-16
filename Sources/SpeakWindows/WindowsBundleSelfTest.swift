@@ -1,5 +1,6 @@
 import Foundation
 import SpeakCore
+import SpeakWindowsPlatform
 
 /// Runtime packaging checks use the production executable and its actual
 /// SwiftPM resource accessor. They need no microphone, account or network.
@@ -10,6 +11,7 @@ enum WindowsBundleSelfTest {
     }
 
     static func run() async throws {
+        try await WindowsRecordingFeedbackSelfTest.validateBundledAssets()
         guard let notes = WindowsBundledResources.releaseNotesData,
               let payload = try JSONSerialization.jsonObject(with: notes) as? [String: Any],
               let entries = payload["entries"] as? [[String: Any]], !entries.isEmpty else {
@@ -56,6 +58,6 @@ enum WindowsBundleSelfTest {
                 try await Task.sleep(nanoseconds: 10_000_000)
             }
         }
-        print("JSTI_BUNDLE_SELF_TEST_OK: resources, Codable, Unicode regex, ICU and atomic file I/O")
+        print("JSTI_BUNDLE_SELF_TEST_OK: resources, eight AAC cues, Codable, Unicode regex, ICU and atomic file I/O")
     }
 }

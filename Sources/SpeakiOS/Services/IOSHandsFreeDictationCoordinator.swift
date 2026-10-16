@@ -404,7 +404,7 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
                 sourceFormat: inputFormat,
                 targetFormat: session.audioFormat
             )
-            inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [preRoll] buffer, _ in
+            try inputNode.installTapSafely(onBus: 0, bufferSize: 4096, format: inputFormat) { [preRoll] buffer, _ in
                 preRoll.append(buffer)
                 if let converted = converter.convert(buffer) {
                     session.send(converted)

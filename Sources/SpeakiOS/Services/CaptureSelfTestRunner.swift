@@ -78,7 +78,11 @@ public final class CaptureSelfTestRunner {
         }
         run.note(.audioSession, atMilliseconds: elapsed())
 
-        let (signal, counter) = Self.installCountingTap(on: engine)
+        // A tap the input rejects means the engine cannot capture.
+        guard let (signal, counter) = try? Self.installCountingTap(on: engine) else {
+            run.fail(at: .engine, atMilliseconds: elapsed())
+            return run.result()
+        }
         tapInstalled = true
 
         guard Self.start(engine) else {
@@ -151,11 +155,11 @@ public final class CaptureSelfTestRunner {
     /// audio having arrived.
     private static func installCountingTap(
         on engine: AVAudioEngine
-    ) -> (FirstInputSignal, SelfTestBufferCounter) {
+    ) throws -> (FirstInputSignal, SelfTestBufferCounter) {
         let signal = FirstInputSignal()
         let counter = SelfTestBufferCounter()
         let format = engine.inputNode.outputFormat(forBus: 0)
-        engine.inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+        try engine.inputNode.installTapSafely(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
             guard buffer.frameLength > 0 else { return }
             counter.increment()
             _ = signal.markObserved()

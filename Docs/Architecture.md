@@ -29,7 +29,8 @@ code, and only the dependency-free `SpeakWatchCore` is built for watchOS.
 | --- | --- | --- |
 | `SpeakHotKeys` | library target | Global-hot-key implementation. |
 | `SpeakWatchCore` | library target | No dependencies; Foundation-only watch capture/complication types and `ReleaseTrain`, linked by the watch targets. |
-| `SpeakCore` | library target | Depends on `SpeakWatchCore` (re-exported); shared catalogues, protocols, models, capture policies and resources. |
+| `CAppleAudioSupport` | library target | Objective-C; turns AVFAudio tap exceptions into `NSError`s. Apple package only. |
+| `SpeakCore` | library target | Depends on `SpeakWatchCore` (re-exported) and `CAppleAudioSupport`; shared catalogues, protocols, models, capture policies and resources. |
 | `SpeakSync` | library target | Depends on `SpeakCore`; CloudKit history, comparison and encrypted-key sync. |
 | `SpeakiOSLib` | library target | Depends on `SpeakCore` and `SpeakSync`; iOS views and services. |
 | `SpeakAutomationKit` | library target | Depends on `SpeakCore`; CLI parsing, socket client and MCP server. |
@@ -52,6 +53,7 @@ The products are `SpeakHotKeys`, `SpeakCore`, `SpeakWatchCore`, `SpeakSync`, `Sp
 ```mermaid
 flowchart TD
     WatchCore[SpeakWatchCore] --> Core[SpeakCore]
+    AudioShim[CAppleAudioSupport] --> Core
     Core --> Sync[SpeakSync]
     Core --> IOSLib[SpeakiOSLib]
     Sync --> IOSLib

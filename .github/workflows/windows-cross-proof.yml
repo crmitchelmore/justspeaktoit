@@ -465,8 +465,9 @@ jobs:
           }
 
   # Signs a separately built layout whose publisher is the certificate subject
-  # from WINDOWS_MSIX_PUBLISHER. Runs only in the protected `windows-signing`
-  # environment, never for pull requests, and does nothing but log when the
+  # from WINDOWS_MSIX_PUBLISHER. Runs only in the `windows-signing`
+  # environment, whose deployment branch policy admits only `main`, never for
+  # pull requests, and does nothing but log when the
   # signing secrets and variables are absent. No key, certificate or client
   # secret exists in the repository or on the runner: GitHub OIDC signs in to
   # Entra ID and the key stays in Artifact Signing's HSMs.
@@ -475,7 +476,8 @@ jobs:
   sign:
     name: Sign the developer MSIX with Azure Artifact Signing
     needs: compile
-    if: ${{ github.event_name != 'pull_request' }}
+    # The environment admits only `main`; skip other refs rather than fail.
+    if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
     runs-on: windows-2022
     timeout-minutes: 30
     environment: windows-signing

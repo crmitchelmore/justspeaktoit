@@ -136,7 +136,7 @@ jobs:
         # files via the GitHub API. It has no changed-file list to work from on
         # a push, so it only runs for pull requests.
         if: github.event_name == 'pull_request'
-        uses: dorny/paths-filter@v4
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:
           filters: |
@@ -185,12 +185,9 @@ jobs:
           fi
 
   core-journey-e2e:
-    name: Core Dictation Journey (≤10m)
+    name: Core Dictation Journey (≤8m tests)
     # This non-UI contract gate may use an explicitly approved native runner.
-    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-macos-build","macOS"]') || '["macos-latest"]') }}
-    # 2m checkout + 3m cache + 12m cold build/receipts + 10m runtime/receipts + 3m upload.
-    # Cold compile observed 405-487s: give it a separate finite 600s command budget.
-    # Actual tests retain their original 480s budget, independent of cold build time.
+    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-macos-build","macOS"]') || '["macos-26-intel"]') }}
     timeout-minutes: 30
     needs: release-paths
     if: needs.release-paths.outputs.core-journey == 'true'
@@ -198,7 +195,9 @@ jobs:
       - uses: actions/checkout@v7.0.1
         timeout-minutes: 2
 
-      # Debug CI populates this cache; never upload it from the journey gate.
+      # Debug CI populates the shared cache. This gate only restores; uploading
+      # gigabytes afterwards would only lengthen it. The hosted runner matches
+      # build-macos's (macos-26-intel) because the key is architecture-scoped.
       - name: Restore Swift packages
         timeout-minutes: 3
         uses: actions/cache/restore@v6
@@ -208,13 +207,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-swift-
 
-      - name: Build core journey test products
-        timeout-minutes: 12
-        run: scripts/run-core-journey-e2e.sh --phase build
+      # Compile outside the eight-minute budget so it measures the journey
+      # tests, not how fast a hosted runner can rebuild the package.
+      - name: Build test products
+        timeout-minutes: 20
+        run: swift build --build-tests
 
-      - name: Run prepared core journey gate
-        timeout-minutes: 10
-        run: scripts/run-core-journey-e2e.sh --phase test
+      - name: Run core journey gate
+        timeout-minutes: 9
+        run: scripts/run-core-journey-e2e.sh
 
       - name: Upload stage diagnostics
         if: always()

@@ -240,6 +240,7 @@ version/baseline authority. `VERSION` is a build hint only.
 - When adding guard-let error paths in transcription code, always clean up audio resources started before the guard point
 - Call `audioEngine.stop()` and `audioEngine.inputNode.removeTap(onBus: 0)` before throwing
 - Compare with existing cleanup paths in the same function to ensure consistency
+- Install taps with `installTapSafely` (SpeakCore), never `installTap`: AVFAudio rejects a tap by raising an Objective-C exception that aborts the app. Keep the call inside the block whose failure path removes the tap and stops the engine. SwiftLint `unsafe_audio_tap` enforces this.
 
 ## AssemblyAI Universal-3.5 Pro Streaming
 
@@ -380,7 +381,7 @@ version/baseline authority. `VERSION` is a build hint only.
 - **Project slug:** `justspeaktoit`
 - **Auth token:** stored in `.env` as `SENTRY_AUTH_TOKEN` (do not commit)
 - **DSN:** configured in `Sources/SpeakApp/SentryManager.swift`
-- **GitHub CI secret:** `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, `SENTRY_PROJECT`
+- **GitHub CI secret:** `SENTRY_AUTH_TOKEN` lives only in the `sentry` environment, whose deployment branch policy admits only `main`. Only the `sentry-upload` job in `release-mac.yml` reads it; the build job, which holds the signing secrets, hands dSYMs over as an artefact. Rotate with `gh secret set SENTRY_AUTH_TOKEN --env sentry`; never add it as a repository secret.
 
 ### Querying Sentry from CLI
 ```bash
@@ -402,6 +403,11 @@ curl -s -X PUT -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" -H "Content-Type: a
   -d '{"status":"ignored"}' \
   "https://de.sentry.io/api/0/organizations/$SENTRY_ORG/issues/{ISSUE_ID}/"
 ```
+
+## GitHub Actions Security
+- New secrets belong in an environment with a `main`-only deployment branch policy (as `sentry` and `windows-signing` do), read only by the job that needs them. The Apple signing, notarisation, App Store and Sparkle secrets used by the release workflows are still repository secrets pending migration; do not add more.
+- `issue_comment` / `pull_request_review_comment` / `workflow_run` jobs that hold secrets must gate on `author_association` or `head_repository.full_name == github.repository` before running.
+- Pin third-party actions to a full commit SHA with a version comment, and pin every action in a job that holds an environment secret; self-hosted runners are only for `main` pushes and approved same-repo SHAs.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->
 ## Beads Issue Tracker

@@ -144,11 +144,10 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
       await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
       throw TranscriptionManagerError.noUsableAudioInput
     }
-    inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-      self?.request?.append(buffer)
-    }
-
     do {
+      try inputNode.installTapSafely(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+        self?.request?.append(buffer)
+      }
       try await startAudioEngineAfterInputDeviceSettles(audioEngine)
     } catch {
       audioEngine.stop()

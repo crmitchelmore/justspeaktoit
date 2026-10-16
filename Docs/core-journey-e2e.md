@@ -6,8 +6,10 @@ Run the required contract gate with the Apple Swift toolchain on macOS:
 scripts/run-core-journey-e2e.sh
 ```
 
-It has an eight-minute test-command budget and CI has a ten-minute wall-clock
-timeout. It uses in-memory HTTP/stream events, temporary history storage, and
+It has an eight-minute test-command budget. CI first compiles the test products
+in a separate step so that budget measures the journey tests rather than hosted
+runner compile speed; the job has a 30-minute wall-clock timeout. It uses
+in-memory HTTP/stream events, temporary history storage, and
 isolated defaults and pasteboards. Automation tests exchange real frames over
 an owner-only UNIX socket, with a stub command handler. No microphone, provider
 network, API key, or paid service is required.

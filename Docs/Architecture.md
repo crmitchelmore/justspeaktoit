@@ -1,5 +1,8 @@
 # Architecture
 
+For reusable lessons from the Windows/Linux port and a sequence for porting
+another native app, see the [desktop porting playbook](desktop-porting-playbook.md).
+
 This document describes the repository at commit `2ff982d` (12 September 2026), with the Windows and Linux desktop
 graph added on 24 September 2026. It is a current-state map, not a target architecture. Feature-gated targets are
 declarations in the build manifest; their presence does not prove that provisioning or distribution has been completed.

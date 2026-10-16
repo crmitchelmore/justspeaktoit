@@ -9,7 +9,13 @@ package struct DesktopHostRecordingEvent<Platform: DesktopHostPlatform>: Sendabl
     let configuration: DesktopConfiguration?
 }
 
-extension DesktopHostController where Platform: DesktopHostAutomationPlatform {
+/// A platform's default text output when no setting is persisted yet; this is
+/// unrelated to and does not imply automation consent.
+package protocol DesktopHostDefaultTextOutputPlatform: DesktopHostPlatform {
+    static var defaultTextOutput: TextOutputOptions { get }
+}
+
+extension DesktopHostController where Platform: DesktopHostDefaultTextOutputPlatform {
     package func captureRecordingEvent(
         modelIndex: Int?, executablePath: String?
     ) -> DesktopHostRecordingEvent<Platform> {

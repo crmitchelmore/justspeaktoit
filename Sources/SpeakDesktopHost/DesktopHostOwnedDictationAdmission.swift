@@ -26,7 +26,14 @@ extension DesktopHostController {
     }
 
     package var canStopDictationSession: Bool {
-        ownedDictation != nil || ownedDictationAdmission != nil || (recording != nil && !busy)
+        hasOwnedDictation || (recording != nil && !busy)
+    }
+
+    /// Whether an owned (non-recording) dictation session is active or being
+    /// admitted; `ownedDictation`/`ownedDictationAdmission` stay internal, so
+    /// platform hosts outside this module read this instead.
+    package var hasOwnedDictation: Bool {
+        ownedDictation != nil || ownedDictationAdmission != nil
     }
 
     var dictationTrigger: HotKeySessionTrigger? {

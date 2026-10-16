@@ -94,7 +94,8 @@ extension DesktopHostController {
                 isCurrent: { run.isCurrent }
             )
             guard run.isCurrent, revision == self.correctionLearningRevision else { return }
-            self.correctionLearningNotice = "Correction observation finished. Review stored candidates for pending changes."
+            self.correctionLearningNotice = "Correction observation finished. "
+                + "Review stored candidates for pending changes."
         } catch is CancellationError {
             return
         } catch {

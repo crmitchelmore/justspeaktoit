@@ -2,6 +2,8 @@ import Foundation
 import SpeakCore
 import SpeakDesktop
 
+// Host actor state (settings, recording, correction learning, vocabulary) stays one cohesive inventory.
+// swiftlint:disable:next type_body_length
 package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package struct SettingsValues: Codable, Sendable {
         package var model = ModelCatalog.defaultBatchTranscriptionModel

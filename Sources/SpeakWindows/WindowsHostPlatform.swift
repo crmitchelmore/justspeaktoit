@@ -184,6 +184,12 @@ enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPla
     }
 }
 
+/// Default text output only; this does not opt Windows into automation
+/// consent/import/revocation behavior (see DesktopHostAutomationPlatform).
+extension WindowsHostPlatform: DesktopHostDefaultTextOutputPlatform {
+    static var defaultTextOutput: WindowsTextOutputOptions { .init() }
+}
+
 extension WindowsAppController {
     init(directory: URL) throws {
         try self.init(directory: directory, effects: WindowsNativeEffects())

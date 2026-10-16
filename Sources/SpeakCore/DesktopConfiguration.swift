@@ -21,6 +21,8 @@ public enum SpeechDefaults {
 
 /// Portable preferences use the Mac's keys. Unknown entries survive edits and
 /// exports, but are never treated as implemented capabilities.
+// Canonical field catalogue, Kind/Choice helpers and Codable validation stay one cohesive type.
+// swiftlint:disable:next type_body_length
 public struct DesktopConfiguration: Codable, Equatable, Sendable {
     public enum Kind: Sendable {
         case text

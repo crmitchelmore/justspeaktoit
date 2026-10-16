@@ -96,7 +96,7 @@ extension WindowsAppController {
         guard canStopDictationSession, let id = dictationSessionID else {
             throw AutomationError.noDictationRunning
         }
-        let owned = ownedDictation != nil || ownedDictationAdmission != nil
+        let owned = hasOwnedDictation
         await toggle(
             target: nil, modelIndex: selectedIndex(), deviceID: selectedMicrophone(), targetExecutablePath: nil,
             textOutput: textOutputOptions()

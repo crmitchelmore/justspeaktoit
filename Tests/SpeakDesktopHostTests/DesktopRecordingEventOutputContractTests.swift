@@ -12,7 +12,7 @@ final class DesktopRecordingEventOutputContractTests: XCTestCase {
         addTeardownBlock { try await fixture.cleanup() }
         let host = fixture.host!
         let index = fixture.batchIndex
-        let defaultEvent = await host.captureRecordingEvent(modelIndex: index, executablePath: nil)
+        let defaultEvent = await captureEventRequiringOnlyDefaultTextOutput(host, modelIndex: index)
         XCTAssertEqual(defaultEvent.textOutput, FakePlatform.defaultTextOutput)
         let queue = DesktopSettingsQueue()
         await queue.submit { await host.recordingEventFixtureOutput(FakeTextOutput(label: "event-output")) }.value
@@ -56,4 +56,13 @@ final class DesktopRecordingEventOutputContractTests: XCTestCase {
 
 extension DesktopHostController where Platform == FakePlatform {
     func recordingEventFixtureOutput(_ options: FakeTextOutput?) { settings.textOutput = options }
+}
+
+/// Proves captureRecordingEvent only needs default-text-output, not automation
+/// consent, by calling it through a generic helper constrained to that protocol alone.
+@MainActor
+private func captureEventRequiringOnlyDefaultTextOutput<Platform: DesktopHostDefaultTextOutputPlatform>(
+    _ host: DesktopHostController<Platform>, modelIndex: Int?
+) async -> DesktopHostRecordingEvent<Platform> {
+    await host.captureRecordingEvent(modelIndex: modelIndex, executablePath: nil)
 }

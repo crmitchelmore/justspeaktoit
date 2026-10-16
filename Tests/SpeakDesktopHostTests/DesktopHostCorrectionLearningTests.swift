@@ -190,6 +190,13 @@ private final class HostLearningReadback: DesktopCorrectionReadback, @unchecked 
     func cancel() { lock.withLock { cancelCount += 1 } }
 }
 
+private struct LearningState: Sendable {
+    let approved: Bool
+    let status: String
+    let candidates: [AutoCorrectionCandidate]
+    let rules: Int
+}
+
 private extension DesktopHostController where Platform == FakePlatform {
     func learningStartWaiting(_ entered: XCTestExpectation) async -> Task<Void, Never>? {
         correctionObservationWait = { _ in
@@ -226,13 +233,11 @@ private extension DesktopHostController where Platform == FakePlatform {
         await correctionObservationTask?.value
     }
 
-    func learningState() async throws -> (
-        approved: Bool, status: String, candidates: [AutoCorrectionCandidate], rules: Int
-    ) {
+    func learningState() async throws -> LearningState {
         let vocabulary = try await vocabularyStore()
-        return (
-            correctionLearningApproved, correctionLearningStatus(),
-            await vocabulary.candidates.candidates, await vocabulary.lexicon.rules.count
+        return LearningState(
+            approved: correctionLearningApproved, status: correctionLearningStatus(),
+            candidates: await vocabulary.candidates.candidates, rules: await vocabulary.lexicon.rules.count
         )
     }
 }

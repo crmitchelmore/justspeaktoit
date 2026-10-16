@@ -48,7 +48,10 @@ final class DesktopCorrectionObservationTests: XCTestCase {
         await fulfillment(of: [entered], timeout: 3)
         task.cancel()
         native.release()
-        do { _ = try await task.value; XCTFail("Late range capture escaped cancellation") } catch is CancellationError {}
+        do {
+            _ = try await task.value
+            XCTFail("Late range capture escaped cancellation")
+        } catch is CancellationError {}
         XCTAssertEqual(native.reads, 0)
     }
 

@@ -29,6 +29,32 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
 
+      - name: Test installed sample contract collector
+        continue-on-error: true
+        run: python3 -B -m unittest discover -s scripts/tests -p test_macos_sample_contract.py -v
+
+      - name: Collect installed sample manual contract evidence (no sampling)
+        id: sample_contract
+        continue-on-error: true
+        run: |
+          status=0
+          python3 scripts/collect-macos-sample-contract.py || status=$?
+          if [ "$status" -eq 0 ] || [ "$status" -eq 3 ]; then
+            echo "artifact_ready=true" >> "$GITHUB_OUTPUT"
+          fi
+          exit "$status"
+
+      - name: Upload installed sample contract evidence (not runtime qualification)
+        if: always() && steps.sample_contract.outputs.artifact_ready == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-installed-sample-contract
+          path: ${{ runner.temp }}/jsti-installed-sample-contract-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          include-hidden-files: false
+          retention-days: 7
+
       - name: Test XCTest crash-report collector
         run: python3 -B -m unittest discover -s scripts/tests -p test_macos_xctest_crashes.py -v
 
@@ -87,6 +113,110 @@ jobs:
         with:
           name: macos-debug-xctest-crash-diagnostics
           path: ${{ runner.temp }}/jsti-xctest-debug-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          include-hidden-files: false
+          retention-days: 7
+
+      - name: Isolate History fixture after full-suite failure (diagnostic only)
+        id: history_isolated
+        if: failure() && steps.debug_tests.outcome == 'failure'
+        continue-on-error: true
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          directory="$RUNNER_TEMP/jsti-history-isolated-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -m 700 "$directory"
+          printf '%s\n' \
+            '{"purpose":"isolated_history_fixture_diagnostic","status":"not_completed",' \
+            '"command":["python3","scripts/with-test-keychain.py","swift","test","--skip-build","--enable-code-coverage","--filter","DesktopLivePolishHistoryTests"],' \
+            '"expected_case":"SpeakDesktopTests.DesktopLivePolishHistoryTests.testNativeAndPortableHistory_RoundTripRawAndSuccessfulPolishWithoutRerunningClient",' \
+            '"command_exit_code":null,"expected_case_count":1,"observed_case_event_counts":null,' \
+            '"selection_verified":false,"parity_qualification":false}' > "$directory/result.json"
+          echo "artifact_ready=true" >> "$GITHUB_OUTPUT"
+          set +e
+          python3 scripts/with-test-keychain.py swift test --skip-build --enable-code-coverage --filter DesktopLivePolishHistoryTests 2>&1 |
+            python3 -c '
+          import json, pathlib, sys
+          directory = pathlib.Path(sys.argv[1])
+          limit = 1024 * 1024
+          received = saved = 0
+          with (directory / "output.log").open("xb") as output:
+              while data := sys.stdin.buffer.read1(65536):
+                  received += len(data)
+                  kept = data[:max(0, limit - saved)]
+                  output.write(kept)
+                  output.flush()
+                  saved += len(kept)
+          (directory / "capture.json").write_text(json.dumps({
+              "received_bytes": received, "saved_bytes": saved,
+              "truncated": received > saved
+          }) + "\n", encoding="ascii")
+          ' "$directory"
+          statuses=("${PIPESTATUS[@]}")
+          set -e
+          python3 - "$directory" "${statuses[0]}" "${statuses[1]}" <<'PY'
+          import json
+          from pathlib import Path
+          import re
+          import sys
+
+          directory = Path(sys.argv[1])
+          command_status, capture_status = map(int, sys.argv[2:])
+          command = ["python3", "scripts/with-test-keychain.py", "swift", "test",
+                     "--skip-build", "--enable-code-coverage", "--filter",
+                     "DesktopLivePolishHistoryTests"]
+          method = "testNativeAndPortableHistory_RoundTripRawAndSuccessfulPolishWithoutRerunningClient"
+          expected = "SpeakDesktopTests.DesktopLivePolishHistoryTests." + method
+          accepted = {
+              expected, "DesktopLivePolishHistoryTests." + method,
+              "-[SpeakDesktopTests.DesktopLivePolishHistoryTests " + method + "]",
+          }
+          capture_file = directory / "capture.json"
+          capture = (json.loads(capture_file.read_text(encoding="ascii")) if capture_file.exists()
+                     else {"status": "unavailable", "truncated": True})
+          log_file = directory / "output.log"
+          data = log_file.read_bytes() if log_file.exists() else b""
+          pattern = rb"(?m)^Test Case '([^'\r\n]{1,512})' (started|passed|failed|skipped)(?=[ .])"
+          events = [(identity.decode("utf-8", errors="replace"), state.decode("ascii"))
+                    for identity, state in re.findall(pattern, data)]
+          unparsed = len(re.findall(rb"(?m)^Test Case ", data)) - len(events)
+          counts = {state: sum(event == state for _, event in events)
+                    for state in ("started", "passed", "failed", "skipped")}
+          complete = capture_status == 0 and capture_file.exists() and not capture["truncated"]
+          selection_verified = (complete and unparsed == 0 and counts["started"] == 1
+                                and sum(counts[state] for state in ("passed", "failed", "skipped")) == 1
+                                and all(identity in accepted for identity, _ in events))
+          passed = command_status == 0 and selection_verified and counts["passed"] == 1
+          result = {
+              "purpose": "isolated_history_fixture_diagnostic",
+              "command": command, "command_exit_code": command_status,
+              "capture_exit_code": capture_status, "capture": capture,
+              "expected_case": expected, "expected_case_count": 1,
+              "observed_case_event_counts": counts,
+              "unparsed_test_case_lines": unparsed,
+              "observed_case_events": events[:16], "case_counts_complete": complete,
+              "selection_verified": selection_verified, "parity_qualification": False,
+              "status": ("isolated_pass" if passed else
+                         "isolated_failure" if command_status else "selection_or_capture_unverified"),
+          }
+          text = json.dumps(result, indent=2, sort_keys=True) + "\n"
+          temporary = directory / ".result.json.tmp"
+          temporary.write_text(text, encoding="ascii")
+          temporary.replace(directory / "result.json")
+          print(text, end="")
+          if not selection_verified:
+              print("Isolated diagnostic: exact-case execution or complete capture NOT established.",
+                    file=sys.stderr)
+          sys.exit(0 if passed else 1)
+          PY
+
+      - name: Upload isolated History fixture diagnostic
+        if: always() && steps.debug_tests.outcome == 'failure' && steps.history_isolated.outputs.artifact_ready == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-history-isolated-${{ steps.history_isolated.outcome }}
+          path: ${{ runner.temp }}/jsti-history-isolated-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: warn
           include-hidden-files: false
           retention-days: 7

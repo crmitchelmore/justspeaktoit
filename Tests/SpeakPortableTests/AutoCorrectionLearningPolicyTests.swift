@@ -22,12 +22,11 @@ final class AutoCorrectionLearningPolicyTests: XCTestCase {
             let preferences = try DesktopConfiguration(values: [
                 enabled: AnyCodable(.bool(false)), threshold: AnyCodable(.int(count))
             ])
-            let document = DesktopConfigurationDocument(preferences: preferences)
             let restored = try JSONDecoder().decode(
-                DesktopConfigurationDocument.self, from: JSONEncoder().encode(document)
+                DesktopConfiguration.self, from: JSONEncoder().encode(preferences)
             )
-            XCTAssertFalse(restored.preferences.enabled(enabled))
-            XCTAssertEqual(restored.preferences.number(threshold), Double(count))
+            XCTAssertFalse(restored.enabled(enabled))
+            XCTAssertEqual(restored.number(threshold), Double(count))
             XCTAssertEqual(try preferences.applying(preferences.entries).entries, preferences.entries)
             XCTAssertFalse(DesktopConfiguration.fields.contains { $0.key == "correctionLearningApproved" })
         }

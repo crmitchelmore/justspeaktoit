@@ -2,9 +2,7 @@ import Foundation
 import SpeakCore
 import SpeakDesktop
 
-package protocol DesktopHostAutomationPlatform: DesktopHostPlatform {
-    static var defaultTextOutput: TextOutputOptions { get }
-}
+package protocol DesktopHostAutomationPlatform: DesktopHostDefaultTextOutputPlatform {}
 
 extension DesktopHostController: AutomationCommandHost where Platform: DesktopHostAutomationPlatform {
     package func automationStatus() -> AutomationResult {

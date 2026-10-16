@@ -53,7 +53,7 @@ final class DataMigrationIntegrationTests: XCTestCase {
         let current = try await fixture.store.snapshot(categories: categories.union([.history, .recordings]))
         let validated = fixture.store.validate(incoming)
         XCTAssertTrue(validated.notices.isEmpty, validated.notices.joined(separator: "\n"))
-        let plan = MigrationPlanner.plan(current: current, incoming: validated, modes: modes, useImported: [])
+        let plan = try MigrationPlanner.plan(current: current, incoming: validated, modes: modes, useImported: [])
         try await fixture.store.apply(plan, categories: categories)
     }
     func testAudioThenText_ReconnectsAndPersistsWithoutDuplicates() async throws {

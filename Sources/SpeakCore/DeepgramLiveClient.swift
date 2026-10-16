@@ -302,3 +302,7 @@ public enum DeepgramLiveError: LocalizedError {
         }
     }
 }
+
+extension DeepgramLiveClient: StreamingAudioReadyProviding {
+    public var isReadyForAudio: Bool { isConnected }
+}

@@ -35,19 +35,16 @@ public final class PronunciationManager: ObservableObject {
     // MARK: - Entry Management
 
     public func addEntry(_ entry: PronunciationEntry) {
-        // Check for duplicates
-        guard !entries.contains(where: { $0.word.lowercased() == entry.word.lowercased() }) else {
-            return
-        }
-        entries.append(entry)
+        let updated = PronunciationDictionary.adding(entry, to: entries)
+        guard updated.count != entries.count else { return }
+        entries = updated
         saveEntries()
     }
 
     public func updateEntry(_ entry: PronunciationEntry) {
-        if let index = entries.firstIndex(where: { $0.id == entry.id }) {
-            entries[index] = entry
-            saveEntries()
-        }
+        guard entries.contains(where: { $0.id == entry.id }) else { return }
+        entries = PronunciationDictionary.updating(entry, in: entries)
+        saveEntries()
     }
 
     public func deleteEntry(_ entry: PronunciationEntry) {
@@ -197,16 +194,7 @@ public final class PronunciationManager: ObservableObject {
         let decoder = JSONDecoder()
         let importedEntries = try decoder.decode([PronunciationEntry].self, from: data)
 
-        if merge {
-            // Merge: add new entries, skip duplicates
-            for entry in importedEntries
-            where !entries.contains(where: { $0.word.lowercased() == entry.word.lowercased() }) {
-                entries.append(entry)
-            }
-        } else {
-            // Replace all entries
-            entries = importedEntries
-        }
+        entries = PronunciationDictionary.importing(importedEntries, into: entries, merge: merge)
 
         saveEntries()
     }

@@ -1,4 +1,5 @@
 import Foundation
+import SpeakCore
 
 /// A History pane event, submitted on the UI thread in the order the user
 /// made it. Selection and version choose what is displayed; the others act on
@@ -15,6 +16,14 @@ public enum DesktopHistoryEvent: Equatable, Sendable {
     case stop
     /// Carries the transcript displayed at the click, which is spoken as is.
     case readAloud(String, text: String)
+    case filter(String)
+    case voiceRead(VoiceOutputSourceSnapshot)
+    case voiceExport(VoiceOutputSourceSnapshot, path: String)
+    case voiceImport(path: String, requestID: String)
+    case voiceImportCancel(requestID: String)
+    case voiceGenerate(VoiceOutputSourceSnapshot, options: VoiceGenerationOptions)
+    case voiceGeneratedPlay(String)
+    case voiceGeneratedExport(String, path: String)
 
     /// Play/Pause and Read aloud clicks kept while the host catches up.
     /// Further clicks are ignored until it does, like clicks on a busy button;
@@ -26,30 +35,51 @@ public enum DesktopHistoryEvent: Equatable, Sendable {
     /// changes always has. A new row also drops the clicks still aimed at the
     /// row it replaces, whose playback and Read aloud the host ends anyway,
     /// and Stop drops the clicks before it, whose playback it would end. At
-    /// most one row, one version, one Stop and `maximumPendingActions` clicks
-    /// are ever pending.
+    /// most one row, one version, one Stop, one filter and
+    /// `maximumPendingActions` clicks are ever pending. A filter preserves
+    /// earlier selection intent while dropping superseded filters and audio
+    /// actions; a later selection cannot overtake it.
     public static let coalesce: DesktopEventDispatcher<DesktopHistoryEvent>.Coalescing = { pending, event in
         switch event.kind {
         case .row:
-            pending.removeAll { $0.kind != .stop }
+            pending.removeAll { $0.kind != .stop && $0.kind != .filter }
         case .version:
             pending.removeAll { $0.kind == .version }
         case .stop:
             pending.removeAll { $0.kind == .action || $0.kind == .stop }
         case .action:
             guard pending.filter({ $0.kind == .action }).count < maximumPendingActions else { return }
+        case .filter:
+            pending.removeAll { $0.kind == .filter || $0.kind == .action || $0.kind == .version }
+        case .importCancellation:
+            guard case let .voiceImportCancel(requestID) = event else { return }
+            let queued = pending.contains {
+                if case let .voiceImport(_, queuedID) = $0 { return queuedID == requestID }
+                return false
+            }
+            pending.removeAll {
+                switch $0 {
+                case let .voiceImport(_, queuedID), let .voiceImportCancel(queuedID):
+                    return queuedID == requestID
+                default: return false
+                }
+            }
+            if queued { return }
         }
         pending.append(event)
     }
 
-    private enum Kind { case row, version, action, stop }
+    private enum Kind { case row, version, action, stop, filter, importCancellation }
 
     private var kind: Kind {
         switch self {
         case .selection: return .row
         case .version: return .version
-        case .playPause, .readAloud: return .action
+        case .playPause, .readAloud, .voiceRead, .voiceExport, .voiceImport,
+             .voiceGenerate, .voiceGeneratedPlay, .voiceGeneratedExport: return .action
+        case .voiceImportCancel: return .importCancellation
         case .stop: return .stop
+        case .filter: return .filter
         }
     }
 }

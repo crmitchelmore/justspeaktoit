@@ -298,3 +298,7 @@ public final class XAISpeechToTextLiveClient: FinalizingStreamingTranscriptionCl
         #endif
     }
 }
+
+extension XAISpeechToTextLiveClient: StreamingAudioReadyProviding {
+    public var isReadyForAudio: Bool { isSessionReady }
+}

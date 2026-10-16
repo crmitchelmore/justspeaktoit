@@ -237,24 +237,11 @@ void glyph(HDC dc, wchar_t code, const RECT &rect, COLORREF shade, UINT dpi, boo
 
 void brandIcon(HDC dc, const RECT &rect) {
     const int size = std::min(rect.right - rect.left, rect.bottom - rect.top);
-    const float scale = size / 1024.0f;
-    const float left = static_cast<float>(rect.left), top = static_cast<float>(rect.top);
-    auto scaled = [&](float x, float y, float width, float height) {
-        return RECT{static_cast<LONG>(left + x * scale), static_cast<LONG>(top + y * scale),
-                    static_cast<LONG>(left + (x + width) * scale), static_cast<LONG>(top + (y + height) * scale)};
-    };
-    Canvas canvas(dc);
-    Gdiplus::GraphicsPath square;
-    roundedPath(square, scaled(0, 0, 1024, 1024), static_cast<int>(224 * scale));
-    Gdiplus::LinearGradientBrush surface(Gdiplus::PointF(left, top), Gdiplus::PointF(left, top + size),
-                                         color(accent), color(accentWarm));
-    canvas.graphics.FillPath(&surface, &square);
-    Gdiplus::SolidBrush bar(color(RGB(0x18, 0x1B, 0x1D)));
-    const float bars[5][2] = {{224, 408}, {348, 328}, {472, 240}, {596, 328}, {720, 408}};
-    for (const auto &entry : bars) {
-        Gdiplus::GraphicsPath path;
-        roundedPath(path, scaled(entry[0], entry[1], 80, 1024 - 2 * entry[1]), static_cast<int>(40 * scale));
-        canvas.graphics.FillPath(&bar, &path);
+    HICON icon = reinterpret_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(101),
+                                                   IMAGE_ICON, size, size, LR_DEFAULTCOLOR));
+    if (icon) {
+        DrawIconEx(dc, rect.left, rect.top, icon, size, size, 0, nullptr, DI_NORMAL);
+        DestroyIcon(icon);
     }
 }
 

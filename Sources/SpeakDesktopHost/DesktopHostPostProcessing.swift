@@ -14,10 +14,10 @@ extension DesktopHostController {
         guard !closed, DesktopPostProcessing.remoteModels.indices.contains(modelIndex) else { return }
         do {
             let model = DesktopPostProcessing.remoteModels[modelIndex].id
-            let options = DesktopPostProcessing.Options(
-                mode: enabled ? .remote : .disabled, modelIdentifier: model,
-                customPrompt: prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : prompt
-            )
+            var options = settings.postProcessing ?? .init()
+            options.mode = enabled ? .remote : .disabled
+            options.modelIdentifier = model
+            options.customPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : prompt
             let typed = key.trimmingCharacters(in: .whitespacesAndNewlines)
             if !typed.isEmpty {
                 let identifier = try postProcessingCredential(for: model)
@@ -27,6 +27,8 @@ extension DesktopHostController {
                 } else {
                     try Platform.saveAPIKey(typed, name: identifier)
                 }
+                await refreshComparison()
+                guard !closed else { return }
             }
             var changed = settings
             changed.postProcessing = options
@@ -49,6 +51,9 @@ extension DesktopHostController {
             return record
         }
         guard !closed, !cancellationRequested, options.mode == .remote else { return record }
+        let input = record.correctedText ?? result.text
+        let directives = record.lexiconDirectives ?? []
+        let tags = record.lexiconContextTags ?? []
         do {
             let key = try Platform.apiKey(
                 name: postProcessingCredential(for: options.modelIdentifier)
@@ -57,7 +62,10 @@ extension DesktopHostController {
             hud(record.id, .postProcessing)
             let task = Task {
                 try Task.checkCancellation()
-                return try await DesktopPostProcessing.process(rawText: result.text, options: options, apiKey: key)
+                return try await DesktopPostProcessing.process(
+                    rawText: input, options: options, apiKey: key,
+                    lexiconDirectives: directives, lexiconContextTags: tags
+                )
             }
             postProcessingTask = task
             defer { postProcessingTask = nil }

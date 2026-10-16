@@ -86,7 +86,7 @@ final class SyntheticEffects: WindowsControllerEffects, @unchecked Sendable {
 
     /// Holds the output like a slow target application until released or
     /// cancelled. Never touches the clipboard or a field.
-    func perform(_ job: WindowsOutputJob, text: String) -> String {
+    func perform(_ job: WindowsOutputJob, text: String) -> DesktopTextOutputResult {
         let index = lock.withLock { () -> Int in
             var copies = false
             if case .clipboard(let output) = job {
@@ -100,7 +100,10 @@ final class SyntheticEffects: WindowsControllerEffects, @unchecked Sendable {
         while !Task.isCancelled, !delivery.isOpen, Date() < deadline { Thread.sleep(forTimeInterval: 0.002) }
         let delivered = !Task.isCancelled && delivery.isOpen
         lock.withLock { outputs[index].delivered = delivered }
-        return delivered ? "Synthetic output delivered." : "Synthetic output cancelled."
+        return DesktopTextOutputResult(
+            delivered ? .confirmedInsertion : .cancelled,
+            status: delivered ? "Synthetic output delivered." : "Synthetic output cancelled."
+        )
     }
 
     func writeSettings(_ data: Data, to url: URL) throws {

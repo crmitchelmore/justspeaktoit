@@ -19,8 +19,14 @@ struct WindowsNativeEffects: WindowsControllerEffects {
     func makeLiveClient(
         model: String, key: String, language: String?, azureEndpoint: String
     ) -> (any FinalizingStreamingTranscriptionClient)? {
+        makeLiveClient(model: model, key: key, language: language, azureEndpoint: azureEndpoint, options: .init())
+    }
+
+    func makeLiveClient(
+        model: String, key: String, language: String?, azureEndpoint: String, options: LiveClientOptions
+    ) -> (any FinalizingStreamingTranscriptionClient)? {
         DesktopLiveTranscription.makeClient(
-            model: model, apiKey: key, language: language, azureEndpoint: azureEndpoint,
+            model: model, apiKey: key, language: language, azureEndpoint: azureEndpoint, options: options,
             makeConnection: { WinHTTPStreamingConnection(request: $0) }
         )
     }
@@ -30,11 +36,33 @@ struct WindowsNativeEffects: WindowsControllerEffects {
     ) async throws -> TranscriptionResult {
         try await controller.transcribePreparedAudio(
             request.audio, model: request.model, key: request.key, duration: request.duration,
-            language: request.language
+            language: request.language, azureEndpoint: request.azureEndpoint, keywords: request.keywords
         )
     }
 
-    func perform(_ job: WindowsOutputJob, text: String) -> String { job.perform(text) }
+    func perform(_ job: WindowsOutputJob, text: String) -> DesktopTextOutputResult { job.performResult(text) }
+
+    func captureInsertionTarget() async throws -> WindowsInsertionTarget? {
+        try await Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
+            return try WindowsInsertionTarget.capture()
+        }.value
+    }
+
+    func captureUtteranceContext(
+        requiresInsertionTarget: Bool
+    ) async throws -> DesktopHostUtteranceContext<WindowsInsertionTarget> {
+        try await Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
+            if requiresInsertionTarget {
+                let target = try WindowsInsertionTarget.capture()
+                return try DesktopHostUtteranceContext(target: target, executablePath: target.executablePathChecked())
+            }
+            return try DesktopHostUtteranceContext(
+                target: nil, executablePath: WindowsInsertionTarget.foregroundExecutablePath()
+            )
+        }.value
+    }
 
     func writeSettings(_ data: Data, to url: URL) throws { try data.write(to: url, options: .atomic) }
 }

@@ -1254,6 +1254,40 @@ int jsti_insertion_executable_path(const JSTIInsertionTarget *target, char *path
     } catch (...) { return jsti::fail("Could not read the original application path.", error, errorCapacity); }
 }
 
+int jsti_foreground_executable_path(char *path, size_t pathCapacity, char *error, size_t errorCapacity) {
+    if (!path || !pathCapacity) return jsti::fail("No application path buffer was supplied.", error, errorCapacity);
+    path[0] = 0;
+    try {
+        const Environment environment = currentEnvironment();
+        const HWND window = environment.foregroundWindow();
+        DWORD pid = 0;
+        if (!window) { if (error && errorCapacity) error[0] = 0; return 0; }
+        if (!GetWindowThreadProcessId(window, &pid)) {
+            return jsti::fail(jsti::systemError("Reading the foreground application"), error, errorCapacity);
+        }
+        if (pid == GetCurrentProcessId() && !environment.allowCurrentProcess) {
+            if (error && errorCapacity) error[0] = 0;
+            return 0;
+        }
+        jsti::Handle process;
+        process.value = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+        if (!process.value) return jsti::fail(jsti::systemError("Retaining the foreground application"), error, errorCapacity);
+        std::wstring value(32768, L'\0');
+        DWORD length = static_cast<DWORD>(value.size());
+        if (!QueryFullProcessImageNameW(process.value, 0, value.data(), &length)) {
+            return jsti::fail(jsti::systemError("Reading the foreground application path"), error, errorCapacity);
+        }
+        value.resize(length);
+        const std::string encoded = jsti::utf8(value);
+        if (encoded.empty() || pathCapacity <= encoded.size()) {
+            return jsti::fail("The foreground application path does not fit its buffer.", error, errorCapacity);
+        }
+        std::memcpy(path, encoded.c_str(), encoded.size() + 1);
+        if (error && errorCapacity) error[0] = 0;
+        return 0;
+    } catch (...) { return jsti::fail("Could not read the foreground application path.", error, errorCapacity); }
+}
+
 void jsti_insertion_destroy(JSTIInsertionTarget *target) {
     if (!target) return;
     std::unique_ptr<JSTIInsertionTarget> owned(target);

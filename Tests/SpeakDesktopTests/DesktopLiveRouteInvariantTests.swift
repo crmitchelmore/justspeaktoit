@@ -15,7 +15,7 @@ import XCTest
 final class DesktopLiveRouteInvariantTests: XCTestCase {
     /// The PCM rates native desktop capture produces for a live route.
     private let captureRates: Set<Int> = [16_000, 24_000]
-    private let latestShared: [LiveTranscriptionProviderID] = [.gladia, .cartesia, .revai]
+    private let latestShared: [LiveTranscriptionProviderID] = [.gladia, .cartesia, .revai, .google, .meta, .modulate]
 
     func testProjectionIsAnOrderedCanonicalSubsetIncludingTheLatestSharedRoutes() {
         let projected = DesktopLiveTranscription.liveModels.map(\.id)

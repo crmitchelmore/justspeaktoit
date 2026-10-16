@@ -107,6 +107,10 @@ public struct CartesiaRemoteVoice: Identifiable, Codable, Hashable, Sendable {
 
 /// Canonical Cartesia Sonic catalogue and voice-identifier conventions.
 public enum CartesiaTTSCatalog {
+    public static let providerIdentifier = "cartesia"
+    public static let credentialIdentifier = "\(providerIdentifier).apiKey"
+    public static var desktopModelIdentifier: String { "\(voiceIDPrefix)\(defaultModel.rawValue)" }
+
     /// Prefix that routes a stored voice identifier back to this provider.
     public static let voiceIDPrefix = "cartesia/"
 

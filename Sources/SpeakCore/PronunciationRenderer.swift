@@ -8,8 +8,8 @@ import Foundation
 /// identically on every platform. Thread safe. Compiled expressions are cached
 /// by options and pattern; `Retention` decides how long they are kept, never
 /// how text is replaced.
-final class PronunciationRenderer: @unchecked Sendable {
-    enum Retention: Sendable {
+public final class PronunciationRenderer: @unchecked Sendable {
+    public enum Retention: Sendable {
         /// Every compiled expression is kept for the renderer's lifetime: the
         /// dictionary manager's established behaviour, whatever its size.
         case unbounded
@@ -25,13 +25,13 @@ final class PronunciationRenderer: @unchecked Sendable {
     private var regexCache: [String: NSRegularExpression] = [:]
     private var compilations = 0
 
-    init(retention: Retention = .unbounded) {
+    public init(retention: Retention = .unbounded) {
         self.retention = retention
     }
 
     /// Applies every entry with a non-empty replacement, in entry order, each
     /// to the result of the previous one.
-    func applyReplacements(to text: String, entries: [PronunciationEntry]) -> String {
+    public func applyReplacements(to text: String, entries: [PronunciationEntry]) -> String {
         var result = text
 
         for entry in entries {

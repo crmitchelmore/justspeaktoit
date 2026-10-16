@@ -60,7 +60,11 @@ static const char *hud_css =
     ".jsti-hud levelbar block.empty { background-color: alpha(currentColor, 0.15); border-radius: 2px; }\n"
     ".jsti-hud levelbar trough { min-height: 4px; padding: 0; border: none; background: none; }\n"
     ".jsti-hud-live { background-color: alpha(currentColor, 0.06); border-radius: 10px; padding: 10px;"
-    " font-size: 13px; }\n";
+    " font-size: 13px; }\n"
+    ".jsti-hud.compact { padding: 12px 18px; }\n"
+    ".jsti-hud.compact .jsti-hud-glyph { min-width: 15px; min-height: 15px; border-radius: 8px; }\n"
+    ".jsti-hud.compact .jsti-hud-clock { font-size: 16px; }\n"
+    ".jsti-hud.compact .jsti-hud-live { background: none; border-radius: 0; padding: 0; }\n";
 
 static struct {
     GtkWindow *window;
@@ -69,6 +73,9 @@ static struct {
     gint64 phase_started;
     double level;
     guint tick, hide;
+    guint64 generation;
+    gboolean compact;
+    gboolean expanded;
     GtkCssProvider *css;
     gchar *headline, *subheadline, *live_text;
 } hud;
@@ -81,7 +88,14 @@ static gboolean hud_is_x11(void) {
 #endif
 }
 
+gboolean jsti_hud_overlay_supported(void) { return hud_is_x11(); }
+
 static gchar *clock_text(gint64 microseconds) {
+    if (hud.compact) {
+        const gint64 seconds = MAX(microseconds, 0) / G_USEC_PER_SEC;
+        return seconds >= 60 ? g_strdup_printf("%" G_GINT64_FORMAT ":%02" G_GINT64_FORMAT "s", seconds / 60, seconds % 60)
+                             : g_strdup_printf("%" G_GINT64_FORMAT "s", seconds);
+    }
     const gint64 hundredths_total = (MAX(microseconds, 0) + 5000) / 10000;
     const int minutes = (int)(hundredths_total / 6000), seconds = (int)((hundredths_total / 100) % 60);
     const int hundredths = (int)(hundredths_total % 100);
@@ -91,7 +105,7 @@ static gchar *clock_text(gint64 microseconds) {
 
 /* Two lines of the latest words: earlier words drop off the front. */
 static gchar *live_tail(const char *text) {
-    const glong limit = 120;
+    const glong limit = hud.expanded ? 280 : 120;
     const glong length = g_utf8_strlen(text, -1);
     if (length <= limit) return g_strdup(text);
     const char *start = g_utf8_offset_to_pointer(text, length - limit);
@@ -121,6 +135,7 @@ static gboolean hud_tick(gpointer data) {
 }
 
 static void hud_stop_timers(void) {
+    ++hud.generation;
     if (hud.tick != 0) g_source_remove(hud.tick);
     if (hud.hide != 0) g_source_remove(hud.hide);
     hud.tick = hud.hide = 0;
@@ -134,7 +149,9 @@ static void hud_hide(void) {
 }
 
 static gboolean hud_hide_later(gpointer data) {
-    (void)data;
+    const guint64 generation = *(const guint64 *)data;
+    if (generation != hud.generation || (hud.phase != HUD_SUCCESS && hud.phase != HUD_FAILURE))
+        return G_SOURCE_REMOVE;
     hud.hide = 0;
     hud_hide();
     return G_SOURCE_REMOVE;
@@ -272,35 +289,60 @@ static void hud_build(void) {
 #endif
     hud.card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_widget_add_css_class(hud.card, "jsti-hud");
+    if (hud.compact) gtk_widget_add_css_class(hud.card, "compact");
     hud.glyph = gtk_image_new();
     gtk_image_set_pixel_size(GTK_IMAGE(hud.glyph), 18);
     gtk_widget_add_css_class(hud.glyph, "jsti-hud-glyph");
     gtk_widget_set_halign(hud.glyph, GTK_ALIGN_CENTER);
-    gtk_widget_set_margin_bottom(hud.glyph, 12);
+    gtk_widget_set_margin_bottom(hud.glyph, hud.compact ? 0 : 12);
     hud.title = hud_label("jsti-hud-title");
     hud.detail = hud_label("jsti-hud-detail");
-    gtk_label_set_lines(GTK_LABEL(hud.detail), 3);
+    gtk_label_set_lines(GTK_LABEL(hud.detail), hud.compact ? 1 : 3);
+    if (hud.compact) {
+        gtk_label_set_wrap(GTK_LABEL(hud.detail), FALSE);
+        gtk_label_set_max_width_chars(GTK_LABEL(hud.detail), 23);
+    }
     gtk_label_set_ellipsize(GTK_LABEL(hud.detail), PANGO_ELLIPSIZE_END);
-    gtk_widget_set_margin_top(hud.detail, 4);
+    gtk_widget_set_margin_top(hud.detail, hud.compact ? 7 : 4);
     hud.meter = gtk_level_bar_new_for_interval(0, 1);
     gtk_level_bar_remove_offset_value(GTK_LEVEL_BAR(hud.meter), GTK_LEVEL_BAR_OFFSET_LOW);
     gtk_level_bar_remove_offset_value(GTK_LEVEL_BAR(hud.meter), GTK_LEVEL_BAR_OFFSET_HIGH);
     gtk_level_bar_remove_offset_value(GTK_LEVEL_BAR(hud.meter), GTK_LEVEL_BAR_OFFSET_FULL);
-    gtk_widget_set_size_request(hud.meter, 100, 4);
+    gtk_widget_set_size_request(hud.meter, hud.compact ? 80 : 100, 4);
     gtk_widget_set_halign(hud.meter, GTK_ALIGN_CENTER);
-    gtk_widget_set_margin_top(hud.meter, 10);
+    gtk_widget_set_margin_top(hud.meter, hud.compact ? 0 : 10);
     hud.clock = hud_label("jsti-hud-clock");
-    gtk_widget_set_margin_top(hud.clock, 8);
+    gtk_widget_set_margin_top(hud.clock, hud.compact ? 0 : 8);
     hud.live = gtk_label_new(NULL);
     gtk_widget_add_css_class(hud.live, "jsti-hud-live");
-    gtk_label_set_wrap(GTK_LABEL(hud.live), TRUE);
-    gtk_label_set_lines(GTK_LABEL(hud.live), 2);
-    gtk_label_set_ellipsize(GTK_LABEL(hud.live), PANGO_ELLIPSIZE_END);
-    gtk_label_set_xalign(GTK_LABEL(hud.live), 0);
-    gtk_label_set_max_width_chars(GTK_LABEL(hud.live), 46);
-    gtk_widget_set_margin_top(hud.live, 12);
+    gtk_label_set_wrap(GTK_LABEL(hud.live), !hud.compact);
+    gtk_label_set_lines(GTK_LABEL(hud.live), hud.compact ? 1 : 2);
+    gtk_label_set_ellipsize(GTK_LABEL(hud.live), hud.compact ? PANGO_ELLIPSIZE_START : PANGO_ELLIPSIZE_END);
+    gtk_label_set_xalign(GTK_LABEL(hud.live), hud.compact ? 1 : 0);
+    gtk_label_set_max_width_chars(GTK_LABEL(hud.live), hud.compact ? 23 : 46);
+    gtk_widget_set_margin_top(hud.live, hud.compact ? 7 : 12);
     GtkWidget *parts[] = { hud.glyph, hud.title, hud.detail, hud.meter, hud.clock, hud.live };
-    for (size_t index = 0; index < G_N_ELEMENTS(parts); ++index) gtk_box_append(GTK_BOX(hud.card), parts[index]);
+    if (hud.compact) {
+        GtkWidget *row = gtk_overlay_new();
+        GtkWidget *edges = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+        GtkWidget *space = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+        gtk_widget_set_hexpand(space, TRUE);
+        gtk_widget_set_size_request(row, -1, 24);
+        GtkWidget *indicators[] = { hud.glyph, hud.meter, hud.clock };
+        for (size_t index = 0; index < G_N_ELEMENTS(indicators); ++index)
+            gtk_widget_set_valign(indicators[index], GTK_ALIGN_CENTER);
+        gtk_box_append(GTK_BOX(edges), hud.glyph);
+        gtk_box_append(GTK_BOX(edges), space);
+        gtk_box_append(GTK_BOX(edges), hud.clock);
+        gtk_overlay_set_child(GTK_OVERLAY(row), edges);
+        gtk_overlay_add_overlay(GTK_OVERLAY(row), hud.meter);
+        gtk_box_append(GTK_BOX(hud.card), row);
+        gtk_box_append(GTK_BOX(hud.card), hud.title);
+        gtk_box_append(GTK_BOX(hud.card), hud.detail);
+        gtk_box_append(GTK_BOX(hud.card), hud.live);
+    } else {
+        for (size_t index = 0; index < G_N_ELEMENTS(parts); ++index) gtk_box_append(GTK_BOX(hud.card), parts[index]);
+    }
     /* The card's CSS margin leaves room for its shadow inside the window. */
     hud.root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_box_append(GTK_BOX(hud.root), hud.card);
@@ -319,30 +361,59 @@ static void hud_notify(int phase, const char *headline, const char *subheadline)
 }
 
 void jsti_hud_show(int phase, const char *headline, const char *subheadline, const char *live) {
+    jsti_hud_show_duration(phase, headline, subheadline, live, 0);
+}
+
+void jsti_hud_show_duration(int phase, const char *headline, const char *subheadline, const char *live,
+                            int display_milliseconds) {
+    jsti_hud_show_presentation(phase, headline, subheadline, live, display_milliseconds, FALSE);
+}
+
+void jsti_hud_show_presentation(int phase, const char *headline, const char *subheadline, const char *live,
+                                int display_milliseconds, gboolean compact) {
+    jsti_hud_show_layout(phase, headline, subheadline, live, display_milliseconds, compact, FALSE);
+}
+
+void jsti_hud_show_layout(int phase, const char *headline, const char *subheadline, const char *live,
+                          int display_milliseconds, gboolean compact, gboolean expanded) {
     if (phase < HUD_HIDDEN || phase >= HUD_PHASES) return;
     if (phase == HUD_HIDDEN) { hud_hide(); return; }
     if (!hud_is_x11()) { hud_notify(phase, headline, subheadline); return; }
+    if (hud.window != NULL && hud.compact != compact) {
+        hud_stop_timers();
+        gtk_window_destroy(hud.window);
+        hud.window = NULL;
+        hud.styled = HUD_HIDDEN;
+    }
+    hud.compact = compact;
+    hud.expanded = expanded && !compact;
     if (hud.window == NULL) hud_build();
+    gtk_label_set_lines(GTK_LABEL(hud.live), compact ? 1 : hud.expanded ? 6 : 2);
+    gtk_label_set_max_width_chars(GTK_LABEL(hud.live), compact ? 23 : hud.expanded ? 64 : 34);
     const gboolean new_phase = phase != hud.phase;
-    if (new_phase) {
+    if (new_phase || hud.styled != phase) {
         if (hud.styled != HUD_HIDDEN) gtk_widget_remove_css_class(hud.card, phase_class[hud.styled]);
         gtk_widget_add_css_class(hud.card, phase_class[phase]);
         hud.styled = phase;
-        hud.phase_started = g_get_monotonic_time();
+        if (new_phase) hud.phase_started = g_get_monotonic_time();
         hud.phase = phase;
     }
-    gtk_image_set_from_icon_name(GTK_IMAGE(hud.glyph), phase_icon[phase]);
+    if (compact) gtk_image_clear(GTK_IMAGE(hud.glyph));
+    else gtk_image_set_from_icon_name(GTK_IMAGE(hud.glyph), phase_icon[phase]);
+    gtk_accessible_update_property(GTK_ACCESSIBLE(hud.glyph), GTK_ACCESSIBLE_PROPERTY_LABEL,
+                                    headline != NULL ? headline : "", -1);
     gtk_label_set_text(GTK_LABEL(hud.title), headline != NULL ? headline : "");
-    gtk_label_set_text(GTK_LABEL(hud.detail), subheadline != NULL ? subheadline : "");
-    gtk_widget_set_visible(hud.detail, subheadline != NULL && subheadline[0] != '\0');
+    gtk_widget_set_visible(hud.title, !compact);
     const gboolean recording = phase == HUD_RECORDING, finished = phase == HUD_SUCCESS || phase == HUD_FAILURE;
+    const char *status = compact && (!finished || subheadline == NULL || subheadline[0] == '\0') ? headline : subheadline;
+    gtk_label_set_text(GTK_LABEL(hud.detail), status != NULL ? status : "");
+    gtk_widget_set_visible(hud.detail, (!compact || !recording) && status != NULL && status[0] != '\0');
     gtk_widget_set_visible(hud.meter, recording);
     gtk_widget_set_visible(hud.clock, !finished);
     gchar *tail = live_tail(live != NULL ? live : "");
     gtk_label_set_text(GTK_LABEL(hud.live), tail);
     gtk_widget_set_visible(hud.live, recording && tail[0] != '\0');
-    /* As on the Mac: 320 px wide, 460 with live text, plus the 36 px margin. */
-    gtk_widget_set_size_request(hud.root, (recording && tail[0] != '\0' ? 460 : 320) + 36, -1);
+    gtk_widget_set_size_request(hud.root, (compact ? 244 : hud.expanded ? 500 : 320) + 36, -1);
     g_free(tail);
     /* Screen readers announce each new phase. */
     if (new_phase) {
@@ -353,7 +424,13 @@ void jsti_hud_show(int phase, const char *headline, const char *subheadline, con
         g_free(announcement);
     }
     hud_stop_timers();
-    if (finished) hud.hide = g_timeout_add(phase == HUD_SUCCESS ? 2400 : 6000, hud_hide_later, NULL);
+    if (finished) {
+        const guint duration = display_milliseconds > 0 ? (guint)display_milliseconds :
+            (phase == HUD_SUCCESS ? 2400 : 6000);
+        guint64 *generation = g_new(guint64, 1);
+        *generation = hud.generation;
+        hud.hide = g_timeout_add_full(G_PRIORITY_DEFAULT, duration, hud_hide_later, generation, g_free);
+    }
     else hud.tick = g_timeout_add(33, hud_tick, NULL);
     hud_tick_apply();
     gtk_widget_set_visible(GTK_WIDGET(hud.window), TRUE);
@@ -433,8 +510,63 @@ int32_t jsti_hud_self_test(char *error, size_t capacity) {
     jsti_hud_show(HUD_SUCCESS, "Completed", "Transcript copied to the clipboard and saved to History.", "");
     hud_wait();
     if (problem == NULL && jsti_hud_card() == NULL) problem = "the completed phase did not stay up.";
+    jsti_hud_show(HUD_RECORDING, "Recording", "Capturing audio", "Synthetic speech");
+    hud_wait();
+    const int full_width = gtk_widget_get_width(hud.root);
+    const gint64 started = hud.phase_started;
+    jsti_hud_show_layout(HUD_RECORDING, "Recording", "Capturing audio",
+                          "Could we move the catch-up to Friday? That gives us a little more time", 0, FALSE, TRUE);
+    hud_wait();
+    if (problem == NULL && (gtk_widget_get_width(hud.root) <= full_width ||
+                            gtk_label_get_lines(GTK_LABEL(hud.live)) != 6 || hud.phase_started != started ||
+                            gtk_window_is_active(hud.window)))
+        problem = "expanded presentation lost its wider transcript, session clock or focus safety.";
+    jsti_hud_show_presentation(HUD_RECORDING, "Recording", "Capturing audio",
+                                "Could we move the catch-up to Friday? That gives us a little more time", 0, TRUE);
+    hud_wait();
+    if (problem == NULL && (gtk_widget_get_width(hud.root) >= full_width || gtk_widget_get_visible(hud.title) ||
+                            gtk_widget_get_visible(hud.detail) || !gtk_widget_get_visible(hud.meter) ||
+                            !gtk_widget_get_visible(hud.clock) || !gtk_widget_get_visible(hud.live) ||
+                            gtk_label_get_wrap(GTK_LABEL(hud.live)) || gtk_label_get_lines(GTK_LABEL(hud.live)) != 1 ||
+                            gtk_label_get_ellipsize(GTK_LABEL(hud.live)) != PANGO_ELLIPSIZE_START ||
+                            hud.phase_started != started || gtk_window_is_active(hud.window)))
+        problem = "the compact layout lost its meter, clock, trailing transcript or focus safety.";
+    gchar *compact_clock = clock_text(83999000);
+    if (problem == NULL && g_strcmp0(compact_clock, "1:23s") != 0)
+        problem = "the compact clock did not use whole seconds.";
+    g_free(compact_clock);
+    jsti_hud_show_presentation(HUD_RECORDING, "Recording", "Capturing audio", "", 0, TRUE);
+    if (problem == NULL && (gtk_widget_get_visible(hud.live) || gtk_widget_get_visible(hud.detail)))
+        problem = "a disabled compact transcript showed placeholder status text.";
+    jsti_hud_show_presentation(HUD_FAILURE, "Error", "Synthetic failure.", "", 3600, TRUE);
+    if (problem == NULL && (gtk_widget_get_visible(hud.clock) ||
+                            g_strcmp0(gtk_label_get_text(GTK_LABEL(hud.detail)), "Synthetic failure.") != 0))
+        problem = "the compact error card lost its status or retained a clock.";
+    jsti_hud_show_duration(HUD_FAILURE, "Something went wrong", "Synthetic failure.", "", 3600);
+    hud_wait();
+    GSource *hide_source = g_main_context_find_source_by_id(NULL, hud.hide);
+    const gint64 remaining = hide_source != NULL ? g_source_get_ready_time(hide_source) - g_get_monotonic_time() : -1;
+    if (problem == NULL && (remaining < 3000000 || remaining > 3600000))
+        problem = "the shortened error timer was not scheduled.";
+    guint64 previous_generation = hud.generation;
+    jsti_hud_show_duration(HUD_FAILURE, "Something went wrong", "Synthetic failure.", "", 6000);
+    hud_hide_later(&previous_generation);
+    hide_source = g_main_context_find_source_by_id(NULL, hud.hide);
+    const gint64 standard_remaining = hide_source != NULL
+        ? g_source_get_ready_time(hide_source) - g_get_monotonic_time() : -1;
+    if (problem == NULL && (jsti_hud_card() == NULL || standard_remaining < 5000000 ||
+                            standard_remaining > 6000000))
+        problem = "an old short error timer hid a replacement error or changed its duration.";
+    previous_generation = hud.generation;
+    jsti_hud_show(HUD_RECORDING, "Recording", "Capturing audio", "");
+    hud_hide_later(&previous_generation);
+    if (problem == NULL && (jsti_hud_card() == NULL || hud.phase != HUD_RECORDING || hud.hide != 0))
+        problem = "an old error timer hid an active recording.";
     jsti_hud_show(HUD_HIDDEN, "", "", "");
     if (problem == NULL && jsti_hud_card() != NULL) problem = "hiding the HUD left it on screen.";
+    jsti_hud_destroy();
+    if (problem == NULL && (hud.window != NULL || hud.tick != 0 || hud.hide != 0))
+        problem = "shutdown left the HUD or its timers alive.";
     if (problem != NULL) {
         jsti_set_error(error, capacity, "Recording HUD: %s", problem);
         result = -1;

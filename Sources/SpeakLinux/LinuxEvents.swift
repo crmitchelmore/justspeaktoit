@@ -59,6 +59,12 @@ final class LinuxEventContext: @unchecked Sendable {
             case .playPause(let identifier): await controller.playbackToggle(identifier)
             case .stop: await controller.playbackStop()
             case .readAloud(let identifier, let text): await controller.readAloud(identifier, text: text)
+            case .filter(let payload): await controller.applyHistoryFilters(payload)
+            case .voiceRead, .voiceExport, .voiceImport, .voiceImportCancel,
+                 .voiceGenerate, .voiceGeneratedPlay, .voiceGeneratedExport:
+                await controller.performVoiceEvent(event) {
+                    LinuxWindow.voiceTextImported($1, requestID: $0)
+                }
             }
         }
     }
@@ -168,7 +174,18 @@ func linuxWindowEvent(
     let value = text.map(String.init(cString:)) ?? ""
     let slot = Int(index)
     let event = Int(event)
+    if event == 70 || event == 71 || event == 72 {
+        linuxVocabularyEvent(Int32(event), payload: value, kind: slot, holder: holder)
+        return
+    }
+    if (100...109).contains(event) || (120...129).contains(event) {
+        holder.enqueueSettings {
+            await holder.controller.enqueueComparisonEvent(Int32(event), text: value, index: index)
+        }
+        return
+    }
     if linuxSessionEvent(event, value: value, slot: slot, holder: holder) { return }
+    if linuxHistoryManagementEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxHistoryEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxReadAloudEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxLocalModelEvent(event, slot: slot, holder: holder) { return }
@@ -202,6 +219,7 @@ private func linuxSessionEvent(_ event: Int, value: String, slot: Int, holder: L
     case Int(JSTI_EVENT_COPY): holder.copyDisplayed()
     case Int(JSTI_EVENT_READY): linuxReady(holder)
     case Int(JSTI_EVENT_CANCEL): Task { await controller.cancelTranscription() }
+    case Int(JSTI_EVENT_USER_ABSENT): Task { await controller.handsFreeUserAbsent(value) }
     case Int(JSTI_EVENT_REFRESH_MODELS): Task { await controller.refreshModels(force: true) }
     default: return false
     }
@@ -209,6 +227,30 @@ private func linuxSessionEvent(_ event: Int, value: String, slot: Int, holder: L
 }
 
 /// History list, export and playback events. Returns false for others.
+private func linuxHistoryManagementEvent(_ event: Int, value: String, slot: Int, holder: LinuxEventContext) -> Bool {
+    switch event {
+    case Int(JSTI_EVENT_HISTORY_FILTERS): holder.submitHistoryPlayback(.filter(value))
+    case Int(JSTI_EVENT_HISTORY_DELETE):
+        let controller = holder.controller
+        holder.enqueueSettings { await controller.beginHistoryDeletion(value, deleteAudio: slot == 1) }
+    case Int(JSTI_EVENT_RECORDINGS_FOLDER): Task { await holder.controller.revealRecordingsDirectory() }
+    case Int(JSTI_EVENT_AUDIO_CLEANUP):
+        holder.enqueueSettings { await holder.controller.beginAudioCleanupConfirmation() }
+    case Int(JSTI_EVENT_AUDIO_CLEANUP_RESPONSE):
+        holder.enqueueSettings { await holder.controller.answerAudioCleanup(value, delete: slot == 1) }
+    case Int(JSTI_EVENT_MIGRATION_INSPECT):
+        holder.enqueueSettings {
+            await holder.controller.beginMigrationInspection(URL(fileURLWithPath: value))
+        }
+    case Int(JSTI_EVENT_MIGRATION_EXPORT):
+        holder.enqueueSettings {
+            await holder.controller.beginMigrationExport(URL(fileURLWithPath: value), includeAudio: slot == 1)
+        }
+    default: return false
+    }
+    return true
+}
+
 private func linuxHistoryEvent(_ event: Int, value: String, slot: Int, holder: LinuxEventContext) -> Bool {
     let controller = holder.controller
     switch event {
@@ -310,6 +352,10 @@ private func linuxReady(_ holder: LinuxEventContext) {
         Task {
             await controller.ready()
             await controller.refreshLoginItem()
+            LinuxWindow.textOutput(
+                await controller.textOutputOptions(),
+                hint: LinuxHostPlatform.session.shortcutAdvice(command: "justspeaktoit")
+            )
             do {
                 try directory.withCString { path in
                     try LinuxNative.call { jsti_window_screenshot_tour(path, $0, $1) }
@@ -334,6 +380,7 @@ private func linuxReady(_ holder: LinuxEventContext) {
         return
     }
     do {
+        LinuxWindow.textOutput(.init(), hint: LinuxHostPlatform.session.shortcutAdvice(command: "justspeaktoit"))
         // Capture the laid-out startup window before the self-test changes it.
         if let path = ProcessInfo.processInfo.environment["JSTI_UI_SNAPSHOT_PATH"] {
             try path.withCString { path in try LinuxNative.call { jsti_window_save_snapshot(path, $0, $1) } }

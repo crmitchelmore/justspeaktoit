@@ -23,6 +23,20 @@ final class LinuxTextOutputOptionsTests: XCTestCase {
         let decoded = try JSONDecoder().decode(LinuxTextOutputOptions.self, from: JSONEncoder().encode(options))
         XCTAssertEqual(decoded, options)
     }
+
+    func testWaylandStatusRetainsButDoesNotPromiseTheX11RestorationPreference() throws {
+        for restore in [false, true] {
+            let options = LinuxTextOutputOptions(restoreClipboard: restore)
+            let status = options.savedStatus(canRestoreClipboard: false)
+            XCTAssertTrue(status.contains("focused at delivery"), status)
+            XCTAssertTrue(status.contains("keeps the transcript on the clipboard"), status)
+            XCTAssertTrue(status.contains("preference is retained"), status)
+            XCTAssertFalse(status.contains("is restored"), status)
+            let decoded = try JSONDecoder().decode(LinuxTextOutputOptions.self, from: JSONEncoder().encode(options))
+            XCTAssertEqual(decoded.restoreClipboard, restore)
+        }
+        XCTAssertTrue(LinuxTextOutputOptions().savedStatus(canRestoreClipboard: true).contains("still owns"))
+    }
 }
 
 final class LinuxOutputPlanTests: XCTestCase {
@@ -78,9 +92,13 @@ final class LinuxOutputPlanTests: XCTestCase {
 }
 
 /// Records every native effect in order.
-private final class RecordingNative: LinuxOutputNative, @unchecked Sendable {
+final class RecordingNative: LinuxOutputNative, @unchecked Sendable {
     let lock = NSLock()
     var clipboard: String?
+    var ownership: UInt64 = 0
+    var clipboardReads = 0
+    var readFails = false
+    var restoreFails = false
     var log: [String] = []
     var focusStays = true
     var ownWindow = false
@@ -88,14 +106,40 @@ private final class RecordingNative: LinuxOutputNative, @unchecked Sendable {
     var sharedClipboard = true
     /// Simulates the user copying something during the restore delay.
     var copyDuringDelay: String?
+    var duringDelay: (() -> Void)?
 
     func record(_ entry: String) { lock.withLock { log.append(entry) } }
 
-    func readClipboard() throws -> String? { lock.withLock { clipboard } }
+    func readClipboard() throws -> String? {
+        try lock.withLock {
+            clipboardReads += 1
+            if readFails { throw LinuxNativeError(message: "Synthetic clipboard read failure.") }
+            return clipboard
+        }
+    }
     func writeClipboard(_ text: String) throws {
         lock.withLock {
             clipboard = text
+            ownership += 1
             log.append("write:\(text)")
+        }
+    }
+    func writeOwnedClipboard(_ text: String) throws -> UInt64 {
+        lock.withLock {
+            clipboard = text
+            ownership += 1
+            log.append("write:\(text)")
+            return ownership
+        }
+    }
+    func restoreClipboard(_ text: String, ownership expected: UInt64) throws -> Bool {
+        try lock.withLock {
+            if restoreFails { throw LinuxNativeError(message: "Synthetic clipboard restore failure.") }
+            guard ownership == expected else { return false }
+            clipboard = text
+            ownership += 1
+            log.append("write:\(text)")
+            return true
         }
     }
     func x11Paste(window: UInt64, shift: Bool) throws -> Bool {
@@ -107,12 +151,26 @@ private final class RecordingNative: LinuxOutputNative, @unchecked Sendable {
         if portalFails { throw LinuxNativeError(message: "Permission was declined in the desktop dialog.") }
         return sharedClipboard
     }
-    func remotePaste(text: String?, shift: Bool) throws { record("portal-paste:\(text ?? "<clipboard>"):\(shift)") }
+    func remotePaste(text: String?, shift: Bool) throws {
+        lock.withLock {
+            if let text {
+                clipboard = text
+                ownership += 1
+            }
+            log.append("portal-paste:\(text ?? "<clipboard>"):\(shift)")
+        }
+    }
     func ownWindowFocused() -> Bool { ownWindow }
     func notify(title: String, body: String) { record("notify:\(title)") }
     func sleep(milliseconds: Int) {
         record("sleep")
-        if let copy = copyDuringDelay { lock.withLock { clipboard = copy } }
+        if let copy = copyDuringDelay {
+            lock.withLock {
+                clipboard = copy
+                ownership += 1
+            }
+        }
+        duringDelay?()
     }
 }
 
@@ -135,6 +193,56 @@ final class LinuxOutputJobTests: XCTestCase {
         _ = job.perform("dictated")
         XCTAssertEqual(native.clipboard, "user copied this")
         XCTAssertFalse(native.log.contains("write:previous"))
+    }
+
+    func testRestoreNeverOverwritesANewerIdenticalTextCopy() {
+        let native = RecordingNative()
+        native.clipboard = "previous"
+        native.copyDuringDelay = "dictated"
+        let job = LinuxOutputJob(plan: .x11Paste(window: 9, shift: false, restoreClipboard: true), native: native)
+        let status = job.perform("dictated")
+        XCTAssertEqual(native.clipboard, "dictated")
+        XCTAssertFalse(native.log.contains("write:previous"))
+        XCTAssertEqual(native.clipboardReads, 1)
+        XCTAssertFalse(status.contains("was restored"), status)
+    }
+
+    func testCancellationDuringDelayDoesNotRestore() {
+        let native = RecordingNative()
+        native.clipboard = "previous"
+        let job = LinuxOutputJob(plan: .x11Paste(window: 9, shift: false, restoreClipboard: true), native: native)
+        native.duringDelay = { job.cancel() }
+        _ = job.perform("dictated")
+        XCTAssertEqual(native.clipboard, "dictated")
+        XCTAssertFalse(native.log.contains("write:previous"))
+    }
+
+    func testReadFailureStillPastesButExplicitlyReportsLostRestoration() {
+        let native = RecordingNative()
+        native.readFails = true
+        let job = LinuxOutputJob(plan: .x11Paste(window: 9, shift: false, restoreClipboard: true), native: native)
+        let status = job.perform("dictated")
+        XCTAssertEqual(native.log, ["write:dictated", "x11:9:false"])
+        XCTAssertTrue(status.contains("Synthetic clipboard read failure"), status)
+    }
+
+    func testRestoreFailureIsReportedWithoutClaimingSuccess() {
+        let native = RecordingNative()
+        native.clipboard = "previous"
+        native.restoreFails = true
+        let job = LinuxOutputJob(plan: .x11Paste(window: 9, shift: false, restoreClipboard: true), native: native)
+        let status = job.perform("dictated")
+        XCTAssertEqual(native.clipboard, "dictated")
+        XCTAssertTrue(status.contains("Synthetic clipboard restore failure"), status)
+        XCTAssertFalse(status.contains("was restored"), status)
+    }
+
+    func testDisabledRestorationDoesNotReadOrDelay() {
+        let native = RecordingNative()
+        let job = LinuxOutputJob(plan: .x11Paste(window: 9, shift: false, restoreClipboard: false), native: native)
+        _ = job.perform("dictated")
+        XCTAssertEqual(native.clipboardReads, 0)
+        XCTAssertEqual(native.log, ["write:dictated", "x11:9:false"])
     }
 
     func testChangedFocusLeavesTheTranscriptOnTheClipboard() {
@@ -161,6 +269,36 @@ final class LinuxOutputJobTests: XCTestCase {
         let job = LinuxOutputJob(plan: .portalPaste(shift: false), native: native)
         _ = job.perform("dictated")
         XCTAssertEqual(native.log, ["portal-start", "portal-paste:dictated:false"])
+    }
+
+    func testPortalRoutesNeverReadDelayOrRestoreRegardlessOfStoredPreference() throws {
+        let session = LinuxDesktopSession(environment: [
+            "XDG_SESSION_TYPE": "wayland", "WAYLAND_DISPLAY": "w-0", "DISPLAY": ":0"
+        ])
+        XCTAssertFalse(session.canUseX11Injection)
+        for restore in [false, true] {
+            for shared in [false, true] {
+                let options = LinuxTextOutputOptions(restoreClipboard: restore)
+                let decoded = try JSONDecoder().decode(
+                    LinuxTextOutputOptions.self, from: JSONEncoder().encode(options)
+                )
+                let plan = try XCTUnwrap(LinuxOutputPlan.make(
+                    options: decoded, target: .init(kind: .focusedApplication),
+                    session: session, portalAvailable: true
+                ))
+                XCTAssertEqual(plan, .portalPaste(shift: false))
+                let native = RecordingNative()
+                native.clipboard = "previous"
+                native.sharedClipboard = shared
+                let status = LinuxOutputJob(plan: plan, native: native).perform("dictated")
+                XCTAssertEqual(native.clipboardReads, 0)
+                XCTAssertEqual(native.clipboard, "dictated")
+                XCTAssertFalse(native.log.contains("sleep"))
+                XCTAssertFalse(native.log.contains("write:previous"))
+                XCTAssertTrue(status.contains("stays on the clipboard"), status)
+                XCTAssertEqual(decoded.restoreClipboard, restore)
+            }
+        }
     }
 
     func testPortalWithoutSharedClipboardUsesTheAppClipboard() {

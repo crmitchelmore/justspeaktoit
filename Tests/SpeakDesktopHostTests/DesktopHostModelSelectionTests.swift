@@ -89,7 +89,7 @@ final class DesktopHostModelSelectionTests: XCTestCase {
 
 /// Counts settings writes and can refuse them, as a read-only profile or a
 /// full disk would.
-private final class SettingsWriteEffects: DesktopHostEffects, @unchecked Sendable {
+final class SettingsWriteEffects: DesktopHostEffects, @unchecked Sendable {
     typealias Platform = FakePlatform
     private let lock = NSLock()
     private var count = 0
@@ -116,7 +116,9 @@ private final class SettingsWriteEffects: DesktopHostEffects, @unchecked Sendabl
             modelIdentifier: request.model, cost: nil, rawPayload: nil, debugInfo: nil
         )
     }
-    func perform(_ job: FakeJob, text: String) -> String { "Delivered." }
+    func perform(_ job: FakeJob, text: String) -> DesktopTextOutputResult {
+        DesktopTextOutputResult(.confirmedInsertion, status: "Delivered.")
+    }
     func writeSettings(_ data: Data, to url: URL) throws {
         try lock.withLock {
             if refusing { throw CocoaError(.fileWriteOutOfSpace) }

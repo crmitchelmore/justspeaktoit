@@ -309,24 +309,3 @@ extension SharedClientLiveController {
     }
   }
 }
-
-/// Folds one provider event into a controller transcript. A provider's
-/// authoritative snapshot replaces the text, even when it is explicitly
-/// empty; otherwise finals fold by the client's declared shape.
-enum SharedTranscriptProjection {
-  static func apply(
-    eventText: String,
-    isFinal: Bool,
-    snapshot: StreamingTranscriptSnapshot?,
-    accumulator: inout TranscriptAccumulator
-  ) -> String? {
-    if let authoritative = snapshot?.resolvedDisplayText {
-      let text = authoritative.trimmingCharacters(in: .whitespacesAndNewlines)
-      accumulator.replace(with: text)
-      return text
-    }
-    let text = eventText.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !text.isEmpty else { return nil }
-    return isFinal ? accumulator.append(final: text) : accumulator.display(withInterim: text)
-  }
-}

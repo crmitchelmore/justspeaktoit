@@ -81,7 +81,7 @@ final class MistralVoxtralDesktopFactoryTests: XCTestCase {
         XCTAssertEqual(route.sampleRate * 100 / 1_000 * 2, 3_200, "One native frame is 3,200 bytes of mono PCM16")
     }
 
-    func testBatchUnknownAndUnimplementedRoutesStayUnavailable() {
+    func testBatchUnknownAndAppleSpeechRoutesStayUnavailable() {
         let batch = ModelCatalog.batchTranscriptionOptions(forProvider: "mistral").map(\.id)
         XCTAssertFalse(batch.isEmpty)
         for identifier in batch + ["mistral/unknown-streaming"] {
@@ -89,15 +89,9 @@ final class MistralVoxtralDesktopFactoryTests: XCTestCase {
             XCTAssertNil(DesktopLiveTranscription.provider(forID: identifier), identifier)
             XCTAssertEqual(DesktopLiveTranscription.captureFrameMilliseconds(forID: identifier), 100, identifier)
         }
-        // Gladia's, Cartesia's, Rev.ai's and Azure's shared clients joined the
-        // projection alongside Voxtral, and their desktop factory tests cover
-        // them positively; the rest stay out.
-        let unimplemented: Set<LiveTranscriptionProviderID> = [
-            .apple, .google, .modulate, .meta
-        ]
+        // Apple Speech requires its native Apple-framework adapter, not a remote client.
         for model in ModelCatalog.liveTranscription {
-            guard let route = LiveTranscriptionRouting.route(for: model.id),
-                  unimplemented.contains(route.provider) else { continue }
+            guard LiveTranscriptionRouting.route(for: model.id)?.provider == .apple else { continue }
             XCTAssertFalse(DesktopLiveTranscription.liveModels.contains { $0.id == model.id }, model.id)
             XCTAssertNil(DesktopLiveTranscription.makeClient(model: model.id, apiKey: "k", makeConnection: { _ in
                 fatalError("An unavailable route must not open a connection")

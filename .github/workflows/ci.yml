@@ -177,19 +177,18 @@ jobs:
           fi
 
   core-journey-e2e:
-    name: Core Dictation Journey (≤10m)
+    name: Core Dictation Journey (≤8m tests)
     # This non-UI contract gate may use an explicitly approved native runner.
     runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-macos-build","macOS"]') || '["macos-26-intel"]') }}
-    timeout-minutes: 10
+    timeout-minutes: 30
     needs: release-paths
     if: needs.release-paths.outputs.core-journey == 'true'
     steps:
       - uses: actions/checkout@v7.0.1
 
-      # Debug CI populates the shared cache. This bounded gate only restores;
-      # uploading gigabytes afterwards must not consume its ten-minute budget.
-      # Its hosted runner must match build-macos's (macos-26-intel): the key is
-      # architecture-scoped, and a cold ARM64 build alone nearly fills the budget.
+      # Debug CI populates the shared cache. This gate only restores; uploading
+      # gigabytes afterwards would only lengthen it. The hosted runner matches
+      # build-macos's (macos-26-intel) because the key is architecture-scoped.
       - name: Restore Swift packages
         uses: actions/cache/restore@v6
         with:
@@ -198,7 +197,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-swift-
 
+      # Compile outside the eight-minute budget so it measures the journey
+      # tests, not how fast a hosted runner can rebuild the package.
+      - name: Build test products
+        timeout-minutes: 20
+        run: swift build --build-tests
+
       - name: Run core journey gate
+        timeout-minutes: 9
         run: scripts/run-core-journey-e2e.sh
 
       - name: Upload stage diagnostics

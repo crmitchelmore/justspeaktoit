@@ -69,6 +69,16 @@ public final class AutoCorrectionDomain {
   /// threshold promotion failed (in which case the candidate is retained so
   /// the promotion can be retried later).
   public func recordEdit(original: String, edited: String, app: String?) async throws {
+    try await recordEdit(original: original, edited: edited, app: app, threshold: nil, isCurrent: { true })
+  }
+
+  public func recordEdit(
+    original: String, edited: String, app: String?, threshold: Int?,
+    isCurrent: @escaping @Sendable () -> Bool
+  ) async throws {
+    if let threshold, !AutoCorrectionLearningPolicy.promotionThresholdRange.contains(threshold) {
+      throw DesktopConfigurationError.invalidField("Correction promotion threshold")
+    }
     guard !original.isEmpty, edited != original else {
       return
     }
@@ -80,11 +90,12 @@ public final class AutoCorrectionDomain {
     }
 
     try await enqueue {
+      guard isCurrent() else { throw CancellationError() }
       let previous = self.candidates
       var promotionError: Error?
       for change in changes {
         do {
-          try await self.processChange(change, app: app)
+          try await self.processChange(change, app: app, threshold: threshold ?? self.promotionThreshold())
         } catch {
           // Promotion failed: the candidate stays pending for retry.
           promotionError = error
@@ -214,7 +225,7 @@ public final class AutoCorrectionDomain {
   /// Update in-memory candidates for one word change. Throws only when a
   /// threshold promotion fails to save its lexicon rule; the candidate is
   /// retained (with its incremented count) in that case.
-  private func processChange(_ change: WordChange, app: String?) async throws {
+  private func processChange(_ change: WordChange, app: String?, threshold: Int) async throws {
     let matchKey = "\(change.original.lowercased())→\(change.corrected.lowercased())"
 
     // Check if we already have this candidate
@@ -223,7 +234,7 @@ public final class AutoCorrectionDomain {
       candidates[index] = candidates[index].incrementingSeen(app: app)
 
       // Check if ready to promote
-      if candidates[index].seenCount >= promotionThreshold() {
+      if candidates[index].seenCount >= threshold {
         // Remove the candidate only after the rule is durably saved.
         try await createRuleFromCandidate(candidates[index])
         candidates.remove(at: index)

@@ -814,8 +814,8 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | enableSendToMac | Partial / Partial | iCloud web History sync is not Send-to-Mac transport/pairing |
 | enableAutomationServer | Equivalent / Source wired, unqualified | Automation; Windows per-user named pipe unchanged. Linux native opt-in starts a bounded same-user Unix socket and `speak`; imported/legacy true preserves intent but never grants device-local approval. False revokes. No native/runtime qualification claimed. |
 | pasteRemoteTranscriptsAtCursor | Missing / Missing | No remote transcript delivery preference |
-| autoCorrectionsEnabled | Missing / Missing | This specific legacy toggle value may be retained opaquely, but is not applied/mapped to Desktop's native candidate pipeline; Desktop has a native candidate review pipeline (promote/dismiss/remove/clear via `DesktopVocabularyCandidates`/`AutoCorrectionDomain`) for already-stored candidates, but lacks Mac's Accessibility-based automatic external-app edit observation (`AutoCorrectionTracker`/`recordEdit`) that populates new candidates |
-| autoCorrectionsPromotionThreshold | Missing / Missing | This specific legacy threshold value may be retained opaquely, but is not applied/mapped; Desktop's candidate pipeline uses its own fixed promotion threshold independent of this preference, still gated on the missing automatic capture above for new candidates |
+| autoCorrectionsEnabled | Source wired, unqualified / Unsupported observation; retained | Canonical true default; Windows requires separate explicit session-local approval and confirmed native Edit/UIA Value output with a retained UIA range. No clipboard/unconfirmed/ambiguous paste learning. Linux X11 top-level identity and Wayland paste do not establish an owned editable span; its retained setting is disabled and explained in GTK. Manual candidate review/promote/dismiss/remove/clear remains available on both platforms when learning is off. NOT_RUN |
+| autoCorrectionsPromotionThreshold | Source wired, unqualified / Retained, inactive for observation | Canonical Mac default 2 and integral 2...10 validation; snapshotted for each admitted Windows observation, driving shared `AutoCorrectionDomain` promotion and durable rollback. Imports preserve values, never grant local learning approval. Linux retained field is read-only until a safe observation adapter exists. NOT_RUN |
 | recordingSoundsEnabled | Native qualified / Native qualified | General + owned native channel; normal readiness/finish cues only; installed-package acceptance pending |
 | recordingSoundProfile | Native qualified / Native qualified | Canonical four profiles + owned preload replacement and explicit previews; all eight production AACs decoded on Windows/Linux |
 | recordingSoundVolume | Native qualified / Native qualified | Strict 0...1 field + Mac volume-squared gain; native tests and queue bounds passed; installed-package acceptance pending |
@@ -865,10 +865,25 @@ Corrections page exists on native desktops; Desktop's separate `DesktopVocabular
 CRUD and auto-correction candidate review journey, reused from Read aloud/Generate above — not
 a missing journey, just not a `SettingsTab` destination. Permission troubleshooting/remediation
 and full archive migration remain missing journeys; Linux profile editing still needs
-compilation and native acceptance. Automatic external-app edit capture for new correction
-candidates, legacy preference value execution and Mac IPA/phoneme/SSML parity remain the real
-pronunciation/corrections gaps (see table above). No placeholder destination or inert switch is
-added for those gaps.
+compilation and native acceptance. Automatic external-app edit capture remains an **open Linux
+parity gap**: neither unconfirmed paste keys nor a top-level window grants AT-SPI field/span
+ownership, and Wayland does not supply an equivalent receipt. The Windows source-only learning
+path uses acknowledged native Edit caret identity or confirmed whole-field UIA Value replacement,
+then retains and samples only that UIA text range with bounded surrounding guards. UIA interfaces
+are created/read/released on the existing COM worker, never on Swift tasks. Password,
+unknown-sensitive, noneditable, oversized and ambiguous ranges are refused. Clipboard and
+unconfirmed/paste-only delivery are not observed. A new recording, output replacement, disable,
+stop-learning or close cancels/fences pending samples; process/window/control/focus changes and
+surrounding-context edits invalidate the native lease. No focus probe is added to recording start,
+and no captured text is logged. Imported preferences do not grant the in-memory session approval.
+Mac IPA/phoneme/SSML parity and native learning qualification remain open.
+
+The learning candidate is authored on exact `f6f2ac90` only. Its focused
+`AutoCorrectionLearningPolicyTests`, added `AutoCorrectionDomainTests`,
+`DesktopCorrectionObservationTests` and `DesktopHostCorrectionLearningTests`, native Windows
+text-output fixture additions and GTK read-only-field assertion are **NOT_RUN** here: this host
+has no Swift toolchain, and WSL/native/UI execution is not authorized. No prior component receipt,
+provider test or other source tree qualifies this learning candidate.
 
 Local model discovery/import/preparation, lexicon/corrections/pronunciation,
 TTS usage/history, audio-only housekeeping/text-file import, profile archive merge, paid access,

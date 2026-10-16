@@ -3006,6 +3006,13 @@ static void configuration_dependencies(GObject *object, GParamSpec *spec, gpoint
     (void)object; (void)spec; (void)data;
     for (guint i = 0; i < configuration.rows->len; ++i) {
         gint32 enabling = g_array_index(configuration.enabled_by_fields, gint32, i);
+        if (enabling == -1) {
+            GtkWidget *row = g_ptr_array_index(configuration.rows, i);
+            gtk_widget_set_sensitive(row, FALSE);
+            adw_action_row_set_subtitle(ADW_ACTION_ROW(row),
+                "Unavailable on this host: no confirmed editable field/span readback. Retained for transfer.");
+            continue;
+        }
         if (!enabling) continue;
         AdwSwitchRow *control = ADW_SWITCH_ROW(g_ptr_array_index(configuration.rows, enabling - 1));
         gtk_widget_set_sensitive(g_ptr_array_index(configuration.rows, i), adw_switch_row_get_active(control));
@@ -3154,8 +3161,8 @@ int32_t jsti_window_set_configuration(const JSTIConfigurationField *fields, size
     }
     for (size_t i = 0; i < count; ++i) {
         const gint32 enabling = fields[i].enabled_by_field;
-        if (enabling < 0 || (size_t)enabling > count ||
-            (enabling && ((size_t)enabling == i + 1 || fields[enabling - 1].is_boolean != 1))) {
+        if (enabling < -1 || (enabling > 0 && ((size_t)enabling > count ||
+            (size_t)enabling == i + 1 || fields[enabling - 1].is_boolean != 1))) {
             configuration_update_free(update);
             return -1;
         }
@@ -3354,7 +3361,9 @@ static gboolean configuration_self_test(void) {
     gboolean found_dependency = FALSE;
     for (guint i = 0; i < configuration.rows->len; ++i) {
         gint32 enabling = g_array_index(configuration.enabled_by_fields, gint32, i);
-        if (!enabling) continue;
+        if (enabling == -1 && gtk_widget_get_sensitive(g_ptr_array_index(configuration.rows, i)))
+            return -1;
+        if (enabling <= 0) continue;
         found_dependency = TRUE;
         AdwSwitchRow *control = ADW_SWITCH_ROW(g_ptr_array_index(configuration.rows, enabling - 1));
         GtkWidget *dependent = g_ptr_array_index(configuration.rows, i);

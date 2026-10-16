@@ -691,6 +691,11 @@ int jsti_insertion_insert(JSTIInsertionTarget *target, const char *text, unsigne
  * already dispatched may complete, and insert then reports its actual/uncertain
  * outcome. The target remains owned until insert returns and destroy is called. */
 void jsti_insertion_cancel(JSTIInsertionTarget *target);
+/* Blocking, bounded worker request; never call on the UI/audio/host actor.
+ * original nonnull captures only the exact acknowledged insertion's UIA range.
+ * original null samples that range once. Identity/context changes refuse learning. */
+int jsti_insertion_learning(JSTIInsertionTarget *target, const char *original,
+                            char *edited, size_t edited_capacity, char *error, size_t error_capacity);
 /* Explicit clipboard-only output, guarded by the captured request's cancellation
  * state immediately before replacement. Does not follow or mutate field focus. */
 int jsti_insertion_copy_text(JSTIInsertionTarget *target, const char *text, JSTIInsertionResult *result,

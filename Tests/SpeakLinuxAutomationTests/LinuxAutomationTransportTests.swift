@@ -245,26 +245,6 @@ final class LinuxAutomationTransportTests: XCTestCase {
         )
     }
 
-    func testStreamCheck_MapsEachNativeStatusToItsExpectedOutcome() {
-        // Regression: the anonymous C enum constants import as `Int`; `check` must widen
-        // its `Int32` status to pattern-match them rather than switching on `Int32` directly.
-        XCTAssertNoThrow(try LinuxAutomationStream.check(Int32(JSTI_AUTOMATION_OK)))
-        XCTAssertThrowsError(try LinuxAutomationStream.check(Int32(JSTI_AUTOMATION_TIMEOUT))) { error in
-            XCTAssertEqual((error as? AutomationError)?.code, .timedOut)
-        }
-        for status in [JSTI_AUTOMATION_CANCELLED, JSTI_AUTOMATION_UNAVAILABLE] {
-            XCTAssertThrowsError(try LinuxAutomationStream.check(Int32(status))) { error in
-                XCTAssertEqual((error as? AutomationError)?.code, .appUnavailable)
-            }
-        }
-        XCTAssertThrowsError(try LinuxAutomationStream.check(Int32(JSTI_AUTOMATION_UNSAFE))) { error in
-            XCTAssertEqual((error as? AutomationError)?.code, .internalError)
-        }
-        XCTAssertThrowsError(try LinuxAutomationStream.check(Int32(JSTI_AUTOMATION_IO))) { error in
-            XCTAssertEqual((error as? AutomationError)?.code, .internalError)
-        }
-    }
-
     func testDisable_CancelsLongCommandAndJoinsReplyWorker() async throws {
         let entered = expectation(description: "long command entered")
         let cancelled = expectation(description: "long command cancelled")
@@ -289,6 +269,30 @@ final class LinuxAutomationTransportTests: XCTestCase {
         let result = await reply
         XCTAssertNotEqual(result?.ok, true)
         XCTAssertFalse(service.isRunning)
+    }
+}
+
+/// Private, stateless native status-mapping checks: no socket, directory or process
+/// is created, so this stays a separate harness from the transport fixture above.
+final class LinuxAutomationStreamCheckTests: XCTestCase {
+    func testStreamCheck_MapsEachNativeStatusToItsExpectedOutcome() {
+        // Regression: the anonymous C enum constants import as `Int`; `check` must widen
+        // its `Int32` status to pattern-match them rather than switching on `Int32` directly.
+        XCTAssertNoThrow(try LinuxAutomationStream.check(Int32(JSTI_AUTOMATION_OK)))
+        XCTAssertThrowsError(try LinuxAutomationStream.check(Int32(JSTI_AUTOMATION_TIMEOUT))) { error in
+            XCTAssertEqual((error as? AutomationError)?.code, .timedOut)
+        }
+        for status in [JSTI_AUTOMATION_CANCELLED, JSTI_AUTOMATION_UNAVAILABLE] {
+            XCTAssertThrowsError(try LinuxAutomationStream.check(Int32(status))) { error in
+                XCTAssertEqual((error as? AutomationError)?.code, .appUnavailable)
+            }
+        }
+        XCTAssertThrowsError(try LinuxAutomationStream.check(Int32(JSTI_AUTOMATION_UNSAFE))) { error in
+            XCTAssertEqual((error as? AutomationError)?.code, .internalError)
+        }
+        XCTAssertThrowsError(try LinuxAutomationStream.check(Int32(JSTI_AUTOMATION_IO))) { error in
+            XCTAssertEqual((error as? AutomationError)?.code, .internalError)
+        }
     }
 }
 

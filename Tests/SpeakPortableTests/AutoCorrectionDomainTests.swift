@@ -4,6 +4,58 @@ import XCTest
 
 @VocabularyActor
 final class AutoCorrectionDomainTests: XCTestCase {
+    func testCancelledWhileInitialLoadIsPending_DoesNotMutateOrPersist() async throws {
+        let admission = LearningAdmission()
+        let store = CandidateTestStore([], loadHook: { admission.cancel() })
+        let lexicon = PersonalLexiconDomain(store: LexiconTestStore([]))
+        let domain = AutoCorrectionDomain(store: store, lexiconService: lexicon, promotionThreshold: { 2 })
+        do {
+            try await domain.recordEdit(original: "Susie", edited: "Susy", app: nil,
+                                        threshold: 2, isCurrent: { admission.isCurrent })
+            XCTFail("Cancellation during queued load was ignored")
+        } catch is CancellationError {}
+        XCTAssertTrue(domain.candidates.isEmpty)
+        let persisted = await store.snapshot()
+        XCTAssertTrue(persisted.isEmpty)
+        XCTAssertTrue(lexicon.rules.isEmpty)
+    }
+
+    func testCapturedThresholdAndCancelledAdmission_PreserveCanonicalPersistence() async throws {
+        let store = CandidateTestStore([])
+        let lexicon = PersonalLexiconDomain(store: LexiconTestStore([]))
+        let domain = AutoCorrectionDomain(store: store, lexiconService: lexicon, promotionThreshold: { 10 })
+        do {
+            try await domain.recordEdit(original: "Susie", edited: "Susy", app: "Synthetic",
+                                        threshold: 2, isCurrent: { false })
+            XCTFail("A stale observation was admitted")
+        } catch is CancellationError {}
+        XCTAssertTrue(domain.candidates.isEmpty)
+        try await domain.recordEdit(original: "Susie", edited: "Susy", app: "Synthetic",
+                                    threshold: 2, isCurrent: { true })
+        let first = try XCTUnwrap(domain.candidates.first)
+        await store.fail(true)
+        do {
+            try await domain.recordEdit(original: "Susie", edited: "Susy", app: "Synthetic",
+                                        threshold: 10, isCurrent: { true })
+            XCTFail("A failed save reported success")
+        } catch {
+            XCTAssertEqual(domain.candidates, [first])
+        }
+        await store.fail(false)
+        try await domain.recordEdit(original: "Susie", edited: "Susy", app: "Synthetic",
+                                    threshold: 2, isCurrent: { true })
+        XCTAssertTrue(domain.candidates.isEmpty)
+        XCTAssertEqual(lexicon.rules.count, 1)
+        let persisted = await store.snapshot()
+        XCTAssertTrue(persisted.isEmpty)
+        do {
+            try await domain.recordEdit(original: "Other", edited: "Another", app: nil,
+                                        threshold: 1, isCurrent: { true })
+            XCTFail("An invalid threshold was accepted")
+        } catch {}
+        XCTAssertEqual(lexicon.rules.count, 1)
+    }
+
     func testCandidatePersistenceRollbackAndPromotionRetryDoesNotDuplicateRules() async throws {
         let lexicon = PersonalLexiconDomain(store: LexiconTestStore([]))
         let store = CandidateTestStore([])
@@ -71,20 +123,31 @@ private actor CandidateTestStore: AutoCorrectionStoring {
     private var candidates: [AutoCorrectionCandidate]
     private var failing = false
     private let delayed: Bool
-    init(_ candidates: [AutoCorrectionCandidate], delayed: Bool = false) {
+    private let loadHook: (@Sendable () -> Void)?
+    init(_ candidates: [AutoCorrectionCandidate], delayed: Bool = false, loadHook: (@Sendable () -> Void)? = nil) {
         self.candidates = candidates
         self.delayed = delayed
+        self.loadHook = loadHook
     }
     func fail(_ value: Bool) { failing = value }
     func replace(_ values: [AutoCorrectionCandidate]) { candidates = values }
     func snapshot() -> [AutoCorrectionCandidate] { candidates }
     func load() async throws -> [AutoCorrectionCandidate] {
+        loadHook?()
         if delayed { try await Task.sleep(for: .milliseconds(20)) }
         return candidates
     }
+
     func save(_ values: [AutoCorrectionCandidate]) throws {
         if failing { throw CocoaError(.fileWriteNoPermission) }
         candidates = values
     }
     func deleteAll() throws { try save([]) }
+}
+
+private final class LearningAdmission: @unchecked Sendable {
+    private let lock = NSLock()
+    private var current = true
+    var isCurrent: Bool { self.lock.withLock { self.current } }
+    func cancel() { self.lock.withLock { self.current = false } }
 }

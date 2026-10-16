@@ -101,7 +101,8 @@ typedef struct JSTIConfigurationField {
     /* Optional newline-separated choices: raw value, tab, display title. */
     const char *choices;
     int32_t requires_hands_free_guard;
-    /* Zero: independent. Otherwise the 1-based index of a boolean enabling field. */
+    /* -1: unavailable/read-only, retained for transfer. Zero: independent.
+     * Positive: the 1-based index of a boolean enabling field. */
     int32_t enabled_by_field;
 } JSTIConfigurationField;
 typedef int32_t (*JSTIConfigurationCallback)(int32_t action, const char *const *values, size_t count,

@@ -61,7 +61,8 @@ public final class DesktopVocabulary {
         self.directory = directory
         lexicon = PersonalLexiconDomain(store: PersonalLexiconStore(appDirectory: directory))
         candidates = AutoCorrectionDomain(
-            store: AutoCorrectionStore(appDirectory: directory), lexiconService: lexicon, promotionThreshold: { 3 }
+            store: AutoCorrectionStore(appDirectory: directory), lexiconService: lexicon,
+            promotionThreshold: { AutoCorrectionLearningPolicy.defaultPromotionThreshold }
         )
         pronunciation = PronunciationStore(directory: directory)
         preferencesFile = directory.appendingPathComponent("vocabulary.json")

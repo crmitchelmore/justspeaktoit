@@ -9,7 +9,7 @@ package struct DesktopHostRecordingEvent<Platform: DesktopHostPlatform>: Sendabl
     let configuration: DesktopConfiguration?
 }
 
-extension DesktopHostController {
+extension DesktopHostController where Platform: DesktopHostAutomationPlatform {
     package func captureRecordingEvent(
         modelIndex: Int?, executablePath: String?
     ) -> DesktopHostRecordingEvent<Platform> {
@@ -18,7 +18,9 @@ extension DesktopHostController {
             textOutput: settings.textOutput ?? Platform.defaultTextOutput, configuration: settings.configuration
         )
     }
+}
 
+extension DesktopHostController {
     /// Recovery text is still History, not a successful automation completion.
     package func completedDictationRecord(_ id: UUID) throws -> DesktopRecordingStore.Record {
         guard dictationSessionID != id else {

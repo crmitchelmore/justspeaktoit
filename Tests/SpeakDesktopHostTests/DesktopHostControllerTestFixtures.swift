@@ -62,6 +62,11 @@ final class FakeLog: @unchecked Sendable {
     private var transcriptValues: [String] = []
     private var keyReadHook: (@Sendable (String) -> Void)?
     private var keyWriteHook: (@Sendable (String, String) throws -> Void)?
+    private var learningReadback: (any DesktopCorrectionReadback)?
+    var correctionReadback: (any DesktopCorrectionReadback)? { lock.withLock { learningReadback } }
+    func installCorrectionReadback(_ readback: (any DesktopCorrectionReadback)?) {
+        lock.withLock { learningReadback = readback }
+    }
     var keys: [String: String] = [:]
 
     func reset() {
@@ -79,6 +84,7 @@ final class FakeLog: @unchecked Sendable {
             transcriptValues = []
             keyReadHook = nil
             keyWriteHook = nil
+            learningReadback = nil
         }
     }
     /// Lets a test observe (or block inside) the instant a stored key is actually
@@ -155,6 +161,12 @@ final class FakeLog: @unchecked Sendable {
 }
 
 enum FakePlatform: DesktopHostAutomationPlatform {
+    static var correctionLearningUnavailable: String? {
+        FakeLog.shared.correctionReadback == nil ? "Synthetic host has no owned text span." : nil
+    }
+    static func correctionReadback(_ job: FakeJob) -> (any DesktopCorrectionReadback)? {
+        FakeLog.shared.correctionReadback
+    }
     static var defaultTextOutput: FakeTextOutput { .init() }
     static func handsFreeReadinessFailure() -> String? { nil }
     typealias VoiceOutputSettings = DesktopVoiceOutputSettings

@@ -28,11 +28,16 @@ extension DesktopHostController {
                 throw error
             }
         }
-        return await vocabulary.presentation(kind: kind, notice: notice)
+        let status = kind == 3 ? [notice, correctionLearningStatus()].filter { !$0.isEmpty }.joined(separator: "\n")
+            : notice
+        return await vocabulary.presentation(kind: kind, notice: status)
     }
 
     package func vocabularyEvent(kind: Int, payload: String) async throws -> String {
         guard !closed else { throw CancellationError() }
+        if kind == 3, payload == "allowLearning" || payload == "stopLearning" {
+            return try correctionLearningApproval(payload)
+        }
         let vocabulary = try await vocabularyStore()
         return try await vocabulary.perform(kind: kind, payload: payload)
     }

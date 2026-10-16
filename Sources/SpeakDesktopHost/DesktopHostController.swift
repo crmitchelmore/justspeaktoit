@@ -116,7 +116,20 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var manualProfileID: UUID?
     var profileEditorState: DesktopHostProfileEditorState?
     var profileWarning: String?
-    package var settings: Settings
+    package var settings: Settings {
+        didSet {
+            cancelCorrectionObservation()
+            if !correctionLearningEnabled { correctionLearningApproved = false }
+        }
+    }
+    var correctionObservation: DesktopCorrectionObservation?
+    var correctionObservationTask: Task<Void, Never>?
+    var correctionObservationWait: @Sendable (Double) async throws -> Void = {
+        try await Task.sleep(for: .seconds($0))
+    }
+    var correctionLearningRevision: UInt64 = 0
+    var correctionLearningApproved = false
+    var correctionLearningNotice: String?
     var vocabularyLoad: Task<DesktopVocabulary, Error>?
     package var recording: Recording?
     var recordingCapturePolicy: (recordID: UUID, value: DesktopHostCapturePolicy)?

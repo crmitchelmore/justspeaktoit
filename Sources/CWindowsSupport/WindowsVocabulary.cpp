@@ -13,7 +13,7 @@ constexpr UINT update = WM_APP + 93;
 enum { list = 900, add, save, remove, up, down, field = 910, preview = 920,
        previewTags, previewButton, notice, includeRules, includeTags, tags, preferences, defaults,
        search = 930, categoryFilter = 931, importMerge = 934, importReplace, exportJSON,
-       reviewCandidates = 960, promoteCandidate, dismissCandidate, clearCandidates };
+       reviewCandidates = 960, promoteCandidate, dismissCandidate, clearCandidates, allowLearning, stopLearning };
 using Row = std::array<std::string, 8>;
 struct Category { std::string value; size_t count; };
 struct Dialog {
@@ -204,7 +204,8 @@ void rebuild(Dialog &d) {
 void pending(Dialog &d, bool busy) {
     d.busy = busy;
     for (int id : {save, remove, up, down, add, previewButton, preferences, defaults, list, importMerge,
-         importReplace, exportJSON, reviewCandidates, promoteCandidate, dismissCandidate, clearCandidates})
+         importReplace, exportJSON, reviewCandidates, promoteCandidate, dismissCandidate, clearCandidates,
+         allowLearning, stopLearning})
         EnableWindow(GetDlgItem(d.window, id), !busy);
     selectionControls(d);
 }
@@ -233,7 +234,8 @@ void action(Dialog &d, const char *name) {
     }
     std::string payload = name;
     if (d.kind == 3) {
-        if (std::strcmp(name, "clear") != 0) {
+        if (std::strcmp(name, "clear") != 0 && std::strcmp(name, "allowLearning") != 0
+            && std::strcmp(name, "stopLearning") != 0) {
             if (d.selected < 0) { set(d.window, notice, "Select a stored candidate first."); return; }
             payload += "\t" + escaped(d.rows[static_cast<size_t>(d.selected)][0]);
         }
@@ -272,8 +274,12 @@ void layout(Dialog &d) {
         for (int i = 0; i < 5; ++i)
             MoveWindow(GetDlgItem(d.window, ids[i]), inset + i * width / 5, footer,
                 width / 5 - scale(d.window, 8), row, TRUE);
-        MoveWindow(GetDlgItem(d.window, notice), inset, footer + row + scale(d.window, 8), width,
-            static_cast<int>(r.bottom) - footer - row - 2 * inset, TRUE);
+        for (int i = 0; i < 2; ++i)
+            MoveWindow(GetDlgItem(d.window, i == 0 ? allowLearning : stopLearning),
+                inset + i * width / 2, footer + row + scale(d.window, 8),
+                width / 2 - scale(d.window, 8), row, TRUE);
+        MoveWindow(GetDlgItem(d.window, notice), inset, footer + 2 * row + scale(d.window, 16), width,
+            static_cast<int>(r.bottom) - footer - 2 * row - scale(d.window, 16) - inset, TRUE);
         ShowScrollBar(d.window, SB_VERT, FALSE);
         return;
     }
@@ -351,7 +357,8 @@ bool createControls(Dialog &d) {
     if (d.kind == 3) {
         for (const auto &item : std::vector<std::pair<int, const wchar_t *>>{
              {promoteCandidate, L"&Approve"}, {dismissCandidate, L"&Dismiss"}, {remove, L"&Remove"},
-             {clearCandidates, L"&Clear all"}, {reviewCandidates, L"Re&load"}})
+             {clearCandidates, L"&Clear all"}, {reviewCandidates, L"Re&load"},
+             {allowLearning, L"Allow &learning for this session"}, {stopLearning, L"&Stop learning"}})
             if (!control(L"BUTTON", item.second, button, item.first)) return false;
         if (!control(L"EDIT", L"Loading stored candidates...", ES_MULTILINE | ES_READONLY
             | ES_AUTOVSCROLL | WS_VSCROLL | WS_TABSTOP, notice)) return false;
@@ -529,7 +536,16 @@ LRESULT CALLBACK procedure(HWND w, UINT message, WPARAM wp, LPARAM lp) {
                     : id == remove ? L"Remove this stored candidate?" : L"Dismiss this stored candidate?";
                 if (MessageBoxW(w, question, L"Confirm candidate change", MB_YESNO | MB_ICONQUESTION) != IDYES) return 0;
             }
-            if (id == promoteCandidate) action(*d, "promote");
+            if (id == allowLearning) {
+                if (MessageBoxW(w, L"Allow correction learning until this app closes?\n\n"
+                    L"Only the exact text range of a confirmed insertion is read after 10-30 seconds. "
+                    L"Changing fields or starting another dictation cancels it. "
+                    L"No unrelated fields are read. Imported settings never grant this approval.",
+                    L"Allow correction learning", MB_YESNO | MB_ICONQUESTION) == IDYES)
+                    action(*d, "allowLearning");
+            }
+            else if (id == stopLearning) action(*d, "stopLearning");
+            else if (id == promoteCandidate) action(*d, "promote");
             else if (id == dismissCandidate) action(*d, "dismiss");
             else if (id == remove) action(*d, "remove");
             else if (id == clearCandidates) action(*d, "clear");

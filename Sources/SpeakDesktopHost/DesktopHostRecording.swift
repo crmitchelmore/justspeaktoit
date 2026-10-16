@@ -15,6 +15,7 @@ extension DesktopHostController {
     }
 
     func startRecording(_ request: DesktopHostRecordingStart<Platform>) async throws {
+        cancelCorrectionObservation()
         let (target, deviceID, profile, textOutput, trigger, handsFree) = (
             request.target, request.deviceID, request.profile, request.textOutput, request.trigger, request.handsFree
         )

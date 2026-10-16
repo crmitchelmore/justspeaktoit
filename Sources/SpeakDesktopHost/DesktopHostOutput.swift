@@ -61,6 +61,8 @@ extension DesktopHostController {
         }
         guard outputSlot.task == nil, !closed else { Platform.cancel(job); return .busy }
         let identifier = UUID()
+        cancelCorrectionObservation()
+        let learningRevision = correctionLearningRevision
         outputSlot = DesktopHostOutputState<Platform>(job: job, id: identifier, recordID: recordID)
         activeOperations += 1
         let effects = self.effects
@@ -84,6 +86,9 @@ extension DesktopHostController {
                 outputSlot = DesktopHostOutputState<Platform>(recordID: recordID, result: completion)
             }
             guard !Task.isCancelled, !closed else { return }
+            beginCorrectionObservation(
+                job: job, text: text, recordID: recordID, revision: learningRevision, completion: completion
+            )
             // A newer dictation owns the HUD by now if one started; this finishes only its own.
             finishHUD(recordID, completion.permitsAutomaticResume
                 ? .success(completion.status) : .failure(completion.status, headline: "Check text output"))
@@ -94,6 +99,7 @@ extension DesktopHostController {
     }
 
     func cancelOutput() {
+        cancelCorrectionObservation()
         if let job = outputSlot.job { Platform.cancel(job) }
         outputSlot.task?.cancel()
         // Speech is output too: recording, import and close end Read aloud.

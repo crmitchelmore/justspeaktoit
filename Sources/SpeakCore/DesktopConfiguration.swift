@@ -55,6 +55,14 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
     }
 
     public static let fields: [Field] = [
+        .init(key: ApplicationPreferenceKey.autoCorrectionsEnabled.rawValue,
+              title: "Learn corrections (verified inserted text; local approval required)",
+              group: "Corrections", kind: .boolean,
+              defaultValue: AnyCodable(.bool(AutoCorrectionLearningPolicy.enabledByDefault))),
+        .init(key: ApplicationPreferenceKey.autoCorrectionsPromotionThreshold.rawValue,
+              title: "Promote a repeated correction after occurrences (2 to 10)",
+              group: "Corrections", kind: .number(AutoCorrectionLearningPolicy.numericPromotionThresholdRange),
+              defaultValue: AnyCodable(.double(Double(AutoCorrectionLearningPolicy.defaultPromotionThreshold)))),
         .init(key: ApplicationPreferenceKey.visualDensity.rawValue, title: "Layout Density",
               group: "General", kind: .choice(AppVisualDensity.allCases.map {
                   Choice(value: $0.rawValue, title: $0.displayName)
@@ -191,7 +199,8 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
             }
             guard valid else { throw DesktopConfigurationError.invalidField(field.title) }
             if field.key == ApplicationPreferenceKey.livePolishDebounceMs.rawValue
-                || field.key == ApplicationPreferenceKey.livePolishMinDeltaChars.rawValue,
+                || field.key == ApplicationPreferenceKey.livePolishMinDeltaChars.rawValue
+                || field.key == ApplicationPreferenceKey.autoCorrectionsPromotionThreshold.rawValue,
                case .double(let number) = value.storage, number.rounded() != number {
                 throw DesktopConfigurationError.invalidField(field.title)
             }

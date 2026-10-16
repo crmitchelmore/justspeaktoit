@@ -171,7 +171,7 @@ public final class WindowsInsertionTarget: @unchecked Sendable {
         }
     }
 
-    private let handle: OpaquePointer
+    let handle: OpaquePointer
     private let lock = NSLock()
     private var inserting = false
 

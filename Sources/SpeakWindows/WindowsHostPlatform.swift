@@ -151,6 +151,12 @@ enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPla
         return false
     }
 
+    package static var correctionLearningUnavailable: String? { nil }
+    package static func correctionReadback(_ job: WindowsOutputJob) -> (any DesktopCorrectionReadback)? {
+        guard case .insertion(let target, _) = job else { return nil }
+        return WindowsCorrectionReadback(target: target)
+    }
+
     /// Read aloud's engine, created on first use in the app's protected folder.
     package static func makeVoiceOutput(stagingDirectory directory: URL) throws -> WindowsVoiceOutput {
         try WindowsVoiceOutput(stagingDirectory: directory)

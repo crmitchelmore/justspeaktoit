@@ -58,8 +58,10 @@ extension DesktopHostVoicePronunciationTests {
             return wav
         }
         let source = try VoiceOutputSourceSnapshot(source: .clipboard, text: "Token")
-        await controller.generateVoiceSource(source, options: .init(autoPlay: false, saveToRecordings: false)) {
-            input, selection, credential in
+        await controller.generateVoiceSource(
+            source,
+            options: .init(autoPlay: false, saveToRecordings: false)
+        ) { input, selection, credential in
             try await PronunciationVoicePlatform.synthesizeVoiceOutput(
                 input, selection: selection, credential: credential)
         }
@@ -164,7 +166,6 @@ extension DesktopHostVoicePronunciationTests {
     }
 
     // Keep failure, cancellation and close cleanup assertions against the same retained result.
-    // swiftlint:disable:next function_body_length
     func testIPA_ProviderFailureAndStoppedOrClosedLateAudioPreservePriorResultAndCleanup() async throws {
         _ = try await configureIPAVoice()
         let original = try VoiceOutputSourceSnapshot(source: .typedText, text: "Token")

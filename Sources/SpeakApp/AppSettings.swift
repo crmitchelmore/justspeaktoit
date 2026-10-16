@@ -1366,9 +1366,11 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
 
     // Auto-Corrections Settings
     autoCorrectionsEnabled =
-      defaults.object(forKey: DefaultsKey.autoCorrectionsEnabled.rawValue) as? Bool ?? true
+      defaults.object(forKey: DefaultsKey.autoCorrectionsEnabled.rawValue) as? Bool
+        ?? AutoCorrectionLearningPolicy.enabledByDefault
     autoCorrectionsPromotionThreshold =
-      defaults.object(forKey: DefaultsKey.autoCorrectionsPromotionThreshold.rawValue) as? Int ?? 2
+      defaults.object(forKey: DefaultsKey.autoCorrectionsPromotionThreshold.rawValue) as? Int
+        ?? AutoCorrectionLearningPolicy.defaultPromotionThreshold
 
     recordingSoundsEnabled =
       defaults.object(forKey: DefaultsKey.recordingSoundsEnabled.rawValue) as? Bool ?? RecordingFeedbackDefaults.enabled

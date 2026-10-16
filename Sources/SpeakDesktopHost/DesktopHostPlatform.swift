@@ -119,6 +119,8 @@ package protocol DesktopHostPlatform: Sendable {
     static func cancel(_ job: OutputJob)
     /// True when the job only copies, for the in-progress status line.
     static func isClipboard(_ job: OutputJob) -> Bool
+    static var correctionLearningUnavailable: String? { get }
+    static func correctionReadback(_ job: OutputJob) -> (any DesktopCorrectionReadback)?
 
     // Read aloud. Hosts without it keep an empty state.
     static func makeReadAloudState() -> ReadAloudState

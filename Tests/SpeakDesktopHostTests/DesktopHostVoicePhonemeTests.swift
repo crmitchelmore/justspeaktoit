@@ -202,8 +202,10 @@ extension DesktopHostVoicePronunciationTests {
     }
 
     func generateIPAVoice(_ source: VoiceOutputSourceSnapshot, session: URLSession) async {
-        await controller.generateVoiceSource(source, options: .init(autoPlay: false, saveToRecordings: false)) {
-            input, selection, credential in
+        await controller.generateVoiceSource(
+            source,
+            options: .init(autoPlay: false, saveToRecordings: false)
+        ) { input, selection, credential in
             try await Self.azurePhonemeAudio(input, selection: selection, credential: credential, session: session)
         }
         let pending = await controller.voiceGenerationTask
@@ -232,8 +234,10 @@ extension DesktopHostVoicePronunciationTests {
             return try XCTUnwrap(task)
         }
         if action == 1 {
-            await controller.generateVoiceSource(source, options: .init(autoPlay: false, saveToRecordings: false)) {
-                input, selection, credential in
+            await controller.generateVoiceSource(
+                source,
+                options: .init(autoPlay: false, saveToRecordings: false)
+            ) { input, selection, credential in
                 try await PronunciationVoicePlatform.synthesizeVoiceOutput(
                     input, selection: selection, credential: credential)
             }

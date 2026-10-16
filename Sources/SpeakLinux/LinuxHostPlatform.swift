@@ -24,6 +24,10 @@ struct LinuxHotKeySettings: Codable, Equatable, Sendable {
 /// GTK 4/libadwaita, the Secret Service, libpulse and the X11 or portal
 /// output paths behind the shared desktop host.
 enum LinuxHostPlatform: DesktopHostAutomationPlatform {
+    static var correctionLearningUnavailable: String? {
+        "Automatic learning is unavailable on Linux: X11 retains only a top-level window, not an AT-SPI "
+            + "editable field/range; Wayland paste has no confirmed destination. Stored candidates remain reviewable."
+    }
     static var defaultTextOutput: LinuxTextOutputOptions { .init() }
     static func handsFreeReadinessFailure() -> String? {
         jsti_window_hands_free_guard_ready() != 0 ? nil

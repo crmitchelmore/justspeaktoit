@@ -343,7 +343,8 @@ private func linuxSettingsEvent(_ event: Int, value: String, slot: Int, holder: 
     return true
 }
 
-private func linuxReady(_ holder: LinuxEventContext) {
+// Startup dispatch keeps smoke-test/screenshot/ready paths in one lifecycle function.
+private func linuxReady(_ holder: LinuxEventContext) { // swiftlint:disable:this function_body_length
     if let check = holder.windowCheck {
         Thread.detachNewThread {
             do { try check() } catch { holder.smokeTestFailure = error }
@@ -387,11 +388,6 @@ private func linuxReady(_ holder: LinuxEventContext) {
         }
         return
     }
-    linuxRunSelfTestAndClose(holder)
-}
-
-/// Runs the headless UI self-test, then requests the window close.
-private func linuxRunSelfTestAndClose(_ holder: LinuxEventContext) {
     do {
         LinuxWindow.textOutput(.init(), hint: LinuxHostPlatform.session.shortcutAdvice(command: "justspeaktoit"))
         // Capture the laid-out startup window before the self-test changes it.

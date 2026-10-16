@@ -32,7 +32,7 @@ extension DesktopHostController {
         await publishLocalCleanup()
     }
 
-    package func localCleanupAction( // swiftlint:disable:this cyclomatic_complexity
+    package func localCleanupAction( // swiftlint:disable:this cyclomatic_complexity function_body_length
         _ action: Int32, identifier: String, repository: String = "", filename: String = ""
     ) {
         guard !closed else { return }
@@ -82,7 +82,8 @@ extension DesktopHostController {
                     localCleanupNotice = "Downloaded weights removed. Model reference and History names are retained."
                 default:
                     let imported = try await localCleanup.resolve(repository: repository, filename: filename)
-                    localCleanupNotice = "\(imported.model.displayName) reference pinned. Download installs the weights."
+                    localCleanupNotice =
+                        "\(imported.model.displayName) reference pinned. Download installs the weights."
                 }
             } catch is CancellationError {
                 localCleanupNotice = "Operation cancelled. Partial download bytes are kept for Resume."

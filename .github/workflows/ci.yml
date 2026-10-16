@@ -179,7 +179,7 @@ jobs:
   core-journey-e2e:
     name: Core Dictation Journey (≤10m)
     # This non-UI contract gate may use an explicitly approved native runner.
-    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-macos-build","macOS"]') || '["macos-latest"]') }}
+    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-macos-build","macOS"]') || '["macos-26-intel"]') }}
     timeout-minutes: 10
     needs: release-paths
     if: needs.release-paths.outputs.core-journey == 'true'
@@ -188,6 +188,8 @@ jobs:
 
       # Debug CI populates the shared cache. This bounded gate only restores;
       # uploading gigabytes afterwards must not consume its ten-minute budget.
+      # Its hosted runner must match build-macos's (macos-26-intel): the key is
+      # architecture-scoped, and a cold ARM64 build alone nearly fills the budget.
       - name: Restore Swift packages
         uses: actions/cache/restore@v6
         with:

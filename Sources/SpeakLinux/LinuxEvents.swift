@@ -59,6 +59,11 @@ final class LinuxEventContext: @unchecked Sendable {
             case .playPause(let identifier): await controller.playbackToggle(identifier)
             case .stop: await controller.playbackStop()
             case .readAloud(let identifier, let text): await controller.readAloud(identifier, text: text)
+            case .voiceRead, .voiceExport, .voiceImport, .voiceImportCancel,
+                 .voiceGenerate, .voiceGeneratedPlay, .voiceGeneratedExport:
+                await controller.performVoiceEvent(event) {
+                    LinuxWindow.voiceTextImported($1, requestID: $0)
+                }
             }
         }
     }

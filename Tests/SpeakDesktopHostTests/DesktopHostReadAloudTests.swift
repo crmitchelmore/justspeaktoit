@@ -102,6 +102,14 @@ struct FakeVoiceOutput: DesktopHostVoiceOutput {
 extension FakePlatform: DesktopHostReadAloudPlatform {
     typealias ReadAloudState = DesktopHostReadAloudState<FakePlayback.Speech, FakeVoiceOutput>
     static func makeVoiceOutput(stagingDirectory directory: URL) throws -> FakeVoiceOutput { FakeVoiceOutput() }
+    static func synthesizeVoiceOutput(
+        _ source: VoiceOutputSourceSnapshot, selection: DesktopSpeechSelection,
+        credential: @Sendable () async throws -> String
+    ) async throws -> Data {
+        _ = try await credential()
+        try Task.checkCancellation()
+        return try XCTUnwrap(PCMWaveWriter.wavData(pcm: Data([1, 0, 2, 0]), sampleRate: 24_000))
+    }
     static let deepgramKeyHint = "save it in the test"
 }
 
@@ -151,6 +159,41 @@ final class DesktopHostReadAloudTests: XCTestCase {
     }
 
     private var statuses: [String] { FakeLog.shared.allStatuses }
+
+    func testAzureRead_UsesNativePlaybackWithRealHistoryOwnershipAndCleansTemporaryAudioOnStop() async throws {
+        try await assertAzureRead(
+            voice: .azureNeural(AzureNeuralVoiceCatalog.voices[0]),
+            options: VoiceSynthesisOptions(speed: 1.25, pitch: -2)
+        )
+    }
+
+    func testMAIRead_UsesSharedAzureCredentialAndPreservesRealHistoryOwnershipThroughStop() async throws {
+        try await assertAzureRead(
+            voice: .azureMAI(AzureMAIVoiceCatalog.voices[0]), options: VoiceSynthesisOptions(useSSML: true)
+        )
+    }
+
+    private func assertAzureRead(voice: DesktopSpeechVoice, options: VoiceSynthesisOptions) async throws {
+        FakeSpeech.shared.reset(holdingSegments: true)
+        FakeLog.shared.setKey("synthetic-key:eastus", name: AzureSpeechConfiguration.credentialIdentifier)
+        await controller.selectVoiceOutput(voice)
+        let saved = await controller.saveVoiceSynthesisOptions(options)
+        XCTAssertTrue(saved)
+        await controller.readAloud(record.uuidString, text: "Synthetic Azure speech.")
+        try await waitFor("native synthetic playback") { FakeSpeech.shared.events.contains("play") }
+        let owner = await controller.voiceOutputRecordID
+        XCTAssertEqual(owner, record)
+        let task = await controller.readAloudState.task
+        await controller.playbackStop()
+        FakeSpeech.shared.releaseSegments()
+        await task?.value
+        let stoppedOwner = await controller.voiceOutputRecordID
+        XCTAssertNil(stoppedOwner)
+        XCTAssertEqual(FakeSpeech.shared.events, ["begin", "play", "end"])
+        let files = try FileManager.default.contentsOfDirectory(atPath:
+            directory.appendingPathComponent("VoiceGeneratedPlayback").path)
+        XCTAssertTrue(files.isEmpty)
+    }
 
     func testReadAloud_SpeaksEachSegmentWithTheSavedVoiceThenFinishes() async throws {
         FakeLog.shared.setKey("deepgram-key", name: deepgramKey)
@@ -244,5 +287,83 @@ final class DesktopHostReadAloudTests: XCTestCase {
         XCTAssertEqual(saved.voice, voice)
         let retired = DesktopVoiceOutputSettings(modelID: "aura-0", voiceID: "deepgram/retired-voice")
         XCTAssertTrue(DesktopVoiceOutputSettings.voices.contains(retired.voice))
+    }
+
+    func testTypedAndClipboardSources_KeepTextSnapshotAndNeverBorrowHistoryOwner() async throws {
+        FakeLog.shared.setKey("deepgram-key", name: deepgramKey)
+        let snapshot = try VoiceOutputSourceSnapshot(source: .typedText, text: "Synthetic typed source")
+        await controller.readVoiceSource(snapshot)
+        try await waitFor("typed finish") { self.statuses.last == "Finished reading aloud." }
+        XCTAssertEqual(FakeSpeech.shared.spoken.map(\.text), [snapshot.text])
+        let owner = await controller.voiceOutputRecordID
+        XCTAssertNil(owner)
+        let selected = await selectedRecord()
+        XCTAssertEqual(selected, record)
+        FakeSpeech.shared.reset()
+        let clipboard = try VoiceOutputSourceSnapshot(source: .clipboard, text: "Synthetic clipboard snapshot")
+        await controller.readVoiceSource(clipboard)
+        try await waitFor("clipboard finish") { FakeSpeech.shared.events.last == "end" }
+        XCTAssertEqual(FakeSpeech.shared.spoken.map(\.text), [clipboard.text])
+    }
+
+    private func selectedRecord() async -> UUID? { await controller.selectedHistoryID }
+
+    func testVoiceExport_WritesChosenWAVWithoutPlaybackOrChangingHistory() async throws {
+        let target = FileManager.default.temporaryDirectory.appendingPathComponent("voice-export-\(UUID()).wav")
+        defer { try? FileManager.default.removeItem(at: target) }
+        let snapshot = try VoiceOutputSourceSnapshot(source: .clipboard, text: "Synthetic export snapshot")
+        let wav = try XCTUnwrap(PCMWaveWriter.wavData(pcm: Data([1, 0, 2, 0]), sampleRate: 24_000))
+        await controller.exportVoiceSource(snapshot, path: target.path) { captured, _, _ in
+            XCTAssertEqual(captured, snapshot)
+            return wav
+        }
+        try await waitFor("export finish") { self.statuses.last == "Voice audio exported as WAV." }
+        XCTAssertEqual(try Data(contentsOf: target), wav)
+        XCTAssertTrue(FakeSpeech.shared.events.isEmpty)
+        let selected = await selectedRecord()
+        XCTAssertEqual(selected, record)
+    }
+
+    func testVoiceExport_StopAndNewerGenerationNeverPublishStaleFile() async throws {
+        let target = FileManager.default.temporaryDirectory.appendingPathComponent("voice-stale-\(UUID()).wav")
+        defer { try? FileManager.default.removeItem(at: target) }
+        let original = Data("existing destination".utf8)
+        try original.write(to: target)
+        let gate = Gate(open: false)
+        let snapshot = try VoiceOutputSourceSnapshot(source: .typedText, text: "Synthetic export")
+        await controller.exportVoiceSource(snapshot, path: target.path) { _, _, _ in
+            await gate.pass()
+            return Data("stale result".utf8)
+        }
+        await controller.playbackStop()
+        FakeLog.shared.setKey("deepgram-key", name: deepgramKey)
+        await controller.readVoiceSource(snapshot)
+        gate.release()
+        try await waitFor("current speech") { FakeSpeech.shared.events.last == "end" }
+        try await waitFor("operations ended") { await self.controller.activeOperations == 0 }
+        XCTAssertEqual(try Data(contentsOf: target), original)
+        XCTAssertFalse(statuses.contains("Voice audio exported as WAV."))
+    }
+
+    func testVoiceExport_CloseAndInvalidDestinationCannotPublish() async throws {
+        let protected = directory.appendingPathComponent("recording.wav")
+        let snapshot = try VoiceOutputSourceSnapshot(source: .typedText, text: "Synthetic export")
+        await controller.exportVoiceSource(snapshot, path: protected.path) { _, _, _ in
+            XCTFail("Protected path reached synthesis")
+            return Data()
+        }
+        XCTAssertEqual(statuses.last, "Choose an export location outside the app's data folder.")
+        let target = FileManager.default.temporaryDirectory.appendingPathComponent("voice-close-\(UUID()).wav")
+        defer { try? FileManager.default.removeItem(at: target) }
+        let gate = Gate(open: false)
+        await controller.exportVoiceSource(snapshot, path: target.path) { _, _, _ in
+            await gate.pass()
+            return Data("late result".utf8)
+        }
+        let closing = Task { await self.controller.close() }
+        try await waitFor("close admission") { await self.controller.closed }
+        gate.release()
+        _ = await closing.value
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
     }
 }

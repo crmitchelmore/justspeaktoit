@@ -81,6 +81,14 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package var transcript = ""
     package var hotKeySession = DesktopHostHotKeySessionState()
     package var readAloudState = Platform.makeReadAloudState()
+    /// Actual History ownership of active voice work; nil for every non-History source.
+    package var voiceOutputRecordID: UUID?
+    package var voiceTextImportTask: Task<Void, Never>?
+    package var voiceTextImportRequestID: String?
+    package var voiceGenerationTask: Task<Void, Never>?
+    package var generatedVoice: DesktopGeneratedVoiceResult?
+    package var voiceUsage = DesktopVoiceUsageState()
+    package var voiceDiscovery = DesktopVoiceDiscoveryState()
     /// The one History Play or Read aloud request that may still start audio or report.
     package var playbackRequests = DesktopPlaybackRequests()
     package var history: [UUID: DesktopRecordingStore.Record] = [:]

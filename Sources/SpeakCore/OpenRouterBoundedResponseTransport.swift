@@ -226,6 +226,7 @@ private final class OpenRouterBoundedResponseCollector: NSObject, URLSessionData
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         let outcome: Outcome = lock.withLock {
+            if isCancelled { return .failure(CancellationError()) }
             if let failure { return .failure(failure) }
             if let error { return .failure(error) }
             guard let response else { return .failure(OpenRouterBoundedResponseTransport.Failure.invalidResponse) }

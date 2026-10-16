@@ -56,12 +56,12 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     // One Soniox key covers transcription and speech generation.
     case .soniox: return "soniox.apiKey"
     // One Cartesia key covers Ink transcription and Sonic speech generation.
-    case .cartesia: return "cartesia.apiKey"
+    case .cartesia: return CartesiaTTSCatalog.credentialIdentifier
     // These four each use one account key for transcription and for speech
     // generation, so they reuse the identifier the transcription provider
     // already writes.
     case .groq: return "groq.apiKey"
-    case .gemini: return "google.apiKey"
+    case .gemini: return GeminiTTSCatalog.credentialIdentifier
     case .mistral: return "mistral.apiKey"
     case .speechmatics: return "speechmatics.apiKey"
     // One xAI key covers Grok Voice transcription, dedicated speech to text
@@ -510,57 +510,25 @@ struct VoiceCatalog {
     return TTSVoice(id: voice.id, name: voice.name, provider: .azure, traits: traits, previewURL: nil)
   }
 
-  static let azureNeuralVoices: [TTSVoice] = [
+  static let azureNeuralVoices: [TTSVoice] = AzureNeuralVoiceCatalog.voices.map { voice in
     TTSVoice(
-      id: "azure/en-US-AriaNeural",
-      name: "Aria",
-      provider: .azure,
-      traits: [.female, .american, .professional],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "azure/en-US-GuyNeural",
-      name: "Guy",
-      provider: .azure,
-      traits: [.male, .american, .professional],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "azure/en-US-JennyNeural",
-      name: "Jenny",
-      provider: .azure,
-      traits: [.female, .american, .casual, .warm],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "azure/en-US-DavisNeural",
-      name: "Davis",
-      provider: .azure,
-      traits: [.male, .american, .professional],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "azure/en-GB-SoniaNeural",
-      name: "Sonia",
-      provider: .azure,
-      traits: [.female, .british, .professional],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "azure/en-GB-RyanNeural",
-      name: "Ryan",
-      provider: .azure,
-      traits: [.male, .british, .professional],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "azure/en-AU-NatashaNeural",
-      name: "Natasha",
-      provider: .azure,
-      traits: [.female, .australian, .professional],
-      previewURL: nil
+      id: voice.id, name: voice.name, provider: .azure,
+      traits: voice.traits.map(azureNeuralTrait), previewURL: nil
     )
-  ]
+  }
+
+  private static func azureNeuralTrait(_ trait: AzureNeuralVoice.Trait) -> TTSVoice.VoiceTrait {
+    switch trait {
+    case .female: .female
+    case .male: .male
+    case .american: .american
+    case .british: .british
+    case .australian: .australian
+    case .professional: .professional
+    case .casual: .casual
+    case .warm: .warm
+    }
+  }
 
   static let systemVoices: [TTSVoice] = [
     TTSVoice(

@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "VoiceSources.h"
 
 #ifdef __cplusplus
 extern "C" {

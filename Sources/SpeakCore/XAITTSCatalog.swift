@@ -38,6 +38,8 @@ public struct XAITTSVoice: Identifiable, Codable, Hashable, Sendable {
 public enum XAITTSCatalog {
     /// Prefix that routes a stored voice identifier back to this provider.
     public static let voiceIDPrefix = "xai/"
+    public static var providerIdentifier: String { String(voiceIDPrefix.dropLast()) }
+    public static var credentialIdentifier: String { "\(providerIdentifier).apiKey" }
 
     /// The service default, used when a request names no voice.
     public static let defaultVoiceID = "eve"

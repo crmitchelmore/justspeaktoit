@@ -54,7 +54,6 @@ let appleCoreSources: [String] = [
     "CaptureSafetyClaim.swift",
     "CaptureSelfTest.swift",
     "CaptureWatchdogs.swift",
-    "CartesiaTTSAPI.swift",
     "DeepgramBalanceClient.swift",
     "DeprecatedCompatibility.swift",
     "DeviceIdentityStore.swift",
@@ -62,7 +61,6 @@ let appleCoreSources: [String] = [
     "FileProductAnalyticsStateStore.swift",
     "GeminiLiveClient.swift",
     "GeminiLiveProtocol.swift",
-    "GeminiTTSAPI.swift",
     "GroqTTSAPI.swift",
     "HandsFreeAudioPreRollBuffer.swift",
     "HandsFreeDictation.swift",
@@ -138,7 +136,6 @@ let appleCoreSources: [String] = [
     "XAILiveClient.swift",
     "XAILiveFinalisation.swift",
     "XAILiveProtocol.swift",
-    "XAITTSAPI.swift",
     "XAITTSRealtime.swift"
 ]
 

@@ -311,6 +311,11 @@ jobs:
             windows-self-test*.log
             windows-ui-smoke*.log
             windows-ui-smoke.bmp
+            windows-ui-smoke.bmp.voice-sources.bmp
+            windows-ui-smoke.bmp.file-source.bmp
+            windows-ui-smoke.bmp.voice-controls.bmp
+            windows-ui-smoke.bmp.voice-usage.bmp
+            windows-ui-smoke.bmp.voice-discovery.bmp
             windows-websocket-tests.xml
             windows-websocket-*.log
             windows-local-transcription.log

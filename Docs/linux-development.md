@@ -23,6 +23,10 @@ packages) is unchanged.
 
 ## Build and run
 
+Voice Output also offers a native text editor, explicit clipboard snapshots and
+user-chosen lossless WAV export. See [Desktop Voice Output sources](desktop-voice-sources.md)
+for source ownership and honest external-selection/Wayland capability limits.
+
 Ubuntu 24.04 (or any distribution with GTK 4.14+, libadwaita 1.5+) and Swift 6.2.3:
 
 ```sh

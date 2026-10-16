@@ -9,6 +9,11 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
     case xai(XAITTSVoice)
     case cartesia(CartesiaTTSVoice)
     case mistral(MistralTTSVoice)
+    case soniox(SonioxTTSResolvedVoice)
+    case gemini(GeminiTTSVoice, model: GeminiTTSModel = GeminiTTSCatalog.defaultModel)
+    case groq(GroqTTSVoice)
+    case speechmatics(SpeechmaticsTTSVoice)
+    case openai(OpenAITTSModel, OpenAITTSVoice)
 
     public var id: String {
         switch self {
@@ -18,6 +23,11 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .xai(let voice): voice.providerVoiceID
         case .cartesia(let voice): voice.providerVoiceID
         case .mistral(let voice): voice.providerVoiceID
+        case .soniox(let voice): voice.providerVoiceID
+        case .gemini(let voice, _): voice.providerVoiceID
+        case .groq(let voice): voice.providerVoiceID
+        case .speechmatics(let voice): voice.providerVoiceID
+        case .openai(_, let voice): voice.providerVoiceID
         }
     }
 
@@ -29,6 +39,11 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .xai(let voice): voice.displayName
         case .cartesia(let voice): voice.displayName
         case .mistral(let voice): voice.displayName
+        case .soniox(let voice): voice.displayName
+        case .gemini(let voice, _): voice.displayName
+        case .groq(let voice): voice.displayName
+        case .speechmatics(let voice): voice.displayName
+        case .openai(_, let voice): voice.name
         }
     }
 
@@ -40,6 +55,11 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .xai: XAITTSCatalog.providerIdentifier
         case .cartesia: CartesiaTTSCatalog.desktopModelIdentifier
         case .mistral: MistralTTSCatalog.defaultModel.desktopModelIdentifier
+        case .soniox: SonioxTTSCatalog.defaultModel.rawValue
+        case .gemini(_, let model): model.desktopModelIdentifier
+        case .groq(let voice): voice.model.desktopModelIdentifier
+        case .speechmatics: SpeechmaticsTTSCatalog.providerIdentifier
+        case .openai(let model, _): model.desktopModelIdentifier
         }
     }
 
@@ -52,6 +72,11 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .cartesia(let voice):
             "\(voice.displayName) — Cartesia \(CartesiaTTSCatalog.defaultModel.displayName)"
         case .mistral(let voice): "\(voice.displayName) — Mistral \(MistralTTSCatalog.defaultModel.displayName)"
+        case .soniox(let voice): "\(voice.displayName) — \(SonioxTTSCatalog.defaultModel.displayName)"
+        case .gemini(let voice, let model): "\(voice.displayName) — \(model.displayName)"
+        case .groq(let voice): "\(voice.displayName) — Groq"
+        case .speechmatics(let voice): "\(voice.displayName) — Speechmatics English"
+        case .openai(let model, let voice): "\(voice.name) — OpenAI \(model.displayName)"
         }
     }
 
@@ -62,6 +87,11 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .xai: XAITTSCatalog.credentialIdentifier
         case .cartesia: CartesiaTTSCatalog.credentialIdentifier
         case .mistral: MistralTTSCatalog.credentialIdentifier
+        case .soniox: VoiceOutputProvider.soniox.apiKeyIdentifier
+        case .gemini: GeminiTTSCatalog.credentialIdentifier
+        case .groq: GroqTTSCatalog.credentialIdentifier
+        case .speechmatics: SpeechmaticsTTSCatalog.credentialIdentifier
+        case .openai: OpenAITTSCatalog.credentialIdentifier
         }
     }
 
@@ -73,18 +103,35 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .xai: .xai
         case .cartesia: .cartesia
         case .mistral: .naturalSpeech
+        case .soniox: .soniox
+        case .gemini, .groq, .speechmatics: .naturalSpeech
+        case .openai: .openai
         }
     }
 
-    /// The PCM sample rate `DesktopMistralSpeechSynthesis` writes the decoded
-    /// WAV at. Every currently-composed provider uses 24 kHz.
-    public var sampleRate: Int { 24_000 }
+    public var sampleRate: Int {
+        if case .speechmatics = self { return SpeechmaticsTTSOutputFormat.wav16k.sampleRate }
+        return 24_000
+    }
 
     public static var voices: [Self] {
-        DeepgramSpeechCatalog.voices.map(Self.deepgram) + AzureNeuralVoiceCatalog.voices.map(Self.azureNeural)
-            + AzureMAIVoiceCatalog.voices.map(Self.azureMAI)
-            + XAITTSCatalog.voices.map(Self.xai)
-            + CartesiaTTSCatalog.voices.map(Self.cartesia)
+        var voices = DeepgramSpeechCatalog.voices.map(Self.deepgram)
+        voices.append(contentsOf: AzureNeuralVoiceCatalog.voices.map(Self.azureNeural))
+        voices.append(contentsOf: AzureMAIVoiceCatalog.voices.map(Self.azureMAI))
+        voices.append(contentsOf: XAITTSCatalog.voices.map(Self.xai))
+        voices.append(contentsOf: CartesiaTTSCatalog.voices.map(Self.cartesia))
+        voices.append(contentsOf: SonioxTTSCatalog.voices.map {
+            .soniox(SonioxTTSCatalog.resolvedVoice(voiceID: $0.providerVoiceID, accountVoices: []))
+        })
+        for model in GeminiTTSCatalog.models {
+            voices.append(contentsOf: GeminiTTSCatalog.voices.map { Self.gemini($0, model: model) })
+        }
+        voices.append(contentsOf: GroqTTSCatalog.voices.map(Self.groq))
+        voices.append(contentsOf: SpeechmaticsTTSCatalog.voices.map(Self.speechmatics))
+        for model in OpenAITTSCatalog.models {
+            voices.append(contentsOf: OpenAITTSCatalog.voices(for: model).map { Self.openai(model, $0) })
+        }
+        return voices
     }
 
     public static func resolved(
@@ -104,6 +151,12 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
     ) throws -> Self {
         let model = modelID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let identifier = voiceID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let voice = try sonioxSelection(model: model, identifier: voiceID, inventory: accountInventory) {
+            return voice
+        }
+        if let voice = try fixedProviderSelection(model: model, identifier: identifier) {
+            return voice
+        }
         if let voice = try cartesiaSelection(model: model, identifier: identifier) {
             return voice
         }
@@ -150,5 +203,24 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
             throw VoiceSynthesisConfigurationError.unsupportedVoice
         }
         return .cartesia(voice)
+    }
+
+    private static func sonioxSelection(
+        model: String?, identifier: String?, inventory: VoiceAccountInventory?
+    ) throws -> Self? {
+        let scoped = identifier?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sonioxModel = model.map { $0.hasPrefix("soniox/") ? String($0.dropFirst(7)) : $0 }
+        guard model == "soniox" || model?.hasPrefix("soniox/") == true
+            || model?.hasPrefix("tts-rt-") == true
+            || sonioxModel.flatMap({ SonioxTTSCatalog.model(forLegacyID: $0) }) != nil
+            || scoped?.lowercased().hasPrefix("soniox/") == true else { return nil }
+        guard model == nil || model == "soniox"
+            || sonioxModel.flatMap({ SonioxTTSCatalog.model(forLegacyID: $0) }) != nil else {
+            throw VoiceSynthesisConfigurationError.unsupportedVoice
+        }
+        let resolved = SonioxTTSCatalog.resolvedVoice(
+            voiceID: scoped, accountVoices: inventory?.soniox?.voices ?? [])
+        guard resolved.fallbackReason == nil else { throw VoiceSynthesisConfigurationError.unsupportedVoice }
+        return .soniox(resolved)
     }
 }

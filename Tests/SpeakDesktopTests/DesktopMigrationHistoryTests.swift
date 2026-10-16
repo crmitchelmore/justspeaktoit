@@ -94,6 +94,34 @@ final class DesktopMigrationHistoryTests: XCTestCase {
         XCTAssertEqual(exported, value)
     }
 
+    func testImportedLocalAudioIsNeverDecodedOrReExported_UnknownFieldsRemain() throws {
+        var original = DesktopRecordingStore.Record(
+            id: UUID(), audioFilename: "private.wav", modelIdentifier: "openai/whisper-1", createdAt: date
+        )
+        original.recordedDuration = 2.5
+        guard case .object(var fields) = try DesktopMigrationHistory.value(original).storage,
+              case .object(var desktop) = fields["desktopHistory"] else { return XCTFail("Expected carrier") }
+        let foreign = AnyCodable.JSONValue.object(["foreign": .string("machine-local authority")])
+        desktop["localAudio"] = foreign
+        desktop["futureNativeField"] = .object(["enabled": .bool(true)])
+        fields["desktopHistory"] = .object(desktop)
+        let value = AnyCodable(.object(fields))
+        let restored = try DesktopMigrationHistory.record(imported(value, id: original.id), category: .history)
+        XCTAssertNil(restored.localAudio)
+        XCTAssertEqual(restored.migrationMetadata, value)
+        var current = restored
+        for _ in 0..<2 {
+            guard case .object(let exported) = try DesktopMigrationHistory.value(current).storage,
+                  case .object(let carrier) = exported["desktopHistory"] else { return XCTFail("Expected carrier") }
+            XCTAssertNil(carrier["localAudio"])
+            XCTAssertEqual(carrier["futureNativeField"], .object(["enabled": .bool(true)]))
+            current = try DesktopMigrationHistory.record(
+                imported(AnyCodable(.object(exported)), id: original.id), category: .history
+            )
+            XCTAssertNil(current.localAudio)
+        }
+    }
+
     func testFractionalNativeTimestampAndUnknownCarrierFields_RemainStableAcrossRepeatedImports() throws {
         var original = DesktopRecordingStore.Record(
             id: UUID(), audioFilename: "private.wav", modelIdentifier: "openai/whisper-1",

@@ -55,8 +55,8 @@ final class DesktopProfileSessionTests: XCTestCase {
     func testSharedCapabilitiesAreLiveProjectionsOfTheDesktopCatalogues() {
         XCTAssertEqual(capabilities.batchModels.map(\.id), DesktopTranscription.batchModels.map(\.id))
         XCTAssertEqual(capabilities.liveModels.map(\.id), DesktopLiveTranscription.liveModels.map(\.id))
-        XCTAssertEqual(capabilities.polishModels.map(\.id), DesktopPostProcessing.remoteModels.map(\.id))
-        XCTAssertFalse(capabilities.supportsPersonalLexicon)
+        XCTAssertEqual(capabilities.polishModels.map(\.id), DesktopPostProcessing.models.map(\.id))
+        XCTAssertTrue(capabilities.supportsPersonalLexicon)
         XCTAssertFalse(capabilities.supportsLiveLanguage)
         XCTAssertTrue(capabilities.canRun(transcriptionModel: " \(batchModel) ", routing: .remoteBatch))
         XCTAssertFalse(capabilities.canRun(transcriptionModel: batchModel, routing: .remoteStreaming))
@@ -64,7 +64,7 @@ final class DesktopProfileSessionTests: XCTestCase {
         XCTAssertFalse(capabilities.canRun(transcriptionModel: liveModel, routing: .remoteBatch))
         XCTAssertFalse(capabilities.canRun(transcriptionModel: "local/whisperkit/tiny", routing: .localBatch))
         XCTAssertTrue(capabilities.canRun(polishModel: ModelCatalog.defaultPostProcessingModel))
-        XCTAssertFalse(capabilities.canRun(polishModel: "local/post-processing/rules"))
+        XCTAssertTrue(capabilities.canRun(polishModel: LocalPostProcessingModel.builtInRulesModelID))
     }
 
     // MARK: - Transcription
@@ -174,36 +174,46 @@ final class DesktopProfileSessionTests: XCTestCase {
 
     func testUnavailablePolishModelSkipsPolishRatherThanRunningAnotherModel() {
         let session = resolve(DictationProfile(
-            name: "Offline", polishEnabled: true, polishModelID: "local/post-processing/rules",
+            name: "Offline", polishEnabled: true, polishModelID: "local/post-processing/downloaded",
             polishPrompt: "Be terse."
         ))
         XCTAssertEqual(session.postProcessing.mode, .disabled)
         XCTAssertEqual(session.postProcessing.modelIdentifier, defaultOptions.modelIdentifier)
-        XCTAssertEqual(session.limitations, [.polishModelUnavailable(modelID: "local/post-processing/rules")])
+        XCTAssertEqual(session.limitations, [.polishModelUnavailable(modelID: "local/post-processing/downloaded")])
         XCTAssertEqual(session.skippedPolishReason, session.limitations[0].message)
         XCTAssertTrue(session.canRecord)
 
         let disabledAnyway = resolve(DictationProfile(
-            name: "Off", polishEnabled: false, polishModelID: "local/post-processing/rules"
+            name: "Off", polishEnabled: false, polishModelID: "local/post-processing/downloaded"
         ))
         XCTAssertEqual(disabledAnyway.postProcessing.mode, .disabled)
         XCTAssertNil(disabledAnyway.skippedPolishReason, "Nothing was skipped: polish was disabled anyway")
-        XCTAssertEqual(disabledAnyway.limitations, [.polishModelUnavailable(modelID: "local/post-processing/rules")])
+        XCTAssertEqual(
+            disabledAnyway.limitations, [.polishModelUnavailable(modelID: "local/post-processing/downloaded")]
+        )
     }
 
     func testLexiconRequestsAreReportedOnlyWhenPolishRuns() {
-        let running = resolve(DictationProfile(
+        var unsupported = capabilities
+        unsupported.supportsPersonalLexicon = false
+        func withoutLexicon(_ profile: DictationProfile) -> DesktopProfileSession {
+            DesktopProfileSessionResolver.resolve(
+                profile: profile, defaultModel: defaultModel, defaultPostProcessing: defaultOptions,
+                capabilities: unsupported
+            )
+        }
+        let running = withoutLexicon(DictationProfile(
             name: "Lexicon", polishEnabled: true, polishIncludeLexiconDirectives: true, polishIncludeContextTags: true
         ))
         XCTAssertEqual(running.limitations, [.lexiconDirectivesUnavailable, .contextTagsUnavailable])
         XCTAssertTrue(running.canRecord)
 
-        let off = resolve(DictationProfile(
+        let off = withoutLexicon(DictationProfile(
             name: "Lexicon off", polishEnabled: false, polishIncludeLexiconDirectives: true
         ))
         XCTAssertTrue(off.limitations.isEmpty)
 
-        let declined = resolve(DictationProfile(
+        let declined = withoutLexicon(DictationProfile(
             name: "Declined", polishEnabled: true, polishIncludeLexiconDirectives: false,
             polishIncludeContextTags: false
         ))
@@ -248,7 +258,7 @@ final class DesktopProfileSessionTests: XCTestCase {
             matchers: [.bundleID("com.apple.Notes")],
             transcriptionModelID: "local/whisperkit/tiny",
             polishEnabled: true,
-            polishModelID: "local/post-processing/rules",
+            polishModelID: "local/post-processing/downloaded",
             polishIncludeLexiconDirectives: true,
             languageIdentifier: "en_GB",
             transcriptionRouting: .localBatch
@@ -256,8 +266,7 @@ final class DesktopProfileSessionTests: XCTestCase {
         let limitations = DesktopProfileSessionResolver.limitations(of: profile, capabilities: capabilities)
         XCTAssertEqual(limitations, [
             .transcriptionModelUnavailable(modelID: "local/whisperkit/tiny", routing: .localBatch),
-            .polishModelUnavailable(modelID: "local/post-processing/rules"),
-            .lexiconDirectivesUnavailable
+            .polishModelUnavailable(modelID: "local/post-processing/downloaded")
         ])
         for limitation in limitations {
             XCTAssertFalse(limitation.message.isEmpty)

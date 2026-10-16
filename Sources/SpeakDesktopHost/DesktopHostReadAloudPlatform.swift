@@ -48,7 +48,8 @@ package extension DesktopHostReadAloudPlatform {
     ) async throws -> Data {
         try await DesktopSpeechSynthesis().synthesize(
             source, voice: selection.voice, options: selection.options,
-            accountInventory: selection.accountInventory, credential: credential
+            accountInventory: selection.accountInventory, sonioxRegion: selection.sonioxRegion,
+            language: selection.language, credential: credential
         )
     }
 

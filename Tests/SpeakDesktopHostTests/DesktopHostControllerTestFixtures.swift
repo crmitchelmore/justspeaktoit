@@ -263,10 +263,6 @@ final class SyntheticEffects: DesktopHostEffects, @unchecked Sendable {
 final class GatedEffects: DesktopHostEffects, @unchecked Sendable {
     typealias Platform = FakePlatform
     let gate: Gate
-    /// Released the instant `transcribe` is actually entered, so a caller can prove this
-    /// invocation reached the real transcribe path without depending on HUD state (which a
-    /// retry on a recreated controller never publishes; see `DesktopHostHUD.hud:32-34`).
-    let entered = Gate(open: false)
     init(gate: Gate) { self.gate = gate }
     func apiKey(name: String) throws -> String { FakeLog.shared.key(name) }
     func makeCapture(
@@ -280,7 +276,6 @@ final class GatedEffects: DesktopHostEffects, @unchecked Sendable {
     func transcribe(
         _ request: DesktopHostTranscriptionRequest, with controller: DesktopHostController<FakePlatform>
     ) async throws -> TranscriptionResult {
-        entered.release()
         await gate.pass()
         try Task.checkCancellation()
         throw CancellationError()

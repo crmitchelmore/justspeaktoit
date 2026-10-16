@@ -29,7 +29,7 @@ public struct SpeechmaticsBatchClient: Sendable {
     private let keywords: [String]
 
     public init(
-        session: URLSession = .shared, baseURL: URL = SpeechmaticsBatchClient.defaultBaseURL, keywords: [String] = []
+        session: URLSession = .shared, baseURL: URL = SpeechmaticsBatchClient.defaultBaseURL, keywords: [String]
     ) {
         self.baseURL = baseURL
         self.keywords = keywords
@@ -40,6 +40,13 @@ public struct SpeechmaticsBatchClient: Sendable {
             try await session.upload(for: request, fromFile: file, delegate: redirects)
         }
         self.send = { request in try await session.data(for: request, delegate: redirects) }
+    }
+
+    /// Source-compatible overload preserved for callers predating keyword hints.
+    public init(
+        session: URLSession = .shared, baseURL: URL = SpeechmaticsBatchClient.defaultBaseURL
+    ) {
+        self.init(session: session, baseURL: baseURL, keywords: [])
     }
 
     public func transcribeFile(

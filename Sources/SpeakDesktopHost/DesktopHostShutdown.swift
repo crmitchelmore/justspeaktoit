@@ -46,10 +46,11 @@ package struct DesktopHostShutdownReport: Equatable, Sendable {
     package var recordingFeedbackClosed = true
     package var handsFreeClosed = true
     package var discoveryEnded = true
+    package var localCleanupClosed = true
 
     package var isComplete: Bool {
         recordingSaved && unfinishedOperations == 0 && playbackClosed && recordingFeedbackClosed
-            && handsFreeClosed && discoveryEnded
+            && handsFreeClosed && discoveryEnded && localCleanupClosed
     }
 
     package init() {}
@@ -62,6 +63,7 @@ package struct DesktopHostShutdownReport: Equatable, Sendable {
         if !recordingFeedbackClosed { parts.append("recording sounds still stopping") }
         if !handsFreeClosed { parts.append("hands-free microphone still stopping") }
         if !discoveryEnded { parts.append("model discovery still running") }
+        if !localCleanupClosed { parts.append("local cleanup still stopping") }
         return "Closed after the shutdown grace period with " + parts.joined(separator: ", ")
             + ". Saved recordings are kept; an interrupted one is recovered at the next launch.\n"
     }
@@ -110,9 +112,21 @@ extension DesktopHostController {
             return shutdownReport ?? DesktopHostShutdownReport()
         }
         closed = true
+        Platform.cancelLocalModels(controller: self)
+        let ownedAdmission = ownedDictationAdmission
+        let ownedDictationID = ownedDictation?.id
+        if let ownedDictationID {
+            requestOwnedDictationStop(
+                requestID: ownedDictationID, reason: "Recording stopped when the app closed. Audio retained."
+            )
+        }
+        ownedAdmission?.operation.cancel()
+        localCleanupTask?.cancel()
         let ownedStartup = ownedCaptureStartup
         requestOwnedStartupAbort()
         let deadline = ContinuousClock.now.advanced(by: shutdownGrace)
+        let localCleanup = localCleanup
+        async let localCleanupClosed = DesktopHostShutdown.wait(until: deadline) { await localCleanup?.close() }
         await cancelInFlightWork(until: deadline)
         var report = DesktopHostShutdownReport()
         recordingFeedbackPreview?.cancel()
@@ -138,6 +152,17 @@ extension DesktopHostController {
             }
             report.recordingSaved = report.recordingSaved && settled
         }
+        if let ownedDictationID {
+            let operation = ownedDictation?.stop
+            let settled = await DesktopHostShutdown.wait(until: deadline) {
+                await operation?.value
+            }
+            report.recordingSaved = report.recordingSaved && settled && ownedDictation?.id != ownedDictationID
+        }
+        if let ownedAdmission {
+            let settled = await DesktopHostShutdown.wait(until: deadline) { await ownedAdmission.operation.value }
+            report.recordingSaved = report.recordingSaved && settled && ownedDictation == nil
+        }
         // Includes admitted opens and every background release attempt.
         let playback = playback
         report.playbackClosed = await DesktopHostShutdown.wait(until: deadline) {
@@ -157,6 +182,7 @@ extension DesktopHostController {
         modelDiscoveryTask = nil
         report.recordingFeedbackClosed = await feedbackClosed
         report.handsFreeClosed = await detectorClosed
+        report.localCleanupClosed = await localCleanupClosed
         finishShutdown(report)
         return report
     }

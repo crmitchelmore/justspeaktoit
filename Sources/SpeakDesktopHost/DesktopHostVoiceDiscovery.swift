@@ -9,6 +9,8 @@ package struct DesktopVoiceDiscoveryState: Sendable {
         set { inventories[.xai] = newValue.map(VoiceAccountInventory.xai) }
     }
     package var context: VoiceAccountCredentialContext?
+    package var sonioxRegion: SonioxTTSRegion?
+    package var sonioxOutputTicket: DesktopPlaybackRequests.Ticket?
     package var modern = false
     package var retiredEpochs: Set<UUID> = []
     package var listing: VoiceAccountInventory?

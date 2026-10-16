@@ -19,6 +19,7 @@ final class LinuxShortcutGestures: @unchecked Sendable {
     private var style: HotKeyActivationStyle
     private var target: LinuxInsertionTarget?
     private var textOutput: Task<LinuxTextOutputOptions, Never>?
+    private var selection: Task<LinuxRecordingSettings, Never>?
     private var deadline: DispatchWorkItem?
     private let clock: @Sendable () -> TimeInterval
     private let deliver: @Sendable (Request) async -> Void
@@ -54,7 +55,10 @@ final class LinuxShortcutGestures: @unchecked Sendable {
     }
 
     /// `target` and `textOutput` are captured by the caller at the press.
-    func keyDown(target: LinuxInsertionTarget?, textOutput: Task<LinuxTextOutputOptions, Never>) {
+    func keyDown(
+        target: LinuxInsertionTarget?, textOutput: Task<LinuxTextOutputOptions, Never>,
+        selection: Task<LinuxRecordingSettings, Never>? = nil
+    ) {
         let now = clock()
         queue.async { [self] in
             if !machine.isKeyDown, machine.holdThreshold != timing.0 || machine.doubleTapWindow != timing.1 {
@@ -62,8 +66,11 @@ final class LinuxShortcutGestures: @unchecked Sendable {
                 machine.holdThreshold = timing.0
                 machine.doubleTapWindow = timing.1
             }
-            self.target = target
-            self.textOutput = textOutput
+            if !machine.isKeyDown {
+                self.target = target
+                self.textOutput = textOutput
+                self.selection = selection
+            }
             if style == .pressToToggle {
                 enqueue(.press, at: now)
             } else {
@@ -131,15 +138,21 @@ final class LinuxShortcutGestures: @unchecked Sendable {
 
     private func enqueue(_ input: HotKeySessionPolicy.Input, at now: TimeInterval) {
         guard let textOutput else { return }
-        let request = Request(
-            input: input, style: style, recognisedAt: now, target: target,
-            targetExecutablePath: target?.executablePath, textOutput: textOutput, modelIndex: -1, deviceID: ""
-        )
+        let selection = selection
+        let target = target
+        let style = style
         let deliver = deliver
         lock.withLock {
             let previous = tail
             tail = Task {
                 await previous?.value
+                let saved = await selection?.value
+                let request = Request(
+                    input: input, style: style, recognisedAt: now, target: target,
+                    targetExecutablePath: target?.executablePath, textOutput: textOutput,
+                    modelIndex: saved?.modelIndex ?? -1, deviceID: saved?.deviceID ?? "",
+                    profile: saved?.profile
+                )
                 await deliver(request)
             }
         }

@@ -46,7 +46,7 @@ final class DesktopProfileEditingTests: XCTestCase {
             matchers: [DictationProfileMatcher(kind: .urlPattern, value: "github.com")],
             transcriptionModelID: "local/whisperkit/tiny",
             polishEnabled: true,
-            polishModelID: "local/post-processing/rules",
+            polishModelID: "local/post-processing/downloaded",
             languageIdentifier: "xx_YY",
             transcriptionRouting: .localBatch
         )
@@ -115,7 +115,8 @@ final class DesktopProfileEditingTests: XCTestCase {
     func testChangingAPreservedChoiceReplacesItWithTheCatalogueValue() {
         let stored = DictationProfile(
             name: "Imported", transcriptionModelID: "local/whisperkit/tiny", polishEnabled: true,
-            polishModelID: "local/post-processing/rules", languageIdentifier: "xx_YY", transcriptionRouting: .localBatch
+            polishModelID: "local/post-processing/downloaded", languageIdentifier: "xx_YY",
+            transcriptionRouting: .localBatch
         )
         var draft = DesktopProfileEditing.draft(for: stored, catalogue: catalogue)
         draft.transcription = .live(index: 0)

@@ -1,20 +1,38 @@
 import Foundation
 import SpeakCore
+import SpeakDesktop
 import CLinuxSupport
 
 extension LinuxWindow {
+    static func voiceLanguageTitle(
+        _ settings: LinuxVoiceOutputSettings, accountInventory: VoiceAccountInventory?
+    ) {
+        guard let index = DesktopConfiguration.fields.firstIndex(where: {
+            $0.key == VoiceOutputLanguagePreference.key
+        }) else {
+            LinuxHostPlatform.update("The canonical Voice language field is unavailable.")
+            return
+        }
+        let result = settings.languageTitle(accountInventory: accountInventory).withCString {
+            jsti_window_set_configuration_field_title(index, $0)
+        }
+        if result < 0 { LinuxHostPlatform.update("The Voice language label could not be shown.") }
+    }
+
     static func configureConfiguration(_ holder: LinuxEventContext) async throws {
-        let preferences = try await holder.controller.configuration()
+        let snapshot = try await holder.controller.voiceConfigurationEditorSnapshot()
+        let preferences = snapshot.preferences
         holder.gestures.configureTiming(
             hold: preferences.number("holdThreshold"), doubleTap: preferences.number("doubleTapWindow")
         )
         let strings = Strings()
         let rows = zip(DesktopConfiguration.fields, preferences.entries).map { field, value in
             JSTIConfigurationField(
-                title: strings.add(field.title), value: strings.add(value), group: strings.add(field.group),
+                title: strings.add(field.key == VoiceOutputLanguagePreference.key ? snapshot.languageTitle : field.title),
+                value: strings.add(value), group: strings.add(field.group),
                 is_boolean: { if case .boolean = field.kind { return 1 }; return 0 }(),
                 requires_hud_overlay: field.requiresHUDOverlay ? 1 : 0,
-                choices: field.serializedChoices.map { strings.add($0) },
+                choices: preferences.serializedChoices(for: field).map { strings.add($0) },
                 requires_hands_free_guard: field.requiresHandsFreeGuard ? 1 : 0,
                 enabled_by_field: field.enabledBy.flatMap { key in
                     DesktopConfiguration.fields.firstIndex { $0.key == key }.map { Int32($0 + 1) }
@@ -33,7 +51,21 @@ extension LinuxWindow {
             }
         }
         guard result == 0 else { throw DesktopConfigurationError.invalidField("Native preferences") }
-        try applyVisualDensity(preferences)
+        try configureConfigurationLayout(preferences, strings: strings)
+    }
+
+    private static func configureConfigurationLayout(_ preferences: DesktopConfiguration, strings: Strings) throws {
+        let density = preferences.visualDensity
+        let layout = JSTIVisualDensity(
+            compact: density.isCompact ? 1 : 0,
+            page_padding: Int32(density.pagePadding), section_spacing: Int32(density.sectionSpacing),
+            card_padding: Int32(density.cardPadding), content_spacing: Int32(density.cardContentSpacing),
+            inline_spacing: Int32(density.inlineSpacing), group_spacing: Int32(density.groupSpacing),
+            minimum_row_height: Int32(density.minimumListRowHeight)
+        )
+        guard jsti_window_set_visual_density(layout) == 0 else {
+            throw DesktopConfigurationError.invalidField("Layout density")
+        }
         let bindings = DesktopSidebarShortcut.allCases.map {
             JSTISidebarShortcut(
                 destination: strings.add($0.rawValue), digit: Int32($0.digit), hint: strings.add($0.chord)
@@ -47,20 +79,6 @@ extension LinuxWindow {
             }
         }
         guard sidebar == 0 else { throw DesktopConfigurationError.invalidField("Sidebar shortcuts") }
-    }
-
-    private static func applyVisualDensity(_ preferences: DesktopConfiguration) throws {
-        let density = preferences.visualDensity
-        let layout = JSTIVisualDensity(
-            compact: density.isCompact ? 1 : 0,
-            page_padding: Int32(density.pagePadding), section_spacing: Int32(density.sectionSpacing),
-            card_padding: Int32(density.cardPadding), content_spacing: Int32(density.cardContentSpacing),
-            inline_spacing: Int32(density.inlineSpacing), group_spacing: Int32(density.groupSpacing),
-            minimum_row_height: Int32(density.minimumListRowHeight)
-        )
-        guard jsti_window_set_visual_density(layout) == 0 else {
-            throw DesktopConfigurationError.invalidField("Layout density")
-        }
     }
 
     static func performConfigurationAction(
@@ -81,6 +99,7 @@ extension LinuxWindow {
         default: throw DesktopConfigurationError.invalidField("Configuration action")
         }
         try await configureConfiguration(holder)
+        if action == 1 { postProcessing(await holder.controller.postProcessingOptions()) }
     }
 }
 
@@ -122,5 +141,27 @@ func linuxConfigurationEvent(
             bytes.withUnsafeBufferPointer { buffer.update(from: $0.baseAddress!, count: $0.count) }
         }
         return -1
+    }
+}
+
+func linuxPostProcessingEvent(_ value: String, slot: Int, holder: LinuxEventContext) {
+    let enabled = slot >= 0
+    let index = enabled ? slot : -1 - slot
+    guard let model = LinuxWindow.postProcessingModelIdentifier(forSelection: index) else {
+        _ = jsti_window_update("Could not save post-processing settings: invalid model selection.", nil, -1)
+        return
+    }
+    let fields: DesktopPostProcessing.NativeFields
+    do { fields = try DesktopPostProcessing.nativeFields(value) } catch {
+        _ = jsti_window_update(error.localizedDescription, nil, -1)
+        return
+    }
+    let controller = holder.controller
+    holder.enqueueSettings {
+        await controller.savePostProcessing(
+            enabled: enabled, modelIdentifier: model, prompt: fields.prompt, key: fields.key,
+            includeLexiconDirectives: fields.includeLexiconDirectives, includeContextTags: fields.includeContextTags
+        )
+        LinuxWindow.postProcessing(await controller.postProcessingOptions())
     }
 }

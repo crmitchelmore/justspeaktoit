@@ -24,7 +24,8 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         ) async throws -> Data = { snapshot, selection, credential in
             try await DesktopSpeechSynthesis().synthesize(
                 snapshot, voice: selection.voice, options: selection.options,
-                accountInventory: selection.accountInventory, credential: credential
+                accountInventory: selection.accountInventory, sonioxRegion: selection.sonioxRegion,
+                language: selection.language, credential: credential
             )
         }
     ) {
@@ -86,7 +87,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             guard voiceTicketIsCurrent(ticket) else { return }
             let result = try DesktopGeneratedVoiceResult(
                 source: snapshot, voice: selection.voice, options: selection.options,
-                audio: VoiceGeneratedAudio(validating: wav)
+                audio: VoiceGeneratedAudio(validating: wav, sampleRate: selection.voice.sampleRate)
             )
             saveWarning = try await archiveGeneratedAudio(result.audio, enabled: options.saveToRecordings)
             try Task.checkCancellation()

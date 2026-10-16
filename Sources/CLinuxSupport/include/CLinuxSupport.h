@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include "VoiceSources.h"
 #include "../../CWindowsSupport/include/VoiceCredentials.h"
+#include "../../CWindowsSupport/include/LocalCleanup.h"
 
 int32_t jsti_comparison_present(const char *models, const char *rounds, const char *detail,
                                const char *selected, int32_t busy, int32_t recording, int32_t judgeable,
@@ -50,8 +51,9 @@ enum {
     JSTI_EVENT_TEXT_OUTPUT = 30,       /* index: method, text: "restore" or "" */
     JSTI_EVENT_COMMAND_TOGGLE = 31,    /* --toggle from another process or action */
     JSTI_EVENT_SHORTCUT_STYLE = 32,    /* index: 0 press, 1 hold, 2 double-tap, 3 hold and double-tap */
-    /* Apply in Post-processing. index: model index, or -1 - index when
-     * disabled; text: prompt, U+001F, then a new OpenRouter key or nothing. */
+    /* Apply in Post-processing. index: full-catalog model index, or -1 - index when
+     * disabled; text: percent-encoded prompt<TAB>percent-encoded new key<TAB>
+     * directives 0/1<TAB>context tags 0/1. Local sends no key. */
     JSTI_EVENT_POST_PROCESSING = 33,
     /* Apply in Azure Speech resource. text: the endpoint as typed ("" clears). */
     JSTI_EVENT_AZURE_RESOURCE = 34,
@@ -61,7 +63,10 @@ enum {
     JSTI_EVENT_AUDIO_CLEANUP = 94,
     JSTI_EVENT_AUDIO_CLEANUP_RESPONSE = 95, /* text: confirmation UUID; index: 1 confirms, 0 cancels */
     JSTI_EVENT_MIGRATION_EXPORT = 96, /* text: selected ZIP destination; index: 1 includes saved audio */
-    JSTI_EVENT_MIGRATION_INSPECT = 97 /* text: selected ZIP source; no application changes */
+    JSTI_EVENT_MIGRATION_INSPECT = 97, /* text: selected ZIP source; no application changes */
+    /* Profiles: percent-escaped TAB fields, starting with revision/action/UUID;
+     * "refresh" opens a new immutable catalogue/editor revision. */
+    JSTI_EVENT_PROFILES = 140
 };
 
 /* Read aloud, Appearance and Launch at login. Linux-only numbers 40-46. */
@@ -106,6 +111,8 @@ typedef int32_t (*JSTIConfigurationCallback)(int32_t action, const char *const *
 int32_t jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t count,
                                       const char *const *recovered_keywords, size_t recovered_count,
                                       JSTIConfigurationCallback callback, void *context);
+/* Queues a label-only update without replacing an unsaved entry value. */
+int32_t jsti_window_set_configuration_field_title(size_t index, const char *title);
 /* False when logind/screen-lock observation is unavailable; manual capture is unaffected. */
 int32_t jsti_window_hands_free_guard_ready(void);
 
@@ -158,11 +165,17 @@ enum {
     JSTI_PAGE_POST_PROCESSING,
     JSTI_PAGE_CORRECTIONS,
     JSTI_PAGE_PRONUNCIATION,
+    JSTI_PAGE_PROFILES,
     JSTI_PAGE_KEYBOARD,
     JSTI_PAGE_CLOUD_SYNC,
     JSTI_PAGE_ABOUT,
     JSTI_PAGE_COUNT
 };
+
+/* Owned, ordered main-thread update. replace=0 only reports an error and keeps
+ * unsaved form contents; replace=1 carries the full H/T/P/L/R profile projection.
+ * Every string is copied before returning; queued strings are freed on close. */
+int32_t jsti_profiles_set(const char *wire, int32_t replacing);
 
 enum { JSTI_WINDOW_SMOKE_TEST = 1 };
 
@@ -235,9 +248,13 @@ int32_t jsti_window_set_transcript_variant(const char *record_id, int32_t varian
 /* method: 0 paste into the focused app, 1 clipboard only. */
 int32_t jsti_window_set_text_output(int32_t method, int32_t restore_clipboard,
                                    int32_t can_restore_clipboard, const char *shortcut_hint);
-/* The Post-processing group: shared remote model names and saved choices. */
+/* Full shared projection; local_index identifies built-in rules. Callback
+ * indexes remain full-projection indexes; selected -1 requires a user choice.
+ * remembered_remote_index is dormant picker recall; -1 requires explicit choice. */
 int32_t jsti_window_set_post_processing(
-    const char *const *models, size_t count, int32_t enabled, int32_t selected, const char *prompt);
+    const char *const *models, size_t count, int32_t enabled, int32_t selected,
+    int32_t local_index, int32_t remembered_remote_index, const char *local_notice,
+    int32_t include_directives, int32_t include_tags, const char *prompt);
 /* Shows the saved Azure Speech resource endpoint ("" for none). */
 int32_t jsti_window_set_azure_resource(const char *endpoint);
 /* The shortcut behaviour picker, indexed as JSTI_EVENT_SHORTCUT_STYLE. */
@@ -470,7 +487,9 @@ enum {
     JSTI_EVENT_LOCAL_MODEL_DOWNLOAD = 50, /* index: row; downloads or resumes */
     JSTI_EVENT_LOCAL_MODEL_CANCEL = 51,   /* index: row */
     JSTI_EVENT_LOCAL_MODEL_REMOVE = 52,   /* index: row */
-    JSTI_EVENT_LOCAL_MODEL_GPU = 53       /* index: 1 on, 0 off */
+    JSTI_EVENT_LOCAL_MODEL_GPU = 53,      /* index: 1 on, 0 off */
+    JSTI_EVENT_LOCAL_MODEL_IMPORT = 54,   /* text: owner/repo newline GGML basename */
+    JSTI_EVENT_LOCAL_MODEL_IMPORT_CANCEL = 55
 };
 
 enum {

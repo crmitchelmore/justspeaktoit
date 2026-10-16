@@ -14,29 +14,18 @@ actor OpenAITTSClient: TextToSpeechClient {
   }
 
   func synthesize(text: String, voice: String, settings: TTSSettings) async throws -> TTSResult {
+    let selection = OpenAITTSRequest(
+      model: try OpenAITTSCatalog.model(forQualityIdentifier: settings.quality.rawValue),
+      voiceID: voice, speed: settings.speed, format: responseFormat(for: settings.format)
+    )
+    try OpenAITTSAPI.validate(text: text, request: selection)
     guard let apiKey = try? await secureStorage.secret(identifier: provider.apiKeyIdentifier),
       !apiKey.isEmpty
     else {
       throw TTSError.apiKeyMissing(provider)
     }
 
-    let voiceID = voice.replacingOccurrences(of: "openai/", with: "")
-    let url = baseURL.appendingPathComponent("audio/speech")
-
-    var request = URLRequest(url: url)
-    request.httpMethod = "POST"
-    request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-    let body: [String: Any] = [
-      "model": modelID(for: settings.quality),
-      "input": text,
-      "voice": voiceID,
-      "speed": settings.speed,
-      "response_format": responseFormat(for: settings.format),
-    ]
-
-    request.httpBody = try JSONSerialization.data(withJSONObject: body)
+    let request = try OpenAITTSAPI.synthesisRequest(text: text, apiKey: apiKey, request: selection)
 
     let (data, response) = try await session.data(for: request)
 
@@ -108,25 +97,11 @@ actor OpenAITTSClient: TextToSpeechClient {
 
   // MARK: - Private Helpers
 
-  private func modelID(for quality: TTSQuality) -> String {
-    switch quality {
-    case .standard:
-      // gpt-4o-mini-tts - fast, affordable, good quality
-      return "gpt-4o-mini-tts"
-    case .high:
-      // tts-1 - standard OpenAI TTS
-      return "tts-1"
-    case .highest:
-      // tts-1-hd - highest quality
-      return "tts-1-hd"
-    }
-  }
-
-  private func responseFormat(for format: AudioFormat) -> String {
+  private func responseFormat(for format: AudioFormat) -> OpenAITTSOutputFormat {
     switch format {
-    case .mp3: return "mp3"
-    case .m4a: return "aac"
-    case .wav: return "wav"
+    case .mp3: return .mp3
+    case .m4a: return .aac
+    case .wav: return .wav
     }
   }
 

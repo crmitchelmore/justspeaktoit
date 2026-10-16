@@ -18,6 +18,7 @@ package actor DesktopPressCaptureLease {
 
     private let worker: any DesktopPressCaptureWorker
     private let onFailureEvent: @Sendable (DesktopPressCaptureFailureEvent) -> Void
+    private let recoveryDelivery: (@Sendable (DesktopPressCapturePCMDelivery) -> Void)?
     private var run: Run?
     private var operation: Task<Void, Never>?
     private var operationGeneration: UInt64 = 0
@@ -38,12 +39,24 @@ package actor DesktopPressCaptureLease {
         DesktopPressCaptureLease(worker: worker, eventSink: onFailureEvent)
     }
 
+    /// Recovery is an app-owned sink, not successful recording adoption. Its
+    /// bounded startup prefix is drained only after real producer quiescence.
+    package static func recoveringOwned(
+        worker: any DesktopPressCaptureQuiescingWorker,
+        recoveryDelivery: @escaping @Sendable (DesktopPressCapturePCMDelivery) -> Void,
+        onFailureEvent: @escaping @Sendable (DesktopPressCaptureFailureEvent) -> Void
+    ) -> DesktopPressCaptureLease {
+        DesktopPressCaptureLease(worker: worker, eventSink: onFailureEvent, recoveryDelivery: recoveryDelivery)
+    }
+
     private init(
         worker: any DesktopPressCaptureWorker,
-        eventSink: @escaping @Sendable (DesktopPressCaptureFailureEvent) -> Void
+        eventSink: @escaping @Sendable (DesktopPressCaptureFailureEvent) -> Void,
+        recoveryDelivery: (@Sendable (DesktopPressCapturePCMDelivery) -> Void)? = nil
     ) {
         self.worker = worker
         self.onFailureEvent = eventSink
+        self.recoveryDelivery = recoveryDelivery
     }
 
     package var phase: DesktopPressCapturePhase { run?.phase ?? .idle }
@@ -58,11 +71,22 @@ package actor DesktopPressCaptureLease {
         guard run == nil else { throw DesktopPressCaptureError.occupied }
         try identity.validate()
         let token = DesktopPressCaptureToken()
-        let relay = DesktopPressCapturePCMRelay(limits: limits) { [weak self] error in
+        let failureSink: @Sendable (DesktopPressCaptureError) -> Void = { [weak self] error in
             let event = DesktopPressCaptureFailureEvent(token: token, identity: identity, error: error)
             Task { await self?.captureFailed(event) }
         }
-        run = Run(token: token, identity: identity, relay: relay)
+        let relay: DesktopPressCapturePCMRelay
+        if let recoveryDelivery {
+            relay = DesktopPressCapturePCMRelay(limits: limits, recovery: {
+                recoveryDelivery(.init(token: token, identity: identity, pcm: $0))
+            }, onFailure: failureSink)
+        } else {
+            relay = DesktopPressCapturePCMRelay(limits: limits, onFailure: failureSink)
+        }
+        run = Run(
+            token: token, identity: identity, relay: relay,
+            quiescingWorker: recoveryDelivery == nil ? nil : worker as? any DesktopPressCaptureQuiescingWorker
+        )
         failure = nil
         operationGeneration &+= 1
         operation = Task {
@@ -113,6 +137,7 @@ package actor DesktopPressCaptureLease {
                 throw failure ?? DesktopPressCaptureError.staleLease
             }
             guard current.ready else { throw DesktopPressCaptureError.notReady }
+            if recoveryDelivery != nil, let failure = current.relay.failure { throw failure }
         } onCancel: {
             Task { await self.cancel(token) }
         }
@@ -133,6 +158,7 @@ package actor DesktopPressCaptureLease {
         try validate(token, identity: identity, admission: admission)
         guard var current = run, current.phase == .reserved else { throw DesktopPressCaptureError.invalidPhase }
         guard current.ready else { throw DesktopPressCaptureError.notReady }
+        if recoveryDelivery != nil, let failure = current.relay.failure { throw failure }
         do {
             try current.relay.attachDelivery { pcm in
                 onPCMDelivery(DesktopPressCapturePCMDelivery(token: token, identity: identity, pcm: pcm))
@@ -208,7 +234,7 @@ package actor DesktopPressCaptureLease {
         guard var current = run, current.token == token else { return }
         current.ready = true
         if let error {
-            current.relay.close()
+            if recoveryDelivery == nil { current.relay.close() }
             current.phase = .closing
             failure = error.error
             onFailureEvent(error)

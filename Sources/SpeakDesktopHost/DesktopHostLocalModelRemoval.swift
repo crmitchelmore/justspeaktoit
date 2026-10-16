@@ -38,7 +38,7 @@ extension DesktopHostController where Platform: DesktopHostLocalModelPlatform {
     /// choose, is in use, as is every model a transcription holds.
     private func localModelInUse(_ model: String) -> Bool {
         let recorded = recording.flatMap {
-            DesktopLocalTranscription.model(for: $0.record.modelIdentifier, host: Platform.localModelHost)
+            localModelSpec(for: $0.record.modelIdentifier)
         }
         return recorded?.catalogueID == model || localModels.ownership.isInUse(model)
     }

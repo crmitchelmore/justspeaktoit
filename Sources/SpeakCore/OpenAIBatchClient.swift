@@ -24,7 +24,7 @@ public struct OpenAIBatchClient: TranscriptionProvider {
     baseURL: URL = URL(string: "https://api.openai.com/v1")!,
     validationServiceName: String = "OpenAI",
     staging: SharedMultipartUploadStaging? = nil,
-    keywords: [String] = [],
+    keywords: [String],
     durationResolver: @escaping @Sendable (URL) async -> TimeInterval = { _ in 0 }
   ) {
     self.session = session
@@ -33,6 +33,20 @@ public struct OpenAIBatchClient: TranscriptionProvider {
     self.baseURL = baseURL
     self.validationServiceName = validationServiceName
     self.durationResolver = durationResolver
+  }
+
+  /// Source-compatible overload preserved for callers predating keyword hints.
+  public init(
+    session: URLSession = .shared,
+    baseURL: URL = URL(string: "https://api.openai.com/v1")!,
+    validationServiceName: String = "OpenAI",
+    staging: SharedMultipartUploadStaging? = nil,
+    durationResolver: @escaping @Sendable (URL) async -> TimeInterval = { _ in 0 }
+  ) {
+    self.init(
+      session: session, baseURL: baseURL, validationServiceName: validationServiceName,
+      staging: staging, keywords: [], durationResolver: durationResolver
+    )
   }
 
   public func transcribeFile(

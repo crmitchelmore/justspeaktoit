@@ -134,6 +134,7 @@ extension LinuxWindow {
         if jsti_window_set_voice_generation_options(settings.generationOptions.nativeFlags) != 0 {
             LinuxHostPlatform.update("The generated voice preferences could not be shown.")
         }
+        voiceLanguageTitle(settings, accountInventory: accountInventory)
         voiceControls(settings, accountInventory: accountInventory)
     }
 

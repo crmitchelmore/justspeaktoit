@@ -14,6 +14,7 @@ package final class DesktopPressCapturePCMRelay: @unchecked Sendable {
     private let joined = DispatchGroup()
     private let limits: DesktopPressCaptureBufferLimits
     private let onFailure: @Sendable (DesktopPressCaptureError) -> Void
+    private let recovery: (@Sendable (DesktopPressCapturePCMBuffer) -> Void)?
     private var phase = Phase.rolling
     private var buffered = Data()
     private var beforeReservationSampleCount = 0
@@ -28,6 +29,17 @@ package final class DesktopPressCapturePCMRelay: @unchecked Sendable {
     ) {
         self.limits = limits
         self.onFailure = onFailure
+        self.recovery = nil
+    }
+
+    init(
+        limits: DesktopPressCaptureBufferLimits,
+        recovery: @escaping @Sendable (DesktopPressCapturePCMBuffer) -> Void,
+        onFailure: @escaping @Sendable (DesktopPressCaptureError) -> Void
+    ) {
+        self.limits = limits
+        self.onFailure = onFailure
+        self.recovery = recovery
     }
 
     package var bufferedBytes: Int { lock.withLock { buffered.count + inFlightBytes } }
@@ -38,9 +50,13 @@ package final class DesktopPressCapturePCMRelay: @unchecked Sendable {
         let receipt = lock.withLock { () -> Receipt in
             guard phase != .closed, phase != .closing else { return Receipt() }
             if let error = append(data) {
+                if recovery != nil {
+                    let first = storedFailure == nil
+                    if first { storedFailure = error }
+                    return Receipt(failure: first ? error : nil)
+                }
                 storedFailure = error
-                fence()
-                return Receipt(failure: error)
+                return Receipt(failure: error, drain: fence())
             }
             return Receipt(accepted: true, drain: claimDrain())
         }
@@ -72,14 +88,16 @@ package final class DesktopPressCapturePCMRelay: @unchecked Sendable {
     }
 
     package func close() {
-        lock.withLock { fence() }
+        let needsDrain = lock.withLock { fence() }
+        if needsDrain { delivery.async { self.drain() } }
     }
 
     package func fail(_ error: DesktopPressCaptureError) {
+        if recovery != nil { recordWorkerFailure(error); return }
         let publish = lock.withLock {
             guard phase != .closed, phase != .closing else { return false }
             storedFailure = error
-            fence()
+            _ = fence()
             return true
         }
         if publish { onFailure(error) }
@@ -89,7 +107,7 @@ package final class DesktopPressCapturePCMRelay: @unchecked Sendable {
         let publish = lock.withLock {
             guard storedFailure == nil else { return false }
             storedFailure = error
-            fence()
+            if recovery == nil { _ = fence() }
             return true
         }
         if publish { onFailure(error) }
@@ -106,7 +124,7 @@ package final class DesktopPressCapturePCMRelay: @unchecked Sendable {
 
     private func append(_ data: Data) -> DesktopPressCaptureError? {
         guard data.count.isMultiple(of: 2) else { return .invalidPCM }
-        if phase == .rolling {
+        if phase == .rolling, recovery == nil {
             appendRolling(data)
         } else {
             guard data.count <= limits.reservedBytes - buffered.count - inFlightBytes else {
@@ -117,23 +135,32 @@ package final class DesktopPressCapturePCMRelay: @unchecked Sendable {
         return nil
     }
 
-    private func fence() {
+    private func fence() -> Bool {
+        if phase != .attached, phase != .closing, phase != .closed, let recovery {
+            sink = recovery
+            phase = .closing
+            let needsDrain = claimDrain()
+            if !draining { phase = .closed; sink = nil }
+            return needsDrain
+        }
         if phase == .attached || phase == .closing {
             phase = .closing
             if !draining {
                 phase = .closed
                 sink = nil
             }
+            return false
         } else {
             phase = .closed
             buffered.removeAll()
             beforeReservationSampleCount = 0
             sink = nil
         }
+        return false
     }
 
     private func claimDrain() -> Bool {
-        guard phase == .attached, !buffered.isEmpty, !draining else { return false }
+        guard phase == .attached || phase == .closing, !buffered.isEmpty, !draining else { return false }
         draining = true
         joined.enter()
         return true

@@ -6,7 +6,7 @@
  * The Local models group of the main window: one row per on-device model with
  * its size and state, Download (or Resume download), Cancel and Remove, and a
  * GPU switch when the runtime has a GPU backend. Like the rest of the window
- * it owns no state: buttons report events 50-53 and Swift pushes each change
+ * it owns no state: buttons report events 50-55 and Swift pushes each change
  * back through jsti_window_set_local_models. Rows are updated in place, so a
  * progress update never replaces a button under the pointer.
  */
@@ -30,6 +30,10 @@ typedef struct LocalModels {
 static struct {
     AdwPreferencesGroup *group;
     AdwSwitchRow *gpu;
+    AdwEntryRow *repository;
+    AdwEntryRow *filename;
+    GtkButton *import_model;
+    GtkButton *cancel_import;
     GArray *rows;
     gboolean suppress;
     /* The last update from Swift, restored after the self-test. */
@@ -57,11 +61,44 @@ static GtkButton *action_button(const char *label, gint32 event, gint32 index) {
     return button;
 }
 
+static void on_import(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    const char *repository = gtk_editable_get_text(GTK_EDITABLE(local.repository));
+    const char *filename = gtk_editable_get_text(GTK_EDITABLE(local.filename));
+    if (strlen(repository) > 193 || strlen(filename) > 96) {
+        jsti_window_update("Enter an owner/repository (up to 193 bytes) and a GGML filename (up to 96 bytes).", NULL, -1);
+        return;
+    }
+    gchar *payload = g_strdup_printf("%s\n%s", repository, filename);
+    emit_event(JSTI_EVENT_LOCAL_MODEL_IMPORT, payload, 0);
+    g_free(payload);
+}
+
+static void add_import_controls(void) {
+    local.repository = ADW_ENTRY_ROW(adw_entry_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(local.repository), "Hugging Face owner/repository");
+    adw_preferences_group_add(local.group, GTK_WIDGET(local.repository));
+    local.filename = ADW_ENTRY_ROW(adw_entry_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(local.filename), "GGML filename (for example ggml-medium.bin)");
+    adw_preferences_group_add(local.group, GTK_WIDGET(local.filename));
+    AdwActionRow *actions = ADW_ACTION_ROW(adw_action_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(actions), "Import a pinned reference, then choose Download");
+    adw_action_row_set_subtitle(actions, "Batch only. Core ML, ONNX, GGUF and distilled models are unsupported.");
+    local.import_model = GTK_BUTTON(gtk_button_new_with_label("Import reference"));
+    gtk_widget_set_valign(GTK_WIDGET(local.import_model), GTK_ALIGN_CENTER);
+    g_signal_connect(local.import_model, "clicked", G_CALLBACK(on_import), NULL);
+    local.cancel_import = action_button("Cancel import", JSTI_EVENT_LOCAL_MODEL_IMPORT_CANCEL, 0);
+    adw_action_row_add_suffix(actions, GTK_WIDGET(local.import_model));
+    adw_action_row_add_suffix(actions, GTK_WIDGET(local.cancel_import));
+    adw_preferences_group_add(local.group, GTK_WIDGET(actions));
+}
+
 struct _GtkWidget *jsti_local_models_group_new(void) {
     local.group = ADW_PREFERENCES_GROUP(adw_preferences_group_new());
     adw_preferences_group_set_title(local.group, "Local models");
     adw_preferences_group_set_description(local.group, "Checking the on-device speech runtime…");
     local.rows = g_array_new(FALSE, TRUE, sizeof(LocalRow));
+    add_import_controls();
     local.gpu = ADW_SWITCH_ROW(adw_switch_row_new());
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(local.gpu), "Use a Vulkan GPU when available");
     adw_action_row_set_subtitle(ADW_ACTION_ROW(local.gpu), "Applies when the speech runtime next starts");
@@ -189,10 +226,11 @@ static struct {
     gint32 event;
     gint32 index;
     guint count;
+    gchar text[300];
 } recorded;
 
 static void record_event(gint32 event, const char *text, gint32 index) {
-    (void)text;
+    g_strlcpy(recorded.text, text != NULL ? text : "", sizeof(recorded.text));
     recorded.event = event;
     recorded.index = index;
     recorded.count++;
@@ -236,6 +274,22 @@ static const char *check_gpu(void) {
     return NULL;
 }
 
+static const char *check_import(void) {
+    gchar *repository = g_strdup(gtk_editable_get_text(GTK_EDITABLE(local.repository)));
+    gchar *filename = g_strdup(gtk_editable_get_text(GTK_EDITABLE(local.filename)));
+    gtk_editable_set_text(GTK_EDITABLE(local.repository), "fixture/whisper");
+    gtk_editable_set_text(GTK_EDITABLE(local.filename), "ggml-tiny.bin");
+    guint before = recorded.count;
+    g_signal_emit_by_name(local.import_model, "clicked");
+    gboolean imported = recorded.count == before + 1 && recorded.event == JSTI_EVENT_LOCAL_MODEL_IMPORT &&
+        strcmp(recorded.text, "fixture/whisper\nggml-tiny.bin") == 0;
+    gboolean cancelled = clicked_reports(local.cancel_import, JSTI_EVENT_LOCAL_MODEL_IMPORT_CANCEL, 0);
+    gtk_editable_set_text(GTK_EDITABLE(local.repository), repository);
+    gtk_editable_set_text(GTK_EDITABLE(local.filename), filename);
+    g_free(repository); g_free(filename);
+    return imported && cancelled ? NULL : "the explicit import fields or cancellation did not reach the host";
+}
+
 int32_t jsti_local_models_self_test(char *error, size_t capacity) {
     if (local.group == NULL) {
         jsti_set_error(error, capacity, "Window self-test: the Local models group was not created");
@@ -261,6 +315,7 @@ int32_t jsti_local_models_self_test(char *error, size_t capacity) {
         show(models);
         failure = check_gpu();
     }
+    if (failure == NULL) failure = check_import();
     local_models_free(models);
     emit_event = jsti_window_emit;
     if (saved != NULL) {

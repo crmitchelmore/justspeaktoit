@@ -96,7 +96,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 try await Self.readVoiceSynthesisKey(effects: effects, name: selection.voice.apiKeyIdentifier)
             }
             try await DesktopVoicePlaybackFile.play(
-                VoiceGeneratedAudio(validating: wav),
+                VoiceGeneratedAudio(validating: wav, sampleRate: selection.voice.sampleRate),
                 directory: directory.appendingPathComponent("VoiceGeneratedPlayback"),
                 prepare: { try Platform.preparePrivateDirectory($0) },
                 through: { try await playback.playToCompletion(speech, path: $0.path) }

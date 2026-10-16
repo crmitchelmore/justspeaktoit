@@ -34,6 +34,15 @@ extension DesktopSpeechVoice {
         if case .deepgram(let voice) = self { return voice.providerVoiceID }
         return id
     }
+
+    /// Favorites remain Mac-compatible voice IDs; an executable picker row
+    /// also distinguishes OpenAI and Gemini models that share that same voice.
+    public var pickerIdentifier: String {
+        switch self {
+        case .openai, .gemini: modelID + "|" + favoriteIdentifier
+        default: favoriteIdentifier
+        }
+    }
 }
 
 /// One native snapshot; row identity never depends on a filtered row's position.
@@ -44,7 +53,7 @@ public struct DesktopVoicePicker: Sendable {
 
     public init(voices: [DesktopSpeechVoice], favoriteIDs: [String]) {
         var seen: Set<String> = []
-        let unique = voices.filter { seen.insert($0.favoriteIdentifier).inserted }
+        let unique = voices.filter { seen.insert($0.pickerIdentifier).inserted }
         self.voices = unique
         let saved = Set(favoriteIDs)
         favorites = unique.map { saved.contains($0.favoriteIdentifier) }

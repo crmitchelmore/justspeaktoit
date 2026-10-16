@@ -48,7 +48,7 @@ for source ownership and honest external-selection/Wayland capability limits.
 Ubuntu 24.04 (or any distribution with GTK 4.14+, libadwaita 1.5+) and Swift 6.2.3:
 
 ```sh
-sudo apt install libgtk-4-dev libadwaita-1-dev libpulse-dev libsecret-1-dev \
+sudo apt install g++ libgtk-4-dev libadwaita-1-dev libpulse-dev libsecret-1-dev \
   libx11-dev libxtst-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
   gstreamer1.0-plugins-good gstreamer1.0-libav libssl-dev pkg-config
 export SPEAK_LINUX_TARGET=1
@@ -59,6 +59,10 @@ scripts/linux-desktop-checks.sh             # self-test + Xvfb window smoke test
 scripts/linux-integration-checks.sh         # keyring, PipeWire, portals, X11 paste
 .build/debug/SpeakLinux                     # the app
 ```
+
+Portable builds also compile the in-process local-model C++ adapter. They need
+the C++ standard-library development headers and linker files supplied by `g++`,
+even when no downloaded model or inference runtime is installed.
 
 The smoke test needs `xvfb` and `dbus`; the integration checks also need
 `gnome-keyring pipewire pipewire-pulse wireplumber pulseaudio-utils openbox
@@ -434,7 +438,7 @@ proven on a physical desktop.
 | `--toggle` / app action | Built on GApplication | Forwarding **unverified** by an automated check |
 | Import and conversion | Verified for WAV (44.1 kHz stereo to 16 kHz mono) | `LinuxAudioConversionTests` through GStreamer; MP3, M4A and Opus depend on installed plugins and are **unverified**; conversion runs only for 16 kHz-WAV-only models (Meta, Azure) |
 | Live transcription transport (SwiftNIO, `SpeakLinuxWebSocket`) | Verified against the loopback probe | `SpeakLinuxWebSocketTests`: echo, PCM frames, ping/pong payload, peer close code and reason with acknowledgement, 2 × 2 MiB through a slow peer, fragmented Unicode and binary, cancellation of pending receive and pre-handshake send, abrupt disconnect, oversize, refused upgrade, and the shared Mistral client's four Voxtral scenarios. TLS (`wss`) to real providers, and live providers other than Mistral's protocol peer, **unverified**; HTTP(S) proxies are **not** honoured by this transport |
-| Live transcription in the app | Wired to the same shared live clients as Windows (OpenAI, Deepgram, AssemblyAI, Speechmatics, Soniox, ElevenLabs, xAI, Mistral, Gladia, Cartesia, Rev.ai and Azure Voice Live) | No provider receipt yet: **unverified** with real keys |
+| Live transcription in the app | Wired to the same shared live clients as Windows (OpenAI, Deepgram, AssemblyAI, Speechmatics, Soniox, ElevenLabs, xAI dedicated speech-to-text, Mistral, Gladia, Cartesia, Rev.ai, Azure Voice Live, Reson8, Google Gemini, Meta Muse and Modulate); Grok Voice remains unexposed | Final-head native transport and real-provider acceptance remain **unverified**; source wiring and protocol fixtures do not establish provider receipts |
 | Azure Speech resource endpoint | Settings shows an entry row while an Azure model is selected; entries are checked with the shared `DesktopHostAzureResource` rules before saving, and live Azure refuses to start without one | `DesktopHostAzureResourceTests`; the window self-test checks the row follows the picker |
 | iCloud sync: History with the Mac, API-key import | Same shared flow as Windows (`DesktopHostCloudSync`); the flow, the adapters and the group verified against the fake CloudKit server | `DesktopHostCloudSyncTests` (sign-in, History both ways, deletion, sign-out, timeout, shutdown); `LinuxCloudKitTransportTests` and `LinuxLoopbackListenerTests` (fake server over a real loopback socket through URLSession and OpenSSL, callback, idle connections, cancellation); `LinuxEnvelopeCryptographyTests` (the CryptoKit/CNG vectors); window self-test; keyring integration check. A live CloudKit receipt, the Console setup (API token, callback URL, Production schema), a real Apple ID sign-in in a browser and the OpenURI portal inside Flatpak are **unverified** |
 | Shortcut styles (press, hold, double-tap, both) | Session rules verified in the shared host | `SpeakDesktopHostTests`; the X11 grab reports press and release (integration check); portal Deactivated on real desktops **unverified** |
@@ -470,6 +474,12 @@ proven on a physical desktop.
    Mac, and key import with a real passphrase.
 
 ## On-device transcription
+
+The source now also provides explicit public Hugging Face GGML reference import,
+separate verified Download, and native Local/Remote then Batch/Live filtering.
+See [desktop Hugging Face imports](desktop-huggingface-import.md) for supported
+formats, provenance, persistence and the **unexecuted** regression/native-control
+evidence boundary. The earlier pinned-model receipts below do not qualify imports.
 
 Linux transcribes recordings and imported files on this computer with the same
 whisper.cpp 1.9.4 runtime and pinned GGML models as Windows

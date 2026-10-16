@@ -38,6 +38,8 @@ if str(HERE) not in sys.path:
 import redistributables  # noqa: E402
 import windows_pe  # noqa: E402
 import windows_targets  # noqa: E402
+sys.path.insert(0, str(HERE.parent / "local-llm-runtime"))
+import local_llm_package  # noqa: E402
 
 LOCAL_RUNTIME_PINS = HERE.parent / "windows-local-runtime" / "dependencies.json"
 APPLICATION = "SpeakWindows.exe"
@@ -51,7 +53,7 @@ RESERVED_NAMES = {"con", "prn", "aux", "nul"} | {"com%d" % n for n in range(1, 1
 ALLOWED_DOWNLOAD_HOSTS = {"download.visualstudio.microsoft.com", "raw.githubusercontent.com"}
 SYSTEM_MODULE, SWIFT_RUNTIME, MICROSOFT_RUNTIME, TEST_MODULE, UNKNOWN_MODULE = (
     "system", "swift-runtime", "microsoft-runtime", "test", "unknown")
-# whisper.cpp DLLs the app loads at run time for on-device transcription.
+# In-process transcription/cleanup DLLs admitted as runtime-loaded sources.
 LOCAL_RUNTIME = "local-inference-runtime"
 
 
@@ -705,8 +707,42 @@ def microsoft_notice_text(microsoft, lock, files):
     return "\n".join(lines)
 
 
+def load_local_llm_runtime(directory, architecture="x64"):
+    try:
+        return local_llm_package.read_directory(
+            directory, "windows", "x86_64" if architecture == "x64" else architecture)
+    except (OSError, ValueError) as error:
+        raise BundleError("cannot authenticate the native local LLM runtime: " + str(error)) from error
+
+
+def local_llm_source(runtime):
+    return dict(runtime["manifest"], manifestSHA256=runtime["manifestSHA256"],
+                libraryPath="LocalLLMRuntime/llama.dll", dependencies=runtime["dependencies"])
+
+
+def local_llm_library_path(name, runtime):
+    return "LocalLLMRuntime/llama.dll" if runtime and name.lower() == "llama.dll" else name
+
+
+def verify_local_llm_payload(entries, source, architecture):
+    prefix = "LocalLLMRuntime/"
+    nested = {name[len(prefix):]: data for name, data in entries.items() if name.startswith(prefix)}
+    if any(name.lower().startswith(prefix.lower()) and not name.startswith(prefix) for name in entries):
+        raise BundleError("native local LLM folder casing differs from the canonical path")
+    if source is None and not nested:
+        return None
+    try:
+        runtime = local_llm_package.validate_entries(
+            nested, "windows", "x86_64" if architecture == "x64" else architecture)
+    except (OSError, ValueError) as error:
+        raise BundleError("invalid nested native local LLM payload: " + str(error)) from error
+    if source != local_llm_source(runtime):
+        raise BundleError("native local LLM source record differs from its authenticated nested payload")
+    return runtime
+
+
 def assemble(application, swift, microsoft, licenses, app_license, policy, lock, cross_check, log, local_runtime=None,
-             architecture="x64"):
+             architecture="x64", local_llm=None):
     """Return ``(entries, manifest)``: bundle bytes keyed by path, and the manifest document."""
     target = windows_targets.target(architecture)
     executables = application.get("executables") or {}
@@ -718,7 +754,19 @@ def assemble(application, swift, microsoft, licenses, app_license, policy, lock,
             raise BundleError(name + " does not match the hash recorded by the build")
     executable = executables[APPLICATION]
     application_image = images[APPLICATION]
-    local_modules = local_runtime["modules"] if local_runtime else {}
+    local_modules = dict(local_runtime["modules"]) if local_runtime else {}
+    if local_llm:
+        try:
+            local_llm = local_llm_package.validate_entries(
+                local_llm["entries"], "windows", "x86_64" if architecture == "x64" else architecture)
+        except (OSError, ValueError) as error:
+            raise BundleError("cannot authenticate the native local LLM runtime: " + str(error)) from error
+        if "llama.dll" in local_modules:
+            raise BundleError("the transcription runtime collides with the native cleanup runtime")
+        local_modules["llama.dll"] = {
+            "name": "llama.dll", "bytes": local_llm["entries"]["llama.dll"],
+            "provenance": local_llm_source(local_llm),
+        }
     if local_modules and set(policy.local) != set(local_modules):
         raise BundleError("the runtime policy was not loaded with the local runtime modules")
 
@@ -764,13 +812,22 @@ def assemble(application, swift, microsoft, licenses, app_license, policy, lock,
         if not image.runs_natively_on(architecture) or not image.is_dll:
             raise BundleError("%s is not a native %s DLL (it is %s)" % (name, architecture, image.architecture))
         version = image.version_info() or {}
-        entries[name] = data
-        files.append({"path": name, "bytes": len(data), "sha256": sha256(data), "source": entry["source"],
+        path = local_llm_library_path(name, local_llm)
+        entries[path] = data
+        files.append({"path": path, "bytes": len(data), "sha256": sha256(data), "source": entry["source"],
                       "fileVersion": version.get("fileVersion"), "imageArchitecture": image.architecture,
                       "provenance": provenance})
     if cross_check is not None:
         for name in list(EXECUTABLES) + swift_files + microsoft_files + local_files:
-            cross_check_with_llvm(cross_check, name, entries[name], images.get(name) or windows_pe.PEImage(entries[name], name), log)
+            data = entries[local_llm_library_path(name, local_llm)]
+            cross_check_with_llvm(cross_check, name, data, images.get(name) or windows_pe.PEImage(data, name), log)
+    if local_llm:
+        for name in ("provisioning.json", "LICENSE.llama-cpp"):
+            path, data = "LocalLLMRuntime/" + name, local_llm["entries"][name]
+            entries[path] = data
+            files.append({"path": path, "bytes": len(data), "sha256": sha256(data),
+                          "source": "license" if name == "LICENSE.llama-cpp" else "native-local-llm-provenance",
+                          "provenance": {"commit": local_llm_package.COMMIT, "license": "MIT"}})
     license_names = []
     for entry in licenses:
         path = "licenses/" + entry["name"]
@@ -794,6 +851,14 @@ def assemble(application, swift, microsoft, licenses, app_license, policy, lock,
         "README.txt": readme_text(application["metadata"], swift_files + microsoft_files, microsoft, local_runtime,
                                   architecture).encode(),
     }
+    if local_llm:
+        generated["README.txt"] += (
+            "\nNative on-device cleanup: CPU llama.cpp b6500 in LocalLLMRuntime/llama.dll. "
+            "Models are separate, explicit downloads. provisioning.json records built bytes, not model-quality "
+            "acceptance. No subprocess or remote fallback is used.\n").encode()
+        generated["THIRD-PARTY-NOTICES.txt"] += (
+            "\nllama.cpp b6500 (commit " + local_llm_package.COMMIT + "), including ggml: "
+            "LocalLLMRuntime/llama.dll\nMIT license: LocalLLMRuntime/LICENSE.llama-cpp\n").encode()
     for path, data in generated.items():
         entries[path] = data
         files.append({"path": path, "bytes": len(data), "sha256": sha256(data),
@@ -830,7 +895,8 @@ def assemble(application, swift, microsoft, licenses, app_license, policy, lock,
                 key: local_runtime["manifest"].get(key)
                 for key in ("runtime", "architecture", "version", "commit", "repository", "cmakeArguments", "compiler",
                             "vulkanSdk")
-            } | {"manifestSHA256": local_runtime["manifestSHA256"], "modules": sorted(local_files)},
+            } | {"manifestSHA256": local_runtime["manifestSHA256"],
+                 "modules": sorted(name for name in local_files if name.lower() in local_runtime["modules"])},
         },
         "policy": policy.data,
         "verification": {"importReader": "windows_pe.py static and delay-load import directories",
@@ -840,6 +906,8 @@ def assemble(application, swift, microsoft, licenses, app_license, policy, lock,
                          "llvmReadobjCrossCheck": cross_check is not None,
                          "windowsEvidence": "scripts/windows-bundle/verify-windows-bundle.ps1 runs the bundle with an isolated PATH and records sampled loaded modules"},
     }
+    if local_llm:
+        manifest["sources"]["localLLMRuntime"] = local_llm_source(local_llm)
     check_bundle_layout(sorted(entries) + ["bundle-manifest.json"], policy)
     return entries, manifest
 
@@ -877,6 +945,8 @@ def main():
     parser.add_argument("--llvm-readobj", type=pathlib.Path, help="cross-check import tables with llvm-readobj")
     parser.add_argument("--local-runtime", type=pathlib.Path,
                         help="whisper.cpp runtime build (build-whisper-runtime.py output) to bundle for on-device transcription")
+    parser.add_argument("--local-llm-runtime", type=pathlib.Path,
+                        help="pinned offline native cleanup build's LocalLLMRuntime directory; no acquisition")
     args = parser.parse_args()
     architecture = args.architecture
     runtime_directory, lock_path = swift_runtime_inputs(args, architecture)
@@ -885,8 +955,9 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     log = Log(output / "bundle-build.log")
     local_runtime = load_local_runtime(args.local_runtime.resolve(), architecture=architecture) if args.local_runtime else None
-    policy = Policy.load(local_runtime=[module["name"] for module in local_runtime["modules"].values()]
-                         if local_runtime else ())
+    local_llm = load_local_llm_runtime(args.local_llm_runtime, architecture) if args.local_llm_runtime else None
+    runtime_names = [module["name"] for module in local_runtime["modules"].values()] if local_runtime else []
+    policy = Policy.load(local_runtime=runtime_names + (["llama.dll"] if local_llm else []))
     lock = json.loads((HERE / "dependencies.json").read_text(encoding="utf-8"))
     application = load_application(app, policy, architecture)
     swift = load_swift_runtime(runtime_directory, lock_path, architecture)
@@ -915,7 +986,7 @@ def main():
     if cross_check is not None and not cross_check.is_file():
         raise BundleError("llvm-readobj not found at " + str(cross_check))
     entries, manifest = assemble(application, swift, microsoft, licenses, app_license, policy,
-                                 lock["microsoftRuntime"], cross_check, log, local_runtime, architecture)
+                                 lock["microsoftRuntime"], cross_check, log, local_runtime, architecture, local_llm)
     manifest_bytes = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode()
     entries["bundle-manifest.json"] = manifest_bytes
     commit = manifest["application"]["sourceCommit"]

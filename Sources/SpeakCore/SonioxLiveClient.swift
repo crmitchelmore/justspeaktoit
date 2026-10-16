@@ -81,7 +81,7 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
         model: String = "stt-rt-v5",
         language: String? = nil,
         sampleRate: Int = 16_000,
-        keywords: [String] = [],
+        keywords: [String],
         makeConnection: @escaping ConnectionFactory,
         schedule: @escaping Scheduler = { seconds, action in
             DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
@@ -92,6 +92,31 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
         self.model = model
         self.language = language
         self.keywords = keywords
+        self.sampleRate = sampleRate
+        self.makeConnection = makeConnection
+        self.schedule = schedule
+        self.ownedSession = ownedSession
+        self.run = SonioxLiveRun(sampleRate: sampleRate)
+        self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
+        queue.setSpecific(key: queueKey, value: true)
+    }
+
+    /// Source-compatible overload preserved for callers predating keyword hints.
+    public init(
+        apiKey: String,
+        model: String = "stt-rt-v5",
+        language: String? = nil,
+        sampleRate: Int = 16_000,
+        makeConnection: @escaping ConnectionFactory,
+        schedule: @escaping Scheduler = { seconds, action in
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
+        },
+        ownedSession: URLSession? = nil
+    ) {
+        self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.model = model
+        self.language = language
+        self.keywords = []
         self.sampleRate = sampleRate
         self.makeConnection = makeConnection
         self.schedule = schedule

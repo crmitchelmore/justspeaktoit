@@ -12,7 +12,7 @@ public struct DesktopProfileCapabilities: Sendable {
     /// without a local runtime.
     public var localModels: [ModelCatalog.Option]
     /// Whether the host can layer personal-lexicon directives and context tags
-    /// into the polish prompt. Desktop hosts have no personal lexicon yet.
+    /// into the remote polish prompt from saved personal-lexicon matches.
     public var supportsPersonalLexicon: Bool
     /// Legacy host-wide forwarding switch. Canonical model support still gates
     /// every hint; new hosts should supply `liveLanguageModelIDs` instead.
@@ -45,7 +45,8 @@ public struct DesktopProfileCapabilities: Sendable {
         DesktopProfileCapabilities(
             batchModels: DesktopTranscription.batchModels,
             liveModels: DesktopLiveTranscription.liveModels,
-            polishModels: DesktopPostProcessing.remoteModels,
+            polishModels: DesktopPostProcessing.models,
+            supportsPersonalLexicon: true,
             liveLanguageModelIDs: DesktopLiveTranscription.languageHintModelIDs
         )
     }
@@ -82,6 +83,7 @@ public struct DesktopProfileCapabilities: Sendable {
 /// limitation is reported to the user; a blocking one refuses to start the
 /// recording rather than run a different model in the profile's name.
 public enum DesktopProfileLimitation: Equatable, Sendable {
+    case transcriptionRoutingUnavailable(String)
     /// The transcription override cannot run here. Recording is refused so the
     /// audio is never sent to a model or provider the profile did not choose.
     case transcriptionModelUnavailable(modelID: String, routing: DictationProfileTranscriptionRouting)
@@ -98,12 +100,16 @@ public enum DesktopProfileLimitation: Equatable, Sendable {
     case contextTagsUnavailable
 
     public var blocksRecording: Bool {
+        if case .transcriptionRoutingUnavailable = self { return true }
         if case .transcriptionModelUnavailable = self { return true }
         return false
     }
 
     public var message: String {
         switch self {
+        case .transcriptionRoutingUnavailable(let routing):
+            return "This profile uses unsupported transcription routing “\(routing)”. "
+                + "Recording is refused until an available model is explicitly selected; no cloud route is inferred."
         case .transcriptionModelUnavailable(let modelID, let routing):
             let kind: String
             switch routing {
@@ -219,6 +225,9 @@ public enum DesktopProfileSessionResolver {
             )
         }
         var limitations: [DesktopProfileLimitation] = []
+        if let routing = profile.unsupportedTranscriptionRouting {
+            limitations.append(.transcriptionRoutingUnavailable(routing))
+        }
         var model = defaultModel
         var effectiveModelIsLive = capabilities.isLive(defaultModel)
         if let override = profile.resolvedTranscriptionOverride {
@@ -232,18 +241,10 @@ public enum DesktopProfileSessionResolver {
             }
         }
 
-        var language: String?
-        if let identifier = TranscriptionLanguageCatalog.providerLanguage(
-            for: profile.languageIdentifier ?? defaultLanguage ?? ""
-        ) {
-            if effectiveModelIsLive, !capabilities.supportsLiveLanguage(for: model) {
-                limitations.append(.languageUnavailableForLiveModel(languageIdentifier: identifier))
-            } else {
-                language = identifier
-            }
-
-        }
-
+        let language = resolveProfileLanguage(
+            profile.languageIdentifier ?? defaultLanguage, model: model, live: effectiveModelIsLive,
+            capabilities: capabilities, limitations: &limitations
+        )
         let polish = resolvePolish(
             profile: profile, defaults: defaultPostProcessing, capabilities: capabilities, limitations: &limitations
         )
@@ -264,6 +265,18 @@ public enum DesktopProfileSessionResolver {
         return TranscriptionLanguageCatalog.providerLanguage(for: language ?? "")
     }
 
+    private static func resolveProfileLanguage(
+        _ language: String?, model: String, live: Bool,
+        capabilities: DesktopProfileCapabilities, limitations: inout [DesktopProfileLimitation]
+    ) -> String? {
+        guard let identifier = TranscriptionLanguageCatalog.providerLanguage(for: language ?? "") else { return nil }
+        guard !live || capabilities.supportsLiveLanguage(for: model) else {
+            limitations.append(.languageUnavailableForLiveModel(languageIdentifier: identifier))
+            return nil
+        }
+        return identifier
+    }
+
     private static func resolvePolish(
         profile: DictationProfile, defaults: DesktopPostProcessing.Options,
         capabilities: DesktopProfileCapabilities, limitations: inout [DesktopProfileLimitation]
@@ -271,31 +284,41 @@ public enum DesktopProfileSessionResolver {
         var options = defaults
         var skippedPolishReason: String?
         if let enabled = profile.polishEnabled {
-            options.mode = enabled ? .remote : .disabled
+            options.mode = enabled ? (DesktopPostProcessing.mode(for: options.modelIdentifier) ?? .disabled) : .disabled
         }
         if let requested = trimmedNonEmpty(profile.polishModelID) {
             if capabilities.canRun(polishModel: requested) {
                 options.modelIdentifier = requested
+                if options.mode != .disabled || profile.polishEnabled == true {
+                    options.mode = DesktopPostProcessing.mode(for: requested) ?? .disabled
+                }
             } else {
                 let limitation = DesktopProfileLimitation.polishModelUnavailable(modelID: requested)
                 limitations.append(limitation)
-                if options.mode == .remote {
+                if options.mode != .disabled || profile.polishEnabled == true {
                     options.mode = .disabled
                     skippedPolishReason = limitation.message
                 }
             }
         }
-        if let prompt = trimmedNonEmpty(profile.polishPrompt) {
-            options.customPrompt = prompt
-        }
-        if let outputLanguage = trimmedNonEmpty(profile.polishOutputLanguage) {
-            options.outputLanguage = outputLanguage
-        }
-        if options.mode == .remote, !capabilities.supportsPersonalLexicon {
+        applyPolishContext(profile, to: &options)
+        if (options.mode == .remote || options.mode == .localLLM), !capabilities.supportsPersonalLexicon {
             if profile.polishIncludeLexiconDirectives == true { limitations.append(.lexiconDirectivesUnavailable) }
             if profile.polishIncludeContextTags == true { limitations.append(.contextTagsUnavailable) }
         }
         return (options, skippedPolishReason)
+    }
+
+    private static func applyPolishContext(
+        _ profile: DictationProfile, to options: inout DesktopPostProcessing.Options
+    ) {
+        guard options.modelIdentifier != LocalPostProcessingModel.builtInRulesModelID else { return }
+        if let prompt = trimmedNonEmpty(profile.polishPrompt) { options.customPrompt = prompt }
+        if let outputLanguage = trimmedNonEmpty(profile.polishOutputLanguage) {
+            options.outputLanguage = outputLanguage
+        }
+        if let include = profile.polishIncludeLexiconDirectives { options.includeLexiconDirectives = include }
+        if let include = profile.polishIncludeContextTags { options.includeContextTags = include }
     }
 
     /// Editor notices describe explicit overrides precisely. An inherited app
@@ -304,6 +327,9 @@ public enum DesktopProfileSessionResolver {
         of profile: DictationProfile, capabilities: DesktopProfileCapabilities
     ) -> [DesktopProfileLimitation] {
         var limitations: [DesktopProfileLimitation] = []
+        if let routing = profile.unsupportedTranscriptionRouting {
+            limitations.append(.transcriptionRoutingUnavailable(routing))
+        }
         let override = profile.resolvedTranscriptionOverride
         if let override, !capabilities.canRun(transcriptionModel: override.modelID, routing: override.routing) {
             limitations.append(.transcriptionModelUnavailable(modelID: override.modelID, routing: override.routing))

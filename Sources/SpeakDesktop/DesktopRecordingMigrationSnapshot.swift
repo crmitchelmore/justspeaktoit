@@ -34,18 +34,19 @@ extension DesktopRecordingStore {
         }
         for entry in audio?.entries ?? [] {
             try Task.checkCancellation()
-            var records = byFilename[entry.filename] ?? []
+            var records = (byFilename[entry.filename] ?? []).filter { $0.localAudio == entry.localAudio }
             if records.isEmpty {
                 let id = try Self.migrationStandaloneID(
-                    entry.filename, retainedIDs: retainedIDs, standaloneIDs: &standaloneIDs, digests: digests
+                    entry.sourceKey, retainedIDs: retainedIDs, standaloneIDs: &standaloneIDs, digests: digests
                 )
                 records = [Record(id: id, audioFilename: entry.filename, modelIdentifier: "",
                                   createdAt: entry.identity.created ?? .distantPast)]
             }
             records = records.filter { audioScope.contains(id: $0.id.uuidString, date: $0.createdAt, kind: "audio") }
-            guard let first = records.first else { continue }
-            let url = try ownedAudioURL(for: first)
+            guard !records.isEmpty else { continue }
+            let url = try ownedAudioURL(for: entry.resolutionRecord)
             let digest = try Self.migrationAudioDigest(url, identity: entry.identity, digests: digests)
+            _ = try ownedAudioURL(for: entry.resolutionRecord)
             for record in records {
                 let audioRecord = try Self.migrationAudioRecord(record, url: url, digest: digest, digests: digests)
                 snapshot.records[.recordings, default: []].append(audioRecord.record)
@@ -113,9 +114,10 @@ extension DesktopRecordingStore {
     private static func unavailableMigrationAudio(
         _ records: [Record], audio: DesktopRecordingAudioSnapshot, scope: DataMigrationScope
     ) throws -> [String] {
-        let available = Set(audio.entries.map(\.filename))
+        let available = Set(audio.entries.map(\.sourceKey))
         var notices: [String] = []
-        for record in records where !record.audioFilename.isEmpty && !available.contains(record.audioFilename) {
+        for record in records where !record.audioFilename.isEmpty
+            && !available.contains(record.localAudio?.sourceKey ?? record.audioFilename) {
             try Task.checkCancellation()
             guard scope.contains(id: record.id.uuidString, date: record.createdAt, kind: "audio") else { continue }
             notices.append("Recordings, \(record.id.uuidString): file unavailable; skipped.")

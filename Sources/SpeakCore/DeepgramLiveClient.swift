@@ -43,7 +43,7 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
 
     public init(
         apiKey: String, model: String = "nova-3", language: String? = nil, sampleRate: Int = 16000,
-        keywords: [String] = [],
+        keywords: [String],
         makeConnection: @escaping ConnectionFactory,
         schedule: @escaping Scheduler = { seconds, action in
             DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
@@ -53,6 +53,26 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
         self.model = model
         self.language = language
         self.keywords = keywords
+        self.sampleRate = sampleRate
+        self.makeConnection = makeConnection
+        self.schedule = schedule
+        self.run = DeepgramLiveRun(sampleRate: sampleRate)
+        self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
+        queue.setSpecific(key: queueKey, value: true)
+    }
+
+    /// Source-compatible overload preserved for callers predating keyword hints.
+    public init(
+        apiKey: String, model: String = "nova-3", language: String? = nil, sampleRate: Int = 16000,
+        makeConnection: @escaping ConnectionFactory,
+        schedule: @escaping Scheduler = { seconds, action in
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
+        }
+    ) {
+        self.apiKey = apiKey
+        self.model = model
+        self.language = language
+        self.keywords = []
         self.sampleRate = sampleRate
         self.makeConnection = makeConnection
         self.schedule = schedule

@@ -37,14 +37,7 @@ final class LinuxEventContext: @unchecked Sendable {
             gestures = LinuxShortcutGestures(style: .pressToToggle) { [weak self] request in
                 guard let self else { return }
                 await self.ready?.value
-                // Model and microphone are the saved ones, read in settings order.
-                let index = await controller.selectedIndex()
-                let device = await controller.selectedMicrophone()
-                await controller.shortcut(.init(
-                    input: request.input, style: request.style, recognisedAt: request.recognisedAt,
-                    target: request.target, targetExecutablePath: request.targetExecutablePath,
-                    textOutput: request.textOutput, modelIndex: index, deviceID: device
-                ))
+                await controller.admitShortcut(request)
             }
         }
         self.searches = DesktopEventDispatcher { query in await controller.searchHistory(query) }
@@ -76,9 +69,21 @@ final class LinuxEventContext: @unchecked Sendable {
 
     /// Text output as of this event in settings order, however late the
     /// recording task runs.
-    func recordingTextOutput() -> Task<LinuxTextOutputOptions, Never> {
+    func recordingSettings(
+        modelIndex: Int? = nil, target: LinuxInsertionTarget? = nil
+    ) -> Task<LinuxRecordingSettings, Never> {
         let controller = controller
-        return settings.read { await controller.textOutputOptions() }
+        return settings.read {
+            let index: Int
+            if let modelIndex, modelIndex >= 0 { index = modelIndex } else {
+                index = await controller.selectedIndex()
+            }
+            return LinuxRecordingSettings(
+                modelIndex: index, deviceID: await controller.selectedMicrophone(),
+                profile: await controller.captureProfile(modelIndex: index, executablePath: target?.executablePath),
+                textOutput: await controller.textOutputOptions()
+            )
+        }
     }
 
     func markReady(_ task: Task<Void, Never>) { lock.withLock { readyTask = task } }
@@ -88,7 +93,7 @@ final class LinuxEventContext: @unchecked Sendable {
     /// before anything else can take focus; toggles run one at a time.
     func shortcutToggle(modelIndex: Int?, deviceID: String?) {
         let target = LinuxEventContext.captureTarget()
-        let textOutput = recordingTextOutput()
+        let selection = recordingSettings(modelIndex: modelIndex, target: target)
         let controller = controller
         let ready = ready
         lock.withLock {
@@ -96,17 +101,10 @@ final class LinuxEventContext: @unchecked Sendable {
             shortcutTail = Task {
                 await previous?.value
                 await ready?.value
-                let index: Int
-                if let modelIndex, modelIndex >= 0 {
-                    index = modelIndex
-                } else {
-                    index = await controller.selectedIndex()
-                }
-                let device: String
-                if let deviceID { device = deviceID } else { device = await controller.selectedMicrophone() }
-                await controller.toggle(
-                    target: target, modelIndex: index, deviceID: device,
-                    targetExecutablePath: target?.executablePath, textOutput: await textOutput.value, trigger: .press
+                let saved = await selection.value
+                await controller.admitCaptured(
+                    target: target, modelIndex: saved.modelIndex, deviceID: deviceID ?? saved.deviceID,
+                    textOutput: saved.textOutput, profile: saved.profile, trigger: .press
                 )
             }
         }
@@ -121,7 +119,11 @@ final class LinuxEventContext: @unchecked Sendable {
     /// target and text output are captured at the press.
     func shortcutKey(pressed: Bool) {
         if pressed {
-            gestures.keyDown(target: Self.captureTarget(), textOutput: recordingTextOutput())
+            let target = Self.captureTarget()
+            let selection = recordingSettings(target: target)
+            gestures.keyDown(
+                target: target, textOutput: Task { await selection.value.textOutput }, selection: selection
+            )
         } else {
             gestures.keyUp()
         }
@@ -174,6 +176,10 @@ func linuxWindowEvent(
     let value = text.map(String.init(cString:)) ?? ""
     let slot = Int(index)
     let event = Int(event)
+    if event == Int(JSTI_EVENT_PROFILES) {
+        linuxProfilesEvent(value, holder: holder)
+        return
+    }
     if event == 70 || event == 71 || event == 72 {
         linuxVocabularyEvent(Int32(event), payload: value, kind: slot, holder: holder)
         return
@@ -188,7 +194,7 @@ func linuxWindowEvent(
     if linuxHistoryManagementEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxHistoryEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxReadAloudEvent(event, value: value, slot: slot, holder: holder) { return }
-    if linuxLocalModelEvent(event, slot: slot, holder: holder) { return }
+    if linuxLocalModelEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxCloudSyncEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxAppearanceEvent(event, slot: slot, holder: holder) { return }
     _ = linuxSettingsEvent(event, value: value, slot: slot, holder: holder)
@@ -201,11 +207,12 @@ private func linuxSessionEvent(_ event: Int, value: String, slot: Int, holder: L
     case Int(JSTI_EVENT_TOGGLE_RECORDING):
         // Record in this window: its own window is focused, so there is no
         // field to paste into. The transcript is saved and offered for Copy.
-        let textOutput = holder.recordingTextOutput()
+        let selection = holder.recordingSettings(modelIndex: slot)
         Task {
-            await controller.toggle(
-                target: nil, modelIndex: slot, deviceID: value, targetExecutablePath: nil,
-                textOutput: await textOutput.value
+            let saved = await selection.value
+            await controller.toggleCaptured(
+                target: nil, modelIndex: slot, deviceID: value,
+                textOutput: saved.textOutput, profile: saved.profile
             )
         }
     case Int(JSTI_EVENT_COMMAND_TOGGLE):
@@ -306,15 +313,7 @@ private func linuxSettingsEvent(_ event: Int, value: String, slot: Int, holder: 
             LinuxWindow.textOutput(await controller.textOutputOptions(), hint: holder.shortcuts.hint)
         }
     case Int(JSTI_EVENT_POST_PROCESSING):
-        let enabled = slot >= 0
-        let model = enabled ? slot : -1 - slot
-        let parts = value.split(separator: "\u{1F}", maxSplits: 1, omittingEmptySubsequences: false)
-        let prompt = parts.first.map(String.init) ?? ""
-        let key = parts.count > 1 ? String(parts[1]) : ""
-        holder.enqueueSettings {
-            await controller.savePostProcessing(enabled: enabled, modelIndex: model, prompt: prompt, key: key)
-            LinuxWindow.postProcessing(await controller.postProcessingOptions())
-        }
+        linuxPostProcessingEvent(value, slot: slot, holder: holder)
     case Int(JSTI_EVENT_AZURE_RESOURCE):
         // Checked before it is queued, with the shared rules the live clients
         // apply, so a saved endpoint can never fail later.

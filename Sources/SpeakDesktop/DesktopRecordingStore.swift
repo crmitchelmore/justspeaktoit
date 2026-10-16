@@ -11,11 +11,14 @@ public actor DesktopRecordingStore {
             case correctedText, lexiconSummary, lexiconDirectives, lexiconContextTags
             case postProcessingModelIdentifier, postProcessingFailure, languageIdentifier, profileName, profileNotes
             case originPlatform, migrationMetadata, recordedDuration, importedCost, importedModelIdentifiers
+            case localAudio
         }
 
         public let id: UUID
         public let createdAt: Date
         public let audioFilename: String
+        /// Local descriptive provenance, usable only with a separately verified ownership registration.
+        public internal(set) var localAudio: DesktopRecordingAudioReference?
         public let modelIdentifier: String
         public var result: TranscriptionResult?
         public var failure: String?
@@ -76,6 +79,14 @@ public actor DesktopRecordingStore {
             self.modelIdentifier = modelIdentifier
         }
 
+        public init(capture: DesktopRecordingLocations.Capture, modelIdentifier: String, createdAt: Date = Date()) {
+            self.init(
+                id: capture.recordingID, audioFilename: capture.recordingID.uuidString + ".wav",
+                modelIdentifier: modelIdentifier, createdAt: createdAt
+            )
+            localAudio = capture.reference
+        }
+
         /// A transcript synced from another device. It keeps that device's
         /// identity and creation time, and has no audio file.
         public init(syncedID id: UUID, createdAt: Date, modelIdentifier: String, originPlatform: String) {
@@ -89,10 +100,13 @@ public actor DesktopRecordingStore {
 
     public let directory: URL
     var deletionLedger: DesktopHistoryDeletionLedger
+    var audioLocations: DesktopRecordingLocations?
 
-    public init(directory: URL) throws {
+    public init(directory: URL, audioLocations: DesktopRecordingLocations? = nil) throws {
         self.directory = directory
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try audioLocations?.validateHistory(directory)
+        self.audioLocations = audioLocations
         deletionLedger = try DesktopHistoryDeletionLedger.load(from: directory)
     }
 
@@ -140,20 +154,23 @@ public actor DesktopRecordingStore {
         return true
     }
 
-    /// Resolves only a regular, non-symlinked audio file inside this store.
-    /// Imported or hand-edited metadata never grants access outside History.
-    /// Hard links and a swap between this check and a later write are outside
-    /// what a path check can detect; a native handle-based boundary would be
-    /// needed for those.
+    /// Legacy audio stays in History; local references require separate verified ownership.
+    /// Imported or hand-edited metadata alone never grants access outside History.
+    /// A descriptive URL is not a held read or mutation grant. Use readAudio for
+    /// strict bounded reads; external repair/deletion needs a separate owned capability.
     public func audioURL(for record: Record) throws -> URL {
         try requireRetained(record.id)
         return try ownedAudioURL(for: record)
     }
 
     func ownedAudioURL(for record: Record) throws -> URL {
+        if record.localAudio != nil {
+            guard let audioLocations else { throw DesktopRecordingLocationError.unregistered }
+            return try audioLocations.resolve(record)
+        }
         let name = record.audioFilename
         guard !name.isEmpty, name != ".", name != "..",
-              !name.contains("/"), !name.contains("\\"), !name.contains(":") else {
+              !name.contains("/"), !name.contains("\\"), !name.contains(":"), !name.utf8.contains(0) else {
             throw CocoaError(.fileReadCorruptFile)
         }
         let root = directory.resolvingSymlinksInPath().standardizedFileURL
@@ -232,7 +249,7 @@ public actor DesktopRecordingStore {
         let target = destination.resolvingSymlinksInPath().standardizedFileURL
         guard !target.pathComponents.starts(with: root.pathComponents, by: {
             $0.caseInsensitiveCompare($1) == .orderedSame
-        }) else {
+        }), audioLocations?.protectsAudioDestination(target) != true else {
             throw CocoaError(.fileWriteNoPermission)
         }
         try Data(text.utf8).write(to: destination, options: .atomic)
@@ -261,12 +278,15 @@ public actor DesktopRecordingStore {
         return RecoveryReport(records: recovered.sorted { $0.createdAt > $1.createdAt }, unreadableFiles: unreadable)
     }
 
-    /// Repairs only a WAV that audioURL(for:) resolves to a regular file inside
-    /// History. Missing or unusable audio is reported, never written or removed.
+    /// Repairs only legacy WAVs inside History. External audio requires a held repair capability.
+    /// Missing or unusable audio is reported, never written or removed.
     private func recoverAudio(for record: Record) -> String {
         let audio: URL
         do { audio = try audioURL(for: record) } catch {
             return "Recording was interrupted and its audio file is missing or unusable. Retry is unavailable."
+        }
+        guard record.localAudio == nil else {
+            return "Recording was interrupted. Audio retained; owned external-audio repair is not implemented."
         }
         guard audio.pathExtension.lowercased() == "wav" else {
             return "Transcription was interrupted. Imported audio retained for retry."

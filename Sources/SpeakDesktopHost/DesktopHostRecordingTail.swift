@@ -50,7 +50,7 @@ extension DesktopHostController {
         }
     }
 
-    private func processStoppedRecording(_ stopped: StoppedRecording) async throws {
+    func processStoppedRecording(_ stopped: StoppedRecording) async throws {
         guard stopped.duration > 0 else {
             stopped.live?.cancel()
             var empty = stopped.record
@@ -63,15 +63,16 @@ extension DesktopHostController {
             await finishLive(stopped, session: live)
         } else {
             await transcribe(
-                stopped.record, duration: stopped.duration, output: stopped.output, profile: stopped.profile
+                stopped.record, duration: stopped.duration, output: stopped.output, profile: stopped.profile,
+                input: stopped.input
             )
         }
     }
 
     /// Capture and live delivery stay active until the tail ends. Every abort
     /// takes ownership of the capture before waking this stop request.
-    func waitForRecordingTail(recordID: UUID) async {
-        let seconds = settings.configuration?.number("postRecordingTailDuration")
+    func waitForRecordingTail(recordID: UUID, seconds snapshot: TimeInterval? = nil) async {
+        let seconds = snapshot ?? settings.configuration?.number("postRecordingTailDuration")
             ?? SpeechDefaults.recordingTailDuration
         guard seconds > 0 else { return }
         Platform.recordingState(2)

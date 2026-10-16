@@ -18,6 +18,9 @@ package protocol DesktopHostLocalRuntime: AnyObject, Sendable {
 /// The controller's Local models state: running downloads, their progress and
 /// the runtime once loaded.
 package struct DesktopHostLocalModelsState<Runtime: DesktopHostLocalRuntime> {
+    package var imported: [HuggingFaceWhisperModel] = []
+    package var importTask: Task<Void, Never>?
+    package var importStatus: String?
     package var downloads: [String: Task<Void, Never>] = [:]
     package var progress: [String: Int64] = [:]
     package var runtime: Runtime?
@@ -81,6 +84,7 @@ where LocalModelsState == DesktopHostLocalModelsState<LocalRuntime> {
     static var localModelDigests: LocalModelDigestProvider { get }
     /// Streams pinned artefacts. Defaults to URLSession.
     static var localModelTransport: any LocalModelDownloadTransport { get }
+    static var localModelMetadataTransport: any HuggingFaceModelMetadataTransport { get }
     /// Why this build cannot run on-device models at all (the runtime
     /// libraries are not installed beside it), or nil when they are.
     static var localRuntimeMissing: String? { get }
@@ -101,6 +105,24 @@ where LocalModelsState == DesktopHostLocalModelsState<LocalRuntime> {
 // These refine the unsupported defaults in DesktopHostLocalModels.swift.
 package extension DesktopHostLocalModelPlatform {
     static var localModelTransport: any LocalModelDownloadTransport { LocalModelURLSessionTransport() }
+    static var localModelMetadataTransport: any HuggingFaceModelMetadataTransport { HuggingFaceModelMetadataHTTP() }
+
+    static func loadLocalModels(directory: URL) throws -> LocalModelsState {
+        var state = makeLocalModelsState()
+        state.imported = try HuggingFaceWhisperStore(
+            directory: directory.appendingPathComponent("LocalModels"),
+            prepareDirectory: { try preparePrivateDirectory($0) }
+        ).load()
+        let supported = state.imported.filter { localModelHost.canExecute(model: $0) }
+        try DesktopHostModels.appendLocal(supported.map { DesktopLocalTranscription.option($0.model) })
+        DesktopLocalTranscription.rememberImportedNames(state.imported)
+        return state
+    }
+
+    static func cancelLocalModels(controller: isolated DesktopHostController<Self>) {
+        controller.localModels.importTask?.cancel()
+        for task in controller.localModels.downloads.values { task.cancel() }
+    }
 
     static func makeLocalModelsState() -> LocalModelsState { DesktopHostLocalModelsState() }
 
@@ -115,7 +137,7 @@ package extension DesktopHostLocalModelPlatform {
     }
 
     static func beginLocalUse(_ model: String, controller: isolated DesktopHostController<Self>) -> String? {
-        guard let spec = DesktopLocalTranscription.model(for: model, host: localModelHost) else { return nil }
+        guard let spec = controller.localModelSpec(for: model) else { return nil }
         controller.localModels.ownership.beginUse(spec.catalogueID)
         return spec.catalogueID
     }

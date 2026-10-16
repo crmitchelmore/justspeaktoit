@@ -40,11 +40,13 @@ package struct DesktopHostShortcutRequest<Platform: DesktopHostPlatform>: Sendab
     package let textOutput: Task<Platform.TextOutputOptions, Never>
     package let modelIndex: Int
     package let deviceID: String
+    package let profile: DesktopProfileSession?
 
     package init(
         input: HotKeySessionPolicy.Input, style: HotKeyActivationStyle, recognisedAt: TimeInterval,
-        target: Platform.InsertionTarget?, targetExecutablePath: String?,
-        textOutput: Task<Platform.TextOutputOptions, Never>, modelIndex: Int, deviceID: String
+        target: Platform.InsertionTarget?, targetExecutablePath: String? = nil,
+        textOutput: Task<Platform.TextOutputOptions, Never>, modelIndex: Int, deviceID: String,
+        profile: DesktopProfileSession? = nil
     ) {
         self.input = input
         self.style = style
@@ -54,6 +56,7 @@ package struct DesktopHostShortcutRequest<Platform: DesktopHostPlatform>: Sendab
         self.textOutput = textOutput
         self.modelIndex = modelIndex
         self.deviceID = deviceID
+        self.profile = profile
     }
 }
 
@@ -65,6 +68,18 @@ extension DesktopHostController {
     /// checked again afterwards and a shortcut whose state changed does
     /// nothing: it never stops a recording it did not see, or starts one.
     package func shortcut(_ request: DesktopHostShortcutRequest<Platform>) async {
+        await routeShortcut(request, waitForOwnedStartup: true)
+    }
+
+    /// The native gesture serializer awaits admission, not microphone readiness.
+    /// The admitted startup/stop remains owned and counted by this controller.
+    package func admitShortcut(_ request: DesktopHostShortcutRequest<Platform>) async {
+        await routeShortcut(request, waitForOwnedStartup: false)
+    }
+
+    private func routeShortcut(
+        _ request: DesktopHostShortcutRequest<Platform>, waitForOwnedStartup: Bool
+    ) async {
         guard !closed else { return }
         if case .gesture(.doubleTap) = request.input {
             let interval = request.recognisedAt - hotKeySession.lastDoubleTap
@@ -72,23 +87,45 @@ extension DesktopHostController {
             hotKeySession.lastDoubleTap = request.recognisedAt
         }
         if await handsFreeShortcut(request) { return }
-        await manualShortcut(request)
+        await manualShortcut(request, waitForOwnedStartup: waitForOwnedStartup)
     }
 
-    private func manualShortcut(_ request: DesktopHostShortcutRequest<Platform>) async {
+    private func manualShortcut(
+        _ request: DesktopHostShortcutRequest<Platform>, waitForOwnedStartup: Bool
+    ) async {
         guard let command = HotKeySessionPolicy.command(
-            for: request.input, style: request.style, active: recording?.trigger
+            for: request.input, style: request.style, active: dictationTrigger
         ) else { return }
         switch command {
         case .start(let trigger):
             guard canStartFromShortcut(request) else { return }
+            if ownedDictationCapability != nil {
+                await admitOwnedDictation(
+                    target: request.target, modelIndex: request.modelIndex, deviceID: request.deviceID,
+                    targetExecutablePath: request.targetExecutablePath, textOutput: request.textOutput,
+                    trigger: trigger, wait: waitForOwnedStartup, profile: request.profile
+                )
+                return
+            }
             let textOutput = await request.textOutput.value
             guard canStartFromShortcut(request) else { return }
-            await toggle(
-                target: request.target, modelIndex: request.modelIndex, deviceID: request.deviceID,
-                targetExecutablePath: request.targetExecutablePath, textOutput: textOutput, trigger: trigger
-            )
+            if let profile = request.profile {
+                await toggleCaptured(
+                    target: request.target, modelIndex: request.modelIndex, deviceID: request.deviceID,
+                    textOutput: textOutput, profile: profile, trigger: trigger
+                )
+            } else {
+                await toggle(
+                    target: request.target, modelIndex: request.modelIndex, deviceID: request.deviceID,
+                    targetExecutablePath: request.targetExecutablePath, textOutput: textOutput, trigger: trigger
+                )
+            }
         case .stop:
+            if ownedDictation != nil || ownedDictationAdmission != nil {
+                await stopOwnedDictationAdmission(wait: waitForOwnedStartup)
+                hotKeySession.startsAfter = ProcessInfo.processInfo.systemUptime
+                return
+            }
             guard let active = recording?.record.id, !busy else { return }
             let textOutput = await request.textOutput.value
             guard !closed, recording?.record.id == active, !busy else { return }

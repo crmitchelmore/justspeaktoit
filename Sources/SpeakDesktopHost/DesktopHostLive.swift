@@ -4,13 +4,17 @@ import SpeakDesktop
 
 extension DesktopHostController {
     func makeLiveSession(
-        model: String, key: String, id: UUID, language: String? = nil, options: LiveClientOptions? = nil
+        model: String, key: String, id: UUID, language: String? = nil, options: LiveClientOptions? = nil,
+        input: DesktopHostRecordingInput? = nil
     ) async throws -> DesktopLiveSession? {
         guard DesktopHostModels.isLive(model) else { return nil }
-        let options = (options ?? settings.configuration?.liveOptions ?? .init())
-            .includingVocabularyKeywords(try await vocabularyKeywords())
+        let baseOptions = options ?? settings.configuration?.liveOptions ?? .init()
+        let vocabulary: [String]
+        if let input { vocabulary = input.vocabulary } else { vocabulary = try await vocabularyKeywords() }
+        let options = baseOptions.includingVocabularyKeywords(vocabulary)
         guard let client = effects.makeLiveClient(
-            model: model, key: key, language: language, azureEndpoint: azureResourceEndpoint(), options: options
+            model: model, key: key, language: language,
+            azureEndpoint: input?.azureEndpoint ?? azureResourceEndpoint(), options: options
         ) else { return nil }
         return DesktopLiveSession(
             client: client, id: id,
@@ -30,7 +34,7 @@ extension DesktopHostController {
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
                 let snapshot = session.snapshot()
-                guard !closed, recording?.record.id == snapshot.id else { return }
+                guard !closed, recording?.record.id == snapshot.id || ownedDictation?.id == snapshot.id else { return }
                 if let error = snapshot.error {
                     await captureFailed(error, recordingID: snapshot.id)
                     return
@@ -39,11 +43,17 @@ extension DesktopHostController {
                 revision = snapshot.revision
                 transcript = snapshot.text
                 let buffering = recordingTail?.recordID == snapshot.id
-                let hint = Platform.finishHint(hotKeySettings(), for: recording?.trigger ?? .other)
+                let hint = Platform.finishHint(
+                    hotKeySettings(), for: recording?.trigger ?? ownedDictation?.request.trigger ?? .other
+                )
                 let status = buffering ? recordingBufferStatus : "Live transcription… " + hint
-                    + (recording.map { profileContext($0.record) } ?? "")
+                    + (recording.map { profileContext($0.record) }
+                        ?? ownedDictation.map { profileContext($0.request.record) } ?? "")
                 update(status, transcript: snapshot.text, state: buffering ? 2 : 1)
-                hud(snapshot.id, .recording(profile: recording?.profile.profileName, liveText: snapshot.text))
+                hud(snapshot.id, .recording(
+                    profile: recording?.profile.profileName ?? ownedDictation?.request.profile.profileName,
+                    liveText: snapshot.text
+                ))
             }
         }
     }

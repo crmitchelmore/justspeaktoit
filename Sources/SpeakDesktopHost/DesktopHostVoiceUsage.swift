@@ -68,19 +68,31 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         let count = text.unicodeScalars.count
         do {
             let selection = try currentVoiceSelection()
-            let estimate = VoiceSynthesisPricing.estimate(
+            let estimate = try VoiceSynthesisPricing.estimate(
                 for: selection.voice, text: text, accountInventory: selection.accountInventory)
             voiceUsage.estimate = "Captured text: \(count) input characters (Unicode scalars).\n"
                 + "Voice: \(selection.voice.label)\n"
                 + (estimate.map { "Input estimate: USD \(Self.voiceCost($0))." }
-                    ?? "Input estimate: unknown; no published rate for this model.")
+                    ?? Self.unknownVoiceEstimate(selection.voice))
                 + (selection.options.useSSML ? "\nSSML is enabled; markup may be billed differently." : "")
                 + (VoiceSynthesisPricing.estimateBasis(for: selection.voice).map { "\n\($0)" } ?? "")
         } catch {
             voiceUsage.estimate = "Input estimate unavailable: \(error.localizedDescription)"
         }
+
         loadVoiceUsage()
         presentVoiceUsage()
+    }
+
+    private static func unknownVoiceEstimate(_ voice: DesktopSpeechVoice) -> String {
+        if case .gemini = voice {
+            return "Input estimate: unknown until Gemini reports text-input tokens; "
+                + "audio estimate requires validated PCM duration."
+        }
+        if case .openai(.mini, _) = voice {
+            return "Input/audio estimate: unknown; OpenAI text/audio tokens and billing were not reported."
+        }
+        return "Input estimate: unknown; no published rate for this model."
     }
 
     package func saveVoiceUsageTracking(_ enabled: Bool, requestID: String) {
@@ -108,7 +120,10 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             let records = try JSONDecoder().decode([VoiceSynthesisUsage.Record].self, from: Data(contentsOf: url))
             guard records.count <= VoiceUsagePolicy.maximumRetainedRequests,
                   records.allSatisfy({ $0.inputCharacters >= 0 && $0.inputCharacters <= 100_000 &&
-                      ($0.audioDuration.map { $0.isFinite && $0 >= 0 } ?? true) }) else {
+                      ($0.audioDuration.map { $0.isFinite && $0 >= 0 } ?? true) &&
+                      ($0.reportedInputTokens.map { $0 >= 0 } ?? true) &&
+                      ($0.estimatedInputCostUSD.map { $0 >= 0 } ?? true) &&
+                      ($0.estimatedAudioCostUSD.map { $0 >= 0 } ?? true) }) else {
                 throw DesktopHostError(message: "The usage ledger contains invalid measurements.")
             }
             voiceUsage.records = records
@@ -133,7 +148,8 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         let duration = completed.compactMap(\.audioDuration).reduce(0, +)
         var lines = [
             voiceUsage.estimate,
-            "Estimates are not charges. No provider billing receipts or token counts are available.",
+            "Estimates are not charges. No provider billing receipts are available. "
+                + "Token counts are recorded only when a provider reports them.",
             "Local requests retained: \(records.count) (latest \(VoiceUsagePolicy.maximumRetainedRequests)).",
             "Validated audio: \(completed.count) requests; failed: \(records.filter { $0.outcome == .failed }.count); "
                 + "cancelled: \(records.filter { $0.outcome == .cancelled }.count).",
@@ -151,6 +167,10 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         if records.contains(where: { $0.voiceID.hasPrefix(CartesiaTTSCatalog.voiceIDPrefix) }) {
             lines.append(CartesiaTTSAPI.pricingEstimateBasis)
         }
+        let gemini = records.filter { GeminiTTSCatalog.model(forID: $0.modelID) != nil }
+        if !gemini.isEmpty {
+            lines.append(Self.geminiUsageSummary(gemini))
+        }
         if let last = records.last {
             lines.append("Last request: \(last.modelID) / \(last.voiceID), \(last.operation.rawValue), "
                 + "\(last.source.displayName), \(last.outcome.rawValue), \(last.inputCharacters) input characters.")
@@ -158,6 +178,21 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         }
         if let warning = voiceUsage.warning { lines.append(warning) }
         return lines.joined(separator: "\n\n")
+    }
+
+    private static func geminiUsageSummary(_ records: [VoiceSynthesisUsage.Record]) -> String {
+        let reported = records.compactMap(\.reportedInputTokens)
+        let tokens = reported.reduce(Decimal.zero) { $0 + Decimal($1) }
+        let completed = records.filter { $0.outcome == .completed }
+        let audio = completed.compactMap(\.estimatedAudioCostUSD).reduce(Decimal.zero, +)
+        let input = completed.compactMap(\.estimatedInputCostUSD).reduce(Decimal.zero, +)
+        return "Gemini reported text-input tokens: \(voiceCost(tokens)) across \(reported.count) requests. "
+            + "Tokens not reported on \(records.count - reported.count) requests; no counts are inferred.\n"
+            + "Validated Gemini component estimates: audio USD \(voiceCost(audio)); "
+            + "reported-token input USD \(voiceCost(input)). "
+            + "Unknown input/total cost on \(completed.filter { $0.estimatedCostUSD == nil }.count) "
+            + "validated requests; components are not added again to the known-price subtotal.\n"
+            + GeminiTTSCatalog.pricingEstimateBasis
     }
 
     private static func voiceCost(_ value: Decimal) -> String {

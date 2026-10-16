@@ -17,7 +17,7 @@ public struct GroqBatchClient: TranscriptionProvider {
   public init(
     session: URLSession = .shared,
     staging: SharedMultipartUploadStaging? = nil,
-    keywords: [String] = [],
+    keywords: [String],
     durationResolver: @escaping @Sendable (URL) async -> TimeInterval = { _ in 0 }
   ) {
     compatibleProvider = OpenAIBatchClient(
@@ -28,6 +28,15 @@ public struct GroqBatchClient: TranscriptionProvider {
       keywords: keywords,
       durationResolver: durationResolver
     )
+  }
+
+  /// Source-compatible overload preserved for callers predating keyword hints.
+  public init(
+    session: URLSession = .shared,
+    staging: SharedMultipartUploadStaging? = nil,
+    durationResolver: @escaping @Sendable (URL) async -> TimeInterval = { _ in 0 }
+  ) {
+    self.init(session: session, staging: staging, keywords: [], durationResolver: durationResolver)
   }
 
   public func transcribeFile(

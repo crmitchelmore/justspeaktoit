@@ -49,7 +49,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
   var apiKeyIdentifier: String {
     switch self {
     case .elevenlabs: return "elevenlabs.apiKey"
-    case .openai: return "openai.tts.apiKey"
+    case .openai: return OpenAITTSCatalog.credentialIdentifier
     case .openrouter: return "openrouter.apiKey"
     case .azure: return "azure.speech.apiKey"
     case .deepgram: return "deepgram.apiKey"
@@ -60,10 +60,10 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     // These four each use one account key for transcription and for speech
     // generation, so they reuse the identifier the transcription provider
     // already writes.
-    case .groq: return "groq.apiKey"
-    case .gemini: return "google.apiKey"
+    case .groq: return GroqTTSCatalog.credentialIdentifier
+    case .gemini: return GeminiTTSCatalog.credentialIdentifier
     case .mistral: return "mistral.apiKey"
-    case .speechmatics: return "speechmatics.apiKey"
+    case .speechmatics: return SpeechmaticsTTSCatalog.credentialIdentifier
     // One xAI key covers Grok Voice transcription, dedicated speech to text
     // and speech generation.
     case .xai: return "xai.apiKey"

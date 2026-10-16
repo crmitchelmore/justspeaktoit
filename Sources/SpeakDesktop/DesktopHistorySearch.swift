@@ -38,7 +38,9 @@ public enum DesktopHistorySearch {
     /// Downloaded Whisper models ran through whisper.cpp on this host, so they
     /// use its runtime-neutral names rather than the Apple runtime's.
     public static func modelDisplayName(for identifier: String) -> String {
-        DesktopLocalTranscription.displayName(for: identifier) ?? ModelCatalog.friendlyName(for: identifier)
+        DesktopLocalTranscription.displayName(for: identifier)
+            ?? DesktopLocalLLMModels.displayName(for: identifier)
+            ?? ModelCatalog.friendlyName(for: identifier)
     }
 
     /// Folded text a host can cache per record and reuse for every keystroke.

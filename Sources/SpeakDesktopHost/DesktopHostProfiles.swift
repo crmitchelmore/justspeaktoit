@@ -25,11 +25,7 @@ extension DesktopHostController {
     }
 
     func resolvedProfile(executablePath: String?) -> DesktopProfileSession {
-        DesktopProfileSessionResolver.resolve(
-            profile: ProfileResolver(profiles: profiles).profile(forWindowsExecutablePath: executablePath),
-            defaultModel: settings.model, defaultPostProcessing: settings.postProcessing ?? .init(),
-            capabilities: profileCapabilities, defaultLanguage: settings.configuration?.language
-        ).capturingTranscriptionOptions(settings.configuration?.liveOptions ?? .init())
+        resolveSelectedProfile(defaultModel: settings.model, executablePath: executablePath)
     }
 
     func profileRecordingStatus(
@@ -82,8 +78,10 @@ extension DesktopHostController {
             batchModels: DesktopHostModels.visible.filter {
                 !DesktopHostModels.isLive($0.id) && !DesktopHostModels.isLocal($0.id)
             },
-            liveModels: DesktopHostModels.live, polishModels: DesktopPostProcessing.remoteModels,
+            liveModels: DesktopHostModels.live,
+            polishModels: localCleanup == nil ? DesktopPostProcessing.models : DesktopPostProcessing.nativeModels(),
             localModels: DesktopHostModels.local,
+            supportsPersonalLexicon: true,
             liveLanguageModelIDs: DesktopLiveTranscription.languageHintModelIDs
         )
     }

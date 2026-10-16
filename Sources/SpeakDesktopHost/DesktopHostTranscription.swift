@@ -6,7 +6,8 @@ extension DesktopHostController {
     /// Output is the recording's own authority; imports and retries pass nil.
     package func transcribe(
         _ original: DesktopRecordingStore.Record, duration: TimeInterval, output: DesktopHostRecordingOutput<Platform>?,
-        profile: DesktopProfileSession? = nil, azureEndpoint: String? = nil
+        profile: DesktopProfileSession? = nil, azureEndpoint: String? = nil,
+        input: DesktopHostRecordingInput? = nil
     ) async {
         var record = original
         cancellationRequested = false
@@ -18,19 +19,20 @@ extension DesktopHostController {
             language: record.languageIdentifier
         )
         let keywords = batchKeywords(for: record.modelIdentifier, options: session.transcriptionOptions)
-        // A retry may already contain an older result.
-        var receivedResult = false
         do {
             guard !closed else { throw CancellationError() }
-            let key = try transcriptionKey(for: record.modelIdentifier)
+            let key: String
+            if let input { key = input.key } else { key = try transcriptionKey(for: record.modelIdentifier) }
             let audio = try await store.audioURL(for: record)
             guard !closed else { throw CancellationError() }
             try checkUploadSize(audio, model: record.modelIdentifier)
             update(transcribingStatus(for: record.modelIdentifier), state: 2)
             hud(record.id, .transcribing())
+            let vocabulary: [String]
+            if let input { vocabulary = input.vocabulary } else { vocabulary = try await vocabularyKeywords() }
             let request = DesktopHostTranscriptionRequest(
                 audio: audio, model: record.modelIdentifier, key: key, duration: duration, language: session.language,
-                keywords: keywords + (try await vocabularyKeywords()), azureEndpoint: azureEndpoint
+                keywords: keywords + vocabulary, azureEndpoint: input?.azureEndpoint ?? azureEndpoint
             )
             noteKeywordLimitation(&record, keywords: request.keywords)
             let effects = self.effects
@@ -43,7 +45,6 @@ extension DesktopHostController {
             // A Cancel while the audio was being found had no request to cancel yet.
             if cancellationRequested { task.cancel() }
             let result = try await task.value
-            receivedResult = true
             record = recordWithResult(result, replacing: record, skippedPolishReason: session.skippedPolishReason)
             try await saveRecord(record)
             record = try await applyVoiceCommands(record)
@@ -56,33 +57,20 @@ extension DesktopHostController {
             guard !closed else { return }
             present(record, output: output)
         } catch {
-            await handleTranscriptionFailure(&record, error: error, receivedResult: receivedResult)
+            if cancellationRequested {
+                record.failure = record.result == nil
+                    ? "Transcription cancelled. Audio retained."
+                    : "Cancelled. Completed transcription and audio retained."
+            } else {
+                record.failure = error.localizedDescription
+            }
+            do { try await saveRecord(record) } catch {
+                reportFailure("History could not be saved: \(error.localizedDescription)", for: record.id)
+                return
+            }
+            let failure = record.failure ?? "Audio retained in History."
+            reportFailure(failure, for: record.id, headline: "Transcription failed")
         }
-    }
-
-    /// Saves the record with its failure message and reports it, choosing between a
-    /// completed-transcript cancellation (a result arrived for THIS request before
-    /// cancellation interrupted voice commands/vocabulary/polish) and an earlier one.
-    private func handleTranscriptionFailure(
-        _ record: inout DesktopRecordingStore.Record, error: Error, receivedResult: Bool
-    ) async {
-        record.failure = cancellationRequested
-            ? cancellationFailureMessage(receivedResult: receivedResult) : error.localizedDescription
-        do { try await saveRecord(record) } catch {
-            reportFailure("History could not be saved: \(error.localizedDescription)", for: record.id)
-            return
-        }
-        let failure = record.failure ?? "Audio retained in History."
-        reportFailure(failure, for: record.id, headline: "Transcription failed")
-    }
-
-    /// `receivedResult` distinguishes a cancellation after a completed provider result
-    /// (voice commands/vocabulary/polish were interrupted but the transcript is retained)
-    /// from one before any result arrived for this request.
-    private func cancellationFailureMessage(receivedResult: Bool) -> String {
-        receivedResult
-            ? "Cancelled. Completed transcription and audio retained."
-            : "Transcription cancelled. Audio retained."
     }
 
     private func batchKeywords(for model: String, options: LiveClientOptions?) -> [String] {
@@ -145,6 +133,21 @@ extension DesktopHostController {
 
     package func cancelTranscription() {
         guard !closed else { return }
+        if ownedDictation == nil, let admission = ownedDictationAdmission {
+            cancellationRequested = true
+            admission.operation.cancel()
+            return
+        }
+        if let active = ownedDictation {
+            cancellationRequested = true
+            cancelRecordingTail()
+            transcriptionTask?.cancel()
+            voiceCommandTask?.cancel()
+            postProcessingTask?.cancel()
+            liveFinalisation?.cancel()
+            requestOwnedDictationStop(requestID: active.id, reason: "Recording cancelled. Audio retained.")
+            return
+        }
         if ownedCaptureStartup != nil {
             requestOwnedStartupAbort()
             return

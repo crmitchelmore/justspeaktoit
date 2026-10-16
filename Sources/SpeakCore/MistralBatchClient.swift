@@ -22,7 +22,7 @@ public struct MistralBatchClient: TranscriptionProvider {
     session: URLSession = .shared,
     baseURL: URL = URL(string: "https://api.mistral.ai/v1")!,
     multipartStaging: SharedMultipartUploadStaging,
-    keywords: [String] = [],
+    keywords: [String],
     durationResolver: @escaping @Sendable (URL) async -> TimeInterval = { _ in 0 }
   ) {
     self.session = session
@@ -30,6 +30,19 @@ public struct MistralBatchClient: TranscriptionProvider {
     self.baseURL = baseURL
     self.multipartStaging = multipartStaging
     self.durationResolver = durationResolver
+  }
+
+  /// Source-compatible overload preserved for callers predating keyword hints.
+  public init(
+    session: URLSession = .shared,
+    baseURL: URL = URL(string: "https://api.mistral.ai/v1")!,
+    multipartStaging: SharedMultipartUploadStaging,
+    durationResolver: @escaping @Sendable (URL) async -> TimeInterval = { _ in 0 }
+  ) {
+    self.init(
+      session: session, baseURL: baseURL, multipartStaging: multipartStaging,
+      keywords: [], durationResolver: durationResolver
+    )
   }
 
   public func transcribeFile(
@@ -116,7 +129,7 @@ public struct MistralBatchClient: TranscriptionProvider {
     boundary: String,
     model: String,
     language: String?,
-    keywords: [String] = []
+    keywords: [String]
   ) throws -> URL {
     var fields = [(name: "model", value: model)]
     if let language { fields.append((name: "language", value: language)) }
@@ -128,6 +141,19 @@ public struct MistralBatchClient: TranscriptionProvider {
       ? "audio/m4a" : BatchTranscriptionJob.mimeType(for: sourceURL) ?? "audio/m4a"
     return try staging.writeMultipart(
       sourceURL: sourceURL, providerID: "mistral", boundary: boundary, fields: fields, mimeType: mimeType
+    )
+  }
+
+  /// Source-compatible overload preserved for callers predating keyword hints.
+  public nonisolated static func makeMultipartUploadBody(
+    sourceURL: URL,
+    staging: SharedMultipartUploadStaging,
+    boundary: String,
+    model: String,
+    language: String?
+  ) throws -> URL {
+    try makeMultipartUploadBody(
+      sourceURL: sourceURL, staging: staging, boundary: boundary, model: model, language: language, keywords: []
     )
   }
 

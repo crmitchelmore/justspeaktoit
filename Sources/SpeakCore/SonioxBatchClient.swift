@@ -24,7 +24,7 @@ public struct SonioxBatchClient: TranscriptionProvider {
 
     public init(
         session: URLSession = .shared,
-        keywords: [String] = [],
+        keywords: [String],
         pollingDelay: Duration = .seconds(2),
         maximumPollingAttempts: Int = 90,
         multipartStaging: SharedMultipartUploadStaging,
@@ -36,6 +36,21 @@ public struct SonioxBatchClient: TranscriptionProvider {
         self.maximumPollingAttempts = maximumPollingAttempts
         self.multipartStaging = multipartStaging
         self.reportCleanupFailure = reportCleanupFailure
+    }
+
+    /// Source-compatible overload preserved for callers predating keyword hints.
+    public init(
+        session: URLSession = .shared,
+        pollingDelay: Duration = .seconds(2),
+        maximumPollingAttempts: Int = 90,
+        multipartStaging: SharedMultipartUploadStaging,
+        reportCleanupFailure: @escaping @Sendable (String) -> Void = { _ in }
+    ) {
+        self.init(
+            session: session, keywords: [], pollingDelay: pollingDelay,
+            maximumPollingAttempts: maximumPollingAttempts, multipartStaging: multipartStaging,
+            reportCleanupFailure: reportCleanupFailure
+        )
     }
 
     public func transcribeFile(

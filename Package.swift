@@ -56,8 +56,6 @@ let appleCoreSources: [String] = [
     "DeviceIdentityStore.swift",
     "ElevenLabsBalanceClient.swift",
     "FileProductAnalyticsStateStore.swift",
-    "GeminiTTSAPI.swift",
-    "GroqTTSAPI.swift",
     "HandsFreeAudioPreRollBuffer.swift",
     "HandsFreeDictationApple.swift",
     "KeyDerivation.swift",
@@ -116,7 +114,6 @@ let appleCoreSources: [String] = [
     "SpeechInsights/SpeechInsightsSummaryBuilder.swift",
     "SpeechInsights/SpeechSessionRecord.swift",
     "SpeechInsights/SpeechTokenizer.swift",
-    "SpeechmaticsTTSAPI.swift",
     "StartupDiagnostics.swift",
     "TranscriptHandoffActivity.swift",
     "TranscriptionActivityHandle.swift",
@@ -166,6 +163,16 @@ let migrationArchiveTarget = Target.target(
     ]
 )
 
+let recordingFileSupportTarget = Target.target(name: "CRecordingFileSupport", publicHeadersPath: "include")
+// Public pinned llama.cpp declarations and a native in-process adapter. No
+// binary is downloaded/resolved by SwiftPM; absent provisioning fails closed.
+let llamaCppTarget = Target.target(
+    name: "CLlamaCpp", exclude: ["upstream/LICENSE", "upstream/PROVENANCE.md"],
+    publicHeadersPath: "include",
+    cxxSettings: [.define("_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH", .when(platforms: [.windows]))],
+    linkerSettings: [.linkedLibrary("dl", .when(platforms: [.linux]))]
+)
+
 // Keep the existing root assets in one resource target, without collecting
 // unrelated branding or platform icon directories added by other targets.
 let feedbackResourceDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -202,7 +209,11 @@ let portablePackage = Package(
             swiftSettings: [.define("SPEAK_PORTABLE_CORE")]
         ),
         migrationArchiveTarget,
-        .target(name: "SpeakDesktop", dependencies: ["SpeakCore", "CMigrationArchive"]),
+        recordingFileSupportTarget,
+        llamaCppTarget,
+        .target(
+            name: "SpeakDesktop", dependencies: ["SpeakCore", "CMigrationArchive", "CRecordingFileSupport", "CLlamaCpp"]
+        ),
         // Recording, History, output, settings and iCloud sync orchestration
         // shared by the Windows and Linux hosts behind DesktopHostPlatform.
         .target(
@@ -471,8 +482,12 @@ let package = portableCoreBuild ? portablePackage : Package(
     ],
     targets: [
         migrationArchiveTarget,
+        recordingFileSupportTarget,
         feedbackResourcesTarget,
-        .target(name: "SpeakDesktop", dependencies: ["SpeakCore", "CMigrationArchive"]),
+        llamaCppTarget,
+        .target(
+            name: "SpeakDesktop", dependencies: ["SpeakCore", "CMigrationArchive", "CRecordingFileSupport", "CLlamaCpp"]
+        ),
         .testTarget(
             name: "SpeakDesktopTests",
             dependencies: ["SpeakDesktop", "SpeakCore", "SpeakTestSupport", "SpeakFeedbackResources"]

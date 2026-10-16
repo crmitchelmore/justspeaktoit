@@ -14,6 +14,8 @@ package struct DesktopVoiceOutputSettings: Codable, Equatable, Sendable {
     package var useSSML: Bool?
     package var trackUsage: Bool?
     package var favoriteVoices: [String]?
+    package var sonioxRegion: String?
+    package var language: String?
 
     private enum CodingKeys: String, CodingKey {
         case modelID, voiceID
@@ -24,6 +26,8 @@ package struct DesktopVoiceOutputSettings: Codable, Equatable, Sendable {
         case useSSML = "ttsUseSSML"
         case trackUsage = "ttsTrackUsage"
         case favoriteVoices = "ttsFavoriteVoices"
+        case sonioxRegion = "sonioxTTSRegion"
+        case language = "ttsLanguage"
     }
 
     package var generationOptions: VoiceGenerationOptions {
@@ -44,14 +48,28 @@ package struct DesktopVoiceOutputSettings: Codable, Equatable, Sendable {
     }
 
     package func synthesisSelection(accountInventory: VoiceAccountInventory?) throws -> DesktopSpeechSelection {
-        try .init(
-            voice: DesktopSpeechVoice.resolved(modelID: modelID, voiceID: voiceID, accountInventory: accountInventory),
+        let voice = try DesktopSpeechVoice.resolved(
+            modelID: modelID, voiceID: voiceID, accountInventory: accountInventory)
+        let region: SonioxTTSRegion
+        if case .soniox = voice {
+            region = try validatedSonioxRegion()
+            try SonioxVoicePreference.validateLanguage(language)
+        } else { region = .unitedStates }
+        return try .init(
+            voice: voice,
             options: VoiceSynthesisOptions(
                 speed: speed ?? VoiceSynthesisOptions.defaultSpeed,
                 pitch: pitch ?? VoiceSynthesisOptions.defaultPitch,
                 useSSML: useSSML ?? VoiceSynthesisOptions.defaultUseSSML
-            ), accountInventory: accountInventory
+            ), accountInventory: accountInventory, sonioxRegion: region, language: language
         )
+    }
+
+    package func validatedSonioxRegion() throws -> SonioxTTSRegion {
+        guard let region = SonioxTTSRegion.recognized(from: sonioxRegion) else {
+            throw DesktopSonioxSpeechError.unsupportedRegion
+        }
+        return region
     }
 
     package var pickerPresentation: (labels: [String], selected: Int) {
@@ -237,6 +255,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 JSONEncoder().encode(changed), to: directory.appendingPathComponent("settings.json")
             )
             settings = changed
+            reconcileSonioxRegionChange(previous)
             if previous.modelID != voiceOutput.modelID || previous.voiceID != voiceOutput.voiceID {
                 voiceCredentialEpoch = UUID()
             }

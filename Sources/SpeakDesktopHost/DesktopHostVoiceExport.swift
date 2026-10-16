@@ -12,7 +12,8 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         ) async throws -> Data = { snapshot, selection, credential in
             try await DesktopSpeechSynthesis().synthesize(
                 snapshot, voice: selection.voice, options: selection.options,
-                accountInventory: selection.accountInventory, credential: credential
+                accountInventory: selection.accountInventory, sonioxRegion: selection.sonioxRegion,
+                language: selection.language, credential: credential
             )
         },
         publish: @escaping @Sendable (Data, URL) async throws -> Void = {

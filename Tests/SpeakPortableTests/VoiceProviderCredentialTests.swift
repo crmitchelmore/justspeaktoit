@@ -7,7 +7,8 @@ final class VoiceProviderCredentialTests: XCTestCase {
 
     func testProviderProjection_UsesCanonicalMetadataAndPurposeWithoutRequiringADiscoveredVoice() throws {
         XCTAssertEqual(VoiceAccountProvider.all.map(\.id), [
-            LiveTranscriptionProviderID.xai.rawValue, LiveTranscriptionProviderID.mistral.rawValue
+            LiveTranscriptionProviderID.xai.rawValue, LiveTranscriptionProviderID.mistral.rawValue,
+            LiveTranscriptionProviderID.soniox.rawValue
         ])
         for provider in VoiceAccountProvider.all {
             let metadata = try XCTUnwrap(LiveTranscriptionProviderID(rawValue: provider.id))
@@ -18,6 +19,7 @@ final class VoiceProviderCredentialTests: XCTestCase {
                            .apiKey(identifier: slot.identifier, providerName: slot.providerName))
         }
         XCTAssertTrue(VoiceAccountProvider.xai.hasDocumentedPresets)
+        XCTAssertTrue(VoiceAccountProvider.soniox.hasDocumentedPresets)
         XCTAssertFalse(VoiceAccountProvider.mistral.hasDocumentedPresets)
         XCTAssertThrowsError(try VoiceAccountProvider(id: "openai"))
         XCTAssertThrowsError(try VoiceAccountProvider(id: " Mistral "))

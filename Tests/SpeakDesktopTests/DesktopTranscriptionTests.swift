@@ -277,19 +277,43 @@ extension DesktopTranscriptionTests {
     func testVocabularyHintsReachOnlySupportedBatchProviderContracts() async throws {
         let audio = try fixture()
         defer { try? FileManager.default.removeItem(at: audio) }
-        for model in [XAISpeechToText.batchCatalogID, AzureTranscriptionModels.fast, "openai/whisper-1"] {
+        // "openai/whisper-1" genuinely supports the batch "prompt" field per the canonical
+        // OpenAITranscriptionModels.supportsBatchPrompt contract; "openai/gpt-4o-transcribe-diarize"
+        // is a real unsupported OpenAI batch route and keeps the negative-coverage slot.
+        let models = [
+            XAISpeechToText.batchCatalogID, AzureTranscriptionModels.fast,
+            "openai/whisper-1", "openai/gpt-4o-transcribe-diarize"
+        ]
+        for model in models {
             StubURLProtocol.reset()
+            let multipart = DesktopMultipartFixture()
+            defer { multipart.remove() }
             StubURLProtocol.handler = { request in
-                let body = StubURLProtocol.body(of: request)
                 if model == AzureTranscriptionModels.fast {
+                    let body = StubURLProtocol.body(of: request)
                     XCTAssertNotNil(body.range(of: Data("\"phraseList\"".utf8)))
                     XCTAssertNotNil(body.range(of: Data("SyntheticCanonical".utf8)))
                     let response = #"{"combinedPhrases":[{"text":"fixture"}],"durationMilliseconds":1000}"#
                     return .ok(Data(response.utf8), url: request.url!)
                 }
-                XCTAssertNil(
-                    body.range(of: Data("SyntheticCanonical".utf8)), "Unsupported routes must not acquire hint fields"
-                )
+                // OpenAI batch uploads clear httpBody/httpBodyStream and upload from a staged
+                // file (OpenAICompatibleBatchTranscriptionClient); StubURLProtocol.body(of:)
+                // cannot observe that upload on every platform, so read the real owned
+                // multipart body the production code actually wrote instead (prior art:
+                // DesktopKeywordBatchDeliveryTests).
+                let bodyData = try multipart.body(for: request)
+                let body = try XCTUnwrap(String(data: bodyData, encoding: .isoLatin1))
+                if model == "openai/whisper-1" {
+                    XCTAssertEqual(
+                        Self.multipartFieldValue("prompt", in: body), "SyntheticCanonical",
+                        "whisper-1 must acquire the exact prompt field value"
+                    )
+                } else {
+                    XCTAssertNil(
+                        Self.multipartFieldValue("prompt", in: body),
+                        "Unsupported OpenAI routes must not acquire the prompt field"
+                    )
+                }
                 return .ok(Data(#"{"text":"fixture"}"#.utf8), url: request.url!)
             }
             var xaiClient = XAIBatchTranscriptionClient(session: StubURLProtocol.makeSession())
@@ -303,8 +327,6 @@ extension DesktopTranscriptionTests {
                 ))
                 return (Data(#"{"text":"fixture"}"#.utf8), response)
             }
-            let multipart = DesktopMultipartFixture()
-            defer { multipart.remove() }
             let result = try await DesktopTranscription.transcribe(
                 audioURL: audio, model: model, apiKey: "fixture-key", duration: 1,
                 azureEndpoint: "https://fixture.cognitiveservices.azure.com",
@@ -313,6 +335,16 @@ extension DesktopTranscriptionTests {
             )
             XCTAssertEqual(result.text, "fixture")
         }
+    }
+
+    /// Extracts the exact value of a named multipart form-data field from a raw
+    /// decoded body, matching the "--boundary\r\nContent-Disposition: ...; name=\"x\"\r\n\r\nVALUE\r\n"
+    /// framing OpenAICompatibleBatchTranscriptionClient.writeBody actually emits.
+    private static func multipartFieldValue(_ name: String, in body: String) -> String? {
+        guard let headerRange = body.range(of: "name=\"\(name)\"\r\n\r\n") else { return nil }
+        let afterHeader = body[headerRange.upperBound...]
+        guard let terminator = afterHeader.range(of: "\r\n") else { return nil }
+        return String(afterHeader[afterHeader.startIndex..<terminator.lowerBound])
     }
 }
 

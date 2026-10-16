@@ -43,17 +43,6 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         }
     }
 
-    package func cancelVoiceProviderCredentialWork(_ context: VoiceAccountCredentialContext?) {
-        guard let context else { return }
-        let destination = VoiceOutputCredentialDestination.explicitProvider(context)
-        if voiceCredentialReadWorkerDestination == destination { voiceCredentialReadTask?.cancel() }
-        if voiceCredentialReadDestination == destination {
-            voiceCredentialReadID = nil
-            voiceCredentialReadDestination = nil
-        }
-        if voiceCredentialWriteDestination == destination { voiceCredentialTask?.cancel() }
-    }
-
     package func voiceProviderCredentialPresentation(_ context: VoiceAccountCredentialContext) async
         -> Result<DesktopVoiceCredentialPresentation, VoiceOutputCredentialError> {
         guard voiceAccountContextIsCurrent(context) else { return .failure(.destinationChanged) }

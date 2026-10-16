@@ -25,7 +25,7 @@ public enum ElevenLabsLiveProtocol {
     /// optional ISO-639 `language_code` is added only when the caller pins a
     /// language.
     public static func webSocketURL(
-        modelID: String, language: String?, sampleRate: Int, keywords: [String] = []
+        modelID: String, language: String?, sampleRate: Int, keywords: [String]
     ) -> URL? {
         guard supportedSampleRates.contains(sampleRate) else { return nil }
         var components = URLComponents()
@@ -45,6 +45,13 @@ public enum ElevenLabsLiveProtocol {
         }
         components.queryItems = items
         return components.url
+    }
+
+    /// Source-compatible overload preserved for callers predating keyword hints.
+    public static func webSocketURL(
+        modelID: String, language: String?, sampleRate: Int
+    ) -> URL? {
+        webSocketURL(modelID: modelID, language: language, sampleRate: sampleRate, keywords: [])
     }
 
     /// Stay below the >100-term billing threshold; Scribe requires <50 characters,

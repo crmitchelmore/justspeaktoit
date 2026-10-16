@@ -58,6 +58,7 @@ package protocol DesktopHostPlatform: Sendable {
     static var displayName: String { get }
     /// Where saved API keys live, for the save confirmation.
     static var credentialStoreName: String { get }
+    static func matchProfile(_ profiles: [DictationProfile], executablePath: String?) -> DictationProfile?
 
     // Window presenter. Safe from any thread.
     static func update(_ status: String, transcript: String?, state: Int32)
@@ -131,6 +132,8 @@ package protocol DesktopHostPlatform: Sendable {
     /// Controller-owned downloads, progress and runtime for on-device models.
     associatedtype LocalModelsState = Void
     static func makeLocalModelsState() -> LocalModelsState
+    static func loadLocalModels(directory: URL) throws -> LocalModelsState
+    static func cancelLocalModels(controller: isolated DesktopHostController<Self>)
     /// How status lines name this computer, e.g. "this PC".
     static var localDeviceName: String { get }
     /// Why an on-device model cannot run now, or nil when it can.
@@ -143,6 +146,12 @@ package protocol DesktopHostPlatform: Sendable {
     /// identifier, or nil for models the host does not run on-device.
     static func beginLocalUse(_ model: String, controller: isolated DesktopHostController<Self>) -> String?
     static func endLocalUse(_ held: String, controller: isolated DesktopHostController<Self>)
+
+    static func makeLocalCleanup(directory: URL) throws -> DesktopLocalLLMStore?
+    static func presentLocalCleanup(
+        _ rows: [DesktopLocalLLMStore.Row], status: String, presenter: UnsafeMutableRawPointer?
+    )
+    static func presentPostProcessing(_ options: DesktopPostProcessing.Options, presenter: UnsafeMutableRawPointer?)
 
     // Launch at login. Hosts without it keep the defaults, and the switch
     // reads unavailable.
@@ -165,6 +174,14 @@ package protocol DesktopHostPlatform: Sendable {
 }
 
 package extension DesktopHostPlatform {
+    static func matchProfile(_ profiles: [DictationProfile], executablePath: String?) -> DictationProfile? {
+        ProfileResolver(profiles: profiles).profile(forWindowsExecutablePath: executablePath)
+    }
+    static func makeLocalCleanup(directory: URL) throws -> DesktopLocalLLMStore? { nil }
+    static func presentLocalCleanup(
+        _ rows: [DesktopLocalLLMStore.Row], status: String, presenter: UnsafeMutableRawPointer?
+    ) {}
+    static func presentPostProcessing(_ options: DesktopPostProcessing.Options, presenter: UnsafeMutableRawPointer?) {}
     static func revealDirectory(_ url: URL) throws {
         throw DesktopHostError(message: "Opening recording folders is unavailable on this host.")
     }

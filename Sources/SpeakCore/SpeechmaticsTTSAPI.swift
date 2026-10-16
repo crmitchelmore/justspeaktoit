@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Errors surfaced by the shared Speechmatics text-to-speech transport.
 public enum SpeechmaticsTTSAPIError: Error, Sendable, Equatable {
@@ -87,16 +90,15 @@ public struct SpeechmaticsTTSAPI: Sendable {
         return components.url
     }
 
-    /// Synthesizes `text` and returns the audio bytes in the requested container.
-    public func synthesize(
+    public static func synthesisRequest(
         text: String,
         apiKey: String,
         request: SpeechmaticsTTSRequest
-    ) async throws -> Data {
+    ) throws -> URLRequest {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw SpeechmaticsTTSAPIError.emptyText
         }
-        guard let url = Self.generateURL(request: request) else {
+        guard let url = generateURL(request: request) else {
             throw SpeechmaticsTTSAPIError.invalidResponse
         }
 
@@ -107,7 +109,16 @@ public struct SpeechmaticsTTSAPI: Sendable {
         urlRequest.httpBody = try JSONSerialization.data(
             withJSONObject: request.jsonBody(text: text)
         )
+        return urlRequest
+    }
 
+    /// Synthesizes `text` and returns the audio bytes in the requested container.
+    public func synthesize(
+        text: String,
+        apiKey: String,
+        request: SpeechmaticsTTSRequest
+    ) async throws -> Data {
+        let urlRequest = try Self.synthesisRequest(text: text, apiKey: apiKey, request: request)
         try Task.checkCancellation()
         let (data, response) = try await session.data(for: urlRequest)
         try Task.checkCancellation()

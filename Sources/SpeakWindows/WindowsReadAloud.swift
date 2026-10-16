@@ -47,6 +47,7 @@ extension WindowsNative {
         }
         return configured && configureVoiceSources(context: context) &&
             jsti_window_set_voice_generation_options(settings.generationOptions.nativeFlags) == 0 &&
+            configureVoiceLanguageTitle(settings, accountInventory: accountInventory) &&
             configureVoiceControls(settings, accountInventory: accountInventory)
     }
 

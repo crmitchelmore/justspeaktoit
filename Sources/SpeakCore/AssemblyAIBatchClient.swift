@@ -22,12 +22,20 @@ public struct AssemblyAIBatchClient: TranscriptionProvider {
 
   public init(
     session: URLSession = .shared,
-    keywords: [String] = [],
+    keywords: [String],
     durationResolver: @escaping @Sendable (URL) async throws -> TimeInterval = { _ in 0 }
   ) {
     self.session = session
     self.keywords = keywords
     self.durationResolver = durationResolver
+  }
+
+  /// Source-compatible overload preserved for callers predating keyword hints.
+  public init(
+    session: URLSession = .shared,
+    durationResolver: @escaping @Sendable (URL) async throws -> TimeInterval = { _ in 0 }
+  ) {
+    self.init(session: session, keywords: [], durationResolver: durationResolver)
   }
 
   // MARK: - Batch Transcription

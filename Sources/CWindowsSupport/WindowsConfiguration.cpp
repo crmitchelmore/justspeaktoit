@@ -11,6 +11,7 @@ constexpr int groupLabelID = 598, groupID = 599, fieldBase = 600, labelBase = 70
 constexpr int problemID = 800, importID = 801, exportID = 802;
 constexpr int recoveryLabelID = 803, recoveryID = 804, restoreID = 805;
 constexpr int previewStartID = 806, previewStopID = 807;
+constexpr UINT refreshTitleMessage = WM_APP + 85;
 struct Field {
     std::wstring title, value, group;
     bool boolean = false;
@@ -26,6 +27,7 @@ struct Configuration {
 };
 Configuration configuration;
 std::mutex configurationMutex;
+HWND activeConfiguration = nullptr;
 struct Dialog {
     Configuration config;
     HFONT font = nullptr;
@@ -323,7 +325,23 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         if (LOWORD(wparam) == previewStopID) { apply(window, *dialog, 5); return 0; }
         break;
     case WM_CLOSE: DestroyWindow(window); return 0;
+    case refreshTitleMessage: {
+        const size_t index = static_cast<size_t>(wparam);
+        std::wstring title;
+        {
+            std::lock_guard<std::mutex> lock(configurationMutex);
+            if (index >= configuration.fields.size() || index >= dialog->config.fields.size()) return 0;
+            title = configuration.fields[index].title;
+        }
+        dialog->config.fields[index].title = title;
+        SetDlgItemTextW(window, labelBase + static_cast<int>(index), title.c_str());
+        return 0;
+    }
     case WM_DESTROY:
+        {
+            std::lock_guard<std::mutex> lock(configurationMutex);
+            if (activeConfiguration == window) activeConfiguration = nullptr;
+        }
         if (dialog->font) DeleteObject(dialog->font);
         return 0;
     }
@@ -355,6 +373,9 @@ void jsti_show_configuration(HWND owner, const wchar_t *group) {
         jsti_window_update(jsti::systemError("Opening configuration editor").c_str(), nullptr, -1);
         return;
     }
+    { std::lock_guard<std::mutex> lock(configurationMutex); activeConfiguration = window; }
+    for (size_t index = 0; index < dialog.config.fields.size(); ++index)
+        if (!dialog.config.fields[index].boolean) SendMessageW(window, refreshTitleMessage, index, 0);
     EnableWindow(owner, FALSE);
     ShowWindow(window, SW_SHOW);
     SetFocus(GetDlgItem(window, groupID));
@@ -433,7 +454,58 @@ void jsti_window_clear_configuration(void) {
     configuration = Configuration();
 }
 
+int jsti_window_set_configuration_field_title(size_t index, const char *title) {
+    if (index >= 32 || !title) return -1;
+    try {
+        std::wstring updated;
+        if (!jsti::wide(title, updated) || updated.empty() || updated.size() > 256) return -1;
+        std::lock_guard<std::mutex> lock(configurationMutex);
+        if (configuration.fields.empty()) return 1;
+        if (index >= configuration.fields.size() || configuration.fields[index].boolean) return -1;
+        configuration.fields[index].title = std::move(updated);
+        if (activeConfiguration && !PostMessageW(activeConfiguration, refreshTitleMessage, index, 0)) return -1;
+        return 0;
+    } catch (const std::exception &) { return -1; }
+}
+
+static bool configurationTitleSelfTest(HWND owner, std::string &error) {
+    Dialog fixture;
+    fixture.config.fields = {{L"Soniox voice language", L"en_GB", L"Voice Output", false}};
+    fixture.group = L"Voice Output";
+    HWND window = createDialog(owner, fixture);
+    if (!window) { error = "Could not create the Voice language label fixture."; return false; }
+    Configuration previous;
+    HWND previousWindow;
+    {
+        std::lock_guard<std::mutex> lock(configurationMutex);
+        previous = configuration;
+        previousWindow = activeConfiguration;
+        configuration = fixture.config;
+        activeConfiguration = window;
+    }
+    SetDlgItemTextW(window, fieldBase, L"fr_FR");
+    const bool queued = jsti_window_set_configuration_field_title(0, "Gemini voice language") == 0;
+    SendMessageW(window, refreshTitleMessage, 0, 0);
+    const bool preserved = text(window, labelBase) == L"Gemini voice language" &&
+        text(window, fieldBase) == L"fr_FR";
+    const bool refused = jsti_window_set_configuration_field_title(32, "Invalid") < 0 &&
+        jsti_window_set_configuration_field_title(0, nullptr) < 0 &&
+        jsti_window_set_configuration_field_title(0, "") < 0;
+    DestroyWindow(window);
+    {
+        std::lock_guard<std::mutex> lock(configurationMutex);
+        configuration = std::move(previous);
+        activeConfiguration = previousWindow;
+    }
+    if (!queued || !preserved || !refused) {
+        error = "Voice language label update replaced an unsaved value or accepted invalid metadata.";
+        return false;
+    }
+    return true;
+}
+
 bool jsti_configuration_self_test(HWND owner, std::string &error) {
+    if (!configurationTitleSelfTest(owner, error)) return false;
     struct Applied { int calls = 0; bool correct = false; } applied;
     Dialog dialog;
     dialog.config.fields = {{L"Language", L"en_GB", L"Transcription", false}, {L"HUD", L"1", L"General", true}};

@@ -72,13 +72,14 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
         package let trigger: HotKeySessionTrigger
     }
 
-    package struct StoppedRecording {
+    package struct StoppedRecording: Sendable {
         package let record: DesktopRecordingStore.Record
         package let duration: TimeInterval
         package let target: Platform.InsertionTarget?
         package let live: DesktopLiveSession?
         package let profile: DesktopProfileSession
         package let textOutput: Platform.TextOutputOptions
+        package var input: DesktopHostRecordingInput? = nil
         package var output: DesktopHostRecordingOutput<Platform> { .init(options: textOutput, target: target) }
     }
 
@@ -91,11 +92,16 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var modelCatalogRevision: UInt64 = 0
     let profileStore: DesktopDictationProfileStore
     package var profiles: [DictationProfile]
+    var manualProfileID: UUID?
+    var profileEditorState: DesktopHostProfileEditorState?
     var profileWarning: String?
     package var settings: Settings
     var vocabularyLoad: Task<DesktopVocabulary, Error>?
     package var recording: Recording?
     var ownedCaptureStartup: DesktopHostOwnedStartupHandle?
+    let ownedDictationCapability: DesktopHostOwnedDictationCapability?
+    var ownedDictation: DesktopHostOwnedDictationHandle<Platform>?
+    var ownedDictationAdmission: DesktopHostOwnedDictationAdmission<Platform>?
     package var recordingTail: (recordID: UUID, task: Task<Void, Never>)?
     var isReady = false
     package var busy = false
@@ -145,6 +151,14 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var transcriptionTask: Task<TranscriptionResult, Error>?
     var voiceCommandTask: Task<String?, Error>?
     var postProcessingTask: Task<DesktopPostProcessing.Outcome, Error>?
+    package let localCleanup: DesktopLocalLLMStore?
+    var localCleanupTask: Task<Void, Never>?
+    var localCleanupNotice = ""
+    var localCleanupPercent = -1
+    var localCleanupOperationID: UUID?
+    var localCleanupPresenting = false
+    var localCleanupPresenter: UnsafeMutableRawPointer?
+    var localCleanupChoices: [String] = []
     package var microphoneWarning: String?
     var cancellationRequested = false
     var historyDeletionInProgress = false
@@ -194,10 +208,12 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var handsFreeRun: DesktopHandsFreeRun<Platform>?
 
     package init(
-        directory: URL, effects: any DesktopHostEffects<Platform>, shutdownGrace: Duration = DesktopHostShutdown.grace
+        directory: URL, effects: any DesktopHostEffects<Platform>, shutdownGrace: Duration = DesktopHostShutdown.grace,
+        ownedDictationCapability: DesktopHostOwnedDictationCapability? = nil
     ) throws {
         self.directory = directory
         self.effects = effects
+        self.ownedDictationCapability = ownedDictationCapability
         self.shutdownGrace = shutdownGrace
         self.store = try DesktopRecordingStore(directory: directory.appendingPathComponent("History"))
         self.uploadStaging = Platform.uploadStaging(directory: directory.appendingPathComponent("Uploads"))
@@ -224,45 +240,18 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
             loadedSettings.configuration = try DesktopConfiguration(
                 values: configuration.values.filter { $0.key != favoriteKey })
         }
+        self.localModels = try Platform.loadLocalModels(directory: directory)
+        self.localCleanup = try Platform.makeLocalCleanup(directory: directory)
         modelCatalog = try Self.prepareModelCatalog(directory: directory, settings: &loadedSettings)
         if let processing = loadedSettings.postProcessing {
             loadedSettings.postProcessing = DesktopPostProcessing.migrated(processing)
         }
-        self.settings = loadedSettings
-    }
-
-    /// `textOutput` was read in settings order at the Record event, so a later
-    /// Apply cannot change how this recording is output.
-    package func toggle(
-        target: Platform.InsertionTarget?, modelIndex: Int, deviceID: String,
-        targetExecutablePath: String?, textOutput: Platform.TextOutputOptions,
-        trigger: HotKeySessionTrigger = .other
-    ) async {
-        if handsFreeMachine.isArmed { await disarmHandsFree(); return }
-        guard isReady, !busy, !closed, DesktopHostModels.all.indices.contains(modelIndex) else { return }
-        cancelOutput()
-        let selected = selectModel(modelIndex)
-        selectMicrophone(deviceID)
-        beginBusyOperation()
-        defer { finishBusyOperation() }
-        if recording != nil { await stopAndTranscribe(); return }
-        // Never record with a model other than the one chosen; why it could
-        // not be saved stays shown.
-        guard selected else { return }
-        do {
-            // Wait for acknowledged silence, while slow decoder release stays
-            // off this actor. Busy prevents another capture during suspension.
-            try await playback.stopAndWait()
-            guard !closed else { return }
-            let profile = resolvedProfile(executablePath: targetExecutablePath)
-            if let limitation = profile.blockingLimitation { throw DesktopHostError(message: limitation.message) }
-            try await startRecording(
-                target: target, deviceID: deviceID, profile: profile, textOutput: textOutput, trigger: trigger
+        if let configuration = loadedSettings.configuration {
+            loadedSettings.configuration = try DesktopPostProcessingConfiguration.importOptions(
+                from: configuration, into: &loadedSettings.postProcessing
             )
-        } catch {
-            update(error.localizedDescription, state: 0)
-            failHUDStart(error.localizedDescription)
         }
+        self.settings = loadedSettings
     }
 
     /// Self-test only: startup without model discovery, which could reach the
@@ -272,6 +261,10 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
 
 extension DesktopHostController {
     func captureFailed(_ message: String, recordingID: UUID) async {
+        if !closed, ownedDictation?.id == recordingID {
+            await stopOwnedDictation(requestID: recordingID, reason: message)
+            return
+        }
         guard !closed, recording?.record.id == recordingID else { return }
         if recording?.handsFree == true, let runID = handsFreeRun?.id {
             await failHandsFree(message, runID: runID)

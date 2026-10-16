@@ -82,7 +82,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
         modelID: String = "scribe_v2_realtime",
         language: String? = nil,
         sampleRate: Int = LiveTranscriptionProviderID.elevenlabs.expectedSampleRate,
-        keywords: [String] = [],
+        keywords: [String],
         makeConnection: @escaping ConnectionFactory,
         schedule: @escaping Scheduler = { seconds, action in
             DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
@@ -91,6 +91,23 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
         self.init(
             apiKey: apiKey, modelID: modelID, language: language, sampleRate: sampleRate,
             timing: .production, keywords: keywords, makeConnection: makeConnection, schedule: schedule
+        )
+    }
+
+    /// Source-compatible overload preserved for callers predating keyword hints.
+    public convenience init(
+        apiKey: String,
+        modelID: String = "scribe_v2_realtime",
+        language: String? = nil,
+        sampleRate: Int = LiveTranscriptionProviderID.elevenlabs.expectedSampleRate,
+        makeConnection: @escaping ConnectionFactory,
+        schedule: @escaping Scheduler = { seconds, action in
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
+        }
+    ) {
+        self.init(
+            apiKey: apiKey, modelID: modelID, language: language, sampleRate: sampleRate,
+            keywords: [], makeConnection: makeConnection, schedule: schedule
         )
     }
 

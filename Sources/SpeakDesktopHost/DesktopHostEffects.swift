@@ -189,4 +189,9 @@ package final class DesktopCaptureContext: @unchecked Sendable {
             }
         } catch { fail(error.localizedDescription) }
     }
+
+    /// Failed/cancelled startup owns audio, but never a provider-ready session.
+    package func receiveRecovery(_ data: Data) {
+        do { try file?.append(data) } catch { fail(error.localizedDescription) }
+    }
 }

@@ -31,6 +31,9 @@ enum LinuxHostPlatform: DesktopHostPlatform {
     typealias VoiceOutputSettings = LinuxVoiceOutputSettings
 
     package static let displayName = "Linux"
+    package static func matchProfile(_ profiles: [DictationProfile], executablePath: String?) -> DictationProfile? {
+        ProfileResolver(profiles: profiles).profile(forLinuxExecutablePath: executablePath)
+    }
     package static let credentialStoreName = "the desktop keyring (Secret Service)"
     package static func makeRecordingFeedbackLoader() -> (any DesktopRecordingFeedbackLoader)? {
         LinuxRecordingFeedbackLoader()

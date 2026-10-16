@@ -48,6 +48,7 @@ extension DesktopHostController {
     package func handsFreeState() -> HandsFreeDictationMachine.State { handsFreeMachine.state }
 
     func handsFreeShortcut(_ request: DesktopHostShortcutRequest<Platform>) async -> Bool {
+        guard ownedDictation == nil, ownedDictationAdmission == nil else { return false }
         guard handsFreeMachine.isArmed || (recording == nil &&
             settings.configuration?.enabled("handsFreeDictationEnabled") == true) else { return false }
         guard handsFreeActs(request) else { return true }
@@ -87,7 +88,7 @@ extension DesktopHostController {
                 return
             }
             if let failure = Platform.handsFreeReadinessFailure() { throw DesktopHostError(message: failure) }
-            let profile = resolvedProfile(executablePath: request.targetExecutablePath)
+            let profile = request.profile ?? resolvedProfile(executablePath: request.targetExecutablePath)
             if let limitation = profile.blockingLimitation { throw DesktopHostError(message: limitation.message) }
             _ = try requireCredentialOrLocalModel(profile.modelIdentifier)
             try requireAzureResource(forLive: profile.modelIdentifier)

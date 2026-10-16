@@ -43,6 +43,98 @@ The current MAI-Voice-2.1 and Flash speakers come directly from the existing
 same regional Azure request builder, saved `key:region` credential and native
 WAV decoding/playback, not a second provider client or credential store.
 
+### Recovered OpenAI, Groq, Gemini and Speechmatics routes
+
+The four-provider source composition reuses the existing shared catalogues,
+request builders and previously delivered desktop engines, rather than copying
+macOS protocol constants or replacing the current Mistral/Soniox/account paths.
+This composition is **source-only and uncompiled/unexecuted**. Earlier component
+receipts do not qualify this combined source, native picker, audio hardware,
+provider access or installed application.
+
+| Route | Executable source projection | Credential | Desktop audio and controls |
+|---|---|---|---|
+| OpenAI | TTS-1, TTS-1 HD and mini; 29 compatible model/voice tuples | Separate `openai.tts.apiKey`, never the transcription key | 24 kHz mono PCM16 WAV; speed 0.5-2; no pitch/SSML |
+| Groq | 12 canonical English/Saudi Arabic Orpheus personas paired with their actual model | Shared `groq.apiKey` | 24 kHz mono PCM16 WAV; normal controls only |
+| Gemini | Every `GeminiTTSCatalog.models` / voice tuple; currently 30 voices with Gemini 3.1 Flash TTS | Shared `google.apiKey` | 24 kHz mono PCM16 WAV, or validated raw L16 wrapped without resampling; normal controls only |
+| Speechmatics | Four canonical English voices | Shared `speechmatics.apiKey` | Actual 16 kHz mono PCM16 WAV; normal controls only |
+
+The native Voice list projects the same canonical executable tuples. OpenAI and Gemini
+rows include the model in their labels and stable picker identity; selecting a
+row saves both model and voice. Favorites retain the Mac-compatible voice-only
+identifier. Favoriting an OpenAI or Gemini voice exposes each compatible model row with a
+distinct native favorite rank; it does not collapse compatible model tuples into one or
+write model-qualified strings into the saved favorites array.
+
+Unsupported speed/pitch/SSML and unknown or incompatible model/voice tuples
+fail before credential access. Stored choices, unknown favorites and unrelated
+Soniox region/language preferences are not reset when choosing another route.
+One captured selection and one credential cover the bounded request sequence.
+OpenAI segments at 4,096 Unicode scalars without splitting a grapheme; Groq uses
+the shared 200-grapheme chunker and refuses more than 60 requests before key
+access. Gemini uses the shared 8,000-grapheme guidance and canonical single retry
+for retryable server/no-audio faults. Whitespace-only Groq/Gemini chunks refuse
+the operation before key access, rather than failing after earlier requests.
+Speechmatics uses the existing Unicode-scalar segmenter.
+
+Captured Gemini language uses the existing `GeminiTTSRequest` contract: a
+catalogued regional choice such as `en_GB` becomes `en-GB`; Automatic and base
+codes retain the canonical detection behavior. Unknown language preferences
+remain stored but refuse execution before key access.
+
+The Gemini configuration successor remains **source-only, uncompiled and
+unexecuted**. Its model projection and strict resolver enumerate the actual
+canonical models, and the captured model reaches request construction and
+per-model usage estimates. The current canonical Mac catalogue/runtime defines
+**only Gemini 3.1 Flash TTS Preview**; its comments explicitly exclude the older
+2.5 previews. Those are not new desktop routes or a remaining catalogue-parity
+gap. Provider aliases and absent model IDs retain the existing default; unknown
+model IDs remain unavailable rather than falling back.
+
+Both native preference editors use one canonical `ttsLanguage` text field, with
+an active-provider label for Gemini or Soniox. Other executable providers
+explicitly label the stored value as unused, and an unavailable voice is labelled
+as such. Picker and account-voice updates change only the label; they do not
+reload unsaved entry values. Linux applies label updates through the existing
+posted GTK queue, without a MainActor hop. Windows updates its next-dialog
+snapshot and posts a label-only refresh for an open editor. There is no new page,
+duplicated language catalogue, credential read or service request for presenting
+these controls.
+
+The text editor preserves canonical regional strings and unknown imported
+values exactly, including through restart/transfer. Request construction alone
+converts Gemini's regional tag; Soniox retains its existing base-language and
+Automatic content/device fallback. Switching providers does not change the
+saved language, Soniox region or favorites. This is not a new language-detection
+engine or a claim that every provider consumes this preference.
+
+Each new completed-audio route requires real, complete, nonsilent PCM/WAV
+metadata, aligned samples and the expected rate. Streaming length placeholders,
+compressed payloads, mixed rates and truncated headers are not repaired or
+relabeled. Speechmatics generation and Read staging retain 16 kHz; no new native
+decoder or resampler is introduced. A later segment error/cancellation returns
+no partial audio. Existing owned-task admission, Stop/close, History attribution,
+archival, native playback and atomic user-chosen export remain the shared paths.
+Replay and retained-result export still use the captured bytes without a key.
+
+Groq, Speechmatics and TTS-1/HD use their canonical character-rate estimates,
+not invoices. Gemini records only input tokens actually reported for each
+attempt, including a no-audio retry, and estimates the audio component from
+validated PCM duration. Missing tokens leave input/total cost unknown.
+OpenAI mini binary WAV reports neither text/audio token counts nor billing:
+its charges stay unestimated. Optional usage fields preserve older ledger
+decoding; non-Gemini routes do not acquire invented token measurements.
+
+**Remaining scope gaps:** desktop export is WAV-only, without Mac MP3/M4A
+format controls or additional decoders. OpenAI quality is represented by the
+actual model tuple, not a second generic quality selector; the native speed
+range remains 0.5-2 even though its API can accept 0.25-4. Gemini models excluded
+from the canonical catalogue are not advertised. Provider-native style/instruction
+surfaces and progressive playback are not implemented here. ElevenLabs,
+OpenRouter and system speech are outside this slice. No new provider probe,
+native runtime, device, packaged-app or full-product parity acceptance is
+claimed by this source composition.
+
 **Cartesia Sonic 3.6** executes the five existing `CartesiaTTSCatalog` presets,
 not the entire account library or older stored Sonic models. Read, Generate and
 text export reuse `CartesiaTTSAPI` request construction, API version and the
@@ -278,7 +370,8 @@ one bounded validated WAV before native playback; Deepgram Read retains its
 existing segmented playback. No independent playback engine or IPC is added.
 
 Long text uses the canonical segmenter. Export validates each provider response,
-joins decoded mono PCM16 at 24 kHz, and writes exactly one RIFF/WAVE header, with
+joins decoded mono PCM16 at the route's actual rate (16 kHz for Speechmatics,
+24 kHz for the other routes), and writes exactly one RIFF/WAVE header, with
 a 64 MiB PCM limit. A failed segment produces no partial destination. The native
 save chooser confirms replacement; only after synthesis succeeds does an atomic
 write replace the chosen file. Destinations inside the app's data folder are
@@ -318,8 +411,10 @@ validated PCM, not playback time. Partial successful segments remain accounted
 for even if a later segment, playback, archival or export fails.
 Replay and retained-result export do not create synthesis entries.
 
-All displayed costs are **input-based estimates, not measured/billed charges**.
-No provider billing receipts or token counts are available on these routes.
+All displayed costs are **estimates, not measured/billed charges**.
+No provider billing receipts are available. Gemini input tokens are recorded
+only when reported; its audio component uses measured validated PCM duration,
+not an inferred audio-token count. Other routes do not invent token counts.
 The completed-audio subtotal excludes unpriced entries and names that exclusion.
 SSML markup, provider character rules, discounts and regional pricing can
 change actual charges. A transport attempt does not prove server receipt, and
@@ -448,6 +543,63 @@ credential C ABI and native controls are unchanged. Mistral provider/key/list/pi
 controls, full native app/vault/playback/accessibility and Apple/runtime service
 acceptance remain a separately reviewed native integration, not accomplished
 by this host checkpoint.
+
+## Soniox completed-audio candidate (source only)
+
+The portable desktop engine reuses `SonioxTTSCatalog`'s v2 model, built-in voice
+identities, legacy v1 migrations and canonical regional endpoints. The shared
+`SonioxTTSAPI` request builders serve both the unchanged Apple HTTP API and the
+desktop bounded transport; there is no copied regional protocol or preset list.
+Although the canonical model name contains "Real-time", this desktop route
+requests complete 24 kHz mono 16-bit PCM WAV, not progressive delivery.
+`SonioxTTSRealtime` remains unavailable on Windows/Linux.
+
+The existing native Voice picker exposes canonical built-ins. Account providers
+also project Soniox into the existing provider/key/Refresh/Pick form. A regional
+listing is bound to its key, session/provider epoch and captured processing region;
+only v2-ready clones are executable. Deleted, unready or unrefreshed clones retain
+their stored identifiers and favorites but are unavailable until explicitly
+refreshed and picked. Unlike the Mac fallback presentation, desktop never silently
+replaces a missing clone with Maya. Mixed model/provider selections are refused.
+
+Native preferences add **Soniox processing region** (US/EU/JP) and **Soniox voice
+language** (automatic or a canonical locale) through existing native configuration
+controls. These values live in the sole `DesktopVoiceOutputSettings` model, not
+duplicate configuration mirrors. Partial imports preserve absent preferences and
+favorites; unknown regional strings remain exportable but cannot activate a
+request. Recognized legacy region aliases are canonicalized only in the editor
+projection until an explicit save. Dictation profiles do not override Voice's
+independent language or region. Speed is 0.7-1.3; pitch and SSML remain unsupported
+and fail before credential lookup instead of being ignored or clamped.
+
+Each Read/Generate/source Export captures selection, region and language before
+owned asynchronous credential I/O. Region changes retire old provider forms and
+listings, invalidate clone evidence, and cancel only a current Soniox synthesis
+ticket; retained replay/export and unrelated-provider output keep their ownership.
+The existing account worker, usage and operation accounting remains balanced until
+actual settlement. Existing generated WAV archival, retained audio export and
+History UUID-or-nil attribution are reused; source text and credentials do not
+enter the usage ledger.
+
+Synthesis splits at grapheme boundaries under the canonical 5,000-character
+request limit, reads one key, and uses a single 120-second HTTP budget with 64 MiB
+response and aggregate audio bounds. Every response must be a complete valid WAV;
+streaming length sentinels, malformed/truncated chunks, duplicate format/data
+chunks, wrong-rate/channel/sample formats and silent audio are refused. No
+partial multi-segment result is published. Discovery has a 20-second total budget,
+512 KiB per page and a bounded total voice/page count. Redirects are refused by
+the existing transport; neither discovery nor synthesis falls back to another
+regional host. Public errors classify failures without reflecting response text,
+keys or provider-controlled error fields.
+
+New synthetic source regressions cover canonical selection/migration and regional
+wire builders, ready/deleted/unready clones, complete/segmented/bounded audio,
+cancellation, stale context/key/region fences, sole-model restart/transfer/favorites,
+profile independence, generated archival/export and usage. These tests have not
+been executed for this candidate. Builds, strict lint, portable/Apple tests,
+Windows/GTK native interaction and callback/holder qualification, installed
+packages, actual accounts and physical playback remain pending. No real provider
+call or native/audio activation is part of this source-only delivery.
 
 ## Actual macOS features and remaining gaps
 

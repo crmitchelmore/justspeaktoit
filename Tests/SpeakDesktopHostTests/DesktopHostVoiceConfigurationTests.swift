@@ -85,16 +85,21 @@ final class DesktopHostVoiceConfigurationTests: XCTestCase {
         try await importValues(["ttsSaveToDirectory": AnyCodable(.bool(true))])
         let selected = try XCTUnwrap(DesktopVoiceOutputSettings.voices.first)
         await controller.selectVoiceOutput(selected)
-        var entries = try await controller.configuration().entries
-        let localeIndex = try XCTUnwrap(DesktopConfiguration.fields.firstIndex { $0.key == "preferredLocale" })
-        entries[localeIndex] = "fr_FR"
+        let original = try await controller.configuration()
+        var entries = original.entries
+        let languageIndex = try XCTUnwrap(DesktopConfiguration.fields.firstIndex {
+            $0.key == ApplicationPreferenceKey.preferredLocale.rawValue
+        })
+        entries[languageIndex] = "fr_FR"
         try await controller.saveConfiguration(entries)
         let saved = await controller.voiceOutputSettings()
         XCTAssertEqual(saved.generationOptions, .init(autoPlay: false, saveToRecordings: true))
         XCTAssertEqual(saved.voiceID, selected.id)
         XCTAssertEqual(entries.count, DesktopConfiguration.fields.count)
         let configuration = try await controller.configuration()
-        XCTAssertEqual(configuration.language, "fr_FR")
+        XCTAssertEqual(configuration.text(ApplicationPreferenceKey.preferredLocale.rawValue), "fr_FR")
+        XCTAssertEqual(configuration.text(ApplicationPreferenceKey.visualDensity.rawValue),
+                       original.text(ApplicationPreferenceKey.visualDensity.rawValue))
     }
 
     func testInvalidImportOrWriteFailure_IsAtomicAcrossVoiceAndDictation() async throws {

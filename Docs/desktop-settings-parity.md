@@ -19,11 +19,63 @@ The macOS controls, Command shortcuts and persistence are unchanged.
 
 The native mapping is Ctrl+1 Dashboard, Ctrl+2 History, Ctrl+3 Voice Output,
 Ctrl+4 General, Ctrl+5 Transcription, Ctrl+6 Post-processing, Ctrl+7 Corrections,
-Ctrl+8 Pronunciation, Ctrl+9 Profiles and Ctrl+0 About. Linux has no Profiles
-destination: Ctrl+9 is unbound, not renumbered or represented by a fake row.
+Ctrl+8 Pronunciation, Ctrl+9 Profiles and Ctrl+0 About. The separate source-only
+Linux Profiles candidate adds the real Profiles destination and its Ctrl+9
+binding together; this is not a claim of native qualification or publication.
 Keyboard and iCloud Sync retain native pointer/focus navigation without invented
 numeric bindings. Switching hints off removes chord text/accessibility hints,
 not destination names or keyboard navigation.
+
+### Linux Profiles candidate (source only)
+
+The native GTK Profiles page uses the existing canonical profile store,
+catalogues and per-recording resolver. It provides an ordered list, create/edit,
+duplicate, confirmed delete, move up/down, and manual selection for the next
+recording in the current app session. Saved profiles and their order survive
+restart; the manual selection deliberately does not become a new portable Mac
+preference or another runtime store. Restart returns to automatic/app settings.
+If a selected profile is deleted or externally removed, the picker explicitly
+shows it as unavailable and uses app settings, not a different automatic match,
+until another profile or Automatic is explicitly selected.
+
+Editable overrides are executable batch/live/downloaded-local models, spoken
+language, inherited/off/on post-processing, an executable polish model including
+built-in Local Rules, custom prompt, output language, and inherited/off/on lexicon
+directives/context tags. Choices come from the host's canonical capability
+projection. The shared Local Rules notice explicitly explains ignored prompt,
+language and context controls; their dormant values remain stored.
+
+X11 automatic matching compares only the captured target process's exact,
+case-sensitive `/proc/PID/exe` path against explicit Linux executable matchers,
+in user order. Missing PID/process access, sandbox boundaries or a target whose
+identity cannot be captured mean no automatic match, never a title/WM_CLASS
+guess. Wayland does not supply a foreign-app identity through this host; manual
+selection works there, but automatic app matching does not. Existing Windows
+executable and Mac bundle-ID matchers are retained, not reinterpreted.
+
+The recording event snapshots the profile, model, microphone and text-output
+selection in the existing ordered settings queue. Global shortcut recognition,
+window Record and command-toggle carry that captured profile into the real
+recording, including hands-free arming, without resolving later editor globals.
+Profiles do not change an already running recording or the global defaults.
+
+The Linux editor applies typed changes over the canonical raw profile document,
+retaining unknown fields, unknown matcher objects and unchanged unsupported
+overrides; duplicate also retains the source's unknown fields. Explicitly
+replacing an unsupported route is required before it can record. A newer routing
+identifier blocks desktop capture instead of being inferred as a remote route.
+Transfer continues to read the preserved canonical raw file. Revision tokens and
+the captured raw document reject stale editor writes; failed writes do not
+publish a new runtime list.
+
+Portable regression sources cover canonical-ID choices, CRUD/order/restart,
+manual-selection capture in an actual synthetic recording, context inheritance,
+raw unknown-field preservation/transfer and unsupported-route refusal. GTK smoke
+sources exercise the production page/wire/actions and Ctrl+9 routing. **None of
+these new tests, compilers, linters, native UI or hardware checks have run for
+this candidate.** The frozen R5 Local Rules source/lint receipt is a dependency,
+not validation of this later delta. This does not establish full profile,
+Apple-engine, installed-runtime or Windows/Linux feature parity.
 
 These are app-window shortcuts, not new global hotkeys. Both shells leave
 editable fields and additional modifiers alone and refuse unavailable, hidden or
@@ -346,6 +398,72 @@ That collector depends on the icon workstream's staging foundation; it is not
 a standalone settings patch. GNOME Flatpak runtime AAC support must be checked
 in the installed app, not inferred from Ubuntu CI.
 
+## Local rules and post-processing context source proposal
+
+This unpublished proposal is based on reviewed Voice Commands tree
+`6207acea169f933523f2fb859c2f8cdf4c9cdbf0`. Its source and regression fixtures
+have not yet been built, linted or executed. It does not establish installed
+Windows/Linux UI acceptance or full post-processing parity.
+
+The Windows post-processing dialog and Linux preference group offer explicit
+**Local** / **Remote** native choices. Local exposes only the canonical
+`LocalPostProcessingModel.builtInRulesModelID` option from `ModelCatalog`;
+execution reuses `TranscriptPostProcessingPolicy.processLocally`, as on Mac.
+Desktop post-processing still defaults to disabled. Local cleanup neither reads
+nor saves provider credentials, sends requests nor installs a runtime. Empty or
+`[blank_audio]` input stays empty. Cancellation retains the original transcript;
+successful History entries use the canonical friendly model name.
+
+Built-in rules ignore custom instructions, output language and lexicon context.
+The native explanation says so, disables those remote-only controls, and keeps
+their stored values for later remote use. Downloaded local LLMs and Apple
+Foundation Models are not implemented; unknown local IDs remain unavailable
+and disabled, never silently mapped to remote cleanup. Native filtered picker
+rows map back to the shared canonical-ID projection; existing remote indexes
+are not shifted by the appended local option.
+
+The existing desktop post-processing options also keep a dormant
+`lastRemoteModelIdentifier` for native picker recall. Explicit Remote Apply
+remembers its canonical selection; Local Apply, reprojection and restart keep
+that choice with the remote prompt, language, temperature and context switches.
+Remembering a model never changes the active mode or grants upload/credential
+permission. An unsupported remembered route requires an explicit supported
+selection instead of choosing another remote model. This is private desktop
+UI metadata, not a Mac preference or a second runtime store: portable export
+continues to describe the actual active model and excludes the recall field.
+
+**Include personal lexicon directives** and **Include lexicon context tags**
+are now real post-processing switches, both defaulting to true like Mac.
+`DesktopPostProcessing.Options` is their sole persisted runtime authority;
+configuration transfer consumes supported values and removes mirrors.
+Absent fields in older options use true; explicit imported false values survive
+restart and export. Remote profile overrides take precedence over app defaults
+in the recording's frozen options snapshot. Request filtering omits each array
+when its switch is off, without deleting context saved on the record. Local
+rules omit both arrays regardless of these retained remote choices. The
+existing vocabulary/lexicon pipeline and Voice Commands ordering are unchanged;
+the former inventory claim that no desktop lexicon pipeline existed was stale.
+
+Portable JSON exports the model, enable choice, custom prompt and both context
+switches. An explicitly enabled built-in-rules import applies locally without
+credential permission; importing disabled leaves it disabled. Imported cloud
+enable/model values are retained but do not grant credential or upload
+permission. Unsupported local selections are preserved for export while
+execution stays disabled. A refused settings write changes neither runtime
+choices nor the existing file. Imports containing only context switches do not
+reset the remote prompt, model, temperature or language.
+The native configuration view and export project temperature/language from the
+existing runtime options even when those keys were absent from a partial
+context-only import; restart uses that same persisted authority.
+
+New portable and Host regression sources cover deterministic cleanup, silence,
+cancellation, credential/request isolation, persistence/transfer, strict types,
+profile context precedence, frozen request omission and friendly History
+identity. Production Win32/GTK self-test fixtures cover native location/model
+mapping, context control labels/states, local key exclusion and unavailable
+selections. These are proposed tests, not evidence that any gate or native UI
+fixture has run.
+
 ## Implemented preference journey
 
 Windows uses **Dictation preferences...** from General, Transcription,
@@ -552,12 +670,12 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | localTranscriptionModel | Partial / Partial | Models; whisper.cpp catalogue, not all Mac inference runtimes/imports |
 | localTranscriptionMode | Partial / Partial | Local batch only; local streaming absent |
 | localStreamingModelSource | Missing / Missing | No native local streaming source editor/runtime |
-| postProcessingEnabled | Equivalent / Equivalent | `DesktopHostPostProcessing.swift`; remote opt-in differs deliberately from Mac's default-on |
-| postProcessingModel | Partial / Partial | Shared remote catalogue; local LLM/rules cleanup unavailable |
+| postProcessingEnabled | Equivalent / Equivalent | `DesktopHostPostProcessing.swift`; desktop default remains disabled. Source proposal adds explicit local rules opt-in without credential access; remote remains opt-in |
+| postProcessingModel | Partial / Partial | Shared remote catalogue plus canonical built-in Local Cleanup in the source proposal; downloaded local LLMs and Apple Foundation Models remain unavailable |
 | postProcessingTemperature | Wired / Wired | Config; range 0...1, OpenRouter request |
-| postProcessingOutputLanguage | Wired / Wired | Config; cleanup system prompt |
-| postProcessingIncludeLexiconDirectives | Missing / Missing | No desktop lexicon pipeline in this baseline |
-| postProcessingIncludeContextTags | Missing / Missing | No desktop lexicon context pipeline |
+| postProcessingOutputLanguage | Wired / Wired | Config; remote cleanup system prompt; built-in rules explicitly ignore it |
+| postProcessingIncludeLexiconDirectives | Source wired / Source wired | Native post-processing switch, Mac default true, options/session snapshot and strict transfer; excludes saved directives from remote requests when false |
+| postProcessingIncludeContextTags | Source wired / Source wired | Native post-processing switch, Mac default true, options/session snapshot and strict transfer; excludes saved context tags from remote requests when false |
 | textOutputMethod | Equivalent / Partial | Output; Windows Smart/direct/clipboard; Linux paste/clipboard, no direct accessibility insertion |
 | restoreClipboard | Equivalent / Partial | Output; Windows restoration; Linux X11 owned plain-text restoration only. Wayland capability-gates the control, retains its saved X11 choice and leaves pasted text on the clipboard |
 | appSwitchDelivery | Missing / Missing | Windows captured-target safety; Linux X11 captured/Wayland current-focus rules, no three-way selector |
@@ -577,8 +695,8 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | liveStopGracePeriod | Partial / Partial | Config; AssemblyAI/Cartesia only; range 0...2 s |
 | preferredAudioInputUID | Equivalent / Equivalent | Native device ID with missing-device warning, never Apple UID translation |
 | defaultTTSVoice | Partial / Partial | Voice; canonical Deepgram Read aloud voices only |
-| ttsLanguage | Missing / Missing | No independent TTS-language editor |
-| sonioxTTSRegion | Missing / Missing | Soniox TTS route unavailable |
+| ttsLanguage | Wired candidate; qualification pending / Same | Native preferences project the sole Voice language; Soniox completed-audio requests capture it independently of dictation profiles. Other providers are not newly language-enabled |
+| sonioxTTSRegion | Wired candidate; qualification pending / Same | Canonical US/EU/JP native choices, sole-model transfer/restart, regional-key/context fences and bounded Soniox v2 completed WAV. Unknown regions remain stored but cannot send a key; no host fallback or portable realtime TTS |
 | ttsSpeed | Transfer wired; workflow separate / Same | Canonical validation and sole-model transfer; incompatible Read aloud explicitly refused; native advanced editor/Azure execution in #1217 |
 | ttsPitch | Transfer wired; workflow separate / Same | Shared integer/range validation, raw recovery export and partial-import preservation; no native pitch editor in this slice |
 | ttsQuality | Missing / Missing | No quality editor/provider options |
@@ -601,7 +719,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | showLiveTranscriptInHUD | Wired / Partial | Config + Windows/X11 HUD; Wayland has no live overlay, so the control is hidden; transcript remains in main window |
 | showCompactHUD | Wired / Partial | Config + native compact Windows/X11 renderer; hidden on Wayland, where notifications are compositor-owned |
 | shortenErrorDisplay | Wired / Partial | Config + HUD; native Windows/X11 timer; Wayland notification lifetime is desktop-owned |
-| showSidebarShortcutHints | Wired; native acceptance pending / Wired; native acceptance pending | General strict Boolean/default true; shared Ctrl-number bindings, live sidebar/accessibility hints; hints off preserves navigation. Linux Profiles is unavailable. |
+| showSidebarShortcutHints | Wired; native acceptance pending / Wired; native acceptance pending | General strict Boolean/default true; shared Ctrl-number bindings, live sidebar/accessibility hints; hints off preserves navigation. This separate source-only candidate adds Linux Profiles with Ctrl+9; native acceptance remains pending. |
 | speedMode | Missing / Missing | No Instant/Live Polish setting; no live-polish engine |
 | livePolishModel | Missing / Missing | No live-polish model execution |
 | livePolishDebounceMs | Missing / Missing | No live-polish scheduler |
@@ -642,8 +760,8 @@ replacement/nearest implemented surface; they do not assert hidden support.
 and reaches the shared cleanup policy. `customShortcutBindings`/individual action
 shortcuts, Shortcut presets/reset, Escape cancellation and conflict management
 beyond the global key remain gaps. Profiles have a Windows native editor with
-shared ordering/session snapshots; Linux lacks a profile editor, even though
-the host can load shared profiles. Apple bundle-ID matchers are preserved but
+shared ordering/session snapshots; this separate source-only candidate adds
+the GTK editor and actual recording selection described above. Apple bundle-ID matchers are preserved but
 not silently converted to executable paths.
 
 The Mac's 12 `SettingsTab` destinations are General, Transcription,
@@ -651,10 +769,11 @@ Post-processing, Profiles, Voice Output, Pronunciation, API Keys, Keyboard,
 Permissions, Compare Models, Data & Migration and About
 (`Sources/SpeakApp/Views/Settings/SettingsTab.swift:3-15`). Native desktops expose
 General/Transcription/Post-processing/Voice Output/Keyboard/About and iCloud sync;
-Windows also exposes Profiles. Provider keys are embedded under Transcription,
+Windows also exposes Profiles; the GTK Profiles destination is added by this
+unqualified source-only candidate. Provider keys are embedded under Transcription,
 not a complete API Keys management page. Pronunciation, permission
-troubleshooting/remediation, comparison, full archive migration and Linux
-profile editing remain missing journeys. Corrections and Troubleshooting
+troubleshooting/remediation, comparison and full archive migration remain
+missing journeys; Linux profile editing still needs compilation and native acceptance. Corrections and Troubleshooting
 destinations outside `SettingsTab` likewise remain unimplemented. No placeholder
 destination or inert switch is added for those gaps.
 

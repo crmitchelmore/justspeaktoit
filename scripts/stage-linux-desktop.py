@@ -3,9 +3,13 @@
 import argparse
 import pathlib
 import shutil
+import struct
+import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP_ID = "com.justspeaktoit.JustSpeakToIt"
+sys.path.insert(0, str(ROOT / "scripts" / "local-llm-runtime"))
+import local_llm_package
 
 
 def resource_bundles(directory):
@@ -22,7 +26,7 @@ def resource_bundles(directory):
     return bundles
 
 
-def stage(binary, output, prefix="/usr/local"):
+def stage(binary, output, prefix="/usr/local", local_llm_runtime=None):
     binary, output = pathlib.Path(binary), pathlib.Path(output)
     if not binary.is_file() or binary.is_symlink():
         raise ValueError("the built SpeakLinux executable must be a regular file")
@@ -35,6 +39,17 @@ def stage(binary, output, prefix="/usr/local"):
     bundles = resource_bundles(binary.parent)
     if core not in bundles or theme.parent not in bundles or not theme.is_dir():
         raise ValueError("the built executable's Linux icon and core resource bundles must be present")
+    runtime = None
+    if local_llm_runtime is not None:
+        with binary.open("rb") as stream:
+            header = stream.read(64)
+        if len(header) != 64 or header[:7] != b"\x7fELF\x02\x01\x01":
+            raise ValueError("native LLM staging requires an ELF64 production application")
+        kind, machine = struct.unpack_from("<HH", header, 16)
+        architecture = {62: "x86_64", 183: "arm64"}.get(machine)
+        if kind not in (2, 3) or architecture is None:
+            raise ValueError("native LLM staging requires a supported native application architecture")
+        runtime = local_llm_package.read_directory(local_llm_runtime, "linux", architecture)
     if output.exists():
         raise ValueError("the staging output must be a new directory")
     output.mkdir(parents=True)
@@ -44,6 +59,12 @@ def stage(binary, output, prefix="/usr/local"):
     (destination / "justspeaktoit").chmod(0o755)
     for bundle in bundles:
         shutil.copytree(bundle, destination / bundle.name)
+    if runtime is not None:
+        runtime_directory = destination / local_llm_package.DIRECTORY
+        runtime_directory.mkdir()
+        for name, data in runtime["entries"].items():
+            (runtime_directory / name).write_bytes(data)
+            (runtime_directory / name).chmod(0o644)
     # Keep the host's standard hicolor index; the private runtime bundle owns
     # its minimal index, not the installed system theme.
     shutil.copytree(theme, output / "share/icons/hicolor", ignore=shutil.ignore_patterns("index.theme"))
@@ -65,8 +86,10 @@ def main():
     parser.add_argument("--binary", required=True, type=pathlib.Path)
     parser.add_argument("--output", required=True, type=pathlib.Path)
     parser.add_argument("--prefix", default="/usr/local", help="eventual install prefix; staging remains under --output")
+    parser.add_argument("--local-llm-runtime", type=pathlib.Path,
+                        help="pinned offline native cleanup build's LocalLLMRuntime directory; no acquisition")
     args = parser.parse_args()
-    stage(args.binary, args.output, args.prefix)
+    stage(args.binary, args.output, args.prefix, args.local_llm_runtime)
 
 
 if __name__ == "__main__":

@@ -69,6 +69,7 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
         LinuxWindow.voiceSources(context: Unmanaged.passUnretained(holder).toOpaque())
         _ = jsti_window_set_appearance(Int32(await controller.appearance().rawValue))
         await controller.configureLocalModels()
+        await controller.configureLocalCleanup(presenter: Unmanaged.passUnretained(holder).toOpaque())
         return await controller.selectedIndex()
     }
     LinuxCloudSync.configure(holder)

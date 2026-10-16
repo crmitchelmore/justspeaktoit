@@ -30,6 +30,7 @@ public struct DesktopSpeechSynthesis: Sendable {
     public func synthesize(
         _ source: VoiceOutputSourceSnapshot, voice: DesktopSpeechVoice,
         options: VoiceSynthesisOptions, accountInventory: VoiceAccountInventory?,
+        sonioxRegion: SonioxTTSRegion = .unitedStates, language: String? = nil,
         credential: @Sendable () async throws -> String
     ) async throws -> Data {
         try Task.checkCancellation()
@@ -53,6 +54,24 @@ public struct DesktopSpeechSynthesis: Sendable {
         case .mistral:
             return try await DesktopMistralSpeechSynthesis(session: session).synthesize(
                 source, voice: voice, inventory: accountInventory, credential: credential)
+        case .soniox:
+            let selection = try DesktopSpeechSelection(
+                voice: voice, options: options, accountInventory: accountInventory,
+                sonioxRegion: sonioxRegion, language: language)
+            return try await DesktopSonioxSpeechSynthesis(session: session).synthesize(
+                source, selection: selection, credential: credential)
+        case .gemini:
+            return try await DesktopGeminiSpeechSynthesis(session: session).synthesize(
+                source, voice: voice, language: language, credential: credential)
+        case .groq:
+            return try await DesktopGroqSpeechSynthesis(session: session).synthesize(
+                source, voice: voice, credential: credential)
+        case .speechmatics:
+            return try await DesktopSpeechmaticsSpeechSynthesis(session: session).synthesize(
+                source, voice: voice, credential: credential)
+        case .openai:
+            return try await DesktopOpenAISpeechSynthesis(session: session).synthesize(
+                source, voice: voice, options: options, credential: credential)
         }
     }
 

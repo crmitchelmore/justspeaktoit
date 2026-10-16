@@ -372,8 +372,85 @@ uses the captured store without presentation. Existing synchronous normal,
 hands-free and comparison capture paths and their PCM/silence behavior are unchanged.
 Synthetic Host/package tests and C-stub graphs do not qualify native ownership,
 permission, endpoint identity, readiness, physical timing or final-partial flush.
-Production owned recording, provider/tail/context handoff and native activation
-remain separately unselected.
+The source-only owned-dictation successor adds an optional injected
+`DesktopHostOwnedDictationCapability` to the normal Host. Its default is nil:
+the executable still selects the working synchronous legacy capture. The
+unselected `WindowsNativeEffects.ownedDictationCapability` constructor composes
+the real dedicated worker only from explicit capability/permission evidence;
+there is no user toggle, Linux backend or automatic qualification inference.
+
+The asynchronous session holds one immutable request (resolved profile/language,
+route/device/PCM format, trigger, insertion target, output settings, provider
+input, tail policy and selected live session), one History record, one WAV and
+one real capture context. Normal Record/shortcut stop, Cancel, silence and close
+address that same owner even while startup occupies busy bookkeeping. Successful
+terminal stop enters the existing `StoppedRecording` batch/live/post-processing
+and output path. Native open/quiescence/retirement never runs on the UI or
+settings admission queue. Failed retirement retains the session/context/file and
+exclusion until request-correlated `retryOwnedDictation`, including after close.
+Shutdown grace limits observation, not ownership.
+
+The actual Windows `hotKey` wrapper delegates to canonical Host `admitShortcut`;
+the original full-await `shortcut` and `toggle` signatures remain unchanged.
+`WindowsHotKeyGestures` aliases the shared
+`DesktopHostShortcutGestures<WindowsHostPlatform>` classifier/serializer, so
+portable fixtures drive its real recognition-ordered Task tail. With an injected
+owned capability only, delivery installs a correlated startup admission and its
+owned Task, then returns without awaiting microphone readiness or retirement.
+Hold release and double-tap stop therefore reach an opening request while its
+native open remains suspended. Direct Record/automation callers still await
+startup and propagate caller cancellation to that tracked Task.
+
+Admission freezes the resolved profile, route, language, credentials, endpoint,
+configuration, target, trigger and device before playback/output/readiness
+suspensions. The event's output-settings Task stays attached to that snapshot;
+later settings changes cannot retag the admitted request. The startup slot
+excludes other capture before a normal owner exists. Stop/Cancel/close address
+both slots, and shutdown observes startup within the existing total deadline
+without releasing late ownership. The unchanged Main composition still closes
+the Host before draining hotkey delivery and still selects legacy capture.
+The legacy serializer path retains its awaited Record/stop behavior.
+
+Windows automation status identifies an actual correlated recording/admission,
+not arbitrary busy work. Start acknowledges success only after genuine owned
+readiness; stop can address owned startup despite busy bookkeeping and refuses
+to report success when retirement still retains that session.
+
+`DesktopPressCaptureLease.recoveringOwned` installs a narrow recovery sink before
+native open. It is separate from recording adoption and is not a file-path
+authority. Before adoption, the new relay retains the whole admitted startup
+prefix up to the **reserved** byte budget: it does not roll away earlier audio.
+The Host budgets two seconds of mono PCM16 (64,000 bytes at 16 kHz or 96,000 at
+24 kHz), including any in-flight payload. Overflow rejects the whole incoming
+frame and reports `startupOverflow`; an odd-byte frame is rejected as
+`invalidPCM`. The first failure remains latched. These are failed recordings,
+not claims that rejected samples were retained. No per-frame task or second PCM
+queue is introduced.
+
+Genuine readiness allows that single buffer to drain once through the existing
+WAV/live context. A failed or cancelled pre-readiness open instead joins real
+producer/callback quiescence, fences and drains admitted PCM only to the same
+WAV, then retires native resources. It never feeds those bytes to a live
+provider or synthesizes a successful ready/recording state. Both paths settle
+delivery before single WAV finalization. A historical capture/retirement failure
+continues to prevent transcription/insertion after a successful cleanup retry.
+Without the new recovery authority, old lease constructors, trailing closures,
+rolling pre-roll and unadopted-buffer discard semantics are unchanged.
+
+The new portable synthetic regression sources cover startup PCM followed by an
+open throw, pre-adoption cancel, delayed readiness/close, final partial PCM,
+bounded overflow/partial frames, stale tickets/callbacks, cleanup retry,
+single-WAV bytes/RIFF lengths, immutable request snapshots and existing normal
+batch/live output. Additional fixtures drive the actual shared Windows
+serializer through held-open hold release, double-tap/single-tap stop, ready
+recording with later settings changes, cancellation before output resolution,
+close-before-drain, and an unchanged legacy-route control. The original 23
+method bodies remain intact across mechanically split files. They have
+**not been compiled or executed in this source-only
+slice**. This wiring is not native Windows SDK/Swift bridge, runtime, device,
+warm-capture or full-parity qualification. The native C ABI/worker and Linux
+healthy-terminal-tail authority are unchanged; production activation remains
+unselected pending separate review and exact-source gates.
 
 Automation is off by default. Settings → Allow automation starts a named-pipe
 server, `\\.\pipe\JustSpeakToIt-SpeakApp-automation-<user SID>`. It rejects
@@ -1128,11 +1205,11 @@ but must not be presented as the identical Apple-only engine or service.
 | Launch at login | General's switch: the HKCU Run value for the portable app (honouring Task Manager's startup switch) and a declared `windows.startupTask` for the MSIX; a login launch starts minimised; shared state, wording and status (`DesktopHostLoginItem`, `DesktopLoginItem`). The window self-test checks the switch; `--self-test` round-trips a Run value of its own, and inside the MSIX lifecycle round-trips the startup task. Compiled against the pinned Windows SDK and run under Wine locally (the registry path and window only) | Windows CI receipt for this revision, including the packaged startup task; a physical sign-in that starts the app minimised from each; Task Manager's and Settings' switches on Windows 10 and 11 |
 | Recording and file import | WASAPI PCM capture, native controls and file selection implemented | Physical microphones, device changes, permission denial, interruption and long-session recovery |
 | Batch transcription | All 31 static remote models through shared clients, plus shared OpenRouter discovery and native refresh | Final-head Windows/Linux CI, real provider receipts and supported formats/languages |
-| Live transcription | Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox, ElevenLabs, Mistral Voxtral, Gladia, Cartesia Ink-2, Rev.ai, two Azure Voice Live routes (to the saved resource endpoint) and the xAI dedicated speech-to-text model use shared clients and native WinHTTP (Gladia's session request is HTTPS); Grok Voice is not exposed | Final-head native host checks, Windows provider receipts including real xAI, Speechmatics, Soniox, ElevenLabs, Mistral, Gladia, Cartesia, Rev.ai and Azure streams (Cartesia's handshake and normal closure are confirmed over Apple URLSession only; Rev.ai's normal closure after `EOS` follows its documentation and reconnection tutorial but has no live receipt yet; Azure's commit and barrier acknowledgements have no live receipt for the shared client yet), and the remaining streaming providers: Google, Meta and Modulate |
+| Live transcription | Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox, ElevenLabs, Mistral Voxtral, Gladia, Cartesia Ink-2, Rev.ai, two Azure Voice Live routes (to the saved resource endpoint), xAI dedicated speech-to-text, Reson8, Google Gemini, Meta Muse and Modulate use shared clients and native WinHTTP (Gladia's session request is HTTPS); Grok Voice is not exposed | Final-head native host checks and Windows provider receipts, including real xAI, Speechmatics, Soniox, ElevenLabs, Mistral, Gladia, Cartesia, Rev.ai, Azure, Reson8, Google, Meta and Modulate streams. Cartesia's handshake and normal closure are confirmed over Apple URLSession only; Rev.ai's normal closure after `EOS` follows its documentation and reconnection tutorial but has no live receipt yet; Azure's commit and barrier acknowledgements have no live receipt for the shared client yet. Shared factory/protocol fixtures are not native-provider acceptance |
 | Global shortcut | Configurable Ctrl/Alt combination with conflict refusal, and all four activation styles: press-to-toggle natively; hold, double-tap and both through the shared SpeakCore gesture machine and session policy. Local Windows cross-compilation and portable gesture/policy tests pass; the native dialog, registration and release polling are covered by the window smoke test with fake registration and key state | Windows CI for this revision, physical keyboard acceptance of hold/double-tap timing, user-adjustable timing, the macOS host adopting the shared machine (it keeps its own `GestureDetector`), hands-free arming and Escape cancel |
 | Text output | Captured-field insertion: native Edit/RichEdit caret/selection replacement, UI Automation Value pattern for empty or fully selected fields, guarded history-excluded paste with clipboard restore and read-back verification, field-identity and password/read-only/elevation refusal; native Text output dialog for Smart, direct-only and clipboard-only output, replace-field and clipboard restoration; each recording keeps the choice read at its Record event; clipboard-only output also copies in-app recordings as an ordinary copy | Windows CI and physical keyboard/screen reader/DPI acceptance of the dialog, physical browser/Electron/Office/XAML acceptance, undo, streaming insertion and voice edit |
 | On-device transcription | Local batch recording and file import through a run-time loaded whisper.cpp 1.9.4 (best CPU variant, or Vulkan on any vendor's GPU when a driver is present). Four canonical Whisper entries (tiny, base, small, large-v3-turbo) are projected from the shared catalogue with pinned GGML files, sizes and SHA-256; the native Local models dialog downloads (resumable, atomic, verified), cancels, removes and sets the GPU choice. Source picker: Remote or Local, then Batch or Live; Local offers Batch only, so the Mode picker hides for it. Runtime DLLs are built from the pinned commit in CI and shipped in the bundle and MSIX with licence and provenance; the native job and the self-contained bundle transcribe the JFK sample with the tiny model | Windows CI receipt for this revision, local streaming, Hugging Face import, real Vulkan hardware (the runners have no GPU), CPU/GPU throughput and memory on physical PCs, and local post-processing |
-| Post-processing | Opt-in shared OpenRouter execution, canonical model selection and custom prompt; original and processed text retained separately; empty transcripts stay empty | Final-head Windows/Linux CI, real OpenRouter receipts, local execution, live polish and full Apple settings parity |
+| Post-processing | Separate Remote and Local choices: shared OpenRouter execution, built-in rules, and downloaded/imported local LLMs. Rendered model identifiers remain stable across native callbacks. Downloaded LLMs use the exact custom system prompt, output language and selected lexicon/context switches; built-in rules retain but do not apply those dormant controls. Local routes never use remote credentials or fall back to a cloud model. Original and processed text remain separate; empty transcripts stay empty | Combined-source compilation and regression gates, final-head Windows/Linux native UI and Apple compatibility, real OpenRouter receipts, provisioned local-runtime/model inference and cancellation/memory/performance acceptance, live polish and remaining Apple settings parity |
 | Personal vocabulary | Native Corrections/Pronunciation editors; shared durable CRUD, order, validation and preview; stored-candidate review/promotion/dismissal/removal/clear; canonical correction matching before post-processing in recording/import/retry/live completion; separately retained provider/corrected/processed text and applied/suggested snapshots; native History correction results; xAI/Azure batch and xAI/AssemblyAI live keyword hints | Final-head native/Apple CI and physical editing/recording/speech acceptance; OS-wide safe edit observation |
 | Profiles and settings | Native ordered per-app editor and shared validation; immutable recording overrides, model-specific live language hints and preserved unknown values | Final-head native UI, physical executable matching, remaining settings and lexicon overrides |
 | History | Native record selection, case/diacritic-insensitive search over original/processed text and friendly model names, original/processed transcript selection for copy and export, retry, text export, external audio opening and in-app playback with Play/Pause, Stop and elapsed/remaining through Media Foundation and WASAPI; durable original/processed results and interrupted-recording recovery | Final-head UI smoke and device acceptance, physical speaker/Bluetooth/USB playback, history import and retention controls |
@@ -1152,6 +1229,12 @@ as explicit product decisions before claiming parity. They are not silently
 waived by a successful Swift build.
 
 ## On-device transcription
+
+The source now also provides explicit public Hugging Face GGML reference import
+and separate verified Download in the native Local models dialog. See
+[desktop Hugging Face imports](desktop-huggingface-import.md) for supported
+formats, provenance, persistence and the **unexecuted** regression/native-control
+evidence boundary. The earlier pinned-model receipts below do not qualify imports.
 
 Windows transcribes recordings and imported files without a network connection
 through [whisper.cpp](https://github.com/ggml-org/whisper.cpp) 1.9.4. It is

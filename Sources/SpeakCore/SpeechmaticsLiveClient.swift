@@ -81,7 +81,7 @@ public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClien
         model: String = SpeechmaticsRealtime.defaultModel,
         language: String? = nil,
         sampleRate: Int = 16_000,
-        keywords: [String] = [],
+        keywords: [String],
         makeConnection: @escaping ConnectionFactory,
         schedule: @escaping Scheduler = { seconds, action in
             DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
@@ -91,6 +91,29 @@ public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClien
         self.accuracyModel = SpeechmaticsRealtime.accuracyModel(from: model)
         self.language = language
         self.keywords = keywords
+        self.sampleRate = sampleRate
+        self.makeConnection = makeConnection
+        self.schedule = schedule
+        self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
+        self.run = SpeechmaticsLiveRun(sampleRate: sampleRate)
+        queue.setSpecific(key: queueKey, value: true)
+    }
+
+    /// Source-compatible overload preserved for callers predating keyword hints.
+    public init(
+        apiKey: String,
+        model: String = SpeechmaticsRealtime.defaultModel,
+        language: String? = nil,
+        sampleRate: Int = 16_000,
+        makeConnection: @escaping ConnectionFactory,
+        schedule: @escaping Scheduler = { seconds, action in
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
+        }
+    ) {
+        self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.accuracyModel = SpeechmaticsRealtime.accuracyModel(from: model)
+        self.language = language
+        self.keywords = []
         self.sampleRate = sampleRate
         self.makeConnection = makeConnection
         self.schedule = schedule

@@ -17,7 +17,10 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     }
 
     package func voiceAccountContextIsCurrent(_ context: VoiceAccountCredentialContext) -> Bool {
-        !closed && voiceDiscovery.modern && voiceDiscovery.context == context
+        let regionMatches = context.provider != .soniox
+            || (voiceDiscovery.sonioxRegion != nil
+                && voiceDiscovery.sonioxRegion == (try? voiceOutputSettings().validatedSonioxRegion()))
+        return !closed && regionMatches && voiceDiscovery.modern && voiceDiscovery.context == context
             && sameVoiceDialog(context.sessionID.uuidString)
     }
 
@@ -32,6 +35,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         if let current = voiceDiscovery.context { voiceDiscovery.retiredEpochs.insert(current.epoch) }
         cancelVoiceProviderCredentialWork(voiceDiscovery.context)
         voiceDiscovery.context = proposed
+        voiceDiscovery.sonioxRegion = try? voiceOutputSettings().validatedSonioxRegion()
         voiceDiscovery.modern = true
         voiceDiscovery.listing = nil
         voiceDiscovery.listingContext = nil
@@ -40,7 +44,12 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         voiceDiscovery.task?.cancel()
         cancelAccountVoiceWork()
         presentVoiceAccountProviders()
-        presentVoiceDiscovery("Provider selected for this dialog only. Set its key and Refresh, then Pick "
+        let regionNotice = proposed.provider == .soniox
+            ? "Soniox region: \(voiceDiscovery.sonioxRegion?.displayName ?? "unsupported stored region"). "
+                + "Change it in Voice Output preferences before opening this dialog. Use its matching project key. "
+            : ""
+        presentVoiceDiscovery(
+            regionNotice + "Provider selected for this dialog only. Set its key and Refresh, then Pick "
             + "a listed voice to save the model and voice together. Source text is not sent by listing.",
             loading: voiceAccountWorkIsPending)
     }
@@ -55,8 +64,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         guard !closed, let context = voiceDiscovery.context else { return }
         voiceDiscovery.message = message
         let inventory = voiceDiscovery.listingContext == context ? voiceDiscovery.listing : nil
-        let presets = context.provider.hasDocumentedPresets
-            ? XAITTSCatalog.voices.map(DesktopSpeechVoice.xai) : []
+        let presets = context.provider.documentedPresets
         let voices = presets + (inventory?.desktopVoices ?? [])
         voiceDiscovery.offeredIDs = loading ? [] : voices.map(\.id)
         let settings = voiceOutputSettings()
@@ -68,9 +76,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
 
     package func refreshVoiceAccountDiscovery(
         _ epoch: String,
-        fetch: @escaping DesktopVoiceAccountFetcher = { context, key in
-            try await .fetch(provider: context.provider, context: context, credential: { key })
-        }
+        fetch: DesktopVoiceAccountFetcher? = nil
     ) {
         guard let context = voiceDiscovery.context, voiceAccountContextIsCurrent(context),
               UUID(uuidString: epoch) == context.epoch else { return }
@@ -78,6 +84,10 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             presentVoiceDiscovery("Previous account or key work is still closing. Retry when it finishes.",
                 loading: true)
             return
+        }
+        let region = voiceDiscovery.sonioxRegion ?? .unitedStates
+        let fetch: DesktopVoiceAccountFetcher = fetch ?? { context, key in
+            try await .fetch(provider: context.provider, context: context, sonioxRegion: region, credential: { key })
         }
         presentVoiceDiscovery("Listing \(context.provider.displayName) account voices. Source text is not sent.",
             loading: true)
@@ -89,24 +99,8 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 self.settleVoiceAccountPresentation()
             }
             do {
-                let slot = try VoiceOutputCredentialSlot(provider: context.provider)
-                let key = try await self.readVoiceAccountKey(slot)
-                try Task.checkCancellation()
-                guard self.voiceAccountContextIsCurrent(context) else { return }
-                let inventory = try await fetch(context, key)
-                try Task.checkCancellation()
-                guard self.voiceAccountContextIsCurrent(context) else { return }
-                guard inventory.provider == context.provider, inventory.matchesCredential(key),
-                      inventory.mistral == nil || inventory.mistral?.context == context else {
-                    throw VoiceAccountDiscoveryError.invalidInventory(context.provider)
-                }
-                let currentKey = try await self.readVoiceAccountKey(slot)
-                try Task.checkCancellation()
-                guard self.voiceAccountContextIsCurrent(context) else { return }
-                guard inventory.matchesCredential(currentKey) else {
-                    self.voiceDiscovery.inventories[context.provider] = nil
-                    throw VoiceOutputCredentialError.destinationChanged
-                }
+                guard let inventory = try await self.fetchVoiceAccountInventory(context, region: region, fetch: fetch)
+                    else { return }
                 self.voiceDiscovery.inventories[context.provider] = inventory
                 self.voiceDiscovery.listing = inventory
                 self.voiceDiscovery.listingContext = context
@@ -119,6 +113,32 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                     : "Listing failed: \(error.localizedDescription)", loading: false)
             }
         }
+    }
+
+    private func fetchVoiceAccountInventory(
+        _ context: VoiceAccountCredentialContext, region: SonioxTTSRegion, fetch: DesktopVoiceAccountFetcher
+    ) async throws -> VoiceAccountInventory? {
+        let slot = try VoiceOutputCredentialSlot(provider: context.provider)
+        let key = try await readVoiceAccountKey(slot)
+        try Task.checkCancellation()
+        guard voiceAccountContextIsCurrent(context) else { return nil }
+        let inventory = try await fetch(context, key)
+        try Task.checkCancellation()
+        guard voiceAccountContextIsCurrent(context) else { return nil }
+        guard inventory.provider == context.provider, inventory.matchesCredential(key),
+              inventory.mistral == nil || inventory.mistral?.context == context,
+              inventory.soniox == nil
+                || (inventory.soniox?.context == context && inventory.soniox?.region == region) else {
+            throw VoiceAccountDiscoveryError.invalidInventory(context.provider)
+        }
+        let currentKey = try await readVoiceAccountKey(slot)
+        try Task.checkCancellation()
+        guard voiceAccountContextIsCurrent(context) else { return nil }
+        guard inventory.matchesCredential(currentKey) else {
+            voiceDiscovery.inventories[context.provider] = nil
+            throw VoiceOutputCredentialError.destinationChanged
+        }
+        return inventory
     }
 
     package func chooseVoiceAccountVoice(_ identifier: String, epoch: String) {
@@ -135,9 +155,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 self.settleVoiceAccountPresentation()
             }
             do {
-                let model = context.provider == .mistral
-                    ? MistralTTSCatalog.voiceIDPrefix + MistralTTSCatalog.defaultModel.id
-                    : XAITTSCatalog.providerIdentifier
+                let model = context.provider.modelIdentifier
                 let voice = try DesktopSpeechVoice.resolved(
                     modelID: model, voiceID: identifier, accountInventory: inventory)
                 if let inventory {
@@ -190,6 +208,9 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         _ selection: DesktopSpeechSelection?, ticket: DesktopPlaybackRequests.Ticket
     ) -> DesktopVoiceSynthesisOwnership {
         voiceAccountOutputTicket = nil
+        if let selection, case .soniox = selection.voice { voiceDiscovery.sonioxOutputTicket = ticket } else {
+            voiceDiscovery.sonioxOutputTicket = nil
+        }
         guard let selection else { return .none }
         voiceSynthesisWorkers += 1
         guard !DesktopSpeechVoice.voices.contains(selection.voice) else { return .ordinary }

@@ -8,6 +8,13 @@ extension DesktopHostController {
         textOutput: Platform.TextOutputOptions, trigger: HotKeySessionTrigger = .other,
         handsFree: DesktopHandsFreeRun<Platform>? = nil
     ) async throws {
+        if handsFree == nil, let capability = ownedDictationCapability {
+            try await startOwnedDictation(
+                target: target, deviceID: deviceID, profile: profile,
+                textOutput: textOutput, trigger: trigger, capability: capability
+            )
+            return
+        }
         let key = try requireCredentialOrLocalModel(profile.modelIdentifier)
         try requireAzureResource(forLive: profile.modelIdentifier)
         // Holds a profile's or the app's on-device model while startup suspends;
@@ -130,7 +137,7 @@ extension DesktopHostController {
         )
     }
 
-    private func saveStartupFailure(
+    func saveStartupFailure(
         _ startupFailure: Error, record: DesktopRecordingStore.Record, file: PCMRecordingFile
     ) async throws {
         // Always close the WAV, including failure before native allocation.
@@ -165,6 +172,10 @@ extension DesktopHostController {
     }
 
     func stopForSilence(recordingID: UUID) async {
+        if ownedDictation?.id == recordingID {
+            await stopOwnedDictation(requestID: recordingID)
+            return
+        }
         while busy {
             guard !closed, recording?.record.id == recordingID else { return }
             try? await Task.sleep(for: .milliseconds(10))

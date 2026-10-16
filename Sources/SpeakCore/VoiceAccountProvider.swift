@@ -5,11 +5,27 @@ public struct VoiceAccountProvider: Hashable, Identifiable, Sendable {
     private let provider: LiveTranscriptionProviderID
     public static let xai = Self(.xai)
     public static let mistral = Self(.mistral)
-    public static let all = [xai, mistral]
+    public static let soniox = Self(.soniox)
+    public static let all = [xai, mistral, soniox]
 
     public var id: String { provider.rawValue }
     public var displayName: String { provider.displayName }
-    public var hasDocumentedPresets: Bool { self == .xai }
+    public var hasDocumentedPresets: Bool { !documentedPresets.isEmpty }
+    public var documentedPresets: [DesktopSpeechVoice] {
+        if self == .xai { return XAITTSCatalog.voices.map(DesktopSpeechVoice.xai) }
+        if self == .soniox {
+            return SonioxTTSCatalog.voices.map {
+                .soniox(SonioxTTSCatalog.resolvedVoice(voiceID: $0.providerVoiceID, accountVoices: []))
+            }
+        }
+        return []
+    }
+
+    public var modelIdentifier: String {
+        if self == .soniox { return SonioxTTSCatalog.defaultModel.rawValue }
+        if self == .mistral { return MistralTTSCatalog.defaultModel.desktopModelIdentifier }
+        return XAITTSCatalog.providerIdentifier
+    }
 
     private init(_ provider: LiveTranscriptionProviderID) { self.provider = provider }
 

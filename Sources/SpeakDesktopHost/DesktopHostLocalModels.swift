@@ -45,6 +45,10 @@ package extension DesktopHostPlatform where ReadAloudState == Void {
 }
 
 package extension DesktopHostPlatform {
+    static func loadLocalModels(directory: URL) throws -> LocalModelsState { makeLocalModelsState() }
+
+    static func cancelLocalModels(controller: isolated DesktopHostController<Self>) {}
+
     static var localDeviceName: String { "this computer" }
 
     static func localReadiness(_ model: String, controller: isolated DesktopHostController<Self>) -> String? {

@@ -28,13 +28,22 @@ public struct ElevenLabsBatchClient: TranscriptionProvider {
     public init(
         session: URLSession = .shared,
         staging: SharedMultipartUploadStaging? = nil,
-        keywords: [String] = [],
+        keywords: [String],
         durationResolver: @escaping @Sendable (URL) async throws -> TimeInterval = { _ in 0 }
     ) {
         self.session = session
         self.staging = staging
         self.keywords = keywords
         self.durationResolver = durationResolver
+    }
+
+    /// Source-compatible overload preserved for callers predating keyword hints.
+    public init(
+        session: URLSession = .shared,
+        staging: SharedMultipartUploadStaging? = nil,
+        durationResolver: @escaping @Sendable (URL) async throws -> TimeInterval = { _ in 0 }
+    ) {
+        self.init(session: session, staging: staging, keywords: [], durationResolver: durationResolver)
     }
 
     public func transcribeFile(

@@ -33,13 +33,22 @@ int32_t jsti_hands_free_guard_self_test(char *error, size_t capacity);
 /* LinuxLocalModels.c: the Local models group, built once with the window,
  * and its part of the window self-test. */
 struct _GtkWidget *jsti_local_models_group_new(void);
+struct _GtkWidget *jsti_local_cleanup_group_new(void);
 int32_t jsti_local_models_self_test(char *error, size_t capacity);
+void jsti_model_filters_add(struct _GtkWidget *group, void (*changed)(gboolean local, gboolean live));
+void jsti_model_filters_select(gboolean local, gboolean live);
+void jsti_model_filters_set_idle(gboolean idle);
+gboolean jsti_model_filters_local(void);
+gboolean jsti_model_filters_live(void);
+int32_t jsti_model_filters_self_test(char *error, size_t capacity);
 
 /* The iCloud sync group (LinuxCloudSync.c): built once for the window's
  * iCloud sync page, and exercised by the window self-test. */
 struct _GtkWidget *jsti_cloud_sync_group_new(void);
 int32_t jsti_cloud_sync_self_test(char *error, size_t capacity);
 struct _GtkWidget *jsti_history_filters_button_new(void);
+struct _GtkWidget *jsti_profiles_page_new(void);
+int32_t jsti_profiles_self_test(char *error, size_t capacity);
 int32_t jsti_history_filters_self_test(char *error, size_t capacity);
 gboolean jsti_history_filters_active(void);
 

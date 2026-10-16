@@ -4,6 +4,8 @@ import Foundation
 public enum SpeechDefaults {
     public static let temperature = 0.2
     public static let outputLanguage = "English"
+    public static let postProcessingIncludeLexiconDirectives = true
+    public static let postProcessingIncludeContextTags = true
     public static let liveStopGracePeriod = 0.0
     public static let recordingTailDuration = 0.5
     public static let voiceCommandsEnabled = true
@@ -140,7 +142,7 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
         .init(key: ApplicationPreferenceKey.recordingSoundVolume.rawValue, title: "Recording sound volume (0 to 1)",
               group: "General", kind: .number(0...1),
               defaultValue: AnyCodable(.double(RecordingFeedbackDefaults.volume)))
-    ]
+    ] + SonioxVoicePreference.fields
 
     public private(set) var values: [String: AnyCodable]
 
@@ -171,6 +173,9 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
                 valid = text.utf8.count <= 65_535 && !text.contains("\0")
             case (.choice(let choices), .string(let text)):
                 valid = choices.contains { $0.value == text }
+                    || (field.key == SonioxVoicePreference.regionKey
+                        && text.utf8.count <= 256
+                        && !text.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains))
             case (.boolean, .bool): valid = true
             case (.number(let range), .double(let number)): valid = number.isFinite && range.contains(number)
             case (.number(let range), .int(let number)): valid = range.contains(Double(number))

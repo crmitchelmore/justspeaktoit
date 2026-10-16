@@ -634,17 +634,21 @@ def verify_bundle(bundle_dir, expected_commit=None):
                     or any(name not in pinned["requiredModules"] and not (variant and variant.fullmatch(name))
                            for name in local_names)):
                 raise PackageError("bundle local runtime differs from the architecture's pinned modules")
+        local_llm = BUNDLE.verify_local_llm_payload(
+            entries, (manifest.get("sources") or {}).get("localLLMRuntime"), architecture)
+        local_names = list(local_names) + (["llama.dll"] if local_llm else [])
         closure_policy = BUNDLE.Policy(policy.data, local_names)
 
         def read_imports(name, category):
-            if name not in entries:
+            path = BUNDLE.local_llm_library_path(name, local_llm)
+            if path not in entries:
                 raise PackageError("bundled runtime module is missing: " + name)
-            image = images.get(name) or windows_pe.PEImage(entries[name], name)
+            image = images.get(name) or windows_pe.PEImage(entries[path], name)
             if category != "application":
                 if not image.runs_natively_on(architecture) or not image.is_dll:
                     raise PackageError("%s is not a native %s DLL (it is %s)" % (
                         name, architecture, image.architecture))
-                if rows[name].get("source") != category:
+                if rows[path].get("source") != category:
                     raise PackageError("runtime source attribution differs for " + name)
             return image.imports(), image.delay_imports()
 
@@ -653,7 +657,8 @@ def verify_bundle(bundle_dir, expected_commit=None):
         if (any(dependencies.get(key) != closure[key] for key in ("bundled", "system", "roots"))
                 or dependencies.get("additionalRuntimeModules") != policy.additional):
             raise PackageError("bundle multi-root dependency closure or importer attribution differs from its PEs")
-        expected_images = set(BUNDLE.EXECUTABLES) | {entry["name"] for entry in closure["bundled"].values()}
+        expected_images = set(BUNDLE.EXECUTABLES) | {
+            BUNDLE.local_llm_library_path(entry["name"], local_llm) for entry in closure["bundled"].values()}
         shipped_images = {name for name in entries if name.lower().endswith((".exe", ".dll"))}
         if shipped_images != expected_images:
             raise PackageError("bundle images differ from the exact production multi-root closure")

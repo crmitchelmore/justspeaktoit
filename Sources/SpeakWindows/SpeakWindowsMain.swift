@@ -15,6 +15,7 @@ final class WindowsEventContext {
     private let historyEvents: DesktopEventDispatcher<DesktopHistoryEvent>
     private let copies: DesktopTranscriptCopyDispatcher
     private let settings = DesktopSettingsQueue()
+    let postProcessingPicker = DesktopPostProcessingPicker()
     lazy var hotKeys = WindowsHotKeyGestures { [controller] request in await controller.hotKey(request) }
     lazy var automation = WindowsAutomationSwitch(controller: controller)
     lazy var profiles = WindowsProfilesCoordinator { [weak self] profiles in
@@ -197,25 +198,6 @@ private func ready(_ holder: WindowsEventContext) {
         }
     } catch { holder.smokeTestFailure = error }
     jsti_window_request_close()
-}
-
-func postProcessingEvent(
-    _ enabled: Int32, _ index: Int32, _ prompt: UnsafePointer<CChar>?,
-    _ newKey: UnsafePointer<CChar>?, _ context: UnsafeMutableRawPointer?
-) {
-    guard let context else { return }
-    let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
-    let prompt = prompt.map(String.init(cString:)) ?? ""
-    let key = newKey.map(String.init(cString:)) ?? ""
-    holder.enqueueSettings {
-        await holder.controller.savePostProcessing(
-            enabled: enabled != 0, modelIndex: Int(index), prompt: prompt, key: key
-        )
-        let saved = await holder.controller.postProcessingOptions()
-        do {
-            try WindowsNative.configurePostProcessing(saved, context: Unmanaged.passUnretained(holder).toOpaque())
-        } catch { WindowsNative.update(error.localizedDescription) }
-    }
 }
 
 private func secondaryWindowEvent(_ event: Int32, value: String, index: Int, holder: WindowsEventContext) {

@@ -6,6 +6,16 @@ import SpeakWindowsPlatform
 import CWindowsSupport
 
 struct WindowsNativeEffects: WindowsControllerEffects {
+    /// Deliberately not selected by Main. The caller must supply actual native
+    /// qualification and permission evidence, not a saved setting.
+    static func ownedDictationCapability(
+        capability: DesktopPressCaptureCapability, permission: DesktopPressCapturePermission
+    ) -> DesktopHostOwnedDictationCapability {
+        DesktopHostOwnedDictationCapability(capability: capability, permission: permission) {
+            DesktopOwnedCaptureWorker(factory: WindowsOwnedCaptureDriverFactory())
+        }
+    }
+
     func apiKey(name: String) throws -> String { try WindowsNative.apiKey(name: name) }
 
     func makeCapture(

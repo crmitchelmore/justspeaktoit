@@ -103,7 +103,13 @@ final class DesktopRecordingLocationsTests: XCTestCase {
         ), category: .history, audioFilename: original.audioFilename)
         XCTAssertNil(imported.localAudio)
         XCTAssertEqual(imported.migrationMetadata, foreignValue)
-        XCTAssertEqual(try DesktopMigrationHistory.value(imported), foreignValue)
+        // The raw forged value is retained verbatim in migrationMetadata (asserted above), but the
+        // portable export never re-exposes a localAudio claim, forged or genuine: strip it here too.
+        var sanitizedFields = fields
+        sanitizedFields.removeValue(forKey: "localAudio")
+        var sanitizedOuter = outer
+        sanitizedOuter["desktopHistory"] = .object(sanitizedFields)
+        XCTAssertEqual(try DesktopMigrationHistory.value(imported), AnyCodable(.object(sanitizedOuter)))
         do {
             _ = try await store.audioURL(for: imported)
             XCTFail("A colliding imported ID must resolve only in History, where audio is absent.")

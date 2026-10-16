@@ -189,7 +189,14 @@ public enum DesktopProfileEditing {
     ) -> DictationProfile {
         var profile = original ?? DictationProfile(id: draft.id ?? UUID(), name: "")
         profile.name = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        profile = profile.replacingWindowsExecutablePaths(cleanedPaths(draft.executablePaths))
+        // Only rewrite the Windows matchers when they actually changed. Always
+        // replacing them would move them to the end of `matchers` even when a
+        // different platform's editor (e.g. Linux) is the one making an edit,
+        // reordering relative to any matcher it had already appended.
+        let windowsPaths = cleanedPaths(draft.executablePaths)
+        if windowsPaths != (original?.windowsExecutablePaths ?? []) {
+            profile = profile.replacingWindowsExecutablePaths(windowsPaths)
+        }
 
         applyTranscription(draft, to: &profile, original: original, catalogue: catalogue)
 

@@ -109,7 +109,11 @@ final class DesktopConfigurationTests: XCTestCase {
                 for choice in choices {
                     XCTAssertNoThrow(try DesktopConfiguration(values: [field.key: AnyCodable(.string(choice.value))]))
                 }
-                XCTAssertThrowsError(try DesktopConfiguration(values: [field.key: AnyCodable(.string("invalid"))]))
+                // The Soniox region field intentionally preserves unknown strings (e.g. a custom
+                // project key) across transfer instead of rejecting them; see SonioxVoicePreference.
+                if field.key != SonioxVoicePreference.regionKey {
+                    XCTAssertThrowsError(try DesktopConfiguration(values: [field.key: AnyCodable(.string("invalid"))]))
+                }
                 XCTAssertThrowsError(try DesktopConfiguration(values: [field.key: AnyCodable(.int(1))]))
             }
         }

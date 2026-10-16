@@ -56,7 +56,14 @@ final class DesktopHostVoiceCommandConfigTests: XCTestCase {
         XCTAssertTrue(VoiceCommandProcessor.containsClipboardCommand(in: "copy pasta", customTriggers: ""))
         try await second.importConfiguration(path: exported.path)
         let imported = try await second.configuration()
-        XCTAssertEqual(imported, restored)
+        // exportConfiguration always losslessly stamps the active post-processing model (even when
+        // unchanged) so a cloud model survives a round trip without being silently dropped; importing
+        // it back therefore adds this one key relative to the pre-transfer `restored` configuration.
+        let expected = try DesktopConfiguration(values: restored.values.merging(
+            [ApplicationPreferenceKey.postProcessingModel.rawValue:
+                AnyCodable(.string(ModelCatalog.defaultPostProcessingModel))]
+        ) { _, new in new })
+        XCTAssertEqual(imported, expected)
         XCTAssertEqual(effects.reads, 0, "Transfer must not read the clipboard or execute voice commands")
         await second.close()
     }

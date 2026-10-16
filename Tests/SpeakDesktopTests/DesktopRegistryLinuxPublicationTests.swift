@@ -140,7 +140,11 @@ final class DesktopRegistryLinuxPublicationTests: XCTestCase {
     }
 
     func testActualProcfsDoesNotSupportAnonymousAllocation() throws {
-        XCTAssertNotEqual(geteuid(), 0)
+        // Root bypasses the permission checks this precondition relies on (e.g. in a
+        // container runner), which would make the "unsupported" detection unverifiable.
+        guard geteuid() != 0 else {
+            throw XCTSkip("Requires a non-root process; root can bypass procfs permission checks.")
+        }
         let directory = open("/proc/\(getpid())/fd", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
         XCTAssertGreaterThanOrEqual(directory, 0)
         defer { XCTAssertEqual(Glibc.close(directory), 0) }

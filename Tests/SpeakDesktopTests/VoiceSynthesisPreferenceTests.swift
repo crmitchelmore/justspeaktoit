@@ -19,8 +19,11 @@ final class VoiceSynthesisPreferenceTests: XCTestCase {
         }
         XCTAssertEqual(speed, VoiceSynthesisOptions.speedRange)
         XCTAssertEqual(pitch, VoiceSynthesisOptions.pitchRange)
+        // Scoped to the synthesis-only transfer keys this test covers (speed/pitch/SSML),
+        // not the broader voiceTransferKeys: Soniox's region/language keys are
+        // intentionally both native settings rows and voice-owned transfer keys.
         XCTAssertTrue(Set(DesktopConfiguration.fields.map(\.key))
-            .isDisjoint(with: DesktopConfiguration.voiceTransferKeys))
+            .isDisjoint(with: DesktopConfiguration.voiceSynthesisTransferKeys))
     }
 
     func testUpdate_PreservesAbsenceAndAcceptsExactNumericBoundaries() throws {

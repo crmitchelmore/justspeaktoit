@@ -138,7 +138,7 @@ jobs:
             tee "$RUNNER_TEMP/windows-runtime-bundle/bootstrap.log"
       - name: Upload self-contained runtime bundle
         if: always()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: windows-runtime-bundle
           path: ${{ runner.temp }}/windows-runtime-bundle/
@@ -146,7 +146,7 @@ jobs:
           retention-days: 14
       - name: Upload Mac-built Windows app and tests
         if: always()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: macos-built-windows-app
           path: ${{ runner.temp }}/windows-app-cross/
@@ -154,7 +154,7 @@ jobs:
           retention-days: 14
       - name: Upload proof and build evidence
         if: always()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: foundation-windows-cross-proof
           path: ${{ runner.temp }}/foundation-proof/
@@ -276,7 +276,7 @@ jobs:
           if ($failures.Count) { throw ($failures -join '; ') }
       - name: Upload Mac-built app execution evidence
         if: always()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: macos-built-windows-runtime-evidence
           path: |
@@ -286,7 +286,7 @@ jobs:
           retention-days: 14
       - name: Upload Windows execution evidence
         if: always()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: foundation-windows-runtime-evidence
           path: proof/windows-*.log
@@ -332,7 +332,7 @@ jobs:
             -LocalModelDirectory (Join-Path $env:GITHUB_WORKSPACE 'local-models')
       - name: Upload bundle execution evidence
         if: always()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: windows-runtime-bundle-execution-evidence
           path: ${{ runner.temp }}/bundle-run/evidence/
@@ -382,7 +382,7 @@ jobs:
               -ToolCache (Join-Path $env:RUNNER_TEMP 'packaging-tools')
           }
       - name: Upload the unsigned developer package
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: windows-developer-msix-unsigned
           path: |
@@ -424,7 +424,7 @@ jobs:
             -Workspace (Join-Path $env:RUNNER_TEMP 'package-admission-control')
       - name: Upload lifecycle evidence
         if: always()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: windows-developer-msix-lifecycle-evidence
           path: |
@@ -517,7 +517,7 @@ jobs:
             -ToolCache (Join-Path $env:RUNNER_TEMP 'packaging-tools')
       - name: Upload the signed developer package
         if: ${{ steps.config.outputs.enabled == 'true' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-developer-msix-signed
           path: |

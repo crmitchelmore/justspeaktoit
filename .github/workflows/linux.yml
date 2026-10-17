@@ -170,7 +170,7 @@ jobs:
 
       - name: Upload window snapshot
         if: always()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: linux-window-snapshot
           path: ${{ runner.temp }}/linux-window.png
@@ -178,7 +178,7 @@ jobs:
 
       - name: Upload page screenshots
         if: always()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: linux-ui-screenshots
           path: ${{ runner.temp }}/linux-ui-screenshots

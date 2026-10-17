@@ -9,16 +9,37 @@ shortcut and delivering transcription while Speak is not the frontmost app.
   Speak window or status item being active.
 - The Fn key uses an event tap/global monitor and requires Input Monitoring.
   The tap is re-enabled when macOS disables it, and the app reconnects after
-  activation, wake, and session unlock.
+  idle activation, wake, and session unlock. Activation during a recording or
+  held trigger does not reconnect the backend or end capture; a delayed
+  activation recovery also leaves a newly started recording alone. Blocked
+  activation recovery resumes once dictation, the held trigger and Voice Edit
+  are all idle; manual reconnect, monitoring stop and binding changes retire it.
+- **Settings > Keyboard > Activation > Cancel recording with Escape** is on by
+  default. Turn it off to keep dictating when you press Escape in any app.
+  Changes apply immediately, including during a recording. The system-wide
+  Escape listener runs only while enabled for dictation or needed by Voice Edit;
+  Voice Edit cancellation is independent of this dictation preference.
 - The status item is a diagnostic and recovery surface. It displays the selected
   binding and backend state and provides **Reconnect Hotkey**; creating a status
   item does not itself make a shortcut global.
 - A transcription session captures the frontmost process and focused
-  accessibility element before the HUD appears. Direct builds deliver to that
+  accessibility element before the HUD appears. Direct builds default to that
   captured target, even if focus changes during transcription or post-processing.
+  With **Insert into the app you're in now**, switching apps does not interrupt
+  recording; after stopping, delivery resolves the app and field in front when
+  the transcript is ready. If that redirected destination changes again before
+  insertion, delivery falls back to the clipboard rather than typing elsewhere.
 - Mac App Store builds remain clipboard-only. App Sandbox does not allow the
   accessibility and cross-process event-injection behavior used by the direct
   build, so the app must not claim automatic insertion for that channel.
+
+## Settings navigation
+
+Every settings destination has an app-local shortcut. General through
+Permissions retain **⌘1–⌘8**. Compare Models uses **⌘9**, Data & Migration
+**⌘0**, About **⌘-**, and Profiles **⌘+** (**⌘⇧=** on the main keyboard).
+Sidebar hints, menus, and Keyboard settings derive from the same bindings.
+Upgrades migrate the previous shipped defaults; customized shortcuts stay intact.
 
 ## Release validation
 
@@ -30,6 +51,10 @@ Treat these as separate gates:
 3. In the direct signed app, grant Input Monitoring and Accessibility. Start a
    recording from TextEdit with the Speak window unfocused, change focus during
    transcription, and verify output returns to the original field.
+   Repeat with **Insert into the app you're in now**, switching apps during a
+   held recording and after stopping. Capture must continue until the trigger is
+   released, and delivery must target the current app. Check Escape with its
+   cancellation toggle both on and off.
 4. Sleep/wake and lock/unlock the Mac. Confirm the status menu returns to
    `Hotkey: <binding> · Active`; use **Reconnect Hotkey** if macOS disabled the
    backend.

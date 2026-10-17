@@ -166,8 +166,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
         return "The transcript goes to the app and field where you started recording, "
           + "even if you've moved to another app. The app you're in now is left alone."
       case .currentApp:
-        return "The transcript follows you: it goes into whichever app and field you're using "
-          + "when it's ready."
+        return "Recording continues when you switch apps. The transcript follows you: it goes into "
+          + "whichever app and field you're using when it's ready."
       case .onlyIfOriginalAppInFront:
         return "The transcript is only inserted if the app where you started recording is still "
           + "in front. Otherwise nothing is typed anywhere and it's kept on the clipboard for you to paste."
@@ -328,6 +328,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case runAtLogin
     case recordingsDirectory
     case hotKeyActivation
+    case cancelRecordingOnEscape
     case holdThreshold
     case doubleTapWindow
     case trackedKeyIdentifiers
@@ -700,6 +701,10 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   /// started by the time the transcript is ready. Defaults to the original app.
   @Published var appSwitchDelivery: AppSwitchDelivery {
     didSet { store(appSwitchDelivery.rawValue, key: .appSwitchDelivery) }
+  }
+
+  @Published var cancelRecordingOnEscape: Bool {
+    didSet { store(cancelRecordingOnEscape, key: .cancelRecordingOnEscape) }
   }
 
   @Published var showHUDDuringSessions: Bool {
@@ -1309,6 +1314,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     appSwitchDelivery =
       defaults.string(forKey: DefaultsKey.appSwitchDelivery.rawValue)
         .flatMap(AppSwitchDelivery.init(rawValue:)) ?? .originalApp
+    cancelRecordingOnEscape =
+      defaults.object(forKey: DefaultsKey.cancelRecordingOnEscape.rawValue) as? Bool ?? true
     showHUDDuringSessions = defaults.object(forKey: DefaultsKey.showHUD.rawValue) as? Bool ?? true
     showLiveTranscriptInHUD =
       defaults.object(forKey: DefaultsKey.showLiveTranscriptInHUD.rawValue) as? Bool ?? true
@@ -1537,6 +1544,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     self.accessibilityInsertionMode = restored.accessibilityInsertionMode
     self.restoreClipboardAfterPaste = restored.restoreClipboardAfterPaste
     self.appSwitchDelivery = restored.appSwitchDelivery
+    self.cancelRecordingOnEscape = restored.cancelRecordingOnEscape
     self.showHUDDuringSessions = restored.showHUDDuringSessions
     self.showLiveTranscriptInHUD = restored.showLiveTranscriptInHUD
   }

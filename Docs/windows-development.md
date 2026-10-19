@@ -1184,6 +1184,40 @@ limitation rather than inventing wire fields. Native Windows strict metadata
 viability and actual Apple execution remain separate qualification requirements;
 unsupported platform identity must error, never fall back to weaker reads.
 
+`DesktopNativeSourceDocumentCodec` is a separate pure, opt-in **local evidence**
+codec, not an exporter, importer, retained-store admission or source reader.
+Its closed source is `desktopVocabularyPreferences`: desktop application-data
+root, fixed `vocabulary.json`, Windows/Linux provenance and exact
+`native-source/<platform>/vocabulary.json` identity. The separate
+`nativeSourceDocument` vocabulary kind is rejected by the existing canonical Mac
+vocabulary validator; it is not a settings field, Mac default or profile.
+
+The entire original file, including unknown members, is potentially sensitive
+user content. No credential exclusion/classification or content scanning is
+performed. Every codec operation requires explicit sensitive-content opt-in.
+Future unencrypted backup integration must warn that sensitive text or secrets
+may be included and must never imply that secrets were excluded. That UI,
+integration, target admission and mutation authority are not implemented here.
+
+Version-1 evidence binds closed headers and preserves presence separately from
+base64-encoded exact bytes. Missing, empty, malformed, BOM-bearing or unknown
+JSON content remain distinct opaque evidence; source content is never decoded,
+normalized or reencoded. Evidence and projections always deny apply/backup and
+complete-category authority. Exact-ID scope remains explicitly partial.
+Combined raw bytes plus encoded archive JSON, including base64 overhead, must
+fit the shared 128,000,000-byte budget; oversized representation is refused,
+never truncated. Source receipts remain read-only evidence, never CAS.
+
+Internal `JSONMemberPreflight` extracts the exact state machine from Settings
+commit `86a0568b`, scanner blob `6051688578a75c72b6b9144f46cfc62cf16b6fe9`.
+Every adapter supplies byte, depth, token, root-record, per-object key,
+encoded-key-span and cancellation-stride bounds plus its guard diagnostic.
+Decoded escaped keys are checked for duplicates before Foundation can collapse
+them. This is member preflight, not grammar/schema validation; those checks
+remain in each codec. Only carrier JSON is scanned, never decoded source bytes.
+The frozen Settings scanner is not changed here; deduplication is not complete
+until its separately selected thin adapter delegates to the qualified helper.
+
 `DataMigrationArchivePolicy` also centralizes the existing Mac archive path,
 entry/total/JSON-size, duplicate-path, manifest and staging-capacity rules.
 Mac ZIP reads use this policy; portable tests exercise exact limits without

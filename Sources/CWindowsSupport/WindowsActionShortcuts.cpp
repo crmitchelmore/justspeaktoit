@@ -588,7 +588,7 @@ bool parseRow(const JSTIActionShortcut &source, Row &row, bool keysOnly) {
     case JSTI_ACTION_RUN_COMPARE: case JSTI_ACTION_RUN_QUICK_VOICE_1: case JSTI_ACTION_RUN_QUICK_VOICE_2:
     case JSTI_ACTION_RUN_QUICK_VOICE_3: case JSTI_ACTION_RUN_PASTE_LAST_HISTORY:
     case JSTI_ACTION_RUN_SPEAK_SELECTED_TEXT: case JSTI_ACTION_RUN_SPEAK_CLIPBOARD:
-    case JSTI_ACTION_RUN_TROUBLESHOOTING: break;
+    case JSTI_ACTION_RUN_TROUBLESHOOTING: case JSTI_ACTION_RUN_VOICE_EDIT: break;
     case JSTI_ACTION_RUN_PAGE:
         if (!source.page || !*source.page || std::strlen(source.page) > 64) return false;
         row.page = source.page;

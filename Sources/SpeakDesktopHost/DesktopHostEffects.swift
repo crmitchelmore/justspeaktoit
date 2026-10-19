@@ -86,6 +86,7 @@ package protocol DesktopHostEffects<Platform>: Sendable {
     func polishLive(
         text: String, model: String, key: String, localLLM: (any DesktopLocalLLMEngine)?
     ) async throws -> String
+    func rewriteSelection(_ request: DesktopVoiceEdit.Request, key: String) async throws -> String
     /// Replaces the settings file atomically.
     func writeSettings(_ data: Data, to url: URL) throws
     /// Idle preparation that never opens the microphone; nil where unsupported.
@@ -95,6 +96,10 @@ package protocol DesktopHostEffects<Platform>: Sendable {
 }
 
 package extension DesktopHostEffects {
+    func rewriteSelection(_ request: DesktopVoiceEdit.Request, key: String) async throws -> String {
+        try await DesktopVoiceEdit.rewrite(request, apiKey: key)
+    }
+
     func prepareCaptureWhileIdle(
         deviceID: String, lifetimeMilliseconds: UInt32
     ) -> (any DesktopCapturePreparation)? { nil }

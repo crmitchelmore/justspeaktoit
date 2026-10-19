@@ -148,6 +148,10 @@ extension DesktopHostController {
     // swiftlint:disable:next cyclomatic_complexity function_body_length
     package func cancelTranscription() {
         guard !closed else { return }
+        if voiceEdit.active != nil {
+            cancelVoiceEdit()
+            return
+        }
         if ownedDictation == nil, let admission = ownedDictationAdmission {
             cancellationRequested = true
             admission.operation.cancel()

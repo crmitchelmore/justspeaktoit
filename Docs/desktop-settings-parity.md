@@ -136,7 +136,8 @@ Windows wires Speak Selected Text and Speak Clipboard through the existing
 Read aloud task, saved Voice Output selection/options, pronunciation rendering,
 credential policy, usage and native playback. They do not borrow the selected
 History record. Both are eligible for global registration. This brings Windows
-to **26 of 27 source-wired actions** with Troubleshooting below, not verified shortcut parity.
+to **26 of 27 source-wired actions** with Troubleshooting below. Voice editing
+adds the final source mapping described below; neither count proves shortcut parity.
 
 Selected text uses a read-only target captured in the native callback. Its
 existing bounded UI Automation worker starts a snapshot before the settings
@@ -2243,7 +2244,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | modulatePIIPhiTagging | Live/batch source wired; unqualified / Same | Native default/on/off choice, strict transfer/restart and captured live/batch provider flags; absent stays off. Native/provider acceptance pending. |
 | accessibilityInsertionMode | Equivalent / Missing | Output; Windows cursor/replace-field; Linux paste cannot claim AX replace-all equivalence |
 | selectedHotKey | Equivalent / Partial | Shortcuts; Windows Ctrl/Alt native key; Linux desktop/portal-owned binding, never Mac Fn key translation |
-| customShortcutBindings | Partial source wiring; unqualified / Shared model only | Windows Keyboard **Action shortcuts** dialog: 26 of 27 actions source-wired, the remaining action stays stored for the Mac; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Linux transfers the Mac-compatible value unchanged without native registration. Native/physical acceptance pending. |
+| customShortcutBindings | Complete source mapping; unqualified / Shared model only | Windows Keyboard **Action shortcuts** dialog: all 27 actions source-wired; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Voice editing additionally requires an editable UIA selection and a rewrite API key. Linux transfers the Mac-compatible value unchanged without native registration. Native/physical acceptance pending. |
 | paidAccessRoutingEnabled | Apple-specific / Apple-specific | BYOK desktop providers; no paid-access entitlement/routing journey. Retained opaque through import/export |
 | simpleModelChoices | Missing / Missing | Native catalogue picker without simplified paid-model chooser |
 | rememberedLocalTranscriptionSource | Partial / Partial | Models remembers Local selection; no Apple on-device source |
@@ -2477,10 +2478,11 @@ shared Host action; Paste Last History Item delivers the newest History item
 (regardless of filters or selection) with the saved text-output settings. Speak
 Selected Text and Speak Clipboard read their own captured source through the
 existing Voice Output pipeline. Troubleshooting opens the local configuration
-and permission report. Edit Selection by Voice remains a missing Windows
-feature; its binding stays stored for the Mac.
+and permission report. Edit Selection by Voice has a source-wired Windows
+adapter; all 27 shared actions now have native execution mappings. This is
+not a claim of compiled, installed or physically exercised shortcut parity.
 Start/Stop Recording, Paste Last History Item, Speak Selected Text and Speak
-Clipboard can work in other apps (`RegisterHotKey`, which needs
+Clipboard and Edit Selection by Voice can work in other apps (`RegisterHotKey`, which needs
 Ctrl or Alt, or F13-F24 alone); other actions work while the window has focus. Global registration that Windows or
 another app refuses is reported in the dialog and status line, and that shortcut
 falls back to this window. Typing in text fields, list/combo navigation and
@@ -2503,3 +2505,41 @@ registration is added. Evidence: portable tests in
 `Tests/SpeakDesktopHostTests/DesktopHostShortcutBindingsTests.swift`. Compiler,
 native smoke tests and physical keyboard acceptance are **NOT_RUN** for this
 source.
+
+### Edit Selection by Voice: Windows source implementation, unqualified
+
+The Windows action captures the foreground field synchronously at the shortcut,
+before queuing host admission. One press captures the selection and starts
+private instruction recording; a second finishes, transcribes the raw instruction
+and requests the same dedicated rewrite prompt and intent-aware formatting policy
+as macOS. Ordinary cleanup may remain disabled. Cleanup-only local models use the
+canonical cloud rewrite default instead, with its own required API key. Model,
+temperature, transcription credential, rewrite credential and profile are captured
+for the run. A normal dictation press cannot steal its microphone.
+
+The Windows adapter retains a UIA selection range, selected text and bounded full
+document. Before delivery and again immediately before mutation, all must still
+match the original process, window, field and focus revision. Identical text
+selected elsewhere is not the same anchor. Replacement is verified against the
+expected complete document, preserving whitespace and Unicode apart from native
+newline encoding. This route cannot redirect to another app or use replace-all.
+An unverifiable anchor yields an explicitly explained clipboard recovery, not
+automatic typing somewhere else. Ambiguous dispatch is never replayed; cancellation
+abandons the target and suppresses clipboard recovery.
+
+Instruction audio is temporary, private and absent from History. Capture stop,
+destroy, busy ownership and scratch cleanup are shared across finish, Cancel and
+close; provider work is separately counted, and late replies cannot replace text.
+A cancelled provider that has not returned retains its private scratch directory
+until its last worker exits. A process crash can also leave scratch audio; startup
+scavenging is not implemented in this source slice.
+
+Authored evidence: `DesktopVoiceEditTests`, `VoiceEditPolicyTests`,
+`DesktopHostVoiceEditTests` and the real RichEdit/UIA voice-edit anchor fixture
+inside `jsti_text_output_self_test`. These cover client policy, batch/live host
+orchestration, missing input/credentials, normal-dictation exclusion, capture
+failures, cancellation/restart/close, private-file removal and changed native
+anchors, including a range move immediately before paste dispatch. They are
+**NOT_RUN** locally. Automatic compiler/test qualification, installed-app keyboard
+and provider/device acceptance remain outstanding. Linux has the shared host
+implementation but no selection-anchor adapter or shortcut registration.

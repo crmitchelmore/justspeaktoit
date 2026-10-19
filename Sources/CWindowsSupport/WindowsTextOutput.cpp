@@ -631,9 +631,11 @@ struct State {
     std::condition_variable changed;
     bool shutdown = false;
     bool readOnlyTarget = false;
+    bool voiceEditTarget = false;
     bool selectionRequested = false;
     bool selectionStarted = false;
     bool selectionFinished = false;
+    bool selectionDelivered = false;
     ULONGLONG selectionDeadline = 0;
     std::wstring selectionText;
     std::string selectionError;
@@ -689,6 +691,8 @@ class Worker {
     Ref<IUIAutomation> automation;
     Ref<IUIAutomationElement> captured;
     Ref<IUIAutomationTextRange> learningRange;
+    Ref<IUIAutomationTextRange> voiceEditRange;
+    std::wstring voiceEditText, voiceEditDocument, voiceEditPrefix, voiceEditSuffix;
     std::wstring learningBefore, learningAfter;
     bool learningAtStart = false, learningAtEnd = false;
 
@@ -810,6 +814,7 @@ class Worker {
     }
 
     bool beginMutation(const JSTIInsertionResult &result, std::string &error) {
+        if (state->voiceEditTarget && !verifyVoiceEditAnchor(error)) return false;
         if (!deliveryOwnerAvailable(*state, error)) return false;
         if (WaitForSingleObject(state->process.value, 0) != WAIT_TIMEOUT) {
             error = "The original application process has exited."; return false;
@@ -902,6 +907,9 @@ class Worker {
             FAILED(ranges->get_Length(&count)) || count < 1 || count > 64) {
             error = "The original app does not expose a bounded text selection."; return false;
         }
+        if (state->voiceEditTarget && (count != 1 || !editable(inspect(captured.value, patterns), patterns))) {
+            error = "Voice editing requires one editable text selection."; return false;
+        }
         for (int index = 0; index < count; ++index) {
             if (abandoned() || GetTickCount64() >= state->selectionDeadline) {
                 error = "Selected-text capture was cancelled or timed out."; return false;
@@ -914,9 +922,84 @@ class Worker {
                 !appendSelectedRange(text, selected)) {
                 error = "Selected text is unavailable or exceeds the 200,000 UTF-16-unit limit."; return false;
             }
+            if (state->voiceEditTarget && (FAILED(range->Clone(voiceEditRange.put())) || !voiceEditRange)) {
+                error = "The original selection could not be anchored for voice editing."; return false;
+            }
         }
         if (text.empty()) { error = "There is no selected text to read aloud."; return false; }
+        if (state->voiceEditTarget) {
+            Ref<IUIAutomationTextRange> document, prefix, suffix;
+            if (FAILED(patterns.text->get_DocumentRange(document.put())) || !document ||
+                !rangeText(document.value, 2000000, voiceEditDocument) ||
+                FAILED(document->Clone(prefix.put())) || !prefix ||
+                FAILED(document->Clone(suffix.put())) || !suffix ||
+                FAILED(prefix->MoveEndpointByRange(TextPatternRangeEndpoint_End, voiceEditRange.value,
+                    TextPatternRangeEndpoint_Start)) ||
+                FAILED(suffix->MoveEndpointByRange(TextPatternRangeEndpoint_Start, voiceEditRange.value,
+                    TextPatternRangeEndpoint_End)) ||
+                !rangeText(prefix.value, 2000000, voiceEditPrefix) ||
+                !rangeText(suffix.value, 2000000, voiceEditSuffix) ||
+                voiceEditPrefix + text + voiceEditSuffix != voiceEditDocument) {
+                error = "The original field is unavailable or too large to verify safely."; return false;
+            }
+            voiceEditText = text;
+            if (!verifyVoiceEditAnchor(error)) return false;
+        }
         return verifySelectionElement(error);
+    }
+
+    bool verifyVoiceEditAnchor(std::string &error) {
+        const NativeKind kind = classifyNative(state->identity.focus);
+        if (kind == NativeKind::Password || kind == NativeKind::ReadOnly || kind == NativeKind::Disabled) {
+            error = refusal(kind);
+            return false;
+        }
+        if (!voiceEditRange || !verifyField(error)) {
+            if (error.empty()) error = "The voice-edit selection was not captured.";
+            return false;
+        }
+        Patterns patterns;
+        fetchPatterns(captured.value, patterns);
+        Ref<IUIAutomationTextRangeArray> ranges;
+        Ref<IUIAutomationTextRange> selected, document;
+        int count = 0, start = 1, end = 1;
+        std::wstring text, entire;
+        if (!patterns.text || FAILED(patterns.text->GetSelection(ranges.put())) || !ranges ||
+            FAILED(ranges->get_Length(&count)) || count != 1 ||
+            FAILED(ranges->GetElement(0, selected.put())) || !selected ||
+            FAILED(selected->CompareEndpoints(TextPatternRangeEndpoint_Start, voiceEditRange.value,
+                TextPatternRangeEndpoint_Start, &start)) ||
+            FAILED(selected->CompareEndpoints(TextPatternRangeEndpoint_End, voiceEditRange.value,
+                TextPatternRangeEndpoint_End, &end)) || start != 0 || end != 0 ||
+            !rangeText(selected.value, static_cast<int>(maximumSelectedTextUnits), text) || text != voiceEditText ||
+            FAILED(patterns.text->get_DocumentRange(document.put())) || !document ||
+            !rangeText(document.value, 2000000, entire) || entire != voiceEditDocument) {
+            error = "The captured selection or its field changed. The voice edit was not applied.";
+            return false;
+        }
+        return !abandoned() && verifyField(error);
+    }
+
+    static std::wstring voiceEditLineEndings(const std::wstring &text) {
+        std::wstring result;
+        result.reserve(text.size());
+        for (size_t index = 0; index < text.size(); ++index) {
+            if (text[index] == L'\r') {
+                result.push_back(L'\n');
+                if (index + 1 < text.size() && text[index + 1] == L'\n') ++index;
+            } else {
+                result.push_back(text[index]);
+            }
+        }
+        return result;
+    }
+
+    bool voiceEditApplied(const Patterns &patterns, const std::wstring &replacement) {
+        Ref<IUIAutomationTextRange> document;
+        std::wstring actual;
+        return patterns.text && SUCCEEDED(patterns.text->get_DocumentRange(document.put())) && document &&
+            rangeText(document.value, 2000000, actual) &&
+            voiceEditLineEndings(actual) == voiceEditLineEndings(voiceEditPrefix + replacement + voiceEditSuffix);
     }
 
     int paste(const std::wstring &text, unsigned flags, const Patterns &patterns, JSTIInsertionResult &result, std::string &error) {
@@ -972,13 +1055,15 @@ class Worker {
             return 1;
         }
         bool verified = false;
-        if (readable) {
+        if (readable || state->voiceEditTarget) {
             const ULONGLONG deadline = GetTickCount64() + environment.verifyTimeoutMs;
             while (true) {
                 std::wstring after;
                 bool readableNow = false;
-                if (readField(patterns, after, readableNow) &&
-                    occurrences(normalizedForComparison(after), normalizedForComparison(text)) >= expected) { verified = true; break; }
+                const bool matches = state->voiceEditTarget ? voiceEditApplied(patterns, text) :
+                    (readField(patterns, after, readableNow) &&
+                     occurrences(normalizedForComparison(after), normalizedForComparison(text)) >= expected);
+                if (matches) { verified = true; break; }
                 if (GetTickCount64() >= deadline) break;
                 environment.sleep(environment.verifyIntervalMs);
             }
@@ -1028,6 +1113,11 @@ class Worker {
         if (facts.readOnlyKnown && facts.readOnly) { error = readOnlyMessage; return -1; }
         if (!editable(facts, patterns)) { error = unsupportedMessage; return -1; }
         const bool replaceField = (flags & JSTI_INSERTION_REPLACE_FIELD) != 0;
+        if (state->voiceEditTarget && !verifyVoiceEditAnchor(error)) return -1;
+        if (state->voiceEditTarget && voiceEditPrefix.size() + text.size() + voiceEditSuffix.size() > 2000000) {
+            error = "The rewritten field would exceed the voice-edit verification limit.";
+            return -1;
+        }
         if (patterns.value) {
             bool useValue = replaceField;
             if (!useValue) {
@@ -1049,7 +1139,8 @@ class Worker {
                 result.method = JSTI_INSERTION_METHOD_UIA_VALUE;
                 std::wstring after;
                 bool readable = false;
-                result.verified = readField(patterns, after, readable) && containsNormalized(after, text) ? 1 : 0;
+                result.verified = state->voiceEditTarget ? (voiceEditApplied(patterns, text) ? 1 : 0) :
+                    (readField(patterns, after, readable) && containsNormalized(after, text) ? 1 : 0);
                 return 0;
             }
         } else if (replaceField) {
@@ -1112,10 +1203,11 @@ public:
                     state->selectionStatus = success ? 0 : -1;
                     state->selectionFinished = true;
                     state->insertBusy = false;
-                    state->shutdown = true;
+                    state->shutdown = state->shutdown || state->abandoned || !state->voiceEditTarget || !success;
                 }
                 state->changed.notify_all();
-                break;
+                if (!success || !state->voiceEditTarget) break;
+                continue;
             }
             if (learning) {
                 std::wstring edited;
@@ -1162,6 +1254,7 @@ public:
             state->changed.notify_all();
         }
         learningRange.reset();
+        voiceEditRange.reset();
         captured.reset();
         automation.reset();
         if (com) CoUninitialize();
@@ -1339,7 +1432,7 @@ int jsti_clipboard_write(const char *text, char *error, size_t capacity) {
 
 void jsti_insertion_prepare(void) { (void)observedFocusRevision(); }
 
-static JSTIInsertionTarget *captureTarget(char *error, size_t capacity, bool readOnly) {
+static JSTIInsertionTarget *captureTarget(char *error, size_t capacity, bool readOnly, bool voiceEdit = false) {
     try {
         Environment environment = currentEnvironment();
         if (readOnly) environment.allowCurrentProcess = true;
@@ -1349,8 +1442,9 @@ static JSTIInsertionTarget *captureTarget(char *error, size_t capacity, bool rea
         if (!captureIdentity(environment, identity, reason)) { jsti::fail(reason, error, capacity); return nullptr; }
         auto state = std::make_shared<State>();
         state->readOnlyTarget = readOnly;
-        state->selectionRequested = readOnly;
-        state->insertBusy = readOnly;
+        state->voiceEditTarget = voiceEdit;
+        state->selectionRequested = readOnly || voiceEdit;
+        state->insertBusy = readOnly || voiceEdit;
         state->selectionDeadline = GetTickCount64() + environment.insertTimeoutMs;
         state->environment = environment;
         state->identity = identity;
@@ -1375,7 +1469,7 @@ static JSTIInsertionTarget *captureTarget(char *error, size_t capacity, bool rea
         if (reserveWorker()) {
             try { target->worker = std::thread([state] { Worker(state).run(); }); }
             catch (...) { WorkerScope releaseReservedSlot; throw; }
-        } else if (readOnly) {
+        } else if (readOnly || voiceEdit) {
             jsti::fail("Too many app accessibility requests are still pending.", error, capacity);
             return nullptr;
         }
@@ -1395,11 +1489,16 @@ JSTIInsertionTarget *jsti_selection_capture(char *error, size_t capacity) {
     return captureTarget(error, capacity, true);
 }
 
+JSTIInsertionTarget *jsti_voice_edit_capture(char *error, size_t capacity) {
+    return captureTarget(error, capacity, false, true);
+}
+
 int jsti_selection_read(JSTIInsertionTarget *target, char *text, size_t textCapacity,
                          char *error, size_t capacity) {
     if (text && textCapacity) text[0] = 0;
-    if (!target || !target->state || !target->state->readOnlyTarget || !target->worker.joinable())
-        return jsti::fail("A retained read-only selection capture is required.", error, capacity);
+    if (!target || !target->state || (!target->state->readOnlyTarget && !target->state->voiceEditTarget) ||
+        !target->worker.joinable())
+        return jsti::fail("A retained selected-text capture is required.", error, capacity);
     try {
         State &state = *target->state;
         std::unique_lock<std::mutex> lock(state.mutex);
@@ -1429,6 +1528,7 @@ int jsti_selection_read(JSTIInsertionTarget *target, char *text, size_t textCapa
         if (encoded.empty() || !text || textCapacity <= encoded.size())
             return jsti::fail("Selected text could not fit in its bounded UTF-8 buffer.", error, capacity);
         std::memcpy(text, encoded.c_str(), encoded.size() + 1);
+        state.selectionDelivered = true;
         if (error && capacity) error[0] = 0;
         return 0;
     } catch (const std::exception &) {
@@ -1461,6 +1561,8 @@ int jsti_insertion_insert(JSTIInsertionTarget *target, const char *text, unsigne
     {
         std::lock_guard<std::mutex> lock(state.mutex);
         if (state.abandoned || state.shutdown) return jsti::fail("This insertion target was cancelled.", error, capacity);
+        if (state.voiceEditTarget && !state.selectionDelivered)
+            return jsti::fail("Read the anchored selection before requesting a voice edit.", error, capacity);
     }
     if (WaitForSingleObject(state.process.value, 0) != WAIT_TIMEOUT) {
         return jsti::fail("The original application process has exited.", error, capacity);
@@ -1469,6 +1571,8 @@ int jsti_insertion_insert(JSTIInsertionTarget *target, const char *text, unsigne
     const unsigned policyMask = JSTI_INSERTION_ORIGINAL_APP | JSTI_INSERTION_CURRENT_APP |
         JSTI_INSERTION_ONLY_ORIGINAL_FRONT;
     const unsigned policy = flags & policyMask;
+    if (state.voiceEditTarget && (policy || (flags & JSTI_INSERTION_REPLACE_FIELD)))
+        return jsti::fail("Voice editing can replace only its original anchored selection.", error, capacity);
     if (policy && (policy & (policy - 1)))
         return jsti::fail("The app-switch delivery policy is invalid.", error, capacity);
     auto recoveryCopy = [&] {
@@ -1492,7 +1596,8 @@ int jsti_insertion_insert(JSTIInsertionTarget *target, const char *text, unsigne
     if (!verifyIdentity(environment, state.identity, reason, addressCapturedNativeField))
         return jsti::fail(reason, error, capacity);
     if (!integrityAllows(state.identity.process, reason)) return jsti::fail(reason, error, capacity);
-    const NativeKind kind = environment.nativeDirectPath ? classifyNative(state.identity.focus) : NativeKind::NotNative;
+    const NativeKind kind = environment.nativeDirectPath && !state.voiceEditTarget
+        ? classifyNative(state.identity.focus) : NativeKind::NotNative;
     if (kind == NativeKind::Password || kind == NativeKind::ReadOnly || kind == NativeKind::Disabled) {
         return jsti::fail(refusal(kind), error, capacity);
     }

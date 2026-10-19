@@ -250,6 +250,8 @@ private func otherWindowEvent(_ event: Int32, value: String, holder: WindowsEven
         } catch { WindowsNative.update("Read aloud failed: \(error.localizedDescription)") }
     case 113:
         holder.enqueueSettings { await controller.readClipboardAloud() }
+    case 114:
+        WindowsVoiceEdit.toggle(holder)
     default: break
     }
 }

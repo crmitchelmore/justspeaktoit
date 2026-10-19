@@ -220,6 +220,16 @@ public final class WindowsInsertionTarget: @unchecked Sendable {
         return WindowsInsertionTarget(handle: handle)
     }
 
+    /// Capture on the native UI callback. The bounded selection read retains an
+    /// editable UIA range; insertion cannot redirect it or replace the whole field.
+    public static func captureVoiceEdit() throws -> WindowsInsertionTarget {
+        var error = [CChar](repeating: 0, count: 1_024)
+        guard let handle = jsti_voice_edit_capture(&error, error.count) else {
+            throw WindowsTextOutputError(String(cString: error))
+        }
+        return WindowsInsertionTarget(handle: handle)
+    }
+
     public func selectedText() async throws -> String {
         let task = Task.detached(priority: .userInitiated) { [self] in
             try Task.checkCancellation()
@@ -321,7 +331,8 @@ public final class WindowsInsertionTarget: @unchecked Sendable {
         case Int32(JSTI_INSERTION_METHOD_CLIPBOARD.rawValue): method = .clipboard
         default:
             throw WindowsTextOutputError(
-                "The native adapter reported success without an insertion method.", clipboard: clipboard
+                "The native adapter reported success without an insertion method.", clipboard: clipboard,
+                mayHaveInserted: true
             )
         }
         return Outcome(

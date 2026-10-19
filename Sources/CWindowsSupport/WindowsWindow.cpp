@@ -3390,6 +3390,7 @@ void jsti_window_action_command(HWND window, int run, const char *page) {
     case JSTI_ACTION_RUN_SPEAK_SELECTED_TEXT: emit(window, JSTI_EVENT_SPEAK_SELECTED_TEXT); break;
     case JSTI_ACTION_RUN_SPEAK_CLIPBOARD: emit(window, JSTI_EVENT_SPEAK_CLIPBOARD); break;
     case JSTI_ACTION_RUN_TROUBLESHOOTING: jsti_show_troubleshooting(window); break;
+    case JSTI_ACTION_RUN_VOICE_EDIT: emit(window, JSTI_EVENT_VOICE_EDIT); break;
     default: break;
     }
 }

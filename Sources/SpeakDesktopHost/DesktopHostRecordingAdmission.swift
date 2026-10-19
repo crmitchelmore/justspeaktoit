@@ -62,6 +62,10 @@ extension DesktopHostController {
     }
 
     private func toggleRecording(_ request: DesktopHostRecordingRequest<Platform>) async {
+        guard voiceEdit.active == nil else {
+            update("Voice edit owns the microphone. Use its shortcut to finish, or Cancel to stop.")
+            return
+        }
         if !closed, ownedDictation != nil || ownedDictationAdmission != nil {
             await stopOwnedDictationAdmission(wait: request.waitForOwnedStartup)
             return

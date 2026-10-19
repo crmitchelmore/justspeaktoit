@@ -9,11 +9,10 @@ extension WindowsHostPlatform {
     package static var shortcutConfigurationKeys: Set<String> { [DesktopShortcutBindings.preferenceKey] }
 }
 
-/// How Windows performs each shared action. Actions with no Windows feature
-/// yet keep their bindings for the Mac and are shown as Mac only.
+/// Exhaustive Windows projection of the shared action catalogue.
 enum WindowsActionShortcutRun: Equatable {
-    case macOnly, record, page(String), playPause, stopSpeech, apiKeys, permissions, compareModels
-    case quickVoice(Int), pasteLastHistoryItem, speakSelectedText, speakClipboard, troubleshooting
+    case record, page(String), playPause, stopSpeech, apiKeys, permissions, compareModels
+    case quickVoice(Int), pasteLastHistoryItem, speakSelectedText, speakClipboard, troubleshooting, voiceEdit
 
     // swiftlint:disable:next cyclomatic_complexity
     init(_ action: DesktopShortcutAction) {
@@ -44,15 +43,14 @@ enum WindowsActionShortcutRun: Equatable {
         case .speakSelectedText: self = .speakSelectedText
         case .speakClipboard: self = .speakClipboard
         case .openTroubleshooting: self = .troubleshooting
-        case .editSelectionByVoice: self = .macOnly
+        case .editSelectionByVoice: self = .voiceEdit
         }
     }
 
-    static let runnable = Set(DesktopShortcutAction.allCases.filter { WindowsActionShortcutRun($0) != .macOnly })
+    static let runnable = Set(DesktopShortcutAction.allCases)
 
     var code: Int32 {
         switch self {
-        case .macOnly: return Int32(JSTI_ACTION_RUN_NONE)
         case .record: return Int32(JSTI_ACTION_RUN_RECORD)
         case .page: return Int32(JSTI_ACTION_RUN_PAGE)
         case .playPause: return Int32(JSTI_ACTION_RUN_PLAY_PAUSE)
@@ -67,6 +65,7 @@ enum WindowsActionShortcutRun: Equatable {
         case .speakSelectedText: return Int32(JSTI_ACTION_RUN_SPEAK_SELECTED_TEXT)
         case .speakClipboard: return Int32(JSTI_ACTION_RUN_SPEAK_CLIPBOARD)
         case .troubleshooting: return Int32(JSTI_ACTION_RUN_TROUBLESHOOTING)
+        case .voiceEdit: return Int32(JSTI_ACTION_RUN_VOICE_EDIT)
         }
     }
 
@@ -74,8 +73,6 @@ enum WindowsActionShortcutRun: Equatable {
         if case .page(let name) = self { return name }
         return ""
     }
-
-    static let macOnlyNote = "Saved for your Mac; Windows cannot run this action yet."
 }
 
 /// What the dialog's check reads on the UI thread without waiting for the
@@ -134,12 +131,10 @@ enum WindowsActionShortcuts {
     }
 
     static func canBeGlobal(_ action: DesktopShortcutAction) -> Bool {
-        WindowsActionShortcutRun(action) != .macOnly && action.supportsGlobalShortcut
+        action.supportsGlobalShortcut
     }
 
     static func note(_ action: DesktopShortcutAction, in bindings: DesktopShortcutBindings) -> String? {
-        let run = WindowsActionShortcutRun(action)
-        if run == .macOnly { return WindowsActionShortcutRun.macOnlyNote }
         let binding = bindings[action]
         guard binding.isEnabled else { return nil }
         guard let chord = bindings.editorRow(for: action).chord else {

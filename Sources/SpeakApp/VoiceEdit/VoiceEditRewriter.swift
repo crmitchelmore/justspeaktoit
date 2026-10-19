@@ -20,12 +20,7 @@ final class VoiceEditRewriter {
   /// GGUF models, Apple Intelligence polish) are transcript-cleanup engines and cannot follow
   /// arbitrary editing instructions.
   var model: String {
-    let configured = settings.postProcessingModel.trimmingCharacters(in: .whitespacesAndNewlines)
-    let resolved = configured.isEmpty ? ModelCatalog.defaultPostProcessingModel : configured
-    if PostProcessingManager.isLocalPostProcessingModel(resolved) {
-      return ModelCatalog.defaultPostProcessingModel
-    }
-    return resolved
+    VoiceEditPolicy.modelIdentifier(configured: settings.postProcessingModel)
   }
 
   /// Whether a usable model and credentials are in place for voice edits.

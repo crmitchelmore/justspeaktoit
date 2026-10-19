@@ -114,6 +114,7 @@ extension DesktopHostController {
             return shutdownReport ?? DesktopHostShutdownReport()
         }
         closed = true
+        cancelVoiceEdit(status: "Voice edit stopped when the app closed.")
         automationTranscriptions.values.forEach { $0.cancel() }
         recording?.live?.livePolish?.cancel()
         liveFinalisation?.livePolish?.cancel()
@@ -180,6 +181,11 @@ extension DesktopHostController {
         if activeOperations > 0 {
             let ended = await DesktopHostShutdown.wait(until: deadline) { await self.operationsEnded() }
             if !ended { report.unfinishedOperations = activeOperations }
+        }
+        if voiceEdit.workers > 0 {
+            _ = await DesktopHostShutdown.wait(until: deadline) { await self.voiceEditWorkersEnded() }
+            let alreadyCounted = voiceEdit.active?.busyHeld == true ? 1 : 0
+            report.unfinishedOperations += max(0, voiceEdit.workers - alreadyCounted)
         }
         if let warm = connectionWarmTask {
             let ended = await DesktopHostShutdown.wait(until: deadline) { await warm.task.value }

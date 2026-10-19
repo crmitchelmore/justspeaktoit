@@ -73,6 +73,7 @@ enum JSTIWindowEvent {
     JSTI_EVENT_PASTE_LAST_HISTORY = 111,
     JSTI_EVENT_SPEAK_SELECTED_TEXT = 112,
     JSTI_EVENT_SPEAK_CLIPBOARD = 113,
+    JSTI_EVENT_VOICE_EDIT = 114,
     JSTI_EVENT_USER_ABSENT = 120
 };
 
@@ -729,6 +730,10 @@ JSTIInsertionTarget *jsti_insertion_capture(char *error, size_t error_capacity);
 /* Begin a bounded read-only snapshot on the worker, also permitting the app's
  * own focused control. This target cannot insert text or replace the clipboard. */
 JSTIInsertionTarget *jsti_selection_capture(char *error, size_t error_capacity);
+/* Captures one editable selection. A successful selection_read anchors its
+ * exact range and document; insertion rechecks both immediately before writing.
+ * Unlike read-only selection capture, this cannot target the app itself. */
+JSTIInsertionTarget *jsti_voice_edit_capture(char *error, size_t error_capacity);
 /* One bounded worker read of selected UIA TextPattern ranges, never the whole
  * field. Password, focus/process changes and unavailable selection are errors.
  * The UTF-8 output is bounded to 200,000 UTF-16 units. Off the UI/host actor only. */
@@ -1427,7 +1432,8 @@ enum {
     JSTI_ACTION_RUN_PASTE_LAST_HISTORY = 11, /* JSTI_EVENT_PASTE_LAST_HISTORY */
     JSTI_ACTION_RUN_SPEAK_SELECTED_TEXT = 12,
     JSTI_ACTION_RUN_SPEAK_CLIPBOARD = 13,
-    JSTI_ACTION_RUN_TROUBLESHOOTING = 14
+    JSTI_ACTION_RUN_TROUBLESHOOTING = 14,
+    JSTI_ACTION_RUN_VOICE_EDIT = 15
 };
 typedef struct {
     const char *identifier;

@@ -297,6 +297,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var automationTranscriptions: [UUID: Task<TranscriptionResult, Error>] = [:]
     var automationPreferenceChanged: (@Sendable () async -> Void)?
     var voiceCommandTask: Task<String?, Error>?
+    var voiceEdit = DesktopHostVoiceEditState()
     var postProcessingTask: Task<DesktopPostProcessing.Outcome, Error>?
     var postProcessingID: UUID? {
         didSet { if postProcessingID != oldValue { retireCleanupPresentation() } }

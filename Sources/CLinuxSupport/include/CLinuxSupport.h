@@ -215,7 +215,8 @@ uint64_t jsti_window_begin_cleanup_preview(void);
 int32_t jsti_window_cleanup_preview(const char *text, uint64_t ticket);
 void jsti_window_end_cleanup_preview(uint64_t ticket);
 /* Events 70 (action), 71 (load), index 0 corrections / 1 pronunciation;
- * event 72 reads a selected recording's correction snapshot (kind 2). */
+ * event 72 reads a selected recording's correction snapshot (kind 2).
+ * Kind 4 edits the separate legacy word-to-pronunciation preference map. */
 int32_t jsti_vocabulary_set(int32_t kind, const char *payload, int32_t refresh);
 int32_t jsti_window_set_model_catalog(
     const JSTIModelRow *rows, size_t count, int32_t selected, const char *status, int32_t refreshing);

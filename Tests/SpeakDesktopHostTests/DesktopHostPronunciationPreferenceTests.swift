@@ -38,7 +38,7 @@ final class DesktopHostPronunciationPreferenceTests: XCTestCase {
             XCTAssertThrowsError(try DesktopHostConfigurationEditorEvent(action: action, values: values))
         }
         var invalid = entries
-        invalid[try fieldIndex("shortErrors")] = "true"
+        invalid[try fieldIndex(ApplicationPreferenceKey.shortenErrorDisplay.rawValue)] = "true"
         XCTAssertThrowsError(try DesktopHostConfigurationEditorEvent(action: 0, values: invalid + [id]))
     }
 
@@ -76,7 +76,7 @@ final class DesktopHostPronunciationPreferenceTests: XCTestCase {
             let snapshot = try await controller.nativeConfigurationEditorSnapshot()
             try await controller.activateConfigurationEditorSnapshot(snapshot)
             var entries = snapshot.entries
-            entries[try fieldIndex("shortErrors")] = intent == .apply ? "1" : "0"
+            entries[try fieldIndex(ApplicationPreferenceKey.shortenErrorDisplay.rawValue)] = intent == .apply ? "1" : "0"
             try await controller.saveConfiguration(entries, intent: intent)
             let after = try await controller.configuration()
             for key in ["transcriptionKeywords", "assemblyAIKeyterms",
@@ -191,7 +191,7 @@ final class DesktopHostPronunciationPreferenceTests: XCTestCase {
         try await controller.activateConfigurationEditorSnapshot(original)
         try await replaceModernWords(["Later"], controller: controller, root: root)
         var unrelated = original.entries
-        unrelated[try fieldIndex("shortErrors")] = "1"
+        unrelated[try fieldIndex(ApplicationPreferenceKey.shortenErrorDisplay.rawValue)] = "1"
         try await controller.saveConfiguration(unrelated)
         let fresh = try await controller.nativeConfigurationEditorSnapshot()
         XCTAssertEqual(fresh.entries[try fieldIndex("assemblyAIKeyterms")], "Explicit, Later, Legacy")

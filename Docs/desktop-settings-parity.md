@@ -80,6 +80,44 @@ Native rendering, provider behavior and installed-package acceptance remain
 unqualified. Linux's old "no streaming route" cleanup subtitle is also corrected:
 remote finished-transcript cleanup can stream previews; local cleanup cannot.
 
+## Legacy pronunciation native editor (source only)
+
+The Pronunciation surface now links to a separate **Legacy word dictionary**
+editor on Win32 and GTK. It exposes the Mac's `ttsPronunciationDictionary`
+word/pronunciation map without converting it into modern pronunciation entries.
+Both use the incumbent list/search, native labelled fields, New, Save, Delete
+confirmation and loading/error feedback. GTK retains its native page column;
+Win32 retains its list/detail layout. Imported multiline text is editable
+without flattening it. A selected entry's original word/value identity travels
+with each edit: stale edits/deletions and renames onto an existing word are
+refused rather than overwriting newer values. New duplicate words require
+selecting the existing entry.
+
+The Host changes only the canonical map through the existing persist-only
+configuration path. It does not request keys, authorize cleanup/probes, copy
+pronunciations into recognition hints, alter suppression/explicit keywords or
+mutate the modern Read aloud store. A dictionary with NULs, native fields over
+65,535 UTF-8 bytes, or an over-4-MiB presentation is explicitly refused for native
+editing and remains intact for portable preference export; there is no lossy
+truncation. Read aloud continues to use the existing modern rendering pipeline;
+this legacy editor does not claim a new legacy phonetic synthesis route.
+
+Four authored Host methods cover CRUD, restart/export, modern-store and unknown
+preference preservation, credential isolation, stale rows, collisions, malformed
+events/display bounds and refused-write retry. Native source fixtures check the
+four-field escaped payload, original identity, delete and New behavior.
+These new product checks are **NOT_RUN** locally; native installed acceptance
+and full parity remain incomplete.
+
+The preceding `054a3385` automatic Linux portable job `118098795757` ran 2,927
+tests (33 skipped) with three failures. Native Windows job `118099016759` also
+reported the same three failures, all in the new Host pronunciation tests:
+they looked up nonexistent field key `shortErrors` rather than canonical
+`ApplicationPreferenceKey.shortenErrorDisplay`. The source now uses that
+canonical key; this repair is **NOT_RUN** locally. Both legacy whole-profile
+expectations repaired in `4bc5e723` passed in the completed Linux log. Neither
+failed job is labelled successful.
+
 ## Modern pronunciation recognition capture (source only)
 
 At `76bd3d78`, completed portable Linux (2,918 tests; 33 skipped) and macOS
@@ -1092,7 +1130,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | ttsSaveToDirectory | Source wired; qualification pending / Same | Strict boolean projects to the sole Voice model. Generated results archive their captured MP3/M4A/WAV container bytes in the actual owned recordings directory, never an imported foreign path. Retained exports reuse those exact bytes; source wiring is not native/runtime or installed-package qualification. |
 | ttsUseSSML | Source wired; qualification pending / Same | Both native synthesis dialogs expose provider-gated SSML with explicit Normal controls reset. Azure Neural/MAI use the shared bounded SSML preflight and request builder; unsupported routes, conflicting full-document prosody and invalid controls fail before credentials. Canonical transfer and the selected-text markup helper are wired; native/provider acceptance remains unqualified. |
 | ttsFavoriteVoices | Source wired; qualification pending / Source wired; qualification pending | Native voice picker ranks and toggles favorites in Read aloud (`DesktopHostVoiceFavorites.swift`, `WindowsReadAloud.swift:30-41`, `LinuxReadAloud.swift:117-125`); transfer/apply confirmed above. No separate standalone favourites-management page; native/provider qualification on this exact head is not separately captured here |
-| ttsPronunciationDictionary | Partial source wiring; unqualified / Same | Strict word-to-text transfer/restart preserves the raw map; only keys seed AssemblyAI recognition using the shared Mac policy, never phonetic values or TTS replacements. No legacy-map native editor or modern-dictionary keyterm seeding yet. The separate native pronunciation store/editor and Voice rendering pipeline remain unchanged. |
+| ttsPronunciationDictionary | Source wired; qualification pending / Same | Strict word-to-text transfer/restart preserves the raw map; only keys seed AssemblyAI recognition using the shared Mac policy, never phonetic values or TTS replacements. A separate native Legacy word dictionary editor supports stale-safe CRUD without altering the modern store or Voice rendering pipeline. Modern literal-word recognition seeding is separately wired above. |
 | historyFlushInterval | Missing selector / Missing selector | History is durable per operation, not configurable timed flush |
 | silenceDetectionEnabled | Executable; qualification pending / Same | Native switch; initial quiet and configured silence stop the existing manual recording/finalization pipeline |
 | handsFreeDictationEnabled | Sound-activation replacement; qualification pending / Same | Fresh frozen target per utterance, record-bound acknowledged output; unconfirmed paste stops, Wayland requires clipboard-only; profile/model still fixed per run; not Apple's classifier |
@@ -1128,7 +1166,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | transcriptionKeywords | Route-dependent / Route-dependent | Shared immutable recording snapshot, batch/import/retry and live delivery below; unsupported routes report a limitation |
 | transcriptionKeywordsLastReconciled | Wired / Wired | Shared `TranscriptionKeywordPolicy` + Config; unchanged-mirror/deliberate-clear reconciliation, durable last mirror |
 | recoveredTranscriptionKeywords | Wired / Wired | Config; native selected-edit recovery with stale-selection and atomic-write guards |
-| assemblyAIIgnoredPronunciationTerms | Partial source wiring; unqualified / Same | Strict text-array transfer/restart suppresses legacy pronunciation recognition seeds; explicit native keyword clear/reselection updates suppression without changing unrelated entries. No separate suppression-list editor or modern-dictionary seeding. |
+| assemblyAIIgnoredPronunciationTerms | Source wired; qualification pending / Same | Strict text-array transfer/restart suppresses modern and legacy pronunciation recognition seeds; explicit native keyword clear/reselection updates suppression without changing unrelated entries. Automatic displayed hints are not persisted as explicit keywords; no separate raw suppression-list editor. |
 | modulateSpeakerDiarization | Live/batch source wired; unqualified / Same | Native default/on/off choice retains absent batch-on/live-off defaults; strict booleans snapshot into recording, import/retry, automation and comparison requests. Native/provider acceptance pending. |
 | modulateEmotionSignal | Live/batch source wired; unqualified / Same | Native default/on/off choice, strict transfer/restart and captured live/batch provider flags; absent stays off. Native/provider acceptance pending. |
 | modulateAccentSignal | Live/batch source wired; unqualified / Same | Native default/on/off choice, strict transfer/restart and captured live/batch provider flags; absent stays off. Native/provider acceptance pending. |

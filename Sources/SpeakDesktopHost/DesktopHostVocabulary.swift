@@ -21,6 +21,7 @@ extension DesktopHostController {
     }
 
     package func vocabularyPresentation(kind: Int, notice: String = "", reload: Bool = false) async throws -> String {
+        if kind == 4 { return try legacyPronunciationPresentation(notice: notice) }
         let vocabulary = try await vocabularyStore()
         if reload {
             do { try await vocabulary.reload() } catch {
@@ -35,6 +36,7 @@ extension DesktopHostController {
 
     package func vocabularyEvent(kind: Int, payload: String) async throws -> String {
         guard !closed else { throw CancellationError() }
+        if kind == 4 { return try await legacyPronunciationEvent(payload) }
         if kind == 3, payload == "allowLearning" || payload == "stopLearning" {
             return try correctionLearningApproval(payload)
         }

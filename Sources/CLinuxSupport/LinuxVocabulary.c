@@ -21,17 +21,17 @@ typedef struct {
     GtkCheckButton *include_rules, *include_tags;
     GtkEntry *tags;
 } Editor;
-static Editor *editors[4];
+static Editor *editors[5];
 static const char *activations[] = { "automatic", "requireContextMatch", "manual", NULL };
 static const char *confidences[] = { "high", "medium", "low", NULL };
 static gboolean filter(GtkListBoxRow *row, gpointer data);
 static gboolean hidden_selection(Editor *e) {
-    if (e->kind != 1 || e->selected < 0) return FALSE;
+    if ((e->kind != 1 && e->kind != 4) || e->selected < 0) return FALSE;
     GtkListBoxRow *row = gtk_list_box_get_row_at_index(e->list, e->selected);
     return row == NULL || !filter(row, e);
 }
 static void selection_controls(Editor *e) {
-    if (e->kind != 1) return;
+    if (e->kind != 1 && e->kind != 4) return;
     const gboolean hidden = hidden_selection(e);
     for (guint i = 0; i < e->buttons->len; ++i) {
         GtkWidget *button = g_ptr_array_index(e->buttons, i);
@@ -87,7 +87,7 @@ static void fill(Editor *e, gchar **row) {
                 row[1], row[2], row[3], row[4], row[5], row[6], row[7]);
         gtk_label_set_text(GTK_LABEL(e->fields[1]), details); g_free(details); return;
     }
-    for (int i = 1; i < 8; ++i) {
+    for (int i = 1; i < (e->kind == 4 ? 3 : 8); ++i) {
         if (e->kind == 1 && i == 7) continue;
         const char *value = row != NULL ? row[i] : "";
         if (combo(e, i)) {
@@ -134,7 +134,13 @@ static void selected(GtkListBox *list, GtkListBoxRow *row, gpointer data) {
 }
 static gchar *action_payload(Editor *e, const char *action) {
     GString *payload = g_string_new(action);
-    if (e->kind == 3) {
+    if (e->kind == 4) {
+        gchar **row = e->selected >= 0 ? g_ptr_array_index(e->rows, (guint)e->selected) : NULL;
+        append_field(payload, row != NULL ? row[0] : "");
+        for (int i = 1; i <= 2; ++i) {
+            gchar *value = text(e->fields[i]); append_field(payload, value); g_free(value);
+        }
+    } else if (e->kind == 3) {
         if (g_strcmp0(action, "clear") != 0) {
             gchar **row = e->selected >= 0 ? g_ptr_array_index(e->rows, (guint)e->selected) : NULL;
             append_field(payload, row != NULL ? row[0] : "");
@@ -276,21 +282,22 @@ static void clicked(GtkButton *button, gpointer data) {
         g_signal_connect_object(dialog, "response", G_CALLBACK(observation_response), e->root, 0);
         gtk_window_present(GTK_WINDOW(dialog)); return;
     }
-    if (g_strcmp0(action, "candidates") == 0) {
-        if (editors[3] != NULL) {
-            GtkRoot *existing = gtk_widget_get_root(editors[3]->root);
+    if (g_strcmp0(action, "candidates") == 0 || g_strcmp0(action, "legacyDictionary") == 0) {
+        const int kind = g_strcmp0(action, "legacyDictionary") == 0 ? 4 : 3;
+        if (editors[kind] != NULL) {
+            GtkRoot *existing = gtk_widget_get_root(editors[kind]->root);
             if (GTK_IS_WINDOW(existing)) gtk_window_present(GTK_WINDOW(existing));
             return;
         }
         GtkRoot *root = gtk_widget_get_root(e->root);
         GtkWidget *window = gtk_window_new();
-        gtk_window_set_title(GTK_WINDOW(window), "Stored correction candidates");
+        gtk_window_set_title(GTK_WINDOW(window), kind == 4 ? "Legacy word dictionary" : "Stored correction candidates");
         gtk_window_set_default_size(GTK_WINDOW(window), 800, 640);
         if (GTK_IS_WINDOW(root)) gtk_window_set_transient_for(GTK_WINDOW(window), GTK_WINDOW(root));
         gtk_window_set_destroy_with_parent(GTK_WINDOW(window), TRUE);
         gtk_window_set_modal(GTK_WINDOW(window), TRUE);
-        gtk_window_set_child(GTK_WINDOW(window), jsti_vocabulary_page_new(3));
-        gtk_window_present(GTK_WINDOW(window)); jsti_window_emit(71, "", 3); return;
+        gtk_window_set_child(GTK_WINDOW(window), jsti_vocabulary_page_new(kind));
+        gtk_window_present(GTK_WINDOW(window)); jsti_window_emit(71, "", kind); return;
     }
     if (e->kind == 3 && g_strcmp0(action, "refresh") != 0) {
         if (g_strcmp0(action, "clear") != 0 && e->selected < 0) {
@@ -373,7 +380,7 @@ static gboolean filter(GtkListBoxRow *row, gpointer data) {
 }
 static void search_changed(GtkSearchEntry *search, gpointer data) {
     (void)search; Editor *e = data;
-    if (e->kind == 1) apply_filters(e);
+    if (e->kind == 1 || e->kind == 4) apply_filters(e);
     else gtk_list_box_invalidate_filter(e->list);
 }
 static void category_changed(GObject *object, GParamSpec *spec, gpointer data) {
@@ -454,9 +461,10 @@ GtkWidget *jsti_vocabulary_page_new(int kind) {
     e->buttons = g_ptr_array_new();
     GtkWidget *column, *page = jsti_page_new(&column); e->root = page; editors[kind] = e;
     g_object_set_data_full(G_OBJECT(page), "vocabulary-editor", e, destroy_editor);
-    GtkWidget *hero = jsti_hero_new("settings", kind == 0 ? "Corrections"
+    GtkWidget *hero = jsti_hero_new("settings", kind == 0 ? "Corrections" : kind == 4 ? "Legacy word dictionary"
         : kind == 3 ? "Stored correction candidates" : "Pronunciation Dictionary",
         kind == 0 ? "Preferred spellings before post-processing. The original provider transcript stays in History."
+        : kind == 4 ? "Mac word-to-pronunciation settings. Words can seed AssemblyAI; modern Read aloud entries stay separate."
         : kind == 3 ? "Review stored candidates. Optional session-consented AT-SPI observation is not acknowledged insertion."
         : "Your Read aloud dictionary. Deepgram uses text replacements, not IPA phoneme tags.", NULL, NULL);
     gtk_box_append(GTK_BOX(column), hero);
@@ -504,15 +512,17 @@ GtkWidget *jsti_vocabulary_page_new(int kind) {
     }
     const char *names[] = {"_New", "_Delete", "Move _up", "Move _down", "_Reload"};
     const char *values[] = {"new", "delete", "up", "down", "refresh"};
-    for (int i = 0; i < 5; ++i) gtk_box_append(GTK_BOX(actions), button(e, names[i], values[i]));
+    for (int i = 0; i < 5; ++i)
+        if (kind != 4 || (i != 2 && i != 3)) gtk_box_append(GTK_BOX(actions), button(e, names[i], values[i]));
     gtk_box_append(GTK_BOX(column), actions);
     const char *rules[] = {"Display name", "Canonical spelling", "Spoken variants (one per line)", "Activation",
         "Context tags (comma-separated)", "Confidence", "Notes"};
     const char *speech[] = {"Word or pattern", "Pronunciation", "Text replacement", "Category",
         "Regular expression", "Case sensitive", "Notes (not stored)"};
-    for (int i = 1; i < 8; ++i) {
+    for (int i = 1; i < (kind == 4 ? 3 : 8); ++i) {
         if (kind == 1 && i == 7) continue;
-        GtkWidget *label = gtk_label_new((kind == 0 ? rules : speech)[i - 1]);
+        const char *title = kind == 4 ? (i == 1 ? "Word" : "Pronunciation") : (kind == 0 ? rules : speech)[i - 1];
+        GtkWidget *label = gtk_label_new(title);
         gtk_label_set_xalign(GTK_LABEL(label), 0); gtk_box_append(GTK_BOX(column), label);
         GtkWidget *widget;
         if (combo(e, i)) {
@@ -521,14 +531,20 @@ GtkWidget *jsti_vocabulary_page_new(int kind) {
             widget = gtk_drop_down_new_from_strings(i == 4 ? a : c); e->fields[i] = widget;
         } else if (check(e, i)) {
             widget = gtk_check_button_new_with_label(speech[i - 1]); e->fields[i] = widget;
-        } else if (kind == 0 && i == 3) widget = multiline(&e->fields[i]);
+        } else if ((kind == 0 && i == 3) || kind == 4) widget = multiline(&e->fields[i]);
         else { widget = gtk_entry_new(); e->fields[i] = widget; }
         gtk_label_set_mnemonic_widget(GTK_LABEL(label), e->fields[i]);
         gtk_accessible_update_property(GTK_ACCESSIBLE(e->fields[i]), GTK_ACCESSIBLE_PROPERTY_LABEL,
-            (kind == 0 ? rules : speech)[i - 1], -1);
+            title, -1);
         gtk_box_append(GTK_BOX(column), widget);
     }
     gtk_box_append(GTK_BOX(column), button(e, "_Save entry", "save"));
+    if (kind == 4) {
+        e->status = gtk_label_new("Loading legacy word dictionary...");
+        gtk_label_set_wrap(GTK_LABEL(e->status), TRUE); gtk_label_set_selectable(GTK_LABEL(e->status), TRUE);
+        gtk_label_set_xalign(GTK_LABEL(e->status), 0); gtk_box_append(GTK_BOX(column), e->status);
+        fill(e, NULL); pending(e, TRUE); return page;
+    }
     if (kind == 1) {
         gtk_box_append(GTK_BOX(column), button(e, "Add default _entries", "defaults"));
         GtkWidget *transfers = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
@@ -536,6 +552,7 @@ GtkWidget *jsti_vocabulary_page_new(int kind) {
         gtk_box_append(GTK_BOX(transfers), button(e, "Import JSON (replace)", "importReplace"));
         gtk_box_append(GTK_BOX(transfers), button(e, "_Export JSON", "export"));
         gtk_box_append(GTK_BOX(column), transfers);
+        gtk_box_append(GTK_BOX(column), button(e, "Legacy _word dictionary", "legacyDictionary"));
     }
     GtkWidget *label = gtk_label_new("Preview text (saved entries are used)");
     gtk_label_set_xalign(GTK_LABEL(label), 0); gtk_box_append(GTK_BOX(column), label);
@@ -658,15 +675,15 @@ static void present(gpointer data) {
     e->filling = FALSE;
     if (e->selected >= 0) {
         fill(e, g_ptr_array_index(e->rows, (guint)e->selected));
-    } else if (selected_id != NULL && e->kind == 1) fill(e, NULL);
+    } else if (selected_id != NULL && (e->kind == 1 || e->kind == 4)) fill(e, NULL);
     g_free(selected_id);
-    if (e->kind == 1) apply_filters(e);
+    if (e->kind == 1 || e->kind == 4) apply_filters(e);
     else if (e->selected >= 0) gtk_list_box_select_row(e->list, gtk_list_box_get_row_at_index(e->list, e->selected));
     pending(e, FALSE);
     if (e->kind == 3 && editors[0] != NULL) jsti_window_emit(71, "", 0);
 }
 int32_t jsti_vocabulary_set(int32_t kind, const char *payload, int32_t refresh) {
-    if (kind < 0 || kind > 3 || payload == NULL || strlen(payload) > 4 * 1024 * 1024
+    if (kind < 0 || kind > 4 || payload == NULL || strlen(payload) > 4 * 1024 * 1024
         || !g_utf8_validate(payload, -1, NULL)) return -1;
     Presentation *p = g_new0(Presentation, 1);
     p->kind = kind; p->payload = g_strdup(payload); p->refresh = refresh != 0;
@@ -821,6 +838,29 @@ static gboolean pronunciation_filter_self_test(char *error, size_t capacity) {
     return valid;
 }
 int32_t jsti_vocabulary_self_test(char *error, size_t capacity) {
+    Editor *previous_legacy = editors[4];
+    GtkWidget *legacy_page = jsti_vocabulary_page_new(4); g_object_ref_sink(legacy_page);
+    Editor *legacy = editors[4];
+    const gchar *legacy_row[] = {"fixture-identity", "Word\t%", "Spoken\nform", "", "", "", "", "", NULL};
+    g_ptr_array_add(legacy->rows, g_strdupv((gchar **)legacy_row)); legacy->selected = 0;
+    fill(legacy, (gchar **)legacy_row);
+    gchar *legacy_payload = action_payload(legacy, "save");
+    gchar **legacy_fields = g_strsplit(legacy_payload, "\t", -1);
+    gchar *legacy_word = g_strv_length(legacy_fields) == 4 ? g_uri_unescape_string(legacy_fields[2], NULL) : NULL;
+    gchar *legacy_value = g_strv_length(legacy_fields) == 4 ? g_uri_unescape_string(legacy_fields[3], NULL) : NULL;
+    gboolean legacy_valid = g_strv_length(legacy_fields) == 4
+        && g_strcmp0(legacy_fields[0], "save") == 0 && g_strcmp0(legacy_fields[1], legacy_row[0]) == 0
+        && g_strcmp0(legacy_word, legacy_row[1]) == 0 && g_strcmp0(legacy_value, legacy_row[2]) == 0;
+    g_free(legacy_word); g_free(legacy_value); g_strfreev(legacy_fields); g_free(legacy_payload);
+    legacy_payload = action_payload(legacy, "delete"); legacy_fields = g_strsplit(legacy_payload, "\t", -1);
+    legacy_valid = legacy_valid && g_strv_length(legacy_fields) == 4 && g_strcmp0(legacy_fields[0], "delete") == 0
+        && g_strcmp0(legacy_fields[1], legacy_row[0]) == 0;
+    g_strfreev(legacy_fields); g_free(legacy_payload);
+    legacy->selected = -1; fill(legacy, NULL);
+    legacy_payload = action_payload(legacy, "save");
+    legacy_valid = legacy_valid && g_strcmp0(legacy_payload, "save\t\t\t") == 0;
+    g_free(legacy_payload); g_object_unref(legacy_page); editors[4] = previous_legacy;
+    if (!legacy_valid) { jsti_set_error(error, capacity, "Legacy dictionary entry identity/escaped fields failed."); return -1; }
     for (int kind = 0; kind < 2; ++kind) {
         Editor *e = editors[kind];
         if (e == NULL) { jsti_set_error(error, capacity, "Vocabulary editor was not constructed."); return -1; }

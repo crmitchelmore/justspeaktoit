@@ -140,7 +140,9 @@ private enum LinuxTroubleshooting {
 
     static func refreshSettings(_ holder: LinuxEventContext, command: Int32) async throws {
         if command == Int32(JSTI_LINUX_TROUBLESHOOTING_KEEP_CLIPBOARD) {
-            try LinuxWindow.configureTextOutput(await holder.controller.textOutputOptions(), hint: holder.shortcuts.hint)
+            try LinuxWindow.configureTextOutput(
+                await holder.controller.textOutputOptions(), hint: holder.shortcuts.hint
+            )
         } else if jsti_window_set_post_processing_enabled(0) != 0 {
             throw DesktopHostError(message: "The cleanup control could not be refreshed.")
         }

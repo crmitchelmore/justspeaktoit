@@ -73,16 +73,16 @@ final class TroubleshootingCredentialTests: XCTestCase {
         }
     }
 
-    func testMissingCredential_DisablesCleanupWithoutChangingModelOrPrompt() async throws {
+    func testMissingCredential_DisablesCleanupWithoutChangingModelOrPromptLanguage() async throws {
         try await withSettings { settings, input in
             let model = settings.postProcessingModel
-            let prompt = settings.postProcessingSystemPrompt
+            let language = settings.postProcessingOutputLanguage
             try await ConfigurationTroubleshootingCheck().apply(
                 .disablePostProcessing, settings: settings, input: input
             ) { throw SecureAppStorageError.valueNotFound }
             XCTAssertFalse(settings.postProcessingEnabled)
             XCTAssertEqual(settings.postProcessingModel, model)
-            XCTAssertEqual(settings.postProcessingSystemPrompt, prompt)
+            XCTAssertEqual(settings.postProcessingOutputLanguage, language)
         }
     }
 
@@ -95,7 +95,7 @@ final class TroubleshootingCredentialTests: XCTestCase {
         let settings = AppSettings(defaults: defaults)
         settings.postProcessingEnabled = true
         settings.postProcessingModel = "openai/gpt-4o-mini"
-        settings.postProcessingSystemPrompt = "Synthetic formatting instruction."
+        settings.postProcessingOutputLanguage = "French"
         let input = DesktopTroubleshooting.Input(
             postProcessing: .init(
                 enabled: true, model: ModelCatalog.resolvedPostProcessingModel(settings.postProcessingModel),

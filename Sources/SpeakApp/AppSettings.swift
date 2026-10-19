@@ -6,6 +6,9 @@ import SpeakHotKeys
 import SwiftUI
 import os.log
 
+/// `SpeakCore.AppSwitchDelivery` would resolve to the `SpeakCore` version enum, not the module.
+typealias SharedAppSwitchDelivery = AppSwitchDelivery
+
 /// Centralised configuration model backed by `UserDefaults` and published to SwiftUI.
 @MainActor
 final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_length
@@ -136,7 +139,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
 
   /// Where a finished transcript goes when, by the time it is ready, the user
   /// is in a different app from the one where recording started.
-  typealias AppSwitchDelivery = SpeakCore.AppSwitchDelivery
+  typealias AppSwitchDelivery = SharedAppSwitchDelivery
 
   enum HotKeyActivationStyle: String, CaseIterable, Identifiable {
     case holdToRecord

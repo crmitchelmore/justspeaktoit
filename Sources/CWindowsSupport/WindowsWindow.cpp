@@ -22,6 +22,7 @@
 #include "WindowsLoginItem.hpp"
 #include "WindowsWindowChrome.hpp"
 #include "WindowsHistoryFilters.hpp"
+#include "WindowsOnboarding.hpp"
 #include "WindowsAppIcon.hpp"
 
 bool jsti_postprocessing_available();
@@ -129,6 +130,7 @@ void stopHandsFreeGuard(HWND window) {
 
 constexpr UINT updateMessage = WM_APP + 1;
 constexpr UINT profilesMessage = WM_APP + 17;
+constexpr UINT guideMessage = WM_APP + 86, permissionsMessage = WM_APP + 87;
 constexpr UINT audioCleanupMessage = WM_APP + 23;
 constexpr int hotkeyID = 1;
 constexpr int modelRefreshID = 140;
@@ -209,6 +211,7 @@ constexpr int setupMicrophoneID = 431, setupModelID = 432, setupShortcutID = 433
 constexpr int appearanceLabelID = 440, appearanceID = 441, automationID = 442, azureID = 443, cloudSyncID = 444,
     shortcutValueID = 445, githubID = 446, issueID = 447, privacyID = 448, loginItemID = 449,
     configurationID = 450;
+constexpr int setupGuideID = 451, permissionsID = 452;
 constexpr UINT tourMessage = WM_APP + 18, appearanceMessage = WM_APP + 19, pageMessage = WM_APP + 20;
 constexpr UINT hudMessage = WM_APP + 21;
 constexpr UINT sidebarMessage = WM_APP + 30;
@@ -781,7 +784,7 @@ unsigned pagesOf(int identifier) {
     case comparisonID: return page(transcriptionPage);
     case shortcutValueID: case shortcutID: return page(keyboardPage);
     case cloudSyncID: return page(cloudSyncPage);
-    case githubID: case issueID: case privacyID: return page(aboutPage);
+    case githubID: case issueID: case privacyID: case setupGuideID: case permissionsID: return page(aboutPage);
     default: return page(transcriptionPage);
     }
 }
@@ -1251,8 +1254,8 @@ void layoutAbout(HWND window, const RECT &content) {
     const int inset = densitySpace(window, 22, visualDensity.card_padding), row = scale(window, 34);
     const std::wstring note = L"Open source under the MIT licence. Your audio goes only to the provider you choose, "
         L"or stays on this PC with an on-device model.";
-    int y = layoutSettingsCard(window, content.top, content, 0xE946, L"About", L"", scale(window, 96) + row +
-        scale(window, 60));
+    int y = layoutSettingsCard(window, content.top, content, 0xE946, L"About", L"", scale(window, 96) + row * 2 +
+        scale(window, 68));
     frame.icon = box(content.left + inset, y, scale(window, 72), scale(window, 72));
     frame.paragraphs.push_back({box(frame.icon.right + scale(window, 18), y + scale(window, 8), scale(window, 480),
                                     scale(window, 30)), L"Just Speak to It", jsti::chrome::Font::title, false});
@@ -1265,6 +1268,9 @@ void layoutAbout(HWND window, const RECT &content) {
     place(window, githubID, box(content.left + inset, y, scale(window, 150), row));
     place(window, issueID, box(content.left + inset + scale(window, 158), y, scale(window, 150), row));
     place(window, privacyID, box(content.left + inset + scale(window, 316), y, scale(window, 150), row));
+    y += row + scale(window, 8);
+    place(window, setupGuideID, box(content.left + inset, y, scale(window, 192), row));
+    place(window, permissionsID, box(content.left + inset + scale(window, 200), y, scale(window, 208), row));
 }
 
 void layout(HWND window) {
@@ -1923,6 +1929,8 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"View on &GitHub", BS_PUSHBUTTON | WS_TABSTOP, githubID) &&
         add(L"BUTTON", L"Report an iss&ue", BS_PUSHBUTTON | WS_TABSTOP, issueID) &&
         add(L"BUTTON", L"Pri&vacy policy", BS_PUSHBUTTON | WS_TABSTOP, privacyID) &&
+        add(L"BUTTON", L"Ru&n setup again…", BS_PUSHBUTTON | WS_TABSTOP, setupGuideID) &&
+        add(L"BUTTON", L"&Windows permissions…", BS_PUSHBUTTON | WS_TABSTOP, permissionsID) &&
         add(L"STATIC", jsti_hotkey_label().c_str(), 0, transcriptLabelID) &&
         add(L"EDIT", L"", ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL | WS_TABSTOP, transcriptID) &&
         add(L"BUTTON", L"&Copy transcript", BS_PUSHBUTTON | WS_TABSTOP, copyID);
@@ -2552,6 +2560,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         if (lparam && jsti::chrome::appearance() == 0 &&
             wcscmp(reinterpret_cast<const wchar_t *>(lparam), L"ImmersiveColorSet") == 0) applyTheme(window);
         break;
+    case guideMessage: jsti_show_guide(window); return 0;
+    case permissionsMessage: jsti_show_permissions(window); return 0;
     case profilesMessage:
         if (idleControl(window, profilesID) && IsWindowEnabled(window)) jsti_show_profiles(window);
         else jsti_cancel_profiles_request();
@@ -2714,6 +2724,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case backupInspectID:
             if (HIWORD(wparam) == BN_CLICKED && idleControl(window, backupInspectID)) inspectMigrationBackup(window);
             return 0;
+        case setupGuideID: if (HIWORD(wparam) == BN_CLICKED) jsti_show_guide(window); return 0;
+        case permissionsID: if (HIWORD(wparam) == BN_CLICKED) jsti_show_permissions(window); return 0;
         case githubID: case issueID: case privacyID: {
             if (HIWORD(wparam) != BN_CLICKED) return 0;
             const wchar_t *address = LOWORD(wparam) == githubID ? L"https://github.com/crmitchelmore/justspeaktoit"
@@ -3353,7 +3365,8 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
         BOOL result;
         while ((result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
             if (sidebarKeyMessage(window, message)) continue;
-            if (!jsti_history_filters_message(&message) && !IsDialogMessageW(window, &message)) {
+            if (!jsti_history_filters_message(&message) && !jsti_guide_message(&message) &&
+                !jsti_permissions_message(&message) && !IsDialogMessageW(window, &message)) {
                 TranslateMessage(&message); DispatchMessageW(&message);
             }
         }
@@ -3563,6 +3576,16 @@ void jsti_window_request_profiles(void) {
         posted = state.window && PostMessageW(state.window, profilesMessage, 0, 0);
     }
     if (!posted) jsti_cancel_profiles_request();
+}
+
+void jsti_window_request_guide(void) {
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (state.window) PostMessageW(state.window, guideMessage, 0, 0);
+}
+
+void jsti_window_request_permissions(void) {
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (state.window) PostMessageW(state.window, permissionsMessage, 0, 0);
 }
 
 int jsti_window_set_history(const JSTIHistoryRow *rows, size_t count, const char *selectedID) {

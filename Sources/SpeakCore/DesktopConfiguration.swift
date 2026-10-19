@@ -181,6 +181,7 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable { // swiftlint:
             values[graceKey] = legacy
         }
         try Self.validateFields(in: values)
+        try Self.validatePronunciationPreferences(in: values)
         // JSON decodes whole numbers as Int; native numeric entries use Double.
         for field in Self.fields {
             guard case .number = field.kind, let value = values[field.key],
@@ -271,7 +272,7 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable { // swiftlint:
 
     public func applying(_ entries: [String]) throws -> Self {
         let changed = values.merging(try Self.parsedEntries(entries)) { _, edited in edited }
-        return try Self(values: changed)
+        return try Self(values: changed).recordingPronunciationKeytermSelection(from: self)
     }
 
     private func stored(_ key: String) -> AnyCodable.JSONValue {
@@ -313,7 +314,9 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable { // swiftlint:
     public var liveOptions: LiveClientOptions {
         LiveClientOptions(
             keywords: TranscriptionKeywordPolicy.words(from: text("transcriptionKeywords")),
-            assemblyAIKeyterms: TranscriptionKeywordPolicy.words(from: text("assemblyAIKeyterms")),
+            assemblyAIKeyterms: pronunciationKeyterms(
+                addingTo: TranscriptionKeywordPolicy.words(from: text("assemblyAIKeyterms"))
+            ),
             modulate: .none, postStopFinalizeBudget: nil, stopGracePeriod: number("liveStopGracePeriod")
         )
     }

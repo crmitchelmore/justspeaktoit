@@ -114,6 +114,54 @@ final class DesktopHostKeywordDeliveryTests: XCTestCase {
         await controller.close()
     }
 
+    func testLegacyPronunciationHints_ReachCapturedLiveAndCompletedHostRequests() async throws {
+        FakeLog.shared.reset()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let effects = KeywordDeliveryEffects()
+        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        let dictionaryKey = ApplicationPreferenceKey.ttsPronunciationDictionary.rawValue
+        let ignoredKey = ApplicationPreferenceKey.assemblyAIIgnoredPronunciationTerms.rawValue
+        let transfer = root.appendingPathComponent("legacy-pronunciation-transfer.json")
+        let vocabulary = try await controller.vocabularyStore()
+        let originalEntries = await vocabulary.entries
+        let first = try DesktopConfiguration(values: [
+            "transcriptionKeywords": AnyCodable(.string("Before")),
+            dictionaryKey: AnyCodable(.object(["Alpha": .string("not sent"), "Beta": .string("not sent")])),
+            ignoredKey: AnyCodable(.array([.string("beta")]))
+        ])
+        try JSONEncoder().encode(DesktopConfigurationDocument(preferences: first)).write(to: transfer)
+        try await controller.importConfiguration(path: transfer.path)
+        let captured = await controller.resolvedProfile(executablePath: nil)
+        let options = try XCTUnwrap(captured.transcriptionOptions)
+        let second = try DesktopConfiguration(values: [
+            "transcriptionKeywords": AnyCodable(.string("After")),
+            dictionaryKey: AnyCodable(.object(["Gamma": .string("never recognition text")]))
+        ])
+        try JSONEncoder().encode(DesktopConfigurationDocument(preferences: second)).write(to: transfer)
+        try await controller.importConfiguration(path: transfer.path)
+        _ = try await controller.makeLiveSession(
+            model: AssemblyAIModels.universal36ProStreamingID, key: "synthetic", id: UUID(), options: options
+        )
+        XCTAssertEqual(effects.options.last?.assemblyAIKeyterms, ["Before", "Alpha"])
+        XCTAssertEqual(effects.options.last?.keywords, ["Before"])
+        let model = AssemblyAIModels.universal35ProBatchID
+        let credential = try XCTUnwrap(DesktopHostModels.provider(for: model)).apiKeyIdentifier
+        FakeLog.shared.setKey("synthetic", name: credential)
+        let audio = root.appendingPathComponent("History").appendingPathComponent("legacy-hints.wav")
+        try XCTUnwrap(PCMWaveWriter.wavData(pcm: Data([1, 0, 2, 0]), sampleRate: 16_000)).write(to: audio)
+        let profile = DesktopProfileSession.defaults(modelIdentifier: model, postProcessing: .init())
+            .capturingTranscriptionOptions(options)
+        let record = DesktopRecordingStore.Record(
+            id: UUID(), audioFilename: audio.lastPathComponent, modelIdentifier: model
+        )
+        await controller.transcribe(record, duration: 1, output: nil, profile: profile)
+        XCTAssertEqual(effects.requests.last?.keywords, ["Before", "Alpha"])
+        let retainedEntries = await vocabulary.entries
+        XCTAssertEqual(retainedEntries, originalEntries)
+        await controller.close()
+    }
+
     private func saveWords(
         _ words: String, controller: DesktopHostController<FakePlatform>
     ) async throws {

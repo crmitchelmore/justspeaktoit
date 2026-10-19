@@ -6,7 +6,7 @@ extension DesktopConfiguration {
             ApplicationPreferenceKey.deepgramStopGracePeriod.rawValue,
             ApplicationPreferenceKey.transcriptionKeywordsLastReconciled.rawValue,
             ApplicationPreferenceKey.recoveredTranscriptionKeywords.rawValue
-        ])
+        ]).union(pronunciationPreferenceKeys)
     }
 
     public var recoveredKeywords: [String] {
@@ -31,7 +31,7 @@ extension DesktopConfiguration {
         changed["assemblyAIKeyterms"] = AnyCodable(.string(active))
         changed["transcriptionKeywordsLastReconciled"] = AnyCodable(.string(active))
         changed["recoveredTranscriptionKeywords"] = AnyCodable(.array(recovered.map { .string($0) }))
-        return try Self(values: changed)
+        return try Self(values: changed).recordingPronunciationKeytermSelection(from: self)
     }
 
     static func reconciledKeywords(in original: [String: AnyCodable]) throws -> [String: AnyCodable] {

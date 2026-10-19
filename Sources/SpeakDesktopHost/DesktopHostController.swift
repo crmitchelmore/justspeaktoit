@@ -52,6 +52,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
                 "azureSpeechResourceEndpoint", "appearance", "runAtLogin", "configuration", "livePolishApproved"
             ]
             preserved = all.filter { !known.contains($0.key) }
+            try adoptStoredPronunciationPreferences()
             let voiceKeys = VoiceSelectionPreference.keys.intersection(Platform.voiceConfigurationKeys)
             if !voiceKeys.isDisjoint(with: preserved.keys)
                 || !voiceKeys.isDisjoint(with: (values.configuration?.values ?? [:]).keys) {
@@ -83,6 +84,17 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
                 configuration[key] = desired
                 values.configuration = try DesktopConfiguration(values: configuration)
             }
+        }
+
+        private mutating func adoptStoredPronunciationPreferences() throws {
+            let keys = DesktopConfiguration.pronunciationPreferenceKeys
+            guard !keys.isDisjoint(with: preserved.keys) else { return }
+            var configuration = values.configuration?.values ?? [:]
+            for key in keys {
+                if configuration[key] == nil { configuration[key] = preserved[key] }
+                preserved.removeValue(forKey: key)
+            }
+            values.configuration = try DesktopConfiguration(values: configuration)
         }
 
         private mutating func adoptStoredStreamingPreference(_ all: [String: AnyCodable]) throws {

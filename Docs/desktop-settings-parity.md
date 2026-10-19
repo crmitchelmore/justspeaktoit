@@ -6,6 +6,32 @@ macOS `AppSettings.DefaultsKey` aliases the shared 91-key
 plus preferences and collections
 outside that enum. Track remaining product acceptance in #1157.
 
+## Legacy pronunciation recognition hints (source only)
+
+The Mac's pronunciation-to-AssemblyAI keyterm policy now lives in SpeakCore:
+modern words precede sorted legacy words, case-insensitive duplicates are removed,
+invalid seeds are excluded, explicit terms win, ignored seeds stay suppressed,
+and the final list has at most 100 entries. Mac Settings uses this same policy
+without changing its existing model guard or synchronization events.
+
+Desktop configuration now validates the canonical `ttsPronunciationDictionary`
+as a word-to-text JSON object and `assemblyAIIgnoredPronunciationTerms` as a text
+array. A transferred dictionary contributes **its keys only** to captured
+AssemblyAI live/completed recognition options; phonetic values are never sent as
+recognition terms or copied into the modern pronunciation/TTS replacement store.
+Native startup adopts these two keys from old root settings when absent from
+nested configuration; nested values win. Other providers' configured keywords
+are unchanged. Raw dictionary values,
+suppression and unrelated future preferences survive configuration apply and
+Codable restart/transfer. An absent dictionary preserves existing desktop option
+behavior. Explicit native keyword edits update legacy seed suppression so a
+deliberate clear is not silently undone; unrelated preference applies do not
+change suppression. Explicit recovered-keyword selection follows the same rule.
+
+This is not a native editor for the legacy dictionary, modern-dictionary keyterm
+seeding, or evidence of provider/native/installed acceptance. The new source
+regressions have not been executed locally; automatic CI remains required.
+
 ## Finished-transcript streaming cleanup candidate (source only)
 
 The canonical `postProcessingStreamingEnabled` boolean is now exposed by the
@@ -895,7 +921,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | ttsSaveToDirectory | Source wired; qualification pending / Same | Strict boolean projects to the sole Voice model. Generated results archive their captured MP3/M4A/WAV container bytes in the actual owned recordings directory, never an imported foreign path. Retained exports reuse those exact bytes; source wiring is not native/runtime or installed-package qualification. |
 | ttsUseSSML | Source wired; qualification pending / Same | Both native synthesis dialogs expose provider-gated SSML with explicit Normal controls reset. Azure Neural/MAI use the shared bounded SSML preflight and request builder; unsupported routes, conflicting full-document prosody and invalid controls fail before credentials. Canonical transfer and the selected-text markup helper are wired; native/provider acceptance remains unqualified. |
 | ttsFavoriteVoices | Source wired; qualification pending / Source wired; qualification pending | Native voice picker ranks and toggles favorites in Read aloud (`DesktopHostVoiceFavorites.swift`, `WindowsReadAloud.swift:30-41`, `LinuxReadAloud.swift:117-125`); transfer/apply confirmed above. No separate standalone favourites-management page; native/provider qualification on this exact head is not separately captured here |
-| ttsPronunciationDictionary | Missing / Missing | This specific legacy preference value may be retained opaquely by generic import/export round-trips, but is not applied/mapped to the native device-local `pronunciation.json` store; Desktop has its own native pronunciation editor/pipeline (`DesktopVocabulary`/`PronunciationDictionary`: CRUD, defaults seeding, import/export, preview) independent of this preference. `PronunciationRenderer` now applies replacements across all four Read aloud/Generate/fresh Export voice-output sources (History, typed text, clipboard, text file), byte-exact on SSML; Mac IPA/phoneme and provider SSML differences remain open |
+| ttsPronunciationDictionary | Partial source wiring; unqualified / Same | Strict word-to-text transfer/restart preserves the raw map; only keys seed AssemblyAI recognition using the shared Mac policy, never phonetic values or TTS replacements. No legacy-map native editor or modern-dictionary keyterm seeding yet. The separate native pronunciation store/editor and Voice rendering pipeline remain unchanged. |
 | historyFlushInterval | Missing selector / Missing selector | History is durable per operation, not configurable timed flush |
 | silenceDetectionEnabled | Executable; qualification pending / Same | Native switch; initial quiet and configured silence stop the existing manual recording/finalization pipeline |
 | handsFreeDictationEnabled | Sound-activation replacement; qualification pending / Same | Fresh frozen target per utterance, record-bound acknowledged output; unconfirmed paste stops, Wayland requires clipboard-only; profile/model still fixed per run; not Apple's classifier |
@@ -931,7 +957,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | transcriptionKeywords | Route-dependent / Route-dependent | Shared immutable recording snapshot, batch/import/retry and live delivery below; unsupported routes report a limitation |
 | transcriptionKeywordsLastReconciled | Wired / Wired | Shared `TranscriptionKeywordPolicy` + Config; unchanged-mirror/deliberate-clear reconciliation, durable last mirror |
 | recoveredTranscriptionKeywords | Wired / Wired | Config; native selected-edit recovery with stale-selection and atomic-write guards |
-| assemblyAIIgnoredPronunciationTerms | Missing / Missing | No pronunciation keyword-suppression editor |
+| assemblyAIIgnoredPronunciationTerms | Partial source wiring; unqualified / Same | Strict text-array transfer/restart suppresses legacy pronunciation recognition seeds; explicit native keyword clear/reselection updates suppression without changing unrelated entries. No separate suppression-list editor or modern-dictionary seeding. |
 | modulateSpeakerDiarization | Missing / Missing | Modulate live route/options not admitted by baseline desktop factory |
 | modulateEmotionSignal | Missing / Missing | Same provider qualification gap |
 | modulateAccentSignal | Missing / Missing | Same provider qualification gap |

@@ -64,6 +64,12 @@ narrow widths; Win32 uses its existing themed keyboard-accessible buttons.
 Browser-launch failures are surfaced. Building or opening About never fetches
 release data, installs an updater, downloads code or changes an app.
 
+Automatic native Linux job `118172561007` failed to compile source `2bbc95b5`
+(synthetic merge `f7ef4c5558ff083f456d44d2aae12999f1c6e2bf`) because the
+browser-failure callback referenced nonexistent `JSTI_EVENT_ERROR`. The repair
+removes that invalid dispatch while retaining the warning log and visible
+status message. This is a source repair, not a successful native qualification.
+
 These developer previews have **manual updates**, not Sparkle or an equivalent
 automatic updater. The page says so and asks users to check platform
 compatibility on View Releases; it does not call a Mac release "latest" for

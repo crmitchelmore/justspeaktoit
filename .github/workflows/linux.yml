@@ -47,7 +47,6 @@ on:
       - .github/workflows/linux.yml
       - .github/workflows/linux-local-runtime.yml
   pull_request:
-    branches: [main]
     paths:
       - .gitattributes
       - Package.swift

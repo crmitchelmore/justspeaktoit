@@ -38,7 +38,6 @@ on:
       - .github/workflows/windows.yml
       - .github/workflows/windows-local-runtime.yml
   pull_request:
-    branches: [main]
     paths:
       - .gitattributes
       - Package.swift

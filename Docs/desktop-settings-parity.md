@@ -65,6 +65,22 @@ action shortcut to it (`JSTI_ACTION_RUN_PASTE_LAST_HISTORY` emits
 UI thread before queueing the Host action, as the Record event does. Linux has
 no action shortcut registration yet.
 
+## Pull-request qualification (source only)
+
+Product pull-request workflows now accept non-main base branches, including
+stacked parity PRs. Main-only push triggers, product path filters, job
+permissions and release gates are unchanged. An authored CI-contract regression
+guards this coverage without using the privileged `pull_request_target` event;
+it is **NOT_RUN** locally. Before this trigger repair, the composed parity PR
+received policy checks but no Windows/Linux/macOS product qualification.
+
+The held `2bbc95b5` source has completed automatic portable Linux qualification
+(2,937 tests, 33 skipped, zero failures) and portable macOS qualification
+(2,841 tests, 55 skipped, zero failures), including all five About methods and
+the Stop-learning cancellation regression. Native Windows job `118172260830`
+also passed its adapter, window creation/shutdown and local-transcription
+checks. These results do not qualify the subsequently composed parity source.
+
 ## About and manual updates (source only)
 
 Native About now shows the installed app's version/build when stamped,

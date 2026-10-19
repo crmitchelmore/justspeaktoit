@@ -21,6 +21,21 @@ const nativeEligibleJobs = [
 ];
 const journeyStages = readFileSync(new URL('../run-core-journey-stages.py', import.meta.url), 'utf8');
 
+test('product checks cover stacked pull requests without broadening push or credential permissions', () => {
+  for (const name of ['ci', 'windows', 'linux']) {
+    const source = readFileSync(new URL(`../../.github/workflows/${name}.yml`, import.meta.url), 'utf8');
+    assert.match(source, /^  push:\n    branches: \[main\]$/m, `${name}: pushes must remain main-only`);
+    const pullRequest = source.match(/^  pull_request:[ \t]*\n((?: {4}[^\n]*\n|\n)*)/m);
+    assert.ok(pullRequest, `${name}: ordinary pull-request checks must exist`);
+    assert.doesNotMatch(pullRequest[1], /^\s+branches(?:-ignore)?:/m,
+      `${name}: non-main target branches must receive product checks`);
+    assert.doesNotMatch(source, /^  pull_request_target:/m, `${name}: no privileged PR event`);
+    if (name !== 'ci') {
+      assert.match(pullRequest[1], /^    paths:$/m, `${name}: retain product path gates`);
+    }
+  }
+});
+
 test('journey cold preparation and actual runtime have separate finite budgets and always-uploaded evidence', () => {
   const swift = jobBodies['core-journey-e2e'];
   const ui = jobBodies['core-journey-fixture-ui'];

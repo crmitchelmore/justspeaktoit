@@ -7,6 +7,7 @@
 #include "VoiceAudioCodec.h"
 #include "VoiceCredentials.h"
 #include "LocalCleanup.h"
+#include "Onboarding.h"
 
 #ifdef __cplusplus
 extern "C" {

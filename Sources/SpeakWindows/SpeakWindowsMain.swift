@@ -180,7 +180,11 @@ private func ready(_ holder: WindowsEventContext) {
         } catch {
             error.localizedDescription.withCString { _ = jsti_window_refresh_microphones(nil, 0, $0) }
         }
-        Task { await holder.controller.ready() }
+        Task {
+            await WindowsPermissions.prepareWarning(holder)
+            await holder.controller.ready()
+            await holder.openGuideIfNeeded()
+        }
         let controller = holder.controller
         holder.enqueueSettings { await controller.refreshLoginItem() }
         return
@@ -259,6 +263,7 @@ enum SpeakWindowsMain {
             }
             defer { if smokeTest { try? FileManager.default.removeItem(at: directory) } }
             if screenshots != nil { try await DesktopHostSampleHistory.seed(directory: directory) }
+            DesktopHostOnboarding.adoptExistingInstall(directory: directory)
             let controller = try await Task.detached {
                 try WindowsAppController(directory: directory)
             }.value
@@ -319,6 +324,8 @@ enum SpeakWindowsMain {
         try await configureModelPickers(controller, holder: holder)
         try await controller.configureModelCatalog()
         await WindowsPresentation.configureAppearance(controller)
+        holder.configurePermissions()
+        holder.configureGuide()
     }
 
     private static func runWindow(controller: WindowsAppController, holder: WindowsEventContext) async throws {
@@ -357,6 +364,8 @@ enum SpeakWindowsMain {
         jsti_window_clear_hotkey()
         jsti_window_clear_azure_resource()
         jsti_window_clear_configuration()
+        jsti_guide_clear()
+        jsti_permissions_clear()
         await releaseServices(holder)
         await WindowsAutomationSwitch.shutDown(holder)
         // Closing first cancels a shortcut's transcription instead of waiting

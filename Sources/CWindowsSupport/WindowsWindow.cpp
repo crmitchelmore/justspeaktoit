@@ -23,6 +23,7 @@
 #include "WindowsLoginItem.hpp"
 #include "WindowsWindowChrome.hpp"
 #include "WindowsHistoryFilters.hpp"
+#include "WindowsOnboarding.hpp"
 #include "WindowsAppIcon.hpp"
 
 bool jsti_postprocessing_available();
@@ -132,6 +133,7 @@ void stopHandsFreeGuard(HWND window) {
 
 constexpr UINT updateMessage = WM_APP + 1;
 constexpr UINT profilesMessage = WM_APP + 17;
+constexpr UINT guideMessage = WM_APP + 86, permissionsMessage = WM_APP + 87;
 constexpr UINT audioCleanupMessage = WM_APP + 23;
 constexpr int hotkeyID = 1;
 constexpr int modelRefreshID = 140;
@@ -215,6 +217,7 @@ constexpr int appearanceLabelID = 440, appearanceID = 441, automationID = 442, a
     shortcutValueID = 445, loginItemID = 449,
     configurationID = 450;
 constexpr int aboutLinkBaseID = 480, aboutDetailsID = 490;
+constexpr int setupGuideID = 451, permissionsID = 452;
 constexpr UINT tourMessage = WM_APP + 18, appearanceMessage = WM_APP + 19, pageMessage = WM_APP + 20;
 constexpr UINT hudMessage = WM_APP + 21;
 constexpr UINT sidebarMessage = WM_APP + 30;
@@ -804,7 +807,7 @@ unsigned pagesOf(int identifier) {
     case comparisonID: return page(transcriptionPage);
     case shortcutValueID: case shortcutID: return page(keyboardPage);
     case cloudSyncID: return page(cloudSyncPage);
-    case aboutDetailsID: return page(aboutPage);
+    case aboutDetailsID: case setupGuideID: case permissionsID: return page(aboutPage);
     default: return page(transcriptionPage);
     }
 }
@@ -1293,7 +1296,7 @@ void layoutAbout(HWND window, const RECT &content) {
     const int gap = scale(window, 8);
     const int linkRows = (static_cast<int>(state.aboutLinks.size()) + 2) / 3;
     int y = layoutSettingsCard(window, content.top, content, 0xE946, L"About", L"",
-        scale(window, 96) + noteHeight + detailsHeight + linkRows * (row + gap));
+        scale(window, 96) + noteHeight + detailsHeight + (linkRows + 1) * (row + gap));
     frame.icon = box(content.left + inset, y, scale(window, 72), scale(window, 72));
     frame.paragraphs.push_back({box(frame.icon.right + scale(window, 18), y + scale(window, 8), scale(window, 480),
                                     scale(window, 30)), L"Just Speak to It", jsti::chrome::Font::title, false});
@@ -1310,6 +1313,9 @@ void layoutAbout(HWND window, const RECT &content) {
         place(window, aboutLinkBaseID + static_cast<int>(i),
             box(content.left + inset + static_cast<int>(i % 3) * (linkWidth + gap),
                 y + static_cast<int>(i / 3) * (row + gap), linkWidth, row));
+    y += linkRows * (row + gap);
+    place(window, setupGuideID, box(content.left + inset, y, scale(window, 192), row));
+    place(window, permissionsID, box(content.left + inset + scale(window, 200), y, scale(window, 208), row));
 }
 
 void layout(HWND window) {
@@ -1968,6 +1974,8 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"&Inspect backup...", BS_PUSHBUTTON | WS_TABSTOP, backupInspectID) &&
         add(L"BUTTON", L"i&Cloud sync settings…", BS_PUSHBUTTON | WS_TABSTOP, cloudSyncID) &&
         add(L"STATIC", state.aboutDetails.c_str(), 0, aboutDetailsID) &&
+        add(L"BUTTON", L"Ru&n setup again…", BS_PUSHBUTTON | WS_TABSTOP, setupGuideID) &&
+        add(L"BUTTON", L"&Windows permissions…", BS_PUSHBUTTON | WS_TABSTOP, permissionsID) &&
         add(L"STATIC", jsti_hotkey_label().c_str(), 0, transcriptLabelID) &&
         add(L"EDIT", L"", ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL | WS_TABSTOP, transcriptID) &&
         add(L"BUTTON", L"&Copy transcript", BS_PUSHBUTTON | WS_TABSTOP, copyID);
@@ -2607,6 +2615,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         if (lparam && jsti::chrome::appearance() == 0 &&
             wcscmp(reinterpret_cast<const wchar_t *>(lparam), L"ImmersiveColorSet") == 0) applyTheme(window);
         break;
+    case guideMessage: jsti_show_guide(window); return 0;
+    case permissionsMessage: jsti_show_permissions(window); return 0;
     case profilesMessage:
         if (idleControl(window, profilesID) && IsWindowEnabled(window)) jsti_show_profiles(window);
         else jsti_cancel_profiles_request();
@@ -2784,6 +2794,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case backupInspectID:
             if (HIWORD(wparam) == BN_CLICKED && idleControl(window, backupInspectID)) inspectMigrationBackup(window);
             return 0;
+        case setupGuideID: if (HIWORD(wparam) == BN_CLICKED) jsti_show_guide(window); return 0;
+        case permissionsID: if (HIWORD(wparam) == BN_CLICKED) jsti_show_permissions(window); return 0;
         case appearanceID:
             if (HIWORD(wparam) == CBN_SELCHANGE) {
                 const LRESULT chosen = SendDlgItemMessageW(window, appearanceID, CB_GETCURSEL, 0, 0);
@@ -3437,7 +3449,8 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
         BOOL result;
         while ((result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
             if (sidebarKeyMessage(window, message)) continue;
-            if (!jsti_history_filters_message(&message) && !IsDialogMessageW(window, &message)) {
+            if (!jsti_history_filters_message(&message) && !jsti_guide_message(&message) &&
+                !jsti_permissions_message(&message) && !IsDialogMessageW(window, &message)) {
                 TranslateMessage(&message); DispatchMessageW(&message);
             }
         }
@@ -3657,6 +3670,16 @@ void jsti_window_request_profiles(void) {
         posted = state.window && PostMessageW(state.window, profilesMessage, 0, 0);
     }
     if (!posted) jsti_cancel_profiles_request();
+}
+
+void jsti_window_request_guide(void) {
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (state.window) PostMessageW(state.window, guideMessage, 0, 0);
+}
+
+void jsti_window_request_permissions(void) {
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (state.window) PostMessageW(state.window, permissionsMessage, 0, 0);
 }
 
 int jsti_window_set_history(const JSTIHistoryRow *rows, size_t count, const char *selectedID) {

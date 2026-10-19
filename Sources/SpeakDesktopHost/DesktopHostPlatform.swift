@@ -114,6 +114,7 @@ package protocol DesktopHostPlatform: Sendable {
     static func confirmAudioCleanup(id: UUID, count: Int) throws
     static var migrationArchive: DesktopMigrationBackup.Adapter? { get }
     static var migrationInspector: DesktopHostMigrationInspector? { get }
+    static var migrationRestorer: DesktopHostMigrationRestorer? { get }
     static func copyToClipboard(_ text: String) throws
 
     static var comparisonDigest: LocalModelDigestProvider? { get }

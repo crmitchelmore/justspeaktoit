@@ -599,7 +599,9 @@ use the sole `DesktopConfiguration` value and retain unrelated unsupported
 preferences. Selected-ID/kind replacement preserves uncovered density and
 resets an explicitly covered clear to absent/Normal. This covers the canonical
 planner and executable configuration projection, not a new native ZIP settings
-application: that archive UI still inspects backups without applying settings.
+application: the archive UI saves, inspects and restores History text and app
+profiles (see [Restore backup](#restore-backup-windows-source-only)), but never
+applies settings from a backup.
 
 Normal retains incumbent native geometry. Compact reduces page margins, card
 padding, section gaps and sidebar whitespace without scaling fonts or controls.
@@ -1816,9 +1818,63 @@ This JSON is **not** the macOS Data & Migration ZIP. Mac backups use
 profiles/history/connections/credentials and optional audio
 (`Sources/SpeakApp/DataMigration/MigrationArchive.swift:7-59`,
 `MigrationCatalog.swift:13-77`, `MigrationPreferenceSchema.swift:6-70`).
-Importing that archive, mapping its categories safely, merge/replace previews,
-rollback and exporting a Mac-compatible archive remain gaps. No ZIP is
-misidentified or silently imported as portable preferences.
+General's **Save ZIP backup** already writes a Mac-compatible archive
+(`DesktopMigrationBackup`). **Restore backup** on Windows now reads one, maps
+its categories, previews merge and replace, asks for confirmation and rolls
+back on failure for History text and app profiles only; see below. Restoring
+settings, audio, credentials, vocabulary, connections and models remains a
+gap. No ZIP is misidentified or silently imported as portable preferences.
+
+### Restore backup (Windows source only)
+
+General > **Restore backup...** opens a Mac-compatible ZIP through a native
+picker. The settings queue only admits the request. Reading, validation and
+planning run on an owned, cancellable worker that writes nothing and removes
+its private staging directory (`DesktopMigrationRestore.prepare`,
+`DesktopHostMigrationRestore.swift`). Records pass the cancellable
+`DataMigrationRecordValidation.validate(..., checkCancellation:,
+recordValidator:)` overload. Duplicate identities, including those that
+differ only in letter case, refuse the whole backup.
+
+The preview lists each applied category's counts (new, updated, removed,
+before and after), conflicts, skipped items and every category that is kept in
+the backup but not applied. It never shows transcript text, profile contents,
+identifiers or credential values. Nothing is written until the user picks an
+action in the native dialog (`WindowsMigrationRestore.cpp`). Cancel is the
+default button. Replace needs a second confirmation that defaults to No. Each
+preview has a single-use token, so a stale or repeated answer is refused.
+
+- **History text** always merges. It follows the canonical planner, so
+  equivalence ignores the root ID and `desktopHistory.id`. A differing backup
+  version becomes a new local item: its planned ID is materialised with
+  `DataMigrationHistoryValue.value(..., id:)` before strict native mapping.
+  `originPlatform` is always nil, so `removeSyncedCopy` can never treat it as a
+  CloudKit copy. The backup's provenance stays in `migrationMetadata`.
+  Items deleted on this device and synced copies are never restored or
+  overwritten. Saved audio is not restored.
+- **App profiles** can merge (this device's version wins conflicts) or
+  replace. Replace skips a category that is absent from the backup. It keeps
+  every existing profile when a notice is prefixed with the category title.
+  A missing or damaged category never becomes an empty replacement.
+- **Settings, credentials, recordings audio, vocabulary, connections and
+  models** are listed as kept in the backup but not applied. Credentials are
+  never imported automatically and their values are not read into the preview.
+  Native configuration, hotkey, microphone and device-path values are not
+  touched.
+
+Apply re-reads the current History and profiles and refuses if either changed
+since the preview. It then writes profiles followed by each History item.
+Before writing, it snapshots the original bytes of every file it touches
+(`DesktopRecordingStore.applyMigrationRestore`). On cancellation or failure,
+it restores those bytes, removes the files it added and reports whether the
+rollback succeeded. Portable tests are in
+`Tests/SpeakDesktopTests/DesktopMigrationRestoreTests.swift`.
+
+Not yet done:
+- Linux has the shared code but no GTK entry point; `LinuxHostPlatform` keeps
+  the default nil restorer.
+- Restored History is not pushed to iCloud sync immediately.
+- There is no native self-test or screenshot receipt for the dialog yet.
 
 ## Local live transcription (Windows source only)
 

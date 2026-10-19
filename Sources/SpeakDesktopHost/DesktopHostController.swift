@@ -324,6 +324,10 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var migrationInspectionTask: Task<Void, Never>?
     var migrationInspectionWorker: Task<DesktopMigrationInspection.Outcome, Never>?
     var audioCleanupConfirmation: (id: UUID, snapshot: DesktopRecordingAudioSnapshot)?
+    var migrationRestoreTask: Task<Void, Never>?
+    var migrationRestoreWorker: Task<DesktopMigrationRestore.Preparation, Never>?
+    var migrationRestoreApplyWorker: Task<DesktopMigrationRestore.Outcome, Never>?
+    var migrationRestoreConfirmation: (id: UUID, plan: DesktopMigrationRestore.Plan)?
     var liveUpdates: Task<Void, Never>?
     var liveFinalisation: DesktopLiveSession?
     /// The recording the HUD follows, from Record until its result.

@@ -20,6 +20,8 @@ func windowsHistoryManagementEvent(
         }
     case 97:
         holder.enqueueSettings { await holder.controller.beginMigrationInspection(URL(fileURLWithPath: value)) }
+    case 98: holder.enqueueSettings { await holder.controller.beginMigrationRestore(URL(fileURLWithPath: value)) }
+    case 99: holder.enqueueSettings { await holder.controller.answerMigrationRestore(value, choice: index) }
     default: return false
     }
     return true

@@ -243,6 +243,10 @@ extension DesktopHostController {
         migrationInspectionWorker?.cancel()
         migrationInspectionTask?.cancel()
         audioCleanupConfirmation = nil
+        migrationRestoreWorker?.cancel()
+        migrationRestoreApplyWorker?.cancel()
+        migrationRestoreTask?.cancel()
+        migrationRestoreConfirmation = nil
         postProcessingTask?.cancel()
         liveFinalisation?.cancel()
     }

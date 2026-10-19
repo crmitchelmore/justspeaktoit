@@ -990,7 +990,7 @@ parity. Evidence labels refer to executable surfaces:
 | Shortcuts | `Sources/SpeakWindows/WindowsHotKey.swift`, `Sources/SpeakLinux/LinuxShortcutGestures.swift`, `SpeakCore/HotKeyGestureMachine.swift` |
 | Voice | `Sources/SpeakDesktopHost/DesktopHostReadAloud.swift`, `SpeakWindows/WindowsReadAloud.swift`, `SpeakLinux/LinuxReadAloud.swift` |
 | General | `Sources/SpeakDesktopHost/DesktopHostSettings.swift`, `DesktopHostLoginItem.swift`, `SpeakWindows/WindowsLoginItemHost.swift`, `SpeakLinux/LinuxLoginItemHost.swift` |
-| Automation | Windows per-user named pipe; Linux `LinuxAutomation.swift`, shared Host commands and `SpeakLinuxAutomation` private Unix socket/`speak` journey (source-only, native qualification pending); `--toggle` remains |
+| Automation | Windows per-user named pipe, `WindowsAutomation.swift`, `WindowsAutomationSetup.swift` and General › CLI and MCP setup (`CWindowsSupport/WindowsAutomationSettings.cpp`, source-only); Linux `LinuxAutomation.swift`, shared Host commands and `SpeakLinuxAutomation` private Unix socket/`speak` journey (source-only, native qualification pending); `--toggle` remains |
 
 Paths named relative to `Sources` in a cell inherit the preceding `Sources/`
 prefix. Missing rows cite the canonical Mac definition above and their native
@@ -1066,7 +1066,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | streamingInsertionEnabled | Missing / Missing | Final transcript insertion only |
 | clipboardInsertionTriggers | Implemented, native acceptance pending / Implemented, native acceptance pending | General trigger entry; bounded native snapshot, canonical matching, no History re-expansion |
 | enableSendToMac | Partial / Partial | iCloud web History sync is not Send-to-Mac transport/pairing |
-| enableAutomationServer | Equivalent / Source wired, unqualified | Automation; Windows per-user named pipe unchanged. Linux native opt-in starts a bounded same-user Unix socket and `speak`; imported/legacy true preserves intent but never grants device-local approval. False revokes. No native/runtime qualification claimed. |
+| enableAutomationServer | Equivalent / Source wired, unqualified | Automation; Windows per-user named pipe unchanged, still saved as legacy `automationEnabled`; General switch plus source-only CLI and MCP setup dialog (status, pipe name, consent text, copyable `speak`/MCP/Claude Code text). Linux native opt-in starts a bounded same-user Unix socket and `speak`; imported/legacy true preserves intent but never grants device-local approval. False revokes. No native/runtime qualification claimed. |
 | pasteRemoteTranscriptsAtCursor | Missing / Missing | No remote transcript delivery preference |
 | autoCorrectionsEnabled | Source wired, unqualified / Separate opt-in observational source, unqualified | Canonical true default is not consent. Windows retains its acknowledged native Edit/UIA Value route and session approval. Linux observation is OFF until its distinct disclosed local in-app session action; generic approval and imports cannot authorize it. Only an admitted ordinary AT-SPI field with a bounded observational span qualifies. Paste/clipboard never do. App-origin changes can also be learned. Manual candidate actions remain available when learning is off. NOT_RUN |
 | autoCorrectionsPromotionThreshold | Source wired, unqualified / Source wired for opt-in observation, unqualified | Canonical Mac default 2 and integral 2...10 validation; captured per observation and passed to the shared domain with its persistence/rollback behavior. Linux preferences are editable but cannot activate sampling or grant consent. NOT_RUN |
@@ -1244,3 +1244,37 @@ all stored values still participate in Apply. Screenshot tours include full and
 compact recording/completion cards.
 These synthetic checks do not establish physical microphone/shortcut/display
 acceptance, provider accuracy or macOS feature parity.
+
+## Automation CLI and MCP setup (Windows, source only)
+
+Command inventory: the shared `AutomationCommand` set (status, transcribe_file,
+start_dictation, stop_dictation, get_history) is implemented by
+`WindowsAutomationHost`; the compiler enforces every `AutomationCommandHost`
+requirement, so no Mac command is missing from the Windows pipe. Mac App
+Intents/Shortcuts (`AutomationIntents.swift`, `AutomationIntentSupport.swift`)
+are Apple-only and have no Windows host surface.
+
+General gains **CLI and MCP setup…** (`WindowsAutomationSettings.cpp`), the
+counterpart of the Mac Automation and CLI cards. It shows on/off with the
+per-user pipe name, the Mac's consent text, PowerShell `speak` examples, the
+MCP client configuration and the Claude Code command, each with Copy. The text
+comes from the shared `AutomationClientSetup` (`WindowsAutomationSetup.swift`),
+so the MCP entry and commands match the Mac. The dialog's on/off button emits
+the existing `AUTOMATION_TOGGLED` event; the pipe's owner-only DACL, remote and
+lower-integrity refusal and default-off gating are unchanged.
+
+`speak.exe` is already built for Windows (`Package.swift`) and ships beside
+`SpeakWindows.exe`; the MSIX declares the console alias
+`JustSpeakToItDeveloperCLI.exe`. The dialog finds whichever applies
+(`jsti_automation_cli_path`) and a package test ties the alias to it. Gaps: no
+`speak` name on PATH (the portable bundle changes no PATH; the alias name is
+deliberately not `speak.exe`), no Mac-style CLI installer or "Copy PATH
+command", and Windows still persists the legacy `automationEnabled` switch
+rather than Linux's shared `enableAutomationServer` + device-local consent.
+
+OpenClaw remains blocked: macOS has no OpenClaw settings journey to match, and
+the client (`OpenClawClient*.swift`) is Apple-only, using
+`URLSessionWebSocketTask`/os.log, with its conversation UI only in SpeakiOS.
+Windows would need an injected WinHTTP WebSocket transport like the realtime
+clients plus a native UI. The package alias test passed locally; native
+execution and the dialog self-test are **NOT_RUN** here.

@@ -167,6 +167,7 @@ extension DesktopHostLocalRulesTests {
             let stored = await controller.settings.configuration
             let authority = try XCTUnwrap(stored)
             XCTAssertTrue(DesktopPostProcessingConfiguration.keys.isDisjoint(with: authority.values.keys))
+            // swiftlint:disable:next line_length
             XCTAssertEqual(configuration.values[DesktopPostProcessingConfiguration.streamingKey], AnyCodable(.bool(false)))
             XCTAssertFalse(applied.streamingEnabled)
             try await controller.exportConfiguration(path: file.path)

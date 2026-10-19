@@ -40,13 +40,14 @@ struct HotkeyInfoCheck: TroubleshootingCheck {
   ) async -> [TroubleshootingItem] {
     let hotKey = settings.selectedHotKey
     var items: [TroubleshootingItem] = []
-    
+
     // Fn-specific troubleshooting
     if hotKey == .fnKey {
       items.append(
         TroubleshootingItem(
           id: "hotkey-fn-tip",
           title: "Fn Key Tip",
+          // swiftlint:disable:next line_length
           detail: "If Fn opens the emoji picker, go to System Settings → Keyboard → \"Press 🌐 key to\" and change it to \"Do Nothing\". External keyboards may not send Fn — consider using a custom shortcut instead.",
           status: .info,
           systemImage: "globe",
@@ -66,7 +67,7 @@ struct HotkeyInfoCheck: TroubleshootingCheck {
         )
       }
     }
-    
+
     return items
   }
 }

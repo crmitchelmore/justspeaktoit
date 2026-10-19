@@ -23,6 +23,7 @@ final class WindowsAppSwitchDeliveryTests: XCTestCase {
             (.onlyIfOriginalAppInFront, UInt32(JSTI_INSERTION_ONLY_ORIGINAL_FRONT.rawValue))
         ]
         for (policy, flag) in policies {
+            // swiftlint:disable:next line_length
             var options = WindowsTextOutputOptions(method: .directOnly, insertion: .replaceField, restoreClipboard: false)
             let legacyFlags = options.nativeFlags
             options.appSwitchDelivery = policy

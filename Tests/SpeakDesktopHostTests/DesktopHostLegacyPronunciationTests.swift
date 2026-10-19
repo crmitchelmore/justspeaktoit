@@ -61,6 +61,7 @@ final class DesktopHostLegacyPronunciationTests: XCTestCase {
         let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
         try await seed(controller, root: root, dictionary: ["A": "First", "B": "Second"])
         let rows = try await legacyRows(controller)
+        // swiftlint:disable:next identifier_name
         let a = try XCTUnwrap(rows.first { $0[1] == "A" })
         _ = try await send(controller, ["save", a[0], "A", "Changed"])
         await expectRefusal(controller, fields: ["delete", a[0], "A", "First"], message: "changed")

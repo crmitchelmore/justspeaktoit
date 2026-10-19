@@ -11,6 +11,7 @@ import SpeakDesktop
 /// copies instead. With several arrivals in one sync, only the newest is
 /// pasted; the rest stay in History.
 extension DesktopHostController {
+    // swiftlint:disable:next large_tuple
     typealias RemoteArrival = (alert: RemoteTranscriptArrival.Alert, recordID: UUID, createdAt: Date)
 
     func remoteArrival(

@@ -13,7 +13,7 @@ struct DesktopHostOwnedDictationStart<Platform: DesktopHostPlatform>: Sendable {
     let endpoint: String
     let configuration: DesktopConfiguration?
     var polish: DesktopHostLivePolishInput?
-    var cleanup: DesktopHostCleanupInput? = nil
+    var cleanup: DesktopHostCleanupInput?
 }
 
 struct DesktopHostOwnedDictationAdmission<Platform: DesktopHostPlatform>: Sendable {
@@ -74,6 +74,7 @@ extension DesktopHostController {
                 profile.transcriptionOptions ?? configuration?.liveOptions ?? .desktopDefaults
             ),
             textOutput: textOutput, trigger: trigger, key: key, endpoint: azureResourceEndpoint(),
+            // swiftlint:disable:next line_length
             configuration: configuration, polish: captureLivePolish(profile), cleanup: captureCleanup(profile.postProcessing)
         )
     }

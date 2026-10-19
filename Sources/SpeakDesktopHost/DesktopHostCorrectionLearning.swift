@@ -39,6 +39,7 @@ extension DesktopHostController {
                 ? "Observational learning allowed for this session. App-origin changes can also be learned. "
                     + "Only an admitted AT-SPI editable field is eligible; paste is never observed."
                 : "Observational learning is off. Allow it explicitly for this session to observe bounded inserted "
+                    // swiftlint:disable:next line_length
                     + "spans; app-origin formatting and changes can also be learned. Accessibility must already be enabled.")
         }
         if !correctionLearningApproved {

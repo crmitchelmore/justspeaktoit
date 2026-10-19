@@ -90,6 +90,7 @@ extension DesktopHostController {
         await postProcess(original, options: options, inputText: nil)
     }
 
+    // swiftlint:disable:next cyclomatic_complexity function_body_length
     func postProcess(
         _ original: DesktopRecordingStore.Record, options: DesktopPostProcessing.Options, inputText: String?
     ) async -> DesktopRecordingStore.Record {

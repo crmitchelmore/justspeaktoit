@@ -12,7 +12,7 @@ extension DesktopMigrationRestore {
     /// Applies a confirmed choice. Application data is compared with the
     /// preview first; profiles and History are rolled back on any failure.
     /// Run on an owned cancellable off-actor worker, not a settings queue.
-    public static func apply(
+    public static func apply( // swiftlint:disable:this function_body_length
         _ plan: Plan, choice: Choice, targets: Targets,
         checkpoint: @escaping @Sendable (Step) throws -> Void = { _ in try Task.checkCancellation() }
     ) async -> Outcome {

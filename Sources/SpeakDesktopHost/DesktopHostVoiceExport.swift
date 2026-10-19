@@ -33,7 +33,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     }
 
     // Retained bypass and fresh synthesis share one owned publication boundary.
-    // swiftlint:disable:next function_body_length
+    // swiftlint:disable:next function_body_length cyclomatic_complexity
     private func startVoiceExport(
         _ snapshot: VoiceOutputSourceSnapshot, path: String, retained: VoiceExportPayload?,
         synthesize: @escaping @Sendable (

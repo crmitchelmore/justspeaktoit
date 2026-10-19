@@ -56,6 +56,7 @@ public enum AppSwitchDelivery: String, Codable, CaseIterable, Identifiable, Send
     public static func nativeHelp(canTargetApps: Bool) -> String {
         canTargetApps
             ? "Legacy keeps existing guarded delivery. Original-app background output requires a safely addressable "
+                // swiftlint:disable:next line_length
                 + "field; otherwise copy only. Current-app delivery is cancelled if its captured destination changes again."
             : "Wayland cannot identify or target another app. Explicit app-switch policies copy only; imported intent "
                 + "is retained. Legacy keeps the existing consented focused-app paste behavior."

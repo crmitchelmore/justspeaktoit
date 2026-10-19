@@ -6,7 +6,7 @@ import SpeakCore
 
 /// Explicit post-processing choices for desktop hosts. Remote cleanup is opt-in;
 /// neither missing credentials nor an unsupported model selects a local substitute.
-public enum DesktopPostProcessing {
+public enum DesktopPostProcessing { // swiftlint:disable:this type_body_length
     public enum Mode: String, Codable, Sendable {
         case disabled
         case remote
@@ -208,8 +208,6 @@ public enum DesktopPostProcessing {
         )
     }
 
-    // existing owned post-processing dispatch surface; no behavior change.
-    // swiftlint:disable:next function_body_length
     public static func process(
         rawText: String, options: Options, apiKey: String,
         lexiconDirectives: [String] = [], lexiconContextTags: [String] = [],
@@ -222,6 +220,8 @@ public enum DesktopPostProcessing {
         )
     }
 
+    // existing owned post-processing dispatch surface; no behavior change.
+    // swiftlint:disable:next function_body_length
     public static func process(
         rawText: String, options: Options, apiKey: String,
         lexiconDirectives: [String] = [], lexiconContextTags: [String] = [],

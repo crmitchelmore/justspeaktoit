@@ -9,7 +9,7 @@ public enum SpeechDefaults {
     public static let postProcessingStreamingEnabled = true
     public static let connectionPreWarmingEnabled = true
     /// Pre-streaming desktop documents and API calls retain their completed-only behavior.
-    public static let desktopLegacyPostProcessingStreamingEnabled = false
+    public static let desktopLegacyPostProcessingStreamingEnabled = false // swiftlint:disable:this identifier_name
     public static let liveStopGracePeriod = 0.0
     public static let recordingTailDuration = 0.5
     public static let voiceCommandsEnabled = true
@@ -211,6 +211,7 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable { // swiftlint:
         self.values = try Self.reconciledKeywords(in: values)
     }
 
+    // swiftlint:disable:next cyclomatic_complexity
     private static func validateFields(in values: [String: AnyCodable]) throws {
         for field in Self.fields {
             guard let value = values[field.key] else { continue }

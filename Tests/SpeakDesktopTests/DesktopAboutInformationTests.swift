@@ -40,6 +40,7 @@ final class DesktopAboutInformationTests: XCTestCase {
                 try DesktopAboutInformation.decodeMetadata(JSONSerialization.data(withJSONObject: object))
             )
         }
+        // swiftlint:disable:next line_length
         XCTAssertThrowsError(try DesktopAboutInformation.decodeMetadata(Data(repeating: 32, count: 4 * 1024 * 1024 + 1)))
     }
 

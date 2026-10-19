@@ -28,7 +28,7 @@ extension DesktopHostController {
     }
 
     // existing owned dictation-session startup orchestration; no behavior change.
-    // swiftlint:disable:next function_body_length
+    // swiftlint:disable:next function_body_length cyclomatic_complexity
     func startOwnedDictation(
         _ snapshot: DesktopHostOwnedDictationStart<Platform>, capability: DesktopHostOwnedDictationCapability
     ) async throws {

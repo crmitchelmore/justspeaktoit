@@ -14,6 +14,7 @@ extension DesktopHostController {
         ))
     }
 
+    // swiftlint:disable:next function_body_length
     func startRecording(_ request: DesktopHostRecordingStart<Platform>) async throws {
         pauseConnectionPreWarming()
         connectionWarmCapture = nil
@@ -113,7 +114,7 @@ extension DesktopHostController {
 
     /// Starts the live session and capture for an already-saved recording,
     /// saving a startup-failure record and rethrowing when either step fails.
-    private func beginLiveRecording(_ start: LiveRecordingStart) async throws {
+    private func beginLiveRecording(_ start: LiveRecordingStart) async throws { // swiftlint:disable:this function_body_length line_length
         let (key, profile, id, file, rate) = (
             start.key, start.profile, start.id, start.file, start.rate
         )

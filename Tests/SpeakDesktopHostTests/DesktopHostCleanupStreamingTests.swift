@@ -1,9 +1,11 @@
+// swiftlint:disable file_length
 import Foundation
 import SpeakCore
 import SpeakDesktop
 import XCTest
 @testable import SpeakDesktopHost
 
+// swiftlint:disable:next type_body_length
 final class DesktopHostCleanupStreamingTests: XCTestCase {
     private var directory: URL!
     private var host: DesktopHostController<FakePlatform>!
@@ -66,6 +68,7 @@ final class DesktopHostCleanupStreamingTests: XCTestCase {
         XCTAssertNil(stillSaved.processedText, "Only the caller's final save may commit cleanup")
     }
 
+    // swiftlint:disable:next function_body_length
     func testLegacyAndOwnedRecording_KeepAdmissionSnapshotAndOnlyCommitFinal() async throws {
         await host.close()
         let index = try XCTUnwrap(DesktopHostModels.all.firstIndex {
@@ -182,6 +185,7 @@ final class DesktopHostCleanupStreamingTests: XCTestCase {
         let record = try await record()
         let requestID = UUID()
         let presentation = await host.cleanupTestPreviewToken(requestID)
+        // swiftlint:disable:next line_length
         await host.publishCleanupPreview("allowed", recordID: record.id, requestID: requestID, presentation: presentation)
         XCTAssertEqual(FakeLog.shared.displayedTranscripts.last, "allowed")
         await host.cleanupTestSelectionAwayBack(record.id)
@@ -416,11 +420,13 @@ private final class CleanupHostEffects: DesktopHostEffects, @unchecked Sendable 
         if failWrites { throw DesktopHostError(message: "Synthetic settings write failure") }
         try base.writeSettings(data, to: url)
     }
+    // swiftlint:disable:next line_length
     func postProcess(text: String, options: DesktopPostProcessing.Options, key: String, directives: [String], tags: [String])
         async throws -> DesktopPostProcessing.Outcome {
         lock.withLock { ordinary += 1 }
         return outcome
     }
+    // swiftlint:disable:next function_parameter_count
     func postProcessStreaming(
         text: String, options: DesktopPostProcessing.Options, key: String, directives: [String], tags: [String],
         onUpdate: @escaping @Sendable (String) -> Void

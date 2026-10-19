@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import Foundation
 
 /// The individual action shortcuts the Mac stores under `customShortcutBindings`.
@@ -342,6 +343,7 @@ public struct DesktopShortcutBindings: Equatable, Sendable {
     public static let defaults = DesktopShortcutBindings(preset: .standard)
 
     public init(preset: DesktopShortcutPreset = .standard) {
+        // swiftlint:disable:next line_length
         bindings = Dictionary(uniqueKeysWithValues: DesktopShortcutAction.allCases.map { ($0, preset.binding(for: $0)) })
         preservedEntries = [:]
     }

@@ -70,10 +70,12 @@ extension DesktopHostAutomationTests {
         let credential = try XCTUnwrap(DesktopHostModels.provider(for: model)).apiKeyIdentifier
         FakeLog.shared.setKey("synthetic", name: credential)
         try await controller.automationFixtureProfile(DictationProfile(
+            // swiftlint:disable:next line_length
             name: "AssemblyAI file", transcriptionModelID: model, polishEnabled: false, transcriptionRouting: .remoteBatch
         ))
         try await importValues([
             "transcriptionKeywords": AnyCodable(.string("Explicit")),
+            // swiftlint:disable:next line_length
             ApplicationPreferenceKey.assemblyAIIgnoredPronunciationTerms.rawValue: AnyCodable(.array([.string("hidden")]))
         ])
         let pronunciationFile = directory.appendingPathComponent("pronunciations.json")

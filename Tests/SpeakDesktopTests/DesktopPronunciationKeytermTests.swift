@@ -73,6 +73,7 @@ final class DesktopPronunciationKeytermTests: XCTestCase {
         let url = try XCTUnwrap(request.url)
         let items = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
         let terms = try XCTUnwrap(items.first { $0.name == "keyterms_prompt" }?.value)
+        // swiftlint:disable:next line_length
         XCTAssertEqual(try JSONDecoder().decode([String].self, from: Data(terms.utf8)), ["Explicit", "Modern", "Legacy"])
     }
 
@@ -85,6 +86,7 @@ final class DesktopPronunciationKeytermTests: XCTestCase {
         var entries = original.entries
         let index = try XCTUnwrap(DesktopConfiguration.fields.firstIndex { $0.key == "assemblyAIKeyterms" })
         entries[index] = ""
+        // swiftlint:disable:next line_length
         let cleared = try original.applying(entries).recordingPronunciationKeytermSelection(from: original, modern: modern)
         XCTAssertEqual(cleared.values[ignoredKey], AnyCodable(.array([.string("modern"), .string("unrelated")])))
         let restarted = try JSONDecoder().decode(DesktopConfiguration.self, from: JSONEncoder().encode(cleared))

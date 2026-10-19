@@ -110,10 +110,13 @@ extension DesktopHostController {
     ) async throws -> DesktopConfiguration {
         guard DesktopHostModels.provider(for: settings.model)?.id == "assemblyai" else { return configuration }
         guard configuration.text("transcriptionKeywords") != previous.text("transcriptionKeywords")
+            // swiftlint:disable:next line_length
             || configuration.text("assemblyAIKeyterms") != previous.text("assemblyAIKeyterms") else { return configuration }
         let model = settings.model
         let hints = try await recognitionVocabulary()
+        // swiftlint:disable:next line_length
         guard !closed, !busy, recording == nil, settings.model == model, try configurationForNativeEditor() == previous else {
+            // swiftlint:disable:next line_length
             throw DesktopHostError(message: "Preferences changed while loading pronunciation hints. Refresh and try again.")
         }
         if let editor {
@@ -122,6 +125,7 @@ extension DesktopHostController {
         if let displayed = editor?.pronunciationWords, hints.pronunciationWords != displayed {
             throw DesktopHostError(message: "Pronunciation hints changed since this editor opened. Reopen preferences.")
         }
+        // swiftlint:disable:next line_length
         return try configuration.recordingPronunciationKeytermSelection(from: previous, modern: hints.pronunciationWords)
     }
 
@@ -174,6 +178,7 @@ extension DesktopHostController {
         let preparation = connectionWarmApproved
             ? " Connection preparation approved until exit, after successful capture only; not live or streaming."
             : configuration.enabled(DesktopConnectionPreWarming.preferenceKey)
+                // swiftlint:disable:next line_length
                 ? " Connection preparation intent retained; approve probes on this device for this session to enable it."
                 : ""
         update(status + approval + preparation + cleanup)

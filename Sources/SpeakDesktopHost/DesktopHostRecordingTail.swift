@@ -7,6 +7,7 @@ extension DesktopHostController {
         "Finishing recording buffer. Cancel keeps captured audio without transcription."
     }
 
+    // swiftlint:disable:next cyclomatic_complexity
     func stopAndTranscribe() async {
         let pending = recording?.record
         defer {

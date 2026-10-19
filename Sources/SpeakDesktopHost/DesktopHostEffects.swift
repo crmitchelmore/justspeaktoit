@@ -78,6 +78,7 @@ package protocol DesktopHostEffects<Platform>: Sendable {
     func postProcess(
         text: String, options: DesktopPostProcessing.Options, key: String, directives: [String], tags: [String]
     ) async throws -> DesktopPostProcessing.Outcome
+    // swiftlint:disable:next function_parameter_count
     func postProcessStreaming(
         text: String, options: DesktopPostProcessing.Options, key: String, directives: [String], tags: [String],
         onUpdate: @escaping @Sendable (String) -> Void
@@ -102,6 +103,7 @@ package extension DesktopHostEffects {
         throw DesktopHostError(message: "This host has no shared-session cleanup connection preparation.")
     }
 
+    // swiftlint:disable:next function_parameter_count
     func postProcessStreaming(
         text: String, options: DesktopPostProcessing.Options, key: String, directives: [String], tags: [String],
         onUpdate: @escaping @Sendable (String) -> Void

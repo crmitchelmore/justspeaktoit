@@ -27,10 +27,13 @@ class APICompatibilityTests(unittest.TestCase):
             blob = subprocess.check_output(
                 ["git", "hash-object", "-w", "--stdin"], cwd=repository, input=MANIFEST, text=True
             ).strip()
+            resources = subprocess.check_output(
+                ["git", "mktree"], cwd=repository, input=f"100644 blob {blob}\tSound.caf\n", text=True
+            ).strip()
             # A real baseline tree, with no commits, hooks or repository build.
             baseline = subprocess.check_output(
                 ["git", "mktree"], cwd=repository,
-                input=f"100644 blob {blob}\tPackage.swift\n", text=True
+                input=f"100644 blob {blob}\tPackage.swift\n040000 tree {resources}\tResources\n", text=True
             ).strip()
             if missing_baseline:
                 baseline = "missing-baseline"
@@ -55,6 +58,10 @@ class APICompatibilityTests(unittest.TestCase):
                     package = Path(args[2])
                     call["manifest"] = (package / "Package.swift").read_text()
                     call["directory"] = str(package)
+                    call["entries"] = sorted(
+                        str(path.relative_to(package)) for path in package.rglob("*")
+                        if path.name not in ("Package.swift", "package.json")
+                    )
                     result = os.environ["DUMP_JSON"]
                     status = int(os.environ["DUMP_STATUS"])
                 else:
@@ -103,6 +110,11 @@ class APICompatibilityTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Baseline has no SpeakWatchCore product", result.stdout)
         self.assert_products(calls, EXISTING_PRODUCTS)
+
+    def test_baseline_directories_are_recreated_empty_for_manifest_evaluation(self):
+        result, calls = self.run_gate()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([call["entries"] for call in calls if "entries" in call], [["Resources"]])
 
     def test_present_product_is_compared(self):
         result, calls = self.run_gate(products=EXISTING_PRODUCTS + ["SpeakWatchCore"])

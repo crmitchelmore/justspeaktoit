@@ -15,6 +15,7 @@ enum WindowsActionShortcutRun: Equatable {
     case macOnly, record, page(String), playPause, stopSpeech, apiKeys, permissions, compareModels
     case quickVoice(Int), pasteLastHistoryItem, speakSelectedText, speakClipboard, troubleshooting
 
+    // swiftlint:disable:next cyclomatic_complexity
     init(_ action: DesktopShortcutAction) {
         switch action {
         case .startStopRecording: self = .record
@@ -214,7 +215,7 @@ extension WindowsNative {
 /// The native dialog's check and save, on the UI thread. The rows are checked
 /// against the last configured bindings; an accepted save joins the settings
 /// queue, and a failed write puts the saved shortcuts back.
-func actionShortcutsCheck(
+func actionShortcutsCheck( // swiftlint:disable:this function_parameter_count
     _ rows: UnsafePointer<JSTIActionShortcut>?, _ count: Int, _ commit: Int32,
     _ message: UnsafeMutablePointer<CChar>?, _ capacity: Int, _ context: UnsafeMutableRawPointer?
 ) -> Int32 {

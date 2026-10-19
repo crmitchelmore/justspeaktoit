@@ -65,6 +65,7 @@ extension WindowsAppController {
         )
     }
 
+    // swiftlint:disable:next cyclomatic_complexity
     fileprivate func applyTroubleshootingFix(
         _ command: Int32, snapshot: WindowsTroubleshootingSnapshot
     ) async throws {

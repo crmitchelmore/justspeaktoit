@@ -71,6 +71,7 @@ final class DesktopHostObservationalLearningTests: XCTestCase {
     func testHeldQueue_OldAllowAndStopCannotConsumeOrRevokeNewOffer() async throws {
         let fixture = try ObservationalFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
+        // swiftlint:disable:next identifier_name
         let a = fixture.span.offerLocalConsent()
         let latch = ObservationalConsentLatch()
         let entered = expectation(description: "old Allow is held before Host delivery")
@@ -86,6 +87,7 @@ final class DesktopHostObservationalLearningTests: XCTestCase {
         }
         await fulfillment(of: [entered], timeout: 3)
         let oldStop = fixture.span.revokeLocalOffer()
+        // swiftlint:disable:next identifier_name
         let b = fixture.span.offerLocalConsent()
         await latch.release()
         let oldResult = await queuedA.value

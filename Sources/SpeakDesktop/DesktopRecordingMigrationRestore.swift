@@ -31,7 +31,7 @@ extension DesktopRecordingStore {
     /// Writes restored History, rolling every touched file back to its prior
     /// bytes (or removing a file it added) when a write or checkpoint fails.
     /// Records are never deleted through the tombstone ledger here.
-    func applyMigrationRestore(
+    func applyMigrationRestore( // swiftlint:disable:this cyclomatic_complexity
         _ writes: [DesktopMigrationRestore.HistoryWrite],
         checkpoint: @Sendable (DesktopMigrationRestore.Step) throws -> Void
     ) throws -> [Record] {
@@ -42,6 +42,7 @@ extension DesktopRecordingStore {
                 throw DataMigrationError.invalid("History: two files claim one item, so nothing was restored.")
             }
         }
+        // swiftlint:disable:next large_tuple
         var staged: [(url: URL, prior: Data?, record: Record)] = []
         for write in writes {
             try Task.checkCancellation()

@@ -101,6 +101,7 @@ final class DesktopVisualDensityTests: XCTestCase {
         guard case .choice(let choices) = fields[0].kind else { return XCTFail("App visibility is not a choice") }
         XCTAssertEqual(choices.map(\.value), ["dockAndMenuBar", "menuBarOnly", "dockOnly"])
         let defaults = try DesktopConfiguration()
+        // swiftlint:disable:next line_length
         XCTAssertEqual(defaults.shellPreferences, DesktopShellPreferences(visibility: .dockAndMenuBar, compactIcon: false))
         XCTAssertFalse(defaults.enabled("analyticsEnabled"))
         XCTAssertTrue(ShellPreference.appleOnlyKeys.isDisjoint(with: DesktopConfiguration.supportedKeys))

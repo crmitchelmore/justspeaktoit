@@ -4,7 +4,7 @@ import SpeakDesktop
 
 extension DesktopHostController {
     /// Output is the recording's own authority; imports and retries pass nil.
-    package func transcribe( // swiftlint:disable:this function_body_length
+    package func transcribe( // swiftlint:disable:this function_body_length cyclomatic_complexity
         _ original: DesktopRecordingStore.Record, duration: TimeInterval, output: DesktopHostRecordingOutput<Platform>?,
         profile: DesktopProfileSession? = nil, azureEndpoint: String? = nil,
         input: DesktopHostRecordingInput? = nil, voiceCommands: DesktopHostVoiceCommandPolicy? = nil

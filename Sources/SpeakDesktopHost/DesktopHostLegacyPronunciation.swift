@@ -45,6 +45,7 @@ extension DesktopHostController {
         return "Legacy pronunciation dictionary saved. The modern Read aloud dictionary is unchanged."
     }
 
+    // swiftlint:disable:next line_length
     private static func legacyPronunciationOriginal(_ identity: String, in dictionary: [String: String]) throws -> String? {
         if identity.isEmpty { return nil }
         guard let data = Data(base64Encoded: identity) else { throw DesktopVocabularyError.invalidEvent }
@@ -55,6 +56,7 @@ extension DesktopHostController {
         return original[0]
     }
 
+    // swiftlint:disable:next line_length
     private static func legacyPronunciationPresentation(_ dictionary: [String: String], notice: String) throws -> String {
         let explanation = "Mac legacy word-to-pronunciation settings. Words can seed AssemblyAI."
             + " Modern Read aloud entries are separate. Use New to add a word."
@@ -72,6 +74,7 @@ extension DesktopHostController {
         }
         let presentation = rows.joined(separator: "\n")
         guard presentation.utf8.count <= 4 * 1024 * 1024 else {
+            // swiftlint:disable:next line_length
             throw DesktopHostError(message: "This legacy dictionary is too large for the editor. Use portable preferences.")
         }
         return presentation

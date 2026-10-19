@@ -197,7 +197,7 @@ func linuxVoicePickerEvent(_ action: Int32, _ identifier: UnsafePointer<CChar>?,
 }
 
 // The native callback preserves one validated event order and its fixed ABI.
-// swiftlint:disable:next function_parameter_count function_body_length
+// swiftlint:disable:next function_parameter_count cyclomatic_complexity
 func linuxVoiceSourceEvent(
     _ action: Int32, _ source: Int32, _ text: UnsafePointer<CChar>?,
     _ record: UnsafePointer<CChar>?, _ path: UnsafePointer<CChar>?, _ context: UnsafeMutableRawPointer?

@@ -144,8 +144,8 @@ final class DesktopConnectionPreWarmingTests: XCTestCase {
                 ), previousFailureCount: 0, failureResponse: nil, error: nil, sender: WarmChallengeSender()
             )
             var called = false
-            OpenRouterConnectionWarmer.ProbeDelegate().urlSession(session, task: task, didReceive: challenge) {
-                disposition, credential in
+            // swiftlint:disable:next line_length
+            OpenRouterConnectionWarmer.ProbeDelegate().urlSession(session, task: task, didReceive: challenge) { disposition, credential in
                 called = true
                 XCTAssertNil(credential)
                 XCTAssertEqual(

@@ -6,11 +6,11 @@ extension DesktopHostController {
     func startRecording(
         target: Platform.InsertionTarget?, deviceID: String, profile: DesktopProfileSession,
         textOutput: Platform.TextOutputOptions, trigger: HotKeySessionTrigger = .other,
-        handsFree: DesktopHandsFreeRun<Platform>? = nil
+        handsFree: DesktopHandsFreeRun<Platform>? = nil, profileNotice: String? = nil
     ) async throws {
         try await startRecording(.init(
             target: target, deviceID: deviceID, profile: profile, textOutput: textOutput,
-            trigger: trigger, handsFree: handsFree, capturePolicy: nil
+            trigger: trigger, handsFree: handsFree, capturePolicy: nil, profileNotice: profileNotice
         ))
     }
 
@@ -29,16 +29,30 @@ extension DesktopHostController {
             )
             return
         }
+        // Provider inputs belong to the Record event, not to later settings edits.
+        let frozenConfiguration: DesktopConfiguration?
+        if let policy = request.capturePolicy {
+            frozenConfiguration = policy.configuration
+        } else { frozenConfiguration = settings.configuration }
+        let rate = DesktopLiveTranscription.route(forID: capturedProfile.modelIdentifier)?.sampleRate
+            ?? PCMRecordingFile.sampleRate
+        let voiceCommands = try DesktopHostVoiceCommandPolicy(recorded: frozenConfiguration)
+        let options = DesktopHostRecordingConfiguration(
+            configuration: frozenConfiguration, azureEndpoint: azureResourceEndpoint(), sampleRate: rate,
+            voiceCommands: voiceCommands
+        )
         let key = try requireCredentialOrLocalModel(capturedProfile.modelIdentifier)
         try requireAzureResource(forLive: capturedProfile.modelIdentifier)
         let polish = captureLivePolish(capturedProfile)
         var profile = capturedProfile
         if DesktopHostModels.provider(for: profile.modelIdentifier)?.id == "assemblyai" {
-            let options = profile.transcriptionOptions ?? settings.configuration?.liveOptions ?? .desktopDefaults
+            let recognition = profile.transcriptionOptions ?? frozenConfiguration?.liveOptions ?? .desktopDefaults
             let hints = try await recognitionVocabulary()
             try Task.checkCancellation()
             guard !closed, handsFree == nil || handsFreeRun?.id == handsFree?.id else { throw CancellationError() }
-            profile = profile.capturingTranscriptionOptions(options.includingPronunciationWords(hints.pronunciationWords))
+            profile = profile.capturingTranscriptionOptions(
+                recognition.includingPronunciationWords(hints.pronunciationWords)
+            )
         }
         // Holds a profile's or the app's on-device model while startup suspends;
         // the recording holds it once capture starts.
@@ -53,19 +67,21 @@ extension DesktopHostController {
         guard !closed, handsFree == nil || handsFreeRun?.id == handsFree?.id else { throw CancellationError() }
         let filename = id.uuidString + ".wav"
         let audio = directory.appendingPathComponent("History").appendingPathComponent(filename)
-        let rate = DesktopLiveTranscription.route(forID: profile.modelIdentifier)?.sampleRate
-            ?? PCMRecordingFile.sampleRate
         let file: PCMRecordingFile
         do { file = try PCMRecordingFile(url: audio, sampleRate: rate) } catch {
             await recordingFeedback?.cancelRecording(id)
             throw error
         }
-        let record = profileRecord(id: id, filename: filename, profile: profile)
+        var record = profileRecord(id: id, filename: filename, profile: profile)
+        if let notice = request.profileNotice, !(record.profileNotes ?? []).contains(notice) {
+            record.profileNotes = (record.profileNotes ?? []) + [notice]
+        }
         try await beginLiveRecording(
             LiveRecordingStart(
                 key: key, profile: profile, id: id, record: record, file: file, rate: rate,
                 target: target, deviceID: deviceID, textOutput: textOutput, trigger: trigger, handsFree: handsFree,
-                polish: polish, capturePolicy: request.capturePolicy, warmGeneration: warmGeneration
+                polish: polish, capturePolicy: request.capturePolicy, options: options,
+                warmGeneration: warmGeneration
             )
         )
         guard !closed, recording?.record.id == id else { return }
@@ -89,6 +105,7 @@ extension DesktopHostController {
         let handsFree: DesktopHandsFreeRun<Platform>?
         let polish: DesktopHostLivePolishInput?
         let capturePolicy: DesktopHostCapturePolicy?
+        let options: DesktopHostRecordingConfiguration
         let warmGeneration: UUID
     }
 
@@ -110,7 +127,8 @@ extension DesktopHostController {
             guard !closed, handsFree == nil || handsFreeRun?.id == handsFree?.id else { throw CancellationError() }
             live = try await makeLiveSession(
                 model: profile.modelIdentifier, key: key, id: id, language: profile.language,
-                options: profile.transcriptionOptions, polish: start.polish
+                options: profile.transcriptionOptions ?? start.options.configuration?.liveOptions ?? .desktopDefaults,
+                azureEndpoint: start.options.azureEndpoint, polish: start.polish
             )
             record = try await retainingLiveKeywordNotice(live?.keywordLimitation, in: record)
             guard !closed, handsFree == nil || handsFreeRun?.id == handsFree?.id else { throw CancellationError() }
@@ -135,7 +153,7 @@ extension DesktopHostController {
             }
             recording = Recording(
                 capture: capture, context: context, file: file, handsFree: handsFree != nil,
-                record: record, target: target, live: live, profile: profile,
+                record: record, target: target, live: live, profile: profile, options: start.options,
                 textOutput: textOutput, trigger: trigger
             )
             recordingCapturePolicy = start.capturePolicy.map { (recordID: id, value: $0) }
@@ -160,10 +178,7 @@ extension DesktopHostController {
     }
 
     private func captureContext(_ start: LiveRecordingStart, live: DesktopLiveSession?) -> DesktopCaptureContext {
-        let configuration: DesktopConfiguration?
-        if let policy = start.capturePolicy {
-            configuration = policy.configuration
-        } else { configuration = settings.configuration }
+        let configuration = start.options.configuration
         let silence = start.handsFree == nil && configuration?.enabled("silenceDetectionEnabled") == true
             ? DictationSilenceMonitor(
                 threshold: configuration?.number("silenceThreshold") ?? DictationSilencePolicy.defaultThreshold,
@@ -211,7 +226,7 @@ extension DesktopHostController {
         }
         return StoppedRecording(
             record: active.record, duration: duration, target: active.target, live: active.live,
-            profile: active.profile, textOutput: active.textOutput
+            profile: active.profile, options: active.options, textOutput: active.textOutput
         )
     }
 

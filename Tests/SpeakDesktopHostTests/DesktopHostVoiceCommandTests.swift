@@ -254,6 +254,57 @@ final class DesktopHostVoiceCommandTests: XCTestCase {
     }
 }
 
+extension DesktopHostVoiceCommandTests {
+    private func toggleBatch() async {
+        await controller.toggle(
+            target: nil, modelIndex: batchIndex, deviceID: "", targetExecutablePath: nil, textOutput: FakeTextOutput()
+        )
+    }
+
+    func testRecordingUsesPolicyFrozenAtRecordNotSettingsChangedBeforeFinish() async throws {
+        try await configuration(triggers: "my snippet")
+        effects.text = "my snippet"
+        let changed = try DesktopConfiguration(values: [
+            "voiceCommandsEnabled": AnyCodable(.bool(false)),
+            "clipboardInsertionTriggers": AnyCodable(.string("different phrase")),
+            "postRecordingTailDuration": AnyCodable(.double(0))
+        ])
+        await toggleBatch()
+        await controller.replaceVoiceCommandConfigurationForTest(changed)
+        await toggleBatch()
+        let records = try await controller.store.records()
+        let record = try XCTUnwrap(records.first)
+        XCTAssertEqual(record.originalText, "my snippet")
+        XCTAssertEqual(record.displayText, effects.clipboard)
+        XCTAssertEqual(effects.reads, 1)
+        await controller.retryHistory(record.id.uuidString)
+        let retried = try await controller.store.record(id: record.id)
+        XCTAssertEqual(retried.displayText, "my snippet", "A retry has no recording policy and uses current settings")
+        XCTAssertEqual(effects.reads, 1)
+    }
+
+    func testRecordedAbsentConfigurationKeepsCanonicalDefaults() async throws {
+        await controller.replaceVoiceCommandConfigurationForTest(nil)
+        let disabled = try DesktopConfiguration(values: [
+            "voiceCommandsEnabled": AnyCodable(.bool(false)),
+            "postRecordingTailDuration": AnyCodable(.double(0))
+        ])
+        await toggleBatch()
+        await controller.replaceVoiceCommandConfigurationForTest(disabled)
+        await toggleBatch()
+        let records = try await controller.store.records()
+        let record = try XCTUnwrap(records.first)
+        XCTAssertEqual(record.displayText, "please Synthetic clipboard")
+        XCTAssertEqual(effects.reads, 1)
+    }
+}
+
+private extension DesktopHostController where Platform == FakePlatform {
+    func replaceVoiceCommandConfigurationForTest(_ configuration: DesktopConfiguration?) {
+        settings.configuration = configuration
+    }
+}
+
 private final class VoiceCommandFinalClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
     let finalShape = TranscriptFinalShape.standaloneSegments
     let text: String

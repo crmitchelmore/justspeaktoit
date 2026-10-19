@@ -24,6 +24,7 @@ package struct DesktopHostRecordingInput: Sendable {
     let azureEndpoint: String
     let vocabulary: [String]
     var pronunciationWords: [String] = []
+    var voiceCommands: DesktopHostVoiceCommandPolicy?
 
     init(key: String, azureEndpoint: String, vocabulary: [String]) {
         self.key = key

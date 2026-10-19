@@ -520,7 +520,12 @@ remote polish, and subsequent History selection, Copy and Export use saved
 variants without consulting the clipboard again. A transcription retry processes
 the new provider result once with a fresh clipboard snapshot, never its earlier
 expanded text. Live previews and failed live recovery text do not expand.
-Comparison results remain raw and never read the clipboard.
+Comparison results remain raw and never read the clipboard. A microphone
+recording (including each hands-free utterance) freezes the enabled switch and
+custom phrases at Record with its other provider inputs, so settings edited
+while it records or finishes apply only to later recordings; a recording made
+without stored preferences keeps the canonical defaults. Imports and retries
+have no recording policy and use the current settings.
 
 As on Mac, **enabled remote post-processing receives the expanded clipboard text**
 when a trigger is spoken. Clipboard contents are not added to transcription
@@ -638,10 +643,23 @@ stops listening and asks the user to check the original field before rearming
 with the hotkey. There is no automatic retry that could duplicate uncertain text.
 Capture-target completion after disarm/close cannot start a late recording.
 
-The run still freezes its original per-app profile/model, device and output
-options. Unlike Mac `startSession(.handsFree)`, it does **not** re-resolve the
-foreground-app profile at each utterance. This remains a separate behavioral
-gap; the fixed in-process capture rate is not silently reinterpreted.
+Each automatic utterance now resolves the profile for the application captured
+with it through the canonical resolver, as Mac `startSession(.handsFree)` does.
+Windows reads the retained target's process, or for explicit clipboard output
+the foreground process without probing an editable field or creating an
+insertion worker. X11 reads the active window's process (`/proc/<pid>/exe`) for
+the canonical Linux executable matchers; Wayland exposes no external app
+identity, so normal app settings apply and the recording's profile notes say
+so. An unreadable app identity likewise keeps normal app settings. The model,
+language and polish choices remain record-bound; no override is persisted into
+app defaults. Unavailable models refuse the utterance without fallback. A route
+requiring a different PCM rate from the armed detector refuses before creating
+a WAV or starting a provider, with guidance to arm again in the destination
+app. The preferred microphone and output method remain detector/run-owned.
+
+Legacy-path recording configuration, live options, Azure endpoint and capture
+rate are snapshotted before asynchronous startup and retained through
+finalization; owned dictation already freezes its inputs at admission.
 
 `DesktopHandsFreeAudio.swift` keeps quiet pre-roll only in RAM (0.5 seconds).
 Startup audio is bounded to three seconds; overflow fails and disarms rather
@@ -1135,7 +1153,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | ttsPronunciationDictionary | Source wired; qualification pending / Same | Strict word-to-text transfer/restart preserves the raw map; only keys seed AssemblyAI recognition using the shared Mac policy, never phonetic values or TTS replacements. A separate native Legacy word dictionary editor supports stale-safe CRUD without altering the modern store or Voice rendering pipeline. Modern literal-word recognition seeding is separately wired above. |
 | historyFlushInterval | Missing selector / Missing selector | History is durable per operation, not configurable timed flush |
 | silenceDetectionEnabled | Executable; qualification pending / Same | Native switch; initial quiet and configured silence stop the existing manual recording/finalization pipeline |
-| handsFreeDictationEnabled | Sound-activation replacement; qualification pending / Same | Fresh frozen target per utterance, record-bound acknowledged output; unconfirmed paste stops, Wayland requires clipboard-only; profile/model still fixed per run; not Apple's classifier |
+| handsFreeDictationEnabled | Sound-activation replacement; per-slice qualification / Same | Fresh target and app profile per utterance (Windows/X11; Wayland uses normal settings with a note), immutable provider options, record-bound output evidence; rate changes refuse/rearm; not Apple's classifier |
 | silenceThreshold | Executable; qualification pending / Same | Canonical range/default and Mac PCM meter; native editor feeds manual silence and sound activation |
 | silenceDuration | Executable; qualification pending / Same | Canonical hold/range feeds manual auto-stop and hands-free debounce; existing recording tail is retained |
 | connectionPreWarmingEnabled | Partial / Partial (source only; NOT_RUN) | Canonical intent round-trips. Separate native session approval allows a credential-free HEAD on the shared OpenRouter pool with a 5-second cancellation budget, only at idle after acknowledged ordinary capture in the current process/configuration and its real cleanup credential check. No probe before successful capture after restart; approval and capture evidence are transient. Completed-request remote cleanup only; native live WinHTTP/NIO and streaming cleanup's owned delegate sessions cannot reuse this pool. Owned/hands-free capture does not provide this witness. Existing device/absence notifications invalidate readiness; no new network/sleep monitor, idle timer/retry or guaranteed latency improvement. |

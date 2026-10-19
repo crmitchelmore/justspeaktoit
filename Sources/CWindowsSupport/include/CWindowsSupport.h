@@ -729,6 +729,10 @@ int jsti_insertion_copy_text(JSTIInsertionTarget *target, const char *text, JSTI
  * includes the NUL; 0 success, 2 insufficient buffer, -1 unavailable. */
 int jsti_insertion_executable_path(const JSTIInsertionTarget *target, char *path, size_t path_capacity,
                                    size_t *required_bytes, char *error, size_t error_capacity);
+/* One foreground-process snapshot, without field lookup, input or an insertion
+ * worker. Empty path means no external app; -1 is an explicit lookup failure.
+ * Supply 131073 bytes for the maximum UTF-8 process path. */
+int jsti_foreground_executable_path(char *path, size_t path_capacity, char *error, size_t error_capacity);
 void jsti_insertion_destroy(JSTIInsertionTarget *target);
 
 /* Automatic clipboard output for one completed recording whose method is copy

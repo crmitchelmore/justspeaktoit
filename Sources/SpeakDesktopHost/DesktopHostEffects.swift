@@ -69,6 +69,10 @@ package protocol DesktopHostEffects<Platform>: Sendable {
     func perform(_ job: Platform.OutputJob, text: String) -> DesktopTextOutputResult
     /// Captures the automatic utterance's destination away from PCM and the UI thread.
     func captureInsertionTarget() async throws -> Platform.InsertionTarget?
+    /// Captures one utterance's app identity, plus its destination when output needs one.
+    func captureUtteranceContext(
+        requiresInsertionTarget: Bool
+    ) async throws -> DesktopHostUtteranceContext<Platform.InsertionTarget>
     /// Read-only snapshot for a matched voice command; never called for other text.
     func voiceCommandClipboardText() async throws -> String?
     func postProcess(
@@ -121,6 +125,14 @@ package extension DesktopHostEffects {
 
     func captureInsertionTarget() async throws -> Platform.InsertionTarget? {
         throw DesktopHostError(message: "This host cannot capture a hands-free insertion destination.")
+    }
+
+    /// Hosts without app identity keep normal app settings for every utterance.
+    func captureUtteranceContext(
+        requiresInsertionTarget: Bool
+    ) async throws -> DesktopHostUtteranceContext<Platform.InsertionTarget> {
+        guard requiresInsertionTarget else { return .init(target: nil, executablePath: nil) }
+        return try await .init(target: captureInsertionTarget(), executablePath: nil)
     }
 
     func makeLiveClient(

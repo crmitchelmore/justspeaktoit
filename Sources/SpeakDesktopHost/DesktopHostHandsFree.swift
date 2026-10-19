@@ -6,19 +6,19 @@ import SpeakDesktop
 final class DesktopHandsFreeRun<Platform: DesktopHostPlatform>: @unchecked Sendable {
     let id: UUID
     let audio: DesktopHandsFreeAudio
-    let profile: DesktopProfileSession
+    let sampleRate: Int
     let textOutput: Platform.TextOutputOptions
     let deviceID: String
     var capture: (any DesktopRecordingCapture)?
     var started = false
 
     init(
-        id: UUID, audio: DesktopHandsFreeAudio, profile: DesktopProfileSession,
+        id: UUID, audio: DesktopHandsFreeAudio, sampleRate: Int,
         textOutput: Platform.TextOutputOptions, deviceID: String
     ) {
         self.id = id
         self.audio = audio
-        self.profile = profile
+        self.sampleRate = sampleRate
         self.textOutput = textOutput
         self.deviceID = deviceID
     }
@@ -102,7 +102,7 @@ extension DesktopHostController {
                 onFailure: { [weak self] message in Task { await self?.failHandsFree(message, runID: id) } }
             )
             let run = DesktopHandsFreeRun<Platform>(
-                id: id, audio: audio, profile: profile,
+                id: id, audio: audio, sampleRate: rate,
                 textOutput: textOutput, deviceID: request.deviceID
             )
             handsFreeRun = run
@@ -154,14 +154,34 @@ extension DesktopHostController {
             beginBusyOperation()
             defer { finishBusyOperation() }
             do {
-                let target = try await utteranceTarget(run)
+                let context = try await self.effects.captureUtteranceContext(
+                    requiresInsertionTarget: Platform.requiresInsertionTarget(run.textOutput)
+                )
+                try Task.checkCancellation()
                 guard !closed, handsFreeRun?.id == runID else { return }
+                if Platform.requiresInsertionTarget(run.textOutput), context.target == nil {
+                    throw DesktopHostError(
+                        message: "No external destination was captured. "
+                            + "Focus a text field or select clipboard-only output."
+                    )
+                }
+                let profile = resolvedProfile(executablePath: context.executablePath)
+                if let limitation = profile.blockingLimitation { throw DesktopHostError(message: limitation.message) }
+                let rate = DesktopLiveTranscription.route(forID: profile.modelIdentifier)?.sampleRate
+                    ?? PCMRecordingFile.sampleRate
+                guard rate == run.sampleRate else {
+                    throw DesktopHostError(
+                        message: "The current app profile needs \(rate) Hz audio, but hands-free is armed at "
+                            + "\(run.sampleRate) Hz. Use the hotkey in that app to arm a new detector."
+                    )
+                }
                 try await startRecording(
-                    target: target, deviceID: run.deviceID, profile: run.profile,
-                    textOutput: run.textOutput, handsFree: run
+                    target: context.target, deviceID: run.deviceID, profile: profile,
+                    textOutput: run.textOutput, handsFree: run, profileNotice: context.profileNotice
                 )
                 guard handsFreeRun?.id == runID, let record = recording else { return }
-                update("Hands-free recording. Silence finishes; hotkey or Record disarms and keeps captured audio.",
+                update("Hands-free recording. Silence finishes; hotkey or Record disarms and keeps captured audio."
+                       + profileContext(record.record),
                        state: 1)
                 hud(record.record.id, .recording(profile: "Hands-free"))
             } catch { await failHandsFree(error.localizedDescription, runID: runID) }
@@ -208,16 +228,6 @@ extension DesktopHostController {
                 status: "Hands-free stopped after a failed session. Captured audio stays in History."
             )
         }
-    }
-
-    private func utteranceTarget(_ run: DesktopHandsFreeRun<Platform>) async throws -> Platform.InsertionTarget? {
-        guard Platform.requiresInsertionTarget(run.textOutput) else { return nil }
-        guard let target = try await effects.captureInsertionTarget() else {
-            throw DesktopHostError(
-                message: "No external destination was captured. Focus a text field or select clipboard-only output."
-            )
-        }
-        return target
     }
 
     func failHandsFree(_ message: String, runID: UUID) async {

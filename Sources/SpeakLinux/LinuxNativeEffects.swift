@@ -61,6 +61,30 @@ struct LinuxNativeEffects: DesktopHostEffects {
 
     func writeSettings(_ data: Data, to url: URL) throws { try data.write(to: url, options: .atomic) }
 
+    /// X11 reads the active window's process for the canonical Linux matchers
+    /// without probing its field; Wayland exposes no external app identity.
+    func captureUtteranceContext(
+        requiresInsertionTarget: Bool
+    ) async throws -> DesktopHostUtteranceContext<LinuxInsertionTarget> {
+        guard LinuxHostPlatform.session.canUseX11Injection else {
+            if requiresInsertionTarget { _ = try await captureInsertionTarget() }
+            return .init(
+                target: nil, executablePath: nil,
+                profileNotice: "Wayland does not expose the external app identity. Normal app settings apply."
+            )
+        }
+        return try await Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
+            let target: LinuxInsertionTarget?
+            if requiresInsertionTarget {
+                target = try LinuxX11.captureTargetChecked()
+            } else { target = try? LinuxX11.captureTargetChecked() }
+            return DesktopHostUtteranceContext(
+                target: requiresInsertionTarget ? target : nil, executablePath: target?.executablePath
+            )
+        }.value
+    }
+
     func voiceCommandClipboardText() async throws -> String? {
         try await Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()

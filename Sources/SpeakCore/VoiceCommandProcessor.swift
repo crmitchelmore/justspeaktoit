@@ -94,10 +94,11 @@ public final class VoiceCommandProcessor {
     ) -> String {
         guard depth < Self.maxClipboardExpansionDepth else { return text }
 
+        // Recognise before reading so ordinary text never queries the clipboard.
+        guard let range = Self.triggerRange(in: text, triggers: triggers()) else { return text }
+
         let clipboardContent = clipboardText() ?? ""
         guard !clipboardContent.isEmpty else { return text }
-
-        guard let range = Self.triggerRange(in: text, triggers: triggers()) else { return text }
 
         var result = text
         result.replaceSubrange(range, with: clipboardContent)

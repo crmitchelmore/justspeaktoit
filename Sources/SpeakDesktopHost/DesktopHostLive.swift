@@ -5,6 +5,7 @@ import SpeakDesktop
 extension DesktopHostController {
     func makeLiveSession(
         model: String, key: String, id: UUID, language: String? = nil, options: LiveClientOptions? = nil,
+        azureEndpoint: String? = nil,
         input: DesktopHostRecordingInput? = nil, polish: DesktopHostLivePolishInput? = nil
     ) async throws -> DesktopLiveSession? {
         guard DesktopHostModels.isLive(model) else { return nil }
@@ -18,7 +19,7 @@ extension DesktopHostController {
         let options = recognition.includingVocabularyKeywords(hints.keywords)
         guard let client = effects.makeLiveClient(
             model: model, key: key, language: language,
-            azureEndpoint: input?.azureEndpoint ?? azureResourceEndpoint(), options: options
+            azureEndpoint: input?.azureEndpoint ?? azureEndpoint ?? azureResourceEndpoint(), options: options
         ) else { return nil }
         return DesktopLiveSession(
             client: client, id: id,
@@ -102,7 +103,7 @@ extension DesktopHostController {
         do {
             try await saveRecord(record)
             if record.failure == nil {
-                record = try await applyVoiceCommands(record)
+                record = try await applyVoiceCommands(record, policy: stopped.voiceCommands)
                 record = try await applyVocabulary(record)
                 record = await applyLivePolish(record, session: session)
                 let skip = record.livePolishResult?.succeeded == true

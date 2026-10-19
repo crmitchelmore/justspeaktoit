@@ -60,6 +60,33 @@ struct WindowsNativeEffects: WindowsControllerEffects {
         }.value
     }
 
+    /// Clipboard-only utterances read the foreground app without probing its field.
+    /// An unreadable app identity keeps normal app settings rather than failing output.
+    func captureUtteranceContext(
+        requiresInsertionTarget: Bool
+    ) async throws -> DesktopHostUtteranceContext<WindowsInsertionTarget> {
+        try await Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
+            let notice = "The current app could not be identified. Normal app settings apply."
+            if requiresInsertionTarget {
+                let target = try WindowsInsertionTarget.capture()
+                let path = try? target.executablePathChecked()
+                return DesktopHostUtteranceContext(
+                    target: target, executablePath: path, profileNotice: path == nil ? notice : nil
+                )
+            }
+            do {
+                return try DesktopHostUtteranceContext<WindowsInsertionTarget>(
+                    target: nil, executablePath: WindowsInsertionTarget.foregroundExecutablePath()
+                )
+            } catch {
+                return DesktopHostUtteranceContext<WindowsInsertionTarget>(
+                    target: nil, executablePath: nil, profileNotice: notice
+                )
+            }
+        }.value
+    }
+
     func writeSettings(_ data: Data, to url: URL) throws { try data.write(to: url, options: .atomic) }
 
     func voiceCommandClipboardText() async throws -> String? {

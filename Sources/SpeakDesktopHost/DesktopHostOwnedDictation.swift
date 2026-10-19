@@ -58,6 +58,7 @@ extension DesktopHostController {
         let hints = try await recognitionVocabulary()
         var input = DesktopHostRecordingInput(key: key, azureEndpoint: snapshot.endpoint, vocabulary: hints.keywords)
         input.pronunciationWords = hints.pronunciationWords
+        input.voiceCommands = try DesktopHostVoiceCommandPolicy(recorded: configuration)
         guard !closed, !cancellationRequested, !Task.isCancelled else { throw CancellationError() }
         let id = snapshot.id
         await recordingFeedback?.recordingRequested(id)

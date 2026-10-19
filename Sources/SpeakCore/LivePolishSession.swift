@@ -40,7 +40,7 @@ public final class LivePolishSession: @unchecked Sendable {
 
     public init(
         recordingID: UUID, preferences: LivePolishPreferences, modelIdentifier: String,
-        sleep: @escaping Sleep = { try await Task.sleep(for: $0) },
+        sleep: @escaping Sleep = LivePolishSession.makeDefaultSleep(),
         onChange: @escaping @Sendable (Result) -> Void = { _ in },
         complete: @escaping Complete
     ) {
@@ -50,6 +50,12 @@ public final class LivePolishSession: @unchecked Sendable {
         self.sleep = sleep
         self.onChange = onChange
         self.complete = complete
+    }
+
+    // Keep this non-inlinable so public defaults cannot duplicate the async closure across modules.
+    @usableFromInline
+    internal static func makeDefaultSleep() -> Sleep {
+        { try await Task.sleep(for: $0) }
     }
 
     public func snapshot() -> Result { lock.withLock { current() } }

@@ -635,6 +635,16 @@ of a late provider, and repeat default-clock finish/result encoding 64 times.
 These changes are **NOT_RUN** locally and are not a verified allocator-crash fix;
 automatic macOS Debug qualification is still required.
 
+The default sleeper is also constructed by a non-inlinable library-owned factory,
+not an async closure literal in the public initializer's default argument.
+[swiftlang/swift#92017](https://github.com/swiftlang/swift/issues/92017) reports
+incompatible async frame copies emitted into library/client modules by that
+default-argument construct; Debug can abort while Release succeeds. The factory
+preserves the initializer signature, `Task.sleep(for:)`, injected clocks and
+cancellation semantics without changing toolchains or excluding Debug tests.
+Existing History controls and the new default-clock regressions remain required;
+the matching upstream report is evidence for the mitigation, not local proof.
+
 `livePolishTailWindowChars` is preserved but has no desktop control or consumer:
 the Mac stores it in `AppSettings`, but `LivePolishManager` uses full `tailText`
 and does not consume this preference either. No tail-window behavior is claimed.

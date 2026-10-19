@@ -1129,6 +1129,144 @@ Missing referenced audio emits preservation notices that block destructive
 archive export. This collector owns only History/audio; it does not claim
 settings, vocabulary, profiles, Voice or credential collection/application.
 
+`DataMigrationVocabularyCatalog` defines the existing Mac pronunciation,
+lexicon and correction collection kinds, source locations, raw record projection
+and typed validation once in `SpeakCore`; Mac `MigrationCatalog` delegates to it.
+`DesktopVocabularyMigrationSnapshot.collect(appDirectory:digests:checkCancellation:)`
+reads the corresponding owned native JSON arrays without calling filtered stores,
+domain snapshots or UI serialization. It retains array order, exact payload
+identifiers/dates, unknown nested JSON members, dismissed candidates and aged
+single-occurrence candidates. Validation does not reencode typed models or
+sanitize/promote/reapprove rules. A result's `records == nil` means a missing
+source; `records == []` means a present empty array. Damage, unreadable/linked or
+changed sources, JSON-size violations and cancellation throw, never produce a
+successful empty replacement. Chunked reads and per-record work observe caller
+cancellation; JSON decoding/encoding itself is bounded but synchronous.
+
+The host must run this collector on its owned cancellable worker and suspend
+admission and mutation for all vocabulary stores throughout capture. Per-file
+identity checks and individual actor barriers **do not provide multi-store
+atomicity**. Host aggregation, archive wiring and transactional application are
+separate responsibilities. Native-only `vocabulary.json` remains explicitly
+unmapped/unapplied; it is not invented as a Mac collection kind. Raw payload
+preservation does not imply unknown record-envelope or manifest field retention.
+
+`DesktopOwnedAppDataFileReader.read(_:appDirectory:maximumBytes:checkCancellation:)`
+is the reusable, codec-free owned-source seam. Its default mode retains the
+vocabulary reader's regular/single-link, non-linked-directory, bounded-chunk and
+metadata-fence behavior. A missing source returns nil; a present source returns
+exact `Data` and a sealed `Receipt`. `revalidate` checks metadata only; it does
+not claim content or directory-chain binding. Caller paths are fixed relative
+app-data paths, not external file authority, and the caller supplies its existing
+source byte budget. No directory or file is created or mutated by the reader.
+
+`readStrict` is a separate explicit opt-in. Its sealed `StrictReceipt` binds
+exact bytes (including empty versus missing), file identity and available
+directory-chain identities before/after capture. `revalidateStrict` performs
+another bounded cancellable read and compares those bindings, rejecting source
+or parent appearance/disappearance, replacement, links, growth and changed
+bytes even at the same size/timestamp. Insufficient platform identity metadata
+throws rather than silently degrading the guarantee. Codecs/digests remain
+caller-owned. Strict absence needs an existing owned root with usable identity;
+an absent root is insufficient identity, not an unanchored successful receipt.
+Even strict receipts are only **point-in-time read evidence**:
+they do not hold a file, prevent later changes, provide atomic CAS or authorize
+publication, deletion, transactions or rollback. A Voice adapter may erase a
+strict receipt into a Sendable throwing revalidation closure; composition and
+write admission remain separate, unwired responsibilities. Its agreed fixed
+source is `VoiceUsage/requests.json` beneath the owned host app-data directory,
+with the existing 2,097,152-byte cap, not the recording/audio directory.
+
+`DesktopVocabularyArchiveSource` is a separate **compatible-kinds, partial-only**
+collector. It strict-reads the canonical `DataMigrationVocabularyCatalog`
+pronunciation, lexicon and correction paths, validates through that shared Mac
+catalogue, and retains exact source bytes, array order, raw unknown members,
+IDs/dates and anchored presence receipts. Old/dismissed candidates are not
+filtered through the runtime store. The same category JSON budget bounds all
+source bytes together and the encoded raw records. All sources are revalidated
+after collection/projection, including sources excluded by the requested scope.
+The host still owns mutation suspension, admission and aggregation; this is not
+multi-store atomicity. Collection does not clear native loaded-state warnings
+or recover a failed coordinator; host unreadable/startup guards remain required.
+
+The native `vocabulary.json` preference composite is separately retained as raw
+**unmapped** bytes/presence/receipt and validated against its existing native
+codec. It has no Mac record kind and never enters the Mac apply route.
+`Snapshot.isCompleteCategory` and `PartialProjection.isCompleteCategory` are
+always false. `projectCompatibleKinds` explicitly declares only the canonical
+selected kinds and always returns a selected-ID scope, including an empty set,
+never a complete-category scope. A full-category backup must refuse authority
+until an independently approved native carrier retains the unmapped composite;
+this API supplies no such carrier or full-category export.
+
+Version 1 ZIPs contain one flattened `vocabulary.json` record array. They do not
+carry per-kind source-presence flags or a selected-kind manifest field. A
+collector therefore distinguishes a missing source from an existing `[]`, but
+that distinction does **not** survive this partial ZIP projection. Raw nested
+payload values/order/IDs/dates do survive; source JSON whitespace stays in the
+collector, not the canonical reencoded ZIP. The real-ZIP tests assert this
+limitation rather than inventing wire fields. Native Windows strict metadata
+viability and actual Apple execution remain separate qualification requirements;
+unsupported platform identity must error, never fall back to weaker reads.
+
+`DesktopNativeSourceDocumentCodec` is a separate pure, opt-in **local evidence**
+codec, not an exporter, importer, retained-store admission or source reader.
+Its closed source is `desktopVocabularyPreferences`: desktop application-data
+root, fixed `vocabulary.json`, Windows/Linux provenance and exact
+`native-source/<platform>/vocabulary.json` identity. The separate
+`nativeSourceDocument` vocabulary kind is rejected by the existing canonical Mac
+vocabulary validator; it is not a settings field, Mac default or profile.
+
+`DesktopVocabularyArchiveSource.collectSensitiveEvidence` is a separate,
+explicit opt-in collection seam. It shares the existing strict owned-source IO;
+legacy `collect` still rejects damaged native preference composites. The new
+seam retains malformed/empty composite bytes as evidence but still refuses
+damaged canonical pronunciation/lexicon/correction arrays. `nativeDomainValidity`
+reports only acceptance by the existing native preferences decoder: it is not
+full-schema validation, a credential-free classification or admission authority.
+IO, cancellation and unexpected failures still propagate.
+
+`Snapshot.projectWithSensitiveNativeEvidence` independently requires sensitive
+opt-in and the canonical closed platform. It combines selected canonical records
+with an unapplied `nativeSourceDocument` carrier from the already-read strict
+snapshot. It reports per-kind canonical presence, native presence and decoder
+acceptance separately; anchored absence is not a fabricated empty payload.
+Scope always has explicit partial IDs; date filters do not invent a native
+timestamp. The combined budget includes **all original source bytes plus the
+mixed encoded record array**, including base64 expansion and envelope overhead,
+even when some source records are excluded. Every source receipt is revalidated
+after projection, including excluded sources. Results always deny apply/backup
+and complete-category authority; mixed records are not Mac-compatible.
+Neither seam is wired to generic ZIP/backup/import, host selection, settings,
+native controls or capsule mutation. Hosts still own source suspension/admission;
+point-in-time receipts do not provide atomicity or CAS.
+
+The entire original file, including unknown members, is potentially sensitive
+user content. No credential exclusion/classification or content scanning is
+performed. Every codec operation requires explicit sensitive-content opt-in.
+Future unencrypted backup integration must warn that sensitive text or secrets
+may be included and must never imply that secrets were excluded. That UI,
+integration, target admission and mutation authority are not implemented here.
+
+Version-1 evidence binds closed headers and preserves presence separately from
+base64-encoded exact bytes. Missing, empty, malformed, BOM-bearing or unknown
+JSON content remain distinct opaque evidence; source content is never decoded,
+normalized or reencoded. Evidence and projections always deny apply/backup and
+complete-category authority. Exact-ID scope remains explicitly partial.
+Combined raw bytes plus encoded archive JSON, including base64 overhead, must
+fit the shared 128,000,000-byte budget; oversized representation is refused,
+never truncated. Source receipts remain read-only evidence, never CAS.
+
+Internal `JSONMemberPreflight` extracts the exact state machine from Settings
+commit `86a0568b`, scanner blob `6051688578a75c72b6b9144f46cfc62cf16b6fe9`.
+Every adapter supplies byte, depth, token, root-record, per-object key,
+encoded-key-span and cancellation-stride bounds plus its guard diagnostic.
+Decoded escaped keys are checked for duplicates before Foundation can collapse
+them. This is member preflight, not grammar/schema validation; those checks
+remain in each codec. Only carrier JSON is scanned, never decoded source bytes.
+The frozen Settings scanner is not changed here; deduplication is not complete
+until its separately selected thin adapter delegates to the qualified helper.
+
 `DataMigrationArchivePolicy` also centralizes the existing Mac archive path,
 entry/total/JSON-size, duplicate-path, manifest and staging-capacity rules.
 Mac ZIP reads use this policy; portable tests exercise exact limits without

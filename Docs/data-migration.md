@@ -1,12 +1,20 @@
 # macOS data export and import
 
 Open **Settings → Data & Migration** for full manual export/import on macOS.
-Windows/Linux provide recording History/audio backups and read-only inspection;
+Windows/Linux provide History backups with optional saved audio and app profiles, plus read-only inspection;
 full native category collection and transactional import remain unfinished.
 Native ZIP inspection also validates profile structure and declared coverage
 through the shared profile catalogue. Missing profile data is not an empty
 collection; prompts and identifiers are never displayed. Profile checks are not
 current-store merge counts, import approval or native application of profiles.
+In General, **App profiles** on Windows or **Include app profiles** on Linux adds per-app overrides and prompts
+to the unencrypted ZIP; it starts off, preserving existing History-only choices.
+The source is read through the shared bounded owned-file reader and exact-byte,
+file and directory-chain revalidation. Unsupported identity metadata, changed
+sources and malformed collections fail the backup rather than becoming empty
+replacement authority. Profiles preserved as unreadable on startup must be
+recovered before selecting them. These read receipts are not write/CAS authority
+or an atomic multi-store transaction; native import remains unavailable.
 
 ## Export
 

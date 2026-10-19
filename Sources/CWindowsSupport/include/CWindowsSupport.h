@@ -63,7 +63,7 @@ enum JSTIWindowEvent {
     JSTI_EVENT_RECORDINGS_FOLDER = 93,
     JSTI_EVENT_AUDIO_CLEANUP = 94,
     JSTI_EVENT_AUDIO_CLEANUP_RESPONSE = 95, /* text: confirmation UUID; index: 1 confirms, 0 cancels */
-    JSTI_EVENT_MIGRATION_EXPORT = 96, /* text: selected ZIP destination; index: 1 includes saved audio */
+    JSTI_EVENT_MIGRATION_EXPORT = 96, /* text: ZIP destination; index bits: 1 saved audio, 2 app profiles */
     JSTI_EVENT_MIGRATION_INSPECT = 97, /* text: selected ZIP source; no application changes */
     JSTI_EVENT_USER_ABSENT = 120
 };

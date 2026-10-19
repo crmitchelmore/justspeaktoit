@@ -585,6 +585,466 @@ Wayland is limited to the clipboard access the compositor grants this client:
 denial is reported, not bypassed or described as supported background access.
 Portable fake tests and native header/syntax checks do not qualify real clipboard
 owners, Win32 UI, GTK/X11/Wayland runtime, accessibility or installed packages.
+
+## Local canonical archive projection candidate
+
+This bounded bridge is a **read-only partial projection**, not a full backup,
+import transaction, native control change or declaration of 91 executable
+preferences. It was composed on integration base `78ad44e8` and later
+cherry-picked onto the parity integration head, where it was adapted to the
+head's native post-processing, Voice and app-switch authorities; its
+qualification must not borrow the earlier native or Apple receipts below.
+Publication requires parent review.
+
+The parent collector can call
+`DesktopHostController.preferenceArchiveProjection(categories:validateJSON:)`
+inside the host, or
+`DesktopHostPreferenceArchive.project(_:categories:validateJSON:)` on an
+immutable `Settings` snapshot. The result is
+`DataMigrationPreferenceProjection`, containing category-keyed canonical
+`DataMigrationRecord` arrays and typed, value-free notices. Only explicitly
+selected `.settings`, `.vocabulary` and `.connections` are accepted; any
+credentials/collection category is rejected. Empty selected categories are
+returned as empty arrays, not as a guarantee that every store was collected.
+The collector still owns aggregation, completeness and publication.
+
+`SpeakCore/DataMigrationPreferenceCatalog.swift` is the sole key/category/kind
+authority: 89 accepted canonical preferences plus seven auxiliaries, not a
+second desktop catalogue. `trackedKeyIdentifiers` and
+`transcriptionKeywordsLastReconciled` remain excluded. Vocabulary and connections
+partition through that catalogue; the bridge never reclassifies them as settings.
+Unknown configuration entries and wrapper fields are named in notices, not
+dumped as arbitrary archive keys. Credential-default values are excluded even
+when retained in a configuration dictionary. No credential APIs are invoked.
+
+Every `SettingsValues` authority is accounted for below. The implementation
+sources are `DesktopHostSettingsArchive.swift` (with presence hooks in
+`DesktopHostController.swift`), `DesktopHostPreferenceArchive.swift`,
+`DesktopHostNativePreferenceProjection.swift`, `WindowsPreferenceArchive.swift`
+and `LinuxPreferenceArchive.swift`; Mac wire names are established by
+`AppSettings.swift` and the shared application-key/catalogue definitions.
+
+| Native authority | Canonical projection or explicit boundary |
+| --- | --- |
+| Explicit active `model` | The existing desktop batch/live registries and shared local-family resolver select `transcriptionMode` and the active model key. Unknown/Apple-only routes are reported, never guessed as batch. Multi-purpose models remain batch when admitted by the batch registry. |
+| `batchModel`, `liveModel`, `localModel` | Stored model slots map to their canonical model keys. An explicit active model wins over its corresponding remembered slot. Local engine/source submode is not invented. |
+| `postProcessing.mode`, `.modelIdentifier`, `.temperature` | `postProcessingEnabled`, `postProcessingModel`, `postProcessingTemperature`; explicit native options override stale configuration mirrors. |
+| `postProcessing.includeLexiconDirectives`, `.includeContextTags`, `.streamingEnabled` | `postProcessingIncludeLexiconDirectives`, `postProcessingIncludeContextTags`, `postProcessingStreamingEnabled`; the native options are their sole desktop authority. `lastRemoteModelIdentifier` is dormant picker recall and is not projected. |
+| `postProcessing.outputLanguage` | Stored text, including explicit empty text, maps to `postProcessingOutputLanguage`; native nil suppresses a stale mirror without inventing a replacement string. |
+| `postProcessing.customPrompt` | Value-free native-only notice, not transferable retention. No current Mac global scalar identity exists; the separate opt-in local capture below preserves the native source value without fabricating a profile. |
+| `appearance` | Native system/light/dark maps to canonical textual appearance, not the native integer encoding. |
+| `runAtLogin` | Explicit recorded boolean only; no OS registration query or side effect. |
+| `automationEnabled` | Explicit `enableAutomationServer` boolean; no service admission or permission change. |
+| Windows `textOutput` | smart/direct-only/clipboard-only map to smart/accessibilityOnly/clipboardOnly; cursor/replace-field map to insertAtCursor/replaceAll; restoration retains its explicit boolean. An explicit `appSwitchDelivery` maps to its canonical key. |
+| Linux `textOutput` | Clipboard-only maps exactly; native paste has no exact Mac method and is reported instead of relabelled smart. Restoration retains its boolean. An explicit `appSwitchDelivery` maps to its canonical key. |
+| `hotKey` | Exact shared Mac activation styles map to `hotKeyActivation`; press-to-toggle/unknown styles are native-only, never fallback conversions. Windows virtual-key bindings and Linux portal/fixed bindings do not become Carbon `selectedHotKey` data. |
+| `voiceOutput` | Only explicitly stored auto-play/save/speed/pitch/SSML, favourite voices, Soniox region, language, quality and output format overlay their canonical keys. No execution getter, default materialization, clamping, provider selection or synthesis occurs. |
+| `voiceOutput.modelID`, `.voiceID`, `.strictVoiceSelection`, `.trackUsage` | Native-only notices. The desktop provider/model/voice tuple is not assumed to equal Mac `defaultTTSVoice`; usage tracking is not a new canonical key. |
+| `microphoneDeviceID` | Native-only notice; a native device identifier is not reinterpreted as a Mac audio-input UID. |
+| `localUseGPU`, `azureSpeechResourceEndpoint` | Native-only notices; neither belongs to the canonical application-key set. |
+| `automationLocalConsent`, `livePolishApproved` | Device-local approvals: native-only notices, never exported as portable grants. |
+| `configuration.values` | Selected, known records are retained and type-validated using the canonical catalogue. Each retained value is explicitly distinguished from a native-authority overlay; retention does not prove execution support. |
+| Unknown top-level `Settings` fields | Names are reported; values remain in the existing settings wrapper, not in canonical records. |
+
+This rule covers every canonical preference without copying its entries:
+explicit native projections win, remaining known configuration values retain
+their catalogue category/kind, the two excluded canonical keys are reported,
+and absent values stay absent. Editor defaults (`value(for:)`), platform
+fallback shortcut getters, effective Voice defaults and the restricted portable
+configuration exporter are not used to fill missing values. New settings track
+whether their otherwise implicit active model/slots were explicitly set; stored
+model keys are explicit on decode. Startup normalization preserves that presence
+metadata without changing runtime selection or existing Codable encoding.
+Optional Voice fields retain legacy opaque values
+when no explicit native replacement exists, with a retained-value notice.
+Projection does not mutate mirrors, Voice, providers, controls or settings files.
+
+All emitted records pass canonical scalar shape/finite-number validation.
+Archive-valid but currently unexecutable Voice values remain raw for recovery,
+not clamped into a different preference. `ttsPronunciationDictionary` is decoded
+as `[String: String]` and emitted as structured `jsonDefault`; a JSON string or
+base64 blob is not equivalent. Apple shortcut JSON requires an explicit typed
+validator supplied by its owning collector; without one it is reported and
+excluded, not accepted by an object-shape guess. Validator failure aborts the
+projection rather than returning success-shaped partial records.
+
+On its original base, the candidate passed 85 focused preference/Voice/hands-free/tail tests
+(23 new projection regressions) and the complete portable suite: 1874 tests,
+30 skipped, zero failures. Those counts were not re-run on the integration head.
+Strict pinned SwiftLint passed all 17 candidate
+and composition-resolution Swift inputs. All four Windows Swift projections
+pass, including the production Windows projection hook and host tests. Those
+header-backed projections do not prove native linking or runtime behavior.
+Published `6dbefced3d899f8e3b4e61d668738443c78cfdb1` has exact-tree native
+**failure** receipts: Windows x64 job115750034474 and ARM64 job115750175252
+failed at `WindowsVoiceControls.cpp:318,344`; Linux job115750206937 failed at
+`LinuxVoiceUsage.c:144`. The undeclared helpers are inherited from selected78ad.
+Their checkout `5c9aec40f8f498e98a257d519b7f8814f41984b0` has published tree
+`35c9ea0e7ac1d9b4b307c798c094ed155d814af0`; no native tests/fixtures ran.
+These failures remain attributed to that frozen source, not replaced by local
+capture checks, historical greens or later integration corrections.
+
+Known limitations remain visible: no raw-file preservation guarantee for values
+already changed by existing startup migrations or unknown members discarded by
+existing nested typed decoders; no synthesized
+Mac shortcut/Voice identifier, device UID, local submode or prompt record; no
+collection-store collection, credential access, default reset semantics,
+import/mutation, or atomic destination publication. The parent must preserve
+category completeness and unknown/native-only material deliberately rather
+than feeding these partial arrays into destructive replacement.
+
+## Value-bearing native configuration source capture (ff6)
+
+`DesktopHostController.configurationCapture(categories:selectedNativeFields:validateJSON:)`
+and pure `DesktopHostConfigurationCapture.capture` return the **unchanged**
+canonical preference projection alongside a separately selected
+`DesktopNativeConfigurationCapture`. This non-Codable result is captured data,
+**not itself an archive carrier, retained-unapplied payload, import contract or
+proof of complete backup**. The isolated codec below is an opt-in transport seam;
+parent aggregation and a safe target retention route remain separate. No schema format,
+settings keys, controls, ABI, runtime behavior, profiles or credentials change.
+
+`SpeakCore/DesktopNativeConfigurationField.swift` is the single noncredential
+source-path/owner/type definition. Opt-in paths cover `postProcessing.customPrompt`,
+separately `configuration.postProcessingSystemPrompt`, `microphoneDeviceID`,
+`localUseGPU`, `azureSpeechResourceEndpoint`, `voiceOutput.modelID`,
+`voiceOutput.voiceID`, `voiceOutput.ttsTrackUsage`, `hotKey` and `textOutput`.
+Each selected entry names its actual Windows/Linux platform, source path and
+native-settings versus legacy-configuration provenance, with explicit presence
+and an optional raw `AnyCodable` value. Missing is not false, zero, empty text or
+an explicit JSON null in these nullable source fields.
+An empty selection captures no values. Unknown/credential/canonical-preference
+selection paths fail; unknown/unselected material is reported by name only.
+
+Native adapters identify only their actual host platform. The shared snapshot
+reads stored authorities, not OS state, editor defaults, activation fallbacks,
+Voice execution getters, providers or credential stores. In-memory source
+metadata retains explicitly decoded native root values before nested typed
+decoders could materialize defaults or discard members; an explicit write
+replaces that source with the current stored authority. Persisted encoding is
+unchanged. This is not recovery of raw values already lost before the snapshot
+was created, nor a raw-file/full-wrapper backup. Root members the head's native
+encoders write and the canonical projection already classifies (post-processing
+lexicon/context-tag/streaming booleans; Voice favourites, Soniox region, language,
+quality and format) are not reported as unresolved. `voiceOutput.strictVoiceSelection`
+and `postProcessing.lastRemoteModelIdentifier` are not captured fields and are named
+in `unresolvedPaths` when present.
+
+Structured shortcuts/output must contain the classified host members (only an
+unset `appSwitchDelivery`, which the native encoder omits, may be absent);
+unexpected, missing, credential-like members and invalid UInt32 shortcut
+numbers fail, never return a sanitized partial object. Unsupported stored
+style/method strings remain raw, without executable-support claims. Azure
+origins reuse `AzureSpeechConfiguration.batchResourceURL`: valid resource or
+existing literal-loopback origins retain the original text, while userinfo,
+query/fragment credentials and invalid URLs fail. Explicit blank endpoint
+text stays blank rather than becoming a default. Prompt whitespace is not
+trimmed; the native global prompt and any actually present legacy scalar remain
+distinct owners, with no invented profile, UUID, matcher or Mac global setting.
+
+Current Mac custom polish persistence is `DictationProfile.polishPrompt` in
+UserDefaults `dictationProfiles` (`DictationProfileStore.swift:9,46-57`), applied
+through transient `PostProcessingManager.sessionPromptOverride`. Its existing
+canonical archive identity is `.profiles`, kind `profile`, existing UUID and
+`value.polishPrompt` (`MigrationCatalog.swift:21,64-77,116`).
+All seven auxiliary preference definitions were checked: none defines a global
+prompt identity. Profiles require their separate raw collection owner; this
+capture never synthesizes profile records from a global prompt.
+
+On its original base, local qualification passed **101 focused tests** (including 16 new capture
+regressions), **1890 full portable tests / 30 skipped / zero failures**, all four
+Windows Swift projections and strict pinned lint on 22 Swift inputs.
+`git diff --check` passes and `Package.resolved` is restored unchanged.
+The first build was interrupted by concurrent local source edits; these results
+come from the subsequent stable-source runs. No native/Apple, installed-app,
+archive-carrier or full-parity acceptance is claimed for the frozen ff6 capture.
+These counts were not re-run on the integration head.
+
+## Isolated native configuration archive transport
+
+`DesktopNativeConfigurationArchiveCodec.project(capture,checkCancellation:)`
+returns immutable `DesktopNativeConfigurationArchive`: validated records,
+original entries, read coverage and value-free unresolved source names.
+`inspect(records,category:checkCancellation:)` validates records after generic
+ZIP reading; `encode(archive,checkCancellation:)` and
+`decode(data,checkCancellation:)` provide a strict deterministic JSON boundary.
+`decode(record,checkCancellation:)` validates one transport record.
+Only the existing closed `DesktopNativeConfigurationField` definitions are
+accepted. No new settings, native capabilities or source inventories are added.
+
+Transport records use category `.settings`, kind `nativeConfiguration` and
+deterministic ID `native/<sourcePlatform>/<sourcePath>`. Their closed envelope
+contains `schemaVersion: 1`, `sourcePlatform`, `sourcePath`, `provenance` and
+`isPresent`; `value` exists exactly when present. An absent selected field still
+has a record with no value. Explicit null, false, zero, empty text, whitespace
+and source-platform structured values remain distinct. No target conversion,
+defaults, trimming, clamping or fabricated profile/global-Mac identity occurs.
+Windows-only structured data remains labelled Windows when read on Linux.
+
+`DesktopNativeConfigurationCoverage` exposes the exact selected IDs and
+`keysByKind`, with an explicitly partial `selectionScope`. Empty selection
+produces an empty `selectedIDs` set, never nil/full-category scope.
+These are **read coverage only**, not apply or replacement approval.
+`permitsReplacement` and `isCompleteCategory` are always false, but those flags
+do not change the generic planner's authority. Aggregators must not treat this
+transport as an approved native importer or as a complete settings collection.
+Existing canonical preference projection/catalogue, migration format, planner
+and executable import acceptance remain unchanged. Canonical preference
+validation still refuses the new transport kind; the Mac importer also has a
+dedicated rejection regression, requiring an Apple test host to execute.
+
+Per-record and aggregate encoded JSON, and raw decode input, are bounded by
+`DataMigrationArchivePolicy.maximumJSONBytes` (128,000,000 bytes), not a separate
+small prompt limit. Record count derives from the canonical field and source
+platform enums. Depth eight covers every currently accepted closed shape;
+parser/member bounds refuse excessive nested or unclassified material.
+Cancellation is checked before work, between records and periodically while
+scanning strings/input/output. Foundation coding itself is synchronous but
+its input/output is bounded and cancellation is checked around each call.
+Run large codec work on an owned cancellable off-actor worker, not a settings
+admission queue or the PCM path.
+Malformed JSON, duplicate keys (including escaped equivalents), identities,
+platforms, provenance, presence/value mismatches, types, unknown members,
+attachments and credential-bearing Azure origins abort explicitly rather than
+returning filtered success.
+
+Actual ZIP regressions exercise `DesktopMigrationArchive` transport with all
+ten source paths, unknown-to-target Windows values and every presence state.
+They require unchanged records, exact selection scopes, no notices and no audio
+hashing. Generic ZIP reading is not the codec's strict raw-JSON parser: callers
+must inspect returned records, and must not claim recovery of outer members
+already discarded by the generic Codable reader. Unresolved/unselected names
+are not value-bearing records and are not included in codec JSON.
+
+This seam does **not** collect credentials or full wrappers, mutate native
+settings/stores, import/apply/retain values on a target, collect profiles,
+publish a destination, or establish full 91-key/feature/native/Apple parity.
+Existing `6db` native compile failures and the integration's separate General
+minimum-window UI failure are not repaired or qualified by this codec.
+
+On its original frozen source, local qualification passed **117 focused tests**, including
+16 new portable codec/ZIP regressions; **1906 full portable tests / 30 skipped /
+zero failures**; all four Windows Swift projections; and strict pinned lint on
+28 attributable Swift inputs. `Package.resolved` is restored unchanged.
+The added Mac importer-rejection regression is linted but not executed locally;
+Apple frameworks/runtime and actual Windows native linking/runtime remain
+unqualified. Holding-branch publication does not select an integration source
+or widen target retention/import/apply acceptance. These counts were not
+re-run after cherry-picking onto the integration head.
+
+## Local immutable retained configuration capsule candidate
+
+`DesktopNativeRetentionMergePolicy.plan(existing:incoming:checkCancellation:)`
+validates both native record sets through the frozen codec and returns proposed
+records, additions, idempotent IDs and explicit conflicts. Equal entire
+envelopes are idempotent; differing presence/raw values conflict, while invalid
+provenance/schema/identities are refused before a candidate is returned.
+Foreign Windows/Linux identities remain separate. Empty incoming arrays never
+clear retained records; an absent selected value cannot replace a present one.
+`hasConflicts` is a report, not a permission to write or apply.
+
+`DesktopNativeRetainedCapsule.create(archive,in:identifier:storage:publication:checkCancellation:)`
+creates one **immutable** `native-retained-<UUID>` private leaf containing
+`records.json`. It validates strict encoded bytes before creating anything,
+uses the existing protected `DesktopMigrationArchive.Storage` creation seam,
+flushes owned staging, validates the reread staging bytes and delegates
+no-replace publication through required `DesktopFilePublication.Copy`.
+Native callers must supply their actual `WindowsMigrationArchive` or
+`LinuxMigrationArchive` storage/publication operations. There is no default
+public-permission Windows fallback, global Root retention pointer, update,
+replace, delete, settings write or automatic native importer.
+
+`reload` validates the file against the instance's held original bytes and
+strictly decodes it. `read(from:)` performs bounded strict restart inspection.
+Restart validation proves current codec validity, **not** historical
+authenticity if an external writer substituted different valid bytes; directory
+naming alone establishes neither ownership nor mutation authority.
+The published `990ff362` implementation checks and opens by path without
+canonical strict-reader evidence; its check/open race remains a qualification
+limit. The subsequent local reader candidate below reuses stronger canonical
+point-in-time fences, not atomic held-descriptor reads or mutation CAS.
+`exportProjection` returns only `.settings` native records with exact selected
+IDs (including an explicit empty set), never complete/replacement scope.
+Canonical/Mac automatic import continues to reject `nativeConfiguration`.
+
+Reusing an existing UUID leaf refuses before modifying it. Prepublication
+failure/cancellation removes only the invocation's named unpublished stage;
+empty-directory removal is nonrecursive, so unrelated children are not deleted.
+Once publication may have committed, an explicit published-effect failure keeps
+the capsule rather than deleting it, retrying or claiming success.
+Staging removal uses native nonrecursive `unlink`/`_wunlink`, after checking for
+a regular file. A directory substituted for staging is refused without deleting
+its children, both before and after publication. Directory cleanup itself uses
+nonrecursive `rmdir`/`_wrmdir`; neither path recursively deletes children.
+`DesktopNativeRetentionCleanupFailure` retains typed `primaryError` and
+`cleanupError`; `DesktopNativeRetentionPublishedFailure.underlyingError`
+preserves the original failure, including cancellation. Their user-facing
+messages do not interpolate underlying errors, paths or captured values.
+Write handle cleanup attempts close once, preserving a dual failure and never
+retrying a failed close. Canonical read-handle cleanup follows its own selected
+single-close contract.
+Construction/reload/export run off the UI/settings-admission/PCM paths.
+
+The frozen `86a` IO primitives provide protected creation and exclusive
+publication, **not** identity-conditioned mutation CAS or owned transactional
+replacement journals. Read seals and process locks do not fill that gap.
+Mutable aggregate retention, conflict-resolution writes, transactional
+replacement and safe apply remain explicitly blocked on that separate
+authority contract. This local capsule is not selected for integration or
+connected to import/export UI.
+
+Vocabulary's `vocabulary.json` opaque-source carrier is a separate peer-owned
+contract, not field ten or this settings capsule. It may contain sensitive user
+content/unknown members; no noncredential classification, scanning, upload or
+automatic carrier admission is inferred. Frozen native-field definitions,
+settings codec/parser, catalogue and source acceptance remain unchanged here.
+
+The prior `f151d0cc` candidate added **18** merge/capsule regressions, including actual
+publication followed by child-task cancellation. That case reports
+`DesktopNativeRetentionPublishedFailure`, strictly reloads the complete original
+envelope after restart, proves one publication and preserves unrelated Root and
+capsule-side files. It neither retries nor deletes committed data.
+
+For that prior source only, the cached WSL Swift toolchain ran these commands through the
+`validate-native-retention.sh` session wrapper, which restores `Package.resolved`:
+
+- `SPEAK_PORTABLE_CORE=1 swift test --scratch-path /tmp/jsti-settings-eacacdaf --jobs 4 --filter 'DesktopNativeRet|DesktopNativeConfiguration|DesktopHostConfigurationCapture|DataMigrationPreference|DesktopHostPreferenceArchive|DesktopHostHandsFree|DesktopHostRecordingTail|DesktopHostVoiceConfiguration|DesktopHostKeywordConfiguration'`:
+  **135 passed / 0 failures**.
+- `SPEAK_PORTABLE_CORE=1 swift test --scratch-path /tmp/jsti-settings-eacacdaf --jobs 4`:
+  **1924 tests / 30 skipped / 0 failures**.
+- `bash scripts/typecheck-windows-swift.sh --jobs 4` (CRLF-normalized script,
+  `SPEAK_WINDOWS_TYPECHECK_DIR=/tmp/jsti-feedback-windows-typecheck-eacacdaf`):
+  all four Windows Swift projections passed; these are compile-only stub graphs.
+- `swiftlint lint --strict --config .swiftlint.yml --baseline .swiftlint-baseline.json`
+  with the pinned 32-path Swift input set in an LF-normalized mirror:
+  **0 violations**.
+
+Native Windows/Apple runtime and installed-host durability remain unqualified.
+This is an isolated local candidate, not integration selection, a mutable
+retention transaction, a safe target importer or full settings parity.
+The scoped nonrecursive-cleanup/error-preservation repair adds six regressions
+(24 total merge/capsule/IO cases). They preserve the unrelated sentinel when
+`unpublished.json` is replaced by a directory before failed publication or
+after successful publication, inspect both typed failures, and prove
+operation-only, close-only, dual-failure and successful handle cleanup each
+closes exactly once. The existing post-publication cancellation case now also
+inspects the original `CancellationError`.
+
+Fresh receipts use the same commands above through
+`validate-native-retention-repair.sh`, with distinct repair log paths:
+**141 focused / 0 failures**, **1930 full portable / 30 skipped / 0 failures**,
+all four Windows compile projections passed, and strict lint of the expanded
+**34-path** Swift set returned **0 violations**. These qualify the repaired
+source, not native Windows/Apple runtime, strict identity-bound IO or mutation
+authority. The prior 135/1924/32-path receipts remain prior-source evidence only.
+
+### Local canonical strict-reader candidate
+
+The capsule imports only these exact canonical modules from selected
+`578cd14f105273cfeddb4e38e792e709f9e28954`, not that branch's profile/History/UI work:
+`DesktopOwnedAppDataFileReadError.swift` (`5d1de758a6045b596bf5925e6842849dd1fb409d`),
+`DesktopOwnedAppDataFileReader.swift` (`fe9c69f02b83c15c65d88dd2830f001aa432a15a`) and
+`DesktopOwnedAppDataFileReader+Strict.swift` (`db7e0a4f3bd5be189256d750b153313dd19d8bea`),
+all under `Sources/SpeakDesktop`. On the integration head these readers were
+already present from the earlier owned-AppData reader integration; the capsule
+uses the head copies. The head `+Strict` file differs from the cited blob only
+by `directoryChain` being internal rather than private.
+
+Staging/published reads use `readStrict` and `revalidateStrict` around codec
+inspection, preserving the canonical byte budget, cancellation and original
+typed read/IO causes. A held capsule keeps both its original sealed bytes and
+`StrictReceipt`; reload/export revalidate the original receipt, so identical
+bytes alone cannot establish the original held source. The receipt compares
+file and directory-chain identity as well as bytes; the same-byte new-file
+identity case is exercised locally.
+Restart inspects the current snapshot only, never historical authenticity.
+Missing records fail rather than becoming empty settings. Missing required
+native metadata fails closed with `insufficientIdentity`, including Windows
+hosts whose Foundation metadata cannot support this contract; there is no
+fallback to the older path-only reader.
+
+These are bounded pre/post byte/file/directory-chain point-in-time fences.
+They are not atomic held-descriptor reads, do not eliminate every check/open
+or ABA race, and grant no mutable Root, deletion, journal or write-CAS authority.
+Canonical generic-scanner adaptation is a separate milestone and remains
+outside this reader candidate.
+
+The isolated directory-only replacement fixture compares the **full canonical
+file identity**, not just inode and bytes. It explicitly skips on this WSL
+filesystem because moving the file changes that identity. Exact bytes and
+unrelated sentinels in both directories remain checked, but this does **not**
+provide an independent directory-chain-only rejection proof on this host.
+No metadata normalization or synthetic identity is used to manufacture one.
+Native Windows/Apple runtime and that independent directory-only case remain
+unqualified.
+
+Final candidate receipts from `validate-native-retention-reader.sh`:
+
+- `SPEAK_PORTABLE_CORE=1 swift test --scratch-path /tmp/jsti-settings-eacacdaf --jobs 4 --filter DesktopNativeRet`:
+  **34 tests / 1 explicit identity-fixture skip / 0 failures**.
+- The same full portable command above: **1940 tests / 31 skipped / 0 failures**,
+  including the explicitly unproven directory-only case.
+- Strict lint with the pinned expanded **38-path** Swift set: **0 violations**.
+- All four Windows compile projections passed before the approved test-only
+  refinement. Their **1318** source/resource/HostTests/manifest/script inputs
+  remain identical, SHA-256
+  `DC68A624962469C190D7B1F0214E1D27FB7F7C1E140AE804BCC4069D124ED9D5`.
+  `SpeakDesktopTests` is outside those graph targets; no extra graph run or
+  native runtime acceptance is inferred from the final test change.
+
+Earlier 33/1939 receipts describe the pre-refinement test source only. The
+selected three canonical source blobs remain byte-identical throughout.
+These receipts were recorded on the original holding branch and were not
+re-run on the integration head.
+
+### Isolated canonical member-preflight delegation candidate
+
+After freezing reader commit `3c88f274`, `NativeConfigurationJSONScan` delegates
+to the separately selected `JSONMemberPreflight` rather than owning a second
+state machine. Only `Sources/SpeakCore/JSONMemberPreflight.swift` (blob
+`dd5603ef399859c946b647909da85f40e448fc55`) and its seven-case test corpus (blob
+`674c22469281a51c57ad6e2ed2044b01326cccd8`) are imported from qualified peer
+`75a81b5f188a7ea89c1e907c53e7201a6470e0fe`; its native-source codec, metadata
+and branch ancestry are not composed. On the integration head both blobs were
+already present (peer `75a81b5f` was cherry-picked as `6e0602c4`), so this
+delegation adds only the adapter and its scan tests.
+
+The thin adapter retains the original `86a` scanner's settings contract:
+canonical 128,000,000-byte budget; depth 8; 4096 tokens; canonical
+field-count times source-platform-count root records; 32 object keys;
+512 encoded key span (closing quote minus opening quote); absolute-index,
+key-lookahead and completion cancellation checks at the original 4096 stride.
+It retains `Malformed or unbounded native configuration JSON.` for guard
+failures and propagates Foundation key-decoding errors without conversion.
+
+The imported corpus and adapter-specific reference/edge/cancellation cases
+exercise these original expectations. Preflight still does not own JSON
+grammar, root shape or migration schema validation: Foundation's existing
+trailing-comma behavior is not silently tightened. Archive codec inspection,
+the closed field inventory and automatic apply/import admission remain
+unchanged. This is not a complete repository-wide deduplication claim or a new
+native-source, profile, capsule or write authority.
+
+Fresh isolated qualification through `validate-native-preflight-adapter.sh`:
+
+- `SPEAK_PORTABLE_CORE=1 swift test --scratch-path /tmp/jsti-settings-eacacdaf --jobs 4 --filter 'JSONMemberPreflight|NativeConfigurationJSONScan|DesktopNativeConfiguration'`:
+  **34 tests / 0 failures**, including the existing canonical byte-budget,
+  escaped/aggregate-size, duplicate-member and ZIP roundtrip regressions.
+- Full portable command: **1950 tests / 31 skipped / 0 failures**. The inherited
+  independent directory-only identity-fixture skip remains explicit and is not
+  converted into acceptance by this adapter.
+- Strict lint in its separate LF-normalized **41-path** source mirror:
+  **0 violations**.
+- A fresh four-target Windows compile-projection run passed; no reader
+  qualification or peer/component receipt is substituted for this source.
+  These are still stub compile graphs, not native Windows/Apple runtime.
+
+The imported helper/corpus blobs remain exact. Reader/capsule code and its
+qualification limits are unchanged; no field/catalogue/schema, automatic
+import/apply or full-parity admission is inferred.
+These receipts come from the original holding branch and were not re-run on
+the integration head.
+
 ## Generated-speech coordination
 
 `SpeechGenerationDefaults` defines the Mac's existing `ttsAutoPlay` (true) and
@@ -1275,8 +1735,11 @@ replacement/nearest implemented surface; they do not assert hidden support.
 
 ## Beyond the enum and destinations
 
-`postProcessingSystemPrompt` is represented by the existing native custom prompt
-and reaches the shared cleanup policy. `customShortcutBindings`/individual action
+The native global custom prompt reaches the shared cleanup policy, but
+`postProcessingSystemPrompt` is not a current Mac persisted scalar or
+`PromptStore` owner. Mac custom prompts live in profile `polishPrompt` records;
+an actually present legacy desktop scalar is a distinct opt-in captured source,
+not silently mapped to a profile. `customShortcutBindings`/individual action
 shortcuts, Shortcut presets/reset, Escape cancellation and conflict management
 beyond the global key remain gaps. Profiles have a Windows native editor with
 shared ordering/session snapshots; this separate source-only candidate adds

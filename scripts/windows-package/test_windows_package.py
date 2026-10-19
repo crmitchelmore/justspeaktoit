@@ -167,6 +167,14 @@ class IdentityTests(unittest.TestCase):
         self.assertIn('constexpr wchar_t launchArgument[] = L"%s";' % startup["parameters"], native)
         self.assertIn('public static let launchArgument = "%s"' % startup["parameters"], shared)
 
+    def test_cli_alias_matches_the_automation_setup_dialog(self):
+        # General › CLI and MCP setup locates the packaged speak command by
+        # this alias; a rename on one side must fail here.
+        alias = windows_msix.load_identity()["cli"]["executionAlias"]
+        native = (windows_msix.REPOSITORY / "Sources/CWindowsSupport/WindowsAutomationSettings.cpp").read_text(
+            encoding="utf-8")
+        self.assertIn('L"\\\\Microsoft\\\\WindowsApps\\\\%s"' % alias, native)
+
     def test_publisher_id_matches_windows_for_known_publishers(self):
         self.assertEqual(windows_msix.publisher_id(
             "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"), "8wekyb3d8bbwe")

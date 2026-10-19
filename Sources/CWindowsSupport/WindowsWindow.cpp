@@ -69,6 +69,8 @@ int jsti_window_recording_state();
 void jsti_show_vocabulary(HWND owner, int kind, void (*emit)(int, const char *, int));
 void jsti_show_vocabulary_result(HWND owner, const char *record, void (*emit)(int, const char *, int));
 bool jsti_vocabulary_self_test(HWND owner, std::string &error);
+void jsti_show_automation_settings(HWND owner, bool (*enabled)(), void (*toggle)(HWND owner));
+bool jsti_automation_settings_self_test(HWND owner, std::string &error);
 
 int jsti_owned_window_save_snapshot(HWND window, const char *path, char *error, size_t errorCapacity);
 
@@ -168,6 +170,7 @@ constexpr int recordingsFolderLabelID = 463, recordingsFolderID = 464;
 constexpr int audioCleanupID = 465;
 constexpr int backupAudioID = 466, backupExportID = 467;
 constexpr int backupInspectID = 468;
+constexpr int automationSettingsID = 489;
 constexpr int sourceID = 175;
 constexpr int comparisonID = 183;
 // Model modes: bit 0 is live, bit 1 is local (on-device).
@@ -586,6 +589,17 @@ void emit(HWND window, int event, const char *text = "") {
     if (state.callback) state.callback(event, text, selection(window), state.context);
 }
 
+// The CLI and MCP setup dialog shows and changes the same automation state as
+// General's switch: the host's last report, and the same toggle event.
+bool automationShownEnabled() {
+    std::lock_guard<std::mutex> lock(state.mutex);
+    return state.automationEnabled;
+}
+
+void requestAutomationToggle(HWND window) {
+    emit(window, JSTI_EVENT_AUTOMATION_TOGGLED, automationShownEnabled() ? "0" : "1");
+}
+
 std::string selectedMicrophone(HWND window) {
     const LRESULT index = SendDlgItemMessageW(window, microphoneID, CB_GETCURSEL, 0, 0);
     if (index == CB_ERR || static_cast<size_t>(index) >= state.microphones.size()) return {};
@@ -772,7 +786,7 @@ unsigned pagesOf(int identifier) {
         return page(generalPage) | page(transcriptionPage) | page(postProcessingPage) | page(keyboardPage);
     case 94: case microphoneID: case textOutputID: case appearanceLabelID: case appearanceID: case automationID:
     case loginItemID: case recordingsFolderLabelID: case recordingsFolderID: case audioCleanupID:
-    case backupAudioID: case backupExportID: case backupInspectID:
+    case backupAudioID: case backupExportID: case backupInspectID: case automationSettingsID:
         return page(generalPage);
     case processingID: return page(postProcessingPage);
     case profilesID: return page(profilesPage);
@@ -1164,7 +1178,10 @@ void layoutSettings(HWND window, const RECT &content) {
                                3 * row + scale(window, 24));
         label(appearanceLabelID, y); control(appearanceID, y, scale(window, 220));
         place(window, loginItemID, RECT{left + scale(window, 188 + 220 + 24), y, right, y + row});
-        place(window, automationID, RECT{left, y + row + scale(window, 12), right, y + 2 * row + scale(window, 12)});
+        place(window, automationID, RECT{left, y + row + scale(window, 12), right - scale(window, 232),
+                                         y + 2 * row + scale(window, 12)});
+        place(window, automationSettingsID, box(right - scale(window, 220), y + row + scale(window, 12),
+                                                scale(window, 220), row));
         label(recordingsFolderLabelID, y + 2 * row + scale(window, 24));
         control(recordingsFolderID, y + 2 * row + scale(window, 24), scale(window, 110));
         place(window, audioCleanupID, RECT{
@@ -1913,6 +1930,7 @@ bool createControls(HWND window) {
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP, appearanceID) &&
         add(L"BUTTON", L"Launch at &login", BS_PUSHBUTTON | WS_TABSTOP, loginItemID) &&
         add(L"BUTTON", L"Allow &automation (speak command and MCP)", BS_PUSHBUTTON | WS_TABSTOP, automationID) &&
+        add(L"BUTTON", L"CLI and MCP s&etup…", BS_PUSHBUTTON | WS_TABSTOP, automationSettingsID) &&
         add(L"STATIC", L"Recording storage", 0, recordingsFolderLabelID) &&
         add(L"BUTTON", L"Open &folder", BS_PUSHBUTTON | WS_TABSTOP, recordingsFolderID) &&
         add(L"BUTTON", L"Delete all a&udio...", BS_PUSHBUTTON | WS_TABSTOP, audioCleanupID) &&
@@ -2033,6 +2051,7 @@ void updateSettingsButtons(HWND window, int recording) {
     EnableWindow(GetDlgItem(window, localModelsID), recording == 0 && jsti_local_models_available());
     EnableWindow(GetDlgItem(window, cloudSyncID), recording == 0 && jsti_cloud_sync_available());
     EnableWindow(GetDlgItem(window, azureID), recording == 0 && jsti_azure_resource_available());
+    EnableWindow(GetDlgItem(window, automationSettingsID), recording == 0);
     bool automation, loginPending;
     int login;
     std::wstring loginDetail;
@@ -2674,6 +2693,11 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case cloudSyncID:
             if (HIWORD(wparam) == BN_CLICKED && idleControl(window, cloudSyncID) && IsWindowEnabled(window)) {
                 jsti_show_cloud_sync_settings(window);
+            }
+            return 0;
+        case automationSettingsID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, automationSettingsID) && IsWindowEnabled(window)) {
+                jsti_show_automation_settings(window, automationShownEnabled, requestAutomationToggle);
             }
             return 0;
         case automationID: {
@@ -4901,7 +4925,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             jsti_voice_sources_self_test(window, failure) && jsti_voice_credentials_self_test(window, failure) &&
             jsti_local_models_self_test(window, failure) && jsti_cloud_sync_settings_self_test(window, failure) &&
             jsti_azure_resource_settings_self_test(window, failure) && jsti_configuration_self_test(window, failure)
-            && jsti_comparison_self_test(window, failure);
+            && jsti_comparison_self_test(window, failure) && jsti_automation_settings_self_test(window, failure);
     };
     bool passed = false;
     try { passed = check(); }

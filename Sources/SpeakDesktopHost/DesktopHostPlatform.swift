@@ -35,6 +35,10 @@ package protocol DesktopHostPlatform: Sendable {
     /// Persisted automatic text-output choices. Each recording snapshots these
     /// when it starts; the platform decides what they mean.
     associatedtype TextOutputOptions: Codable & Sendable
+    static func appSwitchPolicy(_ options: TextOutputOptions?) -> AppSwitchDelivery?
+    static func importingAppSwitchPolicy(
+        from configuration: DesktopConfiguration, into options: inout TextOutputOptions?
+    ) throws -> DesktopConfiguration
     /// The persisted global shortcut.
     associatedtype HotKeySettings: Codable & Sendable
     /// The persisted Read aloud voice.

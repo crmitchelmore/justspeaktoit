@@ -56,6 +56,9 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable { // swiftlint:
     }
 
     public static let fields: [Field] = [
+        .init(key: AppSwitchDelivery.preferenceKey, title: AppSwitchDelivery.settingName,
+              group: "Output", kind: .choice(AppSwitchDelivery.desktopChoices),
+              defaultValue: AnyCodable(.string(""))),
         .init(key: ApplicationPreferenceKey.autoCorrectionsEnabled.rawValue,
               title: "Learn corrections (verified inserted text; local approval required)",
               group: "Corrections", kind: .boolean,

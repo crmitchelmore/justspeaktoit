@@ -677,6 +677,58 @@ combobox's non-rendered subtitle. The isolated screenshot tour seeds actual sess
 options and also captures the explicit `general-portal-output` capability fixture;
 it restores the original output options before subsequent stages.
 
+### Application-switch delivery
+
+`SpeakCore/AppSwitchDelivery.swift` is the canonical three-policy catalogue.
+Mac keeps its existing raw values, labels, explanations and original-app
+default through the `AppSettings.AppSwitchDelivery` typealias. Native Text output
+controls receive those labels from Swift; the general scalar editor uses the
+same catalogue. There is no second native raw-value list.
+
+**Compatibility is deliberate:** native `textOutput.appSwitchDelivery` is optional.
+Absent intent remains legacy, not an implicit Mac default. Existing Windows/X11
+captured-target output and Wayland's consented current-focus portal paste remain
+unchanged. The separately labelled legacy editor choice clears explicit intent;
+it is not a fourth Mac policy. Explicit imports are validated, stored only in
+native output options, exported with their original value, and frozen with the
+recording. Partial imports do not replace an existing policy. Startup migrates a
+previously retained explicit configuration key into that same options owner.
+Atomic write failure cannot publish a different destination. Explicit unsupported
+intent is never silently projected back to legacy paste.
+
+Windows original-app output can directly address a still-live Unicode Edit or
+RichEdit control without activating it or touching the foreground app. Background
+UIA/paste is not claimed supported: that route copies instead. Current-app
+output captures a real other app/field at delivery under the original job's
+cancellation owner. The child retains its own process/field and checks foreground
+and focus-event revision before mutation; a second focus change, cancellation,
+sensitive/stale target or ambiguous dispatch never authorizes unrelated insertion.
+Speak's own UI is not a new destination. Strict original-front intent copies
+instead when another app is in front. A dead original process remains an
+explicit unavailable error rather than permission to redirect.
+
+Linux's explicit policies keep guarded same-foreground X11 paste working with
+captured process-start identity and a second native focus check. The existing
+XID route cannot prove the original background field or safely inspect an
+unrelated delivery-time field (including password/read-only status).
+**Background-original and switched-current X11 targeting remain gaps**: those
+requests recover to clipboard, with a visible reason. Wayland cannot identify
+either destination, so every explicit app-switch policy copies only; legacy
+portal behavior remains available by explicit legacy selection. GTK displays
+this capability explanation in a wrapped label, not a non-rendered combo subtitle.
+Imports retain the requested intent on either session type.
+
+Clipboard recovery is never a confirmed insertion and does not automatically
+resume dictation. Clipboard failure is a failure; X11 key submission stays
+unconfirmed. Redirected Windows output does not grant correction learning to the
+original field. Future Linux observational AT-SPI delivery must keep its own
+session consent and destination provenance; these changes do not borrow either.
+
+This application-switch packet is **source-only, qualification pending**.
+Policy/configuration/transfer/restart/recording-snapshot regressions and native
+adapter/chooser fixtures are authored, not run. No native behavioral acceptance
+or complete three-policy Linux parity is claimed.
+
 ## Configuration transfer is not the Mac backup format
 
 General's Import/Export preferences actions use a bounded, versioned JSON object:
@@ -760,7 +812,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | postProcessingIncludeContextTags | Source wired / Source wired | Native post-processing switch, Mac default true, options/session snapshot and strict transfer; excludes saved context tags from remote requests when false |
 | textOutputMethod | Equivalent / Partial | Output; Windows Smart/direct/clipboard; Linux paste/clipboard, no direct accessibility insertion |
 | restoreClipboard | Equivalent / Partial | Output; Windows restoration; Linux X11 owned plain-text restoration only. Wayland capability-gates the control, retains its saved X11 choice and leaves pasted text on the clipboard |
-| appSwitchDelivery | Missing / Missing | Windows captured-target safety; Linux X11 captured/Wayland current-focus rules, no three-way selector |
+| appSwitchDelivery | Source wired, native qualification pending / Source wired with explicit targeting gaps | Shared Mac policy/type and native chooser; sole native-options persistence, strict transfer and recording snapshots. Windows safely addressable native fields support original-background and guarded delivery-time retarget; Linux switched destinations copy only until a separately safe field route exists. See application-switch delivery above. |
 | showHUD | Wired / Wired | Config + HUD |
 | appVisibility | Missing / Missing | Native window/tray behaviour; no Mac Dock/menu-bar mode selector |
 | showStatusBarIconInDockOnly | Apple-specific / Apple-specific | Dock-only is not a native Windows/Linux mode; tray equivalents need explicit product policy |
@@ -782,9 +834,9 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | ttsSpeed | Transfer wired; workflow separate / Same | Canonical validation and sole-model transfer; incompatible Read aloud explicitly refused; native advanced editor/Azure execution in #1217 |
 | ttsPitch | Transfer wired; workflow separate / Same | Shared integer/range validation, raw recovery export and partial-import preservation; no native pitch editor in this slice |
 | ttsQuality | Source wired; qualification pending / Source wired; qualification pending | Native provider-gated `Speech quality (provider-specific)` choice editor (`VoiceSynthesisPreference.swift:4,28-30`, `WindowsConfiguration.swift`, `LinuxConfiguration.swift`), disabled when the selected provider has no quality tiers; transfer/apply confirmed above. Absent stored override remains nil; HIGH is the editor's own canonical default metadata shown when nothing is stored, a separate fact from which value is actually executable for the selected provider; native/provider qualification on this exact head is not separately captured here |
-| ttsOutputFormat | Missing / Missing | Read aloud uses native staging format |
+| ttsOutputFormat | Source wired; qualification pending / Same | Canonical MP3/M4A/WAV catalogue, native format picker, sole Voice-model transfer/restart and captured Generate/fresh Export format. Exact encoded bytes are retained for archive/export; playback uses decoded WAV. Exact-rate and installed-codec gaps remain; portable/build and native/runtime qualification are still required. Read aloud keeps its independent native PCM path. See desktop-voice-sources.md. |
 | ttsAutoPlay | Transfer wired; workflow pending / Same | Strict canonical boolean projects to the sole Voice model; explicit Read aloud remains playback; Generate acceptance belongs to #1217 |
-| ttsSaveToDirectory | Transfer wired; workflow pending / Same | Strict boolean projects to sole Voice model; generated WAV archival uses actual owned recordings directory in #1217, never an imported foreign path |
+| ttsSaveToDirectory | Source wired; qualification pending / Same | Strict boolean projects to the sole Voice model. Generated results archive their captured MP3/M4A/WAV container bytes in the actual owned recordings directory, never an imported foreign path. Retained exports reuse those exact bytes; source wiring is not native/runtime or installed-package qualification. |
 | ttsUseSSML | Transfer wired; workflow separate / Same | Strict boolean transfer; existing Deepgram Read aloud refuses SSML before credentials/playback; executable Azure/native editor in #1217 |
 | ttsFavoriteVoices | Source wired; qualification pending / Source wired; qualification pending | Native voice picker ranks and toggles favorites in Read aloud (`DesktopHostVoiceFavorites.swift`, `WindowsReadAloud.swift:30-41`, `LinuxReadAloud.swift:117-125`); transfer/apply confirmed above. No separate standalone favourites-management page; native/provider qualification on this exact head is not separately captured here |
 | ttsPronunciationDictionary | Missing / Missing | This specific legacy preference value may be retained opaquely by generic import/export round-trips, but is not applied/mapped to the native device-local `pronunciation.json` store; Desktop has its own native pronunciation editor/pipeline (`DesktopVocabulary`/`PronunciationDictionary`: CRUD, defaults seeding, import/export, preview) independent of this preference. `PronunciationRenderer` now applies replacements across all four Read aloud/Generate/fresh Export voice-output sources (History, typed text, clipboard, text file), byte-exact on SSML; Mac IPA/phoneme and provider SSML differences remain open |

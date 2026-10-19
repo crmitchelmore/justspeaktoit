@@ -255,6 +255,9 @@ int32_t jsti_window_set_transcript_variant(const char *record_id, int32_t varian
 /* method: 0 paste into the focused app, 1 clipboard only. */
 int32_t jsti_window_set_text_output(int32_t method, int32_t restore_clipboard,
                                    int32_t can_restore_clipboard, const char *shortcut_hint);
+int32_t jsti_window_set_text_output_policy(
+    int32_t method, int32_t restore_clipboard, int32_t can_restore_clipboard, const char *shortcut_hint,
+    const char *policy_title, const char *policy_labels, int32_t policy_selection, const char *policy_help);
 /* Full shared projection; local_index identifies built-in rules. Callback
  * indexes remain full-projection indexes; selected -1 requires a user choice.
  * remembered_remote_index is dormant picker recall; -1 requires explicit choice. */

@@ -45,11 +45,28 @@ enum WindowsOutputJob: Sendable {
             }
         case .insertion(let target, let options):
             do {
-                return WindowsInsertionStatus.delivery(for: try target.insert(text, options: options))
+                let outcome = try target.insert(text, options: options)
+                if outcome.method == .clipboard {
+                    return DesktopTextOutputResult(
+                        .recoveryCopy,
+                        status: "Transcript copied. The app-switch destination was unavailable or changed; "
+                            + "nothing was inserted."
+                    )
+                }
+                let result = WindowsInsertionStatus.delivery(for: outcome)
+                guard options.appSwitchDelivery == .currentApp else { return result }
+                return DesktopTextOutputResult(
+                    result.disposition,
+                    status: result.status.replacingOccurrences(
+                        of: "original text field", with: "delivery-time text field"
+                    )
+                )
             } catch let failure as WindowsTextOutputError {
+                let message = WindowsInsertionStatus.message(for: failure)
                 return DesktopTextOutputResult(
                     failure.mayHaveInserted ? .unconfirmedInsertion : .failed,
-                    status: WindowsInsertionStatus.message(for: failure)
+                    status: options.appSwitchDelivery == .currentApp
+                        ? message.replacingOccurrences(of: "original field", with: "delivery-time field") : message
                 )
             } catch {
                 return DesktopTextOutputResult(

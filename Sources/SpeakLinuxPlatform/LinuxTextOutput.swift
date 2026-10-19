@@ -1,9 +1,10 @@
 import Foundation
+import SpeakCore
 import SpeakDesktop
 
-/// Persisted automatic output choices. Unknown or missing keys keep the
-/// defaults, so a settings file from a newer build still loads.
-public struct LinuxTextOutputOptions: Codable, Equatable, Sendable {
+/// Persisted automatic output choices. Missing policy retains legacy behavior;
+/// supplied destination intent is validated instead of silently retargeted.
+public struct LinuxTextOutputOptions: Codable, Equatable, Sendable, DesktopAppSwitchOutputOptions {
     public enum Method: String, Codable, Sendable, CaseIterable {
         /// Put the transcript on the clipboard and send the paste keystroke to
         /// the app that was focused when dictation started.
@@ -16,22 +17,46 @@ public struct LinuxTextOutputOptions: Codable, Equatable, Sendable {
     /// Restore previous plain text while this output still owns the X11 selection.
     /// Wayland retains this choice but cannot confirm paste consumption.
     public var restoreClipboard: Bool
+    /// Nil preserves the pre-policy X11/Wayland behavior.
+    public var appSwitchDelivery: AppSwitchDelivery?
 
     public init(method: Method = .paste, restoreClipboard: Bool = true) {
         self.method = method
         self.restoreClipboard = restoreClipboard
+        self.appSwitchDelivery = nil
     }
 
-    private enum CodingKeys: String, CodingKey { case method, restoreClipboard }
+    private enum CodingKeys: String, CodingKey { case method, restoreClipboard, appSwitchDelivery }
+
+    public init(appSwitchDelivery: AppSwitchDelivery?) {
+        self.init()
+        self.appSwitchDelivery = appSwitchDelivery
+    }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let raw = try? container.decodeIfPresent(String.self, forKey: .method)
         method = raw.flatMap(Method.init(rawValue:)) ?? .paste
         restoreClipboard = (try? container.decodeIfPresent(Bool.self, forKey: .restoreClipboard)) ?? true
+        appSwitchDelivery = try container.decodeIfPresent(AppSwitchDelivery.self, forKey: .appSwitchDelivery)
+    }
+
+    public init(nativeMethod: Int, payload: String) throws {
+        let parts = payload.split(separator: "\t", omittingEmptySubsequences: false)
+        guard (0...1).contains(nativeMethod), parts.count == 2,
+              parts[0].isEmpty || parts[0] == "restore",
+              let selection = Int(parts[1]), String(selection) == parts[1] else {
+            throw DesktopConfigurationError.invalidField("Text output")
+        }
+        self.init(method: nativeMethod == 1 ? .clipboardOnly : .paste, restoreClipboard: parts[0] == "restore")
+        appSwitchDelivery = try AppSwitchDelivery.desktopPolicy(selection: selection)
     }
 
     public func savedStatus(canRestoreClipboard: Bool) -> String {
+        if method == .paste, let appSwitchDelivery {
+            return "Text output saved: \(appSwitchDelivery.displayName). "
+                + AppSwitchDelivery.linuxHelp(canTargetApps: canRestoreClipboard)
+        }
         switch method {
         case .paste:
             guard canRestoreClipboard else {
@@ -64,11 +89,25 @@ public struct LinuxInsertionTarget: Equatable, Sendable {
     public let windowClass: String?
     /// The owning executable, for app profiles. X11 only.
     public let executablePath: String?
+    public let processID: Int32?
+    public let processIdentity: String?
 
     public init(kind: Kind, windowClass: String? = nil, executablePath: String? = nil) {
         self.kind = kind
         self.windowClass = windowClass
         self.executablePath = executablePath
+        self.processID = nil
+        self.processIdentity = nil
+    }
+
+    public init(
+        kind: Kind, windowClass: String?, executablePath: String?, processID: Int32, processIdentity: String?
+    ) {
+        self.kind = kind
+        self.windowClass = windowClass
+        self.executablePath = executablePath
+        self.processID = processID
+        self.processIdentity = processIdentity
     }
 
     /// Terminals paste with Ctrl+Shift+V; Ctrl+V would send a literal ^V.
@@ -98,6 +137,7 @@ public enum LinuxOutputPlan: Equatable, Sendable {
     case copy(reason: String?)
     case x11Paste(window: UInt64, shift: Bool, restoreClipboard: Bool)
     case portalPaste(shift: Bool)
+    case guardedX11(target: LinuxInsertionTarget, policy: AppSwitchDelivery, restoreClipboard: Bool)
 
     public var isClipboard: Bool {
         if case .copy = self { return true }
@@ -117,10 +157,17 @@ public enum LinuxOutputPlan: Equatable, Sendable {
             guard session.canUseX11Injection else {
                 return .copy(reason: "This session does not allow pasting into other apps.")
             }
+            if let policy = options.appSwitchDelivery {
+                return .guardedX11(target: target, policy: policy, restoreClipboard: options.restoreClipboard)
+            }
             return .x11Paste(
                 window: window, shift: target.prefersShiftPaste, restoreClipboard: options.restoreClipboard
             )
         case .focusedApplication:
+            if options.appSwitchDelivery != nil {
+                return .copy(reason: "Wayland cannot verify the original or delivery-time app and field. "
+                    + "Your selected app-switch policy is retained; paste manually.")
+            }
             guard portalAvailable else {
                 return .copy(reason: "This desktop has no remote-input portal for pasting.")
             }
@@ -132,6 +179,8 @@ public enum LinuxOutputPlan: Equatable, Sendable {
 /// Native effects the output job drives. The app uses LinuxOutputNativeAdapter;
 /// tests substitute a recorder.
 public protocol LinuxOutputNative: Sendable {
+    func x11TargetIsFront(_ target: LinuxInsertionTarget) throws -> Bool
+    func x11Paste(target: LinuxInsertionTarget, shift: Bool) throws -> Bool
     func readClipboard() throws -> String?
     func writeClipboard(_ text: String) throws
     func writeOwnedClipboard(_ text: String) throws -> UInt64
@@ -148,6 +197,11 @@ public protocol LinuxOutputNative: Sendable {
     func ownWindowFocused() -> Bool
     func notify(title: String, body: String)
     func sleep(milliseconds: Int)
+}
+
+extension LinuxOutputNative {
+    public func x11TargetIsFront(_ target: LinuxInsertionTarget) throws -> Bool { false }
+    public func x11Paste(target: LinuxInsertionTarget, shift: Bool) throws -> Bool { false }
 }
 
 /// One automatic output. `perform` blocks and runs off the UI thread and the
@@ -184,10 +238,29 @@ public final class LinuxOutputJob: @unchecked Sendable {
             return x11Paste(text, window: window, shift: shift, restore: restore)
         case .portalPaste(let shift):
             return portalPaste(text, shift: shift)
+        case .guardedX11(let target, let policy, let restore):
+            do {
+                guard try native.x11TargetIsFront(target), !native.ownWindowFocused() else {
+                    return copy(text, reason: policy == .currentApp
+                        ? "A new app/field cannot be safely verified on this X11 route. Paste manually."
+                        : "The original app is unavailable or no longer in front. Background X11 insertion is unsupported.")
+                }
+                guard case .x11Window(let window) = target.kind else {
+                    return copy(text, reason: "The captured X11 destination is unavailable.")
+                }
+                return x11Paste(
+                    text, window: window, shift: target.prefersShiftPaste, restore: restore, guardedTarget: target
+                )
+            } catch {
+                return copy(text, reason: "The original destination could not be verified: \(error.localizedDescription)")
+            }
         }
     }
 
     private func copy(_ text: String, reason: String?) -> DesktopTextOutputResult {
+        guard !isCancelled else {
+            return DesktopTextOutputResult(.cancelled, status: "Output cancelled. Saved to History.")
+        }
         do {
             try native.writeClipboard(text)
         } catch {
@@ -202,7 +275,9 @@ public final class LinuxOutputJob: @unchecked Sendable {
         return DesktopTextOutputResult(.recoveryCopy, status: "Transcript copied; press Ctrl+V to paste. \(reason)")
     }
 
-    private func x11Paste(_ text: String, window: UInt64, shift: Bool, restore: Bool) -> DesktopTextOutputResult {
+    private func x11Paste(
+        _ text: String, window: UInt64, shift: Bool, restore: Bool, guardedTarget: LinuxInsertionTarget? = nil
+    ) -> DesktopTextOutputResult {
         var previous: String?
         var readFailure: String?
         if restore {
@@ -220,7 +295,13 @@ public final class LinuxOutputJob: @unchecked Sendable {
                     .cancelled, status: "Output cancelled. The transcript is on the clipboard."
                 )
             }
-            guard try native.x11Paste(window: window, shift: shift) else {
+            let pasted: Bool
+            if let guardedTarget {
+                pasted = try native.x11Paste(target: guardedTarget, shift: shift)
+            } else {
+                pasted = try native.x11Paste(window: window, shift: shift)
+            }
+            guard pasted else {
                 native.notify(title: "Transcript copied", body: "The focused window changed. Press Ctrl+V to paste.")
                 return DesktopTextOutputResult(
                     .recoveryCopy,

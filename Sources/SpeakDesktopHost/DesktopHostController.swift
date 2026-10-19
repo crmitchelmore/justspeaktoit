@@ -290,6 +290,9 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
             loadedSettings.configuration = try DesktopPostProcessingConfiguration.importOptions(
                 from: configuration, into: &loadedSettings.postProcessing
             )
+            loadedSettings.configuration = try Platform.importingAppSwitchPolicy(
+                from: loadedSettings.configuration ?? configuration, into: &loadedSettings.textOutput
+            )
         }
         self.settings = loadedSettings
     }

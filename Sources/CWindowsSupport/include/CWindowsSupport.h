@@ -366,6 +366,9 @@ int jsti_window_set_text_output(int method, int insertion, int restore_clipboard
 /* Reads the configuration the dialog will open with. -1 when unconfigured or
  * an output pointer is null. */
 int jsti_window_text_output(int *method, int *insertion, int *restore_clipboard);
+int jsti_window_set_app_switch(const char *title, const char *labels, int selection, const char *help);
+/* During the synchronous Apply callback, reads that dialog's immutable draft. */
+int jsti_window_app_switch_selection(void);
 /* Thread safe. Drops the configured callback and context so no later dialog
  * can use them; the dialog is unavailable until configured again. A dialog
  * already open is unaffected and keeps its copied callback and context until
@@ -646,14 +649,19 @@ enum JSTIInsertionFlags {
     /* Leave the transcript on the clipboard after a paste instead of
      * restoring the previous content (macOS "restore clipboard" off). */
     JSTI_INSERTION_KEEP_TRANSCRIPT_ON_CLIPBOARD = 1u << 1,
-    /* Never use the clipboard/keystroke fallback; fail closed instead. */
-    JSTI_INSERTION_NO_PASTE_FALLBACK = 1u << 2
+    /* Never paste through the clipboard. An explicit app-switch policy may
+     * still request a recovery copy without sending keys. */
+    JSTI_INSERTION_NO_PASTE_FALLBACK = 1u << 2,
+    JSTI_INSERTION_ORIGINAL_APP = 1u << 3,
+    JSTI_INSERTION_CURRENT_APP = 1u << 4,
+    JSTI_INSERTION_ONLY_ORIGINAL_FRONT = 1u << 5
 };
 enum JSTIInsertionMethod {
     JSTI_INSERTION_METHOD_NONE = 0,
     JSTI_INSERTION_METHOD_NATIVE_EDIT = 1,
     JSTI_INSERTION_METHOD_UIA_VALUE = 2,
-    JSTI_INSERTION_METHOD_PASTE = 3
+    JSTI_INSERTION_METHOD_PASTE = 3,
+    JSTI_INSERTION_METHOD_CLIPBOARD = 4
 };
 enum JSTIInsertionIdentity {
     /* Process, thread, foreground window and focused control matched. */

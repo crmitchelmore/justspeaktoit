@@ -1,13 +1,15 @@
 import Foundation
+import SpeakCore
 import SpeakDesktop
 import CWindowsSupport
 
 /// Text output preferences for the Windows host. These mirror the macOS
 /// product semantics (`TextOutputMethod` and `AccessibilityInsertionMode`)
 /// rather than any Windows API: `smart` prefers direct insertion and falls
-/// back to a guarded paste, `directOnly` never touches the clipboard or
-/// keyboard, and `clipboardOnly` copies without inserting.
-public struct WindowsTextOutputOptions: Codable, Equatable, Sendable {
+/// back to a guarded paste, `directOnly` never sends paste keys, and
+/// `clipboardOnly` copies without inserting. An explicit app-switch policy
+/// may use a recovery copy even when direct insertion is selected.
+public struct WindowsTextOutputOptions: Codable, Equatable, Sendable, DesktopAppSwitchOutputOptions {
     public enum Method: String, Codable, Sendable {
         case smart
         case directOnly
@@ -22,19 +24,27 @@ public struct WindowsTextOutputOptions: Codable, Equatable, Sendable {
     public var method: Method
     public var insertion: Insertion
     public var restoreClipboard: Bool
+    /// Nil preserves the pre-policy captured-target behavior.
+    public var appSwitchDelivery: AppSwitchDelivery?
 
     public init(method: Method = .smart, insertion: Insertion = .insertAtCursor, restoreClipboard: Bool = true) {
         self.method = method
         self.insertion = insertion
         self.restoreClipboard = restoreClipboard
+        self.appSwitchDelivery = nil
     }
 
     private enum CodingKeys: String, CodingKey {
-        case method, insertion, restoreClipboard
+        case method, insertion, restoreClipboard, appSwitchDelivery
     }
 
-    /// Hand-edited settings may omit keys or carry unknown values; every field
-    /// falls back to its default instead of failing the whole settings file.
+    public init(appSwitchDelivery: AppSwitchDelivery?) {
+        self.init()
+        self.appSwitchDelivery = appSwitchDelivery
+    }
+
+    /// Legacy fields retain their defaults. A supplied destination policy is
+    /// strict: invalid intent must not silently become unrelated insertion.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let method = try container.decodeIfPresent(String.self, forKey: .method)
@@ -46,6 +56,7 @@ public struct WindowsTextOutputOptions: Codable, Equatable, Sendable {
             insertion: insertion ?? .insertAtCursor,
             restoreClipboard: try container.decodeIfPresent(Bool.self, forKey: .restoreClipboard) ?? true
         )
+        appSwitchDelivery = try container.decodeIfPresent(AppSwitchDelivery.self, forKey: .appSwitchDelivery)
     }
 
     /// Native flag bits for `jsti_insertion_insert`.
@@ -54,6 +65,12 @@ public struct WindowsTextOutputOptions: Codable, Equatable, Sendable {
         if insertion == .replaceField { flags |= UInt32(JSTI_INSERTION_REPLACE_FIELD.rawValue) }
         if !restoreClipboard { flags |= UInt32(JSTI_INSERTION_KEEP_TRANSCRIPT_ON_CLIPBOARD.rawValue) }
         if method == .directOnly { flags |= UInt32(JSTI_INSERTION_NO_PASTE_FALLBACK.rawValue) }
+        switch appSwitchDelivery {
+        case .originalApp: flags |= UInt32(JSTI_INSERTION_ORIGINAL_APP.rawValue)
+        case .currentApp: flags |= UInt32(JSTI_INSERTION_CURRENT_APP.rawValue)
+        case .onlyIfOriginalAppInFront: flags |= UInt32(JSTI_INSERTION_ONLY_ORIGINAL_FRONT.rawValue)
+        case nil: break
+        }
         return flags
     }
 
@@ -135,6 +152,7 @@ public final class WindowsInsertionTarget: @unchecked Sendable {
         case nativeEdit
         case automationValue
         case paste
+        case clipboard
     }
 
     public enum ClipboardState: Equatable, Sendable {
@@ -254,6 +272,7 @@ public final class WindowsInsertionTarget: @unchecked Sendable {
         case Int32(JSTI_INSERTION_METHOD_NATIVE_EDIT.rawValue): method = .nativeEdit
         case Int32(JSTI_INSERTION_METHOD_UIA_VALUE.rawValue): method = .automationValue
         case Int32(JSTI_INSERTION_METHOD_PASTE.rawValue): method = .paste
+        case Int32(JSTI_INSERTION_METHOD_CLIPBOARD.rawValue): method = .clipboard
         default:
             throw WindowsTextOutputError(
                 "The native adapter reported success without an insertion method.", clipboard: clipboard
@@ -271,7 +290,12 @@ public final class WindowsInsertionTarget: @unchecked Sendable {
 /// or clipboard contents.
 public enum WindowsInsertionStatus {
     public static func delivery(for outcome: WindowsInsertionTarget.Outcome) -> DesktopTextOutputResult {
-        DesktopTextOutputResult(
+        if outcome.method == .clipboard {
+            return DesktopTextOutputResult(
+                .recoveryCopy, status: "Transcript copied; app-switch delivery did not insert text."
+            )
+        }
+        return DesktopTextOutputResult(
             outcome.verified && (outcome.method == .nativeEdit || outcome.fieldIdentity)
                 ? .confirmedInsertion : .unconfirmedInsertion,
             status: message(for: outcome)
@@ -288,6 +312,8 @@ public enum WindowsInsertionStatus {
             status = outcome.verified
                 ? "Pasted into the original text field and saved to History."
                 : "Paste keys sent; insertion could not be confirmed. Saved to History."
+        case .clipboard:
+            return "Transcript copied; app-switch delivery did not insert text."
         }
         if outcome.method != .nativeEdit, !outcome.fieldIdentity {
             status = "Insertion attempted; the original field could not be confirmed. Saved to History."

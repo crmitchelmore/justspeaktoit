@@ -51,6 +51,9 @@ typedef struct UI {
     /* Text output */
     AdwPreferencesGroup *output_group;
     AdwComboRow *output_row;
+    AdwComboRow *app_switch_row;
+    GtkLabel *app_switch_help;
+    gboolean app_switch_configured;
     AdwSwitchRow *restore_row;
     gboolean can_restore_clipboard;
     AdwActionRow *shortcut_row;
@@ -390,8 +393,16 @@ static void on_text_output(GObject *object, GParamSpec *spec, gpointer data) {
     guint method = adw_combo_row_get_selected(ui.output_row);
     gboolean restore = adw_switch_row_get_active(ui.restore_row);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.restore_row), method == 0 && ui.can_restore_clipboard);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.app_switch_row), method == 0 && ui.app_switch_configured);
     refresh_setup();
-    emit(JSTI_EVENT_TEXT_OUTPUT, restore ? "restore" : "", (gint32)method);
+    if (ui.app_switch_configured) {
+        gchar *payload = g_strdup_printf("%s\t%u", restore ? "restore" : "",
+                                        adw_combo_row_get_selected(ui.app_switch_row));
+        emit(JSTI_EVENT_TEXT_OUTPUT, payload, (gint32)method);
+        g_free(payload);
+    } else {
+        emit(JSTI_EVENT_TEXT_OUTPUT, restore ? "restore" : "", (gint32)method);
+    }
 }
 
 static void apply_appearance(guint appearance) {
@@ -1400,6 +1411,19 @@ static GtkWidget *build_general(void) {
     gtk_widget_set_visible(GTK_WIDGET(ui.restore_row), FALSE);
     g_signal_connect(ui.restore_row, "notify::active", G_CALLBACK(on_text_output), NULL);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(output), GTK_WIDGET(ui.restore_row));
+    ui.app_switch_row = ADW_COMBO_ROW(adw_combo_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.app_switch_row), "App-switch delivery");
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.app_switch_row), FALSE);
+    g_signal_connect(ui.app_switch_row, "notify::selected", G_CALLBACK(on_text_output), NULL);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(output), GTK_WIDGET(ui.app_switch_row));
+    ui.app_switch_help = GTK_LABEL(gtk_label_new(NULL));
+    gtk_label_set_wrap(ui.app_switch_help, TRUE);
+    gtk_label_set_xalign(ui.app_switch_help, 0);
+    gtk_widget_set_margin_top(GTK_WIDGET(ui.app_switch_help), 8);
+    gtk_widget_set_margin_bottom(GTK_WIDGET(ui.app_switch_help), 8);
+    gtk_widget_set_margin_start(GTK_WIDGET(ui.app_switch_help), 12);
+    gtk_widget_set_margin_end(GTK_WIDGET(ui.app_switch_help), 12);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(output), GTK_WIDGET(ui.app_switch_help));
     gtk_box_append(GTK_BOX(column), output);
 
     GtkWidget *startup = group("Startup");
@@ -2694,11 +2718,18 @@ typedef struct TextOutput {
     gboolean restore;
     gboolean can_restore;
     gchar *hint;
+    gchar *policy_title;
+    gchar *policy_labels;
+    gchar *policy_help;
+    gint32 policy_selection;
 } TextOutput;
 
 static void text_output_free(gpointer pointer) {
     TextOutput *output = pointer;
     g_free(output->hint);
+    g_free(output->policy_title);
+    g_free(output->policy_labels);
+    g_free(output->policy_help);
     g_free(output);
 }
 
@@ -2706,11 +2737,26 @@ static void text_output_apply(gpointer pointer) {
     TextOutput *output = pointer;
     ui.suppress = TRUE;
     ui.can_restore_clipboard = output->can_restore;
+    if (output->policy_labels != NULL) {
+        gchar **labels = g_strsplit(output->policy_labels, "\n", -1);
+        GtkStringList *model = gtk_string_list_new((const char *const *)labels);
+        adw_combo_row_set_model(ui.app_switch_row, G_LIST_MODEL(model));
+        g_object_unref(model);
+        g_strfreev(labels);
+        adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.app_switch_row), output->policy_title);
+        gtk_label_set_text(ui.app_switch_help, output->policy_help);
+        adw_combo_row_set_selected(ui.app_switch_row, output->policy_selection);
+        ui.app_switch_configured = TRUE;
+    }
     adw_combo_row_set_selected(ui.output_row, output->method == 1 ? 1 : 0);
     adw_switch_row_set_active(ui.restore_row, output->restore);
     gtk_widget_set_visible(GTK_WIDGET(ui.restore_row), output->can_restore);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.restore_row), output->method != 1 && output->can_restore);
-    adw_preferences_group_set_description(ui.output_group, output->can_restore ?
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.app_switch_row), output->method != 1 && ui.app_switch_configured);
+    gboolean explicit_policy = ui.app_switch_configured && adw_combo_row_get_selected(ui.app_switch_row) != 0;
+    adw_preferences_group_set_description(ui.output_group, explicit_policy ?
+        "The saved app-switch policy is enforced. Unsupported or uncertain destinations copy only; "
+        "the delivery support explanation below describes this desktop's limits." : output->can_restore ?
         "Finished text goes to the app you were in when dictation started. Recording in this window offers "
         "Copy instead." :
         "Wayland pastes into the app focused at delivery and cannot confirm when it consumes the paste, "
@@ -2728,6 +2774,30 @@ int32_t jsti_window_set_text_output(int32_t method, int32_t restore_clipboard,
     output->restore = restore_clipboard != 0;
     output->can_restore = can_restore_clipboard != 0;
     output->hint = g_strdup(shortcut_hint);
+    return post(text_output_apply, output, text_output_free);
+}
+
+int32_t jsti_window_set_text_output_policy(
+    int32_t method, int32_t restore_clipboard, int32_t can_restore_clipboard, const char *shortcut_hint,
+    const char *policy_title, const char *policy_labels, int32_t policy_selection, const char *policy_help) {
+    if (method < 0 || method > 1 || policy_title == NULL || *policy_title == '\0' || policy_labels == NULL ||
+        policy_help == NULL || !g_utf8_validate(policy_title, -1, NULL) ||
+        !g_utf8_validate(policy_labels, -1, NULL) || !g_utf8_validate(policy_help, -1, NULL)) return -1;
+    gchar **labels = g_strsplit(policy_labels, "\n", -1);
+    guint count = g_strv_length(labels);
+    gboolean valid = count > 0 && policy_selection >= 0 && (guint)policy_selection < count;
+    for (guint index = 0; index < count; index++) valid = valid && *labels[index] != '\0';
+    g_strfreev(labels);
+    if (!valid) return -1;
+    TextOutput *output = g_new0(TextOutput, 1);
+    output->method = method;
+    output->restore = restore_clipboard != 0;
+    output->can_restore = can_restore_clipboard != 0;
+    output->hint = g_strdup(shortcut_hint);
+    output->policy_title = g_strdup(policy_title);
+    output->policy_labels = g_strdup(policy_labels);
+    output->policy_help = g_strdup(policy_help);
+    output->policy_selection = policy_selection;
     return post(text_output_apply, output, text_output_free);
 }
 
@@ -3814,8 +3884,11 @@ static int32_t login_item_self_test(char *error, size_t capacity) {
 }
 
 static void text_output_capture(int32_t event, const char *text, int32_t index, void *context) {
-    if (event == JSTI_EVENT_TEXT_OUTPUT && index == 1 && g_strcmp0(text, "restore") == 0)
+    gchar *expected = ui.app_switch_configured
+        ? g_strdup_printf("restore\t%u", adw_combo_row_get_selected(ui.app_switch_row)) : g_strdup("restore");
+    if (event == JSTI_EVENT_TEXT_OUTPUT && index == 1 && g_strcmp0(text, expected) == 0)
         ++*(guint *)context;
+    g_free(expected);
 }
 
 static int32_t automation_self_test(char *error, size_t capacity) {
@@ -3839,7 +3912,62 @@ static int32_t automation_self_test(char *error, size_t capacity) {
     return pending && actual ? 0 : fail(error, capacity, "Automation did not show its actual state or failure");
 }
 
+static gboolean app_switch_output_self_test(void) {
+    GListModel *model = adw_combo_row_get_model(ui.app_switch_row);
+    if (model != NULL) g_object_ref(model);
+    guint selection = adw_combo_row_get_selected(ui.app_switch_row);
+    gboolean configured = ui.app_switch_configured;
+    gchar *title = g_strdup(adw_preferences_row_get_title(ADW_PREFERENCES_ROW(ui.app_switch_row)));
+    gchar *help = g_strdup(gtk_label_get_text(ui.app_switch_help));
+    TextOutput original = {
+        .method = (gint32)adw_combo_row_get_selected(ui.output_row),
+        .restore = adw_switch_row_get_active(ui.restore_row), .can_restore = ui.can_restore_clipboard
+    };
+    TextOutput policy = {
+        .method = 0, .restore = TRUE, .can_restore = FALSE,
+        .policy_title = (gchar *)"Fixture destination", .policy_labels = (gchar *)"Legacy\nOriginal\nCurrent\nCopy",
+        .policy_help = (gchar *)"Wayland copies explicit intent only.", .policy_selection = 2
+    };
+    jsti_window_event_fn callback = ui.callback;
+    ui.callback = observe_event;
+    observed.event = 0;
+    text_output_apply(&policy);
+    gboolean valid = observed.event == 0 && adw_combo_row_get_selected(ui.app_switch_row) == 2 &&
+        g_list_model_get_n_items(adw_combo_row_get_model(ui.app_switch_row)) == 4 &&
+        gtk_label_get_wrap(ui.app_switch_help) &&
+        g_strcmp0(gtk_label_get_text(ui.app_switch_help), policy.policy_help) == 0;
+    adw_combo_row_set_selected(ui.app_switch_row, 3);
+    valid = valid && observed.event == JSTI_EVENT_TEXT_OUTPUT && observed.index == 0 &&
+        g_strcmp0(observed.text, "restore\t3") == 0;
+    policy.method = 1;
+    policy.policy_selection = 3;
+    observed.event = 0;
+    text_output_apply(&policy);
+    valid = valid && observed.event == 0 && !gtk_widget_get_sensitive(GTK_WIDGET(ui.app_switch_row)) &&
+        adw_combo_row_get_selected(ui.app_switch_row) == 3;
+    ui.suppress = TRUE;
+    adw_combo_row_set_model(ui.app_switch_row, model);
+    if (model != NULL) g_object_unref(model);
+    adw_combo_row_set_selected(ui.app_switch_row, selection);
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.app_switch_row), title);
+    gtk_label_set_text(ui.app_switch_help, help);
+    ui.app_switch_configured = configured;
+    ui.suppress = FALSE;
+    ui.callback = callback;
+    g_clear_pointer(&observed.text, g_free);
+    g_free(title);
+    g_free(help);
+    text_output_apply(&original);
+    return valid;
+}
+
 static gboolean text_output_self_test(void) {
+    guint original_policy = adw_combo_row_get_selected(ui.app_switch_row);
+    if (ui.app_switch_configured) {
+        ui.suppress = TRUE;
+        adw_combo_row_set_selected(ui.app_switch_row, 0);
+        ui.suppress = FALSE;
+    }
     TextOutput original = {
         .method = (gint32)adw_combo_row_get_selected(ui.output_row),
         .restore = adw_switch_row_get_active(ui.restore_row),
@@ -3872,8 +4000,15 @@ static gboolean text_output_self_test(void) {
     valid = valid && !gtk_widget_get_sensitive(GTK_WIDGET(ui.restore_row)) &&
         adw_switch_row_get_active(ui.restore_row) && strstr(gtk_label_get_text(ui.setup_output), "restored") == NULL;
     text_output_apply(&original);
+    gboolean policy_valid = app_switch_output_self_test();
+    if (ui.app_switch_configured) {
+        ui.suppress = TRUE;
+        adw_combo_row_set_selected(ui.app_switch_row, original_policy);
+        ui.suppress = FALSE;
+        text_output_apply(&original);
+    }
     g_free(original.hint);
-    return valid;
+    return valid && policy_valid;
 }
 
 static gboolean sidebar_navigation_self_test(void) {

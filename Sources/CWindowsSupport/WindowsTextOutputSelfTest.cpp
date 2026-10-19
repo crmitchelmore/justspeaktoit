@@ -273,6 +273,8 @@ struct Fixture {
     std::atomic<uint64_t> focusRevision{1};
     std::atomic<unsigned> releasedKeys{0};
     bool markersSeen = false;
+    bool switchForegroundIsOwn = false;
+    bool switchForegroundSameApp = false;
     std::wstring pastedText;
     // Blocking hook for timeout/lifetime checks.
     jsti::Handle release;
@@ -282,6 +284,14 @@ struct Fixture {
 Fixture *fixture = nullptr;
 
 HWND fakeForeground() { return fixture->foreground; }
+bool fakeOwnApplication(HWND) { return fixture->switchForegroundIsOwn; }
+bool fakeSameApplication(HWND first, HWND second) { return first == second || fixture->switchForegroundSameApp; }
+void switchAgainBeforeRedirect(void *) {
+    fixture->foreground = fixture->host.window;
+    ++fixture->focusRevision;
+}
+void changeRevisionBeforeRedirect(void *) { ++fixture->focusRevision; }
+void cancelBeforeRedirect(void *) { jsti_insertion_cancel(fixture->pendingTarget); }
 Clipboard *fakeClipboard() { return &fixture->clipboard; }
 bool stubPreparePaste(std::string &) {
     if (fixture->prepareMode == Fixture::PrepareMode::Cancel) jsti_insertion_cancel(fixture->pendingTarget);
@@ -466,6 +476,146 @@ std::string checkPureHelpers() {
         return describe("learning null target", "a missing owned range was not rejected");
     }
     jsti_insertion_destroy(nullptr);
+    return {};
+}
+
+std::string checkAppSwitchPolicies(Fixture &state) {
+    SyntheticHost destination;
+    std::string error;
+    if (!destination.start(error)) return describe("app-switch destination", "setup failed", error.c_str());
+    Environment environment = testEnvironment(true);
+    environment.ownApplication = &fakeOwnApplication;
+    environment.sameApplication = &fakeSameApplication;
+    Target target;
+    auto prepare = [&] {
+        state.foreground = state.host.window;
+        state.switchForegroundIsOwn = false;
+        state.switchForegroundSameApp = false;
+        setEnvironment(environment);
+        setText(state.host.edit, L"original");
+        setText(destination.edit, L"destination");
+        select(state.host.edit, 8, 8);
+        select(destination.edit, 11, 11);
+        if (!state.host.focus(state.host.edit) || !destination.focus(destination.edit) || !capture(target, error))
+            return false;
+        state.pendingTarget = target.value;
+        return true;
+    };
+    const int beforePaste = state.pasteCalls.load();
+
+    if (!prepare()) return describe("app-switch original", "capture failed", error.c_str());
+    state.foreground = destination.window;
+    auto attempt = insert(target, " text", JSTI_INSERTION_ORIGINAL_APP);
+    if (attempt.status != 0 || attempt.result.method != JSTI_INSERTION_METHOD_NATIVE_EDIT ||
+        textOf(state.host.edit) != L"original text" || textOf(destination.edit) != L"destination")
+        return describe("app-switch original", "background native delivery touched the wrong destination", attempt.error);
+
+    if (!prepare()) return describe("app-switch original field", "capture failed", error.c_str());
+    setText(state.host.second, L"other field");
+    if (!state.host.focus(state.host.second)) return describe("app-switch original field", "could not move field focus");
+    attempt = insert(target, " text", JSTI_INSERTION_ORIGINAL_APP);
+    if (attempt.status != 0 || textOf(state.host.edit) != L"original text" ||
+        textOf(state.host.second) != L"other field")
+        return describe("app-switch original field", "the newly focused field replaced the captured destination", attempt.error);
+
+    if (!prepare()) return describe("app-switch strict", "capture failed", error.c_str());
+    state.foreground = destination.window;
+    attempt = insert(target, "clipboard", JSTI_INSERTION_ONLY_ORIGINAL_FRONT);
+    if (attempt.status != 0 || attempt.result.method != JSTI_INSERTION_METHOD_CLIPBOARD || attempt.result.verified ||
+        state.clipboard.unicodeText() != L"clipboard" || textOf(state.host.edit) != L"original" ||
+        textOf(destination.edit) != L"destination")
+        return describe("app-switch strict", "copy-only delivery inserted or claimed confirmation", attempt.error);
+
+    if (!prepare()) return describe("app-switch same app", "capture failed", error.c_str());
+    state.foreground = destination.window;
+    state.switchForegroundSameApp = true;
+    attempt = insert(target, " text", JSTI_INSERTION_ONLY_ORIGINAL_FRONT);
+    if (attempt.status != 0 || attempt.result.method != JSTI_INSERTION_METHOD_NATIVE_EDIT ||
+        textOf(state.host.edit) != L"original text" || textOf(destination.edit) != L"destination")
+        return describe("app-switch same app", "another window of the same app was treated as another app", attempt.error);
+
+    if (!prepare()) return describe("app-switch current", "capture failed", error.c_str());
+    state.foreground = destination.window;
+    attempt = insert(target, " text", JSTI_INSERTION_CURRENT_APP);
+    if (attempt.status != 0 || attempt.result.method != JSTI_INSERTION_METHOD_NATIVE_EDIT ||
+        textOf(state.host.edit) != L"original" || textOf(destination.edit) != L"destination text")
+        return describe("app-switch current", "did not use the captured delivery-time field", attempt.error);
+    char learningError[256]{};
+    if (jsti_insertion_learning(target.value, " text", nullptr, 0, learningError, sizeof(learningError)) != -1)
+        return describe("app-switch learning", "redirect granted the original field correction authority");
+
+    if (!prepare()) return describe("app-switch sensitive destination", "capture failed", error.c_str());
+    if (!destination.focus(destination.password))
+        return describe("app-switch sensitive destination", "could not focus the synthetic password field");
+    state.foreground = destination.window;
+    attempt = insert(target, " text", JSTI_INSERTION_CURRENT_APP);
+    if (attempt.status != -1 || textOf(state.host.edit) != L"original" ||
+        textOf(destination.edit) != L"destination")
+        return describe("app-switch sensitive destination", "a password destination was not refused", attempt.error);
+
+    if (!prepare()) return describe("app-switch own UI", "capture failed", error.c_str());
+    state.foreground = destination.window;
+    state.switchForegroundIsOwn = true;
+    attempt = insert(target, " text", JSTI_INSERTION_CURRENT_APP);
+    if (attempt.status != 0 || textOf(state.host.edit) != L"original text" ||
+        textOf(destination.edit) != L"destination")
+        return describe("app-switch own UI", "own UI became a new delivery destination", attempt.error);
+
+    if (!prepare()) return describe("app-switch strict own UI", "capture failed", error.c_str());
+    state.foreground = destination.window;
+    state.switchForegroundIsOwn = true;
+    attempt = insert(target, "clipboard", JSTI_INSERTION_ONLY_ORIGINAL_FRONT);
+    if (attempt.status != 0 || attempt.result.method != JSTI_INSERTION_METHOD_CLIPBOARD ||
+        textOf(state.host.edit) != L"original")
+        return describe("app-switch strict own UI", "own UI bypassed strict original-front policy", attempt.error);
+
+    environment.nativeDirectPath = false;
+    if (!prepare()) return describe("app-switch unsupported background", "capture failed", error.c_str());
+    state.foreground = destination.window;
+    attempt = insert(target, "clipboard", JSTI_INSERTION_ORIGINAL_APP);
+    if (attempt.status != 0 || attempt.result.method != JSTI_INSERTION_METHOD_CLIPBOARD ||
+        textOf(state.host.edit) != L"original" || textOf(destination.edit) != L"destination")
+        return describe("app-switch unsupported background", "unsafe background UIA/paste was attempted", attempt.error);
+    environment.nativeDirectPath = true;
+
+    for (auto hook : {&switchAgainBeforeRedirect, &changeRevisionBeforeRedirect, &cancelBeforeRedirect}) {
+        environment.beforeRedirectedInsert = hook;
+        if (!prepare()) return describe("app-switch second focus/cancel", "capture failed", error.c_str());
+        state.foreground = destination.window;
+        attempt = insert(target, " text", JSTI_INSERTION_CURRENT_APP);
+        if (attempt.status != -1 || attempt.result.method != JSTI_INSERTION_METHOD_NONE ||
+            textOf(state.host.edit) != L"original" || textOf(destination.edit) != L"destination")
+            return describe("app-switch second focus/cancel", "a changed or cancelled child still inserted", attempt.error);
+    }
+    environment.beforeRedirectedInsert = nullptr;
+
+    if (!prepare()) return describe("app-switch clipboard failure", "capture failed", error.c_str());
+    state.foreground = destination.window;
+    state.clipboard.failUnicodeSet = true;
+    attempt = insert(target, "clipboard", JSTI_INSERTION_ONLY_ORIGINAL_FRONT);
+    if (attempt.status != -1 || attempt.result.method != JSTI_INSERTION_METHOD_NONE ||
+        textOf(state.host.edit) != L"original" || textOf(destination.edit) != L"destination")
+        return describe("app-switch clipboard failure", "a failed copy reported success", attempt.error);
+
+    if (!prepare()) return describe("app-switch stale", "capture failed", error.c_str());
+    HWND stale = nullptr;
+    state.host.run([&] {
+        stale = CreateWindowExW(0, L"EDIT", L"stale", WS_CHILD | WS_VISIBLE, 0, 0, 100, 20,
+                               state.host.window, nullptr, GetModuleHandleW(nullptr), nullptr);
+    });
+    if (!stale || !state.host.focus(stale) || !capture(target, error))
+        return describe("app-switch stale", "could not capture a disposable field", error.c_str());
+    state.host.run([&] { DestroyWindow(stale); });
+    state.foreground = destination.window;
+    attempt = insert(target, " text", JSTI_INSERTION_CURRENT_APP);
+    if (attempt.status != -1 || textOf(destination.edit) != L"destination")
+        return describe("app-switch stale", "a destroyed original field authorized an unrelated insert", attempt.error);
+    state.foreground = state.host.window;
+    state.pendingTarget = nullptr;
+    state.switchForegroundIsOwn = false;
+    state.switchForegroundSameApp = false;
+    if (state.pasteCalls != beforePaste) return describe("app-switch native policy", "unexpected paste-key dispatch");
+    setEnvironment(testEnvironment(true));
     return {};
 }
 
@@ -1137,6 +1287,7 @@ int jsti_text_output_self_test(char *error, size_t capacity) {
         if (!state->host.start(failure)) { fixture = nullptr; return jsti::fail(failure, error, capacity); }
         state->foreground = state->host.window;
         failure = checkNativePaths(*state);
+        if (failure.empty()) failure = checkAppSwitchPolicies(*state);
         if (failure.empty()) failure = checkCorrectionLearning(*state);
         if (failure.empty()) failure = checkAutomationPaths(*state);
         if (failure.empty()) failure = checkLifetimes(*state);

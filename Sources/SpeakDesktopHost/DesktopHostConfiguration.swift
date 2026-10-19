@@ -13,7 +13,9 @@ extension DesktopHostController {
             values["postProcessingTemperature"] = AnyCodable(.double(polish.temperature))
             values["postProcessingOutputLanguage"] = AnyCodable(.string(polish.outputLanguage ?? ""))
         }
-        return try DesktopConfiguration(values: values)
+        return try DesktopAppSwitchOutput.project(
+            Platform.appSwitchPolicy(settings.textOutput), over: DesktopConfiguration(values: values)
+        )
     }
 
     package func configurationForNativeEditor() throws -> DesktopConfiguration {
@@ -31,7 +33,9 @@ extension DesktopHostController {
         if let region = SonioxTTSRegion.recognized(from: storedRegion) {
             values[SonioxVoicePreference.regionKey] = AnyCodable(.string(region.rawValue))
         }
-        return try DesktopConfiguration(values: values)
+        return try DesktopAppSwitchOutput.project(
+            Platform.appSwitchPolicy(settings.textOutput), over: DesktopConfiguration(values: values), editor: true
+        )
     }
 
     package func saveConfiguration(_ entries: [String]) async throws {
@@ -75,6 +79,9 @@ extension DesktopHostController {
         )
         applyingAutomationRevocation(to: &changed)
         changed.voiceOutput = voice
+        changed.configuration = try Platform.importingAppSwitchPolicy(
+            from: changed.configuration ?? configuration, into: &changed.textOutput
+        )
         var polish = changed.postProcessing ?? .init()
         polish.temperature = configuration.number("postProcessingTemperature")
         polish.outputLanguage = configuration.text("postProcessingOutputLanguage")
@@ -198,6 +205,9 @@ extension DesktopHostController {
         )
         applyingAutomationRevocation(to: &changed)
         changed.voiceOutput = voice
+        changed.configuration = try Platform.importingAppSwitchPolicy(
+            from: changed.configuration ?? document.preferences, into: &changed.textOutput
+        )
         if !LivePolishPreference.keys.isDisjoint(with: document.preferences.values.keys) {
             changed.livePolishApproved = false
         }

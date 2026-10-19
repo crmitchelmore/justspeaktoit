@@ -310,9 +310,12 @@ private func linuxSettingsEvent(_ event: Int, value: String, slot: Int, holder: 
     case Int(JSTI_EVENT_SELECT_MODEL): holder.enqueueSettings { await controller.selectModel(slot) }
     case Int(JSTI_EVENT_SELECT_MICROPHONE): holder.enqueueSettings { await controller.selectMicrophone(value) }
     case Int(JSTI_EVENT_TEXT_OUTPUT):
-        let options = LinuxTextOutputOptions(
-            method: slot == 1 ? .clipboardOnly : .paste, restoreClipboard: value == "restore"
-        )
+        let options: LinuxTextOutputOptions
+        do { options = try LinuxTextOutputOptions(nativeMethod: slot, payload: value) }
+        catch {
+            LinuxWindow.update("The text output choice could not be read. Reopen preferences and try again.")
+            return true
+        }
         holder.enqueueSettings {
             await controller.saveTextOutput(options)
             LinuxWindow.textOutput(await controller.textOutputOptions(), hint: holder.shortcuts.hint)

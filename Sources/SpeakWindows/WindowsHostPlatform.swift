@@ -161,7 +161,8 @@ enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPla
 
     package static var correctionLearningUnavailable: String? { nil }
     package static func correctionReadback(_ job: WindowsOutputJob) -> (any DesktopCorrectionReadback)? {
-        guard case .insertion(let target, _) = job else { return nil }
+        guard case .insertion(let target, let options) = job,
+              options.appSwitchDelivery != .currentApp else { return nil }
         return WindowsCorrectionReadback(target: target)
     }
 

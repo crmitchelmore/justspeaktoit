@@ -95,8 +95,24 @@ public enum LinuxX11 {
             ? try? FileManager.default.destinationOfSymbolicLink(atPath: "/proc/\(pid)/exe") : nil
         let className = String(cString: windowClass)
         return LinuxInsertionTarget(
-            kind: .x11Window(window), windowClass: className.isEmpty ? nil : className, executablePath: executable
+            kind: .x11Window(window), windowClass: className.isEmpty ? nil : className, executablePath: executable,
+            processID: pid, processIdentity: processIdentity(pid)
         )
+    }
+
+    private static func processIdentity(_ pid: Int32) -> String? {
+        guard pid > 0, let stat = try? String(contentsOfFile: "/proc/\(pid)/stat", encoding: .utf8),
+              let end = stat.lastIndex(of: ")") else { return nil }
+        let fields = stat[stat.index(after: end)...].split(whereSeparator: \.isWhitespace)
+        guard fields.count > 19, UInt64(fields[19]) != nil else { return nil }
+        return String(fields[19])
+    }
+
+    public static func targetIsFront(_ target: LinuxInsertionTarget) throws -> Bool {
+        guard case .x11Window(let window) = target.kind, let pid = target.processID,
+              let birth = target.processIdentity, processIdentity(pid) == birth,
+              let current = try captureTargetChecked() else { return false }
+        return current.kind == .x11Window(window) && current.processID == pid && current.processIdentity == birth
     }
 
     /// Returns false when `window` is no longer the active window.
@@ -150,6 +166,16 @@ public struct LinuxOutputNativeAdapter: LinuxOutputNative {
     public static let restoreTokenCredential = "linux-remote-desktop-restore-token"
 
     public init() {}
+
+    public func x11TargetIsFront(_ target: LinuxInsertionTarget) throws -> Bool {
+        try LinuxX11.targetIsFront(target)
+    }
+
+    public func x11Paste(target: LinuxInsertionTarget, shift: Bool) throws -> Bool {
+        Thread.sleep(forTimeInterval: 0.05)
+        guard try LinuxX11.targetIsFront(target), case .x11Window(let window) = target.kind else { return false }
+        return try LinuxX11.paste(window: window, shift: shift)
+    }
 
     public func readClipboard() throws -> String? { try LinuxClipboard.read() }
     public func writeClipboard(_ text: String) throws { try LinuxClipboard.write(text) }

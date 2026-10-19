@@ -10,8 +10,15 @@ import SpeakDesktopHost
 // builds the portable package, so the orchestration Windows and Linux share
 // is exercised without either native adapter.
 
-struct FakeTextOutput: Codable, Equatable, Sendable {
+struct FakeTextOutput: Codable, Equatable, Sendable, DesktopAppSwitchOutputOptions {
     var label = "default"
+    var appSwitchDelivery: AppSwitchDelivery?
+}
+
+extension FakeTextOutput {
+    init(appSwitchDelivery: AppSwitchDelivery?) {
+        self.init(label: "default", appSwitchDelivery: appSwitchDelivery)
+    }
 }
 
 struct FakeHotKey: Codable, Sendable {}
@@ -19,6 +26,7 @@ struct FakeHotKey: Codable, Sendable {}
 struct FakeJob: Sendable {
     let label: String
     let target: String?
+    var appSwitchDelivery: AppSwitchDelivery?
 }
 
 final class FakePlayback: DesktopHostPlayback, @unchecked Sendable {
@@ -212,7 +220,8 @@ enum FakePlatform: DesktopHostAutomationPlatform {
     }
     static func copyToClipboard(_ text: String) throws { FakeLog.shared.copy(text) }
     static func makeOutputJob(options: FakeTextOutput, target: String?) -> FakeJob? {
-        options.label == "copy" || target != nil ? FakeJob(label: options.label, target: target) : nil
+        options.label == "copy" || target != nil
+            ? FakeJob(label: options.label, target: target, appSwitchDelivery: options.appSwitchDelivery) : nil
     }
     static func requiresInsertionTarget(_ options: FakeTextOutput) -> Bool { options.label != "copy" }
     static func cancel(_ job: FakeJob) {}

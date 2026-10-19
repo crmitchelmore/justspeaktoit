@@ -384,15 +384,29 @@ bool captureIdentity(const Environment &environment, Identity &identity, std::st
     return true;
 }
 
-bool verifyIdentity(const Environment &environment, const Identity &identity, std::string &error) {
+bool ownApplication(HWND window) {
+    DWORD process = 0;
+    return window && GetWindowThreadProcessId(window, &process) && process == GetCurrentProcessId();
+}
+
+constexpr unsigned redirectedFocusFence = 1u << 6;
+
+bool sameApplication(HWND first, HWND second) {
+    DWORD firstProcess = 0, secondProcess = 0;
+    return first && second && GetWindowThreadProcessId(first, &firstProcess) &&
+        GetWindowThreadProcessId(second, &secondProcess) && firstProcess == secondProcess;
+}
+
+bool verifyIdentity(const Environment &environment, const Identity &identity, std::string &error,
+                    bool backgroundNative = false) {
     DWORD process = 0;
     const DWORD thread = GetWindowThreadProcessId(identity.focus, &process);
     GUITHREADINFO info{};
     info.cbSize = sizeof(info);
     if (!identity.window || !identity.focus || !IsWindow(identity.window) || !IsWindow(identity.focus) ||
         process != identity.process || thread != identity.thread ||
-        environment.foregroundWindow() != identity.window || !GetGUIThreadInfo(thread, &info) ||
-        info.hwndFocus != identity.focus || GetAncestor(identity.focus, GA_ROOT) != identity.window) {
+        (!backgroundNative && (environment.foregroundWindow() != identity.window || !GetGUIThreadInfo(thread, &info) ||
+        info.hwndFocus != identity.focus)) || GetAncestor(identity.focus, GA_ROOT) != identity.window) {
         error = movedMessage;
         return false;
     }
@@ -635,6 +649,9 @@ struct State {
     uint64_t focusRevision = 0;
     FocusEvent focusEvent;
     jsti::Handle process;
+    std::shared_ptr<State> redirectedOutput;
+    std::weak_ptr<State> deliveryOwner;
+    bool requiresDeliveryOwner = false;
     std::wstring text;
     unsigned flags = 0;
     JSTIInsertionResult result{};
@@ -642,6 +659,22 @@ struct State {
     int status = -1;
     jsti::Handle exited;
 };
+
+bool deliveryOwnerAvailable(const State &state, std::string &error) {
+    if (!state.requiresDeliveryOwner) return true;
+    const auto owner = state.deliveryOwner.lock();
+    if (!owner || WaitForSingleObject(owner->process.value, 0) != WAIT_TIMEOUT) {
+        error = "The original application process has exited."; return false;
+    }
+    if (!verifyIdentity(owner->environment, owner->identity, error, true)) return false;
+    const NativeKind kind = classifyNative(owner->identity.focus);
+    if (kind == NativeKind::Password || kind == NativeKind::ReadOnly || kind == NativeKind::Disabled) {
+        error = refusal(kind); return false;
+    }
+    std::lock_guard<std::mutex> lock(owner->mutex);
+    if (owner->abandoned || owner->shutdown) { error = "This insertion target was cancelled."; return false; }
+    return true;
+}
 
 class Worker {
     std::shared_ptr<State> state;
@@ -769,6 +802,7 @@ class Worker {
     }
 
     bool beginMutation(const JSTIInsertionResult &result, std::string &error) {
+        if (!deliveryOwnerAvailable(*state, error)) return false;
         if (WaitForSingleObject(state->process.value, 0) != WAIT_TIMEOUT) {
             error = "The original application process has exited."; return false;
         }
@@ -1043,6 +1077,8 @@ public:
 Environment defaultEnvironment() {
     Environment environment;
     environment.foregroundWindow = &realForeground;
+    environment.ownApplication = &ownApplication;
+    environment.sameApplication = &sameApplication;
     environment.clipboard = &systemClipboard;
     environment.sendPaste = &realSendPaste;
     environment.preparePaste = &prepareRealPaste;
@@ -1262,11 +1298,83 @@ int jsti_insertion_insert(JSTIInsertionTarget *target, const char *text, unsigne
     if (WaitForSingleObject(state.process.value, 0) != WAIT_TIMEOUT) {
         return jsti::fail("The original application process has exited.", error, capacity);
     }
-    if (!verifyIdentity(environment, state.identity, reason)) return jsti::fail(reason, error, capacity);
+    if (!deliveryOwnerAvailable(state, reason)) return jsti::fail(reason, error, capacity);
+    const unsigned policyMask = JSTI_INSERTION_ORIGINAL_APP | JSTI_INSERTION_CURRENT_APP |
+        JSTI_INSERTION_ONLY_ORIGINAL_FRONT;
+    const unsigned policy = flags & policyMask;
+    if (policy && (policy & (policy - 1)))
+        return jsti::fail("The app-switch delivery policy is invalid.", error, capacity);
+    auto recoveryCopy = [&] {
+        const int status = jsti_insertion_copy_text(target, text, &local, error, capacity);
+        if (status == 0) local.method = JSTI_INSERTION_METHOD_CLIPBOARD;
+        if (result) *result = local;
+        return status;
+    };
+    const HWND foreground = environment.foregroundWindow();
+    DWORD foregroundProcess = 0;
+    if (foreground) GetWindowThreadProcessId(foreground, &foregroundProcess);
+    const bool originalWindowFront = foreground == state.identity.window;
+    const bool originalAppFront = foreground && environment.sameApplication(foreground, state.identity.window);
+    const bool backgroundNative = policy && !originalWindowFront;
+    const bool addressCapturedNativeField = policy != 0;
+    auto focusStillCaptured = [&] {
+        return !(flags & redirectedFocusFence) || (state.focusRevision && environment.focusRevision &&
+            environment.focusRevision() == state.focusRevision);
+    };
+    if (!focusStillCaptured()) return jsti::fail(changedMessage, error, capacity);
+    if (!verifyIdentity(environment, state.identity, reason, addressCapturedNativeField))
+        return jsti::fail(reason, error, capacity);
     if (!integrityAllows(state.identity.process, reason)) return jsti::fail(reason, error, capacity);
     const NativeKind kind = environment.nativeDirectPath ? classifyNative(state.identity.focus) : NativeKind::NotNative;
     if (kind == NativeKind::Password || kind == NativeKind::ReadOnly || kind == NativeKind::Disabled) {
         return jsti::fail(refusal(kind), error, capacity);
+    }
+    if (policy && !originalWindowFront) {
+        if (!foreground || !foregroundProcess ||
+            (policy == JSTI_INSERTION_ONLY_ORIGINAL_FRONT && !originalAppFront))
+            return recoveryCopy();
+        const bool movedToOtherApp = !environment.ownApplication(foreground) &&
+            !environment.sameApplication(foreground, state.identity.window);
+        if (policy == JSTI_INSERTION_CURRENT_APP && movedToOtherApp) {
+            std::unique_ptr<JSTIInsertionTarget, decltype(&jsti_insertion_destroy)> redirected(
+                jsti_insertion_capture(error, capacity), jsti_insertion_destroy);
+            if (!redirected) return recoveryCopy();
+            // Capture must still describe the real app observed above. The child
+            // retains its process and the existing per-field focus fences.
+            if (redirected->state->identity.window != foreground ||
+                redirected->state->identity.process != foregroundProcess) return recoveryCopy();
+            {
+                std::lock_guard<std::mutex> lock(redirected->state->mutex);
+                redirected->state->deliveryOwner = target->state;
+                redirected->state->requiresDeliveryOwner = true;
+            }
+            {
+                std::lock_guard<std::mutex> lock(state.mutex);
+                if (state.abandoned || state.shutdown)
+                    return jsti::fail("This insertion target was cancelled.", error, capacity);
+                if (state.insertBusy)
+                    return jsti::fail("An insertion is already in progress.", error, capacity);
+                state.insertBusy = true;
+                state.redirectedOutput = redirected->state;
+            }
+            struct RedirectGuard {
+                State &state;
+                ~RedirectGuard() {
+                    std::lock_guard<std::mutex> lock(state.mutex);
+                    state.redirectedOutput.reset();
+                    state.insertBusy = false;
+                }
+            } redirectOwner{state};
+            if (environment.beforeRedirectedInsert) environment.beforeRedirectedInsert(environment.hookContext);
+            const int status = jsti_insertion_insert(redirected.get(), text, (flags & ~policyMask) | redirectedFocusFence,
+                                                    &local, error, capacity);
+            if (result) *result = local;
+            // Never replay ambiguous or failed dispatch into a different route.
+            return status;
+        }
+        // Native Unicode edit messages can address the captured field without
+        // activating it. UIA/paste cannot safely address arbitrary background apps.
+        if (kind != NativeKind::Editable) return recoveryCopy();
     }
     if (kind == NativeKind::Editable) {
         // Never waits on the UI Automation worker: native controls are
@@ -1284,10 +1392,18 @@ int jsti_insertion_insert(JSTIInsertionTarget *target, const char *text, unsigne
         bool verified = false;
         DWORD learningCaret = static_cast<DWORD>(-1);
         auto mayMutate = [&] {
+            if (!deliveryOwnerAvailable(state, reason)) return false;
+            if (!focusStillCaptured()) { reason = changedMessage; return false; }
+            if (policy == JSTI_INSERTION_ONLY_ORIGINAL_FRONT &&
+                !environment.sameApplication(environment.foregroundWindow(), state.identity.window)) {
+                reason = movedMessage; return false;
+            }
+            if (policy == JSTI_INSERTION_CURRENT_APP && backgroundNative &&
+                environment.foregroundWindow() != foreground) { reason = movedMessage; return false; }
             if (WaitForSingleObject(state.process.value, 0) != WAIT_TIMEOUT) {
                 reason = "The original application process has exited."; return false;
             }
-            if (!verifyIdentity(environment, state.identity, reason)) return false;
+            if (!verifyIdentity(environment, state.identity, reason, addressCapturedNativeField)) return false;
             if (classifyNative(state.identity.focus) != NativeKind::Editable) { reason = unsupportedMessage; return false; }
             std::lock_guard<std::mutex> lock(state.mutex);
             if (state.abandoned || state.shutdown) { reason = "This insertion target was cancelled."; return false; }
@@ -1307,9 +1423,11 @@ int jsti_insertion_insert(JSTIInsertionTarget *target, const char *text, unsigne
         }
         local.method = JSTI_INSERTION_METHOD_NATIVE_EDIT;
         local.verified = verified ? 1 : 0;
+        std::string readbackReason;
+        const bool learningDestinationFront = verifyIdentity(environment, state.identity, readbackReason);
         {
             std::lock_guard<std::mutex> lock(state.mutex);
-            state.learningAcknowledged = verified && learningCaret != static_cast<DWORD>(-1);
+            state.learningAcknowledged = learningDestinationFront && verified && learningCaret != static_cast<DWORD>(-1);
             state.learningInserted = state.learningAcknowledged ? value : std::wstring();
             state.learningCaret = learningCaret;
             state.learningWholeField = false;
@@ -1424,12 +1542,22 @@ int jsti_insertion_learning(JSTIInsertionTarget *target, const char *original,
 void jsti_insertion_cancel(JSTIInsertionTarget *target) {
     if (!target || !target->state) return;
     const auto state = target->state;
+    std::shared_ptr<State> redirected;
     {
         std::lock_guard<std::mutex> lock(state->mutex);
         state->abandoned = true;
         state->shutdown = true;
+        redirected = state->redirectedOutput;
     }
     state->changed.notify_all();
+    if (redirected) {
+        {
+            std::lock_guard<std::mutex> lock(redirected->mutex);
+            redirected->abandoned = true;
+            redirected->shutdown = true;
+        }
+        redirected->changed.notify_all();
+    }
 }
 
 int jsti_insertion_executable_path(const JSTIInsertionTarget *target, char *path, size_t pathCapacity,

@@ -136,44 +136,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
 
   /// Where a finished transcript goes when, by the time it is ready, the user
   /// is in a different app from the one where recording started.
-  enum AppSwitchDelivery: String, CaseIterable, Identifiable {
-    /// Insert into the app where recording started, even in the background.
-    case originalApp
-    /// Insert into whichever app and field the user is in now.
-    case currentApp
-    /// Insert only while the original app is still in front; otherwise leave
-    /// the transcript on the clipboard and insert nothing.
-    case onlyIfOriginalAppInFront
-
-    static let settingName = "If you switch apps before the transcript is ready"
-
-    var id: String { rawValue }
-
-    var displayName: String {
-      switch self {
-      case .originalApp:
-        return "Insert into the app where you started"
-      case .currentApp:
-        return "Insert into the app you're in now"
-      case .onlyIfOriginalAppInFront:
-        return "Don't insert — copy to clipboard"
-      }
-    }
-
-    var explanation: String {
-      switch self {
-      case .originalApp:
-        return "The transcript goes to the app and field where you started recording, "
-          + "even if you've moved to another app. The app you're in now is left alone."
-      case .currentApp:
-        return "The transcript follows you: it goes into whichever app and field you're using "
-          + "when it's ready."
-      case .onlyIfOriginalAppInFront:
-        return "The transcript is only inserted if the app where you started recording is still "
-          + "in front. Otherwise nothing is typed anywhere and it's kept on the clipboard for you to paste."
-      }
-    }
-  }
+  typealias AppSwitchDelivery = SpeakCore.AppSwitchDelivery
 
   enum HotKeyActivationStyle: String, CaseIterable, Identifiable {
     case holdToRecord
@@ -1194,7 +1157,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       defaults.object(forKey: DefaultsKey.restoreClipboard.rawValue) as? Bool ?? true
     appSwitchDelivery =
       defaults.string(forKey: DefaultsKey.appSwitchDelivery.rawValue)
-        .flatMap(AppSwitchDelivery.init(rawValue:)) ?? .originalApp
+        .flatMap(AppSwitchDelivery.init(rawValue:)) ?? AppSwitchDelivery.defaultValue
     showHUDDuringSessions = defaults.object(forKey: DefaultsKey.showHUD.rawValue) as? Bool ?? SpeechDefaults.showHUD
     showLiveTranscriptInHUD =
       defaults.object(forKey: DefaultsKey.showLiveTranscriptInHUD.rawValue) as? Bool ?? SpeechDefaults.liveTranscriptHUD

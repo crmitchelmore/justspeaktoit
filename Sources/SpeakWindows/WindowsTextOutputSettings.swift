@@ -1,4 +1,5 @@
 import Foundation
+import SpeakCore
 import SpeakWindowsPlatform
 import CWindowsSupport
 
@@ -7,6 +8,11 @@ extension WindowsNative {
     /// window runs and from any thread afterwards.
     static func configureTextOutput(_ options: WindowsTextOutputOptions, context: UnsafeMutableRawPointer) throws {
         let choice = options.nativeChoice
+        guard jsti_window_set_app_switch(
+            AppSwitchDelivery.settingName, AppSwitchDelivery.desktopLabels,
+            Int32(AppSwitchDelivery.desktopSelection(options.appSwitchDelivery)),
+            AppSwitchDelivery.nativeHelp(canTargetApps: true)
+        ) == 0 else { throw WindowsNativeError(message: "Could not configure app-switch delivery controls.") }
         guard jsti_window_set_text_output(
             choice.method, choice.insertion, choice.restoreClipboard, textOutputEvent, context
         ) == 0 else { throw WindowsNativeError(message: "Could not configure text output controls.") }
@@ -20,11 +26,19 @@ extension WindowsNative {
 func textOutputEvent(_ method: Int32, _ insertion: Int32, _ restore: Int32, _ context: UnsafeMutableRawPointer?) {
     guard let context else { return }
     let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
-    let choice = WindowsTextOutputOptions(
+    var choice = WindowsTextOutputOptions(
         nativeChoice: WindowsTextOutputNativeChoice(method: method, insertion: insertion, restoreClipboard: restore)
     )
+    do {
+        let policy = try AppSwitchDelivery.desktopPolicy(selection: Int(jsti_window_app_switch_selection()))
+        choice?.appSwitchDelivery = policy
+    } catch {
+        WindowsNative.update("The app-switch delivery choice could not be read. Reopen Text output and try again.")
+        return
+    }
+    let savedChoice = choice
     holder.enqueueSettings {
-        if let choice {
+        if let choice = savedChoice {
             await holder.controller.saveTextOutput(choice)
         } else {
             WindowsNative.update("The text output choice could not be read. Reopen Text output and try again.")
@@ -63,7 +77,7 @@ extension WindowsAppController {
         case .smart:
             return "Text output saved: Smart inserts directly, or uses a guarded clipboard paste when needed."
         case .directOnly:
-            return "Text output saved: direct insertion only; the clipboard is never used."
+            return "Text output saved: direct insertion only; paste keys are never used. App-switch recovery may copy."
         case .clipboardOnly:
             return "Text output saved: finished recordings are copied to the clipboard."
         }

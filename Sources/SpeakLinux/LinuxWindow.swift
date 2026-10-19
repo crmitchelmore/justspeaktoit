@@ -185,9 +185,14 @@ enum LinuxWindow {
     }
 
     static func textOutput(_ options: LinuxTextOutputOptions, hint: String) {
-        _ = jsti_window_set_text_output(
+        let canTargetApps = LinuxHostPlatform.session.canUseX11Injection
+        let result = jsti_window_set_text_output_policy(
             options.method == .clipboardOnly ? 1 : 0, options.restoreClipboard ? 1 : 0,
-            LinuxHostPlatform.session.canUseX11Injection ? 1 : 0, hint
+            canTargetApps ? 1 : 0, hint,
+            AppSwitchDelivery.settingName, AppSwitchDelivery.desktopLabels,
+            Int32(AppSwitchDelivery.desktopSelection(options.appSwitchDelivery)),
+            AppSwitchDelivery.linuxHelp(canTargetApps: canTargetApps)
         )
+        if result != 0 { update("Could not refresh text output and app-switch preferences.") }
     }
 }

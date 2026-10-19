@@ -163,9 +163,10 @@ bool createControls(HWND window, Dialog &dialog) {
     const bool okay =
         add(L"STATIC", L"", SS_LEFT, statusID) &&
         add(L"BUTTON", L"Turn automation &on", BS_PUSHBUTTON | WS_TABSTOP, toggleID) &&
-        add(L"STATIC", L"Only programs running as you on this PC can connect: the pipe admits your Windows "
-            L"account alone and refuses network and lower-integrity clients. Requests carry no API keys; the app "
-            L"uses its own saved providers. Automation stays off until you turn it on.", SS_LEFT, securityID) &&
+        add(L"STATIC", L"While automation is on, any program running as you on this PC can start the microphone "
+            L"and read your transcription history. The pipe admits your Windows account alone and refuses network "
+            L"and lower-integrity clients. Requests carry no API keys. Automation stays off until you turn it on.",
+            SS_LEFT, securityID) &&
         add(L"STATIC", cliLabel.c_str(), SS_LEFTNOWORDWRAP | SS_PATHELLIPSIS, cliLabelID) &&
         add(L"EDIT", usage.c_str(), literal, cliID) &&
         add(L"BUTTON", L"Copy &commands", BS_PUSHBUTTON | WS_TABSTOP, copyCliID) &&

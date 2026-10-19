@@ -75,6 +75,15 @@ destinations and explicit fixes live in `SpeakCore/DesktopTroubleshooting.swift`
 macOS consumes that inventory while retaining its own permission and Fn guidance.
 Linux can consume the shared policy but has no native Troubleshooting report yet.
 
+The macOS projection distinguishes an absent or empty credential from a failed
+Keychain read. Failed reads offer no Disable cleanup action. Explicit fixes
+recheck the captured settings, and cleanup rechecks both the credential and the
+model after its asynchronous read. Refused fixes show an error instead of changing
+newer choices. The report refreshes when the selected model or saved credentials
+change, and uses the shared action titles. Eight focused Mac regressions cover
+credential states, changes during a fix, newly available keys and preservation of
+the selected model and prompt; these are authored but **NOT_RUN** locally.
+
 Findings have scrollable, read-only details, settings navigation, and explicit
 Keep transcript or Disable cleanup actions where applicable. No fix runs on
 opening or rechecking. Fixes use the existing settings authorities, refuse stale
@@ -121,6 +130,12 @@ an exact-limit range; separators between nonempty ranges count toward the limit.
 Native helper regressions cover both exact-limit shapes, trailing empty ranges,
 separator overflow, oversize and embedded-NUL rejection without partial appends.
 These additional regressions are authored but **NOT_RUN** locally.
+
+Automatic qualification at `d7487015` stopped at fixture compilation: a
+captured-source gate helper was nested inside a test, and a Windows SDK
+identifier collided with the undersized-buffer fixture. Both are repaired in
+source. They require a fresh composed-head run; neither repair is passing
+execution evidence.
 
 The shared source type has a distinct captured-selection constructor; the
 ordinary constructor and native Voice message parser still refuse an

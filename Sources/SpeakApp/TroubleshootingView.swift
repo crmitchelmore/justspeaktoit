@@ -5,6 +5,9 @@ struct TroubleshootingView: View {
   @EnvironmentObject private var environment: AppEnvironment
   @Environment(\.appVisualDensity) private var density
   @StateObject private var analyser = TroubleshootingAnalyser()
+  @State private var isApplyingFix = false
+  @State private var fixError = ""
+  @State private var showsFixError = false
   @Binding var sidebarSelection: SidebarItem?
 
   var body: some View {
@@ -25,7 +28,36 @@ struct TroubleshootingView: View {
     .onAppear { runAnalysis() }
     .onChange(of: environment.settings.restoreClipboardAfterPaste) { runAnalysis() }
     .onChange(of: environment.settings.postProcessingEnabled) { runAnalysis() }
+    .onChange(of: environment.settings.postProcessingModel) { runAnalysis() }
     .onChange(of: environment.permissions.statuses) { runAnalysis() }
+    .onReceive(
+      NotificationCenter.default.publisher(for: .secureAppStorageDidChange).receive(on: RunLoop.main)
+    ) { _ in runAnalysis() }
+    .alert("Could not apply fix", isPresented: $showsFixError) {
+      Button("OK", role: .cancel) {}
+    } message: {
+      Text(fixError)
+    }
+  }
+
+  private func performAction(_ action: TroubleshootingAction) {
+    switch action {
+    case .navigate(let tab):
+      sidebarSelection = .settings(tab)
+    case .autoFix(_, let fix):
+      guard !isApplyingFix else { return }
+      isApplyingFix = true
+      Task { @MainActor in
+        defer { isApplyingFix = false }
+        do {
+          try await fix()
+        } catch {
+          fixError = error.localizedDescription
+          showsFixError = true
+        }
+        runAnalysis()
+      }
+    }
   }
 
   private func runAnalysis() {
@@ -82,9 +114,7 @@ struct TroubleshootingView: View {
   private var itemsList: some View {
     VStack(alignment: .leading, spacing: density.isCompact ? density.sectionSpacing : 12) {
       ForEach(analyser.items) { item in
-        TroubleshootingItemRow(item: item) { tab in
-          sidebarSelection = .settings(tab)
-        }
+        TroubleshootingItemRow(item: item, isApplyingFix: isApplyingFix, performAction: performAction)
       }
     }
   }
@@ -95,7 +125,8 @@ struct TroubleshootingView: View {
 private struct TroubleshootingItemRow: View {
   @Environment(\.appVisualDensity) private var density
   let item: TroubleshootingItem
-  let navigateToTab: (SettingsTab) -> Void
+  let isApplyingFix: Bool
+  let performAction: @MainActor (TroubleshootingAction) -> Void
 
   var body: some View {
     HStack(alignment: .top, spacing: density.isCompact ? density.inlineSpacing : 14) {
@@ -156,18 +187,18 @@ private struct TroubleshootingItemRow: View {
       HStack(spacing: 8) {
         ForEach(Array(actions.enumerated()), id: \.offset) { _, action in
           switch action {
-          case .autoFix(let fix):
+          case .autoFix(let title, _):
             Button {
-              fix()
+              performAction(action)
             } label: {
-              Label("Fix Now", systemImage: "wrench.and.screwdriver")
+              Label(title, systemImage: "wrench.and.screwdriver")
                 .font(.caption.bold())
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
           case .navigate(let tab):
             Button {
-              navigateToTab(tab)
+              performAction(action)
             } label: {
               Label("Open \(tab.title)", systemImage: "arrow.right.circle")
                 .font(.caption)
@@ -178,6 +209,7 @@ private struct TroubleshootingItemRow: View {
         }
       }
       .padding(.top, 4)
+      .disabled(isApplyingFix)
     }
   }
 }

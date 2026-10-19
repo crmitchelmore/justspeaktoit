@@ -8,7 +8,12 @@ typealias TroubleshootingStatus = DesktopTroubleshooting.Severity
 
 enum TroubleshootingAction {
   case navigate(SettingsTab)
-  case autoFix(() -> Void)
+  case autoFix(title: String, @MainActor () async throws -> Void)
+}
+
+private struct TroubleshootingFixError: LocalizedError {
+  let message: String
+  var errorDescription: String? { message }
 }
 
 struct TroubleshootingItem: Identifiable {
@@ -73,7 +78,7 @@ struct HotkeyInfoCheck: TroubleshootingCheck {
 }
 
 struct ConfigurationTroubleshootingCheck: TroubleshootingCheck {
-  @MainActor func evaluate(  // swiftlint:disable:this cyclomatic_complexity
+  @MainActor func evaluate(
     settings: AppSettings,
     permissions: PermissionsManager,
     secureStorage: SecureAppStorage
@@ -93,35 +98,90 @@ struct ConfigurationTroubleshootingCheck: TroubleshootingCheck {
     }
     let credential: DesktopTroubleshooting.Credential
     if DesktopTroubleshooting.requiresCredential(enabled: enabled, model: model) {
-      credential = await secureStorage.hasSecret(identifier: "openrouter.apiKey") ? .available : .missing
+      credential = await Self.credentialState {
+        try await secureStorage.secret(identifier: "openrouter.apiKey")
+      }
     } else {
       credential = .available
     }
-    return DesktopTroubleshooting.findings(.init(
+    let input = DesktopTroubleshooting.Input(
       postProcessing: .init(enabled: enabled, model: model, credential: credential),
       shortcutName: keyName, shortcutInstructions: instructions, restoreClipboard: restore
-    )).map { finding in
-      let tab: SettingsTab
-      switch finding.destination {
-      case .general: tab = .general
-      case .apiKeys: tab = .apiKeys
-      case .shortcuts: tab = .shortcuts
-      case .permissions: tab = .permissions
+    )
+    return DesktopTroubleshooting.findings(input).map {
+      self.item($0, settings: settings, secureStorage: secureStorage, input: input)
+    }
+  }
+
+  @MainActor private func item(
+    _ finding: DesktopTroubleshooting.Finding, settings: AppSettings,
+    secureStorage: SecureAppStorage, input: DesktopTroubleshooting.Input
+  ) -> TroubleshootingItem {
+    let tab: SettingsTab
+    switch finding.destination {
+    case .general: tab = .general
+    case .apiKeys: tab = .apiKeys
+    case .shortcuts: tab = .shortcuts
+    case .permissions: tab = .permissions
+    }
+    var actions: [TroubleshootingAction] = []
+    if let fix = finding.fix {
+      actions.append(.autoFix(title: fix.title) {
+        try await self.apply(fix, settings: settings, input: input) {
+          try await secureStorage.secret(identifier: "openrouter.apiKey")
+        }
+      })
+    }
+    actions.append(.navigate(tab))
+    return TroubleshootingItem(
+      id: finding.id, title: finding.title, detail: finding.detail,
+      status: finding.severity, systemImage: finding.systemImage, actions: actions
+    )
+  }
+
+  @MainActor static func credentialState(
+    _ readSecret: @MainActor () async throws -> String
+  ) async -> DesktopTroubleshooting.Credential {
+    do {
+      let key = try await readSecret()
+      return key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .missing : .available
+    } catch SecureAppStorageError.valueNotFound {
+      return .missing
+    } catch {
+      return .unavailable
+    }
+  }
+
+  @MainActor func apply(
+    _ fix: DesktopTroubleshooting.Fix, settings: AppSettings, input: DesktopTroubleshooting.Input,
+    readSecret: @MainActor () async throws -> String
+  ) async throws {
+    switch fix {
+    case .keepTranscriptOnClipboard:
+      guard settings.restoreClipboardAfterPaste == input.restoreClipboard else {
+        throw TroubleshootingFixError(message: "Text output changed. Check again before applying this fix.")
       }
-      var actions: [TroubleshootingAction] = []
-      if let fix = finding.fix {
-        actions.append(.autoFix {
-          switch fix {
-          case .keepTranscriptOnClipboard: settings.restoreClipboardAfterPaste = false
-          case .disablePostProcessing: settings.postProcessingEnabled = false
-          }
-        })
+      settings.restoreClipboardAfterPaste = false
+    case .disablePostProcessing:
+      try requireProcessingSnapshot(settings, expected: input.postProcessing)
+      let credential = await Self.credentialState(readSecret)
+      try requireProcessingSnapshot(settings, expected: input.postProcessing)
+      switch credential {
+      case .missing: settings.postProcessingEnabled = false
+      case .available:
+        throw TroubleshootingFixError(message: "A key is now available. Check again before disabling cleanup.")
+      case .unavailable:
+        throw TroubleshootingFixError(message: "The saved credential could not be read. No setting was changed.")
       }
-      actions.append(.navigate(tab))
-      return TroubleshootingItem(
-        id: finding.id, title: finding.title, detail: finding.detail,
-        status: finding.severity, systemImage: finding.systemImage, actions: actions
-      )
+    }
+  }
+
+  @MainActor private func requireProcessingSnapshot(
+    _ settings: AppSettings, expected: DesktopTroubleshooting.PostProcessing
+  ) throws {
+    guard settings.postProcessingEnabled == expected.enabled,
+          ModelCatalog.resolvedPostProcessingModel(settings.postProcessingModel) == expected.model else {
+      throw TroubleshootingFixError(message: "Post-processing changed. Check again before applying this fix.")
     }
   }
 }

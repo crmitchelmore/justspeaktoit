@@ -44,7 +44,7 @@ extension DesktopHostReadAloudTests {
         defer { release.release() }
         await controller.readVoiceSource(.externalSelection) {
             entered.release()
-            await Self.holdCapturedSource(release)
+            await holdCapturedSource(release)
             returned.release()
             return "This late selection must not be spoken."
         }
@@ -91,10 +91,11 @@ extension DesktopHostReadAloudTests {
         defer { release.release() }
         await controller.readVoiceSource(.externalSelection) {
             entered.release()
-            await Self.holdCapturedSource(release)
+            await holdCapturedSource(release)
             returned.release()
             return "Superseded selection."
         }
+
         await entered.pass()
         let previous = await controller.readAloudState.task
         await controller.readVoiceSource(.clipboard) { "Current clipboard." }
@@ -120,12 +121,13 @@ extension DesktopHostReadAloudTests {
         }
     }
 
-    private static func holdCapturedSource(_ release: Gate) async {
-        await withCheckedContinuation { continuation in
-            Task.detached {
-                await release.pass()
-                continuation.resume()
-            }
+}
+
+private func holdCapturedSource(_ release: Gate) async {
+    await withCheckedContinuation { continuation in
+        Task.detached {
+            await release.pass()
+            continuation.resume()
         }
     }
 }

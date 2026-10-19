@@ -380,6 +380,8 @@ jobs:
       # Debug CI populates the shared cache. This gate only restores; uploading
       # gigabytes afterwards would only lengthen it. The hosted runner matches
       # build-macos's (macos-26-intel) because the key is architecture-scoped.
+      # Both Swift stage commands retain Debug's coverage instrumentation;
+      # plain build flags would invalidate the restored compilation graph.
       # Hosted restores of the multi-gigabyte cache have exceeded 3 minutes.
       - name: Restore Swift packages
         timeout-minutes: 5

@@ -62,8 +62,8 @@ test('journey cold preparation and actual runtime have separate finite budgets a
   assert.match(journeyStages, /SETUP_BUDGET = 300/);
   assert.match(journeyStages, /RUNTIME_BUDGET = \{"swift": 480, "ui": 600\}/);
   assert.match(journeyStages, /RECEIPT_BUDGET = 60/);
-  assert.match(journeyStages, /"swift", "build", "--build-tests"/);
-  assert.match(journeyStages, /"swift", "test", "--skip-build", "--disable-automatic-resolution"/);
+  assert.match(journeyStages, /"swift", "build", "--build-tests", "--enable-code-coverage"/);
+  assert.match(journeyStages, /"swift", "test", "--skip-build", "--disable-automatic-resolution",\s+"--enable-code-coverage"/);
   assert.match(journeyStages, /"xcodebuild", "build-for-testing"/);
   assert.match(journeyStages, /"xcodebuild", "test-without-building", "-xctestrun"/);
   assert.match(journeyStages, /"GITHUB_SHA"/);
@@ -75,8 +75,15 @@ test('journey cold preparation and actual runtime have separate finite budgets a
   }
 });
 
-test('macOS Debug build and test stages share one code-coverage instrumentation to avoid a duplicate full rebuild', () => {
+test('macOS Debug and Core Journey share coverage instrumentation and cache keys', () => {
   const body = jobBodies['build-macos'];
+  const journey = jobBodies['core-journey-e2e'];
+  for (const pattern of [/^\s+key:\s*(.+)$/m, /restore-keys:\s*\|\s*\n\s+([^\n]+)/]) {
+    const producer = body.match(pattern);
+    const consumer = journey.match(pattern);
+    assert.ok(producer && consumer, 'Debug and Core Journey must declare matching cache keys');
+    assert.equal(consumer[1].trim(), producer[1].trim());
+  }
   assert.match(body, /^\s+timeout-minutes: 30$/m);
   assert.match(body, /name: Build\n(?:\s+#[^\n]*\n)*\s+run: SWIFT_FLAGS=--enable-code-coverage make build/);
   assert.match(body, /name: Test \(Debug\)\n(?:\s+id: [\w-]+\n)?\s+run: python3 scripts\/with-test-keychain.py swift test --enable-code-coverage/);

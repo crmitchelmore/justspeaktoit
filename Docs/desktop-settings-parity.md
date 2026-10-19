@@ -6,6 +6,23 @@ macOS `AppSettings.DefaultsKey` aliases the shared 91-key
 plus preferences and collections
 outside that enum. Track remaining product acceptance in #1157.
 
+## Core Journey qualification cache (source only)
+
+Automatic #1229 head `a729af1e` restored its exact Swift cache successfully,
+but the test-product build exceeded its 900-second budget before runtime tests
+started (job `118272169107`, elapsed `900.581`, exit `124`). Debug produces that
+cache with code coverage enabled; Core Journey previously requested plain
+build/test flags. Both Swift stage commands now request `--enable-code-coverage`
+to avoid invalidating the restored graph solely through instrumentation.
+The prepared-product receipt already includes the full build command, so
+products prepared with the old flags cannot pass runtime admission.
+
+The full build graph, all 15 required suites, 900-second preparation budget,
+480-second Swift runtime budget and runner approval guards are unchanged.
+Command and workflow contracts now enforce matching instrumentation and cache
+keys. These source changes are NOT_RUN locally; an automatic run must still
+show whether alignment is sufficient for the changed-source build to fit.
+
 ## Correction learning preferences (source only)
 
 GTK now presents the canonical learning enable/threshold fields directly above

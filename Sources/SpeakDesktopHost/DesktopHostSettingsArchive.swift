@@ -3,6 +3,8 @@ import SpeakCore
 /// Archive-only presence tracking: a model slot is projected only when it was
 /// stored or explicitly chosen, never when catalogue preparation filled it.
 extension DesktopHostController.Settings {
+    typealias ArchiveValues = DesktopHostController<Platform>.SettingsValues
+
     package var archiveModel: String? { archiveModelKeys.contains("model") ? self.model : nil }
     package var archiveBatchModel: String? { archiveModelKeys.contains("batchModel") ? self.batchModel : nil }
     package var archiveLiveModel: String? { archiveModelKeys.contains("liveModel") ? self.liveModel : nil }
@@ -22,13 +24,13 @@ extension DesktopHostController.Settings {
     }
 
     mutating func noteArchiveWrite<Value>(
-        _ keyPath: WritableKeyPath<SettingsValues, Value>
+        _ keyPath: WritableKeyPath<ArchiveValues, Value>
     ) {
         if let root = nativeSourceRoot(for: keyPath) { nativeSourceRoots.removeValue(forKey: root) }
-        if keyPath == \SettingsValues.model { archiveModelKeys.insert("model") }
-        if keyPath == \SettingsValues.batchModel { archiveModelKeys.insert("batchModel") }
-        if keyPath == \SettingsValues.liveModel { archiveModelKeys.insert("liveModel") }
-        if keyPath == \SettingsValues.localModel { archiveModelKeys.insert("localModel") }
+        if keyPath == \ArchiveValues.model { archiveModelKeys.insert("model") }
+        if keyPath == \ArchiveValues.batchModel { archiveModelKeys.insert("batchModel") }
+        if keyPath == \ArchiveValues.liveModel { archiveModelKeys.insert("liveModel") }
+        if keyPath == \ArchiveValues.localModel { archiveModelKeys.insert("localModel") }
     }
 
     package func nativeConfigurationSources() throws -> [String: AnyCodable] {
@@ -60,18 +62,18 @@ extension DesktopHostController.Settings {
         }
     }
 
-    private func nativeSourceRoot<Value>(for keyPath: WritableKeyPath<SettingsValues, Value>) -> String? {
-        if keyPath == \SettingsValues.postProcessing {
+    private func nativeSourceRoot<Value>(for keyPath: WritableKeyPath<ArchiveValues, Value>) -> String? {
+        if keyPath == \ArchiveValues.postProcessing {
             return DesktopNativeConfigurationField.customPrompt.sourceRoot
         }
-        if keyPath == \SettingsValues.voiceOutput { return DesktopNativeConfigurationField.voiceID.sourceRoot }
-        if keyPath == \SettingsValues.hotKey { return DesktopNativeConfigurationField.hotKey.sourceRoot }
-        if keyPath == \SettingsValues.textOutput { return DesktopNativeConfigurationField.textOutput.sourceRoot }
-        if keyPath == \SettingsValues.microphoneDeviceID {
+        if keyPath == \ArchiveValues.voiceOutput { return DesktopNativeConfigurationField.voiceID.sourceRoot }
+        if keyPath == \ArchiveValues.hotKey { return DesktopNativeConfigurationField.hotKey.sourceRoot }
+        if keyPath == \ArchiveValues.textOutput { return DesktopNativeConfigurationField.textOutput.sourceRoot }
+        if keyPath == \ArchiveValues.microphoneDeviceID {
             return DesktopNativeConfigurationField.microphoneDeviceID.sourceRoot
         }
-        if keyPath == \SettingsValues.localUseGPU { return DesktopNativeConfigurationField.localUseGPU.sourceRoot }
-        if keyPath == \SettingsValues.azureSpeechResourceEndpoint {
+        if keyPath == \ArchiveValues.localUseGPU { return DesktopNativeConfigurationField.localUseGPU.sourceRoot }
+        if keyPath == \ArchiveValues.azureSpeechResourceEndpoint {
             return DesktopNativeConfigurationField.azureSpeechResourceEndpoint.sourceRoot
         }
         return nil

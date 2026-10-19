@@ -204,6 +204,10 @@ func linuxWindowEvent( // swiftlint:disable:this cyclomatic_complexity
         linuxActionShortcutEdit(value, holder: holder)
         return
     }
+    if event == Int(JSTI_EVENT_SPEAK_CLIPBOARD) {
+        holder.enqueueSettings { await holder.controller.readClipboardAloud() }
+        return
+    }
     if event == 70 || event == 71 || event == 72 {
         linuxVocabularyEvent(Int32(event), payload: value, kind: slot, holder: holder)
         return

@@ -4,7 +4,7 @@ import SpeakDesktopHost
 import CLinuxSupport
 
 enum LinuxActionShortcutRun: Equatable {
-    case record, page(String), stop, troubleshooting, comparison, quickVoice(Int), unavailable
+    case record, page(String), stop, troubleshooting, comparison, quickVoice(Int), clipboard, unavailable
 
     // swiftlint:disable:next cyclomatic_complexity
     init(_ action: DesktopShortcutAction) {
@@ -27,7 +27,8 @@ enum LinuxActionShortcutRun: Equatable {
         case .quickVoice1: self = .quickVoice(1)
         case .quickVoice2: self = .quickVoice(2)
         case .quickVoice3: self = .quickVoice(3)
-        case .speakSelectedText, .speakClipboard, .pauseResumeTTS, .openAPIKeysSettings,
+        case .speakClipboard: self = .clipboard
+        case .speakSelectedText, .pauseResumeTTS, .openAPIKeysSettings,
              .openPermissionsSettings, .pasteLastHistoryItem, .editSelectionByVoice:
             self = .unavailable
         }
@@ -42,6 +43,7 @@ enum LinuxActionShortcutRun: Equatable {
         case .troubleshooting: 4
         case .comparison: 5
         case .quickVoice: 6
+        case .clipboard: 7
         }
     }
     var page: String { if case .page(let name) = self { name } else { "" } }
@@ -136,10 +138,11 @@ extension LinuxActionShortcutRun {
             (.openProfilesSettings, .page("profiles")), (.openVoiceOutputSettings, .page("voice-output")),
             (.openPronunciationSettings, .page("pronunciation")), (.openKeyboardSettings, .page("keyboard")),
             (.openCompareModelsSettings, .comparison), (.openAboutSettings, .page("about")),
-            (.quickVoice1, .quickVoice(1)), (.quickVoice2, .quickVoice(2)), (.quickVoice3, .quickVoice(3))
+            (.quickVoice1, .quickVoice(1)), (.quickVoice2, .quickVoice(2)), (.quickVoice3, .quickVoice(3)),
+            (.speakClipboard, .clipboard)
         ]
         let unavailable: [DesktopShortcutAction] = [
-            .speakSelectedText, .speakClipboard, .pauseResumeTTS, .openAPIKeysSettings,
+            .speakSelectedText, .pauseResumeTTS, .openAPIKeysSettings,
             .openPermissionsSettings, .pasteLastHistoryItem, .editSelectionByVoice
         ]
         guard expected.allSatisfy({ Self($0.0) == $0.1 }),

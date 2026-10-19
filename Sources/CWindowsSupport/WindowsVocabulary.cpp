@@ -209,7 +209,7 @@ void pending(Dialog &d, bool busy) {
          allowLearning, legacyDictionary})
         EnableWindow(GetDlgItem(d.window, id), !busy);
     if (d.kind == 4)
-        for (int id : {field, field + 1, search}) EnableWindow(GetDlgItem(d.window, id), !busy);
+        for (int id : std::array<int, 3>{field, field + 1, search}) EnableWindow(GetDlgItem(d.window, id), !busy);
     selectionControls(d);
 }
 void transfer(Dialog &d, const char *action) {

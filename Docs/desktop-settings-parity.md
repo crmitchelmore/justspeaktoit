@@ -157,6 +157,16 @@ remote finished-transcript cleanup can stream previews; local cleanup cannot.
 
 ## Legacy pronunciation native editor (source only)
 
+At `820799c4`, automatic Linux portable job `118155024145` completed 2,931
+tests (33 skipped) with zero failures. Native Windows job `118155306947`
+failed compilation at the pending-control identifier loop: its deduced
+initializer list mixed the control enum with the integer expression
+`field + 1`. The loop now uses `std::array<int, 3>` without changing which
+controls are protected. Both jobs checked out synthetic merge `0f428229`
+into `0b4ffd7`. This Windows source repair is **NOT_RUN** locally; the failed
+Windows job remains failed evidence, and the Linux pass does not qualify
+later About, Voice or Corrections changes.
+
 The Pronunciation surface now links to a separate **Legacy word dictionary**
 editor on Win32 and GTK. It exposes the Mac's `ttsPronunciationDictionary`
 word/pronunciation map without converting it into modern pronunciation entries.

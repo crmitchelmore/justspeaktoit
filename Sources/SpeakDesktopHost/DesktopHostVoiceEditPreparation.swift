@@ -31,11 +31,12 @@ extension DesktopHostController {
                 .includingPronunciationWords(hints.pronunciationWords)
             run.keywords = batchKeywords(for: run.profile.modelIdentifier, options: options) + hints.keywords
             run.heldModel = beginLocalUse(run.profile.modelIdentifier)
-            let base = directory.appendingPathComponent("VoiceEdit", isDirectory: true)
-            let scratch = base.appendingPathComponent(run.id.uuidString, isDirectory: true)
-            try Platform.preparePrivateDirectory(base)
-            try Platform.preparePrivateDirectory(scratch)
+            let owner = try await voiceEditScratch()
+            try checkVoiceEdit(run)
+            run.scratchOwner = owner
+            let scratch = try owner.createRun(run.id)
             run.scratch = scratch
+            try Platform.preparePrivateDirectory(scratch)
             let rate = DesktopLiveTranscription.route(forID: run.profile.modelIdentifier)?.sampleRate
                 ?? PCMRecordingFile.sampleRate
             run.file = try PCMRecordingFile(

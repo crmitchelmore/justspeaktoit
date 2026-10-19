@@ -155,17 +155,19 @@ extension DesktopHostController {
         if run.workers == 0, run.phase == .retired {
             endLocalUse(run.heldModel)
             run.heldModel = nil
-            if let scratch = run.scratch {
-                do { try FileManager.default.removeItem(at: scratch) } catch {
+            if let owner = run.scratchOwner, run.scratch != nil {
+                do { try owner.removeRun(run.id) } catch {
                     let message = "Private voice-edit audio could not be removed: \(error.localizedDescription)"
                     if closed { FileHandle.standardError.write(Data((message + "\n").utf8)) } else { update(message) }
                 }
             }
+            run.scratchOwner = nil
             run.task = nil
             run.retirement = nil
         }
         voiceEdit.workers -= 1
         if voiceEdit.workers == 0 {
+            if closed { voiceEdit.scratchOwner = nil }
             let pending = voiceEdit.waiters
             voiceEdit.waiters = []
             pending.forEach { $0.resume() }
@@ -173,7 +175,10 @@ extension DesktopHostController {
     }
 
     func voiceEditWorkersEnded() async {
-        guard voiceEdit.workers > 0 else { return }
+        guard voiceEdit.workers > 0 else {
+            if closed { voiceEdit.scratchOwner = nil }
+            return
+        }
         await withCheckedContinuation { voiceEdit.waiters.append($0) }
     }
 }

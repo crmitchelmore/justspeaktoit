@@ -13,6 +13,12 @@ final class DesktopHostVoiceEditTests: XCTestCase {
         FakeLog.shared.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-edit-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        #if !os(Windows)
+        try FileManager.default.createDirectory(
+            at: directory.appendingPathComponent("VoiceEdit-v2"), withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        #endif
         effects = VoiceEditFixtureEffects()
         controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
         await controller.markReadyForSelfTest()
@@ -180,6 +186,60 @@ final class DesktopHostVoiceEditTests: XCTestCase {
         XCTAssertTrue(old.replacements.isEmpty)
         XCTAssertTrue(newer.replacements.isEmpty)
         XCTAssertEqual(effects.lifecycle, [2, 2, 2])
+    }
+
+    func testStartupRecovery_RemovesAbandonedInstructionsWithoutAddingHistory() async throws {
+        let base = directory.appendingPathComponent("VoiceEdit-v2")
+        try FakePlatform.preparePrivateDirectory(base)
+        do {
+            let owner = try DesktopVoiceEditScratch(preparedDirectory: base)
+            let run = try owner.createRun(UUID())
+            try Data("abandoned instruction".utf8).write(to: run.appendingPathComponent("instruction.wav"))
+        }
+        await controller.recoverVoiceEditScratch()
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: base.path).isEmpty)
+        let notice = await controller.voiceEdit.cleanupNotice
+        XCTAssertNil(notice)
+        XCTAssertEqual(effects.lifecycle, [0, 0, 0])
+        XCTAssertTrue(effects.requests.isEmpty)
+        XCTAssertTrue(effects.rewrites.isEmpty)
+    }
+
+    func testLegacyScratch_IsReportedAndNeverRemoved() async throws {
+        let legacy = directory.appendingPathComponent("VoiceEdit")
+        try FakePlatform.preparePrivateDirectory(legacy)
+        let audio = legacy.appendingPathComponent("instruction.wav")
+        try Data("keep".utf8).write(to: audio)
+        await controller.recoverVoiceEditScratch()
+        let notice = await controller.voiceEdit.cleanupNotice
+        XCTAssertTrue(notice?.contains("Legacy private voice-edit storage remains") == true)
+        XCTAssertEqual(try Data(contentsOf: audio), Data("keep".utf8))
+    }
+
+    func testCloseWithHeldRewrite_RetainsScratchOwnershipUntilTheProviderActuallyReturns() async throws {
+        await controller.close()
+        controller = try DesktopHostController<FakePlatform>(
+            directory: directory, effects: effects, shutdownGrace: .milliseconds(30)
+        )
+        await controller.markReadyForSelfTest()
+        let entered = expectation(description: "rewrite entered")
+        effects.beforeRewrite = { entered.fulfill() }
+        await effects.replyGate.hold()
+        let selection = VoiceEditFixtureSelection()
+        await controller.toggleVoiceEdit(source: selection.source(), deviceID: "")
+        await listening()
+        await controller.toggleVoiceEdit(source: VoiceEditFixtureSelection().source(), deviceID: "")
+        await fulfillment(of: [entered], timeout: 2)
+        let report = await controller.close()
+        XCTAssertGreaterThan(report.unfinishedOperations, 0)
+        let base = directory.appendingPathComponent("VoiceEdit-v2")
+        XCTAssertThrowsError(try DesktopVoiceEditScratch(preparedDirectory: base))
+        await effects.replyGate.release()
+        await controller.voiceEditWorkersEnded()
+        let reopened = try DesktopVoiceEditScratch(preparedDirectory: base)
+        XCTAssertEqual(reopened.directory, base)
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: base.path).isEmpty)
+        XCTAssertTrue(selection.replacements.isEmpty)
     }
 
     private func listening() async {

@@ -40,6 +40,9 @@ package struct DesktopHostVoiceEditSource: Sendable {
 
 struct DesktopHostVoiceEditState {
     var active: DesktopHostVoiceEditRun?
+    var scratchOwner: DesktopVoiceEditScratch?
+    var scratchOpening: (id: UUID, task: Task<DesktopVoiceEditScratch, Error>)?
+    var cleanupNotice: String?
     var workers = 0
     var waiters: [CheckedContinuation<Void, Never>] = []
 }
@@ -62,6 +65,7 @@ final class DesktopHostVoiceEditRun: @unchecked Sendable {
     var keywords: [String] = []
     var heldModel: String?
     var scratch: URL?
+    var scratchOwner: DesktopVoiceEditScratch?
     var file: PCMRecordingFile?
     var capture: (any DesktopRecordingCapture)?
     var live: DesktopLiveSession?

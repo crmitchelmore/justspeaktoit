@@ -59,6 +59,7 @@ extension DesktopHostController {
         activeOperations += 1
         defer { finishOperation() }
         await activateRecordingLocations()
+        await recoverVoiceEditScratch()
         do {
             guard let (recovery, deletionWarning) = try await prepareReadyHistory() else { return }
             let status = try await readyStatusMessage(recovery: recovery, deletionWarning: deletionWarning)
@@ -109,6 +110,7 @@ extension DesktopHostController {
         if let permissionWarning { status += " \(permissionWarning)" }
         if let profileWarning { status += " \(profileWarning)" }
         if let notice = recordingLocation.notice { status += " \(notice)" }
+        if let notice = voiceEdit.cleanupNotice { status += " \(notice)" }
         return status
     }
 

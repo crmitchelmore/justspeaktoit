@@ -187,6 +187,7 @@ extension DesktopHostController {
             let alreadyCounted = voiceEdit.active?.busyHeld == true ? 1 : 0
             report.unfinishedOperations += max(0, voiceEdit.workers - alreadyCounted)
         }
+        if voiceEdit.workers == 0 { voiceEdit.scratchOwner = nil }
         if let warm = connectionWarmTask {
             let ended = await DesktopHostShutdown.wait(until: deadline) { await warm.task.value }
             if !ended { report.unfinishedOperations += 1 }

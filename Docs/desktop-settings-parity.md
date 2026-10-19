@@ -2533,15 +2533,24 @@ Instruction audio is temporary, private and absent from History. Capture stop,
 destroy, busy ownership and scratch cleanup are shared across finish, Cancel and
 close; provider work is separately counted, and late replies cannot replace text.
 A cancelled provider that has not returned retains its private scratch directory
-until its last worker exits. A process crash can also leave scratch audio; startup
-scavenging is not implemented in this source slice.
+until its last worker exits. New runs use the versioned `VoiceEdit-v2` namespace:
+a native cross-process directory lease excludes another controller/app instance,
+including while a cancelled provider still owns audio. Startup (or first use)
+removes abandoned UUID runs only after acquiring that lease. Native cleanup
+accepts only an empty run or its single `instruction.wav`; links, extra entries,
+hard-linked audio and unsafe directories are refused rather than recursively
+deleted. Failures are reported. Legacy `VoiceEdit` directories are reported, not
+swept: they have no lease provenance and require separate explicit remediation.
 
 Authored evidence: `DesktopVoiceEditTests`, `VoiceEditPolicyTests`,
-`DesktopHostVoiceEditTests` and the real RichEdit/UIA voice-edit anchor fixture
+`DesktopHostVoiceEditTests`, `DesktopVoiceEditScratchTests` and the real RichEdit/UIA voice-edit anchor fixture
 inside `jsti_text_output_self_test`. These cover client policy, batch/live host
 orchestration, missing input/credentials, normal-dictation exclusion, capture
 failures, cancellation/restart/close, private-file removal and changed native
 anchors, including a range move immediately before paste dispatch. They are
+supplemented by native scratch-owner exclusion, released-owner recovery,
+extra-entry preservation, failed-initialization lease release, POSIX link refusal
+and a host close with an uncooperative rewrite still holding its lease.
 **NOT_RUN** locally. Automatic compiler/test qualification, installed-app keyboard
 and provider/device acceptance remain outstanding. Linux has the shared host
 implementation but no selection-anchor adapter or shortcut registration.

@@ -33,6 +33,17 @@ jsti_recording_publish_result jsti_recording_anonymous_publish(
  * the captured Win32 error on Windows or errno on POSIX. Never copies/unlinks. */
 uint32_t jsti_file_replace(const char *staging_path, const char *destination_path);
 
+typedef struct jsti_scratch_owner jsti_scratch_owner;
+
+/* The caller prepares a private, app-owned root first. A competing owner,
+ * including one in this process, is refused until close/process exit.
+ * Only uppercase UUID leaves containing instruction.wav (or nothing) are
+ * mutable. Links, extra entries and changed/unsafe objects are refused. */
+uint32_t jsti_scratch_open(const char *root, jsti_scratch_owner **owner);
+uint32_t jsti_scratch_create(jsti_scratch_owner *owner, const char *run);
+uint32_t jsti_scratch_remove(jsti_scratch_owner *owner, const char *run);
+uint32_t jsti_scratch_close(jsti_scratch_owner *owner);
+
 #ifdef __cplusplus
 }
 #endif

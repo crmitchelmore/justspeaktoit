@@ -33,6 +33,11 @@ public final class LivePolishSession: @unchecked Sendable {
     private var retired = false
     private var waiters: [CheckedContinuation<Result, Never>] = []
 
+    private enum DeliverySource {
+        case worker
+        case timeout
+    }
+
     public init(
         recordingID: UUID, preferences: LivePolishPreferences, modelIdentifier: String,
         sleep: @escaping Sleep = { try await Task.sleep(for: $0) },
@@ -167,10 +172,10 @@ public final class LivePolishSession: @unchecked Sendable {
                       !TranscriptPostProcessingPolicy.isEffectivelyEmptyTranscript(output) else {
                     throw LivePolishError.invalidResponse
                 }
-                self?.receive(token: token, text: text, output: output, error: nil)
+                self?.receive(source: .worker, token: token, text: text, output: output, error: nil)
             } catch {
                 self?.receive(
-                    token: token, text: text, output: nil,
+                    source: .worker, token: token, text: text, output: nil,
                     error: error is CancellationError ? LivePolishError.cancelled.localizedDescription
                         : error.localizedDescription
                 )
@@ -186,7 +191,7 @@ public final class LivePolishSession: @unchecked Sendable {
             timeout = Task { [weak self] in
                 do { try await sleep(LivePolishPolicy.requestTimeout) } catch { return }
                 self?.receive(
-                    token: token, text: text, output: nil,
+                    source: .timeout, token: token, text: text, output: nil,
                     error: LivePolishError.timedOut.localizedDescription
                 )
             }
@@ -194,13 +199,17 @@ public final class LivePolishSession: @unchecked Sendable {
         }
     }
 
-    private func receive(token: UUID, text: String, output: String?, error: String?) {
-        // existing owned lock-scoped delivery state; no behavior change.
+    private func receive(source: DeliverySource, token: UUID, text: String, output: String?, error: String?) {
         let action = lock.withLock {
             // swiftlint:disable:next large_tuple
-            () -> ([Task<Void, Never>], [CheckedContinuation<Result, Never>], Result)? in
+            () -> (Task<Void, Never>?, [CheckedContinuation<Result, Never>], Result)? in
             guard !retired, token == generation, input == text else { return nil }
-            let old = tasks()
+            // The producer is already finishing; only its peer needs cancellation.
+            let peer: Task<Void, Never>?
+            switch source {
+            case .worker: peer = timeout
+            case .timeout: peer = task
+            }
             generation = UUID()
             task = nil
             timeout = nil
@@ -211,10 +220,10 @@ public final class LivePolishSession: @unchecked Sendable {
             if finishing { retired = true }
             let pending = waiters
             waiters = []
-            return (old, pending, current())
+            return (peer, pending, current())
         }
         guard let action else { return }
-        action.0.forEach { $0.cancel() }
+        action.0?.cancel()
         onChange(action.2)
         action.1.forEach { $0.resume(returning: action.2) }
     }

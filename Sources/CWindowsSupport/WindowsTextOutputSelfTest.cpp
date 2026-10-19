@@ -1,6 +1,7 @@
 #include "include/CWindowsSupport.h"
 #include "WindowsSupportInternal.hpp"
 #include "WindowsTextOutputInternal.hpp"
+#include <richedit.h>
 #include <atomic>
 #include <condition_variable>
 #include <map>
@@ -1303,6 +1304,131 @@ std::string checkCorrectionLearning(Fixture &state) {
     return {};
 }
 
+std::string checkSelectionSources(Fixture &state) {
+    auto &host = state.host;
+    Environment environment = testEnvironment(false);
+    environment.allowCurrentProcess = false;
+    setEnvironment(environment);
+    state.foreground = host.window;
+    state.resolveOverride = nullptr;
+    state.failFocusResolution = false;
+    if (!host.focus(host.richEdit)) return "The selected-text fixture could not focus its RichEdit.";
+    if (supportsTextPattern(host.richEdit) != 1)
+        return "The selected-text RichEdit fixture did not expose its required TextPattern.";
+    setText(host.richEdit, L"private prefix Speak this private suffix");
+    select(host.richEdit, 15, 25);
+    Target target;
+    char error[512]{}, selected[128]{};
+    auto captureSelection = [&] {
+        target.destroy();
+        target.value = jsti_selection_capture(error, sizeof(error));
+        return target.value != nullptr;
+    };
+    auto read = [&] {
+        std::memset(selected, 0, sizeof(selected));
+        return jsti_selection_read(target.value, selected, sizeof(selected), error, sizeof(error));
+    };
+    const DWORD sequence = state.clipboard.sequence();
+    const int pastes = state.pasteCalls.load();
+    SendMessageW(host.richEdit, EM_SETREADONLY, TRUE, 0);
+    if (!captureSelection() || read() != 0 || std::strcmp(selected, "Speak this") != 0)
+        return describe("read-only selection", "did not read only the selected range", error);
+    if (read() != -1 || selected[0])
+        return describe("selection one-shot", "a consumed snapshot returned text again");
+    SendMessageW(host.richEdit, EM_SETREADONLY, FALSE, 0);
+    const Attempt forbidden = insert(target, "forbidden");
+    if (forbidden.status != -1 || !contains(forbidden.error, "read-only"))
+        return describe("selection authority", "a read-only target permitted insertion");
+    JSTIInsertionResult result{};
+    if (jsti_insertion_copy_text(target.value, "forbidden", &result, error, sizeof(error)) != -1 ||
+        !contains(error, "read-only"))
+        return describe("selection authority", "a read-only target permitted clipboard replacement");
+    if (textOf(host.richEdit) != L"private prefix Speak this private suffix" ||
+        state.clipboard.sequence() != sequence || state.pasteCalls != pastes)
+        return describe("selection side effects", "text, clipboard or keyboard input changed");
+
+    state.resolveOverride = host.second;
+    if (!captureSelection()) return describe("selection identity", "capture failed", error);
+    const int differentField = read();
+    state.resolveOverride = nullptr;
+    if (differentField != -1 || selected[0])
+        return describe("selection identity", "another field supplied selected text");
+    if (!captureSelection()) return describe("selection focus", "capture failed", error);
+    ++state.focusRevision;
+    if (read() != -1 || selected[0])
+        return describe("selection focus", "a focus transition retained selection authority");
+    if (!captureSelection()) return describe("selection foreground", "capture failed", error);
+    state.foreground = GetDesktopWindow();
+    const int differentWindow = read();
+    state.foreground = host.window;
+    if (differentWindow != -1 || selected[0])
+        return describe("selection foreground", "a different foreground window retained authority");
+
+    const LONG_PTR savedStyle = GetWindowLongPtrW(host.richEdit, GWL_STYLE);
+    SetWindowLongPtrW(host.richEdit, GWL_STYLE, savedStyle | ES_PASSWORD);
+    const bool passwordCaptured = captureSelection();
+    const int passwordRead = passwordCaptured ? read() : -1;
+    SetWindowLongPtrW(host.richEdit, GWL_STYLE, savedStyle);
+    if (passwordRead != -1 || selected[0])
+        return describe("selection password", "a password control supplied selected text");
+    select(host.richEdit, 15, 15);
+    if (!captureSelection() || read() != -1 || selected[0])
+        return describe("selection caret", "a caret fell back to whole-field text");
+    select(host.richEdit, 15, 25);
+    if (!captureSelection()) return describe("selection buffer", "capture failed", error);
+    char small[2]{'x', 0};
+    if (jsti_selection_read(target.value, small, sizeof(small), error, sizeof(error)) != -1 || small[0])
+        return describe("selection buffer", "a too-small buffer returned partial text");
+    if (!captureSelection()) return describe("selection cancellation", "capture failed", error);
+    jsti_insertion_cancel(target.value);
+    if (read() != -1 || selected[0])
+        return describe("selection cancellation", "a cancelled snapshot returned text");
+    target.destroy();
+
+    SendMessageW(host.richEdit, EM_EXLIMITTEXT, 0, 200001);
+    std::wstring maximum(200000, L'x');
+    setText(host.richEdit, maximum.c_str());
+    select(host.richEdit, 0, 200000);
+    std::vector<char> bounded(600004, 0);
+    if (!captureSelection() || jsti_selection_read(
+        target.value, bounded.data(), bounded.size(), error, sizeof(error)) != 0 ||
+        std::strlen(bounded.data()) != maximum.size())
+        return describe("selection exact limit", "the 200,000-unit boundary was not preserved", error);
+    maximum += L'x';
+    setText(host.richEdit, maximum.c_str());
+    select(host.richEdit, 0, 200001);
+    if (textOf(host.richEdit).size() != maximum.size())
+        return describe("selection over limit", "the fixture did not contain the required oversized selection");
+    if (!captureSelection() || jsti_selection_read(
+        target.value, bounded.data(), bounded.size(), error, sizeof(error)) != -1 ||
+        bounded[0] || !contains(error, "200,000"))
+        return describe("selection over limit", "oversized input was truncated or accepted", error);
+    target.destroy();
+
+    if (!state.release.value) state.release.value = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!state.release.value) return "Could not create the selected-text timeout gate.";
+    ResetEvent(state.release.value);
+    state.hookCalls = 0;
+    state.blockOnCall = -1;
+    struct ReleaseGate {
+        Fixture &state;
+        ~ReleaseGate() { SetEvent(state.release.value); }
+    } release{state};
+    environment.beforeAutomation = &blockingHook;
+    environment.insertTimeoutMs = 80;
+    environment.destroyWaitMs = 0;
+    setEnvironment(environment);
+    if (!captureSelection() || !waitForHook(1))
+        return describe("selection timeout", "the provider gate was not entered", error);
+    const ULONGLONG started = GetTickCount64();
+    if (read() != -1 || selected[0] || GetTickCount64() - started > 2000)
+        return describe("selection timeout", "a blocked provider escaped the bounded read", error);
+    SetEvent(state.release.value);
+    target.destroy();
+    if (!waitForWorkersToExit(5000)) return "A selected-text worker outlived its cancelled request.";
+    return {};
+}
+
 } // namespace
 
 int jsti_text_output_self_test(char *error, size_t capacity) {
@@ -1323,6 +1449,7 @@ int jsti_text_output_self_test(char *error, size_t capacity) {
         if (failure.empty()) failure = checkClipboardRacesAndCancellation(*state);
         if (failure.empty()) failure = checkCapturedProcessAndWorkerBounds(*state);
         if (failure.empty()) failure = checkDeferredFocusAndUncertainTimeout(*state);
+        if (failure.empty()) failure = checkSelectionSources(*state);
         if (state->release.value) SetEvent(state->release.value);
         if (!waitForWorkersToExit(10000)) {
             // A worker that never exited may still call the seams; keep the

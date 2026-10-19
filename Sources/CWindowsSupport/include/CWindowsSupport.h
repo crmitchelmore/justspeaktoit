@@ -71,6 +71,8 @@ enum JSTIWindowEvent {
     JSTI_EVENT_QUICK_VOICE = 110, /* text: favorite slot "1"-"3" from an action shortcut */
     /* Paste Last History Item shortcut; capture the insertion target in the callback. */
     JSTI_EVENT_PASTE_LAST_HISTORY = 111,
+    JSTI_EVENT_SPEAK_SELECTED_TEXT = 112,
+    JSTI_EVENT_SPEAK_CLIPBOARD = 113,
     JSTI_EVENT_USER_ABSENT = 120
 };
 
@@ -724,6 +726,14 @@ typedef struct JSTIInsertionResult {
 void jsti_insertion_prepare(void);
 /* Null with an error when no external application field is focused. */
 JSTIInsertionTarget *jsti_insertion_capture(char *error, size_t error_capacity);
+/* Begin a bounded read-only snapshot on the worker, also permitting the app's
+ * own focused control. This target cannot insert text or replace the clipboard. */
+JSTIInsertionTarget *jsti_selection_capture(char *error, size_t error_capacity);
+/* One bounded worker read of selected UIA TextPattern ranges, never the whole
+ * field. Password, focus/process changes and unavailable selection are errors.
+ * The UTF-8 output is bounded to 200,000 UTF-16 units. Off the UI/host actor only. */
+int jsti_selection_read(JSTIInsertionTarget *target, char *text, size_t text_capacity,
+                         char *error, size_t error_capacity);
 /* Zero: input was submitted by result->method; verified reports read-back.
  * -1: no text mutation was submitted. 1: mutation may have occurred or shortcut
  * submission was partial; do not retry automatically. Clipboard state is
@@ -1414,7 +1424,9 @@ enum {
     JSTI_ACTION_RUN_QUICK_VOICE_1 = 8, /* JSTI_EVENT_QUICK_VOICE for favorite slot 1 */
     JSTI_ACTION_RUN_QUICK_VOICE_2 = 9,
     JSTI_ACTION_RUN_QUICK_VOICE_3 = 10,
-    JSTI_ACTION_RUN_PASTE_LAST_HISTORY = 11 /* JSTI_EVENT_PASTE_LAST_HISTORY */
+    JSTI_ACTION_RUN_PASTE_LAST_HISTORY = 11, /* JSTI_EVENT_PASTE_LAST_HISTORY */
+    JSTI_ACTION_RUN_SPEAK_SELECTED_TEXT = 12,
+    JSTI_ACTION_RUN_SPEAK_CLIPBOARD = 13
 };
 typedef struct {
     const char *identifier;

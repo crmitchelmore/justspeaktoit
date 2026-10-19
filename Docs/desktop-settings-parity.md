@@ -65,6 +65,48 @@ action shortcut to it (`JSTI_ACTION_RUN_PASTE_LAST_HISTORY` emits
 UI thread before queueing the Host action, as the Record event does. Linux has
 no action shortcut registration yet.
 
+## Selected-text and clipboard speech shortcuts (source only)
+
+Windows wires Speak Selected Text and Speak Clipboard through the existing
+Read aloud task, saved Voice Output selection/options, pronunciation rendering,
+credential policy, usage and native playback. They do not borrow the selected
+History record. Both are eligible for global registration. This brings Windows
+to **25 of 27 source-wired actions**, not verified shortcut parity.
+
+Selected text uses a read-only target captured in the native callback. Its
+existing bounded UI Automation worker starts a snapshot before the settings
+queue hop, reads only selected TextPattern ranges, and verifies the retained
+process/window/control, UIA identity, password status and focus revision.
+Read-only text controls and the app's own controls are permitted. The target
+cannot insert text or replace the clipboard. Empty selections, unavailable
+providers, identity changes, oversized text and timeouts fail explicitly;
+there is no whole-field, clipboard or simulated-Copy fallback. Up to 64
+selected ranges are joined with newlines, with 200,000 UTF-16 units of native
+staging and the canonical **100,000 Unicode-scalar** speech limit.
+
+The shared source type has a distinct captured-selection constructor; the
+ordinary constructor and native Voice message parser still refuse an
+uncaptured external selection. Pronunciation replacement preserves this
+provenance. Clipboard speech reuses the existing explicit native snapshot,
+with at most one pending native clipboard reader. A stalled clipboard owner
+cannot create an unbounded collection of native reader threads.
+
+Source capture is owned by the speech task with the existing three-second
+cancellable read gate. Stop, replacement, recording and shutdown release the
+Host without waiting for an uncooperative source; late text cannot reach a
+speech provider. Authored portable/Host regressions cover exact Unicode limits,
+source/provenance preservation, clipboard effects, invalid text, replacement
+and Stop/shutdown during an uncooperative capture. The native hidden-RichEdit
+fixture covers read-only selection, no field/clipboard/keyboard mutation,
+one-shot authority, password/focus/identity/cancellation refusals, exact native
+limits, small buffers and a blocked provider. These checks are **NOT_RUN**
+locally; automatic native/portable qualification and actual keyboard/app
+acceptance remain required.
+
+The Stop speech action delegates directly to the Host, without a page,
+selected-History-row or History-button-enabled gate, so these independent
+speech sources can also be stopped.
+
 ## Pull-request qualification (source only)
 
 Product pull-request workflows now accept non-main base branches, including
@@ -2106,7 +2148,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | modulatePIIPhiTagging | Live/batch source wired; unqualified / Same | Native default/on/off choice, strict transfer/restart and captured live/batch provider flags; absent stays off. Native/provider acceptance pending. |
 | accessibilityInsertionMode | Equivalent / Missing | Output; Windows cursor/replace-field; Linux paste cannot claim AX replace-all equivalence |
 | selectedHotKey | Equivalent / Partial | Shortcuts; Windows Ctrl/Alt native key; Linux desktop/portal-owned binding, never Mac Fn key translation |
-| customShortcutBindings | Partial source wiring; unqualified / Shared model only | Windows Keyboard **Action shortcuts** dialog: 23 of 27 actions run, the rest stay stored for the Mac; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Linux transfers the Mac-compatible value unchanged without native registration. Native/physical acceptance pending. |
+| customShortcutBindings | Partial source wiring; unqualified / Shared model only | Windows Keyboard **Action shortcuts** dialog: 25 of 27 actions source-wired, the rest stay stored for the Mac; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Linux transfers the Mac-compatible value unchanged without native registration. Native/physical acceptance pending. |
 | paidAccessRoutingEnabled | Apple-specific / Apple-specific | BYOK desktop providers; no paid-access entitlement/routing journey. Retained opaque through import/export |
 | simpleModelChoices | Missing / Missing | Native catalogue picker without simplified paid-model chooser |
 | rememberedLocalTranscriptionSource | Partial / Partial | Models remembers Local selection; no Apple on-device source |
@@ -2328,8 +2370,9 @@ and Fn on keys other than function keys, have no Windows equivalent: those
 bindings are kept untouched for the Mac (an unchanged row keeps its stored Mac
 binding even when its switches change) but are not registered on Windows.
 
-Windows runs Start/Stop Recording, Pause/Resume and Stop speech (History
-playback; partial), and the page actions Dashboard, History, Voice Output
+Windows runs Start/Stop Recording, Pause/Resume (History playback; partial),
+Stop speech through the Host without page/History-row gating, and the page
+actions Dashboard, History, Voice Output
 (both), General, Transcription, Post-processing, Corrections, Pronunciation,
 Profiles, Keyboard and About. Data & Migration shows General, which holds the
 Windows backup, export and inspection controls; API Keys, Permissions and
@@ -2337,9 +2380,11 @@ Compare Models press the All API keys, Permissions and Compare models buttons
 when enabled; Quick Voice 1-3 select the saved favourite in that slot through the
 shared Host action; Paste Last History Item delivers the newest History item
 (regardless of filters or selection) with the saved text-output settings. Speak
-Selected Text, Speak Clipboard, Troubleshooting and Edit Selection by Voice are
-marked **Mac only** in the editor and stay stored. Only Start/Stop Recording and
-Paste Last History Item can work in other apps (`RegisterHotKey`, which needs
+Selected Text and Speak Clipboard read their own captured source through the
+existing Voice Output pipeline. Troubleshooting and Edit Selection by Voice
+remain missing Windows features; their bindings stay stored for the Mac.
+Start/Stop Recording, Paste Last History Item, Speak Selected Text and Speak
+Clipboard can work in other apps (`RegisterHotKey`, which needs
 Ctrl or Alt, or F13-F24 alone); other actions work while the window has focus. Global registration that Windows or
 another app refuses is reported in the dialog and status line, and that shortcut
 falls back to this window. Typing in text fields, list/combo navigation and

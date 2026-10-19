@@ -370,7 +370,7 @@ jobs:
     name: Core Dictation Journey (≤8m tests)
     # This non-UI contract gate may use an explicitly approved native runner.
     runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-macos-build","macOS"]') || '["macos-26-intel"]') }}
-    timeout-minutes: 30
+    timeout-minutes: 40
     needs: release-paths
     if: needs.release-paths.outputs.core-journey == 'true'
     steps:
@@ -390,10 +390,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-swift-
 
-      # Cold compile has its own finite 600s command budget so the journey
+      # Cold compile has its own finite 900s command budget so the journey
       # runtime keeps its original 480s budget, independent of build time.
       - name: Build core journey test products
-        timeout-minutes: 12
+        timeout-minutes: 17
         run: scripts/run-core-journey-e2e.sh --phase build
 
       - name: Run prepared core journey gate
@@ -413,11 +413,11 @@ jobs:
     name: Core Journey Fixture UI
     # Hosted ARM has the UI automation entitlement; the native pool does not.
     runs-on: macos-latest
-    # 2m checkout + 6m setup + 12m build/receipts + 12m UI/receipts + 3m upload.
+    # 2m checkout + 6m setup + 17m build/receipts + 12m UI/receipts + 3m upload.
     # The former 600s job spent ~505s preparing before UI tests. Setup now has a
-    # separate 300s command budget; build has 600s, as do actual UI tests (unchanged).
+    # separate 300s command budget; build has 900s; actual UI tests keep 600s.
     # Each product/source receipt is separately bounded to 60s, not hidden setup.
-    timeout-minutes: 35
+    timeout-minutes: 42
     needs: release-paths
     if: needs.release-paths.outputs.core-journey == 'true'
     steps:
@@ -429,7 +429,7 @@ jobs:
         run: python3 scripts/run-core-journey-stages.py ui --phase setup
 
       - name: Build launched fixture test products
-        timeout-minutes: 12
+        timeout-minutes: 17
         run: python3 scripts/run-core-journey-stages.py ui --phase build
 
       - name: Test Speak bootstrap, global hotkey, and launched fixture

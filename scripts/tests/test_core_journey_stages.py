@@ -73,7 +73,7 @@ class CommandTests(unittest.TestCase):
     def test_command_budgets_are_finite_and_old_environment_cannot_extend_runtime(self):
         with mock.patch.dict(os.environ, {"CORE_JOURNEY_BUDGET_SECONDS": "999999"}):
             self.assertEqual(stages.RUNTIME_BUDGET, {"swift": 480, "ui": 600})
-        self.assertEqual(stages.BUILD_BUDGET, 600)
+        self.assertEqual(stages.BUILD_BUDGET, 900)
         self.assertEqual(stages.SETUP_BUDGET, 300)
         self.assertEqual(stages.RECEIPT_BUDGET, 60)
 
@@ -225,7 +225,7 @@ class StageTests(unittest.TestCase):
                             self.assertEqual(stages.execute("ui", self.artifacts), 0)
         build_result = json.loads((self.artifacts / "build/result.json").read_text())
         runtime_result = json.loads((self.artifacts / "runtime/result.json").read_text())
-        self.assertEqual(build_result["budget_seconds"], 600)
+        self.assertEqual(build_result["budget_seconds"], 900)
         self.assertEqual(runtime_result["budget_seconds"], 480)
         self.assertGreater(build_result["command_elapsed_seconds"] + runtime_result["command_elapsed_seconds"], 480)
         self.assertEqual(runtime_result["errors"], [])
@@ -294,7 +294,7 @@ class StageTests(unittest.TestCase):
         result = json.loads((self.artifacts / "build/result.json").read_text())
         self.assertEqual(result["exit_code"], 17)
         self.assertEqual(result["stage"], "build")
-        self.assertEqual(result["budget_seconds"], 600)
+        self.assertEqual(result["budget_seconds"], 900)
 
     def test_build_timeout_is_truthful_and_cannot_produce_prepared_receipt(self):
         command = [sys.executable, "-c", "import time; print('building', flush=True); time.sleep(60)"]

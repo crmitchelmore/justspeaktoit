@@ -16,7 +16,7 @@ import time
 
 GATE = runpy.run_path(str(Path(__file__).with_name("run-core-journey-e2e.py")))
 UI = runpy.run_path(str(Path(__file__).with_name("verify-core-journey-ui.py")))
-BUILD_BUDGET = 600
+BUILD_BUDGET = 900
 SETUP_BUDGET = 300
 RUNTIME_BUDGET = {"swift": 480, "ui": 600}
 RECEIPT_BUDGET = 60

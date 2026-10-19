@@ -114,7 +114,9 @@ final class SyntheticEffects: WindowsControllerEffects, @unchecked Sendable {
     }
 
     func writeSettings(_ data: Data, to url: URL) throws {
-        let fail = lock.withLock { () -> Bool in
+        // Side indexes such as tracked API keys must not consume the failure
+        // aimed at the settings file.
+        let fail = url.lastPathComponent == "settings.json" && lock.withLock { () -> Bool in
             let fail = failWrite
             failWrite = false
             return fail

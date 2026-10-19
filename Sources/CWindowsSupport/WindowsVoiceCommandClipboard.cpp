@@ -1,9 +1,14 @@
 #include "include/CWindowsSupport.h"
 #include "WindowsSupportInternal.hpp"
+#include <atomic>
 #include <cstdlib>
 
 namespace {
 constexpr size_t maximumBytes = 1048576;
+std::atomic<bool> readerActive{false};
+struct ReaderLease {
+    ~ReaderLease() { readerActive.store(false); }
+};
 struct ClipboardLease {
     ~ClipboardLease() { CloseClipboard(); }
 };
@@ -16,6 +21,9 @@ struct TextLease {
 int jsti_voice_command_clipboard_read(char **text, char *error, size_t capacity) {
     if (!text) return jsti::fail("Missing clipboard snapshot destination.", error, capacity);
     *text = nullptr;
+    if (readerActive.exchange(true))
+        return jsti::fail("A native clipboard read is still pending.", error, capacity);
+    ReaderLease reader;
     if (!OpenClipboard(nullptr)) return jsti::fail(jsti::systemError("Reading clipboard"), error, capacity);
     ClipboardLease clipboard;
     if (!IsClipboardFormatAvailable(CF_UNICODETEXT)) return 1;

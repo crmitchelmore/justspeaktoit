@@ -59,7 +59,10 @@ enum DesktopVoiceCommandClipboardRead {
     static let maximumBytes = 1_048_576
 
     static func run(
-        timeout: Duration = .seconds(3), read: @escaping @Sendable () async throws -> String?
+        timeout: Duration = .seconds(3),
+        failureMessage: String = "Clipboard voice command could not be read. Original transcript and audio retained.",
+        timeoutMessage: String = "Clipboard voice command timed out. Original transcript and audio retained.",
+        read: @escaping @Sendable () async throws -> String?
     ) async throws -> String? {
         let gate = Gate()
         return try await withTaskCancellationHandler {
@@ -75,17 +78,13 @@ enum DesktopVoiceCommandClipboardRead {
                         gate.settle(.success(text))
                     } catch {
                         // A native error may contain clipboard-owner text. Never persist it.
-                        gate.settle(.failure(error is CancellationError ? CancellationError() : DesktopHostError(
-                            message: "Clipboard voice command could not be read. "
-                                + "Original transcript and audio retained."
-                        )))
+                        gate.settle(.failure(error is CancellationError ? CancellationError()
+                            : DesktopHostError(message: failureMessage)))
                     }
                 })
                 gate.track(Task {
                     do { try await Task.sleep(for: timeout) } catch { return }
-                    gate.settle(.failure(DesktopHostError(
-                        message: "Clipboard voice command timed out. Original transcript and audio retained."
-                    )))
+                    gate.settle(.failure(DesktopHostError(message: timeoutMessage)))
                 })
             }
         } onCancel: { gate.settle(.failure(CancellationError())) }

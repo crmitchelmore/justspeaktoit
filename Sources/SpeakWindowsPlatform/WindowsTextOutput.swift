@@ -210,6 +210,36 @@ public final class WindowsInsertionTarget: @unchecked Sendable {
         return WindowsInsertionTarget(handle: handle)
     }
 
+    /// Capture the focused selection's identity before the settings queue hop.
+    /// This native target also permits our own app, but cannot insert or copy.
+    public static func captureSelection() throws -> WindowsInsertionTarget {
+        var error = [CChar](repeating: 0, count: 1_024)
+        guard let handle = jsti_selection_capture(&error, error.count) else {
+            throw WindowsTextOutputError(String(cString: error))
+        }
+        return WindowsInsertionTarget(handle: handle)
+    }
+
+    public func selectedText() async throws -> String {
+        let task = Task.detached(priority: .userInitiated) { [self] in
+            try Task.checkCancellation()
+            var text = [CChar](repeating: 0, count: 800_001)
+            var error = [CChar](repeating: 0, count: 1_024)
+            guard jsti_selection_read(self.handle, &text, text.count, &error, error.count) == 0 else {
+                throw WindowsTextOutputError(String(cString: error))
+            }
+            return String(cString: text)
+        }
+        return try await withTaskCancellationHandler {
+            let text = try await task.value
+            try Task.checkCancellation()
+            return text
+        } onCancel: {
+            self.cancel()
+            task.cancel()
+        }
+    }
+
     /// Requests abandonment without waiting for a blocked provider. Keep this
     /// object alive until the insertion call returns; its worker owns native state.
     public func cancel() { jsti_insertion_cancel(handle) }

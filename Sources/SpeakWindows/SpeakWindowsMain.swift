@@ -239,6 +239,15 @@ private func otherWindowEvent(_ event: Int32, value: String, holder: WindowsEven
         // Clipboard-only output accepts no target; the Host reports a missing required one.
         let target = try? WindowsInsertionTarget.capture()
         holder.enqueueSettings { await controller.pasteLastHistoryItem(target: target) }
+    case 112:
+        do {
+            let target = try WindowsInsertionTarget.captureSelection()
+            holder.enqueueSettings {
+                await controller.readVoiceSource(.externalSelection) { try await target.selectedText() }
+            }
+        } catch { WindowsNative.update("Read aloud failed: \(error.localizedDescription)") }
+    case 113:
+        holder.enqueueSettings { await controller.readClipboardAloud() }
     default: break
     }
 }

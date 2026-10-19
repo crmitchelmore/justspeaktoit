@@ -41,8 +41,7 @@ extension DesktopHostController {
         guard !TranscriptPostProcessingPolicy.isEffectivelyEmptyTranscript(text) else {
             throw VoiceOutputSourceSnapshot.Failure.emptyText
         }
-        let prepared = try VoiceOutputSourceSnapshot(
-            source: original.source, text: text, recordID: original.recordID)
+        let prepared = try original.replacingText(text)
         try DesktopSpeechSynthesis.validateSSMLInput(text, voice: selection.voice, options: selection.options)
         try checkVoicePreparation(ticket)
         return prepared

@@ -295,4 +295,36 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         startVoiceRead(text: snapshot.text, source: snapshot.source, owner: UUID(), recordID: nil)
     }
 
+    /// Capture belongs to the existing speech task: Stop, replacement, recording
+    /// and shutdown cancel it before any late text can reach a speech provider.
+    package func readVoiceSource(
+        _ source: VoiceOutputSource, capture: @escaping @Sendable () async throws -> String?
+    ) async {
+        guard !closed else { return }
+        guard canUseHistory else {
+            update("Finish recording or the current data operation before reading aloud.")
+            return
+        }
+        guard source == .clipboard || source == .externalSelection else {
+            update("The requested speech source cannot be captured.")
+            return
+        }
+        let label = source == .clipboard ? "Clipboard text" : "Selected text"
+        startVoiceRead(text: "", source: source, owner: UUID(), recordID: nil) {
+            let text = try await DesktopVoiceCommandClipboardRead.run(
+                failureMessage: "\(label) could not be read safely. No speech was sent.",
+                timeoutMessage: "\(label) capture timed out. No speech was sent."
+            ) { try await capture() }
+            guard let text else { throw DesktopHostError(message: "\(label) is unavailable.") }
+            return text
+        }
+    }
+
+    package func readClipboardAloud() async {
+        let effects = effects
+        await readVoiceSource(.clipboard) {
+            try await effects.voiceCommandClipboardText()
+        }
+    }
+
 }

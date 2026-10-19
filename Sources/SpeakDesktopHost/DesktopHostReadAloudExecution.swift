@@ -10,7 +10,10 @@ import SpeakDesktop
 /// `private` is scoped to a single file and cannot span this split.
 extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     // swiftlint:disable:next function_body_length
-    func startVoiceRead(text: String, source: VoiceOutputSource, owner: UUID, recordID: UUID?) {
+    func startVoiceRead(
+        text: String, source: VoiceOutputSource, owner: UUID, recordID: UUID?,
+        capture: (@Sendable () async throws -> String)? = nil
+    ) {
         // One cohesive playback-lifecycle body: voice selection, optional
         // Deepgram output staging, speech start, and the read-aloud Task all
         // share local state (`speech`, `voiceOutput`, `ticket`) that would
@@ -54,7 +57,15 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             var outcome: String?
             do {
                 try await VoiceSynthesisUsage.$capture.withValue(usage?.capture) {
-                    let original = try VoiceOutputSourceSnapshot(source: source, text: text, recordID: recordID)
+                    let capturedText = try await capture?() ?? text
+                    try Task.checkCancellation()
+                    guard self.playbackRequests.isCurrent(ticket), !self.closed else { throw CancellationError() }
+                    let original: VoiceOutputSourceSnapshot
+                    if source == .externalSelection {
+                        original = try VoiceOutputSourceSnapshot(capturedExternalSelection: capturedText)
+                    } else {
+                        original = try VoiceOutputSourceSnapshot(source: source, text: capturedText, recordID: recordID)
+                    }
                     let prepared = try await self.prepareVoiceSynthesisSource(
                         original, selection: selection, ticket: ticket)
                     if let recordID {

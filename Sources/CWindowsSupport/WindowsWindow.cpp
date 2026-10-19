@@ -3365,8 +3365,7 @@ void jsti_window_action_command(HWND window, int run, const char *page) {
                      reinterpret_cast<LPARAM>(GetDlgItem(window, playPauseID)));
         break;
     case JSTI_ACTION_RUN_STOP_SPEECH:
-        SendMessageW(window, WM_COMMAND, MAKEWPARAM(stopPlaybackID, BN_CLICKED),
-                     reinterpret_cast<LPARAM>(GetDlgItem(window, stopPlaybackID)));
+        emit(window, JSTI_EVENT_HISTORY_STOP);
         break;
     case JSTI_ACTION_RUN_API_KEYS: case JSTI_ACTION_RUN_PERMISSIONS: case JSTI_ACTION_RUN_COMPARE: {
         const int button = run == JSTI_ACTION_RUN_API_KEYS ? apiKeysID
@@ -3385,6 +3384,8 @@ void jsti_window_action_command(HWND window, int run, const char *page) {
     }
     // The Host decides whether output can run now; the latest item may be hidden by filters.
     case JSTI_ACTION_RUN_PASTE_LAST_HISTORY: emit(window, JSTI_EVENT_PASTE_LAST_HISTORY); break;
+    case JSTI_ACTION_RUN_SPEAK_SELECTED_TEXT: emit(window, JSTI_EVENT_SPEAK_SELECTED_TEXT); break;
+    case JSTI_ACTION_RUN_SPEAK_CLIPBOARD: emit(window, JSTI_EVENT_SPEAK_CLIPBOARD); break;
     default: break;
     }
 }

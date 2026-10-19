@@ -602,6 +602,63 @@ explicit copy and fallback copy; those require separate exact-head native CI
 receipts, not substitution of the frozen f29 receipts above. No native control
 IDs, events, C headers, clipboard ownership algorithm or icon assets changed.
 
+## Capture warm-up, remote paste and Mac-only delivery settings (source only)
+
+`SpeakCore/CaptureDeliveryPreference.swift` registers five canonical Mac keys
+in the shared generic editor, strict validation and JSON transfer. Mac defaults
+apply: capture preparation and key-press warm-up on, streaming insertion and
+remote paste off, History interval 5 s. The interval accepts 0...30 so stored
+Mac values below the 1 s slider minimum still import; out-of-range values are
+rejected with the rest of that configuration, as for every field. No
+Swift/native build, test or device check has run for this source.
+
+- **`audioPreWarmingEnabled`.** At each idle transition, Windows
+  (`WindowsCapturePrewarm.cpp`) resolves the saved or default communications
+  capture endpoint, checks that it is active and keeps the Core Audio runtime
+  loaded. It never activates an audio client, so no stream runs, nothing is
+  read and no microphone indicator appears. This is narrower than the Mac
+  engine prewarm: no audio is kept and no audio session is open, so the gain is
+  limited to endpoint resolution and library loading. Each idle period holds it
+  for at most 10 minutes. It is released on recording, busy work, device change
+  (the microphone-warning path), settings or credential changes, disable and
+  shutdown, and renewed only by a later idle transition, never by a timer.
+  Linux has no adapter; the key is stored and has no effect there.
+- **`warmMicrophoneOnKeyPress`.** On Windows and Linux, a hold or double-tap
+  key-down opens a discarding capture on the shortcut's microphone before the
+  gesture resolves. Press-to-toggle does not, because it starts recording at
+  once. The capture closes when the recording capture is ready, after the Mac
+  safety bound max(2.5, hold + 2 × double-tap + 1) s, or on device, settings,
+  credential or shutdown changes. It never opens while a recording, hands-free
+  run, busy operation or automation-owned dictation exists. As on the Mac, a tap
+  that starts nothing briefly lights the microphone indicator; nothing is
+  recorded or sent. Unlike the Mac, its 1.5 s pre-roll is not handed to the
+  recording, so speech before the recording capture opens is not kept.
+- **`streamingInsertionEnabled`.** Stored and transferred only. The Mac streams
+  only into an allowlist of TextEdit and Notes and otherwise pastes once at the
+  end. Windows and Linux have an empty allowlist: text is inserted once when
+  dictation ends. Append-only insertion of live finals was rejected because
+  voice commands, vocabulary corrections, Auto-Clean and post-processing
+  transform the final text, and a live final can still replace interim text.
+  Partial output would leave untransformed text in the field.
+- **`pasteRemoteTranscriptsAtCursor`.** On Windows and Linux, the shared
+  `RemoteTranscriptArrival` rule decides each History record that iCloud sync
+  saves. It acts only on records new to this host, from an iPhone or Apple
+  Watch, with text, and dated within 60 s (and no more than 60 s ahead). It is
+  off by default. The newest qualifying arrival in a sync pass goes through the
+  saved text output to the field focused at that moment, so Clipboard only
+  copies instead, and the status line reports the outcome. It never runs during
+  a recording, hands-free run, automation dictation or pending output. Other
+  arrivals stay in History, and there is no notification with Paste and Copy
+  actions. Two limits make it rarely active. Desktop sync polls every 300 s with
+  no push, so a capture is pasted only if a pass lands within 60 s of it. Desktop
+  sync also joins only the Mac container, so iPhone History in
+  `iCloud.com.justspeaktoit.ios` never arrives; only phone or watch records in
+  the Mac container, the ones the Mac would act on, qualify.
+- **`historyFlushInterval`.** Stored and transferred only. The Mac batches
+  History writes on this interval. Windows and Linux save each History record
+  durably as its operation completes, so a timed flush would only delay
+  durability; the generic editor labels it as a Mac-only value.
+
 ## Recording feedback (native qualified; package acceptance pending)
 
 `SpeakCore/RecordingFeedback.swift` now owns the four existing profiles, eight
@@ -1042,14 +1099,14 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | ttsUseSSML | Source wired; qualification pending / Same | Both native synthesis dialogs expose provider-gated SSML with explicit Normal controls reset. Azure Neural/MAI use the shared bounded SSML preflight and request builder; unsupported routes, conflicting full-document prosody and invalid controls fail before credentials. Canonical transfer and the selected-text markup helper are wired; native/provider acceptance remains unqualified. |
 | ttsFavoriteVoices | Source wired; qualification pending / Source wired; qualification pending | Native voice picker ranks and toggles favorites in Read aloud (`DesktopHostVoiceFavorites.swift`, `WindowsReadAloud.swift:30-41`, `LinuxReadAloud.swift:117-125`); transfer/apply confirmed above. No separate standalone favourites-management page; native/provider qualification on this exact head is not separately captured here |
 | ttsPronunciationDictionary | Partial source wiring; unqualified / Same | Strict word-to-text transfer/restart preserves the raw map; only keys seed AssemblyAI recognition using the shared Mac policy, never phonetic values or TTS replacements. No legacy-map native editor or modern-dictionary keyterm seeding yet. The separate native pronunciation store/editor and Voice rendering pipeline remain unchanged. |
-| historyFlushInterval | Missing selector / Missing selector | History is durable per operation, not configurable timed flush |
+| historyFlushInterval | Persisted only / Persisted only | Generic 0...30 s field; History stays durable per operation (see Capture warm-up section) |
 | silenceDetectionEnabled | Executable; qualification pending / Same | Native switch; initial quiet and configured silence stop the existing manual recording/finalization pipeline |
 | handsFreeDictationEnabled | Sound-activation replacement; qualification pending / Same | Fresh frozen target per utterance, record-bound acknowledged output; unconfirmed paste stops, Wayland requires clipboard-only; profile/model still fixed per run; not Apple's classifier |
 | silenceThreshold | Executable; qualification pending / Same | Canonical range/default and Mac PCM meter; native editor feeds manual silence and sound activation |
 | silenceDuration | Executable; qualification pending / Same | Canonical hold/range feeds manual auto-stop and hands-free debounce; existing recording tail is retained |
 | connectionPreWarmingEnabled | Partial / Partial (source only; NOT_RUN) | Canonical intent round-trips. Separate native session approval allows a credential-free HEAD on the shared OpenRouter pool with a 5-second cancellation budget, only at idle after acknowledged ordinary capture in the current process/configuration and its real cleanup credential check. No probe before successful capture after restart; approval and capture evidence are transient. Completed-request remote cleanup only; native live WinHTTP/NIO and streaming cleanup's owned delegate sessions cannot reuse this pool. Owned/hands-free capture does not provide this witness. Existing device/absence notifications invalidate readiness; no new network/sleep monitor, idle timer/retry or guaranteed latency improvement. |
-| audioPreWarmingEnabled | Missing / Missing | Native capture opened on demand, no capture prewarming preference |
-| warmMicrophoneOnKeyPress | Missing / Missing | No speculative microphone-open preference |
+| audioPreWarmingEnabled | Source wired, unqualified / Persisted only | Bounded idle endpoint preparation without opening the microphone; no Linux adapter |
+| warmMicrophoneOnKeyPress | Source wired, partial / Source wired, partial | Discarding key-down capture with Mac timeout bound; no pre-roll handover |
 | postProcessingStreamingEnabled | Source wired; qualification pending / Same | Native preferences and sole Options authority feed bounded incremental remote SSE cleanup of finished text, with captured inputs, coalesced preview tickets and final-only History/output. Legacy desktop absence stays one-shot; local routes remain completed-only/offline. This is not external streaming insertion or native/provider qualification. |
 | hudSizePreference | Wired / Partial | Config + shared `HUDExpansionPreference`; native chooser and full-card expansion on Windows/X11; retained but hidden on Wayland |
 | showLiveTranscriptInHUD | Wired / Partial | Config + Windows/X11 HUD; Wayland has no live overlay, so the control is hidden; transcript remains in main window |
@@ -1063,11 +1120,11 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | livePolishTailWindowChars | Preserved, inactive / Preserved, inactive | Mac stores but does not consume it in LivePolishManager; full-transcript cleaning, no inert native control |
 | skipPostProcessingWithLivePolish | Source only / Source only | Skips ordinary processing only after successful authoritative-final cleanup; raw/failure metadata retained; NOT_RUN |
 | voiceCommandsEnabled | Implemented, native acceptance pending / Implemented, native acceptance pending | General toggle; canonical expansion before vocabulary and optional polish |
-| streamingInsertionEnabled | Missing / Missing | Final transcript insertion only |
+| streamingInsertionEnabled | Persisted only / Persisted only | Mac allowlist is TextEdit and Notes; desktop inserts final text once |
 | clipboardInsertionTriggers | Implemented, native acceptance pending / Implemented, native acceptance pending | General trigger entry; bounded native snapshot, canonical matching, no History re-expansion |
 | enableSendToMac | Partial / Partial | iCloud web History sync is not Send-to-Mac transport/pairing |
 | enableAutomationServer | Equivalent / Source wired, unqualified | Automation; Windows per-user named pipe unchanged. Linux native opt-in starts a bounded same-user Unix socket and `speak`; imported/legacy true preserves intent but never grants device-local approval. False revokes. No native/runtime qualification claimed. |
-| pasteRemoteTranscriptsAtCursor | Missing / Missing | No remote transcript delivery preference |
+| pasteRemoteTranscriptsAtCursor | Source wired, unqualified / Same | Shared arrival rule on synced History; 300 s poll and Mac-container-only limits |
 | autoCorrectionsEnabled | Source wired, unqualified / Separate opt-in observational source, unqualified | Canonical true default is not consent. Windows retains its acknowledged native Edit/UIA Value route and session approval. Linux observation is OFF until its distinct disclosed local in-app session action; generic approval and imports cannot authorize it. Only an admitted ordinary AT-SPI field with a bounded observational span qualifies. Paste/clipboard never do. App-origin changes can also be learned. Manual candidate actions remain available when learning is off. NOT_RUN |
 | autoCorrectionsPromotionThreshold | Source wired, unqualified / Source wired for opt-in observation, unqualified | Canonical Mac default 2 and integral 2...10 validation; captured per observation and passed to the shared domain with its persistence/rollback behavior. Linux preferences are editable but cannot activate sampling or grant consent. NOT_RUN |
 | recordingSoundsEnabled | Native qualified / Native qualified | General + owned native channel; normal readiness/finish cues only; installed-package acceptance pending |

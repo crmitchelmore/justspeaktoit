@@ -8,6 +8,21 @@ outside that enum. Track remaining product acceptance in #1157.
 
 ## Modulate live feature controls (source only)
 
+At preceding head `c4677631`, portable Apple (2,779 tests; 55 skipped),
+portable Linux (2,875; 33 skipped) and native Linux's Swift suite (3,019;
+34 skipped) all passed with zero failures. These jobs used synthetic merge
+`826d2a8` into `0b4ffd7`; they do not qualify the newer Modulate/warm-up source.
+The native Linux job then failed its generic configuration Apply fixture.
+That fixture incorrectly limited every non-Auto-Clean choice to three/four
+items and the payloads `expanded`/`bubbly`. It also treated all optional
+empty choices as one shared selection. The source repair checks each actual
+catalogue's exact item count and exact emitted identifier, exercising every
+optional empty independently, all existing Apply/preview/recovery actions,
+and availability/title retention. Boolean dependencies are checked as switches,
+not cast to editable text. Stage-specific failures now identify the offending
+field/assertion. Production configuration parsing and Apply routing are unchanged.
+The repaired native fixture has **NOT_RUN**.
+
 The four canonical Modulate booleans are now native Transcription preferences,
 explicitly labelled **Modulate live only**. They enter the immutable recording
 options and the existing Modulate client's query fields; vocabulary merging

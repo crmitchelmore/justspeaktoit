@@ -3436,9 +3436,9 @@ int32_t jsti_window_set_configuration_field_enabled(size_t index, int32_t enable
  * density can precede it); the self-test discovers the real index and
  * threads it through here via the existing untyped context pointer. */
 typedef struct {
-    gint calls;
+    guint calls;
     guint language_index;
-    gboolean empty_choice;
+    guint empty_choice_index;
 } ConfigurationSelfTestContext;
 
 static const char auto_clean_choices[] = "instant\tInstant\nlivePolish\tAuto-Clean";
@@ -3540,18 +3540,17 @@ static int32_t configuration_test_callback(int32_t action, const char *const *va
     for (guint i = 0; i < configuration.rows->len; ++i)
         if (((const char *)g_ptr_array_index(configuration.choices, i))[0] != '\0') {
             const char *choices = g_ptr_array_index(configuration.choices, i);
-            if (choices[0] == '\t') {
-                gchar **lines = g_strsplit(choices, "\n", -1);
-                const guint selected_index = test_context->empty_choice ? 0 : 1;
-                const char *line = lines[selected_index];
-                const char *tab = line != NULL ? strchr(line, '\t') : NULL;
-                const gboolean selected = tab != NULL && strlen(values[i]) == (size_t)(tab - line) &&
-                    strncmp(values[i], line, tab - line) == 0;
-                g_strfreev(lines);
-                if (!selected) return -1;
-            } else if (g_strcmp0(choices, auto_clean_choices) == 0) {
-                if (g_strcmp0(values[i], "livePolish") != 0) return -1;
-            } else if (g_strcmp0(values[i], "expanded") != 0 && g_strcmp0(values[i], "bubbly") != 0) return -1;
+            gchar **lines = g_strsplit(choices, "\n", -1);
+            const guint selected_index = test_context->empty_choice_index == i ? 0 : 1;
+            const char *line = g_strv_length(lines) > selected_index ? lines[selected_index] : NULL;
+            const char *tab = line != NULL ? strchr(line, '\t') : NULL;
+            const gboolean selected = tab != NULL && strlen(values[i]) == (size_t)(tab - line) &&
+                strncmp(values[i], line, tab - line) == 0;
+            g_strfreev(lines);
+            if (!selected) {
+                g_printerr("Configuration self-test: field %u did not emit choice %u.\n", i, selected_index);
+                return -1;
+            }
         }
     ++test_context->calls;
     return 0;
@@ -3625,21 +3624,30 @@ static gboolean configuration_self_test(void) {
     for (guint i = 0; i < configuration.rows->len; ++i) {
         gint32 enabling = g_array_index(configuration.enabled_by_fields, gint32, i);
         if (enabling == -1 && gtk_widget_get_sensitive(g_ptr_array_index(configuration.rows, i)))
-            return -1;
+            return FALSE;
         if (enabling <= 0) continue;
         found_dependency = TRUE;
         AdwSwitchRow *control = ADW_SWITCH_ROW(g_ptr_array_index(configuration.rows, enabling - 1));
         GtkWidget *dependent = g_ptr_array_index(configuration.rows, i);
         gboolean saved = adw_switch_row_get_active(control);
-        gchar *text = g_strdup(gtk_editable_get_text(GTK_EDITABLE(dependent)));
+        const gboolean is_switch = ADW_IS_SWITCH_ROW(dependent), is_choice = ADW_IS_COMBO_ROW(dependent);
+        if (!is_switch && !is_choice && !GTK_IS_EDITABLE(dependent)) return FALSE;
+        const gboolean saved_switch = is_switch && adw_switch_row_get_active(ADW_SWITCH_ROW(dependent));
+        const guint saved_choice = is_choice ? adw_combo_row_get_selected(ADW_COMBO_ROW(dependent)) : 0;
+        gchar *text = !is_switch && !is_choice ? g_strdup(gtk_editable_get_text(GTK_EDITABLE(dependent))) : NULL;
         adw_switch_row_set_active(control, FALSE);
         gboolean disabled = !gtk_widget_get_sensitive(dependent);
         adw_switch_row_set_active(control, TRUE);
         gboolean enabled = gtk_widget_get_sensitive(dependent);
-        gboolean retained = g_strcmp0(text, gtk_editable_get_text(GTK_EDITABLE(dependent))) == 0;
+        gboolean retained = is_switch ? saved_switch == adw_switch_row_get_active(ADW_SWITCH_ROW(dependent)) :
+            is_choice ? saved_choice == adw_combo_row_get_selected(ADW_COMBO_ROW(dependent)) :
+            g_strcmp0(text, gtk_editable_get_text(GTK_EDITABLE(dependent))) == 0;
         adw_switch_row_set_active(control, saved);
         g_free(text);
-        if (!disabled || !enabled || !retained) return FALSE;
+        if (!disabled || !enabled || !retained) {
+            g_printerr("Configuration self-test: dependency for field %u lost availability or its value.\n", i);
+            return FALSE;
+        }
     }
     if (!found_dependency) return FALSE;
     for (guint i = 0; i < configuration.rows->len; ++i) {
@@ -3670,19 +3678,23 @@ static gboolean configuration_self_test(void) {
     if (language_index >= configuration.rows->len) return FALSE;
     AdwEntryRow *language = ADW_ENTRY_ROW(g_ptr_array_index(configuration.rows, language_index));
     gchar *saved = g_strdup(gtk_editable_get_text(GTK_EDITABLE(language)));
-    ConfigurationSelfTestContext test_context = { .calls = 0, .language_index = language_index };
+    ConfigurationSelfTestContext test_context = {
+        .calls = 0, .language_index = language_index, .empty_choice_index = G_MAXUINT
+    };
     AdwComboRow *choice_row = NULL;
-    AdwComboRow *optional_choice_row = NULL;
+    guint optional_choice_count = 0;
     GArray *original_choices = g_array_new(FALSE, FALSE, sizeof(guint));
     for (guint i = 0; i < configuration.rows->len; ++i) {
         if (((const char *)g_ptr_array_index(configuration.choices, i))[0] == '\0') continue;
         choice_row = ADW_COMBO_ROW(g_ptr_array_index(configuration.rows, i));
-        if (((const char *)g_ptr_array_index(configuration.choices, i))[0] == '\t')
-            optional_choice_row = choice_row;
+        const char *choices = g_ptr_array_index(configuration.choices, i);
+        if (choices[0] == '\t') ++optional_choice_count;
         guint count = g_list_model_get_n_items(adw_combo_row_get_model(choice_row));
-        const gboolean auto_clean = g_strcmp0(
-            g_ptr_array_index(configuration.choices, i), auto_clean_choices) == 0;
-        if (auto_clean ? count != 2 : (count != 3 && count != 4)) {
+        gchar **lines = g_strsplit(choices, "\n", -1);
+        const guint expected_count = g_strv_length(lines);
+        g_strfreev(lines);
+        if (count < 2 || count != expected_count) {
+            g_printerr("Configuration self-test: field %u has %u choices; expected %u.\n", i, count, expected_count);
             g_array_unref(original_choices); return FALSE;
         }
         guint original_choice = adw_combo_row_get_selected(choice_row);
@@ -3714,12 +3726,14 @@ static gboolean configuration_self_test(void) {
         g_strcmp0(gtk_editable_get_text(GTK_EDITABLE(language)), "fr_FR") == 0;
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(language), saved_title);
     g_free(saved_title);
-    if (optional_choice_row != NULL) {
-        test_context.empty_choice = TRUE;
+    for (guint i = 0; i < configuration.rows->len; ++i) {
+        if (((const char *)g_ptr_array_index(configuration.choices, i))[0] != '\t') continue;
+        AdwComboRow *optional_choice_row = ADW_COMBO_ROW(g_ptr_array_index(configuration.rows, i));
+        test_context.empty_choice_index = i;
         adw_combo_row_set_selected(optional_choice_row, 0);
         on_configuration_apply(NULL, NULL);
         adw_combo_row_set_selected(optional_choice_row, 1);
-        test_context.empty_choice = FALSE;
+        test_context.empty_choice_index = G_MAXUINT;
     }
     on_configuration_apply(NULL, NULL);
     on_configuration_apply(NULL, GINT_TO_POINTER(4));
@@ -3750,8 +3764,20 @@ static gboolean configuration_self_test(void) {
     g_free(saved);
     configuration.callback = callback;
     configuration.context = context;
-    return test_context.calls == (optional_choice_row != NULL ? 5 : 4) && title_preserved && availability_preserved &&
-        configuration_auto_clean_self_test() && configuration_warm_approval_self_test();
+    if (test_context.calls != optional_choice_count + 4 || !title_preserved || !availability_preserved) {
+        g_printerr("Configuration self-test: calls %u/%u, title %d, availability %d.\n",
+            test_context.calls, optional_choice_count + 4, title_preserved, availability_preserved);
+        return FALSE;
+    }
+    if (!configuration_auto_clean_self_test()) {
+        g_printerr("Configuration self-test: Auto-Clean Apply did not preserve all fields.\n");
+        return FALSE;
+    }
+    if (!configuration_warm_approval_self_test()) {
+        g_printerr("Configuration self-test: session warm-up approval did not preserve intent and consent.\n");
+        return FALSE;
+    }
+    return TRUE;
 }
 
 static void style_apply(gpointer data) {

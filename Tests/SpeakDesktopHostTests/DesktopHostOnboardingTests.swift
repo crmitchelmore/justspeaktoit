@@ -73,4 +73,13 @@ final class DesktopHostOnboardingTests: XCTestCase {
         XCTAssertFalse(summary.ready)
         XCTAssertFalse(summary.text.isEmpty)
     }
+
+    func testABlockedMicrophoneIsNamedInTheReadyStatus() async throws {
+        let controller = try start()
+        let blocked = DesktopPermissionItem(kind: .microphone, status: .denied, detail: "Microphone access is off.")
+        await controller.setPermissionWarning([blocked])
+        await controller.ready()
+        let expected = try XCTUnwrap(DesktopPermissionSummary.blockingMessage([blocked]))
+        XCTAssertTrue(FakeLog.shared.allStatuses.contains { $0.contains(expected) })
+    }
 }

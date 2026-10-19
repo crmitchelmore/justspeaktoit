@@ -105,6 +105,7 @@ extension DesktopHostController {
         }
         if let deletionWarning { status += " \(deletionWarning)" }
         if let microphoneWarning { status += " \(microphoneWarning)" }
+        if let permissionWarning { status += " \(permissionWarning)" }
         if let profileWarning { status += " \(profileWarning)" }
         return status
     }

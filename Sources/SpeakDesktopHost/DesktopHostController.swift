@@ -290,6 +290,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var localCleanupPresenter: UnsafeMutableRawPointer?
     var localCleanupChoices: [String] = []
     package var microphoneWarning: String?
+    /// A blocked essential permission, appended to the ready status.
+    var permissionWarning: String?
     var cancellationRequested = false {
         didSet { if cancellationRequested { retireCleanupPresentation() } }
     }

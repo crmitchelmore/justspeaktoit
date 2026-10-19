@@ -69,4 +69,11 @@ extension DesktopHostController {
 
     /// The shortcut hint the ready status uses, for the practice step.
     package func onboardingShortcutHint() -> String { Platform.readyHint(hotKeySettings()) }
+
+    /// The dashboard's permission warning: the ready status names a blocked
+    /// essential permission, as the Mac dashboard's permissions section does.
+    /// Unlike the microphone list warning it never holds back prewarming.
+    package func setPermissionWarning(_ items: [DesktopPermissionItem]) {
+        permissionWarning = DesktopPermissionSummary.blockingMessage(items)
+    }
 }

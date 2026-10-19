@@ -322,6 +322,7 @@ enum SpeakWindowsMain {
     }
 
     private static func runWindow(controller: WindowsAppController, holder: WindowsEventContext) async throws {
+        try WindowsNative.configureAbout()
         let providerCallbacks = try WindowsNative.beginVoiceProviderCallbacks(holder)
         defer { WindowsNative.endVoiceProviderCallbacks(providerCallbacks) }
         try await configureWindow(controller: controller, holder: holder)

@@ -3,6 +3,7 @@
 #include <commctrl.h>
 #include <commdlg.h>
 #include <cstdio>
+#include <cstring>
 #include <objbase.h>
 #include <shellapi.h>
 #include <shlobj.h>
@@ -207,8 +208,9 @@ constexpr int setupMicrophoneID = 431, setupModelID = 432, setupShortcutID = 433
 // Settings that were menu commands: the automation switch emits
 // AUTOMATION_TOGGLED; the others open the same dialogs as before.
 constexpr int appearanceLabelID = 440, appearanceID = 441, automationID = 442, azureID = 443, cloudSyncID = 444,
-    shortcutValueID = 445, githubID = 446, issueID = 447, privacyID = 448, loginItemID = 449,
+    shortcutValueID = 445, loginItemID = 449,
     configurationID = 450;
+constexpr int aboutLinkBaseID = 480, aboutDetailsID = 490;
 constexpr UINT tourMessage = WM_APP + 18, appearanceMessage = WM_APP + 19, pageMessage = WM_APP + 20;
 constexpr UINT hudMessage = WM_APP + 21;
 constexpr UINT sidebarMessage = WM_APP + 30;
@@ -313,10 +315,13 @@ struct HistoryPresentation {
 };
 struct MicrophoneRow { std::string id; std::wstring name; };
 struct ModelRow { std::string id; std::wstring name; int mode = 0; int order = -1; };
+struct AboutLink { std::wstring title, url; };
 struct WindowState {
     std::mutex mutex;
     HWND window = nullptr;
     bool running = false;
+    std::wstring aboutDetails = L"Build metadata has not been supplied by this host.";
+    std::vector<AboutLink> aboutLinks;
     bool automationEnabled = false, automationChanged = false;
     // Launch at login: the shared DesktopLoginItemState, -1 until the host
     // reports it; a click waits for the state reached.
@@ -753,6 +758,7 @@ unsigned pagesOf(int identifier) {
     constexpr unsigned all = (1u << pageCount) - 1;
     auto page = [](int value) { return 1u << value; };
     if (identifier >= navBaseID && identifier < navBaseID + pageCount) return all;
+    if (identifier >= aboutLinkBaseID && identifier < aboutLinkBaseID + 8) return page(aboutPage);
     switch (identifier) {
     case statusID: case recordID: case importID: return all;
     case transcriptID: case copyID: return page(dashboardPage) | page(historyPage);
@@ -781,7 +787,7 @@ unsigned pagesOf(int identifier) {
     case comparisonID: return page(transcriptionPage);
     case shortcutValueID: case shortcutID: return page(keyboardPage);
     case cloudSyncID: return page(cloudSyncPage);
-    case githubID: case issueID: case privacyID: return page(aboutPage);
+    case aboutDetailsID: return page(aboutPage);
     default: return page(transcriptionPage);
     }
 }
@@ -811,7 +817,7 @@ Role roleOf(HWND window, int identifier) {
     case copyID: case saveID: return Role::primary;
     case importID: return state.page == historyPage ? Role::heroButton : Role::button;
     case automationID: case loginItemID: return Role::toggle;
-    case statusID: return Role::status;
+    case statusID: case aboutDetailsID: return Role::status;
     case historyDetailID: case modelStatusID: case transcriptLabelID: return Role::caption;
     case playbackTimeID: case shortcutValueID: return Role::value;
     case chipSessionsID: case chipTimeID: case chipSpendID: case historySessionsID: case historyErrorsID:
@@ -1251,20 +1257,35 @@ void layoutAbout(HWND window, const RECT &content) {
     const int inset = densitySpace(window, 22, visualDensity.card_padding), row = scale(window, 34);
     const std::wstring note = L"Open source under the MIT licence. Your audio goes only to the provider you choose, "
         L"or stays on this PC with an on-device model.";
-    int y = layoutSettingsCard(window, content.top, content, 0xE946, L"About", L"", scale(window, 96) + row +
-        scale(window, 60));
+    HDC dc = GetDC(window);
+    const int detailsWidth = widthOf(content) - 2 * inset;
+    const int detailsHeight = jsti::chrome::measure(
+        dc, state.aboutDetails, detailsWidth, jsti::chrome::Font::body, GetDpiForWindow(window)
+    ) + scale(window, 12);
+    const int noteHeight = jsti::chrome::measure(
+        dc, note, detailsWidth, jsti::chrome::Font::body, GetDpiForWindow(window)
+    );
+    ReleaseDC(window, dc);
+    const int gap = scale(window, 8);
+    const int linkRows = (static_cast<int>(state.aboutLinks.size()) + 2) / 3;
+    int y = layoutSettingsCard(window, content.top, content, 0xE946, L"About", L"",
+        scale(window, 96) + noteHeight + detailsHeight + linkRows * (row + gap));
     frame.icon = box(content.left + inset, y, scale(window, 72), scale(window, 72));
     frame.paragraphs.push_back({box(frame.icon.right + scale(window, 18), y + scale(window, 8), scale(window, 480),
                                     scale(window, 30)), L"Just Speak to It", jsti::chrome::Font::title, false});
     frame.paragraphs.push_back({box(frame.icon.right + scale(window, 18), y + scale(window, 38), scale(window, 480),
                                     scale(window, 22)), pageInfo[aboutPage].subtitle, jsti::chrome::Font::body, true});
     y += scale(window, 88);
-    frame.paragraphs.push_back({box(content.left + inset, y, widthOf(content) - 2 * inset, scale(window, 44)), note,
+    frame.paragraphs.push_back({box(content.left + inset, y, detailsWidth, noteHeight), note,
                                 jsti::chrome::Font::body, false});
-    y += scale(window, 52);
-    place(window, githubID, box(content.left + inset, y, scale(window, 150), row));
-    place(window, issueID, box(content.left + inset + scale(window, 158), y, scale(window, 150), row));
-    place(window, privacyID, box(content.left + inset + scale(window, 316), y, scale(window, 150), row));
+    y += noteHeight + gap;
+    place(window, aboutDetailsID, box(content.left + inset, y, widthOf(content) - 2 * inset, detailsHeight));
+    y += detailsHeight;
+    const int linkWidth = (widthOf(content) - 2 * inset - 2 * gap) / 3;
+    for (size_t i = 0; i < state.aboutLinks.size(); ++i)
+        place(window, aboutLinkBaseID + static_cast<int>(i),
+            box(content.left + inset + static_cast<int>(i % 3) * (linkWidth + gap),
+                y + static_cast<int>(i / 3) * (row + gap), linkWidth, row));
 }
 
 void layout(HWND window) {
@@ -1920,12 +1941,13 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"Save History &backup...", BS_PUSHBUTTON | WS_TABSTOP, backupExportID) &&
         add(L"BUTTON", L"&Inspect backup...", BS_PUSHBUTTON | WS_TABSTOP, backupInspectID) &&
         add(L"BUTTON", L"i&Cloud sync settings…", BS_PUSHBUTTON | WS_TABSTOP, cloudSyncID) &&
-        add(L"BUTTON", L"View on &GitHub", BS_PUSHBUTTON | WS_TABSTOP, githubID) &&
-        add(L"BUTTON", L"Report an iss&ue", BS_PUSHBUTTON | WS_TABSTOP, issueID) &&
-        add(L"BUTTON", L"Pri&vacy policy", BS_PUSHBUTTON | WS_TABSTOP, privacyID) &&
+        add(L"STATIC", state.aboutDetails.c_str(), 0, aboutDetailsID) &&
         add(L"STATIC", jsti_hotkey_label().c_str(), 0, transcriptLabelID) &&
         add(L"EDIT", L"", ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL | WS_TABSTOP, transcriptID) &&
         add(L"BUTTON", L"&Copy transcript", BS_PUSHBUTTON | WS_TABSTOP, copyID);
+    for (size_t i = 0; i < state.aboutLinks.size() && okay; ++i)
+        okay = add(L"BUTTON", state.aboutLinks[i].title.c_str(), BS_PUSHBUTTON | WS_TABSTOP,
+            aboutLinkBaseID + static_cast<int>(i));
     SendDlgItemMessageW(window, backupAudioID, BM_SETCHECK, BST_CHECKED, 0);
     for (int identifier : {chipSessionsID, chipTimeID, chipSpendID, insightSessionsID, insightTimeID, insightAverageID,
                            insightSpendID, historySessionsID, historyErrorsID, historyAverageID, historySpendID,
@@ -2621,6 +2643,16 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         trayCommand(window, static_cast<UINT>(wparam));
         return 0;
     case WM_COMMAND:
+        if (LOWORD(wparam) >= aboutLinkBaseID && LOWORD(wparam) < aboutLinkBaseID + 8) {
+            const size_t index = LOWORD(wparam) - aboutLinkBaseID;
+            if (HIWORD(wparam) == BN_CLICKED && state.page == aboutPage && index < state.aboutLinks.size()) {
+                const auto result = reinterpret_cast<INT_PTR>(
+                    ShellExecuteW(window, L"open", state.aboutLinks[index].url.c_str(), nullptr, nullptr, SW_SHOWNORMAL)
+                );
+                if (result <= 32) showFailure(window, "Could not open your browser. Check your default browser settings.");
+            }
+            return 0;
+        }
         if (LOWORD(wparam) >= navBaseID && LOWORD(wparam) < navBaseID + pageCount) {
             if (HIWORD(wparam) == BN_CLICKED) showPage(window, LOWORD(wparam) - navBaseID);
             return 0;
@@ -2714,14 +2746,6 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case backupInspectID:
             if (HIWORD(wparam) == BN_CLICKED && idleControl(window, backupInspectID)) inspectMigrationBackup(window);
             return 0;
-        case githubID: case issueID: case privacyID: {
-            if (HIWORD(wparam) != BN_CLICKED) return 0;
-            const wchar_t *address = LOWORD(wparam) == githubID ? L"https://github.com/crmitchelmore/justspeaktoit"
-                : LOWORD(wparam) == issueID ? L"https://github.com/crmitchelmore/justspeaktoit/issues/new"
-                : L"https://justspeaktoit.com/privacy";
-            ShellExecuteW(window, L"open", address, nullptr, nullptr, SW_SHOWNORMAL);
-            return 0;
-        }
         case appearanceID:
             if (HIWORD(wparam) == CBN_SELCHANGE) {
                 const LRESULT chosen = SendDlgItemMessageW(window, appearanceID, CB_GETCURSEL, 0, 0);
@@ -3104,6 +3128,28 @@ void jsti_window_hotkey_event(HWND window, int event) {
     case JSTI_EVENT_HOTKEY_DEADLINE: emit(window, event); break;
     default: break;
     }
+}
+
+int jsti_window_configure_about(const char *details, const JSTIAboutLink *links, size_t count) {
+    if (!details || !links || count == 0 || count > 8 || std::strlen(details) > 4096) return -1;
+    std::wstring information;
+    if (!jsti::wide(details, information) || information.empty()) return -1;
+    std::vector<AboutLink> copied;
+    for (size_t i = 0; i < count; ++i) {
+        AboutLink link;
+        if (!links[i].title || !links[i].url || std::strlen(links[i].title) > 128 ||
+            std::strlen(links[i].url) > 2048 || !jsti::wide(links[i].title, link.title) ||
+            !jsti::wide(links[i].url, link.url) || link.title.empty() ||
+            link.title.find_first_of(L"\r\n\t") != std::wstring::npos ||
+            link.url.compare(0, 8, L"https://") != 0 || link.url.size() <= 8 ||
+            link.url.find_first_of(L" \r\n\t") != std::wstring::npos) return -1;
+        copied.push_back(std::move(link));
+    }
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (state.running) return -1;
+    state.aboutDetails = std::move(information);
+    state.aboutLinks = std::move(copied);
+    return 0;
 }
 
 int jsti_window_set_history_management(const char *identifiers) {
@@ -3928,6 +3974,19 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     { std::lock_guard<std::mutex> lock(state.mutex); window = state.window; }
     if (!window || GetWindowThreadProcessId(window, nullptr) != GetCurrentThreadId()) {
         return jsti::fail("Window checks must run on the UI thread after READY.", error, errorCapacity);
+    }
+    const JSTIAboutLink lateAboutLink{"Late", "https://example.com/"};
+    if (state.aboutLinks.size() != 6 || controlText(GetDlgItem(window, aboutDetailsID)) != state.aboutDetails ||
+        state.aboutDetails.find(L"Version:") == std::wstring::npos ||
+        jsti_window_configure_about("late", &lateAboutLink, 1) != -1 ||
+        jsti_window_configure_about("late", nullptr, 0) != -1)
+        return jsti::fail("About metadata, canonical links or invalid input refusal failed.", error, errorCapacity);
+    for (size_t i = 0; i < state.aboutLinks.size(); ++i) {
+        HWND button = GetDlgItem(window, aboutLinkBaseID + static_cast<int>(i));
+        if (!button || controlText(button) != state.aboutLinks[i].title ||
+            onPage(aboutLinkBaseID + static_cast<int>(i), dashboardPage) ||
+            !onPage(aboutLinkBaseID + static_cast<int>(i), aboutPage))
+            return jsti::fail("About link labels or page scope failed.", error, errorCapacity);
     }
     if (!cleanupPreviewSelfTest(window))
         return jsti::fail("Cleanup preview bounds, coalescing, navigation or retirement failed.", error, errorCapacity);

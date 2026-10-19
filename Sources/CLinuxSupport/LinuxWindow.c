@@ -41,6 +41,8 @@ static void retire_cleanup_preview(void) {
 typedef struct UI {
     AdwApplication *application;
     GtkWindow *window;
+    GtkLabel *about_details;
+    GtkFlowBox *about_links;
     jsti_window_event_fn callback;
     void *context;
     gint32 flags;
@@ -1689,16 +1691,31 @@ static GtkWidget *build_cloud_sync(void) {
     return page;
 }
 
+static void open_link_finished(GObject *source, GAsyncResult *result, gpointer data) {
+    (void)data;
+    GError *error = NULL;
+    if (!gtk_uri_launcher_launch_finish(GTK_URI_LAUNCHER(source), result, &error)) {
+        g_warning("Could not open the browser: %s", error->message);
+        if (ui.window != NULL && !ui.closing) {
+            gtk_label_set_text(ui.status, "Could not open your browser. Check your default browser settings.");
+            emit(JSTI_EVENT_ERROR, "Could not open your browser. Check your default browser settings.", 0);
+        }
+        g_error_free(error);
+    }
+}
+
 static void open_link(GtkButton *button, gpointer data) {
     (void)button;
     GtkUriLauncher *launcher = gtk_uri_launcher_new(data);
-    gtk_uri_launcher_launch(launcher, ui.window, NULL, NULL, NULL);
+    gtk_uri_launcher_launch(launcher, ui.window, NULL, open_link_finished, NULL);
     g_object_unref(launcher);
 }
 
 static GtkWidget *link_button(const char *label, const char *uri) {
     GtkWidget *button = gtk_button_new_with_label(label);
-    g_signal_connect(button, "clicked", G_CALLBACK(open_link), (gpointer)uri);
+    g_object_set_data_full(G_OBJECT(button), "about-uri", g_strdup(uri), g_free);
+    gtk_widget_set_tooltip_text(button, uri);
+    g_signal_connect(button, "clicked", G_CALLBACK(open_link), g_object_get_data(G_OBJECT(button), "about-uri"));
     return button;
 }
 
@@ -1726,12 +1743,18 @@ static GtkWidget *build_about(void) {
     gtk_label_set_wrap(GTK_LABEL(note), TRUE);
     gtk_label_set_xalign(GTK_LABEL(note), 0);
     gtk_box_append(GTK_BOX(body), note);
-    GtkWidget *links = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    gtk_box_append(GTK_BOX(links), link_button("View on GitHub", "https://github.com/crmitchelmore/justspeaktoit"));
-    gtk_box_append(GTK_BOX(links), link_button(
-        "Report an Issue", "https://github.com/crmitchelmore/justspeaktoit/issues/new"));
-    gtk_box_append(GTK_BOX(links), link_button("Privacy Policy", "https://justspeaktoit.com/privacy"));
-    gtk_box_append(GTK_BOX(body), links);
+    ui.about_details = GTK_LABEL(gtk_label_new("Build metadata has not been supplied by this host."));
+    gtk_label_set_xalign(ui.about_details, 0);
+    gtk_label_set_selectable(ui.about_details, TRUE);
+    gtk_label_set_wrap(ui.about_details, TRUE);
+    gtk_box_append(GTK_BOX(body), GTK_WIDGET(ui.about_details));
+    ui.about_links = GTK_FLOW_BOX(gtk_flow_box_new());
+    gtk_flow_box_set_selection_mode(ui.about_links, GTK_SELECTION_NONE);
+    gtk_flow_box_set_min_children_per_line(ui.about_links, 1);
+    gtk_flow_box_set_max_children_per_line(ui.about_links, 3);
+    gtk_flow_box_set_row_spacing(ui.about_links, 8);
+    gtk_flow_box_set_column_spacing(ui.about_links, 8);
+    gtk_box_append(GTK_BOX(body), GTK_WIDGET(ui.about_links));
     gtk_box_append(GTK_BOX(column), card);
     return page;
 }
@@ -2564,6 +2587,51 @@ static void appearance_apply(gpointer data) {
     adw_combo_row_set_selected(ui.appearance_row, (guint)GPOINTER_TO_INT(data));
     apply_appearance((guint)GPOINTER_TO_INT(data));
     ui.suppress = FALSE;
+}
+
+typedef struct AboutInformation {
+    gchar *details;
+    gchar **titles;
+    gchar **urls;
+} AboutInformation;
+
+static void about_information_free(gpointer pointer) {
+    AboutInformation *information = pointer;
+    g_free(information->details);
+    g_strfreev(information->titles);
+    g_strfreev(information->urls);
+    g_free(information);
+}
+
+static void about_information_apply(gpointer pointer) {
+    AboutInformation *information = pointer;
+    gtk_label_set_text(ui.about_details, information->details);
+    GtkWidget *child;
+    while ((child = gtk_widget_get_first_child(GTK_WIDGET(ui.about_links))) != NULL)
+        gtk_flow_box_remove(ui.about_links, child);
+    for (guint i = 0; information->titles[i] != NULL; ++i)
+        gtk_flow_box_insert(ui.about_links, link_button(information->titles[i], information->urls[i]), -1);
+}
+
+int32_t jsti_window_configure_about(const char *details, const JSTIAboutLink *links, size_t count) {
+    if (details == NULL || links == NULL || count == 0 || count > 8 || strlen(details) > 4096 ||
+        !g_utf8_validate(details, -1, NULL) || details[0] == '\0') return -1;
+    for (size_t i = 0; i < count; ++i) {
+        if (links[i].title == NULL || links[i].url == NULL || strlen(links[i].title) > 128 ||
+            strlen(links[i].url) > 2048 || !g_utf8_validate(links[i].title, -1, NULL) ||
+            !g_utf8_validate(links[i].url, -1, NULL) || links[i].title[0] == '\0' ||
+            strpbrk(links[i].title, "\r\n\t") != NULL || !g_str_has_prefix(links[i].url, "https://") ||
+            strlen(links[i].url) <= 8 || strpbrk(links[i].url, " \r\n\t") != NULL) return -1;
+    }
+    AboutInformation *information = g_new0(AboutInformation, 1);
+    information->details = g_strdup(details);
+    information->titles = g_new0(gchar *, count + 1);
+    information->urls = g_new0(gchar *, count + 1);
+    for (size_t i = 0; i < count; ++i) {
+        information->titles[i] = g_strdup(links[i].title);
+        information->urls[i] = g_strdup(links[i].url);
+    }
+    return post(about_information_apply, information, about_information_free);
 }
 
 int32_t jsti_window_set_appearance(int32_t appearance) {
@@ -4568,6 +4636,23 @@ static gboolean cleanup_preview_self_test(void) {
 int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (jsti_hands_free_guard_self_test(error, capacity) != 0) return -1;
     if (ui.window == NULL) return fail(error, capacity, "the window was not created");
+    const JSTIAboutLink invalid_about_link = {"Invalid", "file:///not-an-update"};
+    if (ui.about_details == NULL || ui.about_links == NULL ||
+        strstr(gtk_label_get_text(ui.about_details), "Version:") == NULL ||
+        jsti_window_configure_about("bad", NULL, 0) != -1 ||
+        jsti_window_configure_about("bad", &invalid_about_link, 1) != -1 ||
+        jsti_window_configure_about("\xff", &invalid_about_link, 1) != -1)
+        return fail(error, capacity, "About metadata or invalid input refusal failed");
+    guint about_count = 0;
+    for (GtkWidget *child = gtk_widget_get_first_child(GTK_WIDGET(ui.about_links));
+         child != NULL; child = gtk_widget_get_next_sibling(child)) {
+        GtkWidget *button = gtk_flow_box_child_get_child(GTK_FLOW_BOX_CHILD(child));
+        const char *uri = g_object_get_data(G_OBJECT(button), "about-uri");
+        if (!GTK_IS_BUTTON(button) || uri == NULL || !g_str_has_prefix(uri, "https://"))
+            return fail(error, capacity, "About link label or destination was not preserved");
+        ++about_count;
+    }
+    if (about_count != 6) return fail(error, capacity, "About canonical links are missing");
     if (!cleanup_preview_self_test())
         return fail(error, capacity, "cleanup preview bounds, coalescing, navigation or retirement failed");
     if (local_cleanup_sources_self_test(error, capacity) != 0) return -1;

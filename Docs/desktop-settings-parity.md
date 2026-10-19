@@ -6,6 +6,38 @@ macOS `AppSettings.DefaultsKey` aliases the shared 91-key
 plus preferences and collections
 outside that enum. Track remaining product acceptance in #1157.
 
+## About and manual updates (source only)
+
+Native About now shows the installed app's version/build when stamped,
+configuration, source commit when present, and platform distribution. The
+existing Windows staging metadata and self-contained bundle manifest are read
+beside the executable; neither the working checkout's `VERSION` nor a Mac
+release is used as the installed desktop version. Missing stamps are labelled
+explicitly. Malformed or oversized metadata produces a visible recovery
+notice, not a fabricated version or silent success.
+
+Windows and Linux retain their native branded About layout and controls.
+Six canonical links shared with the Mac lead to GitHub, issue reporting,
+privacy, releases, feature requests and the MIT licence. GTK links reflow at
+narrow widths; Win32 uses its existing themed keyboard-accessible buttons.
+Browser-launch failures are surfaced. Building or opening About never fetches
+release data, installs an updater, downloads code or changes an app.
+
+These developer previews have **manual updates**, not Sparkle or an equivalent
+automatic updater. The page says so and asks users to check platform
+compatibility on View Releases; it does not call a Mac release "latest" for
+Windows/Linux, report "up to date", or imply that a compatible published package
+exists. Unstamped Linux builds remain explicitly unversioned; a release
+packaging/stamping pipeline is still required before claiming versioned Linux
+distribution or automatic-update parity.
+
+Four authored portable regression methods cover both installed metadata
+shapes, invalid/oversized inputs, honest unstamped identity, visible corruption
+and canonical HTTPS link invariants. Native source fixtures inspect rendered
+metadata/link controls without opening a browser. These checks are **NOT_RUN**
+locally under the standing execution restriction; native rendering, installed
+identity and browser-launch acceptance remain unqualified.
+
 ## Modulate live and batch feature controls (source only)
 
 At `ca2d39fb`, completed portable Linux (2,909 tests; 33 skipped) and macOS

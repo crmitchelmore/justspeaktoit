@@ -27,7 +27,10 @@ final class DesktopLocalRulesConfigurationTests: XCTestCase {
             XCTAssertEqual(options?.includeContextTags, true)
             XCTAssertTrue(DesktopPostProcessingConfiguration.keys.isDisjoint(with: retained.values.keys))
             let exported = try DesktopPostProcessingConfiguration.exportOptions(options, over: retained)
-            XCTAssertEqual(exported, source)
+            var expected = source.values
+            expected[DesktopPostProcessingConfiguration.streamingKey] = AnyCodable(.bool(false))
+            XCTAssertEqual(exported.values, expected)
+            XCTAssertEqual(options?.streamingEnabled, false)
             let restored = try JSONDecoder().decode(
                 DesktopConfiguration.self, from: JSONEncoder().encode(exported)
             )
@@ -68,7 +71,12 @@ final class DesktopLocalRulesConfigurationTests: XCTestCase {
             let retained = try DesktopPostProcessingConfiguration.importOptions(from: source, into: &options)
             XCTAssertEqual(options?.mode, .disabled)
             XCTAssertEqual(options?.modelIdentifier, identifier)
-            XCTAssertEqual(try DesktopPostProcessingConfiguration.exportOptions(options, over: retained), source)
+            var expected = source.values
+            expected[DesktopPostProcessingConfiguration.streamingKey] = AnyCodable(.bool(false))
+            XCTAssertEqual(
+                try DesktopPostProcessingConfiguration.exportOptions(options, over: retained).values, expected
+            )
+            XCTAssertEqual(options?.streamingEnabled, false)
         }
     }
 

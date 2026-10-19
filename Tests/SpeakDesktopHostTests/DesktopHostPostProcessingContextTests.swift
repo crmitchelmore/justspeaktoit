@@ -97,7 +97,11 @@ final class DesktopHostPostProcessingContextTests: XCTestCase {
         let exported = try JSONDecoder().decode(DesktopConfigurationDocument.self, from: Data(contentsOf: file))
         for (key, value) in preferences.values { XCTAssertEqual(exported.preferences.values[key], value) }
         let stored = try await controller.configuration()
-        XCTAssertTrue(DesktopPostProcessingConfiguration.keys.isDisjoint(with: stored.values.keys))
+        let configuration = await controller.settings.configuration
+        let authority = try XCTUnwrap(configuration)
+        XCTAssertTrue(DesktopPostProcessingConfiguration.keys.isDisjoint(with: authority.values.keys))
+        XCTAssertEqual(stored.values[DesktopPostProcessingConfiguration.streamingKey], AnyCodable(.bool(false)))
+        XCTAssertFalse(restored.streamingEnabled)
         XCTAssertEqual(probe.reads, 0)
         XCTAssertEqual(probe.writes, 0)
     }

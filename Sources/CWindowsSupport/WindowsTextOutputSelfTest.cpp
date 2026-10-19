@@ -496,8 +496,16 @@ std::string checkAppSwitchPolicies(Fixture &state) {
         setText(destination.edit, L"destination");
         select(state.host.edit, 8, 8);
         select(destination.edit, 11, 11);
-        if (!state.host.focus(state.host.edit) || !destination.focus(destination.edit) || !capture(target, error))
+        if (!state.host.focus(state.host.edit)) {
+            error = "Could not focus the synthetic original field.";
             return false;
+        }
+        if (!capture(target, error)) return false;
+        // UIA can attach the synthetic GUI queues: capture before moving focus.
+        if (!destination.focus(destination.edit)) {
+            error = "Could not focus the synthetic destination field.";
+            return false;
+        }
         state.pendingTarget = target.value;
         return true;
     };

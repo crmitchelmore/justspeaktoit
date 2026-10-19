@@ -8,6 +8,16 @@ outside that enum. Track remaining product acceptance in #1157.
 
 ## Legacy pronunciation recognition hints (source only)
 
+The preceding `9be6c8aa` automatic Linux/Apple-portable/Windows ARM64 suites
+reported the same 13 assertions across seven test cases: old expectations did
+not distinguish the new explicit streaming export/editor projection from sole
+stored configuration. Updated expectations retain whole-value comparisons,
+explicit false, local-only behavior and immutable capture-policy checks.
+Windows x64 additionally exposed a synthetic self-test ordering defect: capture
+of the original field now precedes moving focus to the destination. Production
+focus validation and all app-switch refusal assertions are unchanged. These
+source repairs require new-head CI; old failed runs do not qualify them.
+
 The Mac's pronunciation-to-AssemblyAI keyterm policy now lives in SpeakCore:
 modern words precede sorted legacy words, case-insensitive duplicates are removed,
 invalid seeds are excluded, explicit terms win, ignored seeds stay suppressed,

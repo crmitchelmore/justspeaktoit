@@ -164,10 +164,16 @@ extension DesktopHostLocalRulesTests {
             let result = await controller.postProcess(record("hello  world ,friend"), options: applied)
             XCTAssertEqual(result.processedText, flag ? "Hello world, friend" : nil)
             let configuration = try await controller.configuration()
-            XCTAssertTrue(DesktopPostProcessingConfiguration.keys.isDisjoint(with: configuration.values.keys))
+            let stored = await controller.settings.configuration
+            let authority = try XCTUnwrap(stored)
+            XCTAssertTrue(DesktopPostProcessingConfiguration.keys.isDisjoint(with: authority.values.keys))
+            XCTAssertEqual(configuration.values[DesktopPostProcessingConfiguration.streamingKey], AnyCodable(.bool(false)))
+            XCTAssertFalse(applied.streamingEnabled)
             try await controller.exportConfiguration(path: file.path)
             let exported = try JSONDecoder().decode(DesktopConfigurationDocument.self, from: Data(contentsOf: file))
-            XCTAssertEqual(exported.preferences, preferences)
+            var expected = preferences.values
+            expected[DesktopPostProcessingConfiguration.streamingKey] = AnyCodable(.bool(false))
+            XCTAssertEqual(exported.preferences.values, expected)
             await controller.close()
             controller = try DesktopHostController(directory: directory, effects: effects)
             let restarted = await controller.postProcessingOptions()

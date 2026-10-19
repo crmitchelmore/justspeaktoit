@@ -100,7 +100,15 @@ final class DesktopHostConfigurationTests: XCTestCase {
         let exported = directory.appendingPathComponent("export.json")
         try await controller.exportConfiguration(path: exported.path)
         let result = try JSONDecoder().decode([String: AnyCodable].self, from: Data(contentsOf: exported))
-        XCTAssertEqual(result, document)
+        let preferences = try XCTUnwrap(document["preferences"])
+        guard case .object(var values) = preferences.storage else {
+            XCTFail("Expected preference object")
+            return
+        }
+        values[DesktopPostProcessingConfiguration.streamingKey] = .bool(false)
+        var expected = document
+        expected["preferences"] = AnyCodable(.object(values))
+        XCTAssertEqual(result, expected)
     }
 
     func testInvalidImportAndApplyLeavePreferencesUnchanged() async throws {

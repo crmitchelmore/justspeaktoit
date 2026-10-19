@@ -39,9 +39,9 @@ test('product checks cover stacked pull requests without broadening push or cred
 test('journey cold preparation and actual runtime have separate finite budgets and always-uploaded evidence', () => {
   const swift = jobBodies['core-journey-e2e'];
   const ui = jobBodies['core-journey-fixture-ui'];
-  assert.match(swift, /^\s+timeout-minutes: 30$/m);
-  assert.match(ui, /^\s+timeout-minutes: 35$/m);
-  assert.match(swift, /timeout-minutes: 12\n\s+run: scripts\/run-core-journey-e2e.sh --phase build/);
+  assert.match(swift, /^\s+timeout-minutes: 40$/m);
+  assert.match(ui, /^\s+timeout-minutes: 42$/m);
+  assert.match(swift, /timeout-minutes: 17\n\s+run: scripts\/run-core-journey-e2e.sh --phase build/);
   assert.match(swift, /timeout-minutes: 10\n\s+run: scripts\/run-core-journey-e2e.sh --phase test/);
   assert.ok(swift.indexOf('--phase build') < swift.indexOf('--phase test'));
   for (const phase of ['setup', 'build', 'test']) {
@@ -58,7 +58,7 @@ test('journey cold preparation and actual runtime have separate finite budgets a
   }
   assert.match(ui, /include-hidden-files: true/);
   assert.match(ui, /path: \|\n\s+\.artifacts\/core-journey-fixture-ui\n\s+!\.artifacts\/core-journey-fixture-ui\/DerivedData/);
-  assert.match(journeyStages, /BUILD_BUDGET = 600/);
+  assert.match(journeyStages, /BUILD_BUDGET = 900/);
   assert.match(journeyStages, /SETUP_BUDGET = 300/);
   assert.match(journeyStages, /RUNTIME_BUDGET = \{"swift": 480, "ui": 600\}/);
   assert.match(journeyStages, /RECEIPT_BUDGET = 60/);

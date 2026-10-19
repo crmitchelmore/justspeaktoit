@@ -28,6 +28,10 @@ final class DesktopLegacyEventSnapshotTests: XCTestCase {
         let index = fixture.modelIndex
         let event = queue.read { await host.captureRecordingEvent(modelIndex: index, executablePath: "event-app") }
         let captured = await event.value
+        let hints = try await host.recognitionVocabulary()
+        let expectedProfile = captured.profile.capturingTranscriptionOptions(
+            try XCTUnwrap(captured.profile.transcriptionOptions).includingPronunciationWords(hints.pronunciationWords)
+        )
         let native = OwnedEventGestureFixture(host: host, event: event, index: index)
         addTeardownBlock { await native.unblock() }
         native.hold()
@@ -47,7 +51,8 @@ final class DesktopLegacyEventSnapshotTests: XCTestCase {
         await native.adopt()
         let recording = await host.recording
         let active = try XCTUnwrap(recording)
-        XCTAssertEqual(active.profile, captured.profile)
+        XCTAssertEqual(active.profile, expectedProfile)
+        XCTAssertEqual(active.profile.transcriptionOptions?.pronunciationKeyterms?.modern, hints.pronunciationWords)
         XCTAssertEqual(active.live?.livePolish?.modelIdentifier, capturedModel)
         XCTAssertEqual(fixture.effects.keyReads.filter { $0 == "assemblyai.apiKey" }, ["assemblyai.apiKey"])
         XCTAssertEqual(fixture.effects.keyReads.filter { $0 != "assemblyai.apiKey" }, ["openrouter.apiKey"])
@@ -96,6 +101,10 @@ final class DesktopLegacyEventSnapshotTests: XCTestCase {
         let queue = DesktopSettingsQueue()
         let event = queue.read { await host.captureRecordingEvent(modelIndex: index, executablePath: nil) }
         let captured = await event.value
+        let hints = try await host.recognitionVocabulary()
+        let expectedProfile = captured.profile.capturingTranscriptionOptions(
+            try XCTUnwrap(captured.profile.transcriptionOptions).includingPronunciationWords(hints.pronunciationWords)
+        )
         XCTAssertEqual(captured.profile.livePolish?.approved, false)
         let native = OwnedEventGestureFixture(host: host, event: event, index: index)
         addTeardownBlock { await native.unblock() }
@@ -117,7 +126,8 @@ final class DesktopLegacyEventSnapshotTests: XCTestCase {
         await native.adopt()
         let recording = await host.recording
         let active = try XCTUnwrap(recording)
-        XCTAssertEqual(active.profile, captured.profile)
+        XCTAssertEqual(active.profile, expectedProfile)
+        XCTAssertEqual(active.profile.transcriptionOptions?.pronunciationKeyterms?.modern, hints.pronunciationWords)
         XCTAssertEqual(active.profile.livePolish?.approved, false)
         fixture.effects.client.emit("unapproved preview")
         if let live = active.live { await host.publishLivePreview(live) }

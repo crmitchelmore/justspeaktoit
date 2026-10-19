@@ -1599,8 +1599,9 @@ static GtkWidget *build_post_processing(void) {
     adw_combo_row_set_selected(ui.polish_location_row, GTK_INVALID_LIST_POSITION);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(ui.polish_location_row));
     AdwActionRow *mode = ADW_ACTION_ROW(adw_action_row_new());
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(mode), "Batch");
-    adw_action_row_set_subtitle(mode, "Post-processing has no streaming route");
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(mode), "Finished-transcript cleanup");
+    adw_action_row_set_subtitle(mode,
+        "Remote cleanup can stream previews when enabled in preferences. Local cleanup completes in one step.");
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(mode));
     ui.polish_models = gtk_string_list_new(NULL);
     ui.polish_slots = g_array_new(FALSE, FALSE, sizeof(gint32));

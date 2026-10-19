@@ -6,6 +6,30 @@ macOS `AppSettings.DefaultsKey` aliases the shared 91-key
 plus preferences and collections
 outside that enum. Track remaining product acceptance in #1157.
 
+## Modulate live feature controls (source only)
+
+The four canonical Modulate booleans are now native Transcription preferences,
+explicitly labelled **Modulate live only**. They enter the immutable recording
+options and the existing Modulate client's query fields; vocabulary merging
+preserves them. No route, provider, credential policy or client protocol changes.
+Apply/import/export/Codable restart use the same strict boolean authority.
+Old root settings are adopted only when nested configuration lacks that key;
+nested values win, and the root copy is removed.
+
+Absent desktop values retain the existing `ModulateLiveOptions.none` behavior:
+all four features off, including after an unrelated native preferences Apply.
+This deliberately does not change Mac defaults (Mac speaker diarization remains
+on) or completed-recording Modulate behavior. Batch feature controls are still a
+gap; the native labels must not imply they affect batch transcription.
+
+Eight authored regression methods cover all 16 feature combinations,
+native entries, strict malformed inputs, real injected client request generation,
+captured Host options, vocabulary merging, root/nested precedence,
+transfer/restart and refused-write atomicity. All are **NOT_RUN** locally.
+Native rendering, provider behavior and installed-package acceptance remain
+unqualified. Linux's old "no streaming route" cleanup subtitle is also corrected:
+remote finished-transcript cleanup can stream previews; local cleanup cannot.
+
 ## Legacy pronunciation recognition hints (source only)
 
 The preceding `9be6c8aa` automatic Linux/Apple-portable/Windows ARM64 suites
@@ -968,10 +992,10 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | transcriptionKeywordsLastReconciled | Wired / Wired | Shared `TranscriptionKeywordPolicy` + Config; unchanged-mirror/deliberate-clear reconciliation, durable last mirror |
 | recoveredTranscriptionKeywords | Wired / Wired | Config; native selected-edit recovery with stale-selection and atomic-write guards |
 | assemblyAIIgnoredPronunciationTerms | Partial source wiring; unqualified / Same | Strict text-array transfer/restart suppresses legacy pronunciation recognition seeds; explicit native keyword clear/reselection updates suppression without changing unrelated entries. No separate suppression-list editor or modern-dictionary seeding. |
-| modulateSpeakerDiarization | Missing / Missing | Modulate live route/options not admitted by baseline desktop factory |
-| modulateEmotionSignal | Missing / Missing | Same provider qualification gap |
-| modulateAccentSignal | Missing / Missing | Same provider qualification gap |
-| modulatePIIPhiTagging | Missing / Missing | Same provider qualification gap |
+| modulateSpeakerDiarization | Live source wired; unqualified / Same | Native live-only boolean reaches captured Modulate query; absent desktop value stays false. Batch controls/native/provider acceptance pending. |
+| modulateEmotionSignal | Live source wired; unqualified / Same | Native live-only boolean, strict transfer/restart and captured provider option; batch controls/native/provider acceptance pending. |
+| modulateAccentSignal | Live source wired; unqualified / Same | Native live-only boolean, strict transfer/restart and captured provider option; batch controls/native/provider acceptance pending. |
+| modulatePIIPhiTagging | Live source wired; unqualified / Same | Native live-only boolean, strict transfer/restart and captured provider option; batch controls/native/provider acceptance pending. |
 | accessibilityInsertionMode | Equivalent / Missing | Output; Windows cursor/replace-field; Linux paste cannot claim AX replace-all equivalence |
 | selectedHotKey | Equivalent / Partial | Shortcuts; Windows Ctrl/Alt native key; Linux desktop/portal-owned binding, never Mac Fn key translation |
 | paidAccessRoutingEnabled | Missing / Missing | BYOK desktop providers; no paid-access entitlement/routing journey |

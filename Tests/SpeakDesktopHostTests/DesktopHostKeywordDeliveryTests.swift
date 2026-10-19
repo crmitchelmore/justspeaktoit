@@ -162,6 +162,40 @@ final class DesktopHostKeywordDeliveryTests: XCTestCase {
         await controller.close()
     }
 
+    func testCapturedModulateOptions_SurviveLaterPreferenceChangesAndVocabularyMerge() async throws {
+        FakeLog.shared.reset()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let effects = KeywordDeliveryEffects()
+        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        var entries = try await controller.configuration().entries
+        for key in DesktopConfiguration.modulatePreferenceKeys {
+            let index = try XCTUnwrap(DesktopConfiguration.fields.firstIndex { $0.key == key })
+            entries[index] = "1"
+        }
+        try await controller.saveConfiguration(entries)
+        let captured = await controller.resolvedProfile(executablePath: nil)
+        _ = try await controller.vocabularyEvent(kind: 0, payload: DesktopVocabularyWire.encode([
+            "save", "", "Lexicon", "Canonical", "Lexicon", "automatic", "", "high", ""
+        ]))
+        for key in DesktopConfiguration.modulatePreferenceKeys {
+            let index = try XCTUnwrap(DesktopConfiguration.fields.firstIndex { $0.key == key })
+            entries[index] = "0"
+        }
+        try await controller.saveConfiguration(entries)
+        _ = try await controller.makeLiveSession(
+            model: "modulate/velma-2-stt-streaming", key: "synthetic", id: UUID(),
+            options: captured.transcriptionOptions
+        )
+        XCTAssertEqual(effects.options.last?.modulate, ModulateLiveOptions(
+            speakerDiarization: true, emotionSignal: true, accentSignal: true, piiPhiTagging: true
+        ))
+        XCTAssertEqual(effects.options.last?.keywords, ["Canonical"])
+        let current = try await controller.configuration()
+        XCTAssertEqual(current.liveOptions.modulate, .none)
+        await controller.close()
+    }
+
     private func saveWords(
         _ words: String, controller: DesktopHostController<FakePlatform>
     ) async throws {

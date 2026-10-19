@@ -162,7 +162,7 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable { // swiftlint:
               group: "General", kind: .number(0...1),
               defaultValue: AnyCodable(.double(RecordingFeedbackDefaults.volume)))
     ] + [VoiceSynthesisPreference.quality.field, VoiceAudioFormat.transferField]
-        + SonioxVoicePreference.fields + LivePolishPreference.fields
+        + SonioxVoicePreference.fields + LivePolishPreference.fields + modulateLiveFields
 
     public private(set) var values: [String: AnyCodable]
 
@@ -317,7 +317,7 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable { // swiftlint:
             assemblyAIKeyterms: pronunciationKeyterms(
                 addingTo: TranscriptionKeywordPolicy.words(from: text("assemblyAIKeyterms"))
             ),
-            modulate: .none, postStopFinalizeBudget: nil, stopGracePeriod: number("liveStopGracePeriod")
+            modulate: modulateLiveOptions, postStopFinalizeBudget: nil, stopGracePeriod: number("liveStopGracePeriod")
         )
     }
 }

@@ -96,14 +96,6 @@ extension DesktopHostReadAloudTests {
             return "Superseded selection."
         }
 
-        private func holdCapturedSource(_ release: Gate) async {
-            await withCheckedContinuation { continuation in
-                Task.detached {
-                    await release.pass()
-                    continuation.resume()
-                }
-            }
-        }
         await entered.pass()
         let previous = await controller.readAloudState.task
         await controller.readVoiceSource(.clipboard) { "Current clipboard." }
@@ -126,6 +118,16 @@ extension DesktopHostReadAloudTests {
             await task?.value
             XCTAssertTrue(statuses.last?.hasPrefix("Read aloud failed:") == true)
             XCTAssertTrue(FakeSpeech.shared.spoken.isEmpty)
+        }
+    }
+
+}
+
+private func holdCapturedSource(_ release: Gate) async {
+    await withCheckedContinuation { continuation in
+        Task.detached {
+            await release.pass()
+            continuation.resume()
         }
     }
 }

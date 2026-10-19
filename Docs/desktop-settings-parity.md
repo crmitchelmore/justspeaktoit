@@ -131,6 +131,12 @@ Native helper regressions cover both exact-limit shapes, trailing empty ranges,
 separator overflow, oversize and embedded-NUL rejection without partial appends.
 These additional regressions are authored but **NOT_RUN** locally.
 
+Automatic qualification at `d7487015` stopped at fixture compilation: a
+captured-source gate helper was nested inside a test, and a Windows SDK
+identifier collided with the undersized-buffer fixture. Both are repaired in
+source. They require a fresh composed-head run; neither repair is passing
+execution evidence.
+
 The shared source type has a distinct captured-selection constructor; the
 ordinary constructor and native Voice message parser still refuse an
 uncaptured external selection. Pronunciation replacement preserves this

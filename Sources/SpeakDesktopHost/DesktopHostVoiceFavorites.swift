@@ -39,6 +39,28 @@ package struct DesktopVoicePickerPresentation: Sendable {
 }
 
 extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
+    package func selectQuickVoice(_ slot: Int) {
+        guard !closed else { return }
+        guard (1...3).contains(slot) else {
+            update("Quick Voice needs a slot from 1 to 3.")
+            return
+        }
+        let saved = voiceOutputSettings()
+        let favorites = saved.favoriteVoices ?? []
+        guard favorites.indices.contains(slot - 1) else {
+            update("Quick Voice \(slot) has no saved favorite. Add favorites in Voice Output.")
+            return
+        }
+        let identifier = favorites[slot - 1]
+        let available = DesktopSpeechVoice.voices + voiceDiscovery.inventories.values.flatMap(\.desktopVoices)
+        let matching = available.filter { $0.favoriteIdentifier == identifier }
+        guard let voice = matching.first(where: { $0.modelID == saved.modelID }) ?? matching.first else {
+            update("Quick Voice \(slot) is unavailable. Refresh account voices or update Favorites in Voice Output.")
+            return
+        }
+        selectVoiceOutput(voice)
+    }
+
     /// No vault lookup or provider switch is performed by managing a favorite.
     package func handleVoicePicker(voiceID: String, action: Int32) {
         guard !closed else { return }

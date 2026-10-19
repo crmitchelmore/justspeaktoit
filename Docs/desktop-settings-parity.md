@@ -27,6 +27,21 @@ further output from starting another observation without fresh approval.
 These changes have not been executed locally; automatic native CI and actual
 installed learning workflows remain required before claiming acceptance.
 
+## Quick Voice action foundation (source only)
+
+The shared Host has an action for Quick Voice slots 1 through 3, using the
+Mac's raw ordered favourite list. Unknown or unavailable entries do not shift
+later favourites into a different slot, and duplicates remain preserved.
+A compatible current model is preferred when several models expose the same
+voice. Selection uses the existing Voice Output persistence and error path;
+it does not start synthesis or perform discovery or credential lookups.
+
+Authored Host regressions cover raw slots, duplicate/unavailable entries,
+model retention, restart, credential isolation, missing/invalid slots and refused persistence.
+These checks are **NOT_RUN** locally. Native shortcut mapping still depends
+on the separately composed shortcut workstream; this foundation alone does
+not make Quick Voice executable from Windows/Linux shortcuts.
+
 ## About and manual updates (source only)
 
 Native About now shows the installed app's version/build when stamped,

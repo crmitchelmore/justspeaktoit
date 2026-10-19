@@ -141,4 +141,80 @@ final class DesktopHostVoiceFavoritesTests: XCTestCase {
         let restored = await controller.voiceOutputSettings()
         XCTAssertEqual(restored.favoriteVoices, [])
     }
+
+    func testQuickVoice_UsesRawFavoriteSlotsWithoutSkippingUnavailableOrDuplicateEntries() async throws {
+        let voices = Array(DesktopSpeechVoice.voices.prefix(3))
+        let favorites = ["future/unavailable", voices[2].favoriteIdentifier, voices[2].favoriteIdentifier]
+        await controller.selectVoiceOutput(voices[0])
+        try await importValues([VoiceFavoritePreference.key: VoiceFavoritePreference.encoded(favorites)])
+        let writes = effects.writes
+        let before = await controller.voiceOutputSettings()
+        await controller.selectQuickVoice(1)
+        let refused = await controller.voiceOutputSettings()
+        XCTAssertEqual(refused, before)
+        XCTAssertEqual(effects.writes, writes)
+        XCTAssertTrue(FakeLog.shared.allStatuses.last?.contains("Quick Voice 1 is unavailable") == true)
+        for slot in [2, 3] {
+            await controller.selectQuickVoice(slot)
+            let selected = await controller.voiceOutputSettings()
+            XCTAssertEqual(selected.voiceID, voices[2].id)
+            XCTAssertEqual(selected.modelID, voices[2].modelID)
+            XCTAssertEqual(selected.favoriteVoices, favorites)
+        }
+        let configuration = try await controller.configuration()
+        XCTAssertNil(configuration.values[VoiceFavoritePreference.key])
+        await controller.close()
+        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        let restored = await controller.voiceOutputSettings()
+        XCTAssertEqual(restored.favoriteVoices, favorites)
+        XCTAssertEqual(restored.voiceID, voices[2].id)
+    }
+
+    func testQuickVoice_PreservesTheCurrentModelWhenItsFavoriteVoiceIsExecutable() async throws {
+        let voice = try XCTUnwrap(DesktopSpeechVoice.voices.first {
+            $0.modelID == "openai/tts-1-hd" && $0.favoriteIdentifier == "openai/alloy"
+        })
+        await controller.selectVoiceOutput(voice)
+        try await importValues([
+            VoiceFavoritePreference.key: VoiceFavoritePreference.encoded(["openai/nova"])
+        ])
+        let before = await controller.voiceOutputSettings()
+        await controller.selectQuickVoice(1)
+        let selected = await controller.voiceOutputSettings()
+        XCTAssertEqual(selected.voiceID, "openai/nova")
+        XCTAssertEqual(selected.modelID, voice.modelID)
+        XCTAssertEqual(selected.quality, before.quality)
+    }
+
+    func testQuickVoice_CrossProviderSelectionDoesNotReadCredentials() async throws {
+        try await importValues([
+            VoiceFavoritePreference.key: VoiceFavoritePreference.encoded(["openai/alloy"])
+        ])
+        FakeLog.shared.installKeyReadHook { name in
+            XCTFail("Quick Voice selection must not read credentials: \(name)")
+        }
+        await controller.selectQuickVoice(1)
+        let selected = await controller.voiceOutputSettings()
+        XCTAssertEqual(selected.voiceID, "openai/alloy")
+    }
+
+    func testQuickVoice_MissingInvalidSlotsAndRefusedWritesPreserveSavedSelection() async throws {
+        let voices = Array(DesktopSpeechVoice.voices.prefix(2))
+        await controller.selectVoiceOutput(voices[0])
+        let writes = effects.writes
+        for slot in [-1, 0, 1, 3, 4] { await controller.selectQuickVoice(slot) }
+        XCTAssertEqual(effects.writes, writes)
+        try await importValues([
+            VoiceFavoritePreference.key: VoiceFavoritePreference.encoded([voices[1].favoriteIdentifier])
+        ])
+        let path = directory.appendingPathComponent("settings.json")
+        let data = try Data(contentsOf: path)
+        let before = await controller.voiceOutputSettings()
+        effects.refusesWrites = true
+        await controller.selectQuickVoice(1)
+        let after = await controller.voiceOutputSettings()
+        XCTAssertEqual(after, before)
+        XCTAssertEqual(try Data(contentsOf: path), data)
+        XCTAssertTrue(FakeLog.shared.allStatuses.last?.contains("Could not save Voice Output settings") == true)
+    }
 }

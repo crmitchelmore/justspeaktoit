@@ -36,8 +36,9 @@ static gboolean number(GtkEntry *entry, double *number) {
     const gchar *text = gtk_editable_get_text(GTK_EDITABLE(entry));
     gchar *end = NULL;
     *number = g_ascii_strtod(text, &end);
+    if (end == text) return FALSE;
     while (end != NULL && g_ascii_isspace(*end)) ++end;
-    return end != NULL && end != text && *end == '\0' && isfinite(*number);
+    return end != NULL && *end == '\0' && isfinite(*number);
 }
 static void normal(GtkButton *button, gpointer data) { (void)button; fill(data, 1, 0, FALSE); }
 static void close_controls(GtkButton *button, gpointer data) {
@@ -230,6 +231,14 @@ int32_t jsti_voice_controls_self_test(GtkWindow *owner, char *error, size_t capa
         !gtk_widget_get_sensitive(GTK_WIDGET(controls->speed)) &&
         !gtk_widget_get_sensitive(GTK_WIDGET(controls->pitch)) &&
         !gtk_widget_get_sensitive(GTK_WIDGET(controls->ssml));
+    const char *invalid_pitch[] = {"", " ", "   ", "nan", "inf", "1tail", "1.5"};
+    for (guint i = 0; i < G_N_ELEMENTS(invalid_pitch); ++i) {
+        gtk_editable_set_text(GTK_EDITABLE(controls->pitch), invalid_pitch[i]);
+        passed = !emit(controls) && receipt.calls == 0 && !controls->saving && passed;
+    }
+    gtk_editable_set_text(GTK_EDITABLE(controls->pitch), " -2 ");
+    double pitch = 0;
+    passed = number(controls->pitch, &pitch) && pitch == -2 && passed;
     normal(NULL, controls);
     passed = emit(controls) && passed && receipt.calls == 1 && receipt.request != NULL &&
         g_strcmp0(receipt.json, "{\"speed\":1,\"pitch\":0,\"useSSML\":false}") == 0 &&

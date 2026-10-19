@@ -62,6 +62,12 @@ struct WindowsNativeEffects: WindowsControllerEffects {
 
     func writeSettings(_ data: Data, to url: URL) throws { try data.write(to: url, options: .atomic) }
 
+    func prepareCaptureWhileIdle(
+        deviceID: String, lifetimeMilliseconds: UInt32
+    ) -> (any DesktopCapturePreparation)? {
+        WindowsCapturePreparation(deviceID: deviceID, lifetimeMilliseconds: lifetimeMilliseconds)
+    }
+
     func voiceCommandClipboardText() async throws -> String? {
         try await Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()

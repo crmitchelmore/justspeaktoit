@@ -1290,6 +1290,18 @@ int jsti_recording_feedback_renderer_self_test(char *error, size_t error_capacit
 int jsti_recording_feedback_check_assets(const char *start_path, const char *stop_path,
                                         char *error, size_t error_capacity);
 
+/* Idle capture preparation (WindowsCapturePrewarm.cpp). A worker resolves and
+ * validates the endpoint and keeps the device enumerator resident for at most
+ * lifetime_milliseconds. It never activates an audio client: no stream opens,
+ * no audio is read and the microphone indicator stays off. Create never
+ * blocks on the device; destroy signals and joins the worker. State: 0
+ * preparing, 1 ready, 2 lifetime ended, -1 unavailable. */
+typedef struct JSTICapturePrewarm JSTICapturePrewarm;
+JSTICapturePrewarm *jsti_capture_prewarm_create(const char *device_id, uint32_t lifetime_milliseconds,
+                                                char *error, size_t error_capacity);
+int jsti_capture_prewarm_state(JSTICapturePrewarm *prewarm);
+void jsti_capture_prewarm_destroy(JSTICapturePrewarm *prewarm);
+
 #ifdef __cplusplus
 }
 #endif

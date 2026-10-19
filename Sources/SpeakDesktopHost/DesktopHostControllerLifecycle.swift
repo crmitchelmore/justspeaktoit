@@ -51,7 +51,7 @@ extension DesktopHostController {
     }
 
     package func ready() async {
-        defer { isReady = true }
+        defer { isReady = true; reconcileCapturePreparation() }
         guard !closed else { return }
         preparePlayback()
         await prepareRecordingFeedback()

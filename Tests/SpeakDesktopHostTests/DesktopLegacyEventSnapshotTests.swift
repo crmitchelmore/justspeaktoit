@@ -110,9 +110,9 @@ final class DesktopLegacyEventSnapshotTests: XCTestCase {
         ])
         try await host.saveConfiguration(later.entries, intent: .apply)
         await host.autoCleanFixtureSettings(options: .init(mode: .disabled, modelIdentifier: laterModel))
-        await host.ownedEventFixtureProfile("Later approved profile")
+        await host.ownedEventFixtureProfile("Later instant profile")
         let current = await host.captureProfile(modelIndex: index, executablePath: nil)
-        XCTAssertEqual(current.livePolish?.approved, true)
+        XCTAssertEqual(current.livePolish?.approved, false, "Applying Instant does not authorize Auto-Clean.")
         XCTAssertTrue(fixture.effects.keyReads.isEmpty)
         await native.adopt()
         let recording = await host.recording

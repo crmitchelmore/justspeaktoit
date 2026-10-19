@@ -27,7 +27,7 @@ extension DesktopHostAutomationTests {
             name: "Read-only profile", transcriptionModelID: "openai/whisper-1", polishEnabled: true,
             languageIdentifier: "en_GB", transcriptionRouting: .remoteBatch
         )
-        await controller.automationFixtureProfile(profile)
+        try await controller.automationFixtureProfile(profile)
         try await importValues([
             "transcriptionKeywords": AnyCodable(.string("Captured, Vocabulary")),
             "speedMode": AnyCodable(.string(SpeedModeID.livePolish.rawValue))
@@ -43,6 +43,7 @@ extension DesktopHostAutomationTests {
         let request = try XCTUnwrap(fixture.requests.first)
         XCTAssertEqual(result.model, profile.transcriptionModelID)
         XCTAssertEqual(request.model, profile.transcriptionModelID)
+        XCTAssertEqual(request.key, "synthetic-profile-key")
         XCTAssertEqual(request.language, snapshot.language)
         XCTAssertEqual(request.keywords, (snapshot.transcriptionOptions?.keywords ?? []) + ["Canonical"])
         XCTAssertFalse(request.historySaved)
@@ -66,6 +67,9 @@ extension DesktopHostAutomationTests {
     }
 
     func testReadOnlyPreparation_CancellationRemovesOnlyTransferredConversionWithoutHistoryClaim() async throws {
+        let previousLocalModels = DesktopHostModels.local
+        DesktopHostModels.configure(streamingQualified: false, local: DesktopLocalTranscription.options(host: .linux))
+        defer { DesktopHostModels.configure(streamingQualified: false, local: previousLocalModels) }
         let input = directory.appendingPathComponent("original.mp3")
         let original = Data([1, 2, 3])
         try original.write(to: input)
@@ -76,6 +80,7 @@ extension DesktopHostAutomationTests {
             return 1
         }
         let model = try XCTUnwrap(WhisperCppModels.all.first).catalogueID
+        XCTAssertTrue(DesktopHostModels.isLocal(model))
         let app = controller!
         let command = Task {
             try await app.transcribePreparedAudio(
@@ -121,13 +126,14 @@ extension DesktopHostAutomationTests {
             name: "Captured profile", transcriptionModelID: "openai/whisper-1", polishEnabled: false,
             languageIdentifier: "en_GB", transcriptionRouting: .remoteBatch
         )
-        await controller.automationFixtureProfile(profile)
+        try await controller.automationFixtureProfile(profile)
         let captured = await controller.resolvedProfile(executablePath: nil)
         _ = try await controller.automationStartDictation()
-        await controller.automationFixtureProfile(DictationProfile(name: "Later profile"))
+        try await controller.automationFixtureProfile(DictationProfile(name: "Later profile"))
         let result = try await controller.automationStopDictation()
         XCTAssertEqual(result.model, profile.transcriptionModelID)
         XCTAssertEqual(fixture.requests.last?.model, profile.transcriptionModelID)
+        XCTAssertEqual(fixture.requests.last?.key, "synthetic-profile-key")
         XCTAssertEqual(fixture.requests.last?.language, captured.language)
         let records = try await controller.store.records()
         let saved = try XCTUnwrap(records.first)
@@ -140,7 +146,7 @@ extension DesktopHostAutomationTests {
         let fixture = AutomationFixtureEffects()
         try await use(fixture)
         FakeLog.shared.setKey("synthetic", name: "openrouter.apiKey")
-        await controller.automationFixtureProfile(DictationProfile(
+        try await controller.automationFixtureProfile(DictationProfile(
             name: "Failure profile", transcriptionModelID: "openai/whisper-1",
             polishEnabled: true, polishModelID: ModelCatalog.defaultFastTextModel,
             transcriptionRouting: .remoteBatch
@@ -226,7 +232,10 @@ extension DesktopHostAutomationTests {
 }
 
 extension DesktopHostController where Platform == FakePlatform {
-    fileprivate func automationFixtureProfile(_ profile: DictationProfile) {
+    fileprivate func automationFixtureProfile(_ profile: DictationProfile) throws {
+        if let model = profile.transcriptionModelID {
+            FakeLog.shared.setKey("synthetic-profile-key", name: try credentialIdentifier(for: model))
+        }
         profiles = [profile]
         manualProfileID = profile.id
         settings.model = "openai/gpt-4o-mini-transcribe"

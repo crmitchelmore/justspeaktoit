@@ -29,6 +29,7 @@ final class DesktopLegacyCapturePolicyTests: XCTestCase {
             "silenceDetectionEnabled": AnyCodable(.bool(true)), "silenceThreshold": AnyCodable(.double(0.05)),
             "silenceDuration": AnyCodable(.double(0.5))
         ])
+        let expectedInitial = try initial.applying(initial.entries)
         try await host.saveConfiguration(initial.entries)
         let queue = DesktopSettingsQueue()
         let event = queue.read { await host.captureRecordingEvent(modelIndex: index, executablePath: nil) }
@@ -48,7 +49,7 @@ final class DesktopLegacyCapturePolicyTests: XCTestCase {
         let active = try XCTUnwrap(recording)
         let policy = await host.recordingCapturePolicy
         XCTAssertEqual(policy?.recordID, active.record.id)
-        XCTAssertEqual(policy?.value.configuration, initial)
+        XCTAssertEqual(policy?.value.configuration, expectedInitial)
         let tail = await host.recordingTailSeconds(recordID: active.record.id)
         XCTAssertEqual(tail, 0)
         let staleTail = await host.recordingTailSeconds(recordID: UUID())
@@ -164,6 +165,7 @@ final class DesktopLegacyCapturePolicyTests: XCTestCase {
         XCTAssertEqual(effects.capture?.destroyCount, 1)
         effects.failStart = false
         let later = try DesktopConfiguration(values: ["postRecordingTailDuration": AnyCodable(.int(2))])
+        let expectedLater = try later.applying(later.entries)
         try await host.saveConfiguration(later.entries)
         let next = await host.captureRecordingEvent(modelIndex: index, executablePath: nil)
         await host.toggleCaptured(next, target: nil, modelIndex: index, deviceID: "synthetic")
@@ -172,7 +174,7 @@ final class DesktopLegacyCapturePolicyTests: XCTestCase {
         XCTAssertNotEqual(active.record.id, failedRecord.id)
         let policy = await host.recordingCapturePolicy
         XCTAssertEqual(policy?.recordID, active.record.id)
-        XCTAssertEqual(policy?.value.configuration, later)
+        XCTAssertEqual(policy?.value.configuration, expectedLater)
         let stale = await host.recordingTailSeconds(recordID: failedRecord.id)
         let current = await host.recordingTailSeconds(recordID: active.record.id)
         XCTAssertNil(stale)

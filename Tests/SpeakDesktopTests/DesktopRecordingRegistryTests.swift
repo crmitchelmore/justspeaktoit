@@ -7,6 +7,42 @@ import Glibc
 #endif
 
 final class DesktopRecordingRegistryTests: XCTestCase {
+    func testCodecRoundTripsCanonicalUnicodePathsWithoutChangingIdentity() throws {
+        let fixture = try RecordingLocationFixture()
+        defer { try? fixture.clean() }
+        let identity = try DesktopRecordingLocationIdentity.directory(fixture.history)
+        let history = fixture.history.appendingPathComponent("Space \u{00e9} \u{1f399}", isDirectory: true)
+        let binding = DesktopRecordingLocationCodec.Binding(
+            id: UUID(), history: history, historyIdentity: identity, namespaceIdentity: identity
+        )
+        let envelope = DesktopRecordingLocationCodec.Envelope(binding: binding, payload: .header)
+        let bytes = try DesktopRecordingLocationCodec.encode(envelope)
+        let decoded = try DesktopRecordingLocationCodec.decode(bytes)
+        XCTAssertEqual(decoded.binding, binding)
+        XCTAssertEqual(Array(decoded.binding.history.path.utf16), Array(history.path.utf16))
+        XCTAssertEqual(try DesktopRecordingLocationCodec.encode(decoded), bytes)
+    }
+
+    #if os(Windows)
+    func testCodecRejectsDriveRelativeRemoteAndNoncanonicalWindowsPaths() throws {
+        let identity = DesktopRecordingLocationIdentity(device: 1, file: 1)
+        for path in [
+            "file:///C:relative", "file://server/share/History", "file:////server/share/History",
+            "file:///C:/Root/../History", "file:///C:/History?query=1", "file:///C:/History#fragment"
+        ] {
+            let binding = DesktopRecordingLocationCodec.Binding(
+                id: UUID(), history: try XCTUnwrap(URL(string: path)),
+                historyIdentity: identity, namespaceIdentity: identity
+            )
+            XCTAssertThrowsError(try DesktopRecordingLocationCodec.encode(.init(binding: binding, payload: .header))) {
+                guard case DesktopRecordingRegistryError.corrupt = $0 else {
+                    return XCTFail("Expected a rejected local path, not an identity or publication fallback.")
+                }
+            }
+        }
+    }
+    #endif
+
     func testCodecRejectsTruncationTrailingBytesCorruptionAndForeignNames() throws {
         let fixture = try RecordingLocationFixture()
         defer { try? fixture.clean() }

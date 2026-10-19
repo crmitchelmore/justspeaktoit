@@ -180,11 +180,23 @@ enum DesktopRecordingLocationCodec {
     private static func validatedPath(_ url: URL) throws -> Data {
         let bytes = Data(url.path.utf8)
         guard url.isFileURL, url.host?.isEmpty != false, url.query == nil, url.fragment == nil,
-              url.path.hasPrefix("/"), !bytes.contains(0), !bytes.isEmpty, bytes.count <= 4_096,
+              isAbsoluteLocalPath(url.path), !bytes.contains(0), !bytes.isEmpty, bytes.count <= 4_096,
               url.standardizedFileURL.path == url.path,
               url.pathComponents.allSatisfy({ $0 != "." && $0 != ".." }) else {
             throw DesktopRecordingRegistryError.corrupt
         }
         return bytes
+    }
+
+    private static func isAbsoluteLocalPath(_ path: String) -> Bool {
+        #if os(Windows)
+        // Foundation exposes drive-rooted file paths without the URL's leading slash.
+        let prefix = Array(path.utf16.prefix(3))
+        guard prefix.count == 3, prefix[1] == 0x3a,
+              prefix[2] == 0x2f || prefix[2] == 0x5c else { return false }
+        return (0x41...0x5a).contains(prefix[0]) || (0x61...0x7a).contains(prefix[0])
+        #else
+        return path.hasPrefix("/")
+        #endif
     }
 }

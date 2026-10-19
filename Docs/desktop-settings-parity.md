@@ -59,8 +59,11 @@ recording HUD. Missing targets and delivery failures remain visible. Authored
 Host regressions cover selection/search independence, processed/raw text,
 clipboard-only output, empty newest entries, target/delivery errors, no
 credential lookup and no observational readback even with local approval.
-These checks are **NOT_RUN** locally; native shortcut capture/mapping is still
-pending and this foundation is not a claim of executable shortcut parity.
+These checks are **NOT_RUN** locally. Windows maps the Paste Last History Item
+action shortcut to it (`JSTI_ACTION_RUN_PASTE_LAST_HISTORY` emits
+`JSTI_EVENT_PASTE_LAST_HISTORY`); the callback captures the focused field on the
+UI thread before queueing the Host action, as the Record event does. Linux has
+no action shortcut registration yet.
 
 ## About and manual updates (source only)
 
@@ -2087,7 +2090,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | modulatePIIPhiTagging | Live/batch source wired; unqualified / Same | Native default/on/off choice, strict transfer/restart and captured live/batch provider flags; absent stays off. Native/provider acceptance pending. |
 | accessibilityInsertionMode | Equivalent / Missing | Output; Windows cursor/replace-field; Linux paste cannot claim AX replace-all equivalence |
 | selectedHotKey | Equivalent / Partial | Shortcuts; Windows Ctrl/Alt native key; Linux desktop/portal-owned binding, never Mac Fn key translation |
-| customShortcutBindings | Partial source wiring; unqualified / Shared model only | Windows Keyboard **Action shortcuts** dialog: 22 of 27 actions run, the rest stay stored for the Mac; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Linux transfers the Mac-compatible value unchanged without native registration. Native/physical acceptance pending. |
+| customShortcutBindings | Partial source wiring; unqualified / Shared model only | Windows Keyboard **Action shortcuts** dialog: 23 of 27 actions run, the rest stay stored for the Mac; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Linux transfers the Mac-compatible value unchanged without native registration. Native/physical acceptance pending. |
 | paidAccessRoutingEnabled | Apple-specific / Apple-specific | BYOK desktop providers; no paid-access entitlement/routing journey. Retained opaque through import/export |
 | simpleModelChoices | Missing / Missing | Native catalogue picker without simplified paid-model chooser |
 | rememberedLocalTranscriptionSource | Partial / Partial | Models remembers Local selection; no Apple on-device source |
@@ -2316,11 +2319,12 @@ Profiles, Keyboard and About. Data & Migration shows General, which holds the
 Windows backup, export and inspection controls; API Keys, Permissions and
 Compare Models press the All API keys, Permissions and Compare models buttons
 when enabled; Quick Voice 1-3 select the saved favourite in that slot through the
-shared Host action. Speak Selected Text, Speak Clipboard, Troubleshooting,
-Paste Last History Item and Edit Selection by Voice are marked
-**Mac only** in the editor and stay stored. Only Start/Stop Recording can work in
-other apps (`RegisterHotKey`, which needs Ctrl or Alt, or F13-F24 alone); other
-actions work while the window has focus. Global registration that Windows or
+shared Host action; Paste Last History Item delivers the newest History item
+(regardless of filters or selection) with the saved text-output settings. Speak
+Selected Text, Speak Clipboard, Troubleshooting and Edit Selection by Voice are
+marked **Mac only** in the editor and stay stored. Only Start/Stop Recording and
+Paste Last History Item can work in other apps (`RegisterHotKey`, which needs
+Ctrl or Alt, or F13-F24 alone); other actions work while the window has focus. Global registration that Windows or
 another app refuses is reported in the dialog and status line, and that shortcut
 falls back to this window. Typing in text fields, list/combo navigation and
 button activation keep their keys.

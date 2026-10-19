@@ -3383,6 +3383,8 @@ void jsti_window_action_command(HWND window, int run, const char *page) {
         emit(window, JSTI_EVENT_QUICK_VOICE, slot);
         break;
     }
+    // The Host decides whether output can run now; the latest item may be hidden by filters.
+    case JSTI_ACTION_RUN_PASTE_LAST_HISTORY: emit(window, JSTI_EVENT_PASTE_LAST_HISTORY); break;
     default: break;
     }
 }

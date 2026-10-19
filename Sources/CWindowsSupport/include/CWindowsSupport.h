@@ -69,6 +69,8 @@ enum JSTIWindowEvent {
     JSTI_EVENT_MIGRATION_RESTORE = 98, /* text: selected ZIP source; prepares a preview only */
     JSTI_EVENT_MIGRATION_RESTORE_RESPONSE = 99, /* text: preview token; index: 0 cancel, 1 merge, 2 replace */
     JSTI_EVENT_QUICK_VOICE = 110, /* text: favorite slot "1"-"3" from an action shortcut */
+    /* Paste Last History Item shortcut; capture the insertion target in the callback. */
+    JSTI_EVENT_PASTE_LAST_HISTORY = 111,
     JSTI_EVENT_USER_ABSENT = 120
 };
 
@@ -1411,7 +1413,8 @@ enum {
     JSTI_ACTION_RUN_COMPARE = 7,     /* as Transcription's Compare models button */
     JSTI_ACTION_RUN_QUICK_VOICE_1 = 8, /* JSTI_EVENT_QUICK_VOICE for favorite slot 1 */
     JSTI_ACTION_RUN_QUICK_VOICE_2 = 9,
-    JSTI_ACTION_RUN_QUICK_VOICE_3 = 10
+    JSTI_ACTION_RUN_QUICK_VOICE_3 = 10,
+    JSTI_ACTION_RUN_PASTE_LAST_HISTORY = 11 /* JSTI_EVENT_PASTE_LAST_HISTORY */
 };
 typedef struct {
     const char *identifier;

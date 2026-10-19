@@ -234,6 +234,11 @@ private func otherWindowEvent(_ event: Int32, value: String, holder: WindowsEven
     case 110:
         guard let slot = Int(value) else { return }
         holder.enqueueSettings { await controller.selectQuickVoice(slot) }
+    case 111:
+        // As at the Record event: capture the focused field before anything else can change it.
+        // Clipboard-only output accepts no target; the Host reports a missing required one.
+        let target = try? WindowsInsertionTarget.capture()
+        holder.enqueueSettings { await controller.pasteLastHistoryItem(target: target) }
     default: break
     }
 }

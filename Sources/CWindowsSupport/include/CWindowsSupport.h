@@ -1290,6 +1290,19 @@ int jsti_recording_feedback_renderer_self_test(char *error, size_t error_capacit
 int jsti_recording_feedback_check_assets(const char *start_path, const char *stop_path,
                                         char *error, size_t error_capacity);
 
+/* General > CLI and MCP setup dialog: the automation pipe name, the installed
+ * speak.exe path (empty when it is not beside the app) and the copyable
+ * `speak` usage, MCP client configuration and Claude Code command built by the
+ * host. Text only: no credential passes through. Thread safe; -1 for a NULL,
+ * oversized (over 16 KiB) or invalid UTF-8 field. The dialog's on/off button
+ * emits JSTI_EVENT_AUTOMATION_TOGGLED exactly as General's switch does. */
+int jsti_window_set_automation_details(const char *pipe_name, const char *cli_path, const char *usage,
+                                       const char *mcp_configuration, const char *claude_command);
+/* The installed `speak` command as UTF-8: speak.exe beside the app for the
+ * portable bundle, or the package's CLI execution alias for the MSIX. 1 when
+ * found, 0 (empty buffer) when absent, -1 for a NULL/zero or too-small buffer. */
+int jsti_automation_cli_path(char *buffer, size_t capacity);
+
 #ifdef __cplusplus
 }
 #endif

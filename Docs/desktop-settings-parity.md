@@ -65,13 +65,46 @@ action shortcut to it (`JSTI_ACTION_RUN_PASTE_LAST_HISTORY` emits
 UI thread before queueing the Host action, as the Record event does. Linux has
 no action shortcut registration yet.
 
+## Troubleshooting (source only)
+
+Windows About and the Open Troubleshooting action now open a distinct modeless
+report, not an alias for Permissions. It checks the saved recording shortcut,
+clipboard restoration, missing remote post-processing credentials and observed
+Windows permission states. The configuration check inventory, wording, severity,
+destinations and explicit fixes live in `SpeakCore/DesktopTroubleshooting.swift`;
+macOS consumes that inventory while retaining its own permission and Fn guidance.
+Linux can consume the shared policy but has no native Troubleshooting report yet.
+
+Findings have scrollable, read-only details, settings navigation, and explicit
+Keep transcript or Disable cleanup actions where applicable. No fix runs on
+opening or rechecking. Fixes use the existing settings authorities, refuse stale
+choices and busy/closed controllers, and recheck a previously missing credential
+before disabling cleanup. Unreadable credentials and unknown permissions are
+reported as unknown/warnings, never assumed missing or granted. Refreshes,
+close/reopen and fixes have revision fences so late results cannot enable stale
+actions. The existing Permissions renderer is shared, with independent report
+state, keyboard navigation, labelled controls and DPI-aware layout/font updates.
+Successful fixes refresh the native settings controls from their persisted
+authorities. A pending fix briefly fences concurrent settings dialogs; closing
+the report releases that fence and rejects late presentation.
+
+Four portable regressions cover the canonical inventory, local/disabled/keyed
+processing, missing versus unreadable credentials, and explicit clipboard fixes.
+Native controller fixtures cover stale fixes, refused writes, other-setting
+preservation, credential changes, shutdown and restart. The window smoke fixture
+checks the action entry, read-only details, pending-action gating, stale/closed
+result refusal and invalid commands without applying real settings. These are
+authored **NOT_RUN** checks; compilation, native UI and installed acceptance
+remain required. Windows uses action-run 14 and About control 453, with no new
+window event.
+
 ## Selected-text and clipboard speech shortcuts (source only)
 
 Windows wires Speak Selected Text and Speak Clipboard through the existing
 Read aloud task, saved Voice Output selection/options, pronunciation rendering,
 credential policy, usage and native playback. They do not borrow the selected
 History record. Both are eligible for global registration. This brings Windows
-to **25 of 27 source-wired actions**, not verified shortcut parity.
+to **26 of 27 source-wired actions** with Troubleshooting below, not verified shortcut parity.
 
 Selected text uses a read-only target captured in the native callback. Its
 existing bounded UI Automation worker starts a snapshot before the settings
@@ -2153,7 +2186,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | modulatePIIPhiTagging | Live/batch source wired; unqualified / Same | Native default/on/off choice, strict transfer/restart and captured live/batch provider flags; absent stays off. Native/provider acceptance pending. |
 | accessibilityInsertionMode | Equivalent / Missing | Output; Windows cursor/replace-field; Linux paste cannot claim AX replace-all equivalence |
 | selectedHotKey | Equivalent / Partial | Shortcuts; Windows Ctrl/Alt native key; Linux desktop/portal-owned binding, never Mac Fn key translation |
-| customShortcutBindings | Partial source wiring; unqualified / Shared model only | Windows Keyboard **Action shortcuts** dialog: 25 of 27 actions source-wired, the rest stay stored for the Mac; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Linux transfers the Mac-compatible value unchanged without native registration. Native/physical acceptance pending. |
+| customShortcutBindings | Partial source wiring; unqualified / Shared model only | Windows Keyboard **Action shortcuts** dialog: 26 of 27 actions source-wired, the remaining action stays stored for the Mac; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Linux transfers the Mac-compatible value unchanged without native registration. Native/physical acceptance pending. |
 | paidAccessRoutingEnabled | Apple-specific / Apple-specific | BYOK desktop providers; no paid-access entitlement/routing journey. Retained opaque through import/export |
 | simpleModelChoices | Missing / Missing | Native catalogue picker without simplified paid-model chooser |
 | rememberedLocalTranscriptionSource | Partial / Partial | Models remembers Local selection; no Apple on-device source |
@@ -2386,8 +2419,9 @@ when enabled; Quick Voice 1-3 select the saved favourite in that slot through th
 shared Host action; Paste Last History Item delivers the newest History item
 (regardless of filters or selection) with the saved text-output settings. Speak
 Selected Text and Speak Clipboard read their own captured source through the
-existing Voice Output pipeline. Troubleshooting and Edit Selection by Voice
-remain missing Windows features; their bindings stay stored for the Mac.
+existing Voice Output pipeline. Troubleshooting opens the local configuration
+and permission report. Edit Selection by Voice remains a missing Windows
+feature; its binding stays stored for the Mac.
 Start/Stop Recording, Paste Last History Item, Speak Selected Text and Speak
 Clipboard can work in other apps (`RegisterHotKey`, which needs
 Ctrl or Alt, or F13-F24 alone); other actions work while the window has focus. Global registration that Windows or

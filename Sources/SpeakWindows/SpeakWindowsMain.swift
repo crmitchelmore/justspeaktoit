@@ -350,6 +350,7 @@ enum SpeakWindowsMain {
         try await controller.configureModelCatalog()
         await WindowsPresentation.configureAppearance(controller)
         holder.configurePermissions()
+        try holder.configureTroubleshooting()
         holder.configureGuide()
         await WindowsPresentation.configureShell(controller)
     }
@@ -394,6 +395,7 @@ enum SpeakWindowsMain {
         jsti_window_clear_configuration()
         jsti_guide_clear()
         jsti_permissions_clear()
+        jsti_troubleshooting_clear()
         await releaseServices(holder)
         await WindowsAutomationSwitch.shutDown(holder)
         // Closing first cancels a shortcut's transcription instead of waiting

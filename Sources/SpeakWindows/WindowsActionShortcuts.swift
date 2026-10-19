@@ -13,7 +13,7 @@ extension WindowsHostPlatform {
 /// yet keep their bindings for the Mac and are shown as Mac only.
 enum WindowsActionShortcutRun: Equatable {
     case macOnly, record, page(String), playPause, stopSpeech, apiKeys, permissions, compareModels
-    case quickVoice(Int), pasteLastHistoryItem, speakSelectedText, speakClipboard
+    case quickVoice(Int), pasteLastHistoryItem, speakSelectedText, speakClipboard, troubleshooting
 
     init(_ action: DesktopShortcutAction) {
         switch action {
@@ -42,8 +42,8 @@ enum WindowsActionShortcutRun: Equatable {
         case .pasteLastHistoryItem: self = .pasteLastHistoryItem
         case .speakSelectedText: self = .speakSelectedText
         case .speakClipboard: self = .speakClipboard
-        case .openTroubleshooting, .editSelectionByVoice:
-            self = .macOnly
+        case .openTroubleshooting: self = .troubleshooting
+        case .editSelectionByVoice: self = .macOnly
         }
     }
 
@@ -65,6 +65,7 @@ enum WindowsActionShortcutRun: Equatable {
         case .pasteLastHistoryItem: return Int32(JSTI_ACTION_RUN_PASTE_LAST_HISTORY)
         case .speakSelectedText: return Int32(JSTI_ACTION_RUN_SPEAK_SELECTED_TEXT)
         case .speakClipboard: return Int32(JSTI_ACTION_RUN_SPEAK_CLIPBOARD)
+        case .troubleshooting: return Int32(JSTI_ACTION_RUN_TROUBLESHOOTING)
         }
     }
 

@@ -44,6 +44,7 @@ enum WindowsCommandLineSelfTests {
         try await WindowsHotKeySelfTest.run()
         try await WindowsHistoryRetrySelfTest.run()
         try await WindowsPostProcessingSelfTest.run()
+        try await WindowsTroubleshootingSelfTest.run()
         try WindowsNative.storageMediaAndAutomationSelfTests()
         try await WindowsLocalSelfTest.run()
         guard !DesktopTranscription.batchModels.isEmpty else {

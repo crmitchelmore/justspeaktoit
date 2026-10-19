@@ -6,6 +6,9 @@ public enum SpeechDefaults {
     public static let outputLanguage = "English"
     public static let postProcessingIncludeLexiconDirectives = true
     public static let postProcessingIncludeContextTags = true
+    public static let postProcessingStreamingEnabled = true
+    /// Pre-streaming desktop documents and API calls retain their completed-only behavior.
+    public static let desktopLegacyPostProcessingStreamingEnabled = false
     public static let liveStopGracePeriod = 0.0
     public static let recordingTailDuration = 0.5
     public static let voiceCommandsEnabled = true
@@ -102,6 +105,10 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable { // swiftlint:
         .init(key: ApplicationPreferenceKey.postProcessingTemperature.rawValue, title: "Temperature (0 to 1)",
               group: "Post-processing", kind: .number(0...1),
               defaultValue: AnyCodable(.double(SpeechDefaults.temperature))),
+        .init(key: ApplicationPreferenceKey.postProcessingStreamingEnabled.rawValue,
+              title: "Stream remote cleanup previews (local cleanup is completed-only)",
+              group: "Post-processing", kind: .boolean,
+              defaultValue: AnyCodable(.bool(SpeechDefaults.postProcessingStreamingEnabled))),
         .init(key: ApplicationPreferenceKey.postProcessingOutputLanguage.rawValue,
               title: "Output language (blank keeps the transcript language)",
               group: "Post-processing", kind: .text,

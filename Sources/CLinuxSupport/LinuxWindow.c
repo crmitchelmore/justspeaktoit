@@ -23,6 +23,21 @@ typedef struct Models Models;
 static void models_free(gpointer pointer);
 static void on_model_filter(gboolean local, gboolean live);
 
+static GMutex cleanup_lock;
+static guint64 cleanup_ticket;
+static gboolean cleanup_active, cleanup_posted;
+static gchar *cleanup_text;
+/* UI-thread only; preview text is never a Copy/export/read-aloud source. */
+static gboolean cleanup_visible;
+
+static void retire_cleanup_preview(void) {
+    g_mutex_lock(&cleanup_lock);
+    ++cleanup_ticket;
+    cleanup_active = FALSE;
+    g_clear_pointer(&cleanup_text, g_free);
+    g_mutex_unlock(&cleanup_lock);
+}
+
 typedef struct UI {
     AdwApplication *application;
     GtkWindow *window;
@@ -249,8 +264,8 @@ static void refresh_actions(void) {
     g_free(text);
     gboolean has_record = ui.selected_id != NULL;
     gboolean presented = has_record && g_strcmp0(ui.presented_id, ui.selected_id) == 0;
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.copy), has_text);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.dashboard_copy), has_text);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.copy), has_text && !cleanup_visible);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.dashboard_copy), has_text && !cleanup_visible);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.cancel), ui.state == JSTI_STATE_WORKING);
     gtk_widget_set_visible(GTK_WIDGET(ui.cancel), ui.state == JSTI_STATE_WORKING);
     gboolean recording = ui.state == JSTI_STATE_RECORDING;
@@ -338,11 +353,13 @@ void jsti_window_tray_command(int command) {
 
 static void on_cancel(GtkButton *button, gpointer data) {
     (void)button; (void)data;
+    retire_cleanup_preview();
     emit(JSTI_EVENT_CANCEL, "", 0);
 }
 
 static void on_copy(GtkButton *button, gpointer data) {
     (void)button; (void)data;
+    if (cleanup_visible) return;
     emit(JSTI_EVENT_COPY, "", 0);
 }
 
@@ -603,6 +620,7 @@ static void on_history_selected(GtkListBox *box, GtkListBoxRow *row, gpointer da
     if (index < 0 || (guint)index >= ui.history_ids->len) return;
     const char *id = g_ptr_array_index(ui.history_ids, index);
     if (g_strcmp0(id, ui.selected_id) == 0) return;
+    retire_cleanup_preview();
     g_free(ui.selected_id);
     ui.selected_id = g_strdup(id);
     /* Stale text never stays under another record's actions. */
@@ -619,6 +637,7 @@ static void on_version(GObject *object, GParamSpec *spec, gpointer data) {
     if (ui.selected_id == NULL || g_strcmp0(ui.presented_id, ui.selected_id) != 0) return;
     guint selected = gtk_drop_down_get_selected(ui.version);
     if ((gint32)selected == ui.presented_variant) return;
+    retire_cleanup_preview();
     ui.presented_variant = (gint32)selected;
     emit(JSTI_EVENT_TRANSCRIPT_VERSION, ui.selected_id, (gint32)selected);
 }
@@ -871,6 +890,7 @@ static void on_import(GtkButton *button, gpointer data) {
 
 static gboolean on_close_request(GtkWindow *window, gpointer data) {
     (void)window; (void)data;
+    retire_cleanup_preview();
     jsti_voice_sources_close();
     jsti_voice_credentials_close();
     ui.closing = TRUE;
@@ -958,6 +978,7 @@ static struct {
 
 static void show_page(gint32 page) {
     if (page < 0 || page >= JSTI_PAGE_COUNT) return;
+    if (ui.page != page) retire_cleanup_preview();
     ui.page = page;
     if (page == JSTI_PAGE_CORRECTIONS || page == JSTI_PAGE_PRONUNCIATION)
         emit(71, "", page == JSTI_PAGE_CORRECTIONS ? 0 : 1);
@@ -2032,6 +2053,7 @@ static void update_apply(gpointer pointer) {
     Update *update = pointer;
     if (update->status != NULL) gtk_label_set_text(ui.status, update->status);
     if (update->has_transcript) {
+        cleanup_visible = FALSE;
         set_transcript(update->transcript);
         /* Global text is not bound to a record. */
         g_clear_pointer(&ui.presented_id, g_free);
@@ -2039,6 +2061,70 @@ static void update_apply(gpointer pointer) {
     if (update->state >= 0) ui.state = update->state;
     refresh_actions();
     jsti_tray_set_state(ui.state, ui.tray_summary);
+}
+
+static void cleanup_preview_apply(gpointer pointer) {
+    (void)pointer;
+    g_mutex_lock(&cleanup_lock);
+    cleanup_posted = FALSE;
+    if (cleanup_active && cleanup_text != NULL && !ui.closing && ui.state == JSTI_STATE_WORKING &&
+        (ui.page == JSTI_PAGE_DASHBOARD || ui.page == JSTI_PAGE_HISTORY)) {
+        set_transcript(cleanup_text);
+        cleanup_visible = TRUE;
+        gtk_label_set_text(ui.status, "Streaming cleanup preview. The original is saved in History.");
+        g_clear_pointer(&ui.presented_id, g_free);
+        gtk_widget_set_sensitive(GTK_WIDGET(ui.copy), FALSE);
+        gtk_widget_set_sensitive(GTK_WIDGET(ui.dashboard_copy), FALSE);
+    }
+    g_clear_pointer(&cleanup_text, g_free);
+    g_mutex_unlock(&cleanup_lock);
+}
+
+uint64_t jsti_window_begin_cleanup_preview(void) {
+    g_mutex_lock(&cleanup_lock);
+    if (++cleanup_ticket == 0) ++cleanup_ticket;
+    cleanup_active = TRUE;
+    g_clear_pointer(&cleanup_text, g_free);
+    guint64 ticket = cleanup_ticket;
+    g_mutex_unlock(&cleanup_lock);
+    return ticket;
+}
+
+void jsti_window_end_cleanup_preview(uint64_t ticket) {
+    g_mutex_lock(&cleanup_lock);
+    if (ticket == cleanup_ticket) {
+        ++cleanup_ticket;
+        cleanup_active = FALSE;
+        g_clear_pointer(&cleanup_text, g_free);
+    }
+    g_mutex_unlock(&cleanup_lock);
+}
+
+int32_t jsti_window_cleanup_preview(const char *text, uint64_t ticket) {
+    if (text == NULL || strlen(text) > 65536 || !g_utf8_validate(text, -1, NULL)) return -1;
+    g_mutex_lock(&post_lock);
+    gboolean closed = window_closed;
+    g_mutex_unlock(&post_lock);
+    if (closed) return 1;
+    g_mutex_lock(&cleanup_lock);
+    if (!cleanup_active || ticket != cleanup_ticket) {
+        g_mutex_unlock(&cleanup_lock);
+        return 1;
+    }
+    g_free(cleanup_text);
+    cleanup_text = g_strdup(text);
+    gboolean submit = !cleanup_posted;
+    cleanup_posted = TRUE;
+    g_mutex_unlock(&cleanup_lock);
+    if (!submit) return 0;
+    int32_t result = post(cleanup_preview_apply, NULL, NULL);
+    if (result != 0) {
+        g_mutex_lock(&cleanup_lock);
+        cleanup_posted = FALSE;
+        g_clear_pointer(&cleanup_text, g_free);
+        g_mutex_unlock(&cleanup_lock);
+    }
+    return result;
 }
 
 int32_t jsti_window_update(const char *status, const char *transcript, int32_t state) {
@@ -2682,6 +2768,7 @@ static void presentation_apply(gpointer pointer) {
     }
     g_free(ui.presented_id);
     ui.presented_id = g_strdup(presentation->id);
+    cleanup_visible = FALSE;
     ui.presented_variant = presentation->variant;
     ui.presented_switchable = presentation->switchable;
     if (presentation->variant >= 0) gtk_drop_down_set_selected(ui.version, (guint)presentation->variant);
@@ -4303,9 +4390,66 @@ static int32_t local_cleanup_sources_self_test(char *error, size_t capacity) {
     return okay ? 0 : fail(error, capacity, "local cleanup source/index/prompt/privacy controls failed");
 }
 
+static gboolean cleanup_preview_self_test(void) {
+    gchar *original = displayed_transcript();
+    gchar *status = g_strdup(gtk_label_get_text(ui.status));
+    gchar *presented = g_strdup(ui.presented_id);
+    gint32 state = ui.state, page = ui.page;
+    gboolean visible = cleanup_visible;
+    jsti_window_event_fn callback = ui.callback;
+    ui.callback = NULL;
+    ui.state = JSTI_STATE_WORKING;
+    show_page(JSTI_PAGE_DASHBOARD);
+    guint64 first = jsti_window_begin_cleanup_preview();
+    gboolean okay = jsti_window_cleanup_preview("first", first) == 0 &&
+        jsti_window_cleanup_preview("latest", first) == 0;
+    cleanup_preview_apply(NULL);
+    gchar *actual = displayed_transcript();
+    okay = okay && g_strcmp0(actual, "latest") == 0 &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.copy)) && !gtk_widget_get_sensitive(GTK_WIDGET(ui.dashboard_copy));
+    g_free(actual);
+    show_page(JSTI_PAGE_GENERAL);
+    show_page(JSTI_PAGE_DASHBOARD);
+    okay = okay && jsti_window_cleanup_preview("away/back stale", first) == 1;
+    guint64 second = jsti_window_begin_cleanup_preview();
+    okay = okay && second != first && jsti_window_cleanup_preview("replacement", second) == 0;
+    jsti_window_end_cleanup_preview(first);
+    cleanup_preview_apply(NULL);
+    actual = displayed_transcript();
+    okay = okay && g_strcmp0(actual, "replacement") == 0;
+    g_free(actual);
+    gchar *maximum = g_strnfill(65536, 'x');
+    okay = okay && jsti_window_cleanup_preview(maximum, second) == 0;
+    g_free(maximum);
+    jsti_window_end_cleanup_preview(second);
+    cleanup_preview_apply(NULL);
+    actual = displayed_transcript();
+    okay = okay && g_strcmp0(actual, "replacement") == 0;
+    g_free(actual);
+    gchar *oversized = g_strnfill(65537, 'x');
+    okay = okay && jsti_window_cleanup_preview("retired", second) == 1 &&
+        jsti_window_cleanup_preview(oversized, second) == -1 &&
+        jsti_window_cleanup_preview("\xff", second) == -1;
+    g_free(oversized);
+    set_transcript(original);
+    gtk_label_set_text(ui.status, status);
+    g_free(ui.presented_id);
+    ui.presented_id = presented;
+    ui.state = state;
+    cleanup_visible = visible;
+    show_page(page);
+    ui.callback = callback;
+    refresh_actions();
+    g_free(original);
+    g_free(status);
+    return okay;
+}
+
 int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (jsti_hands_free_guard_self_test(error, capacity) != 0) return -1;
     if (ui.window == NULL) return fail(error, capacity, "the window was not created");
+    if (!cleanup_preview_self_test())
+        return fail(error, capacity, "cleanup preview bounds, coalescing, navigation or retirement failed");
     if (local_cleanup_sources_self_test(error, capacity) != 0) return -1;
     if (jsti_visual_density_self_test(GTK_WIDGET(ui.window)) != 0)
         return fail(error, capacity, "layout density geometry, Normal restoration or editing focus failed");

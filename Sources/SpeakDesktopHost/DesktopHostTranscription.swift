@@ -11,6 +11,10 @@ extension DesktopHostController {
     ) async {
         // existing owned transcription orchestration; no behavior change.
         var record = original
+        defer { capturedCleanup.removeValue(forKey: original.id) }
+        if capturedCleanup[record.id] == nil {
+            capturedCleanup[record.id] = captureCleanup(profile?.postProcessing ?? settings.postProcessing ?? .init())
+        }
         cancellationRequested = false
         // The record's on-device model, a profile's or the app's, stays in use until this finishes.
         let localModel = beginLocalUse(record.modelIdentifier)

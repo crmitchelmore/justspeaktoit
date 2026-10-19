@@ -10,7 +10,8 @@ public enum DesktopPostProcessingConfiguration {
     public static let customPromptKey = "postProcessingSystemPrompt"
     private static let directivesKey = ApplicationPreferenceKey.postProcessingIncludeLexiconDirectives.rawValue
     private static let tagsKey = ApplicationPreferenceKey.postProcessingIncludeContextTags.rawValue
-    public static let keys: Set<String> = [enabledKey, modelKey, customPromptKey, directivesKey, tagsKey]
+    public static let streamingKey = ApplicationPreferenceKey.postProcessingStreamingEnabled.rawValue
+    public static let keys: Set<String> = [enabledKey, modelKey, customPromptKey, directivesKey, tagsKey, streamingKey]
 
     public static func exportOptions(
         _ options: DesktopPostProcessing.Options?, over configuration: DesktopConfiguration
@@ -22,6 +23,7 @@ public enum DesktopPostProcessingConfiguration {
         if values[customPromptKey] == nil { values[customPromptKey] = AnyCodable(.string(options.customPrompt ?? "")) }
         if values[directivesKey] == nil { values[directivesKey] = AnyCodable(.bool(options.includeLexiconDirectives)) }
         if values[tagsKey] == nil { values[tagsKey] = AnyCodable(.bool(options.includeContextTags)) }
+        if values[streamingKey] == nil { values[streamingKey] = AnyCodable(.bool(options.streamingEnabled)) }
         return try DesktopConfiguration(values: values)
     }
 
@@ -36,6 +38,10 @@ public enum DesktopPostProcessingConfiguration {
         let directives = try boolean(directivesKey, in: values)
         let tags = try boolean(tagsKey, in: values)
         var changed = options ?? .init()
+        if let streaming = try boolean(streamingKey, in: values) {
+            changed.streamingEnabled = streaming
+            values.removeValue(forKey: streamingKey)
+        }
         if let directives {
             changed.includeLexiconDirectives = directives
             values.removeValue(forKey: directivesKey)

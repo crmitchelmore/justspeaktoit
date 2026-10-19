@@ -59,6 +59,13 @@ enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPla
     }
 
     package static func recordingState(_ state: Int32) { WindowsNative.recordingState(state) }
+    package static func beginCleanupPreview() -> UInt64 { jsti_window_begin_cleanup_preview() }
+    package static func cleanupPreview(_ text: String, ticket: UInt64) throws {
+        guard jsti_window_cleanup_preview(text, ticket) >= 0 else {
+            throw DesktopHostError(message: "Windows could not enqueue the cleanup preview.")
+        }
+    }
+    package static func endCleanupPreview(_ ticket: UInt64) { jsti_window_end_cleanup_preview(ticket) }
 
     package static func history(_ records: [DesktopRecordingStore.Record], selected: UUID?, selectRecord: Bool) {
         WindowsNative.history(records, selected: selected, selectRecord: selectRecord)

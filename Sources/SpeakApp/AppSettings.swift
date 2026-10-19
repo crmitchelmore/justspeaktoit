@@ -1258,7 +1258,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     warmMicrophoneOnKeyPress =
       defaults.object(forKey: DefaultsKey.warmMicrophoneOnKeyPress.rawValue) as? Bool ?? true
     postProcessingStreamingEnabled =
-      defaults.object(forKey: DefaultsKey.postProcessingStreamingEnabled.rawValue) as? Bool ?? true
+      defaults.object(forKey: DefaultsKey.postProcessingStreamingEnabled.rawValue) as? Bool
+      ?? SpeechDefaults.postProcessingStreamingEnabled
 
     // HUD Settings
     hudSizePreference =

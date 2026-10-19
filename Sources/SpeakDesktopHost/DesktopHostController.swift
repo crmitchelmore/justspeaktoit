@@ -45,6 +45,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
             values = try SettingsValues(from: decoder)
             let container = try decoder.singleValueContainer()
             let all = try container.decode([String: AnyCodable].self)
+            try adoptStoredStreamingPreference(all)
             let known: Set<String> = [
                 "model", "postProcessing", "microphoneDeviceID", "batchModel", "liveModel", "textOutput",
                 "hotKey", "voiceOutput", "automationEnabled", "automationLocalConsent", "localModel", "localUseGPU",
@@ -82,6 +83,21 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
                 configuration[key] = desired
                 values.configuration = try DesktopConfiguration(values: configuration)
             }
+        }
+
+        private mutating func adoptStoredStreamingPreference(_ all: [String: AnyCodable]) throws {
+            let key = DesktopPostProcessingConfiguration.streamingKey
+            guard let configuration = values.configuration, let legacy = configuration.values[key] else { return }
+            let explicit: Bool
+            if case .object(let stored)? = all["postProcessing"]?.storage {
+                explicit = stored["streamingEnabled"] != nil
+            } else { explicit = false }
+            if !explicit {
+                _ = try DesktopPostProcessingConfiguration.importOptions(
+                    from: DesktopConfiguration(values: [key: legacy]), into: &values.postProcessing
+                )
+            }
+            values.configuration = try DesktopConfiguration(values: configuration.values.filter { $0.key != key })
         }
 
         package func encode(to encoder: Encoder) throws {
@@ -160,7 +176,11 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var busyOperations = 0
     package var closed = false {
         didSet {
-            if closed { revokeCorrectionLearningConsent() }
+            if closed {
+                revokeCorrectionLearningConsent()
+                capturedCleanup.removeAll()
+                retireCleanupPresentation()
+            }
         }
     }
     /// Set once `close()` stops waiting; later calls return it.
@@ -203,23 +223,37 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var historyQuery = ""
     var historyFilter = HistorySearchQuery.none
     var historyFilterDraft = DesktopHistoryFilter.none
-    package var selectedHistoryID: UUID?
-    package var transcriptVariant: DesktopTranscriptVariant = .processed
+    package var selectedHistoryID: UUID? {
+        didSet { retireCleanupPresentation() }
+    }
+    package var transcriptVariant: DesktopTranscriptVariant = .processed {
+        didSet { retireCleanupPresentation() }
+    }
     var transcriptionTask: Task<TranscriptionResult, Error>?
     var automationTranscriptions: [UUID: Task<TranscriptionResult, Error>] = [:]
     var automationPreferenceChanged: (@Sendable () async -> Void)?
     var voiceCommandTask: Task<String?, Error>?
     var postProcessingTask: Task<DesktopPostProcessing.Outcome, Error>?
+    var postProcessingID: UUID? {
+        didSet { if postProcessingID != oldValue { retireCleanupPresentation() } }
+    }
+    var cleanupNativeTicket: UInt64?
+    var cleanupPresentationEpoch = UUID()
+    var capturedCleanup: [UUID: DesktopHostCleanupInput] = [:]
     package let localCleanup: DesktopLocalLLMStore?
     var localCleanupTask: Task<Void, Never>?
     var localCleanupNotice = ""
     var localCleanupPercent = -1
     var localCleanupOperationID: UUID?
-    var localCleanupPresenting = false
+    var localCleanupPresenting = false {
+        didSet { retireCleanupPresentation() }
+    }
     var localCleanupPresenter: UnsafeMutableRawPointer?
     var localCleanupChoices: [String] = []
     package var microphoneWarning: String?
-    var cancellationRequested = false
+    var cancellationRequested = false {
+        didSet { if cancellationRequested { retireCleanupPresentation() } }
+    }
     var historyDeletionInProgress = false
     var historyDeletionTask: Task<Void, Never>?
     var folderRevealTask: Task<Void, Error>?
@@ -246,7 +280,9 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var recordingFeedbackPreview: Task<Void, Never>?
     package var comparisons: DesktopComparisonStore?
     var comparisonSync: DesktopHostComparisonSyncHooks?
-    var comparisonVisible = false
+    var comparisonVisible = false {
+        didSet { retireCleanupPresentation() }
+    }
     var comparisonInitialization: DesktopComparisonStoreLoading?
     var comparisonAdmissionTask: Task<Void, Never>?
     package var comparisonTask: Task<Void, Never>?
@@ -335,7 +371,10 @@ extension DesktopHostController {
         }
         await recordingFeedback?.cancelRecording(recordingID)
         beginBusyOperation()
-        defer { finishBusyOperation() }
+        defer {
+            capturedCleanup.removeValue(forKey: recordingID)
+            finishBusyOperation()
+        }
         var record = recording?.record
         let live = recording?.live
         var stopped: StoppedRecording?

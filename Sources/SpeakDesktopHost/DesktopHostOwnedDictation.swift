@@ -35,6 +35,10 @@ extension DesktopHostController {
         try Task.checkCancellation()
         guard recording == nil, ownedDictation == nil, ownedCaptureStartup == nil,
               comparisonCapture == nil, handsFreeRun == nil else { throw DesktopPressCaptureError.occupied }
+        capturedCleanup[snapshot.id] = snapshot.cleanup
+        defer {
+            if ownedDictation?.id != snapshot.id { capturedCleanup.removeValue(forKey: snapshot.id) }
+        }
         let textOutput = await snapshot.textOutput.value
         try Task.checkCancellation()
         let (profile, target, deviceID, trigger) = (
@@ -217,6 +221,7 @@ extension DesktopHostController {
         }
         guard ownedDictation?.id == requestID else { return }
         ownedDictation = nil
+        capturedCleanup.removeValue(forKey: requestID)
         hotKeySession.startsAfter = ProcessInfo.processInfo.systemUptime
         finishBusyOperation()
     }

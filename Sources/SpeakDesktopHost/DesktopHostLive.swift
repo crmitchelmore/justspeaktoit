@@ -80,6 +80,7 @@ extension DesktopHostController {
     }
 
     func finishLive(_ stopped: StoppedRecording, session: DesktopLiveSession) async {
+        defer { capturedCleanup.removeValue(forKey: stopped.record.id) }
         var record = stopped.record
         cancellationRequested = false
         liveFinalisation = session

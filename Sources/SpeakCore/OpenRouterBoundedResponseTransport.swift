@@ -4,7 +4,7 @@ import FoundationNetworking
 #endif
 
 /// One bounded HTTP read shared by OpenRouter's dedicated transcription endpoint and its
-/// audio-model discovery.
+/// audio-model discovery and incremental chat cleanup.
 ///
 /// `URLSession.bytes(for:)` does not exist in swift-corelibs FoundationNetworking, so the
 /// body is collected from data-delegate chunks there. Apple retains the caller’s
@@ -37,17 +37,18 @@ enum OpenRouterBoundedResponseTransport {
         limit: Int,
         deadline: Duration,
         engine: Engine = .platformDefault,
+        onData: (@Sendable (Data) throws -> Bool)? = nil,
         accept: @escaping HeaderPolicy = { _ in }
     ) async throws -> Response {
         try Task.checkCancellation()
         return try await withThrowingTaskGroup(of: Response.self) { group in
             group.addTask {
                 #if canImport(Darwin)
-                if case .platformDefault = engine {
+                if case .platformDefault = engine, onData == nil {
                     return try await receiveApple(request, session: session, limit: limit, accept: accept)
                 }
                 #endif
-                return try await receive(request, session: session, limit: limit, accept: accept)
+                return try await receive(request, session: session, limit: limit, onData: onData, accept: accept)
             }
             group.addTask {
                 try await Task.sleep(for: deadline)
@@ -88,10 +89,11 @@ enum OpenRouterBoundedResponseTransport {
     #endif
 
     private static func receive(
-        _ request: URLRequest, session: URLSession, limit: Int, accept: @escaping HeaderPolicy
+        _ request: URLRequest, session: URLSession, limit: Int,
+        onData: (@Sendable (Data) throws -> Bool)?, accept: @escaping HeaderPolicy
     ) async throws -> Response {
         try Task.checkCancellation()
-        let collector = OpenRouterBoundedResponseCollector(limit: limit, accept: accept)
+        let collector = OpenRouterBoundedResponseCollector(limit: limit, onData: onData, accept: accept)
         // A dedicated session keeps the caller's configuration, including injected protocol
         // classes, while owning the delegate, so per-request state never outlives the call.
         let owned = URLSession(configuration: session.configuration, delegate: collector, delegateQueue: nil)
@@ -121,15 +123,22 @@ private final class OpenRouterBoundedResponseCollector: NSObject, URLSessionData
     private var body = Data()
     private var failure: Error?
     private var isCancelled = false
+    private var receivedBytes = 0
+    private let onData: (@Sendable (Data) throws -> Bool)?
+    private var settled = false
 
-    init(limit: Int, accept: @escaping OpenRouterBoundedResponseTransport.HeaderPolicy) {
+    init(
+        limit: Int, onData: (@Sendable (Data) throws -> Bool)?,
+        accept: @escaping OpenRouterBoundedResponseTransport.HeaderPolicy
+    ) {
         self.limit = limit
+        self.onData = onData
         self.accept = accept
     }
 
     func start(_ task: URLSessionTask, continuation: Continuation) {
         let cancelled: Bool = lock.withLock {
-            guard !isCancelled else { return true }
+            guard !isCancelled, !settled else { return true }
             self.continuation = continuation
             return false
         }
@@ -148,6 +157,7 @@ private final class OpenRouterBoundedResponseCollector: NSObject, URLSessionData
 
     private func resolve(_ outcome: Outcome) {
         let pending: Continuation? = lock.withLock {
+            settled = true
             defer { continuation = nil }
             return continuation
         }
@@ -192,7 +202,9 @@ private final class OpenRouterBoundedResponseCollector: NSObject, URLSessionData
             guard http.expectedContentLength <= Int64(limit) else {
                 return OpenRouterBoundedResponseTransport.Failure.responseTooLarge
             }
-            if http.expectedContentLength > 0 { body.reserveCapacity(Int(http.expectedContentLength)) }
+            if onData == nil, http.expectedContentLength > 0 {
+                body.reserveCapacity(Int(http.expectedContentLength))
+            }
             self.response = http
             return nil
         }
@@ -210,18 +222,35 @@ private final class OpenRouterBoundedResponseCollector: NSObject, URLSessionData
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        let exceeded: Bool = lock.withLock {
-            guard failure == nil else { return false }
-            guard body.count + data.count <= limit else {
+        let admitted: Bool = lock.withLock {
+            guard failure == nil, !isCancelled, !settled else { return false }
+            guard data.count <= limit - receivedBytes else {
                 failure = OpenRouterBoundedResponseTransport.Failure.responseTooLarge
-                return true
+                return false
             }
-            body.append(data)
-            return false
+            receivedBytes += data.count
+            if onData == nil { body.append(data) }
+            return true
         }
-        guard exceeded else { return }
+        if admitted {
+            do {
+                if try onData?(data) == true {
+                    let outcome: Outcome = lock.withLock {
+                        if isCancelled { return .failure(CancellationError()) }
+                        guard let response else {
+                            return .failure(OpenRouterBoundedResponseTransport.Failure.invalidResponse)
+                        }
+                        return .success(.init(http: response, body: Data()))
+                    }
+                    resolve(outcome)
+                    dataTask.cancel()
+                    return
+                }
+            } catch { lock.withLock { failure = error } }
+        }
+        guard let reason = lock.withLock({ failure }) else { return }
         dataTask.cancel()
-        resolve(.failure(OpenRouterBoundedResponseTransport.Failure.responseTooLarge))
+        resolve(.failure(reason))
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {

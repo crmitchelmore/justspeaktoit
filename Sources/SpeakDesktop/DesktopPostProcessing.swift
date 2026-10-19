@@ -22,6 +22,7 @@ public enum DesktopPostProcessing {
         public var temperature: Double
         public var includeLexiconDirectives: Bool
         public var includeContextTags: Bool
+        public var streamingEnabled = SpeechDefaults.desktopLegacyPostProcessingStreamingEnabled
         /// Dormant native-picker recall, never an execution route or portable preference.
         public var lastRemoteModelIdentifier: String?
 
@@ -74,6 +75,8 @@ public enum DesktopPostProcessing {
             includeContextTags = values.contains(.includeContextTags)
                 ? try values.decode(Bool.self, forKey: .includeContextTags)
                 : SpeechDefaults.postProcessingIncludeContextTags
+            streamingEnabled = try values.decodeIfPresent(Bool.self, forKey: .streamingEnabled)
+                ?? SpeechDefaults.desktopLegacyPostProcessingStreamingEnabled
             lastRemoteModelIdentifier = try values.decodeIfPresent(String.self, forKey: .lastRemoteModelIdentifier)
                 ?? (DesktopPostProcessing.mode(for: modelIdentifier) == .remote ? modelIdentifier : nil)
         }
@@ -212,6 +215,19 @@ public enum DesktopPostProcessing {
         lexiconDirectives: [String] = [], lexiconContextTags: [String] = [],
         session: URLSession = .shared, localLLM: (any DesktopLocalLLMEngine)?
     ) async throws -> Outcome {
+        try await process(
+            rawText: rawText, options: options, apiKey: apiKey,
+            lexiconDirectives: lexiconDirectives, lexiconContextTags: lexiconContextTags,
+            session: session, localLLM: localLLM, onUpdate: { _ in }
+        )
+    }
+
+    public static func process(
+        rawText: String, options: Options, apiKey: String,
+        lexiconDirectives: [String] = [], lexiconContextTags: [String] = [],
+        session: URLSession = .shared, localLLM: (any DesktopLocalLLMEngine)?,
+        onUpdate: @escaping @Sendable (String) -> Void
+    ) async throws -> Outcome {
         try Task.checkCancellation()
         if TranscriptPostProcessingPolicy.isEffectivelyEmptyTranscript(rawText) {
             return unchanged(original: rawText, processed: "")
@@ -257,12 +273,19 @@ public enum DesktopPostProcessing {
                 systemPrompt: systemPrompt, userPrompt: userPrompt, response: nil
             )
         }
-        let response = try await OpenRouterChatClient(apiKey: apiKey, session: session).sendChat(
-            systemPrompt: systemPrompt,
-            messages: [.init(role: .user, content: userPrompt)],
-            model: model,
-            temperature: options.temperature
-        )
+        let client = OpenRouterChatClient(apiKey: apiKey, session: session)
+        let response: ChatResponse
+        if options.streamingEnabled {
+            response = try await client.sendChatStreaming(
+                systemPrompt: systemPrompt, messages: [.init(role: .user, content: userPrompt)],
+                model: model, temperature: options.temperature, onUpdate: onUpdate
+            )
+        } else {
+            response = try await client.sendChat(
+                systemPrompt: systemPrompt, messages: [.init(role: .user, content: userPrompt)],
+                model: model, temperature: options.temperature
+            )
+        }
         try Task.checkCancellation()
         guard let assistant = response.messages.last(where: { $0.role == .assistant }),
               !assistant.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -305,6 +328,7 @@ extension DesktopPostProcessing.Options {
     private enum CodingKeys: String, CodingKey {
         case mode, modelIdentifier, customPrompt, outputLanguage, temperature
         case includeLexiconDirectives, includeContextTags
+        case streamingEnabled
         case lastRemoteModelIdentifier
     }
 }

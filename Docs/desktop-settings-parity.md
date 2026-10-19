@@ -6,6 +6,62 @@ macOS `AppSettings.DefaultsKey` aliases the shared 91-key
 plus preferences and collections
 outside that enum. Track remaining product acceptance in #1157.
 
+## Finished-transcript streaming cleanup candidate (source only)
+
+The canonical `postProcessingStreamingEnabled` boolean is now exposed by the
+existing native Post-processing preferences. It applies to **remote cleanup of
+a finished transcript**, not to live transcription, Auto-Clean, Voice synthesis
+or external text insertion. Windows and Linux use the existing portable
+OpenRouter client and bounded HTTP delegate transport with a real `stream: true`
+SSE request. There is no completed-response buffering presented as streaming,
+provider substitution or automatic retry after an uncertain failure.
+
+The Mac's absent-key default remains true, now named once in `SpeechDefaults`.
+For compatibility, existing desktop `Options` initializers and documents without
+the new field retain their previous one-shot behavior (false). The Host projects
+that effective value into the native editor even before options have been
+created; merely applying unrelated settings therefore does not turn streaming
+on. A previously retained canonical boolean is adopted on load when no explicit
+Options value exists; an explicit Options value wins over an old mirror. Apply,
+restart and JSON transfer use Options as the one runtime authority. Unknown and
+dormant configuration values survive, and importing the streaming preference
+does not authorize a remote route, Auto-Clean or downloaded-model execution.
+
+Each recording captures its resolved cleanup options and dedicated credential
+in memory at legacy/owned admission; imports and retries capture at the start
+of their transcription attempt. Prompt, context and request identity are fixed
+before the cleanup task starts. Only accumulated previews reach the native
+window and owned HUD. A latest-value dispatcher and native single-pending-value
+queues avoid a token-task or UI-message backlog. The window's separate preview
+ticket is retired by native page/record/version changes, including away/back,
+as well as Host cancellation, close and replacement. Preview text is not a
+History record or a Copy/export/read-aloud/automatic-output source. The HUD
+still follows its recording when a different app page is visible and respects
+the existing HUD visibility/live-text preferences.
+
+Only a nonempty, successfully terminated response may become the processed
+History/output result. Raw provider text and recovery audio stay separate.
+Malformed UTF-8/JSON, provider errors, filtered/truncated/empty results, missing
+completion, HTTP rejection, cancellation and size/deadline breaches fail
+explicitly; there is no raw-as-cleaned success and no second request. Framing
+accepts split UTF-8, LF/CRLF/CR, comments and multiline data. Bounds are 64 KiB
+per event/line and accumulated text, 2 MiB wire data, a 60-second exchange
+deadline and the existing 280-character HUD tail.
+
+Empty/silent input makes no cleanup request. Disabled cleanup never acquires
+this lane; choosing Instant does not itself enable remote cleanup. Built-in
+rules and explicitly selected
+downloaded LLMs remain offline, completed-only routes; this remote-only switch
+does not fabricate local chunks or silently send local text to a cloud model.
+Downloaded-model/runtime availability and safe external insertion remain their
+existing separate capability gates.
+
+Injectable HTTP/parser, route, settings transfer/restart and actual shared Host
+callback/legacy/owned lifecycle regression sources accompany this candidate.
+**All new product/parser/compiler/lint/tests/native UI/provider/device checks
+are NOT_RUN and this source is NOT_QUALIFIED.** No live-provider support,
+installed-native acceptance or full Windows/Linux parity is established here.
+
 ## Auto-Clean candidate (source only; validation on HOLD)
 
 Windows and Linux share a per-recording Auto-Clean lane in `LivePolishSession`,

@@ -9,6 +9,9 @@ extension DesktopHostController {
 
     func stopAndTranscribe() async {
         let pending = recording?.record
+        defer {
+            if let id = pending?.id, recording?.record.id != id { capturedCleanup.removeValue(forKey: id) }
+        }
         let live = recording?.live
         let handsFree = recording?.handsFree == true
         do {
@@ -51,6 +54,7 @@ extension DesktopHostController {
     }
 
     func processStoppedRecording(_ stopped: StoppedRecording) async throws {
+        defer { capturedCleanup.removeValue(forKey: stopped.record.id) }
         guard stopped.duration > 0 else {
             stopped.live?.cancel()
             var empty = stopped.record
@@ -99,6 +103,7 @@ extension DesktopHostController {
     func saveCancelledRecording(
         _ stopped: StoppedRecording, reason: String = "Recording cancelled. Audio retained."
     ) async throws {
+        defer { capturedCleanup.removeValue(forKey: stopped.record.id) }
         var record = stopped.record
         if let live = stopped.live {
             record.result = liveResult(live.cancel().text, record: record, duration: stopped.duration)

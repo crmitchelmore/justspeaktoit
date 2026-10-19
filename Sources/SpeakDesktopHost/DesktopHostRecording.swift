@@ -34,6 +34,10 @@ extension DesktopHostController {
         let localModel = beginLocalUse(profile.modelIdentifier)
         defer { endLocalUse(localModel) }
         let id = UUID()
+        capturedCleanup[id] = captureCleanup(profile.postProcessing)
+        defer {
+            if recording?.record.id != id { capturedCleanup.removeValue(forKey: id) }
+        }
         await recordingFeedback?.recordingRequested(id)
         guard !closed, handsFree == nil || handsFreeRun?.id == handsFree?.id else { throw CancellationError() }
         let filename = id.uuidString + ".wav"
@@ -158,6 +162,7 @@ extension DesktopHostController {
     func saveStartupFailure(
         _ startupFailure: Error, record: DesktopRecordingStore.Record, file: PCMRecordingFile
     ) async throws {
+        capturedCleanup.removeValue(forKey: record.id)
         // Always close the WAV, including failure before native allocation.
         var failed = record
         failed.failure = closed ? "Recording cancelled when the app closed. Audio retained."
@@ -182,6 +187,7 @@ extension DesktopHostController {
         active.live?.livePolish?.pause()
         let duration: TimeInterval
         do { duration = try DesktopHostRecordingStop.stop(active.capture, file: active.file) } catch {
+            capturedCleanup.removeValue(forKey: active.record.id)
             active.live?.cancel()
             throw error
         }

@@ -199,6 +199,11 @@ int32_t jsti_window_run(
 /* Safe from any thread; applied on the GTK main thread. No-ops before the
  * window exists or after it closes. `status` or `transcript` may be NULL. */
 int32_t jsti_window_update(const char *status, const char *transcript, int32_t state);
+/* Preview-only; one pending value. Native navigation retires the ticket.
+ * Offer returns 1 for a stale ticket, -1 for an enqueue/validation failure. */
+uint64_t jsti_window_begin_cleanup_preview(void);
+int32_t jsti_window_cleanup_preview(const char *text, uint64_t ticket);
+void jsti_window_end_cleanup_preview(uint64_t ticket);
 /* Events 70 (action), 71 (load), index 0 corrections / 1 pronunciation;
  * event 72 reads a selected recording's correction snapshot (kind 2). */
 int32_t jsti_vocabulary_set(int32_t kind, const char *payload, int32_t refresh);

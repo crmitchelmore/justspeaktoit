@@ -401,6 +401,33 @@ struct WindowState {
     int tourStep = -1;
 } state;
 
+struct CleanupPreview {
+    std::mutex mutex;
+    uint64_t ticket = 0;
+    bool active = false, changed = false;
+    std::wstring text;
+} cleanupPreview;
+
+void retireCleanupPreview() {
+    std::lock_guard<std::mutex> lock(cleanupPreview.mutex);
+    ++cleanupPreview.ticket;
+    cleanupPreview.active = false;
+    cleanupPreview.changed = false;
+    cleanupPreview.text.clear();
+}
+
+void applyCleanupPreview(HWND window) {
+    std::lock_guard<std::mutex> lock(cleanupPreview.mutex);
+    if (!cleanupPreview.changed) return;
+    cleanupPreview.changed = false;
+    if (!cleanupPreview.active || state.displayedRecording != 2 ||
+        (state.page != dashboardPage && state.page != historyPage)) return;
+    SetDlgItemTextW(window, transcriptID, cleanupPreview.text.c_str());
+    SetDlgItemTextW(window, statusID, L"Streaming cleanup preview. The original is saved in History.");
+    state.historyPresentationReady = false;
+    EnableWindow(GetDlgItem(window, copyID), FALSE);
+}
+
 std::string historyManagementIDs() {
     std::lock_guard<std::mutex> lock(state.mutex);
     return state.allHistoryIDs;
@@ -571,7 +598,7 @@ void emitRecording(HWND window) {
     if (!IsWindowEnabled(window)) return;
     int recording;
     { std::lock_guard<std::mutex> lock(state.mutex); recording = state.recording; }
-    if (recording == 2) { emit(window, JSTI_EVENT_CANCEL_TRANSCRIPTION); return; }
+    if (recording == 2) { retireCleanupPreview(); emit(window, JSTI_EVENT_CANCEL_TRANSCRIPTION); return; }
     const std::string device = selectedMicrophone(window);
     emit(window, JSTI_EVENT_TOGGLE_RECORDING, device.c_str());
 }
@@ -1724,6 +1751,7 @@ void updateModelLayout(HWND window) {
 void showPage(HWND window, int page) {
     if (page < 0 || page >= pageCount) return;
     const int previous = state.page;
+    if (previous != page) retireCleanupPreview();
     state.page = page;
     // A control on the page being left keeps no keyboard focus.
     HWND focus = GetFocus();
@@ -2228,6 +2256,7 @@ void applyUpdate(HWND window) {
     }
     updateHistoryControls(window, recording);
     refreshSetup(window);
+    applyCleanupPreview(window);
     if (!migrationReport.empty() && IsWindow(window)) {
         MessageBoxW(window, migrationReport.c_str(), L"Backup inspection (read only)", MB_OK | MB_ICONINFORMATION);
     }
@@ -2759,6 +2788,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             return 0;
         case historyID:
             if (HIWORD(wparam) == LBN_SELCHANGE) {
+                retireCleanupPreview();
                 int recording;
                 std::string nowSelected;
                 {
@@ -2831,6 +2861,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
                         ? static_cast<WPARAM>(-1) : static_cast<WPARAM>(state.displayedVariant), 0);
                     return 0;
                 }
+                retireCleanupPreview();
                 { std::lock_guard<std::mutex> lock(state.mutex); ++state.historyInteractionRevision; }
                 state.displayedVariant = static_cast<int>(chosen);
                 state.requestedVariant = state.displayedVariant;
@@ -2929,9 +2960,11 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         }
         break;
     case WM_CLOSE:
+        retireCleanupPreview();
         emit(window, JSTI_EVENT_CLOSING);
         DestroyWindow(window); return 0;
     case WM_DESTROY:
+        retireCleanupPreview();
         stopHandsFreeGuard(window);
         jsti::tray::remove();
         backdrop.release();
@@ -3470,6 +3503,38 @@ int jsti_window_refresh_microphones(const JSTIAudioDevice *devices, size_t count
     } catch (...) { return -1; }
 }
 
+uint64_t jsti_window_begin_cleanup_preview(void) {
+    std::lock_guard<std::mutex> lock(cleanupPreview.mutex);
+    if (++cleanupPreview.ticket == 0) ++cleanupPreview.ticket;
+    cleanupPreview.active = true;
+    cleanupPreview.changed = false;
+    cleanupPreview.text.clear();
+    return cleanupPreview.ticket;
+}
+
+void jsti_window_end_cleanup_preview(uint64_t ticket) {
+    std::lock_guard<std::mutex> lock(cleanupPreview.mutex);
+    if (ticket != cleanupPreview.ticket) return;
+    ++cleanupPreview.ticket;
+    cleanupPreview.active = false;
+    cleanupPreview.changed = false;
+    cleanupPreview.text.clear();
+}
+
+int jsti_window_cleanup_preview(const char *text, uint64_t ticket) {
+    if (!text || std::strlen(text) > 65536) return -1;
+    std::wstring wide;
+    if (!jsti::wide(text, wide)) return -1;
+    std::lock_guard<std::mutex> previewLock(cleanupPreview.mutex);
+    if (!cleanupPreview.active || ticket != cleanupPreview.ticket) return 1;
+    cleanupPreview.text = std::move(wide);
+    cleanupPreview.changed = true;
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (!state.window) return -1;
+    if (!state.posted) state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
+    return state.posted ? 0 : -1;
+}
+
 int jsti_window_update(const char *status, const char *transcript, int recording) {
     std::wstring wideStatus, wideTranscript;
     if ((status && !jsti::wide(status, wideStatus)) || (transcript && !jsti::wide(transcript, wideTranscript)) ||
@@ -3812,12 +3877,60 @@ int jsti_shell_open_directory(const char *path, char *error, size_t errorCapacit
     return 0;
 }
 
+static bool cleanupPreviewSelfTest(HWND window) {
+    const int page = state.page;
+    const bool ready = state.historyPresentationReady;
+    std::wstring originalText(static_cast<size_t>(GetWindowTextLengthW(GetDlgItem(window, transcriptID))) + 1, 0);
+    std::wstring originalStatus(static_cast<size_t>(GetWindowTextLengthW(GetDlgItem(window, statusID))) + 1, 0);
+    GetDlgItemTextW(window, transcriptID, &originalText[0], static_cast<int>(originalText.size()));
+    GetDlgItemTextW(window, statusID, &originalStatus[0], static_cast<int>(originalStatus.size()));
+    int recording;
+    { std::lock_guard<std::mutex> lock(state.mutex); recording = state.recording; }
+    showPage(window, dashboardPage);
+    jsti_window_update(nullptr, nullptr, 2);
+    applyUpdate(window);
+    const uint64_t first = jsti_window_begin_cleanup_preview();
+    bool okay = jsti_window_cleanup_preview("first", first) == 0 &&
+        jsti_window_cleanup_preview("latest", first) == 0;
+    applyUpdate(window);
+    wchar_t actual[128] = {};
+    GetDlgItemTextW(window, transcriptID, actual, 128);
+    okay = okay && wcscmp(actual, L"latest") == 0 && !IsWindowEnabled(GetDlgItem(window, copyID));
+    showPage(window, generalPage);
+    showPage(window, dashboardPage);
+    okay = okay && jsti_window_cleanup_preview("away/back stale", first) == 1;
+    const uint64_t second = jsti_window_begin_cleanup_preview();
+    okay = okay && second != first && jsti_window_cleanup_preview("replacement", second) == 0;
+    jsti_window_end_cleanup_preview(first);
+    applyUpdate(window);
+    GetDlgItemTextW(window, transcriptID, actual, 128);
+    okay = okay && wcscmp(actual, L"replacement") == 0;
+    okay = okay && jsti_window_cleanup_preview(std::string(65536, 'x').c_str(), second) == 0;
+    jsti_window_end_cleanup_preview(second);
+    applyUpdate(window);
+    GetDlgItemTextW(window, transcriptID, actual, 128);
+    okay = okay && wcscmp(actual, L"replacement") == 0;
+    okay = okay && jsti_window_cleanup_preview("retired", second) == 1 &&
+        jsti_window_cleanup_preview(std::string(65537, 'x').c_str(), second) == -1 &&
+        jsti_window_cleanup_preview("\xff", second) == -1;
+    jsti_window_update(nullptr, nullptr, recording);
+    applyUpdate(window);
+    state.historyPresentationReady = ready;
+    showPage(window, page);
+    SetDlgItemTextW(window, transcriptID, originalText.c_str());
+    SetDlgItemTextW(window, statusID, originalStatus.c_str());
+    updateHistoryControls(window, recording);
+    return okay;
+}
+
 int jsti_window_self_test(char *error, size_t errorCapacity) {
     HWND window;
     { std::lock_guard<std::mutex> lock(state.mutex); window = state.window; }
     if (!window || GetWindowThreadProcessId(window, nullptr) != GetCurrentThreadId()) {
         return jsti::fail("Window checks must run on the UI thread after READY.", error, errorCapacity);
     }
+    if (!cleanupPreviewSelfTest(window))
+        return jsti::fail("Cleanup preview bounds, coalescing, navigation or retirement failed.", error, errorCapacity);
     if (!sidebarStartupSelfTest())
         return jsti::fail("Sidebar pre-window retention, real control application or delivery ownership failed.",
                           error, errorCapacity);

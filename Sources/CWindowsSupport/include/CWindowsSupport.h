@@ -145,6 +145,11 @@ int jsti_window_set_model_catalog(const JSTIModelRow *rows, size_t count,
 /* Thread safe; updates coalesce. Null status/transcript retains the prior value.
  * recording: -1 retains current value, 0 idle, 1 recording, 2 busy (disable controls). */
 int jsti_window_update(const char *status, const char *transcript, int recording);
+/* Preview-only, bounded/coalesced, invalidated by native page/record/version changes.
+ * Offer returns 1 for a stale ticket, -1 for an enqueue/validation failure. */
+uint64_t jsti_window_begin_cleanup_preview(void);
+int jsti_window_cleanup_preview(const char *text, uint64_t ticket);
+void jsti_window_end_cleanup_preview(uint64_t ticket);
 void jsti_window_request_close(void);
 /* Copies IDs/names before return; also valid before window_run. Caller may
  * include a synthetic default row with an empty ID. Selection updates are

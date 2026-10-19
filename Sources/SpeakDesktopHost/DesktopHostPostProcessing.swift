@@ -91,13 +91,21 @@ extension DesktopHostController {
         _ original: DesktopRecordingStore.Record, options: DesktopPostProcessing.Options, inputText: String?
     ) async -> DesktopRecordingStore.Record {
         var record = original
+        defer { capturedCleanup.removeValue(forKey: original.id) }
         guard let result = record.result else { return record }
         if TranscriptPostProcessingPolicy.isEffectivelyEmptyTranscript(result.text) {
             record.processedText = ""
             return record
         }
+        let snapshot = capturedCleanup[record.id]
+        let options = snapshot?.options ?? options
         guard !closed, !cancellationRequested, options.mode != .disabled else { return record }
         let input = inputText ?? record.correctedText ?? result.text
+        if TranscriptPostProcessingPolicy.isEffectivelyEmptyTranscript(input) {
+            record.processedText = ""
+            return record
+        }
+        let captured = snapshot ?? captureCleanup(options)
         let context = options.lexiconContext(
             directives: record.lexiconDirectives ?? [], tags: record.lexiconContextTags ?? []
         )
@@ -105,10 +113,37 @@ extension DesktopHostController {
             guard DesktopPostProcessing.mode(for: options.modelIdentifier) == options.mode else {
                 throw DesktopPostProcessingError.unsupportedModel
             }
-            let key = options.mode == .remote
-                ? try Platform.apiKey(name: postProcessingCredential(for: options.modelIdentifier)) : ""
+            if let failure = captured?.failure { throw DesktopHostError(message: failure) }
+            let key: String
+            if let captured { key = captured.key } else {
+                key = options.mode == .remote
+                    ? try Platform.apiKey(name: postProcessingCredential(for: options.modelIdentifier)) : ""
+            }
             update("Polishing transcript… The original is saved in History.", state: 2)
             hud(record.id, .postProcessing)
+            postProcessingTask?.cancel()
+            let requestID = UUID()
+            postProcessingID = requestID
+            if options.mode == .remote, options.streamingEnabled, hudRecording == record.id {
+                selectedHistoryID = record.id
+                transcriptVariant = .processed
+                refreshHistory(selectRecord: true)
+            }
+            let presentation = cleanupPresentationEpoch
+            let nativeTicket = options.mode == .remote && options.streamingEnabled
+                ? Platform.beginCleanupPreview() : nil
+            cleanupNativeTicket = nativeTicket
+            defer {
+                if let nativeTicket { Platform.endCleanupPreview(nativeTicket) }
+                if cleanupNativeTicket == nativeTicket { cleanupNativeTicket = nil }
+            }
+            let recordID = record.id
+            let previews = DesktopEventDispatcher<String> { [weak self] text in
+                await self?.publishCleanupPreview(
+                    text, recordID: recordID, requestID: requestID, presentation: presentation,
+                    nativeTicket: nativeTicket ?? 0
+                )
+            }
             let effects = effects
             let localCleanup = localCleanup
             let task = Task {
@@ -119,6 +154,14 @@ extension DesktopHostController {
                         rawText: input, options: options, apiKey: "", lexiconDirectives: context.directives,
                         lexiconContextTags: context.tags, localLLM: localCleanup
                     )
+                } else if options.mode == .remote, options.streamingEnabled {
+                    outcome = try await effects.postProcessStreaming(
+                        text: input, options: options, key: key, directives: context.directives, tags: context.tags,
+                        onUpdate: { text in
+                            guard text.utf8.count <= OpenRouterChatClient.maximumStreamingTextBytes else { return }
+                            previews.submit(text)
+                        }
+                    )
                 } else {
                     outcome = try await effects.postProcess(
                         text: input, options: options, key: key, directives: context.directives, tags: context.tags
@@ -128,15 +171,23 @@ extension DesktopHostController {
                 return outcome
             }
             postProcessingTask = task
-            defer { postProcessingTask = nil }
+            defer {
+                if postProcessingID == requestID {
+                    postProcessingID = nil
+                    postProcessingTask = nil
+                }
+            }
             let outcome = try await task.value
+            guard !closed, !cancellationRequested, postProcessingID == requestID else {
+                throw CancellationError()
+            }
             record.processedText = outcome.processedText
             record.postProcessingModelIdentifier = outcome.modelIdentifier
         } catch { record.postProcessingFailure = error.localizedDescription }
         return record
     }
 
-    private func postProcessingCredential(for model: String) throws -> String {
+    func postProcessingCredential(for model: String) throws -> String {
         guard case .apiKey(let identifier, _) = ModelCredentialResolver.requirement(
             for: model, purpose: .postProcessing
         ) else { throw DesktopPostProcessingError.unsupportedModel }

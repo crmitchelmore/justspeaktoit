@@ -9,6 +9,9 @@ package enum DesktopConfigurationSaveIntent: Equatable, Sendable {
 extension DesktopHostController {
     package func configuration() throws -> DesktopConfiguration {
         var values = settings.configuration?.values ?? [:]
+        values[DesktopPostProcessingConfiguration.streamingKey] = AnyCodable(
+            .bool((settings.postProcessing ?? .init()).streamingEnabled)
+        )
         if let polish = settings.postProcessing {
             values["postProcessingTemperature"] = AnyCodable(.double(polish.temperature))
             values["postProcessingOutputLanguage"] = AnyCodable(.string(polish.outputLanguage ?? ""))
@@ -85,7 +88,13 @@ extension DesktopHostController {
         var polish = changed.postProcessing ?? .init()
         polish.temperature = configuration.number("postProcessingTemperature")
         polish.outputLanguage = configuration.text("postProcessingOutputLanguage")
+        polish.streamingEnabled = configuration.enabled(DesktopPostProcessingConfiguration.streamingKey)
         changed.postProcessing = polish
+        if let stored = changed.configuration {
+            changed.configuration = try DesktopConfiguration(values: stored.values.filter {
+                $0.key != DesktopPostProcessingConfiguration.streamingKey
+            })
+        }
         switch intent {
         case .apply:
             changed.livePolishApproved = configuration.text("speedMode") == SpeedModeID.livePolish.rawValue

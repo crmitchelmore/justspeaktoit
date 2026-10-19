@@ -71,6 +71,10 @@ package protocol DesktopHostEffects<Platform>: Sendable {
     func postProcess(
         text: String, options: DesktopPostProcessing.Options, key: String, directives: [String], tags: [String]
     ) async throws -> DesktopPostProcessing.Outcome
+    func postProcessStreaming(
+        text: String, options: DesktopPostProcessing.Options, key: String, directives: [String], tags: [String],
+        onUpdate: @escaping @Sendable (String) -> Void
+    ) async throws -> DesktopPostProcessing.Outcome
     func polishLive(
         text: String, model: String, key: String, localLLM: (any DesktopLocalLLMEngine)?
     ) async throws -> String
@@ -79,6 +83,16 @@ package protocol DesktopHostEffects<Platform>: Sendable {
 }
 
 package extension DesktopHostEffects {
+    func postProcessStreaming(
+        text: String, options: DesktopPostProcessing.Options, key: String, directives: [String], tags: [String],
+        onUpdate: @escaping @Sendable (String) -> Void
+    ) async throws -> DesktopPostProcessing.Outcome {
+        try await DesktopPostProcessing.process(
+            rawText: text, options: options, apiKey: key,
+            lexiconDirectives: directives, lexiconContextTags: tags, localLLM: nil, onUpdate: onUpdate
+        )
+    }
+
     func polishLive(
         text: String, model: String, key: String, localLLM: (any DesktopLocalLLMEngine)?
     ) async throws -> String {

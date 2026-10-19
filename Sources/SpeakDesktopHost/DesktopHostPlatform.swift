@@ -66,6 +66,10 @@ package protocol DesktopHostPlatform: Sendable {
 
     // Window presenter. Safe from any thread.
     static func update(_ status: String, transcript: String?, state: Int32)
+    /// Native queue-side tickets reject previews across page/record changes, including away/back.
+    static func beginCleanupPreview() -> UInt64
+    static func cleanupPreview(_ text: String, ticket: UInt64) throws
+    static func endCleanupPreview(_ ticket: UInt64)
     static func recordingState(_ state: Int32)
     static func voiceGenerated(_ presentation: DesktopVoiceResultPresentation)
     static func voiceUsage(_ presentation: DesktopVoiceUsagePresentation)
@@ -212,6 +216,11 @@ package extension DesktopHostPlatform {
     static func voiceTextImportCancelled(_ requestID: String) {}
     static func handsFreeReadinessFailure() -> String? { "Hands-free is unavailable on this host." }
     static func update(_ status: String) { update(status, transcript: nil, state: -1) }
+    static func beginCleanupPreview() -> UInt64 { 0 }
+    static func cleanupPreview(_ text: String, ticket: UInt64) throws {
+        update("Streaming cleanup preview. The original is saved in History.", transcript: text, state: 2)
+    }
+    static func endCleanupPreview(_ ticket: UInt64) {}
     /// Hosts without a dashboard or History header show no totals.
     static func historyInsights(all: DesktopHistoryInsights, visible: DesktopHistoryInsights) {}
     static func historyFilters(models: [String], selection: DesktopHistoryFilter) {}

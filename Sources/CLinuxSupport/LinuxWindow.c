@@ -1088,10 +1088,27 @@ static gboolean sidebar_navigate(guint keyval, GdkModifierType modifiers, GtkWid
     return FALSE;
 }
 
+static gboolean action_shortcut_run(gint run, const char *page, gint slot);
+
 static gboolean sidebar_key_pressed(GtkEventControllerKey *controller, guint keyval, guint keycode,
                                     GdkModifierType modifiers, gpointer data) {
-    (void)controller; (void)keycode; (void)data;
-    return sidebar_navigate(keyval, modifiers, gtk_window_get_focus(ui.window));
+    (void)data;
+    GtkWidget *focused = gtk_window_get_focus(ui.window);
+    if (sidebar_navigate(keyval, modifiers, focused)) return TRUE;
+    if (ui.closing || !gtk_window_is_active(ui.window) ||
+        !gtk_widget_is_sensitive(GTK_WIDGET(ui.window))) return FALSE;
+    return jsti_action_shortcuts_key(controller, keyval, keycode, modifiers, focused, action_shortcut_run);
+}
+
+static void action_key_released(GtkEventControllerKey *controller, guint keyval, guint keycode,
+                                GdkModifierType modifiers, gpointer data) {
+    (void)controller; (void)keyval; (void)modifiers; (void)data;
+    jsti_action_shortcuts_release(keycode);
+}
+
+static void action_window_active(GObject *object, GParamSpec *spec, gpointer data) {
+    (void)spec; (void)data;
+    if (!gtk_window_is_active(GTK_WINDOW(object))) jsti_action_shortcuts_reset();
 }
 
 static void sidebar_header(GtkListBoxRow *row, GtkListBoxRow *before, gpointer data) {
@@ -1770,6 +1787,7 @@ static GtkWidget *build_keyboard(void) {
     g_signal_connect(ui.style_row, "notify::selected", G_CALLBACK(on_style), NULL);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(shortcut), GTK_WIDGET(ui.style_row));
     gtk_box_append(GTK_BOX(column), shortcut);
+    gtk_box_append(GTK_BOX(column), jsti_action_shortcuts_group_new());
     return page;
 }
 
@@ -1811,6 +1829,39 @@ static GtkWidget *link_button(const char *label, const char *uri) {
 static void on_troubleshooting(GtkButton *button, gpointer data) {
     (void)button; (void)data;
     jsti_troubleshooting_open(ui.window);
+}
+
+static gboolean action_shortcut_run(gint run, const char *page, gint slot) {
+    if (ui.closing || !gtk_widget_is_sensitive(GTK_WIDGET(ui.window))) return FALSE;
+    switch (run) {
+    case 1:
+        if (!gtk_widget_is_sensitive(GTK_WIDGET(ui.record))) return FALSE;
+        on_record(NULL, NULL);
+        return TRUE;
+    case 2:
+        for (gint index = 0; page != NULL && index < JSTI_PAGE_COUNT; ++index) {
+            GtkWidget *row = GTK_WIDGET(gtk_list_box_get_row_at_index(ui.sidebar, index));
+            if (g_strcmp0(page_info[index].name, page) != 0) continue;
+            if (!gtk_widget_is_sensitive(row) || !gtk_widget_get_visible(row)) return FALSE;
+            show_page(index);
+            return TRUE;
+        }
+        return FALSE;
+    case 3:
+        if (!gtk_widget_is_sensitive(GTK_WIDGET(ui.voice_stop))) return FALSE;
+        on_stop_play(NULL, NULL);
+        return TRUE;
+    case 4: on_troubleshooting(NULL, NULL); return TRUE;
+    case 5:
+        if (ui.state != JSTI_STATE_IDLE) return FALSE;
+        open_comparison(NULL, NULL);
+        return TRUE;
+    case 6:
+        if (ui.state != JSTI_STATE_IDLE || slot < 1 || slot > 3) return FALSE;
+        emit(JSTI_EVENT_QUICK_VOICE, "", slot);
+        return TRUE;
+    default: return FALSE;
+    }
 }
 
 static GtkWidget *build_about(void) {
@@ -1869,6 +1920,11 @@ static void build_window(void) {
     gtk_event_controller_set_propagation_phase(navigation_keys, GTK_PHASE_BUBBLE);
     g_signal_connect(navigation_keys, "key-pressed", G_CALLBACK(sidebar_key_pressed), NULL);
     gtk_widget_add_controller(window, navigation_keys);
+    GtkEventController *releases = gtk_event_controller_key_new();
+    gtk_event_controller_set_propagation_phase(releases, GTK_PHASE_CAPTURE);
+    g_signal_connect(releases, "key-released", G_CALLBACK(action_key_released), NULL);
+    gtk_widget_add_controller(window, releases);
+    g_signal_connect(window, "notify::is-active", G_CALLBACK(action_window_active), NULL);
 
     /* One transcript buffer: the dashboard and the selected History card show
      * the same displayed text, which Copy, Export and Read aloud act on. */
@@ -4518,6 +4574,65 @@ static gboolean sidebar_navigation_self_test(void) {
     return okay;
 }
 
+typedef struct ActionShortcutCapture {
+    gint32 event, slot;
+    guint calls;
+} ActionShortcutCapture;
+
+static void action_shortcut_capture(gint32 event, const char *text, gint32 slot, void *context) {
+    (void)text;
+    ActionShortcutCapture *capture = context;
+    capture->event = event;
+    capture->slot = slot;
+    ++capture->calls;
+}
+
+static gboolean action_execution_self_test(void) {
+    jsti_window_event_fn callback = ui.callback;
+    void *context = ui.context;
+    gint original_page = ui.page, original_state = ui.state;
+    gboolean window_sensitive = gtk_widget_get_sensitive(GTK_WIDGET(ui.window));
+    gboolean record_sensitive = gtk_widget_get_sensitive(GTK_WIDGET(ui.record));
+    gboolean stop_sensitive = gtk_widget_get_sensitive(GTK_WIDGET(ui.voice_stop));
+    ActionShortcutCapture capture = { 0 };
+    ui.callback = action_shortcut_capture;
+    ui.context = &capture;
+    gboolean okay = TRUE;
+    for (gint page = 0; page < JSTI_PAGE_COUNT; ++page)
+        okay = okay && action_shortcut_run(2, page_info[page].name, 0) && ui.page == page;
+    GtkWidget *history = GTK_WIDGET(gtk_list_box_get_row_at_index(ui.sidebar, JSTI_PAGE_HISTORY));
+    gboolean history_sensitive = gtk_widget_get_sensitive(history);
+    gtk_widget_set_sensitive(history, FALSE);
+    okay = okay && !action_shortcut_run(2, "history", 0);
+    gtk_widget_set_sensitive(history, history_sensitive);
+    capture.calls = 0;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.record), TRUE);
+    okay = okay && action_shortcut_run(1, "", 0) && capture.calls == 1 &&
+        capture.event == JSTI_EVENT_TOGGLE_RECORDING;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.record), FALSE);
+    okay = okay && !action_shortcut_run(1, "", 0) && capture.calls == 1;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), TRUE);
+    okay = okay && action_shortcut_run(3, "", 0) && capture.calls == 2 &&
+        capture.event == JSTI_EVENT_PLAYBACK_STOP;
+    ui.state = JSTI_STATE_IDLE;
+    for (gint slot = 1; slot <= 3; ++slot)
+        okay = okay && action_shortcut_run(6, "", slot) && capture.event == JSTI_EVENT_QUICK_VOICE &&
+            capture.slot == slot && capture.calls == (guint)(2 + slot);
+    okay = okay && !action_shortcut_run(6, "", 0) && !action_shortcut_run(6, "", 4);
+    ui.state = JSTI_STATE_WORKING;
+    okay = okay && !action_shortcut_run(6, "", 1) && !action_shortcut_run(5, "", 0) && capture.calls == 5;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.window), FALSE);
+    okay = okay && !action_shortcut_run(4, "", 0) && !action_shortcut_run(2, "about", 0);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.window), window_sensitive);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.record), record_sensitive);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), stop_sensitive);
+    ui.state = original_state;
+    show_page(original_page);
+    ui.callback = callback;
+    ui.context = context;
+    return okay;
+}
+
 static gboolean post_processing_self_test(void) {
     if (ui.polish_catalog == NULL || ui.polish_local_notice == NULL) return FALSE;
     guint row = adw_combo_row_get_selected(ui.polish_model_row);
@@ -4787,6 +4902,9 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
         return fail(error, capacity, "layout density geometry, Normal restoration or editing focus failed");
     if (!sidebar_navigation_self_test())
         return fail(error, capacity, "sidebar hints, focus guards or window-local navigation failed");
+    if (jsti_action_shortcuts_self_test(error, capacity) != 0) return -1;
+    if (!action_execution_self_test())
+        return fail(error, capacity, "action shortcut native page, event, slot or sensitivity routing failed");
     if (!post_processing_self_test())
         return fail(error, capacity, "Local/Remote post-processing controls, key isolation or callback indexes failed");
     if (ui.recordings_folder == NULL || ui.audio_cleanup == NULL ||

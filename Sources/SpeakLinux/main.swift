@@ -30,6 +30,7 @@ func blocking<Value: Sendable>(_ work: @escaping @Sendable () async throws -> Va
 /// Deterministic checks that need no display, microphone, keyring or network.
 func runSelfTest() throws {
     try LinuxNative.call { jsti_native_self_test($0, $1) }
+    try LinuxActionShortcutRun.checkProjectionForSelfTest()
     guard !DesktopTranscription.batchModels.isEmpty else {
         throw DesktopHostError(message: "No canonical desktop models available.")
     }

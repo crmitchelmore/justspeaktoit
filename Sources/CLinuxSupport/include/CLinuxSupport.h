@@ -71,6 +71,7 @@ enum {
     JSTI_EVENT_AUDIO_CLEANUP_RESPONSE = 95, /* text: confirmation UUID; index: 1 confirms, 0 cancels */
     JSTI_EVENT_MIGRATION_EXPORT = 96, /* text: ZIP destination; index bits: 1 saved audio, 2 app profiles */
     JSTI_EVENT_MIGRATION_INSPECT = 97, /* text: selected ZIP source; no application changes */
+    JSTI_EVENT_QUICK_VOICE = 110, /* index: canonical favorite slot 1...3 */
     /* Profiles: percent-escaped TAB fields, starting with revision/action/UUID;
      * "refresh" opens a new immutable catalogue/editor revision. */
     JSTI_EVENT_PROFILES = 140
@@ -102,6 +103,16 @@ enum {
 enum { JSTI_STATE_IDLE = 0, JSTI_STATE_RECORDING = 1, JSTI_STATE_WORKING = 2 };
 
 typedef void (*jsti_window_event_fn)(int32_t event, const char *text, int32_t index, void *context);
+/* Linux window-local projection of customShortcutBindings. Global/unsupported
+ * rows remain visible but disabled; this does not change dictation registration.
+ * run: 0 unavailable, 1 record, 2 page, 3 stop, 4 troubleshooting,
+ * 5 comparison, 6 quick voice. Strings are copied before return. */
+typedef struct JSTILinuxActionShortcut {
+    const char *title, *chord, *note, *page;
+    uint32_t keysym, modifiers;
+    int32_t run, slot, enabled;
+} JSTILinuxActionShortcut;
+int32_t jsti_window_set_action_shortcuts(const JSTILinuxActionShortcut *rows, size_t count);
 typedef struct JSTIConfigurationField {
     const char *title;
     const char *value;

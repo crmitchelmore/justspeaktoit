@@ -41,8 +41,9 @@ model retention, restart, credential isolation, missing/invalid slots and refuse
 These checks are **NOT_RUN** locally. Windows maps the Quick Voice 1-3 action
 shortcuts to this action (`JSTI_ACTION_RUN_QUICK_VOICE_1`-`3` emit
 `JSTI_EVENT_QUICK_VOICE` with the slot, queued on the settings queue; ignored
-while Voice Output settings are locked). Linux has no action shortcut
-registration yet.
+while Voice Output settings are locked). Linux now has source-wired window-local
+Quick Voice 1-3 actions through the same Host, gated while recording or working;
+global action registration and physical keyboard qualification remain open.
 
 ## Paste last History action foundation (source only)
 
@@ -62,8 +63,8 @@ credential lookup and no observational readback even with local approval.
 These checks are **NOT_RUN** locally. Windows maps the Paste Last History Item
 action shortcut to it (`JSTI_ACTION_RUN_PASTE_LAST_HISTORY` emits
 `JSTI_EVENT_PASTE_LAST_HISTORY`); the callback captures the focused field on the
-UI thread before queueing the Host action, as the Record event does. Linux has
-no action shortcut registration yet.
+UI thread before queueing the Host action, as the Record event does. Linux does
+not yet map the Paste Last History Item action.
 
 ## Troubleshooting (source only)
 
@@ -95,8 +96,9 @@ Five portable host regressions cover persisted cleanup fixes, prompt/model
 preservation, newer credentials, stale settings, closed controllers and effective
 clipboard policy. GTK smoke fixtures cover pending fixes, stale/late reports,
 close/reopen, invalid commands, invalid UTF-8 and row bounds. These are authored
-but **NOT_RUN** locally. This adds a report, not Linux action-shortcut registration
-or native/provider/device acceptance; those gates remain open.
+but **NOT_RUN** locally. The report's separate window-local Linux action mapping
+is described below; global registration and native/provider/device acceptance
+remain open.
 
 The macOS projection distinguishes an absent or empty credential from a failed
 Keychain read. Failed reads offer no Disable cleanup action. Explicit fixes
@@ -2244,7 +2246,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | modulatePIIPhiTagging | Live/batch source wired; unqualified / Same | Native default/on/off choice, strict transfer/restart and captured live/batch provider flags; absent stays off. Native/provider acceptance pending. |
 | accessibilityInsertionMode | Equivalent / Missing | Output; Windows cursor/replace-field; Linux paste cannot claim AX replace-all equivalence |
 | selectedHotKey | Equivalent / Partial | Shortcuts; Windows Ctrl/Alt native key; Linux desktop/portal-owned binding, never Mac Fn key translation |
-| customShortcutBindings | Complete source mapping; unqualified / Shared model only | Windows Keyboard **Action shortcuts** dialog: all 27 actions source-wired; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Voice editing additionally requires an editable UIA selection and a rewrite API key. Linux transfers the Mac-compatible value unchanged without native registration. Native/physical acceptance pending. |
+| customShortcutBindings | Complete source mapping; unqualified / Partial window-local source | Windows Keyboard **Action shortcuts** dialog: all 27 actions source-wired; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Voice editing additionally requires an editable UIA selection and a rewrite API key. Linux projects 20 actions into window-local bindings and shows all saved bindings; seven actions, editing and global registration remain unimplemented. Native/physical acceptance pending. |
 | paidAccessRoutingEnabled | Apple-specific / Apple-specific | BYOK desktop providers; no paid-access entitlement/routing journey. Retained opaque through import/export |
 | simpleModelChoices | Missing / Missing | Native catalogue picker without simplified paid-model chooser |
 | rememberedLocalTranscriptionSource | Partial / Partial | Models remembers Local selection; no Apple on-device source |
@@ -2260,7 +2262,8 @@ an actually present legacy desktop scalar is a distinct opt-in captured source,
 not silently mapped to a profile. `customShortcutBindings`/individual action
 shortcuts, Shortcut presets/reset and conflict reporting are source wired on
 Windows (partial; see [Individual action shortcuts](#individual-action-shortcuts))
-and shared-model only on Linux; Escape cancellation remains a gap. Profiles have a Windows native editor with
+and partially window-local on Linux; the Linux editor, presets and global registration
+remain gaps. Escape recording cancellation remains a gap. Profiles have a Windows native editor with
 shared ordering/session snapshots; this separate source-only candidate adds
 the GTK editor and actual recording selection described above. Apple bundle-ID matchers are preserved but
 not silently converted to executable paths.
@@ -2449,7 +2452,7 @@ execution and the dialog self-test are **NOT_RUN** here.
 
 ## Individual action shortcuts
 
-Windows: partial source wiring, unqualified. Linux: shared model only. macOS
+Windows: source wiring, unqualified. Linux: partial window-local source wiring. macOS
 behaviour, its `customShortcutBindings` key and its JSON shape are unchanged.
 
 `DesktopShortcutAction` (SpeakCore) mirrors the Mac's 27 `ShortcutAction` raw
@@ -2499,12 +2502,51 @@ chords, which run first. Most Mac page defaults (Command+digit) map onto those
 sidebar chords, so their row notes say the sidebar handles them. An imported
 duplicate that the user did not edit is not refused.
 
-Linux has the shared model, persistence and transfer only; no portal or X11
-registration is added. Evidence: portable tests in
+Linux now projects the shared key table to GDK/X11 key values without loading a
+native framework into SpeakCore. Its Keyboard page shows every canonical
+action, the saved combination and an explicit availability/scope note. There
+are 20 window-local execution mappings: recording; Stop speech; Dashboard,
+History, Voice Output (both), General, Transcription, Post-processing,
+Corrections, Pronunciation, Profiles, Keyboard and About; Data & Migration
+(General); Troubleshooting; Compare Models; and Quick Voice 1-3. The actual
+buttons' sensitivity and page availability still apply. Quick Voice queues
+only the existing bounded Host settings action; it does not start synthesis.
+
+GTK handles actions after focused controls and the existing sidebar shortcuts.
+Text editors and editable/drop-down controls retain their keys. Matching
+ignores lock state but not extra Ctrl/Alt/Shift/Super/Meta/Hyper modifiers.
+The current keyboard layout supplies the unshifted key value for combinations
+with shifted punctuation; AltGr-consumed Ctrl/Alt is not treated as an action.
+Repeated presses of an admitted physical key do not repeat the action, even
+while its native control is temporarily disabled. Key release is observed in
+capture phase, and deactivation clears held keys. Modal/non-active windows do
+not run local actions. An imported duplicate retains its value and shows a
+conflict note; the first listed action owns that combination. Sidebar
+Ctrl+digit chords retain precedence and corresponding action notes disclose it.
+
+Seven Linux actions remain unavailable: Speak Selected Text, Speak Clipboard,
+Pause/Resume TTS, API Keys, Permissions, Paste Last History Item and Edit
+Selection by Voice. No API Keys/Permissions action is redirected to an
+unrelated page. Enabled global bindings remain saved and visibly unregistered;
+they are not silently downgraded to local shortcuts. The existing single X11 /
+Wayland-portal dictation shortcut is unchanged. Editing, presets/reset and
+multi-action global registration remain build-out work. Because this is only
+partial application of `customShortcutBindings`, migration continues to
+preserve the whole value rather than claiming full Linux coverage.
+
+Evidence: portable tests in
 `Tests/SpeakCoreTests/DesktopShortcutCatalogTests.swift` and
-`Tests/SpeakDesktopHostTests/DesktopHostShortcutBindingsTests.swift`. Compiler,
-native smoke tests and physical keyboard acceptance are **NOT_RUN** for this
-source.
+`Tests/SpeakDesktopHostTests/DesktopHostShortcutBindingsTests.swift`; four new
+`DesktopShortcutLinuxChordTests` regressions cover every canonical key, exact
+GDK values, modifier policy and unchanged stored bindings. Linux's no-device
+self-test checks all 27 action execution dispositions; the GTK smoke fixture
+checks displayed rows/availability, case/lock normalization, extra modifiers,
+typing focus, disabled rows, key release/repeat suppression and invalid inputs.
+Native dispatch fixtures exercise actual page navigation, record/Stop events,
+all three Quick Voice slots, and busy/disabled-window/control refusals without
+calling a capture device or speech provider.
+These new checks, compiler, native smoke tests and physical keyboard acceptance
+are **NOT_RUN** for this source.
 
 ### Edit Selection by Voice: Windows source implementation, unqualified
 

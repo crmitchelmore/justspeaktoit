@@ -191,6 +191,10 @@ func linuxWindowEvent( // swiftlint:disable:this cyclomatic_complexity
         linuxProfilesEvent(value, holder: holder)
         return
     }
+    if event == Int(JSTI_EVENT_QUICK_VOICE) {
+        holder.enqueueSettings { await holder.controller.selectQuickVoice(slot) }
+        return
+    }
     if event == 70 || event == 71 || event == 72 {
         linuxVocabularyEvent(Int32(event), payload: value, kind: slot, holder: holder)
         return

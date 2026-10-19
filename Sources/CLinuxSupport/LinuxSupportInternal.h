@@ -26,6 +26,14 @@ gboolean jsti_window_loop_running(void);
 typedef void (*jsti_window_apply_fn)(gpointer data);
 int32_t jsti_window_post(jsti_window_apply_fn apply, gpointer data, GDestroyNotify destroy);
 void jsti_window_emit(gint32 event, const char *text, gint32 index);
+struct _GtkEventControllerKey;
+typedef gboolean (*jsti_action_run_fn)(gint run, const char *page, gint slot);
+struct _GtkWidget *jsti_action_shortcuts_group_new(void);
+gboolean jsti_action_shortcuts_key(struct _GtkEventControllerKey *controller,
+    guint keyval, guint keycode, guint modifiers, struct _GtkWidget *focused, jsti_action_run_fn run);
+void jsti_action_shortcuts_release(guint keycode);
+void jsti_action_shortcuts_reset(void);
+int32_t jsti_action_shortcuts_self_test(char *error, size_t capacity);
 void jsti_hands_free_guard_start(void);
 void jsti_hands_free_guard_stop(void);
 int32_t jsti_hands_free_guard_self_test(char *error, size_t capacity);

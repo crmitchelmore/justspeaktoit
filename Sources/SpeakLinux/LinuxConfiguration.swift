@@ -75,6 +75,7 @@ extension LinuxWindow {
             throw DesktopConfigurationError.invalidField("Voice quality availability")
         }
         try configureConfigurationLayout(preferences, strings: strings)
+        try await configureActionShortcuts(holder)
     }
 
     private static func configureConfigurationLayout(_ preferences: DesktopConfiguration, strings: Strings) throws {

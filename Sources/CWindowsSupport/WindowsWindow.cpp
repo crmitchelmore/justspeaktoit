@@ -222,6 +222,7 @@ constexpr UINT tourMessage = WM_APP + 18, appearanceMessage = WM_APP + 19, pageM
 constexpr UINT hudMessage = WM_APP + 21;
 constexpr UINT sidebarMessage = WM_APP + 30;
 constexpr UINT densityMessage = WM_APP + 31;
+constexpr UINT shellMessage = WM_APP + 32;
 struct SidebarBindings {
     int digits[pageCount];
     std::wstring hints[pageCount];
@@ -264,6 +265,22 @@ struct WindowDelivery {
 
 using SidebarDelivery = WindowDelivery<SidebarBindings, sidebarMessage>;
 using DensityDelivery = WindowDelivery<JSTIVisualDensity, densityMessage>;
+
+// General > App visibility, in the shared DesktopAppVisibility order.
+enum ShellVisibility : int { shellBoth = 0, shellTrayOnly = 1, shellTaskbarOnly = 2 };
+struct ShellPresentation {
+    int visibility = shellBoth;
+    bool compact = false;
+};
+using ShellDelivery = WindowDelivery<ShellPresentation, shellMessage>;
+
+int configureShell(ShellDelivery &delivery, HWND window, int visibility, int compact) {
+    if (visibility < shellBoth || visibility > shellTaskbarOnly || (compact != 0 && compact != 1)) return -1;
+    auto update = std::make_unique<ShellPresentation>();
+    update->visibility = visibility;
+    update->compact = compact != 0;
+    return delivery.stage(window, std::move(update));
+}
 
 int configureVisualDensity(DensityDelivery &delivery, HWND window, JSTIVisualDensity density) {
     if ((density.compact != 0 && density.compact != 1) ||
@@ -341,6 +358,7 @@ struct WindowState {
     bool posted = false;
     SidebarDelivery sidebarDelivery;
     DensityDelivery densityDelivery;
+    ShellDelivery shellDelivery;
     bool statusChanged = false;
     bool transcriptChanged = false;
     bool historyChanged = false;
@@ -628,6 +646,47 @@ void emitRecording(HWND window) {
 
 void showPage(HWND window, int page);
 
+// UI thread only. General > App visibility as applied: `trayResident` while
+// the window lives in the notification area with no taskbar button.
+ShellPresentation shell;
+HWND shellOwner = nullptr;
+bool trayResident = false;
+
+// The taskbar shows a button for every visible unowned top-level window, so a
+// hidden owner removes it. The shell reads that rule only when a window is
+// shown, so a visible window is hidden around the change. Without a
+// notification-area icon the button stays, so the window is never unreachable.
+void applyShell(HWND window) {
+    jsti::tray::setCompact(shell.compact);
+    const bool wantsIcon = shell.visibility != shellTaskbarOnly;
+    if (wantsIcon && !jsti::tray::shown())
+        jsti::tray::add(window, jsti::appIcon::smallHandle(), jsti::appIcon::recordingHandle());
+    trayResident = shell.visibility == shellTrayOnly && jsti::tray::shown();
+    if (trayResident && !shellOwner) {
+        shellOwner = CreateWindowExW(WS_EX_TOOLWINDOW, L"STATIC", L"", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr,
+            GetModuleHandleW(nullptr), nullptr);
+        trayResident = shellOwner != nullptr;
+    }
+    const HWND owner = trayResident ? shellOwner : nullptr;
+    if (reinterpret_cast<HWND>(GetWindowLongPtrW(window, GWLP_HWNDPARENT)) != owner) {
+        const bool visible = IsWindowVisible(window) != FALSE;
+        if (visible) ShowWindow(window, SW_HIDE);
+        SetWindowLongPtrW(window, GWLP_HWNDPARENT, reinterpret_cast<LONG_PTR>(owner));
+        // A minimised window in the notification area stays hidden until opened.
+        if (visible && !(trayResident && IsIconic(window))) ShowWindow(window, SW_SHOWNA);
+    }
+    if (!wantsIcon && jsti::tray::shown()) jsti::tray::remove();
+    if (!owner && shellOwner) {
+        DestroyWindow(shellOwner);
+        shellOwner = nullptr;
+    }
+}
+
+void releaseShell() {
+    trayResident = false;
+    if (shellOwner) DestroyWindow(shellOwner);
+    shellOwner = nullptr;
+}
 // A command chosen from the notification area's menu, or its icon clicked.
 void trayCommand(HWND window, UINT command) {
     if (command == jsti::tray::toggle) { emitRecording(window); return; }
@@ -2558,7 +2617,17 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         return 0;
     }
     case WM_SIZE:
+        // Without a taskbar button a minimised window would sit above the
+        // desktop; it goes to the notification area instead.
+        if (wparam == SIZE_MINIMIZED && trayResident) { ShowWindow(window, SW_HIDE); return 0; }
         layout(window); return 0;
+    case WM_SYSCOMMAND:
+        // Close and minimise keep a notification-area app running; Quit exits.
+        if (trayResident && ((wparam & 0xFFF0) == SC_CLOSE || (wparam & 0xFFF0) == SC_MINIMIZE)) {
+            ShowWindow(window, SW_HIDE);
+            return 0;
+        }
+        break;
     case WM_DPICHANGED: {
         std::string iconFailure;
         if (!jsti::appIcon::refresh(window, HIWORD(wparam), iconFailure)) showFailure(window, iconFailure);
@@ -2682,6 +2751,17 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         std::unique_ptr<JSTIVisualDensity> density;
         { std::lock_guard<std::mutex> lock(state.mutex); density = state.densityDelivery.claim(wparam); }
         if (density) { visualDensity = *density; layout(window); }
+        return 0;
+    }
+    case shellMessage: {
+        std::unique_ptr<ShellPresentation> update;
+        { std::lock_guard<std::mutex> lock(state.mutex); update = state.shellDelivery.claim(wparam); }
+        if (update) {
+            shell = *update;
+            applyShell(window);
+            // Removing the icon must not strand a window hidden in the notification area.
+            if (!jsti::tray::shown() && !IsWindowVisible(window)) ShowWindow(window, SW_SHOWMINNOACTIVE);
+        }
         return 0;
     }
     case hudMessage:
@@ -3054,6 +3134,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             state.window = nullptr; state.posted = false; state.audioCleanupToken.clear(); state.migrationReport.clear();
             state.sidebarDelivery.retire();
             state.densityDelivery.retire();
+            state.shellDelivery.retire();
         }
         PostQuitMessage(0); return 0;
     }
@@ -3431,22 +3512,30 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
     } else {
         std::unique_ptr<SidebarBindings> initialSidebar;
         std::unique_ptr<JSTIVisualDensity> initialDensity;
+        std::unique_ptr<ShellPresentation> initialShell;
         {
             std::lock_guard<std::mutex> lock(state.mutex);
             state.window = window;
             initialSidebar = state.sidebarDelivery.claimInitial();
             initialDensity = state.densityDelivery.claimInitial();
+            initialShell = state.shellDelivery.claimInitial();
         }
         if (initialSidebar) state.sidebar = std::move(*initialSidebar);
         initialSidebar.reset();
         if (initialDensity) { visualDensity = *initialDensity; layout(window); }
         initialDensity.reset();
+        shell = initialShell ? *initialShell : ShellPresentation{};
+        initialShell.reset();
         applySidebarBindings(window);
-        // A login launch starts minimised and leaves the focus where it is.
-        ShowWindow(window, jsti::login::launchedAtLogin() ? SW_SHOWMINNOACTIVE : SW_SHOWDEFAULT);
-        UpdateWindow(window);
-        // Optional: without a notification area the app works the same.
-        jsti::tray::add(window, jsti::appIcon::smallHandle(), jsti::appIcon::recordingHandle());
+        // Optional: without a notification area the app keeps its taskbar button.
+        applyShell(window);
+        const bool login = jsti::login::launchedAtLogin();
+        // A login launch leaves the focus where it is: minimised, or only in
+        // the notification area when the app has no taskbar button.
+        if (!(login && trayResident)) {
+            ShowWindow(window, login ? SW_SHOWMINNOACTIVE : SW_SHOWDEFAULT);
+            UpdateWindow(window);
+        }
         emit(window, JSTI_EVENT_READY);
         std::string shortcutFailure;
         if (IsWindow(window) && !jsti_hotkey_start(window, shortcutFailure)) showFailure(window, shortcutFailure);
@@ -3466,6 +3555,7 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
         }
     }
     jsti::hud::destroy();
+    releaseShell();
     state.font = nullptr;
     state.controls.clear(); state.callback = nullptr; state.context = nullptr;
     jsti::appIcon::destroy();
@@ -3477,6 +3567,7 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
         state.running = false; state.window = nullptr;
         state.sidebarDelivery.retire();
         state.densityDelivery.retire();
+        state.shellDelivery.retire();
     }
     return outcome;
 }
@@ -3806,6 +3897,40 @@ int jsti_window_set_visual_density(JSTIVisualDensity density) {
         std::lock_guard<std::mutex> lock(state.mutex);
         return configureVisualDensity(state.densityDelivery, state.window, density);
     } catch (const std::exception &) { return -1; }
+}
+
+int jsti_window_set_shell(int visibility, int compact) {
+    try {
+        std::lock_guard<std::mutex> lock(state.mutex);
+        return configureShell(state.shellDelivery, state.window, visibility, compact);
+    } catch (const std::exception &) { return -1; }
+}
+
+// Validation and retention of App visibility, and the owner change that takes
+// a window off the taskbar, on a private hidden fixture.
+static bool shellSelfTest(std::string &failure) {
+    ShellDelivery startup;
+    bool okay = configureShell(startup, nullptr, 3, 0) == -1 && configureShell(startup, nullptr, -1, 0) == -1 &&
+        configureShell(startup, nullptr, shellTrayOnly, 2) == -1 && !startup.initial;
+    okay = configureShell(startup, nullptr, shellTrayOnly, 1) == 0 && okay;
+    auto admitted = startup.claimInitial();
+    okay = okay && admitted && admitted->visibility == shellTrayOnly && admitted->compact && !startup.initial;
+    const HINSTANCE instance = GetModuleHandleW(nullptr);
+    HWND owner = CreateWindowExW(WS_EX_TOOLWINDOW, L"STATIC", L"", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr,
+        instance, nullptr);
+    HWND fixture = CreateWindowExW(0, L"STATIC", L"", WS_OVERLAPPEDWINDOW, 0, 0, 10, 10, nullptr, nullptr,
+        instance, nullptr);
+    okay = okay && owner && fixture && GetWindow(fixture, GW_OWNER) == nullptr;
+    if (owner && fixture) {
+        SetWindowLongPtrW(fixture, GWLP_HWNDPARENT, reinterpret_cast<LONG_PTR>(owner));
+        okay = okay && GetWindow(fixture, GW_OWNER) == owner;
+        SetWindowLongPtrW(fixture, GWLP_HWNDPARENT, 0);
+        okay = okay && GetWindow(fixture, GW_OWNER) == nullptr;
+    }
+    if (fixture) DestroyWindow(fixture);
+    if (owner) DestroyWindow(owner);
+    if (!okay) failure = "App visibility validation, retention or taskbar ownership failed.";
+    return okay;
 }
 
 int jsti_window_screenshot_tour(const char *directory, char *error, size_t capacity) {
@@ -5113,6 +5238,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     if (passed) passed = jsti::hud::selfTest(failure);
     if (passed) passed = jsti::appIcon::selfTest(window, failure);
     if (passed) passed = jsti::tray::selfTest(failure);
+    if (passed) passed = shellSelfTest(failure);
     return passed ? 0 : jsti::fail(failure, error, errorCapacity);
 }
 

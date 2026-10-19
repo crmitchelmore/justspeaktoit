@@ -116,6 +116,9 @@ typedef struct UI {
     GtkButton *export_button;
     GtkButton *open_audio;
     GtkButton *recordings_folder;
+    GtkButton *recordings_choose;
+    GtkButton *recordings_default;
+    GCancellable *location_chooser;
     GtkButton *audio_cleanup;
     AdwSwitchRow *backup_audio;
     AdwSwitchRow *backup_profiles;
@@ -320,6 +323,10 @@ static void refresh_actions(void) {
     gtk_widget_set_sensitive(GTK_WIDGET(ui.history_clear),
         idle && ui.all_history_ids != NULL && ui.all_history_ids[0] != '\0');
     if (ui.audio_cleanup != NULL) gtk_widget_set_sensitive(GTK_WIDGET(ui.audio_cleanup), idle);
+    if (ui.recordings_choose != NULL) {
+        gtk_widget_set_sensitive(GTK_WIDGET(ui.recordings_choose), idle && ui.location_chooser == NULL);
+        gtk_widget_set_sensitive(GTK_WIDGET(ui.recordings_default), idle && ui.location_chooser == NULL);
+    }
     if (ui.backup_audio != NULL) {
         gtk_widget_set_sensitive(GTK_WIDGET(ui.backup_audio), idle && ui.backup_chooser == NULL);
         gtk_widget_set_sensitive(GTK_WIDGET(ui.backup_profiles), idle && ui.backup_chooser == NULL);
@@ -731,6 +738,62 @@ static void on_recordings_folder(GtkButton *button, gpointer data) {
     emit(JSTI_EVENT_RECORDINGS_FOLDER, "", 0);
 }
 
+typedef struct LocationChoice {
+    GWeakRef parent;
+    GCancellable *cancelled;
+} LocationChoice;
+
+static void recordings_location_chosen(GObject *source, GAsyncResult *result, gpointer data) {
+    LocationChoice *choice = data;
+    GError *error = NULL;
+    GFile *file = gtk_file_dialog_select_folder_finish(GTK_FILE_DIALOG(source), result, &error);
+    GObject *parent = g_weak_ref_get(&choice->parent);
+    gboolean active = parent != NULL && parent == G_OBJECT(ui.window) && !ui.closing &&
+        ui.location_chooser == choice->cancelled && !g_cancellable_is_cancelled(choice->cancelled);
+    if (ui.location_chooser == choice->cancelled) g_clear_object(&ui.location_chooser);
+    if (active) {
+        if (file != NULL) {
+            gchar *path = g_file_get_path(file);
+            if (path != NULL) emit(JSTI_EVENT_RECORDINGS_LOCATION, path, 0);
+            else jsti_window_update("Choose a local folder. This portal did not provide a local path.", NULL, -1);
+            g_free(path);
+        } else if (error != NULL && !g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED) &&
+                   !g_error_matches(error, GTK_DIALOG_ERROR, GTK_DIALOG_ERROR_DISMISSED) &&
+                   !g_error_matches(error, GTK_DIALOG_ERROR, GTK_DIALOG_ERROR_CANCELLED)) {
+            gchar *message = g_strdup_printf("Could not choose a recordings folder: %s", error->message);
+            jsti_window_update(message, NULL, -1);
+            g_free(message);
+        }
+        refresh_actions();
+    }
+    g_clear_error(&error);
+    g_clear_object(&file);
+    g_clear_object(&parent);
+    g_weak_ref_clear(&choice->parent);
+    g_object_unref(choice->cancelled);
+    g_free(choice);
+}
+
+static void on_recordings_choose(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    if (ui.closing || ui.state != 0 || ui.location_chooser != NULL) return;
+    LocationChoice *choice = g_new0(LocationChoice, 1);
+    g_weak_ref_init(&choice->parent, G_OBJECT(ui.window));
+    choice->cancelled = g_cancellable_new();
+    ui.location_chooser = g_object_ref(choice->cancelled);
+    refresh_actions();
+    GtkFileDialog *dialog = gtk_file_dialog_new();
+    gtk_file_dialog_set_title(dialog, "Choose where new recordings are saved (existing audio is not moved)");
+    gtk_file_dialog_select_folder(dialog, ui.window, choice->cancelled, recordings_location_chosen, choice);
+    g_object_unref(dialog);
+}
+
+static void on_recordings_default(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    if (ui.closing || ui.state != 0 || ui.location_chooser != NULL) return;
+    emit(JSTI_EVENT_RECORDINGS_LOCATION, "", 0);
+}
+
 static void on_audio_cleanup(GtkButton *button, gpointer data) {
     (void)button; (void)data;
     emit(JSTI_EVENT_AUDIO_CLEANUP, "", 0);
@@ -904,6 +967,8 @@ static gboolean on_close_request(GtkWindow *window, gpointer data) {
     ui.closing = TRUE;
     if (ui.backup_chooser != NULL) g_cancellable_cancel(ui.backup_chooser);
     g_clear_object(&ui.backup_chooser);
+    if (ui.location_chooser != NULL) g_cancellable_cancel(ui.location_chooser);
+    g_clear_object(&ui.location_chooser);
     jsti_hud_destroy();
     jsti_tray_stop();
     emit(JSTI_EVENT_CLOSING, "", 0);
@@ -1492,6 +1557,19 @@ static GtkWidget *build_general(void) {
     g_signal_connect(ui.recordings_folder, "clicked", G_CALLBACK(on_recordings_folder), NULL);
     adw_action_row_add_suffix(ADW_ACTION_ROW(folder), GTK_WIDGET(ui.recordings_folder));
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(housekeeping), folder);
+    GtkWidget *location = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(location), "New recordings folder");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(location),
+        "Save new audio in a local folder you choose. Existing recordings are never moved or deleted.");
+    ui.recordings_choose = GTK_BUTTON(gtk_button_new_with_mnemonic("_Choose…"));
+    gtk_widget_set_valign(GTK_WIDGET(ui.recordings_choose), GTK_ALIGN_CENTER);
+    g_signal_connect(ui.recordings_choose, "clicked", G_CALLBACK(on_recordings_choose), NULL);
+    adw_action_row_add_suffix(ADW_ACTION_ROW(location), GTK_WIDGET(ui.recordings_choose));
+    ui.recordings_default = GTK_BUTTON(gtk_button_new_with_mnemonic("Use _default"));
+    gtk_widget_set_valign(GTK_WIDGET(ui.recordings_default), GTK_ALIGN_CENTER);
+    g_signal_connect(ui.recordings_default, "clicked", G_CALLBACK(on_recordings_default), NULL);
+    adw_action_row_add_suffix(ADW_ACTION_ROW(location), GTK_WIDGET(ui.recordings_default));
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(housekeeping), location);
     GtkWidget *cleanup = adw_action_row_new();
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(cleanup), "Saved recordings");
     adw_action_row_set_subtitle(ADW_ACTION_ROW(cleanup), "Delete saved audio without removing History entries.");

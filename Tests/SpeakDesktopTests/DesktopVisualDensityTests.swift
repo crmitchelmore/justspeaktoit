@@ -77,7 +77,8 @@ final class DesktopVisualDensityTests: XCTestCase {
     func testEditingAndJSONTransfer_PreserveUnsupportedAppleValuesAndSidebarHints() throws {
         let opaque = AnyCodable(.object(["version": .int(2), "future": .array([.bool(false), .string("retained")])]))
         let original = try DesktopConfiguration(values: [
-            "visualDensity": AnyCodable(.string("compact")), "appVisibility": AnyCodable(.string("dockOnly")),
+            "visualDensity": AnyCodable(.string("compact")),
+            "showStatusBarIconInDockOnly": AnyCodable(.bool(false)),
             "futureAppearance": opaque, "showSidebarShortcutHints": AnyCodable(.bool(false))
         ])
         let edited = try original.applying(original.entries)
@@ -85,16 +86,52 @@ final class DesktopVisualDensityTests: XCTestCase {
             DesktopConfiguration.self, from: JSONEncoder().encode(edited)
         )
         XCTAssertEqual(restored.visualDensity, .compact)
-        XCTAssertEqual(restored.values["appVisibility"], original.values["appVisibility"])
+        XCTAssertEqual(
+            restored.values["showStatusBarIconInDockOnly"], original.values["showStatusBarIconInDockOnly"]
+        )
         XCTAssertEqual(restored.values["futureAppearance"], opaque)
         XCTAssertFalse(restored.enabled("showSidebarShortcutHints"))
-        XCTAssertFalse(DesktopConfiguration.supportedKeys.contains("appVisibility"))
+        XCTAssertFalse(DesktopConfiguration.supportedKeys.contains("showStatusBarIconInDockOnly"))
+    }
+
+    func testShellFields_UseMacValuesAndKeepAppleOnlyShellValuesOpaque() throws {
+        let fields = DesktopConfiguration.fields.filter { ShellPreference.keys.contains($0.key) }
+        XCTAssertEqual(fields.map(\.key), ["appVisibility", "compactStatusBarIcon", "analyticsEnabled"])
+        XCTAssertTrue(fields.allSatisfy { $0.group == "General" })
+        guard case .choice(let choices) = fields[0].kind else { return XCTFail("App visibility is not a choice") }
+        XCTAssertEqual(choices.map(\.value), ["dockAndMenuBar", "menuBarOnly", "dockOnly"])
+        let defaults = try DesktopConfiguration()
+        XCTAssertEqual(defaults.shellPreferences, DesktopShellPreferences(visibility: .dockAndMenuBar, compactIcon: false))
+        XCTAssertFalse(defaults.enabled("analyticsEnabled"))
+        XCTAssertTrue(ShellPreference.appleOnlyKeys.isDisjoint(with: DesktopConfiguration.supportedKeys))
+
+        let opaque: [String: AnyCodable] = [
+            "showStatusBarIconInDockOnly": AnyCodable(.bool(false)),
+            "paidAccessRoutingEnabled": AnyCodable(.bool(true)),
+            "recordingsDirectory": AnyCodable(.string("/Users/someone/Recordings"))
+        ]
+        let imported = try DesktopConfiguration(values: opaque.merging([
+            "appVisibility": AnyCodable(.string("menuBarOnly")), "compactStatusBarIcon": AnyCodable(.bool(true)),
+            "analyticsEnabled": AnyCodable(.bool(true))
+        ]) { $1 })
+        XCTAssertEqual(imported.shellPreferences, DesktopShellPreferences(visibility: .menuBarOnly, compactIcon: true))
+        let restored = try JSONDecoder().decode(
+            DesktopConfiguration.self, from: JSONEncoder().encode(imported.applying(imported.entries))
+        )
+        XCTAssertEqual(restored.shellPreferences, imported.shellPreferences)
+        XCTAssertTrue(restored.enabled("analyticsEnabled"))
+        for (key, value) in opaque { XCTAssertEqual(restored.values[key], value, key) }
+
+        XCTAssertThrowsError(try DesktopConfiguration(values: ["appVisibility": AnyCodable(.string("taskbar"))]))
+        XCTAssertThrowsError(try DesktopConfiguration(values: ["compactStatusBarIcon": AnyCodable(.string("true"))]))
     }
 
     func testCanonicalPreferenceTransfer_PreservesUncoveredValueAndExecutesCoveredClearAsNormal() throws {
         let key = ApplicationPreferenceKey.visualDensity.rawValue
         let density = DataMigrationRecord(id: key, kind: "default", value: AnyCodable(.string("compact")))
-        let opaque = DataMigrationRecord(id: "appVisibility", kind: "default", value: AnyCodable(.string("dockOnly")))
+        let opaque = DataMigrationRecord(
+            id: "showStatusBarIconInDockOnly", kind: "default", value: AnyCodable(.bool(false))
+        )
         try DataMigrationPreferenceCatalog.validate(density, category: .settings, validateJSON: { _ in
             XCTFail("Density is a scalar preference")
         })
@@ -116,7 +153,7 @@ final class DesktopVisualDensityTests: XCTestCase {
             ))
             XCTAssertEqual(preferences.visualDensity, covered ? .normal : .compact)
             XCTAssertEqual(preferences.values[key], covered ? nil : density.value)
-            XCTAssertEqual(preferences.values["appVisibility"], opaque.value)
+            XCTAssertEqual(preferences.values["showStatusBarIconInDockOnly"], opaque.value)
         }
     }
 

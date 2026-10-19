@@ -1,5 +1,6 @@
 import Foundation
 import CWindowsSupport
+import SpeakCore
 import SpeakDesktop
 import SpeakDesktopHost
 
@@ -17,6 +18,13 @@ enum WindowsPresentation {
 
     static func configureAppearance(_ controller: WindowsAppController) async {
         _ = jsti_window_set_appearance(Int32(await controller.appearance().rawValue))
+    }
+
+    /// General › App visibility and the compact icon, staged before the window
+    /// opens so a tray-only login launch never flashes a taskbar button.
+    static func configureShell(_ controller: WindowsAppController) async {
+        let preferences = (try? await controller.configuration())?.shellPreferences ?? DesktopShellPreferences()
+        WindowsHostPlatform.applyShell(preferences)
     }
 
     /// General › Theme: the window already shows the choice; this keeps it.

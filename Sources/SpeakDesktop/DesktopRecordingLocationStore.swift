@@ -1,6 +1,21 @@
 import Foundation
 
 extension DesktopRecordingStore {
+    /// Installs the host's verified local location policy once, after the host opened its
+    /// private namespace on a worker. It must belong to this History; it is never replaced.
+    public func activateAudioLocations(_ locations: DesktopRecordingLocations) throws {
+        guard audioLocations == nil else { throw DesktopRecordingLocationError.duplicateIdentity }
+        try locations.validateHistory(directory)
+        audioLocations = locations
+    }
+
+    public var hasAudioLocations: Bool { audioLocations != nil }
+
+    /// The root of a verified local registration; nil when it is not registered here.
+    public func audioLocationRoot(_ id: UUID) -> URL? {
+        audioLocations?.registeredRoot(id)
+    }
+
     /// Explicit local host authorization only; never called when importing settings/profiles/History.
     public func authorizeLocallySelectedAudioRoot(_ root: URL, id: UUID = UUID()) throws -> UUID {
         guard var locations = audioLocations else { throw DesktopRecordingLocationError.unregistered }

@@ -88,6 +88,9 @@ enum {
      * insensitive until jsti_window_set_login_item reports the state reached. */
     JSTI_EVENT_LOGIN_ITEM = 46,
     JSTI_EVENT_AUTOMATION = 47,
+    /* Housekeeping › New recordings folder. text: chosen absolute local folder,
+     * or "" to save new recordings in History again. Nothing is moved. */
+    JSTI_EVENT_RECORDINGS_LOCATION = 98,
     JSTI_EVENT_USER_ABSENT = 120
 };
 

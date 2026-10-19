@@ -190,6 +190,10 @@ package protocol DesktopHostPlatform: Sendable {
     /// Shows the state on General's switch, with the note under it.
     static func showLoginItem(_ state: DesktopLoginItemState, detail: String)
 
+    /// Applies General's app visibility and compact icon to the window and
+    /// notification area. Hosts without that shell keep and transfer the values.
+    static func applyShell(_ preferences: DesktopShellPreferences)
+
     // Shortcut text for the status line.
     static var defaultHotKey: HotKeySettings { get }
     /// Appended to the Ready status line.
@@ -241,4 +245,5 @@ package extension DesktopHostPlatform {
     static func loginItemState(recorded: Bool?) async -> DesktopLoginItemState { .unavailable }
     static func setLoginItem(_ enabled: Bool) async throws -> DesktopLoginItemState { .unavailable }
     static func showLoginItem(_ state: DesktopLoginItemState, detail: String) {}
+    static func applyShell(_ preferences: DesktopShellPreferences) {}
 }

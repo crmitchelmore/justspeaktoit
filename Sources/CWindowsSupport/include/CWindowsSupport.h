@@ -1344,6 +1344,16 @@ JSTICapturePrewarm *jsti_capture_prewarm_create(const char *device_id, uint32_t 
 int jsti_capture_prewarm_state(JSTICapturePrewarm *prewarm);
 void jsti_capture_prewarm_destroy(JSTICapturePrewarm *prewarm);
 
+/* General > App visibility: visibility is the shared DesktopAppVisibility
+ * order, 0 taskbar and notification area, 1 notification area only, 2 taskbar
+ * only. With 1 the window has no taskbar button and closing or minimising it
+ * hides it to the notification-area icon; Quit still exits. A notification
+ * area that cannot be reached keeps the taskbar button, so the window is never
+ * unreachable. compact 1 shows state by the icon only: a plain tooltip and no
+ * totals line in its menu. Safe before or while the window runs; -1 for an
+ * invalid value. */
+int jsti_window_set_shell(int visibility, int compact);
+
 #ifdef __cplusplus
 }
 #endif

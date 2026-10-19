@@ -171,6 +171,7 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable { // swiftlint:
               group: "General", kind: .number(0...1),
               defaultValue: AnyCodable(.double(RecordingFeedbackDefaults.volume)))
     ] + [VoiceSynthesisPreference.quality.field, VoiceAudioFormat.transferField]
+        + ShellPreference.fields
         + SonioxVoicePreference.fields + CaptureDeliveryPreference.fields
         + LivePolishPreference.fields + modulateFields
 

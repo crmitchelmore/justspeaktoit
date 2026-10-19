@@ -330,6 +330,7 @@ enum SpeakWindowsMain {
         await WindowsPresentation.configureAppearance(controller)
         holder.configurePermissions()
         holder.configureGuide()
+        await WindowsPresentation.configureShell(controller)
     }
 
     private static func runWindow(controller: WindowsAppController, holder: WindowsEventContext) async throws {

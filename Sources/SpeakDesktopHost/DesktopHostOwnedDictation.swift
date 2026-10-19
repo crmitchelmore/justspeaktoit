@@ -63,17 +63,16 @@ extension DesktopHostController {
         let id = snapshot.id
         await recordingFeedback?.recordingRequested(id)
         guard !closed, !cancellationRequested, !Task.isCancelled else { throw CancellationError() }
-        let filename = id.uuidString + ".wav"
         let file: PCMRecordingFile
+        var record: DesktopRecordingStore.Record
         do {
-            file = try PCMRecordingFile(
-                url: directory.appendingPathComponent("History").appendingPathComponent(filename), sampleRate: rate
-            )
+            let opened = try await openRecordingFile(id: id, rate: rate, profile: profile)
+            file = opened.file
+            record = opened.record
         } catch {
             await recordingFeedback?.cancelRecording(id)
             throw error
         }
-        var record = profileRecord(id: id, filename: filename, profile: profile)
         var live: DesktopLiveSession?
         do {
             try await saveRecord(record)

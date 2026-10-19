@@ -193,6 +193,8 @@ extension DesktopHostController {
         report.recordingFeedbackClosed = await feedbackClosed
         report.handsFreeClosed = await detectorClosed
         report.localCleanupClosed = await localCleanupClosed
+        // Late work could still append ownership; then process exit releases the namespace.
+        if report.isComplete { releaseRecordingLocations() }
         finishShutdown(report)
         return report
     }
@@ -234,6 +236,7 @@ extension DesktopHostController {
         voiceCommandTask?.cancel()
         historyDeletionTask?.cancel()
         folderRevealTask?.cancel()
+        recordingLocation.cancel?()
         audioCleanupTask?.cancel()
         migrationExportWorker?.cancel()
         migrationExportTask?.cancel()

@@ -317,6 +317,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var historyDeletionInProgress = false
     var historyDeletionTask: Task<Void, Never>?
     var folderRevealTask: Task<Void, Error>?
+    var recordingLocation = DesktopHostRecordingLocationState()
     var audioCleanupTask: Task<Void, Never>?
     var migrationExportTask: Task<Void, Never>?
     var migrationExportWorker: Task<DesktopMigrationBackup.Outcome, Never>?

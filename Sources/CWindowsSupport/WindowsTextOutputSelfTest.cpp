@@ -450,6 +450,34 @@ int supportsTextPattern(HWND control) {
 
 // ---- steps ---------------------------------------------------------------------
 
+std::string checkSelectionRangeBudget() {
+    if (maximumSelectedTextUnits != 200000) return "The native selection staging limit changed.";
+    std::wstring text;
+    if (!appendSelectedRange(text, L"") || !text.empty() ||
+        !appendSelectedRange(text, L"first") || !appendSelectedRange(text, L"") ||
+        !appendSelectedRange(text, L"second") || text != L"first\nsecond")
+        return "Empty selected ranges introduced separators or dropped selected text.";
+    text.assign(199998, L'x');
+    if (!appendSelectedRange(text, L"y") || text.size() != 200000 ||
+        text.substr(199998) != L"\ny" || !appendSelectedRange(text, L"") || text.size() != 200000)
+        return "An exact-limit selection or its trailing empty range was rejected.";
+    const std::wstring maximum = text;
+    if (appendSelectedRange(text, L"z") || text != maximum)
+        return "An oversized selection was accepted or partially appended.";
+    text.assign(199999, L'x');
+    const std::wstring beforeSeparator = text;
+    if (appendSelectedRange(text, L"y") || text != beforeSeparator)
+        return "The inter-range separator escaped the selection budget.";
+    text.clear();
+    if (!appendSelectedRange(text, std::wstring(200000, L'x')) || text.size() != 200000)
+        return "A single exact-limit range was rejected.";
+    text.clear();
+    if (appendSelectedRange(text, std::wstring(200001, L'x')) || !text.empty() ||
+        appendSelectedRange(text, std::wstring(L"x\0y", 3)) || !text.empty())
+        return "An oversized or embedded-NUL range was accepted or partially appended.";
+    return {};
+}
+
 std::string checkPureHelpers() {
     INPUT inputs[4];
     pasteInputs(inputs);
@@ -1436,6 +1464,8 @@ int jsti_text_output_self_test(char *error, size_t capacity) {
     std::string failure = checkPureHelpers();
     if (!failure.empty()) return jsti::fail(failure, error, capacity);
     try {
+        failure = checkSelectionRangeBudget();
+        if (!failure.empty()) return jsti::fail(failure, error, capacity);
         auto state = std::make_unique<Fixture>();
         fixture = state.get();
         EnvironmentGuard environmentGuard;

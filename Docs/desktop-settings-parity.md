@@ -83,6 +83,11 @@ providers, identity changes, oversized text and timeouts fail explicitly;
 there is no whole-field, clipboard or simulated-Copy fallback. Up to 64
 selected ranges are joined with newlines, with 200,000 UTF-16 units of native
 staging and the canonical **100,000 Unicode-scalar** speech limit.
+Empty ranges add no separator and consume no staging budget, including after
+an exact-limit range; separators between nonempty ranges count toward the limit.
+Native helper regressions cover both exact-limit shapes, trailing empty ranges,
+separator overflow, oversize and embedded-NUL rejection without partial appends.
+These additional regressions are authored but **NOT_RUN** locally.
 
 The shared source type has a distinct captured-selection constructor; the
 ordinary constructor and native Voice message parser still refuse an

@@ -359,7 +359,7 @@ struct WindowState {
     std::vector<MicrophoneRow> microphones;
     std::string microphoneSelection;
     std::vector<int> configuredModelModes;
-    int configuredPreferredModels[3] = {-1, -1, -1}; // Global remote batch, remote live and local batch rows.
+    int configuredPreferredModels[4] = {-1, -1, -1, -1}; // Global remote batch, remote live, local batch and local live rows.
     std::vector<HistoryRow> pendingHistory;
     std::string pendingHistorySelection;
     std::string selectedHistoryID;
@@ -3396,8 +3396,18 @@ int jsti_window_set_model_modes(const int *rowModes, size_t count, int preferred
         state.configuredPreferredModels[0] = preferredBatch;
         state.configuredPreferredModels[1] = preferredLive;
         state.configuredPreferredModels[2] = preferredLocal;
+        state.configuredPreferredModels[3] = -1;
         return 0;
     } catch (const std::exception &) { return -1; }
+}
+
+int jsti_window_set_preferred_local_live_model(int index) {
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (state.running) return -1;
+    const auto &modes = state.configuredModelModes;
+    if (index < -1 || (index >= 0 && (static_cast<size_t>(index) >= modes.size() || modes[index] != 3))) return -1;
+    state.configuredPreferredModels[3] = index;
+    return 0;
 }
 
 int jsti_window_set_model_catalog(const JSTIModelRow *rows, size_t count, const char *status, int refreshing) {

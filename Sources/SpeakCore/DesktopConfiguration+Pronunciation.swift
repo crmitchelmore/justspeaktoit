@@ -67,11 +67,20 @@ extension DesktopConfiguration {
     }
 
     var legacyPronunciationWords: [String] {
-        guard let value = values[ApplicationPreferenceKey.ttsPronunciationDictionary.rawValue] else { return [] }
+        Array(legacyPronunciationDictionary.keys)
+    }
+
+    public var legacyPronunciationDictionary: [String: String] {
+        guard let value = values[ApplicationPreferenceKey.ttsPronunciationDictionary.rawValue] else { return [:] }
         guard case .object(let entries) = value.storage else {
             preconditionFailure("Invalid validated legacy pronunciation dictionary.")
         }
-        return Array(entries.keys)
+        return entries.mapValues {
+            guard case .string(let text) = $0 else {
+                preconditionFailure("Invalid validated legacy pronunciation value.")
+            }
+            return text
+        }
     }
 
     var ignoredPronunciationWords: [String] {

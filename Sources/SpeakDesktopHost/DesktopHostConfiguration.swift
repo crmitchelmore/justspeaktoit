@@ -178,6 +178,18 @@ extension DesktopHostController {
         update(status + approval + preparation + cleanup)
     }
 
+    func persistLegacyPronunciationDictionary(
+        _ dictionary: [String: String], from configuration: DesktopConfiguration
+    ) async throws {
+        var values = configuration.values
+        values[ApplicationPreferenceKey.ttsPronunciationDictionary.rawValue] = AnyCodable(
+            .object(dictionary.mapValues { .string($0) })
+        )
+        try await persistConfiguration(
+            DesktopConfiguration(values: values), intent: .persistOnly, status: "Legacy pronunciation dictionary saved."
+        )
+    }
+
     // Permission follows the effective cleanup route, not unrelated sound settings
     // or the ordinary post-processing prompt/temperature that Auto-Clean does not use.
     func retainedLivePolishApproval(after changed: Settings) throws -> Bool {

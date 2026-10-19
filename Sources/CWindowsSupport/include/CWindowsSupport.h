@@ -14,6 +14,7 @@ extern "C" {
 
 /* Corrections/pronunciation editor; events 70 (action), 71 (load), index 0/1;
  * event 72 reads a selected recording's correction snapshot (kind 2).
+ * Kind 4 edits the separate legacy word-to-pronunciation preference map.
  * Escaped UTF-8 field contract lives in DesktopVocabularyWire. */
 int32_t jsti_vocabulary_set(int32_t kind, const char *payload, int32_t refresh);
 

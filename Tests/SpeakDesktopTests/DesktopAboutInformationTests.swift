@@ -79,4 +79,32 @@ final class DesktopAboutInformationTests: XCTestCase {
         XCTAssertEqual(AppInformationLink.releases.url.path, "/crmitchelmore/justspeaktoit/releases")
         XCTAssertFalse(AppInformationLink.releases.url.absoluteString.contains("/latest"))
     }
+
+    func testAbout_MetadataReadAcceptsExactLimitAndStopsAfterOneOverflowByte() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let maximum = 4 * 1024 * 1024
+        let commit = String(repeating: "c", count: 40)
+        let json = try JSONSerialization.data(withJSONObject: ["sourceCommit": commit])
+        for overflow in [0, 32] {
+            let file = root.appendingPathComponent("metadata-\(overflow).json")
+            var padded = json
+            padded.append(Data(repeating: 32, count: maximum - json.count + overflow))
+            try padded.write(to: file)
+            let handle = try FileHandle(forReadingFrom: file)
+            defer { try? handle.close() }
+            if overflow == 0 {
+                let data = try DesktopAboutInformation.readMetadata(handle)
+                XCTAssertEqual(data.count, maximum)
+                XCTAssertEqual(try DesktopAboutInformation.decodeMetadata(data).commit, commit)
+                XCTAssertEqual(try handle.offset(), UInt64(maximum))
+            } else {
+                XCTAssertThrowsError(try DesktopAboutInformation.readMetadata(handle)) { error in
+                    XCTAssertEqual((error as NSError).code, CocoaError.fileReadTooLarge.rawValue)
+                }
+                XCTAssertEqual(try handle.offset(), UInt64(maximum + 1))
+            }
+        }
+    }
 }

@@ -36,6 +36,11 @@ beside the executable; neither the working checkout's `VERSION` nor a Mac
 release is used as the installed desktop version. Missing stamps are labelled
 explicitly. Malformed or oversized metadata produces a visible recovery
 notice, not a fabricated version or silent success.
+The 4-MiB metadata bound also applies during file reads, not just to a pre-read
+size snapshot: a file that grows or changes after that check cannot cause an
+unbounded read. An authored portable regression accepts an exact-limit padded
+JSON document and verifies overflow rejection after consuming only one byte
+beyond the limit. This additional check is **NOT_RUN** locally.
 
 Windows and Linux retain their native branded About layout and controls.
 Six canonical links shared with the Mac lead to GitHub, issue reporting,

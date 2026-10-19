@@ -11,12 +11,13 @@ constexpr wchar_t className[] = L"JSTINotificationArea";
 
 HWND host = nullptr, mainWindow = nullptr;
 HICON idleIcon = nullptr, recordingIcon = nullptr;
-bool added = false, registered = false;
+bool added = false, registered = false, compactIcon = false;
 int shownRecording = 0;
 std::wstring shownSummary;
 UINT taskbarCreated = 0;
 
 std::wstring tip(int recording) {
+    if (compactIcon) return L"Just Speak to It";
     switch (recording) {
     case 1: return L"Just Speak to It: recording";
     case 2: return L"Just Speak to It: transcribing";
@@ -47,7 +48,7 @@ bool addIcon() {
 }
 
 void showMenu(POINT anchor) {
-    HMENU menu = buildMenu(shownRecording, shownSummary);
+    HMENU menu = buildMenu(shownRecording, compactIcon ? std::wstring() : shownSummary);
     if (!menu) return;
     // The owner must be foreground for the menu to close on an outside click.
     SetForegroundWindow(host);
@@ -151,7 +152,28 @@ void setState(int recording, const std::wstring &summary) {
     Shell_NotifyIconW(NIM_MODIFY, &data);
 }
 
+void setCompact(bool compact) {
+    if (compact == compactIcon) return;
+    compactIcon = compact;
+    if (!added) return;
+    NOTIFYICONDATAW data = iconData();
+    data.uFlags = NIF_TIP | NIF_SHOWTIP;
+    Shell_NotifyIconW(NIM_MODIFY, &data);
+}
+
+bool shown() { return added; }
+
 bool selfTest(std::string &failure) {
+    const bool wasCompact = compactIcon;
+    compactIcon = true;
+    const bool plainTip = tip(1) == L"Just Speak to It" && tip(2) == L"Just Speak to It";
+    compactIcon = false;
+    const bool statusTip = tip(1) == L"Just Speak to It: recording";
+    compactIcon = wasCompact;
+    if (!plainTip || !statusTip) {
+        failure = "Notification area: the compact icon does not drop the status from its tooltip.";
+        return false;
+    }
     auto label = [](HMENU menu, UINT position) {
         wchar_t text[128] = {};
         GetMenuStringW(menu, position, text, 128, MF_BYPOSITION);

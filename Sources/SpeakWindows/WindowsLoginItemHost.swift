@@ -1,5 +1,6 @@
 import Foundation
 import CWindowsSupport
+import SpeakCore
 import SpeakDesktop
 import SpeakDesktopHost
 
@@ -22,6 +23,12 @@ extension WindowsHostPlatform {
 
     static func showLoginItem(_ state: DesktopLoginItemState, detail: String) {
         _ = jsti_window_set_login_item(state.rawValue, detail)
+    }
+
+    /// General › App visibility and compact icon (WindowsWindow.cpp `applyShell`).
+    static func applyShell(_ preferences: DesktopShellPreferences) {
+        let visibility = DesktopAppVisibility.allCases.firstIndex(of: preferences.visibility) ?? 0
+        _ = jsti_window_set_shell(Int32(visibility), preferences.compactIcon ? 1 : 0)
     }
 
     /// The registry and the startup task API can wait on the system; keep

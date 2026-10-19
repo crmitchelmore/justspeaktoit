@@ -1290,6 +1290,16 @@ int jsti_recording_feedback_renderer_self_test(char *error, size_t error_capacit
 int jsti_recording_feedback_check_assets(const char *start_path, const char *stop_path,
                                         char *error, size_t error_capacity);
 
+/* General > App visibility: visibility is the shared DesktopAppVisibility
+ * order, 0 taskbar and notification area, 1 notification area only, 2 taskbar
+ * only. With 1 the window has no taskbar button and closing or minimising it
+ * hides it to the notification-area icon; Quit still exits. A notification
+ * area that cannot be reached keeps the taskbar button, so the window is never
+ * unreachable. compact 1 shows state by the icon only: a plain tooltip and no
+ * totals line in its menu. Safe before or while the window runs; -1 for an
+ * invalid value. */
+int jsti_window_set_shell(int visibility, int compact);
+
 #ifdef __cplusplus
 }
 #endif

@@ -133,6 +133,7 @@ extension DesktopHostController {
         reconcileVoiceQualityChange(previousVoice)
         let cleanup = await disarmHandsFreeForConfiguration()
         try await configureRecordingFeedback(configuration)
+        Platform.applyShell(configuration.shellPreferences)
         Platform.hud(.hidden)
         let approval = intent == .persistOnly && changed.livePolishApproved != true
             && configuration.text("speedMode") == SpeedModeID.livePolish.rawValue
@@ -214,6 +215,7 @@ extension DesktopHostController {
         reconcileVoiceQualityChange(previousVoice)
         let cleanup = await disarmHandsFreeForConfiguration()
         try await configureRecordingFeedback(document.preferences)
+        Platform.applyShell(document.preferences.shellPreferences)
         Platform.hud(.hidden)
         update(configurationImportStatus(document, settings: changed) + cleanup)
     }

@@ -319,6 +319,7 @@ enum SpeakWindowsMain {
         try await configureModelPickers(controller, holder: holder)
         try await controller.configureModelCatalog()
         await WindowsPresentation.configureAppearance(controller)
+        await WindowsPresentation.configureShell(controller)
     }
 
     private static func runWindow(controller: WindowsAppController, holder: WindowsEventContext) async throws {

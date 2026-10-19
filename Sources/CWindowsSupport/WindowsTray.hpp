@@ -23,6 +23,11 @@ void setIcons(HICON idle, HICON recording);
 // recording: 0 idle, 1 recording, 2 transcribing. `summary` is the Sessions,
 // Recording Time and Spend line; empty hides it.
 void setState(int recording, const std::wstring &summary);
+// Compact: the icon alone shows the state, with a plain tooltip and no totals
+// line in the menu, like the Mac's compact menu bar icon.
+void setCompact(bool compact);
+// True while the icon is in the notification area.
+bool shown();
 // The menu for a state; exposed for the self-test.
 HMENU buildMenu(int recording, const std::wstring &summary);
 bool selfTest(std::string &failure);

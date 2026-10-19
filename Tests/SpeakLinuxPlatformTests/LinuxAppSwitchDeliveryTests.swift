@@ -133,7 +133,7 @@ final class LinuxAppSwitchDeliveryTests: XCTestCase {
     }
 }
 
-private final class PolicyNative: LinuxOutputNative, @unchecked Sendable {
+final class PolicyNative: LinuxOutputNative, @unchecked Sendable {
     var front = true, own = false, secondFocus = false, failCopy = false
     var clipboard: String?
     var pastes = 0, portals = 0

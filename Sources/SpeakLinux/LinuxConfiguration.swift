@@ -42,19 +42,14 @@ extension LinuxWindow {
         let strings = Strings()
         let rows = zip(DesktopConfiguration.fields, preferences.entries).map { field, value in
             JSTIConfigurationField(
-                title: strings.add(field.key == ApplicationPreferenceKey.autoCorrectionsEnabled.rawValue
-                    || field.key == ApplicationPreferenceKey.autoCorrectionsPromotionThreshold.rawValue
-                    ? field.title + " (unavailable on Linux; retained for transfer)"
-                    : field.key == VoiceOutputLanguagePreference.key ? snapshot.languageTitle
+                title: strings.add(field.key == VoiceOutputLanguagePreference.key ? snapshot.languageTitle
                     : field.key == VoiceSynthesisPreference.quality.key.rawValue ? snapshot.qualityTitle : field.title),
                 value: strings.add(value), group: strings.add(field.group),
                 is_boolean: { if case .boolean = field.kind { return 1 }; return 0 }(),
                 requires_hud_overlay: field.requiresHUDOverlay ? 1 : 0,
                 choices: preferences.serializedChoices(for: field).map { strings.add($0) },
                 requires_hands_free_guard: field.requiresHandsFreeGuard ? 1 : 0,
-                enabled_by_field: field.key == ApplicationPreferenceKey.autoCorrectionsEnabled.rawValue
-                    || field.key == ApplicationPreferenceKey.autoCorrectionsPromotionThreshold.rawValue ? -1
-                    : field.enabledBy.flatMap { key in
+                enabled_by_field: field.enabledBy.flatMap { key in
                     DesktopConfiguration.fields.firstIndex { $0.key == key }.map { Int32($0 + 1) }
                 } ?? 0
             )

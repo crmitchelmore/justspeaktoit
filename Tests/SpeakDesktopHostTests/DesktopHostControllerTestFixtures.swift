@@ -168,7 +168,26 @@ final class FakeLog: @unchecked Sendable {
     func setKey(_ key: String, name: String) { lock.withLock { keys[name] = key } }
 }
 
+protocol FakeObservationalConsent: Sendable {
+    func consentActionIsCurrent(_ allowed: Bool, token: UInt64) -> Bool
+    func setLocalConsent(_ allowed: Bool, token: UInt64?) -> Bool
+}
+
 enum FakePlatform: DesktopHostAutomationPlatform {
+    static var supportsObservationalCorrections: Bool {
+        FakeLog.shared.correctionReadback?.provenance == .observationalATSPISpan
+    }
+    @discardableResult
+    static func setObservationalCorrectionConsent(_ allowed: Bool, token: UInt64?) -> Bool {
+        guard let native = FakeLog.shared.correctionReadback as? any FakeObservationalConsent else {
+            return !allowed
+        }
+        return native.setLocalConsent(allowed, token: token)
+    }
+    static func observationalCorrectionActionIsCurrent(_ allowed: Bool, token: UInt64) -> Bool {
+        (FakeLog.shared.correctionReadback as? any FakeObservationalConsent)?
+            .consentActionIsCurrent(allowed, token: token) == true
+    }
     static var correctionLearningUnavailable: String? {
         FakeLog.shared.correctionReadback == nil ? "Synthetic host has no owned text span." : nil
     }
@@ -264,6 +283,10 @@ final class SyntheticEffects: DesktopHostEffects, @unchecked Sendable {
     let transcription = Gate(open: true)
     private let lock = NSLock()
     private var performed: [(FakeJob, String)] = []
+    private let outputDisposition: DesktopTextOutputResult.Disposition
+    init(outputDisposition: DesktopTextOutputResult.Disposition = .confirmedInsertion) {
+        self.outputDisposition = outputDisposition
+    }
     var outputs: [(FakeJob, String)] { lock.withLock { performed } }
 
     func apiKey(name: String) throws -> String { FakeLog.shared.key(name) }
@@ -287,7 +310,7 @@ final class SyntheticEffects: DesktopHostEffects, @unchecked Sendable {
     }
     func perform(_ job: FakeJob, text: String) -> DesktopTextOutputResult {
         lock.withLock { performed.append((job, text)) }
-        return DesktopTextOutputResult(.confirmedInsertion, status: "Delivered.")
+        return DesktopTextOutputResult(outputDisposition, status: "Delivered.")
     }
     func writeSettings(_ data: Data, to url: URL) throws { try data.write(to: url, options: .atomic) }
 }

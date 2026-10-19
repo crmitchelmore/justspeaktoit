@@ -17,6 +17,7 @@ typedef struct {
     GPtrArray *buttons;
     gint selected;
     gboolean filling, busy;
+    guint64 consent_token;
     GtkCheckButton *include_rules, *include_tags;
     GtkEntry *tags;
 } Editor;
@@ -80,7 +81,8 @@ static gboolean combo(Editor *e, int i) { return e->kind == 0 && (i == 4 || i ==
 static gboolean check(Editor *e, int i) { return e->kind == 1 && (i == 5 || i == 6); }
 static void fill(Editor *e, gchar **row) {
     if (e->kind == 3) {
-        gchar *details = row == NULL ? g_strdup("Select a stored candidate. No edits in other apps are observed.")
+        gchar *details = row == NULL ? g_strdup(
+            "Select a stored candidate. Learning requires separate local session consent.")
             : g_strdup_printf("%s -> %s\nSeen: %s\nSource apps: %s\nFirst seen: %s\nLast seen: %s\nState: %s",
                 row[1], row[2], row[3], row[4], row[5], row[6], row[7]);
         gtk_label_set_text(GTK_LABEL(e->fields[1]), details); g_free(details); return;
@@ -98,9 +100,23 @@ static void fill(Editor *e, gchar **row) {
         } else set_text(e->fields[i], value);
     }
 }
+static gboolean action_available(const char *action, gboolean busy) {
+    return !busy || g_strcmp0(action, "stopLearning") == 0;
+}
+int32_t jsti_vocabulary_learning_controls_contract_self_test(void) {
+    /* The same predicate drives the actual GTK buttons while a Host queue
+     * is held; this fixture creates no widgets and performs no UI actions. */
+    return action_available("stopLearning", TRUE) && action_available("stopLearning", FALSE)
+        && !action_available("allowObservationalLearning", TRUE) && !action_available("save", TRUE)
+        && action_available("allowObservationalLearning", FALSE) ? 0 : -1;
+}
 static void pending(Editor *e, gboolean busy) {
     e->busy = busy;
-    for (guint i = 0; i < e->buttons->len; ++i) gtk_widget_set_sensitive(g_ptr_array_index(e->buttons, i), !busy);
+    for (guint i = 0; i < e->buttons->len; ++i) {
+        GtkWidget *button = g_ptr_array_index(e->buttons, i);
+        const char *action = g_object_get_data(G_OBJECT(button), "vocabulary-action");
+        gtk_widget_set_sensitive(button, action_available(action, busy));
+    }
     gtk_widget_set_sensitive(GTK_WIDGET(e->list), !busy);
     selection_controls(e);
 }
@@ -219,9 +235,47 @@ static void candidate_response(AdwMessageDialog *dialog, const char *response, g
         pending(e, TRUE); jsti_window_emit(70, payload, 3);
     }
 }
+static void observation_response(AdwMessageDialog *dialog, const char *response, gpointer data) {
+    (void)dialog;
+    Editor *e = g_object_get_data(G_OBJECT(data), "vocabulary-editor");
+    if (e != NULL && g_strcmp0(response, "allow") == 0) {
+        const guint64 token = jsti_atspi_offer_local_consent();
+        if (token == 0) {
+            gtk_label_set_text(GTK_LABEL(e->status), "Local consent is unavailable. Restart the app to try again.");
+            return;
+        }
+        e->consent_token = token;
+        gchar *payload = g_strdup_printf("allowObservationalLearning\t%" G_GUINT64_FORMAT, token);
+        pending(e, TRUE);
+        jsti_window_emit(70, payload, e->kind); g_free(payload);
+    }
+}
 static void clicked(GtkButton *button, gpointer data) {
     Editor *e = data;
     const char *action = g_object_get_data(G_OBJECT(button), "vocabulary-action");
+    if (g_strcmp0(action, "stopLearning") == 0) {
+        /* Revoke the native capability before a queued Swift action runs. */
+        const guint64 token = jsti_atspi_revoke_local_consent();
+        e->consent_token = token;
+        gchar *payload = g_strdup_printf("stopObservationalLearning\t%" G_GUINT64_FORMAT, token);
+        pending(e, TRUE); jsti_window_emit(70, payload, e->kind); g_free(payload); return;
+    }
+    if (g_strcmp0(action, "allowObservationalLearning") == 0) {
+        GtkRoot *root = gtk_widget_get_root(e->root);
+        GtkWidget *dialog = adw_message_dialog_new(GTK_IS_WINDOW(root) ? GTK_WINDOW(root) : NULL,
+            "Allow observational learning for this session?",
+            "After you focus a supported ordinary editable field, JustSpeakToIt may insert directly through AT-SPI "
+            "and read a bounded span and surrounding guards. This is observation, not proof that our insertion "
+            "caused the change: app-origin formatting and changes can also be learned. Password and ambiguous "
+            "fields are excluded; clipboard and paste are never observed. Accessibility must already be enabled. "
+            "This permission is not saved or imported. Stop learning revokes it immediately.");
+        adw_message_dialog_add_responses(ADW_MESSAGE_DIALOG(dialog),
+            "cancel", "Keep off", "allow", "Allow for this session", NULL);
+        adw_message_dialog_set_default_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
+        adw_message_dialog_set_close_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
+        g_signal_connect_object(dialog, "response", G_CALLBACK(observation_response), e->root, 0);
+        gtk_window_present(GTK_WINDOW(dialog)); return;
+    }
     if (g_strcmp0(action, "candidates") == 0) {
         if (editors[3] != NULL) {
             GtkRoot *existing = gtk_widget_get_root(editors[3]->root);
@@ -387,6 +441,8 @@ static GtkWidget *multiline(GtkWidget **view) {
 }
 static void destroy_editor(gpointer data) {
     Editor *e = data;
+    if (e->kind == 0 && e->consent_token != 0)
+        jsti_atspi_observational_consent(0, e->consent_token);
     if (editors[e->kind] == e) editors[e->kind] = NULL;
     g_ptr_array_unref(e->rows); g_ptr_array_unref(e->categories); g_ptr_array_unref(e->buttons);
     g_free(e->category); g_free(e);
@@ -401,7 +457,7 @@ GtkWidget *jsti_vocabulary_page_new(int kind) {
     GtkWidget *hero = jsti_hero_new("settings", kind == 0 ? "Corrections"
         : kind == 3 ? "Stored correction candidates" : "Pronunciation Dictionary",
         kind == 0 ? "Preferred spellings before post-processing. The original provider transcript stays in History."
-        : kind == 3 ? "Review real stored candidates. Automatic observation of edits in other apps is not available."
+        : kind == 3 ? "Review stored candidates. Optional session-consented AT-SPI observation is not acknowledged insertion."
         : "Your Read aloud dictionary. Deepgram uses text replacements, not IPA phoneme tags.", NULL, NULL);
     gtk_box_append(GTK_BOX(column), hero);
     e->search = gtk_search_entry_new();
@@ -503,8 +559,13 @@ GtkWidget *jsti_vocabulary_page_new(int kind) {
         gtk_box_append(GTK_BOX(column), GTK_WIDGET(e->tags));
         gtk_box_append(GTK_BOX(column), button(e, "Save _context settings", "preferences"));
         gtk_box_append(GTK_BOX(column), button(e, "Review stored _candidates", "candidates"));
-        label = gtk_label_new("Automatic observation of edits in other apps is not available on this platform.");
+        label = gtk_label_new("Observational learning is off until you explicitly allow it for this session. "
+            "App-origin changes can also be learned. Only supported AT-SPI fields qualify; paste never does. "
+            "Enable learning in Preferences first. Accessibility availability depends on the desktop and toolkit, "
+            "including on Wayland; no OS accessibility setting is changed.");
         gtk_label_set_wrap(GTK_LABEL(label), TRUE); gtk_box_append(GTK_BOX(column), label);
+        gtk_box_append(GTK_BOX(column), button(e, "_Allow observational learning...", "allowObservationalLearning"));
+        gtk_box_append(GTK_BOX(column), button(e, "_Stop learning", "stopLearning"));
     }
     e->status = gtk_label_new("Select Reload to load saved entries.");
     gtk_label_set_wrap(GTK_LABEL(e->status), TRUE); gtk_label_set_selectable(GTK_LABEL(e->status), TRUE);

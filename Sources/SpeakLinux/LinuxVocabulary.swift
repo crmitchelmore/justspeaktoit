@@ -1,5 +1,6 @@
 import Foundation
 import SpeakDesktop
+import SpeakLinuxPlatform
 import CLinuxSupport
 
 func linuxVocabularyEvent(_ event: Int32, payload: String, kind: Int, holder: LinuxEventContext) {
@@ -12,7 +13,11 @@ func linuxVocabularyEvent(_ event: Int32, payload: String, kind: Int, holder: Li
                 }
                 return
             }
-            let notice = event == 70 ? try await holder.controller.vocabularyEvent(kind: kind, payload: payload) : ""
+            let learning = payload.hasPrefix("allowObservationalLearning\t")
+                || payload.hasPrefix("stopObservationalLearning\t")
+            var notice = event == 70
+                ? try await holder.controller.vocabularyEvent(kind: learning ? 3 : kind, payload: payload) : ""
+            if learning || kind == 0 || kind == 3 { notice += "\n" + LinuxAtspiTarget.availability }
             let preview = payload.hasPrefix("preview\t")
             let snapshot = preview ? notice : try await holder.controller.vocabularyPresentation(
                 kind: kind, notice: notice, reload: event == 71

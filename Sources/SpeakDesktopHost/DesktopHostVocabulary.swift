@@ -38,6 +38,15 @@ extension DesktopHostController {
         if kind == 3, payload == "allowLearning" || payload == "stopLearning" {
             return try correctionLearningApproval(payload)
         }
+        let observational = payload.split(separator: "\t", omittingEmptySubsequences: false)
+        if kind == 3, let action = observational.first,
+           action == "allowObservationalLearning" || action == "stopObservationalLearning" {
+            guard observational.count == 2, let token = UInt64(observational[1]),
+                  token > 0, String(token) == observational[1] else {
+                throw DesktopHostError(message: "Observational learning requires a current local consent action.")
+            }
+            return try correctionLearningApproval(String(action), observationalToken: token)
+        }
         let vocabulary = try await vocabularyStore()
         return try await vocabulary.perform(kind: kind, payload: payload)
     }

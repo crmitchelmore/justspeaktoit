@@ -125,6 +125,11 @@ package protocol DesktopHostPlatform: Sendable {
     static func isClipboard(_ job: OutputJob) -> Bool
     static var correctionLearningUnavailable: String? { get }
     static func correctionReadback(_ job: OutputJob) -> (any DesktopCorrectionReadback)?
+    static var supportsObservationalCorrections: Bool { get }
+    /// Local, nonpersistent consent; revocation must not wait for native work.
+    @discardableResult
+    static func setObservationalCorrectionConsent(_ allowed: Bool, token: UInt64?) -> Bool
+    static func observationalCorrectionActionIsCurrent(_ allowed: Bool, token: UInt64) -> Bool
 
     // Read aloud. Hosts without it keep an empty state.
     static func makeReadAloudState() -> ReadAloudState
@@ -180,6 +185,10 @@ package protocol DesktopHostPlatform: Sendable {
 }
 
 package extension DesktopHostPlatform {
+    static var supportsObservationalCorrections: Bool { false }
+    @discardableResult
+    static func setObservationalCorrectionConsent(_ allowed: Bool, token: UInt64?) -> Bool { !allowed }
+    static func observationalCorrectionActionIsCurrent(_ allowed: Bool, token: UInt64) -> Bool { false }
     static func matchProfile(_ profiles: [DictationProfile], executablePath: String?) -> DictationProfile? {
         ProfileResolver(profiles: profiles).profile(forWindowsExecutablePath: executablePath)
     }

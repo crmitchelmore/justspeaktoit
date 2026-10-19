@@ -20,6 +20,9 @@ public struct LinuxTextOutputOptions: Codable, Equatable, Sendable, DesktopAppSw
     /// Nil preserves the pre-policy X11/Wayland behavior.
     public var appSwitchDelivery: AppSwitchDelivery?
 
+    // Consent for the captured original field cannot authorize an explicit delivery policy.
+    var permitsOriginalObservationalInsertion: Bool { method == .paste && appSwitchDelivery == nil }
+
     public init(method: Method = .paste, restoreClipboard: Bool = true) {
         self.method = method
         self.restoreClipboard = restoreClipboard
@@ -91,6 +94,7 @@ public struct LinuxInsertionTarget: Equatable, Sendable {
     public let executablePath: String?
     public let processID: Int32?
     public let processIdentity: String?
+    public let observationalTarget: LinuxAtspiTarget?
 
     public init(kind: Kind, windowClass: String? = nil, executablePath: String? = nil) {
         self.kind = kind
@@ -98,6 +102,7 @@ public struct LinuxInsertionTarget: Equatable, Sendable {
         self.executablePath = executablePath
         self.processID = nil
         self.processIdentity = nil
+        self.observationalTarget = nil
     }
 
     public init(
@@ -108,6 +113,19 @@ public struct LinuxInsertionTarget: Equatable, Sendable {
         self.executablePath = executablePath
         self.processID = processID
         self.processIdentity = processIdentity
+        self.observationalTarget = nil
+    }
+
+    public init(
+        kind: Kind, windowClass: String? = nil, executablePath: String? = nil,
+        processID: Int32? = nil, processIdentity: String? = nil, observationalTarget: LinuxAtspiTarget?
+    ) {
+        self.kind = kind
+        self.windowClass = windowClass
+        self.executablePath = executablePath
+        self.processID = processID
+        self.processIdentity = processIdentity
+        self.observationalTarget = observationalTarget
     }
 
     /// Terminals paste with Ctrl+Shift+V; Ctrl+V would send a literal ^V.
@@ -211,16 +229,33 @@ public final class LinuxOutputJob: @unchecked Sendable {
     private let native: any LinuxOutputNative
     private let lock = NSLock()
     private var cancelled = false
+    private let observational: (any LinuxObservationalInsertion)?
+    private var observed = false
+    public var isClipboard: Bool { observational == nil && plan.isClipboard }
+    public var correctionReadback: (any DesktopCorrectionReadback)? {
+        lock.withLock { observed && !cancelled ? observational : nil }
+    }
 
     /// Delay before a restore, so a slow target reads the transcript first.
     public static let restoreDelayMilliseconds = 750
 
-    public init(plan: LinuxOutputPlan, native: any LinuxOutputNative) {
-        self.plan = plan
-        self.native = native
+    public convenience init(plan: LinuxOutputPlan, native: any LinuxOutputNative) {
+        self.init(plan: plan, native: native, options: LinuxTextOutputOptions(), observational: nil)
     }
 
-    public func cancel() { lock.withLock { cancelled = true } }
+    public init(
+        plan: LinuxOutputPlan, native: any LinuxOutputNative, options: LinuxTextOutputOptions,
+        observational: (any LinuxObservationalInsertion)?
+    ) {
+        self.plan = plan
+        self.native = native
+        self.observational = options.permitsOriginalObservationalInsertion ? observational : nil
+    }
+
+    public func cancel() {
+        lock.withLock { cancelled = true; observed = false }
+        observational?.cancel()
+    }
     private var isCancelled: Bool { lock.withLock { cancelled } }
 
     public func perform(_ text: String) -> String {
@@ -230,6 +265,32 @@ public final class LinuxOutputJob: @unchecked Sendable {
     public func performResult(_ text: String) -> DesktopTextOutputResult {
         guard !isCancelled else {
             return DesktopTextOutputResult(.cancelled, status: "Output cancelled. Saved to History.")
+        }
+        if let observational {
+            switch observational.insert(text) {
+            case .unavailableBeforeDispatch: break
+            case .observedSpan:
+                let eligible = lock.withLock {
+                    guard !cancelled else { return false }
+                    observed = true
+                    return true
+                }
+                return DesktopTextOutputResult(
+                    eligible ? .observedInsertion : .cancelled,
+                    status: "AT-SPI text was observed in the original field, not acknowledged as our mutation. "
+                        + "Check the field; app-origin changes may also be learned."
+                )
+            case .indeterminateAfterDispatch:
+                observational.cancel()
+                return DesktopTextOutputResult(
+                    .failed,
+                    status: "AT-SPI insertion is indeterminate. Nothing was retried or pasted. "
+                        + "Check the original field before copying from History."
+                )
+            }
+        }
+        guard !isCancelled else {
+            return DesktopTextOutputResult(.cancelled, status: "Output cancelled. Check History.")
         }
         switch plan {
         case .copy(let reason):

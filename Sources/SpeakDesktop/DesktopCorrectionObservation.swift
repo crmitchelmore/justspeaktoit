@@ -1,12 +1,25 @@
 import Foundation
 import SpeakCore
 
-/// A native lease may read only its acknowledged insertion's retained field/range.
+public enum DesktopCorrectionProvenance: Equatable, Sendable {
+    case acknowledgedInsertion
+    /// Observed changes are not proof that our insertion caused them.
+    case observationalATSPISpan
+}
+
+/// A native lease may read only its retained span, subject to provenance-specific consent.
 public protocol DesktopCorrectionReadback: Sendable {
+    var provenance: DesktopCorrectionProvenance { get }
+    var isCurrent: Bool { get }
     var application: String? { get }
     func begin(original: String) throws
     func read() throws -> String
     func cancel()
+}
+
+public extension DesktopCorrectionReadback {
+    var provenance: DesktopCorrectionProvenance { .acknowledgedInsertion }
+    var isCurrent: Bool { true }
 }
 
 /// Cancellation is synchronous; even a blocked native read cannot admit a late edit.
@@ -15,7 +28,8 @@ public final class DesktopCorrectionObservation: @unchecked Sendable {
     private var cancelled = false
     private let native: any DesktopCorrectionReadback
     public var application: String? { self.native.application }
-    public var isCurrent: Bool { self.lock.withLock { !self.cancelled } }
+    public var provenance: DesktopCorrectionProvenance { self.native.provenance }
+    public var isCurrent: Bool { self.lock.withLock { !self.cancelled } && self.native.isCurrent }
 
     public init(native: any DesktopCorrectionReadback) { self.native = native }
 

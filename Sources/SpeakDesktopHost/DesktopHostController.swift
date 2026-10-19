@@ -121,7 +121,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package var settings: Settings {
         didSet {
             cancelCorrectionObservation()
-            if !correctionLearningEnabled { correctionLearningApproved = false }
+            if !correctionLearningEnabled { revokeCorrectionLearningConsent() }
         }
     }
     var correctionObservation: DesktopCorrectionObservation?
@@ -131,6 +131,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     }
     var correctionLearningRevision: UInt64 = 0
     var correctionLearningApproved = false
+    var observationalCorrectionConsent = false
     var correctionLearningNotice: String?
     var vocabularyLoad: Task<DesktopVocabulary, Error>?
     package var recording: Recording?
@@ -143,7 +144,11 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var isReady = false
     package var busy = false
     var busyOperations = 0
-    package var closed = false
+    package var closed = false {
+        didSet {
+            if closed { revokeCorrectionLearningConsent() }
+        }
+    }
     /// Set once `close()` stops waiting; later calls return it.
     var shutdownReport: DesktopHostShutdownReport?
     /// How long `close()` waits in all for cancelled work to end.

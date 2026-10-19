@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "LinuxAtspi.h"
 #include "VoiceSources.h"
 #include "VoiceAudioCodec.h"
 #include "../../CWindowsSupport/include/VoiceCredentials.h"

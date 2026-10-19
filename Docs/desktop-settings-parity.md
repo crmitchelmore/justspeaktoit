@@ -866,8 +866,8 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | enableSendToMac | Partial / Partial | iCloud web History sync is not Send-to-Mac transport/pairing |
 | enableAutomationServer | Equivalent / Source wired, unqualified | Automation; Windows per-user named pipe unchanged. Linux native opt-in starts a bounded same-user Unix socket and `speak`; imported/legacy true preserves intent but never grants device-local approval. False revokes. No native/runtime qualification claimed. |
 | pasteRemoteTranscriptsAtCursor | Missing / Missing | No remote transcript delivery preference |
-| autoCorrectionsEnabled | Source wired, unqualified / Unsupported observation; retained | Canonical true default; Windows requires separate explicit session-local approval and confirmed native Edit/UIA Value output with a retained UIA range. No clipboard/unconfirmed/ambiguous paste learning. Linux X11 top-level identity and Wayland paste do not establish an owned editable span; its retained setting is disabled and explained in GTK. Manual candidate review/promote/dismiss/remove/clear remains available on both platforms when learning is off. NOT_RUN |
-| autoCorrectionsPromotionThreshold | Source wired, unqualified / Retained, inactive for observation | Canonical Mac default 2 and integral 2...10 validation; snapshotted for each admitted Windows observation, driving shared `AutoCorrectionDomain` promotion and durable rollback. Imports preserve values, never grant local learning approval. Linux retained field is read-only until a safe observation adapter exists. NOT_RUN |
+| autoCorrectionsEnabled | Source wired, unqualified / Separate opt-in observational source, unqualified | Canonical true default is not consent. Windows retains its acknowledged native Edit/UIA Value route and session approval. Linux observation is OFF until its distinct disclosed local in-app session action; generic approval and imports cannot authorize it. Only an admitted ordinary AT-SPI field with a bounded observational span qualifies. Paste/clipboard never do. App-origin changes can also be learned. Manual candidate actions remain available when learning is off. NOT_RUN |
+| autoCorrectionsPromotionThreshold | Source wired, unqualified / Source wired for opt-in observation, unqualified | Canonical Mac default 2 and integral 2...10 validation; captured per observation and passed to the shared domain with its persistence/rollback behavior. Linux preferences are editable but cannot activate sampling or grant consent. NOT_RUN |
 | recordingSoundsEnabled | Native qualified / Native qualified | General + owned native channel; normal readiness/finish cues only; installed-package acceptance pending |
 | recordingSoundProfile | Native qualified / Native qualified | Canonical four profiles + owned preload replacement and explicit previews; all eight production AACs decoded on Windows/Linux |
 | recordingSoundVolume | Native qualified / Native qualified | Strict 0...1 field + Mac volume-squared gain; native tests and queue bounds passed; installed-package acceptance pending |
@@ -917,9 +917,10 @@ Corrections page exists on native desktops; Desktop's separate `DesktopVocabular
 CRUD and auto-correction candidate review journey, reused from Read aloud/Generate above — not
 a missing journey, just not a `SettingsTab` destination. Permission troubleshooting/remediation
 and full archive migration remain missing journeys; Linux profile editing still needs
-compilation and native acceptance. Automatic external-app edit capture remains an **open Linux
-parity gap**: neither unconfirmed paste keys nor a top-level window grants AT-SPI field/span
-ownership, and Wayland does not supply an equivalent receipt. The Windows source-only learning
+compilation and native acceptance. Strict acknowledged mutation attribution remains an **open Linux
+parity gap**: neither paste keys nor a top-level window supplies an editable-span receipt.
+The separate Linux source-only observational route is described below; it does not close that
+acknowledgment gap. The Windows source-only learning
 path uses acknowledged native Edit caret identity or confirmed whole-field UIA Value replacement,
 then retains and samples only that UIA text range with bounded surrounding guards. UIA interfaces
 are created/read/released on the existing COM worker, never on Swift tasks. Password,
@@ -936,6 +937,85 @@ The learning candidate is authored on exact `f6f2ac90` only. Its focused
 text-output fixture additions and GTK read-only-field assertion are **NOT_RUN** here: this host
 has no Swift toolchain, and WSL/native/UI execution is not authorized. No prior component receipt,
 provider test or other source tree qualifies this learning candidate.
+
+The bounded Linux successor is based on exact `b05a2d41`, without changing the earlier frozen
+learning packets. It adds `observedInsertion` and `observationalATSPISpan`, distinct from Windows
+`confirmedInsertion`/acknowledged provenance. Observed delivery does not permit automatic
+hands-free resume. Linux's Allow dialog explains that app-origin formatting/changes can also
+be learned; it issues a generation-bound local one-use offer. Both Allow and Stop carry
+that immutable native generation through queued Host actions. An older queued Allow cannot
+consume a newer offer, nor can an older queued Stop revoke it. Tokenless, imported,
+malformed and replayed grants cannot authorize observation. Stop remains actionable while
+another editor action is pending. Editor destruction revokes only its own generation, so
+a delayed old editor cannot revoke a reopened editor's offer.
+Consent is memory-only and defaults OFF. Stop revokes native capability immediately, before
+queued Host work; disabling learning and closing revoke it too. No OS accessibility property
+is written and no bus/helper/screen reader is autolaunched. Cached availability is shown on
+refresh; unsupported desktop/toolkit/sandbox targets keep ordinary unconfirmed paste behavior.
+Wayland is not blanket-excluded: availability depends on the actual AT-SPI field, not X11 IDs.
+
+The integrated output job admits an original-field observational lease only for legacy
+(`appSwitchDelivery == nil`) automatic paste. Every explicit app-switch policy and clipboard-only
+output refuse that lease before dispatch: they cannot observe or learn from the original
+field, nor use its consent to redirect output. Explicit same-foreground X11 delivery remains an unconfirmed
+guarded paste; unsupported switched/background X11 and explicit Wayland intent remain recovery
+copies. Legacy Wayland may still use a separately consented AT-SPI field without a remote-input
+portal; a copy-only fallback plan alone does not revoke that capability. The old three- and
+five-argument target initializers and two-argument output-job initializer remain available.
+Only recording-target capture attaches the observational lease; delivery-time X11 identity/focus
+checks retain their metadata-only capture and do not acquire a new field capability.
+Five additional authored integration cases cover these interactions and initializer references;
+they are **NOT_RUN**, not native acceptance evidence.
+
+Before registering events, bounded metadata introspection verifies the installed registry's
+app-scoped `RegisterEvent(s, as, s)` and either historical `DeregisterEvent(s)` or current
+`DeregisterEvent(s, s)` cleanup contract. Unknown contracts fail closed before registration.
+Cleanup uses the negotiated signature on the private worker with finite 300 ms calls;
+failure stops observation, reports a non-sensitive cleanup failure and closes the private
+connection rather than silently retaining subscriptions. Historical prefix cleanup restores
+only minimal focus metadata discovery when needed, not a global text listener.
+
+After consent, a private in-process GIO worker listens only to essential focus metadata for
+discovery. It admits a known nonpassword Text/EditableText control in another process with
+an application/top-level parent chain, unique bus owner, connection epoch and local focus
+generation. Recording target capture only takes an already-admitted identity, never a late
+focus reconstruction; focus must change to a supported field after consent. Native mutation,
+verification and readback run off UI/audio/start queues with finite RPC/request budgets.
+Insertion is collapsed-caret/no-selection only: `InsertText` length uses UTF-8 BYTES while
+offsets and event lengths use native CHARACTERS (not Swift graphemes or UTF-16).
+Known-safe role/state is rechecked before bounded text reads. A matching insertion event,
+pre/post text/count/caret and surrounding guards qualify only observational evidence.
+FALSE, timeout, cancellation, mismatched/absent events or ambiguity after dispatch yield an
+explicit indeterminate failure without retry, clipboard fallback or learning.
+
+Standard AT-SPI has no transaction ID, retained TextRange or atomic compare-and-insert.
+The native regression documents the indistinguishable case where an application prefill
+emits the matching event and a subsequent no-op accessibility insertion still returns TRUE.
+This is intentionally accepted only as disclosed observation, never acknowledged causality.
+Subsequent events are scoped to that object; app-scoped registration never grants a global
+text listener. Strict interior edits fold into a bounded character-offset span; its final
+text must equal the folded events and retain unchanged bounded guards. Unknown/malformed,
+missing-visible, reset, out-of-span or ambiguous-boundary edits invalidate it, as do privacy,
+parent, focus, owner, connection and lifetime changes. There is no fabricated server revision
+or claim that undetectable dropped events are detectable. The adapter is deliberately
+conservative: whole-span/boundary replacement and unsupported toolkit events are skipped.
+Queued callbacks retain native lifetimes and become inert on cancellation. No raw field text
+is logged. Native ownership remains checked through shared domain admission, not just the
+readback reply. After a lease ends, the worker may revalidate the same known control's
+metadata for a fresh lease; it never reuses its text or discovers a field on recording start.
+Candidate extraction/promotion still uses the existing shared domain and timing.
+
+Authored successor checks are `LinuxObservationalInsertionTests`,
+`DesktopHostObservationalLearningTests` and the no-bus/no-UI native
+`jsti_atspi_contract_self_test` invoked by the former. They cover delivery provenance,
+no fallback after uncertain dispatch, consent/import separation, actual Host output and
+promotion, revoked local offers, held-queue old-Allow/old-Stop/new-offer ordering,
+tokenless/malformed/replayed actions, pending native Stop availability, both registry cleanup
+schemas and unknown contracts, invalidation at read completion, held-task Stop/close,
+state bitmaps/privacy, Unicode units, event folding,
+ambiguity and late/owner/connection fences. All are **NOT_RUN**: this assignment authorizes
+source inspection/handoff only, not a compiler, test runner, native/UI/bus probe or provider
+call. Toolkit/X11/Wayland/runtime qualification remains open and requires reviewed integration.
 
 Local model discovery/import/preparation, lexicon/corrections/pronunciation,
 TTS usage/history, audio-only housekeeping/text-file import, profile archive merge, paid access,

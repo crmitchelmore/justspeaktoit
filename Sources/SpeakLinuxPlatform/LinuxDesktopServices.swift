@@ -79,7 +79,12 @@ public enum LinuxX11 {
 
     /// The focused X11 top-level window, unless it belongs to this process.
     public static func captureTarget() -> LinuxInsertionTarget? {
-        try? captureTargetChecked()
+        guard let target = try? captureTargetChecked() else { return nil }
+        return LinuxInsertionTarget(
+            kind: target.kind, windowClass: target.windowClass, executablePath: target.executablePath,
+            processID: target.processID, processIdentity: target.processIdentity,
+            observationalTarget: LinuxAtspiTarget.captureAdmitted()
+        )
     }
 
     public static func captureTargetChecked() throws -> LinuxInsertionTarget? {

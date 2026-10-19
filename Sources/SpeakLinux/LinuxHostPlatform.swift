@@ -25,8 +25,18 @@ struct LinuxHotKeySettings: Codable, Equatable, Sendable {
 /// output paths behind the shared desktop host.
 enum LinuxHostPlatform: DesktopHostAutomationPlatform {
     static var correctionLearningUnavailable: String? {
-        "Automatic learning is unavailable on Linux: X11 retains only a top-level window, not an AT-SPI "
-            + "editable field/range; Wayland paste has no confirmed destination. Stored candidates remain reviewable."
+        nil
+    }
+    static var supportsObservationalCorrections: Bool { true }
+    @discardableResult
+    static func setObservationalCorrectionConsent(_ allowed: Bool, token: UInt64?) -> Bool {
+        LinuxAtspiTarget.setSessionConsent(allowed, token: token)
+    }
+    static func observationalCorrectionActionIsCurrent(_ allowed: Bool, token: UInt64) -> Bool {
+        LinuxAtspiTarget.consentActionIsCurrent(allowed, token: token)
+    }
+    static func correctionReadback(_ job: LinuxOutputJob) -> (any DesktopCorrectionReadback)? {
+        job.correctionReadback
     }
     static var defaultTextOutput: LinuxTextOutputOptions { .init() }
     static func handsFreeReadinessFailure() -> String? {
@@ -187,7 +197,10 @@ enum LinuxHostPlatform: DesktopHostAutomationPlatform {
         guard let plan = LinuxOutputPlan.make(
             options: options, target: target, session: session, portalAvailable: portal
         ) else { return nil }
-        return LinuxOutputJob(plan: plan, native: LinuxOutputNativeAdapter())
+        return LinuxOutputJob(
+            plan: plan, native: LinuxOutputNativeAdapter(), options: options,
+            observational: target?.observationalTarget
+        )
     }
 
     package static func cancel(_ job: LinuxOutputJob) { job.cancel() }
@@ -196,7 +209,7 @@ enum LinuxHostPlatform: DesktopHostAutomationPlatform {
         options.method != .clipboardOnly
     }
 
-    package static func isClipboard(_ job: LinuxOutputJob) -> Bool { job.plan.isClipboard }
+    package static func isClipboard(_ job: LinuxOutputJob) -> Bool { job.isClipboard }
 
     package static func makePlayback() -> LinuxAudioPlayback { LinuxAudioPlayback() }
 

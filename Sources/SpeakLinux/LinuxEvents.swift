@@ -143,7 +143,10 @@ final class LinuxEventContext: @unchecked Sendable {
     static func captureTarget() -> LinuxInsertionTarget? {
         switch LinuxHostPlatform.session.displayServer {
         case .x11: return LinuxX11.captureTarget()
-        case .wayland: return LinuxInsertionTarget(kind: .focusedApplication)
+        case .wayland:
+            return LinuxInsertionTarget(
+                kind: .focusedApplication, observationalTarget: LinuxAtspiTarget.captureAdmitted()
+            )
         case .unknown: return nil
         }
     }

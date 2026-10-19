@@ -411,6 +411,68 @@ teardown. Linux uses its existing owned pre-window/UI-context update queue.
 Native fixtures measure production layout functions, unchanged Normal geometry,
 Compact reductions, startup retention and editing focus. Fixture compilation
 does not establish runtime, multi-DPI or installed-product acceptance.
+
+## App shell, recordings folder and analytics (source only)
+
+`ShellPreference.fields` (`Sources/SpeakCore/DesktopShellPreference.swift`)
+adds `appVisibility`, `compactStatusBarIcon` and `analyticsEnabled` to General
+with the Mac keys, defaults and strict values, so save, restart and portable
+JSON import/export round-trip them. `appVisibility` reuses the Mac's stored
+cases with native labels: `both` is **Taskbar and notification area**,
+`menuBarOnly` **Notification area only** and `dockOnly` **Taskbar only**.
+`showStatusBarIconInDockOnly`, `paidAccessRoutingEnabled` and
+`recordingsDirectory` stay opaque Apple-only keys: imports retain them for the
+Mac and never execute them.
+
+- **Windows app visibility** applies before the window opens and live on save
+  or import. Notification area only gives the window a hidden tool-window owner
+  (`GWLP_HWNDPARENT`), so it has no taskbar button; close and minimise hide it
+  to the notification area, the icon or **Open** brings it back, a login launch
+  stays there and **Quit** exits. It also leaves Alt+Tab while hidden, and
+  reassigning the owner is a documented but discouraged Win32 pattern. If the
+  notification area is unavailable (Explorer not ready) the window keeps its
+  taskbar button and is never stranded. Taskbar only removes the icon.
+- **Compact icon** (Windows) keeps the brand icon and recording dot but drops
+  recording state from the tooltip and the totals line from the menu.
+- **Linux** stores, shows and transfers both shell choices but does not apply
+  them: GTK 4 has no portable tray or taskbar-hiding API, so the capability rule
+  is persistence only until a StatusNotifier host exists.
+- **Analytics**: Windows and Linux send no analytics or crash reports, so the
+  switch has nothing to gate. It is stored and transferred so a Mac import keeps
+  its choice; absent is never treated as consent.
+- **Paid-access routing and Dock-only icon** have no desktop journey (desktop
+  providers are bring-your-own-key and there is no Dock); both are preserved
+  only.
+
+`recordingsDirectory` itself is never executed: a Mac path in an import cannot
+authorise a folder. A separate, device-local choice builds on SpeakDesktop's
+verified recording locations (`DesktopRecordingLocations`, held captures and the
+append-only private registry beside History):
+
+- At startup the host reopens an existing private namespace on a cancellable
+  worker; it never creates one. Only an explicit local choice initialises it and
+  authorises the folder, which must be absolute and outside the app's data
+  folder. The verified choice is kept in `recording-location.json` in the app
+  data folder, never in portable settings, and is restored only when its
+  registration still matches.
+- New dictation and live recordings are written through a held capture in the
+  chosen folder. If that fails, the recording goes to History with a note.
+  **Use default** returns new recordings to History. Nothing is ever moved or
+  deleted, and audio already in a chosen folder stays playable.
+- Open folder reveals the chosen folder, otherwise History.
+- Linux (Glibc) offers it in Housekeeping (**Choose…** with the GTK 4.10 folder
+  dialog, and **Use default**). Windows keeps
+  `WindowsRecordingRegistry.factory`'s `identityUnavailable` fence and reports
+  that choosing a folder is not yet available, so recordings stay in History.
+  Enabling it needs the Swift identity and restart integration for the native
+  registry (keeping competing-open exclusion until close) plus a qualified
+  held-capture writer, then a Windows folder picker.
+- Not yet covered: recovering interrupted recordings from a chosen folder, deleting
+  History items or cleaning audio there (refused, audio retained), and owned-capture
+  startup, file import and comparison samples, which still write to History.
+
+Portable tests cover the shared fields, one-time activation and foreign History
+refusal. None of this has native, Linux or Windows acceptance yet.
 ## Clipboard voice commands
 
 General preferences expose `voiceCommandsEnabled` (default true, as on Mac) and
@@ -1016,11 +1078,11 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | restoreClipboard | Equivalent / Partial | Output; Windows restoration; Linux X11 owned plain-text restoration only. Wayland capability-gates the control, retains its saved X11 choice and leaves pasted text on the clipboard |
 | appSwitchDelivery | Source wired, native qualification pending / Source wired with explicit targeting gaps | Shared Mac policy/type and native chooser; sole native-options persistence, strict transfer and recording snapshots. Windows safely addressable native fields support original-background and guarded delivery-time retarget; Linux switched destinations copy only until a separately safe field route exists. See application-switch delivery above. |
 | showHUD | Wired / Wired | Config + HUD |
-| appVisibility | Missing / Missing | Native window/tray behaviour; no Mac Dock/menu-bar mode selector |
-| showStatusBarIconInDockOnly | Apple-specific / Apple-specific | Dock-only is not a native Windows/Linux mode; tray equivalents need explicit product policy |
-| compactStatusBarIcon | Missing / Missing | No tray compact-style preference |
+| appVisibility | Source wired; native acceptance pending / Persisted only | General; Windows taskbar and notification area, notification area only or taskbar only, applied at launch and live. GTK has no portable tray, so Linux stores and transfers it. See app shell above |
+| showStatusBarIconInDockOnly | Apple-specific / Apple-specific | No Dock on Windows/Linux; retained opaque through import/export, not shown |
+| compactStatusBarIcon | Source wired; native acceptance pending / Persisted only | General; Windows compact notification-area tooltip and menu. Linux stores and transfers it |
 | runAtLogin | Equivalent / Equivalent | General; native startup task/login entry, OS status displayed |
-| recordingsDirectory | Missing / Missing | Fixed private per-user History directory, no relocation UI |
+| recordingsDirectory | Partial: fenced / Partial: source only | Mac path retained, never executed. Device-local chosen folder via verified recording locations: Linux Housekeeping chooser; Windows reports unavailable while `WindowsRecordingRegistry` identity/restart integration is fenced. Existing audio never moves. See recordings folder above |
 | hotKeyActivation | Equivalent / Equivalent | Shortcuts; press/hold/double-tap/combined styles; Linux portal availability caveat |
 | holdThreshold | Wired / Wired | Config + shared gesture machine; 0.2...1.5 s |
 | doubleTapWindow | Wired / Wired | Config + shared gesture machine; 0.2...1 s |
@@ -1084,11 +1146,11 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | modulatePIIPhiTagging | Live/batch source wired; unqualified / Same | Native default/on/off choice, strict transfer/restart and captured live/batch provider flags; absent stays off. Native/provider acceptance pending. |
 | accessibilityInsertionMode | Equivalent / Missing | Output; Windows cursor/replace-field; Linux paste cannot claim AX replace-all equivalence |
 | selectedHotKey | Equivalent / Partial | Shortcuts; Windows Ctrl/Alt native key; Linux desktop/portal-owned binding, never Mac Fn key translation |
-| paidAccessRoutingEnabled | Missing / Missing | BYOK desktop providers; no paid-access entitlement/routing journey |
+| paidAccessRoutingEnabled | Apple-specific / Apple-specific | BYOK desktop providers; no paid-access entitlement/routing journey. Retained opaque through import/export |
 | simpleModelChoices | Missing / Missing | Native catalogue picker without simplified paid-model chooser |
 | rememberedLocalTranscriptionSource | Partial / Partial | Models remembers Local selection; no Apple on-device source |
 | rememberedRemoteTranscriptionMode | Equivalent / Equivalent | Models; native source/mode preferences |
-| analyticsEnabled | Missing / Missing | No native analytics consent/pipeline; do not treat missing as enabled |
+| analyticsEnabled | Wired; nothing to gate / Same | General switch, Mac default and strict transfer. Desktop sends no analytics or crash reports; absent is never consent |
 
 ## Beyond the enum and destinations
 

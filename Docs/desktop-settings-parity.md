@@ -974,6 +974,56 @@ Importing that archive, mapping its categories safely, merge/replace previews,
 rollback and exporting a Mac-compatible archive remain gaps. No ZIP is
 misidentified or silently imported as portable preferences.
 
+## First-run setup and permissions (Windows source wired; Linux model only)
+
+The Mac's `OnboardingView`, `PermissionsManager`, `PermissionRecoveryHelp` and
+`DashboardPermissionsSection` journeys have a shared desktop model and a Windows
+native surface. Earlier baseline notes that called onboarding and permission
+remediation missing on Windows are superseded by this source.
+
+- **Shared model** (`SpeakCore/DesktopOnboarding.swift`,
+  `SpeakDesktopHost/DesktopHostOnboarding.swift`): ordered steps (welcome,
+  microphone, text insertion, transcription route, shortcut practice, optional
+  post-processing, done), their actions and plain-language guidance; permission
+  items with status, guidance and blocking summary. Completion is stored under
+  the Mac's canonical `hasCompletedOnboarding` key, with the last step reached,
+  in `onboarding.json` beside `settings.json`. An existing install with saved
+  settings is adopted as complete, so upgrades do not see the guide.
+- **Windows setup guide** (`SpeakWindows/WindowsOnboarding.swift`,
+  `CWindowsSupport/WindowsOnboarding.cpp`): a modeless window owned by the main
+  window, opened on first launch after the controller is ready and again from
+  About, **Run setup again**. Steps open the existing native dialogs (Text
+  output, Local models, Keyboard shortcut, Post-processing), Windows microphone
+  privacy settings (rechecked on return), the Permissions window and a test
+  dictation through the tray's Start/Stop. The route step reports whether the
+  selected remote model has a saved key. Provider keys go through
+  `WindowsOnboardingHooks.shared.openAPIKeys`, which a separate API Keys page
+  can set; until then it opens Transcription, where keys are entered today.
+  Skip and Finish both record completion. The guide is modeless so the global
+  shortcut keeps working while practising; the app never types into its own
+  windows, so practice text appears in the main window's transcript, ready to copy.
+- **Windows Permissions window** (`SpeakWindows/WindowsPermissions.swift`,
+  `CWindowsSupport/WindowsPermissions.cpp`): live rows for microphone privacy
+  (global and desktop-app access, from the CapabilityAccessManager consent
+  store), text insertion (UI Automation/SendInput availability, and the chosen
+  output mode), elevation mismatch (an elevated app cannot type into
+  non-elevated apps and vice versa), the automation pipe setting, notifications
+  (not used by the Windows app, shown as not applicable) and the startup task
+  (`DesktopLoginItemState`). Each row has guidance mirroring
+  `PermissionRecoveryHelp` and a remediation button: `ms-settings:` privacy
+  pages through `ShellExecuteW`, or the app's own Text output/General pages.
+  The window rechecks when it is reactivated after Windows Settings and on
+  **Check again**.
+- **Dashboard warning**: a blocked microphone or unavailable insertion route is
+  named in the ready status line (`DesktopHostController.permissionWarning`),
+  the Windows equivalent of `DashboardPermissionsSection`.
+- **Limits**: the automation row reflects the saved setting, not whether the
+  pipe is currently listening; there is no notification-area "Run setup"
+  entry; all native and Swift code is uncompiled and unqualified on Windows.
+- **Linux**: shares the step and permission model; no native GTK guide or
+  Permissions page yet. Portal/PipeWire microphone access and Wayland
+  insertion limits need their own adapter before Linux can present the model.
+
 ## Evidence legend
 
 The table is exhaustive for the 91 enum keys. "Equivalent" denotes a working
@@ -1105,7 +1155,8 @@ Post-processing, Profiles, Voice Output, Pronunciation, API Keys, Keyboard,
 Permissions, Compare Models, Data & Migration and About
 (`Sources/SpeakApp/Views/Settings/SettingsTab.swift:3-15`). Native desktops expose
 General/Transcription/Post-processing/Voice Output/Keyboard/About and iCloud sync;
-Windows also exposes Profiles; the GTK Profiles destination is added by this
+Windows also exposes Profiles and a separate native Permissions window (About, or
+the setup guide); the GTK Profiles destination is added by this
 unqualified source-only candidate. Provider keys are embedded under Transcription,
 not a complete API Keys management page. Comparison is implemented as a
 separate native window outside this `SettingsTab` list — live/file multi-model
@@ -1117,8 +1168,9 @@ captured in this document. No dedicated `SettingsTab`-equivalent Pronunciation o
 Corrections page exists on native desktops; Desktop's separate `DesktopVocabulary`/
 `WindowsVocabulary` editor window already provides an equivalent lexicon, pronunciation.json
 CRUD and auto-correction candidate review journey, reused from Read aloud/Generate above — not
-a missing journey, just not a `SettingsTab` destination. Permission troubleshooting/remediation
-and full archive migration remain missing journeys; Linux profile editing still needs
+a missing journey, just not a `SettingsTab` destination. Windows permission
+troubleshooting/remediation is source wired (see first-run setup and permissions above); Linux
+permission remediation and full archive migration remain missing journeys; Linux profile editing still needs
 compilation and native acceptance. Strict acknowledged mutation attribution remains an **open Linux
 parity gap**: neither paste keys nor a top-level window supplies an editable-span receipt.
 The separate Linux source-only observational route is described below; it does not close that

@@ -64,6 +64,9 @@ bool jsti_local_models_available();
 std::wstring jsti_local_models_summary();
 void jsti_show_local_models(HWND owner);
 bool jsti_local_models_self_test(HWND owner, std::string &error);
+bool jsti_api_keys_available();
+void jsti_show_api_keys(HWND owner);
+bool jsti_api_keys_self_test(HWND owner, std::string &error);
 bool jsti_cloud_sync_available();
 void jsti_show_cloud_sync_settings(HWND owner);
 bool jsti_cloud_sync_settings_self_test(HWND owner, std::string &error);
@@ -223,6 +226,10 @@ constexpr UINT hudMessage = WM_APP + 21;
 constexpr UINT sidebarMessage = WM_APP + 30;
 constexpr UINT densityMessage = WM_APP + 31;
 constexpr UINT shellMessage = WM_APP + 32;
+// The API keys dialog opens from its Transcription button or the host's
+// openAPIKeys() request (jsti_window_request_api_keys).
+constexpr int apiKeysID = 491;
+constexpr UINT apiKeysMessage = WM_APP + 98;
 struct SidebarBindings {
     int digits[pageCount];
     std::wstring hints[pageCount];
@@ -1283,8 +1290,9 @@ void layoutSettings(HWND window, const RECT &content) {
         button(modelRefreshID, y, scale(window, 168)); button(localModelsID, y, scale(window, 168));
         y += row + scale(window, 24);
         label(91, y);
-        placeField(window, keyID, RECT{left + scale(window, 188), y, right - scale(window, 124), y + row});
-        button(saveID, y, scale(window, 112));
+        placeField(window, keyID, RECT{left + scale(window, 188), y, right - scale(window, 252), y + row});
+        place(window, saveID, box(right - scale(window, 240), y, scale(window, 112), row));
+        button(apiKeysID, y, scale(window, 116));
         y += row + scale(window, 12);
         place(window, azureID, box(left + scale(window, 188), y, scale(window, 240), row));
         place(window, configurationID, box(right - scale(window, 220), y, scale(window, 220), row));
@@ -2019,6 +2027,7 @@ bool createControls(HWND window) {
         add(L"STATIC", L"&API key (Windows Credential Manager)", 0, 91) &&
         add(L"EDIT", L"", ES_PASSWORD | ES_AUTOHSCROLL | WS_TABSTOP, keyID) &&
         add(L"BUTTON", L"&Save key", BS_PUSHBUTTON | WS_TABSTOP, saveID) &&
+        add(L"BUTTON", L"All API &keys…", BS_PUSHBUTTON | WS_TABSTOP, apiKeysID) &&
         add(L"BUTTON", L"A&zure Speech resource…", BS_PUSHBUTTON | WS_TABSTOP, azureID) &&
         add(L"STATIC", L"&Microphone", 0, 94) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, microphoneID) &&
@@ -2154,6 +2163,7 @@ void updateSettingsButtons(HWND window, int recording) {
     EnableWindow(GetDlgItem(window, cloudSyncID), recording == 0 && jsti_cloud_sync_available());
     EnableWindow(GetDlgItem(window, azureID), recording == 0 && jsti_azure_resource_available());
     EnableWindow(GetDlgItem(window, automationSettingsID), recording == 0);
+    EnableWindow(GetDlgItem(window, apiKeysID), recording == 0 && jsti_api_keys_available());
     bool automation, loginPending;
     int login;
     std::wstring loginDetail;
@@ -2695,6 +2705,9 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         if (idleControl(window, profilesID) && IsWindowEnabled(window)) jsti_show_profiles(window);
         else jsti_cancel_profiles_request();
         return 0;
+    case apiKeysMessage:
+        if (idleControl(window, apiKeysID) && IsWindowEnabled(window)) jsti_show_api_keys(window);
+        return 0;
     case updateMessage:
         applyUpdate(window); return 0;
     case audioCleanupMessage: {
@@ -2830,6 +2843,11 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case azureID:
             if (HIWORD(wparam) == BN_CLICKED && idleControl(window, azureID) && IsWindowEnabled(window)) {
                 jsti_show_azure_resource_settings(window);
+            }
+            return 0;
+        case apiKeysID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, apiKeysID) && IsWindowEnabled(window)) {
+                jsti_show_api_keys(window);
             }
             return 0;
         case cloudSyncID:
@@ -3777,6 +3795,11 @@ void jsti_window_request_guide(void) {
 void jsti_window_request_permissions(void) {
     std::lock_guard<std::mutex> lock(state.mutex);
     if (state.window) PostMessageW(state.window, permissionsMessage, 0, 0);
+}
+
+void jsti_window_request_api_keys(void) {
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (state.window) PostMessageW(state.window, apiKeysMessage, 0, 0);
 }
 
 int jsti_window_set_history(const JSTIHistoryRow *rows, size_t count, const char *selectedID) {
@@ -5178,7 +5201,8 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             jsti_text_output_settings_self_test(window, textOutputID, setRecording, recordingBlocked, &observed, failure) &&
             jsti_hotkey_self_test(window, observe, &observed, failure) && jsti_voice_settings_self_test(window, failure) &&
             jsti_voice_sources_self_test(window, failure) && jsti_voice_credentials_self_test(window, failure) &&
-            jsti_local_models_self_test(window, failure) && jsti_cloud_sync_settings_self_test(window, failure) &&
+            jsti_local_models_self_test(window, failure) && jsti_api_keys_self_test(window, failure) &&
+            jsti_cloud_sync_settings_self_test(window, failure) &&
             jsti_azure_resource_settings_self_test(window, failure) && jsti_configuration_self_test(window, failure)
             && jsti_comparison_self_test(window, failure) && jsti_automation_settings_self_test(window, failure);
     };

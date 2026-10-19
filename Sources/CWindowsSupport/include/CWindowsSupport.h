@@ -1354,6 +1354,37 @@ void jsti_capture_prewarm_destroy(JSTICapturePrewarm *prewarm);
  * invalid value. */
 int jsti_window_set_shell(int visibility, int compact);
 
+/* API keys dialog. Rows never carry a secret: `status` is host-written text
+ * such as "Saved" plus a masked suffix, `url` is empty or an https provider key page.
+ * The callback runs on the UI thread with a borrowed identifier and, for
+ * save/validate, the typed key or NULL (validate the stored key); the dialog
+ * wipes its copies after the call returns, so the host must copy what it
+ * keeps. The dialog stays busy until the next jsti_window_set_api_keys. */
+enum JSTIAPIKeyAction {
+    JSTI_API_KEY_SAVE = 1,
+    JSTI_API_KEY_REMOVE = 2,
+    JSTI_API_KEY_VALIDATE = 3,
+    /* Sent with an empty identifier as the dialog opens: keys saved from the
+     * Transcription or Voice editors since the last refresh show at once. */
+    JSTI_API_KEY_REFRESH = 4
+};
+typedef struct JSTIAPIKeyRow {
+    const char *identifier;
+    const char *label;
+    const char *uses;
+    const char *status;
+    const char *url;
+    const char *hint;
+    int saved;
+} JSTIAPIKeyRow;
+typedef void (*JSTIAPIKeyCallback)(int action, const char *identifier, const char *key, void *context);
+/* Copies the rows; `context` is borrowed until cleared or replaced. */
+int jsti_window_set_api_keys(const JSTIAPIKeyRow *rows, size_t count, const char *status,
+                             JSTIAPIKeyCallback callback, void *context);
+void jsti_window_clear_api_keys(void);
+/* Opens the dialog over the main window when idle (onboarding entry hook). */
+void jsti_window_request_api_keys(void);
+
 #ifdef __cplusplus
 }
 #endif

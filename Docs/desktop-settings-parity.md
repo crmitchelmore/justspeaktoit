@@ -1704,6 +1704,51 @@ Policy/configuration/transfer/restart/recording-snapshot regressions and native
 adapter/chooser fixtures are authored, not run. No native behavioral acceptance
 or complete three-policy Linux parity is claimed.
 
+## API Keys page (Windows source only; NOT_RUN)
+
+The Mac's API Keys destination
+(`Sources/SpeakApp/Views/Settings/SettingsView+APIKeys.swift`) now has a native
+Windows equivalent: **Transcription → All API keys…** opens a dialog, and
+`WindowsNative.openAPIKeys()` (`jsti_window_request_api_keys`) is the single
+entry hook onboarding can call later. It lists one row per credential Windows
+can use, projected from the canonical catalogues rather than a Windows-owned
+list (`DesktopHostAPIKeys.swift` `apiKeyCatalogEntries`): every non-local
+transcription batch/live provider, OpenRouter post-processing, each Voice Output
+credential slot and the Voice account providers, merged by identifier with
+their uses shown (`SpeakCore/APIKeyCatalog.swift`). Azure entries take the
+existing `key` + region form; the configured Azure Speech resource endpoint is
+used when checking.
+
+- Each row shows **Not set**, **Saved** with a masked last-four suffix, or
+  an unreadable-store message. The dialog never receives a stored key; typed
+  text is wiped from the dialog's buffers once handed to the host.
+- **Save key / Replace key** sanitises and checks the key before writing it,
+  matching the Mac's save-then-validate flow; a failed check does not write.
+  **Remove key** asks for confirmation first. **Check validity** checks typed
+  text, or the stored key when the field is empty. **Get API key…** opens the
+  provider's https key page.
+- Checking reuses the shared provider validators where they exist;
+  `SpeakCore/APIKeyValidation.swift` adds portable probes for OpenRouter,
+  Gladia and Azure Speech (resource health or voice list). Alibaba is
+  format-checked only and is not executable on Windows.
+- Storage is the same Windows Credential Manager identifier the Transcription,
+  Post-processing and Voice editors use, written through the same path
+  (cloud sync observes it when enabled). Changes therefore show in both places. The dialog
+  re-reads every row when it opens and after each action.
+- `trackedKeyIdentifiers` follows the Mac semantics: saving a non-empty key
+  registers its identifier, removing it unregisters it, and opening the page
+  reconciles the list against what the store actually holds. The list lives in
+  `trackedKeyIdentifiers.json` beside the desktop settings. It holds identifiers
+  only, is never exported, and does not drive readiness, which still reads the
+  store directly. Keys saved from the embedded editors are recorded too.
+- Partial: keys imported by **Import API keys my Mac syncs** are written
+  without recording; the next page refresh reconciles them. Operations are
+  refused while recording or a Voice Output task runs. Portable catalogue,
+  masking, tracking and validation tests (`Tests/SpeakPortableTests/APIKeyCatalogTests.swift`)
+  and the native dialog self-test (`jsti_api_keys_self_test`) are authored, but
+  none has been built or run, and no physical credential lifecycle evidence
+  exists. Linux has no API Keys page.
+
 ## Configuration transfer is not the Mac backup format
 
 General's Import/Export preferences actions use a bounded, versioned JSON object:
@@ -1842,7 +1887,7 @@ parity. Evidence labels refer to executable surfaces:
 | Models | `Sources/SpeakDesktopHost/DesktopHostModels.swift`, `DesktopHostModelDiscovery.swift`, `DesktopHostLocalModels.swift`, `SpeakDesktop/DesktopLiveTranscription.swift` |
 | Output | `Sources/SpeakWindows/WindowsTextOutputSettings.swift`, `SpeakLinux/LinuxControllerSettings.swift`, `SpeakLinuxPlatform/LinuxTextOutput.swift` |
 | HUD | `Sources/SpeakDesktopHost/DesktopHostHUD.swift`, `Sources/SpeakDesktop/DesktopHUD.swift` |
-| Keys | `Sources/SpeakDesktopHost/DesktopHostCredentials.swift`, `SpeakWindows/WindowsNative.swift`, `SpeakLinuxPlatform/LinuxCredentialStore.swift` |
+| Keys | `Sources/SpeakDesktopHost/DesktopHostCredentials.swift`, `DesktopHostAPIKeys.swift`, `SpeakCore/APIKeyCatalog.swift`, `SpeakWindows/WindowsNative.swift`, `SpeakWindows/WindowsAPIKeys.swift`, `SpeakLinuxPlatform/LinuxCredentialStore.swift` |
 | Shortcuts | `Sources/SpeakWindows/WindowsHotKey.swift`, `Sources/SpeakLinux/LinuxShortcutGestures.swift`, `SpeakCore/HotKeyGestureMachine.swift` |
 | Voice | `Sources/SpeakDesktopHost/DesktopHostReadAloud.swift`, `SpeakWindows/WindowsReadAloud.swift`, `SpeakLinux/LinuxReadAloud.swift` |
 | General | `Sources/SpeakDesktopHost/DesktopHostSettings.swift`, `DesktopHostLoginItem.swift`, `SpeakWindows/WindowsLoginItemHost.swift`, `SpeakLinux/LinuxLoginItemHost.swift` |
@@ -1880,7 +1925,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | hotKeyActivation | Equivalent / Equivalent | Shortcuts; press/hold/double-tap/combined styles; Linux portal availability caveat |
 | holdThreshold | Wired / Wired | Config + shared gesture machine; 0.2...1.5 s |
 | doubleTapWindow | Wired / Wired | Config + shared gesture machine; 0.2...1 s |
-| trackedKeyIdentifiers | Equivalent / Equivalent | Keys; provider credential names, not values; no full API-key management destination |
+| trackedKeyIdentifiers | Equivalent (source only; NOT_RUN) / Partial | Keys; identifiers only, in `trackedKeyIdentifiers.json`. Saving a key from the shared editors registers its identifier and removing it unregisters it. Windows' API Keys page also reconciles the list against the store; Linux has no page, so keys written outside those editors stay untracked |
 | preferredLocale | Wired / Wired | Config + `DesktopProfileSession.swift`; provider language capability gates; automation language remains a separate gap |
 | postRecordingTailDuration | Wired / Wired | Config + `DesktopHostRecordingTail.swift`; owned 0...2 s capture buffer, immediate cancel/failure/shutdown cleanup, no stale finalisation |
 | deepgramStopGracePeriod | Equivalent migration / Equivalent migration | Valid legacy value initializes absent liveStopGracePeriod; canonical value, including zero, wins; legacy retained for downgrade |
@@ -1966,8 +2011,9 @@ Permissions, Compare Models, Data & Migration and About
 General/Transcription/Post-processing/Voice Output/Keyboard/About and iCloud sync;
 Windows also exposes Profiles and a separate native Permissions window (About, or
 the setup guide); the GTK Profiles destination is added by this
-unqualified source-only candidate. Provider keys are embedded under Transcription,
-not a complete API Keys management page. Comparison is implemented as a
+unqualified source-only candidate. Windows now has an API Keys page (see
+"API Keys page" above; source only, NOT_RUN); Linux provider keys remain
+embedded under Transcription and Voice. Comparison is implemented as a
 separate native window outside this `SettingsTab` list — live/file multi-model
 capture, blind judging/ranking, playback and scoreboard export
 (`DesktopHostComparison.swift`, `WindowsComparison.swift`,

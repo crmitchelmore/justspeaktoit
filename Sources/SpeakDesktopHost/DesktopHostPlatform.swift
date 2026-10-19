@@ -48,6 +48,8 @@ package protocol DesktopHostPlatform: Sendable {
     ) -> DesktopHostNativePreferenceProjection
     static var nativeConfigurationPlatform: DesktopNativeConfigurationCapture.Platform? { get }
     static var voiceConfigurationKeys: Set<String> { get }
+    /// Shortcut configuration keys the host applies; see DesktopHostShortcutBindings.swift.
+    static var shortcutConfigurationKeys: Set<String> { get }
     static func exportVoiceConfiguration(
         _ voiceOutput: VoiceOutputSettings?, over configuration: DesktopConfiguration
     ) throws -> DesktopConfiguration

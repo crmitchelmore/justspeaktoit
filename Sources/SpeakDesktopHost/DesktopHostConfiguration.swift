@@ -324,6 +324,7 @@ extension DesktopHostController {
         _ document: DesktopConfigurationDocument, settings changed: Settings
     ) -> String {
         let supported = DesktopConfiguration.supportedKeys.union(Platform.voiceConfigurationKeys)
+            .union(Platform.shortcutConfigurationKeys)
         let unknown = (changed.configuration?.values.keys ?? document.preferences.values.keys)
             .filter { !supported.contains($0) }.sorted()
         let hasSynthesis = !DesktopConfiguration.voiceSynthesisTransferKeys

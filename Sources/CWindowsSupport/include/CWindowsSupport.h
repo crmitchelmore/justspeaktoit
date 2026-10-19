@@ -1385,6 +1385,52 @@ void jsti_window_clear_api_keys(void);
 /* Opens the dialog over the main window when idle (onboarding entry hook). */
 void jsti_window_request_api_keys(void);
 
+/* ---- Action shortcuts ----------------------------------------------------
+ * The Mac's individual action shortcuts (SpeakCore DesktopShortcutAction), one
+ * row per catalogue action in catalogue order. `run` says how Windows performs
+ * the action; -1 keeps the row stored for the Mac without running it here.
+ * Rows run inside this window, or system-wide through RegisterHotKey when
+ * `global` and `can_be_global` are set and the combination includes Ctrl or
+ * Alt (or is F13-F24 alone). Modifiers are JSTI hotkey modifiers:
+ * Alt 1, Ctrl 2, Shift 4. A zero virtual key has no Windows equivalent. */
+enum {
+    JSTI_ACTION_RUN_NONE = -1,
+    JSTI_ACTION_RUN_RECORD = 1,      /* as the Record button */
+    JSTI_ACTION_RUN_PAGE = 2,        /* shows `page`, a sidebar page name */
+    JSTI_ACTION_RUN_PLAY_PAUSE = 3,  /* as History's Play/Pause */
+    JSTI_ACTION_RUN_STOP_SPEECH = 4  /* as Stop on History or Voice Output */
+};
+typedef struct {
+    const char *identifier;
+    const char *title;
+    const char *note;  /* why Windows does not run it, or NULL */
+    const char *page;  /* JSTI_ACTION_RUN_PAGE only */
+    int run;
+    unsigned modifiers;
+    unsigned virtual_key;
+    int enabled;
+    int global;
+    int can_be_global;
+} JSTIActionShortcut;
+/* Validates the dialog's rows on the UI thread and, when commit is 1, saves
+ * them; never wait for a Swift actor here. Returns 0 to accept (message may
+ * carry warnings, one per line) or -1 to refuse with message. */
+typedef int (*JSTIActionShortcutsCallback)(const JSTIActionShortcut *rows, size_t count, int commit,
+                                           char *message, size_t capacity, void *context);
+/* Runs on the UI thread when an imported configuration may have changed the
+ * bindings; the host reads its settings and configures again. */
+typedef void (*JSTIActionShortcutsRefresh)(void *context);
+/* Thread safe; strings are copied. preset_rows holds preset_count blocks of
+ * `count` rows in the same order; only their keys and flags are read. Running
+ * windows re-register at once; failures are reported on the status line and
+ * in the dialog. The context is borrowed like jsti_window_set_text_output's. */
+int jsti_window_set_action_shortcuts(const JSTIActionShortcut *rows, size_t count,
+                                     const char *const *preset_names, const JSTIActionShortcut *preset_rows,
+                                     size_t preset_count, JSTIActionShortcutsCallback callback,
+                                     JSTIActionShortcutsRefresh refresh, void *context);
+/* Unregisters every action shortcut and drops the callbacks and context. */
+void jsti_window_clear_action_shortcuts(void);
+
 #ifdef __cplusplus
 }
 #endif

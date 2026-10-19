@@ -208,6 +208,10 @@ func linuxWindowEvent( // swiftlint:disable:this cyclomatic_complexity
         holder.enqueueSettings { await holder.controller.readClipboardAloud() }
         return
     }
+    if event == Int(JSTI_EVENT_SPEECH_PAUSE) {
+        holder.enqueueSettings { await holder.controller.pauseResumeSpeech() }
+        return
+    }
     if event == 70 || event == 71 || event == 72 {
         linuxVocabularyEvent(Int32(event), payload: value, kind: slot, holder: holder)
         return

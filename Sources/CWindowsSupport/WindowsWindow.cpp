@@ -3350,7 +3350,7 @@ int jsti_window_configure_about(const char *details, const JSTIAboutLink *links,
 }
 
 // Action shortcuts from WindowsActionShortcuts.cpp, on the UI thread. Each runs
-// exactly what its button or sidebar row does, and only while that is enabled.
+// its corresponding Host action or enabled button/sidebar behavior.
 void jsti_window_action_command(HWND window, int run, const char *page) {
     if (!IsWindow(window) || !IsWindowEnabled(window)) return;
     switch (run) {
@@ -3364,8 +3364,7 @@ void jsti_window_action_command(HWND window, int run, const char *page) {
         }
         break;
     case JSTI_ACTION_RUN_PLAY_PAUSE:
-        SendMessageW(window, WM_COMMAND, MAKEWPARAM(playPauseID, BN_CLICKED),
-                     reinterpret_cast<LPARAM>(GetDlgItem(window, playPauseID)));
+        emit(window, JSTI_EVENT_SPEECH_PAUSE);
         break;
     case JSTI_ACTION_RUN_STOP_SPEECH:
         emit(window, JSTI_EVENT_HISTORY_STOP);
@@ -4874,6 +4873,10 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         SendMessageW(window, WM_COMMAND, MAKEWPARAM(playPauseID, BN_CLICKED), 0);
         if (observed.event != JSTI_EVENT_HISTORY_PLAY_PAUSE || observed.id != "one" || observed.model != 1) {
             failure = "Play did not report the selected record."; return false;
+        }
+        jsti_window_action_command(window, JSTI_ACTION_RUN_PLAY_PAUSE, nullptr);
+        if (observed.event != JSTI_EVENT_SPEECH_PAUSE) {
+            failure = "The speech shortcut fell back to History playback."; return false;
         }
         observed.event = -500;
         SendMessageW(window, WM_COMMAND, MAKEWPARAM(stopPlaybackID, BN_CLICKED), 0);

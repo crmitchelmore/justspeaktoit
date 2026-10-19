@@ -168,6 +168,8 @@ package protocol DesktopHostSpeechPlayback: DesktopHostPlayback {
     /// `endSpeech`, or until Stop, another row, recording, import, History
     /// playback, another speech or close ends it.
     func beginSpeech(recordID: UUID) throws -> Speech
+    /// Only this exact active speech may toggle; never falls back to History.
+    func togglePause(speech: Speech) -> Bool
     /// Plays one synthesized segment and returns the seconds rendered. A
     /// segment of an ended speech is refused with `CancellationError`, as is
     /// one interrupted by Stop or by cancelling the calling task.

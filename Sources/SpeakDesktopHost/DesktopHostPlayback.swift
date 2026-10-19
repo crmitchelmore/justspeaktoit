@@ -61,3 +61,17 @@ extension DesktopHostController {
             "Reading aloud stopped.")
     }
 }
+
+extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
+    package func pauseResumeSpeech() {
+        guard !closed else { return }
+        guard canUseHistory else {
+            update("Finish recording or the current data operation before changing speech playback.")
+            return
+        }
+        guard let speech = readAloudState.speech, playback.togglePause(speech: speech) else {
+            update("No active speech to pause or resume.")
+            return
+        }
+    }
+}

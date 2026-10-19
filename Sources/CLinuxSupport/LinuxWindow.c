@@ -1866,6 +1866,10 @@ static gboolean action_shortcut_run(gint run, const char *page, gint slot) {
         if (ui.state != JSTI_STATE_IDLE) return FALSE;
         emit(JSTI_EVENT_SPEAK_CLIPBOARD, "", 0);
         return TRUE;
+    case 8:
+        if (ui.state != JSTI_STATE_IDLE) return FALSE;
+        emit(JSTI_EVENT_SPEECH_PAUSE, "", 0);
+        return TRUE;
     default: return FALSE;
     }
 }
@@ -4627,13 +4631,15 @@ static gboolean action_execution_self_test(void) {
     okay = okay && !action_shortcut_run(6, "", 0) && !action_shortcut_run(6, "", 4);
     okay = okay && action_shortcut_run(7, "", 0) && capture.event == JSTI_EVENT_SPEAK_CLIPBOARD &&
         capture.slot == 0 && capture.calls == 6;
+    okay = okay && action_shortcut_run(8, "", 0) && capture.event == JSTI_EVENT_SPEECH_PAUSE &&
+        capture.slot == 0 && capture.calls == 7;
     ui.state = JSTI_STATE_WORKING;
     okay = okay && !action_shortcut_run(6, "", 1) && !action_shortcut_run(5, "", 0) &&
-        !action_shortcut_run(7, "", 0) && capture.calls == 6;
+        !action_shortcut_run(7, "", 0) && !action_shortcut_run(8, "", 0) && capture.calls == 7;
     gtk_widget_set_sensitive(GTK_WIDGET(ui.window), FALSE);
     ui.state = JSTI_STATE_IDLE;
     okay = okay && !action_shortcut_run(4, "", 0) && !action_shortcut_run(2, "about", 0) &&
-        !action_shortcut_run(7, "", 0) && capture.calls == 6;
+        !action_shortcut_run(7, "", 0) && !action_shortcut_run(8, "", 0) && capture.calls == 7;
     gtk_widget_set_sensitive(GTK_WIDGET(ui.window), window_sensitive);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.record), record_sensitive);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), stop_sensitive);

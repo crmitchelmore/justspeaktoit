@@ -1152,6 +1152,38 @@ write admission remain separate, unwired responsibilities. Its agreed fixed
 source is `VoiceUsage/requests.json` beneath the owned host app-data directory,
 with the existing 2,097,152-byte cap, not the recording/audio directory.
 
+`DesktopVocabularyArchiveSource` is a separate **compatible-kinds, partial-only**
+collector. It strict-reads the canonical `DataMigrationVocabularyCatalog`
+pronunciation, lexicon and correction paths, validates through that shared Mac
+catalogue, and retains exact source bytes, array order, raw unknown members,
+IDs/dates and anchored presence receipts. Old/dismissed candidates are not
+filtered through the runtime store. The same category JSON budget bounds all
+source bytes together and the encoded raw records. All sources are revalidated
+after collection/projection, including sources excluded by the requested scope.
+The host still owns mutation suspension, admission and aggregation; this is not
+multi-store atomicity. Collection does not clear native loaded-state warnings
+or recover a failed coordinator; host unreadable/startup guards remain required.
+
+The native `vocabulary.json` preference composite is separately retained as raw
+**unmapped** bytes/presence/receipt and validated against its existing native
+codec. It has no Mac record kind and never enters the Mac apply route.
+`Snapshot.isCompleteCategory` and `PartialProjection.isCompleteCategory` are
+always false. `projectCompatibleKinds` explicitly declares only the canonical
+selected kinds and always returns a selected-ID scope, including an empty set,
+never a complete-category scope. A full-category backup must refuse authority
+until an independently approved native carrier retains the unmapped composite;
+this API supplies no such carrier or full-category export.
+
+Version 1 ZIPs contain one flattened `vocabulary.json` record array. They do not
+carry per-kind source-presence flags or a selected-kind manifest field. A
+collector therefore distinguishes a missing source from an existing `[]`, but
+that distinction does **not** survive this partial ZIP projection. Raw nested
+payload values/order/IDs/dates do survive; source JSON whitespace stays in the
+collector, not the canonical reencoded ZIP. The real-ZIP tests assert this
+limitation rather than inventing wire fields. Native Windows strict metadata
+viability and actual Apple execution remain separate qualification requirements;
+unsupported platform identity must error, never fall back to weaker reads.
+
 `DataMigrationArchivePolicy` also centralizes the existing Mac archive path,
 entry/total/JSON-size, duplicate-path, manifest and staging-capacity rules.
 Mac ZIP reads use this policy; portable tests exercise exact limits without

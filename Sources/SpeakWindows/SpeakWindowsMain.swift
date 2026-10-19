@@ -313,6 +313,9 @@ enum SpeakWindowsMain {
         let textOutput = await controller.textOutputOptions()
         try WindowsNative.configureTextOutput(textOutput, context: Unmanaged.passUnretained(holder).toOpaque())
         try await configureHotKey(holder)
+        guard await WindowsNative.configureActionShortcuts(holder) else {
+            throw WindowsNativeError(message: "Could not configure action shortcuts.")
+        }
         try await WindowsNative.configureConfiguration(holder)
         try await configureAzureResource(holder)
         await restoreServices(holder)
@@ -354,6 +357,7 @@ enum SpeakWindowsMain {
         // this context once the holder can be released.
         jsti_window_clear_text_output()
         jsti_window_clear_hotkey()
+        jsti_window_clear_action_shortcuts()
         jsti_window_clear_azure_resource()
         jsti_window_clear_configuration()
         await releaseServices(holder)

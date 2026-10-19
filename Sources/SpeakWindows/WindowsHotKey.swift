@@ -100,6 +100,7 @@ func hotKeyEvent(_ modifiers: UInt32, _ key: UInt32, _ style: Int32, _ context: 
         if !WindowsNative.configureHotKey(saved, context: Unmanaged.passUnretained(holder).toOpaque()) {
             WindowsNative.update("The saved shortcut could not be shown. Reopen Keyboard shortcut and try again.")
         }
+        await WindowsNative.configureActionShortcuts(holder)
     }
 }
 

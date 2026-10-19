@@ -157,6 +157,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                     try await Self.writeVoiceCredential(cleaned, identifier: slot.identifier)
                 }
                 self.invalidateVoiceInventory(for: slot)
+                self.recordTrackedAPIKey(slot.identifier, value: cleaned)
                 guard !self.closed, !Task.isCancelled else {
                     completion(.failure(.completedWhileClosing)); return
                 }

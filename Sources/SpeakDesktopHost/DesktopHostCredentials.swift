@@ -32,6 +32,7 @@ extension DesktopHostController {
             } else {
                 try Platform.saveAPIKey(cleaned, name: provider.apiKeyIdentifier)
             }
+            recordTrackedAPIKey(provider.apiKeyIdentifier, value: cleaned)
             invalidateConnectionPreWarming(resetCapture: true)
             if provider.id == OpenRouterService.providerID { refreshModels(force: true) }
             update(cleaned.isEmpty ? "API key removed." : "API key saved in \(Platform.credentialStoreName).")

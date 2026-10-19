@@ -79,6 +79,7 @@ extension DesktopHostController {
         } else {
             try Platform.saveAPIKey(key, name: identifier)
         }
+        recordTrackedAPIKey(identifier, value: key)
         invalidateConnectionPreWarming(resetCapture: true)
         await refreshComparison()
     }

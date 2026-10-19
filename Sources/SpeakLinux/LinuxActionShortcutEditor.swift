@@ -70,27 +70,39 @@ func linuxActionShortcutEdit(_ wire: String, holder: LinuxEventContext) {
         shortcutEditFinished(request.request, success: false, message: reason)
     case .accepted(let bindings, let warnings):
         holder.enqueueSettings {
-            do {
-                try await holder.controller.saveShortcutBindings(bindings, replacing: base)
-            } catch {
-                shortcutEditFinished(request.request, success: false, message: error.localizedDescription)
-                LinuxHostPlatform.update("Could not save action shortcuts: \(error.localizedDescription)")
-                return
-            }
-            do {
-                try await LinuxWindow.configureActionShortcuts(holder)
-            } catch {
-                if jsti_window_set_action_shortcuts(nil, 0) != 0 {
-                    LinuxHostPlatform.update("Saved shortcuts could not be activated or disabled safely.")
-                }
-                let message = "Shortcuts were saved but could not be activated: \(error.localizedDescription)"
-                shortcutEditFinished(request.request, success: false, message: message)
-                LinuxHostPlatform.update(message)
-                return
-            }
-            let message = warnings.isEmpty ? "Action shortcuts saved." : warnings.prefix(3).joined(separator: "\n")
-            shortcutEditFinished(request.request, success: true, message: message)
-            LinuxHostPlatform.update(message)
+            await saveLinuxActionShortcuts(
+                bindings, replacing: base, warnings: warnings, request: request.request, holder: holder
+            )
         }
     }
+}
+
+private func saveLinuxActionShortcuts(
+    _ bindings: DesktopShortcutBindings,
+    replacing base: DesktopShortcutBindings,
+    warnings: [String],
+    request: UUID,
+    holder: LinuxEventContext
+) async {
+    do {
+        try await holder.controller.saveShortcutBindings(bindings, replacing: base)
+    } catch {
+        shortcutEditFinished(request, success: false, message: error.localizedDescription)
+        LinuxHostPlatform.update("Could not save action shortcuts: \(error.localizedDescription)")
+        return
+    }
+    do {
+        try await LinuxWindow.configureActionShortcuts(holder)
+    } catch {
+        if jsti_window_set_action_shortcuts(nil, 0) != 0 {
+            LinuxHostPlatform.update("Saved shortcuts could not be activated or disabled safely.")
+        }
+        let message = "Shortcuts were saved but could not be activated: \(error.localizedDescription)"
+        shortcutEditFinished(request, success: false, message: message)
+        LinuxHostPlatform.update(message)
+        return
+    }
+    let message = warnings.isEmpty ? "Action shortcuts saved." : warnings.prefix(3).joined(separator: "\n")
+    shortcutEditFinished(request, success: true, message: message)
+    LinuxHostPlatform.update(message)
 }

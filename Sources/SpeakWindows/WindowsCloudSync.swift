@@ -146,6 +146,7 @@ func saveKeyEvent(_ value: String, index: Int, holder: WindowsEventContext) {
 extension SpeakWindowsMain {
     /// Saved automation and iCloud sync, once the window's dialogs are configured.
     static func restoreServices(_ holder: WindowsEventContext) async {
+        WindowsAutomationSetup.configure()
         if !holder.smokeTest { await WindowsAutomationSwitch.restore(holder) }
         await WindowsCloudSync.configure(holder)
     }

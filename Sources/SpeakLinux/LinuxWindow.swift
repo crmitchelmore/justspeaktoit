@@ -193,6 +193,6 @@ enum LinuxWindow {
             Int32(AppSwitchDelivery.desktopSelection(options.appSwitchDelivery)),
             AppSwitchDelivery.linuxHelp(canTargetApps: canTargetApps)
         )
-        if result != 0 { update("Could not refresh text output and app-switch preferences.") }
+        if result != 0 { LinuxHostPlatform.update("Could not refresh text output and app-switch preferences.") }
     }
 }

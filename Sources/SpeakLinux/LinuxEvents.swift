@@ -316,7 +316,7 @@ private func linuxSettingsEvent(_ event: Int, value: String, slot: Int, holder: 
         let options: LinuxTextOutputOptions
         do { options = try LinuxTextOutputOptions(nativeMethod: slot, payload: value) }
         catch {
-            LinuxWindow.update("The text output choice could not be read. Reopen preferences and try again.")
+            LinuxHostPlatform.update("The text output choice could not be read. Reopen preferences and try again.")
             return true
         }
         holder.enqueueSettings {

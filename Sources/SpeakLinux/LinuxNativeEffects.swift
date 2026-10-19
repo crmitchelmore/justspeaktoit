@@ -12,6 +12,10 @@ struct LinuxNativeEffects: DesktopHostEffects {
 
     func apiKey(name: String) throws -> String { try LinuxCredentialStore.read(name: name) }
 
+    func warmPostProcessingConnection() async throws {
+        try await OpenRouterConnectionWarmer.warmUp()
+    }
+
     func makeCapture(
         context: DesktopCaptureContext, deviceID: String, sampleRate: Int, frameMilliseconds: Int
     ) throws -> any DesktopRecordingCapture {

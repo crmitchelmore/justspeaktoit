@@ -9,6 +9,7 @@ package enum DesktopConfigurationSaveIntent: Equatable, Sendable {
 extension DesktopHostController {
     package func configuration() throws -> DesktopConfiguration {
         var values = settings.configuration?.values ?? [:]
+        values.removeValue(forKey: DesktopConnectionPreWarming.approvalProjectionKey)
         values[DesktopPostProcessingConfiguration.streamingKey] = AnyCodable(
             .bool((settings.postProcessing ?? .init()).streamingEnabled)
         )
@@ -29,6 +30,7 @@ extension DesktopHostController {
         values[VoiceAudioFormat.preferenceKey] = projected.values[VoiceAudioFormat.preferenceKey]
         let qualityKey = VoiceSynthesisPreference.quality.key.rawValue
         values[qualityKey] = projected.values[qualityKey]
+        values[DesktopConnectionPreWarming.approvalProjectionKey] = AnyCodable(.bool(connectionWarmApproved))
         if values[qualityKey] == nil, let voice = settings.voiceOutput as? DesktopVoiceOutputSettings {
             values[qualityKey] = AnyCodable(.string(voice.qualityForNativeEditor))
         }
@@ -75,6 +77,11 @@ extension DesktopHostController {
     private func persistConfiguration(
         _ configuration: DesktopConfiguration, intent: DesktopConfigurationSaveIntent, status: String
     ) async throws {
+        invalidateConnectionPreWarming(resetCapture: true)
+        let approved = configuration.enabled(DesktopConnectionPreWarming.approvalProjectionKey)
+            && configuration.enabled(DesktopConnectionPreWarming.preferenceKey)
+            && (intent == .apply || connectionWarmApproved)
+        let configuration = try DesktopConnectionPreWarming.removingApproval(from: configuration)
         var changed = settings
         var voice = changed.voiceOutput
         changed.configuration = try importingAutomationPreferences(
@@ -103,6 +110,7 @@ extension DesktopHostController {
         }
         let previousVoice = settings.voiceOutput
         try await persistAutomationAwareSettings(changed)
+        connectionWarmApproved = approved
         reconcileSonioxRegionChange(previousVoice)
         reconcileVoiceQualityChange(previousVoice)
         let cleanup = await disarmHandsFreeForConfiguration()
@@ -111,7 +119,12 @@ extension DesktopHostController {
         let approval = intent == .persistOnly && changed.livePolishApproved != true
             && configuration.text("speedMode") == SpeedModeID.livePolish.rawValue
             ? " Auto-Clean is not authorized; use Apply preferences to enable cleanup requests." : ""
-        update(status + approval + cleanup)
+        let preparation = connectionWarmApproved
+            ? " Connection preparation approved until exit, after successful capture only; not live or streaming."
+            : configuration.enabled(DesktopConnectionPreWarming.preferenceKey)
+                ? " Connection preparation intent retained; approve probes on this device for this session to enable it."
+                : ""
+        update(status + approval + preparation + cleanup)
     }
 
     // Permission follows the effective cleanup route, not unrelated sound settings
@@ -152,6 +165,7 @@ extension DesktopHostController {
         var values = projected.values
         values.removeValue(forKey: "automationLocalConsent")
         values.removeValue(forKey: "automationEnabled")
+        values.removeValue(forKey: DesktopConnectionPreWarming.approvalProjectionKey)
         let preferences = try DesktopConfiguration(values: values)
         let document = DesktopConfigurationDocument(preferences: preferences)
         let data = try encoder.encode(document)
@@ -174,8 +188,10 @@ extension DesktopHostController {
             throw DesktopHostError(message: "Finish dictation before importing configuration.")
         }
         let changed = try prepareConfigurationImport(document)
+        invalidateConnectionPreWarming(resetCapture: true)
         let previousVoice = settings.voiceOutput
         try await persistAutomationAwareSettings(changed)
+        connectionWarmApproved = false
         reconcileSonioxRegionChange(previousVoice)
         reconcileVoiceQualityChange(previousVoice)
         let cleanup = await disarmHandsFreeForConfiguration()
@@ -210,7 +226,9 @@ extension DesktopHostController {
         var changed = settings
         var voice = changed.voiceOutput
         changed.configuration = try importingAutomationPreferences(
-            Platform.importVoiceConfiguration(from: document.preferences, into: &voice)
+            Platform.importVoiceConfiguration(
+                from: DesktopConnectionPreWarming.removingApproval(from: document.preferences), into: &voice
+            )
         )
         applyingAutomationRevocation(to: &changed)
         changed.voiceOutput = voice
@@ -267,7 +285,11 @@ extension DesktopHostController {
         let autoClean = document.preferences.text("speedMode") == SpeedModeID.livePolish.rawValue
             ? " Auto-Clean is retained but not authorized: review and Apply preferences to allow cleanup requests."
             : ""
-        return status + autoClean + automationImportNotice()
+        let preparation = document.preferences.values[DesktopConnectionPreWarming.preferenceKey] != nil
+            ? " Connection preparation intent retained without session approval. "
+                + "Approve on this device, then complete a successful capture; live/streaming warming is unavailable."
+            : ""
+        return status + autoClean + preparation + automationImportNotice()
             + (unknown.isEmpty ? "" : " Preserved but not applied: \(unknown.joined(separator: ", ")).")
     }
 

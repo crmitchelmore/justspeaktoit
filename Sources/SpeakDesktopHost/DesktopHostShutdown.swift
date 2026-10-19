@@ -181,6 +181,10 @@ extension DesktopHostController {
             let ended = await DesktopHostShutdown.wait(until: deadline) { await self.operationsEnded() }
             if !ended { report.unfinishedOperations = activeOperations }
         }
+        if let warm = connectionWarmTask {
+            let ended = await DesktopHostShutdown.wait(until: deadline) { await warm.task.value }
+            if !ended { report.unfinishedOperations += 1 }
+        }
         if let discovery = modelDiscoveryTask {
             report.discoveryEnded = await DesktopHostShutdown.wait(until: deadline) { await discovery.value }
         }

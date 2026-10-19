@@ -684,7 +684,65 @@ static bool configurationEmptyChoiceSelfTest(HWND owner, std::string &error) {
     return okay;
 }
 
+static bool configurationWarmApprovalSelfTest(HWND owner, std::string &error) {
+    struct Applied { int calls = 0; bool approved = false; } applied;
+    auto make = [&]() {
+        Dialog dialog;
+        dialog.group = L"Post-processing";
+        dialog.config.fields = {
+            {L"Connection intent", L"1", L"Post-processing", true},
+            {L"Session approval", L"0", L"Post-processing", true, {}, false, 1}
+        };
+        dialog.config.context = &applied;
+        dialog.config.callback = [](int action, const char *const *values, size_t count, void *context,
+                                      char *message, size_t capacity) {
+            auto &state = *static_cast<Applied *>(context);
+            if (action != 0 || count != 2 || std::string(values[0]) != "1" ||
+                std::string(values[1]) != (state.approved ? "1" : "0"))
+                return jsti::fail("Intent was mistaken for explicit session approval.", message, capacity);
+            ++state.calls;
+            return 0;
+        };
+        return dialog;
+    };
+    Dialog first = make();
+    HWND window = createDialog(owner, first);
+    if (!window) { error = "Could not create connection approval fixture."; return false; }
+    const auto checked = [&]() {
+        return SendDlgItemMessageW(window, fieldBase + 1, BM_GETCHECK, 0, 0) == BST_CHECKED;
+    };
+    bool valid = IsWindowEnabled(GetDlgItem(window, fieldBase + 1)) && !checked();
+    SendDlgItemMessageW(window, fieldBase, BM_SETCHECK, BST_UNCHECKED, 0);
+    SendMessageW(window, WM_COMMAND, MAKEWPARAM(fieldBase, BN_CLICKED), 0);
+    valid = valid && !IsWindowEnabled(GetDlgItem(window, fieldBase + 1)) && !checked();
+    SendDlgItemMessageW(window, fieldBase, BM_SETCHECK, BST_CHECKED, 0);
+    SendMessageW(window, WM_COMMAND, MAKEWPARAM(fieldBase, BN_CLICKED), 0);
+    valid = valid && IsWindowEnabled(GetDlgItem(window, fieldBase + 1)) && !checked();
+    SendMessageW(window, WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
+    valid = valid && !IsWindow(window) && applied.calls == 1;
+    if (IsWindow(window)) DestroyWindow(window);
+    Dialog second = make();
+    window = createDialog(owner, second);
+    if (!window) { error = "Could not create explicit approval fixture."; return false; }
+    valid = valid && !checked();
+    SendDlgItemMessageW(window, fieldBase + 1, BM_SETCHECK, BST_CHECKED, 0);
+    applied.approved = true;
+    SendMessageW(window, WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
+    valid = valid && !IsWindow(window) && applied.calls == 2;
+    if (IsWindow(window)) DestroyWindow(window);
+    Dialog cancelled = make();
+    window = createDialog(owner, cancelled);
+    if (!window) { error = "Could not create cancelled approval fixture."; return false; }
+    SendDlgItemMessageW(window, fieldBase + 1, BM_SETCHECK, BST_CHECKED, 0);
+    SendMessageW(window, WM_COMMAND, MAKEWPARAM(IDCANCEL, BN_CLICKED), 0);
+    valid = valid && !IsWindow(window) && applied.calls == 2;
+    if (IsWindow(window)) DestroyWindow(window);
+    if (!valid) error = "Connection intent, explicit approval, dependency or Cancel was conflated.";
+    return valid;
+}
+
 bool jsti_configuration_self_test(HWND owner, std::string &error) {
+    if (!configurationWarmApprovalSelfTest(owner, error)) return false;
     if (!configurationTitleSelfTest(owner, error)) return false;
     if (!configurationAutoCleanSelfTest(owner, error)) return false;
     if (!configurationEmptyChoiceSelfTest(owner, error)) return false;

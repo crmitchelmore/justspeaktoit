@@ -7,6 +7,7 @@ public enum SpeechDefaults {
     public static let postProcessingIncludeLexiconDirectives = true
     public static let postProcessingIncludeContextTags = true
     public static let postProcessingStreamingEnabled = true
+    public static let connectionPreWarmingEnabled = true
     /// Pre-streaming desktop documents and API calls retain their completed-only behavior.
     public static let desktopLegacyPostProcessingStreamingEnabled = false
     public static let liveStopGracePeriod = 0.0
@@ -109,6 +110,14 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable { // swiftlint:
               title: "Stream remote cleanup previews (local cleanup is completed-only)",
               group: "Post-processing", kind: .boolean,
               defaultValue: AnyCodable(.bool(SpeechDefaults.postProcessingStreamingEnabled))),
+        .init(key: DesktopConnectionPreWarming.preferenceKey,
+              title: "Prepare completed-only OpenRouter cleanup (not live/streaming)",
+              group: "Post-processing", kind: .boolean,
+              defaultValue: AnyCodable(.bool(SpeechDefaults.connectionPreWarmingEnabled))),
+        .init(key: DesktopConnectionPreWarming.approvalProjectionKey,
+              title: "Approve probes this session, only after successful capture",
+              group: "Post-processing", kind: .boolean, defaultValue: AnyCodable(.bool(false)),
+              enabledBy: DesktopConnectionPreWarming.preferenceKey),
         .init(key: ApplicationPreferenceKey.postProcessingOutputLanguage.rawValue,
               title: "Output language (blank keeps the transcript language)",
               group: "Post-processing", kind: .text,

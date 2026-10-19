@@ -3557,6 +3557,64 @@ static int32_t configuration_test_callback(int32_t action, const char *const *va
     return 0;
 }
 
+typedef struct { guint intent; guint approval; guint calls; gboolean approved; } WarmApprovalConfigurationTest;
+
+static int32_t configuration_warm_approval_callback(
+    int32_t action, const char *const *values, size_t count, void *context, char *error, size_t capacity
+) {
+    (void)error; (void)capacity;
+    WarmApprovalConfigurationTest *test = context;
+    if (action != 0 || count != configuration.rows->len || test->intent >= count || test->approval >= count ||
+        g_strcmp0(values[test->intent], "1") != 0 ||
+        g_strcmp0(values[test->approval], test->approved ? "1" : "0") != 0) return -1;
+    ++test->calls;
+    return 0;
+}
+
+static gboolean configuration_warm_approval_self_test(void) {
+    WarmApprovalConfigurationTest test = {
+        .intent = configuration.rows->len, .approval = configuration.rows->len, .calls = 0, .approved = FALSE
+    };
+    for (guint index = 0; index < configuration.rows->len; ++index) {
+        const char *title = adw_preferences_row_get_title(
+            ADW_PREFERENCES_ROW(g_ptr_array_index(configuration.rows, index)));
+        if (g_strcmp0(title, "Prepare completed-only OpenRouter cleanup (not live/streaming)") == 0)
+            test.intent = index;
+        if (g_strcmp0(title, "Approve probes this session, only after successful capture") == 0)
+            test.approval = index;
+    }
+    if (test.intent >= configuration.rows->len || test.approval >= configuration.rows->len) return FALSE;
+    GtkWidget *intent = g_ptr_array_index(configuration.rows, test.intent);
+    GtkWidget *approval = g_ptr_array_index(configuration.rows, test.approval);
+    if (!ADW_IS_SWITCH_ROW(intent) || !ADW_IS_SWITCH_ROW(approval) ||
+        g_array_index(configuration.enabled_by_fields, gint32, test.approval) != (gint32)test.intent + 1)
+        return FALSE;
+    const gboolean saved_intent = adw_switch_row_get_active(ADW_SWITCH_ROW(intent));
+    const gboolean saved_approval = adw_switch_row_get_active(ADW_SWITCH_ROW(approval));
+    JSTIConfigurationCallback saved_callback = configuration.callback;
+    void *saved_context = configuration.context;
+    configuration.callback = configuration_warm_approval_callback;
+    configuration.context = &test;
+    adw_switch_row_set_active(ADW_SWITCH_ROW(approval), FALSE);
+    adw_switch_row_set_active(ADW_SWITCH_ROW(intent), FALSE);
+    gboolean valid = !gtk_widget_get_sensitive(approval) &&
+        !adw_switch_row_get_active(ADW_SWITCH_ROW(approval));
+    adw_switch_row_set_active(ADW_SWITCH_ROW(intent), TRUE);
+    valid = valid && gtk_widget_get_sensitive(approval) &&
+        !adw_switch_row_get_active(ADW_SWITCH_ROW(approval));
+    on_configuration_apply(NULL, NULL);
+    valid = valid && test.calls == 1;
+    adw_switch_row_set_active(ADW_SWITCH_ROW(approval), TRUE);
+    test.approved = TRUE;
+    on_configuration_apply(NULL, NULL);
+    valid = valid && test.calls == 2;
+    adw_switch_row_set_active(ADW_SWITCH_ROW(approval), saved_approval);
+    adw_switch_row_set_active(ADW_SWITCH_ROW(intent), saved_intent);
+    configuration.callback = saved_callback;
+    configuration.context = saved_context;
+    return valid;
+}
+
 static gboolean configuration_self_test(void) {
     if (!configuration_empty_choice_self_test()) return FALSE;
     if (configuration.rows == NULL || configuration.rows->len < 10 ||
@@ -3693,7 +3751,7 @@ static gboolean configuration_self_test(void) {
     configuration.callback = callback;
     configuration.context = context;
     return test_context.calls == (optional_choice_row != NULL ? 5 : 4) && title_preserved && availability_preserved &&
-        configuration_auto_clean_self_test();
+        configuration_auto_clean_self_test() && configuration_warm_approval_self_test();
 }
 
 static void style_apply(gpointer data) {

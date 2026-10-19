@@ -12,6 +12,7 @@ extension DesktopHostController {
                     for: DesktopHostModels.all[modelIndex].id
                   ) else { throw DesktopTranscriptionError.unsupportedModel }
             let cleaned = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            invalidateConnectionPreWarming(resetCapture: true)
             if !cleaned.isEmpty, provider.apiKeyIdentifier == AzureSpeechConfiguration.credentialIdentifier {
                 let model = DesktopHostModels.all[modelIndex].id
                 if AzureTranscriptionModels.batchIDs.contains(model) {
@@ -31,6 +32,7 @@ extension DesktopHostController {
             } else {
                 try Platform.saveAPIKey(cleaned, name: provider.apiKeyIdentifier)
             }
+            invalidateConnectionPreWarming(resetCapture: true)
             if provider.id == OpenRouterService.providerID { refreshModels(force: true) }
             update(cleaned.isEmpty ? "API key removed." : "API key saved in \(Platform.credentialStoreName).")
             await refreshComparison()

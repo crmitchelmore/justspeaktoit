@@ -4,7 +4,10 @@ import SpeakDesktop
 
 extension DesktopHostController {
     package func selectedMicrophone() -> String { settings.microphoneDeviceID ?? "" }
-    package func setMicrophoneWarning(_ warning: String?) { microphoneWarning = warning }
+    package func setMicrophoneWarning(_ warning: String?) {
+        invalidateConnectionPreWarming(resetCapture: true)
+        microphoneWarning = warning
+    }
 
     package func selectMicrophone(_ identifier: String) {
         guard canUseHistory else { return }

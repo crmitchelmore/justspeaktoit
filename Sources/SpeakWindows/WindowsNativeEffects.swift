@@ -18,6 +18,10 @@ struct WindowsNativeEffects: WindowsControllerEffects {
 
     func apiKey(name: String) throws -> String { try WindowsNative.apiKey(name: name) }
 
+    func warmPostProcessingConnection() async throws {
+        try await OpenRouterConnectionWarmer.warmUp()
+    }
+
     func makeCapture(
         context: WindowsCaptureContext, deviceID: String, sampleRate: Int, frameMilliseconds: Int
     ) throws -> any WindowsRecordingCapture {

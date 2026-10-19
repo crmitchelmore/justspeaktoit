@@ -46,10 +46,18 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
             let container = try decoder.singleValueContainer()
             let all = try container.decode([String: AnyCodable].self)
             try adoptStoredStreamingPreference(all)
+            var configuration = values.configuration?.values ?? [:]
+            let warmKey = DesktopConnectionPreWarming.preferenceKey
+            if configuration[warmKey] == nil { configuration[warmKey] = all[warmKey] }
+            configuration.removeValue(forKey: DesktopConnectionPreWarming.approvalProjectionKey)
+            if values.configuration != nil || configuration[warmKey] != nil {
+                values.configuration = try DesktopConfiguration(values: configuration)
+            }
             let known: Set<String> = [
                 "model", "postProcessing", "microphoneDeviceID", "batchModel", "liveModel", "textOutput",
                 "hotKey", "voiceOutput", "automationEnabled", "automationLocalConsent", "localModel", "localUseGPU",
-                "azureSpeechResourceEndpoint", "appearance", "runAtLogin", "configuration", "livePolishApproved"
+                "azureSpeechResourceEndpoint", "appearance", "runAtLogin", "configuration", "livePolishApproved",
+                DesktopConnectionPreWarming.preferenceKey, DesktopConnectionPreWarming.approvalProjectionKey
             ]
             preserved = all.filter { !known.contains($0.key) }
             try adoptStoredPreferences(DesktopConfiguration.pronunciationPreferenceKeys)
@@ -156,12 +164,17 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var modelDiscoveryTask: Task<Void, Never>?
     var modelCatalogRevision: UInt64 = 0
     let profileStore: DesktopDictationProfileStore
-    package var profiles: [DictationProfile]
-    var manualProfileID: UUID?
+    package var profiles: [DictationProfile] {
+        didSet { invalidateConnectionPreWarming(resetCapture: true) }
+    }
+    var manualProfileID: UUID? {
+        didSet { invalidateConnectionPreWarming(resetCapture: true) }
+    }
     var profileEditorState: DesktopHostProfileEditorState?
     var profileWarning: String?
     package var settings: Settings {
         didSet {
+            invalidateConnectionPreWarming(resetCapture: true)
             cancelCorrectionObservation()
             if !correctionLearningEnabled { revokeCorrectionLearningConsent() }
         }
@@ -176,6 +189,13 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var observationalCorrectionConsent = false
     var correctionLearningNotice: String?
     var vocabularyLoad: Task<DesktopVocabulary, Error>?
+    var connectionWarmApproved = false
+    var connectionWarmGeneration = UUID()
+    var connectionWarmTracker = LiveStreamWarmTracker()
+    var connectionWarmCapture: DesktopHostConnectionWarmCapture?
+    var connectionWarmTask: (id: UUID, task: Task<Void, Never>)?
+    var connectionWarmPending = false
+    var connectionWarmCredentialWork = 0
     package var recording: Recording?
     var recordingCapturePolicy: (recordID: UUID, value: DesktopHostCapturePolicy)?
     var ownedCaptureStartup: DesktopHostOwnedStartupHandle?
@@ -189,6 +209,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package var closed = false {
         didSet {
             if closed {
+                connectionWarmApproved = false
+                invalidateConnectionPreWarming(resetCapture: true)
                 revokeCorrectionLearningConsent()
                 capturedCleanup.removeAll()
                 retireCleanupPresentation()
@@ -199,7 +221,12 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var shutdownReport: DesktopHostShutdownReport?
     /// How long `close()` waits in all for cancelled work to end.
     package nonisolated let shutdownGrace: Duration
-    package var activeOperations = 0
+    package var activeOperations = 0 {
+        didSet {
+            if activeOperations > 0 { pauseConnectionPreWarming() }
+            else { reconcileConnectionPreWarming() }
+        }
+    }
     var operationWaiters: [CheckedContinuation<Void, Never>] = []
     var shutdownWaiters: [CheckedContinuation<Void, Never>] = []
     package var transcript = ""
@@ -377,6 +404,7 @@ extension DesktopHostController {
             return
         }
         guard !closed, recording?.record.id == recordingID else { return }
+        invalidateConnectionPreWarming(resetCapture: true)
         if recording?.handsFree == true, let runID = handsFreeRun?.id {
             await failHandsFree(message, runID: runID)
             return

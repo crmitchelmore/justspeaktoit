@@ -15,6 +15,9 @@ extension DesktopHostController {
     }
 
     func startRecording(_ request: DesktopHostRecordingStart<Platform>) async throws {
+        pauseConnectionPreWarming()
+        connectionWarmCapture = nil
+        let warmGeneration = connectionWarmGeneration
         cancelCorrectionObservation()
         let (target, deviceID, profile, textOutput, trigger, handsFree) = (
             request.target, request.deviceID, request.profile, request.textOutput, request.trigger, request.handsFree
@@ -54,7 +57,7 @@ extension DesktopHostController {
             LiveRecordingStart(
                 key: key, profile: profile, id: id, record: record, file: file, rate: rate,
                 target: target, deviceID: deviceID, textOutput: textOutput, trigger: trigger, handsFree: handsFree,
-                polish: polish, capturePolicy: request.capturePolicy
+                polish: polish, capturePolicy: request.capturePolicy, warmGeneration: warmGeneration
             )
         )
         guard !closed, recording?.record.id == id else { return }
@@ -78,6 +81,7 @@ extension DesktopHostController {
         let handsFree: DesktopHandsFreeRun<Platform>?
         let polish: DesktopHostLivePolishInput?
         let capturePolicy: DesktopHostCapturePolicy?
+        let warmGeneration: UUID
     }
 
     /// Starts the live session and capture for an already-saved recording,
@@ -114,6 +118,12 @@ extension DesktopHostController {
             do { try capture.start() } catch {
                 capture.destroy()
                 throw error
+            }
+            if handsFree == nil {
+                acknowledgeConnectionWarmCapture(
+                    generation: start.warmGeneration, recordID: id,
+                    model: profile.modelIdentifier, options: profile.postProcessing
+                )
             }
             recording = Recording(
                 capture: capture, context: context, file: file, handsFree: handsFree != nil,

@@ -71,6 +71,7 @@ extension DesktopHostController {
     }
 
     private func savePostProcessingKey(_ key: String, for model: String) async throws {
+        invalidateConnectionPreWarming(resetCapture: true)
         let identifier = try postProcessingCredential(for: model)
         if let saveByHand = cloudSync.saveKeyByHand {
             try await saveByHand(key, identifier)
@@ -78,6 +79,7 @@ extension DesktopHostController {
         } else {
             try Platform.saveAPIKey(key, name: identifier)
         }
+        invalidateConnectionPreWarming(resetCapture: true)
         await refreshComparison()
     }
 
@@ -118,6 +120,12 @@ extension DesktopHostController {
             if let captured { key = captured.key } else {
                 key = options.mode == .remote
                     ? try Platform.apiKey(name: postProcessingCredential(for: options.modelIdentifier)) : ""
+            }
+            if options.mode == .remote, !options.streamingEnabled {
+                acknowledgeConnectionWarmCleanupCredential(
+                    recordID: record.id, model: options.modelIdentifier,
+                    available: !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                )
             }
             update("Polishing transcript… The original is saved in History.", state: 2)
             hud(record.id, .postProcessing)

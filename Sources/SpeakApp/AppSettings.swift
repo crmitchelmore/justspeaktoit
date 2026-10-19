@@ -1252,7 +1252,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       ttsPronunciationDictionary = [:]
     }
     connectionPreWarmingEnabled =
-      defaults.object(forKey: DefaultsKey.connectionPreWarmingEnabled.rawValue) as? Bool ?? true
+      defaults.object(forKey: DefaultsKey.connectionPreWarmingEnabled.rawValue) as? Bool
+        ?? SpeechDefaults.connectionPreWarmingEnabled
     audioPreWarmingEnabled =
       defaults.object(forKey: DefaultsKey.audioPreWarmingEnabled.rawValue) as? Bool ?? true
     warmMicrophoneOnKeyPress =

@@ -45,6 +45,8 @@ package struct DesktopHostTranscriptionRequest: Sendable {
 package protocol DesktopHostEffects<Platform>: Sendable {
     associatedtype Platform: DesktopHostPlatform
     func apiKey(name: String) throws -> String
+    /// Explicit native opt-in: only the actual completed-request shared pool.
+    func warmPostProcessingConnection() async throws
     func makeCapture(
         context: DesktopCaptureContext, deviceID: String, sampleRate: Int, frameMilliseconds: Int
     ) throws -> any DesktopRecordingCapture
@@ -83,6 +85,10 @@ package protocol DesktopHostEffects<Platform>: Sendable {
 }
 
 package extension DesktopHostEffects {
+    func warmPostProcessingConnection() async throws {
+        throw DesktopHostError(message: "This host has no shared-session cleanup connection preparation.")
+    }
+
     func postProcessStreaming(
         text: String, options: DesktopPostProcessing.Options, key: String, directives: [String], tags: [String],
         onUpdate: @escaping @Sendable (String) -> Void

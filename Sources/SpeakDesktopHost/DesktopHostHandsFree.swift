@@ -228,6 +228,8 @@ extension DesktopHostController {
     }
 
     package func handsFreeUserAbsent(_ reason: String) async {
+        connectionWarmApproved = false
+        invalidateConnectionPreWarming(resetCapture: true)
         guard handsFreeMachine.isArmed else { return }
         await disarmHandsFree(status: "Hands-free disarmed: \(reason)")
     }

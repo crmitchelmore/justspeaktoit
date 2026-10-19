@@ -75,6 +75,7 @@ package final class DesktopHostCloudSync<Platform: DesktopHostPlatform>: @unchec
     private let lock = NSLock()
     private var signIn: Task<Void, Never>?
     private weak var comparisonController: DesktopHostController<Platform>?
+    private weak var connectionWarmController: DesktopHostController<Platform>?
 
     /// Where a host's sync state lives: cursors, the bound iCloud user,
     /// acknowledgements and imported-key bookkeeping. No credentials.
@@ -96,6 +97,7 @@ package final class DesktopHostCloudSync<Platform: DesktopHostPlatform>: @unchec
         self.work = work
         self.native = native
         self.timing = timing
+        self.connectionWarmController = controller
         let history = DesktopHistorySyncStore(
             records: controller.store,
             state: state,
@@ -198,6 +200,7 @@ package final class DesktopHostCloudSync<Platform: DesktopHostPlatform>: @unchec
     /// passphrase always turns key import on, and an unticked box always turns
     /// it off, so an earlier Apply still in progress cannot decide the result.
     private func apply(history: Bool, keys: Bool, passphrase: String) async {
+        await connectionWarmController?.beginConnectionWarmCredentialWork()
         do {
             try await service.setHistoryEnabled(history)
             let importing = await service.status().apiKeyImportEnabled
@@ -207,6 +210,7 @@ package final class DesktopHostCloudSync<Platform: DesktopHostPlatform>: @unchec
             } else if keys, !importing {
                 notify("Enter the API-key sync passphrase from your Mac to import its keys.")
                 await publish()
+                await connectionWarmController?.endConnectionWarmCredentialWork()
                 return
             } else if !keys {
                 try await service.disableKeyImport()
@@ -219,6 +223,7 @@ package final class DesktopHostCloudSync<Platform: DesktopHostPlatform>: @unchec
             notify("iCloud sync: \(error.localizedDescription)")
             await publish()
         }
+        await connectionWarmController?.endConnectionWarmCredentialWork()
     }
 
     private func signOut() async {
@@ -231,7 +236,9 @@ package final class DesktopHostCloudSync<Platform: DesktopHostPlatform>: @unchec
     }
 
     private func runSync(announce: Bool) async {
+        await connectionWarmController?.beginConnectionWarmCredentialWork()
         let report = await service.sync()
+        await connectionWarmController?.endConnectionWarmCredentialWork()
         if let error = report.error {
             if announce { notify("iCloud sync: \(error)") }
         } else if !report.importedKeys.isEmpty {
@@ -285,6 +292,7 @@ package final class DesktopHostCloudSync<Platform: DesktopHostPlatform>: @unchec
     /// Hands the settings their state. Done while sync runs, so it cannot
     /// reach the window after shutdown detached it.
     private func publish() async {
+        await connectionWarmController?.invalidateConnectionPreWarming(resetCapture: true)
         let status = await service.status()
         work.ifRunning { native.present(status) }
         guard !work.isStopped else { return }

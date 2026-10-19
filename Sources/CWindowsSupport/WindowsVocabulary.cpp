@@ -208,6 +208,8 @@ void pending(Dialog &d, bool busy) {
          importReplace, exportJSON, reviewCandidates, promoteCandidate, dismissCandidate, clearCandidates,
          allowLearning, stopLearning, legacyDictionary})
         EnableWindow(GetDlgItem(d.window, id), !busy);
+    if (d.kind == 4)
+        for (int id : {field, field + 1, search}) EnableWindow(GetDlgItem(d.window, id), !busy);
     selectionControls(d);
 }
 void transfer(Dialog &d, const char *action) {
@@ -824,7 +826,12 @@ bool jsti_vocabulary_self_test(HWND owner, std::string &error) {
             fill(dialog, row); action(dialog, "save");
             auto fields = split(captured, '\t');
             bool valid = fields.size() == 4 && fields[0] == "save" && fields[1] == row[0]
-                && decoded(fields[2]) == row[1] && decoded(fields[3]) == row[2];
+                && decoded(fields[2]) == row[1] && decoded(fields[3]) == row[2]
+                && !IsWindowEnabled(GetDlgItem(window, field))
+                && !IsWindowEnabled(GetDlgItem(window, field + 1));
+            pending(dialog, false);
+            valid = valid && IsWindowEnabled(GetDlgItem(window, field))
+                && IsWindowEnabled(GetDlgItem(window, field + 1));
             action(dialog, "delete"); fields = split(captured, '\t');
             valid = valid && fields.size() == 4 && fields[0] == "delete" && fields[1] == row[0];
             SendMessageW(window, WM_COMMAND, MAKEWPARAM(add, BN_CLICKED), 0);

@@ -119,8 +119,16 @@ final class DesktopGeminiConfigurationTests: DeepgramSpeechStubTestCase {
             Array(keys.dropFirst(regionIndex).prefix(SonioxVoicePreference.fields.count)),
             SonioxVoicePreference.fields.map(\.key)
         )
-        XCTAssertEqual(Array(keys.suffix(LivePolishPreference.fields.count)), LivePolishPreference.fields.map(\.key))
-        XCTAssertLessThan(languageIndex, keys.count - LivePolishPreference.fields.count)
+        let modulateKeys: [ApplicationPreferenceKey] = [
+            .modulateSpeakerDiarization, .modulateEmotionSignal, .modulateAccentSignal, .modulatePIIPhiTagging
+        ]
+        XCTAssertEqual(Array(keys.suffix(modulateKeys.count)), modulateKeys.map(\.rawValue))
+        let livePolishIndex = keys.count - modulateKeys.count - LivePolishPreference.fields.count
+        XCTAssertEqual(
+            Array(keys.dropFirst(livePolishIndex).prefix(LivePolishPreference.fields.count)),
+            LivePolishPreference.fields.map(\.key)
+        )
+        XCTAssertLessThan(languageIndex, livePolishIndex)
         XCTAssertTrue(VoiceOutputLanguagePreference.title(for: .gemini(GeminiTTSCatalog.defaultVoice))
             .hasPrefix("Gemini"))
         let soniox = try DesktopSpeechVoice.resolved(

@@ -12,6 +12,8 @@ final class DesktopConnectionPreWarmingTests: XCTestCase {
         XCTAssertTrue(configuration.enabled(DesktopConnectionPreWarming.preferenceKey))
         XCTAssertFalse(configuration.enabled(DesktopConnectionPreWarming.approvalProjectionKey))
         XCTAssertEqual(DesktopConnectionPreWarming.preferenceKey, "connectionPreWarmingEnabled")
+        XCTAssertTrue(DesktopConfiguration.supportedKeys.contains(DesktopConnectionPreWarming.preferenceKey))
+        XCTAssertFalse(DesktopConfiguration.supportedKeys.contains(DesktopConnectionPreWarming.approvalProjectionKey))
     }
 
     func testNativeFields_AreBooleanAndApprovalDependsOnIntent() throws {

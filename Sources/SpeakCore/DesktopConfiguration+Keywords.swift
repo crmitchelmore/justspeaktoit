@@ -2,7 +2,7 @@ import Foundation
 
 extension DesktopConfiguration {
     public static var supportedKeys: Set<String> {
-        Set(fields.map(\.key)).union([
+        Set(fields.map(\.key)).subtracting([DesktopConnectionPreWarming.approvalProjectionKey]).union([
             ApplicationPreferenceKey.deepgramStopGracePeriod.rawValue,
             ApplicationPreferenceKey.transcriptionKeywordsLastReconciled.rawValue,
             ApplicationPreferenceKey.recoveredTranscriptionKeywords.rawValue

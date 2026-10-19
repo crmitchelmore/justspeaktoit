@@ -161,6 +161,12 @@ package protocol DesktopHostPlatform: Sendable {
     /// identifier, or nil for models the host does not run on-device.
     static func beginLocalUse(_ model: String, controller: isolated DesktopHostController<Self>) -> String?
     static func endLocalUse(_ held: String, controller: isolated DesktopHostController<Self>)
+    /// An in-process streaming client for a `DesktopHostModels.localLive`
+    /// model, or nil when the host cannot stream it. Throws the user-facing
+    /// reason the model cannot run now.
+    static func makeLocalLiveClient(
+        _ model: String, language: String?, controller: isolated DesktopHostController<Self>
+    ) async throws -> (any FinalizingStreamingTranscriptionClient)?
 
     static func makeLocalCleanup(directory: URL) throws -> DesktopLocalLLMStore?
     static func presentLocalCleanup(

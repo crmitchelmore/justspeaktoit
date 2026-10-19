@@ -100,7 +100,10 @@ extension SpeakWindowsMain {
     /// Source and Mode pickers, then the Local models dialog.
     static func configureModelPickers(_ controller: WindowsAppController, holder: WindowsEventContext) async throws {
         let preferences = await controller.preferredModelIDs()
-        try WindowsModels.configureModes(batch: preferences.batch, live: preferences.live, local: preferences.local)
+        try WindowsModels.configureModes(
+            batch: preferences.batch, live: preferences.live, local: preferences.local,
+            localLive: preferences.localLive
+        )
         await controller.configureLocalModels(context: Unmanaged.passUnretained(holder).toOpaque())
         await controller.configureLocalCleanup(presenter: Unmanaged.passUnretained(holder).toOpaque())
     }

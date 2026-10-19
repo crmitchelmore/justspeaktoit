@@ -118,6 +118,22 @@ final class LocalModelIdentityTests: XCTestCase {
         )
     }
 
+    func testWhisperLiveIdentifiersRoundTripThroughBatchModels() {
+        XCTAssertEqual(
+            LocalModelIdentity.whisperLiveModelID(forBatchModelID: "local/whisperkit/base"),
+            "local/streaming/whisperkit/base"
+        )
+        XCTAssertEqual(
+            LocalModelIdentity.whisperBatchModelID(fromLiveModelID: "local/streaming/whisperkit/base"),
+            "local/whisperkit/base"
+        )
+        XCTAssertNil(LocalModelIdentity.whisperBatchModelID(fromLiveModelID: "local/whisperkit/base"))
+        for model in WhisperCppModels.all {
+            let live = LocalModelIdentity.whisperLiveModelID(forBatchModelID: model.catalogueID)
+            XCTAssertEqual(LocalModelIdentity.whisperBatchModelID(fromLiveModelID: live), model.catalogueID)
+        }
+    }
+
     func testParakeetSourceIdentifierMatchesTheSharedConstant() {
         let source = LocalStreamingModelSource(
             repoID: ParakeetLocalModels.tdtV3Int8RepoID,

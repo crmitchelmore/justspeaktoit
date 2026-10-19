@@ -120,7 +120,8 @@ extension DesktopHostController {
         chosen.model = model.id
         Self.rememberModelSlot(in: &chosen)
         if chosen.model != settings.model || chosen.batchModel != settings.batchModel
-            || chosen.liveModel != settings.liveModel || chosen.localModel != settings.localModel {
+            || chosen.liveModel != settings.liveModel || chosen.localModel != settings.localModel
+            || chosen.localLiveModel != settings.localLiveModel {
             do {
                 try effects.writeSettings(
                     JSONEncoder().encode(chosen), to: directory.appendingPathComponent("settings.json")

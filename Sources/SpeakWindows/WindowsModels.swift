@@ -12,19 +12,23 @@ typealias WindowsModels = DesktopHostModels
 extension DesktopHostModels {
     /// Catalogue entries the bundled whisper.cpp runtime is qualified to serve.
     static let windowsLocal = DesktopLocalTranscription.options(host: .windows)
+    /// The same pinned models streamed in process (Local, Live).
+    static let windowsLocalLive = DesktopLocalStreaming.options(host: .windows)
 
     /// Call first in `main`, before anything reads the catalogue.
     static func configureForWindows() {
-        configure(streamingQualified: true, local: windowsLocal)
+        configure(streamingQualified: true, local: windowsLocal, localLive: windowsLocalLive)
     }
 
     /// Remote models need their provider's key; on-device models need none.
     static func requiresKey(_ model: String) -> Bool { !isLocal(model) }
 
     /// Bit 0 is live, bit 1 is on-device, matching the native Source and Mode pickers.
-    static func mode(of model: String) -> Int32 { (isLive(model) ? 1 : 0) + (isLocal(model) ? 2 : 0) }
+    static func mode(of model: String) -> Int32 {
+        (isLive(model) || isLocalLive(model) ? 1 : 0) + (isLocal(model) ? 2 : 0)
+    }
 
-    static func configureModes(batch: String?, live: String?, local: String?) throws {
+    static func configureModes(batch: String?, live: String?, local: String?, localLive: String? = nil) throws {
         let models = all
         let modes: [Int32] = models.map { mode(of: $0.id) }
         func index(_ identifier: String?, mode: Int32) -> Int32 {
@@ -36,7 +40,9 @@ extension DesktopHostModels {
                 $0.baseAddress, $0.count, index(batch, mode: 0), index(live, mode: 1), index(local, mode: 2)
             )
         }
-        guard result == 0 else { throw WindowsNativeError(message: "Could not configure transcription modes.") }
+        guard result == 0, jsti_window_set_preferred_local_live_model(index(localLive, mode: 3)) == 0 else {
+            throw WindowsNativeError(message: "Could not configure transcription modes.")
+        }
     }
 
     static func publish(status: String, refreshing: Bool) throws {

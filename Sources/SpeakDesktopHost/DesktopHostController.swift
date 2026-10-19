@@ -19,6 +19,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
         /// Device-local approval, never included in portable configuration.
         package var automationLocalConsent: Bool?
         package var localModel: String?
+        /// Last on-device live model (`local/streaming/whisperkit/...`).
+        package var localLiveModel: String?
         package var localUseGPU: Bool?
         /// Device-local Azure resource, under the Apple apps' key.
         package var azureSpeechResourceEndpoint: String?
@@ -57,6 +59,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
                 "model", "postProcessing", "microphoneDeviceID", "batchModel", "liveModel", "textOutput",
                 "hotKey", "voiceOutput", "automationEnabled", "automationLocalConsent", "localModel", "localUseGPU",
                 "azureSpeechResourceEndpoint", "appearance", "runAtLogin", "configuration", "livePolishApproved",
+                "localLiveModel",
                 DesktopConnectionPreWarming.preferenceKey, DesktopConnectionPreWarming.approvalProjectionKey
             ]
             preserved = all.filter { !known.contains($0.key) }
@@ -450,7 +453,8 @@ extension DesktopHostController {
     package func importAudio(path: String, modelIndex: Int) async {
         guard isReady, !busy, !closed, recording == nil,
               DesktopHostModels.all.indices.contains(modelIndex),
-              !DesktopHostModels.isLive(DesktopHostModels.all[modelIndex].id) else { return }
+              !DesktopHostModels.isLive(DesktopHostModels.all[modelIndex].id),
+              !DesktopHostModels.isLocalLive(DesktopHostModels.all[modelIndex].id) else { return }
         cancelOutput()
         guard selectModel(modelIndex) else { return }
         busy = true

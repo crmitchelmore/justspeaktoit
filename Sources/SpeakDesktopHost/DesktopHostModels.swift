@@ -9,6 +9,7 @@ package enum DesktopHostModels {
         let lock = NSLock()
         var streamingQualified = true
         var local: [ModelCatalog.Option] = []
+        var localLive: [ModelCatalog.Option] = []
         var slots = DesktopModelSlots(live: DesktopLiveTranscription.liveModels)
         /// Install state shown after each local model's name.
         var localLabels: [String: String] = [:]
@@ -20,14 +21,18 @@ package enum DesktopHostModels {
     package static var streamingQualified: Bool { storage.lock.withLock { storage.streamingQualified } }
 
     /// Call once at startup, before anything reads the catalogue. `local` lists
-    /// the on-device models this host's runtime can serve; nil keeps the
-    /// current list (none by default).
-    package static func configure(streamingQualified: Bool, local: [ModelCatalog.Option]? = nil) {
+    /// the on-device models this host's runtime can serve and `localLive` the
+    /// ones it can stream; nil keeps the current list (none by default).
+    package static func configure(
+        streamingQualified: Bool, local: [ModelCatalog.Option]? = nil, localLive: [ModelCatalog.Option]? = nil
+    ) {
         storage.lock.withLock {
             storage.streamingQualified = streamingQualified
             if let local { storage.local = local }
+            if let localLive { storage.localLive = localLive }
             storage.slots = DesktopModelSlots(
-                live: streamingQualified ? DesktopLiveTranscription.liveModels : [], local: storage.local
+                live: streamingQualified ? DesktopLiveTranscription.liveModels : [], local: storage.local,
+                localLive: storage.localLive
             )
         }
     }
@@ -35,6 +40,9 @@ package enum DesktopHostModels {
     package static var live: [ModelCatalog.Option] { streamingQualified ? DesktopLiveTranscription.liveModels : [] }
     /// On-device models; empty on hosts without a local runtime.
     package static var local: [ModelCatalog.Option] { storage.lock.withLock { storage.local } }
+    /// On-device models this host streams in process; empty unless configured.
+    /// They need no network, so they do not depend on `streamingQualified`.
+    package static var localLive: [ModelCatalog.Option] { storage.lock.withLock { storage.localLive } }
 
     /// Stable global slot order for captured native callbacks. Use visible for pickers.
     package static var all: [ModelCatalog.Option] { snapshot.entries.map(\.option) }
@@ -71,7 +79,12 @@ package enum DesktopHostModels {
 
     package static func isLive(_ model: String) -> Bool { live.contains { $0.id == model } }
 
-    package static func isLocal(_ model: String) -> Bool { local.contains { $0.id == model } }
+    /// Downloaded batch or live models; both run without a key or network.
+    package static func isLocal(_ model: String) -> Bool {
+        local.contains { $0.id == model } || isLocalLive(model)
+    }
+
+    package static func isLocalLive(_ model: String) -> Bool { localLive.contains { $0.id == model } }
 
     // Provider metadata is untrusted UI text. Bound native control labels and
     // replace embedded controls without changing canonical model identifiers.
@@ -116,10 +129,12 @@ package struct DesktopHostModelPreferences: Sendable {
     package let batch: String?
     package let live: String?
     package let local: String?
+    package let localLive: String?
 
-    package init(batch: String?, live: String?, local: String?) {
+    package init(batch: String?, live: String?, local: String?, localLive: String? = nil) {
         self.batch = batch
         self.live = live
         self.local = local
+        self.localLive = localLive
     }
 }

@@ -92,11 +92,13 @@ public enum DesktopLocalTranscription {
         return models(host: host).first { $0.catalogueID == trimmed }
     }
 
-    /// The friendly name of a whisper.cpp selection, or `nil` for any other
-    /// identifier. History keeps showing it even if a host stops offering it.
+    /// The friendly name of a whisper.cpp selection, live or batch, or `nil`
+    /// for any other identifier. History keeps showing it even if a host stops
+    /// offering it.
     public static func displayName(for identifier: String) -> String? {
         importedNames.lock.withLock { importedNames.values[identifier] }
             ?? WhisperCppModels.model(forCatalogueID: identifier).map { $0.displayName + " (on-device)" }
+            ?? DesktopLocalStreaming.displayName(for: identifier)
     }
 
     /// Whisper takes a bare ISO 639 code. Region and script subtags are

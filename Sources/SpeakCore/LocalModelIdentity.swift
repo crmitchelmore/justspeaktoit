@@ -35,4 +35,24 @@ public enum LocalModelIdentity {
     public static func postProcessingHuggingFaceModelID(repoID: String, filename: String) -> String {
         "\(postProcessingHuggingFacePrefix)\(slug(repoID))/\(slug(filename))"
     }
+
+    /// Downloaded Whisper batch models; the Mac's WhisperKit and the desktop
+    /// hosts' whisper.cpp pins share these catalogue identifiers.
+    public static let whisperBatchPrefix = "local/whisperkit/"
+    /// Live (streaming) use of a downloaded Whisper batch model. Persisted as
+    /// the Mac's `localStreamingModelSource` and as desktop live selections.
+    public static let whisperLivePrefix = "local/streaming/whisperkit/"
+
+    /// The live identifier that streams with a downloaded Whisper batch model.
+    public static func whisperLiveModelID(forBatchModelID modelID: String) -> String {
+        guard modelID.hasPrefix(whisperBatchPrefix) else { return whisperLivePrefix + modelID }
+        return whisperLivePrefix + modelID.dropFirst(whisperBatchPrefix.count)
+    }
+
+    /// The batch model a live Whisper identifier streams with, or nil for any
+    /// other identifier.
+    public static func whisperBatchModelID(fromLiveModelID liveID: String) -> String? {
+        guard liveID.hasPrefix(whisperLivePrefix) else { return nil }
+        return whisperBatchPrefix + liveID.dropFirst(whisperLivePrefix.count)
+    }
 }

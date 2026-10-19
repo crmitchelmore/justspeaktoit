@@ -7,7 +7,8 @@ public struct DesktopModelSlots: Sendable {
     public struct Entry: Sendable {
         public internal(set) var option: ModelCatalog.Option
         public let isLive: Bool
-        /// A downloaded model the host runs on-device (batch only).
+        /// A downloaded model the host runs on-device. Local entries that are
+        /// also live stream with that model (`localLive`).
         public let isLocal: Bool
         public internal(set) var isAvailable: Bool
     }
@@ -24,12 +25,16 @@ public struct DesktopModelSlots: Sendable {
     private var initial: [ModelCatalog.Option]
     private let maximumSlots: Int
 
-    public init(live: [ModelCatalog.Option], local: [ModelCatalog.Option] = [], maximumSlots: Int = 10_000) {
+    public init(
+        live: [ModelCatalog.Option], local: [ModelCatalog.Option] = [], localLive: [ModelCatalog.Option] = [],
+        maximumSlots: Int = 10_000
+    ) {
         let batch = DesktopTranscription.batchModels
-        let liveIDs = Set(live.map(\.id))
-        let localIDs = Set(local.map(\.id)).subtracting(liveIDs)
+        let localLiveIDs = Set(localLive.map(\.id))
+        let liveIDs = Set(live.map(\.id)).union(localLiveIDs)
+        let localIDs = Set(local.map(\.id)).subtracting(liveIDs).union(localLiveIDs)
         var seen = Set<String>()
-        initial = (batch + local + live).filter { seen.insert($0.id).inserted }
+        initial = (batch + local + localLive + live).filter { seen.insert($0.id).inserted }
         entries = initial.map {
             Entry(option: $0, isLive: liveIDs.contains($0.id), isLocal: localIDs.contains($0.id), isAvailable: true)
         }

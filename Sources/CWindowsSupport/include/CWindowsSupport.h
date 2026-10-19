@@ -1304,6 +1304,11 @@ int jsti_recording_feedback_renderer_self_test(char *error, size_t error_capacit
  * Returns 2 after both bounded decodes and cleanup, -1 with an explicit error. */
 int jsti_recording_feedback_check_assets(const char *start_path, const char *stop_path,
                                         char *error, size_t error_capacity);
+/* The saved on-device live row (mode 3) restored when the user picks Local and
+ * Live. Call after jsti_window_set_model_modes, which clears it, and before
+ * window_run. -1 chooses the first local live row. Returns -1 when the index is
+ * not a configured mode-3 row or the window is running. */
+int jsti_window_set_preferred_local_live_model(int index);
 
 /* General > CLI and MCP setup dialog: the automation pipe name, the installed
  * speak.exe path (empty when it is not beside the app) and the copyable

@@ -13,8 +13,11 @@ extension DesktopHostController where Platform: DesktopHostLocalModelPlatform {
             + localModels.imported.filter { Platform.localModelHost.canExecute(model: $0) }.map(\.model)
     }
 
+    /// The model behind a batch identifier or, for live use, the batch model
+    /// a `local/streaming/whisperkit/...` identifier streams with.
     package func localModelSpec(for identifier: String) -> WhisperCppModel? {
-        localModelSpecs.first { $0.catalogueID == identifier }
+        let batch = DesktopLocalStreaming.batchModelID(forLiveModelID: identifier) ?? identifier
+        return localModelSpecs.first { $0.catalogueID == batch }
     }
 
     package var localInstaller: LocalModelInstaller {
@@ -95,6 +98,22 @@ extension DesktopHostController where Platform: DesktopHostLocalModelPlatform {
         } catch DesktopLocalTranscriptionError.modelDoesNotMatchDigest {
             throw discardMismatchedModel(spec)
         }
+    }
+
+    /// Streams a pinned downloaded model in process. The recording holds the
+    /// model through `beginLocalUse`, so it cannot be removed meanwhile.
+    package func makeLocalLiveClient(
+        _ model: String, language: String?
+    ) async throws -> (any FinalizingStreamingTranscriptionClient)? {
+        guard DesktopHostModels.isLocalLive(model),
+              let spec = DesktopLocalStreaming.model(forLiveID: model, host: Platform.localModelHost),
+              localModelSpec(for: model)?.catalogueID == spec.catalogueID else { return nil }
+        if let problem = localReadiness(model) { throw DesktopHostError(message: problem) }
+        let file = try localInstaller.verifiedFile(for: .init(spec))
+        let runtime = try await localRuntime()
+        return DesktopLocalStreamingClient(
+            recognizer: runtime.recognizer, model: spec, modelFile: file, language: language
+        )
     }
 
     // MARK: - Local models
@@ -216,6 +235,9 @@ extension DesktopHostController where Platform: DesktopHostLocalModelPlatform {
             let (row, label) = localModelRow(spec, installer: installer)
             rows.append(row)
             labels[spec.catalogueID] = label
+            // A live model shares its batch model's download.
+            let live = DesktopLocalStreaming.liveModelID(for: spec)
+            if DesktopHostModels.isLocalLive(live) { labels[live] = label }
         }
         if labels != DesktopHostModels.labelledSnapshot.1 {
             DesktopHostModels.setLocalLabels(labels)

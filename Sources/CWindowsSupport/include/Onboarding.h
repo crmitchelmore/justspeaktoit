@@ -95,6 +95,32 @@ int32_t jsti_permissions_set_rows(const JSTIPermissionRow *rows, size_t count, c
 /* Thread safe. Opens the Permissions window, or brings it forward. */
 void jsti_window_request_permissions(void);
 
+enum JSTITroubleshootingCommand {
+    JSTI_TROUBLESHOOTING_CHECK = 1,
+    JSTI_TROUBLESHOOTING_GENERAL = 2,
+    JSTI_TROUBLESHOOTING_API_KEYS = 3,
+    JSTI_TROUBLESHOOTING_SHORTCUTS = 4,
+    JSTI_TROUBLESHOOTING_PERMISSIONS = 5,
+    JSTI_TROUBLESHOOTING_KEEP_CLIPBOARD = 6,
+    JSTI_TROUBLESHOOTING_DISABLE_PROCESSING = 7
+};
+typedef struct JSTITroubleshootingRow {
+    const char *title;
+    const char *status;
+    const char *detail;
+    const char *navigation_title;
+    const char *fix_title;
+    int32_t navigation_command;
+    int32_t fix_command; /* zero means no explicit Fix now action */
+    int32_t blocking;
+} JSTITroubleshootingRow;
+int32_t jsti_troubleshooting_configure(JSTIPermissionsCallback callback, void *context);
+void jsti_troubleshooting_clear(void);
+uint64_t jsti_troubleshooting_revision(void);
+/* Returns 1 for a superseded/closed check, 0 on publication, -1 on invalid input. */
+int32_t jsti_troubleshooting_set_rows(
+    const JSTITroubleshootingRow *rows, size_t count, const char *summary, uint64_t revision);
+
 /* Live system state; each field is 1 allowed/on, 0 denied/off, -1 unknown. */
 typedef struct JSTISystemPermissions {
     int32_t microphone_device; /* "Microphone access" for this device (administrator) */

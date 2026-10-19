@@ -231,7 +231,7 @@ constexpr int appearanceLabelID = 440, appearanceID = 441, automationID = 442, a
     shortcutValueID = 445, loginItemID = 449,
     configurationID = 450;
 constexpr int aboutLinkBaseID = 480, aboutDetailsID = 490;
-constexpr int setupGuideID = 451, permissionsID = 452;
+constexpr int setupGuideID = 451, permissionsID = 452, troubleshootingID = 453;
 constexpr UINT tourMessage = WM_APP + 18, appearanceMessage = WM_APP + 19, pageMessage = WM_APP + 20;
 constexpr UINT hudMessage = WM_APP + 21;
 constexpr UINT sidebarMessage = WM_APP + 30;
@@ -887,7 +887,7 @@ unsigned pagesOf(int identifier) {
     case comparisonID: return page(transcriptionPage);
     case shortcutValueID: case shortcutID: case actionShortcutsID: return page(keyboardPage);
     case cloudSyncID: return page(cloudSyncPage);
-    case aboutDetailsID: case setupGuideID: case permissionsID: return page(aboutPage);
+    case aboutDetailsID: case setupGuideID: case permissionsID: case troubleshootingID: return page(aboutPage);
     default: return page(transcriptionPage);
     }
 }
@@ -1384,7 +1384,7 @@ void layoutAbout(HWND window, const RECT &content) {
     const int gap = scale(window, 8);
     const int linkRows = (static_cast<int>(state.aboutLinks.size()) + 2) / 3;
     int y = layoutSettingsCard(window, content.top, content, 0xE946, L"About", L"",
-        scale(window, 96) + noteHeight + detailsHeight + (linkRows + 1) * (row + gap));
+        scale(window, 96) + noteHeight + detailsHeight + (linkRows + 2) * (row + gap));
     frame.icon = box(content.left + inset, y, scale(window, 72), scale(window, 72));
     frame.paragraphs.push_back({box(frame.icon.right + scale(window, 18), y + scale(window, 8), scale(window, 480),
                                     scale(window, 30)), L"Just Speak to It", jsti::chrome::Font::title, false});
@@ -1404,6 +1404,7 @@ void layoutAbout(HWND window, const RECT &content) {
     y += linkRows * (row + gap);
     place(window, setupGuideID, box(content.left + inset, y, scale(window, 192), row));
     place(window, permissionsID, box(content.left + inset + scale(window, 200), y, scale(window, 208), row));
+    place(window, troubleshootingID, box(content.left + inset, y + row + gap, scale(window, 240), row));
 }
 
 void layout(HWND window) {
@@ -2067,6 +2068,7 @@ bool createControls(HWND window) {
         add(L"STATIC", state.aboutDetails.c_str(), 0, aboutDetailsID) &&
         add(L"BUTTON", L"Ru&n setup again…", BS_PUSHBUTTON | WS_TABSTOP, setupGuideID) &&
         add(L"BUTTON", L"&Windows permissions…", BS_PUSHBUTTON | WS_TABSTOP, permissionsID) &&
+        add(L"BUTTON", L"&Troubleshooting…", BS_PUSHBUTTON | WS_TABSTOP, troubleshootingID) &&
         add(L"STATIC", jsti_hotkey_label().c_str(), 0, transcriptLabelID) &&
         add(L"EDIT", L"", ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL | WS_TABSTOP, transcriptID) &&
         add(L"BUTTON", L"&Copy transcript", BS_PUSHBUTTON | WS_TABSTOP, copyID);
@@ -2924,6 +2926,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             return 0;
         case setupGuideID: if (HIWORD(wparam) == BN_CLICKED) jsti_show_guide(window); return 0;
         case permissionsID: if (HIWORD(wparam) == BN_CLICKED) jsti_show_permissions(window); return 0;
+        case troubleshootingID: if (HIWORD(wparam) == BN_CLICKED) jsti_show_troubleshooting(window); return 0;
         case backupRestoreID:
             if (HIWORD(wparam) == BN_CLICKED && idleControl(window, backupRestoreID)) {
                 std::string failure;
@@ -3386,6 +3389,7 @@ void jsti_window_action_command(HWND window, int run, const char *page) {
     case JSTI_ACTION_RUN_PASTE_LAST_HISTORY: emit(window, JSTI_EVENT_PASTE_LAST_HISTORY); break;
     case JSTI_ACTION_RUN_SPEAK_SELECTED_TEXT: emit(window, JSTI_EVENT_SPEAK_SELECTED_TEXT); break;
     case JSTI_ACTION_RUN_SPEAK_CLIPBOARD: emit(window, JSTI_EVENT_SPEAK_CLIPBOARD); break;
+    case JSTI_ACTION_RUN_TROUBLESHOOTING: jsti_show_troubleshooting(window); break;
     default: break;
     }
 }
@@ -4310,6 +4314,10 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     if (!window || GetWindowThreadProcessId(window, nullptr) != GetCurrentThreadId()) {
         return jsti::fail("Window checks must run on the UI thread after READY.", error, errorCapacity);
     }
+    if (!GetDlgItem(window, troubleshootingID) || !onPage(troubleshootingID, aboutPage) ||
+        onPage(troubleshootingID, dashboardPage) || !jsti_troubleshooting_self_test(window))
+        return jsti::fail("Troubleshooting entry, independent report state or stale-result checks failed.",
+                          error, errorCapacity);
     const JSTIAboutLink lateAboutLink{"Late", "https://example.com/"};
     if (!onPage(configurationID, correctionsPage) || onPage(configurationID, pronunciationPage))
         return jsti::fail("Correction learning preferences lost their page scope.", error, errorCapacity);

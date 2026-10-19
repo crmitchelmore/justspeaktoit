@@ -197,7 +197,7 @@ extension DesktopHostController {
         return record
     }
 
-    func postProcessingCredential(for model: String) throws -> String {
+    package func postProcessingCredential(for model: String) throws -> String {
         guard case .apiKey(let identifier, _) = ModelCredentialResolver.requirement(
             for: model, purpose: .postProcessing
         ) else { throw DesktopPostProcessingError.unsupportedModel }

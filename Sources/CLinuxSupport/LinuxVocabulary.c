@@ -118,6 +118,11 @@ static void pending(Editor *e, gboolean busy) {
         gtk_widget_set_sensitive(button, action_available(action, busy));
     }
     gtk_widget_set_sensitive(GTK_WIDGET(e->list), !busy);
+    if (e->kind == 4) {
+        gtk_widget_set_sensitive(e->fields[1], !busy);
+        gtk_widget_set_sensitive(e->fields[2], !busy);
+        gtk_widget_set_sensitive(e->search, !busy);
+    }
     selection_controls(e);
 }
 static void append_field(GString *payload, const char *value) {
@@ -850,7 +855,11 @@ int32_t jsti_vocabulary_self_test(char *error, size_t capacity) {
     gchar *legacy_value = g_strv_length(legacy_fields) == 4 ? g_uri_unescape_string(legacy_fields[3], NULL) : NULL;
     gboolean legacy_valid = g_strv_length(legacy_fields) == 4
         && g_strcmp0(legacy_fields[0], "save") == 0 && g_strcmp0(legacy_fields[1], legacy_row[0]) == 0
-        && g_strcmp0(legacy_word, legacy_row[1]) == 0 && g_strcmp0(legacy_value, legacy_row[2]) == 0;
+        && g_strcmp0(legacy_word, legacy_row[1]) == 0 && g_strcmp0(legacy_value, legacy_row[2]) == 0
+        && !gtk_widget_get_sensitive(legacy->fields[1]) && !gtk_widget_get_sensitive(legacy->fields[2]);
+    pending(legacy, FALSE);
+    legacy_valid = legacy_valid && gtk_widget_get_sensitive(legacy->fields[1])
+        && gtk_widget_get_sensitive(legacy->fields[2]);
     g_free(legacy_word); g_free(legacy_value); g_strfreev(legacy_fields); g_free(legacy_payload);
     legacy_payload = action_payload(legacy, "delete"); legacy_fields = g_strsplit(legacy_payload, "\t", -1);
     legacy_valid = legacy_valid && g_strv_length(legacy_fields) == 4 && g_strcmp0(legacy_fields[0], "delete") == 0

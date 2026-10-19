@@ -88,7 +88,9 @@ word/pronunciation map without converting it into modern pronunciation entries.
 Both use the incumbent list/search, native labelled fields, New, Save, Delete
 confirmation and loading/error feedback. GTK retains its native page column;
 Win32 retains its list/detail layout. Imported multiline text is editable
-without flattening it. A selected entry's original word/value identity travels
+without flattening it. Fields and search are disabled while a legacy request is
+pending, then restored for success or retry, so a delayed response cannot
+silently replace new typing. A selected entry's original word/value identity travels
 with each edit: stale edits/deletions and renames onto an existing word are
 refused rather than overwriting newer values. New duplicate words require
 selecting the existing entry.

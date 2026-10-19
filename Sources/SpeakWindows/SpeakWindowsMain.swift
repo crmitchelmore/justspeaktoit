@@ -231,6 +231,9 @@ private func otherWindowEvent(_ event: Int32, value: String, holder: WindowsEven
     case 14: Task { await controller.cancelTranscription() }
     case 120: Task { await controller.handsFreeUserAbsent(value) }
     case 20: Task { await controller.refreshModels(force: true) }
+    case 110:
+        guard let slot = Int(value) else { return }
+        holder.enqueueSettings { await controller.selectQuickVoice(slot) }
     default: break
     }
 }

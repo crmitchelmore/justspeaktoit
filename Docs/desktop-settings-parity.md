@@ -38,9 +38,11 @@ it does not start synthesis or perform discovery or credential lookups.
 
 Authored Host regressions cover raw slots, duplicate/unavailable entries,
 model retention, restart, credential isolation, missing/invalid slots and refused persistence.
-These checks are **NOT_RUN** locally. Native shortcut mapping still depends
-on the separately composed shortcut workstream; this foundation alone does
-not make Quick Voice executable from Windows/Linux shortcuts.
+These checks are **NOT_RUN** locally. Windows maps the Quick Voice 1-3 action
+shortcuts to this action (`JSTI_ACTION_RUN_QUICK_VOICE_1`-`3` emit
+`JSTI_EVENT_QUICK_VOICE` with the slot, queued on the settings queue; ignored
+while Voice Output settings are locked). Linux has no action shortcut
+registration yet.
 
 ## About and manual updates (source only)
 
@@ -2005,7 +2007,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | modulatePIIPhiTagging | Live/batch source wired; unqualified / Same | Native default/on/off choice, strict transfer/restart and captured live/batch provider flags; absent stays off. Native/provider acceptance pending. |
 | accessibilityInsertionMode | Equivalent / Missing | Output; Windows cursor/replace-field; Linux paste cannot claim AX replace-all equivalence |
 | selectedHotKey | Equivalent / Partial | Shortcuts; Windows Ctrl/Alt native key; Linux desktop/portal-owned binding, never Mac Fn key translation |
-| customShortcutBindings | Partial source wiring; unqualified / Shared model only | Windows Keyboard **Action shortcuts** dialog: 19 of 27 actions run, the rest stay stored for the Mac; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Linux transfers the Mac-compatible value unchanged without native registration. Native/physical acceptance pending. |
+| customShortcutBindings | Partial source wiring; unqualified / Shared model only | Windows Keyboard **Action shortcuts** dialog: 22 of 27 actions run, the rest stay stored for the Mac; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Linux transfers the Mac-compatible value unchanged without native registration. Native/physical acceptance pending. |
 | paidAccessRoutingEnabled | Apple-specific / Apple-specific | BYOK desktop providers; no paid-access entitlement/routing journey. Retained opaque through import/export |
 | simpleModelChoices | Missing / Missing | Native catalogue picker without simplified paid-model chooser |
 | rememberedLocalTranscriptionSource | Partial / Partial | Models remembers Local selection; no Apple on-device source |
@@ -2233,8 +2235,9 @@ playback; partial), and the page actions Dashboard, History, Voice Output
 Profiles, Keyboard and About. Data & Migration shows General, which holds the
 Windows backup, export and inspection controls; API Keys, Permissions and
 Compare Models press the All API keys, Permissions and Compare models buttons
-when enabled. Speak Selected Text, Speak Clipboard, Troubleshooting, Quick
-Voice 1-3, Paste Last History Item and Edit Selection by Voice are marked
+when enabled; Quick Voice 1-3 select the saved favourite in that slot through the
+shared Host action. Speak Selected Text, Speak Clipboard, Troubleshooting,
+Paste Last History Item and Edit Selection by Voice are marked
 **Mac only** in the editor and stay stored. Only Start/Stop Recording can work in
 other apps (`RegisterHotKey`, which needs Ctrl or Alt, or F13-F24 alone); other
 actions work while the window has focus. Global registration that Windows or

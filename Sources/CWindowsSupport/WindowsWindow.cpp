@@ -3356,6 +3356,13 @@ void jsti_window_action_command(HWND window, int run, const char *page) {
             SendMessageW(window, WM_COMMAND, MAKEWPARAM(button, BN_CLICKED), reinterpret_cast<LPARAM>(control));
         break;
     }
+    case JSTI_ACTION_RUN_QUICK_VOICE_1: case JSTI_ACTION_RUN_QUICK_VOICE_2: case JSTI_ACTION_RUN_QUICK_VOICE_3: {
+        // Voice Output settings are locked while recording, as its buttons are.
+        if (!IsWindowEnabled(GetDlgItem(window, voiceSettingsID))) break;
+        const char *slot = run == JSTI_ACTION_RUN_QUICK_VOICE_1 ? "1" : run == JSTI_ACTION_RUN_QUICK_VOICE_2 ? "2" : "3";
+        emit(window, JSTI_EVENT_QUICK_VOICE, slot);
+        break;
+    }
     default: break;
     }
 }

@@ -66,6 +66,7 @@ enum JSTIWindowEvent {
     JSTI_EVENT_AUDIO_CLEANUP_RESPONSE = 95, /* text: confirmation UUID; index: 1 confirms, 0 cancels */
     JSTI_EVENT_MIGRATION_EXPORT = 96, /* text: ZIP destination; index bits: 1 saved audio, 2 app profiles */
     JSTI_EVENT_MIGRATION_INSPECT = 97, /* text: selected ZIP source; no application changes */
+    JSTI_EVENT_QUICK_VOICE = 110, /* text: favorite slot "1"-"3" from an action shortcut */
     JSTI_EVENT_USER_ABSENT = 120
 };
 
@@ -1401,7 +1402,10 @@ enum {
     JSTI_ACTION_RUN_STOP_SPEECH = 4, /* as Stop on History or Voice Output */
     JSTI_ACTION_RUN_API_KEYS = 5,    /* as Transcription's All API keys button */
     JSTI_ACTION_RUN_PERMISSIONS = 6, /* as About's Permissions button */
-    JSTI_ACTION_RUN_COMPARE = 7      /* as Transcription's Compare models button */
+    JSTI_ACTION_RUN_COMPARE = 7,     /* as Transcription's Compare models button */
+    JSTI_ACTION_RUN_QUICK_VOICE_1 = 8, /* JSTI_EVENT_QUICK_VOICE for favorite slot 1 */
+    JSTI_ACTION_RUN_QUICK_VOICE_2 = 9,
+    JSTI_ACTION_RUN_QUICK_VOICE_3 = 10
 };
 typedef struct {
     const char *identifier;

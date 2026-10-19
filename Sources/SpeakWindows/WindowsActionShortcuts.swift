@@ -13,6 +13,7 @@ extension WindowsHostPlatform {
 /// yet keep their bindings for the Mac and are shown as Mac only.
 enum WindowsActionShortcutRun: Equatable {
     case macOnly, record, page(String), playPause, stopSpeech, apiKeys, permissions, compareModels
+    case quickVoice(Int)
 
     init(_ action: DesktopShortcutAction) {
         switch action {
@@ -35,8 +36,11 @@ enum WindowsActionShortcutRun: Equatable {
         case .openAPIKeysSettings: self = .apiKeys
         case .openPermissionsSettings: self = .permissions
         case .openCompareModelsSettings: self = .compareModels
-        case .speakSelectedText, .speakClipboard, .openTroubleshooting,
-             .quickVoice1, .quickVoice2, .quickVoice3, .pasteLastHistoryItem, .editSelectionByVoice:
+        case .quickVoice1: self = .quickVoice(1)
+        case .quickVoice2: self = .quickVoice(2)
+        case .quickVoice3: self = .quickVoice(3)
+        case .speakSelectedText, .speakClipboard, .openTroubleshooting, .pasteLastHistoryItem,
+             .editSelectionByVoice:
             self = .macOnly
         }
     }
@@ -53,6 +57,9 @@ enum WindowsActionShortcutRun: Equatable {
         case .apiKeys: return Int32(JSTI_ACTION_RUN_API_KEYS)
         case .permissions: return Int32(JSTI_ACTION_RUN_PERMISSIONS)
         case .compareModels: return Int32(JSTI_ACTION_RUN_COMPARE)
+        case .quickVoice(1): return Int32(JSTI_ACTION_RUN_QUICK_VOICE_1)
+        case .quickVoice(2): return Int32(JSTI_ACTION_RUN_QUICK_VOICE_2)
+        case .quickVoice: return Int32(JSTI_ACTION_RUN_QUICK_VOICE_3)
         }
     }
 

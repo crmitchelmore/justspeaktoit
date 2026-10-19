@@ -44,7 +44,7 @@ extension DesktopHostReadAloudTests {
         defer { release.release() }
         await controller.readVoiceSource(.externalSelection) {
             entered.release()
-            await holdCapturedSource(release)
+            await Self.holdCapturedSource(release)
             returned.release()
             return "This late selection must not be spoken."
         }
@@ -91,18 +91,9 @@ extension DesktopHostReadAloudTests {
         defer { release.release() }
         await controller.readVoiceSource(.externalSelection) {
             entered.release()
-            await holdCapturedSource(release)
+            await Self.holdCapturedSource(release)
             returned.release()
             return "Superseded selection."
-        }
-
-        private func holdCapturedSource(_ release: Gate) async {
-            await withCheckedContinuation { continuation in
-                Task.detached {
-                    await release.pass()
-                    continuation.resume()
-                }
-            }
         }
         await entered.pass()
         let previous = await controller.readAloudState.task
@@ -126,6 +117,15 @@ extension DesktopHostReadAloudTests {
             await task?.value
             XCTAssertTrue(statuses.last?.hasPrefix("Read aloud failed:") == true)
             XCTAssertTrue(FakeSpeech.shared.spoken.isEmpty)
+        }
+    }
+
+    private static func holdCapturedSource(_ release: Gate) async {
+        await withCheckedContinuation { continuation in
+            Task.detached {
+                await release.pass()
+                continuation.resume()
+            }
         }
     }
 }

@@ -1404,8 +1404,8 @@ std::string checkSelectionSources(Fixture &state) {
         return describe("selection caret", "a caret fell back to whole-field text");
     select(host.richEdit, 15, 25);
     if (!captureSelection()) return describe("selection buffer", "capture failed", error);
-    char small[2]{'x', 0};
-    if (jsti_selection_read(target.value, small, sizeof(small), error, sizeof(error)) != -1 || small[0])
+    char tinyBuffer[2]{'x', 0};
+    if (jsti_selection_read(target.value, tinyBuffer, sizeof(tinyBuffer), error, sizeof(error)) != -1 || tinyBuffer[0])
         return describe("selection buffer", "a too-small buffer returned partial text");
     if (!captureSelection()) return describe("selection cancellation", "capture failed", error);
     jsti_insertion_cancel(target.value);

@@ -264,6 +264,12 @@ bool jsti_voice_controls_self_test(HWND owner, std::string &error) {
         bool passed = number(window, speedID, value) && value == dialog.options.speed &&
             !IsWindowEnabled(GetDlgItem(window, speedID)) && !IsWindowEnabled(GetDlgItem(window, pitchID)) &&
             !IsWindowEnabled(GetDlgItem(window, ssmlID));
+        for (const wchar_t *invalid : {L"", L" ", L"   ", L"nan", L"inf", L"1tail", L"1.5"}) {
+            SetDlgItemTextW(window, pitchID, invalid);
+            passed = !save(window, dialog) && receipt.calls == 0 && !dialog.saving && passed;
+        }
+        SetDlgItemTextW(window, pitchID, L" -2 ");
+        passed = number(window, pitchID, value) && value == -2 && passed;
         RECT client{}; GetClientRect(window, &client);
         for (HWND child = GetWindow(window, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT)) {
             RECT bounds{}; GetWindowRect(child, &bounds);

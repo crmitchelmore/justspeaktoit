@@ -38,6 +38,15 @@ metadata/link controls without opening a browser. These checks are **NOT_RUN**
 locally under the standing execution restriction; native rendering, installed
 identity and browser-launch acceptance remain unqualified.
 
+## Voice synthesis numeric input (source only)
+
+The native Voice synthesis fixtures additionally check empty/whitespace-only,
+non-finite, trailing-junk and fractional pitch rejection with no save event,
+while preserving valid numbers surrounded by whitespace. GTK now checks that
+numeric conversion consumed a number **before** skipping trailing whitespace;
+previously a whitespace-only pitch could be accepted as zero. This source fix
+and the Win32/GTK regression assertions are **NOT_RUN** locally.
+
 ## Modulate live and batch feature controls (source only)
 
 At `ca2d39fb`, completed portable Linux (2,909 tests; 33 skipped) and macOS

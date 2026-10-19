@@ -19,19 +19,27 @@ extension DesktopHostController {
         connectionWarmCapture = nil
         let warmGeneration = connectionWarmGeneration
         cancelCorrectionObservation()
-        let (target, deviceID, profile, textOutput, trigger, handsFree) = (
+        let (target, deviceID, capturedProfile, textOutput, trigger, handsFree) = (
             request.target, request.deviceID, request.profile, request.textOutput, request.trigger, request.handsFree
         )
         if handsFree == nil, let capability = ownedDictationCapability {
             try await startOwnedDictation(
-                target: target, deviceID: deviceID, profile: profile,
+                target: target, deviceID: deviceID, profile: capturedProfile,
                 textOutput: textOutput, trigger: trigger, capability: capability
             )
             return
         }
-        let key = try requireCredentialOrLocalModel(profile.modelIdentifier)
-        try requireAzureResource(forLive: profile.modelIdentifier)
-        let polish = captureLivePolish(profile)
+        let key = try requireCredentialOrLocalModel(capturedProfile.modelIdentifier)
+        try requireAzureResource(forLive: capturedProfile.modelIdentifier)
+        let polish = captureLivePolish(capturedProfile)
+        var profile = capturedProfile
+        if DesktopHostModels.provider(for: profile.modelIdentifier)?.id == "assemblyai" {
+            let options = profile.transcriptionOptions ?? settings.configuration?.liveOptions ?? .desktopDefaults
+            let hints = try await recognitionVocabulary()
+            try Task.checkCancellation()
+            guard !closed, handsFree == nil || handsFreeRun?.id == handsFree?.id else { throw CancellationError() }
+            profile = profile.capturingTranscriptionOptions(options.includingPronunciationWords(hints.pronunciationWords))
+        }
         // Holds a profile's or the app's on-device model while startup suspends;
         // the recording holds it once capture starts.
         let localModel = beginLocalUse(profile.modelIdentifier)

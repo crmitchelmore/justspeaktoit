@@ -27,7 +27,7 @@ extension DesktopHostController {
         return DesktopProfileSessionResolver.resolve(
             profile: profile, defaultModel: defaultModel, defaultPostProcessing: settings.postProcessing ?? .init(),
             capabilities: profileCapabilities, defaultLanguage: settings.configuration?.language
-        ).capturingTranscriptionOptions(settings.configuration?.liveOptions ?? .init())
+        ).capturingTranscriptionOptions(settings.configuration?.liveOptions ?? .desktopDefaults)
             .capturingModulateFeatures(settings.configuration?.modulateBatchFeatures ?? .init())
             .capturingLivePolish(livePolishSelection())
     }

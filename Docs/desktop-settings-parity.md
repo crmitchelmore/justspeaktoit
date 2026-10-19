@@ -8,6 +8,17 @@ outside that enum. Track remaining product acceptance in #1157.
 
 ## Modulate live and batch feature controls (source only)
 
+At `ca2d39fb`, completed portable Linux (2,909 tests; 33 skipped) and macOS
+(2,813; 55 skipped) each reported 19 failures on synthetic merge `b432351c`
+into `0b4ffd7`. Three new Host fixtures used the nonexistent batch identifier
+`modulate/velma-2-stt`; they now use the existing canonical
+`modulate/velma-2-stt-batch`, with no production alias or route added.
+Generic metadata tests also assumed that only app-switch choices could have
+an empty editor sentinel and that every choice persisted a string. Their
+assertions now distinguish the four Modulate default sentinels and assert
+boolean acceptance/string rejection explicitly. These source repairs are
+**NOT_RUN** locally; the failed jobs remain failed evidence.
+
 At preceding head `c4677631`, portable Apple (2,779 tests; 55 skipped),
 portable Linux (2,875; 33 skipped) and native Linux's Swift suite (3,019;
 34 skipped) all passed with zero failures. These jobs used synthetic merge
@@ -69,6 +80,41 @@ Native rendering, provider behavior and installed-package acceptance remain
 unqualified. Linux's old "no streaming route" cleanup subtitle is also corrected:
 remote finished-transcript cleanup can stream previews; local cleanup cannot.
 
+## Modern pronunciation recognition capture (source only)
+
+Desktop AssemblyAI recognition now combines explicit terms, literal modern
+dictionary words and sorted legacy dictionary keys through the shared Mac
+policy. Regex entries, spoken pronunciation text and TTS replacements are not
+recognition seeds. Ignored words remain suppressed, explicit reselection wins,
+and the existing character/count bounds and case-insensitive uniqueness apply.
+Automatic seeds never enter the shared keyword preference or other providers'
+requests. Raw comparisons remain deliberately free of dictionary seeding.
+
+First-party desktop defaults/configuration explicitly opt in to this policy.
+Existing public `LiveClientOptions` initializer signatures and explicitly
+constructed options retain their former behavior. A value snapshot captures
+the selected/legacy/ignored preferences before asynchronous vocabulary work,
+then freezes modern words once admitted, including an empty dictionary.
+Vocabulary copying preserves that snapshot and provider controls. Ordinary
+recordings freeze it before capture; owned capture uses its existing input
+snapshot. Live startup, completed transcription, import/retry and read-only
+automation file commands resolve the same policy without rereading changed
+settings after suspension. Failed vocabulary reloads refuse stale hints.
+
+When native keywords are edited while AssemblyAI is selected, clear and
+reselection reconcile modern and legacy suppression together. Unrelated
+Apply and other providers do not infer new modern suppression. If the selected
+model, preferences or recording state changes while hints load, Apply refuses
+the stale edit explicitly. Preview/recovered-keyword persistence uses the same
+reconciliation without granting fresh cleanup or warming approval.
+
+Authored checks cover the real injected AssemblyAI query, captured ordering,
+empty snapshots, old initializer arity, literal/regex/replacement separation,
+reload failure, normal recording/import/retry, owned input, native clear,
+transfer/restart and read-only automation. New product execution is **NOT_RUN**
+locally. Native keyword auto-population, legacy-dictionary editing and actual
+provider/native/installed acceptance remain gaps; this is not full parity.
+
 ## Legacy pronunciation recognition hints (source only)
 
 The preceding `9be6c8aa` automatic Linux/Apple-portable/Windows ARM64 suites
@@ -101,9 +147,10 @@ behavior. Explicit native keyword edits update legacy seed suppression so a
 deliberate clear is not silently undone; unrelated preference applies do not
 change suppression. Explicit recovered-keyword selection follows the same rule.
 
-This is not a native editor for the legacy dictionary, modern-dictionary keyterm
-seeding, or evidence of provider/native/installed acceptance. The new source
-regressions have not been executed locally; automatic CI remains required.
+This section describes the earlier legacy-only slice. The modern capture source
+above extends it; neither slice is a native editor for the legacy dictionary or
+evidence of provider/native/installed acceptance. New source regressions have not
+been executed locally; automatic CI remains required.
 
 ## Finished-transcript streaming cleanup candidate (source only)
 

@@ -17,13 +17,24 @@ extension DesktopConfiguration {
         )
     }
 
+    var pronunciationKeytermSelection: AssemblyAIPronunciationKeyterms.Selection {
+        .init(
+            current: TranscriptionKeywordPolicy.words(from: text("assemblyAIKeyterms")),
+            legacy: legacyPronunciationWords, ignored: ignoredPronunciationWords
+        )
+    }
+
     func recordingPronunciationKeytermSelection(from previous: Self) throws -> Self {
-        guard values[ApplicationPreferenceKey.ttsPronunciationDictionary.rawValue] != nil,
+        try recordingPronunciationKeytermSelection(from: previous, modern: [])
+    }
+
+    public func recordingPronunciationKeytermSelection(from previous: Self, modern: [String]) throws -> Self {
+        guard values[ApplicationPreferenceKey.ttsPronunciationDictionary.rawValue] != nil || !modern.isEmpty,
               text("transcriptionKeywords") != previous.text("transcriptionKeywords")
                 || text("assemblyAIKeyterms") != previous.text("assemblyAIKeyterms") else { return self }
         let ignored = AssemblyAIPronunciationKeyterms.ignored(
             selected: text("assemblyAIKeyterms"),
-            seeds: AssemblyAIPronunciationKeyterms.seeds(modern: [], legacy: legacyPronunciationWords),
+            seeds: AssemblyAIPronunciationKeyterms.seeds(modern: modern, legacy: legacyPronunciationWords),
             stored: ignoredPronunciationWords
         )
         var changed = values

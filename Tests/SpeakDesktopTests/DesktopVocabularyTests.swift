@@ -66,6 +66,26 @@ final class DesktopVocabularyTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("pronunciation.json")), corrupt)
     }
 
+    func testRecognitionHints_UseLiteralWordsWithoutRegexOrSpokenReplacements() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vocabulary = DesktopVocabulary(directory: root)
+        try await vocabulary.load()
+        let file = root.appendingPathComponent("recognition.json")
+        try JSONEncoder().encode([
+            PronunciationEntry(word: "Literal", pronunciation: "Not recognition text", replacement: "Never send"),
+            PronunciationEntry(word: "Regex.*", pronunciation: "Also not sent", isRegex: true)
+        ]).write(to: file)
+        _ = try await vocabulary.perform(kind: 1, payload: DesktopVocabularyWire.encode(["importReplace", file.path]))
+        _ = try await vocabulary.perform(kind: 0, payload: DesktopVocabularyWire.encode([
+            "save", "", "Lexicon", "Canonical", "Lexicon", "automatic", "", "high", ""
+        ]))
+        let hints = try vocabulary.recognitionHints()
+        XCTAssertEqual(hints.keywords, ["Canonical"])
+        XCTAssertEqual(hints.pronunciationWords, ["Literal"])
+        XCTAssertEqual(vocabulary.speechText("Literal"), "Never send")
+    }
+
     nonisolated func testEscapingPreservesUserTextAndRejectsMalformedEvents() throws {
         let values = ["%25", "tab\tvalue", "line\nvalue\r", "caf\u{00E9}", ""]
         XCTAssertEqual(try DesktopVocabularyWire.decode(DesktopVocabularyWire.encode(values)), values)
@@ -109,6 +129,7 @@ final class DesktopVocabularyTests: XCTestCase {
         let corrupt = Data("invalid".utf8)
         try corrupt.write(to: file)
         do { try await second.reload(); XCTFail("Reload must report corrupt data") } catch {}
+        XCTAssertThrowsError(try second.recognitionHints())
         do {
             _ = try await second.perform(kind: 1, payload: DesktopVocabularyWire.encode(["defaults"]))
             XCTFail("A failed reload must block writes")

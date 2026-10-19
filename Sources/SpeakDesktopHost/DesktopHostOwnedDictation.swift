@@ -55,9 +55,9 @@ extension DesktopHostController {
             sampleRate: rate,
             frameMilliseconds: DesktopLiveTranscription.captureFrameMilliseconds(forID: profile.modelIdentifier)
         )
-        let input = DesktopHostRecordingInput(
-            key: key, azureEndpoint: snapshot.endpoint, vocabulary: try await vocabularyKeywords()
-        )
+        let hints = try await recognitionVocabulary()
+        var input = DesktopHostRecordingInput(key: key, azureEndpoint: snapshot.endpoint, vocabulary: hints.keywords)
+        input.pronunciationWords = hints.pronunciationWords
         guard !closed, !cancellationRequested, !Task.isCancelled else { throw CancellationError() }
         let id = snapshot.id
         await recordingFeedback?.recordingRequested(id)

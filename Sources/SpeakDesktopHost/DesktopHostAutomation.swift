@@ -38,7 +38,8 @@ extension DesktopHostController: AutomationCommandHost where Platform: DesktopHo
         defer { endLocalUse(held) }
         do {
             let request = try automationFileRequest(url, profile: profile)
-            let result = try await runAutomationFileCommand(request)
+            let options = profile.transcriptionOptions ?? settings.configuration?.liveOptions ?? .desktopDefaults
+            let result = try await runAutomationFileCommand(request, options: options)
             try Task.checkCancellation()
             guard !closed else { throw automationUnavailable }
             return AutomationResult(text: result.text, model: model, durationSeconds: result.duration)
@@ -73,13 +74,13 @@ extension DesktopHostController: AutomationCommandHost where Platform: DesktopHo
     }
 
     private func runAutomationFileCommand(
-        _ request: DesktopHostTranscriptionRequest
+        _ request: DesktopHostTranscriptionRequest, options: LiveClientOptions
     ) async throws -> TranscriptionResult {
         let effects = effects
         let id = UUID()
         let task = Task {
             try Task.checkCancellation()
-            let request = try await self.automationVocabularyRequest(request)
+            let request = try await self.automationVocabularyRequest(request, options: options)
             try Task.checkCancellation()
             return try await effects.transcribe(request, with: self)
         }
@@ -92,12 +93,15 @@ extension DesktopHostController: AutomationCommandHost where Platform: DesktopHo
     }
 
     private func automationVocabularyRequest(
-        _ request: DesktopHostTranscriptionRequest
+        _ request: DesktopHostTranscriptionRequest, options: LiveClientOptions
     ) async throws -> DesktopHostTranscriptionRequest {
-        let vocabulary = try await vocabularyKeywords()
+        let hints = try await recognitionVocabulary()
+        let keywords = batchKeywords(
+            for: request.model, options: options.includingPronunciationWords(hints.pronunciationWords)
+        )
         var combined = DesktopHostTranscriptionRequest(
             audio: request.audio, model: request.model, key: request.key, duration: request.duration,
-            language: request.language, keywords: request.keywords + vocabulary,
+            language: request.language, keywords: keywords + hints.keywords,
             azureEndpoint: request.azureEndpoint
         )
         combined.historySaved = request.historySaved

@@ -23,7 +23,7 @@ extension DesktopHostController {
             modelIdentifier: record.modelIdentifier, postProcessing: settings.postProcessing ?? .init(),
             language: record.languageIdentifier
         ).capturingModulateFeatures(settings.configuration?.modulateBatchFeatures ?? .init())
-        let keywords = batchKeywords(for: record.modelIdentifier, options: session.transcriptionOptions)
+        let options = session.transcriptionOptions ?? settings.configuration?.liveOptions ?? .desktopDefaults
         let modulateFeatures = session.modulateBatchFeatures
         do {
             guard !closed else { throw CancellationError() }
@@ -34,11 +34,16 @@ extension DesktopHostController {
             try checkUploadSize(audio, model: record.modelIdentifier)
             update(transcribingStatus(for: record.modelIdentifier), state: 2)
             hud(record.id, .transcribing())
-            let vocabulary: [String]
-            if let input { vocabulary = input.vocabulary } else { vocabulary = try await vocabularyKeywords() }
+            let hints: (keywords: [String], pronunciationWords: [String])
+            if let input { hints = (input.vocabulary, input.pronunciationWords) } else {
+                hints = try await recognitionVocabulary()
+            }
+            let keywords = batchKeywords(
+                for: record.modelIdentifier, options: options.includingPronunciationWords(hints.pronunciationWords)
+            )
             var request = DesktopHostTranscriptionRequest(
                 audio: audio, model: record.modelIdentifier, key: key, duration: duration, language: session.language,
-                keywords: keywords + vocabulary, azureEndpoint: input?.azureEndpoint ?? azureEndpoint
+                keywords: keywords + hints.keywords, azureEndpoint: input?.azureEndpoint ?? azureEndpoint
             )
             request.modulateFeatures = modulateFeatures
             noteKeywordLimitation(&record, keywords: request.keywords)
@@ -81,7 +86,7 @@ extension DesktopHostController {
     }
 
     func batchKeywords(for model: String, options: LiveClientOptions?) -> [String] {
-        let snapshot = options ?? settings.configuration?.liveOptions ?? .init()
+        let snapshot = options ?? settings.configuration?.liveOptions ?? .desktopDefaults
         return DesktopTranscription.provider(for: model)?.id == "assemblyai"
             ? snapshot.assemblyAIKeyterms : snapshot.keywords
     }

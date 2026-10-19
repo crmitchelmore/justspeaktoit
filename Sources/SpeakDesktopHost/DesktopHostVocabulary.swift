@@ -56,6 +56,11 @@ extension DesktopHostController {
         return await vocabulary.keywords()
     }
 
+    func recognitionVocabulary() async throws -> (keywords: [String], pronunciationWords: [String]) {
+        let vocabulary = try await vocabularyStore()
+        return try await vocabulary.recognitionHints()
+    }
+
     package func vocabularyHistoryPresentation(_ identifier: String) throws -> String {
         guard canUseHistory, let id = UUID(uuidString: identifier), selectedHistoryID == id,
               let record = history[id], isVisible(id) else {

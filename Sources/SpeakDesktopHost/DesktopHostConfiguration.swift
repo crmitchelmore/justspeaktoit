@@ -51,7 +51,8 @@ extension DesktopHostController {
         guard !closed, !busy, recording == nil else {
             throw DesktopHostError(message: "Finish dictation before changing configuration.")
         }
-        let configuration = try configurationForNativeEditor().applying(entries)
+        let previous = try configurationForNativeEditor()
+        let configuration = try await reconcilingPronunciationSelection(previous.applying(entries), from: previous)
         try await persistConfiguration(
             configuration, intent: intent, status: "Configuration saved. New recordings use these preferences."
         )
@@ -68,10 +69,27 @@ extension DesktopHostController {
         guard !closed, !busy, recording == nil else {
             throw DesktopHostError(message: "Finish dictation before recovering keywords.")
         }
-        let recovered = try configurationForNativeEditor().applying(entries).recoveringKeywords(selected)
+        let previous = try configurationForNativeEditor()
+        let recovered = try await reconcilingPronunciationSelection(
+            previous.applying(entries).recoveringKeywords(selected), from: previous
+        )
         try await persistConfiguration(
             recovered, intent: .persistOnly, status: "Recovered keywords restored. New recordings use this shared list."
         )
+    }
+
+    private func reconcilingPronunciationSelection(
+        _ configuration: DesktopConfiguration, from previous: DesktopConfiguration
+    ) async throws -> DesktopConfiguration {
+        guard DesktopHostModels.provider(for: settings.model)?.id == "assemblyai" else { return configuration }
+        guard configuration.text("transcriptionKeywords") != previous.text("transcriptionKeywords")
+            || configuration.text("assemblyAIKeyterms") != previous.text("assemblyAIKeyterms") else { return configuration }
+        let model = settings.model
+        let hints = try await recognitionVocabulary()
+        guard !closed, !busy, recording == nil, settings.model == model, try configurationForNativeEditor() == previous else {
+            throw DesktopHostError(message: "Preferences changed while loading pronunciation hints. Refresh and try again.")
+        }
+        return try configuration.recordingPronunciationKeytermSelection(from: previous, modern: hints.pronunciationWords)
     }
 
     private func persistConfiguration(

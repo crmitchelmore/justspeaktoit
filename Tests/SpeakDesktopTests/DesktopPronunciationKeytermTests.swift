@@ -1,5 +1,6 @@
 import Foundation
 import SpeakCore
+import SpeakDesktop
 import XCTest
 
 final class DesktopPronunciationKeytermTests: XCTestCase {
@@ -12,6 +13,89 @@ final class DesktopPronunciationKeytermTests: XCTestCase {
             legacy: ["zeta", "Alpha", "", "two,terms", String(repeating: "x", count: 51)]
         )
         XCTAssertEqual(seeds, ["Beta", "alpha", "zeta"])
+    }
+
+    func testSelection_CapturesModernPrioritySuppressionAndStableLegacyOrder() {
+        let selection = AssemblyAIPronunciationKeyterms.Selection(
+            current: ["Explicit", "HIDDEN"], legacy: ["Zeta", "alpha"], ignored: ["hidden", "beta"]
+        ).capturingModernWords(["Beta", "alpha", "Modern"])
+        XCTAssertEqual(selection.keyterms, ["Explicit", "HIDDEN", "alpha", "Modern", "Zeta"])
+        XCTAssertEqual(selection.capturingModernWords(["Later"]), selection)
+        XCTAssertEqual(
+            AssemblyAIPronunciationKeyterms.Selection(current: [], legacy: ["Zeta", "alpha"], ignored: []),
+            AssemblyAIPronunciationKeyterms.Selection(current: [], legacy: ["alpha", "Zeta"], ignored: [])
+        )
+    }
+
+    func testResolvedOptions_PreserveVocabularyAndControlsWithoutReopeningTheSeedSnapshot() {
+        let configured = LiveClientOptions(
+            keywords: ["Shared"], assemblyAIKeyterms: ["Explicit"], modulate: .init(emotionSignal: true),
+            postStopFinalizeBudget: 9, stopGracePeriod: 0.3
+        ).capturingPronunciationKeyterms(.init(current: ["Explicit"], legacy: ["Alpha"], ignored: []))
+        let captured = configured.includingPronunciationWords(["Modern"]).includingVocabularyKeywords(["Lexicon"])
+        XCTAssertEqual(captured.keywords, ["Shared", "Lexicon"])
+        XCTAssertEqual(captured.assemblyAIKeyterms, ["Explicit", "Modern", "Alpha", "Lexicon"])
+        XCTAssertEqual(captured.includingPronunciationWords(["Later"]), captured)
+        XCTAssertEqual(captured.modulate, configured.modulate)
+        XCTAssertEqual(captured.postStopFinalizeBudget, 9)
+        XCTAssertEqual(captured.stopGracePeriod, 0.3)
+        XCTAssertEqual(
+            LiveClientOptions.desktopDefaults.includingPronunciationWords([])
+                .includingPronunciationWords(["Later"]).assemblyAIKeyterms, []
+        )
+    }
+
+    func testOldInitializer_ExplicitOptionsDoNotAcquireAutomaticPronunciationHints() {
+        let make: ([String], [String], ModulateLiveOptions) -> LiveClientOptions
+            = LiveClientOptions.init(keywords:assemblyAIKeyterms:modulate:)
+        for terms in [[], ["Explicit"]] {
+            let original = make(["Shared"], terms, .none)
+            XCTAssertNil(original.pronunciationKeyterms)
+            XCTAssertEqual(original.includingPronunciationWords(["Modern"]), original)
+        }
+    }
+
+    func testCapturedModernWords_ReachTheRealAssemblyAIQueryWithoutReplacementText() throws {
+        let configured = try DesktopConfiguration(values: [
+            "transcriptionKeywords": AnyCodable(.string("Explicit")),
+            dictionaryKey: AnyCodable(.object(["Legacy": .string("DO NOT SEND LEGACY PRONUNCIATION")])),
+            ignoredKey: AnyCodable(.array([.string("hidden")]))
+        ])
+        let options = configured.liveOptions.includingPronunciationWords(["Modern", "Hidden"])
+        let factory = AssemblyAISocketFactory()
+        let client = try XCTUnwrap(DesktopLiveTranscription.makeClient(
+            model: AssemblyAIModels.universal36ProStreamingID, apiKey: "synthetic", language: nil, azureEndpoint: "",
+            options: options, makeConnection: { factory.make($0) }
+        ))
+        client.start(onTranscript: { _, _ in }, onError: { XCTFail("\($0)") })
+        defer { client.cancel() }
+        let request = try XCTUnwrap(factory.requests.first)
+        let url = try XCTUnwrap(request.url)
+        let items = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+        let terms = try XCTUnwrap(items.first { $0.name == "keyterms_prompt" }?.value)
+        XCTAssertEqual(try JSONDecoder().decode([String].self, from: Data(terms.utf8)), ["Explicit", "Modern", "Legacy"])
+    }
+
+    func testModernNativeClearAndReselection_RetainSuppressionAcrossRestart() throws {
+        let original = try DesktopConfiguration(values: [
+            "transcriptionKeywords": AnyCodable(.string("Explicit")),
+            ignoredKey: AnyCodable(.array([.string("unrelated")]))
+        ])
+        let modern = ["Modern", "two,terms", String(repeating: "x", count: 51)]
+        var entries = original.entries
+        let index = try XCTUnwrap(DesktopConfiguration.fields.firstIndex { $0.key == "assemblyAIKeyterms" })
+        entries[index] = ""
+        let cleared = try original.applying(entries).recordingPronunciationKeytermSelection(from: original, modern: modern)
+        XCTAssertEqual(cleared.values[ignoredKey], AnyCodable(.array([.string("modern"), .string("unrelated")])))
+        let restarted = try JSONDecoder().decode(DesktopConfiguration.self, from: JSONEncoder().encode(cleared))
+        XCTAssertEqual(restarted.liveOptions.includingPronunciationWords(modern).assemblyAIKeyterms, [])
+        entries = restarted.entries
+        entries[index] = "MODERN"
+        let selected = try restarted.applying(entries).recordingPronunciationKeytermSelection(
+            from: restarted, modern: modern
+        )
+        XCTAssertEqual(selected.values[ignoredKey], AnyCodable(.array([.string("unrelated")])))
+        XCTAssertEqual(selected.liveOptions.includingPronunciationWords(modern).assemblyAIKeyterms, ["MODERN"])
     }
 
     func testSeedPolicy_UsesCharacterRatherThanUTF8ByteLimit() {

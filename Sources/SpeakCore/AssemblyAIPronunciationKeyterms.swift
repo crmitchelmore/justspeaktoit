@@ -2,6 +2,33 @@ import Foundation
 
 /// Recognition hints only: legacy dictionary values are not TTS replacements.
 public enum AssemblyAIPronunciationKeyterms {
+    public struct Selection: Sendable, Equatable {
+        public let current: [String]
+        public let legacy: [String]
+        public let ignored: [String]
+        /// Nil has not been admitted yet; an empty array freezes an empty dictionary.
+        public let modern: [String]?
+
+        public init(current: [String], legacy: [String], ignored: [String], modern: [String]? = nil) {
+            self.current = current
+            self.legacy = legacy.sorted()
+            self.ignored = ignored
+            self.modern = modern
+        }
+
+        public func capturingModernWords(_ words: [String]) -> Self {
+            Self(current: current, legacy: legacy, ignored: ignored, modern: modern ?? words)
+        }
+
+        public var keyterms: [String] {
+            AssemblyAIPronunciationKeyterms.merged(
+                current: current,
+                seeds: AssemblyAIPronunciationKeyterms.seeds(modern: modern ?? [], legacy: legacy),
+                ignored: ignored
+            )
+        }
+    }
+
     public static func parse(_ raw: String) -> [String] {
         raw.split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }

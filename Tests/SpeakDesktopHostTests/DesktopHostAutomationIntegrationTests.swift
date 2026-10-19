@@ -63,6 +63,43 @@ extension DesktopHostAutomationTests {
         XCTAssertNotEqual(approved, true)
     }
 
+    func testReadOnlyAssemblyAIFile_MergesModernPronunciationsOnlyIntoRecognitionHints() async throws {
+        let fixture = AutomationFixtureEffects()
+        try await use(fixture)
+        let model = AssemblyAIModels.universal35ProBatchID
+        let credential = try XCTUnwrap(DesktopHostModels.provider(for: model)).apiKeyIdentifier
+        FakeLog.shared.setKey("synthetic", name: credential)
+        try await controller.automationFixtureProfile(DictationProfile(
+            name: "AssemblyAI file", transcriptionModelID: model, polishEnabled: false, transcriptionRouting: .remoteBatch
+        ))
+        try await importValues([
+            "transcriptionKeywords": AnyCodable(.string("Explicit")),
+            ApplicationPreferenceKey.assemblyAIIgnoredPronunciationTerms.rawValue: AnyCodable(.array([.string("hidden")]))
+        ])
+        let pronunciationFile = directory.appendingPathComponent("pronunciations.json")
+        try JSONEncoder().encode([
+            PronunciationEntry(word: "Modern", pronunciation: "Not sent", replacement: "Never sent"),
+            PronunciationEntry(word: "Hidden", pronunciation: "Not sent"),
+            PronunciationEntry(word: "Regex.*", pronunciation: "Not sent", isRegex: true)
+        ]).write(to: pronunciationFile)
+        _ = try await controller.vocabularyEvent(
+            kind: 1, payload: DesktopVocabularyWire.encode(["importReplace", pronunciationFile.path])
+        )
+        let file = directory.appendingPathComponent("input.wav")
+        let bytes = try XCTUnwrap(PCMWaveWriter.wavData(pcm: Data([1, 0, 2, 0]), sampleRate: 16_000))
+        try bytes.write(to: file)
+        let result = try await controller.automationTranscribeFile(at: file)
+        let request = try XCTUnwrap(fixture.requests.first)
+        XCTAssertEqual(result.model, model)
+        XCTAssertEqual(request.keywords, ["Explicit", "Modern"])
+        XCTAssertFalse(request.historySaved)
+        XCTAssertEqual(try Data(contentsOf: file), bytes)
+        let history = try await controller.store.records()
+        XCTAssertTrue(history.isEmpty)
+        XCTAssertEqual(fixture.postProcessingCalls, 0)
+        XCTAssertTrue(fixture.base.outputs.isEmpty)
+    }
+
     func testNativeAdmissionFailure_IsNotReportedAsSuccessfulDictation() async throws {
         try await use(AutomationFixtureEffects(refuseCapture: true))
         let response = await AutomationCommandDispatcher.response(to: .init(command: .startDictation), host: controller)

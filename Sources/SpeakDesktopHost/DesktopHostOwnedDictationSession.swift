@@ -23,6 +23,13 @@ package struct DesktopHostRecordingInput: Sendable {
     let key: String
     let azureEndpoint: String
     let vocabulary: [String]
+    var pronunciationWords: [String] = []
+
+    init(key: String, azureEndpoint: String, vocabulary: [String]) {
+        self.key = key
+        self.azureEndpoint = azureEndpoint
+        self.vocabulary = vocabulary
+    }
 }
 
 package struct DesktopHostOwnedDictationRequest<Platform: DesktopHostPlatform>: Sendable {

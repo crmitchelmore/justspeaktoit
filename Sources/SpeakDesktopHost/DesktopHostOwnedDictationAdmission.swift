@@ -71,7 +71,7 @@ extension DesktopHostController {
         return .init(
             id: UUID(), target: target, deviceID: deviceID,
             profile: profile.capturingTranscriptionOptions(
-                profile.transcriptionOptions ?? configuration?.liveOptions ?? .init()
+                profile.transcriptionOptions ?? configuration?.liveOptions ?? .desktopDefaults
             ),
             textOutput: textOutput, trigger: trigger, key: key, endpoint: azureResourceEndpoint(),
             configuration: configuration, polish: captureLivePolish(profile), cleanup: captureCleanup(profile.postProcessing)

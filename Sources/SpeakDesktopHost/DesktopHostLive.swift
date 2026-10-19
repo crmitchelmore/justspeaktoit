@@ -8,10 +8,14 @@ extension DesktopHostController {
         input: DesktopHostRecordingInput? = nil, polish: DesktopHostLivePolishInput? = nil
     ) async throws -> DesktopLiveSession? {
         guard DesktopHostModels.isLive(model) else { return nil }
-        let baseOptions = options ?? settings.configuration?.liveOptions ?? .init()
-        let vocabulary: [String]
-        if let input { vocabulary = input.vocabulary } else { vocabulary = try await vocabularyKeywords() }
-        let options = baseOptions.includingVocabularyKeywords(vocabulary)
+        let baseOptions = options ?? settings.configuration?.liveOptions ?? .desktopDefaults
+        let hints: (keywords: [String], pronunciationWords: [String])
+        if let input { hints = (input.vocabulary, input.pronunciationWords) } else {
+            hints = try await recognitionVocabulary()
+        }
+        let recognition = DesktopHostModels.provider(for: model)?.id == "assemblyai"
+            ? baseOptions.includingPronunciationWords(hints.pronunciationWords) : baseOptions
+        let options = recognition.includingVocabularyKeywords(hints.keywords)
         guard let client = effects.makeLiveClient(
             model: model, key: key, language: language,
             azureEndpoint: input?.azureEndpoint ?? azureResourceEndpoint(), options: options

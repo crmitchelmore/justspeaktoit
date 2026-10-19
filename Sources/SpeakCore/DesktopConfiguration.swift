@@ -337,7 +337,7 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable { // swiftlint:
                 addingTo: TranscriptionKeywordPolicy.words(from: text("assemblyAIKeyterms"))
             ),
             modulate: modulateLiveOptions, postStopFinalizeBudget: nil, stopGracePeriod: number("liveStopGracePeriod")
-        )
+        ).capturingPronunciationKeyterms(pronunciationKeytermSelection)
     }
 }
 

@@ -126,6 +126,11 @@ public final class DesktopVocabulary {
 
     public func speechText(_ text: String) -> String { renderer.applyReplacements(to: text, entries: entries) }
 
+    public func recognitionHints() throws -> (keywords: [String], pronunciationWords: [String]) {
+        if let loadError { throw loadError }
+        return (keywords(), entries.filter { !$0.isRegex }.map(\.word))
+    }
+
     public func presentation(kind: Int, notice: String = "") -> String {
         var header = [
             notice, String(preferences.includeLexiconDirectives), String(preferences.includeContextTags),

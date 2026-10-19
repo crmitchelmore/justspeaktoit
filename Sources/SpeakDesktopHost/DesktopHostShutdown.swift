@@ -219,7 +219,8 @@ extension DesktopHostController {
         voiceProviderIssuedSlot = nil
         voiceCredentialReadDestination = nil
         cancelOutput()
-        generatedVoice = nil
+        // Completed audio belongs to the controller lifetime, not the cancelled operation.
+        // Closed entrypoints still refuse replay/export, and late work cannot replace it.
         voiceTextImportTask?.cancel()
         cancellationRequested = true
         transcriptionTask?.cancel()

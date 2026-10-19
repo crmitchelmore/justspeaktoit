@@ -60,7 +60,9 @@ if (-not $hosted -and -not $DisposableMachine) {
     throw 'This test trusts a temporary certificate machine-wide, installs packages and writes %LOCALAPPDATA%\JustSpeakToIt. Run it only on a GitHub-hosted runner or a throwaway VM with -DisposableMachine.'
 }
 
-Add-Type -Path (Join-Path $PSScriptRoot 'PackageLifecycleNative.cs')
+if (-not ('Jsti.PackageLifecycle.Native' -as [type])) {
+    Add-Type -Path (Join-Path $PSScriptRoot 'PackageLifecycleNative.cs')
+}
 
 # --- inputs and derived identity ---------------------------------------------------
 $workspace = (New-Item -ItemType Directory -Force -Path $Workspace).FullName

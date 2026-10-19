@@ -97,15 +97,18 @@ final class DesktopHostVoiceGenerationTests: XCTestCase {
     }
 
     func testStopAndShutdown_KeepStalledGenerationCountedAndNeverPublishOrArchiveItsLateResult() async throws {
+        let entered = expectation(description: "Synthetic provider entered before Stop")
         let gate = VoiceGenerationGate()
         let wav = try audio()
         let source = try VoiceOutputSourceSnapshot(source: .typedText, text: "Synthetic cancellation.")
         await controller.generateVoiceSource(
             source, options: .init(autoPlay: true, saveToRecordings: true)
         ) { _, _, _ in
+            entered.fulfill()
             await gate.wait()
             return wav
         }
+        await fulfillment(of: [entered], timeout: 3)
         let task = await controller.voiceGenerationTask
         await controller.playbackStop()
         await controller.generateVoiceSource(

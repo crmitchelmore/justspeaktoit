@@ -129,8 +129,10 @@ jobs:
           printf '%s\n' \
             '{"purpose":"isolated_history_fixture_diagnostic","status":"not_completed",' \
             '"command":["python3","scripts/with-test-keychain.py","swift","test","--skip-build","--enable-code-coverage","--filter","DesktopLivePolishHistoryTests"],' \
-            '"expected_case":"SpeakDesktopTests.DesktopLivePolishHistoryTests.testNativeAndPortableHistory_RoundTripRawAndSuccessfulPolishWithoutRerunningClient",' \
-            '"command_exit_code":null,"expected_case_count":1,"observed_case_event_counts":null,' \
+            '"expected_cases":["SpeakDesktopTests.DesktopLivePolishHistoryTests.testControlRecordWithoutSession_RoundTripsRawAndPolishedValues",' \
+            '"SpeakDesktopTests.DesktopLivePolishHistoryTests.testControlResultAfterFinish_RoundTripsSuccessfulPolish",' \
+            '"SpeakDesktopTests.DesktopLivePolishHistoryTests.testNativeAndPortableHistory_RoundTripRawAndSuccessfulPolishWithoutRerunningClient"],' \
+            '"command_exit_code":null,"expected_case_count":3,"observed_case_event_counts":null,' \
             '"selection_verified":false,"parity_qualification":false}' > "$directory/result.json"
           echo "artifact_ready=true" >> "$GITHUB_OUTPUT"
           set +e
@@ -165,12 +167,17 @@ jobs:
           command = ["python3", "scripts/with-test-keychain.py", "swift", "test",
                      "--skip-build", "--enable-code-coverage", "--filter",
                      "DesktopLivePolishHistoryTests"]
-          method = "testNativeAndPortableHistory_RoundTripRawAndSuccessfulPolishWithoutRerunningClient"
-          expected = "SpeakDesktopTests.DesktopLivePolishHistoryTests." + method
-          accepted = {
-              expected, "DesktopLivePolishHistoryTests." + method,
-              "-[SpeakDesktopTests.DesktopLivePolishHistoryTests " + method + "]",
-          }
+          methods = [
+              "testControlRecordWithoutSession_RoundTripsRawAndPolishedValues",
+              "testControlResultAfterFinish_RoundTripsSuccessfulPolish",
+              "testNativeAndPortableHistory_RoundTripRawAndSuccessfulPolishWithoutRerunningClient",
+          ]
+          expected = ["SpeakDesktopTests.DesktopLivePolishHistoryTests." + method for method in methods]
+          accepted = {}
+          for method, canonical in zip(methods, expected):
+              for alias in (canonical, "DesktopLivePolishHistoryTests." + method,
+                            "-[SpeakDesktopTests.DesktopLivePolishHistoryTests " + method + "]"):
+                  accepted[alias] = canonical
           capture_file = directory / "capture.json"
           capture = (json.loads(capture_file.read_text(encoding="ascii")) if capture_file.exists()
                      else {"status": "unavailable", "truncated": True})
@@ -179,20 +186,33 @@ jobs:
           pattern = rb"(?m)^Test Case '([^'\r\n]{1,512})' (started|passed|failed|skipped)(?=[ .])"
           events = [(identity.decode("utf-8", errors="replace"), state.decode("ascii"))
                     for identity, state in re.findall(pattern, data)]
-          unparsed = len(re.findall(rb"(?m)^Test Case ", data)) - len(events)
+          unparsed = data.count(b"Test Case '") - len(events)
           counts = {state: sum(event == state for _, event in events)
                     for state in ("started", "passed", "failed", "skipped")}
+          per_case = {identity: [] for identity in expected}
+          unknown = 0
+          for identity, state in events:
+              canonical = accepted.get(identity)
+              if canonical is None:
+                  unknown += 1
+              else:
+                  per_case[canonical].append(state)
           complete = capture_status == 0 and capture_file.exists() and not capture["truncated"]
-          selection_verified = (complete and unparsed == 0 and counts["started"] == 1
-                                and sum(counts[state] for state in ("passed", "failed", "skipped")) == 1
-                                and all(identity in accepted for identity, _ in events))
-          passed = command_status == 0 and selection_verified and counts["passed"] == 1
+          selection_verified = (
+              complete and unparsed == 0 and unknown == 0
+              and all(len(states) == 2 and states[0] == "started"
+                      and states[1] in ("passed", "failed", "skipped") for states in per_case.values())
+          )
+          passed = (command_status == 0 and selection_verified
+                    and all(states == ["started", "passed"] for states in per_case.values()))
           result = {
               "purpose": "isolated_history_fixture_diagnostic",
               "command": command, "command_exit_code": command_status,
               "capture_exit_code": capture_status, "capture": capture,
-              "expected_case": expected, "expected_case_count": 1,
+              "expected_cases": expected, "expected_case_count": len(expected),
               "observed_case_event_counts": counts,
+              "observed_expected_case_events": {identity: states[:8] for identity, states in per_case.items()},
+              "unknown_case_event_count": unknown,
               "unparsed_test_case_lines": unparsed,
               "observed_case_events": events[:16], "case_counts_complete": complete,
               "selection_verified": selection_verified, "parity_qualification": False,

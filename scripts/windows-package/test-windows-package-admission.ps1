@@ -37,7 +37,9 @@ $hosted = $env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_ENVIRONMENT -eq 'githu
 if (-not $hosted -and -not $DisposableMachine) {
     throw 'This control installs a package and trusts a temporary certificate. Run it only on a GitHub-hosted runner or a throwaway VM with -DisposableMachine.'
 }
-Add-Type -Path (Join-Path $PSScriptRoot 'PackageLifecycleNative.cs')
+if (-not ('Jsti.PackageLifecycle.Native' -as [type])) {
+    Add-Type -Path (Join-Path $PSScriptRoot 'PackageLifecycleNative.cs')
+}
 
 $workspace = (New-Item -ItemType Directory -Force -Path $Workspace).FullName
 $evidenceDirectory = (New-Item -ItemType Directory -Force -Path (Join-Path $workspace 'evidence')).FullName
@@ -122,6 +124,7 @@ function Get-ExistingState($Process, [IntPtr] $Window) {
 }
 
 $process = $null
+$startupError = $null
 $window = [IntPtr]::Zero
 try {
     $report.admission = Test-JstiLifecycleAdmission $ledger (Get-ObservedState)
@@ -158,10 +161,12 @@ try {
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
     $startInfo.FileName = $aliasPath
     $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardError = $true
     $startInfo.CreateNoWindow = $true
     $startInfo.WorkingDirectory = $workspace
     $process = [System.Diagnostics.Process]::Start($startInfo)
     Add-JstiOwnedProcess $ledger $process
+    $startupError = [Jsti.PackageLifecycle.Native]::ReadBoundedOutputAsync($process.StandardError, 16384)
     $deadline = (Get-Date).AddSeconds(90)
     $rows = -1
     while ((Get-Date) -lt $deadline -and $rows -ne [int] $expectations.history.rows) {
@@ -227,6 +232,16 @@ try {
     $report.cleanup = $cleanup
     if (-not $cleanup.skipped) {
         Add-Check 'Everything the control created is removed' ($cleanup.failures.Count -eq 0) $cleanup
+    }
+    if ($startupError) {
+        try {
+            if ($startupError.Wait(5000)) {
+                [System.IO.File]::WriteAllText((Join-Path $evidenceDirectory 'installed-startup-stderr.log'),
+                    $startupError.GetAwaiter().GetResult(), (New-Object System.Text.UTF8Encoding $false))
+            } else {
+                $failures.Add('Startup stderr capture did not complete after owned-process cleanup.')
+            }
+        } catch { $failures.Add("Startup stderr capture failed: $($_.Exception.Message)") }
     }
     $report.failures = @($failures)
     Write-JstiJson (Join-Path $evidenceDirectory 'package-admission-evidence.json') $report

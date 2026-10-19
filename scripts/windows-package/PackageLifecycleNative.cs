@@ -37,6 +37,24 @@ namespace Jsti.PackageLifecycle
 
     public static class Native
     {
+        public static async System.Threading.Tasks.Task<string> ReadBoundedOutputAsync(
+            System.IO.TextReader reader, int maximumCharacters)
+        {
+            if (reader == null) throw new ArgumentNullException("reader");
+            if (maximumCharacters < 1) throw new ArgumentOutOfRangeException("maximumCharacters");
+            var result = new StringBuilder();
+            var buffer = new char[1024];
+            bool truncated = false;
+            int count;
+            while ((count = await reader.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false)) != 0)
+            {
+                int retained = Math.Min(count, maximumCharacters - result.Length);
+                result.Append(buffer, 0, retained);
+                truncated = truncated || retained != count;
+            }
+            return result.ToString() + (truncated ? "\n[stderr truncated]\n" : "");
+        }
+
         const int ActivateNoErrorUI = 0x2;
         const uint WM_GETTEXT = 0x000D, WM_GETTEXTLENGTH = 0x000E, WM_CLOSE = 0x0010;
         const uint LB_GETTEXT = 0x0189, LB_GETTEXTLEN = 0x018A, LB_GETCOUNT = 0x018B;

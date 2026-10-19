@@ -165,3 +165,20 @@ foreach ($case in $cases) {
 if ($script:failed) { throw "$($script:failed) lifecycle ownership checks failed." }
 Write-Host 'Lifecycle ownership rules passed: a refused run changes nothing and cleanup removes only owned state.'
 & (Join-Path $PSScriptRoot 'test-recording-feedback-readiness.ps1')
+
+if (-not ('Jsti.PackageLifecycle.Native' -as [type])) {
+    Add-Type -Path (Join-Path $PSScriptRoot 'PackageLifecycleNative.cs')
+}
+foreach ($case in @(
+    @{ text = ''; expected = ''; label = 'empty stderr' },
+    @{ text = 'startup failure'; expected = 'startup failure'; label = 'short stderr' },
+    @{ text = ('x' * 5000); expected = (('x' * 32) + "`n[stderr truncated]`n"); label = 'oversized stderr' }
+)) {
+    $reader = New-Object System.IO.StringReader -ArgumentList (,[string] $case.text)
+    try {
+        $captured = [Jsti.PackageLifecycle.Native]::ReadBoundedOutputAsync($reader, 32).GetAwaiter().GetResult()
+        Assert-That ($captured -ceq $case.expected) "$($case.label) retains exactly the bounded prefix"
+        Assert-That ($reader.Read() -eq -1) "$($case.label) drains through EOF"
+    } finally { $reader.Dispose() }
+}
+if ($script:failed) { throw "$($script:failed) lifecycle output checks failed." }

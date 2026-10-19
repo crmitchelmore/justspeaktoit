@@ -41,7 +41,6 @@ public enum DesktopTroubleshooting {
         public let fix: Fix?
         public let systemImage: String
 
-        // swiftlint:disable:next function_parameter_count
         public init(
             id: String, title: String, detail: String, severity: Severity,
             destination: Destination, fix: Fix? = nil, systemImage: String

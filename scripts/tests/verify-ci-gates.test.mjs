@@ -79,7 +79,7 @@ test('macOS Debug build and test stages share one code-coverage instrumentation 
   const body = jobBodies['build-macos'];
   assert.match(body, /^\s+timeout-minutes: 30$/m);
   assert.match(body, /name: Build\n(?:\s+#[^\n]*\n)*\s+run: SWIFT_FLAGS=--enable-code-coverage make build/);
-  assert.match(body, /name: Test \(Debug\)\n\s+run: python3 scripts\/with-test-keychain.py swift test --enable-code-coverage/);
+  assert.match(body, /name: Test \(Debug\)\n(?:\s+id: [\w-]+\n)?\s+run: python3 scripts\/with-test-keychain.py swift test --enable-code-coverage/);
   assert.ok(body.indexOf('name: Build') < body.indexOf('name: Test (Debug)'),
     'Build must run before Test (Debug) so the coverage-enabled cache is already warm');
   assert.ok(body.indexOf('name: Test (Debug)') < body.indexOf('name: Build SpeakCore (App Store flavour)'),

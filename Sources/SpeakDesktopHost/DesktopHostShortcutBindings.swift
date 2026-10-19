@@ -100,7 +100,12 @@ extension DesktopShortcutBindings {
                     "\(row.action.displayName): \(chord.displayName) has no Mac equivalent, so it cannot be saved."
                 )
             }
-            guard DesktopShortcutKey.isRecordable(macKeyCode: binding.keyCode, hasModifiers: !binding.modifiers.isEmpty)
+            let defaultKey = row.action.defaultBinding
+            let restoresDefault = defaultKey.isEnabled && binding.keyCode == defaultKey.keyCode &&
+                binding.modifiers == defaultKey.modifiers
+            guard restoresDefault || DesktopShortcutKey.isRecordable(
+                macKeyCode: binding.keyCode, hasModifiers: !binding.modifiers.isEmpty
+            )
             else {
                 return .refused(
                     "\(row.action.displayName): use Ctrl, Alt or Shift with \(chord.displayName). "

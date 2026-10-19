@@ -95,6 +95,10 @@ final class LinuxEventContext: @unchecked Sendable {
     /// A shortcut, `--toggle` or the app action. The target is captured now,
     /// before anything else can take focus; toggles run one at a time.
     func shortcutToggle(modelIndex: Int?, deviceID: String?) {
+        guard jsti_action_shortcuts_editor_is_open() == 0 else {
+            LinuxHostPlatform.update("Close the action shortcut editor before recording.")
+            return
+        }
         let target = LinuxEventContext.captureTarget()
         let selection = recordingSettings(modelIndex: modelIndex, target: target)
         let controller = controller
@@ -122,6 +126,7 @@ final class LinuxEventContext: @unchecked Sendable {
     /// target and text output are captured at the press.
     func shortcutKey(pressed: Bool) {
         if pressed {
+            guard jsti_action_shortcuts_editor_is_open() == 0 else { return }
             let target = Self.captureTarget()
             let selection = recordingSettings(target: target)
             if !smokeTest, gestures.currentStyle != .pressToToggle {
@@ -193,6 +198,10 @@ func linuxWindowEvent( // swiftlint:disable:this cyclomatic_complexity
     }
     if event == Int(JSTI_EVENT_QUICK_VOICE) {
         holder.enqueueSettings { await holder.controller.selectQuickVoice(slot) }
+        return
+    }
+    if event == Int(JSTI_EVENT_ACTION_SHORTCUT_EDIT) {
+        linuxActionShortcutEdit(value, holder: holder)
         return
     }
     if event == 70 || event == 71 || event == 72 {

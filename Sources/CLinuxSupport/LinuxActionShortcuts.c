@@ -1,13 +1,5 @@
-#include "LinuxSupportInternal.h"
-#include <adwaita.h>
+#include "LinuxActionShortcutsInternal.h"
 #include <string.h>
-
-typedef struct ActionRow {
-    gchar *title, *chord, *note, *page;
-    guint keysym, modifiers;
-    gint run, slot;
-    gboolean enabled;
-} ActionRow;
 
 static GPtrArray *current;
 static GtkListBox *preferences;
@@ -19,6 +11,7 @@ static void row_free(gpointer pointer) {
     g_free(row->chord);
     g_free(row->note);
     g_free(row->page);
+    g_free(row->identifier);
     g_free(row);
 }
 
@@ -39,17 +32,27 @@ static void refresh_preferences(void) {
     }
 }
 
-GtkWidget *jsti_action_shortcuts_group_new(void) {
+static void edit_clicked(GtkButton *button, gpointer owner) {
+    (void)button;
+    jsti_action_shortcut_editor_open(GTK_WINDOW(owner));
+}
+
+GtkWidget *jsti_action_shortcuts_group_new(GtkWindow *owner) {
     GtkWidget *group = adw_preferences_group_new();
     adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(group), "Action shortcuts");
     adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(group),
         "Saved bindings run while this window is active, outside typing controls. Sidebar shortcuts run first. "
-        "Global action registration and editing these bindings here are not available yet.");
+        "Edit keys, switches and presets below. Global action registration is not available yet.");
     preferences = GTK_LIST_BOX(gtk_list_box_new());
     g_object_add_weak_pointer(G_OBJECT(preferences), (gpointer *)&preferences);
     gtk_list_box_set_selection_mode(preferences, GTK_SELECTION_NONE);
     gtk_widget_add_css_class(GTK_WIDGET(preferences), "boxed-list");
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(group), GTK_WIDGET(preferences));
+    GtkWidget *edit = gtk_button_new_with_label("Edit action shortcuts...");
+    gtk_widget_set_halign(edit, GTK_ALIGN_START);
+    gtk_widget_set_margin_top(edit, 8);
+    g_signal_connect(edit, "clicked", G_CALLBACK(edit_clicked), owner);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group), edit);
     refresh_preferences();
     return group;
 }
@@ -58,38 +61,70 @@ static void apply_rows(gpointer pointer) {
     GPtrArray *rows = g_ptr_array_ref(pointer);
     g_clear_pointer(&current, g_ptr_array_unref);
     current = rows;
+    jsti_action_shortcut_editor_rows(rows);
     refresh_preferences();
 }
 
-int32_t jsti_window_set_action_shortcuts(const JSTILinuxActionShortcut *rows, size_t count) {
-    if (count > 64 || (count != 0 && rows == NULL)) return -1;
+GPtrArray *jsti_action_shortcuts_copy_rows(const JSTILinuxActionShortcut *rows, size_t count) {
+    if (count > 64 || (count != 0 && rows == NULL)) return NULL;
     GPtrArray *copy = g_ptr_array_new_with_free_func(row_free);
     for (size_t i = 0; i < count; ++i) {
         const JSTILinuxActionShortcut *row = rows + i;
         if (row->title == NULL || row->chord == NULL || row->note == NULL || row->page == NULL ||
+            row->identifier == NULL || !g_utf8_validate(row->identifier, -1, NULL) ||
             !g_utf8_validate(row->title, -1, NULL) || !g_utf8_validate(row->chord, -1, NULL) ||
             !g_utf8_validate(row->note, -1, NULL) || !g_utf8_validate(row->page, -1, NULL) ||
             row->run < 0 || row->run > 6 || (row->modifiers & ~13u) != 0 ||
+            row->identifier[0] == '\0' || strlen(row->identifier) > 128 ||
+            (row->binding_enabled != 0 && row->binding_enabled != 1) ||
+            (row->binding_global != 0 && row->binding_global != 1) ||
+            (row->can_be_global != 0 && row->can_be_global != 1) ||
+            (row->has_key != 0 && row->has_key != 1) ||
             (row->enabled != 0 && row->enabled != 1) ||
             (row->enabled && (row->keysym == 0 || row->run == 0)) ||
             (row->run == 2 && row->page[0] == '\0') ||
             (row->run == 6 && (row->slot < 1 || row->slot > 3))) {
             g_ptr_array_unref(copy);
-            return -1;
+            return NULL;
         }
         ActionRow *item = g_new0(ActionRow, 1);
         item->title = g_strdup(row->title);
         item->chord = g_strdup(row->chord);
         item->note = g_strdup(row->note);
         item->page = g_strdup(row->page);
+        item->identifier = g_strdup(row->identifier);
         item->keysym = row->keysym;
         item->modifiers = row->modifiers;
         item->run = row->run;
         item->slot = row->slot;
         item->enabled = row->enabled != 0;
+        item->binding_enabled = row->binding_enabled != 0;
+        item->binding_global = row->binding_global != 0;
+        item->can_be_global = row->can_be_global != 0;
+        item->has_key = row->has_key != 0;
         g_ptr_array_add(copy, item);
     }
-    return jsti_window_post(apply_rows, copy, (GDestroyNotify)g_ptr_array_unref);
+    return copy;
+}
+
+GPtrArray *jsti_action_shortcuts_clone_rows(GPtrArray *rows) {
+    GPtrArray *copy = g_ptr_array_new_with_free_func(row_free);
+    for (guint i = 0; rows != NULL && i < rows->len; ++i) {
+        ActionRow *original = g_ptr_array_index(rows, i);
+        ActionRow *row = g_memdup2(original, sizeof *row);
+        row->title = g_strdup(original->title);
+        row->chord = g_strdup(original->chord);
+        row->note = g_strdup(original->note);
+        row->page = g_strdup(original->page);
+        row->identifier = g_strdup(original->identifier);
+        g_ptr_array_add(copy, row);
+    }
+    return copy;
+}
+
+int32_t jsti_window_set_action_shortcuts(const JSTILinuxActionShortcut *rows, size_t count) {
+    GPtrArray *copy = jsti_action_shortcuts_copy_rows(rows, count);
+    return copy == NULL ? -1 : jsti_window_post(apply_rows, copy, (GDestroyNotify)g_ptr_array_unref);
 }
 
 void jsti_action_shortcuts_release(guint keycode) {
@@ -186,6 +221,7 @@ int32_t jsti_action_shortcuts_self_test(char *error, size_t capacity) {
     row->chord = g_strdup("Ctrl+D");
     row->note = g_strdup("This window");
     row->page = g_strdup("");
+    row->identifier = g_strdup("openDashboard");
     row->keysym = GDK_KEY_d;
     row->modifiers = GDK_CONTROL_MASK;
     row->run = 1;

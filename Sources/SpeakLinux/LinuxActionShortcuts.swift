@@ -51,8 +51,36 @@ enum LinuxActionShortcutRun: Equatable {
 extension LinuxWindow {
     static func configureActionShortcuts(_ holder: LinuxEventContext) async throws {
         let bindings = await holder.controller.shortcutBindings
+        let revision = LinuxActionShortcutEditorState.shared.configure(bindings)
         let strings = Strings()
-        let rows = DesktopShortcutAction.allCases.map { action in
+        let rows = actionShortcutRows(bindings, strings: strings)
+        let presets = DesktopShortcutPreset.allCases
+        guard let reset = presets.firstIndex(of: .standard) else {
+            throw DesktopHostError(message: "The canonical shortcut defaults are unavailable.")
+        }
+        let presetRows = presets.flatMap { actionShortcutRows(bindings.applying($0), strings: strings) }
+        let names: [UnsafePointer<CChar>?] = presets.map { strings.add($0.displayName) }
+        let result = withExtendedLifetime(strings) {
+            let configured = rows.withUnsafeBufferPointer { jsti_window_set_action_shortcuts($0.baseAddress, $0.count) }
+            guard configured == 0 else { return configured }
+            return names.withUnsafeBufferPointer { names in
+                presetRows.withUnsafeBufferPointer { entries in
+                    revision.uuidString.withCString {
+                        jsti_window_set_action_shortcut_editor(
+                            $0, names.baseAddress, entries.baseAddress, presets.count, rows.count,
+                            Int32(reset)
+                        )
+                    }
+                }
+            }
+        }
+        guard result == 0 else { throw DesktopHostError(message: "Linux action shortcuts could not be configured.") }
+    }
+
+    private static func actionShortcutRows(
+        _ bindings: DesktopShortcutBindings, strings: Strings
+    ) -> [JSTILinuxActionShortcut] {
+        DesktopShortcutAction.allCases.map { action in
             let binding = bindings[action]
             let chord = binding.linuxChord
             let run = LinuxActionShortcutRun(action)
@@ -60,16 +88,15 @@ extension LinuxWindow {
             let unset = binding.keyCode == 0 && binding.modifiers.isEmpty && !binding.isEnabled
             return JSTILinuxActionShortcut(
                 title: strings.add(action.displayName),
-                chord: strings.add(unset ? "Not set" : chord?.displayName ?? "Mac-specific key"),
-                note: strings.add(note), page: strings.add(run.page), keysym: chord?.keysym ?? 0,
+                chord: strings.add(unset ? "Not set" : chord?.displayName ?? binding.windowsDisplayName),
+                note: strings.add(note), page: strings.add(run.page), identifier: strings.add(action.rawValue),
+                keysym: unset ? 0 : chord?.keysym ?? 0,
                 modifiers: chord?.modifiers ?? 0, run: run.code, slot: run.slot,
-                enabled: binding.isEnabled && !binding.isGlobal && chord != nil && run != .unavailable ? 1 : 0
+                enabled: binding.isEnabled && !binding.isGlobal && chord != nil && run != .unavailable ? 1 : 0,
+                binding_enabled: binding.isEnabled ? 1 : 0, binding_global: binding.isGlobal ? 1 : 0,
+                can_be_global: action.supportsGlobalShortcut ? 1 : 0, has_key: unset ? 0 : 1
             )
         }
-        let result = withExtendedLifetime(strings) {
-            rows.withUnsafeBufferPointer { jsti_window_set_action_shortcuts($0.baseAddress, $0.count) }
-        }
-        guard result == 0 else { throw DesktopHostError(message: "Linux action shortcuts could not be configured.") }
     }
 
     private static func actionShortcutNote(
@@ -80,7 +107,9 @@ extension LinuxWindow {
         if !binding.isEnabled { return "Off" }
         if run == .unavailable { return "Not implemented on Linux yet. The binding stays saved." }
         if binding.isGlobal { return "Global action registration is not available yet. The binding stays saved." }
-        guard let chord = binding.linuxChord else { return "This Mac-specific combination stays saved, not registered." }
+        guard let chord = binding.linuxChord else {
+            return "This Mac-specific combination stays saved, not registered."
+        }
         if chord.modifiers == DesktopShortcutLinuxChord.control,
            let sidebar = DesktopSidebarShortcut.allCases.first(where: { chord.keysym == UInt32(0x30 + $0.digit) }),
            run != .page(sidebar.rawValue) {

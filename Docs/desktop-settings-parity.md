@@ -2246,7 +2246,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | modulatePIIPhiTagging | Live/batch source wired; unqualified / Same | Native default/on/off choice, strict transfer/restart and captured live/batch provider flags; absent stays off. Native/provider acceptance pending. |
 | accessibilityInsertionMode | Equivalent / Missing | Output; Windows cursor/replace-field; Linux paste cannot claim AX replace-all equivalence |
 | selectedHotKey | Equivalent / Partial | Shortcuts; Windows Ctrl/Alt native key; Linux desktop/portal-owned binding, never Mac Fn key translation |
-| customShortcutBindings | Complete source mapping; unqualified / Partial window-local source | Windows Keyboard **Action shortcuts** dialog: all 27 actions source-wired; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Voice editing additionally requires an editable UIA selection and a rewrite API key. Linux projects 20 actions into window-local bindings and shows all saved bindings; seven actions, editing and global registration remain unimplemented. Native/physical acceptance pending. |
+| customShortcutBindings | Complete source mapping; unqualified / Partial window-local source | Windows Keyboard **Action shortcuts** dialog: all 27 actions source-wired; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Voice editing additionally requires an editable UIA selection and a rewrite API key. Linux projects 20 actions into window-local bindings and edits all saved bindings with presets/reset; seven execution actions and global registration remain unimplemented. Native/physical acceptance pending. |
 | paidAccessRoutingEnabled | Apple-specific / Apple-specific | BYOK desktop providers; no paid-access entitlement/routing journey. Retained opaque through import/export |
 | simpleModelChoices | Missing / Missing | Native catalogue picker without simplified paid-model chooser |
 | rememberedLocalTranscriptionSource | Partial / Partial | Models remembers Local selection; no Apple on-device source |
@@ -2262,8 +2262,9 @@ an actually present legacy desktop scalar is a distinct opt-in captured source,
 not silently mapped to a profile. `customShortcutBindings`/individual action
 shortcuts, Shortcut presets/reset and conflict reporting are source wired on
 Windows (partial; see [Individual action shortcuts](#individual-action-shortcuts))
-and partially window-local on Linux; the Linux editor, presets and global registration
-remain gaps. Escape recording cancellation remains a gap. Profiles have a Windows native editor with
+and partially window-local on Linux, with a source-wired editor and presets;
+Linux global registration remains a gap. Escape recording cancellation remains a gap.
+Profiles have a Windows native editor with
 shared ordering/session snapshots; this separate source-only candidate adds
 the GTK editor and actual recording selection described above. Apple bundle-ID matchers are preserved but
 not silently converted to executable paths.
@@ -2529,10 +2530,33 @@ Pause/Resume TTS, API Keys, Permissions, Paste Last History Item and Edit
 Selection by Voice. No API Keys/Permissions action is redirected to an
 unrelated page. Enabled global bindings remain saved and visibly unregistered;
 they are not silently downgraded to local shortcuts. The existing single X11 /
-Wayland-portal dictation shortcut is unchanged. Editing, presets/reset and
-multi-action global registration remain build-out work. Because this is only
+Wayland-portal dictation shortcut is unchanged. Multi-action global registration
+remains build-out work. Because this is only
 partial application of `customShortcutBindings`, migration continues to
 preserve the whole value rather than claiming full Linux coverage.
+
+The Linux Keyboard **Edit action shortcuts...** dialog edits a draft with
+native key capture, Clear, Enabled and Work in other apps switches. It uses the
+same canonical presets and reset defaults as macOS/Windows. Global switches
+explicitly say the binding is saved but not registered. The shared editor
+validation refuses newly introduced duplicates, unmodified typing keys and
+local collisions with Linux's separate Ctrl+Alt+Space dictation shortcut;
+sidebar collisions and shared reserved-key policy produce visible warnings.
+Restoring canonical defaults explicitly permits the default Space/Escape media
+keys without permitting arbitrary unmodified typing keys.
+
+Record-key mode protects keyboard focus; Escape cancels recording a key and
+Tab can leave that mode. The main window's dictation gesture/command admission
+is suppressed while this editor is open, without dropping releases from a
+gesture already in progress. Save/Cancel and error feedback remain visible
+outside the scrolling form. Mac-only combinations survive switch-only edits;
+explicit Clear is distinct from an unsupported key. Unknown future entries
+survive edits and presets. An unchanged settings refresh keeps the draft's
+revision; changed saved bindings invalidate it. Host persistence compares
+against the original bindings again after queue admission. A failed write
+leaves memory, disk and draft unchanged, and a request-correlated completion
+prevents a late save result from closing a newer editor. Saving is not reported
+as complete until persistence and native reconfiguration have succeeded.
 
 Evidence: portable tests in
 `Tests/SpeakCoreTests/DesktopShortcutCatalogTests.swift` and
@@ -2545,6 +2569,11 @@ typing focus, disabled rows, key release/repeat suppression and invalid inputs.
 Native dispatch fixtures exercise actual page navigation, record/Stop events,
 all three Quick Voice slots, and busy/disabled-window/control refusals without
 calling a capture device or speech provider.
+Six `DesktopHostLinuxShortcutEditTests` cover switch-only preservation versus
+Clear, every preset/default, invalid/duplicate keys, strict complete draft
+decoding, stale saves and refused writes. GTK editor fixtures cover draft
+isolation, key capture, Clear, presets/reset, visible failed saves, UUID case
+normalization, close/reopen late-result fencing and stale configurations.
 These new checks, compiler, native smoke tests and physical keyboard acceptance
 are **NOT_RUN** for this source.
 

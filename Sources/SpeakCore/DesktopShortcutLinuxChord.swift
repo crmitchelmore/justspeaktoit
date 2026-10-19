@@ -50,6 +50,15 @@ public struct DesktopShortcutLinuxChord: Hashable, Sendable {
 }
 
 extension DesktopShortcutBinding {
+    public init?(linux chord: DesktopShortcutLinuxChord, isGlobal: Bool, isEnabled: Bool) {
+        guard let key = DesktopShortcutKey.all.first(where: { $0.linuxKeysym == chord.keysym }) else { return nil }
+        var modifiers: DesktopShortcutModifiers = []
+        if chord.modifiers & DesktopShortcutLinuxChord.control != 0 { modifiers.insert(.command) }
+        if chord.modifiers & DesktopShortcutLinuxChord.alt != 0 { modifiers.insert(.option) }
+        if chord.modifiers & DesktopShortcutLinuxChord.shift != 0 { modifiers.insert(.shift) }
+        self.init(keyCode: key.macKeyCode, modifiers: modifiers, isGlobal: isGlobal, isEnabled: isEnabled)
+    }
+
     /// As on Windows, Command projects to Ctrl and Option to Alt. A distinct
     /// Mac Control binding remains preserved rather than collapsing into Ctrl.
     public var linuxChord: DesktopShortcutLinuxChord? {

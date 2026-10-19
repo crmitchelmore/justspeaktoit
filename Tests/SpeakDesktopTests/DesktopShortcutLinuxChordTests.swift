@@ -11,6 +11,9 @@ final class DesktopShortcutLinuxChordTests: XCTestCase {
             let chord = DesktopShortcutBinding(keyCode: key.macKeyCode, modifiers: .command).linuxChord
             XCTAssertEqual(chord?.keysym, key.linuxKeysym)
             XCTAssertEqual(chord?.displayName, "Ctrl+\(key.name)")
+            let stored = DesktopShortcutBinding(linux: try XCTUnwrap(chord), isGlobal: false, isEnabled: true)
+            XCTAssertEqual(stored?.keyCode, key.macKeyCode)
+            XCTAssertEqual(stored?.modifiers, .command)
         }
     }
 

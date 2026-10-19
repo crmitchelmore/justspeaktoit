@@ -1,4 +1,4 @@
-#include "LinuxSupportInternal.h"
+#include "LinuxActionShortcutsInternal.h"
 
 #include <adwaita.h>
 #include <string.h>
@@ -267,6 +267,7 @@ static void refresh_setup(void) {
 
 static void refresh_actions(void) {
     gboolean idle = ui.state == JSTI_STATE_IDLE;
+    jsti_action_shortcut_editor_set_idle(idle);
     gchar *text = displayed_transcript();
     gboolean has_text = text != NULL && text[0] != '\0';
     g_free(text);
@@ -965,6 +966,7 @@ static gboolean on_close_request(GtkWindow *window, gpointer data) {
     jsti_troubleshooting_close();
     jsti_voice_sources_close();
     jsti_voice_credentials_close();
+    jsti_action_shortcut_editor_close();
     ui.closing = TRUE;
     if (ui.backup_chooser != NULL) g_cancellable_cancel(ui.backup_chooser);
     g_clear_object(&ui.backup_chooser);
@@ -1787,7 +1789,7 @@ static GtkWidget *build_keyboard(void) {
     g_signal_connect(ui.style_row, "notify::selected", G_CALLBACK(on_style), NULL);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(shortcut), GTK_WIDGET(ui.style_row));
     gtk_box_append(GTK_BOX(column), shortcut);
-    gtk_box_append(GTK_BOX(column), jsti_action_shortcuts_group_new());
+    gtk_box_append(GTK_BOX(column), jsti_action_shortcuts_group_new(ui.window));
     return page;
 }
 
@@ -4903,6 +4905,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (!sidebar_navigation_self_test())
         return fail(error, capacity, "sidebar hints, focus guards or window-local navigation failed");
     if (jsti_action_shortcuts_self_test(error, capacity) != 0) return -1;
+    if (jsti_action_shortcut_editor_self_test(ui.window, error, capacity) != 0) return -1;
     if (!action_execution_self_test())
         return fail(error, capacity, "action shortcut native page, event, slot or sensitivity routing failed");
     if (!post_processing_self_test())

@@ -27,8 +27,9 @@ typedef void (*jsti_window_apply_fn)(gpointer data);
 int32_t jsti_window_post(jsti_window_apply_fn apply, gpointer data, GDestroyNotify destroy);
 void jsti_window_emit(gint32 event, const char *text, gint32 index);
 struct _GtkEventControllerKey;
+struct _GtkWindow;
 typedef gboolean (*jsti_action_run_fn)(gint run, const char *page, gint slot);
-struct _GtkWidget *jsti_action_shortcuts_group_new(void);
+struct _GtkWidget *jsti_action_shortcuts_group_new(struct _GtkWindow *owner);
 gboolean jsti_action_shortcuts_key(struct _GtkEventControllerKey *controller,
     guint keyval, guint keycode, guint modifiers, struct _GtkWidget *focused, jsti_action_run_fn run);
 void jsti_action_shortcuts_release(guint keycode);

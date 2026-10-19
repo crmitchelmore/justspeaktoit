@@ -119,6 +119,28 @@ final class DesktopHostCorrectionLearningTests: XCTestCase {
         XCTAssertGreaterThan(fixture.readback.cancels, 0)
     }
 
+    func testStopLearning_RevokesApprovalAndFencesHeldObservationBeforeFurtherOutput() async throws {
+        let fixture = try LearningFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        _ = try await fixture.host.vocabularyEvent(kind: 3, payload: "allowLearning")
+        let entered = expectation(description: "observation waiting during Stop")
+        let owned = await fixture.host.learningStartWaiting(entered)
+        let pending = try XCTUnwrap(owned)
+        await fulfillment(of: [entered], timeout: 3)
+        _ = try await fixture.host.vocabularyEvent(kind: 3, payload: "stopLearning")
+        await pending.value
+        let state = try await fixture.host.learningState()
+        XCTAssertFalse(state.approved)
+        XCTAssertTrue(state.candidates.isEmpty)
+        XCTAssertEqual(state.rules, 0)
+        XCTAssertEqual(fixture.readback.reads, 0)
+        XCTAssertGreaterThan(fixture.readback.cancels, 0)
+        let begins = fixture.readback.begins
+        await fixture.host.learningOutputAndWait()
+        XCTAssertEqual(fixture.readback.begins, begins)
+        await fixture.host.close()
+    }
+
     func testActualReplacementOutput_FencesHeldOldObservationAndCompletesNewOutput() async throws {
         let fixture = try LearningFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }

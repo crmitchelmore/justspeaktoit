@@ -14,9 +14,16 @@ has a Learning preferences button that opens the existing Corrections preference
 group. Both reuse the existing revision-aware preference authority and save
 path; there is no second settings store or implicit session approval.
 Linux observational learning still requires separate local session consent.
+Windows Stop learning remains enabled while candidate work is pending; Allow
+and mutations stay disabled. Stop follows the existing ordered settings queue,
+with explicit waiting-for-confirmation feedback rather than claiming revocation
+before the Host has processed it.
 
 Authored native fixtures check GTK row ancestry, Windows page scope and initial
 Corrections group selection, and saving without losing hidden preference values.
+Additional fixtures check pending native Stop availability and that Host Stop
+revokes approval, cancels a held observation before readback, and prevents
+further output from starting another observation without fresh approval.
 These changes have not been executed locally; automatic native CI and actual
 installed learning workflows remain required before claiming acceptance.
 
@@ -60,6 +67,19 @@ while preserving valid numbers surrounded by whitespace. GTK now checks that
 numeric conversion consumed a number **before** skipping trailing whitespace;
 previously a whitespace-only pitch could be accepted as zero. This source fix
 and the Win32/GTK regression assertions are **NOT_RUN** locally.
+
+## Cleanup mode disclosure (source only)
+
+The Windows cleanup dialog no longer claims that post-processing has no
+streaming route. Its mode label follows the selected source/model: remote
+finished-transcript cleanup can stream previews, while built-in rules and
+downloaded local LLM cleanup remain completed-only. An unavailable selection
+asks for a supported model instead of implying an executable route. This is
+distinct from Auto-Clean during live dictation; no provider request, setting
+default or model capability changes.
+
+Authored Win32 fixtures check local rules, downloaded models, remote selection
+and unavailable-model labels. They are **NOT_RUN** locally.
 
 ## Modulate live and batch feature controls (source only)
 

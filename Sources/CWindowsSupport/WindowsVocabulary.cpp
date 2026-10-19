@@ -206,7 +206,7 @@ void pending(Dialog &d, bool busy) {
     d.busy = busy;
     for (int id : {save, remove, up, down, add, previewButton, preferences, defaults, list, importMerge,
          importReplace, exportJSON, reviewCandidates, promoteCandidate, dismissCandidate, clearCandidates,
-         allowLearning, stopLearning, legacyDictionary})
+         allowLearning, legacyDictionary})
         EnableWindow(GetDlgItem(d.window, id), !busy);
     if (d.kind == 4)
         for (int id : {field, field + 1, search}) EnableWindow(GetDlgItem(d.window, id), !busy);
@@ -257,7 +257,8 @@ void action(Dialog &d, const char *name) {
         for (int i = 1; i < 8; ++i) payload += "\t" + escaped(value(d, i));
     }
     pending(d, true);
-    set(d.window, notice, "Saving or previewing...");
+    set(d.window, notice, std::strcmp(name, "stopLearning") == 0
+        ? "Stop requested; waiting for confirmation..." : "Saving or previewing...");
     d.emit(70, payload.c_str(), d.kind);
 }
 int scale(HWND w, int v) { return MulDiv(v, static_cast<int>(GetDpiForWindow(w)), 96); }
@@ -810,14 +811,26 @@ bool jsti_vocabulary_self_test(HWND owner, std::string &error) {
             continue;
         }
         if (kind == 3) {
+            bool valid = dialog.busy && IsWindowEnabled(GetDlgItem(window, stopLearning))
+                && !IsWindowEnabled(GetDlgItem(window, allowLearning));
+            captured.clear();
+            SendMessageW(window, WM_COMMAND, MAKEWPARAM(stopLearning, BN_CLICKED),
+                reinterpret_cast<LPARAM>(GetDlgItem(window, stopLearning)));
+            valid = valid && captured == "stopLearning" && dialog.busy
+                && IsWindowEnabled(GetDlgItem(window, stopLearning))
+                && !IsWindowEnabled(GetDlgItem(window, allowLearning))
+                && get(window, notice) == "Stop requested; waiting for confirmation...";
+            pending(dialog, false);
+            valid = valid && IsWindowEnabled(GetDlgItem(window, allowLearning))
+                && IsWindowEnabled(GetDlgItem(window, stopLearning));
             Row row{}; row[0] = "synthetic\t%"; row[1] = "Synthetic"; row[2] = "Canonical"; row[3] = "2";
             dialog.rows.push_back(row); dialog.selected = 0;
             fill(dialog, row); action(dialog, "promote");
             auto fields = split(captured, '\t');
-            bool valid = fields.size() == 2 && decoded(fields[1]) == row[0] && fields[0] == "promote";
+            valid = valid && fields.size() == 2 && decoded(fields[1]) == row[0] && fields[0] == "promote";
             action(dialog, "clear"); valid = valid && captured == "clear";
             DestroyWindow(window);
-            if (!valid) { error = "Stored candidate events were not preserved."; return false; }
+            if (!valid) { error = "Stored candidate events or pending Stop learning availability failed."; return false; }
             continue;
         }
         if (kind == 4) {

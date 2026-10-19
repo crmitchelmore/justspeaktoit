@@ -82,6 +82,10 @@ void updateModelControls(HWND window, const SettingsDialog &dialog) {
         (static_cast<size_t>(selected) >= remoteBoundary(dialog.config)) == local;
     const bool rules = available && selected == dialog.config.localIndex;
     const bool instructions = available && !rules && (local || location == 1);
+    SetDlgItemTextW(window, modeLabelID, !available
+        ? L"Mode: Select a supported model"
+        : local ? L"Mode: Finished transcript (local, completed-only)"
+        : L"Mode: Finished transcript (remote, optional streaming previews)");
     SetDlgItemTextW(window, warningID, location == CB_ERR
         ? L"The stored model is unavailable. Choose Local or Remote and a supported model before applying."
         : !available ? (local ? L"Choose a supported local model before applying."
@@ -147,7 +151,7 @@ bool createControls(HWND window, SettingsDialog &dialog) {
         add(L"STATIC", L"", SS_LEFT, warningID) &&
         add(L"STATIC", L"Model &source", 0, locationLabelID) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, locationID) &&
-        add(L"STATIC", L"Mode: Batch (post-processing has no streaming route)", 0, modeLabelID) &&
+        add(L"STATIC", L"", 0, modeLabelID) &&
         add(L"STATIC", L"Post-processing &model", 0, modelLabelID) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, modelID) &&
         add(L"BUTTON", L"&Manage downloaded GGUF models...", BS_PUSHBUTTON | WS_TABSTOP, manageID) &&
@@ -401,12 +405,14 @@ static bool localCleanupSourcesSelfTest(HWND owner, std::string &error) {
         && SendDlgItemMessageW(window, modelID, CB_GETCURSEL, 0, 0) == 2
         && SendDlgItemMessageW(window, modelID, CB_GETITEMDATA, 2, 0) == 4
         && IsWindowEnabled(GetDlgItem(window, promptID)) && IsWindowEnabled(GetDlgItem(window, directivesID))
+        && controlText(window, modeLabelID) == L"Mode: Finished transcript (local, completed-only)"
         && !(GetWindowLongPtrW(GetDlgItem(window, keyID), GWL_STYLE) & WS_VISIBLE)
         && (GetWindowLongPtrW(GetDlgItem(window, manageID), GWL_STYLE) & WS_VISIBLE);
     SendDlgItemMessageW(window, modelID, CB_SETCURSEL, 0, 0);
     SendMessageW(window, WM_COMMAND, MAKEWPARAM(modelID, CBN_SELCHANGE), 0);
     okay = okay && !IsWindowEnabled(GetDlgItem(window, promptID)) &&
         !IsWindowEnabled(GetDlgItem(window, directivesID)) && !IsWindowEnabled(GetDlgItem(window, tagsID)) &&
+        controlText(window, modeLabelID) == L"Mode: Finished transcript (local, completed-only)" &&
         controlText(window, warningID) == dialog.config.localNotice;
     SendDlgItemMessageW(window, modelID, CB_SETCURSEL, 2, 0);
     SendMessageW(window, WM_COMMAND, MAKEWPARAM(modelID, CBN_SELCHANGE), 0);
@@ -414,6 +420,7 @@ static bool localCleanupSourcesSelfTest(HWND owner, std::string &error) {
     SendMessageW(window, WM_COMMAND, MAKEWPARAM(locationID, CBN_SELCHANGE), 0);
     okay = okay && SendDlgItemMessageW(window, modelID, CB_GETCOUNT, 0, 0) == 2
         && SendDlgItemMessageW(window, modelID, CB_GETCURSEL, 0, 0) == 1
+        && controlText(window, modeLabelID) == L"Mode: Finished transcript (remote, optional streaming previews)"
         && SendDlgItemMessageW(window, modelID, CB_GETITEMDATA, 1, 0) == 1;
     SetDlgItemTextW(window, keyID, L"must-not-reach-local-callback");
     SendDlgItemMessageW(window, locationID, CB_SETCURSEL, 0, 0);
@@ -433,6 +440,7 @@ static bool localCleanupSourcesSelfTest(HWND owner, std::string &error) {
     SendMessageW(window, WM_COMMAND, MAKEWPARAM(locationID, CBN_SELCHANGE), 0);
     SendMessageW(window, WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
     const bool noFallback = IsWindow(window) && applied.calls == 1 &&
+        controlText(window, modeLabelID) == L"Mode: Select a supported model" &&
         SendDlgItemMessageW(window, modelID, CB_GETCURSEL, 0, 0) == CB_ERR;
     if (IsWindow(window)) DestroyWindow(window);
     if (!noFallback || jsti_window_set_cleanup_sources(10001) != -1) {
@@ -491,6 +499,7 @@ bool jsti_settings_self_test(HWND owner, std::string &error) {
         !IsWindowEnabled(GetDlgItem(window, directivesID)) && !IsWindowEnabled(GetDlgItem(window, tagsID)) &&
         controlText(window, directivesID) == L"Include personal lexicon &directives" &&
         controlText(window, tagsID) == L"Include lexicon context &tags" &&
+        controlText(window, modeLabelID) == L"Mode: Finished transcript (local, completed-only)" &&
         controlText(window, warningID) == dialog.config.localNotice;
     SendDlgItemMessageW(window, enabledID, BM_SETCHECK, BST_CHECKED, 0);
     SetDlgItemTextW(window, keyID, L"must-not-reach-callback");
@@ -529,6 +538,7 @@ bool jsti_settings_self_test(HWND owner, std::string &error) {
     if (!window) { error = jsti::systemError("Creating unavailable cleanup settings fixture"); return false; }
     SendMessageW(window, WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
     const bool refused = IsWindow(window) && applied.calls == 0 &&
+        controlText(window, modeLabelID) == L"Mode: Select a supported model" &&
         SendDlgItemMessageW(window, locationID, CB_GETCURSEL, 0, 0) == CB_ERR &&
         SendDlgItemMessageW(window, modelID, CB_GETCOUNT, 0, 0) == 0 &&
         !IsWindowEnabled(GetDlgItem(window, keyID));

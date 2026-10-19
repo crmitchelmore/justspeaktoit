@@ -125,7 +125,12 @@ final class DesktopLocalStreamingClientTests: XCTestCase {
             tuning: .init(interimInterval: 60, maximumWindow: 2)
         )
         client.start(onTranscript: { events.record($0, $1) }, onError: { error in XCTFail("\(error)") })
-        send(client, pcm(seconds: 5, amplitude: 4_000))
+        // A steady tone becomes noise after about four seconds, so a 20 ms
+        // gap each second keeps it speech whenever the worker commits.
+        for _ in 0..<5 {
+            send(client, pcm(seconds: 0.02, amplitude: 0))
+            send(client, pcm(seconds: 1, amplitude: 4_000))
+        }
         _ = await client.finishAndWait()
         XCTAssertTrue(recognizer.calls.allSatisfy { $0 <= 32_000 })
         XCTAssertGreaterThanOrEqual(recognizer.calls.count, 3)

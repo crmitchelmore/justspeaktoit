@@ -164,7 +164,7 @@ final class DesktopHostVoiceFormatTests: XCTestCase {
             await controller.saveVoiceOutput(saved)
             let shown = try await controller.configurationForNativeEditor()
             XCTAssertEqual(shown.text(key), format)
-            try await controller.saveConfiguration([], intent: .persistOnly)
+            try await controller.saveConfiguration(shown.entries, intent: .persistOnly)
             let after = await controller.voiceOutputSettings()
             XCTAssertEqual(after.format, format)
         }

@@ -236,6 +236,32 @@ void encode(const JSTIVoiceCodecRequest &request, MemoryStream *memory) {
     }
     check(request, deadline); require(writer->Finalize(), "Finalize native audio container"); check(request, deadline);
 }
+void requireAudioAttribute(IMFMediaType *type, REFGUID key, UINT32 expected, const char *operation) {
+    UINT32 actual = 0; require(type->GetUINT32(key, &actual), operation);
+    if (actual != expected) throw Failure{MF_E_INVALIDMEDIATYPE, operation};
+}
+void verifyAudioType(IMFMediaType *type, REFGUID codec, uint32_t rate, bool decoded) {
+    GUID major{}, actual{};
+    require(type->GetGUID(MF_MT_MAJOR_TYPE, &major), "Read retained voice major type");
+    require(type->GetGUID(MF_MT_SUBTYPE, &actual), "Read retained voice subtype");
+    if (major != MFMediaType_Audio || actual != codec)
+        throw Failure{MF_E_INVALIDMEDIATYPE, "Retained voice audio has an unexpected codec; choose WAV"};
+    requireAudioAttribute(type, MF_MT_AUDIO_NUM_CHANNELS, 1, "Voice audio must remain mono; choose WAV");
+    requireAudioAttribute(type, MF_MT_AUDIO_SAMPLES_PER_SECOND, rate,
+        "Voice audio must preserve the captured sample rate; choose WAV");
+    if (decoded) {
+        requireAudioAttribute(type, MF_MT_AUDIO_BITS_PER_SAMPLE, 16, "Decoded voice audio must remain PCM16");
+        requireAudioAttribute(type, MF_MT_AUDIO_BLOCK_ALIGNMENT, 2, "Decoded voice audio has invalid PCM alignment");
+        requireAudioAttribute(type, MF_MT_AUDIO_AVG_BYTES_PER_SECOND, rate * 2,
+            "Decoded voice audio has an invalid PCM byte rate");
+    }
+}
+void verifyNativeType(IMFSourceReader *reader, const JSTIVoiceCodecRequest &request) {
+    ComPtr<IMFMediaType> type;
+    require(reader->GetNativeMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, &type),
+        "Read retained voice track format");
+    verifyAudioType(type.Get(), subtype(request.format), request.sample_rate, false);
+}
 void decode(const JSTIVoiceCodecRequest &request, const std::vector<uint8_t> &encoded) {
     ComPtr<MemoryStream> memory; memory.Attach(new MemoryStream(encoded));
     ComPtr<IMFByteStream> stream; require(API::shared().stream(memory.Get(), &stream), "Open encoded voice stream");
@@ -243,6 +269,7 @@ void decode(const JSTIVoiceCodecRequest &request, const std::vector<uint8_t> &en
     require(API::shared().reader(stream.Get(), nullptr, &reader), "Open native encoded voice decoder");
     require(reader->SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS, FALSE), "Disable unrelated streams");
     require(reader->SetStreamSelection(MF_SOURCE_READER_FIRST_AUDIO_STREAM, TRUE), "Select encoded voice track");
+    verifyNativeType(reader.Get(), request);
     auto type = pcmType(request.sample_rate);
     require(reader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, nullptr, type.Get()), "Decode mono PCM16");
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(120);
@@ -252,8 +279,16 @@ void decode(const JSTIVoiceCodecRequest &request, const std::vector<uint8_t> &en
         DWORD flags = 0; ComPtr<IMFSample> sample;
         require(reader->ReadSample(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, nullptr, &flags, nullptr, &sample),
             "Decode retained voice audio");
-        if (flags & (MF_SOURCE_READERF_ERROR | MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED))
-            throw Failure{MF_E_INVALIDMEDIATYPE, "Encoded voice audio changed its decoded format"};
+        if (flags & MF_SOURCE_READERF_ERROR)
+            throw Failure{MF_E_INVALIDMEDIATYPE, "Encoded voice audio decoder reported an error"};
+        if (flags & MF_SOURCE_READERF_NATIVEMEDIATYPECHANGED) verifyNativeType(reader.Get(), request);
+        // A decoder can announce new attributes without changing the required PCM layout.
+        if (sample || (flags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED)) {
+            ComPtr<IMFMediaType> current;
+            require(reader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, &current),
+                "Read actual decoded voice format");
+            verifyAudioType(current.Get(), MFAudioFormat_PCM, request.sample_rate, true);
+        }
         if (sample) {
             ComPtr<IMFMediaBuffer> buffer; require(sample->ConvertToContiguousBuffer(&buffer), "Read decoded audio");
             BYTE *bytes = nullptr; DWORD count = 0;
@@ -283,9 +318,22 @@ template<class Work> int32_t perform(Work work, char *error, size_t capacity) {
 int32_t jsti_voice_codec_available(const char *format, uint32_t rate, char *error, size_t capacity) {
     return perform([&] {
         requireDecoder(format);
+        // Writer setup alone does not prove muxing or the decoder's final negotiated output.
+        encodedType(format, rate);
+        std::vector<uint8_t> pcm(static_cast<size_t>(rate) * 2);
+        for (size_t index = 0; index < rate; ++index) {
+            uint16_t sample = index % 64 < 32 ? 6000 : static_cast<uint16_t>(-6000);
+            pcm[index * 2] = static_cast<uint8_t>(sample & 255);
+            pcm[index * 2 + 1] = static_cast<uint8_t>(sample >> 8);
+        }
+        JSTIVoiceCodecRequest probe{format, rate, pcm.data(), pcm.size(),
+            [](int32_t, const uint8_t *, size_t, void *) -> int32_t { return 0; },
+            [](void *) -> int32_t { return 0; }, nullptr};
         ComPtr<MemoryStream> memory; memory.Attach(new MemoryStream());
-        ComPtr<IMFByteStream> stream; require(API::shared().stream(memory.Get(), &stream), "Create codec probe stream");
-        DWORD track = 0; auto writer = makeWriter(format, rate, stream.Get(), track);
+        encode(probe, memory.Get());
+        auto encoded = memory->snapshot();
+        if (encoded.empty()) throw Failure{MF_E_INVALID_FILE_FORMAT, "Native codec probe returned empty audio"};
+        decode(probe, encoded);
     }, error, capacity);
 }
 int32_t jsti_voice_codec_encode(const JSTIVoiceCodecRequest *request, char *error, size_t capacity) {

@@ -21,7 +21,9 @@ final class VoiceSynthesisPreferenceTests: XCTestCase {
         XCTAssertEqual(speed, VoiceSynthesisOptions.speedRange)
         XCTAssertEqual(pitch, VoiceSynthesisOptions.pitchRange)
         XCTAssertEqual(Set(DesktopConfiguration.fields.map(\.key)).intersection(DesktopConfiguration.voiceTransferKeys),
-            SonioxVoicePreference.keys.union([ApplicationPreferenceKey.ttsQuality.rawValue]))
+            SonioxVoicePreference.keys.union([
+                ApplicationPreferenceKey.ttsQuality.rawValue, VoiceAudioFormat.preferenceKey
+            ]))
     }
 
     func testUpdate_PreservesAbsenceAndAcceptsExactNumericBoundaries() throws {

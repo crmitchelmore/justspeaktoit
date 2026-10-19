@@ -59,7 +59,19 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable { // swiftlint:
         }
     }
 
-    public static let fields: [Field] = [
+    public static let fields: [Field] = {
+        // Appended step by step: one chained `+` expression exceeds the type checker's time limit.
+        var all = Self.baseFields
+        all += [VoiceSynthesisPreference.quality.field, VoiceAudioFormat.transferField]
+        all += ShellPreference.fields
+        all += SonioxVoicePreference.fields
+        all += CaptureDeliveryPreference.fields
+        all += LivePolishPreference.fields
+        all += Self.modulateFields
+        return all
+    }()
+
+    private static let baseFields: [Field] = [
         .init(key: AppSwitchDelivery.preferenceKey, title: AppSwitchDelivery.settingName,
               group: "Output", kind: .choice(AppSwitchDelivery.desktopChoices),
               defaultValue: AnyCodable(.string(""))),
@@ -170,10 +182,7 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable { // swiftlint:
         .init(key: ApplicationPreferenceKey.recordingSoundVolume.rawValue, title: "Recording sound volume (0 to 1)",
               group: "General", kind: .number(0...1),
               defaultValue: AnyCodable(.double(RecordingFeedbackDefaults.volume)))
-    ] + [VoiceSynthesisPreference.quality.field, VoiceAudioFormat.transferField]
-        + ShellPreference.fields
-        + SonioxVoicePreference.fields + CaptureDeliveryPreference.fields
-        + LivePolishPreference.fields + modulateFields
+    ]
 
     public private(set) var values: [String: AnyCodable]
 

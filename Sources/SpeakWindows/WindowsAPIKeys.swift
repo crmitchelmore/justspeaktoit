@@ -44,6 +44,10 @@ extension WindowsEventContext {
 extension SpeakWindowsMain {
     static func configureAPIKeys(_ holder: WindowsEventContext) async {
         await holder.refreshAPIKeys(status: "")
+        WindowsOnboardingHooks.shared.openAPIKeys = { _ in
+            WindowsNative.openAPIKeys()
+            return true
+        }
     }
 }
 

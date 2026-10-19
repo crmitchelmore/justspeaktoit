@@ -12,7 +12,7 @@ extension WindowsHostPlatform {
 /// How Windows performs each shared action. Actions with no Windows feature
 /// yet keep their bindings for the Mac and are shown as Mac only.
 enum WindowsActionShortcutRun: Equatable {
-    case macOnly, record, page(String), playPause, stopSpeech
+    case macOnly, record, page(String), playPause, stopSpeech, apiKeys, permissions, compareModels
 
     init(_ action: DesktopShortcutAction) {
         switch action {
@@ -30,8 +30,12 @@ enum WindowsActionShortcutRun: Equatable {
         case .openProfilesSettings: self = .page(DesktopSidebarShortcut.profiles.rawValue)
         case .openKeyboardSettings: self = .page("keyboard")
         case .openAboutSettings: self = .page(DesktopSidebarShortcut.about.rawValue)
-        case .speakSelectedText, .speakClipboard, .openTroubleshooting, .openDataMigrationSettings,
-             .openAPIKeysSettings, .openPermissionsSettings, .openCompareModelsSettings,
+        // Windows keeps backup, export and inspection on General.
+        case .openDataMigrationSettings: self = .page(DesktopSidebarShortcut.general.rawValue)
+        case .openAPIKeysSettings: self = .apiKeys
+        case .openPermissionsSettings: self = .permissions
+        case .openCompareModelsSettings: self = .compareModels
+        case .speakSelectedText, .speakClipboard, .openTroubleshooting,
              .quickVoice1, .quickVoice2, .quickVoice3, .pasteLastHistoryItem, .editSelectionByVoice:
             self = .macOnly
         }
@@ -46,6 +50,9 @@ enum WindowsActionShortcutRun: Equatable {
         case .page: return Int32(JSTI_ACTION_RUN_PAGE)
         case .playPause: return Int32(JSTI_ACTION_RUN_PLAY_PAUSE)
         case .stopSpeech: return Int32(JSTI_ACTION_RUN_STOP_SPEECH)
+        case .apiKeys: return Int32(JSTI_ACTION_RUN_API_KEYS)
+        case .permissions: return Int32(JSTI_ACTION_RUN_PERMISSIONS)
+        case .compareModels: return Int32(JSTI_ACTION_RUN_COMPARE)
         }
     }
 

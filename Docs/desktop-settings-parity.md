@@ -1715,7 +1715,7 @@ The Mac's API Keys destination
 (`Sources/SpeakApp/Views/Settings/SettingsView+APIKeys.swift`) now has a native
 Windows equivalent: **Transcription → All API keys…** opens a dialog, and
 `WindowsNative.openAPIKeys()` (`jsti_window_request_api_keys`) is the single
-entry hook onboarding can call later. It lists one row per credential Windows
+entry hook; the setup guide and the Open API Keys Settings action shortcut use it. It lists one row per credential Windows
 can use, projected from the canonical catalogues rather than a Windows-owned
 list (`DesktopHostAPIKeys.swift` `apiKeyCatalogEntries`): every non-local
 transcription batch/live provider, OpenRouter post-processing, each Voice Output
@@ -1853,8 +1853,8 @@ remediation missing on Windows are superseded by this source.
   privacy settings (rechecked on return), the Permissions window and a test
   dictation through the tray's Start/Stop. The route step reports whether the
   selected remote model has a saved key. Provider keys go through
-  `WindowsOnboardingHooks.shared.openAPIKeys`, which a separate API Keys page
-  can set; until then it opens Transcription, where keys are entered today.
+  `WindowsOnboardingHooks.shared.openAPIKeys`, which the API Keys page sets
+  at startup to open its dialog; unset, it falls back to Transcription.
   Skip and Finish both record completion. The guide is modeless so the global
   shortcut keeps working while practising; the app never types into its own
   windows, so practice text appears in the main window's transcript, ready to copy.
@@ -1990,7 +1990,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | modulatePIIPhiTagging | Live/batch source wired; unqualified / Same | Native default/on/off choice, strict transfer/restart and captured live/batch provider flags; absent stays off. Native/provider acceptance pending. |
 | accessibilityInsertionMode | Equivalent / Missing | Output; Windows cursor/replace-field; Linux paste cannot claim AX replace-all equivalence |
 | selectedHotKey | Equivalent / Partial | Shortcuts; Windows Ctrl/Alt native key; Linux desktop/portal-owned binding, never Mac Fn key translation |
-| customShortcutBindings | Partial source wiring; unqualified / Shared model only | Windows Keyboard **Action shortcuts** dialog: 15 of 27 actions run, the rest stay stored for the Mac; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Linux transfers the Mac-compatible value unchanged without native registration. Native/physical acceptance pending. |
+| customShortcutBindings | Partial source wiring; unqualified / Shared model only | Windows Keyboard **Action shortcuts** dialog: 19 of 27 actions run, the rest stay stored for the Mac; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Linux transfers the Mac-compatible value unchanged without native registration. Native/physical acceptance pending. |
 | paidAccessRoutingEnabled | Apple-specific / Apple-specific | BYOK desktop providers; no paid-access entitlement/routing journey. Retained opaque through import/export |
 | simpleModelChoices | Missing / Missing | Native catalogue picker without simplified paid-model chooser |
 | rememberedLocalTranscriptionSource | Partial / Partial | Models remembers Local selection; no Apple on-device source |
@@ -2215,8 +2215,10 @@ binding even when its switches change) but are not registered on Windows.
 Windows runs Start/Stop Recording, Pause/Resume and Stop speech (History
 playback; partial), and the page actions Dashboard, History, Voice Output
 (both), General, Transcription, Post-processing, Corrections, Pronunciation,
-Profiles, Keyboard and About. Speak Selected Text, Speak Clipboard,
-Troubleshooting, Data & Migration, API Keys, Permissions, Compare Models, Quick
+Profiles, Keyboard and About. Data & Migration shows General, which holds the
+Windows backup, export and inspection controls; API Keys, Permissions and
+Compare Models press the All API keys, Permissions and Compare models buttons
+when enabled. Speak Selected Text, Speak Clipboard, Troubleshooting, Quick
 Voice 1-3, Paste Last History Item and Edit Selection by Voice are marked
 **Mac only** in the editor and stay stored. Only Start/Stop Recording can work in
 other apps (`RegisterHotKey`, which needs Ctrl or Alt, or F13-F24 alone); other

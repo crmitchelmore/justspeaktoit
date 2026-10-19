@@ -3348,6 +3348,14 @@ void jsti_window_action_command(HWND window, int run, const char *page) {
         SendMessageW(window, WM_COMMAND, MAKEWPARAM(stopPlaybackID, BN_CLICKED),
                      reinterpret_cast<LPARAM>(GetDlgItem(window, stopPlaybackID)));
         break;
+    case JSTI_ACTION_RUN_API_KEYS: case JSTI_ACTION_RUN_PERMISSIONS: case JSTI_ACTION_RUN_COMPARE: {
+        const int button = run == JSTI_ACTION_RUN_API_KEYS ? apiKeysID
+            : run == JSTI_ACTION_RUN_PERMISSIONS ? permissionsID : comparisonID;
+        HWND control = GetDlgItem(window, button);
+        if (control && IsWindowEnabled(control))
+            SendMessageW(window, WM_COMMAND, MAKEWPARAM(button, BN_CLICKED), reinterpret_cast<LPARAM>(control));
+        break;
+    }
     default: break;
     }
 }

@@ -1398,7 +1398,10 @@ enum {
     JSTI_ACTION_RUN_RECORD = 1,      /* as the Record button */
     JSTI_ACTION_RUN_PAGE = 2,        /* shows `page`, a sidebar page name */
     JSTI_ACTION_RUN_PLAY_PAUSE = 3,  /* as History's Play/Pause */
-    JSTI_ACTION_RUN_STOP_SPEECH = 4  /* as Stop on History or Voice Output */
+    JSTI_ACTION_RUN_STOP_SPEECH = 4, /* as Stop on History or Voice Output */
+    JSTI_ACTION_RUN_API_KEYS = 5,    /* as Transcription's All API keys button */
+    JSTI_ACTION_RUN_PERMISSIONS = 6, /* as About's Permissions button */
+    JSTI_ACTION_RUN_COMPARE = 7      /* as Transcription's Compare models button */
 };
 typedef struct {
     const char *identifier;

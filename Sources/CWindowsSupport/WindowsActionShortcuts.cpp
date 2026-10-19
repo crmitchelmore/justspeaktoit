@@ -584,7 +584,8 @@ bool parseRow(const JSTIActionShortcut &source, Row &row, bool keysOnly) {
     if (source.note && (!jsti::wide(source.note, row.wideNote) || row.wideNote.size() > 512)) return false;
     switch (source.run) {
     case JSTI_ACTION_RUN_NONE: case JSTI_ACTION_RUN_RECORD: case JSTI_ACTION_RUN_PLAY_PAUSE:
-    case JSTI_ACTION_RUN_STOP_SPEECH: break;
+    case JSTI_ACTION_RUN_STOP_SPEECH: case JSTI_ACTION_RUN_API_KEYS: case JSTI_ACTION_RUN_PERMISSIONS:
+    case JSTI_ACTION_RUN_COMPARE: break;
     case JSTI_ACTION_RUN_PAGE:
         if (!source.page || !*source.page || std::strlen(source.page) > 64) return false;
         row.page = source.page;

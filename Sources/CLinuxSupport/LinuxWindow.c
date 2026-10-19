@@ -1787,7 +1787,6 @@ static void open_link_finished(GObject *source, GAsyncResult *result, gpointer d
         g_warning("Could not open the browser: %s", error->message);
         if (ui.window != NULL && !ui.closing) {
             gtk_label_set_text(ui.status, "Could not open your browser. Check your default browser settings.");
-            emit(JSTI_EVENT_ERROR, "Could not open your browser. Check your default browser settings.", 0);
         }
         g_error_free(error);
     }

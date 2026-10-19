@@ -48,10 +48,7 @@ struct WindowsNativeEffects: WindowsControllerEffects {
     func transcribe(
         _ request: WindowsTranscriptionRequest, with controller: WindowsAppController
     ) async throws -> TranscriptionResult {
-        try await controller.transcribePreparedAudio(
-            request.audio, model: request.model, key: request.key, duration: request.duration,
-            language: request.language, keywords: request.keywords, azureEndpoint: request.azureEndpoint
-        )
+        try await controller.transcribePreparedAudio(request)
     }
 
     func perform(_ job: WindowsOutputJob, text: String) -> DesktopTextOutputResult { job.performResult(text) }

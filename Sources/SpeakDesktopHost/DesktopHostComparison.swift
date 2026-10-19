@@ -27,6 +27,8 @@ struct DesktopComparisonConfiguration {
     let endpoint: String
     let deviceID: String
     let generation: UUID
+    var modulateLive = ModulateLiveOptions.none
+    var modulateBatch = ModulateTranscriptionFeatures()
 }
 
 final class DesktopHostComparisonClosingCapture: @unchecked Sendable {
@@ -160,7 +162,8 @@ extension DesktopHostController {
             guard let route = LiveTranscriptionRouting.route(for: candidate.modelID),
                   let client = effects.makeLiveClient(
                     model: candidate.modelID, key: configuration.keys[candidate.modelID] ?? "",
-                    language: configuration.language, azureEndpoint: configuration.endpoint
+                    language: configuration.language, azureEndpoint: configuration.endpoint,
+                    options: LiveClientOptions(modulate: configuration.modulateLive)
                   ) else { throw DesktopTranscriptionError.unsupportedModel }
             return DesktopComparisonLive.Lane(candidate: candidate, client: client, sampleRate: route.sampleRate)
         }
@@ -219,7 +222,7 @@ extension DesktopHostController {
         return try await DesktopTranscription.transcribe(
             audioURL: request.audio, model: request.model, apiKey: request.key,
             duration: request.duration, language: request.language,
-            azureEndpoint: endpoint, staging: uploadStaging
+            azureEndpoint: endpoint, modulateFeatures: request.modulateFeatures, staging: uploadStaging
         )
     }
 

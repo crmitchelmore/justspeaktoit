@@ -32,9 +32,13 @@ extension DesktopHostController {
                 guard let key = configuration.keys[candidate.modelID] else {
                     throw DesktopHostError(message: "The comparison credential snapshot is missing.")
                 }
+                var request = DesktopHostTranscriptionRequest(
+                    audio: audio, model: candidate.modelID, key: key,
+                    duration: snapshot.round.sample.durationSeconds, language: language
+                )
+                request.modulateFeatures = configuration.modulateBatch
                 return try await self.effects.transcribeComparison(
-                    .init(audio: audio, model: candidate.modelID, key: key,
-                          duration: snapshot.round.sample.durationSeconds, language: language),
+                    request,
                     azureEndpoint: configuration.endpoint, with: self
                 )
             }

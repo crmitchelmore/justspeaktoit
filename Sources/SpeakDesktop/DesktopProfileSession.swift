@@ -161,6 +161,7 @@ public struct DesktopProfileSession: Equatable, Sendable {
     /// post-processing outcome so History explains the missing processed text.
     public let skippedPolishReason: String?
     public private(set) var livePolish: DesktopLivePolishSelection?
+    public private(set) var modulateBatchFeatures = ModulateTranscriptionFeatures()
 
     public init(
         profileName: String?,
@@ -197,6 +198,13 @@ public struct DesktopProfileSession: Equatable, Sendable {
             transcriptionOptions: options
         )
         captured.livePolish = livePolish
+        captured.modulateBatchFeatures = modulateBatchFeatures
+        return captured
+    }
+
+    public func capturingModulateFeatures(_ features: ModulateTranscriptionFeatures) -> Self {
+        var captured = self
+        captured.modulateBatchFeatures = features
         return captured
     }
 

@@ -83,10 +83,13 @@ extension DesktopHostController {
             )
         }
         try DesktopComparisonRunner.validate(candidates)
-        return DesktopComparisonConfiguration(
+        var configuration = DesktopComparisonConfiguration(
             selected: candidates, keys: Dictionary(uniqueKeysWithValues: states.map { ($0.option.id, $0.key) }),
             language: language, endpoint: azureResourceEndpoint(), deviceID: settings.microphoneDeviceID ?? "",
             generation: generation
         )
+        configuration.modulateLive = settings.configuration?.modulateLiveOptions ?? .none
+        configuration.modulateBatch = settings.configuration?.modulateBatchFeatures ?? .init()
+        return configuration
     }
 }

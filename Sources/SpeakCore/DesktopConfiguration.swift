@@ -171,7 +171,7 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable { // swiftlint:
               group: "General", kind: .number(0...1),
               defaultValue: AnyCodable(.double(RecordingFeedbackDefaults.volume)))
     ] + [VoiceSynthesisPreference.quality.field, VoiceAudioFormat.transferField]
-        + SonioxVoicePreference.fields + LivePolishPreference.fields + modulateLiveFields
+        + SonioxVoicePreference.fields + LivePolishPreference.fields + modulateFields
 
     public private(set) var values: [String: AnyCodable]
 
@@ -208,13 +208,14 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable { // swiftlint:
             case (.text, .string(let text)):
                 valid = text.utf8.count <= 65_535 && !text.contains("\0")
             case (.choice(let choices), .string(let text)):
-                valid = choices.contains { $0.value == text }
+                valid = !Self.modulatePreferenceKeys.contains(field.key) && (choices.contains { $0.value == text }
                     || ((field.key == SonioxVoicePreference.regionKey
                             || field.key == VoiceSynthesisPreference.quality.key.rawValue
                             || field.key == VoiceAudioFormat.preferenceKey
                             || field.key == ApplicationPreferenceKey.speedMode.rawValue)
                         && text.utf8.count <= 256
-                        && !text.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains))
+                        && !text.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)))
+            case (.choice, .bool): valid = Self.modulatePreferenceKeys.contains(field.key)
             case (.boolean, .bool): valid = true
             case (.number(let range), .double(let number)): valid = number.isFinite && range.contains(number)
             case (.number(let range), .int(let number)): valid = range.contains(Double(number))
@@ -263,6 +264,11 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable { // swiftlint:
         var changed: [String: AnyCodable] = [:]
         for (field, entry) in zip(Self.fields, entries) {
             switch field.kind {
+            case .choice where Self.modulatePreferenceKeys.contains(field.key):
+                guard entry == "" || entry == "0" || entry == "1" else {
+                    throw DesktopConfigurationError.invalidField(field.title)
+                }
+                if !entry.isEmpty { changed[field.key] = AnyCodable(.bool(entry == "1")) }
             case .text, .choice: changed[field.key] = AnyCodable(.string(entry))
             case .boolean:
                 guard entry == "0" || entry == "1" else {
@@ -280,7 +286,11 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable { // swiftlint:
     }
 
     public func applying(_ entries: [String]) throws -> Self {
-        let changed = values.merging(try Self.parsedEntries(entries)) { _, edited in edited }
+        var changed = values.merging(try Self.parsedEntries(entries)) { _, edited in edited }
+        for (field, entry) in zip(Self.fields, entries)
+            where Self.modulatePreferenceKeys.contains(field.key) && entry.isEmpty {
+            changed.removeValue(forKey: field.key)
+        }
         return try Self(values: changed).recordingPronunciationKeytermSelection(from: self)
     }
 

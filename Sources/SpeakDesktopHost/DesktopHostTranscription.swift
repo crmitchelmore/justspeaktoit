@@ -22,8 +22,9 @@ extension DesktopHostController {
         let session = profile ?? .defaults(
             modelIdentifier: record.modelIdentifier, postProcessing: settings.postProcessing ?? .init(),
             language: record.languageIdentifier
-        )
+        ).capturingModulateFeatures(settings.configuration?.modulateBatchFeatures ?? .init())
         let keywords = batchKeywords(for: record.modelIdentifier, options: session.transcriptionOptions)
+        let modulateFeatures = session.modulateBatchFeatures
         do {
             guard !closed else { throw CancellationError() }
             let key: String
@@ -35,10 +36,11 @@ extension DesktopHostController {
             hud(record.id, .transcribing())
             let vocabulary: [String]
             if let input { vocabulary = input.vocabulary } else { vocabulary = try await vocabularyKeywords() }
-            let request = DesktopHostTranscriptionRequest(
+            var request = DesktopHostTranscriptionRequest(
                 audio: audio, model: record.modelIdentifier, key: key, duration: duration, language: session.language,
                 keywords: keywords + vocabulary, azureEndpoint: input?.azureEndpoint ?? azureEndpoint
             )
+            request.modulateFeatures = modulateFeatures
             noteKeywordLimitation(&record, keywords: request.keywords)
             let effects = self.effects
             let task = Task {

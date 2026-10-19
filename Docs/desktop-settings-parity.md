@@ -6,7 +6,7 @@ macOS `AppSettings.DefaultsKey` aliases the shared 91-key
 plus preferences and collections
 outside that enum. Track remaining product acceptance in #1157.
 
-## Modulate live feature controls (source only)
+## Modulate live and batch feature controls (source only)
 
 At preceding head `c4677631`, portable Apple (2,779 tests; 55 skipped),
 portable Linux (2,875; 33 skipped) and native Linux's Swift suite (3,019;
@@ -23,24 +23,48 @@ not cast to editable text. Stage-specific failures now identify the offending
 field/assertion. Production configuration parsing and Apply routing are unchanged.
 The repaired native fixture has **NOT_RUN**.
 
-The four canonical Modulate booleans are now native Transcription preferences,
-explicitly labelled **Modulate live only**. They enter the immutable recording
-options and the existing Modulate client's query fields; vocabulary merging
-preserves them. No route, provider, credential policy or client protocol changes.
-Apply/import/export/Codable restart use the same strict boolean authority.
+At published `5d180aa4`, automatic portable Linux (2,903 tests; 33 skipped)
+and portable macOS (2,807; 55 skipped) each reported the same two failures,
+using synthetic merge `60704fa1` into `0b4ffd7`. One assertion still expected
+Auto-Clean fields to be the final fields after the new Modulate controls were
+appended; the revised assertion checks both complete ordered blocks. The other
+exposed a real classification bug: the transient native warming approval action
+was included in persisted supported preference keys. That projection is now
+excluded, while the canonical warming intent remains supported. The existing
+strict canonical-key assertion is retained, with explicit intent/approval
+classification coverage added. These repairs are **NOT_RUN** locally and do
+not imply either failed job passed.
+
+The four canonical Modulate booleans are native Transcription preferences for
+standard batch and live transcription. Each native choice offers the existing
+default, Enabled or Disabled. Only explicit choices persist a boolean; selecting
+the default removes that override rather than persisting an empty string.
+Apply/import/export/Codable restart retain strict boolean storage authority;
+the native empty sentinel is never accepted as a stored string.
 Old root settings are adopted only when nested configuration lacks that key;
 nested values win, and the root copy is removed.
 
-Absent desktop values retain the existing `ModulateLiveOptions.none` behavior:
-all four features off, including after an unrelated native preferences Apply.
-This deliberately does not change Mac defaults (Mac speaker diarization remains
-on) or completed-recording Modulate behavior. Batch feature controls are still a
-gap; the native labels must not imply they affect batch transcription.
+Absent values retain the previous per-route defaults, including after unrelated
+Apply: batch speaker identification is on, live speaker identification is off,
+and the other features are off. The speaker choice explains this difference.
+Explicit values affect both routes. Mac defaults remain unchanged. English Fast
+does not support these advanced flags and its existing client omits them.
 
-Eight authored regression methods cover all 16 feature combinations,
-native entries, strict malformed inputs, real injected client request generation,
-captured Host options, vocabulary merging, root/nested precedence,
-transfer/restart and refused-write atomicity. All are **NOT_RUN** locally.
+Recording profiles snapshot batch features alongside live options. Normal
+recordings, imports, History retries, owned recording admission, automation
+file requests and vocabulary reconstruction preserve the snapshot. Both native
+adapters pass the whole request into prepared audio handling, including
+conversion. Windows now also retains that request's existing `historySaved`
+authority instead of dropping it. Comparison admission snapshots the same
+flags for live and batch lanes, without adding normal keywords, post-processing,
+vocabulary or automatic insertion to raw comparisons. Existing public profile
+and package request initializer arities and prepared-audio overloads are retained.
+
+Authored regression methods cover all 16 feature combinations through actual
+batch multipart and live query generation, native default/reset choices, strict
+stored types, recording/import/retry and comparison snapshots, automation
+vocabulary reconstruction, root/nested precedence, transfer/restart and
+refused-write atomicity. All new product checks are **NOT_RUN** locally.
 Native rendering, provider behavior and installed-package acceptance remain
 unqualified. Linux's old "no streaming route" cleanup subtitle is also corrected:
 remote finished-transcript cleanup can stream previews; local cleanup cannot.
@@ -1007,10 +1031,10 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | transcriptionKeywordsLastReconciled | Wired / Wired | Shared `TranscriptionKeywordPolicy` + Config; unchanged-mirror/deliberate-clear reconciliation, durable last mirror |
 | recoveredTranscriptionKeywords | Wired / Wired | Config; native selected-edit recovery with stale-selection and atomic-write guards |
 | assemblyAIIgnoredPronunciationTerms | Partial source wiring; unqualified / Same | Strict text-array transfer/restart suppresses legacy pronunciation recognition seeds; explicit native keyword clear/reselection updates suppression without changing unrelated entries. No separate suppression-list editor or modern-dictionary seeding. |
-| modulateSpeakerDiarization | Live source wired; unqualified / Same | Native live-only boolean reaches captured Modulate query; absent desktop value stays false. Batch controls/native/provider acceptance pending. |
-| modulateEmotionSignal | Live source wired; unqualified / Same | Native live-only boolean, strict transfer/restart and captured provider option; batch controls/native/provider acceptance pending. |
-| modulateAccentSignal | Live source wired; unqualified / Same | Native live-only boolean, strict transfer/restart and captured provider option; batch controls/native/provider acceptance pending. |
-| modulatePIIPhiTagging | Live source wired; unqualified / Same | Native live-only boolean, strict transfer/restart and captured provider option; batch controls/native/provider acceptance pending. |
+| modulateSpeakerDiarization | Live/batch source wired; unqualified / Same | Native default/on/off choice retains absent batch-on/live-off defaults; strict booleans snapshot into recording, import/retry, automation and comparison requests. Native/provider acceptance pending. |
+| modulateEmotionSignal | Live/batch source wired; unqualified / Same | Native default/on/off choice, strict transfer/restart and captured live/batch provider flags; absent stays off. Native/provider acceptance pending. |
+| modulateAccentSignal | Live/batch source wired; unqualified / Same | Native default/on/off choice, strict transfer/restart and captured live/batch provider flags; absent stays off. Native/provider acceptance pending. |
+| modulatePIIPhiTagging | Live/batch source wired; unqualified / Same | Native default/on/off choice, strict transfer/restart and captured live/batch provider flags; absent stays off. Native/provider acceptance pending. |
 | accessibilityInsertionMode | Equivalent / Missing | Output; Windows cursor/replace-field; Linux paste cannot claim AX replace-all equivalence |
 | selectedHotKey | Equivalent / Partial | Shortcuts; Windows Ctrl/Alt native key; Linux desktop/portal-owned binding, never Mac Fn key translation |
 | paidAccessRoutingEnabled | Missing / Missing | BYOK desktop providers; no paid-access entitlement/routing journey |

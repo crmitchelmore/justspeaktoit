@@ -10,31 +10,49 @@ extension DesktopConfiguration {
         ]
     }
 
-    static var modulateLiveFields: [Field] {
-        let defaults = ModulateLiveOptions.none
-        return [
-            .init(key: ApplicationPreferenceKey.modulateSpeakerDiarization.rawValue,
-                  title: "Identify speakers (Modulate live only)", group: "Transcription", kind: .boolean,
-                  defaultValue: AnyCodable(.bool(defaults.speakerDiarization))),
-            .init(key: ApplicationPreferenceKey.modulateEmotionSignal.rawValue,
-                  title: "Detect emotion (Modulate live only)", group: "Transcription", kind: .boolean,
-                  defaultValue: AnyCodable(.bool(defaults.emotionSignal))),
-            .init(key: ApplicationPreferenceKey.modulateAccentSignal.rawValue,
-                  title: "Detect accents (Modulate live only)", group: "Transcription", kind: .boolean,
-                  defaultValue: AnyCodable(.bool(defaults.accentSignal))),
-            .init(key: ApplicationPreferenceKey.modulatePIIPhiTagging.rawValue,
-                  title: "Tag personal and health information (Modulate live only)",
-                  group: "Transcription", kind: .boolean,
-                  defaultValue: AnyCodable(.bool(defaults.piiPhiTagging)))
+    static var modulateFields: [Field] {
+        [
+            modulateField(.modulateSpeakerDiarization, title: "Identify speakers (Modulate)",
+                          legacy: "Legacy defaults (batch on; live off)"),
+            modulateField(.modulateEmotionSignal, title: "Detect emotion (Modulate)", legacy: "Default (off)"),
+            modulateField(.modulateAccentSignal, title: "Detect accents (Modulate)", legacy: "Default (off)"),
+            modulateField(.modulatePIIPhiTagging, title: "Tag personal and health information (Modulate)",
+                          legacy: "Default (off)")
         ]
     }
 
+    private static func modulateField(_ key: ApplicationPreferenceKey, title: String, legacy: String) -> Field {
+        .init(key: key.rawValue, title: title, group: "Transcription",
+              kind: .choice([.init(value: "", title: legacy), .init(value: "1", title: "Enabled"),
+                             .init(value: "0", title: "Disabled")]),
+              defaultValue: AnyCodable(.string("")))
+    }
+
     public var modulateLiveOptions: ModulateLiveOptions {
-        ModulateLiveOptions(
-            speakerDiarization: enabled(ApplicationPreferenceKey.modulateSpeakerDiarization.rawValue),
-            emotionSignal: enabled(ApplicationPreferenceKey.modulateEmotionSignal.rawValue),
-            accentSignal: enabled(ApplicationPreferenceKey.modulateAccentSignal.rawValue),
-            piiPhiTagging: enabled(ApplicationPreferenceKey.modulatePIIPhiTagging.rawValue)
+        let defaults = ModulateLiveOptions.none
+        return ModulateLiveOptions(
+            speakerDiarization: modulateValue(.modulateSpeakerDiarization, default: defaults.speakerDiarization),
+            emotionSignal: modulateValue(.modulateEmotionSignal, default: defaults.emotionSignal),
+            accentSignal: modulateValue(.modulateAccentSignal, default: defaults.accentSignal),
+            piiPhiTagging: modulateValue(.modulatePIIPhiTagging, default: defaults.piiPhiTagging)
         )
+    }
+
+    public var modulateBatchFeatures: ModulateTranscriptionFeatures {
+        let defaults = ModulateTranscriptionFeatures()
+        return ModulateTranscriptionFeatures(
+            speakerDiarization: modulateValue(.modulateSpeakerDiarization, default: defaults.speakerDiarization),
+            emotionSignal: modulateValue(.modulateEmotionSignal, default: defaults.emotionSignal),
+            accentSignal: modulateValue(.modulateAccentSignal, default: defaults.accentSignal),
+            piiPhiTagging: modulateValue(.modulatePIIPhiTagging, default: defaults.piiPhiTagging)
+        )
+    }
+
+    private func modulateValue(_ key: ApplicationPreferenceKey, default fallback: Bool) -> Bool {
+        guard let value = values[key.rawValue] else { return fallback }
+        guard case .bool(let enabled) = value.storage else {
+            preconditionFailure("Invalid validated Modulate feature preference.")
+        }
+        return enabled
     }
 }

@@ -205,6 +205,55 @@ final class DesktopHostKeywordDeliveryTests: XCTestCase {
         try await controller.saveConfiguration(entries)
     }
 
+    func testModulateBatchRecordingSnapshotImportAndRetry_UseExplicitAndLegacyFeatureSelections() async throws {
+        FakeLog.shared.reset()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let effects = KeywordDeliveryEffects()
+        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        await controller.markReadyForSelfTest()
+        let model = "modulate/velma-2-stt"
+        let index = try XCTUnwrap(DesktopHostModels.all.firstIndex { $0.id == model })
+        let credential = try XCTUnwrap(DesktopHostModels.provider(for: model)).apiKeyIdentifier
+        FakeLog.shared.setKey("synthetic", name: credential)
+        let selected = await controller.selectModel(index)
+        XCTAssertTrue(selected)
+        try await saveModulate("1", controller: controller)
+        let captured = await controller.resolvedProfile(executablePath: nil)
+        try await saveModulate("0", controller: controller)
+        try await controller.startRecording(
+            target: nil, deviceID: "", profile: captured, textOutput: FakeTextOutput()
+        )
+        await controller.toggle(
+            target: nil, modelIndex: index, deviceID: "", targetExecutablePath: nil, textOutput: FakeTextOutput()
+        )
+        XCTAssertEqual(effects.requests.first?.modulateFeatures, captured.modulateBatchFeatures)
+        XCTAssertEqual(captured.modulateBatchFeatures, ModulateTranscriptionFeatures(
+            speakerDiarization: true, emotionSignal: true, accentSignal: true, piiPhiTagging: true
+        ))
+        let records = try await controller.store.records()
+        let record = try XCTUnwrap(records.first)
+        let audio = try await controller.store.audioURL(for: record)
+        await controller.importAudio(path: audio.path, modelIndex: index)
+        XCTAssertEqual(effects.requests.last?.modulateFeatures, ModulateTranscriptionFeatures(speakerDiarization: false))
+        try await saveModulate("", controller: controller)
+        await controller.retryHistory(record.id.uuidString)
+        XCTAssertEqual(effects.requests.last?.modulateFeatures, ModulateTranscriptionFeatures())
+        XCTAssertEqual(effects.requests.count, 3)
+        await controller.close()
+    }
+
+    private func saveModulate(
+        _ value: String, controller: DesktopHostController<FakePlatform>
+    ) async throws {
+        var entries = try await controller.configuration().entries
+        for key in DesktopConfiguration.modulatePreferenceKeys {
+            let index = try XCTUnwrap(DesktopConfiguration.fields.firstIndex { $0.key == key })
+            entries[index] = value
+        }
+        try await controller.saveConfiguration(entries)
+    }
+
     func testLiveLexiconOnlyNoticesFollowTheEffectiveRunThroughRecordingAndHistory() async throws {
         DesktopHostModels.configure(streamingQualified: true)
         let whisper = "openai/gpt-realtime-whisper-streaming"

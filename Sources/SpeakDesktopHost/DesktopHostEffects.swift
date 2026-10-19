@@ -23,6 +23,7 @@ package struct DesktopHostTranscriptionRequest: Sendable {
     /// Speech resource captured at the start of its own transcription attempt.
     package let azureEndpoint: String?
     package var historySaved = true
+    package var modulateFeatures = ModulateTranscriptionFeatures()
 
     package init(
         audio: URL, model: String, key: String, duration: TimeInterval, language: String?, keywords: [String] = [],

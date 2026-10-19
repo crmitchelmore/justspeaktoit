@@ -18,6 +18,8 @@ extension DesktopHostAutomationTests {
         XCTAssertTrue(defaults.historySaved)
         XCTAssertEqual(defaults.keywords, [])
         XCTAssertNil(defaults.azureEndpoint)
+        XCTAssertEqual(original.modulateFeatures, .init())
+        XCTAssertEqual(defaults.modulateFeatures, .init())
     }
 
     func testManualProfileSnapshot_ReadOnlyUsesCanonicalModelLanguageAndKeywords() async throws {
@@ -30,7 +32,9 @@ extension DesktopHostAutomationTests {
         try await controller.automationFixtureProfile(profile)
         try await importValues([
             "transcriptionKeywords": AnyCodable(.string("Captured, Vocabulary")),
-            "speedMode": AnyCodable(.string(SpeedModeID.livePolish.rawValue))
+            "speedMode": AnyCodable(.string(SpeedModeID.livePolish.rawValue)),
+            ApplicationPreferenceKey.modulateSpeakerDiarization.rawValue: AnyCodable(.bool(false)),
+            ApplicationPreferenceKey.modulateEmotionSignal.rawValue: AnyCodable(.bool(true))
         ])
         _ = try await controller.vocabularyEvent(kind: 0, payload: DesktopVocabularyWire.encode([
             "save", "", "Lexicon", "Canonical", "Lexicon", "automatic", "", "high", ""
@@ -46,6 +50,8 @@ extension DesktopHostAutomationTests {
         XCTAssertEqual(request.key, "synthetic-profile-key")
         XCTAssertEqual(request.language, snapshot.language)
         XCTAssertEqual(request.keywords, (snapshot.transcriptionOptions?.keywords ?? []) + ["Canonical"])
+        XCTAssertEqual(request.modulateFeatures, .init(speakerDiarization: false, emotionSignal: true))
+        XCTAssertEqual(request.modulateFeatures, snapshot.modulateBatchFeatures)
         XCTAssertFalse(request.historySaved)
         XCTAssertEqual(try Data(contentsOf: file), original)
         XCTAssertEqual(fixture.postProcessingCalls, 0)

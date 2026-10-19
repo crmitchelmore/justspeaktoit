@@ -68,6 +68,7 @@ extension DesktopHostController: AutomationCommandHost where Platform: DesktopHo
             azureEndpoint: azureResourceEndpoint()
         )
         request.historySaved = false
+        request.modulateFeatures = profile.modulateBatchFeatures
         return request
     }
 
@@ -100,6 +101,7 @@ extension DesktopHostController: AutomationCommandHost where Platform: DesktopHo
             azureEndpoint: request.azureEndpoint
         )
         combined.historySaved = request.historySaved
+        combined.modulateFeatures = request.modulateFeatures
         return combined
     }
 

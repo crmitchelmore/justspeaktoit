@@ -68,6 +68,35 @@ final class DesktopModulateTests: XCTestCase {
         try assertClean(multipart, audio: audio)
     }
 
+    func testEveryConfiguredFeatureCombination_ReachesActualBatchMultipart() async throws {
+        let keys: [ApplicationPreferenceKey] = [
+            .modulateSpeakerDiarization, .modulateEmotionSignal, .modulateAccentSignal, .modulatePIIPhiTagging
+        ]
+        let multipart = DesktopMultipartFixture()
+        defer { multipart.remove() }
+        let audio = try fixture()
+        for mask in 0..<16 {
+            let configuration = try DesktopConfiguration(values: Dictionary(uniqueKeysWithValues:
+                keys.enumerated().map { ($0.element.rawValue, AnyCodable(.bool(mask & (1 << $0.offset) != 0))) }
+            ))
+            let restored = try JSONDecoder().decode(
+                DesktopConfiguration.self, from: JSONEncoder().encode(configuration.applying(configuration.entries))
+            )
+            let features = restored.modulateBatchFeatures
+            StubURLProtocol.handler = { request in
+                XCTAssertEqual(request.url?.path, "/api/velma-2-stt-batch")
+                let body = try Self.uploadBody(multipart)
+                for field in features.multipartFields {
+                    XCTAssertNotNil(body.range(of: Data("name=\"\(field.name)\"\r\n\r\n\(field.value)\r\n".utf8)))
+                }
+                return .ok(Data(Self.standardResponse.utf8), url: request.url!)
+            }
+            let result = try await transcribe(audio, model: standardModel, features: features, multipart: multipart)
+            XCTAssertEqual(result.text, mask & 1 != 0 ? "Speaker 1: Hello.\nSpeaker 2: Hi!" : "Hello. Hi!")
+            try assertClean(multipart, audio: audio)
+        }
+    }
+
     func testEnglishFastOmitsAdvancedFlagsAndKeepsItsOwnCostAndResultShape() async throws {
         let multipart = DesktopMultipartFixture()
         defer { multipart.remove() }

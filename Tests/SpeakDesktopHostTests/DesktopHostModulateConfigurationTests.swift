@@ -32,12 +32,23 @@ final class DesktopHostModulateConfigurationTests: XCTestCase {
         let restarted = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
         let restored = try await restarted.configuration()
         XCTAssertEqual(restored.liveOptions.modulate, configuration.liveOptions.modulate)
+        XCTAssertEqual(restored.modulateBatchFeatures, configuration.modulateBatchFeatures)
         var entries = restored.entries
         let index = try XCTUnwrap(DesktopConfiguration.fields.firstIndex { $0.key == emotion })
         entries[index] = "0"
         try await restarted.saveConfiguration(entries)
         let cleared = try await restarted.configuration()
         XCTAssertEqual(cleared.liveOptions.modulate, .none)
+        XCTAssertEqual(cleared.modulateBatchFeatures, .init(speakerDiarization: false))
+        entries[index] = ""
+        let speakerIndex = try XCTUnwrap(DesktopConfiguration.fields.firstIndex { $0.key == speaker })
+        entries[speakerIndex] = ""
+        try await restarted.saveConfiguration(entries)
+        let legacy = try await restarted.configuration()
+        XCTAssertNil(legacy.values[speaker])
+        XCTAssertNil(legacy.values[emotion])
+        XCTAssertEqual(legacy.liveOptions.modulate, .none)
+        XCTAssertEqual(legacy.modulateBatchFeatures, .init())
         await restarted.close()
     }
 
@@ -91,6 +102,42 @@ final class DesktopHostModulateConfigurationTests: XCTestCase {
         XCTAssertEqual(retainedModel, selected)
         XCTAssertEqual(try Data(contentsOf: disk), original)
         XCTAssertEqual(after.values["futureProviderControl"], AnyCodable(.string("kept")))
+        await controller.close()
+    }
+
+    func testComparisonAdmission_CapturesFeaturesBeforeLaterChanges() async throws {
+        FakeLog.shared.reset()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let model = "modulate/velma-2-stt"
+        let credential = try XCTUnwrap(DesktopHostModels.provider(for: model)).apiKeyIdentifier
+        FakeLog.shared.setKey("synthetic", name: credential)
+        let otherModel = "openai/whisper-1"
+        let otherCredential = try XCTUnwrap(DesktopHostModels.provider(for: otherModel)).apiKeyIdentifier
+        FakeLog.shared.setKey("synthetic", name: otherCredential)
+        var entries = try await controller.configuration().entries
+        for key in DesktopConfiguration.modulatePreferenceKeys {
+            let index = try XCTUnwrap(DesktopConfiguration.fields.firstIndex { $0.key == key })
+            entries[index] = "1"
+        }
+        try await controller.saveConfiguration(entries)
+        let batch = try await controller.comparisonAdmission(
+            [model, otherModel], live: false, language: nil, generation: UUID()
+        )
+        for key in DesktopConfiguration.modulatePreferenceKeys {
+            let index = try XCTUnwrap(DesktopConfiguration.fields.firstIndex { $0.key == key })
+            entries[index] = "0"
+        }
+        try await controller.saveConfiguration(entries)
+        XCTAssertEqual(batch.modulateBatch, .init(
+            speakerDiarization: true, emotionSignal: true, accentSignal: true, piiPhiTagging: true
+        ))
+        XCTAssertEqual(batch.modulateLive, .init(
+            speakerDiarization: true, emotionSignal: true, accentSignal: true, piiPhiTagging: true
+        ))
+        let current = try await controller.configuration()
+        XCTAssertEqual(current.modulateBatchFeatures, .init(speakerDiarization: false))
         await controller.close()
     }
 }

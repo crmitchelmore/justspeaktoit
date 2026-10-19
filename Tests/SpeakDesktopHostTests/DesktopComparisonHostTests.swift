@@ -57,6 +57,36 @@ final class DesktopComparisonHostTests: XCTestCase {
         await controller.close()
     }
 
+    func testConfiguredModulateFlags_ReachRawBatchLanesWithoutNormalKeywords() async throws {
+        DesktopHostModels.configure(streamingQualified: false)
+        defer { DesktopHostModels.configure(streamingQualified: true) }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try seedModulateComparisonSettings(root)
+        let source = root.appendingPathComponent("input.wav")
+        try XCTUnwrap(PCMWaveWriter.wavData(pcm: Data(repeating: 4, count: 3200), sampleRate: 16_000))
+            .write(to: source)
+        let effects = ComparisonHostEffects(sourceToMutate: root.appendingPathComponent("mutable-fixture"))
+        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        await controller.markReadyForSelfTest()
+        let models = ["modulate/velma-2-stt", "openai/whisper-1"]
+        await controller.comparisonEvent(
+            102, text: "\n" + models.joined(separator: "\t") + "\n" + source.path, index: 0
+        )
+        await controller.comparisonTask?.value
+        XCTAssertEqual(effects.requests.count, 2)
+        for request in effects.requests {
+            XCTAssertEqual(request.modulateFeatures, .init(
+                speakerDiarization: true, emotionSignal: true, accentSignal: true, piiPhiTagging: true
+            ))
+            XCTAssertEqual(request.keywords, [])
+        }
+        let history = try await controller.store.records()
+        XCTAssertTrue(history.isEmpty)
+        await controller.close()
+    }
+
     func testCancellationAndCloseKeepPendingAudioWithoutNormalHistory() async throws {
         DesktopHostModels.configure(streamingQualified: false)
         defer { DesktopHostModels.configure(streamingQualified: true) }
@@ -101,6 +131,7 @@ final class DesktopComparisonHostTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let effects = ComparisonHostEffects(sourceToMutate: root, liveEnabled: true)
+        try seedModulateComparisonSettings(root)
         let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
         await controller.markReadyForSelfTest()
         let selected = Array(DesktopHostModels.visible.filter {
@@ -116,6 +147,14 @@ final class DesktopComparisonHostTests: XCTestCase {
         let pending = await store.rounds()
         XCTAssertEqual(pending.count, 1)
         XCTAssertEqual(effects.liveClients.count, 2)
+        XCTAssertEqual(effects.options.count, 2)
+        for options in effects.options {
+            XCTAssertEqual(options.modulate, .init(
+                speakerDiarization: true, emotionSignal: true, accentSignal: true, piiPhiTagging: true
+            ))
+            XCTAssertEqual(options.keywords, [])
+            XCTAssertEqual(options.assemblyAIKeyterms, [])
+        }
         XCTAssertEqual(effects.liveClients[0].audio, effects.liveClients[1].audio)
         XCTAssertEqual(effects.liveClients[0].audio.count, 1)
         let generation = await controller.comparisonGeneration
@@ -137,6 +176,18 @@ final class DesktopComparisonHostTests: XCTestCase {
         XCTAssertTrue(history.records.isEmpty)
         await controller.close()
     }
+}
+
+private func seedModulateComparisonSettings(_ root: URL) throws {
+    var values = Dictionary(uniqueKeysWithValues: DesktopConfiguration.modulatePreferenceKeys.map {
+        ($0, AnyCodable.JSONValue.bool(true))
+    })
+    values["transcriptionKeywords"] = .string("Not part of raw comparisons")
+    let settings: [String: AnyCodable] = [
+        "model": AnyCodable(.string(ModelCatalog.defaultBatchTranscriptionModel)),
+        "configuration": AnyCodable(.object(values))
+    ]
+    try JSONEncoder().encode(settings).write(to: root.appendingPathComponent("settings.json"))
 }
 
 private func seedComparisonHistory(
@@ -171,12 +222,16 @@ private final class ComparisonHostEffects: DesktopHostEffects, @unchecked Sendab
     private var observed: [Data] = []
     private var captures = 0
     private var clients: [HostComparisonClient] = []
+    private var capturedRequests: [DesktopHostTranscriptionRequest] = []
+    private var capturedOptions: [LiveClientOptions] = []
     let sourceToMutate: URL
     let gate: Gate?
     let liveEnabled: Bool
     var bytes: [Data] { lock.withLock { observed } }
     var captureCount: Int { lock.withLock { captures } }
     var liveClients: [HostComparisonClient] { lock.withLock { clients } }
+    var requests: [DesktopHostTranscriptionRequest] { lock.withLock { capturedRequests } }
+    var options: [LiveClientOptions] { lock.withLock { capturedOptions } }
     init(sourceToMutate: URL, gate: Gate? = nil, liveEnabled: Bool = false) {
         self.sourceToMutate = sourceToMutate; self.gate = gate; self.liveEnabled = liveEnabled
     }
@@ -199,12 +254,22 @@ private final class ComparisonHostEffects: DesktopHostEffects, @unchecked Sendab
     func transcribe(
         _ request: DesktopHostTranscriptionRequest, with controller: DesktopHostController<FakePlatform>
     ) async throws -> TranscriptionResult { throw DesktopHostError(message: "Normal pipeline must not run.") }
+    func makeLiveClient(
+        model: String, key: String, language: String?, azureEndpoint: String, options: LiveClientOptions
+    ) -> (any FinalizingStreamingTranscriptionClient)? {
+        lock.withLock { capturedOptions.append(options) }
+        return makeLiveClient(model: model, key: key, language: language, azureEndpoint: azureEndpoint)
+    }
     func transcribeComparison(
         _ request: DesktopHostTranscriptionRequest, azureEndpoint: String,
         with controller: DesktopHostController<FakePlatform>
     ) async throws -> TranscriptionResult {
         let data = try Data(contentsOf: request.audio)
-        let mutateOriginal = lock.withLock { observed.append(data); return observed.count == 1 }
+        let mutateOriginal = lock.withLock {
+            observed.append(data)
+            capturedRequests.append(request)
+            return observed.count == 1
+        }
         await gate?.pass()
         try Task.checkCancellation()
         if mutateOriginal {

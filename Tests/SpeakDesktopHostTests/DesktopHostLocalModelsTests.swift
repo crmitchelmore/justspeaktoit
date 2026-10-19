@@ -29,7 +29,7 @@ final class DesktopHostLocalModelsTests: XCTestCase {
     override func tearDown() async throws {
         await controller.close()
         try? FileManager.default.removeItem(at: directory)
-        DesktopHostModels.configure(streamingQualified: true, local: [])
+        DesktopHostModels.configure(streamingQualified: true, local: [], localLive: [])
         DesktopHostModels.setLocalLabels([:])
     }
 
@@ -136,6 +136,40 @@ final class DesktopHostLocalModelsTests: XCTestCase {
         })
         let ownership = await controller.ownershipForTests
         XCTAssertFalse(ownership.isInUse(tiny.catalogueID), "A finished recording let its model go")
+    }
+
+    func testLocalLiveRecordingStreamsTheDownloadedModelWithoutAKey() async throws {
+        DesktopHostModels.configure(
+            streamingQualified: false, localLive: DesktopLocalStreaming.options(host: .linux)
+        )
+        let live = DesktopLocalStreaming.liveModelID(for: tiny)
+        XCTAssertTrue(DesktopHostModels.isLocalLive(live))
+        XCTAssertTrue(DesktopHostModels.isLocal(live), "A local live model needs no key")
+        XCTAssertFalse(DesktopHostModels.isLive(live), "Remote live routes never see it")
+        var readiness = await controller.localReadiness(live)
+        XCTAssertEqual(readiness, "Whisper Tiny is not downloaded yet. Open Local models to download it.")
+        try await download(tiny)
+        readiness = await controller.localReadiness(live)
+        XCTAssertNil(readiness)
+        let slot = try XCTUnwrap(DesktopHostModels.all.firstIndex { $0.id == live })
+        await controller.toggle(
+            target: nil, modelIndex: slot, deviceID: "", targetExecutablePath: nil, textOutput: FakeTextOutput()
+        )
+        await controller.toggle(
+            target: nil, modelIndex: slot, deviceID: "", targetExecutablePath: nil, textOutput: FakeTextOutput()
+        )
+        let records = try await DesktopRecordingStore(directory: directory.appendingPathComponent("History"))
+            .recoverInterruptedRecordings().records
+        let record = try XCTUnwrap(records.first)
+        XCTAssertEqual(record.modelIdentifier, live)
+        XCTAssertNil(record.failure)
+        XCTAssertTrue(record.result?.text.contains("Local words from Whisper Tiny.") == true, record.result?.text ?? "")
+        XCTAssertEqual(
+            DesktopHistorySearch.modelDisplayName(for: record.modelIdentifier), "Whisper Tiny (on-device, live)"
+        )
+        XCTAssertEqual(FakeLocalState.shared.runtime.request?.model, tiny.catalogueID)
+        let ownership = await controller.ownershipForTests
+        XCTAssertFalse(ownership.isInUse(tiny.catalogueID), "A finished live recording let its model go")
     }
 
     func testSilenceStaysEmptyWithoutRunningTheModel() async throws {

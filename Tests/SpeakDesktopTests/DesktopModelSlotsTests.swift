@@ -14,6 +14,22 @@ final class DesktopModelSlotsTests: XCTestCase {
         XCTAssertTrue(slots.entries.allSatisfy(\.isAvailable))
     }
 
+    func testLocalLiveEntriesAreLocalAndLiveAndFollowBatchLocalModels() {
+        let local = DesktopLocalTranscription.options(host: .windows)
+        let localLive = DesktopLocalStreaming.options(host: .windows)
+        let live = DesktopLiveTranscription.liveModels
+        let slots = DesktopModelSlots(live: live, local: local, localLive: localLive + localLive)
+        XCTAssertEqual(
+            slots.entries.map(\.option.id),
+            DesktopTranscription.batchModels.map(\.id) + local.map(\.id) + localLive.map(\.id) + live.map(\.id)
+        )
+        let liveLocal = slots.entries.filter { $0.isLive && $0.isLocal }
+        XCTAssertEqual(liveLocal.map(\.option.id), localLive.map(\.id))
+        XCTAssertEqual(slots.entries.filter { $0.isLocal && !$0.isLive }.map(\.option.id), local.map(\.id))
+        XCTAssertEqual(slots.entries.filter { $0.isLive && !$0.isLocal }.map(\.option.id), live.map(\.id))
+        XCTAssertTrue(localLive.allSatisfy { $0.displayName.hasSuffix("(on-device, live)") })
+    }
+
     func testRefreshReordersAndRenamesVisibleModelsWithoutChangingEventIdentities() throws {
         var slots = DesktopModelSlots(live: DesktopLiveTranscription.liveModels)
         let initial = slots.entries.map(\.option.id)

@@ -24,8 +24,10 @@ extension DesktopHostController {
         return (models, unavailable)
     }
 
+    /// On-device live models are left out; their batch model is already a
+    /// candidate.
     func comparisonModelStates(
-        options: [ModelCatalog.Option] = DesktopHostModels.visible
+        options: [ModelCatalog.Option] = DesktopHostModels.visible.filter { !DesktopHostModels.isLocalLive($0.id) }
     ) -> [DesktopComparisonModelState] {
         var keys: [String: Result<String, Error>] = [:]
         return options.map { option in
@@ -67,6 +69,7 @@ extension DesktopHostController {
         let available = DesktopHostModels.visible
         let options = try identifiers.map { identifier in
             guard let option = available.first(where: { $0.id == identifier }),
+                  !DesktopHostModels.isLocalLive(identifier),
                   DesktopHostModels.isLive(identifier) == live else {
                 throw DesktopHostError(message: "A selected model is no longer available for this comparison mode.")
             }

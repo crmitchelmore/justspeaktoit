@@ -6,8 +6,11 @@ extension DesktopHostController {
     static func prepareModelCatalog(directory: URL, settings: inout Settings) throws -> OpenRouterAudioCatalogStore {
         // Remote batch, live and on-device choices keep separate slots, so
         // switching Source restores each one's last model.
-        let isLocal = DesktopHostModels.isLocal
-        let remoteBatch = settings.batchModel.flatMap { isLocal($0) ? nil : $0 }
+        let isLocalLive = DesktopHostModels.isLocalLive
+        let isLocal: (String) -> Bool = { DesktopHostModels.isLocal($0) && !isLocalLive($0) }
+        let activeLocalLive = isLocalLive(settings.model) ? settings.model : nil
+        settings.localLiveModel = settings.localLiveModel.flatMap { isLocalLive($0) ? $0 : nil }
+        let remoteBatch = settings.batchModel.flatMap { isLocal($0) || isLocalLive($0) ? nil : $0 }
         let selection = DesktopModelSelection.migrated(
             model: settings.model, batchModel: remoteBatch, liveModel: settings.liveModel,
             isLive: DesktopHostModels.isLive,
@@ -24,6 +27,10 @@ extension DesktopHostController {
         } else {
             settings.batchModel = selection.batchModel
             settings.localModel = settings.localModel.flatMap { isLocal($0) ? $0 : nil }
+        }
+        if let activeLocalLive {
+            settings.model = activeLocalLive
+            settings.localLiveModel = activeLocalLive
         }
         let credential = DesktopTranscription.batchModels.lazy.compactMap { DesktopHostModels.provider(for: $0.id) }
             .first { $0.id == OpenRouterService.providerID }?.apiKeyIdentifier

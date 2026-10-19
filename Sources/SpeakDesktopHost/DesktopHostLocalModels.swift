@@ -64,6 +64,10 @@ package extension DesktopHostPlatform {
     static func beginLocalUse(_ model: String, controller: isolated DesktopHostController<Self>) -> String? { nil }
 
     static func endLocalUse(_ held: String, controller: isolated DesktopHostController<Self>) {}
+
+    static func makeLocalLiveClient(
+        _ model: String, language: String?, controller: isolated DesktopHostController<Self>
+    ) async throws -> (any FinalizingStreamingTranscriptionClient)? { nil }
 }
 
 extension DesktopHostController {
@@ -118,6 +122,8 @@ extension DesktopHostController {
     package static func rememberModelSlot(in settings: inout Settings) {
         if DesktopHostModels.isLive(settings.model) {
             settings.liveModel = settings.model
+        } else if DesktopHostModels.isLocalLive(settings.model) {
+            settings.localLiveModel = settings.model
         } else if DesktopHostModels.isLocal(settings.model) {
             settings.localModel = settings.model
         } else {

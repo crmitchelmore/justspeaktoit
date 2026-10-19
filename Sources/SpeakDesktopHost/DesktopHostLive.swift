@@ -7,6 +7,14 @@ extension DesktopHostController {
         model: String, key: String, id: UUID, language: String? = nil, options: LiveClientOptions? = nil,
         input: DesktopHostRecordingInput? = nil, polish: DesktopHostLivePolishInput? = nil
     ) async throws -> DesktopLiveSession? {
+        if DesktopHostModels.isLocalLive(model) {
+            // On-device streaming has no provider vocabulary, keyterms or endpoint.
+            guard let client = try await Platform.makeLocalLiveClient(model, language: language, controller: self)
+            else { return nil }
+            return DesktopLiveSession(
+                client: client, id: id, keywordLimitation: nil, livePolish: makeLivePolish(polish, id: id)
+            )
+        }
         guard DesktopHostModels.isLive(model) else { return nil }
         let baseOptions = options ?? settings.configuration?.liveOptions ?? .desktopDefaults
         let hints: (keywords: [String], pronunciationWords: [String])
@@ -143,6 +151,9 @@ extension DesktopHostController {
     }
 
     package func preferredModelIDs() -> DesktopHostModelPreferences {
-        DesktopHostModelPreferences(batch: settings.batchModel, live: settings.liveModel, local: settings.localModel)
+        DesktopHostModelPreferences(
+            batch: settings.batchModel, live: settings.liveModel, local: settings.localModel,
+            localLive: settings.localLiveModel
+        )
     }
 }

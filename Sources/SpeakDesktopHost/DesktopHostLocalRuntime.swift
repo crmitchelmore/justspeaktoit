@@ -145,4 +145,10 @@ package extension DesktopHostLocalModelPlatform {
     static func endLocalUse(_ held: String, controller: isolated DesktopHostController<Self>) {
         controller.localModels.ownership.endUse(held)
     }
+
+    static func makeLocalLiveClient(
+        _ model: String, language: String?, controller: isolated DesktopHostController<Self>
+    ) async throws -> (any FinalizingStreamingTranscriptionClient)? {
+        try await controller.makeLocalLiveClient(model, language: language)
+    }
 }

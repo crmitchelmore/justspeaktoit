@@ -197,6 +197,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var connectionWarmPending = false
     var connectionWarmCredentialWork = 0
     var capturePreparation: (deviceID: String, value: any DesktopCapturePreparation)?
+    var shortcutPressMicrophone: (id: UUID, capture: any DesktopRecordingCapture)?
     package var recording: Recording?
     var recordingCapturePolicy: (recordID: UUID, value: DesktopHostCapturePolicy)?
     var ownedCaptureStartup: DesktopHostOwnedStartupHandle?

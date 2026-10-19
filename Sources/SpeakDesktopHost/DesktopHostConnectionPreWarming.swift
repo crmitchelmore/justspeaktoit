@@ -39,7 +39,11 @@ extension DesktopHostController {
         connectionWarmPending = false
         connectionWarmTask?.task.cancel()
         connectionWarmTracker.invalidate()
-        if resetCapture { connectionWarmCapture = nil; refreshCapturePreparation() }
+        if resetCapture {
+            connectionWarmCapture = nil
+            refreshCapturePreparation()
+            endShortcutPressMicrophone()
+        }
     }
 
     func pauseConnectionPreWarming() {

@@ -123,6 +123,10 @@ final class LinuxEventContext: @unchecked Sendable {
         if pressed {
             let target = Self.captureTarget()
             let selection = recordingSettings(target: target)
+            if !smokeTest, gestures.currentStyle != .pressToToggle {
+                let controller = controller
+                Task { await controller.warmMicrophoneForShortcutPress() }
+            }
             gestures.keyDown(
                 target: target, textOutput: Task { await selection.value.textOutput }, selection: selection
             )

@@ -185,6 +185,14 @@ enum LinuxWindow {
     }
 
     static func textOutput(_ options: LinuxTextOutputOptions, hint: String) {
+        do {
+            try configureTextOutput(options, hint: hint)
+        } catch {
+            LinuxHostPlatform.update(error.localizedDescription)
+        }
+    }
+
+    static func configureTextOutput(_ options: LinuxTextOutputOptions, hint: String) throws {
         let canTargetApps = LinuxHostPlatform.session.canUseX11Injection
         let result = jsti_window_set_text_output_policy(
             options.method == .clipboardOnly ? 1 : 0, options.restoreClipboard ? 1 : 0,
@@ -193,6 +201,8 @@ enum LinuxWindow {
             Int32(AppSwitchDelivery.desktopSelection(options.appSwitchDelivery)),
             AppSwitchDelivery.linuxHelp(canTargetApps: canTargetApps)
         )
-        if result != 0 { LinuxHostPlatform.update("Could not refresh text output and app-switch preferences.") }
+        guard result == 0 else {
+            throw DesktopHostError(message: "Could not refresh text output and app-switch preferences.")
+        }
     }
 }

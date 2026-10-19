@@ -54,6 +54,8 @@ func runSelfTest() throws {
 /// until the window closes, then drains every queue and closes the controller.
 func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws {
     try LinuxWindow.configureAbout()
+    try LinuxWindow.configureTroubleshooting(holder)
+    defer { jsti_troubleshooting_clear() }
     try configureApplicationIcon()
     let providerCallbacks = try LinuxWindow.beginVoiceProviderCallbacks(holder)
     defer { LinuxWindow.endVoiceProviderCallbacks(providerCallbacks) }

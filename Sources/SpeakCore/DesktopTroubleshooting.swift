@@ -103,13 +103,13 @@ public enum DesktopTroubleshooting {
                     return Finding(
                         id: check.rawValue, title: "Post-Processing Needs an API Key",
                         detail: "Post-processing is enabled and uses \(processing.model), which requires an OpenRouter "
-                            + "API key. Add one in API Keys, or disable post-processing if you don't need it.",
+                            + "API key. Add the key for this model, or disable post-processing if you don't need it.",
                         severity: .issue, destination: .apiKeys, fix: .disablePostProcessing, systemImage: "key"
                     )
                 case .unavailable:
                     return Finding(
                         id: check.rawValue, title: "Post-Processing Key Could Not Be Checked",
-                        detail: "The saved credential could not be read. Open API Keys and check its status; "
+                        detail: "The saved credential could not be read. Check the API key for this model; "
                             + "this does not mean the key is missing.",
                         severity: .warning, destination: .apiKeys, systemImage: "key"
                     )

@@ -34,21 +34,13 @@ extension WindowsAppController {
     fileprivate func troubleshootingSnapshot(
         permissions: [WindowsPermissionRow], revision: UInt64
     ) -> WindowsTroubleshootingSnapshot {
-        let processing = postProcessingOptions()
         let output = textOutputOptions()
-        let enabled = processing.mode != .disabled
-        var credential = DesktopTroubleshooting.Credential.available
-        if DesktopTroubleshooting.requiresCredential(enabled: enabled, model: processing.modelIdentifier) {
-            do {
-                let key = try effects.apiKey(name: postProcessingCredential(for: processing.modelIdentifier))
-                credential = key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .missing : .available
-            } catch { credential = .unavailable }
-        }
         let shortcut = hotKeySettings()
-        var findings = DesktopTroubleshooting.findings(.init(
-            postProcessing: .init(enabled: enabled, model: processing.modelIdentifier, credential: credential),
-            shortcutName: shortcut.name, shortcutInstructions: shortcut.readyHint, restoreClipboard: output.restoreClipboard
-        ))
+        let configuration = troubleshootingConfiguration(
+            shortcutName: shortcut.name, shortcutInstructions: shortcut.readyHint,
+            restoreClipboard: output.restoreClipboard
+        )
+        var findings = configuration.findings
         findings += permissions.compactMap { row in
             let item = row.item
             guard item.status == .denied || item.status == .warning || item.status == .unknown else { return nil }
@@ -61,11 +53,10 @@ extension WindowsAppController {
         }
         findings.sort { $0.severity.priority < $1.severity.priority }
         return WindowsTroubleshootingSnapshot(
-            revision: revision, processing: processing, output: output, findings: findings
+            revision: revision, processing: configuration.processing, output: output, findings: findings
         )
     }
 
-    // swiftlint:disable:next cyclomatic_complexity
     fileprivate func applyTroubleshootingFix(
         _ command: Int32, snapshot: WindowsTroubleshootingSnapshot
     ) async throws {
@@ -89,22 +80,7 @@ extension WindowsAppController {
                   snapshot.findings.contains(where: { $0.fix == .disablePostProcessing }) else {
                 throw WindowsNativeError(message: "Post-processing changed. Check again before applying this fix.")
             }
-            let key: String
-            do {
-                key = try effects.apiKey(name: postProcessingCredential(for: snapshot.processing.modelIdentifier))
-            } catch {
-                throw WindowsNativeError(message: "The saved credential could not be read. No setting was changed.")
-            }
-            guard key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                throw WindowsNativeError(message: "A key is now available. Check again before changing post-processing.")
-            }
-            await savePostProcessing(
-                enabled: false, modelIdentifier: snapshot.processing.modelIdentifier,
-                prompt: snapshot.processing.customPrompt ?? "", key: ""
-            )
-            guard postProcessingOptions().mode == .disabled else {
-                throw WindowsNativeError(message: "Post-processing could not be disabled. Check the app status.")
-            }
+            try await disablePostProcessingForTroubleshooting(expected: snapshot.processing)
         default: throw WindowsNativeError(message: "This Troubleshooting fix is not supported.")
         }
     }
@@ -120,7 +96,6 @@ private enum WindowsTroubleshooting {
             let processing = await holder.controller.postProcessingOptions()
             try WindowsNative.configurePostProcessing(processing, context: context)
         }
-        try await WindowsNative.configureConfiguration(holder)
     }
 
     static func navigation(_ destination: DesktopTroubleshooting.Destination) -> (String, Int32) {

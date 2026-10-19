@@ -962,6 +962,7 @@ static void on_import(GtkButton *button, gpointer data) {
 static gboolean on_close_request(GtkWindow *window, gpointer data) {
     (void)window; (void)data;
     retire_cleanup_preview();
+    jsti_troubleshooting_close();
     jsti_voice_sources_close();
     jsti_voice_credentials_close();
     ui.closing = TRUE;
@@ -1807,6 +1808,11 @@ static GtkWidget *link_button(const char *label, const char *uri) {
     return button;
 }
 
+static void on_troubleshooting(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    jsti_troubleshooting_open(ui.window);
+}
+
 static GtkWidget *build_about(void) {
     GtkWidget *column, *page = jsti_page_new(&column);
     GtkWidget *body;
@@ -1843,6 +1849,10 @@ static GtkWidget *build_about(void) {
     gtk_flow_box_set_row_spacing(ui.about_links, 8);
     gtk_flow_box_set_column_spacing(ui.about_links, 8);
     gtk_box_append(GTK_BOX(body), GTK_WIDGET(ui.about_links));
+    GtkWidget *troubleshooting = gtk_button_new_with_mnemonic("_Troubleshooting");
+    gtk_widget_set_halign(troubleshooting, GTK_ALIGN_START);
+    g_signal_connect(troubleshooting, "clicked", G_CALLBACK(on_troubleshooting), NULL);
+    gtk_box_append(GTK_BOX(body), troubleshooting);
     gtk_box_append(GTK_BOX(column), card);
     return page;
 }
@@ -2721,6 +2731,20 @@ int32_t jsti_window_configure_about(const char *details, const JSTIAboutLink *li
         information->urls[i] = g_strdup(links[i].url);
     }
     return post(about_information_apply, information, about_information_free);
+}
+
+static void post_processing_enabled_apply(gpointer pointer) {
+    gboolean suppress = ui.suppress;
+    ui.suppress = TRUE;
+    adw_switch_row_set_active(ui.polish_row, *(gint32 *)pointer != 0);
+    ui.suppress = suppress;
+}
+
+int32_t jsti_window_set_post_processing_enabled(int32_t enabled) {
+    if (enabled != 0 && enabled != 1) return -1;
+    gint32 *value = g_new(gint32, 1);
+    *value = enabled;
+    return post(post_processing_enabled_apply, value, g_free);
 }
 
 int32_t jsti_window_set_appearance(int32_t appearance) {
@@ -4888,6 +4912,23 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (jsti_history_filters_self_test(error, capacity) != 0) return -1;
     if (jsti_vocabulary_self_test(error, capacity) != 0) return -1;
     if (jsti_profiles_self_test(error, capacity) != 0) return -1;
+    if (jsti_troubleshooting_self_test(ui.window, error, capacity) != 0) return -1;
+    {
+        GtkTextBuffer *prompt = gtk_text_view_get_buffer(ui.polish_prompt_row);
+        GtkTextIter prompt_start, prompt_end;
+        gtk_text_buffer_get_bounds(prompt, &prompt_start, &prompt_end);
+        gchar *draft = gtk_text_buffer_get_text(prompt, &prompt_start, &prompt_end, TRUE);
+        gint32 saved_enabled = adw_switch_row_get_active(ui.polish_row) ? 1 : 0;
+        gint32 disabled = 0;
+        post_processing_enabled_apply(&disabled);
+        gtk_text_buffer_get_bounds(prompt, &prompt_start, &prompt_end);
+        gchar *after_fix = gtk_text_buffer_get_text(prompt, &prompt_start, &prompt_end, TRUE);
+        gboolean draft_preserved = g_strcmp0(draft, after_fix) == 0 && !adw_switch_row_get_active(ui.polish_row);
+        post_processing_enabled_apply(&saved_enabled);
+        g_free(draft); g_free(after_fix);
+        if (!draft_preserved || jsti_window_set_post_processing_enabled(2) != -1)
+            return fail(error, capacity, "cleanup fix refresh replaced a prompt draft or accepted an invalid state");
+    }
     const char *first = "00000000-0000-0000-0000-000000000001";
     const char *second = "00000000-0000-0000-0000-000000000002";
     JSTIHistoryRow rows[] = {

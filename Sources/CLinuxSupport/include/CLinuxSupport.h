@@ -242,6 +242,30 @@ typedef struct JSTIAboutLink {
 /* Copies metadata and up to eight HTTPS links onto the GTK queue. No update
  * check, download or installation is implied. */
 int32_t jsti_window_configure_about(const char *details, const JSTIAboutLink *links, size_t count);
+enum {
+    JSTI_LINUX_TROUBLESHOOTING_CHECK = 1,
+    JSTI_LINUX_TROUBLESHOOTING_KEEP_CLIPBOARD = 2,
+    JSTI_LINUX_TROUBLESHOOTING_DISABLE_PROCESSING = 3
+};
+typedef void (*jsti_troubleshooting_fn)(int32_t command, uint64_t revision, void *context);
+typedef struct JSTILinuxTroubleshootingRow {
+    const char *title;
+    const char *detail;
+    const char *status;
+    const char *navigation_title;
+    const char *fix_title;
+    int32_t navigation_page;
+    int32_t fix_command;
+} JSTILinuxTroubleshootingRow;
+int32_t jsti_troubleshooting_configure(jsti_troubleshooting_fn callback, void *context);
+void jsti_troubleshooting_clear(void);
+uint64_t jsti_troubleshooting_revision(void);
+/* Copies up to 32 rows onto the GTK queue. Old/closed revisions are ignored.
+ * 0 means queued, -1 means invalid input or an unavailable window queue. */
+int32_t jsti_troubleshooting_set_rows(const JSTILinuxTroubleshootingRow *rows, size_t count,
+                                      const char *summary, uint64_t revision);
+/* Updates only the saved enabled state, preserving unsaved prompt/model drafts. */
+int32_t jsti_window_set_post_processing_enabled(int32_t enabled);
 /* General › Launch at login: the shared DesktopLoginItemState (0 off, 1 on,
  * 2 off by the system, 3 on by policy, 4 unavailable) and the note under it. */
 int32_t jsti_window_set_login_item(int32_t state, const char *detail);

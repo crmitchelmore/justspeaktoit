@@ -91,6 +91,7 @@ enum LinuxHostPlatform: DesktopHostAutomationPlatform {
     }
 
     static var session: LinuxDesktopSession { runtime.lock.withLock { runtime.session } }
+    static var remoteDesktopAvailable: Bool { runtime.lock.withLock { runtime.remoteDesktopAvailable } }
 
     /// What the status line calls the shortcut, e.g. "Ctrl+Alt+Space".
     static var shortcutName: String {

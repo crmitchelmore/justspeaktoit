@@ -53,6 +53,9 @@ int32_t jsti_history_filters_self_test(char *error, size_t capacity);
 gboolean jsti_history_filters_active(void);
 
 struct _GtkWindow;
+void jsti_troubleshooting_open(struct _GtkWindow *owner);
+void jsti_troubleshooting_close(void);
+int32_t jsti_troubleshooting_self_test(struct _GtkWindow *owner, char *error, size_t capacity);
 void jsti_show_voice_sources(struct _GtkWindow *owner, const char *record, const char *history);
 int32_t jsti_voice_sources_self_test(struct _GtkWindow *owner, char *error, size_t capacity);
 void jsti_voice_sources_close(void);

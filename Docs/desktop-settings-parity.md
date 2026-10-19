@@ -73,7 +73,30 @@ clipboard restoration, missing remote post-processing credentials and observed
 Windows permission states. The configuration check inventory, wording, severity,
 destinations and explicit fixes live in `SpeakCore/DesktopTroubleshooting.swift`;
 macOS consumes that inventory while retaining its own permission and Fn guidance.
-Linux can consume the shared policy but has no native Troubleshooting report yet.
+Linux About now opens a native GTK Troubleshooting report using the same
+configuration policy. It retains the current shortcut listener's actual hint,
+labels unknown sessions and startup portal unavailability, and explicitly avoids
+inferring microphone or insertion permission from session detection. Clipboard
+restoration is checked only where X11 supports it; Wayland does not offer an
+inapplicable restoration fix. API-key findings navigate to Linux Post-processing,
+where the relevant key is edited; shortcut findings open Keyboard.
+
+The Linux report has selectable, wrapped details, keyboard/Escape support,
+rechecking, explicit fixes and close/reopen revision fences. It is modeless during
+review; a pending fix temporarily protects the parent settings from competing
+edits. Cleanup credential checks and persisted fixes use one shared desktop-host
+authority on Windows and Linux. Refreshing a fix does not rebuild unrelated
+configuration editors, and Linux's cleanup switch refresh preserves unsaved
+prompt/model drafts. Credential checks use the normal desktop keyring read path,
+including any unlock it requires. Opening the report does not probe the microphone
+or request microphone/desktop permission grants.
+
+Five portable host regressions cover persisted cleanup fixes, prompt/model
+preservation, newer credentials, stale settings, closed controllers and effective
+clipboard policy. GTK smoke fixtures cover pending fixes, stale/late reports,
+close/reopen, invalid commands, invalid UTF-8 and row bounds. These are authored
+but **NOT_RUN** locally. This adds a report, not Linux action-shortcut registration
+or native/provider/device acceptance; those gates remain open.
 
 The macOS projection distinguishes an absent or empty credential from a failed
 Keychain read. Failed reads offer no Disable cleanup action. Explicit fixes

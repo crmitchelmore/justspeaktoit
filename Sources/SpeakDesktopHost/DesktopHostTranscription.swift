@@ -172,6 +172,12 @@ extension DesktopHostController {
             update("Stopping backup inspection... No application data will be changed.", state: 2)
             return
         }
+        if migrationRestoreWorker != nil || migrationRestoreApplyWorker != nil {
+            migrationRestoreWorker?.cancel()
+            migrationRestoreApplyWorker?.cancel()
+            update("Stopping restore... Any change is put back.", state: 2)
+            return
+        }
         if let export = migrationExportWorker {
             export.cancel()
             update("Stopping History backup... Existing files will be kept.", state: 2)

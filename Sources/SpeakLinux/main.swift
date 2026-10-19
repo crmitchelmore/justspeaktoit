@@ -53,6 +53,7 @@ func runSelfTest() throws {
 /// Configures the window from saved settings, runs GTK on this (main) thread
 /// until the window closes, then drains every queue and closes the controller.
 func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws {
+    try LinuxWindow.configureAbout()
     try configureApplicationIcon()
     let providerCallbacks = try LinuxWindow.beginVoiceProviderCallbacks(holder)
     defer { LinuxWindow.endVoiceProviderCallbacks(providerCallbacks) }

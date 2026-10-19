@@ -232,6 +232,13 @@ int32_t jsti_window_show_migration_report(const char *text);
 int32_t jsti_window_set_insights(const JSTIInsights *all, const JSTIInsights *visible);
 /* Applies and shows the saved appearance, indexed as JSTI_EVENT_APPEARANCE. */
 int32_t jsti_window_set_appearance(int32_t appearance);
+typedef struct JSTIAboutLink {
+    const char *title;
+    const char *url;
+} JSTIAboutLink;
+/* Copies metadata and up to eight HTTPS links onto the GTK queue. No update
+ * check, download or installation is implied. */
+int32_t jsti_window_configure_about(const char *details, const JSTIAboutLink *links, size_t count);
 /* General › Launch at login: the shared DesktopLoginItemState (0 off, 1 on,
  * 2 off by the system, 3 on by policy, 4 unavailable) and the note under it. */
 int32_t jsti_window_set_login_item(int32_t state, const char *detail);

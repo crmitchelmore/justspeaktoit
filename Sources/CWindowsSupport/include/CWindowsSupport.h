@@ -216,6 +216,14 @@ typedef struct JSTIHistoryRow {
     int tone;
 } JSTIHistoryRow;
 
+typedef struct JSTIAboutLink {
+    const char *title;
+    const char *url;
+} JSTIAboutLink;
+/* Copies metadata and up to eight HTTPS links before window_run. No network,
+ * updater or installation is started. Returns -1 for invalid input or a running window. */
+int jsti_window_configure_about(const char *details, const JSTIAboutLink *links, size_t count);
+
 typedef struct JSTIHistoryFilterModel {
     const char *id;
     const char *name;

@@ -72,6 +72,7 @@ enum {
     JSTI_EVENT_MIGRATION_EXPORT = 96, /* text: ZIP destination; index bits: 1 saved audio, 2 app profiles */
     JSTI_EVENT_MIGRATION_INSPECT = 97, /* text: selected ZIP source; no application changes */
     JSTI_EVENT_QUICK_VOICE = 110, /* index: canonical favorite slot 1...3 */
+    JSTI_EVENT_SPEAK_CLIPBOARD = 113, /* captures through the owned Host speech task, not History */
     JSTI_EVENT_ACTION_SHORTCUT_EDIT = 115, /* revision/request header, then percent-escaped draft rows */
     /* Profiles: percent-escaped TAB fields, starting with revision/action/UUID;
      * "refresh" opens a new immutable catalogue/editor revision. */

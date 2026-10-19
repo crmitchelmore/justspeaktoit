@@ -2246,7 +2246,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | modulatePIIPhiTagging | Live/batch source wired; unqualified / Same | Native default/on/off choice, strict transfer/restart and captured live/batch provider flags; absent stays off. Native/provider acceptance pending. |
 | accessibilityInsertionMode | Equivalent / Missing | Output; Windows cursor/replace-field; Linux paste cannot claim AX replace-all equivalence |
 | selectedHotKey | Equivalent / Partial | Shortcuts; Windows Ctrl/Alt native key; Linux desktop/portal-owned binding, never Mac Fn key translation |
-| customShortcutBindings | Complete source mapping; unqualified / Partial window-local source | Windows Keyboard **Action shortcuts** dialog: all 27 actions source-wired; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Voice editing additionally requires an editable UIA selection and a rewrite API key. Linux projects 20 actions into window-local bindings and edits all saved bindings with presets/reset; seven execution actions and global registration remain unimplemented. Native/physical acceptance pending. |
+| customShortcutBindings | Complete source mapping; unqualified / Partial window-local source | Windows Keyboard **Action shortcuts** dialog: all 27 actions source-wired; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Voice editing additionally requires an editable UIA selection and a rewrite API key. Linux projects 21 actions into window-local bindings and edits all saved bindings with presets/reset; six execution actions and global registration remain unimplemented. Native/physical acceptance pending. |
 | paidAccessRoutingEnabled | Apple-specific / Apple-specific | BYOK desktop providers; no paid-access entitlement/routing journey. Retained opaque through import/export |
 | simpleModelChoices | Missing / Missing | Native catalogue picker without simplified paid-model chooser |
 | rememberedLocalTranscriptionSource | Partial / Partial | Models remembers Local selection; no Apple on-device source |
@@ -2506,12 +2506,20 @@ duplicate that the user did not edit is not refused.
 Linux now projects the shared key table to GDK/X11 key values without loading a
 native framework into SpeakCore. Its Keyboard page shows every canonical
 action, the saved combination and an explicit availability/scope note. There
-are 20 window-local execution mappings: recording; Stop speech; Dashboard,
+are 21 window-local execution mappings: recording; Stop speech; Speak Clipboard; Dashboard,
 History, Voice Output (both), General, Transcription, Post-processing,
 Corrections, Pronunciation, Profiles, Keyboard and About; Data & Migration
 (General); Troubleshooting; Compare Models; and Quick Voice 1-3. The actual
 buttons' sensitivity and page availability still apply. Quick Voice queues
 only the existing bounded Host settings action; it does not start synthesis.
+
+Speak Clipboard admits the existing owned `readClipboardAloud` task; the
+settings queue does not wait for clipboard capture, synthesis or playback.
+It uses Linux's guarded native clipboard snapshot, not the selected History
+record. Empty, non-text, failed or timed-out capture cannot fall back to History.
+Stop, replacement, recording and shutdown cancel the owned speech request.
+The shortcut is window-local and requires an idle, sensitive main window;
+no global registration or external selected-text capability is implied.
 
 GTK handles actions after focused controls and the existing sidebar shortcuts.
 Text editors and editable/drop-down controls retain their keys. Matching
@@ -2525,7 +2533,7 @@ not run local actions. An imported duplicate retains its value and shows a
 conflict note; the first listed action owns that combination. Sidebar
 Ctrl+digit chords retain precedence and corresponding action notes disclose it.
 
-Seven Linux actions remain unavailable: Speak Selected Text, Speak Clipboard,
+Six Linux actions remain unavailable: Speak Selected Text,
 Pause/Resume TTS, API Keys, Permissions, Paste Last History Item and Edit
 Selection by Voice. No API Keys/Permissions action is redirected to an
 unrelated page. Enabled global bindings remain saved and visibly unregistered;
@@ -2569,6 +2577,10 @@ typing focus, disabled rows, key release/repeat suppression and invalid inputs.
 Native dispatch fixtures exercise actual page navigation, record/Stop events,
 all three Quick Voice slots, and busy/disabled-window/control refusals without
 calling a capture device or speech provider.
+The native dispatch fixture also checks Speak Clipboard admission and
+busy/disabled-window refusal. Existing captured-source Host regressions cover
+clipboard-versus-History ownership, empty/non-text input and cancellation;
+they are not evidence that this new Linux mapping has run.
 Six `DesktopHostLinuxShortcutEditTests` cover switch-only preservation versus
 Clear, every preset/default, invalid/duplicate keys, strict complete draft
 decoding, stale saves and refused writes. GTK editor fixtures cover draft

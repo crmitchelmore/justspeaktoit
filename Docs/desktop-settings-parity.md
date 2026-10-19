@@ -14,9 +14,16 @@ has a Learning preferences button that opens the existing Corrections preference
 group. Both reuse the existing revision-aware preference authority and save
 path; there is no second settings store or implicit session approval.
 Linux observational learning still requires separate local session consent.
+Windows Stop learning remains enabled while candidate work is pending; Allow
+and mutations stay disabled. Stop follows the existing ordered settings queue,
+with explicit waiting-for-confirmation feedback rather than claiming revocation
+before the Host has processed it.
 
 Authored native fixtures check GTK row ancestry, Windows page scope and initial
 Corrections group selection, and saving without losing hidden preference values.
+Additional fixtures check pending native Stop availability and that Host Stop
+revokes approval, cancels a held observation before readback, and prevents
+further output from starting another observation without fresh approval.
 These changes have not been executed locally; automatic native CI and actual
 installed learning workflows remain required before claiming acceptance.
 

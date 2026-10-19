@@ -6,6 +6,7 @@ package struct DesktopHostRecordingConfiguration: Sendable {
     package let configuration: DesktopConfiguration?
     package let azureEndpoint: String
     package let sampleRate: Int
+    package let voiceCommands: DesktopHostVoiceCommandPolicy
 }
 
 /// App identity and insertion destination belong to the same utterance.

@@ -2,16 +2,35 @@ import Foundation
 import SpeakCore
 import SpeakDesktop
 
+/// Voice-command preferences captured with a microphone recording, so a settings
+/// edit made while it records or finishes cannot change how its transcript expands.
+package struct DesktopHostVoiceCommandPolicy: Equatable, Sendable {
+    let enabled: Bool
+    let triggers: String
+
+    init(_ configuration: DesktopConfiguration) {
+        enabled = configuration.enabled("voiceCommandsEnabled")
+        triggers = configuration.text("clipboardInsertionTriggers")
+    }
+
+    /// A recording without stored preferences keeps canonical defaults, never later settings.
+    init(recorded configuration: DesktopConfiguration?) throws {
+        try self.init(configuration ?? DesktopConfiguration())
+    }
+}
+
 extension DesktopHostController {
     /// Runs once per successful provider result, before vocabulary and polish.
-    /// History selection and Copy consume saved variants.
-    func applyVoiceCommands(_ original: DesktopRecordingStore.Record) async throws -> DesktopRecordingStore.Record {
+    /// History selection and Copy consume saved variants. Microphone recordings
+    /// pass the policy frozen at Record; imports and retries use current settings.
+    func applyVoiceCommands(
+        _ original: DesktopRecordingStore.Record, policy recorded: DesktopHostVoiceCommandPolicy? = nil
+    ) async throws -> DesktopRecordingStore.Record {
         guard !closed, !cancellationRequested else { throw CancellationError() }
         try Task.checkCancellation()
         guard let text = original.originalText, original.correctedText == nil else { return original }
-        let preferences = try configuration()
-        let enabled = preferences.enabled("voiceCommandsEnabled")
-        let triggers = preferences.text("clipboardInsertionTriggers")
+        let policy = try recorded ?? DesktopHostVoiceCommandPolicy(configuration())
+        let (enabled, triggers) = (policy.enabled, policy.triggers)
         guard enabled, VoiceCommandProcessor.containsClipboardCommand(in: text, customTriggers: triggers) else {
             return original
         }

@@ -68,7 +68,8 @@ extension DesktopHostController {
         } else {
             await transcribe(
                 stopped.record, duration: stopped.duration, output: stopped.output, profile: stopped.profile,
-                azureEndpoint: stopped.options?.azureEndpoint, input: stopped.input
+                azureEndpoint: stopped.options?.azureEndpoint, input: stopped.input,
+                voiceCommands: stopped.voiceCommands
             )
         }
     }

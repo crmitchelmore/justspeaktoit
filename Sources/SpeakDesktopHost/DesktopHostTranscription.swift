@@ -7,7 +7,7 @@ extension DesktopHostController {
     package func transcribe( // swiftlint:disable:this function_body_length
         _ original: DesktopRecordingStore.Record, duration: TimeInterval, output: DesktopHostRecordingOutput<Platform>?,
         profile: DesktopProfileSession? = nil, azureEndpoint: String? = nil,
-        input: DesktopHostRecordingInput? = nil
+        input: DesktopHostRecordingInput? = nil, voiceCommands: DesktopHostVoiceCommandPolicy? = nil
     ) async {
         // existing owned transcription orchestration; no behavior change.
         var record = original
@@ -59,7 +59,7 @@ extension DesktopHostController {
             let result = try await task.value
             record = recordWithResult(result, replacing: record, skippedPolishReason: session.skippedPolishReason)
             try await saveRecord(record)
-            record = try await applyVoiceCommands(record)
+            record = try await applyVoiceCommands(record, policy: voiceCommands)
             record = try await applyVocabulary(record)
             record = await postProcess(record, options: session.postProcessing)
             if cancellationRequested { record.failure = "Cancelled. Completed transcription and audio retained." }

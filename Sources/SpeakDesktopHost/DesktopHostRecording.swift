@@ -36,8 +36,10 @@ extension DesktopHostController {
         } else { frozenConfiguration = settings.configuration }
         let rate = DesktopLiveTranscription.route(forID: capturedProfile.modelIdentifier)?.sampleRate
             ?? PCMRecordingFile.sampleRate
+        let voiceCommands = try DesktopHostVoiceCommandPolicy(recorded: frozenConfiguration)
         let options = DesktopHostRecordingConfiguration(
-            configuration: frozenConfiguration, azureEndpoint: azureResourceEndpoint(), sampleRate: rate
+            configuration: frozenConfiguration, azureEndpoint: azureResourceEndpoint(), sampleRate: rate,
+            voiceCommands: voiceCommands
         )
         let key = try requireCredentialOrLocalModel(capturedProfile.modelIdentifier)
         try requireAzureResource(forLive: capturedProfile.modelIdentifier)

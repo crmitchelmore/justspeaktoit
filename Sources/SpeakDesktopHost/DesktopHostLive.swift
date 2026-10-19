@@ -103,7 +103,7 @@ extension DesktopHostController {
         do {
             try await saveRecord(record)
             if record.failure == nil {
-                record = try await applyVoiceCommands(record)
+                record = try await applyVoiceCommands(record, policy: stopped.voiceCommands)
                 record = try await applyVocabulary(record)
                 record = await applyLivePolish(record, session: session)
                 let skip = record.livePolishResult?.succeeded == true

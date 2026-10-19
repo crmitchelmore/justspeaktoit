@@ -429,7 +429,12 @@ remote polish, and subsequent History selection, Copy and Export use saved
 variants without consulting the clipboard again. A transcription retry processes
 the new provider result once with a fresh clipboard snapshot, never its earlier
 expanded text. Live previews and failed live recovery text do not expand.
-Comparison results remain raw and never read the clipboard.
+Comparison results remain raw and never read the clipboard. A microphone
+recording (including each hands-free utterance) freezes the enabled switch and
+custom phrases at Record with its other provider inputs, so settings edited
+while it records or finishes apply only to later recordings; a recording made
+without stored preferences keeps the canonical defaults. Imports and retries
+have no recording policy and use the current settings.
 
 As on Mac, **enabled remote post-processing receives the expanded clipboard text**
 when a trigger is spoken. Clipboard contents are not added to transcription

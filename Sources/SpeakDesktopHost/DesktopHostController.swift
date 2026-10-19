@@ -157,6 +157,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
         package let textOutput: Platform.TextOutputOptions
         package var input: DesktopHostRecordingInput?
         package var output: DesktopHostRecordingOutput<Platform> { .init(options: textOutput, target: target) }
+        /// Frozen at Record; nil only for directly constructed finishes.
+        package var voiceCommands: DesktopHostVoiceCommandPolicy? { input?.voiceCommands ?? options?.voiceCommands }
     }
 
     package nonisolated let directory: URL

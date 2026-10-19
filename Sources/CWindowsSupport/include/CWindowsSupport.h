@@ -65,6 +65,8 @@ enum JSTIWindowEvent {
     JSTI_EVENT_AUDIO_CLEANUP_RESPONSE = 95, /* text: confirmation UUID; index: 1 confirms, 0 cancels */
     JSTI_EVENT_MIGRATION_EXPORT = 96, /* text: ZIP destination; index bits: 1 saved audio, 2 app profiles */
     JSTI_EVENT_MIGRATION_INSPECT = 97, /* text: selected ZIP source; no application changes */
+    JSTI_EVENT_MIGRATION_RESTORE = 98, /* text: selected ZIP source; prepares a preview only */
+    JSTI_EVENT_MIGRATION_RESTORE_RESPONSE = 99, /* text: preview token; index: 0 cancel, 1 merge, 2 replace */
     JSTI_EVENT_USER_ABSENT = 120
 };
 
@@ -344,6 +346,10 @@ int jsti_shell_open_file(const char *path, char *error, size_t error_capacity);
 int jsti_shell_open_directory(const char *path, char *error, size_t error_capacity);
 int jsti_window_confirm_audio_cleanup(const char *token, size_t count, char *error, size_t error_capacity);
 int jsti_window_show_migration_report(const char *text, char *error, size_t error_capacity);
+/* Shows a restore preview and answers MIGRATION_RESTORE_RESPONSE exactly once
+ * with token. offers_replace enables the Replace app profiles choice. */
+int jsti_window_confirm_migration_restore(const char *token, const char *text, int offers_replace,
+                                          char *error, size_t error_capacity);
 
 /* Atomic Apply callback from the native settings dialog, on the UI thread.
  * prompt/new_key are borrowed until return. Empty new_key means keep the saved

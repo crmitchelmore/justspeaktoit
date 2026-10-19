@@ -24,6 +24,7 @@
 #include "WindowsWindowChrome.hpp"
 #include "WindowsHistoryFilters.hpp"
 #include "WindowsAppIcon.hpp"
+#include "WindowsMigrationRestore.hpp"
 
 bool jsti_postprocessing_available();
 void jsti_show_postprocessing(HWND owner);
@@ -171,6 +172,7 @@ constexpr int recordingsFolderLabelID = 463, recordingsFolderID = 464;
 constexpr int audioCleanupID = 465;
 constexpr int backupAudioID = 466, backupExportID = 467;
 constexpr int backupInspectID = 468;
+constexpr int backupRestoreID = 476;
 constexpr int backupProfilesID = 469;
 constexpr int automationSettingsID = 489;
 constexpr int sourceID = 175;
@@ -698,6 +700,7 @@ void updateHistoryControls(HWND window, int recording) {
     EnableWindow(GetDlgItem(window, backupProfilesID), recording == 0);
     EnableWindow(GetDlgItem(window, backupExportID), recording == 0);
     EnableWindow(GetDlgItem(window, backupInspectID), recording == 0);
+    EnableWindow(GetDlgItem(window, backupRestoreID), recording == 0);
     jsti_history_filters_enabled(recording == 0);
     SetDlgItemTextW(window, historyFiltersID, jsti_history_filters_label().c_str());
     EnableWindow(GetDlgItem(window, clearSearchID), recording == 0 && searching(window));
@@ -795,6 +798,7 @@ unsigned pagesOf(int identifier) {
     case 94: case microphoneID: case textOutputID: case appearanceLabelID: case appearanceID: case automationID:
     case loginItemID: case recordingsFolderLabelID: case recordingsFolderID: case audioCleanupID:
     case backupAudioID: case backupProfilesID: case backupExportID: case backupInspectID:
+    case backupRestoreID:
     case automationSettingsID:
         return page(generalPage);
     case processingID: return page(postProcessingPage);
@@ -1176,7 +1180,9 @@ void layoutSettings(HWND window, const RECT &content) {
             2 * row + scale(window, 12));
         place(window, configurationID, box(right - scale(window, 220),
             cardTop + densitySpace(window, 16, visualDensity.card_padding), scale(window, 220), row));
-        label(94, y); control(microphoneID, y);
+        // Restore sits above Save ZIP backup so the page keeps its minimum height.
+        label(94, y); control(microphoneID, y, right - left - scale(window, 188 + 176 + 12));
+        button(backupRestoreID, y, scale(window, 176));
         const int backupY = y + row + scale(window, 12);
         place(window, textOutputID, box(left, backupY, scale(window, 170), row));
         place(window, backupAudioID, RECT{
@@ -1966,6 +1972,7 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"App &profiles", BS_AUTOCHECKBOX | WS_TABSTOP, backupProfilesID) &&
         add(L"BUTTON", L"Save &ZIP backup...", BS_PUSHBUTTON | WS_TABSTOP, backupExportID) &&
         add(L"BUTTON", L"&Inspect backup...", BS_PUSHBUTTON | WS_TABSTOP, backupInspectID) &&
+        add(L"BUTTON", L"Restore backup...", BS_PUSHBUTTON | WS_TABSTOP, backupRestoreID) &&
         add(L"BUTTON", L"i&Cloud sync settings…", BS_PUSHBUTTON | WS_TABSTOP, cloudSyncID) &&
         add(L"STATIC", state.aboutDetails.c_str(), 0, aboutDetailsID) &&
         add(L"STATIC", jsti_hotkey_label().c_str(), 0, transcriptLabelID) &&
@@ -2635,6 +2642,10 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             confirmed ? 1 : 0, state.context);
         return 0;
     }
+    case jsti::migrationRestore::message:
+        jsti::migrationRestore::present(window, idleControl(window, backupRestoreID) && IsWindowEnabled(window),
+            state.callback, state.context);
+        return 0;
     case WM_HOTKEY:
         jsti_hotkey_message(window, message, wparam);
         return 0;
@@ -2783,6 +2794,14 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             return 0;
         case backupInspectID:
             if (HIWORD(wparam) == BN_CLICKED && idleControl(window, backupInspectID)) inspectMigrationBackup(window);
+            return 0;
+        case backupRestoreID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, backupRestoreID)) {
+                std::string failure;
+                const std::string selected = jsti::migrationRestore::choose(window, failure);
+                if (!failure.empty()) showFailure(window, failure);
+                else if (!selected.empty()) emit(window, JSTI_EVENT_MIGRATION_RESTORE, selected.c_str());
+            }
             return 0;
         case appearanceID:
             if (HIWORD(wparam) == CBN_SELCHANGE) {
@@ -3037,6 +3056,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             state.sidebarDelivery.retire();
             state.densityDelivery.retire();
         }
+        jsti::migrationRestore::clear();
         PostQuitMessage(0); return 0;
     }
     return DefWindowProcW(window, message, wparam, lparam);
@@ -3216,6 +3236,24 @@ int jsti_window_confirm_audio_cleanup(const char *token, size_t count, char *err
     if (!PostMessageW(state.window, audioCleanupMessage, 0, 0)) {
         state.audioCleanupToken.clear();
         return jsti::fail("Could not show the recording audio confirmation.", error, capacity);
+    }
+    return 0;
+}
+
+int jsti_window_confirm_migration_restore(const char *token, const char *text, int offers_replace,
+                                          char *error, size_t capacity) {
+    std::wstring checkedToken, preview;
+    if (!token || !jsti::wide(token, checkedToken) || checkedToken.empty() || !text || !jsti::wide(text, preview) ||
+        preview.empty() || (offers_replace != 0 && offers_replace != 1)) {
+        return jsti::fail("The backup restore preview is invalid.", error, capacity);
+    }
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (!state.window || !jsti::migrationRestore::stage(token, std::move(preview), offers_replace == 1)) {
+        return jsti::fail("The backup restore preview is unavailable.", error, capacity);
+    }
+    if (!PostMessageW(state.window, jsti::migrationRestore::message, 0, 0)) {
+        jsti::migrationRestore::clear();
+        return jsti::fail("Could not show the backup restore preview.", error, capacity);
     }
     return 0;
 }

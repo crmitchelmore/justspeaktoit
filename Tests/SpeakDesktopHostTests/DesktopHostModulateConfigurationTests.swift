@@ -110,7 +110,7 @@ final class DesktopHostModulateConfigurationTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
-        let model = "modulate/velma-2-stt"
+        let model = "modulate/velma-2-stt-batch"
         let credential = try XCTUnwrap(DesktopHostModels.provider(for: model)).apiKeyIdentifier
         FakeLog.shared.setKey("synthetic", name: credential)
         let otherModel = "openai/whisper-1"

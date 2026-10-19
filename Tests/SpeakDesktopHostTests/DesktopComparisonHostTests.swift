@@ -70,7 +70,7 @@ final class DesktopComparisonHostTests: XCTestCase {
         let effects = ComparisonHostEffects(sourceToMutate: root.appendingPathComponent("mutable-fixture"))
         let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
         await controller.markReadyForSelfTest()
-        let models = ["modulate/velma-2-stt", "openai/whisper-1"]
+        let models = ["modulate/velma-2-stt-batch", "openai/whisper-1"]
         await controller.comparisonEvent(
             102, text: "\n" + models.joined(separator: "\t") + "\n" + source.path, index: 0
         )

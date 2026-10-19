@@ -70,13 +70,13 @@ final class DesktopModulateConfigurationTests: XCTestCase {
     func testBatchFeatureSnapshot_SurvivesOtherCaptureHelpersWithoutChangingOldInitializer() throws {
         let initial = try configuration(mask: 6)
         let later = try configuration(mask: 9)
-        let captured = DesktopProfileSession.defaults(modelIdentifier: "modulate/velma-2-stt", postProcessing: .init())
+        let captured = DesktopProfileSession.defaults(modelIdentifier: "modulate/velma-2-stt-batch", postProcessing: .init())
             .capturingModulateFeatures(initial.modulateBatchFeatures)
             .capturingTranscriptionOptions(later.liveOptions)
         XCTAssertEqual(captured.modulateBatchFeatures, initial.modulateBatchFeatures)
         XCTAssertEqual(captured.transcriptionOptions, later.liveOptions)
         XCTAssertEqual(
-            DesktopProfileSession.defaults(modelIdentifier: "modulate/velma-2-stt", postProcessing: .init())
+            DesktopProfileSession.defaults(modelIdentifier: "modulate/velma-2-stt-batch", postProcessing: .init())
                 .modulateBatchFeatures, .init()
         )
     }

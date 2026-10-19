@@ -26,7 +26,8 @@ final class DesktopConfigurationTests: XCTestCase {
             for (index, choice) in choices.enumerated() {
                 XCTAssertFalse(choice.title.isEmpty, field.key)
                 XCTAssertTrue(
-                    !choice.value.isEmpty || (field.key == AppSwitchDelivery.preferenceKey && index == 0),
+                    !choice.value.isEmpty || (index == 0 && (field.key == AppSwitchDelivery.preferenceKey
+                        || DesktopConfiguration.modulatePreferenceKeys.contains(field.key))),
                     field.key
                 )
                 for text in [choice.value, choice.title] {
@@ -149,7 +150,16 @@ final class DesktopConfigurationTests: XCTestCase {
                 XCTAssertThrowsError(try DesktopConfiguration(values: [field.key: AnyCodable(.string("bad\0text"))]))
             case .choice(let choices):
                 for choice in choices {
-                    XCTAssertNoThrow(try DesktopConfiguration(values: [field.key: AnyCodable(.string(choice.value))]))
+                    if DesktopConfiguration.modulatePreferenceKeys.contains(field.key) {
+                        XCTAssertThrowsError(try DesktopConfiguration(values: [field.key: AnyCodable(.string(choice.value))]))
+                    } else {
+                        XCTAssertNoThrow(try DesktopConfiguration(values: [field.key: AnyCodable(.string(choice.value))]))
+                    }
+                }
+                if DesktopConfiguration.modulatePreferenceKeys.contains(field.key) {
+                    for enabled in [false, true] {
+                        XCTAssertNoThrow(try DesktopConfiguration(values: [field.key: AnyCodable(.bool(enabled))]))
+                    }
                 }
                 // Forward-compatible choice fields intentionally preserve an unrecognized
                 // stored string (e.g. a future region identifier, or quality/speed mode this

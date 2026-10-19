@@ -158,13 +158,14 @@ typedef struct UI {
     AdwComboRow *appearance_row;
     AdwSwitchRow *login_row;
     AdwSwitchRow *automation_row;
-    GtkWidget *configuration_columns[4];
+    GtkWidget *configuration_columns[5];
 } UI;
 
 static UI ui;
 static guint polish_remote_count = G_MAXUINT;
 static GtkWidget *polish_local_group;
 GtkWidget *jsti_vocabulary_page_new(int kind);
+GtkWidget *jsti_vocabulary_learning_preferences(void);
 int32_t jsti_vocabulary_self_test(char *error, size_t capacity);
 
 static struct {
@@ -1795,6 +1796,7 @@ static void build_window(void) {
     add_page(JSTI_PAGE_TRANSCRIPTION, build_transcription());
     add_page(JSTI_PAGE_POST_PROCESSING, build_post_processing());
     add_page(JSTI_PAGE_CORRECTIONS, jsti_vocabulary_page_new(0));
+    ui.configuration_columns[4] = jsti_vocabulary_learning_preferences();
     add_page(JSTI_PAGE_PRONUNCIATION, jsti_vocabulary_page_new(1));
     add_page(JSTI_PAGE_PROFILES, jsti_profiles_page_new());
     add_page(JSTI_PAGE_KEYBOARD, build_keyboard());
@@ -3274,11 +3276,12 @@ static void configuration_apply(gpointer data) {
         configuration.overlay_settings = g_array_ref(update->overlay_settings);
         configuration.hands_free_settings = g_array_ref(update->hands_free_settings);
         configuration.enabled_by_fields = g_array_ref(update->enabled_by_fields);
-        GtkWidget *groups[4];
-        for (guint i = 0; i < 4; ++i) {
-            groups[i] = group("Dictation preferences");
+        GtkWidget *groups[5];
+        for (guint i = 0; i < G_N_ELEMENTS(groups); ++i) {
+            groups[i] = group(i == 4 ? "Correction learning" : "Dictation preferences");
             adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(groups[i]),
-                "Apply saves all preference fields. Provider-specific options only affect supported routes.");
+                i == 4 ? "Apply saves all preference fields. Enabling learning does not grant local session permission."
+                : "Apply saves all preference fields. Provider-specific options only affect supported routes.");
             gtk_box_append(GTK_BOX(ui.configuration_columns[i]), groups[i]);
         }
         if (!jsti_hud_overlay_supported())
@@ -3288,7 +3291,8 @@ static void configuration_apply(gpointer data) {
         for (guint i = 0; i < update->titles->len; ++i) {
             const char *section = g_ptr_array_index(update->groups, i);
             guint slot = g_strcmp0(section, "Transcription") == 0 ? 1 :
-                g_strcmp0(section, "Post-processing") == 0 ? 2 : g_strcmp0(section, "Keyboard") == 0 ? 3 : 0;
+                g_strcmp0(section, "Post-processing") == 0 ? 2 : g_strcmp0(section, "Keyboard") == 0 ? 3 :
+                g_strcmp0(section, "Corrections") == 0 ? 4 : 0;
             gboolean boolean = g_array_index(update->booleans, gboolean, i);
             const char *choices = g_ptr_array_index(update->choices, i);
             GtkWidget *row = boolean ? adw_switch_row_new() :
@@ -3309,7 +3313,7 @@ static void configuration_apply(gpointer data) {
             g_ptr_array_add(configuration.rows, row);
             if (boolean) g_signal_connect(row, "notify::active", G_CALLBACK(configuration_dependencies), NULL);
         }
-        for (guint i = 0; i < 4; ++i) {
+        for (guint i = 0; i < G_N_ELEMENTS(groups); ++i) {
             GtkWidget *apply = gtk_button_new_with_label("Apply preferences");
             gtk_widget_set_halign(apply, GTK_ALIGN_END);
             g_signal_connect(apply, "clicked", G_CALLBACK(on_configuration_apply), NULL);
@@ -3733,6 +3737,18 @@ static gboolean configuration_self_test(void) {
         configuration.rows->len != configuration.booleans->len ||
         configuration.rows->len != configuration.overlay_settings->len ||
         configuration.rows->len != configuration.hands_free_settings->len) return FALSE;
+    GtkWidget *corrections = gtk_stack_get_child_by_name(ui.pages, "corrections");
+    if (ui.configuration_columns[4] == NULL || corrections == NULL ||
+        !gtk_widget_is_ancestor(ui.configuration_columns[4], corrections)) return FALSE;
+    gboolean found_learning_switch = FALSE, found_learning_threshold = FALSE;
+    for (guint i = 0; i < configuration.rows->len; ++i) {
+        GtkWidget *row = g_ptr_array_index(configuration.rows, i);
+        if (!gtk_widget_is_ancestor(row, ui.configuration_columns[4])) continue;
+        if (gtk_widget_is_ancestor(row, ui.configuration_columns[0])) return FALSE;
+        found_learning_switch |= ADW_IS_SWITCH_ROW(row);
+        found_learning_threshold |= ADW_IS_ENTRY_ROW(row);
+    }
+    if (!found_learning_switch || !found_learning_threshold) return FALSE;
     gboolean found_dependency = FALSE;
     for (guint i = 0; i < configuration.rows->len; ++i) {
         gint32 enabling = g_array_index(configuration.enabled_by_fields, gint32, i);

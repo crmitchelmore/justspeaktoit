@@ -6,6 +6,20 @@ macOS `AppSettings.DefaultsKey` aliases the shared 91-key
 plus preferences and collections
 outside that enum. Track remaining product acceptance in #1157.
 
+## Correction learning preferences (source only)
+
+GTK now presents the canonical learning enable/threshold fields directly above
+the Corrections editor instead of burying them in General. Windows Corrections
+has a Learning preferences button that opens the existing Corrections preference
+group. Both reuse the existing revision-aware preference authority and save
+path; there is no second settings store or implicit session approval.
+Linux observational learning still requires separate local session consent.
+
+Authored native fixtures check GTK row ancestry, Windows page scope and initial
+Corrections group selection, and saving without losing hidden preference values.
+These changes have not been executed locally; automatic native CI and actual
+installed learning workflows remain required before claiming acceptance.
+
 ## About and manual updates (source only)
 
 Native About now shows the installed app's version/build when stamped,

@@ -827,6 +827,36 @@ bool jsti_configuration_self_test(HWND owner, std::string &error) {
     if (!configurationTitleSelfTest(owner, error)) return false;
     if (!configurationAutoCleanSelfTest(owner, error)) return false;
     if (!configurationEmptyChoiceSelfTest(owner, error)) return false;
+    struct LearningApplied { int calls = 0; bool correct = false; } learningApplied;
+    Dialog learning;
+    learning.group = L"Corrections";
+    learning.config.fields = {{L"Learn corrections", L"0", L"Corrections", true},
+        {L"Promotion threshold", L"2", L"Corrections", false},
+        {L"Language", L"en_GB", L"General", false}};
+    learning.config.context = &learningApplied;
+    learning.config.callback = [](int action, const char *const *values, size_t count, void *context,
+                                  char *, size_t) {
+        auto &result = *static_cast<LearningApplied *>(context);
+        ++result.calls;
+        result.correct = action == 0 && count == 3 && std::string(values[0]) == "1" &&
+            std::string(values[1]) == "3" && std::string(values[2]) == "en_GB";
+        return 0;
+    };
+    HWND learningWindow = createDialog(owner, learning);
+    if (!learningWindow) { error = "Could not create correction learning preferences."; return false; }
+    const bool learningGrouped = learning.group == L"Corrections" && learningApplied.calls == 0 &&
+        (GetWindowLongW(GetDlgItem(learningWindow, fieldBase), GWL_STYLE) & WS_VISIBLE) &&
+        (GetWindowLongW(GetDlgItem(learningWindow, fieldBase + 1), GWL_STYLE) & WS_VISIBLE) &&
+        !(GetWindowLongW(GetDlgItem(learningWindow, fieldBase + 2), GWL_STYLE) & WS_VISIBLE);
+    SendDlgItemMessageW(learningWindow, fieldBase, BM_SETCHECK, BST_CHECKED, 0);
+    SetDlgItemTextW(learningWindow, fieldBase + 1, L"3");
+    SendMessageW(learningWindow, WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
+    const bool learningSaved = !IsWindow(learningWindow) && learningApplied.calls == 1 && learningApplied.correct;
+    if (IsWindow(learningWindow)) DestroyWindow(learningWindow);
+    if (!learningGrouped || !learningSaved) {
+        error = "Correction learning preferences lost initial grouping or hidden preference values.";
+        return false;
+    }
     struct Applied { int calls = 0; bool correct = false; } applied;
     Dialog dialog;
     dialog.config.fields = {{L"Language", L"en_GB", L"Transcription", false}, {L"HUD", L"1", L"General", true}};

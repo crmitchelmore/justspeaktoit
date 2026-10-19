@@ -1084,6 +1084,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | modulatePIIPhiTagging | Live/batch source wired; unqualified / Same | Native default/on/off choice, strict transfer/restart and captured live/batch provider flags; absent stays off. Native/provider acceptance pending. |
 | accessibilityInsertionMode | Equivalent / Missing | Output; Windows cursor/replace-field; Linux paste cannot claim AX replace-all equivalence |
 | selectedHotKey | Equivalent / Partial | Shortcuts; Windows Ctrl/Alt native key; Linux desktop/portal-owned binding, never Mac Fn key translation |
+| customShortcutBindings | Partial source wiring; unqualified / Shared model only | Windows Keyboard **Action shortcuts** dialog: 15 of 27 actions run, the rest stay stored for the Mac; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Linux transfers the Mac-compatible value unchanged without native registration. Native/physical acceptance pending. |
 | paidAccessRoutingEnabled | Missing / Missing | BYOK desktop providers; no paid-access entitlement/routing journey |
 | simpleModelChoices | Missing / Missing | Native catalogue picker without simplified paid-model chooser |
 | rememberedLocalTranscriptionSource | Partial / Partial | Models remembers Local selection; no Apple on-device source |
@@ -1094,8 +1095,9 @@ replacement/nearest implemented surface; they do not assert hidden support.
 
 `postProcessingSystemPrompt` is represented by the existing native custom prompt
 and reaches the shared cleanup policy. `customShortcutBindings`/individual action
-shortcuts, Shortcut presets/reset, Escape cancellation and conflict management
-beyond the global key remain gaps. Profiles have a Windows native editor with
+shortcuts, Shortcut presets/reset and conflict reporting are source wired on
+Windows (partial; see [Individual action shortcuts](#individual-action-shortcuts))
+and shared-model only on Linux; Escape cancellation remains a gap. Profiles have a Windows native editor with
 shared ordering/session snapshots; this separate source-only candidate adds
 the GTK editor and actual recording selection described above. Apple bundle-ID matchers are preserved but
 not silently converted to executable paths.
@@ -1244,3 +1246,53 @@ all stored values still participate in Apply. Screenshot tours include full and
 compact recording/completion cards.
 These synthetic checks do not establish physical microphone/shortcut/display
 acceptance, provider accuracy or macOS feature parity.
+
+## Individual action shortcuts
+
+Windows: partial source wiring, unqualified. Linux: shared model only. macOS
+behaviour, its `customShortcutBindings` key and its JSON shape are unchanged.
+
+`DesktopShortcutAction` (SpeakCore) mirrors the Mac's 27 `ShortcutAction` raw
+values, defaults and global eligibility; `DesktopShortcutCatalogParityTests`
+asserts identical identifiers and defaults against the Apple types. Bindings keep
+the Mac's `keyCode`, `modifiers` (`command`, `option`, `control`, `shift`,
+`function`), `isGlobal` and `isEnabled` fields, so a desktop JSON configuration
+export/import carries them under the Mac key and unknown entries survive.
+`DesktopHostShortcutBindings` stores them in portable settings and the desktop
+editor check (`DesktopShortcutBindings.editing`) is shared, not Windows-owned.
+
+Modifier mapping: Command is Ctrl, Option is Alt, Shift is Shift. Mac Control,
+and Fn on keys other than function keys, have no Windows equivalent: those
+bindings are kept untouched for the Mac (an unchanged row keeps its stored Mac
+binding even when its switches change) but are not registered on Windows.
+
+Windows runs Start/Stop Recording, Pause/Resume and Stop speech (History
+playback; partial), and the page actions Dashboard, History, Voice Output
+(both), General, Transcription, Post-processing, Corrections, Pronunciation,
+Profiles, Keyboard and About. Speak Selected Text, Speak Clipboard,
+Troubleshooting, Data & Migration, API Keys, Permissions, Compare Models, Quick
+Voice 1-3, Paste Last History Item and Edit Selection by Voice are marked
+**Mac only** in the editor and stay stored. Only Start/Stop Recording can work in
+other apps (`RegisterHotKey`, which needs Ctrl or Alt, or F13-F24 alone); other
+actions work while the window has focus. Global registration that Windows or
+another app refuses is reported in the dialog and status line, and that shortcut
+falls back to this window. Typing in text fields, list/combo navigation and
+button activation keep their keys.
+
+The Keyboard page's **Action shortcuts…** dialog lists every action with its
+state, edits the key with Clear, Enabled and Works in other apps, offers the
+presets Standard (defaults), Recording and speech only, and All action shortcuts
+off, and **Reset to defaults**. Save refuses duplicates among enabled runnable
+actions when either row was edited, the dictation shortcut's combination,
+combinations the Mac cannot store, and keys without Ctrl, Alt or Shift other
+than F13-F20 and Insert; it warns about system-reserved combinations and about sidebar `Ctrl+number`
+chords, which run first. Most Mac page defaults (Command+digit) map onto those
+sidebar chords, so their row notes say the sidebar handles them. An imported
+duplicate that the user did not edit is not refused.
+
+Linux has the shared model, persistence and transfer only; no portal or X11
+registration is added. Evidence: portable tests in
+`Tests/SpeakCoreTests/DesktopShortcutCatalogTests.swift` and
+`Tests/SpeakDesktopHostTests/DesktopHostShortcutBindingsTests.swift`. Compiler,
+native smoke tests and physical keyboard acceptance are **NOT_RUN** for this
+source.

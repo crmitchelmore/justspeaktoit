@@ -80,6 +80,14 @@ final class FakeSpeech: @unchecked Sendable {
             log.append("end")
         }
     }
+
+    func togglePause(_ speech: FakePlayback.Speech) -> Bool {
+        lock.withLock {
+            guard active == speech else { return false }
+            log.append("togglePause")
+            return true
+        }
+    }
 }
 
 extension FakePlayback: DesktopHostSpeechPlayback {
@@ -89,6 +97,7 @@ extension FakePlayback: DesktopHostSpeechPlayback {
     }
 
     func beginSpeech(recordID: UUID) throws -> Speech { FakeSpeech.shared.begin(Speech(recordID: recordID)) }
+    func togglePause(speech: Speech) -> Bool { FakeSpeech.shared.togglePause(speech) }
     func playToCompletion(_ speech: Speech, path: String) async throws -> TimeInterval {
         try await FakeSpeech.shared.play(speech)
     }

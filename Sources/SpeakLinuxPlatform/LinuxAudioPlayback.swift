@@ -138,20 +138,22 @@ public final class LinuxAudioPlayback: @unchecked Sendable {
     }
 
     public func togglePause(recordID: UUID) -> Bool {
-        lock.withLock {
-            guard let run = current, run.recordID == recordID else {
-                return toggleSpeechPauseLocked(recordID: recordID)
-            }
-            let paused = run.with { player -> Bool in
-                let pause = player.state != .paused
-                player.setPaused(pause)
-                return pause
-            }
-            // Paused speech keeps its later segments silent until resumed.
-            if let paused, speechState?.speech.recordID == recordID { speechState?.paused = paused }
-            showLocked(run)
-            return true
+        lock.withLock { togglePauseLocked(recordID: recordID) }
+    }
+
+    func togglePauseLocked(recordID: UUID) -> Bool {
+        guard let run = current, run.recordID == recordID else {
+            return toggleSpeechPauseLocked(recordID: recordID)
         }
+        let paused = run.with { player -> Bool in
+            let pause = player.state != .paused
+            player.setPaused(pause)
+            return pause
+        }
+        // Paused speech keeps its later segments silent until resumed.
+        if let paused, speechState?.speech.recordID == recordID { speechState?.paused = paused }
+        showLocked(run)
+        return true
     }
 
     /// Ends Read aloud and the current run. Only the user's Stop is

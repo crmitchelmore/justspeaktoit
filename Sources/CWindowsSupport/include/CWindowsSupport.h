@@ -74,6 +74,7 @@ enum JSTIWindowEvent {
     JSTI_EVENT_SPEAK_SELECTED_TEXT = 112,
     JSTI_EVENT_SPEAK_CLIPBOARD = 113,
     JSTI_EVENT_VOICE_EDIT = 114,
+    JSTI_EVENT_SPEECH_PAUSE = 116, /* exact active speech only; never starts History audio */
     JSTI_EVENT_USER_ABSENT = 120
 };
 
@@ -1421,7 +1422,7 @@ enum {
     JSTI_ACTION_RUN_NONE = -1,
     JSTI_ACTION_RUN_RECORD = 1,      /* as the Record button */
     JSTI_ACTION_RUN_PAGE = 2,        /* shows `page`, a sidebar page name */
-    JSTI_ACTION_RUN_PLAY_PAUSE = 3,  /* as History's Play/Pause */
+    JSTI_ACTION_RUN_PLAY_PAUSE = 3,  /* pause/resume the active speech, independent of History selection */
     JSTI_ACTION_RUN_STOP_SPEECH = 4, /* as Stop on History or Voice Output */
     JSTI_ACTION_RUN_API_KEYS = 5,    /* as Transcription's All API keys button */
     JSTI_ACTION_RUN_PERMISSIONS = 6, /* as About's Permissions button */

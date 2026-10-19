@@ -2246,7 +2246,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | modulatePIIPhiTagging | Live/batch source wired; unqualified / Same | Native default/on/off choice, strict transfer/restart and captured live/batch provider flags; absent stays off. Native/provider acceptance pending. |
 | accessibilityInsertionMode | Equivalent / Missing | Output; Windows cursor/replace-field; Linux paste cannot claim AX replace-all equivalence |
 | selectedHotKey | Equivalent / Partial | Shortcuts; Windows Ctrl/Alt native key; Linux desktop/portal-owned binding, never Mac Fn key translation |
-| customShortcutBindings | Complete source mapping; unqualified / Partial window-local source | Windows Keyboard **Action shortcuts** dialog: all 27 actions source-wired; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Voice editing additionally requires an editable UIA selection and a rewrite API key. Linux projects 21 actions into window-local bindings and edits all saved bindings with presets/reset; six execution actions and global registration remain unimplemented. Native/physical acceptance pending. |
+| customShortcutBindings | Complete source mapping; unqualified / Partial window-local source | Windows Keyboard **Action shortcuts** dialog: all 27 actions source-wired; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Voice editing additionally requires an editable UIA selection and a rewrite API key. Linux projects 22 actions into window-local bindings and edits all saved bindings with presets/reset; five execution actions and global registration remain unimplemented. Native/physical acceptance pending. |
 | paidAccessRoutingEnabled | Apple-specific / Apple-specific | BYOK desktop providers; no paid-access entitlement/routing journey. Retained opaque through import/export |
 | simpleModelChoices | Missing / Missing | Native catalogue picker without simplified paid-model chooser |
 | rememberedLocalTranscriptionSource | Partial / Partial | Models remembers Local selection; no Apple on-device source |
@@ -2470,7 +2470,7 @@ and Fn on keys other than function keys, have no Windows equivalent: those
 bindings are kept untouched for the Mac (an unchanged row keeps its stored Mac
 binding even when its switches change) but are not registered on Windows.
 
-Windows runs Start/Stop Recording, Pause/Resume (History playback; partial),
+Windows runs Start/Stop Recording, Pause/Resume (the active speech),
 Stop speech through the Host without page/History-row gating, and the page
 actions Dashboard, History, Voice Output
 (both), General, Transcription, Post-processing, Corrections, Pronunciation,
@@ -2492,6 +2492,15 @@ another app refuses is reported in the dialog and status line, and that shortcut
 falls back to this window. Typing in text fields, list/combo navigation and
 button activation keep their keys.
 
+Pause/Resume TTS now targets the exact active speech handle on both desktop
+hosts, independently of the selected History row. It applies to History Read
+aloud, captured clipboard/selection speech and generated voice playback,
+including the silent interval before or between segments. It does not start
+or pause a History recording as a fallback. Native admission checks the full
+speech identity under the playback lock, so a replaced/ended speech cannot
+pause a newer speech or History run with the same record ID. Existing
+record-bound History Play/Pause behavior is unchanged.
+
 The Keyboard page's **Action shortcuts…** dialog lists every action with its
 state, edits the key with Clear, Enabled and Works in other apps, offers the
 presets Standard (defaults), Recording and speech only, and All action shortcuts
@@ -2506,7 +2515,8 @@ duplicate that the user did not edit is not refused.
 Linux now projects the shared key table to GDK/X11 key values without loading a
 native framework into SpeakCore. Its Keyboard page shows every canonical
 action, the saved combination and an explicit availability/scope note. There
-are 21 window-local execution mappings: recording; Stop speech; Speak Clipboard; Dashboard,
+are 22 window-local execution mappings: recording; Stop speech; Pause/Resume TTS;
+Speak Clipboard; Dashboard,
 History, Voice Output (both), General, Transcription, Post-processing,
 Corrections, Pronunciation, Profiles, Keyboard and About; Data & Migration
 (General); Troubleshooting; Compare Models; and Quick Voice 1-3. The actual
@@ -2533,8 +2543,8 @@ not run local actions. An imported duplicate retains its value and shows a
 conflict note; the first listed action owns that combination. Sidebar
 Ctrl+digit chords retain precedence and corresponding action notes disclose it.
 
-Six Linux actions remain unavailable: Speak Selected Text,
-Pause/Resume TTS, API Keys, Permissions, Paste Last History Item and Edit
+Five Linux actions remain unavailable: Speak Selected Text,
+API Keys, Permissions, Paste Last History Item and Edit
 Selection by Voice. No API Keys/Permissions action is redirected to an
 unrelated page. Enabled global bindings remain saved and visibly unregistered;
 they are not silently downgraded to local shortcuts. The existing single X11 /
@@ -2577,10 +2587,17 @@ typing focus, disabled rows, key release/repeat suppression and invalid inputs.
 Native dispatch fixtures exercise actual page navigation, record/Stop events,
 all three Quick Voice slots, and busy/disabled-window/control refusals without
 calling a capture device or speech provider.
-The native dispatch fixture also checks Speak Clipboard admission and
+The native dispatch fixture also checks Speak Clipboard and speech-pause admission and
 busy/disabled-window refusal. Existing captured-source Host regressions cover
 clipboard-versus-History ownership, empty/non-text input and cancellation;
 they are not evidence that this new Linux mapping has run.
+New Host speech-pause regressions cover captured sources while an unrelated
+History row is selected, absent speech and post-Stop refusal. Linux and Windows
+playback regressions exercise exact-handle pause/resume, stale handles with a
+reused record ID and refusal to affect History playback. Existing segment
+tests additionally use the new speech-handle entry point. A Windows native
+dispatch fixture distinguishes the speech shortcut event from History Play.
+These additions are source-only and NOT_RUN.
 Six `DesktopHostLinuxShortcutEditTests` cover switch-only preservation versus
 Clear, every preset/default, invalid/duplicate keys, strict complete draft
 decoding, stale saves and refused writes. GTK editor fixtures cover draft

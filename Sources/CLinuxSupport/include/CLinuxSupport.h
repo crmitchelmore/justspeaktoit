@@ -74,6 +74,7 @@ enum {
     JSTI_EVENT_QUICK_VOICE = 110, /* index: canonical favorite slot 1...3 */
     JSTI_EVENT_SPEAK_CLIPBOARD = 113, /* captures through the owned Host speech task, not History */
     JSTI_EVENT_ACTION_SHORTCUT_EDIT = 115, /* revision/request header, then percent-escaped draft rows */
+    JSTI_EVENT_SPEECH_PAUSE = 116, /* exact active speech only; never starts History audio */
     /* Profiles: percent-escaped TAB fields, starting with revision/action/UUID;
      * "refresh" opens a new immutable catalogue/editor revision. */
     JSTI_EVENT_PROFILES = 140

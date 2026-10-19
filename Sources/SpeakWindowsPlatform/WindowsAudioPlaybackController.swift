@@ -109,21 +109,23 @@ public final class WindowsAudioPlaybackController: @unchecked Sendable {
     /// follows.
     @discardableResult
     public func togglePause(recordID: UUID) -> Bool {
-        lock.withLock {
-            guard let run = current, run.recordID == recordID, !run.stopped else {
-                return toggleSpeechPauseLocked(recordID: recordID)
-            }
-            run.pauseRequested.toggle()
-            if speechState?.speech.recordID == recordID { speechState?.paused = run.pauseRequested }
-            if !run.pauseCommandQueued {
-                run.pauseCommandQueued = true
-                run.worker.async {
-                    self.lock.withLock { run.pauseCommandQueued = false }
-                    self.applyPause(run)
-                }
-            }
-            return true
+        lock.withLock { togglePauseLocked(recordID: recordID) }
+    }
+
+    func togglePauseLocked(recordID: UUID) -> Bool {
+        guard let run = current, run.recordID == recordID, !run.stopped else {
+            return toggleSpeechPauseLocked(recordID: recordID)
         }
+        run.pauseRequested.toggle()
+        if speechState?.speech.recordID == recordID { speechState?.paused = run.pauseRequested }
+        if !run.pauseCommandQueued {
+            run.pauseCommandQueued = true
+            run.worker.async {
+                self.lock.withLock { run.pauseCommandQueued = false }
+                self.applyPause(run)
+            }
+        }
+        return true
     }
 
     /// Requests cancellation and ends speech. The display resets only after

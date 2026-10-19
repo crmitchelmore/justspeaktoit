@@ -252,6 +252,8 @@ private func otherWindowEvent(_ event: Int32, value: String, holder: WindowsEven
         holder.enqueueSettings { await controller.readClipboardAloud() }
     case 114:
         WindowsVoiceEdit.toggle(holder)
+    case Int32(JSTI_EVENT_SPEECH_PAUSE):
+        holder.enqueueSettings { await controller.pauseResumeSpeech() }
     default: break
     }
 }

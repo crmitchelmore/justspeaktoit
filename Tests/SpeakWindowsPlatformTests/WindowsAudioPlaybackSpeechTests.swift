@@ -64,6 +64,28 @@ final class WindowsAudioPlaybackSpeechTests: XCTestCase {
         controller.endSpeech(speech)
     }
 
+    func testSpeechPause_RequiresTheExactActiveHandleAndNeverPausesHistory() async throws {
+        let id = UUID()
+        let old = try controller.beginSpeech(recordID: id)
+        XCTAssertTrue(controller.togglePause(speech: old))
+        XCTAssertEqual(controller.activity?.state, .paused)
+        XCTAssertTrue(controller.togglePause(speech: old))
+        XCTAssertEqual(controller.activity?.state, .preparing)
+        let current = try controller.beginSpeech(recordID: id)
+        XCTAssertFalse(controller.togglePause(speech: old))
+        XCTAssertEqual(controller.activity?.state, .preparing)
+        controller.endSpeech(current)
+        XCTAssertFalse(controller.togglePause(speech: current))
+        try controller.play(recordID: id, path: "history.wav", knownDuration: 1)
+        await playbackEventually {
+            self.backend.handles.first?.counts.started == 1 && self.controller.activity?.state == .playing
+        }
+        XCTAssertFalse(controller.togglePause(speech: current))
+        XCTAssertEqual(controller.activity?.state, .playing)
+        try await controller.stopAndWait()
+        XCTAssertFalse(controller.togglePause(speech: current))
+    }
+
     func testAudioHousekeeping_DoesNotStopSpeechOrItsNextSegment() async throws {
         let speech = try controller.beginSpeech(recordID: UUID())
         try await controller.stopSavedAudioAndWait()
@@ -158,14 +180,14 @@ final class WindowsAudioPlaybackSpeechTests: XCTestCase {
     func testPausedSpeech_StartsItsNextSegmentPausedWithoutSound() async throws {
         let id = UUID()
         let speech = try controller.beginSpeech(recordID: id)
-        XCTAssertTrue(controller.togglePause(recordID: id))
+        XCTAssertTrue(controller.togglePause(speech: speech))
         XCTAssertFalse(controller.togglePause(recordID: UUID()))
         let paused = await settledDisplay()
         XCTAssertEqual(paused?.state, .paused)
         let (segment, handle) = try await segment(speech)
         XCTAssertEqual(handle.counts.pausedBeforeStart, 1, "the segment was audible before the user resumed")
         XCTAssertEqual(controller.activity?.state, .paused)
-        XCTAssertTrue(controller.togglePause(recordID: id))
+        XCTAssertTrue(controller.togglePause(speech: speech))
         await playbackEventually { handle.counts.resumed == 1 }
         handle.complete(.init(status: .finished, played: 1))
         _ = try await segment.value

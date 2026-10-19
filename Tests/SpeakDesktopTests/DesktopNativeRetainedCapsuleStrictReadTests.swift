@@ -2,6 +2,9 @@ import Foundation
 import SpeakCore
 import SpeakDesktop
 import XCTest
+#if os(Windows)
+import WinSDK
+#endif
 
 final class DesktopNativeRetainedReadTests: XCTestCase {
     private struct Fixture {
@@ -24,6 +27,24 @@ final class DesktopNativeRetainedReadTests: XCTestCase {
         let file = directory.appendingPathComponent(DesktopNativeRetainedCapsule.filename)
         try bytes.write(to: file)
         return Fixture(directory: directory, file: file, bytes: bytes)
+    }
+
+    /// Foundation's Windows `linkItem` creates a symbolic link, so create a real NTFS hard link there.
+    private func hardLink(_ existing: URL, to link: URL) throws {
+        #if os(Windows)
+        let paths = [existing, link].map { url in
+            url.withUnsafeFileSystemRepresentation { $0.map(String.init(cString:)) }
+        }
+        guard let source = paths[0], let target = paths[1] else { throw CocoaError(.fileWriteInvalidFileName) }
+        let sourceWide = Array(source.utf16) + [0]
+        let targetWide = Array(target.utf16) + [0]
+        let created = targetWide.withUnsafeBufferPointer { targetBuffer in
+            sourceWide.withUnsafeBufferPointer { CreateHardLinkW(targetBuffer.baseAddress, $0.baseAddress, nil) }
+        }
+        guard created else { throw NSError(domain: "Win32", code: Int(GetLastError())) }
+        #else
+        try FileManager.default.linkItem(at: existing, to: link)
+        #endif
     }
 
     func testReplacementAtCanonicalPreopenCheck_IsRejectedWithoutTouchingEitherFile() throws {
@@ -79,7 +100,7 @@ final class DesktopNativeRetainedReadTests: XCTestCase {
     func testHardLinkedRecord_IsRejectedAndBothNamesRemain() throws {
         let source = try fixture()
         let other = source.directory.appendingPathComponent("other.json")
-        try FileManager.default.linkItem(at: source.file, to: other)
+        try hardLink(source.file, to: other)
         XCTAssertThrowsError(try DesktopNativeRetainedCapsule.read(from: source.directory)) {
             guard case DesktopOwnedAppDataFileReadError.unsafeFile = $0 else {
                 return XCTFail("Expected unsafe hard link, got \($0).")

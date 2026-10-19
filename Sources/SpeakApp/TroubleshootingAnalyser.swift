@@ -73,7 +73,7 @@ struct HotkeyInfoCheck: TroubleshootingCheck {
 }
 
 struct ConfigurationTroubleshootingCheck: TroubleshootingCheck {
-  @MainActor func evaluate(
+  @MainActor func evaluate(  // swiftlint:disable:this cyclomatic_complexity
     settings: AppSettings,
     permissions: PermissionsManager,
     secureStorage: SecureAppStorage
@@ -160,7 +160,7 @@ final class TroubleshootingAnalyser: ObservableObject {
   private let checks: [TroubleshootingCheck] = [
     PermissionsCheck(),
     ConfigurationTroubleshootingCheck(),
-    HotkeyInfoCheck(),
+    HotkeyInfoCheck()
   ]
 
   func analyse(settings: AppSettings, permissions: PermissionsManager, secureStorage: SecureAppStorage) async {

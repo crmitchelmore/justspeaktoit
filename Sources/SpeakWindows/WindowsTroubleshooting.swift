@@ -47,7 +47,8 @@ extension WindowsAppController {
         let shortcut = hotKeySettings()
         var findings = DesktopTroubleshooting.findings(.init(
             postProcessing: .init(enabled: enabled, model: processing.modelIdentifier, credential: credential),
-            shortcutName: shortcut.name, shortcutInstructions: shortcut.readyHint, restoreClipboard: output.restoreClipboard
+            shortcutName: shortcut.name, shortcutInstructions: shortcut.readyHint,
+            restoreClipboard: output.restoreClipboard
         ))
         findings += permissions.compactMap { row in
             let item = row.item
@@ -65,7 +66,6 @@ extension WindowsAppController {
         )
     }
 
-    // swiftlint:disable:next cyclomatic_complexity
     fileprivate func applyTroubleshootingFix(
         _ command: Int32, snapshot: WindowsTroubleshootingSnapshot
     ) async throws {
@@ -96,7 +96,8 @@ extension WindowsAppController {
                 throw WindowsNativeError(message: "The saved credential could not be read. No setting was changed.")
             }
             guard key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                throw WindowsNativeError(message: "A key is now available. Check again before changing post-processing.")
+                throw WindowsNativeError(
+                    message: "A key is now available. Check again before changing post-processing.")
             }
             await savePostProcessing(
                 enabled: false, modelIdentifier: snapshot.processing.modelIdentifier,
@@ -261,7 +262,8 @@ enum WindowsTroubleshootingSelfTest {
         try require(refused == changed, "a failed write changed the clipboard setting")
         try await controller.applyTroubleshootingFix(keepClipboard, snapshot: current)
         let saved = await controller.textOutputOptions()
-        try require(!saved.restoreClipboard && saved.method == changed.method, "the clipboard fix changed other choices")
+        try require(!saved.restoreClipboard && saved.method == changed.method,
+            "the clipboard fix changed other choices")
     }
 
     private static func checkProcessing(_ controller: WindowsAppController, effects: SyntheticEffects) async throws {
@@ -271,7 +273,8 @@ enum WindowsTroubleshootingSelfTest {
         effects.setSyntheticAPIKey("")
         await controller.savePostProcessing(enabled: true, modelIdentifier: model, prompt: "Keep this prompt.", key: "")
         let missing = await controller.troubleshootingSnapshot(permissions: [], revision: 3)
-        try require(missing.findings.contains { $0.fix == .disablePostProcessing }, "the missing key has no explicit fix")
+        try require(missing.findings.contains { $0.fix == .disablePostProcessing },
+            "the missing key has no explicit fix")
         effects.setSyntheticAPIKey(nil)
         let unreadable = await controller.troubleshootingSnapshot(permissions: [], revision: 4)
         try require(unreadable.findings.contains {
@@ -282,7 +285,8 @@ enum WindowsTroubleshootingSelfTest {
         effects.setSyntheticAPIKey("")
         try await controller.applyTroubleshootingFix(disableProcessing, snapshot: missing)
         let saved = await controller.postProcessingOptions()
-        try require(saved.mode == .disabled && saved.customPrompt == "Keep this prompt.", "the cleanup fix lost settings")
+        try require(saved.mode == .disabled && saved.customPrompt == "Keep this prompt.",
+            "the cleanup fix lost settings")
         try await reject { try await controller.applyTroubleshootingFix(disableProcessing, snapshot: missing) }
     }
 

@@ -10,10 +10,13 @@ package struct DesktopHostProfilesSnapshot: Sendable {
 }
 
 extension DesktopHostController {
-    func profileRecord(id: UUID, filename: String, profile: DesktopProfileSession) -> DesktopRecordingStore.Record {
-        var record = DesktopRecordingStore.Record(
-            id: id, audioFilename: filename, modelIdentifier: profile.modelIdentifier
-        )
+    func profileRecord(
+        id: UUID, filename: String, profile: DesktopProfileSession,
+        capture: DesktopRecordingLocations.Capture? = nil
+    ) -> DesktopRecordingStore.Record {
+        var record = capture.map {
+            DesktopRecordingStore.Record(capture: $0, modelIdentifier: profile.modelIdentifier)
+        } ?? DesktopRecordingStore.Record(id: id, audioFilename: filename, modelIdentifier: profile.modelIdentifier)
         record.profileName = profile.profileName
         record.languageIdentifier = profile.language
         record.profileNotes = profile.limitations.map(\.message)

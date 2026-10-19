@@ -58,6 +58,7 @@ extension DesktopHostController {
         refreshModels(force: false)
         activeOperations += 1
         defer { finishOperation() }
+        await activateRecordingLocations()
         do {
             guard let (recovery, deletionWarning) = try await prepareReadyHistory() else { return }
             let status = try await readyStatusMessage(recovery: recovery, deletionWarning: deletionWarning)
@@ -106,6 +107,7 @@ extension DesktopHostController {
         if let deletionWarning { status += " \(deletionWarning)" }
         if let microphoneWarning { status += " \(microphoneWarning)" }
         if let profileWarning { status += " \(profileWarning)" }
+        if let notice = recordingLocation.notice { status += " \(notice)" }
         return status
     }
 

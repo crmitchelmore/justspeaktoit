@@ -247,6 +247,8 @@ private func linuxHistoryManagementEvent(_ event: Int, value: String, slot: Int,
         let controller = holder.controller
         holder.enqueueSettings { await controller.beginHistoryDeletion(value, deleteAudio: slot == 1) }
     case Int(JSTI_EVENT_RECORDINGS_FOLDER): Task { await holder.controller.revealRecordingsDirectory() }
+    case Int(JSTI_EVENT_RECORDINGS_LOCATION):
+        holder.enqueueSettings { await holder.controller.chooseRecordingsDirectory(value) }
     case Int(JSTI_EVENT_AUDIO_CLEANUP):
         holder.enqueueSettings { await holder.controller.beginAudioCleanupConfirmation() }
     case Int(JSTI_EVENT_AUDIO_CLEANUP_RESPONSE):

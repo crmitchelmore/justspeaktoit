@@ -212,6 +212,11 @@ public struct DesktopRecordingLocations: Sendable {
         }
     }
 
+    /// Read-only lookup; a registration is never created or replaced here.
+    public func registeredRoot(_ id: UUID) -> URL? {
+        registrations[id]?.root
+    }
+
     func validateHistory(_ directory: URL) throws {
         guard directory.standardizedFileURL == history,
               try DesktopRecordingLocationIdentity.directory(directory) == historyIdentity else {

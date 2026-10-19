@@ -10,9 +10,8 @@ extension DesktopHostController {
         activeOperations += 1
         defer { folderRevealTask = nil; finishOperation() }
         do {
-            let store = store
+            let folder = await recordingsFolderToReveal()
             let task = Task.detached {
-                let folder = await store.directory
                 try Task.checkCancellation()
                 guard try folder.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true else {
                     throw DesktopHostError(message: "The recording storage folder is unavailable.")
@@ -22,6 +21,9 @@ extension DesktopHostController {
             }
             folderRevealTask = task
             try await task.value
+            guard !closed, !DesktopHostRecordingLocation.isQualifiedPlatform else { return }
+            Platform.update("Opened the History recordings folder. "
+                + "Choosing a different recordings folder is not yet available on this platform.")
         } catch {
             guard !closed else { return }
             Platform.update("Could not open the recordings folder: \(error.localizedDescription)")

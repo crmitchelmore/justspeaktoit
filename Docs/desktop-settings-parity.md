@@ -626,6 +626,15 @@ successful final Auto-Clean when the skip preference is true; otherwise it
 receives the successful cleaned text, or the corrected original on failure.
 An Auto-Clean failure remains visible even if ordinary cleanup succeeds.
 
+The macOS Debug job `118222049873` aborted in the successful-finish History
+control with `freed pointer was not the last allocation`; Release success does
+not qualify that failure. The delivery path now cancels only the opposite
+worker/timer, not its own producing task. Regression sources assert uncancelled
+success, failure and timeout delivery, preserve cancellation and identity fencing
+of a late provider, and repeat default-clock finish/result encoding 64 times.
+These changes are **NOT_RUN** locally and are not a verified allocator-crash fix;
+automatic macOS Debug qualification is still required.
+
 `livePolishTailWindowChars` is preserved but has no desktop control or consumer:
 the Mac stores it in `AppSettings`, but `LivePolishManager` uses full `tailText`
 and does not consume this preference either. No tail-window behavior is claimed.

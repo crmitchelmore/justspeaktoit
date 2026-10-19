@@ -69,7 +69,7 @@ extension DesktopShortcutBindings {
     /// as window navigation. Duplicates refuse only when an edited row is
     /// involved, so an imported duplicate never blocks unrelated changes, and
     /// warnings are reported only for edited rows.
-    package func editing(
+    package func editing( // swiftlint:disable:this cyclomatic_complexity function_body_length
         _ rows: [DesktopHostShortcutRow],
         runnable: Set<DesktopShortcutAction>,
         blocking: (DesktopShortcutAction, DesktopShortcutWindowsChord) -> String? = { _, _ in nil },

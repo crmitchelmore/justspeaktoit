@@ -143,6 +143,7 @@ final class OpenRouterCleanupStream: @unchecked Sendable {
         }
     }
 
+    // swiftlint:disable:next cyclomatic_complexity
     private func consumeEvent(_ payload: String) throws {
         if payload == "[DONE]" {
             guard stopped else { throw ChatStreamingError.incomplete }

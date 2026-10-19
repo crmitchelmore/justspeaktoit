@@ -4,6 +4,7 @@ import SpeakCore
 import SpeakDesktop
 @testable import SpeakDesktopHost
 
+// swiftlint:disable:next type_body_length
 final class DesktopHostConfigurationTests: XCTestCase {
     private var directory: URL!
     private var controller: DesktopHostController<FakePlatform>!

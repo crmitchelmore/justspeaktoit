@@ -71,7 +71,7 @@ public enum VoiceAudioFormat: String, Codable, CaseIterable, Identifiable, Senda
         while offset < bytes.count {
             guard bytes.count - offset >= 8 else { throw VoiceAudioFormatError.invalidContainer }
             var size = bytes[offset..<offset + 4].reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
-            let name = String(decoding: bytes[offset + 4..<offset + 8], as: UTF8.self)
+            let name = String(bytes: bytes[offset + 4..<offset + 8], encoding: .utf8) ?? ""
             var headerSize: UInt64 = 8
             if size == 1 {
                 guard bytes.count - offset >= 16 else { throw VoiceAudioFormatError.invalidContainer }

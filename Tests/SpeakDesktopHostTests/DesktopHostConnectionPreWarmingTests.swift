@@ -1,9 +1,11 @@
+// swiftlint:disable file_length
 import Foundation
 import XCTest
 import SpeakCore
 import SpeakDesktop
 @testable import SpeakDesktopHost
 
+// swiftlint:disable:next type_body_length
 final class DesktopHostConnectionPreWarmingTests: XCTestCase {
     private var directory: URL!
     private var effects: ConnectionWarmEffects!

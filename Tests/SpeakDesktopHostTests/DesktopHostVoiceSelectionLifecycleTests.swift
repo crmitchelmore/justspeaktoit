@@ -90,8 +90,8 @@ final class DesktopHostVoiceSelectionLifecycleTests: XCTestCase {
                     "mistral/account-only", "xai/account-only", "soniox/future", "openai/future"] {
             try await importValues(["defaultTTSVoice": AnyCodable(.string(raw))])
             await controller.readVoiceSource(source)
-            await controller.generateVoiceSource(source, options: .init(autoPlay: false, saveToRecordings: false)) {
-                _, _, credential in
+            // swiftlint:disable:next line_length
+            await controller.generateVoiceSource(source, options: .init(autoPlay: false, saveToRecordings: false)) { _, _, credential in
                 access.record(1); _ = try await credential(); return wav
             }
             await controller.exportVoiceSource(source, path: destination.path, synthesize: { _, _, credential in

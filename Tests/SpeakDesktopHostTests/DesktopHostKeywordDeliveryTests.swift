@@ -1,9 +1,11 @@
+// swiftlint:disable file_length
 import Foundation
 import XCTest
 import SpeakCore
 import SpeakDesktop
 @testable import SpeakDesktopHost
 
+// swiftlint:disable:next type_body_length
 final class DesktopHostKeywordDeliveryTests: XCTestCase {
     func testRecordingSnapshotImportRetryAndExplicitClearReachTheRealHostRequest() async throws {
         FakeLog.shared.reset()
@@ -114,6 +116,7 @@ final class DesktopHostKeywordDeliveryTests: XCTestCase {
         await controller.close()
     }
 
+    // swiftlint:disable:next function_body_length
     func testLegacyPronunciationHints_ReachCapturedLiveAndCompletedHostRequests() async throws {
         FakeLog.shared.reset()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -202,6 +205,7 @@ final class DesktopHostKeywordDeliveryTests: XCTestCase {
         await controller.close()
     }
 
+    // swiftlint:disable:next function_body_length
     func testModernPronunciationSnapshot_RecordingImportRetryAndOtherProvidersKeepDistinctHints() async throws {
         FakeLog.shared.reset()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -214,6 +218,7 @@ final class DesktopHostKeywordDeliveryTests: XCTestCase {
             ApplicationPreferenceKey.ttsPronunciationDictionary.rawValue: AnyCodable(.object([
                 "Legacy": .string("Not recognition text")
             ])),
+            // swiftlint:disable:next line_length
             ApplicationPreferenceKey.assemblyAIIgnoredPronunciationTerms.rawValue: AnyCodable(.array([.string("hidden")]))
         ])
         let transfer = root.appendingPathComponent("recognition-preferences.json")
@@ -288,6 +293,7 @@ final class DesktopHostKeywordDeliveryTests: XCTestCase {
     ) async throws {
         let file = root.appendingPathComponent("recognition-pronunciations.json")
         try JSONEncoder().encode(entries).write(to: file)
+        // swiftlint:disable:next line_length
         _ = try await controller.vocabularyEvent(kind: 1, payload: DesktopVocabularyWire.encode(["importReplace", file.path]))
     }
 
@@ -330,6 +336,7 @@ final class DesktopHostKeywordDeliveryTests: XCTestCase {
         let record = try XCTUnwrap(records.first)
         let audio = try await controller.store.audioURL(for: record)
         await controller.importAudio(path: audio.path, modelIndex: index)
+        // swiftlint:disable:next line_length
         XCTAssertEqual(effects.requests.last?.modulateFeatures, ModulateTranscriptionFeatures(speakerDiarization: false))
         try await saveModulate("", controller: controller)
         await controller.retryHistory(record.id.uuidString)

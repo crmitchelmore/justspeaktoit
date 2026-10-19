@@ -23,7 +23,7 @@ extension DesktopVocabularyArchiveSource {
 
 extension DesktopVocabularyArchiveSource.Snapshot {
     /// Sensitive opt-in is not backup admission. No source content or credential classification occurs here.
-    public func projectWithSensitiveNativeEvidence(
+    public func projectWithSensitiveNativeEvidence( // swiftlint:disable:this function_body_length
         platform: DesktopNativeSourceDocument.Platform, allowSensitiveContent: Bool = false,
         scope: DataMigrationScope = .init(),
         checkCancellation: () throws -> Void = { try Task.checkCancellation() }

@@ -25,6 +25,7 @@ package struct DesktopHostNativePreferenceProjection: Sendable {
         set(.hotKeyActivation, .string(style))
     }
 
+    // swiftlint:disable:next cyclomatic_complexity
     package mutating func voice(_ voice: DesktopVoiceOutputSettings?) {
         guard let voice else { return }
         if let value = voice.autoPlay { set(.ttsAutoPlay, .bool(value)) }

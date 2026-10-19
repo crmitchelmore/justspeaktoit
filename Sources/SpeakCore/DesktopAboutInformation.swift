@@ -97,6 +97,7 @@ public struct DesktopAboutInformation: Equatable, Sendable {
             let sourceCommit: String?
             let configuration: String?
             let application: Application?
+            // swiftlint:disable:next nesting
             struct Application: Decodable {
                 let sourceCommit: String?
                 let configuration: String?

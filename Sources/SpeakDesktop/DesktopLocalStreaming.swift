@@ -53,7 +53,7 @@ public enum DesktopLocalStreaming {
 /// limit, commits the window as a standalone final. Finishing recognises what
 /// remains and returns the whole session. Silence never reaches the model, so
 /// a silent recording stays empty.
-public final class DesktopLocalStreamingClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
+public final class DesktopLocalStreamingClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable { // swiftlint:disable:this type_body_length line_length
     public struct Tuning: Sendable, Equatable {
         public var sampleRate: Int
         /// Audio after speech starts between interim passes.
@@ -346,6 +346,7 @@ public final class DesktopLocalStreamingClient: FinalizingStreamingTranscription
         if input.count < tuning.sampleRate {
             input.append(contentsOf: repeatElement(Float(0), count: tuning.sampleRate - input.count))
         }
+        // swiftlint:disable:next line_length
         let raw = try await recognizer.transcribe(samples: input, modelFile: modelFile, model: model, language: language)
         try Task.checkCancellation()
         return DesktopLocalTranscription.cleanTranscript(raw)

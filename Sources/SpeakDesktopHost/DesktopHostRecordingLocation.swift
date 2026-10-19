@@ -101,6 +101,7 @@ extension DesktopHostController {
         guard !closed, recordingLocation.cancel == nil else { return }
         let store = store
         let selectionURL = directory.appendingPathComponent(DesktopHostRecordingLocation.filename)
+        // swiftlint:disable:next large_tuple
         let worker = Task.detached { () async throws -> (
             DesktopHostRecordingLocation.Activation?, DesktopHostRecordingLocationSelection?, URL?
         ) in
@@ -141,7 +142,7 @@ extension DesktopHostController {
     }
 
     /// An explicit local choice. Existing recordings stay where they are; nothing is moved or deleted.
-    package func chooseRecordingsDirectory(_ path: String) async {
+    package func chooseRecordingsDirectory(_ path: String) async { // swiftlint:disable:this cyclomatic_complexity function_body_length line_length
         guard !closed else { return }
         let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { useDefaultRecordingsDirectory(); return }

@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import Foundation
 import CWindowsSupport
 import SpeakDesktop
@@ -220,6 +221,7 @@ private func secondaryWindowEvent(_ event: Int32, value: String, index: Int, hol
     otherWindowEvent(event, value: value, holder: holder)
 }
 
+// swiftlint:disable:next cyclomatic_complexity
 private func otherWindowEvent(_ event: Int32, value: String, holder: WindowsEventContext) {
     let controller = holder.controller
     switch event {

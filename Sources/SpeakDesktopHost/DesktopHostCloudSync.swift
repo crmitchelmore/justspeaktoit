@@ -319,7 +319,7 @@ extension DesktopHostController {
     /// the displayed transcript is re-rendered only for the selected record and
     /// only while nothing else owns the transcript area. A removed selection is
     /// cleared, so no action can target a record that no longer exists.
-    package func applySyncedHistory(_ changes: [DesktopHistorySyncChange]) async {
+    package func applySyncedHistory(_ changes: [DesktopHistorySyncChange]) async { // swiftlint:disable:this cyclomatic_complexity line_length
         guard !closed else { return }
         var selectedChanged = false
         var arrival: RemoteArrival?

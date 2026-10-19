@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import Foundation
 import SpeakCore
 import SpeakDesktop
@@ -49,6 +50,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
             }
         }
 
+        // swiftlint:disable:next function_body_length
         package init(from decoder: Decoder) throws {
             values = try SettingsValues(from: decoder)
             let container = try decoder.singleValueContainer()
@@ -242,8 +244,12 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package nonisolated let shutdownGrace: Duration
     package var activeOperations = 0 {
         didSet {
-            if activeOperations > 0 { pauseConnectionPreWarming() }
-            else { reconcileConnectionPreWarming(); reconcileCapturePreparation() }
+            if activeOperations > 0 {
+                pauseConnectionPreWarming()
+            } else {
+                reconcileConnectionPreWarming()
+                reconcileCapturePreparation()
+            }
         }
     }
     var operationWaiters: [CheckedContinuation<Void, Never>] = []

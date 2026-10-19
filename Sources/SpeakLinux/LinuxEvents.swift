@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import Foundation
 import SpeakCore
 import SpeakDesktop
@@ -312,6 +313,7 @@ private func linuxAppearanceEvent(_ event: Int, slot: Int, holder: LinuxEventCon
     return true
 }
 
+// swiftlint:disable:next cyclomatic_complexity
 private func linuxSettingsEvent(_ event: Int, value: String, slot: Int, holder: LinuxEventContext) -> Bool {
     let controller = holder.controller
     switch event {
@@ -320,8 +322,7 @@ private func linuxSettingsEvent(_ event: Int, value: String, slot: Int, holder: 
     case Int(JSTI_EVENT_SELECT_MICROPHONE): holder.enqueueSettings { await controller.selectMicrophone(value) }
     case Int(JSTI_EVENT_TEXT_OUTPUT):
         let options: LinuxTextOutputOptions
-        do { options = try LinuxTextOutputOptions(nativeMethod: slot, payload: value) }
-        catch {
+        do { options = try LinuxTextOutputOptions(nativeMethod: slot, payload: value) } catch {
             LinuxHostPlatform.update("The text output choice could not be read. Reopen preferences and try again.")
             return true
         }

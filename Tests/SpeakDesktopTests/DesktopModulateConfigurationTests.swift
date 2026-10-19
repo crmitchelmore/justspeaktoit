@@ -70,6 +70,7 @@ final class DesktopModulateConfigurationTests: XCTestCase {
     func testBatchFeatureSnapshot_SurvivesOtherCaptureHelpersWithoutChangingOldInitializer() throws {
         let initial = try configuration(mask: 6)
         let later = try configuration(mask: 9)
+        // swiftlint:disable:next line_length
         let captured = DesktopProfileSession.defaults(modelIdentifier: "modulate/velma-2-stt-batch", postProcessing: .init())
             .capturingModulateFeatures(initial.modulateBatchFeatures)
             .capturingTranscriptionOptions(later.liveOptions)

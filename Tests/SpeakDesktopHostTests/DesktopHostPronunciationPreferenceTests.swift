@@ -1,9 +1,11 @@
+// swiftlint:disable file_length
 import Foundation
 import SpeakCore
 import SpeakDesktop
 import XCTest
 @testable import SpeakDesktopHost
 
+// swiftlint:disable:next type_body_length
 final class DesktopHostPronunciationPreferenceTests: XCTestCase {
     func testNativeEditorEvents_RequireViewIdentityAndExactPayloads() throws {
         let entries = try DesktopConfiguration(values: [:]).entries
@@ -76,6 +78,7 @@ final class DesktopHostPronunciationPreferenceTests: XCTestCase {
             let snapshot = try await controller.nativeConfigurationEditorSnapshot()
             try await controller.activateConfigurationEditorSnapshot(snapshot)
             var entries = snapshot.entries
+            // swiftlint:disable:next line_length
             entries[try fieldIndex(ApplicationPreferenceKey.shortenErrorDisplay.rawValue)] = intent == .apply ? "1" : "0"
             try await controller.saveConfiguration(entries, intent: intent)
             let after = try await controller.configuration()
@@ -251,6 +254,7 @@ final class DesktopHostPronunciationPreferenceTests: XCTestCase {
         for (explicit, seed) in [(String(repeating: "x", count: 65_535), "Legacy"), ("Explicit", "Bad\0Word")] {
             let configuration = try DesktopConfiguration(values: [
                 "transcriptionKeywords": AnyCodable(.string(explicit)),
+                // swiftlint:disable:next line_length
                 ApplicationPreferenceKey.ttsPronunciationDictionary.rawValue: AnyCodable(.object([seed: .string("spoken")]))
             ])
             let file = root.appendingPathComponent("large-native-keywords.json")
@@ -282,6 +286,7 @@ final class DesktopHostPronunciationPreferenceTests: XCTestCase {
             ApplicationPreferenceKey.ttsPronunciationDictionary.rawValue:
                 AnyCodable(.object(["Legacy": .string("Retained pronunciation, not a recognition hint")])),
             "recoveredTranscriptionKeywords": AnyCodable(.array([.string("MODERN")])),
+            // swiftlint:disable:next line_length
             ApplicationPreferenceKey.assemblyAIIgnoredPronunciationTerms.rawValue: AnyCodable(.array([.string("hidden")]))
         ])
         let file = root.appendingPathComponent("native-pronunciation-preferences.json")
@@ -299,6 +304,7 @@ final class DesktopHostPronunciationPreferenceTests: XCTestCase {
         let file = root.appendingPathComponent("native-pronunciation-words.json")
         let entries = words.map { PronunciationEntry(word: $0, pronunciation: "Not a recognition hint") }
         try JSONEncoder().encode(entries).write(to: file)
+        // swiftlint:disable:next line_length
         _ = try await controller.vocabularyEvent(kind: 1, payload: DesktopVocabularyWire.encode(["importReplace", file.path]))
     }
 

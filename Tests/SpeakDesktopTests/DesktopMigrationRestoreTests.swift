@@ -54,7 +54,7 @@ final class DesktopMigrationRestoreTests: XCTestCase {
         let damaged = "\(DataMigrationCategory.profiles.title): some items could not be read."
         let sources = [
             RestoreFixture.snapshot([:], categories: [.profiles]),
-            RestoreFixture.snapshot([.profiles: [incoming]], categories: [.profiles], notices: [damaged]),
+            RestoreFixture.snapshot([.profiles: [incoming]], categories: [.profiles], notices: [damaged])
         ]
         for snapshot in sources {
             let plan = try await DesktopMigrationRestore.plan(snapshot, targets: fixture.targets)
@@ -120,7 +120,7 @@ final class DesktopMigrationRestoreTests: XCTestCase {
         let added = [UUID(), UUID()]
         let snapshot = RestoreFixture.snapshot([
             .history: try [existingID, added[0], added[1]].map { try RestoreFixture.history($0, text: "Restored") },
-            .profiles: [try RestoreFixture.profile(DictationProfile(name: "Incoming", polishPrompt: nil))],
+            .profiles: [try RestoreFixture.profile(DictationProfile(name: "Incoming", polishPrompt: nil))]
         ])
         let plan = try await DesktopMigrationRestore.plan(snapshot, targets: fixture.targets)
         XCTAssertEqual(plan.preview.rows.first?.merge?.updated, 1)
@@ -148,7 +148,7 @@ final class DesktopMigrationRestoreTests: XCTestCase {
         let profileBytes = try Data(contentsOf: fixture.profiles.fileURL)
         let snapshot = RestoreFixture.snapshot([
             .history: [try RestoreFixture.history(UUID(), text: "Restored")],
-            .profiles: [try RestoreFixture.profile(DictationProfile(name: "Incoming", polishPrompt: nil))],
+            .profiles: [try RestoreFixture.profile(DictationProfile(name: "Incoming", polishPrompt: nil))]
         ])
         let plan = try await DesktopMigrationRestore.plan(snapshot, targets: fixture.targets)
         let outcome = await DesktopMigrationRestore.apply(
@@ -188,7 +188,7 @@ final class DesktopMigrationRestoreTests: XCTestCase {
             originPlatform: "macos"
         ))
         let snapshot = RestoreFixture.snapshot([.history: [
-            try RestoreFixture.history(deleted, text: "Backup"), try RestoreFixture.history(synced, text: "Backup"),
+            try RestoreFixture.history(deleted, text: "Backup"), try RestoreFixture.history(synced, text: "Backup")
         ]])
         let plan = try await DesktopMigrationRestore.plan(snapshot, targets: fixture.targets)
         XCTAssertFalse(plan.preview.changes(.merge))
@@ -302,7 +302,7 @@ private struct RestoreFixture {
 /// Deterministic, collision-resistant enough for fixtures; not cryptographic.
 private final class RestoreDigest: LocalModelSHA256Hasher {
     private var lanes: [UInt64] = [
-        0xcbf2_9ce4_8422_2325, 0x8422_2325_cbf2_9ce4, 0x9e37_79b9_7f4a_7c15, 0x2545_f491_4f6c_dd1d,
+        0xcbf2_9ce4_8422_2325, 0x8422_2325_cbf2_9ce4, 0x9e37_79b9_7f4a_7c15, 0x2545_f491_4f6c_dd1d
     ]
 
     func update(_ bytes: UnsafeRawBufferPointer) throws {

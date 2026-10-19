@@ -8,7 +8,7 @@ import FoundationNetworking
 /// only the outcome message: debug snapshots describe the probe request.
 public enum APIKeyValidation {
     // One provider per case keeps the identifier-to-validator map auditable.
-    // swiftlint:disable:next cyclomatic_complexity
+    // swiftlint:disable:next cyclomatic_complexity function_body_length
     public static func validate(
         identifier: String,
         key: String,

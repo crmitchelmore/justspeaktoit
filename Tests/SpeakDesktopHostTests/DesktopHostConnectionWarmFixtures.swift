@@ -24,8 +24,11 @@ actor ConnectionWarmProbe {
 
     func release(_ id: Int, success: Bool) {
         guard let continuation = held.removeValue(forKey: id) else { return }
-        if success { continuation.resume() }
-        else { continuation.resume(throwing: URLError(.notConnectedToInternet)) }
+        if success {
+            continuation.resume()
+        } else {
+            continuation.resume(throwing: URLError(.notConnectedToInternet))
+        }
     }
 }
 
@@ -108,6 +111,7 @@ extension DesktopHostController where Platform == FakePlatform {
         connectionWarmCapture?.credentialsReady = true
     }
 
+    // swiftlint:disable:next large_tuple
     func warmStateForTest() -> (approved: Bool, witness: Bool, eligible: Bool, warm: Bool, owned: Bool) {
         (
             connectionWarmApproved, connectionWarmCapture != nil, connectionWarmEligible,

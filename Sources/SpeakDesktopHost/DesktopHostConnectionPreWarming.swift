@@ -109,8 +109,7 @@ extension DesktopHostController {
         let pending = connectionWarmPending
         connectionWarmPending = false
         if generation == connectionWarmGeneration, connectionWarmEligible {
-            if succeeded { connectionWarmTracker.markWarmed(host: host, at: Date()) }
-            else {
+            if succeeded { connectionWarmTracker.markWarmed(host: host, at: Date()) } else {
                 connectionWarmTracker.markFailed(host: host)
                 connectionWarmCapture = nil
                 update("Connection preparation failed. Cleanup will connect normally; no idle retry was scheduled.")

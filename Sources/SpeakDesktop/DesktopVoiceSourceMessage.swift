@@ -35,6 +35,7 @@ public enum DesktopVoiceSourceMessage: Equatable, Sendable {
         }
     }
 
+    // swiftlint:disable:next cyclomatic_complexity
     private static func preferenceMessage(
         source: Int32, text: String, record: String, path: String
     ) throws -> Self {

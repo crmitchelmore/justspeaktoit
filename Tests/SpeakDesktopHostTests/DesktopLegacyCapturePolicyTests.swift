@@ -139,6 +139,7 @@ final class DesktopLegacyCapturePolicyTests: XCTestCase {
         XCTAssertTrue(fixture.effects.keyReads.filter { $0 != "assemblyai.apiKey" }.isEmpty)
     }
 
+    // swiftlint:disable:next function_body_length
     func testLegacyStartupFailure_NextRecordingCannotInheritStalePolicyIdentity() async throws {
         FakeLog.shared.reset()
         DesktopHostModels.configure(streamingQualified: true)

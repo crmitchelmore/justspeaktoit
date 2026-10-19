@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import Foundation
 import SpeakCore
 import SpeakDesktop
@@ -262,6 +263,7 @@ public final class LinuxOutputJob: @unchecked Sendable {
         performResult(text).status
     }
 
+    // swiftlint:disable:next cyclomatic_complexity function_body_length
     public func performResult(_ text: String) -> DesktopTextOutputResult {
         guard !isCancelled else {
             return DesktopTextOutputResult(.cancelled, status: "Output cancelled. Saved to History.")
@@ -304,6 +306,7 @@ public final class LinuxOutputJob: @unchecked Sendable {
                 guard try native.x11TargetIsFront(target), !native.ownWindowFocused() else {
                     return copy(text, reason: policy == .currentApp
                         ? "A new app/field cannot be safely verified on this X11 route. Paste manually."
+                        // swiftlint:disable:next line_length
                         : "The original app is unavailable or no longer in front. Background X11 insertion is unsupported.")
                 }
                 guard case .x11Window(let window) = target.kind else {
@@ -313,6 +316,7 @@ public final class LinuxOutputJob: @unchecked Sendable {
                     text, window: window, shift: target.prefersShiftPaste, restore: restore, guardedTarget: target
                 )
             } catch {
+                // swiftlint:disable:next line_length
                 return copy(text, reason: "The original destination could not be verified: \(error.localizedDescription)")
             }
         }

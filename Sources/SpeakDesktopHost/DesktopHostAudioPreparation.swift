@@ -25,6 +25,7 @@ extension DesktopHostController {
         return try await transcribePreparedAudio(request)
     }
 
+    // swiftlint:disable:next line_length
     package func transcribePreparedAudio(_ request: DesktopHostTranscriptionRequest) async throws -> TranscriptionResult {
         let (audio, model, key, duration, language, keywords) = (
             request.audio, request.model, request.key, request.duration, request.language, request.keywords

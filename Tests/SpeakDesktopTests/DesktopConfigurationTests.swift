@@ -132,7 +132,7 @@ final class DesktopConfigurationTests: XCTestCase {
     }
 
     // existing owned test exhaustively covering every numeric field/range; no behavior change.
-    // swiftlint:disable:next function_body_length
+    // swiftlint:disable:next function_body_length cyclomatic_complexity
     func testNumericRangesTypesAndNonFiniteEntriesAreRejected() throws {
         for field in DesktopConfiguration.fields {
             switch field.kind {
@@ -151,8 +151,10 @@ final class DesktopConfigurationTests: XCTestCase {
             case .choice(let choices):
                 for choice in choices {
                     if DesktopConfiguration.modulatePreferenceKeys.contains(field.key) {
+                        // swiftlint:disable:next line_length
                         XCTAssertThrowsError(try DesktopConfiguration(values: [field.key: AnyCodable(.string(choice.value))]))
                     } else {
+                        // swiftlint:disable:next line_length
                         XCTAssertNoThrow(try DesktopConfiguration(values: [field.key: AnyCodable(.string(choice.value))]))
                     }
                 }

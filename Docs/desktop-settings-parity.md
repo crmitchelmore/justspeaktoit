@@ -2526,6 +2526,8 @@ newline encoding. This route cannot redirect to another app or use replace-all.
 An unverifiable anchor yields an explicitly explained clipboard recovery, not
 automatic typing somewhere else. Ambiguous dispatch is never replayed; cancellation
 abandons the target and suppresses clipboard recovery.
+The existing native HUD distinguishes confirmed replacement from recovery or error;
+manual paste is not shown as a successfully completed edit.
 
 Instruction audio is temporary, private and absent from History. Capture stop,
 destroy, busy ownership and scratch cleanup are shared across finish, Cancel and

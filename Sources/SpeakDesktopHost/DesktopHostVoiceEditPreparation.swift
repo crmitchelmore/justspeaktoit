@@ -61,10 +61,13 @@ extension DesktopHostController {
                 "Voice edit: listening for your instruction. Press Edit Selection by Voice again to finish; "
                     + "Cancel stops without editing.", state: 1
             )
-            beginHUD(run.id, .recording(profile: "Voice edit"))
+            beginHUD(run.id, .init(
+                phase: .recording, headline: "Voice edit", subheadline: "Speak your editing instruction"
+            ))
         } catch {
             run.live?.cancel()
-            await retireVoiceEdit(run, status: "Voice edit failed: \(error.localizedDescription)")
+            let message = "Voice edit failed: \(error.localizedDescription)"
+            await retireVoiceEdit(run, status: message, presentation: .failure(message, headline: "Voice edit failed"))
         }
     }
 
@@ -91,6 +94,6 @@ extension DesktopHostController {
 
     func voiceEditCaptureFailed(id: UUID, message: String) {
         guard voiceEdit.active?.id == id else { return }
-        cancelVoiceEdit(status: "Voice edit microphone failed: \(message)")
+        cancelVoiceEdit(status: "Voice edit microphone failed: \(message)", showFailure: true)
     }
 }

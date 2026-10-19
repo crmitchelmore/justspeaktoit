@@ -3,7 +3,7 @@ import SpeakCore
 import SpeakDesktop
 
 extension DesktopHostController {
-    package var voiceEditIsListening: Bool { voiceEdit.active?.phase == .listening }
+    var voiceEditIsListening: Bool { voiceEdit.active?.phase == .listening }
 
     /// Only admission is queued with settings. Recording and provider work have
     /// their own cancellable task, so Cancel and shutdown can always reach it.
@@ -20,7 +20,7 @@ extension DesktopHostController {
             }
             return
         }
-        guard canUseHistory, ownedCaptureStartup == nil, ownedDictation == nil,
+        guard canUseHistory, outputSlot.task == nil, ownedCaptureStartup == nil, ownedDictation == nil,
               ownedDictationAdmission == nil, !handsFreeMachine.isArmed else {
             source.cancel()
             update("Finish the current operation before editing a selection by voice.")
@@ -70,26 +70,33 @@ extension DesktopHostController {
             let instruction = VoiceEditPolicy.normalizedInstruction(raw)
             guard !instruction.isEmpty else { throw DesktopVoiceEditError.emptyInput }
             update("Voice edit: applying your instruction to the captured text.", state: 2)
+            hud(run.id, .init(
+                phase: .postProcessing, headline: "Editing selection", subheadline: "Applying your spoken instruction"
+            ))
             let rewritten = try await effects.rewriteSelection(.init(
                 selection: run.selection, instruction: instruction, model: run.rewriteModel,
                 temperature: run.temperature
             ), key: run.key)
             try checkVoiceEdit(run)
             guard !rewritten.isEmpty else { throw OpenRouterClientError.invalidResponse }
-            let status = try await run.source.replace(rewritten)
+            hud(run.id, .delivering(copying: false))
+            let delivery = try await run.source.replace(rewritten)
             try checkVoiceEdit(run)
-            await retireVoiceEdit(run, status: status)
+            await retireVoiceEdit(run, status: delivery.status, presentation: delivery.presentation)
         } catch {
-            await retireVoiceEdit(run, status: "Voice edit failed: \(error.localizedDescription)")
+            let message = "Voice edit failed: \(error.localizedDescription)"
+            await retireVoiceEdit(run, status: message, presentation: .failure(message, headline: "Voice edit failed"))
         }
     }
 
-    package func cancelVoiceEdit(
-        status: String = "Voice edit cancelled. If delivery had begun, check the original selection."
+    func cancelVoiceEdit(
+        status: String = "Voice edit cancelled. If delivery had begun, check the original selection.",
+        showFailure: Bool = false
     ) {
         guard let run = voiceEdit.active, run.phase != .retired else { return }
         run.phase = .retired
         run.retirementStatus = status
+        run.retirementHUD = showFailure ? .failure(status, headline: "Voice edit failed") : .hidden
         run.task?.cancel()
         run.live?.cancel()
         run.source.cancel()
@@ -101,7 +108,9 @@ extension DesktopHostController {
         }
     }
 
-    func retireVoiceEdit(_ run: DesktopHostVoiceEditRun, status: String) async {
+    func retireVoiceEdit(
+        _ run: DesktopHostVoiceEditRun, status: String, presentation: DesktopHUDState = .hidden
+    ) async {
         if let retirement = run.retirement { await retirement.value; return }
         run.phase = .retired
         run.live?.cancel()
@@ -124,7 +133,14 @@ extension DesktopHostController {
                 }
                 if !closed {
                     update(message, state: 0)
-                    finishHUD(run.id, .hidden)
+                    let outcome: DesktopHUDState = cleanupFailed
+                        ? .failure(message, headline: "Voice edit cleanup failed")
+                        : run.retirementHUD ?? presentation
+                    if hudRecording == run.id {
+                        finishHUD(run.id, outcome)
+                    } else if cleanupFailed || outcome.phase == .failure {
+                        failHUDStart(message)
+                    }
                 } else if cleanupFailed {
                     FileHandle.standardError.write(Data((message + "\n").utf8))
                 }

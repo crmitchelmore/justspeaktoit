@@ -23,7 +23,9 @@ enum WindowsVoiceEdit {
         }
     }
 
-    private static func replace(_ text: String, target: WindowsInsertionTarget) async throws -> String {
+    private static func replace(
+        _ text: String, target: WindowsInsertionTarget
+    ) async throws -> DesktopHostVoiceEditDelivery {
         let work = Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()
             return try target.insert(text, options: .init())
@@ -52,13 +54,15 @@ enum WindowsVoiceEdit {
         if outcome.verified && outcome.fieldIdentity {
             switch outcome.clipboard {
             case .restoreFailed, .restoredPartially:
-                return "Voice edit replaced the selection, but the previous clipboard could not be fully restored."
+                return .recovery(
+                    "Voice edit replaced the selection, but the previous clipboard could not be fully restored."
+                )
             case .changedMeanwhile:
-                return "Voice edit replaced the selection. A newer clipboard change was preserved."
+                return .replaced("Voice edit replaced the selection. A newer clipboard change was preserved.")
             case .transcriptLeft:
-                return "Voice edit replaced the selection. The rewrite remains on the clipboard."
+                return .replaced("Voice edit replaced the selection. The rewrite remains on the clipboard.")
             case .untouched, .restored:
-                return "Voice edit: the captured selection was replaced."
+                return .replaced("Voice edit: the captured selection was replaced.")
             }
         }
         return try recover(
@@ -68,7 +72,7 @@ enum WindowsVoiceEdit {
 
     private static func recover(
         _ text: String, target: WindowsInsertionTarget, reason: String, ambiguous: Bool
-    ) throws -> String {
+    ) throws -> DesktopHostVoiceEditDelivery {
         try Task.checkCancellation()
         do { try target.copy(text) } catch {
             throw WindowsTextOutputError(
@@ -76,8 +80,8 @@ enum WindowsVoiceEdit {
                 mayHaveInserted: ambiguous
             )
         }
-        return ambiguous
+        return .recovery(ambiguous
             ? "Voice edit may have reached the app. Rewrite copied; check the original before pasting. \(reason)"
-            : "Voice edit was not applied. Rewrite copied for manual paste. \(reason)"
+            : "Voice edit was not applied. Rewrite copied for manual paste. \(reason)")
     }
 }

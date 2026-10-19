@@ -2,15 +2,33 @@ import Foundation
 import SpeakCore
 import SpeakDesktop
 
+package enum DesktopHostVoiceEditDelivery: Sendable {
+    case replaced(String)
+    case recovery(String)
+
+    var status: String {
+        switch self {
+        case .replaced(let message), .recovery(let message): return message
+        }
+    }
+
+    var presentation: DesktopHUDState {
+        switch self {
+        case .replaced(let message): return .success(message)
+        case .recovery(let message): return .failure(message, headline: "Check voice edit")
+        }
+    }
+}
+
 package struct DesktopHostVoiceEditSource: Sendable {
     let executablePath: String?
     let capture: @Sendable () async throws -> String
-    let replace: @Sendable (String) async throws -> String
+    let replace: @Sendable (String) async throws -> DesktopHostVoiceEditDelivery
     let cancel: @Sendable () -> Void
 
     package init(
         executablePath: String?, capture: @escaping @Sendable () async throws -> String,
-        replace: @escaping @Sendable (String) async throws -> String,
+        replace: @escaping @Sendable (String) async throws -> DesktopHostVoiceEditDelivery,
         cancel: @escaping @Sendable () -> Void
     ) {
         self.executablePath = executablePath
@@ -50,6 +68,7 @@ final class DesktopHostVoiceEditRun: @unchecked Sendable {
     var stopping: Task<TimeInterval, Error>?
     var retirement: Task<Void, Never>?
     var retirementStatus: String?
+    var retirementHUD: DesktopHUDState?
     var workers = 0
     var busyHeld = true
 

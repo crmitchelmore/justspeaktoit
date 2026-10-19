@@ -1,7 +1,7 @@
 import Foundation
 import SpeakCore
 import SpeakDesktop
-import SpeakDesktopHost
+@testable import SpeakDesktopHost
 import XCTest
 
 final class DesktopHostVoiceEditTests: XCTestCase {
@@ -23,6 +23,7 @@ final class DesktopHostVoiceEditTests: XCTestCase {
         FakeLog.shared.setKey("fixture-rewrite-key", name: "openrouter.apiKey")
         await controller.savePostProcessing(enabled: false, modelIndex: 0, prompt: "Not an editing prompt.", key: "")
         FakeLog.shared.setKey("fixture-rewrite-key", name: "openrouter.apiKey")
+        _ = try await controller.recognitionVocabulary()
     }
 
     override func tearDown() async throws {
@@ -65,6 +66,19 @@ final class DesktopHostVoiceEditTests: XCTestCase {
         XCTAssertEqual(effects.requests.first?.key, "fixture-transcription-key")
         XCTAssertTrue(effects.requests.first?.audio.path.contains("VoiceEdit") == true)
         XCTAssertEqual(try regularFiles(), before)
+        XCTAssertEqual(FakeLog.shared.huds.last?.phase, .success)
+    }
+
+    func testManualClipboardRecovery_IsNotPresentedAsACompletedReplacement() async {
+        let selection = VoiceEditFixtureSelection(recovery: true)
+        await controller.toggleVoiceEdit(source: selection.source(), deviceID: "")
+        await listening()
+        await controller.toggleVoiceEdit(source: VoiceEditFixtureSelection().source(), deviceID: "")
+        await idle()
+        await controller.voiceEditWorkersEnded()
+        XCTAssertTrue(selection.replacements.isEmpty)
+        XCTAssertEqual(FakeLog.shared.huds.last?.phase, .failure)
+        XCTAssertEqual(FakeLog.shared.huds.last?.headline, "Check voice edit")
     }
 
     func testNormalDictationCannotStealVoiceEditingAndCancelStopsCaptureOnce() async {
@@ -201,15 +215,20 @@ final class DesktopHostVoiceEditTests: XCTestCase {
 private final class VoiceEditFixtureSelection: @unchecked Sendable {
     private let lock = NSLock()
     private let text: String
+    private let recovery: Bool
     private var written: [String] = []
     var replacements: [String] { lock.withLock { written } }
-    init(text: String = "Original selection.") { self.text = text }
+    init(text: String = "Original selection.", recovery: Bool = false) {
+        self.text = text
+        self.recovery = recovery
+    }
     func source() -> DesktopHostVoiceEditSource {
         .init(
             executablePath: nil, capture: { self.text },
             replace: { text in
+                if self.recovery { return .recovery("Rewrite copied for manual paste; the anchor changed.") }
                 self.lock.withLock { self.written.append(text) }
-                return "Fixture selection replaced."
+                return .replaced("Fixture selection replaced.")
             },
             cancel: {}
         )

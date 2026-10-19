@@ -63,8 +63,11 @@ extension LinuxHostPlatform {
 
     package static func voiceGenerated(_ presentation: DesktopVoiceResultPresentation) {
         let result = presentation.resultID.withCString { identifier in
-            presentation.message.withCString {
-                jsti_window_set_voice_generated_result(identifier, presentation.working ? 1 : 0, $0)
+            presentation.message.withCString { message in
+                presentation.format.rawValue.withCString {
+                    jsti_window_set_voice_generated_result_with_format(
+                        identifier, presentation.working ? 1 : 0, message, $0)
+                }
             }
         }
         if result < 0 { update("The generated voice result could not be shown.") }
@@ -131,11 +134,22 @@ extension LinuxWindow {
         }
 
         if result != 0 { LinuxHostPlatform.update("The Read aloud voices could not be shown.") }
+        voiceAudioFormats(settings)
         if jsti_window_set_voice_generation_options(settings.generationOptions.nativeFlags) != 0 {
             LinuxHostPlatform.update("The generated voice preferences could not be shown.")
         }
         voiceLanguageTitle(settings, accountInventory: accountInventory)
         voiceControls(settings, accountInventory: accountInventory)
+    }
+
+    static func voiceAudioFormats(_ settings: LinuxVoiceOutputSettings, status: String = "") {
+        let rows = VoiceAudioFormat.allCases.map { $0.rawValue + "\t" + $0.displayName }.joined(separator: "\n")
+        let result = rows.withCString { rows in
+            (settings.format ?? VoiceAudioFormat.desktopLegacyDefault.rawValue).withCString { selected in
+                status.withCString { jsti_window_set_voice_audio_formats(rows, selected, $0) }
+            }
+        }
+        if result != 0 { LinuxHostPlatform.update("The saved Voice file format could not be shown.") }
     }
 
     static func voiceControls(_ settings: LinuxVoiceOutputSettings, inventory: XAIAccountVoiceInventory? = nil) {
@@ -182,7 +196,8 @@ func linuxVoicePickerEvent(_ action: Int32, _ identifier: UnsafePointer<CChar>?,
     }
 }
 
-// swiftlint:disable:next function_parameter_count
+// The native callback preserves one validated event order and its fixed ABI.
+// swiftlint:disable:next function_parameter_count function_body_length
 func linuxVoiceSourceEvent(
     _ action: Int32, _ source: Int32, _ text: UnsafePointer<CChar>?,
     _ record: UnsafePointer<CChar>?, _ path: UnsafePointer<CChar>?, _ context: UnsafeMutableRawPointer?
@@ -195,6 +210,14 @@ func linuxVoiceSourceEvent(
             record: record.map(String.init(cString:)) ?? "", path: path.map(String.init(cString:)) ?? ""
         )
         switch message {
+        case .audioFormat(let identifier):
+            holder.enqueueSettings {
+                await holder.controller.beginVoiceAudioFormatSave(identifier) { saved, failure in
+                    guard let saved else { return }
+                    LinuxWindow.voiceAudioFormats(saved,
+                        status: failure ?? "Voice file format saved. Generated results keep their captured format.")
+                }
+            }
         case .discoveryOpen, .discoveryOpenModern, .discoveryRefresh,
              .discoveryClose, .discoveryChoose, .discoveryProvider:
             holder.enqueueSettings { await holder.controller.handleVoiceDiscovery(message) }

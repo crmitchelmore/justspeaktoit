@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "VoiceSources.h"
+#include "VoiceAudioCodec.h"
 #include "../../CWindowsSupport/include/VoiceCredentials.h"
 #include "../../CWindowsSupport/include/LocalCleanup.h"
 

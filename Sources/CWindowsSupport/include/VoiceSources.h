@@ -36,12 +36,19 @@ int32_t jsti_window_set_voice_markup_helper(int32_t enabled, const JSTIVoiceMark
 /* Thread safe, borrowed strings copied. Empty error means success. Stale
  * request tokens cannot replace text or revive a closed editor. */
 int32_t jsti_window_set_voice_text_import(const char *token, const char *text, const char *error);
-/* 115 Generate: path is snapshotted flags (bit 0 auto-play, bit 1 save).
+/* 115 Generate: path is snapshotted "flags|format" (bit 0 auto-play, bit 1 save).
+ * Legacy numeric-only flags remain valid and use the captured stored/default format.
  * 116 Play result / 117 Export result: record is an opaque result ID, not a
  * History owner. 118 saves both preference flags atomically via source.
  * Setters copy borrowed strings and dispatch to the native editor. */
 int32_t jsti_window_set_voice_generation_options(int32_t flags);
 int32_t jsti_window_set_voice_generated_result(const char *result_id, int32_t working, const char *message);
+/* Canonical "identifier<TAB>label" rows, selected raw identifier, persistence/error status.
+ * Tagged118 audio-format carries the chosen ID in text, source -1, record "format".
+ * A new snapshot acknowledges Save; unsupported raw IDs remain visible and unmodified. */
+int32_t jsti_window_set_voice_audio_formats(const char *rows, const char *selected, const char *status);
+int32_t jsti_window_set_voice_generated_result_with_format(
+    const char *result_id, int32_t working, const char *message, const char *format);
 /* 119 saves {"speed":number,"pitch":number,"useSSML":bool} through text;
  * record carries an opaque acknowledgement token, never a History owner.
  * Capabilities: bit 0 speed, bit 1 pitch, bit 2 SSML. Unsupported stored values

@@ -40,6 +40,14 @@ enum LinuxHostPlatform: DesktopHostAutomationPlatform {
         ProfileResolver(profiles: profiles).profile(forLinuxExecutablePath: executablePath)
     }
     package static let credentialStoreName = "the desktop keyring (Secret Service)"
+    package static func requireVoiceAudioFormat(_ format: VoiceAudioFormat, sampleRate: Int) async throws {
+        try await LinuxVoiceAudioCodec.requireAvailable(format, sampleRate: sampleRate)
+    }
+    package static func encodeVoiceAudio(
+        _ audio: VoiceGeneratedAudio, format: VoiceAudioFormat
+    ) async throws -> VoiceGeneratedAudio {
+        try await LinuxVoiceAudioCodec.encode(audio, format: format)
+    }
     package static func makeRecordingFeedbackLoader() -> (any DesktopRecordingFeedbackLoader)? {
         LinuxRecordingFeedbackLoader()
     }

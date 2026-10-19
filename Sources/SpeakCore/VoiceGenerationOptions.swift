@@ -2,10 +2,16 @@
 public struct VoiceGenerationOptions: Equatable, Sendable {
     public let autoPlay: Bool
     public let saveToRecordings: Bool
+    public let format: VoiceAudioFormat?
 
     public init(autoPlay: Bool, saveToRecordings: Bool) {
+        self.init(autoPlay: autoPlay, saveToRecordings: saveToRecordings, format: nil)
+    }
+
+    public init(autoPlay: Bool, saveToRecordings: Bool, format: VoiceAudioFormat?) {
         self.autoPlay = autoPlay
         self.saveToRecordings = saveToRecordings
+        self.format = format
     }
 
     public var nativeFlags: Int32 { (autoPlay ? 1 : 0) | (saveToRecordings ? 2 : 0) }

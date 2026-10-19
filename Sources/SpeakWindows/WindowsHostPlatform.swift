@@ -30,6 +30,14 @@ enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPla
 
     package static let displayName = "Windows"
     package static let credentialStoreName = "Windows Credential Manager"
+    package static func requireVoiceAudioFormat(_ format: VoiceAudioFormat, sampleRate: Int) async throws {
+        try await WindowsVoiceAudioCodec.requireAvailable(format, sampleRate: sampleRate)
+    }
+    package static func encodeVoiceAudio(
+        _ audio: VoiceGeneratedAudio, format: VoiceAudioFormat
+    ) async throws -> VoiceGeneratedAudio {
+        try await WindowsVoiceAudioCodec.encode(audio, format: format)
+    }
     package static func makeRecordingFeedbackLoader() -> (any DesktopRecordingFeedbackLoader)? {
         WindowsRecordingFeedbackLoader()
     }

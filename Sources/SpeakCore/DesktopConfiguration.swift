@@ -151,7 +151,8 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable { // swiftlint:
         .init(key: ApplicationPreferenceKey.recordingSoundVolume.rawValue, title: "Recording sound volume (0 to 1)",
               group: "General", kind: .number(0...1),
               defaultValue: AnyCodable(.double(RecordingFeedbackDefaults.volume)))
-    ] + [VoiceSynthesisPreference.quality.field] + SonioxVoicePreference.fields + LivePolishPreference.fields
+    ] + [VoiceSynthesisPreference.quality.field, VoiceAudioFormat.transferField]
+        + SonioxVoicePreference.fields + LivePolishPreference.fields
 
     public private(set) var values: [String: AnyCodable]
 
@@ -190,6 +191,7 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable { // swiftlint:
                 valid = choices.contains { $0.value == text }
                     || ((field.key == SonioxVoicePreference.regionKey
                             || field.key == VoiceSynthesisPreference.quality.key.rawValue
+                            || field.key == VoiceAudioFormat.preferenceKey
                             || field.key == ApplicationPreferenceKey.speedMode.rawValue)
                         && text.utf8.count <= 256
                         && !text.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains))

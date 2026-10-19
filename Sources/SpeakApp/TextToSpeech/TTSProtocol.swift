@@ -124,25 +124,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
 
 typealias TTSQuality = VoiceSynthesisQuality
 
-enum AudioFormat: String, Codable, CaseIterable, Identifiable {
-  case mp3
-  case m4a
-  case wav
-
-  var id: String { rawValue }
-
-  var displayName: String {
-    switch self {
-    case .mp3: return "MP3"
-    case .m4a: return "AAC (M4A)"
-    case .wav: return "WAV"
-    }
-  }
-
-  var fileExtension: String {
-    rawValue
-  }
-}
+typealias AudioFormat = VoiceAudioFormat
 
 struct TTSSettings {
   var speed: Double
@@ -160,7 +142,7 @@ struct TTSSettings {
     speed: Double = 1.0,
     pitch: Double = 0.0,
     quality: TTSQuality = .high,
-    format: AudioFormat = .mp3,
+    format: AudioFormat = .macDefault,
     useSSML: Bool = false,
     language: String? = nil,
     sonioxRegion: SonioxTTSRegion = .unitedStates

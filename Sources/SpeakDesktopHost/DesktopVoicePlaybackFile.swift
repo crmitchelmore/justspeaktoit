@@ -1,11 +1,12 @@
 import Foundation
 import SpeakCore
+import SpeakDesktop
 
 package enum DesktopVoicePlaybackFile {
     static func writeExport(_ wav: Data, to destination: URL) async throws {
         let writer = Task.detached {
             try Task.checkCancellation()
-            try wav.write(to: destination, options: .atomic)
+            try DesktopVoiceExportPublication.write(wav, to: destination)
         }
         try await withTaskCancellationHandler { try await writer.value } onCancel: { writer.cancel() }
     }

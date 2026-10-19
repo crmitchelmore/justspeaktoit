@@ -17,6 +17,7 @@ package struct DesktopVoiceOutputSettings: Codable, Equatable, Sendable {
     package var sonioxRegion: String?
     package var language: String?
     package var quality: String?
+    package var format: String?
 
     private enum CodingKeys: String, CodingKey {
         case modelID, voiceID
@@ -30,6 +31,7 @@ package struct DesktopVoiceOutputSettings: Codable, Equatable, Sendable {
         case sonioxRegion = "sonioxTTSRegion"
         case language = "ttsLanguage"
         case quality = "ttsQuality"
+        case format = "ttsOutputFormat"
     }
 
     package var generationOptions: VoiceGenerationOptions {
@@ -191,6 +193,8 @@ package protocol DesktopHostVoiceOutput: Sendable {
 package struct DesktopHostReadAloudState<Speech: Sendable, Engine: DesktopHostVoiceOutput>: Sendable {
     package var task: Task<Void, Never>?
     package var exportTask: Task<Void, Never>?
+    package var formatSaveTask: Task<Void, Never>?
+    package var codecOperationID: UUID?
     /// Keeps the record's playback controls active, so Pause and Stop work
     /// while segments are synthesized and between them.
     package var speech: Speech?
@@ -262,6 +266,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 JSONEncoder().encode(changed), to: directory.appendingPathComponent("settings.json")
             )
             settings = changed
+            voiceSettingsRevision &+= 1
             reconcileSonioxRegionChange(previous)
             if previous.modelID != voiceOutput.modelID || previous.voiceID != voiceOutput.voiceID
                 || previous.quality != voiceOutput.quality {

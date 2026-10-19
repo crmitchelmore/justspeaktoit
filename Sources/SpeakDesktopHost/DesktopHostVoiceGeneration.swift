@@ -14,6 +14,26 @@ package struct DesktopVoiceResultPresentation: Sendable {
     package let resultID: String
     package let working: Bool
     package let message: String
+    package let format: VoiceAudioFormat
+
+    package init(resultID: String, working: Bool, message: String) {
+        self.init(resultID: resultID, working: working, message: message, format: .wav)
+    }
+
+    package init(resultID: String, working: Bool, message: String, format: VoiceAudioFormat) {
+        self.resultID = resultID
+        self.working = working
+        self.message = message
+        self.format = format
+    }
+}
+
+private struct VoiceGenerationJob: Sendable {
+    let source: VoiceOutputSourceSnapshot
+    let selection: DesktopSpeechSelection
+    let options: VoiceGenerationOptions
+    let ticket: DesktopPlaybackRequests.Ticket
+    let format: VoiceAudioFormat
 }
 
 extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
@@ -41,7 +61,13 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             return
         }
         let selection: DesktopSpeechSelection
-        do { selection = try currentVoiceSelection() } catch {
+        let format: VoiceAudioFormat
+        let conversionID: UUID?
+        do {
+            selection = try currentVoiceSelection()
+            format = try options.format ?? VoiceAudioFormat.storedValue(voiceOutputSettings().format)
+            conversionID = try admitVoiceAudioConversion(format)
+        } catch {
             presentVoiceResult(working: false, message: error.localizedDescription); return
         }
         stopReadAloud()
@@ -52,9 +78,12 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         presentVoiceResult(working: true, message: "Generating voice audio with \(voice.name)…")
         let usage = beginVoiceUsage(operation: .generate, source: snapshot.source, recordID: snapshot.recordID)
         let accountWork = beginAccountVoiceWork(selection, ticket: ticket)
+        let job = VoiceGenerationJob(source: snapshot, selection: selection,
+                                     options: options, ticket: ticket, format: format)
         activeOperations += 1
         voiceGenerationTask = Task {
             defer {
+                self.finishVoiceAudioConversion(conversionID)
                 self.finishAccountVoiceWork(accountWork)
                 self.finishVoiceUsage(usage)
                 self.voiceGenerationTask = nil
@@ -63,32 +92,47 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             }
             await VoiceSynthesisUsage.$capture.withValue(usage?.capture) {
                 await self.runVoiceGeneration(
-                    snapshot, selection: selection, options: options, ticket: ticket, synthesize: synthesize
+                    job, synthesize: synthesize
                 )
             }
         }
     }
 
     private func runVoiceGeneration(
-        _ snapshot: VoiceOutputSourceSnapshot, selection: DesktopSpeechSelection,
-        options: VoiceGenerationOptions, ticket: DesktopPlaybackRequests.Ticket,
+        _ job: VoiceGenerationJob,
         synthesize: @Sendable (
             VoiceOutputSourceSnapshot, DesktopSpeechSelection, @Sendable () async throws -> String
         ) async throws -> Data
     ) async {
+        let snapshot = job.source
+        let selection = job.selection
+        let options = job.options
+        let ticket = job.ticket
+        let format = job.format
         let effects = effects
         var saveWarning: String?
         var published = false
         do {
+            try await Platform.requireVoiceAudioFormat(format, sampleRate: selection.sampleRate)
+            try Task.checkCancellation()
+            guard voiceTicketIsCurrent(ticket) else { return }
             let prepared = try await prepareVoiceSynthesisSource(snapshot, selection: selection, ticket: ticket)
             let wav = try await synthesize(prepared, selection) {
                 try await Self.readVoiceSynthesisKey(effects: effects, name: selection.voice.apiKeyIdentifier)
             }
+
             try Task.checkCancellation()
             guard voiceTicketIsCurrent(ticket) else { return }
-            let result = try DesktopGeneratedVoiceResult(
+            let canonical = try VoiceGeneratedAudio(validating: wav, sampleRate: selection.sampleRate)
+            let audio = try await Platform.encodeVoiceAudio(canonical, format: format)
+            try Task.checkCancellation()
+            guard voiceTicketIsCurrent(ticket) else { return }
+            guard audio.format == format, audio.sampleRate == selection.sampleRate else {
+                throw VoiceAudioFormatError.invalidContainer
+            }
+            let result = DesktopGeneratedVoiceResult(
                 source: snapshot, voice: selection.voice, options: selection.options,
-                audio: VoiceGeneratedAudio(validating: wav, sampleRate: selection.sampleRate)
+                audio: audio
             )
             saveWarning = try await archiveGeneratedAudio(result.audio, enabled: options.saveToRecordings)
             try Task.checkCancellation()
@@ -166,7 +210,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             }
             return
         }
-        exportVoiceSource(result.source, path: path, retainedAudio: result.audio.wav)
+        exportRetainedVoiceAudio(result.source, audio: result.audio, path: path)
     }
 
     package func discardGeneratedVoice(for recordID: UUID) {
@@ -187,7 +231,8 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     private func presentVoiceResult(working: Bool, message: String) {
         update(message)
         Platform.voiceGenerated(.init(
-            resultID: generatedVoice?.id.uuidString ?? "", working: working, message: message
+            resultID: generatedVoice?.id.uuidString ?? "", working: working, message: message,
+            format: generatedVoice?.audio.format ?? .wav
         ))
     }
 

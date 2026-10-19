@@ -1272,7 +1272,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       TTSQuality(rawValue: defaults.string(forKey: DefaultsKey.ttsQuality.rawValue) ?? "") ?? .high
     ttsOutputFormat =
       AudioFormat(rawValue: defaults.string(forKey: DefaultsKey.ttsOutputFormat.rawValue) ?? "")
-      ?? .mp3
+      ?? .macDefault
     ttsAutoPlay =
       defaults.object(forKey: DefaultsKey.ttsAutoPlay.rawValue) as? Bool
         ?? SpeechGenerationDefaults.autoPlay

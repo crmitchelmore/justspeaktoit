@@ -15,6 +15,7 @@ namespace {
 enum { sourceLabel = 920, sourceID, textLabel, textID, loadID, noticeID, readID, exportID, stopID };
 enum { autoPlayID = 940, saveID, generateID, playResultID, exportResultID, controlsID, usageID, discoveryID, helperID };
 enum { markupListID = 990, markupTextID, markupCopyID, markupNoticeID, markupWrapID };
+enum { formatLabelID = 970, formatID };
 struct MarkupExample { std::wstring text, description; };
 struct MarkupConfiguration {
     bool enabled = false;
@@ -34,12 +35,21 @@ struct GenerationState {
     bool working = false;
     std::string resultID;
     std::wstring message;
+    std::string format = "wav";
 };
+struct FormatState {
+    std::vector<std::wstring> labels;
+    std::vector<std::string> identifiers;
+    int selected = -1;
+    std::wstring status;
+};
+FormatState formatState;
 GenerationState generationState;
 HWND generationWindow = nullptr;
 constexpr UINT generationMessage = WM_APP + 25;
 constexpr UINT importResultMessage = WM_APP + 24;
 constexpr UINT markupMessage = WM_APP + 28;
+constexpr UINT formatMessage = WM_APP + 45;
 struct ImportResult {
     HWND window = nullptr;
     std::string token;
@@ -53,6 +63,8 @@ struct Dialog {
     std::wstring history, typed, clipboard, file;
     std::string importToken;
     GenerationState generation;
+    FormatState formats;
+    bool formatPending = false;
     int source = 0;
     HFONT font = nullptr;
     HWND markupWindow = nullptr;
@@ -80,8 +92,11 @@ void refresh(HWND window, Dialog &dialog) {
     const bool ready = !dialog.generation.working && dialog.importToken.empty() && hasText(text(window)) &&
         (dialog.source != 0 || !dialog.record.empty());
     EnableWindow(GetDlgItem(window, readID), ready);
-    EnableWindow(GetDlgItem(window, exportID), ready);
-    EnableWindow(GetDlgItem(window, generateID), ready);
+    const bool formatReady = !dialog.formatPending && (dialog.formats.identifiers.empty() ||
+        (dialog.formats.selected >= 0 && static_cast<size_t>(dialog.formats.selected) < dialog.formats.identifiers.size() &&
+         !dialog.formats.identifiers[dialog.formats.selected].empty()));
+    EnableWindow(GetDlgItem(window, exportID), ready && formatReady);
+    EnableWindow(GetDlgItem(window, generateID), ready && formatReady);
     const bool resultReady = !dialog.generation.working && !dialog.generation.resultID.empty();
     EnableWindow(GetDlgItem(window, playResultID), resultReady);
     EnableWindow(GetDlgItem(window, exportResultID), resultReady);
@@ -91,6 +106,18 @@ void refresh(HWND window, Dialog &dialog) {
     const bool markup = canEditMarkup(dialog);
     EnableWindow(GetDlgItem(window, helperID), markup);
     if (IsWindow(dialog.markupWindow)) EnableWindow(GetDlgItem(dialog.markupWindow, markupWrapID), markup);
+}
+std::string selectedFormat(const Dialog &dialog) {
+    if (dialog.formats.selected < 0 || static_cast<size_t>(dialog.formats.selected) >= dialog.formats.identifiers.size())
+        return "";
+    return dialog.formats.identifiers[dialog.formats.selected];
+}
+void showFormats(HWND window, Dialog &dialog) {
+    SendDlgItemMessageW(window, formatID, CB_RESETCONTENT, 0, 0);
+    for (const auto &label : dialog.formats.labels)
+        SendDlgItemMessageW(window, formatID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
+    SendDlgItemMessageW(window, formatID, CB_SETCURSEL, dialog.formats.selected, 0);
+    if (!dialog.formats.status.empty()) SetDlgItemTextW(window, noticeID, dialog.formats.status.c_str());
 }
 struct MarkupDialog {
     HWND owner = nullptr;
@@ -292,7 +319,7 @@ void select(HWND window, Dialog &dialog) {
     SetDlgItemTextW(window, noticeID, dialog.source == 0 && dialog.record.empty()
         ? L"Choose a recording in History, then reopen this editor. History text is captured when this editor opens."
         : L"Read, Generate and Export text send this snapshot to the selected voice provider with your saved key. "
-          L"Generate retains the provider's mono PCM16 WAV; Play/Export result reuse it without a provider request. "
+          L"Generate retains the selected file format and native-decoded playback; Play/Export reuse them without a provider request. "
           L"Voice controls show the selected route's actual capabilities. Stop cancels active voice work.");
     refresh(window, dialog);
 }
@@ -370,18 +397,32 @@ void exportAudio(HWND window, Dialog &dialog, bool retained = false) {
     const std::string snapshot = jsti::utf8(text(window));
     const std::string record = retained ? dialog.generation.resultID : dialog.source == 0 ? dialog.record : "";
     const int source = dialog.source == 3 ? 4 : dialog.source;
+    const std::string format = retained ? dialog.generation.format
+        : dialog.formats.identifiers.empty() ? "wav" : selectedFormat(dialog);
+    if (format.empty()) { SetDlgItemTextW(window, noticeID, L"Choose an available file format first."); return; }
+    const std::wstring extension(format.begin(), format.end());
+    const std::wstring filename = L"voice-output." + extension;
+    const std::wstring pattern = L"*." + extension;
+    std::wstring filter = extension + L" audio (" + pattern + L")";
+    filter.push_back(0); filter += pattern; filter.push_back(0); filter.push_back(0);
     std::vector<wchar_t> path(32768, 0);
-    wcscpy_s(path.data(), path.size(), L"voice-output.wav");
+    wcscpy_s(path.data(), path.size(), filename.c_str());
     OPENFILENAMEW choice{};
     choice.lStructSize = sizeof(choice);
     choice.hwndOwner = window;
-    choice.lpstrFilter = L"WAV audio (*.wav)\0*.wav\0";
+    choice.lpstrFilter = filter.c_str();
     choice.lpstrFile = path.data();
     choice.nMaxFile = static_cast<DWORD>(path.size());
-    choice.lpstrDefExt = L"wav";
+    choice.lpstrDefExt = extension.c_str();
     choice.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
     if (!GetSaveFileNameW(&choice)) {
         if (CommDlgExtendedError()) SetDlgItemTextW(window, noticeID, L"The audio save dialog could not be opened.");
+        return;
+    }
+    const std::wstring chosen(path.data());
+    const auto dot = chosen.find_last_of(L'.');
+    if (dot == std::wstring::npos || _wcsicmp(chosen.c_str() + dot + 1, extension.c_str()) != 0) {
+        SetDlgItemTextW(window, noticeID, L"Keep the selected file format's extension. No export was started.");
         return;
     }
     const std::string destination = jsti::utf8(path.data());
@@ -397,8 +438,11 @@ void layout(HWND window) {
     const int margin = scale(window, 20), gap = scale(window, 10), height = scale(window, 34);
     const int width = bounds.right - 2 * margin, bottom = bounds.bottom - margin - height;
     auto move = [&](int id, int x, int y, int w, int h) { MoveWindow(GetDlgItem(window, id), x, y, w, h, TRUE); };
-    move(sourceLabel, margin, margin, width, scale(window, 22));
-    move(sourceID, margin, margin + scale(window, 26), width - scale(window, 170), scale(window, 240));
+    move(sourceLabel, margin, margin, width - scale(window, 340), scale(window, 22));
+    move(sourceID, margin, margin + scale(window, 26), width - scale(window, 340), scale(window, 240));
+    move(formatLabelID, bounds.right - margin - scale(window, 330), margin, scale(window, 155), scale(window, 22));
+    move(formatID, bounds.right - margin - scale(window, 330), margin + scale(window, 26),
+         scale(window, 155), scale(window, 200));
     move(loadID, bounds.right - margin - scale(window, 160), margin + scale(window, 26), scale(window, 160), height);
     move(textLabel, margin, margin + scale(window, 70), width - scale(window, 180), scale(window, 22));
     move(helperID, bounds.right - margin - scale(window, 170), margin + scale(window, 64), scale(window, 170), height);
@@ -440,6 +484,8 @@ bool create(HWND window, Dialog &dialog) {
         !add(L"STATIC", L"", SS_LEFT, noticeID) ||
         !add(L"BUTTON", L"&Usage and input estimate...", BS_PUSHBUTTON | WS_TABSTOP, usageID) ||
         !add(L"BUTTON", L"&Account voices...", BS_PUSHBUTTON | WS_TABSTOP, discoveryID) ||
+        !add(L"STATIC", L"File &format", 0, formatLabelID) ||
+        !add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, formatID) ||
         !add(L"BUTTON", L"&Auto-play generated audio", BS_AUTOCHECKBOX | BS_MULTILINE | WS_TABSTOP, autoPlayID) ||
         !add(L"BUTTON", L"Save audio to recordings", BS_AUTOCHECKBOX | BS_MULTILINE | WS_TABSTOP, saveID) ||
         !add(L"BUTTON", L"Voice &controls...", BS_PUSHBUTTON | WS_TABSTOP, controlsID) ||
@@ -447,7 +493,7 @@ bool create(HWND window, Dialog &dialog) {
         !add(L"BUTTON", L"&Play result", BS_PUSHBUTTON | WS_TABSTOP, playResultID) ||
         !add(L"BUTTON", L"Export result...", BS_PUSHBUTTON | WS_TABSTOP, exportResultID) ||
         !add(L"BUTTON", L"&Read aloud", BS_PUSHBUTTON | WS_TABSTOP, readID) ||
-        !add(L"BUTTON", L"&Export text WAV...", BS_PUSHBUTTON | WS_TABSTOP, exportID) ||
+        !add(L"BUTTON", L"&Export text...", BS_PUSHBUTTON | WS_TABSTOP, exportID) ||
         !add(L"BUTTON", L"&Stop", BS_PUSHBUTTON | WS_TABSTOP, stopID) ||
         !add(L"BUTTON", L"Close", BS_PUSHBUTTON | WS_TABSTOP, IDCANCEL)) return false;
     dialog.font = CreateFontW(-MulDiv(10, GetDpiForWindow(window), 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
@@ -458,7 +504,9 @@ bool create(HWND window, Dialog &dialog) {
         if (SendDlgItemMessageW(window, sourceID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(name.c_str())) < 0) return false;
     }
     SendDlgItemMessageW(window, sourceID, CB_SETCURSEL, 0, 0);
-    { std::lock_guard<std::mutex> lock(mutex); dialog.generation = generationState; generationWindow = window; }
+    { std::lock_guard<std::mutex> lock(mutex);
+      dialog.generation = generationState; dialog.formats = formatState; generationWindow = window; }
+    showFormats(window, dialog);
     SendDlgItemMessageW(window, autoPlayID, BM_SETCHECK, dialog.generation.flags & 1 ? BST_CHECKED : BST_UNCHECKED, 0);
     SendDlgItemMessageW(window, saveID, BM_SETCHECK, dialog.generation.flags & 2 ? BST_CHECKED : BST_UNCHECKED, 0);
     select(window, dialog); layout(window);
@@ -472,6 +520,9 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     }
     if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
     switch (message) {
+    case formatMessage:
+        { std::lock_guard<std::mutex> lock(mutex); dialog->formats = formatState; }
+        dialog->formatPending = false; showFormats(window, *dialog); refresh(window, *dialog); return 0;
     case markupMessage: refresh(window, *dialog); return 0;
     case generationMessage: {
         GenerationState current;
@@ -484,6 +535,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         if (wparam & 2) {
             dialog->generation.resultID = std::move(current.resultID);
             dialog->generation.working = current.working;
+            dialog->generation.format = current.format;
             SetDlgItemTextW(window, noticeID, current.message.c_str());
         }
         refresh(window, *dialog); return 0;
@@ -528,6 +580,16 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         layout(window); return 0;
     }
     case WM_COMMAND:
+        if (LOWORD(wparam) == formatID && HIWORD(wparam) == CBN_SELCHANGE) {
+            dialog->formats.selected = static_cast<int>(SendDlgItemMessageW(window, formatID, CB_GETCURSEL, 0, 0));
+            const auto identifier = selectedFormat(*dialog);
+            if (!identifier.empty() && dialog->config.callback) {
+                dialog->formatPending = true; refresh(window, *dialog);
+                SetDlgItemTextW(window, noticeID, L"Checking installed codecs before saving...");
+                dialog->config.callback(118, -1, identifier.c_str(), "format", "audio-format", dialog->config.context);
+            }
+            return 0;
+        }
         if (LOWORD(wparam) == sourceID && HIWORD(wparam) == CBN_SELCHANGE) { select(window, *dialog); return 0; }
         if (LOWORD(wparam) == textID && HIWORD(wparam) == EN_CHANGE) {
             const bool importing = !dialog->importToken.empty();
@@ -556,7 +618,9 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             dialog->config.callback(118, dialog->generation.flags, "", "", "", dialog->config.context); break;
         case generateID:
             if (IsWindowEnabled(GetDlgItem(window, generateID))) {
-                emit(window, *dialog, 115, std::to_string(dialog->generation.flags));
+                const auto format = selectedFormat(*dialog);
+                emit(window, *dialog, 115, std::to_string(dialog->generation.flags) +
+                    (format.empty() ? "" : "|" + format));
             }
             break;
         case playResultID:
@@ -649,13 +713,48 @@ int32_t jsti_window_set_voice_generation_options(int32_t flags) {
 }
 
 int32_t jsti_window_set_voice_generated_result(const char *resultID, int32_t working, const char *message) {
+    return jsti_window_set_voice_generated_result_with_format(resultID, working, message, "wav");
+}
+int32_t jsti_window_set_voice_generated_result_with_format(
+    const char *resultID, int32_t working, const char *message, const char *format) {
     std::wstring value;
-    if (!resultID || std::strlen(resultID) > 64 || (working != 0 && working != 1) ||
+    if (!resultID || std::strlen(resultID) > 64 || !format || std::strlen(format) > 12 ||
+        !*format || std::strspn(format, "abcdefghijklmnopqrstuvwxyz0123456789") != std::strlen(format) ||
+        (working != 0 && working != 1) ||
         !jsti::wide(message ? message : "", value)) return -1;
     std::lock_guard<std::mutex> lock(mutex);
     generationState.resultID = resultID; generationState.working = working != 0;
     generationState.message = std::move(value);
+    generationState.format = format;
     return generationWindow && !PostMessageW(generationWindow, generationMessage, 2, 0) ? -1 : 0;
+}
+int32_t jsti_window_set_voice_audio_formats(const char *rows, const char *selected, const char *status) {
+    if (!rows || !selected || std::strlen(rows) > 8192 || std::strlen(selected) > 256) return -1;
+    FormatState next;
+    if (!jsti::wide(status ? status : "", next.status)) return -1;
+    const std::string values(rows);
+    size_t offset = 0;
+    while (offset < values.size()) {
+        const size_t end = values.find('\n', offset);
+        const auto row = values.substr(offset, end == std::string::npos ? end : end - offset);
+        const auto tab = row.find('\t');
+        if (tab == std::string::npos || tab == 0 || tab > 12 || next.labels.size() >= 64) return -1;
+        std::string identifier = row.substr(0, tab);
+        if (identifier.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789") != std::string::npos) return -1;
+        std::wstring label;
+        if (!jsti::wide(row.substr(tab + 1).c_str(), label)) return -1;
+        if (identifier == selected) next.selected = static_cast<int>(next.labels.size());
+        next.identifiers.push_back(identifier); next.labels.push_back(std::move(label));
+        if (end == std::string::npos) break;
+        offset = end + 1;
+    }
+    if (next.labels.empty()) return -1;
+    if (next.selected < 0) {
+        next.selected = static_cast<int>(next.labels.size());
+        next.labels.push_back(L"Unavailable stored format"); next.identifiers.push_back("");
+    }
+    std::lock_guard<std::mutex> lock(mutex); formatState = std::move(next);
+    return generationWindow && !PostMessageW(generationWindow, formatMessage, 0, 0) ? -1 : 0;
 }
 
 void jsti_show_voice_sources(HWND owner, const char *record, const char *history) {
@@ -778,13 +877,57 @@ bool markupSelfTest(HWND window, Dialog &source) {
     return passed;
 }
 }
+namespace {
+bool formatSelfTest(HWND window, Dialog &dialog) {
+    struct Received { std::string request, format, generated; int action = 0; } received;
+    const auto callback = dialog.config.callback;
+    void *context = dialog.config.context;
+    dialog.config.callback = [](int32_t action, int32_t source, const char *text,
+                                const char *, const char *path, void *value) {
+        auto &result = *static_cast<Received *>(value);
+        if (action == 115) result.generated = path;
+        if (action == 118 && source == -1) {
+            result.action = action; result.format = text; result.request = path;
+        }
+    };
+    dialog.config.context = &received;
+    const char *rows = "mp3\tMP3\nm4a\tAAC (M4A)\nwav\tWAV";
+    bool passed = jsti_window_set_voice_audio_formats(rows, "wav", "") == 0;
+    SendMessageW(window, formatMessage, 0, 0);
+    passed = SendDlgItemMessageW(window, formatID, CB_GETCOUNT, 0, 0) == 3 &&
+        SendDlgItemMessageW(window, formatID, CB_GETCURSEL, 0, 0) == 2 && passed;
+    SendMessageW(window, WM_COMMAND, MAKEWPARAM(generateID, BN_CLICKED), 0);
+    passed = received.generated == "2|wav" && passed;
+    SendDlgItemMessageW(window, formatID, CB_SETCURSEL, 0, 0);
+    SendMessageW(window, WM_COMMAND, MAKEWPARAM(formatID, CBN_SELCHANGE), 0);
+    passed = received.action == 118 && received.format == "mp3" && received.request == "audio-format" &&
+        !IsWindowEnabled(GetDlgItem(window, generateID)) && passed;
+    passed = jsti_window_set_voice_audio_formats(rows, "mp3", "Synthetic codec available.") == 0 && passed;
+    SendMessageW(window, formatMessage, 0, 0);
+    SendMessageW(window, WM_COMMAND, MAKEWPARAM(generateID, BN_CLICKED), 0);
+    passed = received.generated == "2|mp3" && passed;
+    passed = jsti_window_set_voice_generated_result_with_format("synthetic-m4a", 0, "", "m4a") == 0 && passed;
+    SendMessageW(window, generationMessage, 2, 0);
+    passed = dialog.generation.format == "m4a" && selectedFormat(dialog) == "mp3" &&
+        IsWindowEnabled(GetDlgItem(window, exportResultID)) && passed;
+    passed = jsti_window_set_voice_audio_formats(rows, "future", "Synthetic unsupported format.") == 0 && passed;
+    SendMessageW(window, formatMessage, 0, 0);
+    passed = SendDlgItemMessageW(window, formatID, CB_GETCOUNT, 0, 0) == 4 &&
+        !IsWindowEnabled(GetDlgItem(window, generateID)) && !IsWindowEnabled(GetDlgItem(window, exportID)) &&
+        IsWindowEnabled(GetDlgItem(window, readID)) && IsWindowEnabled(GetDlgItem(window, exportResultID)) && passed;
+    dialog.config.callback = callback; dialog.config.context = context;
+    return passed;
+}
+}
 bool jsti_voice_sources_self_test(HWND owner, std::string &error) {
     struct Received {
         int calls = 0, source = -1, generated = 0, flags = -1;
         std::string text, record, generateFlags, playedResult;
     } received;
     GenerationState originalGeneration;
-    { std::lock_guard<std::mutex> lock(mutex); originalGeneration = generationState; }
+    FormatState originalFormats;
+    { std::lock_guard<std::mutex> lock(mutex); originalGeneration = generationState;
+      originalFormats = std::move(formatState); formatState = {}; }
     Dialog dialog;
     { std::lock_guard<std::mutex> lock(mutex); dialog.config = configuration; }
     dialog.config.callback = [](int32_t action, int32_t source, const char *value,
@@ -798,7 +941,10 @@ bool jsti_voice_sources_self_test(HWND owner, std::string &error) {
     dialog.config.context = &received;
     dialog.record = "synthetic-record"; dialog.history = L"Synthetic History snapshot";
     HWND window = makeDialog(owner, dialog);
-    if (!window) { error = "Voice sources fixture could not open."; return false; }
+    if (!window) {
+        std::lock_guard<std::mutex> lock(mutex); formatState = std::move(originalFormats);
+        error = "Voice sources fixture could not open."; return false;
+    }
     const bool history = text(window) == dialog.history && IsWindowEnabled(GetDlgItem(window, readID));
     SendMessageW(window, WM_COMMAND, MAKEWPARAM(readID, BN_CLICKED), 0);
     const bool historySnapshot = received.calls == 1 && received.source == 0 &&
@@ -877,6 +1023,7 @@ bool jsti_voice_sources_self_test(HWND owner, std::string &error) {
         IsWindowEnabled(GetDlgItem(window, exportResultID));
     const bool markup = markupSelfTest(window, dialog) &&
         received.calls == 4 && received.generated == 1 && received.flags == 2;
+    const bool formats = formatSelfTest(window, dialog);
     RECT minimum{0, 0, scale(window, 620), scale(window, 540)};
     AdjustWindowRectExForDpi(&minimum, WS_OVERLAPPEDWINDOW, FALSE, WS_EX_CONTROLPARENT, GetDpiForWindow(window));
     SetWindowPos(window, nullptr, 0, 0, minimum.right - minimum.left, minimum.bottom - minimum.top,
@@ -890,10 +1037,11 @@ bool jsti_voice_sources_self_test(HWND owner, std::string &error) {
             bounds.right <= client.right && bounds.bottom <= client.bottom;
     }
     DestroyWindow(window);
-    { std::lock_guard<std::mutex> lock(mutex); generationState = std::move(originalGeneration); }
+    { std::lock_guard<std::mutex> lock(mutex); generationState = std::move(originalGeneration);
+      formatState = std::move(originalFormats); }
     const bool passed = history && typed && unavailable && historySnapshot && typedSnapshot &&
         clipboardSnapshot && fileSnapshot && staleImport && failedImport && editedImport &&
-        generatedSnapshot && busyResult && retainedResult && boundedControls && markup;
+        generatedSnapshot && busyResult && retainedResult && boundedControls && markup && formats;
     if (!passed) {
         error = "Voice sources fixture failed: history=" + std::to_string(history) +
             ", typed=" + std::to_string(typed) + ", unloadedClipboard=" + std::to_string(unavailable) +
@@ -904,7 +1052,8 @@ bool jsti_voice_sources_self_test(HWND owner, std::string &error) {
             ", failedImport=" + std::to_string(failedImport) + ", editedImport=" + std::to_string(editedImport) +
             ", generatedSnapshot=" + std::to_string(generatedSnapshot) + ", busyResult=" + std::to_string(busyResult) +
             ", retainedResult=" + std::to_string(retainedResult) +
-            ", boundedControls=" + std::to_string(boundedControls) + ", markup=" + std::to_string(markup) + ".";
+            ", boundedControls=" + std::to_string(boundedControls) + ", markup=" + std::to_string(markup) +
+            ", formats=" + std::to_string(formats) + ".";
     }
     return passed && captured && jsti_voice_controls_self_test(owner, error) &&
         jsti_voice_usage_self_test(owner, error) && jsti_voice_discovery_self_test(owner, error);

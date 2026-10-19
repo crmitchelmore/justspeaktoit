@@ -6,10 +6,10 @@ extension DesktopRecordingStore {
     /// The actor serializes publication with History's audio-only housekeeping.
     public func archiveVoiceAudio(_ audio: VoiceGeneratedAudio, identifier: UUID = UUID()) throws -> URL {
         try Task.checkCancellation()
-        let destination = directory.appendingPathComponent(identifier.uuidString + ".wav")
+        let destination = directory.appendingPathComponent(identifier.uuidString + "." + audio.format.fileExtension)
         let staging = directory.appendingPathComponent(".voice-archive-\(UUID().uuidString).partial")
         do {
-            try audio.wav.write(to: staging, options: .withoutOverwriting)
+            try audio.data.write(to: staging, options: .withoutOverwriting)
             try Task.checkCancellation()
             try DesktopFilePublication.commit(staging: staging, destination: destination)
         } catch let committed as DesktopFilePublicationCleanupFailure {

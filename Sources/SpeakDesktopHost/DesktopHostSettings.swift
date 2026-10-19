@@ -189,7 +189,8 @@ extension DesktopHostController {
         voiceGenerationTask?.cancel()
         Platform.voiceGenerated(.init(
             resultID: generatedVoice?.id.uuidString ?? "", working: false,
-            message: "Stopped. Completed generated audio remains available."
+            message: "Stopped. Completed generated audio remains available.",
+            format: generatedVoice?.audio.format ?? .wav
         ))
         voiceOutputRecordID = nil
         playbackRequests.end()

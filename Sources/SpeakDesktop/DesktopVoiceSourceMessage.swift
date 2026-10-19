@@ -6,6 +6,7 @@ public enum DesktopVoiceSourceMessage: Equatable, Sendable {
     case event(DesktopHistoryEvent)
     case preferences(VoiceGenerationOptions)
     case synthesisPreferences(VoiceSynthesisOptions, requestID: String)
+    case audioFormat(String)
     case usageReport(text: String, requestID: String)
     case usageTracking(Bool, requestID: String)
     case discoveryOpen(String), discoveryRefresh(String), discoveryClose(String)
@@ -47,6 +48,9 @@ public enum DesktopVoiceSourceMessage: Equatable, Sendable {
             return try discoveryMessage(source: source, text: text, record: record, path: path)
         }
         switch path {
+        case "audio-format":
+            guard source == -1, VoiceAudioFormat(rawValue: text) != nil else { throw Failure.invalidPreferences }
+            return .audioFormat(text)
         case "usage-report":
             guard source == -1, text.unicodeScalars.count <= VoiceOutputSourceSnapshot.maximumCharacters else {
                 throw Failure.invalidPreferences
@@ -117,8 +121,15 @@ public enum DesktopVoiceSourceMessage: Equatable, Sendable {
         case 110: return .voiceRead(snapshot)
         case 111: return .voiceExport(snapshot, path: path)
         case 115:
-            guard let flags = Int32(path) else { throw Failure.invalidPreferences }
-            return .voiceGenerate(snapshot, options: try options(flags))
+            let fields = path.split(separator: "|", omittingEmptySubsequences: false)
+            guard (1...2).contains(fields.count), let flags = Int32(fields[0]) else {
+                throw Failure.invalidPreferences
+            }
+            let legacy = try options(flags)
+            if fields.count == 1 { return .voiceGenerate(snapshot, options: legacy) }
+            guard let format = VoiceAudioFormat(rawValue: String(fields[1])) else { throw Failure.invalidPreferences }
+            return .voiceGenerate(snapshot, options: .init(
+                autoPlay: legacy.autoPlay, saveToRecordings: legacy.saveToRecordings, format: format))
         default: throw Failure.invalidAction
         }
     }

@@ -21,6 +21,7 @@ extension DesktopHostController {
         let projected = try Platform.exportVoiceConfiguration(settings.voiceOutput, over: configuration)
         var values = configuration.values
         for key in SonioxVoicePreference.keys { values[key] = projected.values[key] }
+        values[VoiceAudioFormat.preferenceKey] = projected.values[VoiceAudioFormat.preferenceKey]
         let qualityKey = VoiceSynthesisPreference.quality.key.rawValue
         values[qualityKey] = projected.values[qualityKey]
         if values[qualityKey] == nil, let voice = settings.voiceOutput as? DesktopVoiceOutputSettings {
@@ -247,9 +248,10 @@ extension DesktopHostController {
     }
 
     private func reconcileVoiceQualityChange(_ previous: Platform.VoiceOutputSettings?) {
-        let oldQuality = (previous as? DesktopVoiceOutputSettings)?.quality
-        let newQuality = (settings.voiceOutput as? DesktopVoiceOutputSettings)?.quality
-        if oldQuality != newQuality { voiceCredentialEpoch = UUID() }
+        let oldVoice = previous as? DesktopVoiceOutputSettings
+        let newVoice = settings.voiceOutput as? DesktopVoiceOutputSettings
+        if oldVoice != newVoice { voiceSettingsRevision &+= 1 }
+        if oldVoice?.quality != newVoice?.quality { voiceCredentialEpoch = UUID() }
     }
 
     private func disarmHandsFreeForConfiguration() async -> String {

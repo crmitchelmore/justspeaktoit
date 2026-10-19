@@ -1,4 +1,4 @@
-# Desktop Voice Output sources and WAV export
+# Desktop Voice Output sources and audio export
 
 Windows and Linux remain developer previews, not macOS-parity releases.
 
@@ -43,6 +43,79 @@ The current MAI-Voice-2.1 and Flash speakers come directly from the existing
 `AzureMAIVoiceCatalog`, including their locale/model identifiers. MAI uses the
 same regional Azure request builder, saved `key:region` credential and native
 WAV decoding/playback, not a second provider client or credential store.
+
+### Captured file formats (source-only successor)
+
+`SpeakCore.VoiceAudioFormat` owns the growing MP3 / AAC (M4A) / WAV identifiers,
+labels, extensions and defaults; Mac's `AudioFormat` is a narrow alias. Mac keeps
+its MP3 default. Absent native desktop preferences remain legacy WAV without
+writing a new value. The sole Voice settings model owns `ttsOutputFormat`;
+restart and configuration transfer preserve unknown/imported values verbatim.
+Unknown values are unavailable, not silently migrated or converted to WAV.
+The advanced editor projects that same stored value instead of displaying an
+unrelated WAV default. Direct saves and successful configuration Apply/import
+advance one controller-owned Voice revision, so changed-then-restored settings
+cannot admit a stale codec-discovery result.
+
+The native **File format** picker checks installed encoder/container/decoder
+capability at the current captured mono rate before saving. Generate and fresh
+**Export text...** repeat that check before dictionary, credential or provider
+access; imported preferences are not execution evidence. Generate captures the
+format with the immutable source, voice, quality and generation options. Fresh
+export captures the chosen extension; it does not mutate the saved preference.
+**Read aloud** remains the established provider/native PCM path, independent of
+the file preference, and does not introduce an encode/decode step into live audio.
+
+WAV retains the existing canonical PCM16 bytes without conversion. Compressed
+generation synthesizes once through the existing provider WAV contract, then
+encodes and fully decodes the actual resulting container **in process**.
+The retained result owns both exact encoded export/archive bytes and the
+native-decoded mono WAV used for playback. Retained Play/Export does not reread
+the dictionary, settings, key, provider or conversion codec. Its extension must match that
+retained format; renaming it to another container is refused. Original source,
+History identity, model/options and usage ownership are not rewritten.
+
+Windows dynamically loads the optional Media Foundation modules already used
+by the native decoder. Installed synchronous encoder media types and an
+instantiable decoder are queried, and the bounded in-memory container writer
+is configured at the exact source rate before admission. Linux reuses the
+existing GStreamer app dependency: MP3 needs `lamemp3enc`, `mpegaudioparse` and a
+compatible decoder; M4A needs an installed `fdkaacenc`, `voaacenc` or `avenc_aac`,
+`aacparse`, `mp4mux`, `qtdemux` and a compatible AAC decoder. Shared appsrc,
+appsink, typefind, decodebin and audioconvert elements must also be installed.
+AAC is muxed into real fragmented MP4, not ADTS renamed `.m4a`.
+Capability checks inspect/create the installed route and its caps; only later
+native round-trip fixtures can qualify actual container/device behavior.
+No plugins, packages, remote calls, subprocesses, IPC or disk polling are added.
+
+**Open rate/platform gaps:** catalogue membership is not executable support.
+The Microsoft AAC encoder documents only 44.1/48 kHz, so native 16/24 kHz sources
+normally cannot use that M4A route. MP3 likewise requires an enumerated exact-rate
+mono type. Missing Linux plugins or unsupported exact-rate caps refuse with a
+reason before key/provider work. No resampler or quality override forces success;
+these routes remain explicit parity gaps. The inspected Mac Azure path itself
+maps M4A preference to MP3 output; this desktop successor instead requires a real
+AAC/M4A container or refuses. It does not change incumbent Mac provider behavior.
+
+Encoded and decoded bytes have separate 64 MiB-derived bounds. Each native pass
+checks cancellation and a 120-second budget between synchronous codec calls;
+an individual system call is not forcibly interruptible. Its worker remains
+owned and awaited through native teardown and bounded Host shutdown reporting.
+Format-save settings callbacks enqueue admission only: one cancellable,
+active-operation-counted discovery task occupies its slot until teardown, so
+the settings queue can drain before close. Stop/close and later settings fence
+a suspended result; another discovery cannot pile up behind a stalled worker.
+Generation and fresh compressed export also share one conversion admission
+until their native worker returns. Stop does not release that slot early;
+replacement compressed jobs refuse before another codec/key/provider call.
+Export stages a complete sibling then performs one native atomic replacement;
+failure/cancellation before that commit preserves an existing destination and
+cleans staging. The protected app data root remains refused.
+
+This incremental implementation and all new portable, Host, native-container
+and native-control regression sources are **NOT_RUN / NOT_QUALIFIED**. No parser,
+compiler, linter, test, provider, native UI/device or installed-app execution is
+admitted. Source packaging/authentication is not runtime or full-parity evidence.
 
 ### Pronunciation replacements for captured text sources
 
@@ -304,8 +377,9 @@ The native SSML Helper interaction is described below.
 This successor, its focused regression sources and native fixture extensions
 are **uncompiled and unexecuted**. Earlier receipts do not qualify it.
 
-**Remaining scope gaps:** desktop export is WAV-only, without Mac MP3/M4A
-format controls or additional decoders. Other canonical provider models remain
+**Remaining scope gaps:** MP3/M4A use the source-only, exact-rate native format
+routes above; unavailable codecs/rates and runtime qualification remain open.
+Other canonical provider models remain
 unavailable unless their desktop engine explicitly implements them (for example,
 the current Cartesia default-model projection). Gemini models excluded from the
 canonical catalogue are not advertised. Separate style/instruction controls are
@@ -378,7 +452,9 @@ audio. Existing native playback, retained replay/export and publication helpers
 are unchanged. Actual requests and validated PCM feed local usage with the
 canonical USD0.0392/thousand-character **Startup-plan estimate**, not a billed
 charge or a guarantee of the user's plan. Cartesia account discovery, explicit
-language, non-WAV format selection and physical/service acceptance remain gaps.
+language and physical/service acceptance remain gaps. Non-WAV files use the
+unqualified exact-rate native conversion route described above, not a different
+Cartesia response format.
 
 xAI's documented Eve and Ara presets come from `XAITTSCatalog`. Read, Generate
 and text export use the shared `/v1/tts` request contract with automatic language,
@@ -521,7 +597,7 @@ run off the UI/actor, remain counted until their worker ends, and obey bounded
 shutdown. A stalled filesystem cannot admit an unbounded set of further reads.
 
 **Read aloud** explicitly speaks the snapshot through the existing native
-player, regardless of the Generate auto-play preference. **Export text WAV**
+player, regardless of the Generate auto-play preference. **Export text...**
 asks for a local destination before synthesis and does not play the audio.
 Both use the selected executable voice and its saved provider credential and
 send text to that provider. Azure uses the existing Azure Speech credential
@@ -529,17 +605,17 @@ send text to that provider. Azure uses the existing Azure Speech credential
 settings, not a second Voice credential store. Text export requests speech again.
 
 **Generate** captures the text, voice, synthesis controls and both generation preferences, produces
-one complete validated WAV and retains it independently of later editor or
+one complete validated audio result in the captured format and retains it independently of later editor or
 preference changes. **Auto-play generated audio** defaults on; with it off,
 generation completes without speaking and **Play result** is still available.
-**Export result** copies the retained WAV to a user-chosen location. Replay and
+**Export result** copies the exact retained container to a user-chosen location. Replay and
 result export never send a new synthesis request or require a fresh credential.
 Starting another voice job supersedes active work; Stop preserves an already
 completed result. Only one counted generated-audio operation is admitted, even
 if a cancelled provider or filesystem is still closing.
 
 **Save audio to recordings** defaults off. When enabled for Generate, the store
-actor archives an independent flat `UUID.wav` in the actual managed History
+actor archives an independent flat `UUID.<captured extension>` in the actual managed History
 audio directory. It does not create a transcript, change metadata or promote
 the audio into History on restart. Publication is atomic and exclusive, with
 temporary sibling staging removed before returning. Existing destinations
@@ -599,7 +675,8 @@ Long text uses the canonical segmenter. Export validates each provider response,
 joins decoded mono PCM16 at the captured actual rate (16 kHz for Speechmatics;
 quality-selectable 16/24/48 kHz where supported; otherwise the existing 24 kHz),
 and writes exactly one RIFF/WAVE header, with
-a 64 MiB PCM limit. A failed segment produces no partial destination. The native
+a 64 MiB PCM limit, before any selected native container conversion.
+A failed segment or codec pass produces no partial destination. The native
 save chooser confirms replacement; only after synthesis succeeds does an atomic
 write replace the chosen file. Destinations inside the app's data folder are
 refused, protecting History and settings. Filesystem write failures are reported.
@@ -844,8 +921,8 @@ models now execute Read, Generate and text export through that same bounded
 Azure engine, with retained replay/export independent of later settings.
 The documented xAI Eve/Ara presets now execute the REST/WAV journey with
 canonical speed and true request accounting, not account discovery or progressive delivery.
-System and wider providers, non-WAV export formats and broader
-Voice workspace parity remain gaps. Advanced configuration transfer is a
+System and wider providers, qualification of the new exact-rate non-WAV export
+routes and broader Voice workspace parity remain gaps. Advanced configuration transfer is a
 separately coordinated settings integration; this PR does not create another
 configuration authority.
 

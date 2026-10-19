@@ -3,6 +3,8 @@ import SpeakCore
 extension DesktopVoiceOutputSettings {
     package func configurationProjection(over values: [String: AnyCodable]) -> [String: AnyCodable] {
         var projection = values
+        projection[VoiceAudioFormat.preferenceKey] = format.map { AnyCodable(.string($0)) }
+            ?? projection[VoiceAudioFormat.preferenceKey]
         projection[VoiceSynthesisPreference.quality.key.rawValue] =
             quality.map { AnyCodable(.string($0)) } ?? projection[VoiceSynthesisPreference.quality.key.rawValue]
         projection[VoiceFavoritePreference.key] = favoriteVoices.map(VoiceFavoritePreference.encoded)
@@ -33,6 +35,7 @@ extension DesktopVoiceOutputSettings {
         let favorites = try VoiceFavoritePreference.value(in: values)
         let region = try SonioxVoicePreference.string(SonioxVoicePreference.regionKey, in: values)
         let language = try SonioxVoicePreference.string(SonioxVoicePreference.languageKey, in: values)
+        let format = try VoiceAudioFormat.preference(in: values)
         if let play { autoPlay = play }
         if let save { saveToRecordings = save }
         if let speed = synthesis.speed { self.speed = speed }
@@ -42,6 +45,7 @@ extension DesktopVoiceOutputSettings {
         if let region { sonioxRegion = region }
         if let language { self.language = language }
         if let quality = synthesis.quality { self.quality = quality }
+        if let format { self.format = format }
     }
 
     package func validatedSynthesisOptions() throws -> VoiceSynthesisOptions {

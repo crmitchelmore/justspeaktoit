@@ -20,32 +20,69 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             try await DesktopVoicePlaybackFile.writeExport($0, to: $1)
         }
     ) {
+        startVoiceExport(snapshot, path: path, retained: retainedAudio.map { .init(data: $0, format: .wav) },
+                         synthesize: synthesize, publish: publish)
+    }
+
+    package func exportRetainedVoiceAudio(
+        _ snapshot: VoiceOutputSourceSnapshot, audio: VoiceGeneratedAudio, path: String
+    ) {
+        startVoiceExport(snapshot, path: path, retained: .init(data: audio.data, format: audio.format),
+            synthesize: { _, _, _ in throw VoiceAudioFormatError.invalidContainer },
+            publish: { try await DesktopVoicePlaybackFile.writeExport($0, to: $1) })
+    }
+
+    // Retained bypass and fresh synthesis share one owned publication boundary.
+    // swiftlint:disable:next function_body_length
+    private func startVoiceExport(
+        _ snapshot: VoiceOutputSourceSnapshot, path: String, retained: VoiceExportPayload?,
+        synthesize: @escaping @Sendable (
+            VoiceOutputSourceSnapshot, DesktopSpeechSelection, @Sendable () async throws -> String
+        ) async throws -> Data,
+        publish: @escaping @Sendable (Data, URL) async throws -> Void
+    ) {
         guard !closed, canUseHistory else { return }
         let destination: URL
+        let format: VoiceAudioFormat
         do {
             destination = try voiceExportDestination(path)
+            format = try VoiceAudioFormat.storedValue(destination.pathExtension.lowercased())
+            guard retained == nil || retained?.format == format else {
+                throw DesktopHostError(
+                    message: "Choose .\(retained?.format.fileExtension ?? "") for this retained result.")
+            }
         } catch { update(error.localizedDescription); return }
         let selection: DesktopSpeechSelection?
-        do { selection = retainedAudio == nil ? try currentVoiceSelection() : nil } catch {
+        let conversionID: UUID?
+        do {
+            selection = retained == nil ? try currentVoiceSelection() : nil
+            conversionID = retained == nil ? try admitVoiceAudioConversion(format) : nil
+        } catch {
             update(error.localizedDescription); return
         }
         stopReadAloud()
         playback.stop(announcing: false)
         let ticket = playbackRequests.begin()
         let effects = effects
-        update(selection.map { "Synthesizing WAV with \($0.voice.name). Stop cancels export…" } ??
+        update(selection.map { "Synthesizing \(format.displayName) with \($0.voice.name). Stop cancels export…" } ??
             "Exporting retained voice audio. No synthesis request is sent. Stop cancels export…")
         voiceOutputRecordID = snapshot.recordID
-        let usage = retainedAudio == nil
+        let usage = retained == nil
             ? beginVoiceUsage(operation: .export, source: snapshot.source, recordID: snapshot.recordID) : nil
         let accountWork = beginAccountVoiceWork(selection, ticket: ticket)
         activeOperations += 1
         readAloudState.exportTask = Task {
-            defer { self.finishAccountVoiceOperation(accountWork, usage: usage) }
+            defer {
+                self.finishVoiceAudioConversion(conversionID)
+                self.finishAccountVoiceOperation(accountWork, usage: usage)
+            }
             do {
-                let wav: Data
-                if let retainedAudio { wav = retainedAudio } else if let selection {
-                    wav = try await VoiceSynthesisUsage.$capture.withValue(usage?.capture) {
+                let bytes: Data
+                if let retained { bytes = retained.data } else if let selection {
+                    try await Platform.requireVoiceAudioFormat(format, sampleRate: selection.sampleRate)
+                    try Task.checkCancellation()
+                    guard !self.closed, self.playbackRequests.isCurrent(ticket) else { return }
+                    let wav = try await VoiceSynthesisUsage.$capture.withValue(usage?.capture) {
                         let prepared = try await self.prepareVoiceSynthesisSource(
                             snapshot, selection: selection, ticket: ticket)
                         return try await synthesize(prepared, selection) {
@@ -53,6 +90,14 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                                 effects: effects, name: selection.voice.apiKeyIdentifier)
                         }
                     }
+                    try Task.checkCancellation()
+                    guard !self.closed, self.playbackRequests.isCurrent(ticket) else { return }
+                    let canonical = try VoiceGeneratedAudio(validating: wav, sampleRate: selection.sampleRate)
+                    let audio = try await Platform.encodeVoiceAudio(canonical, format: format)
+                    guard audio.format == format, audio.sampleRate == selection.sampleRate else {
+                        throw VoiceAudioFormatError.invalidContainer
+                    }
+                    bytes = audio.data
                 } else {
                     throw VoiceSynthesisConfigurationError.unsupportedVoice
                 }
@@ -61,9 +106,10 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 guard !self.closed, self.playbackRequests.isCurrent(ticket) else { return }
                 // No partial destination is ever published. A failed synthesis or
                 // cancellation before this commit leaves any existing file intact.
-                try await publish(wav, destination)
-                self.finishVoiceExport(ticket, status: retainedAudio == nil ? "Voice audio exported as WAV." :
-                    "Retained voice audio exported as WAV; no synthesis request was sent.")
+                try await publish(bytes, destination)
+                self.finishVoiceExport(ticket, status: retained == nil
+                    ? "Voice audio exported as \(format.displayName)."
+                    : "Retained voice audio exported as \(format.displayName); no synthesis request was sent.")
             } catch is CancellationError {
                 self.finishVoiceExport(ticket, status: "Voice export cancelled.")
             } catch {
@@ -74,9 +120,11 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
 
     package func voiceExportDestination(_ path: String) throws -> URL {
         let destination = URL(fileURLWithPath: path)
-        guard !path.isEmpty, !path.utf8.contains(0), destination.pathExtension.lowercased() == "wav" else {
-            throw DesktopHostError(message: "Choose a WAV file for voice export.")
+        guard !path.isEmpty, !path.utf8.contains(0),
+              VoiceAudioFormat(rawValue: destination.pathExtension.lowercased()) != nil else {
+            throw DesktopHostError(message: "Choose an MP3, M4A or WAV file for voice export.")
         }
+
         let resolved = destination.resolvingSymlinksInPath().standardizedFileURL.path
         let root = directory.resolvingSymlinksInPath().standardizedFileURL.path
         #if os(Windows)
@@ -100,4 +148,9 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         guard !busy, recording == nil else { return }
         update(status)
     }
+}
+
+private struct VoiceExportPayload: Sendable {
+    let data: Data
+    let format: VoiceAudioFormat
 }

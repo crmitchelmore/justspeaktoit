@@ -19,11 +19,15 @@ static MarkupConfiguration markup_configuration;
 static guint generation_flags;
 static gboolean generation_working;
 static gchar *generated_result;
+static gchar *generated_format;
+typedef struct { gchar **labels, **identifiers; guint selected; gchar *status; } FormatState;
+static FormatState format_state;
 
 typedef struct {
     gint refs;
     GtkWindow *window;
     GtkDropDown *source;
+    GtkDropDown *format;
     GtkTextView *editor;
     GtkLabel *notice;
     GtkButton *read, *export_button, *load;
@@ -31,7 +35,8 @@ typedef struct {
     GtkCheckButton *auto_play, *save;
     GtkWidget *helper, *markup_apply;
     GtkWindow *markup_window;
-    gchar *result_id;
+    gchar *result_id, *result_format;
+    gboolean format_pending;
     guint generation_flags;
     gboolean working, applying_options;
     gchar *record, *history, *typed, *clipboard, *file, *import_token;
@@ -49,6 +54,7 @@ static void release(gpointer data) {
     g_free(dialog->record); g_free(dialog->history); g_free(dialog->typed); g_free(dialog->clipboard);
     g_free(dialog->file); g_free(dialog->import_token);
     g_free(dialog->result_id);
+    g_free(dialog->result_format);
     g_clear_object(&dialog->clipboard_cancel);
     g_free(dialog);
 }
@@ -66,8 +72,11 @@ static void refresh(Dialog *dialog) {
     gboolean ready = !dialog->working && dialog->import_token == NULL && g_strstrip(value)[0] != '\0' &&
         (dialog->selected != 0 || dialog->record[0] != '\0');
     gtk_widget_set_sensitive(GTK_WIDGET(dialog->read), ready);
-    gtk_widget_set_sensitive(GTK_WIDGET(dialog->export_button), ready);
-    gtk_widget_set_sensitive(GTK_WIDGET(dialog->generate), ready);
+    guint format_index = dialog->format != NULL ? gtk_drop_down_get_selected(dialog->format) : GTK_INVALID_LIST_POSITION;
+    gboolean format_ready = !dialog->format_pending && (format_state.identifiers == NULL ||
+        (format_index < g_strv_length(format_state.identifiers) && format_state.identifiers[format_index][0] != '\0'));
+    gtk_widget_set_sensitive(GTK_WIDGET(dialog->export_button), ready && format_ready);
+    gtk_widget_set_sensitive(GTK_WIDGET(dialog->generate), ready && format_ready);
     gboolean result_ready = !dialog->working && dialog->result_id[0] != '\0';
     gtk_widget_set_sensitive(GTK_WIDGET(dialog->play_result), result_ready);
     gtk_widget_set_sensitive(GTK_WIDGET(dialog->export_result), result_ready);
@@ -279,7 +288,7 @@ static void select_source(GObject *object, GParamSpec *spec, gpointer data) {
     gtk_label_set_text(dialog->notice, dialog->selected == 0 && dialog->record[0] == '\0'
         ? "Choose a recording in History, then reopen this editor. History is captured when the editor opens."
         : "Read, Generate and Export text send this snapshot to the selected voice provider with your saved key. "
-          "Generate retains the provider's mono PCM16 WAV; Play/Export result reuse it without a provider request. "
+          "Generate retains the chosen audio container and decoded playback; Play/Export result send no new request. "
           "Voice controls show the selected route's actual capabilities. Stop cancels active voice work.");
     refresh(dialog);
 }
@@ -407,23 +416,30 @@ static void stop(GtkButton *button, gpointer data) {
     gtk_label_set_text(dialog->notice, "Stopped. The captured text is unchanged.");
     dialog->callback(112, 0, "", "", "", dialog->context);
 }
-typedef struct { Dialog *dialog; gchar *text, *record; guint source; gboolean retained; } Export;
+typedef struct { Dialog *dialog; gchar *text, *record, *format; guint source; gboolean retained; } Export;
 static void export_response(GtkNativeDialog *chooser, int response, gpointer data) {
     Export *job = data;
     if (response == GTK_RESPONSE_ACCEPT && job->dialog->window != NULL) {
         GFile *file = gtk_file_chooser_get_file(GTK_FILE_CHOOSER(chooser));
         gchar *path = file != NULL ? g_file_get_path(file) : NULL;
-        if (path != NULL) {
+        gchar *lower = path != NULL ? g_ascii_strdown(path, -1) : NULL;
+        gchar *suffix = g_strconcat(".", job->format, NULL);
+        if (path != NULL && g_str_has_suffix(lower, suffix)) {
             cancel_import(job->dialog);
             job->dialog->callback(job->retained ? 117 : 111, (gint32)job->source,
                                   job->text, job->record, path, job->dialog->context);
             gtk_label_set_text(job->dialog->notice,
                 "Export started. Check the main window status for its result. Stop cancels it.");
-        } else gtk_label_set_text(job->dialog->notice, "Choose a local WAV file for export.");
-        g_free(path); g_clear_object(&file);
+        } else gtk_label_set_text(job->dialog->notice, "Choose a local file with the selected format's extension.");
+        g_free(lower); g_free(suffix); g_free(path); g_clear_object(&file);
     }
     gtk_native_dialog_destroy(chooser); g_object_unref(chooser);
-    g_free(job->text); g_free(job->record); release(job->dialog); g_free(job);
+    g_free(job->text); g_free(job->record); g_free(job->format); release(job->dialog); g_free(job);
+}
+static const char *selected_format(Dialog *dialog) {
+    guint selected = gtk_drop_down_get_selected(dialog->format);
+    if (format_state.identifiers == NULL || selected >= g_strv_length(format_state.identifiers)) return "";
+    return format_state.identifiers[selected];
 }
 static void export_audio(GtkButton *button, gpointer data) {
     Dialog *dialog = data;
@@ -432,11 +448,19 @@ static void export_audio(GtkButton *button, gpointer data) {
     job->retained = button == dialog->export_result;
     job->source = dialog->selected == 3 ? 4 : dialog->selected;
     job->record = g_strdup(job->retained ? dialog->result_id : dialog->selected == 0 ? dialog->record : "");
+    job->format = g_strdup(job->retained ? dialog->result_format
+        : format_state.identifiers == NULL ? "wav" : selected_format(dialog));
+    if (job->format == NULL || job->format[0] == '\0') {
+        gtk_label_set_text(dialog->notice, "Choose an available file format first.");
+        g_free(job->text); g_free(job->record); g_free(job->format); release(job->dialog); g_free(job); return;
+    }
     GtkFileChooserNative *chooser = gtk_file_chooser_native_new(
         "Export voice audio", dialog->window, GTK_FILE_CHOOSER_ACTION_SAVE, "Export", "Cancel");
-    gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(chooser), "voice-output.wav");
+    gchar *filename = g_strconcat("voice-output.", job->format, NULL);
+    gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(chooser), filename); g_free(filename);
     GtkFileFilter *filter = gtk_file_filter_new();
-    gtk_file_filter_set_name(filter, "WAV audio"); gtk_file_filter_add_pattern(filter, "*.wav");
+    gchar *pattern = g_strconcat("*.", job->format, NULL);
+    gtk_file_filter_set_name(filter, job->format); gtk_file_filter_add_pattern(filter, pattern); g_free(pattern);
     gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(chooser), filter);
     g_object_unref(filter);
     g_signal_connect(chooser, "response", G_CALLBACK(export_response), job);
@@ -446,10 +470,70 @@ static void generate_audio(GtkButton *button, gpointer data) {
     (void)button;
     Dialog *dialog = data;
     gchar *snapshot = text(dialog);
-    gchar *flags = g_strdup_printf("%u", dialog->generation_flags);
+    const char *format = selected_format(dialog);
+    gchar *flags = format[0] != '\0' ? g_strdup_printf("%u|%s", dialog->generation_flags, format)
+        : g_strdup_printf("%u", dialog->generation_flags);
     dialog->callback(115, dialog->selected == 3 ? 4 : (gint32)dialog->selected,
                      snapshot, dialog->selected == 0 ? dialog->record : "", flags, dialog->context);
     g_free(snapshot); g_free(flags);
+}
+static void format_changed(GObject *object, GParamSpec *spec, gpointer data) {
+    (void)object; (void)spec;
+    Dialog *dialog = data;
+    if (dialog->applying_options) return;
+    const char *identifier = selected_format(dialog);
+    if (identifier[0] == '\0') return;
+    dialog->format_pending = TRUE; refresh(dialog);
+    gtk_label_set_text(dialog->notice, "Checking installed codecs before saving...");
+    dialog->callback(118, -1, identifier, "format", "audio-format", dialog->context);
+}
+static void show_formats(Dialog *dialog) {
+    dialog->applying_options = TRUE;
+    GtkStringList *labels = gtk_string_list_new((const char *const *)format_state.labels);
+    gtk_drop_down_set_model(dialog->format, G_LIST_MODEL(labels)); g_object_unref(labels);
+    gtk_drop_down_set_selected(dialog->format, format_state.selected);
+    dialog->applying_options = FALSE; dialog->format_pending = FALSE;
+    if (format_state.status != NULL && format_state.status[0] != '\0')
+        gtk_label_set_text(dialog->notice, format_state.status);
+    refresh(dialog);
+}
+static void clear_formats(FormatState *value) {
+    g_strfreev(value->labels); g_strfreev(value->identifiers); g_free(value->status);
+    *value = (FormatState){0};
+}
+static void free_formats(gpointer data) { clear_formats(data); g_free(data); }
+static void apply_formats(gpointer data) {
+    FormatState *value = data;
+    clear_formats(&format_state); format_state = *value; *value = (FormatState){0};
+    if (active != NULL && active->window != NULL) show_formats(active);
+}
+int32_t jsti_window_set_voice_audio_formats(const char *rows, const char *selected, const char *status) {
+    if (rows == NULL || selected == NULL || strlen(rows) > 8192 || strlen(selected) > 256 ||
+        !g_utf8_validate(rows, -1, NULL) || !g_utf8_validate(selected, -1, NULL) ||
+        !g_utf8_validate(status != NULL ? status : "", -1, NULL)) return -1;
+    gchar **lines = g_strsplit(rows, "\n", -1);
+    guint count = g_strv_length(lines);
+    if (count == 0 || count > 64) { g_strfreev(lines); return -1; }
+    FormatState *value = g_new0(FormatState, 1); value->selected = GTK_INVALID_LIST_POSITION;
+    value->labels = g_new0(gchar *, count + 2); value->identifiers = g_new0(gchar *, count + 2);
+    value->status = g_strdup(status != NULL ? status : "");
+    for (guint index = 0; index < count; ++index) {
+        gchar *tab = strchr(lines[index], '\t');
+        if (tab == NULL || tab == lines[index] || tab - lines[index] > 12) {
+            g_strfreev(lines); free_formats(value); return -1;
+        }
+        *tab = '\0';
+        if (strspn(lines[index], "abcdefghijklmnopqrstuvwxyz0123456789") != strlen(lines[index])) {
+            g_strfreev(lines); free_formats(value); return -1;
+        }
+        value->identifiers[index] = g_strdup(lines[index]); value->labels[index] = g_strdup(tab + 1);
+        if (strcmp(lines[index], selected) == 0) value->selected = index;
+    }
+    if (value->selected == GTK_INVALID_LIST_POSITION) {
+        value->selected = count; value->identifiers[count] = g_strdup("");
+        value->labels[count] = g_strdup("Unavailable stored format");
+    }
+    g_strfreev(lines); return jsti_window_post(apply_formats, value, free_formats);
 }
 static void play_result(GtkButton *button, gpointer data) {
     (void)button;
@@ -496,25 +580,34 @@ int32_t jsti_window_set_voice_generation_options(int32_t flags) {
     guint *value = g_new(guint, 1); *value = (guint)flags;
     return jsti_window_post(apply_generation_options, value, g_free);
 }
-typedef struct { gchar *result_id, *message; gboolean working; } GeneratedResult;
+typedef struct { gchar *result_id, *message, *format; gboolean working; } GeneratedResult;
 static void apply_generated_result(gpointer data) {
     GeneratedResult *result = data;
     g_free(generated_result); generated_result = g_strdup(result->result_id);
+    g_free(generated_format); generated_format = g_strdup(result->format);
     generation_working = result->working;
     if (active == NULL || active->window == NULL) return;
     g_free(active->result_id); active->result_id = g_strdup(result->result_id);
+    g_free(active->result_format); active->result_format = g_strdup(result->format);
     active->working = result->working;
     gtk_label_set_text(active->notice, result->message); refresh(active);
 }
 static void free_generated_result(gpointer data) {
     GeneratedResult *result = data;
-    g_free(result->result_id); g_free(result->message); g_free(result);
+    g_free(result->result_id); g_free(result->message); g_free(result->format); g_free(result);
 }
 int32_t jsti_window_set_voice_generated_result(const char *identifier, int32_t working, const char *message) {
+    return jsti_window_set_voice_generated_result_with_format(identifier, working, message, "wav");
+}
+int32_t jsti_window_set_voice_generated_result_with_format(
+    const char *identifier, int32_t working, const char *message, const char *format) {
     if (identifier == NULL || strlen(identifier) > 64 || (working != 0 && working != 1) ||
+        format == NULL || strlen(format) == 0 || strlen(format) > 12 ||
+        strspn(format, "abcdefghijklmnopqrstuvwxyz0123456789") != strlen(format) ||
         !g_utf8_validate(identifier, -1, NULL) || !g_utf8_validate(message != NULL ? message : "", -1, NULL)) return -1;
     GeneratedResult *result = g_new0(GeneratedResult, 1);
     result->result_id = g_strdup(identifier); result->message = g_strdup(message != NULL ? message : "");
+    result->format = g_strdup(format);
     result->working = working != 0;
     return jsti_window_post(apply_generated_result, result, free_generated_result);
 }
@@ -552,6 +645,7 @@ static Dialog *make_dialog(GtkWindow *owner, const char *record, const char *his
     dialog->history = g_strdup(history != NULL ? history : "");
     dialog->typed = g_strdup(""); dialog->clipboard = g_strdup(""); dialog->file = g_strdup("");
     dialog->result_id = g_strdup(generated_result != NULL ? generated_result : "");
+    dialog->result_format = g_strdup(generated_format != NULL ? generated_format : "wav");
     dialog->generation_flags = generation_flags; dialog->working = generation_working;
     dialog->callback = configuration.callback; dialog->context = configuration.context;
     dialog->window = GTK_WINDOW(gtk_window_new());
@@ -574,6 +668,17 @@ static Dialog *make_dialog(GtkWindow *owner, const char *record, const char *his
     dialog->load = GTK_BUTTON(gtk_button_new_with_label("Load clipboard"));
     gtk_box_append(GTK_BOX(source_row), GTK_WIDGET(dialog->load));
     gtk_box_append(GTK_BOX(box), source_row);
+    GtkWidget *formats = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    GtkWidget *format_label = gtk_label_new_with_mnemonic("_File format");
+    dialog->format = GTK_DROP_DOWN(gtk_drop_down_new(NULL, NULL));
+    gtk_label_set_mnemonic_widget(GTK_LABEL(format_label), GTK_WIDGET(dialog->format));
+    gtk_accessible_update_property(GTK_ACCESSIBLE(dialog->format),
+        GTK_ACCESSIBLE_PROPERTY_LABEL, "Voice file format", -1);
+    gtk_widget_set_size_request(GTK_WIDGET(dialog->format), -1, 44);
+    gtk_widget_set_tooltip_text(GTK_WIDGET(dialog->format),
+        "Installed encoder and decoder availability is checked before saving or sending a synthesis request.");
+    gtk_box_append(GTK_BOX(formats), format_label); gtk_box_append(GTK_BOX(formats), GTK_WIDGET(dialog->format));
+    gtk_box_append(GTK_BOX(box), formats);
     GtkWidget *text_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     GtkWidget *text_label = label("Text snapshot"); gtk_widget_set_hexpand(text_label, TRUE);
     dialog->helper = gtk_button_new_with_mnemonic("SSML _Helper...");
@@ -623,7 +728,7 @@ static Dialog *make_dialog(GtkWindow *owner, const char *record, const char *his
     gtk_box_append(GTK_BOX(box), results);
     GtkWidget *actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     dialog->read = GTK_BUTTON(gtk_button_new_with_label("Read aloud"));
-    dialog->export_button = GTK_BUTTON(gtk_button_new_with_label("Export text WAV..."));
+    dialog->export_button = GTK_BUTTON(gtk_button_new_with_label("Export text..."));
     GtkWidget *stop_button = gtk_button_new_with_label("Stop");
     GtkWidget *close_button = gtk_button_new_with_label("Close");
     gtk_box_append(GTK_BOX(actions), GTK_WIDGET(dialog->read));
@@ -631,6 +736,7 @@ static Dialog *make_dialog(GtkWindow *owner, const char *record, const char *his
     gtk_box_append(GTK_BOX(actions), stop_button); gtk_box_append(GTK_BOX(actions), close_button);
     gtk_box_append(GTK_BOX(box), actions);
     g_signal_connect(dialog->source, "notify::selected", G_CALLBACK(select_source), dialog);
+    g_signal_connect(dialog->format, "notify::selected", G_CALLBACK(format_changed), dialog);
     g_signal_connect(gtk_text_view_get_buffer(dialog->editor), "changed", G_CALLBACK(changed), dialog);
     g_signal_connect(dialog->load, "clicked", G_CALLBACK(load_clipboard), dialog);
     g_signal_connect(dialog->helper, "clicked", G_CALLBACK(show_markup), dialog);
@@ -643,7 +749,7 @@ static Dialog *make_dialog(GtkWindow *owner, const char *record, const char *his
     g_signal_connect(dialog->save, "toggled", G_CALLBACK(preferences_changed), dialog);
     g_signal_connect(stop_button, "clicked", G_CALLBACK(stop), dialog);
     g_signal_connect(close_button, "clicked", G_CALLBACK(close_dialog), dialog);
-    select_source(NULL, NULL, dialog);
+    select_source(NULL, NULL, dialog); show_formats(dialog);
     return dialog;
 }
 void jsti_show_voice_sources(GtkWindow *owner, const char *record, const char *history) {
@@ -838,9 +944,43 @@ static gboolean markup_self_test(Dialog *dialog) {
     g_free(original_text); g_free(copied);
     return passed;
 }
+static gboolean format_self_test(Dialog *dialog) {
+    const JSTIVoiceSourceCallback callback = dialog->callback;
+    void *context = dialog->context;
+    Received received = {0};
+    dialog->callback = receive_fixture; dialog->context = &received;
+    format_state = (FormatState) {
+        .labels = g_strsplit("MP3\nAAC (M4A)\nWAV", "\n", -1),
+        .identifiers = g_strsplit("mp3\nm4a\nwav", "\n", -1), .selected = 2 };
+    show_formats(dialog);
+    generate_audio(NULL, dialog);
+    gboolean passed = g_list_model_get_n_items(gtk_drop_down_get_model(dialog->format)) == 3 &&
+        g_strcmp0(received.generate_flags, "2|wav") == 0;
+    gtk_drop_down_set_selected(dialog->format, 0);
+    passed = dialog->format_pending && !gtk_widget_get_sensitive(GTK_WIDGET(dialog->generate)) && passed;
+    format_state.selected = 0; show_formats(dialog);
+    generate_audio(NULL, dialog);
+    passed = g_strcmp0(received.generate_flags, "2|mp3") == 0 && passed;
+    g_free(dialog->result_format); dialog->result_format = g_strdup("m4a");
+    passed = strcmp(selected_format(dialog), "mp3") == 0 &&
+        gtk_widget_get_sensitive(GTK_WIDGET(dialog->export_result)) && passed;
+    format_state.selected = GTK_INVALID_LIST_POSITION; show_formats(dialog);
+    passed = !gtk_widget_get_sensitive(GTK_WIDGET(dialog->generate)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(dialog->export_button)) &&
+        gtk_widget_get_sensitive(GTK_WIDGET(dialog->read)) &&
+        gtk_widget_get_sensitive(GTK_WIDGET(dialog->export_result)) && passed;
+    dialog->callback = callback; dialog->context = context;
+    g_free(received.generate_flags); g_free(received.played_result);
+    clear_formats(&format_state);
+    return passed;
+}
 int32_t jsti_voice_sources_self_test(GtkWindow *owner, char *error, size_t capacity) {
+    FormatState original_formats = format_state; format_state = (FormatState){0};
     Dialog *dialog = make_dialog(owner, "synthetic-record", "Synthetic History snapshot");
-    if (dialog == NULL) { jsti_set_error(error, capacity, "Voice sources fixture could not open."); return -1; }
+    if (dialog == NULL) {
+        format_state = original_formats;
+        jsti_set_error(error, capacity, "Voice sources fixture could not open."); return -1;
+    }
     Received received = {0};
     dialog->callback = receive_fixture; dialog->context = &received;
     gchar *snapshot = text(dialog);
@@ -899,12 +1039,14 @@ int32_t jsti_voice_sources_self_test(GtkWindow *owner, char *error, size_t capac
         gtk_widget_get_sensitive(GTK_WIDGET(dialog->export_result));
     gboolean markup = markup_self_test(dialog) &&
         received.calls == 4 && received.generated == 1 && received.flags == 2;
+    gboolean formats = format_self_test(dialog);
     gtk_window_destroy(dialog->window);
+    format_state = original_formats;
     g_free(received.text); g_free(received.record);
     g_free(received.generate_flags); g_free(received.played_result);
     gboolean passed = history && typed && unavailable && history_snapshot && typed_snapshot &&
         clipboard_snapshot && file_snapshot && stale_import && failed_import && edited_import &&
-        generated_snapshot && busy_result && retained_result && markup;
+        generated_snapshot && busy_result && retained_result && markup && formats;
     if (!passed) jsti_set_error(error, capacity, "Voice sources state/snapshot checks failed.");
     return passed && jsti_voice_controls_self_test(owner, error, capacity) == 0 &&
         jsti_voice_usage_self_test(owner, error, capacity) == 0

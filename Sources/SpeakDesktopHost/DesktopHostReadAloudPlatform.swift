@@ -26,9 +26,28 @@ where Playback: DesktopHostSpeechPlayback, VoiceOutputSettings == DesktopVoiceOu
     /// Where this window saves the Deepgram key, e.g. "choose a Deepgram
     /// model, then Save key", for the missing-key status line.
     static var deepgramKeyHint: String { get }
+    static func requireVoiceAudioFormat(_ format: VoiceAudioFormat, sampleRate: Int) async throws
+    static func encodeVoiceAudio(
+        _ audio: VoiceGeneratedAudio, format: VoiceAudioFormat
+    ) async throws -> VoiceGeneratedAudio
 }
 
 package extension DesktopHostReadAloudPlatform {
+    static func requireVoiceAudioFormat(_ format: VoiceAudioFormat, sampleRate: Int) async throws {
+        guard format == .wav else {
+            throw VoiceAudioFormatError.unavailable(
+                "This host has no native \(format.displayName) encoder. Choose WAV.")
+        }
+    }
+
+    static func encodeVoiceAudio(
+        _ audio: VoiceGeneratedAudio, format: VoiceAudioFormat
+    ) async throws -> VoiceGeneratedAudio {
+        try await requireVoiceAudioFormat(format, sampleRate: audio.sampleRate)
+        guard audio.format == .wav else { throw VoiceAudioFormatError.invalidContainer }
+        return audio
+    }
+
     static func voiceCredential(
         _ result: Result<DesktopVoiceCredentialPresentation, VoiceOutputCredentialError>, requestID: UUID) {}
     static func voiceCredentialFinished(
@@ -56,6 +75,8 @@ package extension DesktopHostReadAloudPlatform {
     /// Cancels the segment being synthesized, so no later one is admitted, and
     /// returns the record's controls to idle once nothing more will be spoken.
     static func stopReadAloud(_ state: inout ReadAloudState, playback: Playback) {
+        // A cancelled native discovery remains admitted until its worker has torn down.
+        state.formatSaveTask?.cancel()
         state.task?.cancel()
         state.task = nil
         state.exportTask?.cancel()

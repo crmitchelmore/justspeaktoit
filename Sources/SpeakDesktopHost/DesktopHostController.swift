@@ -159,6 +159,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package var voiceTextImportTask: Task<Void, Never>?
     package var voiceTextImportRequestID: String?
     package var voiceGenerationTask: Task<Void, Never>?
+    package var voiceSettingsRevision: UInt64 = 0
     package var voiceCredentialEpoch = UUID()
     package var voiceCredentialTask: Task<Void, Never>?
     package var voiceCredentialRequestID: UUID?

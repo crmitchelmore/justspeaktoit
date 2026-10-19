@@ -46,9 +46,19 @@ extension WindowsNative {
             }
         }
         return configured && configureVoiceSources(context: context) &&
+            configureVoiceAudioFormats(settings) &&
             jsti_window_set_voice_generation_options(settings.generationOptions.nativeFlags) == 0 &&
             configureVoiceLanguageTitle(settings, accountInventory: accountInventory) &&
             configureVoiceControls(settings, accountInventory: accountInventory)
+    }
+
+    static func configureVoiceAudioFormats(_ settings: WindowsVoiceOutputSettings, status: String = "") -> Bool {
+        let rows = VoiceAudioFormat.allCases.map { $0.rawValue + "\t" + $0.displayName }.joined(separator: "\n")
+        return rows.withCString { rows in
+            (settings.format ?? VoiceAudioFormat.desktopLegacyDefault.rawValue).withCString { selected in
+                status.withCString { jsti_window_set_voice_audio_formats(rows, selected, $0) == 0 }
+            }
+        }
     }
 
     static func configureVoiceControls(
@@ -164,15 +174,19 @@ extension WindowsHostPlatform {
 
     package static func voiceGenerated(_ presentation: DesktopVoiceResultPresentation) {
         let result = presentation.resultID.withCString { identifier in
-            presentation.message.withCString {
-                jsti_window_set_voice_generated_result(identifier, presentation.working ? 1 : 0, $0)
+            presentation.message.withCString { message in
+                presentation.format.rawValue.withCString {
+                    jsti_window_set_voice_generated_result_with_format(
+                        identifier, presentation.working ? 1 : 0, message, $0)
+                }
             }
         }
         if result < 0 { WindowsNative.update("The generated voice result could not be shown.") }
     }
 }
 
-// swiftlint:disable:next function_parameter_count
+// The native callback preserves one validated event order and its fixed ABI.
+// swiftlint:disable:next function_parameter_count function_body_length
 func windowsVoiceSourceEvent(
     _ action: Int32, _ source: Int32, _ text: UnsafePointer<CChar>?,
     _ record: UnsafePointer<CChar>?, _ path: UnsafePointer<CChar>?, _ context: UnsafeMutableRawPointer?
@@ -185,6 +199,16 @@ func windowsVoiceSourceEvent(
             record: record.map(String.init(cString:)) ?? "", path: path.map(String.init(cString:)) ?? ""
         )
         switch message {
+        case .audioFormat(let identifier):
+            holder.enqueueSettings {
+                await holder.controller.beginVoiceAudioFormatSave(identifier) { saved, failure in
+                    guard let saved else { return }
+                    if !WindowsNative.configureVoiceAudioFormats(saved,
+                        status: failure ?? "Voice file format saved. Generated results keep their captured format.") {
+                        WindowsNative.update("The saved Voice file format could not be shown.")
+                    }
+                }
+            }
         case .discoveryOpen, .discoveryOpenModern, .discoveryRefresh,
              .discoveryClose, .discoveryChoose, .discoveryProvider:
             holder.enqueueSettings { await holder.controller.handleVoiceDiscovery(message) }

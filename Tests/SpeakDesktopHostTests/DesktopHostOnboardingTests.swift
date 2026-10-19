@@ -54,7 +54,8 @@ final class DesktopHostOnboardingTests: XCTestCase {
     }
 
     func testAnUpgradedInstallIsNotShownTheFirstRunGuide() async throws {
-        try Data("{}".utf8).write(to: directory.appendingPathComponent("settings.json"))
+        let saved = try JSONEncoder().encode(DesktopHostController<FakePlatform>.Settings())
+        try saved.write(to: directory.appendingPathComponent("settings.json"))
         let controller = try start()
         let needed = await controller.needsOnboarding()
         XCTAssertFalse(needed)

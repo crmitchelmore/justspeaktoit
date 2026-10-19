@@ -45,6 +45,7 @@ extension DesktopHostController {
     }
 
     func notifyRecordingFeedback(_ id: UUID, handsFree: Bool, captureReady: Bool = false) async {
+        if captureReady { endShortcutPressMicrophone() }
         // Sound activation must not hear our own automatic cues.
         if handsFree { await recordingFeedback?.cancelRecording(id) } else if captureReady {
             await recordingFeedback?.captureReady(id)

@@ -212,6 +212,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var connectionWarmTask: (id: UUID, task: Task<Void, Never>)?
     var connectionWarmPending = false
     var connectionWarmCredentialWork = 0
+    var capturePreparation: (deviceID: String, value: any DesktopCapturePreparation)?
+    var shortcutPressMicrophone: (id: UUID, capture: any DesktopRecordingCapture)?
     package var recording: Recording?
     var recordingCapturePolicy: (recordID: UUID, value: DesktopHostCapturePolicy)?
     var ownedCaptureStartup: DesktopHostOwnedStartupHandle?
@@ -241,7 +243,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package var activeOperations = 0 {
         didSet {
             if activeOperations > 0 { pauseConnectionPreWarming() }
-            else { reconcileConnectionPreWarming() }
+            else { reconcileConnectionPreWarming(); reconcileCapturePreparation() }
         }
     }
     var operationWaiters: [CheckedContinuation<Void, Never>] = []

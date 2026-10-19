@@ -322,13 +322,19 @@ extension DesktopHostController {
     package func applySyncedHistory(_ changes: [DesktopHistorySyncChange]) async {
         guard !closed else { return }
         var selectedChanged = false
+        var arrival: RemoteArrival?
         for change in changes {
             switch change {
             case .saved(let id):
                 guard let record = await store.existingRecord(id: id) else { continue }
                 // Reading the record suspends; the window may have closed meanwhile.
                 guard !closed else { return }
+                let isNew = history[id] == nil
                 indexHistory(record)
+                if let candidate = remoteArrival(record, isNew: isNew),
+                   arrival.map({ candidate.createdAt > $0.createdAt }) ?? true {
+                    arrival = candidate
+                }
                 selectedChanged = selectedChanged || id == selectedHistoryID
             case .removed(let id):
                 history[id] = nil
@@ -351,5 +357,6 @@ extension DesktopHostController {
             transcript = record.text(for: transcriptVariant) ?? ""
             Platform.historyPresentation(record, variant: transcriptVariant, status: "Updated from iCloud.")
         }
+        if let arrival { await pasteRemoteArrival(arrival) }
     }
 }

@@ -87,9 +87,17 @@ package protocol DesktopHostEffects<Platform>: Sendable {
     ) async throws -> String
     /// Replaces the settings file atomically.
     func writeSettings(_ data: Data, to url: URL) throws
+    /// Idle preparation that never opens the microphone; nil where unsupported.
+    func prepareCaptureWhileIdle(
+        deviceID: String, lifetimeMilliseconds: UInt32
+    ) -> (any DesktopCapturePreparation)?
 }
 
 package extension DesktopHostEffects {
+    func prepareCaptureWhileIdle(
+        deviceID: String, lifetimeMilliseconds: UInt32
+    ) -> (any DesktopCapturePreparation)? { nil }
+
     func warmPostProcessingConnection() async throws {
         throw DesktopHostError(message: "This host has no shared-session cleanup connection preparation.")
     }

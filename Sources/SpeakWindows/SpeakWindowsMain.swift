@@ -137,6 +137,10 @@ private func hotKeyWindowEvent(_ event: Int32, value: String, index: Int, holder
     case 21:
         // As at the Record event: capture the focused field before anything else can change it.
         let captured = try? WindowsInsertionTarget.capture()
+        if holder.hotKeys.style != .pressToToggle, !holder.smokeTest {
+            let controller = holder.controller
+            Task { await controller.warmMicrophoneForShortcutPress(deviceID: value) }
+        }
         let event = holder.recordingEvent(modelIndex: index, executablePath: captured?.executablePath)
         holder.hotKeys.keyDown(
             target: captured, textOutput: Task { await event.value.textOutput },

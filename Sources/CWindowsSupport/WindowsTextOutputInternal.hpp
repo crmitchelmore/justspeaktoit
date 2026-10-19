@@ -84,6 +84,8 @@ void setEnvironment(const Environment &environment);
 void resetEnvironment();
 
 // Pure helpers exposed for deterministic checks.
+inline constexpr size_t maximumSelectedTextUnits = 200000;
+bool appendSelectedRange(std::wstring &text, const std::wstring &selected);
 void pasteInputs(INPUT (&inputs)[4]);
 std::wstring normalizedForComparison(const std::wstring &text);
 bool containsNormalized(const std::wstring &haystack, const std::wstring &needle);

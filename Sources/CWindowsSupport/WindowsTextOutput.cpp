@@ -902,23 +902,17 @@ class Worker {
             FAILED(ranges->get_Length(&count)) || count < 1 || count > 64) {
             error = "The original app does not expose a bounded text selection."; return false;
         }
-        constexpr size_t maximum = 200000;
         for (int index = 0; index < count; ++index) {
             if (abandoned() || GetTickCount64() >= state->selectionDeadline) {
                 error = "Selected-text capture was cancelled or timed out."; return false;
             }
             Ref<IUIAutomationTextRange> range;
             std::wstring selected;
-            const size_t separator = text.empty() ? 0 : 1;
-            if (text.size() + separator > maximum ||
+            if (text.size() > maximumSelectedTextUnits ||
                 FAILED(ranges->GetElement(index, range.put())) ||
-                !rangeText(range.value, static_cast<int>(maximum - text.size() - separator), selected) ||
-                selected.find(L'\0') != std::wstring::npos) {
+                !rangeText(range.value, static_cast<int>(maximumSelectedTextUnits - text.size()), selected) ||
+                !appendSelectedRange(text, selected)) {
                 error = "Selected text is unavailable or exceeds the 200,000 UTF-16-unit limit."; return false;
-            }
-            if (!selected.empty()) {
-                if (separator) text += L'\n';
-                text += selected;
             }
         }
         if (text.empty()) { error = "There is no selected text to read aloud."; return false; }
@@ -1203,6 +1197,17 @@ void setEnvironment(const Environment &environment) {
 void resetEnvironment() {
     std::lock_guard<std::mutex> lock(environmentMutex);
     environmentOverridden = false;
+}
+
+bool appendSelectedRange(std::wstring &text, const std::wstring &selected) {
+    if (text.size() > maximumSelectedTextUnits || selected.find(L'\0') != std::wstring::npos) return false;
+    if (selected.empty()) return true;
+    const size_t separator = text.empty() ? 0 : 1;
+    const size_t remaining = maximumSelectedTextUnits - text.size();
+    if (separator > remaining || selected.size() > remaining - separator) return false;
+    if (separator) text.push_back(L'\n');
+    text += selected;
+    return true;
 }
 
 void pasteInputs(INPUT (&inputs)[4]) {

@@ -61,6 +61,19 @@ numeric conversion consumed a number **before** skipping trailing whitespace;
 previously a whitespace-only pitch could be accepted as zero. This source fix
 and the Win32/GTK regression assertions are **NOT_RUN** locally.
 
+## Cleanup mode disclosure (source only)
+
+The Windows cleanup dialog no longer claims that post-processing has no
+streaming route. Its mode label follows the selected source/model: remote
+finished-transcript cleanup can stream previews, while built-in rules and
+downloaded local LLM cleanup remain completed-only. An unavailable selection
+asks for a supported model instead of implying an executable route. This is
+distinct from Auto-Clean during live dictation; no provider request, setting
+default or model capability changes.
+
+Authored Win32 fixtures check local rules, downloaded models, remote selection
+and unavailable-model labels. They are **NOT_RUN** locally.
+
 ## Modulate live and batch feature controls (source only)
 
 At `ca2d39fb`, completed portable Linux (2,909 tests; 33 skipped) and macOS

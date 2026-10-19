@@ -22,6 +22,23 @@ final class DesktopHostCorrectionLearningTests: XCTestCase {
         await fixture.host.close()
     }
 
+    func testHistoryPaste_DoesNotStartObservationEvenWithLocalApproval() async throws {
+        let fixture = try LearningFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        await fixture.host.markReadyForSelfTest()
+        _ = try await fixture.host.vocabularyEvent(kind: 3, payload: "allowLearning")
+        await fixture.host.learningHistoryPasteAndWait()
+        let output = await fixture.host.outputSlot.result
+        XCTAssertEqual(output?.disposition, .confirmedInsertion)
+        XCTAssertEqual(fixture.readback.begins, 0)
+        XCTAssertEqual(fixture.readback.reads, 0)
+        let state = try await fixture.host.learningState()
+        XCTAssertTrue(state.approved)
+        XCTAssertTrue(state.candidates.isEmpty)
+        XCTAssertEqual(state.rules, 0)
+        await fixture.host.close()
+    }
+
     func testImportTrueAndUnknownApprovalMirror_DoNotGrantApprovalOrReadText() async throws {
         let fixture = try LearningFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
@@ -220,6 +237,18 @@ private struct LearningState: Sendable {
 }
 
 private extension DesktopHostController where Platform == FakePlatform {
+    func learningHistoryPasteAndWait() async {
+        correctionObservationWait = { _ in }
+        var record = DesktopRecordingStore.Record(
+            id: UUID(), audioFilename: "synthetic.wav", modelIdentifier: "synthetic"
+        )
+        record.processedText = "Susie"
+        indexHistory(record)
+        pasteLastHistoryItem(target: "synthetic")
+        await outputSlot.task?.value
+        await correctionObservationTask?.value
+    }
+
     func learningStartWaiting(_ entered: XCTestExpectation) async -> Task<Void, Never>? {
         correctionObservationWait = { _ in
             entered.fulfill()

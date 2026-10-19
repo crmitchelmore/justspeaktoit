@@ -44,6 +44,24 @@ shortcuts to this action (`JSTI_ACTION_RUN_QUICK_VOICE_1`-`3` emit
 while Voice Output settings are locked). Linux has no action shortcut
 registration yet.
 
+## Paste last History action foundation (source only)
+
+The shared Host can explicitly deliver the most recent History item's processed
+text (or its corrected/original fallback), using saved text-output settings and
+the field captured by the native action. It ignores the active History search
+and selected row without changing either. An empty newest item reports that
+there is nothing to paste rather than silently substituting an older item.
+Clipboard-only output does not require a captured field.
+
+The action reuses the existing single owned output slot, cancellation and
+shutdown path. It does not start correction observation or change the
+recording HUD. Missing targets and delivery failures remain visible. Authored
+Host regressions cover selection/search independence, processed/raw text,
+clipboard-only output, empty newest entries, target/delivery errors, no
+credential lookup and no observational readback even with local approval.
+These checks are **NOT_RUN** locally; native shortcut capture/mapping is still
+pending and this foundation is not a claim of executable shortcut parity.
+
 ## About and manual updates (source only)
 
 Native About now shows the installed app's version/build when stamped,

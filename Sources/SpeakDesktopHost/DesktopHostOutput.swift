@@ -1,9 +1,8 @@
 import Foundation
 import SpeakDesktop
 
-/// Automatic output authority for one recording: the text output options
-/// persisted when it started and the field captured at its hotkey, if any.
-/// Imports and History retries never carry one.
+/// Text-output options and the field captured for a recording or explicit
+/// History paste. Imports and History retries never carry output authority.
 package struct DesktopHostRecordingOutput<Platform: DesktopHostPlatform>: Sendable {
     package let options: Platform.TextOutputOptions
     package let target: Platform.InsertionTarget?
@@ -47,14 +46,19 @@ package enum DesktopHostOutputStart {
     }
 }
 
+enum DesktopHostOutputPurpose: Sendable {
+    case recording, historyPaste
+}
+
 extension DesktopHostController {
-    /// Exactly one automatic output can be pending. A cancelled blocked
+    /// Exactly one text output can be pending. A cancelled blocked
     /// provider retains its slot until it returns, while capture remains free
     /// to start and new transcripts remain safely available in History. The
-    /// options are the recording's own; current settings are never read here.
+    /// options belong to the submitted snapshot; current settings are never read here.
     /// The platform decides whether the options copy or insert into the target.
     func beginOutput(
-        _ text: String, output: DesktopHostRecordingOutput<Platform>, recordID: UUID
+        _ text: String, output: DesktopHostRecordingOutput<Platform>, recordID: UUID,
+        purpose: DesktopHostOutputPurpose = .recording
     ) -> DesktopHostOutputStart {
         guard let job = Platform.makeOutputJob(options: output.options, target: output.target) else {
             return .unavailable
@@ -86,13 +90,18 @@ extension DesktopHostController {
                 outputSlot = DesktopHostOutputState<Platform>(recordID: recordID, result: completion)
             }
             guard !Task.isCancelled, !closed else { return }
-            beginCorrectionObservation(
-                job: job, text: text, recordID: recordID, revision: learningRevision, completion: completion
-            )
-            // A newer dictation owns the HUD by now if one started; this finishes only its own.
-            finishHUD(recordID, completion.permitsAutomaticResume
-                ? .success(completion.status) : .failure(completion.status, headline: "Check text output"))
-            guard recording == nil, selectedHistoryID == recordID else { return }
+            switch purpose {
+            case .recording:
+                beginCorrectionObservation(
+                    job: job, text: text, recordID: recordID, revision: learningRevision, completion: completion
+                )
+                // A newer dictation owns the HUD by now if one started; this finishes only its own.
+                finishHUD(recordID, completion.permitsAutomaticResume
+                    ? .success(completion.status) : .failure(completion.status, headline: "Check text output"))
+                guard recording == nil, selectedHistoryID == recordID else { return }
+            case .historyPaste:
+                guard canUseHistory else { return }
+            }
             update(completion.status, state: 0)
         }
         return Platform.isClipboard(job) ? .copying : .inserting
@@ -104,5 +113,30 @@ extension DesktopHostController {
         outputSlot.task?.cancel()
         // Speech is output too: recording, import and close end Read aloud.
         stopReadAloud()
+    }
+}
+
+extension DesktopHostController where Platform: DesktopHostDefaultTextOutputPlatform {
+    package func pasteLastHistoryItem(target: Platform.InsertionTarget?) {
+        guard !closed else { return }
+        guard canUseHistory, outputSlot.task == nil else {
+            update("Finish the current recording or text output before pasting from History.")
+            return
+        }
+        guard let record = DesktopHistorySearch.ordered(Array(history.values)).first,
+              let text = record.displayText, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            update("Nothing to paste. The most recent History item has no text.")
+            return
+        }
+        let output = DesktopHostRecordingOutput<Platform>(
+            options: settings.textOutput ?? Platform.defaultTextOutput, target: target
+        )
+        switch beginOutput(text, output: output, recordID: record.id, purpose: .historyPaste) {
+        case .inserting: update("Pasting the most recent History item into the captured text field…")
+        case .copying: update("Copying the most recent History item to the clipboard…")
+        case .busy: update("Another text output is still finishing. Try pasting from History again afterward.")
+        case .unavailable:
+            update("Could not paste from History. Focus a supported text field or choose clipboard-only output.")
+        }
     }
 }

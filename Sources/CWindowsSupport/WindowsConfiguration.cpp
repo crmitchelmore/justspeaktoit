@@ -429,15 +429,18 @@ int jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t c
                     fields[field.enabledByField - 1].is_boolean != 1))) return -1;
             if (fields[i].choices && fields[i].choices[0]) {
                 std::wstring choices;
-                if (field.boolean || !jsti::wide(fields[i].choices, choices) || choices.size() > 65535) return -1;
+                if (field.boolean || !jsti::wide(fields[i].choices, choices) || choices.size() > 65535 ||
+                    choices.back() == L'\n') return -1;
                 std::wistringstream stream(choices);
                 std::wstring line;
                 bool found = false;
                 while (std::getline(stream, line)) {
                     const size_t tab = line.find(L'\t');
-                    if (tab == std::wstring::npos || tab == 0 || tab + 1 == line.size() ||
+                    if (tab == std::wstring::npos || tab + 1 == line.size() ||
                         line.find(L'\t', tab + 1) != std::wstring::npos || field.choices.size() >= 32) return -1;
                     const auto value = line.substr(0, tab);
+                    if (std::any_of(field.choices.begin(), field.choices.end(),
+                        [&](const auto &choice) { return choice.first == value; })) return -1;
                     found = found || value == field.value;
                     field.choices.emplace_back(value, line.substr(tab + 1));
                 }
@@ -596,9 +599,95 @@ static bool configurationAutoCleanSelfTest(HWND owner, std::string &error) {
     return true;
 }
 
+static bool configurationEmptyChoiceSelfTest(HWND owner, std::string &error) {
+    Configuration previous;
+    { std::lock_guard<std::mutex> lock(configurationMutex); previous = configuration; }
+    struct Applied { int calls = 0; std::string expected; bool correct = false; } applied;
+    const auto callback = [](int action, const char *const *values, size_t count, void *context,
+                              char *, size_t) -> int {
+        auto &result = *static_cast<Applied *>(context);
+        ++result.calls;
+        result.correct = action == 0 && count == 2 && values && values[0] && values[1] &&
+            std::string(values[0]) == result.expected && std::string(values[1]) == "preserved";
+        return result.correct ? 0 : -1;
+    };
+    JSTIConfigurationField fields[2]{};
+    fields[0].title = "Destination policy"; fields[0].value = ""; fields[0].group = "General";
+    fields[0].choices = "\tLegacy fixture\nretained\tExplicit fixture";
+    fields[1].title = "Other setting"; fields[1].value = "preserved"; fields[1].group = "General";
+    const auto registerFields = [&] {
+        return jsti_window_set_configuration(fields, 2, nullptr, 0, callback, &applied);
+    };
+    bool okay = registerFields() == 0;
+    const auto retained = [&] {
+        std::lock_guard<std::mutex> lock(configurationMutex);
+        return configuration.fields.size() == 2 && configuration.fields[0].choices.size() == 2 &&
+            configuration.fields[0].choices[0] == std::make_pair(std::wstring(), std::wstring(L"Legacy fixture")) &&
+            configuration.fields[0].value.empty() && configuration.fields[1].value == L"preserved" &&
+            configuration.callback == callback && configuration.context == &applied;
+    };
+    okay = okay && retained();
+    const char *invalid[] = {
+        "\tLegacy\n\tDuplicate empty", "\tLegacy\nretained\tFirst\nretained\tDuplicate",
+        "\t", "\tLegacy\textra", "Missing separator", "\tLegacy\nretained\t", "\tLegacy\n"
+    };
+    for (const char *choices : invalid) {
+        fields[0].choices = choices;
+        okay = registerFields() == -1 && retained() && okay;
+    }
+    std::string bounded = "\tLegacy fixture";
+    for (int index = 1; index < 32; ++index) bounded += "\nvalue" + std::to_string(index) + "\tChoice";
+    fields[0].choices = bounded.c_str();
+    okay = registerFields() == 0 && okay;
+    bounded += "\nextra\tThirty-third choice";
+    fields[0].choices = bounded.c_str();
+    okay = registerFields() == -1 && okay;
+    const std::string oversized(65536, 'x');
+    fields[0].choices = oversized.c_str();
+    okay = registerFields() == -1 && okay;
+    fields[0].choices = "\tLegacy fixture\nretained\tExplicit fixture";
+    okay = registerFields() == 0 && retained() && okay;
+    fields[0].value = "not-listed";
+    okay = registerFields() == -1 && retained() && okay;
+    fields[0].value = "";
+    fields[0].is_boolean = 1;
+    okay = registerFields() == -1 && retained() && okay;
+    fields[0].is_boolean = 0;
+    fields[0].value = " retained ";
+    fields[0].choices = "\tLegacy fixture\n retained \tExplicit fixture";
+    okay = registerFields() == 0 && okay;
+    {
+        std::lock_guard<std::mutex> lock(configurationMutex);
+        okay = configuration.fields.size() == 2 && configuration.fields[0].choices.size() == 2 &&
+            configuration.fields[0].value == L" retained " &&
+            configuration.fields[0].choices[1].first == L" retained " && okay;
+    }
+    fields[0].value = "";
+    fields[0].choices = "\tLegacy fixture\nretained\tExplicit fixture";
+    okay = registerFields() == 0 && retained() && okay;
+    for (int selection = 0; selection < 2; ++selection) {
+        Dialog fixture;
+        { std::lock_guard<std::mutex> lock(configurationMutex); fixture.config = configuration; }
+        HWND window = okay ? createDialog(owner, fixture) : nullptr;
+        if (!window) { okay = false; break; }
+        const bool populated = SendDlgItemMessageW(window, fieldBase, CB_GETCOUNT, 0, 0) == 2 &&
+            SendDlgItemMessageW(window, fieldBase, CB_GETCURSEL, 0, 0) == 0;
+        SendDlgItemMessageW(window, fieldBase, CB_SETCURSEL, selection, 0);
+        applied.expected = selection == 0 ? "" : "retained";
+        const int before = applied.calls;
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
+        okay = populated && !IsWindow(window) && applied.calls == before + 1 && applied.correct && okay;
+        if (IsWindow(window)) DestroyWindow(window);
+    }
+    { std::lock_guard<std::mutex> lock(configurationMutex); configuration = std::move(previous); }
+    if (!okay) error = "Optional choice registration lost an empty draft, accepted ambiguous metadata or changed Apply values.";
+    return okay;
+}
+
 bool jsti_configuration_self_test(HWND owner, std::string &error) {
     if (!configurationTitleSelfTest(owner, error)) return false;
     if (!configurationAutoCleanSelfTest(owner, error)) return false;
+    if (!configurationEmptyChoiceSelfTest(owner, error)) return false;
     struct Applied { int calls = 0; bool correct = false; } applied;
     Dialog dialog;
     dialog.config.fields = {{L"Language", L"en_GB", L"Transcription", false}, {L"HUD", L"1", L"General", true}};

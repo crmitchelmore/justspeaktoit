@@ -29,8 +29,13 @@ final class DesktopLegacyCapturePolicyTests: XCTestCase {
             "silenceDetectionEnabled": AnyCodable(.bool(true)), "silenceThreshold": AnyCodable(.double(0.05)),
             "silenceDuration": AnyCodable(.double(0.5))
         ])
-        let expectedInitial = try initial.applying(initial.entries)
         try await host.saveConfiguration(initial.entries)
+        let expectedInitial = try await host.configuration()
+        XCTAssertEqual(expectedInitial.number("postRecordingTailDuration"), 0)
+        XCTAssertTrue(expectedInitial.enabled("silenceDetectionEnabled"))
+        XCTAssertEqual(expectedInitial.number("silenceThreshold"), 0.05)
+        XCTAssertEqual(expectedInitial.number("silenceDuration"), 0.5)
+        XCTAssertNil(expectedInitial.values[AppSwitchDelivery.preferenceKey])
         let queue = DesktopSettingsQueue()
         let event = queue.read { await host.captureRecordingEvent(modelIndex: index, executablePath: nil) }
         _ = await event.value
@@ -165,8 +170,11 @@ final class DesktopLegacyCapturePolicyTests: XCTestCase {
         XCTAssertEqual(effects.capture?.destroyCount, 1)
         effects.failStart = false
         let later = try DesktopConfiguration(values: ["postRecordingTailDuration": AnyCodable(.int(2))])
-        let expectedLater = try later.applying(later.entries)
         try await host.saveConfiguration(later.entries)
+        let expectedLater = try await host.configuration()
+        XCTAssertEqual(expectedLater.number("postRecordingTailDuration"), 2)
+        XCTAssertNil(expectedLater.values[AppSwitchDelivery.preferenceKey])
+        XCTAssertNotEqual(expectedLater, failed.configuration)
         let next = await host.captureRecordingEvent(modelIndex: index, executablePath: nil)
         await host.toggleCaptured(next, target: nil, modelIndex: index, deviceID: "synthetic")
         let recording = await host.recording

@@ -13,6 +13,7 @@ final class DesktopConfigurationTests: XCTestCase {
     private static let forwardCompatibleChoiceKeys: Set<String> = [
         SonioxVoicePreference.regionKey,
         ApplicationPreferenceKey.ttsQuality.rawValue,
+        VoiceAudioFormat.preferenceKey,
         ApplicationPreferenceKey.speedMode.rawValue
     ]
 
@@ -22,9 +23,13 @@ final class DesktopConfigurationTests: XCTestCase {
             XCTAssertFalse(choices.isEmpty)
             XCTAssertLessThanOrEqual(choices.count, 32)
             XCTAssertEqual(Set(choices.map(\.value)).count, choices.count)
-            for choice in choices {
+            for (index, choice) in choices.enumerated() {
+                XCTAssertFalse(choice.title.isEmpty, field.key)
+                XCTAssertTrue(
+                    !choice.value.isEmpty || (field.key == AppSwitchDelivery.preferenceKey && index == 0),
+                    field.key
+                )
                 for text in [choice.value, choice.title] {
-                    XCTAssertFalse(text.isEmpty)
                     XCTAssertFalse(
                         text.contains("\t") || text.contains("\n") || text.contains("\r") || text.contains("\0")
                     )
@@ -32,6 +37,29 @@ final class DesktopConfigurationTests: XCTestCase {
             }
             XCTAssertLessThanOrEqual(field.serializedChoices?.utf8.count ?? 0, 65_535)
             XCTAssertTrue(choices.contains { AnyCodable(.string($0.value)) == field.defaultValue })
+        }
+    }
+
+    func testAppSwitchLegacyChoice_IsAnExplicitEditorSentinelNotAPersistedDefault() throws {
+        let field = try XCTUnwrap(DesktopConfiguration.fields.first { $0.key == AppSwitchDelivery.preferenceKey })
+        guard case .choice(let choices) = field.kind else { return XCTFail("Missing app-switch choices.") }
+        XCTAssertEqual(choices.map(\.value), AppSwitchDelivery.desktopChoices.map(\.value))
+        XCTAssertEqual(choices.map(\.title), AppSwitchDelivery.desktopChoices.map(\.title))
+        let first = try XCTUnwrap(choices.first)
+        XCTAssertEqual(first.value, "")
+        XCTAssertEqual(choices.dropFirst().map(\.value), AppSwitchDelivery.allCases.map(\.rawValue))
+        XCTAssertEqual(field.defaultValue, AnyCodable(.string("")))
+        XCTAssertEqual(field.serializedChoices?.components(separatedBy: "\n").first, "\t\(first.title)")
+        let missing = try DesktopConfiguration()
+        XCTAssertNil(missing.values[field.key])
+        let editor = try missing.applying(missing.entries)
+        XCTAssertEqual(editor.values[field.key], AnyCodable(.string("")))
+        for policy in AppSwitchDelivery.allCases {
+            let explicit = try DesktopConfiguration(values: [field.key: AnyCodable(.string(policy.rawValue))])
+            XCTAssertEqual(try explicit.applying(explicit.entries).values[field.key], explicit.values[field.key])
+        }
+        for invalid in ["legacy", "invalid", " originalApp", "currentApp\n", "\t", "\0"] {
+            XCTAssertThrowsError(try DesktopConfiguration(values: [field.key: AnyCodable(.string(invalid))]))
         }
     }
 

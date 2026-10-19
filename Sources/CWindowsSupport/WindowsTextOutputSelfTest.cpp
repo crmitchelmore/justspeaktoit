@@ -731,6 +731,8 @@ std::string checkNativePaths(Fixture &state) {
 
 std::string checkAutomationPaths(Fixture &state) {
     SyntheticHost &host = state.host;
+    // App-switch cases share this host but leave a different sibling value.
+    setText(host.second, L"other");
     setEnvironment(testEnvironment(false));
     Target target;
     std::string error;
@@ -798,7 +800,9 @@ std::string checkAutomationPaths(Fixture &state) {
     state.resolveOverride = host.window;
     attempt = insert(target, "late");
     state.resolveOverride = nullptr;
-    if (attempt.status != -1 || !contains(attempt.error, "changed") || textOf(host.edit) != L"Hello dear world" ||
+    if (attempt.status != -1 || !contains(attempt.error, "changed") ||
+        attempt.result.method != JSTI_INSERTION_METHOD_NONE || attempt.result.verified ||
+        state.clipboard.sequence() != beforeRefusals || textOf(host.edit) != L"Hello dear world" ||
         textOf(host.second) != L"other" || state.pasteCalls.load() != 1) {
         return describe("uia identity", "a different focused element was not rejected", attempt.error);
     }
@@ -808,7 +812,9 @@ std::string checkAutomationPaths(Fixture &state) {
     state.resolveOverride = host.second;
     attempt = insert(target, "late");
     state.resolveOverride = nullptr;
-    if (attempt.status != -1 || !contains(attempt.error, "no longer focused") || textOf(host.second) != L"other" ||
+    if (attempt.status != -1 || !contains(attempt.error, "no longer focused") ||
+        attempt.result.method != JSTI_INSERTION_METHOD_NONE || attempt.result.verified ||
+        state.clipboard.sequence() != beforeRefusals || textOf(host.second) != L"other" ||
         state.pasteCalls.load() != 1) {
         return describe("uia sibling", "an element outside the captured control was not rejected", attempt.error);
     }

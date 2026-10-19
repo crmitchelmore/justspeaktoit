@@ -3203,6 +3203,32 @@ static void configuration_apply(gpointer data) {
     gtk_widget_set_visible(configuration.recovery_group, configuration.recovery_count > 0);
 }
 
+static gboolean configuration_choices_valid(const char *choices, const char *value) {
+    if (choices == NULL || value == NULL || choices[0] == '\0' ||
+        !g_utf8_validate(choices, -1, NULL) || strlen(choices) > 65535) return FALSE;
+    gchar **lines = g_strsplit(choices, "\n", -1);
+    gboolean valid = g_strv_length(lines) <= 32, found = FALSE;
+    for (guint choice = 0; valid && lines[choice] != NULL; ++choice) {
+        const char *tab = strchr(lines[choice], '\t');
+        if (tab == NULL || tab[1] == '\0' || strchr(tab + 1, '\t') != NULL) {
+            valid = FALSE;
+            break;
+        }
+        const size_t length = (size_t)(tab - lines[choice]);
+        for (guint previous = 0; previous < choice; ++previous) {
+            const char *previous_tab = strchr(lines[previous], '\t');
+            if ((size_t)(previous_tab - lines[previous]) == length &&
+                strncmp(lines[previous], lines[choice], length) == 0) {
+                valid = FALSE;
+                break;
+            }
+        }
+        found |= strlen(value) == length && strncmp(value, lines[choice], length) == 0;
+    }
+    g_strfreev(lines);
+    return valid && found;
+}
+
 int32_t jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t count,
                                       const char *const *recovered_keywords, size_t recovered_count,
                                       JSTIConfigurationCallback callback, void *context) {
@@ -3251,23 +3277,9 @@ int32_t jsti_window_set_configuration(const JSTIConfigurationField *fields, size
             configuration_update_free(update);
             return -1;
         }
-        if (choices[0] != '\0') {
-            gchar **lines = g_strsplit(choices, "\n", -1);
-            gboolean valid = g_strv_length(lines) <= 32, found = FALSE;
-            for (guint choice = 0; lines[choice] != NULL; ++choice) {
-                const char *tab = strchr(lines[choice], '\t');
-                if (tab == NULL || tab == lines[choice] || tab[1] == '\0' || strchr(tab + 1, '\t') != NULL) {
-                    valid = FALSE;
-                    break;
-                }
-                found |= strlen(fields[i].value) == (size_t)(tab - lines[choice]) &&
-                    strncmp(fields[i].value, lines[choice], tab - lines[choice]) == 0;
-            }
-            g_strfreev(lines);
-            if (!valid || !found) {
-                configuration_update_free(update);
-                return -1;
-            }
+        if (choices[0] != '\0' && !configuration_choices_valid(choices, fields[i].value)) {
+            configuration_update_free(update);
+            return -1;
         }
         g_ptr_array_add(update->choices, g_strdup(choices));
         g_ptr_array_add(update->titles, g_strdup(fields[i].title));
@@ -3338,6 +3350,7 @@ int32_t jsti_window_set_configuration_field_enabled(size_t index, int32_t enable
 typedef struct {
     gint calls;
     guint language_index;
+    gboolean empty_choice;
 } ConfigurationSelfTestContext;
 
 static const char auto_clean_choices[] = "instant\tInstant\nlivePolish\tAuto-Clean";
@@ -3403,6 +3416,29 @@ static gboolean configuration_auto_clean_self_test(void) {
     return test.calls == 1;
 }
 
+static gboolean configuration_empty_choice_self_test(void) {
+    const char *choices = "\tLegacy fixture\n retained \tExplicit fixture";
+    gboolean valid = configuration_choices_valid(choices, "") &&
+        configuration_choices_valid(choices, " retained ") && !configuration_choices_valid(choices, "retained");
+    const char *invalid[] = {
+        "\tLegacy\n\tDuplicate empty", "\tLegacy\nretained\tFirst\nretained\tDuplicate", "\t",
+        "\tLegacy\textra", "Missing separator", "\tLegacy\nretained\t", "\tLegacy\n", "\xff\tInvalid"
+    };
+    for (guint index = 0; index < G_N_ELEMENTS(invalid); ++index)
+        valid = !configuration_choices_valid(invalid[index], "") && valid;
+    valid = !configuration_choices_valid(choices, "not-listed") && valid;
+    GString *bounded = g_string_new("\tLegacy fixture");
+    for (guint index = 1; index < 32; ++index) g_string_append_printf(bounded, "\nvalue%u\tChoice", index);
+    valid = configuration_choices_valid(bounded->str, "") && valid;
+    g_string_append(bounded, "\nextra\tThirty-third choice");
+    valid = !configuration_choices_valid(bounded->str, "") && valid;
+    g_string_set_size(bounded, 65536);
+    memset(bounded->str, 'x', bounded->len);
+    valid = !configuration_choices_valid(bounded->str, "") && valid;
+    g_string_free(bounded, TRUE);
+    return valid;
+}
+
 static int32_t configuration_test_callback(int32_t action, const char *const *values, size_t count,
                                           void *context, char *error, size_t capacity) {
     (void)error; (void)capacity;
@@ -3415,7 +3451,17 @@ static int32_t configuration_test_callback(int32_t action, const char *const *va
     if (action != 0 && action != 3 && action != 4 && action != 5) return -1;
     for (guint i = 0; i < configuration.rows->len; ++i)
         if (((const char *)g_ptr_array_index(configuration.choices, i))[0] != '\0') {
-            if (g_strcmp0(g_ptr_array_index(configuration.choices, i), auto_clean_choices) == 0) {
+            const char *choices = g_ptr_array_index(configuration.choices, i);
+            if (choices[0] == '\t') {
+                gchar **lines = g_strsplit(choices, "\n", -1);
+                const guint selected_index = test_context->empty_choice ? 0 : 1;
+                const char *line = lines[selected_index];
+                const char *tab = line != NULL ? strchr(line, '\t') : NULL;
+                const gboolean selected = tab != NULL && strlen(values[i]) == (size_t)(tab - line) &&
+                    strncmp(values[i], line, tab - line) == 0;
+                g_strfreev(lines);
+                if (!selected) return -1;
+            } else if (g_strcmp0(choices, auto_clean_choices) == 0) {
                 if (g_strcmp0(values[i], "livePolish") != 0) return -1;
             } else if (g_strcmp0(values[i], "expanded") != 0 && g_strcmp0(values[i], "bubbly") != 0) return -1;
         }
@@ -3424,6 +3470,7 @@ static int32_t configuration_test_callback(int32_t action, const char *const *va
 }
 
 static gboolean configuration_self_test(void) {
+    if (!configuration_empty_choice_self_test()) return FALSE;
     if (configuration.rows == NULL || configuration.rows->len < 10 ||
         configuration.rows->len != configuration.booleans->len ||
         configuration.rows->len != configuration.overlay_settings->len ||
@@ -3479,10 +3526,13 @@ static gboolean configuration_self_test(void) {
     gchar *saved = g_strdup(gtk_editable_get_text(GTK_EDITABLE(language)));
     ConfigurationSelfTestContext test_context = { .calls = 0, .language_index = language_index };
     AdwComboRow *choice_row = NULL;
+    AdwComboRow *optional_choice_row = NULL;
     GArray *original_choices = g_array_new(FALSE, FALSE, sizeof(guint));
     for (guint i = 0; i < configuration.rows->len; ++i) {
         if (((const char *)g_ptr_array_index(configuration.choices, i))[0] == '\0') continue;
         choice_row = ADW_COMBO_ROW(g_ptr_array_index(configuration.rows, i));
+        if (((const char *)g_ptr_array_index(configuration.choices, i))[0] == '\t')
+            optional_choice_row = choice_row;
         guint count = g_list_model_get_n_items(adw_combo_row_get_model(choice_row));
         const gboolean auto_clean = g_strcmp0(
             g_ptr_array_index(configuration.choices, i), auto_clean_choices) == 0;
@@ -3518,6 +3568,13 @@ static gboolean configuration_self_test(void) {
         g_strcmp0(gtk_editable_get_text(GTK_EDITABLE(language)), "fr_FR") == 0;
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(language), saved_title);
     g_free(saved_title);
+    if (optional_choice_row != NULL) {
+        test_context.empty_choice = TRUE;
+        adw_combo_row_set_selected(optional_choice_row, 0);
+        on_configuration_apply(NULL, NULL);
+        adw_combo_row_set_selected(optional_choice_row, 1);
+        test_context.empty_choice = FALSE;
+    }
     on_configuration_apply(NULL, NULL);
     on_configuration_apply(NULL, GINT_TO_POINTER(4));
     on_configuration_apply(NULL, GINT_TO_POINTER(5));
@@ -3547,7 +3604,7 @@ static gboolean configuration_self_test(void) {
     g_free(saved);
     configuration.callback = callback;
     configuration.context = context;
-    return test_context.calls == 4 && title_preserved && availability_preserved &&
+    return test_context.calls == (optional_choice_row != NULL ? 5 : 4) && title_preserved && availability_preserved &&
         configuration_auto_clean_self_test();
 }
 

@@ -255,7 +255,9 @@ private extension DesktopHostVoicePronunciationTests {
         XCTAssertFalse(FakeSpeech.shared.events.contains("play"))
         await assertSettled()
     }
+}
 
+extension DesktopHostVoicePronunciationTests {
     func heldDictionary() async throws -> (VoicePronunciationGate, Task<DesktopVocabulary, Error>) {
         let vocabulary = try await controller.vocabularyStore()
         let gate = VoicePronunciationGate()

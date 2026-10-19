@@ -96,7 +96,8 @@ def products(kind, directory, deadline):
 
 def build_command(kind, directory):
     if kind == "swift":
-        return ["swift", "build", "--build-tests"]
+        # Debug CI owns this cache; instrumentation must match its build/test flags.
+        return ["swift", "build", "--build-tests", "--enable-code-coverage"]
     return [
         "xcodebuild", "build-for-testing", "-workspace", "Just Speak to It.xcworkspace",
         "-scheme", "SpeakApp", "-configuration", "Debug", "-destination", "platform=macOS",
@@ -114,6 +115,7 @@ def test_command(kind, directory):
     if kind == "swift":
         return [
             "swift", "test", "--skip-build", "--disable-automatic-resolution",
+            "--enable-code-coverage",
             "--filter", "|".join(f"{suite}/" for suite in GATE["REQUIRED_SUITES"]),
         ]
     manifests = list((directory / "DerivedData/Build/Products").glob("*.xctestrun"))

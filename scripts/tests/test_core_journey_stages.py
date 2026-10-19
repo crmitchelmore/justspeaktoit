@@ -21,10 +21,15 @@ SPEC.loader.exec_module(stages)
 
 class CommandTests(unittest.TestCase):
     def test_swift_build_once_and_runtime_cannot_build_or_resolve_dependencies(self):
-        self.assertEqual(stages.build_command("swift", Path("artifacts")), ["swift", "build", "--build-tests"])
+        self.assertEqual(
+            stages.build_command("swift", Path("artifacts")),
+            ["swift", "build", "--build-tests", "--enable-code-coverage"],
+        )
         command = stages.test_command("swift", Path("artifacts"))
         self.assertEqual(command[:4], ["swift", "test", "--skip-build", "--disable-automatic-resolution"])
-        self.assertEqual(command[4:], ["--filter", "|".join(f"{s}/" for s in stages.GATE["REQUIRED_SUITES"])])
+        self.assertEqual(command[4:], [
+            "--enable-code-coverage", "--filter", "|".join(f"{s}/" for s in stages.GATE["REQUIRED_SUITES"]),
+        ])
         self.assertEqual(len(stages.GATE["REQUIRED_SUITES"]), 15)
 
     def test_ui_uses_same_built_manifest_destination_and_all_four_suites(self):

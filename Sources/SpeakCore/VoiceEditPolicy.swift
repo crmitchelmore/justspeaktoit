@@ -136,7 +136,10 @@ public enum VoiceEditPolicy {
     }
 
     private static func jsonString<T: Encodable>(_ value: T) -> String {
-        guard let data = try? JSONEncoder().encode(value),
+        // Darwin's JSONEncoder does not guarantee key order; keep prompts byte-stable.
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(value),
               let string = String(data: data, encoding: .utf8) else {
             preconditionFailure("Voice edit payload must be JSON encodable")
         }

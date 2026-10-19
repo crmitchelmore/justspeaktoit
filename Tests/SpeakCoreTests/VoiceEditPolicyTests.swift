@@ -32,6 +32,7 @@ final class VoiceEditPolicyTests: XCTestCase {
         XCTAssertTrue(message.contains("\"selectedText\":\"The quick brown fox\""))
         XCTAssertTrue(message.contains("\"instruction\":\"make this shorter\""))
         XCTAssertTrue(message.contains("untrusted data"))
+        XCTAssertTrue(message.hasSuffix(#"{"instruction":"make this shorter","selectedText":"The quick brown fox"}"#))
     }
 
     func testUserMessage_escapesQuotesAndNewlinesSoContentCannotBecomeStructure() {

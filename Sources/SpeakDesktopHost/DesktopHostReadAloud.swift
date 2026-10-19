@@ -7,6 +7,7 @@ import SpeakDesktop
 package struct DesktopVoiceOutputSettings: Codable, Equatable, Sendable {
     package var modelID: String?
     package var voiceID: String?
+    package var strictVoiceSelection: Bool?
     package var autoPlay: Bool?
     package var saveToRecordings: Bool?
     package var speed: Double?
@@ -20,7 +21,7 @@ package struct DesktopVoiceOutputSettings: Codable, Equatable, Sendable {
     package var format: String?
 
     private enum CodingKeys: String, CodingKey {
-        case modelID, voiceID
+        case modelID, voiceID, strictVoiceSelection
         case autoPlay = "ttsAutoPlay"
         case saveToRecordings = "ttsSaveToDirectory"
         case speed = "ttsSpeed"
@@ -66,7 +67,7 @@ package struct DesktopVoiceOutputSettings: Codable, Equatable, Sendable {
     }
 
     package func resolvedVoice(accountInventory: VoiceAccountInventory?) throws -> DesktopSpeechVoice {
-        try DesktopSpeechVoice.resolved(modelID: modelID, voiceID: voiceID, accountInventory: accountInventory)
+        try storedVoice(accountInventory: accountInventory)
             .applyingQuality(VoiceSynthesisQuality.storedValue(quality))
     }
 
@@ -217,9 +218,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     package func voiceOutputSettings() -> DesktopVoiceOutputSettings { settings.voiceOutput ?? .init() }
 
     package func saveVoiceOutput(_ voiceOutput: DesktopVoiceOutputSettings) {
-        let label = (try? DesktopSpeechVoice.resolved(
-            modelID: voiceOutput.modelID, voiceID: voiceOutput.voiceID, accountInventory: selectedVoiceAccountInventory
-        ))?.label
+        let label = (try? voiceOutput.storedVoice(accountInventory: selectedVoiceAccountInventory))?.label
         _ = persistVoiceOutput(voiceOutput, message: label.map { "Read aloud voice saved: \($0)." } ??
             "Voice Output settings saved. The stored voice is unavailable on this host.")
     }
@@ -232,6 +231,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         var changed = voiceOutputSettings()
         changed.modelID = voice.modelID
         changed.voiceID = voice.id
+        changed.strictVoiceSelection = nil
         if case .openai = voice { changed.quality = voice.defaultQuality.rawValue }
         if case .elevenlabs = voice { changed.quality = voice.defaultQuality.rawValue }
         saveVoiceOutput(changed)
@@ -269,7 +269,8 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             voiceSettingsRevision &+= 1
             reconcileSonioxRegionChange(previous)
             if previous.modelID != voiceOutput.modelID || previous.voiceID != voiceOutput.voiceID
-                || previous.quality != voiceOutput.quality {
+                || previous.quality != voiceOutput.quality
+                || previous.strictVoiceSelection != voiceOutput.strictVoiceSelection {
                 voiceCredentialEpoch = UUID()
             }
             if wasTracking != voiceUsageTrackingEnabled { voiceUsage.epoch = UUID() }

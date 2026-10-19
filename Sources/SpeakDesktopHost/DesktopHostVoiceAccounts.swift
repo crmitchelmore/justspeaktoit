@@ -167,6 +167,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 var saved = self.voiceOutputSettings()
                 saved.modelID = voice.modelID
                 saved.voiceID = voice.id
+                saved.strictVoiceSelection = nil
                 guard self.persistVoiceOutput(saved, message: "Voice saved: \(voice.label).") else {
                     self.presentVoiceDiscovery("Could not save the voice. Previous settings are unchanged.",
                         loading: false)

@@ -75,4 +75,5 @@ extension DesktopConfiguration {
     public static let voiceSynthesisTransferKeys = Set(VoiceSynthesisPreference.allCases.map { $0.key.rawValue })
     public static let voiceTransferKeys = voiceGenerationTransferKeys.union(voiceSynthesisTransferKeys)
         .union([VoiceFavoritePreference.key, VoiceAudioFormat.preferenceKey]).union(SonioxVoicePreference.keys)
+        .union(VoiceSelectionPreference.keys)
 }

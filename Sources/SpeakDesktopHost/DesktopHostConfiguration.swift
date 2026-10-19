@@ -241,6 +241,11 @@ extension DesktopHostController {
         if localRules {
             status = "Configuration imported. Built-in Local Cleanup follows the imported enable choice; "
                 + "no credentials accessed."
+        } else if !VoiceSelectionPreference.keys.intersection(Platform.voiceConfigurationKeys)
+            .isDisjoint(with: document.preferences.values.keys) {
+            status = "Configuration imported. Voice selection is stored; unavailable choices refuse speech. "
+                + "Choose an executable voice in Voice Output or explicitly refresh its account inventory. "
+                + "No service permission was granted."
         } else if document.preferences.values[VoiceSynthesisPreference.quality.key.rawValue] != nil {
             status = "Configuration imported. Voice quality selects the compatible provider model or PCM rate. "
                 + "Unknown choices are preserved; no service permission was granted."
@@ -261,7 +266,11 @@ extension DesktopHostController {
         let oldVoice = previous as? DesktopVoiceOutputSettings
         let newVoice = settings.voiceOutput as? DesktopVoiceOutputSettings
         if oldVoice != newVoice { voiceSettingsRevision &+= 1 }
-        if oldVoice?.quality != newVoice?.quality { voiceCredentialEpoch = UUID() }
+        if oldVoice?.quality != newVoice?.quality || oldVoice?.modelID != newVoice?.modelID
+            || oldVoice?.voiceID != newVoice?.voiceID
+            || oldVoice?.strictVoiceSelection != newVoice?.strictVoiceSelection {
+            voiceCredentialEpoch = UUID()
+        }
     }
 
     private func disarmHandsFreeForConfiguration() async -> String {

@@ -2,7 +2,7 @@ import SpeakCore
 
 extension DesktopVoiceOutputSettings {
     package func configurationProjection(over values: [String: AnyCodable]) -> [String: AnyCodable] {
-        var projection = values
+        var projection = selectionProjection(over: values)
         projection[VoiceAudioFormat.preferenceKey] = format.map { AnyCodable(.string($0)) }
             ?? projection[VoiceAudioFormat.preferenceKey]
         projection[VoiceSynthesisPreference.quality.key.rawValue] =
@@ -36,6 +36,8 @@ extension DesktopVoiceOutputSettings {
         let region = try SonioxVoicePreference.string(SonioxVoicePreference.regionKey, in: values)
         let language = try SonioxVoicePreference.string(SonioxVoicePreference.languageKey, in: values)
         let format = try VoiceAudioFormat.preference(in: values)
+        let selection = try VoiceSelectionPreference.Update(preferences: values)
+        applyVoiceSelection(selection, qualityWasProvided: synthesis.quality != nil)
         if let play { autoPlay = play }
         if let save { saveToRecordings = save }
         if let speed = synthesis.speed { self.speed = speed }
@@ -71,8 +73,7 @@ extension DesktopVoiceOutputSettings {
 
     package func qualityControlsAvailable(accountInventory: VoiceAccountInventory?) -> Bool {
         do {
-            let voice = try DesktopSpeechVoice.resolved(modelID: modelID, voiceID: voiceID,
-                accountInventory: accountInventory)
+            let voice = try storedVoice(accountInventory: accountInventory)
             return voice.supportsQualityControls
                 || quality.map { VoiceSynthesisQuality(rawValue: $0) == nil } == true
         } catch { return false }

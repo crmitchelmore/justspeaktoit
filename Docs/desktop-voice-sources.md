@@ -2,6 +2,44 @@
 
 Windows and Linux remain developer previews, not macOS-parity releases.
 
+## Imported default voice (source-only successor)
+
+An explicit Mac `defaultTTSVoice` projects into the existing sole native Voice
+selection, not a second persisted preference. Supported scalar IDs use the
+canonical shared voice migrations and default model policy. An absent key leaves
+the existing selection alone, including the legacy no-selection default; startup
+and import never discover an account, read a key or send a synthesis request.
+
+The portable desktop-only `desktopTTSModelID` companion preserves the explicit
+model that a voice scalar cannot describe. Existing quality, format, region and
+other Voice controls retain their own canonical transfer semantics. Reimporting
+the same voice scalar does not erase a native advanced model. A different explicit
+model with no incoming quality does not inherit an old model-selecting quality
+that would undo that model choice. Unknown voice/model strings remain verbatim in
+the native model and portable export, including across restarts.
+
+Imported selection provenance requires strict resolution: unknown or Apple-only
+voices, unimplemented OpenRouter routes and dynamic account voices without the
+required inventory show the existing actionable **Unavailable stored voice**
+picker row and refuse Read, Generate, fresh Export and the selected-key form
+before credential/provider access. They never become Deepgram's legacy fallback,
+another provider's default or a different account voice. An explicit native
+catalogue/account choice replaces that intent only after persistence succeeds.
+Previously captured jobs and completed audio retain their own immutable source,
+voice and bytes; selecting an unavailable future voice does not reinterpret them.
+
+Raw root/nested startup preferences are claimed only by hosts with the Voice
+configuration bridge; nested canonical values take precedence. Generic hosts
+without that bridge preserve but do not apply them. Failed imports/writes keep
+the previous selection, settings revision and credential epoch. Successful
+selection changes rotate the existing fences, including an import/restore ABA
+during held native format discovery.
+
+This successor is source-authored only. Its portable/host regressions have not
+been parsed, compiled or run; native UI, provider and runtime acceptance remain
+open. It neither changes the independently frozen audio-format/publication
+repairs nor claims full desktop parity.
+
 ## Favorite voices
 
 Both native pickers retain **Voice** (all available voices) and add a separate

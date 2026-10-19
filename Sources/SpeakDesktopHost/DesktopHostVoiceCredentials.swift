@@ -202,8 +202,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         guard !Task.isCancelled else { return .failure(.cancelled) }
         let voice: DesktopSpeechVoice
         do {
-            voice = try DesktopSpeechVoice.resolved(
-                modelID: settings.modelID, voiceID: settings.voiceID, accountInventory: cached)
+            voice = try settings.storedVoice(accountInventory: cached)
         } catch { return .failure(.unavailable) }
         let slot: VoiceOutputCredentialSlot
         do {
@@ -224,8 +223,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     private func currentVoiceCredentialSlot() throws -> VoiceOutputCredentialSlot {
         let inventory = selectedVoiceAccountInventory
         let saved = voiceOutputSettings()
-        let voice = try DesktopSpeechVoice.resolved(
-            modelID: saved.modelID, voiceID: saved.voiceID, accountInventory: inventory)
+        let voice = try saved.storedVoice(accountInventory: inventory)
         return try .init(voice: voice, accountInventory: inventory)
     }
 

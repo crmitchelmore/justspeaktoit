@@ -51,6 +51,20 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
                 "azureSpeechResourceEndpoint", "appearance", "runAtLogin", "configuration", "livePolishApproved"
             ]
             preserved = all.filter { !known.contains($0.key) }
+            let voiceKeys = VoiceSelectionPreference.keys.intersection(Platform.voiceConfigurationKeys)
+            if !voiceKeys.isDisjoint(with: preserved.keys)
+                || !voiceKeys.isDisjoint(with: (values.configuration?.values ?? [:]).keys) {
+                var configuration = values.configuration?.values ?? [:]
+                let claimed = voiceKeys.union(
+                    [VoiceSynthesisPreference.quality.key.rawValue].filter {
+                        Platform.voiceConfigurationKeys.contains($0)
+                    })
+                for key in claimed {
+                    if configuration[key] == nil { configuration[key] = preserved[key] }
+                    preserved.removeValue(forKey: key)
+                }
+                values.configuration = try DesktopConfiguration(values: configuration)
+            }
             guard Platform.self is any DesktopHostAutomationPlatform.Type else { return }
             let key = ApplicationPreferenceKey.enableAutomationServer.rawValue
             preserved.removeValue(forKey: key)
@@ -285,6 +299,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
             loadedSettings.configuration = try DesktopConfiguration(
                 values: configuration.values.filter { $0.key != favoriteKey })
         }
+        try Self.importStoredVoiceSelection(into: &loadedSettings)
         self.localModels = try Platform.loadLocalModels(directory: directory)
         self.localCleanup = try Platform.makeLocalCleanup(directory: directory)
         modelCatalog = try Self.prepareModelCatalog(directory: directory, settings: &loadedSettings)

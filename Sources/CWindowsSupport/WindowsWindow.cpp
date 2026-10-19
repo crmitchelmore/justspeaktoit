@@ -775,7 +775,8 @@ unsigned pagesOf(int identifier) {
     case readAloudID: case stopPlaybackID: return page(historyPage) | page(voicePage);
     case voiceSettingsID: case voiceSourcesID: case voiceCredentialID: return page(voicePage);
     case configurationID:
-        return page(generalPage) | page(transcriptionPage) | page(postProcessingPage) | page(keyboardPage);
+        return page(generalPage) | page(transcriptionPage) | page(postProcessingPage) | page(keyboardPage) |
+            page(correctionsPage);
     case 94: case microphoneID: case textOutputID: case appearanceLabelID: case appearanceID: case automationID:
     case loginItemID: case recordingsFolderLabelID: case recordingsFolderID: case audioCleanupID:
     case backupAudioID: case backupExportID: case backupInspectID:
@@ -1120,6 +1121,8 @@ int layoutSettingsCard(HWND window, int top, const RECT &content, wchar_t glyph,
 }
 
 void layoutSettings(HWND window, const RECT &content) {
+    SetDlgItemTextW(window, configurationID, state.page == correctionsPage ?
+        L"Learning &preferences..." : L"Dictation &preferences...");
     const int gap = densitySpace(window, 18, visualDensity.section_spacing), row = scale(window, 34);
     const int inset = densitySpace(window, 22, visualDensity.card_padding);
     const bool voice = state.page == voicePage;
@@ -1224,6 +1227,8 @@ void layoutSettings(HWND window, const RECT &content) {
                 : L"Edit words, phonetic pronunciations and text replacements. Regular expressions, case sensitivity "
                   L"and entry order use the same matching as the Mac. Deepgram uses text replacements, not IPA tags.", row);
         place(window, corrections ? correctionsID : pronunciationID, box(left, y, scale(window, 230), row));
+        if (corrections)
+            place(window, configurationID, box(left + scale(window, 242), y, scale(window, 220), row));
         break;
     }
     case profilesPage: {
@@ -2696,6 +2701,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             if (HIWORD(wparam) == BN_CLICKED && idleControl(window, configurationID) && IsWindowEnabled(window))
                 jsti_show_configuration(window, state.page == transcriptionPage ? L"Transcription" :
                     state.page == postProcessingPage ? L"Post-processing" :
+                    state.page == correctionsPage ? L"Corrections" :
                     state.page == keyboardPage ? L"Keyboard" : L"General");
             return 0;
         case azureID:
@@ -3976,6 +3982,8 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         return jsti::fail("Window checks must run on the UI thread after READY.", error, errorCapacity);
     }
     const JSTIAboutLink lateAboutLink{"Late", "https://example.com/"};
+    if (!onPage(configurationID, correctionsPage) || onPage(configurationID, pronunciationPage))
+        return jsti::fail("Correction learning preferences lost their page scope.", error, errorCapacity);
     if (state.aboutLinks.size() != 6 || controlText(GetDlgItem(window, aboutDetailsID)) != state.aboutDetails ||
         state.aboutDetails.find(L"Version:") == std::wstring::npos ||
         jsti_window_configure_about("late", &lateAboutLink, 1) != -1 ||

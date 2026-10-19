@@ -11,6 +11,7 @@ typedef struct {
 typedef struct {
     int kind;
     GtkWidget *root, *fields[8], *preview, *preview_tags, *status, *search, *category_filter;
+    GtkWidget *learning_preferences;
     GtkListBox *list;
     GPtrArray *rows, *categories;
     gchar *category;
@@ -22,6 +23,9 @@ typedef struct {
     GtkEntry *tags;
 } Editor;
 static Editor *editors[5];
+GtkWidget *jsti_vocabulary_learning_preferences(void) {
+    return editors[0] != NULL ? editors[0]->learning_preferences : NULL;
+}
 static const char *activations[] = { "automatic", "requireContextMatch", "manual", NULL };
 static const char *confidences[] = { "high", "medium", "low", NULL };
 static gboolean filter(GtkListBoxRow *row, gpointer data);
@@ -473,6 +477,10 @@ GtkWidget *jsti_vocabulary_page_new(int kind) {
         : kind == 3 ? "Review stored candidates. Optional session-consented AT-SPI observation is not acknowledged insertion."
         : "Your Read aloud dictionary. Deepgram uses text replacements, not IPA phoneme tags.", NULL, NULL);
     gtk_box_append(GTK_BOX(column), hero);
+    if (kind == 0) {
+        e->learning_preferences = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+        gtk_box_append(GTK_BOX(column), e->learning_preferences);
+    }
     e->search = gtk_search_entry_new();
     gtk_widget_set_tooltip_text(e->search, "Search saved entries");
     g_signal_connect(e->search, "search-changed", G_CALLBACK(search_changed), e);
@@ -583,7 +591,7 @@ GtkWidget *jsti_vocabulary_page_new(int kind) {
         gtk_box_append(GTK_BOX(column), button(e, "Review stored _candidates", "candidates"));
         label = gtk_label_new("Observational learning is off until you explicitly allow it for this session. "
             "App-origin changes can also be learned. Only supported AT-SPI fields qualify; paste never does. "
-            "Enable learning in Preferences first. Accessibility availability depends on the desktop and toolkit, "
+            "Enable and apply Correction learning above first. Accessibility availability depends on the desktop and toolkit, "
             "including on Wayland; no OS accessibility setting is changed.");
         gtk_label_set_wrap(GTK_LABEL(label), TRUE); gtk_box_append(GTK_BOX(column), label);
         gtk_box_append(GTK_BOX(column), button(e, "_Allow observational learning...", "allowObservationalLearning"));

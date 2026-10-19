@@ -136,7 +136,7 @@ final class DesktopHostElevenLabsVoiceTests: XCTestCase {
         XCTAssertEqual(request.url?.path, "/v1/text-to-dialogue")
         XCTAssertEqual(request.value(forHTTPHeaderField: "xi-api-key"), "synthetic-eleven")
         let body = try XCTUnwrap(JSONSerialization.jsonObject(
-            with: try XCTUnwrap(request.httpBody)) as? [String: Any])
+            with: StubURLProtocol.body(of: request)) as? [String: Any])
         XCTAssertEqual(body["model_id"] as? String, ElevenLabsTTSModels.elevenV4.id)
         let inputs = try XCTUnwrap(body["inputs"] as? [[String: String]])
         XCTAssertEqual(inputs, [["text": source.text, "voice_id": ElevenLabsTTSCatalog.voices[0].id]])

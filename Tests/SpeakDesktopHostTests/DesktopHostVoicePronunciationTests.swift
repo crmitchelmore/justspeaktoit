@@ -158,7 +158,7 @@ final class DesktopHostVoicePronunciationTests: XCTestCase {
         await pending?.value
         let request = try XCTUnwrap(StubURLProtocol.recordedRequests.first)
         let body = try XCTUnwrap(JSONSerialization.jsonObject(
-            with: try XCTUnwrap(request.httpBody)) as? [String: Any])
+            with: StubURLProtocol.body(of: request)) as? [String: Any])
         XCTAssertEqual(body["input"] as? String, "Token Token")
         XCTAssertEqual(body["model"] as? String, OpenAITTSModel.mini.rawValue)
         XCTAssertEqual(StubURLProtocol.recordedRequests.count, 1)

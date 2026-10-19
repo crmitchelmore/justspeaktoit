@@ -46,10 +46,14 @@ final class SonioxDesktopContractTests: DeepgramSpeechStubTestCase {
             let actual = try XCTUnwrap(StubURLProtocol.recordedRequests.last)
             XCTAssertEqual(actual.url, region.speakEndpoint)
             XCTAssertEqual(actual.httpMethod, canonical.httpMethod)
-            XCTAssertEqual(StubURLProtocol.body(of: actual), canonical.httpBody)
+            let body = StubURLProtocol.body(of: actual)
+            XCTAssertEqual(
+                try JSONDecoder().decode([String: AnyCodable].self, from: body),
+                try JSONDecoder().decode([String: AnyCodable].self, from: XCTUnwrap(canonical.httpBody))
+            )
             XCTAssertEqual(actual.value(forHTTPHeaderField: "Authorization"), "Bearer synthetic-key")
             XCTAssertFalse(try XCTUnwrap(actual.url?.absoluteString).contains("synthetic-key"))
-            let encodedBody = try XCTUnwrap(String(bytes: StubURLProtocol.body(of: actual), encoding: .utf8))
+            let encodedBody = try XCTUnwrap(String(bytes: body, encoding: .utf8))
             XCTAssertFalse(encodedBody.contains("synthetic-key"))
             let listing = try SonioxTTSAPI.voiceListRequest(
                 apiKey: "synthetic-key", region: region, cursor: "synthetic + / cursor")

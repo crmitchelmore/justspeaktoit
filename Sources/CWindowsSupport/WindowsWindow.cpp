@@ -44,6 +44,13 @@ void jsti_hotkey_stop(HWND window);
 bool jsti_hotkey_message(HWND window, UINT message, WPARAM wparam);
 void jsti_show_hotkey_settings(HWND owner);
 bool jsti_hotkey_self_test(HWND owner, int (*observe)(void *), void *context, std::string &error);
+bool jsti_action_shortcuts_available();
+bool jsti_action_shortcuts_start(HWND owner, std::string &failure);
+void jsti_action_shortcuts_stop();
+void jsti_action_shortcuts_request_refresh();
+bool jsti_action_shortcut_key_message(HWND window, const MSG &message);
+void jsti_show_action_shortcuts(HWND owner);
+bool jsti_action_shortcuts_self_test(HWND owner, std::string &error);
 bool jsti_voice_output_available();
 void jsti_show_voice_settings(HWND owner);
 bool jsti_voice_settings_self_test(HWND owner, std::string &error);
@@ -150,6 +157,8 @@ constexpr int playbackTimeID = 162;
 constexpr int textOutputID = 170;
 // Opens the native Shortcut dialog directly; it emits no window event.
 constexpr int shortcutID = 171;
+// Opens the native Action shortcuts dialog (WindowsActionShortcuts.cpp).
+constexpr int actionShortcutsID = 478;
 constexpr int transcriptLabelID = 92;
 // Read aloud emits an event; Voice… opens the native Voice output dialog.
 constexpr int readAloudID = 172;
@@ -779,7 +788,7 @@ unsigned pagesOf(int identifier) {
     case correctionsID: return page(correctionsPage);
     case pronunciationID: return page(pronunciationPage);
     case comparisonID: return page(transcriptionPage);
-    case shortcutValueID: case shortcutID: return page(keyboardPage);
+    case shortcutValueID: case shortcutID: case actionShortcutsID: return page(keyboardPage);
     case cloudSyncID: return page(cloudSyncPage);
     case githubID: case issueID: case privacyID: return page(aboutPage);
     default: return page(transcriptionPage);
@@ -1230,10 +1239,11 @@ void layoutSettings(HWND window, const RECT &content) {
     case keyboardPage: {
         const int y = layoutSettingsCard(window, top, content, 0xE765, L"Shortcut",
             L"The shortcut works while another app is in front. Hold, double-tap or press to toggle, as you choose.",
-            row + scale(window, 40));
+            2 * row + scale(window, 52));
         place(window, shortcutValueID, RECT{left, y, right, y + scale(window, 28)});
         place(window, shortcutID, box(left, y + scale(window, 40), scale(window, 200), row));
         place(window, configurationID, box(left + scale(window, 212), y + scale(window, 40), scale(window, 220), row));
+        place(window, actionShortcutsID, box(left, y + scale(window, 52) + row, scale(window, 200), row));
         break;
     }
     case cloudSyncPage: {
@@ -1895,6 +1905,7 @@ bool createControls(HWND window) {
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP, modeID) &&
         add(L"STATIC", L"", 0, shortcutValueID) &&
         add(L"BUTTON", L"Change &keyboard shortcut…", BS_PUSHBUTTON | WS_TABSTOP, shortcutID) &&
+        add(L"BUTTON", L"&Action shortcuts…", BS_PUSHBUTTON | WS_TABSTOP, actionShortcutsID) &&
         add(L"STATIC", L"&Transcription model", 0, 90) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, modelID) &&
         add(L"BUTTON", L"Configure &post-processing…", BS_PUSHBUTTON | WS_TABSTOP, processingID) &&
@@ -1964,6 +1975,7 @@ bool createControls(HWND window) {
     EnableWindow(GetDlgItem(window, processingID), jsti_postprocessing_available());
     EnableWindow(GetDlgItem(window, textOutputID), jsti_text_output_available());
     EnableWindow(GetDlgItem(window, shortcutID), jsti_hotkey_available());
+    EnableWindow(GetDlgItem(window, actionShortcutsID), jsti_action_shortcuts_available());
     std::wstring modelStatus;
     bool refreshing;
     {
@@ -2173,6 +2185,7 @@ void applyUpdate(HWND window) {
     EnableWindow(GetDlgItem(window, processingID), recording == 0 && jsti_postprocessing_available());
     EnableWindow(GetDlgItem(window, textOutputID), recording == 0 && jsti_text_output_available());
     EnableWindow(GetDlgItem(window, shortcutID), recording == 0 && jsti_hotkey_available());
+    EnableWindow(GetDlgItem(window, actionShortcutsID), recording == 0 && jsti_action_shortcuts_available());
     updateSettingsButtons(window, recording);
     {
         // The shortcut can change through its dialog; avoid repainting an unchanged label.
@@ -2747,6 +2760,11 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
                 refreshSetup(window);
             }
             return 0;
+        case actionShortcutsID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, actionShortcutsID) && IsWindowEnabled(window)) {
+                jsti_show_action_shortcuts(window);
+            }
+            return 0;
         case retryID: emitHistory(window, JSTI_EVENT_HISTORY_RETRY); return 0;
         case exportID:
             if (IsWindowEnabled(GetDlgItem(window, exportID))) emitHistory(window, JSTI_EVENT_HISTORY_EXPORT);
@@ -2969,6 +2987,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         jsti::tray::remove();
         backdrop.release();
         jsti_hotkey_stop(window);
+        jsti_action_shortcuts_stop();
         {
             std::lock_guard<std::mutex> lock(state.mutex);
             state.window = nullptr; state.posted = false; state.audioCleanupToken.clear(); state.migrationReport.clear();
@@ -3102,6 +3121,32 @@ void jsti_window_hotkey_event(HWND window, int event) {
     }
     case JSTI_EVENT_HOTKEY_UP:
     case JSTI_EVENT_HOTKEY_DEADLINE: emit(window, event); break;
+    default: break;
+    }
+}
+
+// Action shortcuts from WindowsActionShortcuts.cpp, on the UI thread. Each runs
+// exactly what its button or sidebar row does, and only while that is enabled.
+void jsti_window_action_command(HWND window, int run, const char *page) {
+    if (!IsWindow(window) || !IsWindowEnabled(window)) return;
+    switch (run) {
+    case JSTI_ACTION_RUN_RECORD: jsti_window_hotkey_event(window, JSTI_EVENT_TOGGLE_RECORDING); break;
+    case JSTI_ACTION_RUN_PAGE:
+        for (int index = 0; page && index < pageCount; ++index) {
+            HWND row = GetDlgItem(window, navBaseID + index);
+            if (std::strcmp(pageInfo[index].name, page) != 0) continue;
+            if (IsWindowEnabled(row) && IsWindowVisible(row)) showPage(window, index);
+            break;
+        }
+        break;
+    case JSTI_ACTION_RUN_PLAY_PAUSE:
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(playPauseID, BN_CLICKED),
+                     reinterpret_cast<LPARAM>(GetDlgItem(window, playPauseID)));
+        break;
+    case JSTI_ACTION_RUN_STOP_SPEECH:
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(stopPlaybackID, BN_CLICKED),
+                     reinterpret_cast<LPARAM>(GetDlgItem(window, stopPlaybackID)));
+        break;
     default: break;
     }
 }
@@ -3348,11 +3393,15 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
         emit(window, JSTI_EVENT_READY);
         std::string shortcutFailure;
         if (IsWindow(window) && !jsti_hotkey_start(window, shortcutFailure)) showFailure(window, shortcutFailure);
+        std::string actionShortcutFailure;
+        if (IsWindow(window) && !jsti_action_shortcuts_start(window, actionShortcutFailure))
+            showFailure(window, actionShortcutFailure);
         if (IsWindow(window)) applySidebarBindings(window);
         MSG message{};
         BOOL result;
         while ((result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
             if (sidebarKeyMessage(window, message)) continue;
+            if (jsti_action_shortcut_key_message(window, message)) continue;
             if (!jsti_history_filters_message(&message) && !IsDialogMessageW(window, &message)) {
                 TranslateMessage(&message); DispatchMessageW(&message);
             }
@@ -3672,10 +3721,15 @@ int jsti_window_show_page(int page) {
 }
 
 int jsti_window_set_sidebar_shortcuts(const JSTISidebarShortcut *bindings, size_t count, int showHints) {
+    int result = -1;
     try {
         std::lock_guard<std::mutex> lock(state.mutex);
-        return configureSidebarShortcuts(state.sidebarDelivery, state.window, bindings, count, showHints);
+        result = configureSidebarShortcuts(state.sidebarDelivery, state.window, bindings, count, showHints);
     } catch (const std::exception &) { return -1; }
+    // The host sends these after every configuration change, including imports,
+    // so action shortcuts are read again with them.
+    if (result == 0) jsti_action_shortcuts_request_refresh();
+    return result;
 }
 
 int jsti_window_set_visual_density(JSTIVisualDensity density) {
@@ -4897,7 +4951,8 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             jsti_history_filters_self_test(window, failure) &&
             jsti_vocabulary_self_test(window, failure) &&
             jsti_text_output_settings_self_test(window, textOutputID, setRecording, recordingBlocked, &observed, failure) &&
-            jsti_hotkey_self_test(window, observe, &observed, failure) && jsti_voice_settings_self_test(window, failure) &&
+            jsti_hotkey_self_test(window, observe, &observed, failure) &&
+            jsti_action_shortcuts_self_test(window, failure) && jsti_voice_settings_self_test(window, failure) &&
             jsti_voice_sources_self_test(window, failure) && jsti_voice_credentials_self_test(window, failure) &&
             jsti_local_models_self_test(window, failure) && jsti_cloud_sync_settings_self_test(window, failure) &&
             jsti_azure_resource_settings_self_test(window, failure) && jsti_configuration_self_test(window, failure)

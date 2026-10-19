@@ -2,6 +2,7 @@
 #include "WindowsSupportInternal.hpp"
 #include <algorithm>
 #include <commdlg.h>
+#include <cstring>
 #include <mutex>
 #include <sstream>
 #include <vector>
@@ -14,6 +15,7 @@ constexpr int previewStartID = 806, previewStopID = 807;
 constexpr size_t maximumConfigurationFields = 64;
 static_assert(maximumConfigurationFields <= labelBase - fieldBase);
 constexpr UINT refreshTitleMessage = WM_APP + 85;
+constexpr UINT refreshSnapshotMessage = WM_APP + 86;
 struct Field {
     std::wstring title, value, group;
     bool boolean = false;
@@ -27,6 +29,7 @@ struct Configuration {
     std::vector<std::wstring> recovered;
     JSTIConfigurationCallback callback = nullptr;
     void *context = nullptr;
+    std::string revision;
 };
 Configuration configuration;
 std::mutex configurationMutex;
@@ -38,10 +41,15 @@ struct Dialog {
     std::vector<std::wstring> groups;
     std::wstring group = L"General";
     int scrollOffset = 0;
+    bool pending = false;
 };
 int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
 
 void updateDependencies(HWND window, const Dialog &dialog) {
+    if (dialog.pending) {
+        for (HWND control : dialog.controls) EnableWindow(control, GetDlgCtrlID(control) == IDCANCEL);
+        return;
+    }
     for (size_t i = 0; i < dialog.config.fields.size(); ++i) {
         const int enabling = dialog.config.fields[i].enabledByField;
         const int availability = dialog.config.fields[i].availability;
@@ -59,6 +67,15 @@ std::wstring text(HWND window, int id) {
     std::wstring value(static_cast<size_t>(length) + 1, 0);
     value.resize(static_cast<size_t>(GetWindowTextW(control, value.data(), length + 1)));
     return value;
+}
+
+bool acknowledge(const Configuration &config) {
+    if (config.revision.empty()) return true;
+    const char *value = config.revision.c_str();
+    char error[1024]{};
+    if (config.callback(6, &value, 1, config.context, error, sizeof(error)) == 0) return true;
+    jsti_window_update(error[0] ? error : "Could not acknowledge the preferences view.", nullptr, -1);
+    return false;
 }
 
 void layout(HWND window, Dialog &dialog) {
@@ -246,6 +263,8 @@ void apply(HWND window, Dialog &dialog, int action) {
         }
         entries.push_back(jsti::utf8(path));
     }
+    if (!dialog.config.revision.empty() && (action == 0 || action == 3 || action == 4 || action == 5))
+        entries.push_back(dialog.config.revision);
     std::vector<const char *> borrowed;
     for (const auto &entry : entries) borrowed.push_back(entry.c_str());
     char error[1024] = {};
@@ -257,6 +276,10 @@ void apply(HWND window, Dialog &dialog, int action) {
     }
     if (action == 4 || action == 5) {
         SetDlgItemTextW(window, problemID, L"Preview request queued. Progress and errors appear on the main window.");
+        if (!dialog.config.revision.empty()) {
+            dialog.pending = true;
+            updateDependencies(window, dialog);
+        }
     } else DestroyWindow(window);
 }
 
@@ -330,6 +353,19 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         if (LOWORD(wparam) == previewStopID) { apply(window, *dialog, 5); return 0; }
         break;
     case WM_CLOSE: DestroyWindow(window); return 0;
+    case refreshSnapshotMessage: {
+        Configuration updated;
+        { std::lock_guard<std::mutex> lock(configurationMutex); updated = configuration; }
+        for (HWND control : dialog->controls) DestroyWindow(control);
+        dialog->controls.clear();
+        dialog->groups.clear();
+        if (dialog->font) DeleteObject(dialog->font);
+        dialog->font = nullptr;
+        dialog->pending = false;
+        dialog->config = std::move(updated);
+        if (!controls(window, *dialog)) { DestroyWindow(window); return 0; }
+        return acknowledge(dialog->config) ? 1 : 0;
+    }
     case refreshTitleMessage: {
         const size_t index = static_cast<size_t>(wparam);
         std::wstring title;
@@ -407,13 +443,17 @@ void jsti_show_configuration(HWND owner, const wchar_t *group) {
     else if (result < 0) jsti_window_update(jsti::systemError("Reading configuration messages").c_str(), nullptr, -1);
 }
 
-int jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t count,
+static int setConfiguration(const JSTIConfigurationField *fields, size_t count,
                                   const char *const *recovered_keywords, size_t recovered_count,
-                                  JSTIConfigurationCallback callback, void *context) {
+                                  JSTIConfigurationCallback callback, void *context, const char *revision) {
     if (!fields || !count || count > maximumConfigurationFields || !callback || recovered_count > 1000 ||
         (recovered_count && !recovered_keywords)) return -1;
     Configuration updated;
     try {
+        if (revision) {
+            if (!revision[0] || std::strlen(revision) > 64) return -1;
+            updated.revision = revision;
+        }
         for (size_t i = 0; i < count; ++i) {
             Field field;
             if (!jsti::wide(fields[i].title, field.title) || !jsti::wide(fields[i].value, field.value) ||
@@ -455,10 +495,32 @@ int jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t c
         }
         updated.callback = callback;
         updated.context = context;
-        std::lock_guard<std::mutex> lock(configurationMutex);
-        configuration = std::move(updated);
+        HWND window;
+        {
+            std::lock_guard<std::mutex> lock(configurationMutex);
+            configuration = updated;
+            window = activeConfiguration;
+        }
+        if (revision) {
+            if (window && IsWindow(window)) {
+                DWORD_PTR rendered = 0;
+                if (!SendMessageTimeoutW(window, refreshSnapshotMessage, 0, 0,
+                    SMTO_BLOCK | SMTO_ABORTIFHUNG, 5000, &rendered) || rendered != 1) return -1;
+            } else if (!acknowledge(updated)) return -1;
+        }
         return 0;
     } catch (const std::exception &) { return -1; }
+}
+
+int jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t count,
+    const char *const *recovered, size_t recoveredCount, JSTIConfigurationCallback callback, void *context) {
+    return setConfiguration(fields, count, recovered, recoveredCount, callback, context, nullptr);
+}
+
+int jsti_window_set_configuration_revision(const JSTIConfigurationField *fields, size_t count,
+    const char *const *recovered, size_t recoveredCount, JSTIConfigurationCallback callback,
+    void *context, const char *revision) {
+    return revision ? setConfiguration(fields, count, recovered, recoveredCount, callback, context, revision) : -1;
 }
 
 void jsti_window_clear_configuration(void) {
@@ -522,14 +584,33 @@ static bool configurationTitleSelfTest(HWND owner, std::string &error) {
     SendMessageW(window, refreshTitleMessage, 0, 0);
     availabilityPreserved = availabilityPreserved && IsWindowEnabled(GetDlgItem(window, fieldBase)) &&
         text(window, fieldBase) == L"fr_FR";
-    DestroyWindow(window);
+    struct RevisionTest { int renders = 0, applies = 0; } revisionTest;
+    const auto revisionCallback = [](int action, const char *const *values, size_t count,
+        void *context, char *, size_t) -> int {
+        auto &test = *static_cast<RevisionTest *>(context);
+        const std::string revision = "12345678-1234-1234-1234-123456789abc";
+        if (action == 6 && count == 1 && std::string(values[0]) == revision) {
+            ++test.renders; return 0;
+        }
+        if (action == 0 && count == 2 && std::string(values[0]) == "Effective hints" &&
+            std::string(values[1]) == revision) { ++test.applies; return 0; }
+        return -1;
+    };
+    JSTIConfigurationField revised{};
+    revised.title = "AssemblyAI hints"; revised.value = "Effective hints"; revised.group = "Transcription";
+    const bool revisionRendered = jsti_window_set_configuration_revision(
+        &revised, 1, nullptr, 0, revisionCallback, &revisionTest, "12345678-1234-1234-1234-123456789abc") == 0 &&
+        text(window, fieldBase) == L"Effective hints" && revisionTest.renders == 1;
+    if (revisionRendered) SendMessageW(window, WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
+    const bool revisionApplied = !IsWindow(window) && revisionTest.applies == 1;
+    if (IsWindow(window)) DestroyWindow(window);
     {
         std::lock_guard<std::mutex> lock(configurationMutex);
         configuration = std::move(previous);
         activeConfiguration = previousWindow;
     }
-    if (!queued || !preserved || !refused || !availabilityPreserved) {
-        error = "Voice language label update replaced an unsaved value or accepted invalid metadata.";
+    if (!queued || !preserved || !refused || !availabilityPreserved || !revisionRendered || !revisionApplied) {
+        error = "Configuration labels, live snapshot replacement or emitted view revision failed.";
         return false;
     }
     return true;

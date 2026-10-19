@@ -1,6 +1,7 @@
 import Foundation
 import SpeakCore
 import SpeakDesktop
+import SpeakDesktopHost
 import CLinuxSupport
 
 extension LinuxWindow {
@@ -34,13 +35,13 @@ extension LinuxWindow {
     }
 
     static func configureConfiguration(_ holder: LinuxEventContext) async throws {
-        let snapshot = try await holder.controller.voiceConfigurationEditorSnapshot()
+        let snapshot = try await holder.controller.nativeConfigurationEditorSnapshot()
         let preferences = snapshot.preferences
         holder.gestures.configureTiming(
             hold: preferences.number("holdThreshold"), doubleTap: preferences.number("doubleTapWindow")
         )
         let strings = Strings()
-        let rows = zip(DesktopConfiguration.fields, preferences.entries).map { field, value in
+        let rows = zip(DesktopConfiguration.fields, snapshot.entries).map { field, value in
             JSTIConfigurationField(
                 title: strings.add(field.key == VoiceOutputLanguagePreference.key ? snapshot.languageTitle
                     : field.key == VoiceSynthesisPreference.quality.key.rawValue ? snapshot.qualityTitle : field.title),
@@ -58,10 +59,12 @@ extension LinuxWindow {
         let result = withExtendedLifetime(strings) {
             rows.withUnsafeBufferPointer { fields in
                 recovered.withUnsafeBufferPointer { recovery in
-                    jsti_window_set_configuration(
-                        fields.baseAddress, fields.count, recovery.baseAddress, recovery.count,
-                        linuxConfigurationEvent, Unmanaged.passUnretained(holder).toOpaque()
-                    )
+                    snapshot.id.withCString {
+                        jsti_window_set_configuration_revision(
+                            fields.baseAddress, fields.count, recovery.baseAddress, recovery.count,
+                            linuxConfigurationEvent, Unmanaged.passUnretained(holder).toOpaque(), $0
+                        )
+                    }
                 }
             }
         }
@@ -102,20 +105,22 @@ extension LinuxWindow {
     }
 
     static func performConfigurationAction(
-        _ action: Int32, values: [String], holder: LinuxEventContext
+        _ action: Int32, values: [String], holder: LinuxEventContext, editorID: String? = nil
     ) async throws {
         switch action {
-        case 0: try await holder.controller.saveConfiguration(values, intent: .apply)
+        case 0: try await holder.controller.saveConfiguration(values, intent: .apply, editorID: editorID)
         case 1: try await holder.controller.importConfiguration(path: values[0])
         case 2: try await holder.controller.exportConfiguration(path: values[0])
         case 3:
             guard let selected = values.last else {
                 throw DesktopConfigurationError.invalidField("Recovered keyword selection")
             }
-            try await holder.controller.recoverConfigurationKeywords(Array(values.dropLast()), selected: selected)
+            try await holder.controller.recoverConfigurationKeywords(
+                Array(values.dropLast()), selected: selected, editorID: editorID
+            )
         case 4, 5:
             try await holder.controller.previewRecordingFeedback(
-                action == 4 ? .start : .stop, configurationEntries: values
+                action == 4 ? .start : .stop, configurationEntries: values, editorID: editorID
             )
         default: throw DesktopConfigurationError.invalidField("Configuration action")
         }
@@ -134,26 +139,26 @@ func linuxConfigurationEvent(
 ) -> Int32 {
     guard let context, let entries else { return -1 }
     let holder = Unmanaged<LinuxEventContext>.fromOpaque(context).takeUnretainedValue()
-    let values = UnsafeBufferPointer(start: entries, count: count).map { $0.map(String.init(cString:)) ?? "" }
+    let received = UnsafeBufferPointer(start: entries, count: count).map { $0.map(String.init(cString:)) ?? "" }
     do {
-        if action == 0 || action == 4 || action == 5 {
-            try DesktopConfiguration.validateEntries(values)
-        } else if action == 3 {
-            guard values.count == DesktopConfiguration.fields.count + 1 else {
-                throw DesktopConfigurationError.invalidField("Recovered keyword selection")
-            }
-            try DesktopConfiguration.validateEntries(Array(values.dropLast()))
-        } else if
-            !(action == 1 || action == 2) || values.count != 1 {
-            throw DesktopConfigurationError.invalidField("Configuration action")
-        }
-        holder.enqueueSettings {
-            do {
-                try await LinuxWindow.performConfigurationAction(action, values: values, holder: holder)
-            } catch {
-                LinuxHostPlatform.update(error.localizedDescription)
-                do { try await LinuxWindow.configureConfiguration(holder) } catch {
+        switch try DesktopHostConfigurationEditorEvent(action: action, values: received) {
+        case .rendered(let id):
+            holder.enqueueSettings {
+                do { try await holder.controller.activateConfigurationEditorSnapshot(id) } catch {
                     LinuxHostPlatform.update(error.localizedDescription)
+                }
+            }
+        case .action(let action, let values, let editorID):
+            holder.enqueueSettings {
+                do {
+                    try await LinuxWindow.performConfigurationAction(
+                        action, values: values, holder: holder, editorID: editorID
+                    )
+                } catch {
+                    LinuxHostPlatform.update(error.localizedDescription)
+                    do { try await LinuxWindow.configureConfiguration(holder) } catch {
+                        LinuxHostPlatform.update(error.localizedDescription)
+                    }
                 }
             }
         }

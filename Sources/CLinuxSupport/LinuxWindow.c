@@ -174,6 +174,7 @@ static struct {
     GtkWidget *recovery_group;
     AdwComboRow *recovery_row;
     guint recovery_count;
+    gchar *revision;
     JSTIConfigurationCallback callback;
     void *context;
 } configuration;
@@ -1939,6 +1940,7 @@ int32_t jsti_window_run(
     g_clear_object(&read_aloud.favorite_names);
     configuration.callback = NULL;
     configuration.context = NULL;
+    g_clear_pointer(&configuration.revision, g_free);
     g_clear_pointer(&configuration.rows, g_ptr_array_unref);
     g_clear_pointer(&configuration.choices, g_ptr_array_unref);
     g_clear_pointer(&configuration.booleans, g_array_unref);
@@ -3050,6 +3052,7 @@ typedef struct ConfigurationUpdate {
     GArray *enabled_by_fields;
     JSTIConfigurationCallback callback;
     void *context;
+    gchar *revision;
 } ConfigurationUpdate;
 
 static void configuration_problem(const char *message) {
@@ -3104,6 +3107,8 @@ static void on_configuration_apply(GtkButton *button, gpointer data) {
         GtkStringList *model = GTK_STRING_LIST(adw_combo_row_get_model(configuration.recovery_row));
         g_ptr_array_add(values, g_strdup(gtk_string_list_get_string(model, selected)));
     }
+    if (configuration.revision != NULL)
+        g_ptr_array_add(values, g_strdup(configuration.revision));
     configuration_submit(action, (const char *const *)values->pdata, values->len);
     g_ptr_array_unref(values);
 }
@@ -3149,6 +3154,7 @@ static void configuration_update_free(gpointer data) {
     g_array_unref(update->overlay_settings);
     g_array_unref(update->hands_free_settings);
     g_array_unref(update->enabled_by_fields);
+    g_free(update->revision);
     g_free(update);
 }
 
@@ -3181,6 +3187,8 @@ static void configuration_apply(gpointer data) {
     ConfigurationUpdate *update = data;
     configuration.callback = update->callback;
     configuration.context = update->context;
+    g_free(configuration.revision);
+    configuration.revision = g_strdup(update->revision);
     if (configuration.rows == NULL) {
         configuration.rows = g_ptr_array_new();
         configuration.choices = g_ptr_array_ref(update->choices);
@@ -3289,6 +3297,10 @@ static void configuration_apply(gpointer data) {
     g_object_unref(recovered);
     configuration.recovery_count = update->recovered->len;
     gtk_widget_set_visible(configuration.recovery_group, configuration.recovery_count > 0);
+    if (configuration.revision != NULL) {
+        const char *values[] = {configuration.revision};
+        configuration_submit(6, values, 1);
+    }
 }
 
 static gboolean configuration_choices_valid(const char *choices, const char *value) {
@@ -3317,12 +3329,13 @@ static gboolean configuration_choices_valid(const char *choices, const char *val
     return valid && found;
 }
 
-int32_t jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t count,
+static int32_t set_configuration(const JSTIConfigurationField *fields, size_t count,
                                       const char *const *recovered_keywords, size_t recovered_count,
-                                      JSTIConfigurationCallback callback, void *context) {
+                                      JSTIConfigurationCallback callback, void *context, const char *revision) {
     if (fields == NULL || count == 0 || count > JSTI_MAXIMUM_CONFIGURATION_FIELDS ||
         callback == NULL || recovered_count > 1000 ||
-        (recovered_count > 0 && recovered_keywords == NULL)) return -1;
+        (recovered_count > 0 && recovered_keywords == NULL) ||
+        (revision != NULL && (revision[0] == '\0' || strlen(revision) > 64))) return -1;
     ConfigurationUpdate *update = g_new0(ConfigurationUpdate, 1);
     update->titles = g_ptr_array_new_with_free_func(g_free);
     update->values = g_ptr_array_new_with_free_func(g_free);
@@ -3335,6 +3348,7 @@ int32_t jsti_window_set_configuration(const JSTIConfigurationField *fields, size
     update->enabled_by_fields = g_array_new(FALSE, FALSE, sizeof(gint32));
     update->callback = callback;
     update->context = context;
+    update->revision = g_strdup(revision);
     for (size_t i = 0; i < recovered_count; ++i) {
         if (recovered_keywords[i] == NULL || !g_utf8_validate(recovered_keywords[i], -1, NULL) ||
             strlen(recovered_keywords[i]) > 65535) {
@@ -3381,6 +3395,17 @@ int32_t jsti_window_set_configuration(const JSTIConfigurationField *fields, size
         g_array_append_val(update->hands_free_settings, hands_free_setting);
     }
     return post(configuration_apply, update, configuration_update_free);
+}
+
+int32_t jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t count,
+    const char *const *recovered, size_t recovered_count, JSTIConfigurationCallback callback, void *context) {
+    return set_configuration(fields, count, recovered, recovered_count, callback, context, NULL);
+}
+
+int32_t jsti_window_set_configuration_revision(const JSTIConfigurationField *fields, size_t count,
+    const char *const *recovered, size_t recovered_count, JSTIConfigurationCallback callback,
+    void *context, const char *revision) {
+    return revision != NULL ? set_configuration(fields, count, recovered, recovered_count, callback, context, revision) : -1;
 }
 
 typedef struct {
@@ -3445,9 +3470,17 @@ static const char auto_clean_choices[] = "instant\tInstant\nlivePolish\tAuto-Cle
 
 typedef struct { guint index; guint calls; } AutoCleanConfigurationTest;
 
+static gboolean configuration_test_revision(const char *const *values, size_t *count) {
+    if (configuration.revision == NULL) return TRUE;
+    if (*count == 0 || g_strcmp0(values[*count - 1], configuration.revision) != 0) return FALSE;
+    --*count;
+    return TRUE;
+}
+
 static int32_t configuration_auto_clean_callback(
     int32_t action, const char *const *values, size_t count, void *context, char *error, size_t capacity
 ) {
+    if (!configuration_test_revision(values, &count)) return -1;
     (void)error; (void)capacity;
     AutoCleanConfigurationTest *test = context;
     const guint index = test->index;
@@ -3529,6 +3562,7 @@ static gboolean configuration_empty_choice_self_test(void) {
 
 static int32_t configuration_test_callback(int32_t action, const char *const *values, size_t count,
                                           void *context, char *error, size_t capacity) {
+    if (!configuration_test_revision(values, &count)) return -1;
     (void)error; (void)capacity;
     ConfigurationSelfTestContext *test_context = context;
     if (test_context->language_index >= count) return -1;
@@ -3561,6 +3595,7 @@ typedef struct { guint intent; guint approval; guint calls; gboolean approved; }
 static int32_t configuration_warm_approval_callback(
     int32_t action, const char *const *values, size_t count, void *context, char *error, size_t capacity
 ) {
+    if (!configuration_test_revision(values, &count)) return -1;
     (void)error; (void)capacity;
     WarmApprovalConfigurationTest *test = context;
     if (action != 0 || count != configuration.rows->len || test->intent >= count || test->approval >= count ||

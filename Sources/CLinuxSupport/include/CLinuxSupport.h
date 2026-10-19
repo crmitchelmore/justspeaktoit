@@ -115,6 +115,11 @@ typedef int32_t (*JSTIConfigurationCallback)(int32_t action, const char *const *
 int32_t jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t count,
                                       const char *const *recovered_keywords, size_t recovered_count,
                                       JSTIConfigurationCallback callback, void *context);
+/* Revision mode acknowledges rendered fields with action 6, then appends that
+ * revision to actions 0/3/4/5 so queued edits retain their actual view identity. */
+int32_t jsti_window_set_configuration_revision(const JSTIConfigurationField *fields, size_t count,
+    const char *const *recovered_keywords, size_t recovered_count,
+    JSTIConfigurationCallback callback, void *context, const char *revision);
 /* Queues a label-only update without replacing an unsaved entry value. */
 int32_t jsti_window_set_configuration_field_title(size_t index, const char *title);
 /* Queues route availability for a field with no enabling-field dependency. */

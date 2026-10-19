@@ -48,11 +48,22 @@ extension DesktopHostController {
     }
 
     package func saveConfiguration(_ entries: [String], intent: DesktopConfigurationSaveIntent) async throws {
+        try await saveConfiguration(entries, intent: intent, editorID: nil)
+    }
+
+    package func saveConfiguration(
+        _ entries: [String], intent: DesktopConfigurationSaveIntent, editorID: String?
+    ) async throws {
         guard !closed, !busy, recording == nil else {
             throw DesktopHostError(message: "Finish dictation before changing configuration.")
         }
         let previous = try configurationForNativeEditor()
-        let configuration = try await reconcilingPronunciationSelection(previous.applying(entries), from: previous)
+        let editor = try activeConfigurationEditor()
+        try requireConfigurationEditorID(editorID, editor: editor)
+        let canonical = try canonicalConfigurationEntries(entries, from: previous, editor: editor)
+        let configuration = try await reconcilingPronunciationSelection(
+            previous.applying(canonical), from: previous, editor: editor
+        )
         try await persistConfiguration(
             configuration, intent: intent, status: "Configuration saved. New recordings use these preferences."
         )
@@ -61,17 +72,32 @@ extension DesktopHostController {
     package func previewRecordingFeedback(
         _ sound: RecordingFeedbackSound, configurationEntries: [String]
     ) async throws {
-        try await saveConfiguration(configurationEntries, intent: .persistOnly)
+        try await previewRecordingFeedback(sound, configurationEntries: configurationEntries, editorID: nil)
+    }
+
+    package func previewRecordingFeedback(
+        _ sound: RecordingFeedbackSound, configurationEntries: [String], editorID: String?
+    ) async throws {
+        try await saveConfiguration(configurationEntries, intent: .persistOnly, editorID: editorID)
         try previewRecordingFeedback(sound)
     }
 
     package func recoverConfigurationKeywords(_ entries: [String], selected: String) async throws {
+        try await recoverConfigurationKeywords(entries, selected: selected, editorID: nil)
+    }
+
+    package func recoverConfigurationKeywords(
+        _ entries: [String], selected: String, editorID: String?
+    ) async throws {
         guard !closed, !busy, recording == nil else {
             throw DesktopHostError(message: "Finish dictation before recovering keywords.")
         }
         let previous = try configurationForNativeEditor()
+        let editor = try activeConfigurationEditor()
+        try requireConfigurationEditorID(editorID, editor: editor)
+        let canonical = try canonicalConfigurationEntries(entries, from: previous, editor: editor)
         let recovered = try await reconcilingPronunciationSelection(
-            previous.applying(entries).recoveringKeywords(selected), from: previous
+            previous.applying(canonical).recoveringKeywords(selected), from: previous, editor: editor
         )
         try await persistConfiguration(
             recovered, intent: .persistOnly, status: "Recovered keywords restored. New recordings use this shared list."
@@ -79,7 +105,8 @@ extension DesktopHostController {
     }
 
     private func reconcilingPronunciationSelection(
-        _ configuration: DesktopConfiguration, from previous: DesktopConfiguration
+        _ configuration: DesktopConfiguration, from previous: DesktopConfiguration,
+        editor: DesktopHostConfigurationEditorBasis?
     ) async throws -> DesktopConfiguration {
         guard DesktopHostModels.provider(for: settings.model)?.id == "assemblyai" else { return configuration }
         guard configuration.text("transcriptionKeywords") != previous.text("transcriptionKeywords")
@@ -88,6 +115,12 @@ extension DesktopHostController {
         let hints = try await recognitionVocabulary()
         guard !closed, !busy, recording == nil, settings.model == model, try configurationForNativeEditor() == previous else {
             throw DesktopHostError(message: "Preferences changed while loading pronunciation hints. Refresh and try again.")
+        }
+        if let editor {
+            try requireConfigurationEditorID(editor.id.uuidString, editor: activeConfigurationEditor())
+        }
+        if let displayed = editor?.pronunciationWords, hints.pronunciationWords != displayed {
+            throw DesktopHostError(message: "Pronunciation hints changed since this editor opened. Reopen preferences.")
         }
         return try configuration.recordingPronunciationKeytermSelection(from: previous, modern: hints.pronunciationWords)
     }

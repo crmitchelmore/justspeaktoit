@@ -189,6 +189,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var observationalCorrectionConsent = false
     var correctionLearningNotice: String?
     var vocabularyLoad: Task<DesktopVocabulary, Error>?
+    var configurationEditor: DesktopHostConfigurationEditorState?
     var connectionWarmApproved = false
     var connectionWarmGeneration = UUID()
     var connectionWarmTracker = LiveStreamWarmTracker()
@@ -209,6 +210,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package var closed = false {
         didSet {
             if closed {
+                configurationEditor = nil
                 connectionWarmApproved = false
                 invalidateConnectionPreWarming(resetCapture: true)
                 revokeCorrectionLearningConsent()

@@ -82,6 +82,17 @@ remote finished-transcript cleanup can stream previews; local cleanup cannot.
 
 ## Modern pronunciation recognition capture (source only)
 
+At `76bd3d78`, completed portable Linux (2,918 tests; 33 skipped) and macOS
+(2,822; 55 skipped) compiled and executed this capture source using synthetic
+merge `dafed1f538699bddca1cf8769074f8750e6ee297` into `0b4ffd7`. Each reported
+the same two held legacy-event profile equality failures: expected profiles
+still had unresolved pronunciation options, while admission now freezes words.
+The revised tests derive that frozen selection from a pre-delivery vocabulary
+snapshot and retain whole-profile comparisons plus every original consent,
+credential, cleanup, preview and output assertion. These source repairs are
+**NOT_RUN** locally; neither failed job is labelled successful. This evidence
+does not qualify the newer native editor projection below.
+
 Desktop AssemblyAI recognition now combines explicit terms, literal modern
 dictionary words and sorted legacy dictionary keys through the shared Mac
 policy. Regex entries, spoken pronunciation text and TTS replacements are not
@@ -112,8 +123,48 @@ Authored checks cover the real injected AssemblyAI query, captured ordering,
 empty snapshots, old initializer arity, literal/regex/replacement separation,
 reload failure, normal recording/import/retry, owned input, native clear,
 transfer/restart and read-only automation. New product execution is **NOT_RUN**
-locally. Native keyword auto-population, legacy-dictionary editing and actual
-provider/native/installed acceptance remain gaps; this is not full parity.
+locally. Legacy-dictionary editing and actual provider/native/installed
+acceptance remain gaps; this is not full parity.
+
+### Native pronunciation hint presentation (source only)
+
+Windows and Linux now use the same Host native editor snapshot to populate the
+existing AssemblyAI field with effective explicit, modern and legacy terms when
+AssemblyAI is selected. The shared keywords field remains explicit-only.
+Loading this projection never writes settings or reads provider credentials.
+The older raw configuration/Voice snapshot APIs remain unchanged.
+
+The display snapshot is separate from persisted preferences. Both native
+adapters acknowledge its view identifier through the native callback, after
+Win32 snapshot registration/active control replacement or GTK's queued row
+application, not when the GTK update is merely queued. Apply, preview
+and recovered-keyword actions refuse an unrendered or superseded snapshot, or
+one whose model/preferences have changed. Every edit carries its actual native
+view identifier; equal-looking fields cannot authorize a queued older view.
+The old native registration APIs retain their original callback shape.
+Win32 save-and-preview blocks further edits until active controls are replaced
+and acknowledged; its language-only updates still preserve unsaved values.
+An unchanged projected AssemblyAI field is restored to its canonical explicit
+value before reconciliation, so
+unrelated Apply/persist-only cannot leak automatic seeds into shared keywords,
+exported settings or suppression. Deliberate clear/reselection still follows
+the shared suppression policy. Dictionary changes preserve unedited fields;
+a keyword edit from a changed dictionary snapshot requires reopening settings.
+Failed writes preserve both settings and the retryable editor authority.
+If the combined projection exceeds the existing 65,535-byte field limit or
+contains a NUL that native controls cannot represent, the editor explicitly
+reports that it is showing saved keywords only. Raw values and automatic
+recognition policy remain intact; they are never silently truncated.
+
+Nine authored Host methods cover strict shared native event decoding, view
+identity, display-only behavior, credential isolation,
+Apply/persist-only and restart, clear/recovered selection, unrendered and
+superseded snapshots, stale preferences/model/dictionary, non-AssemblyAI
+presentation, native display limits and refused-write retry. The Win32 fixture
+also checks active control replacement, acknowledgement and stamped Apply;
+GTK fixtures assert the actual rendered revision before checking their unchanged
+field and recovery payloads. New native/Host checks are **NOT_RUN** locally;
+native rendering and installed acceptance are still unqualified.
 
 ## Legacy pronunciation recognition hints (source only)
 

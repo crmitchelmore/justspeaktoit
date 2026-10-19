@@ -1,5 +1,6 @@
 import Foundation
 import SpeakCore
+import SpeakDesktopHost
 import CWindowsSupport
 
 extension WindowsNative {
@@ -39,13 +40,13 @@ extension WindowsNative {
     }
 
     static func configureConfiguration(_ holder: WindowsEventContext) async throws {
-        let snapshot = try await holder.controller.voiceConfigurationEditorSnapshot()
+        let snapshot = try await holder.controller.nativeConfigurationEditorSnapshot()
         let preferences = snapshot.preferences
         holder.hotKeys.configureTiming(
             hold: preferences.number("holdThreshold"), doubleTap: preferences.number("doubleTapWindow")
         )
         let strings = ConfigurationStrings()
-        let rows = zip(DesktopConfiguration.fields, preferences.entries).map { field, value in
+        let rows = zip(DesktopConfiguration.fields, snapshot.entries).map { field, value in
             JSTIConfigurationField(
                 title: strings.add(field.key == VoiceOutputLanguagePreference.key ? snapshot.languageTitle
                     : field.key == VoiceSynthesisPreference.quality.key.rawValue ? snapshot.qualityTitle : field.title),
@@ -63,10 +64,12 @@ extension WindowsNative {
         let result = withExtendedLifetime(strings) {
             rows.withUnsafeBufferPointer { fields in
                 recovered.withUnsafeBufferPointer { recovery in
-                    jsti_window_set_configuration(
-                        fields.baseAddress, fields.count, recovery.baseAddress, recovery.count,
-                        windowsConfigurationEvent, Unmanaged.passUnretained(holder).toOpaque()
-                    )
+                    snapshot.id.withCString {
+                        jsti_window_set_configuration_revision(
+                            fields.baseAddress, fields.count, recovery.baseAddress, recovery.count,
+                            windowsConfigurationEvent, Unmanaged.passUnretained(holder).toOpaque(), $0
+                        )
+                    }
                 }
             }
         }
@@ -109,20 +112,22 @@ extension WindowsNative {
     }
 
     static func performConfigurationAction(
-        _ action: Int32, values: [String], holder: WindowsEventContext
+        _ action: Int32, values: [String], holder: WindowsEventContext, editorID: String? = nil
     ) async throws {
         switch action {
-        case 0: try await holder.controller.saveConfiguration(values, intent: .apply)
+        case 0: try await holder.controller.saveConfiguration(values, intent: .apply, editorID: editorID)
         case 1: try await holder.controller.importConfiguration(path: values[0])
         case 2: try await holder.controller.exportConfiguration(path: values[0])
         case 3:
             guard let selected = values.last else {
                 throw DesktopConfigurationError.invalidField("Recovered keyword selection")
             }
-            try await holder.controller.recoverConfigurationKeywords(Array(values.dropLast()), selected: selected)
+            try await holder.controller.recoverConfigurationKeywords(
+                Array(values.dropLast()), selected: selected, editorID: editorID
+            )
         case 4, 5:
             try await holder.controller.previewRecordingFeedback(
-                action == 4 ? .start : .stop, configurationEntries: values
+                action == 4 ? .start : .stop, configurationEntries: values, editorID: editorID
             )
         default: throw DesktopConfigurationError.invalidField("Configuration action")
         }
@@ -148,26 +153,26 @@ func windowsConfigurationEvent(
 ) -> Int32 {
     guard let context, let entries else { return -1 }
     let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
-    let values = UnsafeBufferPointer(start: entries, count: count).map { $0.map(String.init(cString:)) ?? "" }
+    let received = UnsafeBufferPointer(start: entries, count: count).map { $0.map(String.init(cString:)) ?? "" }
     do {
-        if action == 0 || action == 4 || action == 5 {
-            try DesktopConfiguration.validateEntries(values)
-        } else if action == 3 {
-            guard values.count == DesktopConfiguration.fields.count + 1 else {
-                throw DesktopConfigurationError.invalidField("Recovered keyword selection")
-            }
-            try DesktopConfiguration.validateEntries(Array(values.dropLast()))
-        } else if
-            !(action == 1 || action == 2) || values.count != 1 {
-            throw DesktopConfigurationError.invalidField("Configuration action")
-        }
-        holder.enqueueSettings {
-            do {
-                try await WindowsNative.performConfigurationAction(action, values: values, holder: holder)
-            } catch {
-                WindowsNative.update(error.localizedDescription)
-                do { try await WindowsNative.configureConfiguration(holder) } catch {
+        switch try DesktopHostConfigurationEditorEvent(action: action, values: received) {
+        case .rendered(let id):
+            holder.enqueueSettings {
+                do { try await holder.controller.activateConfigurationEditorSnapshot(id) } catch {
                     WindowsNative.update(error.localizedDescription)
+                }
+            }
+        case .action(let action, let values, let editorID):
+            holder.enqueueSettings {
+                do {
+                    try await WindowsNative.performConfigurationAction(
+                        action, values: values, holder: holder, editorID: editorID
+                    )
+                } catch {
+                    WindowsNative.update(error.localizedDescription)
+                    do { try await WindowsNative.configureConfiguration(holder) } catch {
+                        WindowsNative.update(error.localizedDescription)
+                    }
                 }
             }
         }

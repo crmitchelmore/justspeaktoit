@@ -82,7 +82,7 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable { // swiftlint:
               title: "Shared keywords (comma-separated; supported providers only)",
               group: "Transcription", kind: .text, defaultValue: AnyCodable(.string(""))),
         .init(key: ApplicationPreferenceKey.assemblyAIKeyterms.rawValue,
-              title: "AssemblyAI keyterms (same shared keyword list)",
+              title: "AssemblyAI keyterms (includes pronunciation hints when selected)",
               group: "Transcription", kind: .text, defaultValue: AnyCodable(.string(""))),
         .init(key: ApplicationPreferenceKey.liveStopGracePeriod.rawValue,
               title: "Live stop grace (seconds; AssemblyAI and Cartesia)",

@@ -1,6 +1,8 @@
 import Foundation
 
 public struct DesktopAboutInformation: Equatable, Sendable {
+    private static let maximumMetadataBytes = 4 * 1024 * 1024
+
     public enum Platform: String, Sendable {
         case windows = "Windows", linux = "Linux"
     }
@@ -60,10 +62,12 @@ public struct DesktopAboutInformation: Equatable, Sendable {
             guard FileManager.default.fileExists(atPath: file.path) else { continue }
             do {
                 let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
-                guard let size = attributes[.size] as? NSNumber, size.intValue <= 4 * 1024 * 1024 else {
+                guard let size = attributes[.size] as? NSNumber, size.intValue <= maximumMetadataBytes else {
                     throw CocoaError(.fileReadTooLarge)
                 }
-                let metadata = try decodeMetadata(Data(contentsOf: file))
+                let handle = try FileHandle(forReadingFrom: file)
+                defer { try? handle.close() }
+                let metadata = try decodeMetadata(readMetadata(handle))
                 return Self(
                     version: version, build: build, commit: commit ?? metadata.commit,
                     configuration: metadata.configuration ?? configuration
@@ -78,6 +82,16 @@ public struct DesktopAboutInformation: Equatable, Sendable {
         return Self(version: version, build: build, commit: commit, configuration: configuration)
     }
 
+    static func readMetadata(_ file: FileHandle) throws -> Data {
+        var data = Data()
+        while let chunk = try file.read(upToCount: min(65_536, maximumMetadataBytes + 1 - data.count)),
+              !chunk.isEmpty {
+            data.append(chunk)
+            guard data.count <= maximumMetadataBytes else { throw CocoaError(.fileReadTooLarge) }
+        }
+        return data
+    }
+
     static func decodeMetadata(_ data: Data) throws -> (commit: String, configuration: String?) {
         struct Metadata: Decodable {
             let sourceCommit: String?
@@ -88,7 +102,7 @@ public struct DesktopAboutInformation: Equatable, Sendable {
                 let configuration: String?
             }
         }
-        guard data.count <= 4 * 1024 * 1024 else { throw CocoaError(.fileReadTooLarge) }
+        guard data.count <= maximumMetadataBytes else { throw CocoaError(.fileReadTooLarge) }
         let metadata = try JSONDecoder().decode(Metadata.self, from: data)
         guard let commit = commitToken(metadata.sourceCommit ?? metadata.application?.sourceCommit) else {
             throw CocoaError(.fileReadCorruptFile)

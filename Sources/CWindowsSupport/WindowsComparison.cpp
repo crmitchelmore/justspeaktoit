@@ -1,6 +1,7 @@
 #include "include/CWindowsSupport.h"
 #include "WindowsWindowChrome.hpp"
 #include <commdlg.h>
+#include <cderr.h>
 #include <mutex>
 #include <sstream>
 #include <vector>
@@ -17,12 +18,16 @@ constexpr int deleteID = 740;
 constexpr int syncID = 741, syncNowID = 742;
 constexpr int referenceID = 743, allID = 744, noneID = 745, referenceLabelID = 746;
 constexpr int exportScopeID = 747, exportLabelID = 748, copyJSONID = 749, copyMarkdownID = 750;
+constexpr int nextFileID = 751;
 struct Row { std::string id; std::wstring name; bool live = false, selected = false; };
 struct Presentation {
     std::string models, rounds, detail, selected;
     bool busy = false, recording = false, judgeable = false;
     bool syncEnabled = false, syncAvailable = false;
     std::string references, reference;
+    std::string batchRound;
+    int batchRemaining = 0;
+    bool canNext = false;
 };
 std::mutex mutex;
 Presentation pending;
@@ -80,7 +85,8 @@ void populateModels(HWND window, Dialog &dialog) {
         SendDlgItemMessageW(window, modelsID, LB_SETSEL, row.selected, dialog.visible.size() - 1);
     }
     SetDlgItemTextW(window, runID, live ? L"&Start microphone" : L"&Choose samples and run...");
-    EnableWindow(GetDlgItem(window, runID), !dialog.shown.busy && dialog.visible.size() >= 2);
+    EnableWindow(GetDlgItem(window, runID),
+                 !dialog.shown.busy && dialog.shown.batchRound.empty() && dialog.visible.size() >= 2);
 }
 void selectionChanged(HWND window, Dialog &dialog) {
     std::string selected;
@@ -140,11 +146,14 @@ void present(HWND window, Dialog &dialog) {
     for (size_t i = 0; i < references.size(); ++i) if (references[i].id == next.reference)
         SendDlgItemMessageW(window, referenceID, CB_SETCURSEL, i, 0);
     EnableWindow(GetDlgItem(window, referenceID), !references.empty());
-    for (int id : {modelsID, modeID, languageID}) EnableWindow(GetDlgItem(window, id), !next.busy);
-    EnableWindow(GetDlgItem(window, runID), !next.busy && dialog.visible.size() >= 2);
-    for (int id : {allID, noneID}) EnableWindow(GetDlgItem(window, id), !next.busy);
+    const bool batch = !next.batchRound.empty();
+    for (int id : {modelsID, modeID, languageID}) EnableWindow(GetDlgItem(window, id), !next.busy && !batch);
+    EnableWindow(GetDlgItem(window, runID), !next.busy && !batch && dialog.visible.size() >= 2);
+    for (int id : {allID, noneID}) EnableWindow(GetDlgItem(window, id), !next.busy && !batch);
     EnableWindow(GetDlgItem(window, stopID), next.recording);
-    EnableWindow(GetDlgItem(window, cancelID), next.busy);
+    EnableWindow(GetDlgItem(window, cancelID), next.busy || batch);
+    ShowWindow(GetDlgItem(window, nextFileID), batch ? SW_SHOW : SW_HIDE);
+    EnableWindow(GetDlgItem(window, nextFileID), next.canNext && !next.busy && next.batchRemaining > 0);
     EnableWindow(GetDlgItem(window, judgeID), next.judgeable);
     EnableWindow(GetDlgItem(window, ranksID), next.judgeable);
     EnableWindow(GetDlgItem(window, playID), !next.busy && !dialog.rounds.empty());
@@ -190,6 +199,7 @@ void layout(HWND window, Dialog &dialog) {
     move(jsonID, 270, 592, 155, 30); move(markdownID, 435, 592, 175, 30);
     move(copyJSONID, 270, 632, 155, 30); move(copyMarkdownID, 435, 632, 175, 30);
     move(deleteID, 16, 585, 240, 32);
+    move(nextFileID, 16, 632, 240, 30);
     move(syncID, 16, 686, 420, 32); move(syncNowID, 450, 686, 160, 32);
     const HFONT font = jsti::chrome::font(jsti::chrome::Font::body, GetDpiForWindow(window));
     for (HWND control : dialog.controls) SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
@@ -207,11 +217,12 @@ void run(HWND window, Dialog &dialog) {
             if (count++) payload += "\t";
             payload += dialog.visible[i].id;
         }
-    if (count < 2 || count > 8) {
-        MessageBoxW(window, L"Select two to eight models (Ctrl+click or Shift+click).",
+    const bool live = SendDlgItemMessageW(window, modeID, CB_GETCURSEL, 0, 0) == 1;
+    if (count < 2 || (live && count > 8)) {
+        MessageBoxW(window, live ? L"Select two to eight Live models (Ctrl+click or Shift+click)."
+                                : L"Select at least two File models (Ctrl+click or Shift+click).",
                     L"Comparison models", MB_OK | MB_ICONWARNING); return;
     }
-    const bool live = SendDlgItemMessageW(window, modeID, CB_GETCURSEL, 0, 0) == 1;
     if (!live) {
         std::vector<wchar_t> files(131072, 0);
         OPENFILENAMEW picker{}; picker.lStructSize = sizeof(picker); picker.hwndOwner = window;
@@ -220,7 +231,10 @@ void run(HWND window, Dialog &dialog) {
         picker.lpstrFilter = L"Audio\0*.wav;*.mp3;*.m4a;*.aac;*.mp4;*.flac;*.ogg;*.opus;*.webm\0";
         picker.Flags = OFN_EXPLORER | OFN_ALLOWMULTISELECT | OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
         if (!GetOpenFileNameW(&picker)) {
-            if (CommDlgExtendedError()) MessageBoxW(window, L"Could not open the audio picker.", L"Comparison", MB_OK);
+            const DWORD error = CommDlgExtendedError();
+            if (error) MessageBoxW(window, error == FNERR_BUFFERTOOSMALL
+                ? L"The selected file names exceed the native picker's buffer. Choose fewer or shorter names."
+                : L"Could not open the audio picker.", L"Comparison", MB_OK | MB_ICONWARNING);
             return;
         }
         const std::wstring first(files.data());
@@ -305,6 +319,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             && add(copyJSONID, L"BUTTON", L"Copy JSON", BS_PUSHBUTTON | WS_TABSTOP)
             && add(copyMarkdownID, L"BUTTON", L"Copy Markdown", BS_PUSHBUTTON | WS_TABSTOP)
             && add(deleteID, L"BUTTON", L"&Delete / discard saved round...", BS_PUSHBUTTON | WS_TABSTOP)
+            && add(nextFileID, L"BUTTON", L"&Next file", BS_PUSHBUTTON | WS_TABSTOP)
             && add(syncID, L"BUTTON", L"Sync comparison transcripts and rankings with &iCloud",
                    BS_AUTOCHECKBOX | BS_MULTILINE | WS_TABSTOP)
             && add(syncNowID, L"BUTTON", L"S&ync now / retry", BS_PUSHBUTTON | WS_TABSTOP);
@@ -366,12 +381,18 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         }
         if (HIWORD(wparam) == BN_CLICKED) switch (LOWORD(wparam)) {
         case IDCANCEL: SendMessageW(window, WM_CLOSE, 0, 0); break;
-        case runID: run(window, *dialog); break;
+        case runID:
+            if (IsWindowEnabled(GetDlgItem(window, runID))) run(window, *dialog);
+            break;
         case allID: case noneID:
             SendDlgItemMessageW(window, modelsID, LB_SETSEL, LOWORD(wparam) == allID, -1);
             selectionChanged(window, *dialog); break;
         case stopID: emit(*dialog, 104); break;
         case cancelID: emit(*dialog, 105); break;
+        case nextFileID:
+            if (IsWindowEnabled(GetDlgItem(window, nextFileID)) && dialog->shown.canNext)
+                emit(*dialog, 128, dialog->shown.batchRound);
+            break;
         case judgeID: emit(*dialog, 106, dialog->shown.selected + "\n" + text(window, ranksID)); break;
         case jsonID: exportFile(window, *dialog, false); break;
         case markdownID: exportFile(window, *dialog, true); break;
@@ -421,10 +442,21 @@ extern "C" int jsti_comparison_present(const char *models, const char *rounds, c
                                       const char *selected, int busy, int recording, int judgeable,
                                       int sync_enabled, int sync_available,
                                       const char *references, const char *reference) {
-    if (!models || !rounds || !detail || !selected || !references || !reference) return -1;
+    return jsti_comparison_present_batch(models, rounds, detail, selected, busy, recording, judgeable,
+        sync_enabled, sync_available, references, reference, "", 0, 0);
+}
+
+extern "C" int jsti_comparison_present_batch(const char *models, const char *rounds, const char *detail,
+                                            const char *selected, int busy, int recording, int judgeable,
+                                            int sync_enabled, int sync_available,
+                                            const char *references, const char *reference,
+                                            const char *batch_round, int batch_remaining, int can_next) {
+    if (!models || !rounds || !detail || !selected || !references || !reference || !batch_round
+        || batch_remaining < 0) return -1;
     std::lock_guard<std::mutex> lock(mutex);
     pending = {models, rounds, detail, selected, busy != 0, recording != 0, judgeable != 0,
-               sync_enabled != 0, sync_available != 0, references, reference};
+               sync_enabled != 0, sync_available != 0, references, reference,
+               batch_round, batch_remaining, can_next != 0};
     return activeWindow && PostMessageW(activeWindow, presentMessage, 0, 0) ? 0 : -1;
 }
 
@@ -535,6 +567,19 @@ bool jsti_comparison_self_test(HWND owner, std::string &error, const std::string
                 require(false, failure);
         };
         jsti::chrome::setAppearance(1); snapshot("comparison-blind-light.bmp");
+        { std::lock_guard<std::mutex> lock(mutex);
+          pending.batchRound = "synthetic-round"; pending.batchRemaining = 1; pending.canNext = false;
+          pending.detail = "Batch paused. One sample queued. Judge before Next file.\n\n" + pending.detail; }
+        present(window, *dialog);
+        require(IsWindowVisible(GetDlgItem(window, nextFileID)) && !IsWindowEnabled(GetDlgItem(window, nextFileID))
+                && !IsWindowEnabled(GetDlgItem(window, runID)) && IsWindowEnabled(GetDlgItem(window, cancelID)),
+                "Paused batch does not require judging before explicit Next file.");
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(nextFileID, BN_CLICKED), 0);
+        require(check.event != 128, "Unjudged batch admitted Next file.");
+        snapshot("comparison-batch-paused-light.bmp");
+        { std::lock_guard<std::mutex> lock(mutex);
+          pending.batchRound.clear(); pending.batchRemaining = 0; }
+        present(window, *dialog);
         SendDlgItemMessageW(window, modeID, CB_SETCURSEL, 1, 0); populateModels(window, *dialog);
         SendDlgItemMessageW(window, modelsID, LB_SETSEL, TRUE, 0);
         SendDlgItemMessageW(window, modelsID, LB_SETSEL, TRUE, 1);
@@ -564,12 +609,23 @@ bool jsti_comparison_self_test(HWND owner, std::string &error, const std::string
         present(window, *dialog);
         require(!IsWindowEnabled(GetDlgItem(window, judgeID)), "A judged comparison can be judged again.");
         jsti::chrome::setAppearance(2); snapshot("comparison-revealed-dark.bmp");
+        SendDlgItemMessageW(window, modeID, CB_SETCURSEL, 0, 0); populateModels(window, *dialog);
+        { std::lock_guard<std::mutex> lock(mutex);
+          pending.batchRound = "synthetic-round"; pending.batchRemaining = 1; pending.canNext = true;
+          pending.detail = "Batch paused. One sample queued. Choose Next file to continue.\n\n" + pending.detail; }
+        present(window, *dialog);
+        require(IsWindowEnabled(GetDlgItem(window, nextFileID)) && !IsWindowEnabled(GetDlgItem(window, runID)),
+                "Judged batch cannot explicitly start its next sample.");
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(nextFileID, BN_CLICKED), 0);
+        require(check.event == 128 && check.payload == "synthetic-round", "Next file lost its paused round identity.");
+        snapshot("comparison-batch-ready-dark.bmp");
         { std::lock_guard<std::mutex> lock(mutex); pending.busy = true; pending.recording = true; }
         present(window, *dialog);
         require(!IsWindowEnabled(GetDlgItem(window, runID)) && IsWindowEnabled(GetDlgItem(window, stopID)),
                 "Comparison run/stop controls do not follow capture state.");
         require(!IsWindowEnabled(GetDlgItem(window, copyJSONID))
                 && !IsWindowEnabled(GetDlgItem(window, exportScopeID)), "Busy comparison exports remain enabled.");
+        require(!IsWindowEnabled(GetDlgItem(window, nextFileID)), "Busy batch admitted duplicate Next file.");
         SetWindowPos(window, nullptr, 0, 0, 580, 400, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
         require(GetScrollPos(window, SB_VERT) == 0, "Comparison short-area scroll did not reset.");
         PostMessageW(window, WM_CLOSE, 0, 0);

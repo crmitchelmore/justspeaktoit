@@ -17,8 +17,10 @@ typedef struct {
     GtkButton *sync_now;
     GtkButton *select_all, *select_none;
     GtkButton *copy_json, *copy_markdown;
+    GtkButton *next_file;
     GPtrArray *model_ids, *round_ids, *reference_ids;
     gchar *selected, *model_rows, *round_rows, *reference_rows;
+    gchar *batch_round;
     gboolean suppress;
 } Comparison;
 static Comparison ui;
@@ -164,7 +166,7 @@ static void files_chosen(GObject *source, GAsyncResult *result, gpointer data) {
     GError *error = NULL;
     GListModel *files = gtk_file_dialog_open_multiple_finish(GTK_FILE_DIALOG(source), result, &error);
     if (files != NULL) {
-        gboolean valid = g_list_model_get_n_items(files) <= 32;
+        gboolean valid = g_list_model_get_n_items(files) > 0;
         for (guint i = 0; valid && i < g_list_model_get_n_items(files); ++i) {
             GFile *file = g_list_model_get_item(files, i);
             gchar *path = g_file_get_path(file);
@@ -173,7 +175,7 @@ static void files_chosen(GObject *source, GAsyncResult *result, gpointer data) {
             g_free(path); g_object_unref(file);
         }
         if (valid && ui.window == request->window) comparison_emit(102, payload->str, 0);
-        else if (ui.window == request->window) comparison_error("Choose one to 32 local audio files with single-line names.");
+        else if (ui.window == request->window) comparison_error("Choose local audio files with single-line names.");
         g_object_unref(files);
     }
     if (ui.window == request->window) picker_error(error); else g_clear_error(&error);
@@ -196,11 +198,12 @@ static void run_clicked(GtkButton *button, gpointer data) {
             g_string_append(payload, g_ptr_array_index(ui.model_ids, i));
         }
     }
-    if (count < 2 || count > 8) {
-        comparison_error("Select two to eight comparison models.");
+    gboolean live = gtk_drop_down_get_selected(ui.mode) == 1;
+    if (count < 2 || (live && count > 8)) {
+        comparison_error(live ? "Select two to eight Live models." : "Select at least two File models.");
         g_string_free(payload, TRUE); return;
     }
-    if (gtk_drop_down_get_selected(ui.mode) == 1) {
+    if (live) {
         comparison_emit(103, payload->str, 0); g_string_free(payload, TRUE); return;
     }
     GtkFileDialog *picker = gtk_file_dialog_new();
@@ -212,6 +215,8 @@ static void action_clicked(GtkButton *button, gpointer data) {
     (void)data;
     if (button == ui.stop) comparison_emit(104, "", 0);
     if (button == ui.cancel) comparison_emit(105, "", 0);
+    if (button == ui.next_file && gtk_widget_get_sensitive(GTK_WIDGET(button)) && ui.batch_round != NULL)
+        comparison_emit(128, ui.batch_round, 0);
     if (button == ui.play) comparison_emit(108, ui.selected != NULL ? ui.selected : "", 0);
     if (button == ui.stop_audio) comparison_emit(109, "", 0);
     if (button == ui.sync_now) comparison_emit(122, "", 0);
@@ -304,6 +309,7 @@ static gboolean closing(GtkWindow *window, gpointer data) {
     g_clear_pointer(&ui.model_rows, g_free);
     g_clear_pointer(&ui.round_rows, g_free);
     g_clear_pointer(&ui.reference_rows, g_free);
+    g_clear_pointer(&ui.batch_round, g_free);
     g_clear_pointer(&ui.model_ids, g_ptr_array_unref);
     g_clear_pointer(&ui.round_ids, g_ptr_array_unref);
     g_clear_pointer(&ui.reference_ids, g_ptr_array_unref);
@@ -351,7 +357,7 @@ void jsti_comparison_open(GtkWindow *parent) {
     gtk_entry_set_placeholder_text(ui.language, "Language hint (e.g. en_GB); blank is Automatic");
     named(GTK_WIDGET(ui.language), "Comparison language hint");
     gtk_box_append(GTK_BOX(column), GTK_WIDGET(ui.language));
-    heading(GTK_BOX(column), "Models (select two to eight)");
+    heading(GTK_BOX(column), "Models (at least two; Live supports up to eight)");
     GtkWidget *selection = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     ui.select_all = GTK_BUTTON(button_new("Select all ready", G_CALLBACK(select_models)));
     ui.select_none = GTK_BUTTON(button_new("Select none", G_CALLBACK(select_models)));
@@ -398,7 +404,13 @@ void jsti_comparison_open(GtkWindow *parent) {
     ui.ranks = GTK_ENTRY(gtk_entry_new()); named(GTK_WIDGET(ui.ranks), "Ranks in blind order");
     gtk_box_append(GTK_BOX(column), GTK_WIDGET(ui.ranks));
     ui.judge = GTK_BUTTON(button_new("Save ranking and reveal", G_CALLBACK(action_clicked)));
-    gtk_box_append(GTK_BOX(column), GTK_WIDGET(ui.judge));
+    ui.next_file = GTK_BUTTON(button_new("Next file", G_CALLBACK(action_clicked)));
+    named(GTK_WIDGET(ui.next_file), "Next file");
+    gtk_widget_set_visible(GTK_WIDGET(ui.next_file), FALSE);
+    GtkWidget *judging = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_box_append(GTK_BOX(judging), GTK_WIDGET(ui.judge));
+    gtk_box_append(GTK_BOX(judging), GTK_WIDGET(ui.next_file));
+    gtk_box_append(GTK_BOX(column), judging);
     heading(GTK_BOX(column), "Export transcripts and model identities (no audio)");
     const char *scopes[] = {"All rounds", "Selected round", NULL};
     ui.export_scope = GTK_DROP_DOWN(gtk_drop_down_new_from_strings(scopes));
@@ -437,11 +449,14 @@ typedef struct {
     gchar *models, *rounds, *detail, *selected;
     gboolean busy, recording, judgeable, sync_enabled, sync_available;
     gchar *references, *reference;
+    gchar *batch_round;
+    gint32 batch_remaining;
+    gboolean can_next;
 } Presentation;
 static void free_presentation(gpointer value) {
     Presentation *p = value;
     g_free(p->models); g_free(p->rounds); g_free(p->detail); g_free(p->selected);
-    g_free(p->references); g_free(p->reference); g_free(p);
+    g_free(p->references); g_free(p->reference); g_free(p->batch_round); g_free(p);
 }
 static void present(gpointer value) {
     if (ui.window == NULL) return;
@@ -495,12 +510,16 @@ static void present(gpointer value) {
     if (g_strcmp0(ui.selected, p->selected) != 0) gtk_editable_set_text(GTK_EDITABLE(ui.ranks), "");
     g_free(ui.selected); ui.selected = g_strdup(p->selected);
     gtk_text_buffer_set_text(gtk_text_view_get_buffer(ui.detail), p->detail, -1);
+    gboolean batch = p->batch_round != NULL && p->batch_round[0] != '\0';
+    g_free(ui.batch_round); ui.batch_round = g_strdup(p->batch_round);
     GtkWidget *settings[] = {GTK_WIDGET(ui.mode), GTK_WIDGET(ui.models), GTK_WIDGET(ui.language)};
-    for (guint i = 0; i < G_N_ELEMENTS(settings); ++i) gtk_widget_set_sensitive(settings[i], !p->busy);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.select_all), !p->busy);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.select_none), !p->busy);
+    for (guint i = 0; i < G_N_ELEMENTS(settings); ++i) gtk_widget_set_sensitive(settings[i], !p->busy && !batch);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.select_all), !p->busy && !batch);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.select_none), !p->busy && !batch);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.stop), p->recording);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.cancel), p->busy);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.cancel), p->busy || batch);
+    gtk_widget_set_visible(GTK_WIDGET(ui.next_file), batch);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.next_file), p->can_next && !p->busy && p->batch_remaining > 0);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.judge), p->judgeable);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.ranks), p->judgeable);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.play), !p->busy && ui.round_ids->len > 0);
@@ -510,7 +529,7 @@ static void present(gpointer value) {
     gtk_widget_set_sensitive(GTK_WIDGET(ui.copy_markdown), !p->busy && ui.round_ids->len > 0);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.export_scope), !p->busy && ui.round_ids->len > 0);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.delete_round), !p->busy && p->selected[0] != '\0');
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.run), !p->busy && ui.model_ids->len >= 2);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.run), !p->busy && !batch && ui.model_ids->len >= 2);
     gtk_check_button_set_active(ui.sync, p->sync_enabled);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.sync), p->sync_available);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.sync_now), p->sync_available && p->sync_enabled);
@@ -520,13 +539,22 @@ int32_t jsti_comparison_present(const char *models, const char *rounds, const ch
                                const char *selected, int32_t busy, int32_t recording, int32_t judgeable,
                                int32_t sync_enabled, int32_t sync_available,
                                const char *references, const char *reference) {
+    return jsti_comparison_present_batch(models, rounds, detail, selected, busy, recording, judgeable,
+        sync_enabled, sync_available, references, reference, "", 0, 0);
+}
+int32_t jsti_comparison_present_batch(const char *models, const char *rounds, const char *detail,
+                                     const char *selected, int32_t busy, int32_t recording, int32_t judgeable,
+                                     int32_t sync_enabled, int32_t sync_available,
+                                     const char *references, const char *reference,
+                                     const char *batch_round, int32_t batch_remaining, int32_t can_next) {
     if (models == NULL || rounds == NULL || detail == NULL || selected == NULL
-        || references == NULL || reference == NULL) return -1;
+        || references == NULL || reference == NULL || batch_round == NULL || batch_remaining < 0) return -1;
     Presentation *p = g_new0(Presentation, 1);
     p->models = g_strdup(models); p->rounds = g_strdup(rounds); p->detail = g_strdup(detail);
     p->selected = g_strdup(selected); p->busy = busy != 0; p->recording = recording != 0; p->judgeable = judgeable != 0;
     p->sync_enabled = sync_enabled != 0; p->sync_available = sync_available != 0;
     p->references = g_strdup(references); p->reference = g_strdup(reference);
+    p->batch_round = g_strdup(batch_round); p->batch_remaining = batch_remaining; p->can_next = can_next != 0;
     return jsti_window_post(present, p, free_presentation);
 }
 
@@ -621,12 +649,23 @@ int32_t jsti_comparison_self_test(GtkWindow *parent, char *error, size_t capacit
     test_event = 0; confirm_deletion(deletion, "delete");
     valid = valid && test_event == 0;
     free_request(deletion);
+    p.batch_round = "synthetic-round"; p.batch_remaining = 1; p.can_next = FALSE; present(&p);
+    valid = valid && gtk_widget_get_visible(GTK_WIDGET(ui.next_file))
+        && !gtk_widget_get_sensitive(GTK_WIDGET(ui.next_file))
+        && !gtk_widget_get_sensitive(GTK_WIDGET(ui.run)) && gtk_widget_get_sensitive(GTK_WIDGET(ui.cancel));
+    test_event = 0; g_signal_emit_by_name(ui.next_file, "clicked");
+    valid = valid && test_event == 0;
+    p.judgeable = FALSE; p.can_next = TRUE; present(&p);
+    valid = valid && gtk_widget_get_sensitive(GTK_WIDGET(ui.next_file));
+    g_signal_emit_by_name(ui.next_file, "clicked");
+    valid = valid && test_event == 128 && g_strcmp0(test_payload, "synthetic-round") == 0;
     PickerRequest *stale_export = picker_request(g_string_new(ui.selected), TRUE);
     p.busy = TRUE; p.recording = TRUE; p.judgeable = FALSE; present(&p);
     valid = valid && !gtk_widget_get_sensitive(GTK_WIDGET(ui.run))
         && gtk_widget_get_sensitive(GTK_WIDGET(ui.stop)) && !gtk_widget_get_sensitive(GTK_WIDGET(ui.judge))
         && !gtk_widget_get_sensitive(GTK_WIDGET(ui.copy_json))
-        && !gtk_widget_get_sensitive(GTK_WIDGET(ui.export_scope));
+        && !gtk_widget_get_sensitive(GTK_WIDGET(ui.export_scope))
+        && !gtk_widget_get_sensitive(GTK_WIDGET(ui.next_file));
     finish_fixture();
     valid = valid && test_event == 123;
     save_export(stale_export, "late-picker.md");
@@ -636,23 +675,42 @@ int32_t jsti_comparison_self_test(GtkWindow *parent, char *error, size_t capacit
     return valid ? 0 : -1;
 }
 
-typedef struct { GtkWindow *parent; gchar *directory; gboolean revealed; AdwColorScheme original; } ComparisonTour;
+typedef struct { GtkWindow *parent; gchar *directory; guint stage; AdwColorScheme original; } ComparisonTour;
+static Presentation tour_fixture(guint stage) {
+    Presentation p = fixture(stage == 1 || stage == 3);
+    if (stage >= 2) {
+        p.batch_round = "synthetic-round"; p.batch_remaining = 1; p.can_next = stage == 3;
+        p.detail = stage == 3
+            ? "Batch paused. One sample queued. Choose Next file to continue.\n\n"
+              "Result A - File A (rank 2)\nCould we meet Friday?\n\n"
+              "Result B - File B (rank 1)\nCould we meet on Friday?\n\nScoreboard\nFile B: 1 win\nFile A: 0 wins"
+            : "Batch paused. One sample queued. Judge before Next file.\n\n"
+              "Result A\nCould we meet Friday?\n\nResult B\nCould we meet on Friday?\n"
+              "Could we meet [+on] Friday?\n\nRank every blind result to reveal models.";
+    }
+    return p;
+}
 static gboolean comparison_snapshot(gpointer value) {
     ComparisonTour *tour = value;
-    const char *name = tour->revealed ? "comparison-revealed-dark.png" : "comparison-blind-light.png";
+    const char *names[] = {"comparison-blind-light.png", "comparison-revealed-dark.png",
+        "comparison-batch-paused-light.png", "comparison-batch-ready-dark.png"};
+    const char *name = names[tour->stage];
     gchar *path = g_build_filename(tour->directory, name, NULL);
     if (ui.window == NULL || jsti_widget_save_snapshot(adw_window_get_content(ADW_WINDOW(ui.window)), path, TRUE) != 0)
         g_printerr("Comparison snapshot %s failed.\n", name);
     g_free(path);
-    const char *full_name = tour->revealed ? "comparison-revealed-dark-full.png" : "comparison-blind-light-full.png";
+    const char *full_names[] = {"comparison-blind-light-full.png", "comparison-revealed-dark-full.png",
+        "comparison-batch-paused-light-full.png", "comparison-batch-ready-dark-full.png"};
+    const char *full_name = full_names[tour->stage];
     path = g_build_filename(tour->directory, full_name, NULL);
     if (ui.window == NULL || jsti_widget_save_snapshot(ui.column, path, TRUE) != 0)
         g_printerr("Comparison snapshot %s failed.\n", full_name);
     g_free(path);
-    if (!tour->revealed) {
-        tour->revealed = TRUE;
-        Presentation p = fixture(TRUE); present(&p);
-        adw_style_manager_set_color_scheme(adw_style_manager_get_default(), ADW_COLOR_SCHEME_FORCE_DARK);
+    if (tour->stage < 3) {
+        ++tour->stage;
+        Presentation p = tour_fixture(tour->stage); present(&p);
+        adw_style_manager_set_color_scheme(adw_style_manager_get_default(),
+            tour->stage == 2 ? ADW_COLOR_SCHEME_FORCE_LIGHT : ADW_COLOR_SCHEME_FORCE_DARK);
         g_timeout_add(700, comparison_snapshot, tour);
     } else {
         finish_fixture();

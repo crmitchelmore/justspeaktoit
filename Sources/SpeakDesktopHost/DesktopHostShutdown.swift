@@ -185,6 +185,7 @@ extension DesktopHostController {
             let ended = await DesktopHostShutdown.wait(until: deadline) { await warm.task.value }
             if !ended { report.unfinishedOperations += 1 }
         }
+        report.unfinishedOperations += comparisonOperations.activeCount
         if let discovery = modelDiscoveryTask {
             report.discoveryEnded = await DesktopHostShutdown.wait(until: deadline) { await discovery.value }
         }
@@ -200,6 +201,8 @@ extension DesktopHostController {
     /// or start new work once `closed` is set, stopping the closing
     /// comparison capture within `deadline` before the rest proceed.
     private func cancelInFlightWork(until deadline: ContinuousClock.Instant) async {
+        discardComparisonBatch()
+        comparisonOperations.cancelAll()
         comparisonAdmissionTask?.cancel()
         comparisonTask?.cancel()
         comparisonInitialization?.task.cancel()

@@ -226,7 +226,7 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable { // swiftlint:
                             || field.key == VoiceAudioFormat.preferenceKey
                             || field.key == ApplicationPreferenceKey.speedMode.rawValue)
                         && text.utf8.count <= 256
-                        && !text.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)))
+                        && !text.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })))
             case (.choice, .bool): valid = Self.modulatePreferenceKeys.contains(field.key)
             case (.boolean, .bool): valid = true
             case (.number(let range), .double(let number)): valid = number.isFinite && range.contains(number)

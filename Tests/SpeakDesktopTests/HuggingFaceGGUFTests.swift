@@ -4,6 +4,24 @@ import SpeakCore
 @testable import SpeakDesktop
 
 final class HuggingFaceGGUFTests: XCTestCase {
+    func testLicenseValidation_AcceptsASCIIAndRejectsControlCharacters() throws {
+        func model(license: String) throws -> HuggingFaceGGUFModel {
+            try HuggingFaceGGUFModel(
+                repository: LocalLLMFixture.repository, filename: LocalLLMFixture.filename,
+                revision: LocalLLMFixture.revision, byteCount: Int64(LocalLLMFixture.bytes.count),
+                sha256: TestSHA256.hex(LocalLLMFixture.bytes), license: license
+            )
+        }
+        for license in ["MIT", "Apache-2.0", String(repeating: "x", count: 128)] {
+            XCTAssertEqual(try model(license: license).license, license)
+        }
+        for license in ["", "MIT\ninjected", "MIT\0", "MIT\u{7F}", "MÍT", String(repeating: "x", count: 129)] {
+            XCTAssertThrowsError(try model(license: license)) {
+                XCTAssertEqual($0 as? HuggingFaceWhisperError, .invalidMetadata)
+            }
+        }
+    }
+
     func testRecommendationsKeepCanonicalMacIdentitiesAndFriendlyNames() throws {
         XCTAssertFalse(ModelCatalog.localPostProcessing.isEmpty)
         for recommendation in ModelCatalog.localPostProcessing {

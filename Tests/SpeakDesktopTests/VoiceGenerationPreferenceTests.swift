@@ -4,7 +4,7 @@ import XCTest
 final class VoiceGenerationPreferenceTests: XCTestCase {
     func testTransferAndDictationKeys_ProjectCanonicalApplicationKeys() {
         let canonical = Set(ApplicationPreferenceKey.allCases.map(\.rawValue))
-        XCTAssertEqual(canonical.count, 91)
+        XCTAssertEqual(canonical.count, 92)
         XCTAssertTrue(DesktopConfiguration.supportedKeys.isSubset(of: canonical))
         XCTAssertTrue(DesktopConfiguration.voiceGenerationTransferKeys.isSubset(of: canonical))
         for preference in VoiceGenerationPreference.allCases {

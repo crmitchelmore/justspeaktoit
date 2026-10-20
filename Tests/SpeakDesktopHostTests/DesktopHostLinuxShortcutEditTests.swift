@@ -68,15 +68,15 @@ final class DesktopHostLinuxShortcutEditTests: XCTestCase {
             .init(keysym: 0x73, modifiers: 5)
         ]
         for chord in bad {
-            var unset = base
-            unset[.openDataMigrationSettings] = DesktopShortcutBinding(
-                keyCode: 0, modifiers: [], isGlobal: false, isEnabled: false
-            )
-            guard case .refused = unset.editingLinux([
+            guard case .refused = base.editingLinux([
                 .init(action: .showHistory, chord: chord, isEnabled: true, isGlobal: false, replacesKey: true)
             ], runnable: Set(DesktopShortcutAction.allCases)) else { return XCTFail("Invalid key accepted") }
         }
-        guard case .refused = base.editingLinux([
+        var unset = base
+        unset[.openDataMigrationSettings] = DesktopShortcutBinding(
+            keyCode: 0, modifiers: [], isGlobal: false, isEnabled: false
+        )
+        guard case .refused = unset.editingLinux([
             .init(action: .openDataMigrationSettings, chord: nil,
                   isEnabled: true, isGlobal: false, replacesKey: false)
         ], runnable: [.openDataMigrationSettings]) else { return XCTFail("Unset key enabled") }

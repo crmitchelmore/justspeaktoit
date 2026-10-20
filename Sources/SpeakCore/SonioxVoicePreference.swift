@@ -17,7 +17,7 @@ public enum SonioxVoicePreference {
         guard let value = values[key] else { return nil }
         guard case .string(let text) = value.storage,
               text.utf8.count <= 256,
-              !text.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
+              !text.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
             throw DesktopConfigurationError.invalidField(key)
         }
         return text

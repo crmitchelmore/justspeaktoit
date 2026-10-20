@@ -35,7 +35,7 @@ public struct HuggingFaceGGUFModel: Codable, Equatable, Sendable, Identifiable {
               HuggingFaceWhisperModel.isHex(sha256, count: 64),
               (24...Int64(16 * 1_024 * 1_024 * 1_024)).contains(byteCount),
               !license.isEmpty, license.utf8.count <= 128, license.allSatisfy(\.isASCII),
-              !license.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
+              !license.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
             throw HuggingFaceWhisperError.invalidMetadata
         }
         self.repository = repository

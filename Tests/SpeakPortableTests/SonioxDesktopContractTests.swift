@@ -101,5 +101,22 @@ final class SonioxDesktopContractTests: DeepgramSpeechStubTestCase {
         for speed in [SonioxTTSAPI.speedRange.lowerBound, SonioxTTSAPI.speedRange.upperBound] {
             XCTAssertNoThrow(try VoiceSynthesisOptions(speed: speed).validate(for: voice.capabilities))
         }
+
+        func testPreferenceStrings_PreserveUnknownValuesButRejectControlsAndOversize() throws {
+            let key = SonioxVoicePreference.regionKey
+            for value in ["", "future-region", "日本", String(repeating: "x", count: 256)] {
+                XCTAssertEqual(
+                    try SonioxVoicePreference.string(key, in: [key: AnyCodable(.string(value))]), value
+                )
+            }
+            for value in ["region\ninjected", "region\0", "region\u{7F}", String(repeating: "x", count: 257)] {
+                XCTAssertThrowsError(try SonioxVoicePreference.string(key, in: [key: AnyCodable(.string(value))])) {
+                    guard let failure = $0 as? DesktopConfigurationError, case .invalidField(let field) = failure else {
+                        return XCTFail("Expected an invalid field, received \($0)")
+                    }
+                    XCTAssertEqual(field, key)
+                }
+            }
+        }
     }
 }

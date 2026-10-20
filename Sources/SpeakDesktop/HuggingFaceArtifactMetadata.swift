@@ -49,7 +49,7 @@ struct HuggingFaceArtifactMetadata: Equatable, Sendable {
         }
         let license = response.cardData?.license ?? "Not declared; check the repository"
         guard !license.isEmpty, license.utf8.count <= 128, license.allSatisfy(\.isASCII),
-              !license.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
+              !license.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
             throw HuggingFaceWhisperError.invalidMetadata
         }
         return .init(

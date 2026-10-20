@@ -52,7 +52,7 @@ public struct SonioxAccountVoiceInventory: Equatable, Sendable, CustomStringConv
                 return Self(voices: voices, region: region, context: context, credential: key)
             }
             guard next.utf8.count <= 4_096,
-                  !next.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
+                  !next.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
                   cursors.insert(next).inserted else { throw VoiceAccountDiscoveryError.invalidInventory(.soniox) }
             cursor = next
         }
@@ -100,7 +100,7 @@ public struct SonioxAccountVoiceInventory: Equatable, Sendable, CustomStringConv
             && SonioxTTSCatalog.voice(forID: voice.id) == nil
             && !voice.name.isEmpty && voice.name.utf8.count <= 256
             && voice.name == voice.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            && !voice.name.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+            && !voice.name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
             && voice.models.count <= 32
             && Set(voice.models.map(\.model)).count == voice.models.count
     }

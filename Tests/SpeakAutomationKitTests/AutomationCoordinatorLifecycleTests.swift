@@ -65,7 +65,8 @@ final class AutomationCoordinatorLifecycleTests: XCTestCase {
         coordinator.deactivate()
         coordinator.activate { .success(id: $0.id, command: $0.command, result: .init(text: "new")) }
         await fulfillment(of: [cancelled], timeout: 1)
-        _ = await old.value
+        let stopped = await old.value
+        XCTAssertEqual(stopped.error?.code, .appUnavailable)
         let fresh = await coordinator.respond(to: request)
         XCTAssertEqual(fresh.result?.text, "new")
         coordinator.deactivate()

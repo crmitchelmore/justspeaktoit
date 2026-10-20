@@ -75,6 +75,11 @@ public final class AutomationRequestCoordinator: @unchecked Sendable {
     /// Running commands are cancelled, not awaited: they own app state and finish
     /// on their own, but their replies are dropped rather than cached.
     public func deactivate() {
+        self.deactivate(afterInvalidating: { _ in })
+    }
+
+    /// Lifecycle test seam for completion between invalidation and stopped replies.
+    func deactivate(afterInvalidating: ([Task<AutomationResponse, Never>]) -> Void) {
         var stopped: [(Key, AutomationCompletion)] = []
         let orphaned: [Task<AutomationResponse, Never>] = self.lock.withLock {
             self.generation &+= 1
@@ -90,6 +95,7 @@ public final class AutomationRequestCoordinator: @unchecked Sendable {
         for work in orphaned {
             work.cancel()
         }
+        afterInvalidating(orphaned)
         for (key, completion) in stopped {
             completion.finish(.failure(
                 id: key.id, command: key.command,
@@ -162,8 +168,9 @@ public final class AutomationRequestCoordinator: @unchecked Sendable {
         let completion = AutomationCompletion()
         let work = Task { [weak self] () -> AutomationResponse in
             let response = await handler(request)
-            self?.finish(key: key, response: response, generation: generation)
-            completion.finish(response)
+            if self?.finish(key: key, response: response, generation: generation) == true {
+                completion.finish(response)
+            }
             return response
         }
         self.inFlight[key] = work
@@ -171,9 +178,9 @@ public final class AutomationRequestCoordinator: @unchecked Sendable {
         return .running(completion)
     }
 
-    private func finish(key: Key, response: AutomationResponse, generation: UInt64) {
+    private func finish(key: Key, response: AutomationResponse, generation: UInt64) -> Bool {
         self.lock.withLock {
-            guard generation == self.generation else { return }
+            guard generation == self.generation else { return false }
             self.inFlight.removeValue(forKey: key)
             self.completions.removeValue(forKey: key)
             self.completed[key] = response
@@ -182,6 +189,7 @@ public final class AutomationRequestCoordinator: @unchecked Sendable {
                 let evicted = self.completionOrder.removeFirst()
                 self.completed.removeValue(forKey: evicted)
             }
+            return true
         }
     }
 }

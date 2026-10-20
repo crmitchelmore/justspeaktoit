@@ -213,8 +213,7 @@ extension StreamingProviderSession {
                     }
                     if self.current(active), active.connection === connection { self.receive(active, connection) }
                 case .failure(let error):
-                    if !active.ready, !active.finishing, self.configuration.retryBeforeReady(error),
-                       self.reconnect(active) { return }
+                    if self.retryBeforeReady(error, active) { return }
                     let failure = active.finishing ? self.finishError(active) : self.configuration.transportError(error)
                     self.fail(failure, active)
                 }
@@ -265,6 +264,10 @@ extension StreamingProviderSession {
         }
     }
 
+    private func retryBeforeReady(_ error: Error, _ active: Run) -> Bool {
+        !active.ready && !active.finishing && configuration.retryBeforeReady(error) && reconnect(active)
+    }
+
     private func reconnect(_ active: Run) -> Bool {
         guard current(active), !active.finishing, !active.sending || !active.ready,
               active.reconnects < configuration.maximumReconnects else { return false }
@@ -275,9 +278,7 @@ extension StreamingProviderSession {
         active.sending = false
         active.sendID += 1
         previous?.cancel()
-        do {
-            connect(active, request: try configuration.request())
-        } catch {
+        do { connect(active, request: try configuration.request()) } catch {
             fail(error, active)
         }
         return true
@@ -317,7 +318,10 @@ extension StreamingProviderSession {
                       active.sending, active.sendID == sendID else { return }
                 active.sending = false
                 active.budget.release(bytes)
-                if let error { self.fail(self.configuration.transportError(error), active) } else { self.pump(active) }
+                if let error {
+                    if self.retryBeforeReady(error, active) { return }
+                    self.fail(self.configuration.transportError(error), active)
+                } else { self.pump(active) }
             }
         }
     }

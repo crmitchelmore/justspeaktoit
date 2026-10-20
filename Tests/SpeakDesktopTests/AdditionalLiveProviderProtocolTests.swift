@@ -71,6 +71,60 @@ final class AdditionalLiveProviderProtocolTests: XCTestCase {
         XCTAssertEqual(fixture.events.errors.count, 1)
     }
 
+    func testMetaRetriesFailedSetupSendAndKeepsPendingCapture() {
+        let fixture = AdditionalLiveProviderFixture(.meta)
+        fixture.start()
+        fixture.client.sendAudio(fixture.frame(7))
+        let original = fixture.socket
+        original.open()
+        original.completeSend(URLError(.networkConnectionLost))
+        XCTAssertEqual(fixture.factory.sockets.count, 2)
+        guard fixture.factory.sockets.count == 2 else { return }
+        XCTAssertEqual(original.cancels, 1)
+        XCTAssertTrue(fixture.events.errors.isEmpty)
+        original.fail()
+        original.emit(AdditionalLiveProvider.meta.ready)
+        fixture.becomeReady()
+        XCTAssertEqual(fixture.socket.binary, [fixture.frame(7)])
+        XCTAssertTrue(fixture.events.errors.isEmpty)
+        fixture.client.cancel()
+    }
+
+    func testMetaSetupSendRetryIsBoundedAndCannotRestartCancelledRun() {
+        for cancelled in [false, true] {
+            let fixture = AdditionalLiveProviderFixture(.meta)
+            fixture.start()
+            fixture.socket.open()
+            if cancelled { fixture.client.cancel() }
+            fixture.socket.completeSend(URLError(.networkConnectionLost))
+            if !cancelled {
+                XCTAssertEqual(fixture.factory.sockets.count, 2)
+                guard fixture.factory.sockets.count == 2 else { return }
+                fixture.socket.open()
+                fixture.socket.completeSend(URLError(.networkConnectionLost))
+            }
+            XCTAssertEqual(fixture.factory.sockets.count, cancelled ? 1 : 2)
+            XCTAssertEqual(fixture.events.errors.count, cancelled ? 0 : 1)
+            XCTAssertTrue(fixture.factory.sockets.allSatisfy { $0.cancels == 1 })
+            fixture.clock.fire(5)
+            fixture.clock.fire(10)
+            XCTAssertEqual(fixture.events.errors.count, cancelled ? 0 : 1)
+        }
+    }
+
+    func testAudioSendFailureAfterReadyDoesNotReconnect() {
+        for provider in AdditionalLiveProvider.allCases {
+            let fixture = AdditionalLiveProviderFixture(provider)
+            fixture.start()
+            fixture.becomeReady()
+            fixture.client.sendAudio(fixture.frame())
+            fixture.socket.completeSend(URLError(.networkConnectionLost))
+            XCTAssertEqual(fixture.factory.sockets.count, 1, "\(provider)")
+            XCTAssertEqual(fixture.events.errors.count, 1, "\(provider)")
+            XCTAssertEqual(fixture.socket.cancels, 1)
+        }
+    }
+
     func testGeminiGoAwayReconnectRetainsTranscriptAndIgnoresRetiredSocket() async {
         let fixture = AdditionalLiveProviderFixture(.gemini)
         fixture.start()

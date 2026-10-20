@@ -66,6 +66,30 @@ cleanup_mounted_dmg() {
 
 trap cleanup_mounted_dmg EXIT
 
+# Hosted macOS runners intermittently fail image creation with "Resource busy"
+# while the system scans freshly written files. Retry with backoff, removing
+# any partial image first; persistent failures still fail the release.
+hdiutil_with_retry() {
+    local output="$1"
+    local attempt
+    shift
+
+    for attempt in 1 2 3 4 5; do
+        rm -f "$output"
+        if hdiutil "$@"; then
+            return 0
+        fi
+        if [ "$attempt" -lt 5 ]; then
+            echo "  hdiutil $1 attempt $attempt failed; retrying in $((attempt * 5))s..."
+            sync
+            sleep $((attempt * 5))
+        fi
+    done
+
+    echo "hdiutil $1 failed after 5 attempts"
+    return 1
+}
+
 echo "Creating DMG installer..."
 echo "  App: $APP_PATH"
 echo "  Output: $OUTPUT_DMG"
@@ -97,7 +121,7 @@ APP_SIZE=$(du -sm "$APP_PATH" | cut -f1)
 DMG_SIZE=$((APP_SIZE + 20))
 
 # Create temporary writable DMG
-hdiutil create -srcfolder "$DMG_TEMP" -volname "$VOLUME_NAME" -fs HFS+ \
+hdiutil_with_retry "$DMG_TEMP_RW" create -srcfolder "$DMG_TEMP" -volname "$VOLUME_NAME" -fs HFS+ \
     -fsargs "-c c=64,a=16,e=16" -format UDRW -size "${DMG_SIZE}m" "$DMG_TEMP_RW"
 
 # Mount the DMG
@@ -161,7 +185,7 @@ sleep 3
 detach_mounted_dmg
 
 # Convert to compressed read-only DMG
-hdiutil convert "$DMG_TEMP_RW" -format UDZO -imagekey zlib-level=9 -o "$OUTPUT_DMG"
+hdiutil_with_retry "$OUTPUT_DMG" convert "$DMG_TEMP_RW" -format UDZO -imagekey zlib-level=9 -o "$OUTPUT_DMG"
 
 # Clean up
 rm -rf "$DMG_TEMP"

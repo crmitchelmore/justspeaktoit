@@ -29,6 +29,26 @@ The earlier timeout was therefore not deterministic; the coverage mismatch
 remains an unnecessary invalidation, not a proven sole cause. Qualification
 of the aligned commands and later feature descendants is separate.
 
+## Shared provider credential write ownership (source only; NOT_RUN)
+
+The API Keys, Transcription and Post-processing editors now share an owned
+off-actor writer for native vault calls and the existing saved-by-hand sync
+hook. The Host actor remains available while storage is blocked. One writer
+slot excludes competing edits, including Voice Output key writes, and stays
+owned until the actual storage call returns, even if its request is cancelled.
+Closing cancels that worker, accounts for it in the normal shutdown grace and
+does not claim that cancelling an already-started vault call rolls it back.
+Completed native writes still update the tracked identifier index; failures
+remain unconfirmed and never echo arbitrary native error contents.
+
+Late API Keys completion after cancellation or closing asks the user to check
+saved state instead of announcing success. Cancelled per-feature saves do not
+continue applying post-processing settings. Four regressions cover blocked
+native and saved-by-hand writes, cross-editor exclusion, bounded Host close
+and partial-write error redaction. They are authored but NOT_RUN locally.
+This is Host write ownership, not a new queue-drain contract for the native
+Transcription and Post-processing settings event queues.
+
 ## Linux Permissions destination (source only; NOT_RUN)
 
 About's **Permissions** button, Open Permissions action (run 10/event 118)

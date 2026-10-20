@@ -21,13 +21,12 @@ extension DesktopHostController {
         )
     }
 
-    // existing owned post-processing persistence surface; no behavior change.
     // swiftlint:disable:next cyclomatic_complexity
     package func savePostProcessing(
         enabled: Bool, modelIdentifier model: String, prompt: String, key: String,
         includeLexiconDirectives: Bool? = nil, includeContextTags: Bool? = nil
     ) async {
-        guard !closed else { return }
+        guard !closed, !Task.isCancelled else { return }
         do {
             guard let mode = DesktopPostProcessing.mode(for: model) else {
                 throw DesktopPostProcessingError.unsupportedModel
@@ -47,7 +46,7 @@ extension DesktopHostController {
             let typed = key.trimmingCharacters(in: .whitespacesAndNewlines)
             if mode == .remote, !typed.isEmpty {
                 try await savePostProcessingKey(typed, for: model)
-                guard !closed else { return }
+                guard !closed, !Task.isCancelled else { return }
             }
             var changed = settings
             changed.postProcessing = options
@@ -71,16 +70,9 @@ extension DesktopHostController {
     }
 
     private func savePostProcessingKey(_ key: String, for model: String) async throws {
-        invalidateConnectionPreWarming(resetCapture: true)
         let identifier = try postProcessingCredential(for: model)
-        if let saveByHand = cloudSync.saveKeyByHand {
-            try await saveByHand(key, identifier)
-            guard !closed else { return }
-        } else {
-            try Platform.saveAPIKey(key, name: identifier)
-        }
-        recordTrackedAPIKey(identifier, value: key)
-        invalidateConnectionPreWarming(resetCapture: true)
+        try await writeProviderAPIKey(key, identifier: identifier)
+        guard !closed, !Task.isCancelled else { return }
         await refreshComparison()
     }
 

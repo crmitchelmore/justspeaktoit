@@ -125,7 +125,7 @@ final class DesktopHostVoiceCredentialVaultTests: XCTestCase {
     }
 }
 
-private final class BlockingVoiceVaultGate: @unchecked Sendable {
+final class BlockingVoiceVaultGate: @unchecked Sendable {
     private let condition = NSCondition()
     private var open = false
     private var entered = false

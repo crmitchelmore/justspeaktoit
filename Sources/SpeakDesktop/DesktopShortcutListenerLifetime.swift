@@ -34,13 +34,25 @@ package final class DesktopShortcutListenerLifetime: @unchecked Sendable {
         return accepted
     }
 
-    package var acceptsCallbacks: Bool {
+    private var callbacksAllowed: Bool {
+        switch phase {
+        case .starting: true
+        case .registered(let cleanup): cleanup != nil
+        case .idle, .stopped: false
+        }
+    }
+
+    /// Preflight only. Final dispatch must use `admitCallback` after native preparation.
+    package var acceptsCallbacks: Bool { lock.withLock { callbacksAllowed } }
+
+    /// Final bounded enqueue against stop; the body must not reenter this lifetime.
+    /// Native capture, IPC and synchronous queue waits belong before this call.
+    @discardableResult
+    package func admitCallback(_ operation: () -> Void) -> Bool {
         lock.withLock {
-            switch phase {
-            case .starting: true
-            case .registered(let cleanup): cleanup != nil
-            case .idle, .stopped: false
-            }
+            guard callbacksAllowed else { return false }
+            operation()
+            return true
         }
     }
 

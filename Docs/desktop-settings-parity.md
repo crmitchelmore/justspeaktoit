@@ -235,6 +235,11 @@ not just flags set after registration returns. Stop permanently fences new
 callback admission and result publication. An already-started X11 or portal
 registration may still finish, but its late success is immediately closed and
 cannot republish controls. Shutdown does not wait for a blocked startup dialog.
+Callback preflight is not final admission: native target capture and the gesture
+style's synchronous queue read stay outside the lifetime lock, then a bounded
+settings/gesture enqueue is atomically admitted against stop. If stop wins during
+preparation, no gesture or microphone-warmup task is submitted. Held-preparation
+and racing-final-admission regressions are authored but NOT_RUN locally.
 The native callback context stays alive through the actual stop call and holds
 the window/controller only weakly. A settings read already in flight rechecks
 the publication fence afterward.

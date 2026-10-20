@@ -164,6 +164,14 @@ class DesktopIconTests(unittest.TestCase):
                                 and not lines[index].lstrip().startswith("#")), len(lines))
                     self.assertIn("      - .gitattributes", lines[start:end])
 
+    def test_resource_workflow_pins_reviewed_remote_actions(self):
+        workflow = (ROOT / ".github/workflows/desktop-icons.yml").read_text()
+        self.assertIn("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1", workflow)
+        for line in workflow.splitlines():
+            if "uses:" in line:
+                action = line.split("uses:", 1)[1].strip().split()[0]
+                self.assertRegex(action, r"^[^@]+@[0-9a-f]{40}$")
+
     def test_linux_integration_assertion_includes_high_dpi_tray_pixmaps(self):
         integration = (ROOT / "scripts/linux-integration-checks.sh").read_text()
         self.assertIn("[22, 22], [32, 32], [48, 48], [64, 64], [96, 96]", integration)

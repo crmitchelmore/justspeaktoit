@@ -448,6 +448,15 @@ step/job ceilings are unchanged. The GTK smoke checks cover actual row filtering
 four remembered slots and Local/Remote mode memory. These additions are authored
 NOT_RUN locally and do not prove microphone performance or installed acceptance.
 
+Portable configuration JSON also recognises canonical Local Batch and Local Live
+model choices when this host offers them. It updates only inactive remembered
+slots, not the active model or service permissions, and never downloads a model.
+Unavailable/wrong-mode IDs and changes to the active mode remain preserved but
+unapplied, with a notice; choosing a model explicitly replaces that pending
+choice. The queued GTK update emits no selection callback. Source-only restart,
+round-trip, failure and native smoke assertions accompany this mapping; all are
+NOT_RUN here. History-backup restore still does not apply settings.
+
 Before the keyring and desktop integration checks, the harness runs
 `--integration-test atspi-selection` against an external synthetic AT-SPI
 service, each time on its own nested private bus. The fixture refuses a

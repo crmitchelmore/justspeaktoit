@@ -70,6 +70,8 @@ final class FakeLog: @unchecked Sendable {
     private var transcriptValues: [String] = []
     private var keyReadHook: (@Sendable (String) -> Void)?
     private var keyWriteHook: (@Sendable (String, String) throws -> Void)?
+    private var localChoices: [DesktopHostModelPreferences] = []
+    private var localChoiceFailure = false
     private var learningReadback: (any DesktopCorrectionReadback)?
     var correctionReadback: (any DesktopCorrectionReadback)? { lock.withLock { learningReadback } }
     func installCorrectionReadback(_ readback: (any DesktopCorrectionReadback)?) {
@@ -92,6 +94,8 @@ final class FakeLog: @unchecked Sendable {
             transcriptValues = []
             keyReadHook = nil
             keyWriteHook = nil
+            localChoices = []
+            localChoiceFailure = false
             learningReadback = nil
         }
     }
@@ -166,6 +170,14 @@ final class FakeLog: @unchecked Sendable {
         return lock.withLock { keys[name] ?? "" }
     }
     func setKey(_ key: String, name: String) { lock.withLock { keys[name] = key } }
+    var publishedLocalChoices: [DesktopHostModelPreferences] { lock.withLock { localChoices } }
+    func refuseLocalChoices(_ refuse: Bool) { lock.withLock { localChoiceFailure = refuse } }
+    func publishLocalChoices(batch: String?, live: String?) throws {
+        try lock.withLock {
+            if localChoiceFailure { throw DesktopHostError(message: "Synthetic model publication failed.") }
+            localChoices.append(.init(batch: nil, live: nil, local: batch, localLive: live))
+        }
+    }
 }
 
 protocol FakeObservationalConsent: Sendable {
@@ -212,6 +224,9 @@ enum FakePlatform: DesktopHostAutomationPlatform {
     ) { FakeLog.shared.status(status) }
     static func transcriptVariant(_ variant: DesktopTranscriptVariant?, for record: UUID?, switchable: Bool) {}
     static func publishModels(status: String, refreshing: Bool) throws {}
+    static func publishLocalModelPreferences(batch: String?, live: String?) throws {
+        try FakeLog.shared.publishLocalChoices(batch: batch, live: live)
+    }
     static func apiKey(name: String) throws -> String { FakeLog.shared.key(name) }
     static func voiceTextImportCancelled(_ requestID: String) {
         FakeLog.shared.status("Import stopped: \(requestID)")

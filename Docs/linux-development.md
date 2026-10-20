@@ -1,5 +1,9 @@
 # Linux development
 
+For the cross-platform review and reusable migration lessons, see the
+[desktop porting playbook](desktop-porting-playbook.md). It distinguishes main
+from the newer, unmerged desktop integration and its exact-revision evidence.
+
 The Linux target is a **developer preview, not a Linux release**. It reuses the
 portable Swift core (`SpeakCore`, `SpeakDesktop`) and the desktop host shared
 with Windows (`SpeakDesktopHost`), and reaches the desktop through a narrow C

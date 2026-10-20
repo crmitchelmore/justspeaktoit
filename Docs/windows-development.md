@@ -1,5 +1,9 @@
 # Windows development and shared Swift core
 
+For the cross-platform review and reusable migration lessons, see the
+[desktop porting playbook](desktop-porting-playbook.md). It distinguishes main
+from the newer, unmerged desktop integration and its exact-revision evidence.
+
 The Windows target is an **initial native developer build, not a feature-complete
 Windows release**. Feature parity with the macOS application remains the product
 acceptance criterion. The current implementation does not meet that criterion.

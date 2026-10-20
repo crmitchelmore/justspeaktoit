@@ -19,6 +19,14 @@ fixture is not evidence that native private-directory admission will accept it.
 Existing paths are never taken over by the synthetic helper. Production owner,
 ACL and no-reparse checks are unchanged.
 
+Normal startup prepares the application root with the same native token-user
+owner and protected ACL before the controller creates History or loads local
+model metadata. Otherwise an elevated token can give a Foundation-created root
+the Administrators owner and its later private-directory admission correctly
+fails. Package lifecycle fixtures assign the current user's ownership only to
+the fresh fixture root that their pristine-admission ledger already owns; they
+do not take over pre-existing user data or relax native admission.
+
 Registry V1 and qualification-only V2 publish a pending handle created in their
 held namespace using a simple validated basename and a NULL `RootDirectory`.
 The [Windows `FILE_RENAME_INFORMATION` contract](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_file_rename_information)

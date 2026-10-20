@@ -835,6 +835,10 @@ try {
         '--expectations', $expectationsPath)
     Assert-Check 'The synthetic portable-install fixture is written' ($made.ExitCode -eq 0) $made.StandardError.Trim()
     Copy-Item -LiteralPath $staging -Destination $dataDirectory -Recurse
+    # This admitted run owns the fresh fixture; elevated defaults may name Administrators.
+    $fixtureAccess = Get-Acl -LiteralPath $dataDirectory
+    $fixtureAccess.SetOwner([Security.Principal.WindowsIdentity]::GetCurrent().User)
+    Set-Acl -LiteralPath $dataDirectory -AclObject $fixtureAccess
     $expectations = Read-JstiJson $expectationsPath
     $transcript = $expectations.history.selectedTranscript
     $rows = [int] $expectations.history.rows

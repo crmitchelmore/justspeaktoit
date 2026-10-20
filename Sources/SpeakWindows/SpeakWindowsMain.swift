@@ -287,6 +287,7 @@ enum SpeakWindowsMain {
                     throw WindowsNativeError(message: "Windows did not provide the local app data directory.")
                 }
                 directory = URL(fileURLWithPath: local).appendingPathComponent("JustSpeakToIt")
+                try WindowsHostPlatform.preparePrivateDirectory(directory)
             }
             defer { if smokeTest { try? FileManager.default.removeItem(at: directory) } }
             if screenshots != nil { try await DesktopHostSampleHistory.seed(directory: directory) }

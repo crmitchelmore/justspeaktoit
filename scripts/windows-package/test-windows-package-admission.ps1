@@ -152,6 +152,10 @@ try {
         '--expectations', $expectationsPath)
     Assert-Check 'The existing user data is written' ($made.ExitCode -eq 0) $made.StandardError.Trim()
     Copy-Item -LiteralPath $staging -Destination $dataDirectory -Recurse
+    # This admitted run owns the fresh fixture; elevated defaults may name Administrators.
+    $fixtureAccess = Get-Acl -LiteralPath $dataDirectory
+    $fixtureAccess.SetOwner([Security.Principal.WindowsIdentity]::GetCurrent().User)
+    Set-Acl -LiteralPath $dataDirectory -AclObject $fixtureAccess
     $expectations = Read-JstiJson $expectationsPath
     $script:fixturePaths = @($expectations.files.PSObject.Properties | ForEach-Object { $_.Name })
     $deadline = (Get-Date).AddSeconds(60)

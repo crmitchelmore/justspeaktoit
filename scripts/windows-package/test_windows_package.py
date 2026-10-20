@@ -568,6 +568,26 @@ Write-Output 'PASS sixteen deterministic mock-only family waits (no real sleeps 
         self.assertIn("PASS sixteen deterministic mock-only", result.stdout)
 
 
+class AppDataOwnershipTests(unittest.TestCase):
+    def test_normal_startup_prepares_private_root_before_any_controller_io(self):
+        source = (HERE.parents[1] / "Sources/SpeakWindows/SpeakWindowsMain.swift").read_text(encoding="utf-8")
+        main = source[source.index("@main"):]
+        prepare = main.index("try WindowsHostPlatform.preparePrivateDirectory(directory)")
+        self.assertLess(main.index('appendingPathComponent("JustSpeakToIt")'), prepare)
+        self.assertLess(prepare, main.index("DesktopHostOnboarding.adoptExistingInstall"))
+        self.assertLess(prepare, main.index("WindowsAppController(directory: directory)"))
+
+    def test_newly_copied_fixtures_use_current_user_not_elevated_default_group_owner(self):
+        for name in ("test-windows-package-lifecycle.ps1", "test-windows-package-admission.ps1"):
+            with self.subTest(script=name):
+                source = (HERE / name).read_text(encoding="utf-8")
+                copied = source.index("Copy-Item -LiteralPath $staging -Destination $dataDirectory -Recurse")
+                fixture = source[copied:source.index("$expectations = Read-JstiJson", copied)]
+                self.assertIn("$fixtureAccess = Get-Acl -LiteralPath $dataDirectory", fixture)
+                self.assertIn("$fixtureAccess.SetOwner([Security.Principal.WindowsIdentity]::GetCurrent().User)", fixture)
+                self.assertIn("Set-Acl -LiteralPath $dataDirectory -AclObject $fixtureAccess", fixture)
+
+
 class AssetTests(unittest.TestCase):
     def test_png_round_trip(self):
         pixels = bytes((x * 7 + y * 13 + channel * 31) & 255 for y in range(5) for x in range(9) for channel in range(4))

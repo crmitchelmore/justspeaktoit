@@ -18,13 +18,14 @@ final class DesktopMistralTests: XCTestCase {
         defer { multipart.remove() }
         let audio = try fixture()
         let audioBytes = try Data(contentsOf: audio)
+        let apiModel = String(model.dropFirst("mistral/".count))
         StubURLProtocol.handler = { request in
             XCTAssertEqual(request.url?.absoluteString, "https://api.mistral.ai/v1/audio/transcriptions")
             XCTAssertEqual(request.httpMethod, "POST")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer desktop-test")
             XCTAssertNil(request.httpBody, "Audio must use a file upload, not an in-memory body")
             let body = try Self.uploadBody(in: multipart.directory)
-            for field in ["name=\"model\"", "\r\nvoxtral-mini-latest\r\n", "name=\"language\"", "\r\nen\r\n",
+            for field in ["name=\"model\"", "\r\n\(apiModel)\r\n", "name=\"language\"", "\r\nen\r\n",
                           "Content-Type: audio/wav", "filename=\"\(audio.lastPathComponent)\""] {
                 XCTAssertNotNil(body.range(of: Data(field.utf8)), field)
             }

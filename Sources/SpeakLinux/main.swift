@@ -86,6 +86,7 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
     LinuxWindow.endVoiceProviderCallbacks(providerCallbacks)
     try blocking {
         holder.shortcuts.stop()
+        holder.historyPaste.stop()
         if !holder.smokeTest { holder.microphones.stop() }
         await holder.finishSettings()
         await controller.stopProviderCredentialEdits()

@@ -16,6 +16,7 @@ final class WindowsEventContext {
     private let historyEvents: DesktopEventDispatcher<DesktopHistoryEvent>
     private let copies: DesktopTranscriptCopyDispatcher
     private let settings = DesktopSettingsQueue()
+    let historyPaste = DesktopHistoryPasteAdmission()
     let postProcessingPicker = DesktopPostProcessingPicker()
     lazy var hotKeys = WindowsHotKeyGestures { [controller] request in await controller.hotKey(request) }
     lazy var automation = WindowsAutomationSwitch(controller: controller)
@@ -70,6 +71,19 @@ final class WindowsEventContext {
     var currentSettingsTask: Task<Void, Never>? { settings.current }
 
     func finishSettings() async { await settings.drain() }
+
+    func pasteLastHistory() {
+        guard let request = historyPaste.begin() else {
+            WindowsNative.update("History paste is already pending or the app is closing. No new target was captured.")
+            return
+        }
+        let target = try? WindowsInsertionTarget.capture()
+        let controller = controller
+        enqueueSettings {
+            defer { request.finish() }
+            await controller.pasteLastHistoryItem(target: target, request: request)
+        }
+    }
 
     /// Called by the UI thread at the Record event. Reads text output in
     /// settings order: an Apply before Record is used, and one after it cannot
@@ -237,10 +251,7 @@ private func otherWindowEvent(_ event: Int32, value: String, holder: WindowsEven
         guard let slot = Int(value) else { return }
         holder.enqueueSettings { await controller.selectQuickVoice(slot) }
     case 111:
-        // As at the Record event: capture the focused field before anything else can change it.
-        // Clipboard-only output accepts no target; the Host reports a missing required one.
-        let target = try? WindowsInsertionTarget.capture()
-        holder.enqueueSettings { await controller.pasteLastHistoryItem(target: target) }
+        holder.pasteLastHistory()
     case 112:
         do {
             let target = try WindowsInsertionTarget.captureSelection()
@@ -390,6 +401,7 @@ enum SpeakWindowsMain {
         await Task.detached { monitor?.stop() }.value
         holder.microphoneMonitor = nil
         WindowsNative.endVoiceProviderCallbacks(providerCallbacks)
+        holder.historyPaste.stop()
         await holder.finishSettings()
         await controller.stopProviderCredentialEdits()
         // A drained Apply may have refreshed the dialog; never leave it holding

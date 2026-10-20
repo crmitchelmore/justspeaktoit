@@ -45,7 +45,8 @@ test('Apple CI routing keeps UI execution on hosted ARM and compilation on Intel
 
 test('native pool still requires the exact reviewed source and trusted event', () => {
   for (const id of nativeEligibleJobs) {
-    const fallback = id === 'core-journey-e2e' ? ['macos-latest'] : ['macos-26-intel'];
+    // Restore-only gates must share build-macos's hosted architecture to hit its cache.
+    const fallback = ['macos-26-intel'];
     assert.deepEqual(route(id, routingContext(), { JSTI_NATIVE_APPROVED_SHA: 'head-sha' }),
       ['jsti-macos-build', 'macOS']);
     assert.deepEqual(route(id, routingContext(), {

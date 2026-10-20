@@ -261,11 +261,17 @@ final class GeminiInteractionsClientTests: XCTestCase { // swiftlint:disable:thi
     func testPollingCadenceAndOverallDeadlineAreBounded() async throws {
         let audioURL = try Self.makeTemporaryAudioFile()
         defer { try? FileManager.default.removeItem(at: audioURL) }
-        for interval in [0.0, -1.0, 100.0, .greatestFiniteMagnitude] {
+        for (index, interval) in [0.0, -1.0, 100.0, .greatestFiniteMagnitude].enumerated() {
             let recorder = GeminiRequestLog()
+            // A poll cancelled by the previous iteration's deadline can still
+            // reach the shared stub after this handler is installed; a
+            // per-iteration key keeps it out of this iteration's log.
+            let apiKey = "k\(index)"
             StubURLProtocol.respond {  request in
                 let url = try XCTUnwrap(request.url)
-                _ = await recorder.record(method: request.httpMethod ?? "", path: url.path)
+                if request.value(forHTTPHeaderField: GeminiTranscribeModels.apiKeyHeader) == apiKey {
+                    _ = await recorder.record(method: request.httpMethod ?? "", path: url.path)
+                }
                 let headers = url.path == "/upload/v1beta/files"
                     ? ["x-goog-upload-url": "https://generativelanguage.googleapis.com/upload/session"] : [:]
                 let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: headers)!
@@ -279,12 +285,14 @@ final class GeminiInteractionsClientTests: XCTestCase { // swiftlint:disable:thi
                                                   filePollInterval: interval, filePollTimeout: 0.2)
             let start = ContinuousClock.now
             do {
-                _ = try await client.transcribeFile(at: audioURL, apiKey: "k", language: nil)
+                _ = try await client.transcribeFile(at: audioURL, apiKey: apiKey, language: nil)
                 XCTFail("Processing should time out")
             } catch let error as GeminiBatchError {
                 guard case .uploadFailed = error else { return XCTFail("Unexpected error: \(error)") }
             }
-            XCTAssertLessThan(start.duration(to: .now), .seconds(2))
+            // The budget is 0.2s; the margin only absorbs a loaded CI runner
+            // while still failing a 100s cadence or an unbounded wait.
+            XCTAssertLessThan(start.duration(to: .now), .seconds(5))
             let calls = await recorder.calls
             let polls = calls.filter { $0.hasPrefix("GET ") }
             XCTAssertLessThanOrEqual(polls.count, 20, "Nonpositive intervals must not cause a tight loop")

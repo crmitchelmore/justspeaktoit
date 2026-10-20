@@ -86,6 +86,7 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
     LinuxWindow.endVoiceProviderCallbacks(providerCallbacks)
     try blocking {
         holder.shortcuts.stop()
+        holder.historyPaste.stop()
         if !holder.smokeTest { holder.microphones.stop() }
         await holder.finishSettings()
         await controller.stopProviderCredentialEdits()
@@ -139,7 +140,31 @@ func configureApplicationIcon() throws {
     try LinuxNative.call { jsti_app_icon_configure(theme.deletingLastPathComponent().path, $0, $1) }
 }
 
+func prepareDesktopAction(_ arguments: [String], forward: Bool) throws {
+    var nativeArguments = arguments.map { strdup($0) }
+    defer { nativeArguments.forEach { free($0) } }
+    guard nativeArguments.allSatisfy({ $0 != nil }) else {
+        throw DesktopHostError(message: "Could not allocate desktop action command arguments.")
+    }
+    nativeArguments.append(nil)
+    try LinuxNative.call {
+        jsti_window_validate_action_command(Int32(arguments.count), &nativeArguments, $0, $1)
+    }
+    guard forward else { return }
+    try LinuxNative.call {
+        jsti_window_forward_action(
+            linuxApplicationID, Int32(arguments.count), &nativeArguments, $0, $1
+        )
+    }
+}
+
 let arguments = CommandLine.arguments
+let actionArguments = LinuxActionShortcutRun.forwardedCommandArguments
+let forwardsAction = arguments.contains(where: { actionArguments.contains($0) })
+if forwardsAction || arguments.contains(JSTI_TOGGLE_ARGUMENT) {
+    do { try prepareDesktopAction(arguments, forward: forwardsAction) } catch { fail(error) }
+    if forwardsAction { exit(0) }
+}
 DesktopHostModels.configure(
     streamingQualified: LinuxLiveTransport.qualified, local: DesktopLocalTranscription.options(host: .linux)
 )
@@ -171,12 +196,13 @@ let integrationCheck = arguments.firstIndex(of: "--integration-test").flatMap {
     arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil
 }
 switch integrationCheck {
-case "keyring", "capture", "portal", "x11-hotkey":
+case "keyring", "capture", "portal", "x11-hotkey", "x11-hotkey-locks":
     do {
         switch integrationCheck {
         case "keyring": try LinuxIntegrationChecks.keyring()
         case "capture": try LinuxIntegrationChecks.capture()
         case "x11-hotkey": try LinuxIntegrationChecks.x11Hotkey()
+        case "x11-hotkey-locks": try LinuxIntegrationChecks.x11Hotkey(lockStates: true)
         default: try LinuxIntegrationChecks.portal()
         }
     } catch { fail(error) }

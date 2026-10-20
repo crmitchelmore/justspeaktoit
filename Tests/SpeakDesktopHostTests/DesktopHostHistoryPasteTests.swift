@@ -124,6 +124,54 @@ final class DesktopHostHistoryPasteTests: XCTestCase {
         await finishOutput()
         XCTAssertEqual(effects.calls.count, 1)
     }
+
+    func testPaste_ExpiredQueuedCaptureCannotStartOutputButAFreshRequestCan() async throws {
+        let clock = HostHistoryPasteClock()
+        let admission = DesktopHistoryPasteAdmission(now: { clock.now })
+        let stale = try XCTUnwrap(admission.begin())
+        await controller.indexHistory(record("Retained text", createdAt: 1))
+        XCTAssertNil(admission.begin())
+        let queuedController = try XCTUnwrap(controller)
+        let queue = DesktopSettingsQueue()
+        queue.submit { clock.advance(DesktopHistoryPasteAdmission.maximumDelay) }
+        queue.submit {
+            defer { stale.finish() }
+            await queuedController.pasteLastHistoryItem(target: "stale-field", request: stale)
+        }
+        await queue.drain()
+        XCTAssertTrue(effects.calls.isEmpty)
+        let output = await controller.outputSlot.task
+        XCTAssertNil(output)
+        XCTAssertTrue(FakeLog.shared.allStatuses.last?.contains("captured target expired") == true)
+        XCTAssertFalse(stale.isCurrent)
+        let fresh = try XCTUnwrap(admission.begin())
+        defer { fresh.finish() }
+        await controller.pasteLastHistoryItem(target: "new-field", request: fresh)
+        await finishOutput()
+        XCTAssertEqual(effects.calls.count, 1)
+        XCTAssertEqual(effects.calls.first?.job.target, "new-field")
+    }
+
+    func testPaste_ShutdownInvalidatedRequestCannotStartOutputBeforeHostClose() async throws {
+        let admission = DesktopHistoryPasteAdmission()
+        let request = try XCTUnwrap(admission.begin())
+        defer { request.finish() }
+        await controller.indexHistory(record("Retained text", createdAt: 1))
+        admission.stop()
+        await controller.pasteLastHistoryItem(target: "captured-field", request: request)
+        XCTAssertTrue(effects.calls.isEmpty)
+        let output = await controller.outputSlot.task
+        XCTAssertNil(output)
+        XCTAssertTrue(FakeLog.shared.allStatuses.last?.contains("request was cancelled") == true)
+        XCTAssertNil(admission.begin())
+    }
+}
+
+private final class HostHistoryPasteClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var instant = ContinuousClock.now
+    var now: ContinuousClock.Instant { lock.withLock { instant } }
+    func advance(_ duration: Duration) { lock.withLock { instant = instant.advanced(by: duration) } }
 }
 
 extension DesktopHostController where Platform == FakePlatform {

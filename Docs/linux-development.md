@@ -347,6 +347,87 @@ app without raising its window (GApplication forwards the command line), so it
 can be bound to a key in any desktop. The `app.toggle-recording` action does
 the same over D-Bus.
 
+The X11 listener discovers CapsLock/ShiftLock, NumLock and ScrollLock slots from
+the actual modifier and key maps when registering, rather than assuming Mod2
+and Mod5 are locks. A slot that also contains AltGr, a group-switch key or another
+ordinary key is deliberately not ignored; explicitly required modifiers also
+remain required. Grab and release use the same owned set of unique lock-state
+variants, and event admission rejects extra non-lock modifiers. Custom maps with
+mixed lock/non-lock slots may need the desktop-owned `--toggle` binding instead.
+Runtime key/modifier remapping still needs a listener restart: automatic
+remapping/rebinding, multiple global actions and real keyboard/layout acceptance
+remain open gates. No-display native fixtures cover the classification and mask
+invariants, including the 256-variant bound; these changes are NOT_RUN locally.
+The disposable Xvfb integration harness also authors an
+`--integration-test x11-hotkey-locks` check: reject Ctrl+Alt+Shift+Space, then
+require exact press/release receipts with locks off, CapsLock, CapsLock+NumLock,
+NumLock, and locks off again. Each producer phase waits for its own
+acknowledgement; a false extra-modifier activation cannot compensate for a missed
+lock-state action. Readiness, phase waits and the child process are bounded; native
+stop is deferred on every exit. The rejection uses a 250 ms test-only quiet
+window, not a production readiness delay. The private server is discarded after
+the harness; no real desktop key map is modified. This check is NOT_RUN locally
+and does not qualify AltGr, arbitrary layouts, runtime remapping or Wayland.
+
+With the app **already running**, desktop keyboard settings can also bind
+`justspeaktoit --speak-clipboard` and `justspeaktoit --paste-last-history`.
+The same running-app forwarding path supports `--stop-speech`,
+`--pause-resume-speech`, and `--quick-voice-1`, `--quick-voice-2` or
+`--quick-voice-3`. Quick Voice selects the corresponding saved favorite; it does
+not start speech, record an instruction, or read selection/clipboard text.
+Pause/Resume acts on the active speech through the existing Host policy.
+Stop uses the existing Playback Stop action. Its native control remains enabled
+while idle, recording or working; Stop is idempotent if no audio is playing.
+It cancels speech/playback without cancelling dictation or clearing a busy
+operation's state/status. Modal-disabled or closing windows still refuse it.
+Inside Flatpak use `flatpak run com.justspeaktoit.JustSpeakToIt` followed by the
+same argument. These commands forward without presenting the window, preserving
+the external app's focus. Speak Clipboard uses the saved Voice Output settings;
+Paste Last History captures the invocation target and uses saved output policy,
+not the selected History row. Clipboard-only output requires no external field.
+X11 requires a captured external window for paste; Wayland retains the existing
+portal delivery-time-focus and recovery-copy behavior, not an anchored-field
+guarantee. Forwarding happens before model/controller construction or opening
+application stores. A cold invocation of any of these commands exits nonzero
+instead of opening a window and acting on the wrong focus.
+
+Choose one action per invocation; different action flags together or unsupported
+options are refused before dispatch, including two different Quick Voice slots.
+This preflight includes legacy `--toggle`: adding an unknown option (including
+`--gapplication-service`) or another action refuses before model/controller
+construction or store access. A valid `--toggle`, with optional `--background`
+or repeated identical toggle flags, keeps its existing cold-launch and
+running-app dictation behavior; it is not changed into a running-only command.
+Busy/recording states refuse clipboard speech, History paste, Pause/Resume and
+Quick Voice; closing or modal-disabled windows refuse all commands. Stop follows
+its own control's availability as described above. Refusal returns a nonzero exit
+status. Status 0 means admitted
+to the running app, not that speech or paste completed; results and provider
+errors appear in the app.
+Bindings remain user-owned desktop configuration: the saved Global switch
+does not automatically register these actions. Parser and native dispatch
+fixtures are authored but NOT_RUN locally.
+
+`scripts/linux-desktop-checks.sh` also opts into a cross-process fixture only
+inside its private session bus. It launches 34 real command-client processes
+against the production native command handler with a synthetic event callback:
+valid and repeated commands, `--background`, mixed action flags, unsupported
+options, Quick Voice slot identity/conflicts, Stop availability during idle,
+working and recording states, busy/recording/modal/closing refusal, and all seven running-only
+commands with no primary. Malformed toggle options are additionally refused both
+with and without a primary; no real toggle/provider action is delivered.
+The fixture applies production `refresh_actions` for each state, not a synthetic
+Stop-sensitivity override, including explicit Stop modal/closing refusals.
+Each child has a 15-second deadline and is reaped; the smoke-test envelope is
+600 seconds. The fixture requires exact callback identity/count/slot, unchanged page
+and hidden-window visibility, refusal diagnostics, and an empty isolated data
+directory after all clients. A separate smoke-window application path avoids
+colliding with the fixture's real GApplication identity; a private main context
+keeps unrelated GTK/Host callbacks out of the fixture. It never invokes providers,
+reads clipboard content, or pastes into a field. This fixture is also NOT_RUN
+locally: automatic cross-process qualification, compositor key bindings and
+external-field/provider acceptance remain unverified.
+
 Data lives in `$XDG_DATA_HOME/JustSpeakToIt` (`~/.local/share/JustSpeakToIt`;
 Flatpak: `~/.var/app/com.justspeaktoit.JustSpeakToIt/data/JustSpeakToIt`):
 `settings.json`, `History/`, profiles and the OpenRouter catalogue cache, all

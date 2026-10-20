@@ -27,6 +27,7 @@ final class LinuxEventContext: @unchecked Sendable {
     let shortcuts: LinuxShortcuts
     let automation: LinuxAutomationSwitch
     let apiKeys = DesktopAPIKeyRequests()
+    let historyPaste = DesktopHistoryPasteAdmission()
     private(set) var gestures: LinuxShortcutGestures!
     lazy var microphones = LinuxMicrophoneMonitor(controller: controller)
     /// Set before the window opens, when iCloud sync is configured.
@@ -71,6 +72,21 @@ final class LinuxEventContext: @unchecked Sendable {
     func enqueueSettings(_ action: @escaping @Sendable () async -> Void) { settings.submit(action) }
     var currentSettingsTask: Task<Void, Never>? { settings.current }
     func finishSettings() async { await settings.drain() }
+
+    func pasteLastHistory() {
+        guard let request = historyPaste.begin() else {
+            LinuxHostPlatform.update(
+                "History paste is already pending or the app is closing. No new target was captured."
+            )
+            return
+        }
+        let target = Self.captureTarget(includeObservation: false)
+        let controller = controller
+        enqueueSettings {
+            defer { request.finish() }
+            await controller.pasteLastHistoryItem(target: target, request: request)
+        }
+    }
 
     /// Text output as of this event in settings order, however late the
     /// recording task runs.
@@ -127,20 +143,23 @@ final class LinuxEventContext: @unchecked Sendable {
 
     /// A global shortcut press or release from the X11 or portal thread. The
     /// target and text output are captured at the press.
-    func shortcutKey(pressed: Bool) {
-        if pressed {
-            guard jsti_action_shortcuts_editor_is_open() == 0, jsti_api_keys_is_open() == 0 else { return }
-            let target = Self.captureTarget()
+    func shortcutKey(pressed: Bool, lifetime: DesktopShortcutListenerLifetime) {
+        guard pressed else {
+            lifetime.admitCallback { gestures.keyUp() }
+            return
+        }
+        guard jsti_action_shortcuts_editor_is_open() == 0, jsti_api_keys_is_open() == 0 else { return }
+        let target = Self.captureTarget()
+        let shouldWarmMicrophone = !smokeTest && gestures.currentStyle != .pressToToggle
+        lifetime.admitCallback {
             let selection = recordingSettings(target: target)
-            if !smokeTest, gestures.currentStyle != .pressToToggle {
+            if shouldWarmMicrophone {
                 let controller = controller
                 Task { await controller.warmMicrophoneForShortcutPress() }
             }
             gestures.keyDown(
                 target: target, textOutput: Task { await selection.value.textOutput }, selection: selection
             )
-        } else {
-            gestures.keyUp()
         }
     }
 
@@ -153,12 +172,21 @@ final class LinuxEventContext: @unchecked Sendable {
 
     /// X11 reports the focused window; Wayland hides it, so the paste goes to
     /// whatever is focused at delivery, never to this app's own window.
-    static func captureTarget() -> LinuxInsertionTarget? {
+    /// History paste must not consume the one-shot correction-learning target.
+    static func captureTarget(includeObservation: Bool = true) -> LinuxInsertionTarget? {
         switch LinuxHostPlatform.session.displayServer {
-        case .x11: return LinuxX11.captureTarget()
+        case .x11:
+            if includeObservation { return LinuxX11.captureTarget() }
+            do {
+                return try LinuxX11.captureTargetChecked()
+            } catch {
+                LinuxHostPlatform.update("Could not capture the paste target: \(error.localizedDescription)")
+                return nil
+            }
         case .wayland:
             return LinuxInsertionTarget(
-                kind: .focusedApplication, observationalTarget: LinuxAtspiTarget.captureAdmitted()
+                kind: .focusedApplication,
+                observationalTarget: includeObservation ? LinuxAtspiTarget.captureAdmitted() : nil
             )
         case .unknown: return nil
         }
@@ -239,6 +267,8 @@ private func linuxActionEvent(_ event: Int, value: String, slot: Int, holder: Li
         }
     case Int(JSTI_EVENT_SPEECH_PAUSE):
         holder.enqueueSettings { await holder.controller.pauseResumeSpeech() }
+    case Int(JSTI_EVENT_PASTE_LAST_HISTORY):
+        holder.pasteLastHistory()
     default: return false
     }
     return true

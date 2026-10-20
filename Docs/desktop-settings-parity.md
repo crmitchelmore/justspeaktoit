@@ -78,7 +78,7 @@ Post-processing drains, keyless ordering, ordered live completion, later Apply,
 bounded overflow and permanent shutdown refusal. These native wiring and test changes remain
 NOT_RUN locally; this is not yet automatic qualification of the drain contract.
 
-## Linux Permissions destination (source only; NOT_RUN)
+## Linux Permissions destination (native CI qualified; physical acceptance open)
 
 About's **Permissions** button, Open Permissions action (run 10/event 118)
 and Troubleshooting's permission finding open a distinct modeless libadwaita
@@ -101,7 +101,9 @@ existing explicit paste workflow requests RemoteDesktop access when needed.
 
 Revision fencing ignores late reports after Check again or close/reopen.
 Four pure Linux presentation tests and native lifecycle/invalid-row/dispatch
-fixtures are authored but NOT_RUN locally. This is a usable permission recovery
+fixtures were NOT_RUN locally. Automatic `1667ee83` qualification passed native
+Windows (job `118642699896`) and Linux desktop (job `118642912114`), plus Debug,
+Core Journey, Fixture UI and API compatibility. This is a usable permission recovery
 destination, not evidence that capture, insertion or desktop permissions have
 been exercised on a physical system.
 
@@ -163,7 +165,103 @@ These checks are **NOT_RUN** locally. Windows maps the Paste Last History Item
 action shortcut to it (`JSTI_ACTION_RUN_PASTE_LAST_HISTORY` emits
 `JSTI_EVENT_PASTE_LAST_HISTORY`); the callback captures the focused field on the
 UI thread before queueing the Host action, as the Record event does. Linux does
-not yet map the Paste Last History Item action.
+the same through window-local run 11/event 111. It captures the invocation target
+before joining the settings queue, without acquiring the one-shot AT-SPI
+observational target or starting correction learning. Native admission refuses
+recording, work and an insensitive parent, but is independent of the History
+page, selected row and speech controls. The saved output policy remains
+authoritative: clipboard-only works without a field; paste requires a captured
+target. X11 never substitutes a stale external window when this app has focus.
+Wayland retains its documented delivery-time-focus portal and recovery-copy
+policy; it does not acquire an anchored external-field guarantee.
+
+Both hosts now bound History-paste admission **before target capture**: only one
+request can wait in the settings queue. Further invocations report that paste is
+pending rather than capturing and retaining more external targets. The Host checks
+the request's one-second monotonic capture budget immediately before starting
+output; an expired or shutdown-invalidated request reports refusal, never retries,
+and releases its admission slot only when its queued consumer returns. Shutdown
+invalidates this gate before draining settings. The existing separate output slot
+still refuses overlapping output. This bounds delayed requests; it does not expand
+X11/Wayland target guarantees or change ordinary Copy or recording output. Portable
+burst/expiry/concurrent-admission tests and Host queued-expiry/cancellation tests
+are authored but NOT_RUN locally, pending automatic native/portable qualification.
+
+Linux now has **25 of 27 source-wired window-local actions**; selected-text speech,
+voice editing and global action registration remain open. Mapping, native row
+validation and busy/recording/parent/page-independent dispatch fixtures are
+authored but NOT_RUN locally. They need automatic qualification. Clipboard
+delivery alone is not evidence of external-field paste or global-shortcut parity.
+
+Linux also exposes `--speak-clipboard`, `--paste-last-history`, `--stop-speech`,
+`--pause-resume-speech` and `--quick-voice-1` / `--quick-voice-2` /
+`--quick-voice-3` through the existing GApplication command-forwarding path.
+Quick Voice selects a saved favorite without reading text or starting speech.
+Stop reuses Playback Stop, whose native control now stays enabled across idle,
+recording and working states. Stop is idempotent when silent and does not cancel
+dictation or clear another operation's busy status; modal/closing gates still
+apply. Other commands retain their idle gates. The app must already be running:
+cold invocations are refused, and forwarding never raises the app window.
+Users can bind them in desktop keyboard settings; global action rows explain
+this fallback without presenting the saved binding as registered. Different
+action flags or unsupported options together are refused before dispatch. Busy,
+recording, closing and modal-disabled states refuse commands according to those
+existing action gates; distinct Quick Voice slots conflict before dispatch.
+Command parser/dispatch fixtures are authored but NOT_RUN locally.
+Legacy `--toggle` also receives pure preflight before model/controller/store
+initialization: malformed options or conflicting actions are refused, while a
+valid toggle retains its cold-launch/remote behavior. The native command handler
+independently rejects unknown options for every action, including toggle.
+The automatic desktop-check harness additionally enables 34 real child
+command processes on its private bus with synthetic native event capture, bounded
+waits, refusal diagnostics, hidden-window/page invariants and an empty isolated
+data-directory requirement, including malformed toggle options with and without
+a primary. Stop cases use production action refresh, not a fabricated enabled
+control during work, and cover all three states plus modal/closing refusal.
+A separate scripted Host regression checks speech cancellation while retaining
+busy state and status; it is also authored, NOT_RUN locally. This does not
+deliver a native/provider/field action.
+The cross-process fixture is also NOT_RUN locally; automatic qualification,
+compositor/provider and external-field acceptance remain open.
+
+## Linux shortcut listener lifetime (source only; NOT_RUN)
+
+X11 registration now reads the actual modifier/key maps rather than ignoring
+guessed Mod2/Mod5 lock bits. Only lock-only slots are ignored, across every
+symbol level; AltGr/group-switch/mixed slots and explicitly required modifiers
+remain significant. The listener owns the exact unique grab/ungrab variants and
+checks event modifiers before admitting a press. No-display native fixtures
+cover relocated ScrollLock, AltGr, mixed/unknown keys, explicit lock modifiers
+and zero/all-eight-bit subset bounds. These are authored but NOT_RUN locally.
+Runtime remapping/rebinding, safe multi-action registration and physical
+keyboard/layout qualification remain open, not inferred from this repair.
+An additional authored private-Xvfb integration sequence rejects an extra Shift,
+then requires one press/release in each off/Caps/Caps+Num/Num/off lock state with
+per-phase producer acknowledgements and exact event prefixes. Cleanup is
+deferred and all waits are bounded. This is NOT_RUN locally; it covers only the
+disposable server's default map, not AltGr or runtime layout changes.
+
+The existing dictation listener now owns its startup and actual native cleanup,
+not just flags set after registration returns. Stop permanently fences new
+callback admission and result publication. An already-started X11 or portal
+registration may still finish, but its late success is immediately closed and
+cannot republish controls. Shutdown does not wait for a blocked startup dialog.
+Callback preflight is not final admission: native target capture and the gesture
+style's synchronous queue read stay outside the lifetime lock, then a bounded
+settings/gesture enqueue is atomically admitted against stop. If stop wins during
+preparation, no gesture or microphone-warmup task is submitted. Held-preparation
+and racing-final-admission regressions are authored but NOT_RUN locally.
+The native callback context stays alive through the actual stop call and holds
+the window/controller only weakly. A settings read already in flight rechecks
+the publication fence afterward.
+
+Six authored portable regressions cover stop-before-start, single admission,
+blocked startup and late cleanup, explicit failure hints, reentrant cleanup
+outside the state lock, and racing stop/completion. These are NOT_RUN locally;
+automatic portable/native qualification remains required. Existing X11/portal
+binding protocols, dictation gestures and fallback commands are unchanged.
+This closes a listener-lifetime prerequisite; multi-action global registration
+and physical shortcut acceptance remain open.
 
 ## Troubleshooting (source only)
 
@@ -2379,7 +2477,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | modulatePIIPhiTagging | Live/batch source wired; unqualified / Same | Native default/on/off choice, strict transfer/restart and captured live/batch provider flags; absent stays off. Native/provider acceptance pending. |
 | accessibilityInsertionMode | Equivalent / Missing | Output; Windows cursor/replace-field; Linux paste cannot claim AX replace-all equivalence |
 | selectedHotKey | Equivalent / Partial | Shortcuts; Windows Ctrl/Alt native key; Linux desktop/portal-owned binding, never Mac Fn key translation |
-| customShortcutBindings | Complete source mapping; unqualified / Partial window-local source | Windows Keyboard **Action shortcuts** dialog: all 27 actions source-wired; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Voice editing additionally requires an editable UIA selection and a rewrite API key. Linux projects 24 actions into window-local bindings and edits all saved bindings with presets/reset; three execution actions and global registration remain unimplemented. Native/physical acceptance pending. |
+| customShortcutBindings | Complete source mapping; unqualified / Partial window-local source | Windows Keyboard **Action shortcuts** dialog: all 27 actions source-wired; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Voice editing additionally requires an editable UIA selection and a rewrite API key. Linux projects 25 actions into window-local bindings and edits all saved bindings with presets/reset; selected-text speech, voice editing and global registration remain unimplemented. Native/physical acceptance pending. |
 | paidAccessRoutingEnabled | Apple-specific / Apple-specific | BYOK desktop providers; no paid-access entitlement/routing journey. Retained opaque through import/export |
 | simpleModelChoices | Missing / Missing | Native catalogue picker without simplified paid-model chooser |
 | rememberedLocalTranscriptionSource | Partial / Partial | Models remembers Local selection; no Apple on-device source |

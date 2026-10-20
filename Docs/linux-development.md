@@ -366,7 +366,8 @@ the harness; no real desktop key map is modified. This check is NOT_RUN locally
 and does not qualify AltGr, arbitrary layouts, runtime remapping or Wayland.
 
 With the app **already running**, desktop keyboard settings can also bind
-`justspeaktoit --speak-clipboard` and `justspeaktoit --paste-last-history`.
+`justspeaktoit --speak-clipboard`, `justspeaktoit --speak-selected-text` and
+`justspeaktoit --paste-last-history`.
 The same running-app forwarding path supports `--stop-speech`,
 `--pause-resume-speech`, and `--quick-voice-1`, `--quick-voice-2` or
 `--quick-voice-3`. Quick Voice selects the corresponding saved favorite; it does
@@ -394,7 +395,7 @@ This preflight includes legacy `--toggle`: adding an unknown option (including
 construction or store access. A valid `--toggle`, with optional `--background`
 or repeated identical toggle flags, keeps its existing cold-launch and
 running-app dictation behavior; it is not changed into a running-only command.
-Busy/recording states refuse clipboard speech, History paste, Pause/Resume and
+Busy/recording states refuse clipboard/selected-text speech, History paste, Pause/Resume and
 Quick Voice; closing or modal-disabled windows refuse all commands. Stop follows
 its own control's availability as described above. Refusal returns a nonzero exit
 status. Status 0 means admitted
@@ -404,12 +405,36 @@ Bindings remain user-owned desktop configuration: the saved Global switch
 does not automatically register these actions. Parser and native dispatch
 fixtures are authored but NOT_RUN locally.
 
+Selected-text speech requires its own **Voice Output > Selection access >
+Allow...** session disclosure. After allowing, refocus an external ordinary
+editable AT-SPI field, select text and invoke `--speak-selected-text` without
+raising this app. The selected text may be sent to the saved remote Voice
+Output provider. Correction-learning consent does not authorize this read-only
+session; neither settings nor imports grant it. Stop access revokes pending
+reads before requesting speech Stop, and shutdown revokes access before draining
+settings. The app does not enable desktop accessibility.
+
+Capture on the command path uses only an already-admitted field receipt. A
+single pending lease across session restarts prevents queued target accumulation.
+The private worker has 2.5 seconds from invocation, requires exactly one
+nonempty selection of at most 8,192 Unicode scalars / 32,768 UTF-8 bytes, and
+rechecks target identity, privacy, range and contents before returning a
+snapshot to the owned Host speech task. Selection/caret changes invalidate the
+receipt; any new admission revalidates the same known control off the action
+path. Text mutation events are registered only during the explicit read.
+Read-only documents, password/ambiguous controls and unsupported apps refuse;
+there is no clipboard or PRIMARY-selection fallback. This is a per-field
+AT-SPI capability, not blanket X11/Wayland support. The in-app source dialog
+still excludes external selection because opening it changes focus.
+Pure contract and command fixtures are authored, NOT_RUN locally; real field,
+provider/audio and compositor acceptance remain unverified.
+
 `scripts/linux-desktop-checks.sh` also opts into a cross-process fixture only
-inside its private session bus. It launches 34 real command-client processes
+inside its private session bus. It launches 39 real command-client processes
 against the production native command handler with a synthetic event callback:
 valid and repeated commands, `--background`, mixed action flags, unsupported
 options, Quick Voice slot identity/conflicts, Stop availability during idle,
-working and recording states, busy/recording/modal/closing refusal, and all seven running-only
+working and recording states, busy/recording/modal/closing refusal, and all eight running-only
 commands with no primary. Malformed toggle options are additionally refused both
 with and without a primary; no real toggle/provider action is delivered.
 The fixture applies production `refresh_actions` for each state, not a synthetic

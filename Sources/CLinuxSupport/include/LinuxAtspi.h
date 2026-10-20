@@ -28,8 +28,22 @@ void jsti_atspi_release(JSTIAtspiTarget *target);
 int32_t jsti_atspi_insert(JSTIAtspiTarget *target, const char *text);
 int32_t jsti_atspi_begin(JSTIAtspiTarget *target, const char *original);
 int32_t jsti_atspi_read(JSTIAtspiTarget *target, char *output, size_t capacity);
+/* Separate read-only authority; correction consent and targets never grant it.
+ * An offer belongs to one pending native dialog; revoke with (0, 0) invalidates
+ * that dialog synchronously. No permission is persisted or imported. */
+typedef struct JSTIAtspiSelection JSTIAtspiSelection;
+uint64_t jsti_atspi_selection_offer(void);
+int32_t jsti_atspi_selection_consent(int32_t allowed, uint64_t token);
+int32_t jsti_atspi_selection_status(void);
+/* Metadata-only invocation receipt, one pending lease across session restarts.
+ * Release it even if never read. Each lease admits one bounded worker read;
+ * selected text is never captured on the calling/GTK thread. */
+JSTIAtspiSelection *jsti_atspi_selection_capture(void);
+int32_t jsti_atspi_selection_read(JSTIAtspiSelection *lease, char *output, size_t capacity);
+void jsti_atspi_selection_release(JSTIAtspiSelection *lease);
 /* Pure fixtures: no bus, UI, services or field access. */
 int32_t jsti_atspi_contract_self_test(void);
+int32_t jsti_atspi_selection_contract_self_test(void);
 int32_t jsti_vocabulary_learning_controls_contract_self_test(void);
 #ifdef __cplusplus
 }

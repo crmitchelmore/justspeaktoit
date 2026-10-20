@@ -78,6 +78,7 @@ enum {
     JSTI_EVENT_SPEECH_PAUSE = 116, /* exact active speech only; never starts History audio */
     JSTI_EVENT_API_KEYS = 117,
     JSTI_EVENT_PERMISSIONS = 118,
+    JSTI_EVENT_SPEAK_SELECTED_TEXT = 130, /* captures a selection-only invocation receipt before queueing */
     /* Profiles: percent-escaped TAB fields, starting with revision/action/UUID;
      * "refresh" opens a new immutable catalogue/editor revision. */
     JSTI_EVENT_PROFILES = 140
@@ -106,6 +107,7 @@ enum {
 #define JSTI_LOGIN_LAUNCH_ARGUMENT "--background"
 #define JSTI_TOGGLE_ARGUMENT "--toggle"
 #define JSTI_SPEAK_CLIPBOARD_ARGUMENT "--speak-clipboard"
+#define JSTI_SPEAK_SELECTED_TEXT_ARGUMENT "--speak-selected-text"
 #define JSTI_PASTE_LAST_HISTORY_ARGUMENT "--paste-last-history"
 #define JSTI_STOP_SPEECH_ARGUMENT "--stop-speech"
 #define JSTI_PAUSE_SPEECH_ARGUMENT "--pause-resume-speech"
@@ -129,7 +131,9 @@ typedef void (*jsti_window_event_fn)(int32_t event, const char *text, int32_t in
  * rows remain visible but disabled; this does not change dictation registration.
  * run: 0 unavailable, 1 record, 2 page, 3 stop, 4 troubleshooting,
  * 5 comparison, 6 quick voice, 7 clipboard speech, 8 speech pause,
- * 9 API Keys, 10 Permissions, 11 paste last History. Strings are copied before return. */
+ * 9 API Keys, 10 Permissions, 11 paste last History, 12 selected-text speech.
+ * Selected-text speech needs external focus; its saved window binding stays disabled.
+ * Strings are copied before return. */
 typedef struct JSTILinuxActionShortcut {
     const char *title, *chord, *note, *page, *identifier;
     uint32_t keysym, modifiers;

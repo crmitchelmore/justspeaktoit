@@ -16,6 +16,7 @@
 #define BUDGET_US (2500 * 1000)
 
 typedef struct Session Session;
+typedef enum { CORRECTION_SESSION, SELECTION_SESSION } SessionPurpose;
 typedef enum { CLEANUP_UNKNOWN, CLEANUP_EVENT, CLEANUP_APPLICATION } CleanupShape;
 typedef enum { FRESH, DISPATCHED, INSERTED, SAMPLING, FINISHED } Phase;
 struct JSTIAtspiTarget {
@@ -31,10 +32,11 @@ struct JSTIAtspiTarget {
     gboolean left_edge, right_edge;
     GArray *signals;
     gboolean registered;
-    guint metadata_registrations;
+    guint metadata_registrations, selection_registrations;
 };
 struct Session {
     gint refs, stopped, status;
+    SessionPurpose purpose;
     GMainContext *context;
     GDBusConnection *bus;
     GCancellable *cancel;
@@ -47,12 +49,22 @@ struct Session {
     gchar *pending_owner, *pending_path;
 };
 static GMutex state_lock;
-static Session *current;
+static Session *current, *selection_current;
+typedef struct { gint pending; } SelectionAdmission;
+static SelectionAdmission selection_admission;
 static guint64 next_epoch;
 typedef struct { guint64 generation, offer; gboolean exhausted; } ConsentLedger;
-static ConsentLedger consent;
+static ConsentLedger consent, selection_consent;
 static const char *metadata_events[] = { "object:state-changed", "object:property-change",
     "object:attributes-changed", "object:children-changed", "window:" };
+static const char *selection_events[] = { "object:text-selection-changed", "object:text-caret-moved" };
+
+struct JSTIAtspiSelection {
+    gint refs, started;
+    JSTIAtspiTarget *target;
+    SelectionAdmission *admission;
+    gint64 deadline;
+};
 
 static Session *session_ref(Session *s) { g_atomic_int_inc(&s->refs); return s; }
 static void session_unref(Session *s) {
@@ -274,6 +286,7 @@ static gboolean track(JSTIAtspiTarget *t, const char *detail, gint start, gint l
     g_free(t->tracked); t->tracked = next;
     return TRUE;
 }
+static void queue_target_readmission(JSTIAtspiTarget *t);
 static void object_event(GDBusConnection *bus, const gchar *sender, const gchar *path,
     const gchar *interface, const gchar *signal, GVariant *parameters, gpointer data) {
     (void)bus; (void)interface;
@@ -289,7 +302,10 @@ static void object_event(GDBusConnection *bus, const gchar *sender, const gchar 
         g_variant_unref(value); g_variant_unref(wrapped); g_variant_unref(properties);
         if (!ok) invalidate(t);
     } else if (g_strcmp0(signal, "TextCaretMoved") == 0 || g_strcmp0(signal, "TextSelectionChanged") == 0) {
-        /* Final caret/selection checks are independent of mutation origin. */
+        /* Re-admit the same known control, but never retarget an outstanding read. */
+        if (t->session->purpose == SELECTION_SESSION) {
+            invalidate(t); queue_target_readmission(t);
+        }
     } else {
         /* Privacy, parent, attributes, children, window and lifetime changes
          * make the lease ambiguous. No text is fetched by these callbacks. */
@@ -364,6 +380,11 @@ static void detach(JSTIAtspiTarget *t) {
             cleanup_arguments(s->cleanup_shape, metadata_events[i], t->owner));
     }
     t->metadata_registrations = 0;
+    for (guint i = 0; i < t->selection_registrations && !g_atomic_int_get(&s->stopped); ++i) {
+        registry_cleanup_call(s, "DeregisterEvent",
+            cleanup_arguments(s->cleanup_shape, selection_events[i], t->owner));
+    }
+    t->selection_registrations = 0;
     if (had_metadata && s->cleanup_shape == CLEANUP_EVENT && !g_atomic_int_get(&s->stopped)) {
         /* Older prefix-based cleanup can also remove our minimal focus
          * registration. Restore metadata discovery, never a text listener. */
@@ -394,6 +415,17 @@ static gboolean attach_metadata(JSTIAtspiTarget *t, gint64 deadline) {
         if (reply == NULL) return FALSE;
         g_variant_unref(reply);
         ++t->metadata_registrations;
+    }
+    if (t->session->purpose == SELECTION_SESSION) {
+        subscribe_target(t, OBJECT_EVENT, "TextSelectionChanged", t->path);
+        subscribe_target(t, OBJECT_EVENT, "TextCaretMoved", t->path);
+        for (guint i = 0; i < G_N_ELEMENTS(selection_events); ++i) {
+            GVariant *reply = rpc(t->session, "org.a11y.atspi.Registry", "/org/a11y/atspi/registry", REGISTRY,
+                "RegisterEvent", g_variant_new("(s@ass)", selection_events[i], g_variant_new_strv(NULL, 0), t->owner),
+                "()", deadline);
+            if (reply == NULL) return FALSE;
+            g_variant_unref(reply); ++t->selection_registrations;
+        }
     }
     return current_target(t);
 }
@@ -457,6 +489,13 @@ static void queue_admission(Session *s) {
     s->admission_queued = TRUE;
     GSource *idle = g_idle_source_new();
     g_source_set_callback(idle, admission, s, NULL); g_source_attach(idle, s->context); g_source_unref(idle);
+}
+static void queue_target_readmission(JSTIAtspiTarget *t) {
+    Session *s = t->session;
+    if (g_atomic_int_get(&s->stopped) || t != s->admitted || t->focus != s->focus) return;
+    g_free(s->pending_owner); g_free(s->pending_path);
+    s->pending_owner = g_strdup(t->owner); s->pending_path = g_strdup(t->path);
+    if (!s->busy) queue_admission(s);
 }
 static gboolean admission(gpointer data) {
     Session *s = data;
@@ -573,8 +612,8 @@ static gboolean consent_action_current(const ConsentLedger *ledger, gboolean all
     return !ledger->exhausted && token != 0 && token == ledger->generation
         && (!allowed || token == ledger->offer);
 }
-static Session *revoke_current_locked(void) {
-    Session *old = current; current = NULL;
+static Session *revoke_session_locked(Session **slot) {
+    Session *old = *slot; *slot = NULL;
     if (old != NULL) {
         g_atomic_int_set(&old->stopped, TRUE);
         invalidate(old->admitted);
@@ -584,7 +623,7 @@ static Session *revoke_current_locked(void) {
 }
 uint64_t jsti_atspi_offer_local_consent(void) {
     g_mutex_lock(&state_lock);
-    Session *old = revoke_current_locked();
+    Session *old = revoke_session_locked(&current);
     guint64 token = advance_consent(&consent, TRUE);
     g_mutex_unlock(&state_lock);
     if (old != NULL) session_unref(old);
@@ -592,7 +631,7 @@ uint64_t jsti_atspi_offer_local_consent(void) {
 }
 uint64_t jsti_atspi_revoke_local_consent(void) {
     g_mutex_lock(&state_lock);
-    Session *old = revoke_current_locked();
+    Session *old = revoke_session_locked(&current);
     guint64 token = advance_consent(&consent, FALSE);
     g_mutex_unlock(&state_lock);
     if (old != NULL) session_unref(old);
@@ -603,23 +642,44 @@ int32_t jsti_atspi_consent_action_is_current(int32_t allowed, uint64_t token) {
     gboolean valid = consent_action_current(&consent, allowed != 0, token);
     g_mutex_unlock(&state_lock); return valid ? 1 : 0;
 }
-int32_t jsti_atspi_observational_consent(int32_t allowed, uint64_t token) {
+static int32_t apply_consent(Session **slot, ConsentLedger *ledger, SessionPurpose purpose,
+    int32_t allowed, uint64_t token) {
     g_mutex_lock(&state_lock);
-    if ((token == 0 && allowed) || (token != 0 && !consent_action_current(&consent, allowed != 0, token))) {
+    if ((token == 0 && allowed) || (token != 0 && !consent_action_current(ledger, allowed != 0, token))) {
         g_mutex_unlock(&state_lock); return 0;
     }
-    if (token == 0) advance_consent(&consent, FALSE);
-    else consent.offer = 0;
-    Session *old = revoke_current_locked();
+    if (token == 0) advance_consent(ledger, FALSE);
+    else ledger->offer = 0;
+    Session *old = revoke_session_locked(slot);
     if (allowed) {
         Session *s = g_new0(Session, 1);
-        s->refs = 1; s->epoch = ++next_epoch; s->status = 1;
-        s->context = g_main_context_new(); s->cancel = g_cancellable_new(); current = s;
-        GThread *thread = g_thread_new("correction-atspi", worker, session_ref(s)); g_thread_unref(thread);
+        s->refs = 1; s->epoch = ++next_epoch; s->status = 1; s->purpose = purpose;
+        s->context = g_main_context_new(); s->cancel = g_cancellable_new(); *slot = s;
+        const char *name = purpose == SELECTION_SESSION ? "selection-atspi" : "correction-atspi";
+        GThread *thread = g_thread_new(name, worker, session_ref(s)); g_thread_unref(thread);
     }
     g_mutex_unlock(&state_lock);
     if (old != NULL) session_unref(old);
     return 1;
+}
+int32_t jsti_atspi_observational_consent(int32_t allowed, uint64_t token) {
+    return apply_consent(&current, &consent, CORRECTION_SESSION, allowed, token);
+}
+uint64_t jsti_atspi_selection_offer(void) {
+    g_mutex_lock(&state_lock);
+    Session *old = revoke_session_locked(&selection_current);
+    guint64 token = advance_consent(&selection_consent, TRUE);
+    g_mutex_unlock(&state_lock);
+    if (old != NULL) session_unref(old);
+    return token;
+}
+int32_t jsti_atspi_selection_consent(int32_t allowed, uint64_t token) {
+    return apply_consent(&selection_current, &selection_consent, SELECTION_SESSION, allowed, token);
+}
+int32_t jsti_atspi_selection_status(void) {
+    g_mutex_lock(&state_lock);
+    int status = selection_current != NULL ? g_atomic_int_get(&selection_current->status) : 0;
+    g_mutex_unlock(&state_lock); return status;
 }
 int32_t jsti_atspi_observational_status(void) {
     g_mutex_lock(&state_lock);
@@ -640,19 +700,49 @@ int32_t jsti_atspi_is_current(JSTIAtspiTarget *t) {
     g_mutex_unlock(&state_lock); return valid ? 1 : 0;
 }
 
+static JSTIAtspiSelection *capture_selection(Session *s, SelectionAdmission *admission) {
+    JSTIAtspiTarget *t = s != NULL ? s->admitted : NULL;
+    JSTIAtspiSelection *lease = NULL;
+    if (!g_atomic_int_get(&admission->pending) && t != NULL && s->purpose == SELECTION_SESSION && current_target(t)
+        && g_atomic_int_compare_and_exchange(&t->captured, 0, 1)) {
+        g_atomic_int_set(&admission->pending, TRUE);
+        lease = g_new0(JSTIAtspiSelection, 1);
+        lease->refs = 1; lease->target = target_ref(t); lease->admission = admission;
+        lease->deadline = g_get_monotonic_time() + BUDGET_US;
+    }
+    return lease;
+}
+JSTIAtspiSelection *jsti_atspi_selection_capture(void) {
+    g_mutex_lock(&state_lock);
+    JSTIAtspiSelection *lease = capture_selection(selection_current, &selection_admission);
+    g_mutex_unlock(&state_lock); return lease;
+}
+static void selection_unref(JSTIAtspiSelection *lease) {
+    if (lease == NULL || !g_atomic_int_dec_and_test(&lease->refs)) return;
+    SelectionAdmission *admission = lease->admission;
+    jsti_atspi_release(lease->target); g_free(lease);
+    g_atomic_int_set(&admission->pending, FALSE);
+}
+void jsti_atspi_selection_release(JSTIAtspiSelection *lease) {
+    if (lease == NULL) return;
+    jsti_atspi_cancel(lease->target); selection_unref(lease);
+}
+
 typedef struct {
     gint refs;
     GMutex lock;
     GCond changed;
     gboolean done;
     JSTIAtspiTarget *target;
+    JSTIAtspiSelection *selection;
     gint kind, result;
     gchar *input, *output;
 } Request;
 static void request_free(gpointer data) {
     Request *r = data;
     if (!g_atomic_int_dec_and_test(&r->refs)) return;
-    jsti_atspi_release(r->target); g_free(r->input); g_free(r->output);
+    jsti_atspi_release(r->target); selection_unref(r->selection);
+    g_free(r->input); g_free(r->output);
     g_mutex_clear(&r->lock); g_cond_clear(&r->changed); g_free(r);
 }
 static gboolean guards(JSTIAtspiTarget *t, gint64 deadline) {
@@ -715,18 +805,61 @@ static gint insert(JSTIAtspiTarget *t, const gchar *text, gint64 deadline) {
     if (!ok) return -1;
     t->tracked = g_strdup(text); t->phase = INSERTED; return 1;
 }
+static gboolean selection_range_valid(gint selections, gint start, gint end, gint count) {
+    return selections == 1 && start >= 0 && end > start && end <= count && end - start <= LIMIT;
+}
+static gboolean selection_range(JSTIAtspiTarget *t, gint *start, gint *end, gint64 deadline) {
+    GVariant *reply = rpc(t->session, t->owner, t->path, TEXT, "GetNSelections", NULL, "(i)", deadline);
+    gint selections = -1, count = -1;
+    if (reply != NULL) { g_variant_get(reply, "(i)", &selections); g_variant_unref(reply); }
+    if (selections != 1 || !integer_property(t, "CharacterCount", &count, deadline)) return FALSE;
+    reply = rpc(t->session, t->owner, t->path, TEXT, "GetSelection", g_variant_new("(i)", 0), "(ii)", deadline);
+    if (reply == NULL) return FALSE;
+    g_variant_get(reply, "(ii)", start, end); g_variant_unref(reply);
+    return selection_range_valid(selections, *start, *end, count) && current_target(t);
+}
+static gchar *read_selection(JSTIAtspiTarget *t, gint64 deadline) {
+    if (t->phase != FRESH || !identity(t, FALSE, deadline)) return NULL;
+    subscribe_target(t, OBJECT_EVENT, "TextChanged", t->path);
+    GVariant *reply = rpc(t->session, "org.a11y.atspi.Registry", "/org/a11y/atspi/registry", REGISTRY,
+        "RegisterEvent", g_variant_new("(s@ass)", "object:text-changed", g_variant_new_strv(NULL, 0), t->owner),
+        "()", deadline);
+    if (reply == NULL) return NULL;
+    g_variant_unref(reply); t->registered = TRUE;
+    gint start, end, final_start, final_end;
+    if (!identity(t, FALSE, deadline) || !selection_range(t, &start, &end, deadline)) return NULL;
+    gchar *text = read_text(t, start, end, deadline);
+    gboolean ok = text != NULL && identity(t, FALSE, deadline)
+        && selection_range(t, &final_start, &final_end, deadline) && start == final_start && end == final_end;
+    gchar *again = ok ? read_text(t, start, end, deadline) : NULL;
+    ok = ok && again != NULL && g_strcmp0(text, again) == 0
+        && identity(t, FALSE, deadline) && selection_range(t, &final_start, &final_end, deadline)
+        && start == final_start && end == final_end && current_target(t) && g_get_monotonic_time() < deadline;
+    g_free(again);
+    t->phase = FINISHED;
+    if (!ok) g_clear_pointer(&text, g_free);
+    return text;
+}
+static gboolean request_allowed(SessionPurpose purpose, gint kind) {
+    return (purpose == SELECTION_SESSION && kind == 3)
+        || (purpose == CORRECTION_SESSION && kind >= 0 && kind <= 2);
+}
 static gboolean execute(gpointer data) {
     Request *r = data;
     JSTIAtspiTarget *t = r->target; Session *s = t->session;
     gint result = r->kind == 0 && t->phase >= DISPATCHED ? -1 : 0;
-    if (current_target(t) && !s->busy) {
+    if (current_target(t) && !s->busy && request_allowed(s->purpose, r->kind)) {
         s->busy = TRUE;
         s->active_target = t;
-        const gint64 deadline = g_get_monotonic_time() + BUDGET_US;
+        const gint64 deadline = r->selection != NULL
+            ? r->selection->deadline : g_get_monotonic_time() + BUDGET_US;
         if (r->kind == 0) result = insert(t, r->input, deadline);
         else if (r->kind == 1) {
             if (t->phase == INSERTED && g_strcmp0(r->input, t->original) == 0
                 && identity(t, FALSE, deadline)) { t->phase = SAMPLING; result = 1; }
+        } else if (r->kind == 3) {
+            r->output = read_selection(t, deadline);
+            if (r->output != NULL) result = 1;
         } else if (r->kind == 2 && t->phase == SAMPLING && identity(t, FALSE, deadline)) {
             gint caret, count;
             const gint mutation = t->mutations;
@@ -747,8 +880,10 @@ static gboolean execute(gpointer data) {
     g_mutex_lock(&r->lock); r->result = result; r->done = TRUE;
     g_cond_broadcast(&r->changed); g_mutex_unlock(&r->lock); return G_SOURCE_REMOVE;
 }
-static gint submit(JSTIAtspiTarget *t, gint kind, const char *input, char *out, size_t capacity) {
-    if (t == NULL) return 0;
+static gint submit(JSTIAtspiTarget *t, gint kind, const char *input, char *out, size_t capacity,
+    JSTIAtspiSelection *selection) {
+    if (t == NULL || !request_allowed(t->session->purpose, kind)
+        || (kind == 3 && (selection == NULL || selection->target != t))) return 0;
     g_mutex_lock(&state_lock);
     if (g_atomic_int_get(&t->cancelled) || g_atomic_int_get(&t->session->stopped)) {
         g_mutex_unlock(&state_lock);
@@ -757,6 +892,8 @@ static gint submit(JSTIAtspiTarget *t, gint kind, const char *input, char *out, 
     Request *r = g_new0(Request, 1);
     r->refs = 2; g_mutex_init(&r->lock); g_cond_init(&r->changed);
     r->target = target_ref(t); r->kind = kind; r->input = g_strdup(input);
+    r->selection = selection;
+    if (selection != NULL) g_atomic_int_inc(&selection->refs);
     /* Always enqueue: invoke_full can run inline on a caller acquiring an idle
      * context. These operations must run exclusively on the private worker. */
     GSource *source = g_idle_source_new();
@@ -768,22 +905,19 @@ static gint submit(JSTIAtspiTarget *t, gint kind, const char *input, char *out, 
     while (!r->done && g_cond_wait_until(&r->changed, &r->lock, until)) {}
     gint result = r->done ? r->result : kind == 0 ? -1 : 0;
     if (!r->done) invalidate(t);
-    if (result == 1 && kind == 2) {
-        if (r->output == NULL || strlen(r->output) >= capacity) result = 0;
+    if (result == 1 && (kind == 2 || kind == 3)) {
+        if (out == NULL || r->output == NULL || strlen(r->output) >= capacity
+            || (kind == 3 && !jsti_atspi_is_current(t))) result = 0;
         else g_strlcpy(out, r->output, capacity);
     }
     g_mutex_unlock(&r->lock); request_free(r); return result;
 }
 static gboolean cancel_lease(gpointer data) {
-    JSTIAtspiTarget *t = data; Session *s = t->session;
+    JSTIAtspiTarget *t = data;
     detach(t);
     /* A new lease may revalidate the SAME known control off the hot path.
      * This never discovers a late arbitrary focused field or reuses a span. */
-    if (!g_atomic_int_get(&s->stopped) && t == s->admitted && t->focus == s->focus) {
-        g_free(s->pending_owner); g_free(s->pending_path);
-        s->pending_owner = g_strdup(t->owner); s->pending_path = g_strdup(t->path);
-        if (!s->busy) queue_admission(s);
-    }
+    queue_target_readmission(t);
     return G_SOURCE_REMOVE;
 }
 void jsti_atspi_cancel(JSTIAtspiTarget *t) {
@@ -796,9 +930,80 @@ void jsti_atspi_cancel(JSTIAtspiTarget *t) {
     g_source_attach(source, t->session->context); g_source_unref(source);
     g_mutex_unlock(&state_lock);
 }
-int32_t jsti_atspi_insert(JSTIAtspiTarget *t, const char *text) { return submit(t, 0, text, NULL, 0); }
-int32_t jsti_atspi_begin(JSTIAtspiTarget *t, const char *text) { return submit(t, 1, text, NULL, 0); }
-int32_t jsti_atspi_read(JSTIAtspiTarget *t, char *out, size_t capacity) { return submit(t, 2, NULL, out, capacity); }
+int32_t jsti_atspi_insert(JSTIAtspiTarget *t, const char *text) { return submit(t, 0, text, NULL, 0, NULL); }
+int32_t jsti_atspi_begin(JSTIAtspiTarget *t, const char *text) { return submit(t, 1, text, NULL, 0, NULL); }
+int32_t jsti_atspi_read(JSTIAtspiTarget *t, char *out, size_t capacity) { return submit(t, 2, NULL, out, capacity, NULL); }
+int32_t jsti_atspi_selection_read(JSTIAtspiSelection *lease, char *out, size_t capacity) {
+    if (lease == NULL || out == NULL || capacity == 0
+        || !g_atomic_int_compare_and_exchange(&lease->started, 0, 1)) return 0;
+    return submit(lease->target, 3, NULL, out, capacity, lease);
+}
+
+static gboolean selection_admission_contract(void) {
+    SelectionAdmission gate = {0};
+    Session *s = g_new0(Session, 1);
+    s->refs = 1; s->purpose = SELECTION_SESSION; s->epoch = 1;
+    s->context = g_main_context_new(); s->cancel = g_cancellable_new();
+    JSTIAtspiTarget *t = g_new0(JSTIAtspiTarget, 1);
+    t->refs = 1; t->session = session_ref(s); t->epoch = 1;
+    t->parents = g_ptr_array_new_with_free_func(g_free); s->admitted = t;
+    JSTIAtspiSelection *lease = capture_selection(s, &gate);
+    gboolean ok = lease != NULL && capture_selection(s, &gate) == NULL;
+    for (guint i = 0; i < 1000; ++i) ok &= capture_selection(s, &gate) == NULL;
+    if (lease != NULL) {
+        Request *r = g_new0(Request, 1);
+        r->refs = 1; r->target = target_ref(t); r->selection = lease;
+        g_mutex_init(&r->lock); g_cond_init(&r->changed); g_atomic_int_inc(&lease->refs);
+        g_atomic_int_set(&s->stopped, TRUE);
+        jsti_atspi_selection_release(lease);
+        ok &= g_atomic_int_get(&gate.pending) && capture_selection(s, &gate) == NULL;
+        request_free(r);
+        ok &= !g_atomic_int_get(&gate.pending);
+    }
+    g_atomic_int_set(&s->stopped, FALSE); g_atomic_int_set(&t->cancelled, FALSE);
+    g_atomic_int_set(&t->captured, FALSE);
+    s->purpose = CORRECTION_SESSION;
+    ok &= capture_selection(s, &gate) == NULL;
+    s->purpose = SELECTION_SESSION;
+    lease = capture_selection(s, &gate);
+    ok &= lease != NULL;
+    g_atomic_int_set(&s->stopped, TRUE);
+    if (lease != NULL) jsti_atspi_selection_release(lease);
+    jsti_atspi_release(t); session_unref(s);
+    return ok && !g_atomic_int_get(&gate.pending);
+}
+int32_t jsti_atspi_selection_contract_self_test(void) {
+    JSTIAtspiSelection empty = {0};
+    char output[4] = {0};
+    ConsentLedger observation = {0}, selection = {0};
+    guint64 observation_token = advance_consent(&observation, TRUE);
+    guint64 selection_token = advance_consent(&selection, TRUE);
+    advance_consent(&selection, FALSE);
+    gboolean ok = consent_action_current(&observation, TRUE, observation_token)
+        && !consent_action_current(&selection, TRUE, selection_token)
+        && !request_allowed((SessionPurpose)99, 0) && !request_allowed((SessionPurpose)99, 3);
+    ok &= jsti_atspi_selection_read(&empty, NULL, 0) == 0 && !g_atomic_int_get(&empty.started)
+        && jsti_atspi_selection_read(&empty, output, sizeof(output)) == 0 && g_atomic_int_get(&empty.started)
+        && jsti_atspi_selection_read(&empty, output, sizeof(output)) == 0 && output[0] == '\0';
+    selection_token = advance_consent(&selection, TRUE);
+    advance_consent(&observation, FALSE);
+    ok &= consent_action_current(&selection, TRUE, selection_token);
+    for (gint kind = -1; kind <= 4; ++kind) {
+        ok &= request_allowed(SELECTION_SESSION, kind) == (kind == 3);
+        ok &= request_allowed(CORRECTION_SESSION, kind) == (kind >= 0 && kind <= 2);
+    }
+    Session s = {0}; s.purpose = SELECTION_SESSION; s.epoch = 7; s.focus = 8;
+    JSTIAtspiTarget t = {0}; t.session = &s; t.epoch = 7; t.focus = 8; t.owner = ":1.99"; t.path = "/fixture";
+    object_event(NULL, t.owner, t.path, OBJECT_EVENT, "TextSelectionChanged", NULL, &t);
+    ok &= !current_target(&t);
+    return ok && selection_range_valid(1, 0, LIMIT, LIMIT)
+        && selection_range_valid(1, 100000, 100010, 200000)
+        && !selection_range_valid(0, 0, 1, 1) && !selection_range_valid(2, 0, 1, 1)
+        && !selection_range_valid(1, -1, 1, 1) && !selection_range_valid(1, 1, 1, 1)
+        && !selection_range_valid(1, 1, 0, 1) && !selection_range_valid(1, 0, 2, 1)
+        && !selection_range_valid(1, 0, LIMIT + 1, LIMIT + 1)
+        && selection_admission_contract() ? 0 : -1;
+}
 
 static gboolean bitmap_contract(void) {
     GVariantBuilder b; g_variant_builder_init(&b, G_VARIANT_TYPE("au"));

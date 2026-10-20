@@ -199,34 +199,7 @@ func linuxWindowEvent( // swiftlint:disable:this cyclomatic_complexity
         linuxProfilesEvent(value, holder: holder)
         return
     }
-    if event == Int(JSTI_EVENT_QUICK_VOICE) {
-        holder.enqueueSettings { await holder.controller.selectQuickVoice(slot) }
-        return
-    }
-    if event == Int(JSTI_EVENT_ACTION_SHORTCUT_EDIT) {
-        linuxActionShortcutEdit(value, holder: holder)
-        return
-    }
-    if event == Int(JSTI_EVENT_SPEAK_CLIPBOARD) {
-        holder.enqueueSettings { await holder.controller.readClipboardAloud() }
-        return
-    }
-    if event == Int(JSTI_EVENT_API_KEYS) {
-        if jsti_window_request_api_keys() != 0 {
-            LinuxHostPlatform.update("API Keys could not be opened. Try again when the app is idle.")
-        }
-        return
-    }
-    if event == Int(JSTI_EVENT_PERMISSIONS) {
-        if jsti_window_request_permissions() != 0 {
-            LinuxHostPlatform.update("Permissions could not be opened. Try again after closing other dialogs.")
-        }
-        return
-    }
-    if event == Int(JSTI_EVENT_SPEECH_PAUSE) {
-        holder.enqueueSettings { await holder.controller.pauseResumeSpeech() }
-        return
-    }
+    if linuxActionEvent(event, value: value, slot: slot, holder: holder) { return }
     if event == 70 || event == 71 || event == 72 {
         linuxVocabularyEvent(Int32(event), payload: value, kind: slot, holder: holder)
         return
@@ -245,6 +218,30 @@ func linuxWindowEvent( // swiftlint:disable:this cyclomatic_complexity
     if linuxCloudSyncEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxAppearanceEvent(event, slot: slot, holder: holder) { return }
     _ = linuxSettingsEvent(event, value: value, slot: slot, holder: holder)
+}
+
+/// Action-shortcut destinations without a page of their own. Returns false for others.
+private func linuxActionEvent(_ event: Int, value: String, slot: Int, holder: LinuxEventContext) -> Bool {
+    switch event {
+    case Int(JSTI_EVENT_QUICK_VOICE):
+        holder.enqueueSettings { await holder.controller.selectQuickVoice(slot) }
+    case Int(JSTI_EVENT_ACTION_SHORTCUT_EDIT):
+        linuxActionShortcutEdit(value, holder: holder)
+    case Int(JSTI_EVENT_SPEAK_CLIPBOARD):
+        holder.enqueueSettings { await holder.controller.readClipboardAloud() }
+    case Int(JSTI_EVENT_API_KEYS):
+        if jsti_window_request_api_keys() != 0 {
+            LinuxHostPlatform.update("API Keys could not be opened. Try again when the app is idle.")
+        }
+    case Int(JSTI_EVENT_PERMISSIONS):
+        if jsti_window_request_permissions() != 0 {
+            LinuxHostPlatform.update("Permissions could not be opened. Try again after closing other dialogs.")
+        }
+    case Int(JSTI_EVENT_SPEECH_PAUSE):
+        holder.enqueueSettings { await holder.controller.pauseResumeSpeech() }
+    default: return false
+    }
+    return true
 }
 
 /// Recording, import, copy and lifecycle events. Returns false for others.

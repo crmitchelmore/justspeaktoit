@@ -140,13 +140,17 @@ func configureApplicationIcon() throws {
     try LinuxNative.call { jsti_app_icon_configure(theme.deletingLastPathComponent().path, $0, $1) }
 }
 
-func forwardDesktopAction(_ arguments: [String]) throws {
+func prepareDesktopAction(_ arguments: [String], forward: Bool) throws {
     var nativeArguments = arguments.map { strdup($0) }
     defer { nativeArguments.forEach { free($0) } }
     guard nativeArguments.allSatisfy({ $0 != nil }) else {
         throw DesktopHostError(message: "Could not allocate desktop action command arguments.")
     }
     nativeArguments.append(nil)
+    try LinuxNative.call {
+        jsti_window_validate_action_command(Int32(arguments.count), &nativeArguments, $0, $1)
+    }
+    guard forward else { return }
     try LinuxNative.call {
         jsti_window_forward_action(
             linuxApplicationID, Int32(arguments.count), &nativeArguments, $0, $1
@@ -156,9 +160,10 @@ func forwardDesktopAction(_ arguments: [String]) throws {
 
 let arguments = CommandLine.arguments
 let actionArguments = LinuxActionShortcutRun.forwardedCommandArguments
-if arguments.contains(where: { actionArguments.contains($0) }) {
-    do { try forwardDesktopAction(arguments) } catch { fail(error) }
-    exit(0)
+let forwardsAction = arguments.contains(where: { actionArguments.contains($0) })
+if forwardsAction || arguments.contains(JSTI_TOGGLE_ARGUMENT) {
+    do { try prepareDesktopAction(arguments, forward: forwardsAction) } catch { fail(error) }
+    if forwardsAction { exit(0) }
 }
 DesktopHostModels.configure(
     streamingQualified: LinuxLiveTransport.qualified, local: DesktopLocalTranscription.options(host: .linux)

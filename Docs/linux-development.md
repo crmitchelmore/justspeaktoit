@@ -391,6 +391,11 @@ instead of opening a window and acting on the wrong focus.
 
 Choose one action per invocation; different action flags together or unsupported
 options are refused before dispatch, including two different Quick Voice slots.
+This preflight includes legacy `--toggle`: adding an unknown option (including
+`--gapplication-service`) or another action refuses before model/controller
+construction or store access. A valid `--toggle`, with optional `--background`
+or repeated identical toggle flags, keeps its existing cold-launch and
+running-app dictation behavior; it is not changed into a running-only command.
 Busy/recording states refuse clipboard speech, History paste, Pause/Resume and
 Quick Voice; closing or modal-disabled windows refuse all commands. Stop follows
 its own control's availability as described above. Refusal returns a nonzero exit
@@ -402,12 +407,13 @@ does not automatically register these actions. Parser and native dispatch
 fixtures are authored but NOT_RUN locally.
 
 `scripts/linux-desktop-checks.sh` also opts into a cross-process fixture only
-inside its private session bus. It launches 28 real command-client processes
+inside its private session bus. It launches 32 real command-client processes
 against the production native command handler with a synthetic event callback:
 valid and repeated commands, `--background`, mixed action flags, unsupported
 options, Quick Voice slot identity/conflicts, Stop availability during idle and
-working states, busy/recording/modal/closing refusal, and all seven commands with
-no primary.
+working states, busy/recording/modal/closing refusal, and all seven running-only
+commands with no primary. Malformed toggle options are additionally refused both
+with and without a primary; no real toggle/provider action is delivered.
 Each child has a 15-second deadline and is reaped; the smoke-test envelope is
 540 seconds. The fixture requires exact callback identity/count/slot, unchanged page
 and hidden-window visibility, refusal diagnostics, and an empty isolated data

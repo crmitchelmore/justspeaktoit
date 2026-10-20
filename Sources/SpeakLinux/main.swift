@@ -190,12 +190,13 @@ let integrationCheck = arguments.firstIndex(of: "--integration-test").flatMap {
     arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil
 }
 switch integrationCheck {
-case "keyring", "capture", "portal", "x11-hotkey":
+case "keyring", "capture", "portal", "x11-hotkey", "x11-hotkey-locks":
     do {
         switch integrationCheck {
         case "keyring": try LinuxIntegrationChecks.keyring()
         case "capture": try LinuxIntegrationChecks.capture()
         case "x11-hotkey": try LinuxIntegrationChecks.x11Hotkey()
+        case "x11-hotkey-locks": try LinuxIntegrationChecks.x11Hotkey(lockStates: true)
         default: try LinuxIntegrationChecks.portal()
         }
     } catch { fail(error) }

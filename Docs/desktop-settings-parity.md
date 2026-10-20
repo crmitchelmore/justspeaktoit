@@ -290,6 +290,46 @@ real 2.5-second lease to expire. No provider, clipboard, actual field or device 
 used. This fixture is also NOT_RUN locally; automatic native evidence remains
 required and cannot replace physical-desktop/provider acceptance.
 
+## Local model configuration transfer (Windows/Linux source only; NOT_RUN)
+
+Portable JSON imports now map the Mac's `localTranscriptionModel` and
+`localStreamingModelSource` to the offered host's independent Local Batch and
+Local Live choices. Only exact, available, same-mode catalogue identifiers are
+admitted. This does not activate a model, download files, load a runtime, read
+credentials or grant service permissions. Remote choices remain unchanged.
+The active mode's existing model cannot be replaced by an import: a different
+choice for that mode stays preserved but unapplied, with an explicit notice.
+Choose the desired model in Models to make that change.
+
+Mapped values live only in the native settings slots; JSON export projects their
+canonical Mac keys, and unrelated preference edits do not leave stale mirrors.
+Unsupported or wrong-mode choices remain opaque and survive round-trip export.
+An explicit model selection replaces that mode's pending imported choice, even
+when the user reselects the current model. Missing keys do not clear a saved slot.
+The Mac's `localTranscriptionMode` intent is still retained, not used to switch
+the active route automatically.
+
+Both native presenters update inactive Local choices quietly, preserving active
+selection, remote preferences and callback identity. GTK uses its existing owned
+post queue; Windows merges pending per-slot updates on its locked UI queue and
+clears them across consumption/restart. A native publication failure explicitly
+reports that configuration was saved and requires reopening before switching;
+it does not bypass import's approval invalidation or hands-free cleanup.
+
+The separate preference archive projection now tracks explicit `localLiveModel`
+presence and exports it as `localStreamingModelSource`. An explicitly active
+Local Live model adds `localTranscriptionMode=streaming`, never puts its live ID
+in the batch key, and does not invent a selection for an absent slot. This is a
+projection repair, not a claim that the History-backup restore applies settings.
+
+Authored checks cover four-slot restart/export, unsupported and wrong-mode
+round trips, active-mode protection and explicit reselection, invalid-type and
+failed-write atomicity, native-publication failure recovery, absent keys and
+archive presence. Native GTK and Windows smoke assertions cover quiet inactive
+updates and protection of the active mode; Windows also checks merged pending
+updates and wrong-mode rejection. All new execution evidence is **NOT_RUN here**;
+portable, Apple and native qualification remains required.
+
 ## Linux Local Live transcription (source only; NOT_RUN)
 
 Linux now projects the same executable pinned Whisper models into **Local >
@@ -1234,7 +1274,7 @@ and `LinuxPreferenceArchive.swift`; Mac wire names are established by
 | Native authority | Canonical projection or explicit boundary |
 | --- | --- |
 | Explicit active `model` | The existing desktop batch/live registries and shared local-family resolver select `transcriptionMode` and the active model key. Unknown/Apple-only routes are reported, never guessed as batch. Multi-purpose models remain batch when admitted by the batch registry. |
-| `batchModel`, `liveModel`, `localModel` | Stored model slots map to their canonical model keys. An explicit active model wins over its corresponding remembered slot. Local engine/source submode is not invented. |
+| `batchModel`, `liveModel`, `localModel`, `localLiveModel` | Explicit stored slots map to canonical keys; Local Live uses `localStreamingModelSource`, not the batch key. An explicit active model wins over its remembered slot and supplies the Local batch/streaming submode; an inactive slot does not invent one. |
 | `postProcessing.mode`, `.modelIdentifier`, `.temperature` | `postProcessingEnabled`, `postProcessingModel`, `postProcessingTemperature`; explicit native options override stale configuration mirrors. |
 | `postProcessing.includeLexiconDirectives`, `.includeContextTags`, `.streamingEnabled` | `postProcessingIncludeLexiconDirectives`, `postProcessingIncludeContextTags`, `postProcessingStreamingEnabled`; the native options are their sole desktop authority. `lastRemoteModelIdentifier` is dormant picker recall and is not projected. |
 | `postProcessing.outputLanguage` | Stored text, including explicit empty text, maps to `postProcessingOutputLanguage`; native nil suppresses a stale mirror without inventing a replacement string. |
@@ -2403,7 +2443,8 @@ selection use its batch model.
 Remaining gaps: no compiled or device receipt for the new Linux picker/runtime path;
 imported Hugging Face models are batch only; Auto-Clean live polish is not
 offered for local live; profiles cannot override to a local live model;
-configuration transfer does not map `localStreamingModelSource`; a model whose
+portable JSON maps offered inactive Local choices but does not activate a route;
+full settings-archive restore remains incomplete. A model whose
 file fails its digest during streaming is reported, not removed automatically
 as in batch; sherpa-onnx and Parakeet streaming sources are Mac only.
 
@@ -2488,7 +2529,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | batchTranscriptionModel | Equivalent / Equivalent | Models; independent remembered batch model |
 | localTranscriptionModel | Partial / Partial | Models; pinned whisper.cpp catalogue plus explicit Hugging Face GGML imports (`desktop-huggingface-import.md`); not the Mac WhisperKit/Core ML or sherpa-onnx runtimes |
 | localTranscriptionMode | Source wired, unqualified / Source wired, unqualified | Windows and Linux Local Batch and Live: Live streams a pinned downloaded whisper.cpp model in process with VAD-bounded windows and shares the remembered `localLiveModel` slot; native/runtime acceptance remains open |
-| localStreamingModelSource | Partial / Partial | Windows and Linux Local Live selections use the Mac's WhisperKit live identity (`local/streaming/whisperkit/...`) for pinned Whisper models, saved in the host `localLiveModel` slot; configuration transfer does not map the Mac key yet. Sherpa-onnx and Parakeet sources are not offered because no desktop host runs them |
+| localStreamingModelSource | Partial / Partial | Both hosts use the canonical Whisper live identity in `localLiveModel`; source-only JSON transfer maps offered inactive choices and preserves unavailable/active-mode changes without activation. Archive projection uses the correct live key; full settings restore and native acceptance remain open. No desktop sherpa-onnx or Parakeet runtime |
 | postProcessingEnabled | Equivalent / Equivalent | `DesktopHostPostProcessing.swift`; desktop default remains disabled. Source proposal adds explicit local rules opt-in without credential access; remote remains opt-in |
 | postProcessingModel | Partial / Partial | Shared remote catalogue, built-in Local Cleanup and downloaded GGUF LLMs through the native llama.cpp runtime (`desktop-local-llm-cleanup.md`, source only); Apple Foundation Models and MLX remain unavailable |
 | postProcessingTemperature | Wired / Wired | Config; range 0...1, OpenRouter request |

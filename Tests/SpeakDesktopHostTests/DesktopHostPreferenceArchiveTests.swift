@@ -108,6 +108,7 @@ final class DesktopHostPreferenceArchiveTests: XCTestCase {
             $0.batchModel = ModelCatalog.defaultBatchTranscriptionModel
             $0.liveModel = "migrated/live"
             $0.localModel = "local/transcribe.cpp/test"
+            $0.localLiveModel = "local/streaming/whisperkit/tiny"
         }
         XCTAssertEqual(try records(settings), ["liveTranscriptionModel": AnyCodable(.string("migrated/live"))])
         settings.model = ModelCatalog.defaultBatchTranscriptionModel

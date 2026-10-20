@@ -9,6 +9,9 @@ extension DesktopHostController.Settings {
     package var archiveBatchModel: String? { archiveModelKeys.contains("batchModel") ? self.batchModel : nil }
     package var archiveLiveModel: String? { archiveModelKeys.contains("liveModel") ? self.liveModel : nil }
     package var archiveLocalModel: String? { archiveModelKeys.contains("localModel") ? self.localModel : nil }
+    package var archiveLocalLiveModel: String? {
+        archiveModelKeys.contains("localLiveModel") ? self.localLiveModel : nil
+    }
 
     package mutating func preservingArchiveModelPresence<T>(_ update: (inout Self) throws -> T) rethrows -> T {
         let explicit = archiveModelKeys
@@ -20,7 +23,9 @@ extension DesktopHostController.Settings {
         let nativeRoots = Set(DesktopNativeConfigurationField.allCases.map(\.sourceRoot))
             .subtracting([DesktopNativeConfigurationField.legacyCustomPrompt.sourceRoot])
         nativeSourceRoots = all.filter { nativeRoots.contains($0.key) }
-        archiveModelKeys = Set(all.keys).intersection(["model", "batchModel", "liveModel", "localModel"])
+        archiveModelKeys = Set(all.keys).intersection([
+            "model", "batchModel", "liveModel", "localModel", "localLiveModel"
+        ])
     }
 
     mutating func noteArchiveWrite<Value>(
@@ -31,6 +36,7 @@ extension DesktopHostController.Settings {
         if keyPath == \ArchiveValues.batchModel { archiveModelKeys.insert("batchModel") }
         if keyPath == \ArchiveValues.liveModel { archiveModelKeys.insert("liveModel") }
         if keyPath == \ArchiveValues.localModel { archiveModelKeys.insert("localModel") }
+        if keyPath == \ArchiveValues.localLiveModel { archiveModelKeys.insert("localLiveModel") }
     }
 
     package func nativeConfigurationSources() throws -> [String: AnyCodable] {

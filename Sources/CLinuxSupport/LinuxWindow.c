@@ -2613,6 +2613,30 @@ int32_t jsti_window_set_preferred_models(int32_t batch, int32_t live, int32_t lo
     return post(model_preferences_apply, g_memdup2(values, sizeof(values)), g_free);
 }
 
+static void local_model_preferences_apply(gpointer pointer) {
+    const gint32 *values = pointer;
+    guint active = model_mode(jsti_model_filters_local(), jsti_model_filters_live());
+    for (guint i = 0; i < 2; ++i) {
+        if (values[i] < 0 || active == i + 2) continue;
+        gboolean found = FALSE;
+        for (guint j = 0; ui.model_catalog != NULL && j < ui.model_catalog->slots->len; ++j) {
+            Slot slot = g_array_index(ui.model_catalog->slots, Slot, j);
+            if (slot.global == values[i] && slot.live == (i != 0) && g_str_has_prefix(slot.id, "local/")) {
+                found = TRUE;
+                break;
+            }
+        }
+        if (found) ui.preferred_model_slots[i + 2] = values[i];
+        else gtk_label_set_text(ui.status, "Saved Local model choice is unavailable. Reopen the app before switching modes.");
+    }
+}
+
+int32_t jsti_window_set_local_model_preferences(int32_t batch, int32_t live) {
+    if (batch < -1 || live < -1) return -1;
+    const gint32 values[] = { batch, live };
+    return post(local_model_preferences_apply, g_memdup2(values, sizeof(values)), g_free);
+}
+
 typedef struct Microphones {
     GPtrArray *ids;
     GPtrArray *names;
@@ -4437,7 +4461,7 @@ static void observe_event(gint32 event, const char *text, gint32 index, void *co
 /* Real model rows must remain distinct across all four source/mode pairs. */
 static gboolean model_modes_self_test(void) {
     if (ui.model_catalog == NULL) return FALSE;
-    gint32 saved[4], preferred[] = { -1, -1, -1, -1 };
+    gint32 saved[4], preferred[] = { -1, -1, -1, -1 }, first[] = { -1, -1, -1, -1 };
     guint counts[4] = {0};
     memcpy(saved, ui.preferred_model_slots, sizeof(saved));
     gint32 selection = selected_model_slot();
@@ -4448,10 +4472,11 @@ static gboolean model_modes_self_test(void) {
     for (guint i = 0; i < ui.model_catalog->slots->len; ++i) {
         Slot slot = g_array_index(ui.model_catalog->slots, Slot, i);
         guint mode = model_mode(g_str_has_prefix(slot.id, "local/"), slot.live);
+        if (first[mode] < 0) first[mode] = slot.global;
         preferred[mode] = slot.global;
         ++counts[mode];
     }
-    gboolean okay = counts[0] > 0 && counts[2] > 0 && counts[3] > 0 &&
+    gboolean okay = counts[0] > 0 && counts[2] > 1 && counts[3] > 1 &&
         jsti_window_set_preferred_models(-2, -1, -1, -1) == -1;
     model_preferences_apply(preferred);
     ui.callback = observe_event;
@@ -4465,6 +4490,26 @@ static gboolean model_modes_self_test(void) {
         okay = selected_model_slot() == preferred[mode] && ui.model_slots->len == counts[mode] &&
             observed.event == JSTI_EVENT_SELECT_MODEL && observed.index == preferred[mode] &&
             gtk_widget_get_visible(GTK_WIDGET(ui.key_row)) == (mode < 2);
+    }
+    if (okay) {
+        jsti_model_filters_select(FALSE, FALSE);
+        on_model_filter(FALSE, FALSE);
+        gint32 selected = selected_model_slot(), event = observed.event = -500;
+        const gint32 imported[] = { first[2], first[3] };
+        local_model_preferences_apply((gpointer)imported);
+        okay = selected_model_slot() == selected && observed.event == event &&
+            ui.preferred_model_slots[0] == preferred[0] && ui.preferred_model_slots[2] == first[2] &&
+            ui.preferred_model_slots[3] == first[3];
+        jsti_model_filters_select(TRUE, TRUE);
+        on_model_filter(TRUE, TRUE);
+        okay = okay && observed.event == JSTI_EVENT_SELECT_MODEL && observed.index == first[3];
+        observed.event = -500;
+        const gint32 replacement[] = { preferred[2], preferred[3] };
+        local_model_preferences_apply((gpointer)replacement);
+        okay = okay && selected_model_slot() == first[3] && observed.event == -500 &&
+            ui.preferred_model_slots[3] == first[3] &&
+            ui.preferred_model_slots[2] == preferred[2] &&
+            jsti_window_set_local_model_preferences(-2, -1) == -1;
     }
     jsti_model_filters_select(FALSE, remote_live);
     jsti_model_filters_select(TRUE, local_live);

@@ -390,6 +390,8 @@ struct WindowState {
     std::vector<MicrophoneRow> pendingMicrophones;
     std::wstring microphoneError;
     bool modelsChanged = false;
+    bool localModelPreferencesChanged = false;
+    int pendingLocalModelPreferences[2] = {-1, -1};
     bool modelsRefreshing = false;
     std::wstring modelStatus;
     std::vector<ModelRow> pendingModels;
@@ -2248,7 +2250,8 @@ void applyUpdate(HWND window) {
     std::vector<MicrophoneRow> microphones;
     std::wstring microphoneError;
     bool statusChanged, transcriptChanged, historyChanged, variantChanged, variantSwitchable;
-    bool modelsChanged, modelsRefreshing;
+    bool modelsChanged, modelsRefreshing, localModelPreferencesChanged;
+    int localModelPreferences[2];
     std::vector<ModelRow> models;
     std::wstring modelStatus;
     std::vector<HistoryRow> history;
@@ -2273,6 +2276,11 @@ void applyUpdate(HWND window) {
         modelsRefreshing = state.modelsRefreshing;
         if (modelsChanged) { models = std::move(state.pendingModels); modelStatus = state.modelStatus; }
         state.modelsChanged = false;
+        localModelPreferencesChanged = state.localModelPreferencesChanged;
+        std::copy(std::begin(state.pendingLocalModelPreferences), std::end(state.pendingLocalModelPreferences),
+                  localModelPreferences);
+        std::fill(std::begin(state.pendingLocalModelPreferences), std::end(state.pendingLocalModelPreferences), -1);
+        state.localModelPreferencesChanged = false;
         statusChanged = state.statusChanged; transcriptChanged = state.transcriptChanged;
         state.statusChanged = false; state.transcriptChanged = false;
         historyChanged = state.historyChanged;
@@ -2308,6 +2316,18 @@ void applyUpdate(HWND window) {
         if (!applyModelRows(window, models)) modelStatus = L"Could not display refreshed models. Previous selection retained.";
         state.remoteModelStatus = modelStatus;
         EnableWindow(GetDlgItem(window, modelRefreshID), !modelsRefreshing);
+    }
+    if (localModelPreferencesChanged) {
+        for (int i = 0; i < 2; ++i) {
+            const int index = localModelPreferences[i], mode = i + 2;
+            if (index < 0 || state.activeMode == mode) continue;
+            if (static_cast<size_t>(index) < state.modelModes.size() && state.modelModes[index] == mode)
+                state.preferredModels[mode] = index;
+            else {
+                status = L"Saved Local model choice is unavailable. Reopen the app before switching modes.";
+                statusChanged = true;
+            }
+        }
     }
     updateSourceControls(window);
     if (statusChanged) SetDlgItemTextW(window, statusID, status.c_str());
@@ -3558,6 +3578,8 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
             }
         }
         state.pendingModels.clear(); state.modelsChanged = false;
+        state.localModelPreferencesChanged = false;
+        std::fill(std::begin(state.pendingLocalModelPreferences), std::end(state.pendingLocalModelPreferences), -1);
         for (int mode = 0; mode < modeCount; ++mode) {
             const auto first = std::find(state.modelModes.begin(), state.modelModes.end(), mode);
             state.preferredModels[mode] = first == state.modelModes.end() ? -1 : static_cast<int>(first - state.modelModes.begin());
@@ -3728,6 +3750,32 @@ int jsti_window_set_preferred_local_live_model(int index) {
     const auto &modes = state.configuredModelModes;
     if (index < -1 || (index >= 0 && (static_cast<size_t>(index) >= modes.size() || modes[index] != 3))) return -1;
     state.configuredPreferredModels[3] = index;
+    return 0;
+}
+
+int jsti_window_set_local_model_preferences(int batch, int live) {
+    std::lock_guard<std::mutex> lock(state.mutex);
+    const int values[] = {batch, live};
+    for (int i = 0; i < 2; ++i) {
+        const int index = values[i], mode = i + 2;
+        if (index < -1) return -1;
+        if (index < 0) continue;
+        if (state.running) {
+            if (static_cast<size_t>(index) >= state.knownModelIdentities.size() ||
+                state.knownModelIdentities[index].second != mode) return -1;
+        } else if (static_cast<size_t>(index) >= state.configuredModelModes.size() ||
+                   state.configuredModelModes[index] != mode) return -1;
+    }
+    if (!state.running) {
+        for (int i = 0; i < 2; ++i) if (values[i] >= 0) state.configuredPreferredModels[i + 2] = values[i];
+        return 0;
+    }
+    for (int i = 0; i < 2; ++i) if (values[i] >= 0) state.pendingLocalModelPreferences[i] = values[i];
+    state.localModelPreferencesChanged = true;
+    if (state.window && !state.posted) {
+        state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
+        if (!state.posted) return -1;
+    }
     return 0;
 }
 
@@ -5304,6 +5352,36 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         if (!remoteShown || !localChosen || !sourceLocked || !changeSource(0, 0) || !changeMode(1, 1) ||
             !changeSource(1, 2) || !changeSource(0, 0)) {
             failure = "The Source picker lost a source preference, its controls or the global model identity."; return false;
+        }
+        state.modelNames = {L"Remote Batch", L"Remote Live", L"Local Batch", L"Local Live",
+                            L"Imported Local Batch", L"Imported Local Live"};
+        state.modelModes = {0, 1, 2, 3, 2, 3};
+        state.modelOrder = {0, 1, 2, 3, 4, 5};
+        {
+            std::lock_guard<std::mutex> lock(state.mutex);
+            state.knownModelIdentities = {{"remote-batch", 0}, {"remote-live", 1}, {"local-batch", 2},
+                                         {"local-live", 3}, {"other-batch", 2}, {"other-live", 3}};
+        }
+        state.preferredModels[3] = 3;
+        if (!populateModels(window)) { failure = "Local transfer fixture could not display models."; return false; }
+        const int beforeImport = observed.event = -500;
+        if (jsti_window_set_local_model_preferences(4, -1) != 0 ||
+            jsti_window_set_local_model_preferences(-1, 5) != 0) {
+            failure = "Inactive Local choices could not be published."; return false;
+        }
+        applyUpdate(window);
+        if (selection(window) != 0 || observed.event != beforeImport || state.preferredModels[0] != 0 ||
+            state.preferredModels[1] != 1 || state.preferredModels[2] != 4 || state.preferredModels[3] != 5 ||
+            !changeSource(1, 4) || !changeMode(1, 5) || jsti_window_set_local_model_preferences(2, 3) != 0) {
+            failure = "Local transfer activated a model or lost an inactive preference."; return false;
+        }
+        observed.event = -500;
+        applyUpdate(window);
+        if (selection(window) != 5 || observed.event != -500 || state.preferredModels[3] != 5 ||
+            state.preferredModels[2] != 2 ||
+            jsti_window_set_local_model_preferences(-2, -1) != -1 ||
+            jsti_window_set_local_model_preferences(1, 2) != -1 || !changeSource(0, 1)) {
+            failure = "Local transfer replaced the active model or accepted a wrong-mode index."; return false;
         }
         // The Text output modal must block both background recording paths.
         auto setRecording = [](HWND owner, int recording) {

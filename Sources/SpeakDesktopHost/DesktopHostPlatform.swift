@@ -95,6 +95,8 @@ package protocol DesktopHostPlatform: Sendable {
     static func transcriptVariant(_ variant: DesktopTranscriptVariant?, for record: UUID?, switchable: Bool)
     /// Shows `DesktopHostModels.snapshot` with a catalogue status line.
     static func publishModels(status: String, refreshing: Bool) throws
+    /// Updates inactive Local slots without activating a model or emitting a selection.
+    static func publishLocalModelPreferences(batch: String?, live: String?) throws
 
     // Credentials.
     /// Returns "" when no key is saved.
@@ -206,6 +208,9 @@ package protocol DesktopHostPlatform: Sendable {
 }
 
 package extension DesktopHostPlatform {
+    static func publishLocalModelPreferences(batch: String?, live: String?) throws {
+        throw DesktopHostError(message: "Updating Local model choices is unavailable on this host.")
+    }
     static var supportsObservationalCorrections: Bool { false }
     @discardableResult
     static func setObservationalCorrectionConsent(_ allowed: Bool, token: UInt64?) -> Bool { !allowed }

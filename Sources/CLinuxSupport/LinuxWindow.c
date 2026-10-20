@@ -1782,7 +1782,9 @@ static GtkWidget *build_keyboard(void) {
         ADW_PREFERENCES_GROUP(shortcut),
         "Where the desktop offers no shortcut portal, bind the command justspeaktoit --toggle to a key in your "
         "desktop's keyboard settings. With the app already running, --speak-clipboard reads clipboard text aloud "
-        "and --paste-last-history delivers the newest History text without raising this window.");
+        "and --paste-last-history delivers the newest History text without raising this window. "
+        "The running app also accepts --stop-speech, --pause-resume-speech and --quick-voice-1 "
+        "(or --quick-voice-2 / --quick-voice-3).");
     ui.shortcut_row = ADW_ACTION_ROW(adw_action_row_new());
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.shortcut_row), "Keyboard shortcut");
     adw_action_row_set_subtitle(ui.shortcut_row, "Checking the desktop…");
@@ -2109,14 +2111,17 @@ static void on_activate(GApplication *application, gpointer data) {
 }
 
 typedef struct WindowCommand {
-    gint run;
+    gint run, slot;
     gboolean background, unknown_argument;
 } WindowCommand;
 
 static gboolean parse_window_command(gint argc, const gchar *const *argv, WindowCommand *command) {
-    const struct { const gchar *argument; gint run; } actions[] = {
-        { JSTI_TOGGLE_ARGUMENT, 1 }, { JSTI_SPEAK_CLIPBOARD_ARGUMENT, 7 },
-        { JSTI_PASTE_LAST_HISTORY_ARGUMENT, 11 }
+    const struct { const gchar *argument; gint run, slot; } actions[] = {
+        { JSTI_TOGGLE_ARGUMENT, 1, 0 }, { JSTI_SPEAK_CLIPBOARD_ARGUMENT, 7, 0 },
+        { JSTI_PASTE_LAST_HISTORY_ARGUMENT, 11, 0 },
+        { JSTI_STOP_SPEECH_ARGUMENT, 3, 0 }, { JSTI_PAUSE_SPEECH_ARGUMENT, 8, 0 },
+        { JSTI_QUICK_VOICE_1_ARGUMENT, 6, 1 }, { JSTI_QUICK_VOICE_2_ARGUMENT, 6, 2 },
+        { JSTI_QUICK_VOICE_3_ARGUMENT, 6, 3 }
     };
     *command = (WindowCommand){ 0 };
     for (gint index = 1; index < argc; ++index) {
@@ -2125,19 +2130,26 @@ static gboolean parse_window_command(gint argc, const gchar *const *argv, Window
         for (guint action = 0; action < G_N_ELEMENTS(actions); ++action) {
             if (g_strcmp0(argv[index], actions[action].argument) != 0) continue;
             known = TRUE;
-            if (command->run != 0 && command->run != actions[action].run) return FALSE;
+            if (command->run != 0 &&
+                (command->run != actions[action].run || command->slot != actions[action].slot)) return FALSE;
             command->run = actions[action].run;
+            command->slot = actions[action].slot;
         }
         if (!known) command->unknown_argument = TRUE;
     }
     return TRUE;
 }
 
-/* 0 means admitted, not completed; 2 requires the running app, 3 refuses busy/closed actions. */
-static gint forward_window_command(gint run, gboolean remote) {
+static gboolean is_forwardable_command(gint run, gint slot) {
+    if (run == 6) return slot >= 1 && slot <= 3;
+    return slot == 0 && (run == 3 || run == 7 || run == 8 || run == 11);
+}
+
+/* 0 means admitted, not completed; 2 requires the running app, 3 means unavailable now. */
+static gint forward_window_command(gint run, gint slot, gboolean remote) {
     if (!remote || ui.window == NULL) return 2;
-    if (run != 7 && run != 11) return 3;
-    return action_shortcut_run(run, "", 0) ? 0 : 3;
+    if (!is_forwardable_command(run, slot)) return 3;
+    return action_shortcut_run(run, "", slot) ? 0 : 3;
 }
 
 static int reject_local_action(GApplication *application, GApplicationCommandLine *line, gpointer data) {
@@ -2150,7 +2162,7 @@ int32_t jsti_window_forward_action(const char *app_id, int argc, char **argv, ch
     WindowCommand command;
     if (app_id == NULL || !g_application_id_is_valid(app_id) || argc < 1 || argv == NULL ||
         !parse_window_command(argc, (const gchar *const *)argv, &command) || command.unknown_argument ||
-        (command.run != 7 && command.run != 11)) {
+        !is_forwardable_command(command.run, command.slot)) {
         jsti_set_error(error, capacity, "Choose exactly one supported desktop action command.");
         return -1;
     }
@@ -2182,9 +2194,11 @@ static int on_command_line(GApplication *application, GApplicationCommandLine *l
             g_application_command_line_printerr(line, "Unsupported option for this desktop action command.\n");
             return 2;
         }
-        gint status = forward_window_command(command.run, remote);
+        gint status = forward_window_command(command.run, command.slot, remote);
         if (status == 2)
             g_application_command_line_printerr(line, "Open JustSpeakToIt before using this action command.\n");
+        else if (status != 0 && command.run == 3)
+            g_application_command_line_printerr(line, "Playback Stop is unavailable. Start playback or close dialogs first.\n");
         else if (status != 0)
             g_application_command_line_printerr(line, "Finish the current operation or close dialogs first.\n");
         return status;
@@ -4793,12 +4807,28 @@ static gboolean command_forwarding_self_test(void) {
     const gchar *mixed[] = { "justspeaktoit", JSTI_TOGGLE_ARGUMENT, JSTI_SPEAK_CLIPBOARD_ARGUMENT };
     const gchar *mixed_output[] = { "justspeaktoit", JSTI_PASTE_LAST_HISTORY_ARGUMENT, JSTI_SPEAK_CLIPBOARD_ARGUMENT };
     const gchar *unknown[] = { "justspeaktoit", JSTI_SPEAK_CLIPBOARD_ARGUMENT, "--gapplication-service" };
+    const struct { const gchar *argument; gint run, slot, event; } controls[] = {
+        { JSTI_STOP_SPEECH_ARGUMENT, 3, 0, JSTI_EVENT_PLAYBACK_STOP },
+        { JSTI_PAUSE_SPEECH_ARGUMENT, 8, 0, JSTI_EVENT_SPEECH_PAUSE },
+        { JSTI_QUICK_VOICE_1_ARGUMENT, 6, 1, JSTI_EVENT_QUICK_VOICE },
+        { JSTI_QUICK_VOICE_2_ARGUMENT, 6, 2, JSTI_EVENT_QUICK_VOICE },
+        { JSTI_QUICK_VOICE_3_ARGUMENT, 6, 3, JSTI_EVENT_QUICK_VOICE }
+    };
     gboolean okay = parse_window_command(2, background, &command) && command.run == 0 && command.background;
     okay = okay && parse_window_command(3, toggle, &command) && command.run == 1 && command.background;
     okay = okay && parse_window_command(2, clipboard, &command) && command.run == 7 && !command.background;
     okay = okay && parse_window_command(3, paste, &command) && command.run == 11;
     okay = okay && !parse_window_command(3, mixed, &command) && !parse_window_command(3, mixed_output, &command);
     okay = okay && parse_window_command(3, unknown, &command) && command.unknown_argument;
+    for (guint index = 0; index < G_N_ELEMENTS(controls); ++index) {
+        const gchar *arguments[] = { "justspeaktoit", controls[index].argument };
+        okay = okay && parse_window_command(2, arguments, &command) &&
+            command.run == controls[index].run && command.slot == controls[index].slot &&
+            is_forwardable_command(command.run, command.slot);
+    }
+    const gchar *mixed_slots[] = { "justspeaktoit", JSTI_QUICK_VOICE_1_ARGUMENT, JSTI_QUICK_VOICE_2_ARGUMENT };
+    okay = okay && !parse_window_command(3, mixed_slots, &command) && !is_forwardable_command(6, 0) &&
+        !is_forwardable_command(6, 4) && !is_forwardable_command(1, 0) && !is_forwardable_command(3, 1);
     char *invalid[] = { "justspeaktoit", JSTI_SPEAK_CLIPBOARD_ARGUMENT, "--gapplication-service", NULL };
     char error[256] = { 0 };
     okay = okay && jsti_window_forward_action(
@@ -4807,6 +4837,7 @@ static gboolean command_forwarding_self_test(void) {
     void *context = ui.context;
     gint state = ui.state, page = ui.page;
     gboolean sensitive = gtk_widget_get_sensitive(GTK_WIDGET(ui.window)), closing = ui.closing;
+    gboolean stop_sensitive = gtk_widget_get_sensitive(GTK_WIDGET(ui.voice_stop));
     GtkWindow *window = ui.window;
     ActionShortcutCapture capture = { 0 };
     ui.callback = action_shortcut_capture;
@@ -4814,25 +4845,51 @@ static gboolean command_forwarding_self_test(void) {
     ui.state = JSTI_STATE_IDLE;
     ui.closing = FALSE;
     gtk_widget_set_sensitive(GTK_WIDGET(ui.window), TRUE);
-    okay = okay && forward_window_command(7, TRUE) == 0 && capture.event == JSTI_EVENT_SPEAK_CLIPBOARD &&
+    okay = okay && forward_window_command(7, 0, TRUE) == 0 && capture.event == JSTI_EVENT_SPEAK_CLIPBOARD &&
         capture.calls == 1 && ui.page == page;
-    okay = okay && forward_window_command(11, TRUE) == 0 && capture.event == JSTI_EVENT_PASTE_LAST_HISTORY &&
+    okay = okay && forward_window_command(11, 0, TRUE) == 0 && capture.event == JSTI_EVENT_PASTE_LAST_HISTORY &&
         capture.calls == 2 && ui.page == page;
-    okay = okay && forward_window_command(7, FALSE) == 2 && forward_window_command(11, FALSE) == 2;
+    okay = okay && forward_window_command(7, 0, FALSE) == 2 && forward_window_command(11, 0, FALSE) == 2;
     ui.window = NULL;
-    okay = okay && forward_window_command(7, TRUE) == 2 && forward_window_command(11, TRUE) == 2;
+    okay = okay && forward_window_command(7, 0, TRUE) == 2 && forward_window_command(11, 0, TRUE) == 2;
     ui.window = window;
     ui.state = JSTI_STATE_WORKING;
-    okay = okay && forward_window_command(7, TRUE) == 3 && forward_window_command(11, TRUE) == 3;
+    okay = okay && forward_window_command(7, 0, TRUE) == 3 && forward_window_command(11, 0, TRUE) == 3;
     ui.state = JSTI_STATE_RECORDING;
-    okay = okay && forward_window_command(7, TRUE) == 3 && forward_window_command(11, TRUE) == 3;
+    okay = okay && forward_window_command(7, 0, TRUE) == 3 && forward_window_command(11, 0, TRUE) == 3;
     ui.state = JSTI_STATE_IDLE;
     gtk_widget_set_sensitive(GTK_WIDGET(ui.window), FALSE);
-    okay = okay && forward_window_command(7, TRUE) == 3 && forward_window_command(11, TRUE) == 3;
+    okay = okay && forward_window_command(7, 0, TRUE) == 3 && forward_window_command(11, 0, TRUE) == 3;
     gtk_widget_set_sensitive(GTK_WIDGET(ui.window), TRUE);
     ui.closing = TRUE;
-    okay = okay && forward_window_command(7, TRUE) == 3 && forward_window_command(11, TRUE) == 3 &&
+    okay = okay && forward_window_command(7, 0, TRUE) == 3 && forward_window_command(11, 0, TRUE) == 3 &&
         capture.calls == 2;
+    ui.closing = FALSE;
+    ui.state = JSTI_STATE_IDLE;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), TRUE);
+    for (guint index = 0; index < G_N_ELEMENTS(controls); ++index) {
+        capture = (ActionShortcutCapture){ 0 };
+        gint run = controls[index].run, slot = controls[index].slot;
+        okay = okay && forward_window_command(run, slot, TRUE) == 0 &&
+            capture.calls == 1 && capture.event == controls[index].event &&
+            capture.slot == slot && ui.page == page && forward_window_command(run, slot, FALSE) == 2;
+        gtk_widget_set_sensitive(GTK_WIDGET(ui.window), FALSE);
+        okay = okay && forward_window_command(run, slot, TRUE) == 3 && capture.calls == 1;
+        gtk_widget_set_sensitive(GTK_WIDGET(ui.window), TRUE);
+        ui.closing = TRUE;
+        okay = okay && forward_window_command(run, slot, TRUE) == 3 && capture.calls == 1;
+        ui.closing = FALSE;
+        if (run != 3) {
+            ui.state = JSTI_STATE_WORKING;
+            okay = okay && forward_window_command(run, slot, TRUE) == 3 && capture.calls == 1;
+            ui.state = JSTI_STATE_RECORDING;
+            okay = okay && forward_window_command(run, slot, TRUE) == 3 && capture.calls == 1;
+            ui.state = JSTI_STATE_IDLE;
+        }
+    }
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), FALSE);
+    okay = okay && forward_window_command(3, 0, TRUE) == 3;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), stop_sensitive);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.window), sensitive);
     ui.closing = closing;
     ui.state = state;
@@ -4945,32 +5002,44 @@ static gboolean command_process_self_test(char *error, size_t capacity) {
     gint state = ui.state, page = ui.page;
     gboolean closing = ui.closing, sensitive = gtk_widget_get_sensitive(GTK_WIDGET(ui.window));
     gboolean visible = gtk_widget_get_visible(GTK_WIDGET(ui.window));
+    gboolean stop_enabled = gtk_widget_get_sensitive(GTK_WIDGET(ui.voice_stop));
     ActionShortcutCapture capture = { 0 };
     ui.callback = action_shortcut_capture;
     ui.context = &capture;
     gtk_widget_set_visible(GTK_WIDGET(ui.window), FALSE);
     const struct {
         const gchar *argument, *second;
-        gint state, event;
-        gboolean sensitive, closing;
+        gint state, event, slot;
+        gboolean sensitive, closing, stop_enabled;
         const gchar *refusal;
     } cases[] = {
-        { JSTI_SPEAK_CLIPBOARD_ARGUMENT, NULL, JSTI_STATE_IDLE, JSTI_EVENT_SPEAK_CLIPBOARD, TRUE, FALSE, NULL },
-        { JSTI_PASTE_LAST_HISTORY_ARGUMENT, NULL, JSTI_STATE_IDLE, JSTI_EVENT_PASTE_LAST_HISTORY, TRUE, FALSE, NULL },
+        { JSTI_SPEAK_CLIPBOARD_ARGUMENT, NULL, JSTI_STATE_IDLE, JSTI_EVENT_SPEAK_CLIPBOARD, 0, TRUE, FALSE, FALSE, NULL },
+        { JSTI_PASTE_LAST_HISTORY_ARGUMENT, NULL, JSTI_STATE_IDLE, JSTI_EVENT_PASTE_LAST_HISTORY, 0, TRUE, FALSE, FALSE, NULL },
         { JSTI_PASTE_LAST_HISTORY_ARGUMENT, JSTI_PASTE_LAST_HISTORY_ARGUMENT,
-            JSTI_STATE_IDLE, JSTI_EVENT_PASTE_LAST_HISTORY, TRUE, FALSE, NULL },
+            JSTI_STATE_IDLE, JSTI_EVENT_PASTE_LAST_HISTORY, 0, TRUE, FALSE, FALSE, NULL },
         { JSTI_SPEAK_CLIPBOARD_ARGUMENT, JSTI_LOGIN_LAUNCH_ARGUMENT,
-            JSTI_STATE_IDLE, JSTI_EVENT_SPEAK_CLIPBOARD, TRUE, FALSE, NULL },
-        { JSTI_SPEAK_CLIPBOARD_ARGUMENT, NULL, JSTI_STATE_WORKING, 0, TRUE, FALSE, "Finish the current operation" },
-        { JSTI_PASTE_LAST_HISTORY_ARGUMENT, NULL, JSTI_STATE_RECORDING, 0, TRUE, FALSE, "Finish the current operation" },
-        { JSTI_SPEAK_CLIPBOARD_ARGUMENT, NULL, JSTI_STATE_IDLE, 0, FALSE, FALSE, "Finish the current operation" },
-        { JSTI_PASTE_LAST_HISTORY_ARGUMENT, NULL, JSTI_STATE_IDLE, 0, TRUE, TRUE, "Finish the current operation" },
+            JSTI_STATE_IDLE, JSTI_EVENT_SPEAK_CLIPBOARD, 0, TRUE, FALSE, FALSE, NULL },
+        { JSTI_SPEAK_CLIPBOARD_ARGUMENT, NULL, JSTI_STATE_WORKING, 0, 0, TRUE, FALSE, FALSE, "Finish the current operation" },
+        { JSTI_PASTE_LAST_HISTORY_ARGUMENT, NULL, JSTI_STATE_RECORDING, 0, 0, TRUE, FALSE, FALSE, "Finish the current operation" },
+        { JSTI_SPEAK_CLIPBOARD_ARGUMENT, NULL, JSTI_STATE_IDLE, 0, 0, FALSE, FALSE, FALSE, "Finish the current operation" },
+        { JSTI_PASTE_LAST_HISTORY_ARGUMENT, NULL, JSTI_STATE_IDLE, 0, 0, TRUE, TRUE, FALSE, "Finish the current operation" },
         { JSTI_SPEAK_CLIPBOARD_ARGUMENT, JSTI_PASTE_LAST_HISTORY_ARGUMENT,
-            JSTI_STATE_IDLE, 0, TRUE, FALSE, "Choose exactly one supported desktop action command" },
+            JSTI_STATE_IDLE, 0, 0, TRUE, FALSE, FALSE, "Choose exactly one supported desktop action command" },
         { JSTI_TOGGLE_ARGUMENT, JSTI_SPEAK_CLIPBOARD_ARGUMENT,
-            JSTI_STATE_IDLE, 0, TRUE, FALSE, "Choose exactly one supported desktop action command" },
+            JSTI_STATE_IDLE, 0, 0, TRUE, FALSE, FALSE, "Choose exactly one supported desktop action command" },
         { JSTI_SPEAK_CLIPBOARD_ARGUMENT, "--gapplication-service",
-            JSTI_STATE_IDLE, 0, TRUE, FALSE, "Choose exactly one supported desktop action command" }
+            JSTI_STATE_IDLE, 0, 0, TRUE, FALSE, FALSE, "Choose exactly one supported desktop action command" },
+        { JSTI_STOP_SPEECH_ARGUMENT, NULL, JSTI_STATE_IDLE, JSTI_EVENT_PLAYBACK_STOP, 0, TRUE, FALSE, TRUE, NULL },
+        { JSTI_STOP_SPEECH_ARGUMENT, NULL, JSTI_STATE_WORKING, JSTI_EVENT_PLAYBACK_STOP, 0, TRUE, FALSE, TRUE, NULL },
+        { JSTI_STOP_SPEECH_ARGUMENT, NULL, JSTI_STATE_IDLE, 0, 0, TRUE, FALSE, FALSE, "Playback Stop is unavailable" },
+        { JSTI_PAUSE_SPEECH_ARGUMENT, NULL, JSTI_STATE_IDLE, JSTI_EVENT_SPEECH_PAUSE, 0, TRUE, FALSE, FALSE, NULL },
+        { JSTI_QUICK_VOICE_1_ARGUMENT, NULL, JSTI_STATE_IDLE, JSTI_EVENT_QUICK_VOICE, 1, TRUE, FALSE, FALSE, NULL },
+        { JSTI_QUICK_VOICE_2_ARGUMENT, NULL, JSTI_STATE_IDLE, JSTI_EVENT_QUICK_VOICE, 2, TRUE, FALSE, FALSE, NULL },
+        { JSTI_QUICK_VOICE_3_ARGUMENT, NULL, JSTI_STATE_IDLE, JSTI_EVENT_QUICK_VOICE, 3, TRUE, FALSE, FALSE, NULL },
+        { JSTI_QUICK_VOICE_1_ARGUMENT, JSTI_QUICK_VOICE_3_ARGUMENT,
+            JSTI_STATE_IDLE, 0, 0, TRUE, FALSE, FALSE, "Choose exactly one supported desktop action command" },
+        { JSTI_QUICK_VOICE_1_ARGUMENT, NULL, JSTI_STATE_WORKING, 0, 0, TRUE, FALSE, FALSE, "Finish the current operation" },
+        { JSTI_PAUSE_SPEECH_ARGUMENT, NULL, JSTI_STATE_RECORDING, 0, 0, TRUE, FALSE, FALSE, "Finish the current operation" }
     };
     for (guint index = 0; okay && index < G_N_ELEMENTS(cases); ++index) {
         const gchar *arguments[] = { executable, cases[index].argument, cases[index].second, NULL };
@@ -4978,16 +5047,20 @@ static gboolean command_process_self_test(char *error, size_t capacity) {
         ui.state = cases[index].state;
         ui.closing = cases[index].closing;
         gtk_widget_set_sensitive(GTK_WIDGET(ui.window), cases[index].sensitive);
+        gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), cases[index].stop_enabled);
         okay = check_command_process(arguments, directory, cases[index].event != 0, cases[index].refusal, error, capacity);
         if (okay && (capture.calls != (cases[index].event != 0 ? 1u : 0u) ||
-            capture.event != cases[index].event || capture.slot != 0 || ui.page != page ||
+            capture.event != cases[index].event || capture.slot != cases[index].slot || ui.page != page ||
             gtk_widget_get_visible(GTK_WIDGET(ui.window)))) {
             jsti_set_error(error, capacity, "Command fixture %u changed page/visibility or emitted the wrong event.", index);
             okay = FALSE;
         }
     }
     g_clear_object(&primary);
-    const gchar *cold[] = { JSTI_SPEAK_CLIPBOARD_ARGUMENT, JSTI_PASTE_LAST_HISTORY_ARGUMENT };
+    const gchar *cold[] = {
+        JSTI_SPEAK_CLIPBOARD_ARGUMENT, JSTI_PASTE_LAST_HISTORY_ARGUMENT, JSTI_STOP_SPEECH_ARGUMENT,
+        JSTI_PAUSE_SPEECH_ARGUMENT, JSTI_QUICK_VOICE_1_ARGUMENT, JSTI_QUICK_VOICE_2_ARGUMENT, JSTI_QUICK_VOICE_3_ARGUMENT
+    };
     for (guint index = 0; okay && index < G_N_ELEMENTS(cold); ++index) {
         const gchar *arguments[] = { executable, cold[index], NULL };
         okay = check_command_process(arguments, directory, FALSE,
@@ -4997,6 +5070,7 @@ static gboolean command_process_self_test(char *error, size_t capacity) {
     ui.closing = closing;
     ui.callback = callback;
     ui.context = callback_context;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), stop_enabled);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.window), sensitive);
     gtk_widget_set_visible(GTK_WIDGET(ui.window), visible);
     GDir *contents = g_dir_open(directory, 0, &failure);
@@ -5018,7 +5092,8 @@ static gboolean command_process_self_test(char *error, size_t capacity) {
     g_free(executable);
     g_main_context_pop_thread_default(context);
     g_main_context_unref(context);
-    if (okay) g_print("Desktop commands: 13 real client processes passed forwarding, refusal and store-isolation checks.\n");
+    if (okay) g_print("Desktop commands: %u real client processes passed forwarding, refusal and store-isolation checks.\n",
+        (guint)(G_N_ELEMENTS(cases) + G_N_ELEMENTS(cold)));
     return okay;
 }
 

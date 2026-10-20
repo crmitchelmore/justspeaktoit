@@ -37,6 +37,8 @@ MAX_UPLOAD_SECONDS = 30
 MAX_RESPONSE_SECONDS = 180
 TRANSCRIPTION_PATH = "/speechtotext/transcriptions:transcribe?api-version=2025-10-15"
 STREAMING_PATH = "/voice-live/realtime?api-version=2026-04-10&model=gpt-4.1"
+MAI_STREAMING_PATH = "/mai/v1/realtime?intent=transcription"
+STREAMING_PATHS = {STREAMING_PATH, MAI_STREAMING_PATH}
 MAX_STREAM_SECONDS = 3600
 MAX_STREAM_UPLOAD = 256 * 1024 * 1024
 MAX_STREAM_DOWNLOAD = 64 * 1024 * 1024
@@ -271,8 +273,9 @@ def validate_transcription(body, content_type):
 
 
 class AzureTransport:
-    def __init__(self, origin, tokens):
+    def __init__(self, origin, tokens, mai_streaming_origin=None):
         self.origin = resource_origin(origin)
+        self.mai_streaming_origin = resource_origin(mai_streaming_origin) if mai_streaming_origin else self.origin
         self.tokens = tokens
         context = ssl.create_default_context()
         if sys.platform == "darwin":
@@ -284,9 +287,11 @@ class AzureTransport:
             urllib.request.HTTPSHandler(context=context),
         )
 
-    def open_streaming(self, key):
-        # Voice Live uses the Foundry host for the same fixed custom-resource name.
-        host = urllib.parse.urlsplit(self.origin).hostname.replace(
+    def open_streaming(self, key, path=STREAMING_PATH):
+        if path not in STREAMING_PATHS:
+            raise ProxyError(404, "Only the fixed Voice Live and MAI Realtime routes are supported.")
+        origin = self.mai_streaming_origin if path == MAI_STREAMING_PATH else self.origin
+        host = urllib.parse.urlsplit(origin).hostname.replace(
             ".cognitiveservices.azure.com", ".services.ai.azure.com",
         )
         for attempt in range(2):
@@ -300,7 +305,7 @@ class AzureTransport:
                     raw.close()
                     raise
                 request = (
-                    "GET " + STREAMING_PATH + " HTTP/1.1\r\nHost: " + host
+                    "GET " + path + " HTTP/1.1\r\nHost: " + host
                     + "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13"
                     + "\r\nSec-WebSocket-Key: " + key + "\r\nAuthorization: Bearer " + token
                     + "\r\nUser-Agent: JustSpeakLocalProxy\r\n\r\n"
@@ -315,7 +320,7 @@ class AzureTransport:
                 if status in (401, 403):
                     raise ProxyError(status, "Azure denied streaming access. Check sign-in and Speech permissions.")
                 if status == 429:
-                    raise ProxyError(429, "Azure Voice Live rate limit or quota reached.")
+                    raise ProxyError(429, "Azure transcription rate limit or quota reached.")
                 if (status != 101 or headers.get("Upgrade", "").lower() != "websocket"
                         or "upgrade" not in [value.strip().lower()
                                              for value in headers.get("Connection", "").split(",")]
@@ -446,7 +451,7 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
                 raise ProxyError(403, "Only the exact loopback host is accepted.")
             if self.headers.get("Origin") is not None or self.headers.get("Sec-Fetch-Site") is not None:
                 raise ProxyError(403, "Browser requests are not supported.")
-            streaming = self.command == "GET" and self.path == STREAMING_PATH
+            streaming = self.command == "GET" and self.path in STREAMING_PATHS
             header = "api-key" if streaming else "Ocp-Apim-Subscription-Key"
             supplied = self.headers.get_all(header) or []
             if len(supplied) != 1 or not hmac.compare_digest(
@@ -544,7 +549,7 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
                 raise ValueError("Invalid key length")
         except (ValueError, base64.binascii.Error) as error:
             raise ProxyError(400, "Invalid WebSocket handshake key.") from error
-        upstream = self.server.transport.open_streaming(keys[0])
+        upstream = self.server.transport.open_streaming(keys[0], self.path)
         self.close_connection = True
         try:
             self.protocol_version = "HTTP/1.1"
@@ -570,6 +575,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--subscription", required=True, help="Explicit Azure subscription ID")
     parser.add_argument("--resource", required=True, help="Custom Azure HTTPS resource origin")
+    parser.add_argument("--mai-streaming-resource", help="Optional fixed resource for dedicated MAI Realtime only")
     parser.add_argument("--token-file", required=True, help="Private local client token file (created with mode 600)")
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
@@ -579,7 +585,9 @@ def main():
     if not az:
         parser.error("Azure CLI is required. Install it and run az login.")
     try:
-        transport = AzureTransport(args.resource, AzureCLIToken(args.subscription, az))
+        transport = AzureTransport(
+            args.resource, AzureCLIToken(args.subscription, az), mai_streaming_origin=args.mai_streaming_resource,
+        )
         # Fail before claiming readiness if sign-in is missing.
         transport.tokens.get()
         server = ProxyServer(args.port, local_token(args.token_file), transport)

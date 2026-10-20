@@ -35,6 +35,8 @@ final class AzureVoiceLiveRun: @unchecked Sendable {
     var commitSent = false
     /// Azure acknowledged the final commit, or no commit was needed.
     var commitAcknowledged = false
+    /// Dedicated MAI must produce a real final after the final commit.
+    var finalCommitCompleted = false
     var barrierSent = false
     /// Azure answered the barrier, so every item created by the audio and the
     /// commit before it has been announced.
@@ -97,6 +99,7 @@ struct AzureVoiceLiveTranscript: Equatable, Sendable {
     private(set) var order: [String] = []
     private var known: Set<String> = []
     private var drafts: [String: String] = [:]
+    private var intermediateSuffixes: [String: String] = [:]
     private var finals: [String: String] = [:]
     private var failures: Set<String> = []
 
@@ -114,7 +117,11 @@ struct AzureVoiceLiveTranscript: Equatable, Sendable {
 
     /// Completed items plus the latest draft of each item still in progress.
     var display: String {
-        Self.join(order.compactMap { item in finals[item] ?? (failures.contains(item) ? nil : drafts[item]) })
+        Self.join(order.compactMap { item in
+            if let final = finals[item] { return final }
+            guard !failures.contains(item) else { return nil }
+            return (drafts[item] ?? "") + (intermediateSuffixes[item] ?? "")
+        })
     }
 
     mutating func register(_ item: String) {
@@ -127,6 +134,14 @@ struct AzureVoiceLiveTranscript: Equatable, Sendable {
         register(item)
         guard !isSettled(item) else { return false }
         drafts[item, default: ""] += delta
+        intermediateSuffixes[item] = nil
+        return true
+    }
+
+    mutating func replaceIntermediate(_ suffix: String, item: String) -> Bool {
+        register(item)
+        guard !isSettled(item) else { return false }
+        intermediateSuffixes[item] = suffix
         return true
     }
 
@@ -136,6 +151,7 @@ struct AzureVoiceLiveTranscript: Equatable, Sendable {
         guard !isSettled(item) else { return false }
         finals[item] = transcript
         drafts[item] = nil
+        intermediateSuffixes[item] = nil
         return true
     }
 
@@ -145,6 +161,7 @@ struct AzureVoiceLiveTranscript: Equatable, Sendable {
         guard !isSettled(item) else { return false }
         failures.insert(item)
         drafts[item] = nil
+        intermediateSuffixes[item] = nil
         return true
     }
 

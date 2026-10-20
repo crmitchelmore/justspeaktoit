@@ -97,6 +97,9 @@ extension ModelCatalog {
         AlibabaSpeechModels.funLive: LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish], postStopFinalizeBudget: 5
         ),
+        AzureTranscriptionModels.mai2Streaming: LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish], postStopFinalizeBudget: 5
+        ),
         AzureTranscriptionModels.speechLive: LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish], postStopFinalizeBudget: 5
         ),

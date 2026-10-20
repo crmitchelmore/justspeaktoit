@@ -221,6 +221,10 @@ public enum LiveTranscriptionRouting {
         }
 
         switch provider {
+        case .azure:
+            // Streaming is part of this provider's model name, not just a catalogue suffix.
+            if modelID == AzureTranscriptionModels.mai2Streaming { return AzureTranscriptionModels.mai2StreamingModel }
+            return name
         case .elevenlabs:
             // The catalogue exposes `elevenlabs/scribe-v2-streaming`, but the
             // ElevenLabs realtime API model id is `scribe_v2_realtime`.

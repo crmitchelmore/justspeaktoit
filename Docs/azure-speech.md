@@ -11,11 +11,26 @@ by this integration. Access to a model depends on the resource's tier and region
 | Fast recorded-audio transcription | Speech `transcriptions:transcribe`, version `2025-10-15` | macOS, iOS and Windows |
 | MAI-Transcribe-2 / 1.5 recorded audio | Same API, with the explicit enhanced-mode model | macOS, iOS and Windows; resource access required |
 | Azure Speech / MAI live input | Voice Live, version `2026-04-10`, pre-deployed `gpt-4.1` session | macOS, iOS and Windows; resource endpoint required |
+| MAI-Transcribe-2-Streaming incremental input | Dedicated `/mai/v1/realtime?intent=transcription` API | macOS, iOS and Windows; deployment named `mai-transcribe-2-streaming` required |
 | Azure neural voices, MAI-Voice-2.1 and MAI-Voice-2.1-Flash | Regional synthesis and voices-list APIs | macOS TTS; shared transport and MAI catalogue in SpeakCore |
 
-MAI live input uses Azure's `mai-transcribe` identifier. It is intentionally not
-labelled MAI-Transcribe-2: the live API does not promise the same version as the
-file API. Voice Live assistant responses are disabled; the client never sends
+The legacy MAI live selection uses Azure's `mai-transcribe` alias, currently
+documented as MAI-Transcribe-2, and is labelled **Turn-based**. Its stable catalogue
+identifier remains `azure/mai-transcribe-streaming` so existing saved selections
+do not silently change models. **Azure MAI-Transcribe-2-Streaming (Preview)** is
+the distinct incremental model, `mai-transcribe-2-streaming`; its API suffix is
+preserved rather than stripped as a catalogue convention. Both use the existing
+shared lifecycle and Azure credential/resource settings. The incremental route
+uses the dedicated MAI Realtime API, not Voice Live: live testing showed that
+Voice Live still withholds its deltas until a turn ends, even with the streaming
+model selected and the newer `2026-07-15` API.
+The dedicated route requires a deployment named `mai-transcribe-2-streaming`.
+It configures a transcription-only session with turn detection and noise reduction
+set to null before audio starts. Its finish drains audio, sends one commit and
+requires both acknowledgement and a real `completed` transcript within five
+seconds. A commit acknowledgement alone, including silence, cannot report success.
+No post-audio configuration barrier is sent: MAI freezes its settings after audio starts.
+Voice Live assistant responses are disabled; the client never sends
 `response.create`. Live shutdown drains queued audio, commits remaining audio without changing VAD,
 then awaits a server acknowledgement and transcription finals within a five-second
 overall budget. Azure rejects disabling turn detection after a session has started.
@@ -30,6 +45,36 @@ recording in which every turn failed is reported as a transcription failure. Onl
 empty-buffer answer to the client's own final commit is benign: any other server
 error, including one that names the commit or the finalisation barrier, ends the
 session as a failure.
+
+### MAI model comparison
+
+| Model | Configured in the app | Behaviour and trade-offs |
+| --- | --- | --- |
+| `mai-transcribe-2-streaming` | Remote → Streaming → Azure MAI-Transcribe-2-Streaming (Preview) | Dedicated Realtime API: incremental text while speaking; provisional text can revise. Requires a matching deployment. Published introductory audio rate is $0.54/hour through 2026. |
+| `mai-transcribe` | Remote → Streaming → Azure MAI Transcribe (Turn-based, Preview) | Azure-selected alias, currently MAI-Transcribe-2. Phrase/turn-sized updates; alias can change with Azure updates. Existing selections keep this route. |
+| `mai-transcribe-2` | Not separately pinned in Voice Live; MAI-Transcribe-2 is also available under Remote → Batch | Explicit Voice Live version has the same turn-based model as the current alias, not the dedicated streaming model. Recorded-audio mode waits for a whole-file result. |
+| MAI-Transcribe-1.5 | Remote → Batch only | Previous-generation recorded-audio model, not an incremental live route. |
+| MAI-Transcribe-1 | Not configured | Deprecated; no new integration. |
+
+The Realtime API (`/mai/v1/realtime`), Speech SDK and Voice Live are integration
+methods, not additional MAI model variants. The app uses the dedicated Realtime
+API for genuine incremental MAI and Voice Live for the legacy alias and Azure
+Speech. Both retain native transports, bounded lifecycle and local-proxy support.
+No Speech SDK or new audio capture path is added.
+
+Azure controls the delivery cadence. The app forwards deltas immediately and
+also accepts MAI `intermediate` events as replacement provisional suffixes after
+the accumulated deltas, without inserting spaces inside a provider's item.
+A completion replaces that item's draft; late suffixes cannot revive completed
+or failed items. Dedicated MAI does not wait for VAD or commit to display text.
+The legacy Voice Live turn detector remains semantic VAD with 500 ms silence,
+not a user-configurable delay or a first-text latency guarantee.
+
+Availability is resource-specific. On 12 October 2026 the configured East US
+resource rejected the dedicated model with `transcription_upstream_not_configured`
+even though Microsoft's current region table lists East US. The app reports this
+explicitly and never silently switches to the turn-based alias. A successful
+local `/health` response does not prove streaming-model access.
 
 This does not add a bring-your-own Azure OpenAI deployment. That requires its own
 deployment endpoint and authentication contract; an ordinary OpenAI key is never
@@ -99,6 +144,7 @@ Azure rejects the unsigned zero values previously sent by the app.
 `scripts/azure-speech-proxy.py` is a dependency-free Python 3 bridge for
 subscriptions that disable Azure resource keys. Sign in with `az login` and
 grant the signed-in account **Cognitive Services Speech User** on the resource.
+Dedicated MAI also accepts **Cognitive Services User** on its Foundry resource.
 The proxy uses Azure CLI's Speech-scoped Entra token, caches it in memory and
 refreshes it before expiry. It does not create an app registration, save an
 Entra token or change subscription authentication policies.
@@ -119,6 +165,13 @@ key**. Keep it out of source control. Native clients send its value in
 `Ocp-Apim-Subscription-Key` for HTTP or `api-key` for WebSocket upgrades; both
 headers are consumed locally and never forwarded. Azure receives an Entra bearer
 token and the fixed inference request, never the local token.
+To keep working batch, TTS and Voice Live routes on one resource while MAI
+incremental transcription uses another, add
+`--mai-streaming-resource https://YOUR_STREAMING_RESOURCE.cognitiveservices.azure.com`.
+This fixed, validated origin applies only to `/mai/v1/realtime`; it does not
+replace the primary resource. Without it, the primary resource serves both APIs.
+Deploy MAI-Transcribe-2-Streaming on the chosen resource with the exact deployment
+name `mai-transcribe-2-streaming`. The endpoint and local credential stay unchanged.
 Do not omit the local token: loopback alone does not prevent another
 local process or a browser from attempting to spend your Azure quota.
 
@@ -139,6 +192,7 @@ Only these native-client routes are accepted:
 | `GET /cognitiveservices/voices/list` | `/tts/cognitiveservices/voices/list` |
 | `POST /speechtotext/transcriptions:transcribe?api-version=2025-10-15` | Same path and pinned API version |
 | WebSocket `/voice-live/realtime?api-version=2026-04-10&model=gpt-4.1` | Same route on the resource's `.services.ai.azure.com` host |
+| WebSocket `/mai/v1/realtime?intent=transcription` | Same route on the fixed MAI streaming resource's `.services.ai.azure.com` host |
 | `GET /health` | Local readiness only; does not verify Azure model access |
 
 Synthesis uses the existing Azure SSML body and `X-Microsoft-OutputFormat`
@@ -161,8 +215,8 @@ Uploads have a 30-second total receive deadline; upstream response bodies have
 a 180-second total deadline. Saturated admission returns HTTP 503. The app checks
 the complete multipart size before constructing or sending an oversized upload.
 
-Voice Live tunnels native WebSocket frames over certificate-validated TLS to the
-same resource's Foundry host. It preserves the existing shared client's readiness,
+Both streaming routes tunnel native WebSocket frames over certificate-validated
+TLS to their fixed Foundry hosts. They preserve the shared client's readiness,
 audio ordering and finalisation protocol, with text-only transcription and no
 assistant responses. The tunnel has a 60-second idle limit, one-hour session
 limit, 256 MiB upload limit and 64 MiB download limit; four concurrent HTTP/live
@@ -186,7 +240,9 @@ not a proxy running on a Mac.
    proxy compatibility for transcription only, not Azure model access or TTS support.
 3. Select **Remote → Batch → Azure MAI-Transcribe-2 (Preview)**, or Azure Fast
    Transcription, for recorded audio. For live transcription select
-   **Remote → Streaming → Azure MAI Transcribe (Voice Live, Preview)** or Azure Speech.
+   **Remote → Streaming → Azure MAI-Transcribe-2-Streaming (Preview)** when the
+   resource supports it, **Azure MAI Transcribe (Turn-based, Preview)** for the
+   legacy route, or Azure Speech.
 
 Only the literal IPv4 loopback origin with an explicit port is allowed; enter
 `127.0.0.1`, not `localhost`, a LAN address, a path or a query. The shared transcription
@@ -196,13 +252,13 @@ never sent to the proxy, and a proxy credential is never sent to Azure.
 Direct Azure HTTPS endpoint validation is unchanged. Direct TTS still rejects
 proxy credentials; the app's TTS settings do not route through this endpoint.
 
-**Previously installed Alpha builds still reject loopback endpoints; an app
-update containing these changes is required.** No installed app or saved
+**Alpha builds predating loopback support reject these endpoints; use a compatible
+build. The dedicated incremental model also requires its new catalogue/API
+implementation.** No installed app or saved
 credentials are modified by running the script. Voice output in the app still
 uses its regional endpoint; the proxy's TTS routes remain usable by standalone
-native clients. This proxy implements the existing Voice Live `mai-transcribe`
-model, **not MAI-Transcribe-2-Streaming**. The latter is a separate deployment/API
-at `/mai/v1/realtime` with a different session and event contract.
+native clients. This proxy tunnels both Voice Live and the dedicated
+`/mai/v1/realtime` API with their distinct session and completion contracts.
 No TLS interception, Entra app registration or API-key policy exemption is needed.
 
 Run the offline proxy checks with:
@@ -220,8 +276,32 @@ run `SPEAK_PORTABLE_CORE=1 swift test --filter AzureLocalProxyTests`; otherwise
 the batch check is skipped and CI never reads credentials or spends Azure quota.
 Set `JSTI_AZURE_PROXY_STREAMING=1` as well to opt into the real shared Voice Live
 client check. It sends the synthetic fixture in paced 100 ms PCM chunks, requires
-live text before stopping and the full expected final phrase without errors,
-and checks both `mai-transcribe` and `azure-speech`.
+live Azure Speech text before stopping and the full expected final phrase without
+errors for both `mai-transcribe` and `azure-speech`. The legacy MAI alias is
+turn-based: its first-text timing is deliberately not an incremental guarantee.
+For genuine incremental MAI acceptance, instead set
+`JSTI_AZURE_PROXY_MAI_STREAMING=1`, use a canonical **24 kHz** PCM16 mono synthetic
+WAV containing at least six seconds of continuous speech, and run
+`swift test --filter testConfiguredProxy_dedicatedMAIEmitsTextDuringContinuousSpeech`.
+This check requires text before all speech is sent, at least 500 ms before the
+fixture ends, multiple display updates and the expected complete final phrase.
+It adds no trailing silence and never treats text arriving only after Stop as
+incremental success.
+On 12 October 2026, the dedicated Realtime deployment in Sweden Central passed
+that check through the compiled shared client and split-resource loopback proxy:
+first text arrived 0.31 seconds into 9.29 seconds of continuous synthetic speech,
+with 55 display updates and the complete expected final phrase. Direct wire
+inspection observed replacement `intermediate` events before speech ended.
+The same model through Voice Live `2026-07-15` emitted its deltas only after
+`speech_stopped` and the turn commit. The installed Alpha app was not replaced;
+these receipts establish the new source and proxy route, not installed-app
+microphone acceptance.
+The current East US legacy MAI smoke check remains intermittent: a later run
+exceeded the unchanged five-second finish budget, while Azure Speech live and
+recorded-audio checks passed. A direct legacy Voice Live control also received
+the turn commit but no transcription within its observation deadline.
+This separate limitation is tracked in [#1201](https://github.com/crmitchelmore/justspeaktoit/issues/1201);
+it is not hidden by a timeout increase or a silent move to the dedicated model.
 Preserve `Package.resolved` when switching to the dependency-free portable graph.
 
 On 7 October 2026, the loopback proxy returned HTTP 200 and valid WAV and MP3

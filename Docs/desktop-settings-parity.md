@@ -181,6 +181,16 @@ validation and busy/recording/parent/page-independent dispatch fixtures are
 authored but NOT_RUN locally. They need automatic qualification. Clipboard
 delivery alone is not evidence of external-field paste or global-shortcut parity.
 
+Linux also exposes `--speak-clipboard` and `--paste-last-history` through the
+existing GApplication command-forwarding path. The app must already be running:
+cold invocations are refused, and forwarding never raises the app window.
+Users can bind them in desktop keyboard settings; global action rows explain
+this fallback without presenting the saved binding as registered. Different
+action flags or unsupported options together are refused before dispatch. Busy, recording, closing and
+modal-disabled states refuse the commands through the existing action gates.
+Command parser/dispatch fixtures are authored but NOT_RUN locally; actual
+cross-process/compositor/provider and external-field acceptance remains open.
+
 ## Linux shortcut listener lifetime (source only; NOT_RUN)
 
 The existing dictation listener now owns its startup and actual native cleanup,

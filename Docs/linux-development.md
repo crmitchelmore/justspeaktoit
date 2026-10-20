@@ -343,6 +343,29 @@ app without raising its window (GApplication forwards the command line), so it
 can be bound to a key in any desktop. The `app.toggle-recording` action does
 the same over D-Bus.
 
+With the app **already running**, desktop keyboard settings can also bind
+`justspeaktoit --speak-clipboard` and `justspeaktoit --paste-last-history`.
+Inside Flatpak use `flatpak run com.justspeaktoit.JustSpeakToIt` followed by the
+same argument. These commands forward without presenting the window, preserving
+the external app's focus. Speak Clipboard uses the saved Voice Output settings;
+Paste Last History captures the invocation target and uses saved output policy,
+not the selected History row. Clipboard-only output requires no external field.
+X11 requires a captured external window for paste; Wayland retains the existing
+portal delivery-time-focus and recovery-copy behavior, not an anchored-field
+guarantee. Forwarding happens before model/controller construction or opening
+application stores. A cold invocation of either new command exits nonzero
+instead of opening a window and acting on the wrong focus.
+
+Choose one action per invocation; different action flags together or unsupported
+options are refused before dispatch. A busy, recording, closing or modal-disabled
+app refuses the new commands with a nonzero exit status. Status 0 means admitted
+to the running app, not that speech or paste completed; results and provider
+errors appear in the app.
+Bindings remain user-owned desktop configuration: the saved Global switch
+does not automatically register these actions. Parser and native dispatch
+fixtures are authored but NOT_RUN locally; actual cross-process forwarding,
+compositor key bindings and external-field/provider acceptance remain unverified.
+
 Data lives in `$XDG_DATA_HOME/JustSpeakToIt` (`~/.local/share/JustSpeakToIt`;
 Flatpak: `~/.var/app/com.justspeaktoit.JustSpeakToIt/data/JustSpeakToIt`):
 `settings.json`, `History/`, profiles and the OpenRouter catalogue cache, all

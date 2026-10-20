@@ -104,6 +104,13 @@ enum {
 /* The argument the login item starts the app with (the shared
  * DesktopLoginItem.launchArgument): the window starts minimised. */
 #define JSTI_LOGIN_LAUNCH_ARGUMENT "--background"
+#define JSTI_TOGGLE_ARGUMENT "--toggle"
+#define JSTI_SPEAK_CLIPBOARD_ARGUMENT "--speak-clipboard"
+#define JSTI_PASTE_LAST_HISTORY_ARGUMENT "--paste-last-history"
+
+/* Forward an action command before constructing a controller or opening stores.
+ * Refuses a missing primary instance without activating any window. */
+int32_t jsti_window_forward_action(const char *app_id, int argc, char **argv, char *error, size_t error_capacity);
 
 /* Recording state for jsti_window_update: -1 keeps the current state. */
 enum { JSTI_STATE_IDLE = 0, JSTI_STATE_RECORDING = 1, JSTI_STATE_WORKING = 2 };

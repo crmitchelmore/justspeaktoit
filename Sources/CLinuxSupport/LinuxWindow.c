@@ -1780,7 +1780,8 @@ static GtkWidget *build_keyboard(void) {
     adw_preferences_group_set_description(
         ADW_PREFERENCES_GROUP(shortcut),
         "Where the desktop offers no shortcut portal, bind the command justspeaktoit --toggle to a key in your "
-        "desktop's keyboard settings.");
+        "desktop's keyboard settings. With the app already running, --speak-clipboard reads clipboard text aloud "
+        "and --paste-last-history delivers the newest History text without raising this window.");
     ui.shortcut_row = ADW_ACTION_ROW(adw_action_row_new());
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.shortcut_row), "Keyboard shortcut");
     adw_action_row_set_subtitle(ui.shortcut_row, "Checking the desktop…");
@@ -2106,26 +2107,96 @@ static void on_activate(GApplication *application, gpointer data) {
     }
 }
 
+typedef struct WindowCommand {
+    gint run;
+    gboolean background, unknown_argument;
+} WindowCommand;
+
+static gboolean parse_window_command(gint argc, const gchar *const *argv, WindowCommand *command) {
+    const struct { const gchar *argument; gint run; } actions[] = {
+        { JSTI_TOGGLE_ARGUMENT, 1 }, { JSTI_SPEAK_CLIPBOARD_ARGUMENT, 7 },
+        { JSTI_PASTE_LAST_HISTORY_ARGUMENT, 11 }
+    };
+    *command = (WindowCommand){ 0 };
+    for (gint index = 1; index < argc; ++index) {
+        gboolean known = g_strcmp0(argv[index], JSTI_LOGIN_LAUNCH_ARGUMENT) == 0;
+        if (known) command->background = TRUE;
+        for (guint action = 0; action < G_N_ELEMENTS(actions); ++action) {
+            if (g_strcmp0(argv[index], actions[action].argument) != 0) continue;
+            known = TRUE;
+            if (command->run != 0 && command->run != actions[action].run) return FALSE;
+            command->run = actions[action].run;
+        }
+        if (!known) command->unknown_argument = TRUE;
+    }
+    return TRUE;
+}
+
+/* 0 means admitted, not completed; 2 requires the running app, 3 refuses busy/closed actions. */
+static gint forward_window_command(gint run, gboolean remote) {
+    if (!remote || ui.window == NULL) return 2;
+    if (run != 7 && run != 11) return 3;
+    return action_shortcut_run(run, "", 0) ? 0 : 3;
+}
+
+static int reject_local_action(GApplication *application, GApplicationCommandLine *line, gpointer data) {
+    (void)application; (void)data;
+    g_application_command_line_printerr(line, "Open JustSpeakToIt before using this action command.\n");
+    return 2;
+}
+
+int32_t jsti_window_forward_action(const char *app_id, int argc, char **argv, char *error, size_t capacity) {
+    WindowCommand command;
+    if (app_id == NULL || !g_application_id_is_valid(app_id) || argc < 1 || argv == NULL ||
+        !parse_window_command(argc, (const gchar *const *)argv, &command) || command.unknown_argument ||
+        (command.run != 7 && command.run != 11)) {
+        jsti_set_error(error, capacity, "Choose exactly one supported desktop action command.");
+        return -1;
+    }
+    GApplication *client = g_application_new(app_id, G_APPLICATION_HANDLES_COMMAND_LINE);
+    g_signal_connect(client, "command-line", G_CALLBACK(reject_local_action), NULL);
+    gint status = g_application_run(client, argc, argv);
+    g_object_unref(client);
+    if (status != 0) {
+        jsti_set_error(error, capacity, "The desktop action was refused (status %d).", status);
+        return -1;
+    }
+    return 0;
+}
+
 static int on_command_line(GApplication *application, GApplicationCommandLine *line, gpointer data) {
     (void)data;
     gint argc = 0;
     gchar **argv = g_application_command_line_get_arguments(line, &argc);
-    gboolean toggle = FALSE, background = FALSE;
-    for (gint index = 1; index < argc; index++) {
-        if (g_strcmp0(argv[index], "--toggle") == 0) toggle = TRUE;
-        if (g_strcmp0(argv[index], JSTI_LOGIN_LAUNCH_ARGUMENT) == 0) background = TRUE;
-    }
+    WindowCommand command;
+    gboolean parsed = parse_window_command(argc, (const gchar *const *)argv, &command);
     g_strfreev(argv);
+    if (!parsed) {
+        g_application_command_line_printerr(line, "Choose only one action command per invocation.\n");
+        return 2;
+    }
     gboolean remote = g_application_command_line_get_is_remote(line);
+    if (command.run != 0 && command.run != 1) {
+        if (command.unknown_argument) {
+            g_application_command_line_printerr(line, "Unsupported option for this desktop action command.\n");
+            return 2;
+        }
+        gint status = forward_window_command(command.run, remote);
+        if (status == 2)
+            g_application_command_line_printerr(line, "Open JustSpeakToIt before using this action command.\n");
+        else if (status != 0)
+            g_application_command_line_printerr(line, "Finish the current operation or close dialogs first.\n");
+        return status;
+    }
     if (!remote || ui.window == NULL) {
-        if (ui.window == NULL) ui.start_minimized = background && !toggle;
+        if (ui.window == NULL) ui.start_minimized = command.background && command.run == 0;
         g_application_activate(application);
     }
     /* A remote --toggle drives the running app without raising its window, so
      * focus stays on the field that should receive the text; a second login
      * launch leaves the running app as it is. */
-    if (toggle) emit(JSTI_EVENT_COMMAND_TOGGLE, selected_microphone(), selected_model_slot());
-    else if (remote && !background) gtk_window_present(ui.window);
+    if (command.run == 1) emit(JSTI_EVENT_COMMAND_TOGGLE, selected_microphone(), selected_model_slot());
+    else if (remote && !command.background) gtk_window_present(ui.window);
     return 0;
 }
 
@@ -4706,6 +4777,63 @@ static gboolean action_execution_self_test(void) {
     return okay;
 }
 
+static gboolean command_forwarding_self_test(void) {
+    WindowCommand command;
+    const gchar *background[] = { "justspeaktoit", JSTI_LOGIN_LAUNCH_ARGUMENT };
+    const gchar *toggle[] = { "justspeaktoit", JSTI_TOGGLE_ARGUMENT, JSTI_LOGIN_LAUNCH_ARGUMENT };
+    const gchar *clipboard[] = { "justspeaktoit", JSTI_SPEAK_CLIPBOARD_ARGUMENT };
+    const gchar *paste[] = { "justspeaktoit", JSTI_PASTE_LAST_HISTORY_ARGUMENT, JSTI_PASTE_LAST_HISTORY_ARGUMENT };
+    const gchar *mixed[] = { "justspeaktoit", JSTI_TOGGLE_ARGUMENT, JSTI_SPEAK_CLIPBOARD_ARGUMENT };
+    const gchar *mixed_output[] = { "justspeaktoit", JSTI_PASTE_LAST_HISTORY_ARGUMENT, JSTI_SPEAK_CLIPBOARD_ARGUMENT };
+    const gchar *unknown[] = { "justspeaktoit", JSTI_SPEAK_CLIPBOARD_ARGUMENT, "--gapplication-service" };
+    gboolean okay = parse_window_command(2, background, &command) && command.run == 0 && command.background;
+    okay = okay && parse_window_command(3, toggle, &command) && command.run == 1 && command.background;
+    okay = okay && parse_window_command(2, clipboard, &command) && command.run == 7 && !command.background;
+    okay = okay && parse_window_command(3, paste, &command) && command.run == 11;
+    okay = okay && !parse_window_command(3, mixed, &command) && !parse_window_command(3, mixed_output, &command);
+    okay = okay && parse_window_command(3, unknown, &command) && command.unknown_argument;
+    char *invalid[] = { "justspeaktoit", JSTI_SPEAK_CLIPBOARD_ARGUMENT, "--gapplication-service", NULL };
+    char error[256] = { 0 };
+    okay = okay && jsti_window_forward_action(
+        "com.justspeaktoit.JustSpeakToIt", 3, invalid, error, sizeof(error)) == -1 && error[0] != '\0';
+    jsti_window_event_fn callback = ui.callback;
+    void *context = ui.context;
+    gint state = ui.state, page = ui.page;
+    gboolean sensitive = gtk_widget_get_sensitive(GTK_WIDGET(ui.window)), closing = ui.closing;
+    GtkWindow *window = ui.window;
+    ActionShortcutCapture capture = { 0 };
+    ui.callback = action_shortcut_capture;
+    ui.context = &capture;
+    ui.state = JSTI_STATE_IDLE;
+    ui.closing = FALSE;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.window), TRUE);
+    okay = okay && forward_window_command(7, TRUE) == 0 && capture.event == JSTI_EVENT_SPEAK_CLIPBOARD &&
+        capture.calls == 1 && ui.page == page;
+    okay = okay && forward_window_command(11, TRUE) == 0 && capture.event == JSTI_EVENT_PASTE_LAST_HISTORY &&
+        capture.calls == 2 && ui.page == page;
+    okay = okay && forward_window_command(7, FALSE) == 2 && forward_window_command(11, FALSE) == 2;
+    ui.window = NULL;
+    okay = okay && forward_window_command(7, TRUE) == 2 && forward_window_command(11, TRUE) == 2;
+    ui.window = window;
+    ui.state = JSTI_STATE_WORKING;
+    okay = okay && forward_window_command(7, TRUE) == 3 && forward_window_command(11, TRUE) == 3;
+    ui.state = JSTI_STATE_RECORDING;
+    okay = okay && forward_window_command(7, TRUE) == 3 && forward_window_command(11, TRUE) == 3;
+    ui.state = JSTI_STATE_IDLE;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.window), FALSE);
+    okay = okay && forward_window_command(7, TRUE) == 3 && forward_window_command(11, TRUE) == 3;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.window), TRUE);
+    ui.closing = TRUE;
+    okay = okay && forward_window_command(7, TRUE) == 3 && forward_window_command(11, TRUE) == 3 &&
+        capture.calls == 2;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.window), sensitive);
+    ui.closing = closing;
+    ui.state = state;
+    ui.callback = callback;
+    ui.context = context;
+    return okay;
+}
+
 static gboolean post_processing_self_test(void) {
     if (ui.polish_catalog == NULL || ui.polish_local_notice == NULL) return FALSE;
     guint row = adw_combo_row_get_selected(ui.polish_model_row);
@@ -4979,6 +5107,8 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (jsti_action_shortcut_editor_self_test(ui.window, error, capacity) != 0) return -1;
     if (!action_execution_self_test())
         return fail(error, capacity, "action shortcut native page, event, slot or sensitivity routing failed");
+    if (!command_forwarding_self_test())
+        return fail(error, capacity, "desktop-bound command parsing, dispatch or lifetime admission failed");
     if (!post_processing_self_test())
         return fail(error, capacity, "Local/Remote post-processing controls, key isolation or callback indexes failed");
     if (ui.recordings_folder == NULL || ui.audio_cleanup == NULL ||

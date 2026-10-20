@@ -4819,6 +4819,11 @@ static gboolean action_execution_self_test(void) {
     return okay;
 }
 
+static guint command_wait_milliseconds(gint64 remaining) {
+    if (remaining <= 0) return 0;
+    return (guint)((MIN(remaining, 15 * G_TIME_SPAN_SECOND) + 999) / 1000);
+}
+
 static gboolean command_forwarding_self_test(void) {
     WindowCommand command;
     const gchar *background[] = { "justspeaktoit", JSTI_LOGIN_LAUNCH_ARGUMENT };
@@ -4836,7 +4841,11 @@ static gboolean command_forwarding_self_test(void) {
         { JSTI_QUICK_VOICE_2_ARGUMENT, 6, 2, JSTI_EVENT_QUICK_VOICE },
         { JSTI_QUICK_VOICE_3_ARGUMENT, 6, 3, JSTI_EVENT_QUICK_VOICE }
     };
-    gboolean okay = parse_window_command(2, background, &command) && command.run == 0 && command.background;
+    gboolean okay = command_wait_milliseconds(-1) == 0 && command_wait_milliseconds(0) == 0 &&
+        command_wait_milliseconds(1) == 1 && command_wait_milliseconds(15001) == 16 &&
+        command_wait_milliseconds(15 * G_TIME_SPAN_SECOND) == 15000 &&
+        command_wait_milliseconds(G_MAXINT64) == 15000 &&
+        parse_window_command(2, background, &command) && command.run == 0 && command.background;
     okay = okay && parse_window_command(3, toggle, &command) && command.run == 1 && command.background;
     okay = okay && parse_window_command(2, clipboard, &command) && command.run == 7 && !command.background;
     okay = okay && parse_window_command(3, paste, &command) && command.run == 11;
@@ -4955,8 +4964,12 @@ static gboolean command_process_expired(gpointer data) {
 
 static gboolean check_command_process(
     const gchar *const *arguments, const gchar *directory, gboolean success,
-    const gchar *refusal, char *error, size_t capacity
+    const gchar *refusal, gint64 group_deadline, char *error, size_t capacity
 ) {
+    if (g_get_monotonic_time() >= group_deadline) {
+        jsti_set_error(error, capacity, "The shared command-client fixture budget expired before %s.", arguments[1]);
+        return FALSE;
+    }
     GSubprocessLauncher *launcher = g_subprocess_launcher_new(
         G_SUBPROCESS_FLAGS_STDOUT_SILENCE | G_SUBPROCESS_FLAGS_STDERR_PIPE);
     g_subprocess_launcher_setenv(launcher, "XDG_DATA_HOME", directory, TRUE);
@@ -4970,7 +4983,7 @@ static gboolean check_command_process(
     }
     GMainContext *context = g_main_context_get_thread_default();
     check.loop = g_main_loop_new(context, FALSE);
-    GSource *deadline = g_timeout_source_new_seconds(15);
+    GSource *deadline = g_timeout_source_new(command_wait_milliseconds(group_deadline - g_get_monotonic_time()));
     g_source_set_callback(deadline, command_process_expired, &check, NULL);
     g_source_attach(deadline, context);
     g_subprocess_communicate_utf8_async(check.child, NULL, NULL, command_process_finished, &check);
@@ -4981,11 +4994,12 @@ static gboolean check_command_process(
         g_subprocess_force_exit(check.child);
         g_subprocess_wait(check.child, NULL, NULL);
     }
-    gboolean okay = check.completed && !check.timed_out && g_subprocess_get_if_exited(check.child) &&
+    const gboolean group_expired = g_get_monotonic_time() >= group_deadline;
+    gboolean okay = check.completed && !check.timed_out && !group_expired && g_subprocess_get_if_exited(check.child) &&
         g_subprocess_get_successful(check.child) == success &&
         (refusal == NULL || (check.diagnostic != NULL && strstr(check.diagnostic, refusal) != NULL));
     if (!okay) jsti_set_error(error, capacity, "Command %s failed its process contract: %s%s",
-        arguments[1], check.timed_out ? "timed out; " : "",
+        arguments[1], group_expired ? "shared command-client budget expired; " : check.timed_out ? "timed out; " : "",
         check.failure != NULL ? check.failure->message :
             (check.diagnostic != NULL ? check.diagnostic : "unexpected process status"));
     g_clear_error(&check.failure);
@@ -5087,6 +5101,8 @@ static gboolean command_process_self_test(char *error, size_t capacity) {
         { JSTI_QUICK_VOICE_1_ARGUMENT, NULL, JSTI_STATE_WORKING, 0, 0, TRUE, FALSE, "Finish the current operation" },
         { JSTI_PAUSE_SPEECH_ARGUMENT, NULL, JSTI_STATE_RECORDING, 0, 0, TRUE, FALSE, "Finish the current operation" }
     };
+    /* Leave most of the 600-second smoke envelope for non-command checks. */
+    const gint64 group_deadline = g_get_monotonic_time() + 180 * G_TIME_SPAN_SECOND;
     for (guint index = 0; okay && index < G_N_ELEMENTS(cases); ++index) {
         const gchar *arguments[] = { executable, cases[index].argument, cases[index].second, NULL };
         capture = (ActionShortcutCapture){ 0 };
@@ -5094,7 +5110,8 @@ static gboolean command_process_self_test(char *error, size_t capacity) {
         ui.closing = cases[index].closing;
         gtk_widget_set_sensitive(GTK_WIDGET(ui.window), cases[index].sensitive);
         refresh_actions();
-        okay = check_command_process(arguments, directory, cases[index].event != 0, cases[index].refusal, error, capacity);
+        okay = check_command_process(
+            arguments, directory, cases[index].event != 0, cases[index].refusal, group_deadline, error, capacity);
         if (okay && (capture.calls != (cases[index].event != 0 ? 1u : 0u) ||
             capture.event != cases[index].event || capture.slot != cases[index].slot || ui.page != page ||
             gtk_widget_get_visible(GTK_WIDGET(ui.window)))) {
@@ -5111,13 +5128,13 @@ static gboolean command_process_self_test(char *error, size_t capacity) {
     for (guint index = 0; okay && index < G_N_ELEMENTS(cold); ++index) {
         const gchar *arguments[] = { executable, cold[index], NULL };
         okay = check_command_process(arguments, directory, FALSE,
-            "Open JustSpeakToIt before using this action command", error, capacity);
+            "Open JustSpeakToIt before using this action command", group_deadline, error, capacity);
     }
     const gchar *cold_invalid[] = { "--typo", "--gapplication-service" };
     for (guint index = 0; okay && index < G_N_ELEMENTS(cold_invalid); ++index) {
         const gchar *arguments[] = { executable, JSTI_TOGGLE_ARGUMENT, cold_invalid[index], NULL };
         okay = check_command_process(arguments, directory, FALSE,
-            "Choose exactly one supported desktop action command", error, capacity);
+            "Choose exactly one supported desktop action command", group_deadline, error, capacity);
     }
     ui.state = state;
     ui.closing = closing;

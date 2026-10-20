@@ -953,6 +953,12 @@ append-only private registry beside History):
   History items or cleaning audio there (refused, audio retained), and owned-capture
   startup, file import and comparison samples, which still write to History.
 
+Post-publication registration failures remain visible, but their durable IDs
+stay reserved through the store's value copy. A retry or restart reuses the
+existing registration only after revalidating its directory identity, rather
+than consuming another immutable registry entry. Replaced roots still fail
+closed. Published capture ownership likewise survives a failed store call.
+
 Portable tests cover the shared fields, one-time activation and foreign History
 refusal. None of this has native, Linux or Windows acceptance yet.
 ## Clipboard voice commands

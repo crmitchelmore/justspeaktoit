@@ -49,6 +49,7 @@ public struct DesktopRecordingAudioReference: Codable, Equatable, Sendable {
 /// The native immutable adapter is opt-in; injected in-memory state is not host restart support.
 public protocol DesktopRecordingLocationPersistence: Sendable {
     func loadVerified() throws -> DesktopRecordingLocationState
+    /// Report a committed-but-unconfirmed append as `DesktopRecordingRegistryWriteFailure` with `.published`.
     func appendRegistration(_ registration: DesktopRecordingLocationRegistration) throws
     /// Report a committed-but-unconfirmed append as `DesktopRecordingRegistryWriteFailure` with `.published`.
     func appendRecording(_ recording: DesktopRecordingLocationOwnership) throws
@@ -153,15 +154,25 @@ public struct DesktopRecordingLocations: Sendable {
         try Task.checkCancellation()
         guard registrations[id] == nil else { throw DesktopRecordingLocationError.duplicateIdentity }
         try Self.validateRootURL(root)
+        let root = root.standardizedFileURL
+        if let existing = registrations.values.first(where: { $0.root.path == root.path }) {
+            try validate(existing)
+            return existing.id
+        }
         let registration = DesktopRecordingLocationRegistration(
-            id: id, root: root.standardizedFileURL, history: history, historyIdentity: historyIdentity,
+            id: id, root: root, history: history, historyIdentity: historyIdentity,
             rootIdentity: try .directory(root)
         )
         try validate(registration)
-        try persistence.appendRegistration(registration)
+        do {
+            try persistence.appendRegistration(registration)
+        } catch let failure as DesktopRecordingRegistryWriteFailure {
+            if case .published = failure.effect { registrations[id] = registration }
+            throw failure
+        }
+        registrations[id] = registration
         try Task.checkCancellation()
         try validate(registration)
-        registrations[id] = registration
         return id
     }
 

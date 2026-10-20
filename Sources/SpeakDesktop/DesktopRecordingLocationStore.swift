@@ -19,8 +19,8 @@ extension DesktopRecordingStore {
     /// Explicit local host authorization only; never called when importing settings/profiles/History.
     public func authorizeLocallySelectedAudioRoot(_ root: URL, id: UUID = UUID()) throws -> UUID {
         guard var locations = audioLocations else { throw DesktopRecordingLocationError.unregistered }
+        defer { audioLocations = locations }
         let id = try locations.authorizeLocallySelectedRoot(root, id: id)
-        audioLocations = locations
         return id
     }
 
@@ -33,8 +33,8 @@ extension DesktopRecordingStore {
             throw DesktopRecordingLocationError.duplicateIdentity
         }
         guard var locations = audioLocations else { throw DesktopRecordingLocationError.unregistered }
+        defer { audioLocations = locations }
         let capture = try locations.createCapture(at: locationID, recordingID: recordingID, using: factory)
-        audioLocations = locations
         return capture
     }
 

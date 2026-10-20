@@ -10,6 +10,7 @@ final class RecordingLocationMemoryPersistence: DesktopRecordingLocationPersiste
     private var recordings: [DesktopRecordingLocationOwnership] = []
     var failure: Failure?
     var recordingError: Error?
+    var didAppendRegistration: (() throws -> Void)?
     var didAppendRecording: (() throws -> Void)?
     var overrideState: DesktopRecordingLocationState?
 
@@ -28,6 +29,7 @@ final class RecordingLocationMemoryPersistence: DesktopRecordingLocationPersiste
             throw DesktopRecordingLocationError.duplicateIdentity
         }
         registrations.append(registration)
+        try didAppendRegistration?()
     }
 
     func appendRecording(_ recording: DesktopRecordingLocationOwnership) throws {

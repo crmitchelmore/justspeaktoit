@@ -3,6 +3,68 @@ import XCTest
 @testable import SpeakDesktop
 
 final class DesktopRecordingLocationPublicationTests: XCTestCase {
+    func testCommittedRegistrationFailure_ReusesDurableIDAcrossRetryAndRestart() async throws {
+        let fixture = try RecordingLocationFixture()
+        defer { try? fixture.clean() }
+        let store = try fixture.store()
+        let id = UUID()
+        fixture.memory.didAppendRegistration = {
+            throw DesktopRecordingRegistryWriteFailure(
+                primaryError: CancellationError(), cleanupError: nil, effect: .published
+            )
+        }
+        do {
+            _ = try await store.authorizeLocallySelectedAudioRoot(fixture.first, id: id)
+            XCTFail("A committed failure must still be reported.")
+        } catch {
+            guard let failure = error as? DesktopRecordingRegistryWriteFailure, case .published = failure.effect else {
+                return XCTFail("Expected an explicit committed publication failure, received \(error)")
+            }
+            XCTAssertTrue(failure.primaryError is CancellationError)
+        }
+        let root = await store.audioLocationRoot(id)
+        XCTAssertEqual(root, fixture.first)
+        fixture.memory.didAppendRegistration = nil
+        let retried = try await store.authorizeLocallySelectedAudioRoot(fixture.first)
+        XCTAssertEqual(retried, id)
+        let restarted = try fixture.store()
+        let restored = try await restarted.authorizeLocallySelectedAudioRoot(fixture.first)
+        XCTAssertEqual(restored, id)
+        XCTAssertEqual(try fixture.memory.loadVerified().registrations.count, 1)
+    }
+
+    func testRepeatedSelection_ReusesOnlyTheVerifiedDirectoryIdentity() throws {
+        let fixture = try RecordingLocationFixture()
+        defer { try? fixture.clean() }
+        var locations = try DesktopRecordingLocations(historyDirectory: fixture.history, persistence: fixture.memory)
+        let id = try locations.authorizeLocallySelectedRoot(fixture.first)
+        XCTAssertEqual(try locations.authorizeLocallySelectedRoot(fixture.first), id)
+        let moved = fixture.root.appendingPathComponent("original-root")
+        try FileManager.default.moveItem(at: fixture.first, to: moved)
+        try FileManager.default.createDirectory(at: fixture.first, withIntermediateDirectories: false)
+        XCTAssertThrowsError(try locations.authorizeLocallySelectedRoot(fixture.first)) {
+            guard case DesktopRecordingLocationError.changedLocation = $0 else { return XCTFail("\($0)") }
+        }
+        XCTAssertEqual(try fixture.memory.loadVerified().registrations.count, 1)
+    }
+
+    func testPostAppendValidationFailure_KeepsThePublishedRegistrationReserved() throws {
+        let fixture = try RecordingLocationFixture()
+        defer { try? fixture.clean() }
+        var locations = try DesktopRecordingLocations(historyDirectory: fixture.history, persistence: fixture.memory)
+        let id = UUID()
+        let moved = fixture.root.appendingPathComponent("original-root")
+        fixture.memory.didAppendRegistration = {
+            try FileManager.default.moveItem(at: fixture.first, to: moved)
+            try FileManager.default.createDirectory(at: fixture.first, withIntermediateDirectories: false)
+        }
+        XCTAssertThrowsError(try locations.authorizeLocallySelectedRoot(fixture.first, id: id))
+        XCTAssertEqual(locations.registeredRoot(id), fixture.first)
+        fixture.memory.didAppendRegistration = nil
+        XCTAssertThrowsError(try locations.authorizeLocallySelectedRoot(fixture.first))
+        XCTAssertEqual(try fixture.memory.loadVerified().registrations.count, 1)
+    }
+
     func testCancellationAfterOwnershipPublication_DoesNotDiscardTheCommittedCapture() throws {
         let fixture = try RecordingLocationFixture()
         defer { try? fixture.clean() }
@@ -57,6 +119,38 @@ final class DesktopRecordingLocationPublicationTests: XCTestCase {
         XCTAssertEqual(try restarted.resolve(record), writer.url)
         XCTAssertThrowsError(try locations.createCapture(at: location, recordingID: id, using: writer.factory))
         XCTAssertEqual(writer.creations, 1)
+    }
+
+    func testCommittedCaptureFailure_StorePreservesThePublishedIdentityBeforeRestart() async throws {
+        let fixture = try RecordingLocationFixture()
+        defer { try? fixture.clean() }
+        let store = try fixture.store()
+        let location = try await store.authorizeLocallySelectedAudioRoot(fixture.first)
+        let writer = RecordingCleanupWriter()
+        let id = UUID()
+        fixture.memory.didAppendRecording = {
+            throw DesktopRecordingRegistryWriteFailure(
+                primaryError: CancellationError(), cleanupError: nil, effect: .published
+            )
+        }
+        do {
+            _ = try await store.createLocallyAuthorizedCapture(at: location, recordingID: id, using: writer.factory)
+            XCTFail("A committed failure must still be reported.")
+        } catch {
+            guard let failure = error as? DesktopRecordingRegistryWriteFailure, case .published = failure.effect else {
+                return XCTFail("Expected a committed capture failure, received \(error)")
+            }
+        }
+        let publishedURL = writer.url
+        fixture.memory.didAppendRecording = nil
+        do {
+            _ = try await store.createLocallyAuthorizedCapture(at: location, recordingID: id, using: writer.factory)
+            XCTFail("The store must reserve the published capture identity.")
+        } catch {
+            guard case DesktopRecordingLocationError.duplicateIdentity = error else { return XCTFail("\(error)") }
+        }
+        XCTAssertEqual(writer.creations, 1)
+        XCTAssertEqual(try Data(contentsOf: publishedURL), writer.bytes)
     }
 
     func testPCMInitializationFailureAfterPublication_KeepsRegisteredRecoveryAudio() throws {

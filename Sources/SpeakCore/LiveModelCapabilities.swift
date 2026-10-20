@@ -11,6 +11,13 @@ import Foundation
 public enum SpeedModeID: String, Sendable, CaseIterable, Hashable {
     case instant
     case livePolish
+
+    public var displayName: String {
+        switch self {
+        case .instant: return "Instant"
+        case .livePolish: return "Auto-Clean"
+        }
+    }
 }
 
 /// Per-model capabilities that influence the live transcription pipeline.
@@ -88,6 +95,9 @@ extension ModelCatalog {
             supportsLanguageHint: true
         ),
         AlibabaSpeechModels.funLive: LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish], postStopFinalizeBudget: 5
+        ),
+        AzureTranscriptionModels.mai2Streaming: LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish], postStopFinalizeBudget: 5
         ),
         AzureTranscriptionModels.speechLive: LiveModelCapabilities(

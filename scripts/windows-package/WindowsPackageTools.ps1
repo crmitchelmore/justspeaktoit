@@ -74,6 +74,23 @@ function Invoke-JstiTool {
     return $result
 }
 
+function Assert-JstiMakeAppxPackSucceeded {
+    param(
+        [Parameter(Mandatory = $true)] $Result,
+        [Parameter(Mandatory = $true)] [string] $LogPath
+    )
+    if ($Result.ExitCode -eq 0) { return }
+    # MakeAppx verbose output can be large; its final lines contain the failure.
+    foreach ($stream in @('StandardOutput', 'StandardError')) {
+        $text = [string] $Result.$stream
+        Write-Host "MakeAppx ${stream} (last 4096 characters; full log: $LogPath):"
+        if ($text.Length -gt 0) {
+            Write-Host $text.Substring([Math]::Max(0, $text.Length - 4096))
+        }
+    }
+    throw "MakeAppx pack failed with exit code $($Result.ExitCode); see $LogPath"
+}
+
 function Invoke-JstiPython {
     param([Parameter(Mandatory = $true)] [string] $Python, [string[]] $Arguments, [string] $LogPath)
     $command = Get-Command $Python -CommandType Application -ErrorAction Stop | Select-Object -First 1

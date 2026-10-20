@@ -74,6 +74,8 @@ package final class DesktopHostCloudSync<Platform: DesktopHostPlatform>: @unchec
     private let timing: DesktopHostCloudSyncTiming
     private let lock = NSLock()
     private var signIn: Task<Void, Never>?
+    private weak var comparisonController: DesktopHostController<Platform>?
+    private weak var connectionWarmController: DesktopHostController<Platform>?
 
     /// Where a host's sync state lives: cursors, the bound iCloud user,
     /// acknowledgements and imported-key bookkeeping. No credentials.
@@ -95,6 +97,7 @@ package final class DesktopHostCloudSync<Platform: DesktopHostPlatform>: @unchec
         self.work = work
         self.native = native
         self.timing = timing
+        self.connectionWarmController = controller
         let history = DesktopHistorySyncStore(
             records: controller.store,
             state: state,
@@ -119,8 +122,22 @@ package final class DesktopHostCloudSync<Platform: DesktopHostPlatform>: @unchec
     /// state and starts the periodic pass, the first one at once.
     package func start(controller: DesktopHostController<Platform>) async {
         await service.prepare()
+        do {
+            let store = try await controller.loadComparisonStore()
+            guard !work.isStopped else { return }
+            await service.installComparisonStore(store)
+            comparisonController = controller
+            await controller.installComparisonSync(.init(
+                status: { [service] in await service.status() },
+                setEnabled: { [service] enabled in try await service.setComparisonEnabled(enabled) },
+                changed: { [weak self] in self?.requestSync() }
+            ))
+        } catch { notify("Comparison sync storage: \(error.localizedDescription)") }
         await controller.installCloudSync(DesktopHostSyncHooks(
             historyChanged: { [weak self] in self?.requestSync() },
+            deleteHistory: { [service] id, deleteAudio in
+                try await service.deleteHistory(id: id, deleteAudio: deleteAudio)
+            },
             saveKeyByHand: { [service] value, identifier in
                 try await service.saveKeyByHand(value, identifier: identifier)
             }
@@ -183,6 +200,7 @@ package final class DesktopHostCloudSync<Platform: DesktopHostPlatform>: @unchec
     /// passphrase always turns key import on, and an unticked box always turns
     /// it off, so an earlier Apply still in progress cannot decide the result.
     private func apply(history: Bool, keys: Bool, passphrase: String) async {
+        await connectionWarmController?.beginConnectionWarmCredentialWork()
         do {
             try await service.setHistoryEnabled(history)
             let importing = await service.status().apiKeyImportEnabled
@@ -192,6 +210,7 @@ package final class DesktopHostCloudSync<Platform: DesktopHostPlatform>: @unchec
             } else if keys, !importing {
                 notify("Enter the API-key sync passphrase from your Mac to import its keys.")
                 await publish()
+                await connectionWarmController?.endConnectionWarmCredentialWork()
                 return
             } else if !keys {
                 try await service.disableKeyImport()
@@ -204,6 +223,7 @@ package final class DesktopHostCloudSync<Platform: DesktopHostPlatform>: @unchec
             notify("iCloud sync: \(error.localizedDescription)")
             await publish()
         }
+        await connectionWarmController?.endConnectionWarmCredentialWork()
     }
 
     private func signOut() async {
@@ -216,7 +236,9 @@ package final class DesktopHostCloudSync<Platform: DesktopHostPlatform>: @unchec
     }
 
     private func runSync(announce: Bool) async {
+        await connectionWarmController?.beginConnectionWarmCredentialWork()
         let report = await service.sync()
+        await connectionWarmController?.endConnectionWarmCredentialWork()
         if let error = report.error {
             if announce { notify("iCloud sync: \(error)") }
         } else if !report.importedKeys.isEmpty {
@@ -270,8 +292,11 @@ package final class DesktopHostCloudSync<Platform: DesktopHostPlatform>: @unchec
     /// Hands the settings their state. Done while sync runs, so it cannot
     /// reach the window after shutdown detached it.
     private func publish() async {
+        await connectionWarmController?.invalidateConnectionPreWarming(resetCapture: true)
         let status = await service.status()
         work.ifRunning { native.present(status) }
+        guard !work.isStopped else { return }
+        await comparisonController?.refreshComparison()
     }
 
     /// Names the providers whose keys were imported, for the status line.
@@ -294,16 +319,22 @@ extension DesktopHostController {
     /// the displayed transcript is re-rendered only for the selected record and
     /// only while nothing else owns the transcript area. A removed selection is
     /// cleared, so no action can target a record that no longer exists.
-    package func applySyncedHistory(_ changes: [DesktopHistorySyncChange]) async {
+    package func applySyncedHistory(_ changes: [DesktopHistorySyncChange]) async { // swiftlint:disable:this cyclomatic_complexity line_length
         guard !closed else { return }
         var selectedChanged = false
+        var arrival: RemoteArrival?
         for change in changes {
             switch change {
             case .saved(let id):
                 guard let record = await store.existingRecord(id: id) else { continue }
                 // Reading the record suspends; the window may have closed meanwhile.
                 guard !closed else { return }
+                let isNew = history[id] == nil
                 indexHistory(record)
+                if let candidate = remoteArrival(record, isNew: isNew),
+                   arrival.map({ candidate.createdAt > $0.createdAt }) ?? true {
+                    arrival = candidate
+                }
                 selectedChanged = selectedChanged || id == selectedHistoryID
             case .removed(let id):
                 history[id] = nil
@@ -326,5 +357,6 @@ extension DesktopHostController {
             transcript = record.text(for: transcriptVariant) ?? ""
             Platform.historyPresentation(record, variant: transcriptVariant, status: "Updated from iCloud.")
         }
+        if let arrival { await pasteRemoteArrival(arrival) }
     }
 }

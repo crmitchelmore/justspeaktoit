@@ -26,31 +26,97 @@ gboolean jsti_window_loop_running(void);
 typedef void (*jsti_window_apply_fn)(gpointer data);
 int32_t jsti_window_post(jsti_window_apply_fn apply, gpointer data, GDestroyNotify destroy);
 void jsti_window_emit(gint32 event, const char *text, gint32 index);
+struct _GtkEventControllerKey;
+struct _GtkWindow;
+void jsti_permissions_open(struct _GtkWindow *owner);
+void jsti_permissions_close(void);
+int32_t jsti_permissions_self_test(struct _GtkWindow *owner, char *error, size_t capacity);
+void jsti_api_keys_open(struct _GtkWindow *owner);
+void jsti_api_keys_close(void);
+void jsti_api_keys_set_idle(gboolean idle);
+struct _GtkWidget *jsti_api_keys_group_new(struct _GtkWindow *owner);
+int32_t jsti_api_keys_self_test(struct _GtkWindow *owner, char *error, size_t capacity);
+typedef gboolean (*jsti_action_run_fn)(gint run, const char *page, gint slot);
+struct _GtkWidget *jsti_action_shortcuts_group_new(struct _GtkWindow *owner);
+gboolean jsti_action_shortcuts_key(struct _GtkEventControllerKey *controller,
+    guint keyval, guint keycode, guint modifiers, struct _GtkWidget *focused, jsti_action_run_fn run);
+void jsti_action_shortcuts_release(guint keycode);
+void jsti_action_shortcuts_reset(void);
+int32_t jsti_action_shortcuts_self_test(char *error, size_t capacity);
+void jsti_hands_free_guard_start(void);
+void jsti_hands_free_guard_stop(void);
+int32_t jsti_hands_free_guard_self_test(char *error, size_t capacity);
 
 /* LinuxLocalModels.c: the Local models group, built once with the window,
  * and its part of the window self-test. */
 struct _GtkWidget *jsti_local_models_group_new(void);
+struct _GtkWidget *jsti_local_cleanup_group_new(void);
 int32_t jsti_local_models_self_test(char *error, size_t capacity);
+void jsti_model_filters_add(struct _GtkWidget *group, void (*changed)(gboolean local, gboolean live));
+void jsti_model_filters_select(gboolean local, gboolean live);
+void jsti_model_filters_set_idle(gboolean idle);
+gboolean jsti_model_filters_local(void);
+gboolean jsti_model_filters_live(void);
+int32_t jsti_model_filters_self_test(char *error, size_t capacity);
 
 /* The iCloud sync group (LinuxCloudSync.c): built once for the window's
  * iCloud sync page, and exercised by the window self-test. */
 struct _GtkWidget *jsti_cloud_sync_group_new(void);
 int32_t jsti_cloud_sync_self_test(char *error, size_t capacity);
+struct _GtkWidget *jsti_history_filters_button_new(void);
+struct _GtkWidget *jsti_profiles_page_new(void);
+int32_t jsti_profiles_self_test(char *error, size_t capacity);
+int32_t jsti_history_filters_self_test(char *error, size_t capacity);
+gboolean jsti_history_filters_active(void);
+
+struct _GtkWindow;
+void jsti_troubleshooting_open(struct _GtkWindow *owner);
+void jsti_troubleshooting_close(void);
+int32_t jsti_troubleshooting_self_test(struct _GtkWindow *owner, char *error, size_t capacity);
+void jsti_show_voice_sources(struct _GtkWindow *owner, const char *record, const char *history);
+int32_t jsti_voice_sources_self_test(struct _GtkWindow *owner, char *error, size_t capacity);
+void jsti_voice_sources_close(void);
+guint64 jsti_voice_provider_generation(void);
+gboolean jsti_voice_provider_enter(guint64 generation);
+void jsti_voice_provider_leave(void);
+void jsti_show_voice_provider_credentials(struct _GtkWindow *owner, guint64 generation,
+    const char *session, const char *epoch, const char *provider);
+void jsti_voice_sources_show_fixture(struct _GtkWindow *owner);
+int32_t jsti_voice_sources_save_snapshot(const char *path);
+void jsti_voice_controls_show_fixture(struct _GtkWindow *owner);
+int32_t jsti_voice_controls_save_snapshot(const char *path);
+void jsti_voice_usage_show_fixture(struct _GtkWindow *owner);
+int32_t jsti_voice_usage_save_snapshot(const char *path);
 
 struct _GtkWidget;
+struct _GtkWidget *jsti_voice_credentials_group_new(void);
+void jsti_voice_credentials_set_idle(gboolean idle);
+void jsti_voice_credentials_selection_changed(void);
+void jsti_voice_credentials_selection_pending(void);
+void jsti_voice_credentials_close(void);
+int32_t jsti_voice_credentials_self_test(char *error, size_t capacity);
 struct _GtkLabel;
+struct _GtkWindow;
+void jsti_comparison_open(struct _GtkWindow *parent);
+int32_t jsti_comparison_self_test(struct _GtkWindow *parent, char *error, size_t capacity);
+void jsti_comparison_screenshot_tour(struct _GtkWindow *parent, const char *directory);
+int32_t jsti_widget_save_snapshot(struct _GtkWidget *widget, const char *path, gboolean opaque);
 
 /* LinuxWindowStyle.c: the app's look, shared by every page. Colours follow
  * the Mac app's brand tokens and switch with the desktop's light or dark
  * style. Each builder returns a new floating widget. */
 void jsti_style_install(void);
-/* The app icon, drawn rather than loaded so it needs no image loader. */
+/* Canonical Mac artwork loaded once from the bundled hicolor theme. */
+void jsti_app_icon_install(void);
+void jsti_app_icon_clear(void);
 struct _GtkWidget *jsti_brand_icon_new(int size);
 /* Paints the app icon into a size x size square at the origin. */
 struct _cairo;
 void jsti_brand_icon_paint(struct _cairo *cr, double size);
 /* A scrolling page with centred content; `*content` receives its column. */
 struct _GtkWidget *jsti_page_new(struct _GtkWidget **content);
+void jsti_visual_density_apply(struct _GtkWidget *root, const JSTIVisualDensity *density);
+int32_t jsti_visual_density_self_test(struct _GtkWidget *root);
 /* A gradient header. `variant` is NULL (brand), "voice" or "settings".
  * `*chips` receives the row for jsti_chip_new; `*trailing` the top-right slot. */
 struct _GtkWidget *jsti_hero_new(const char *variant, const char *title, const char *subtitle,
@@ -73,6 +139,13 @@ double jsti_capture_level(void);
 /* LinuxHUD.c: the recording HUD, on the main thread. `phase` is the shared
  * DesktopHUDState.Phase; `live` shows while recording. */
 void jsti_hud_show(int phase, const char *headline, const char *subheadline, const char *live);
+void jsti_hud_show_duration(int phase, const char *headline, const char *subheadline, const char *live,
+                            int display_milliseconds);
+void jsti_hud_show_presentation(int phase, const char *headline, const char *subheadline, const char *live,
+                                int display_milliseconds, gboolean compact);
+void jsti_hud_show_layout(int phase, const char *headline, const char *subheadline, const char *live,
+                          int display_milliseconds, gboolean compact, gboolean expanded);
+gboolean jsti_hud_overlay_supported(void);
 /* Redraws after a light or dark change; destroys the HUD with the window. */
 void jsti_hud_destroy(void);
 /* The HUD's card and shadow, when on screen, for snapshots; NULL otherwise. */

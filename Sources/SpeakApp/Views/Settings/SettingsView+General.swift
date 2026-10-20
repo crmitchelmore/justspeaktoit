@@ -137,7 +137,7 @@ extension SettingsView {
               }
               .settingsMenuPicker()
               .speakTooltip(
-                "Choose what happens if you move to another app while Speak is still transcribing."
+                "Choose where your transcript goes if you switch apps while recording or transcribing."
               )
               .accessibilityLabel("App switch delivery picker")
               Text(settings.appSwitchDelivery.explanation)

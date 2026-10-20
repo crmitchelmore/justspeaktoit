@@ -37,7 +37,9 @@ $hosted = $env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_ENVIRONMENT -eq 'githu
 if (-not $hosted -and -not $DisposableMachine) {
     throw 'This control installs a package and trusts a temporary certificate. Run it only on a GitHub-hosted runner or a throwaway VM with -DisposableMachine.'
 }
-Add-Type -Path (Join-Path $PSScriptRoot 'PackageLifecycleNative.cs')
+if (-not ('Jsti.PackageLifecycle.Native' -as [type])) {
+    Add-Type -Path (Join-Path $PSScriptRoot 'PackageLifecycleNative.cs')
+}
 
 $workspace = (New-Item -ItemType Directory -Force -Path $Workspace).FullName
 $evidenceDirectory = (New-Item -ItemType Directory -Force -Path (Join-Path $workspace 'evidence')).FullName
@@ -51,6 +53,7 @@ $name = $base.name
 $dataDirectory = Join-Path $env:LOCALAPPDATA $settings.fileSystem.dataDirectoryName
 $packageDataDirectory = Join-Path $env:LOCALAPPDATA ('Packages\' + $base.packageFamilyName)
 $aliasPath = Join-Path $env:LOCALAPPDATA ('Microsoft\WindowsApps\' + $base.executionAlias)
+$cliAliasPath = Join-Path $env:LOCALAPPDATA ('Microsoft\WindowsApps\' + $base.cliExecutionAlias)
 $expectationsPath = Join-Path $workspace 'fixture-expectations.json'
 $childWorkspace = Join-Path $workspace 'refused-lifecycle'
 $childEvidencePath = Join-Path $childWorkspace 'evidence\package-lifecycle-evidence.json'
@@ -78,7 +81,8 @@ function Get-ObservedState {
         registrations = @(Get-AppxPackage -Name $name -AllUsers | ForEach-Object { $_.PackageFullName })
         packageData = Test-Path -LiteralPath $packageDataDirectory
         alias = Test-Path -LiteralPath $aliasPath
-        processes = @(Get-Process -Name SpeakWindows -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
+        cliAlias = Test-Path -LiteralPath $cliAliasPath
+        processes = @(Get-Process -Name SpeakWindows, speak -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
         publisherCertificates = @(Get-ChildItem Cert:\CurrentUser\My, Cert:\LocalMachine\TrustedPeople |
             Where-Object { $_.Subject -eq $base.publisher } | ForEach-Object { $_.PSPath } | Sort-Object)
     }
@@ -108,6 +112,7 @@ function Get-ExistingState($Process, [IntPtr] $Window) {
         transcript = $null
         data = Get-UserData $(if ($script:report.existing) { 'after' } else { 'before' })
         alias = Test-Path -LiteralPath $aliasPath
+        cliAlias = Test-Path -LiteralPath $cliAliasPath
         packageData = Test-Path -LiteralPath $packageDataDirectory
         publisherCertificates = (Get-ObservedState).publisherCertificates
     }
@@ -119,6 +124,7 @@ function Get-ExistingState($Process, [IntPtr] $Window) {
 }
 
 $process = $null
+$startupError = $null
 $window = [IntPtr]::Zero
 try {
     $report.admission = Test-JstiLifecycleAdmission $ledger (Get-ObservedState)
@@ -146,6 +152,10 @@ try {
         '--expectations', $expectationsPath)
     Assert-Check 'The existing user data is written' ($made.ExitCode -eq 0) $made.StandardError.Trim()
     Copy-Item -LiteralPath $staging -Destination $dataDirectory -Recurse
+    # This admitted run owns the fresh fixture; elevated defaults may name Administrators.
+    $fixtureAccess = Get-Acl -LiteralPath $dataDirectory
+    $fixtureAccess.SetOwner([Security.Principal.WindowsIdentity]::GetCurrent().User)
+    Set-Acl -LiteralPath $dataDirectory -AclObject $fixtureAccess
     $expectations = Read-JstiJson $expectationsPath
     $script:fixturePaths = @($expectations.files.PSObject.Properties | ForEach-Object { $_.Name })
     $deadline = (Get-Date).AddSeconds(60)
@@ -155,10 +165,12 @@ try {
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
     $startInfo.FileName = $aliasPath
     $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardError = $true
     $startInfo.CreateNoWindow = $true
     $startInfo.WorkingDirectory = $workspace
     $process = [System.Diagnostics.Process]::Start($startInfo)
     Add-JstiOwnedProcess $ledger $process
+    $startupError = [Jsti.PackageLifecycle.Native]::ReadBoundedOutputAsync($process.StandardError, 16384)
     $deadline = (Get-Date).AddSeconds(90)
     $rows = -1
     while ((Get-Date) -lt $deadline -and $rows -ne [int] $expectations.history.rows) {
@@ -204,7 +216,8 @@ try {
     Add-Check 'The existing user data is unchanged' ($after.data.passed -and
         (($before.data.files | ConvertTo-Json -Compress) -eq ($after.data.files | ConvertTo-Json -Compress))) $after.data
     Add-Check 'The existing alias, package data and certificates are unchanged' (
-        $after.alias -eq $before.alias -and $after.packageData -eq $before.packageData -and
+        $after.alias -eq $before.alias -and $after.cliAlias -eq $before.cliAlias -and
+        $after.packageData -eq $before.packageData -and
         (@($after.publisherCertificates) -join ',') -eq (@($before.publisherCertificates) -join ',')) $after
 } catch {
     $failures.Add("$($_.Exception.Message) (line $($_.InvocationInfo.ScriptLineNumber))")
@@ -223,6 +236,16 @@ try {
     $report.cleanup = $cleanup
     if (-not $cleanup.skipped) {
         Add-Check 'Everything the control created is removed' ($cleanup.failures.Count -eq 0) $cleanup
+    }
+    if ($startupError) {
+        try {
+            if ($startupError.Wait(5000)) {
+                [System.IO.File]::WriteAllText((Join-Path $evidenceDirectory 'installed-startup-stderr.log'),
+                    $startupError.GetAwaiter().GetResult(), (New-Object System.Text.UTF8Encoding $false))
+            } else {
+                $failures.Add('Startup stderr capture did not complete after owned-process cleanup.')
+            }
+        } catch { $failures.Add("Startup stderr capture failed: $($_.Exception.Message)") }
     }
     $report.failures = @($failures)
     Write-JstiJson (Join-Path $evidenceDirectory 'package-admission-evidence.json') $report

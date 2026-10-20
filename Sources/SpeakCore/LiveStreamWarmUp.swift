@@ -160,7 +160,15 @@ public struct LiveStreamWarmTracker: Equatable, Sendable {
         now: Date,
         enabled: Bool = true
     ) -> String? {
-        guard enabled, let provider, let host = provider.streamWarmUp.host else {
+        self.hostNeedingWarmUp(using: provider?.streamWarmUp ?? .unsupported, now: now, enabled: enabled)
+    }
+
+    /// Reuses the same freshness policy for another proven shared-session route.
+    /// The owner must fence completion by request identity as well as host.
+    public mutating func hostNeedingWarmUp(
+        using policy: LiveStreamWarmUp, now: Date, enabled: Bool = true
+    ) -> String? {
+        guard enabled, let host = policy.host else {
             self.invalidate()
             return nil
         }

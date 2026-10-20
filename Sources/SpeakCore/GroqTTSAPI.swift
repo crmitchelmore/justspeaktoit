@@ -1,10 +1,14 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Errors surfaced by the shared Groq Orpheus speech-generation transport.
 public enum GroqTTSAPIError: Error, Sendable, Equatable {
     case invalidResponse
     case emptyText
-    /// HTTP 401/403 — the key is missing, wrong or revoked.
+    case excessiveFanOut(segmentCount: Int)
+    /// HTTP 401 — the key is missing, wrong or revoked.
     case unauthorized(statusCode: Int, message: String)
     /// The organisation has not accepted this model's terms. Groq returns HTTP
     /// 400 with `model_terms_required`; only a console admin can clear it, so
@@ -80,6 +84,25 @@ public struct GroqTTSAPI: Sendable {
     /// Where an organisation admin accepts a model's terms.
     public static let modelTermsURL = "https://console.groq.com/settings/model-terms"
 
+    public static func synthesisSegments(_ text: String) throws -> [String] {
+        let segments = TTSTextChunker.chunks(text, maximumCharacters: maxInputCharacters)
+        guard !segments.isEmpty,
+              segments.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
+            throw GroqTTSAPIError.emptyText
+        }
+        guard segments.count <= maxRequestsPerSynthesis else {
+            throw GroqTTSAPIError.excessiveFanOut(segmentCount: segments.count)
+        }
+        return segments
+    }
+
+    public static func excessiveFanOutMessage(segmentCount: Int) -> String? {
+        guard segmentCount > maxRequestsPerSynthesis else { return nil }
+        return "Groq Orpheus speaks at most \(maxInputCharacters) characters per "
+            + "request, so this text would cost \(segmentCount) separate requests. Speak at most "
+            + "\(maxSynthesisCharacters) characters at a time, or choose a provider that takes longer input."
+    }
+
     private let session: URLSession
 
     public init(session: URLSession = .shared) {
@@ -92,6 +115,23 @@ public struct GroqTTSAPI: Sendable {
         apiKey: String,
         request: GroqTTSRequest
     ) async throws -> Data {
+        let urlRequest = try Self.synthesisRequest(input: input, apiKey: apiKey, request: request)
+        try Task.checkCancellation()
+        let (data, response) = try await session.data(for: urlRequest)
+        try Task.checkCancellation()
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw GroqTTSAPIError.invalidResponse
+        }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            throw Self.error(from: data, statusCode: httpResponse.statusCode)
+        }
+        guard !data.isEmpty else { throw GroqTTSAPIError.invalidResponse }
+        return data
+    }
+
+    public static func synthesisRequest(
+        input: String, apiKey: String, request: GroqTTSRequest
+    ) throws -> URLRequest {
         guard !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw GroqTTSAPIError.emptyText
         }
@@ -104,18 +144,7 @@ public struct GroqTTSAPI: Sendable {
             withJSONObject: request.jsonBody(input: input)
         )
 
-        try Task.checkCancellation()
-        let (data, response) = try await session.data(for: urlRequest)
-        try Task.checkCancellation()
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw GroqTTSAPIError.invalidResponse
-        }
-        guard (200..<300).contains(httpResponse.statusCode) else {
-            throw Self.error(from: data, statusCode: httpResponse.statusCode)
-        }
-        guard !data.isEmpty else { throw GroqTTSAPIError.invalidResponse }
-        return data
+        return urlRequest
     }
 
     /// Validates a Groq API key with a `GET /models` probe.

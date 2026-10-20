@@ -4,9 +4,24 @@ on:
   push:
     branches: [main]
     paths:
+      - .gitattributes
       - Package.swift
+      - Resources/AppIcon.iconset/**
+      - scripts/generate-desktop-icons.py
+      - scripts/stage-linux-desktop.py
+      - scripts/tests/test_desktop_icons.py
+      - scripts/tests/test_linux_automation_staging.py
+      - Sources/CLinuxAutomation/**
+      - Sources/SpeakLinuxAutomation/**
+      - Sources/SpeakAutomationKit/**
+      - Sources/SpeakCLI/**
+      - Tests/SpeakLinuxAutomationTests/**
+      - Tests/SpeakAutomationKitTests/**
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
+      - Sources/CLlamaCpp/**
+      - Sources/CMigrationArchive/**
+      - Sources/CRecordingFileSupport/**
       - Sources/SpeakDesktopHost/**
       - Sources/SpeakDesktopSync/**
       - Sources/SpeakSync/**
@@ -35,11 +50,25 @@ on:
       - .github/workflows/linux.yml
       - .github/workflows/linux-local-runtime.yml
   pull_request:
-    branches: [main]
     paths:
+      - .gitattributes
       - Package.swift
+      - Resources/AppIcon.iconset/**
+      - scripts/generate-desktop-icons.py
+      - scripts/stage-linux-desktop.py
+      - scripts/tests/test_desktop_icons.py
+      - scripts/tests/test_linux_automation_staging.py
+      - Sources/CLinuxAutomation/**
+      - Sources/SpeakLinuxAutomation/**
+      - Sources/SpeakAutomationKit/**
+      - Sources/SpeakCLI/**
+      - Tests/SpeakLinuxAutomationTests/**
+      - Tests/SpeakAutomationKitTests/**
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
+      - Sources/CLlamaCpp/**
+      - Sources/CMigrationArchive/**
+      - Sources/CRecordingFileSupport/**
       - Sources/SpeakDesktopHost/**
       - Sources/SpeakDesktopSync/**
       - Sources/SpeakSync/**
@@ -94,12 +123,28 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Normalize container checkout ancestry
+        # Native registry/capture fixtures live under the checkout's .build.
+        # Match their owner/mode contract, not just container-root writability.
+        # Do not touch sibling action/temp mounts or weaken runtime admission.
+        run: |
+          set -eu
+          test "$(dirname "$(dirname "$GITHUB_WORKSPACE")")" = /__w
+          owner="$(id -u):$(id -g)"
+          for directory in /__w "$(dirname "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE"; do
+            test -d "$directory"
+            test ! -L "$directory"
+            chown "$owner" "$directory"
+            chmod go-w "$directory"
+          done
+
       - name: Install GTK 4, libadwaita, PipeWire, keyring and X11 test tools
         run: |
           apt-get update -q
           DEBIAN_FRONTEND=noninteractive apt-get install -y -q \
             libgtk-4-dev libadwaita-1-dev libpulse-dev libsecret-1-dev libx11-dev libxtst-dev libssl-dev pkg-config \
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+            gstreamer1.0-libav \
             dbus dbus-x11 gnome-keyring pipewire pipewire-pulse wireplumber pulseaudio-utils \
             xvfb openbox zenity xdotool weston python3 python3-gi gir1.2-glib-2.0 \
             fonts-cantarell adwaita-icon-theme
@@ -140,7 +185,11 @@ jobs:
         run: |
           swift --version
           swift build --configuration release --product SpeakLinux --jobs 4 --force-resolved-versions
+          swift build --configuration release --product speak --jobs 4 --force-resolved-versions
           cmp packaging/linux/Package.resolved Package.resolved
+
+      - name: Test Linux automation staging
+        run: python3 -B -m unittest discover -s scripts/tests -p test_linux_automation_staging.py
 
       - name: Test shared core, desktop host and Linux adapters
         run: swift test --configuration release --jobs 4 --force-resolved-versions
@@ -170,7 +219,7 @@ jobs:
 
       - name: Upload window snapshot
         if: always()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linux-window-snapshot
           path: ${{ runner.temp }}/linux-window.png
@@ -178,7 +227,7 @@ jobs:
 
       - name: Upload page screenshots
         if: always()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linux-ui-screenshots
           path: ${{ runner.temp }}/linux-ui-screenshots

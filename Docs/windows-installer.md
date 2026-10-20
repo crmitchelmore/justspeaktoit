@@ -22,16 +22,68 @@ identity in the repository.
 | Default publisher | `CN=Just Speak to It Developer` (placeholder for the unsigned package) |
 | Package family | `com.justspeaktoit.windows.developer_12qtdfzdxrxs0` for the default publisher |
 | Application / AUMID | `JustSpeakToIt` / `<family>!JustSpeakToIt` |
+| Hidden CLI application / AUMID | `JustSpeakToItCLI` / `<family>!JustSpeakToItCLI` |
 | Display name | Just Speak to It Developer |
-| Execution alias | `JustSpeakToItDeveloper.exe` |
+| GUI execution alias | `JustSpeakToItDeveloper.exe` → `SpeakWindows.exe` (unchanged) |
+| CLI execution alias | `JustSpeakToItDeveloperCLI.exe` → `speak.exe` (console) |
 | Architecture | The runtime bundle's: x64, or arm64 from the ARM64 bundle (`processorArchitectures` lists both) |
 | Target | `Windows.Desktop`, minimum 10.0.19041.0, tested 10.0.20348.0 (the CI runner build) |
 | Capabilities | `runFullTrust`, `unvirtualizedResources` (restricted), `microphone` (device) |
-| Payload | Every file of the verified runtime bundle, byte for byte (including its `README.txt`, which describes the portable bundle), plus `AppxManifest.xml`, three logos and `package-manifest.json` |
+| Payload | Every file of the verified runtime bundle, byte for byte (including its `README.txt`, which describes the portable bundle), plus `AppxManifest.xml`, canonical logos and scale/target-size variants, and `package-manifest.json` |
 
 The family name is Windows' hash of the publisher. The builder computes it
 (checked against Microsoft's published `8wekyb3d8bbwe` and `cw5n1h2txyewy`
 IDs) and the lifecycle test requires Windows to report the same value.
+
+The package carries the real `speak` SwiftPM release product for both x64 and
+ARM64, using the verified bundle's two executable hashes and exact multi-root
+dependency graph. Packaging re-reads both PEs and their static/delay imports;
+missing/tampered CLI bytes, test or unknown imports, foreign architecture and
+false importer/root attribution are refused before layout creation.
+
+The SDK permits only one `windows.appExecutionAlias` extension per Application,
+even when the extensions use different namespace versions. The CLI therefore
+has its own `JustSpeakToItCLI` Application, with required canonical visual
+assets and [`AppListEntry="none"`](https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-uap-visualelements).
+There are exactly two reviewed Applications but only one visible Start entry;
+the GUI Application, AUMID, icons, alias and startup task remain unchanged.
+The real CLI keeps
+[`uap5:Extension`'s `Executable` override](https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-uap5-extension)
+and [`uap5:AppExecutionAlias`'s `uap10:Subsystem="console"`](https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-uap5-appexecutionalias).
+A console-subsystem alias must also declare
+[`uap10:SupportsMultipleInstances="true"`](https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-f-application)
+on its own `Application` element; the hidden CLI Application does this and the
+GUI Application is unchanged. No generic `speak.exe` alias is registered and no PATH, trust, install or
+startup policy changes. Run `JustSpeakToItDeveloperCLI.exe --help` or
+`JustSpeakToItDeveloperCLI.exe --version` after a developer package installation;
+portable use remains `.\speak.exe`.
+The existing Windows CLI version fallback is `0.0.0-dev`; it is not the MSIX
+version. Other commands still use the running app's existing automation pipe.
+
+Disposable-runner lifecycle checks require both aliases to appear and disappear,
+verify the hidden CLI application and installed executable/alias association,
+require exactly one visible GUI entry for the package family, and run help/version with
+bounded redirected streams and isolated PATH. A pre-existing CLI alias or CLI
+process blocks admission and is never owned or removed by a refused run.
+Fast CLI checks do not substitute stdout for GUI module provenance. Fresh native
+build and MakeAppx/install/alias/removal receipts are still required: earlier
+GUI-only receipts do not qualify this CLI packaging change. The `6d920e46`
+developer layouts were rejected by MakeAppx with `0x80080204` because both alias
+extensions occupied the GUI Application. Static/mock topology tests do not
+qualify the corrected layout: actual x64/ARM64 SDK packing and installed
+alias/start/upgrade/removal receipts remain required.
+
+Package logos come from the canonical Mac 1024px export with transparent
+corners. The three manifest roots (`StoreLogo`, `Square44x44Logo` and
+`Square150x150Logo`) include high-DPI scale variants up to 400%; the 44px logo
+also has unplated and light-unplated target-size variants for Start/search and
+the taskbar. Both shell appearances retain the same coloured brand, rather
+than treating the full application icon as a symbolic glyph. Windows resolves
+these qualified siblings through MRT without extra manifest entries. The
+executable's embedded native icon travels unchanged in the verified bundle
+and package. Asset/package tests cover exact sizes, alpha and layout membership;
+installed rendering and resource linkage still need the native lifecycle and
+window checks. No new signed Stable distribution is implied.
 
 **Release trains.** [Alpha and Stable](alpha-stable-release-trains.md) define
 Mac and iOS surfaces only; `ReleaseTrains.json` has no Windows identity and
@@ -317,7 +369,10 @@ the unsigned upgrade package, and then, under Windows PowerShell:
    lengths, and unknown user files. An untrusted package is refused. The base
    version installs, shows both records and the fixture transcript, and
    recovers the interrupted record in the real directory without changing any
-   audio sample or other file.
+   audio sample or other user file. It also requires the app's legacy setup
+   migration to create `onboarding.json` with the canonical completed state.
+   Missing, malformed or incomplete setup state and every other unexpected
+   metadata file still fail the preservation check.
 7. With the base installed, a cancelled upgrade, a tampered upgrade, an
    untrusted upgrade and an upgrade while the app runs (expected
    `ERROR_PACKAGES_IN_USE`) each leave the previous registration, its
@@ -350,6 +405,12 @@ check, deployment result with HRESULT and deployment log, launch state,
 module provenance, runner facts (build, integrity, UAC settings), the
 admission decision, the cleanup record, and the admission control's evidence
 with the refused run's own evidence.
+
+MakeAppx failures print the last 4096 characters of each captured output stream
+and the full log path without changing the failure status. Separate always-run
+pack-diagnostic artifacts retain only `*.pack.log` from the base, upgrade and
+optional signed-job layouts, even when packing fails before lifecycle testing.
+They do not include signing material or environment dumps.
 
 ## Evidence at this checkpoint
 

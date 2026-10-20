@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Retain a natively built production SpeakWindows.exe and record how it was built.
+"""Retain native production SpeakWindows.exe and speak.exe and record how they were built.
 
 Run on Windows after ``swift build --configuration release --product
-SpeakWindows`` and before any test build, which recompiles the same modules
+SpeakWindows`` and ``swift build --configuration release --product speak``,
+before any test build, which recompiles the same modules
 with testable imports. The output has the layout ``build-windows-app.py``
-produces on the Mac: ``SpeakWindows.exe``, its SwiftPM resource directories
+produces on the Mac: ``SpeakWindows.exe``, ``speak.exe``, their SwiftPM resource directories
 and ``app-build-metadata.json``, so the bundle builder authenticates either.
 The executable must be an image a native process of the architecture loads
 and must not import a test library.
@@ -27,6 +28,7 @@ import windows_pe  # noqa: E402
 import windows_targets  # noqa: E402
 
 APPLICATION = "SpeakWindows.exe"
+EXECUTABLES = (APPLICATION, "speak.exe")
 TEST_MODULES = {"xctest.dll", "testing.dll"}
 
 
@@ -53,16 +55,24 @@ def stage(bin_path, output, architecture, commit, versions=None):
         raise StageError("keep the staged app separate from the build directory")
     if output.exists() and any(output.iterdir()):
         raise StageError("the staging directory must be new or empty")
-    executable = bin_path / APPLICATION
-    data = executable.read_bytes()
-    image = windows_pe.PEImage(data, APPLICATION)
-    if not image.runs_natively_on(architecture) or image.is_dll:
-        raise StageError("%s is a %s image, not a native %s executable" % (APPLICATION, image.architecture, architecture))
-    tests = sorted(name for name in image.imports() + image.delay_imports() if name.lower() in TEST_MODULES)
-    if tests:
-        raise StageError(APPLICATION + " imports " + ", ".join(tests) + "; stage it before building tests")
+    images, hashes = {}, {}
+    for name in EXECUTABLES:
+        executable = bin_path / name
+        if not executable.is_file() or executable.is_symlink():
+            raise StageError("missing production executable " + name)
+        data = executable.read_bytes()
+        image = windows_pe.PEImage(data, name)
+        if not image.runs_natively_on(architecture) or image.is_dll:
+            raise StageError("%s is a %s image, not a native %s executable" % (name, image.architecture, architecture))
+        if name == "speak.exe" and image.subsystem != windows_pe.IMAGE_SUBSYSTEM_WINDOWS_CUI:
+            raise StageError("speak.exe must use the console subsystem")
+        tests = sorted(module for module in image.imports() + image.delay_imports() if module.lower() in TEST_MODULES)
+        if tests:
+            raise StageError(name + " imports " + ", ".join(tests) + "; stage it before building tests")
+        images[name], hashes[name] = image, hashlib.sha256(data).hexdigest()
     output.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(executable, output / APPLICATION)
+    for name in EXECUTABLES:
+        shutil.copy2(bin_path / name, output / name)
     resources = []
     for directory in sorted(bin_path.glob("*.resources")):
         if not directory.is_dir() or directory.is_symlink() or directory.name[:-len(".resources")].endswith("Tests"):
@@ -74,9 +84,10 @@ def stage(bin_path, output, architecture, commit, versions=None):
     metadata = {"host": platform.system(), "hostArchitecture": platform.machine(), "target": target["swiftTriple"],
                 "configuration": "release", "appBuiltForTesting": False, "sourceCommit": commit,
                 "build": "native Windows SwiftPM build, staged before any test build",
-                "imageArchitecture": image.architecture,
+                "imageArchitecture": images[APPLICATION].architecture,
+                "imageArchitectures": {name: image.architecture for name, image in images.items()},
                 "swiftCompiler": versions["swiftCompiler"], "nativeCompiler": versions["nativeCompiler"],
-                "executables": {APPLICATION: hashlib.sha256(data).hexdigest()}, "resources": resources,
+                "executables": hashes, "resources": resources,
                 "runtimeStatus": "Windows execution evidence is recorded separately"}
     (output / "app-build-metadata.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
     return metadata

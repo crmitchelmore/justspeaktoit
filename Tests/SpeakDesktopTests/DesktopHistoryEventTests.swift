@@ -1,8 +1,31 @@
 import Foundation
+import SpeakCore
 import XCTest
 @testable import SpeakDesktop
 
 final class DesktopHistoryEventTests: XCTestCase {
+    func testFilterRemainsBeforeNewSelectionAndSupersedesEarlierPendingActions() {
+        var pending: [DesktopHistoryEvent] = [.selection("A"), .playPause("A"), .version("A", .original), .stop]
+        DesktopHistoryEvent.coalesce(&pending, .filter("first"))
+        XCTAssertEqual(pending, [.selection("A"), .stop, .filter("first")])
+        DesktopHistoryEvent.coalesce(&pending, .selection("B"))
+        XCTAssertEqual(pending, [.stop, .filter("first"), .selection("B")])
+        DesktopHistoryEvent.coalesce(&pending, .playPause("B"))
+        DesktopHistoryEvent.coalesce(&pending, .filter("latest"))
+        XCTAssertEqual(pending, [.stop, .selection("B"), .filter("latest")])
+    }
+
+    func testVoiceSourceActions_ShareStopOrderingWithHistory() async throws {
+        let held = await heldLane()
+        let snapshot = try VoiceOutputSourceSnapshot(source: .typedText, text: "Synthetic source")
+        held.lane.submit(.voiceRead(snapshot))
+        held.lane.submit(.voiceExport(snapshot, path: "/synthetic.wav"))
+        held.lane.submit(.stop)
+        await held.finish()
+        let applied = await held.host.applied
+        XCTAssertEqual(applied, [.selection("A"), .stop])
+    }
+
     /// Why History clicks share one ordered lane: the previous wiring started
     /// one Task per click, and independent Tasks may enter the host in either
     /// order. Under this legal schedule audio starts after Stop, and Play on
@@ -186,20 +209,40 @@ private actor HistoryHostProbe {
         applied.append(event)
         switch event {
         case .selection(let id):
-            if id != selected { audible = nil }
-            selected = id
+            applySelection(id)
         case .version: break
         case .playPause(let id):
-            if audible == .playing(id) {
-                audible = .paused(id)
-            } else if audible == .paused(id) {
-                audible = .playing(id)
-            } else if id == selected {
-                audible = .playing(id)
-            }
+            togglePlayback(id)
         case .stop: audible = nil
         case .readAloud(let id, let text):
-            if id == selected { audible = .reading(id, text) }
+            applyReadAloud(id: id, text: text)
+        case .filter: audible = nil
+        case .voiceRead(let snapshot):
+            audible = .reading(snapshot.recordID?.uuidString ?? "text-source", snapshot.text)
+        case .voiceExport: audible = nil
+        case .voiceImport, .voiceImportCancel, .voiceGenerate, .voiceGeneratedPlay, .voiceGeneratedExport: break
+        }
+    }
+
+    /// `.selection` clears whatever is audible unless it already matches the
+    /// row being selected, then records the newly-selected row.
+    private func applySelection(_ id: String) {
+        if id != selected { audible = nil }
+        selected = id
+    }
+
+    /// `.readAloud` only takes over the audible slot for the selected row.
+    private func applyReadAloud(id: String, text: String) {
+        if id == selected { audible = .reading(id, text) }
+    }
+
+    private func togglePlayback(_ id: String) {
+        if audible == .playing(id) {
+            audible = .paused(id)
+        } else if audible == .paused(id) {
+            audible = .playing(id)
+        } else if id == selected {
+            audible = .playing(id)
         }
     }
 }

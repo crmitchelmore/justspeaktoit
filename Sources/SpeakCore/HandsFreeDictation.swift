@@ -5,49 +5,6 @@
 // AppleSpeechAnalyzerTranscriber.swift.
 import Foundation
 
-extension HandsFreeDictationMachine.Failure {
-    /// Classifies a thrown session error. Unknown errors are treated as capture
-    /// failures so arming always disarms with a message rather than hanging.
-    public init(_ error: Error) {
-        guard let modelError = error as? AppleLocalModelError else {
-            self = .captureFailed
-            return
-        }
-        switch modelError {
-        case .speechDetectorUnavailable, .speechDetectorFailed, .speechTranscriberUnavailable:
-            self = .detectorUnavailable
-        case .localeUnsupported:
-            self = .localeUnsupported
-        case .modelAssetsUnavailable:
-            self = .assetsUnavailable
-        case .compatibleAudioFormatUnavailable:
-            self = .audioUnavailable
-        case .foundationModelUnavailable, .emptyTranscript:
-            self = .captureFailed
-        }
-    }
-
-    /// User-facing reason shown when arming or capture fails. Hands-free must
-    /// never fail silently: a failed arm looks identical to a quiet room.
-    public var message: String {
-        switch self {
-        case .detectorUnavailable:
-            return "Hands-free dictation needs Apple's on-device speech detector, "
-                + "which isn't available on this device."
-        case .assetsUnavailable:
-            return "Hands-free dictation couldn't install Apple's on-device speech models."
-        case .localeUnsupported:
-            return "Hands-free dictation doesn't support this language on this device."
-        case .audioUnavailable:
-            return "Hands-free dictation couldn't access the microphone."
-        case .captureFailed:
-            return "Hands-free dictation stopped because the recording session failed."
-        case .unsupportedConfiguration:
-            return "Hands-free dictation requires an Apple on-device streaming model."
-        }
-    }
-}
-
 /// Timings for hands-free dictation, kept in one pure place so the state
 /// machine, the detector session and the UI agree on the same budgets.
 public enum HandsFreeDictationPolicy {
@@ -65,17 +22,10 @@ public enum HandsFreeDictationPolicy {
     /// phoneme is included once speech is confirmed.
     public static let preRollSeconds: Double = 0.5
 
-    /// Detector sensitivity used when arming. `.medium` trades a little
-    /// eagerness for far fewer false starts in a noisy room.
-    public static let sensitivity: AppleSpeechDetectorSensitivity = .medium
-
     public static func silenceHoldSeconds(configured value: TimeInterval) -> TimeInterval {
         min(max(value, 0.5), 5.0)
     }
 
-    public static func supportsCapture(modelID: String, isStreaming: Bool) -> Bool {
-        isStreaming && AppleLocalModels.isSpeechAnalyzerModel(modelID)
-    }
 }
 
 /// Turns a stream of voice-activity samples into the discrete edges the
@@ -291,11 +241,6 @@ public struct HandsFreeDictationMachine: Equatable, Sendable {
             state = .off
             return [.cancelCapture, .stopDetector]
         }
-    }
-
-    /// Convenience for call sites holding a thrown error rather than a reason.
-    public mutating func handle(sessionError: Error) -> [Effect] {
-        handle(.sessionFailed(Failure(sessionError)))
     }
 
     /// A refused capture start disarms and reports, but never emits

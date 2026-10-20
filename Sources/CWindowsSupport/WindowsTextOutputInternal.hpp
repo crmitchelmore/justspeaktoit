@@ -38,6 +38,8 @@ struct FocusEvent {
 
 struct Environment {
     HWND (*foregroundWindow)() = nullptr;
+    bool (*ownApplication)(HWND window) = nullptr;
+    bool (*sameApplication)(HWND first, HWND second) = nullptr;
     Clipboard *(*clipboard)() = nullptr;
     // Delivers Ctrl+V to the foreground thread; production uses SendInput.
     unsigned (*sendPaste)(std::string &error) = nullptr;
@@ -56,6 +58,7 @@ struct Environment {
     // Optional hook run on the worker before any provider call; may block so
     // timeouts and detached cleanup can be exercised deterministically.
     void (*beforeAutomation)(void *context) = nullptr;
+    void (*beforeRedirectedInsert)(void *context) = nullptr;
     void *hookContext = nullptr;
     bool allowCurrentProcess = false;
     // When false, captured controls are never classified as native, so every
@@ -81,6 +84,8 @@ void setEnvironment(const Environment &environment);
 void resetEnvironment();
 
 // Pure helpers exposed for deterministic checks.
+inline constexpr size_t maximumSelectedTextUnits = 200000;
+bool appendSelectedRange(std::wstring &text, const std::wstring &selected);
 void pasteInputs(INPUT (&inputs)[4]);
 std::wstring normalizedForComparison(const std::wstring &text);
 bool containsNormalized(const std::wstring &haystack, const std::wstring &needle);

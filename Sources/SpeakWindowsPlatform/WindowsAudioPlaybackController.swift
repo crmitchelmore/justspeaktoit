@@ -109,21 +109,23 @@ public final class WindowsAudioPlaybackController: @unchecked Sendable {
     /// follows.
     @discardableResult
     public func togglePause(recordID: UUID) -> Bool {
-        lock.withLock {
-            guard let run = current, run.recordID == recordID, !run.stopped else {
-                return toggleSpeechPauseLocked(recordID: recordID)
-            }
-            run.pauseRequested.toggle()
-            if speechState?.speech.recordID == recordID { speechState?.paused = run.pauseRequested }
-            if !run.pauseCommandQueued {
-                run.pauseCommandQueued = true
-                run.worker.async {
-                    self.lock.withLock { run.pauseCommandQueued = false }
-                    self.applyPause(run)
-                }
-            }
-            return true
+        lock.withLock { togglePauseLocked(recordID: recordID) }
+    }
+
+    func togglePauseLocked(recordID: UUID) -> Bool {
+        guard let run = current, run.recordID == recordID, !run.stopped else {
+            return toggleSpeechPauseLocked(recordID: recordID)
         }
+        run.pauseRequested.toggle()
+        if speechState?.speech.recordID == recordID { speechState?.paused = run.pauseRequested }
+        if !run.pauseCommandQueued {
+            run.pauseCommandQueued = true
+            run.worker.async {
+                self.lock.withLock { run.pauseCommandQueued = false }
+                self.applyPause(run)
+            }
+        }
+        return true
     }
 
     /// Requests cancellation and ends speech. The display resets only after
@@ -160,6 +162,25 @@ public final class WindowsAudioPlaybackController: @unchecked Sendable {
             try Task.checkCancellation()
             guard ContinuousClock.now < deadline else {
                 throw WindowsAudioPlaybackError("Audio output has not stopped. Recording has not started.")
+            }
+
+            try await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
+    /// Housekeeping removes captured audio, not synthesized speech.
+    public func stopSavedAudioAndWait() async throws {
+        let identifier = lock.withLock { () -> UUID? in
+            guard speechState == nil, let run = current else { return nil }
+            stopLocked(run)
+            return run.id
+        }
+        guard let identifier else { return }
+        let deadline = ContinuousClock.now + .seconds(stopTimeout)
+        while !lock.withLock({ live[identifier]?.outputQuiet ?? true }) {
+            try Task.checkCancellation()
+            guard ContinuousClock.now < deadline else {
+                throw WindowsAudioPlaybackError("Saved audio playback has not stopped. Audio cleanup was cancelled.")
             }
             try await Task.sleep(for: .milliseconds(5))
         }

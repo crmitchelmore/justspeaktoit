@@ -102,4 +102,38 @@ final class VoiceCommandProcessorTests: XCTestCase {
 
     XCTAssertEqual(processor.process("copy pasta"), "copy pasta")
   }
+
+  func testOrdinaryText_doesNotReadClipboard() {
+    var reads = 0
+    let processor = VoiceCommandProcessor(
+      configuration: VoiceCommandProcessor.Configuration(
+        isEnabled: { true },
+        customTriggers: { "" },
+        clipboardText: {
+          reads += 1
+          return "PASTED"
+        }
+      )
+    )
+
+    XCTAssertEqual(processor.process("ordinary transcript"), "ordinary transcript")
+    XCTAssertEqual(reads, 0)
+  }
+
+  func testDisabledProcessor_doesNotReadClipboard() {
+    var reads = 0
+    let processor = VoiceCommandProcessor(
+      configuration: VoiceCommandProcessor.Configuration(
+        isEnabled: { false },
+        customTriggers: { "" },
+        clipboardText: {
+          reads += 1
+          return "PASTED"
+        }
+      )
+    )
+
+    XCTAssertEqual(processor.process("copy pasta"), "copy pasta")
+    XCTAssertEqual(reads, 0)
+  }
 }

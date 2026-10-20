@@ -140,12 +140,13 @@ func cloudSyncEvent(
 /// with sync configured the controller saves and marks it in one step.
 func saveKeyEvent(_ value: String, index: Int, holder: WindowsEventContext) {
     let controller = holder.controller
-    holder.enqueueSettings { await controller.saveKey(value, modelIndex: index) }
+    holder.enqueueSettings { await controller.beginKeySave(value, modelIndex: index) }
 }
 
 extension SpeakWindowsMain {
     /// Saved automation and iCloud sync, once the window's dialogs are configured.
     static func restoreServices(_ holder: WindowsEventContext) async {
+        WindowsAutomationSetup.configure()
         if !holder.smokeTest { await WindowsAutomationSwitch.restore(holder) }
         await WindowsCloudSync.configure(holder)
     }

@@ -33,6 +33,15 @@ if ! git show "${BASELINE}:Package.swift" > "$baseline_manifest_dir/Package.swif
     echo "==> Unable to read baseline Package.swift" >&2
     exit 1
 fi
+# The manifest may list a top-level directory while it is evaluated, so recreate
+# the baseline's top-level directories empty. No file contents are copied.
+if ! baseline_directories=$(git ls-tree -d --name-only "${BASELINE}"); then
+    echo "==> Unable to read baseline directories" >&2
+    exit 1
+fi
+while IFS= read -r directory; do
+    [[ -n "$directory" ]] && mkdir -p -- "$baseline_manifest_dir/$directory"
+done <<< "$baseline_directories"
 if ! swift package --package-path "$baseline_manifest_dir" dump-package > "$baseline_manifest_dir/package.json"; then
     echo "==> Unable to evaluate baseline package products" >&2
     exit 1

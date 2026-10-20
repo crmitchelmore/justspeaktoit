@@ -100,100 +100,24 @@ func hotKeyEvent(_ modifiers: UInt32, _ key: UInt32, _ style: Int32, _ context: 
         if !WindowsNative.configureHotKey(saved, context: Unmanaged.passUnretained(holder).toOpaque()) {
             WindowsNative.update("The saved shortcut could not be shown. Reopen Keyboard shortcut and try again.")
         }
+        await WindowsNative.configureActionShortcuts(holder)
     }
 }
 
 typealias WindowsHotKeySessionState = DesktopHostHotKeySessionState
 
-/// One recognised shortcut input with everything captured at its key press.
-struct WindowsHotKeyRequest: Sendable {
-    let input: HotKeySessionPolicy.Input
-    let style: HotKeyActivationStyle
-    /// Monotonic seconds when the gesture was recognised.
-    let recognisedAt: TimeInterval
-    let target: WindowsInsertionTarget?
-    let textOutput: Task<WindowsTextOutputOptions, Never>
-    let modelIndex: Int
-    let deviceID: String
-}
+typealias WindowsHotKeyRequest = DesktopHostShortcutRequest<WindowsHostPlatform>
+typealias WindowsHotKeyGestures = DesktopHostShortcutGestures<WindowsHostPlatform>
 
-/// Classifies shortcut presses and releases with the shared gesture machine.
-/// Every method runs on the native UI thread, which owns the machine and its
-/// one deadline timer. Requests reach the controller one at a time in
-/// recognition order, so a release never overtakes the start it ends.
-final class WindowsHotKeyGestures: @unchecked Sendable {
-    private var machine = HotKeyGestureMachine()
-    private(set) var style: HotKeyActivationStyle = .windowsDefault
-    private var target: WindowsInsertionTarget?
-    private var textOutput: Task<WindowsTextOutputOptions, Never>?
-    private var modelIndex = 0
-    private var deviceID = ""
-    private let clock: () -> TimeInterval
-    private let armDeadline: (Int32) -> Void
-    private let deliver: @Sendable (WindowsHotKeyRequest) async -> Void
-    private let lock = NSLock()
-    private var tail: Task<Void, Never>?
-
-    init(
+extension DesktopHostShortcutGestures where Platform == WindowsHostPlatform {
+    convenience init(
         clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
         armDeadline: @escaping (Int32) -> Void = { _ = jsti_window_set_hotkey_deadline($0) },
         deliver: @escaping @Sendable (WindowsHotKeyRequest) async -> Void
     ) {
-        self.clock = clock
-        self.armDeadline = armDeadline
-        self.deliver = deliver
-    }
-
-    /// A style change forgets partial gestures and ends a hold in progress,
-    /// because its release will no longer be reported under the old style.
-    func configure(style: HotKeyActivationStyle) {
-        let ended = machine.reset()
-        armDeadline(-1)
-        submit(ended)
-        self.style = style
-    }
-
-    func keyDown(
-        target: WindowsInsertionTarget?, textOutput: Task<WindowsTextOutputOptions, Never>,
-        modelIndex: Int, deviceID: String
-    ) {
-        self.target = target
-        self.textOutput = textOutput
-        self.modelIndex = modelIndex
-        self.deviceID = deviceID
-        submit(machine.keyDown(at: clock()))
-    }
-
-    func keyUp() { submit(machine.keyUp(at: clock())) }
-
-    func deadlineReached() { submit(machine.deadlineReached(at: clock())) }
-
-    /// Waits for every request already handed to the controller.
-    func drain() async { await lock.withLock { tail }?.value }
-
-    private func submit(_ gestures: [HotKeyGestureMachine.Gesture]) {
-        let now = clock()
-        if let deadline = machine.deadline {
-            let milliseconds = max(0, ((deadline.time - now) * 1_000).rounded(.up))
-            armDeadline(Int32(min(milliseconds, Double(Int32.max))))
-        } else {
-            armDeadline(-1)
-        }
-        guard let textOutput, !gestures.isEmpty else { return }
-        for gesture in gestures {
-            let request = WindowsHotKeyRequest(
-                input: .gesture(gesture), style: style, recognisedAt: now, target: target,
-                textOutput: textOutput, modelIndex: modelIndex, deviceID: deviceID
-            )
-            let deliver = deliver
-            lock.withLock {
-                let previous = tail
-                tail = Task {
-                    await previous?.value
-                    await deliver(request)
-                }
-            }
-        }
+        self.init(
+            clock: clock, armDeadline: armDeadline, executablePath: { $0?.executablePath }, deliver: deliver
+        )
     }
 }
 
@@ -218,30 +142,6 @@ extension WindowsAppController {
     /// gesture may stop only the kind of session it started, and a start
     /// recognised while an earlier shortcut stop was still finishing is stale.
     func hotKey(_ request: WindowsHotKeyRequest) async {
-        guard !closed else { return }
-        if case .gesture(.doubleTap) = request.input {
-            let interval = request.recognisedAt - hotKeySession.lastDoubleTap
-            guard interval >= HotKeyGestureTiming.doubleTapCommandInterval else { return }
-            hotKeySession.lastDoubleTap = request.recognisedAt
-        }
-        guard let command = HotKeySessionPolicy.command(
-            for: request.input, style: request.style, active: recording?.trigger
-        ) else { return }
-        switch command {
-        case .start(let trigger):
-            guard recording == nil, !busy, request.recognisedAt >= hotKeySession.startsAfter else { return }
-            await toggle(
-                target: request.target, modelIndex: request.modelIndex, deviceID: request.deviceID,
-                targetExecutablePath: request.target?.executablePath, textOutput: await request.textOutput.value,
-                trigger: trigger
-            )
-        case .stop:
-            guard recording != nil, !busy else { return }
-            await toggle(
-                target: request.target, modelIndex: request.modelIndex, deviceID: request.deviceID,
-                targetExecutablePath: request.target?.executablePath, textOutput: await request.textOutput.value
-            )
-            hotKeySession.startsAfter = ProcessInfo.processInfo.systemUptime
-        }
+        await admitShortcut(request)
     }
 }

@@ -213,7 +213,7 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
         guard jsonString != "[DONE]", let data = jsonString.data(using: .utf8) else { return nil }
 
         guard let chunk = try? JSONDecoder().decode(OpenRouterStreamChunk.self, from: data),
-              let delta = chunk.choices.first?.delta,
+              let delta = chunk.choices?.first?.delta,
               let content = delta.content, !content.isEmpty else {
             return nil
         }
@@ -649,23 +649,4 @@ private struct OpenRouterValidationResponse: Decodable {
 
     let valid: Bool?
     let data: ValidationData?
-}
-
-private struct OpenRouterStreamChunkDelta: Decodable {
-    let role: String?
-    let content: String?
-}
-
-private struct OpenRouterStreamChunkChoice: Decodable {
-    let delta: OpenRouterStreamChunkDelta?
-    let finishReason: String?
-
-    enum CodingKeys: String, CodingKey {
-        case delta
-        case finishReason = "finish_reason"
-    }
-}
-
-private struct OpenRouterStreamChunk: Decodable {
-    let choices: [OpenRouterStreamChunkChoice]
 }

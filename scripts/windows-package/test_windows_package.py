@@ -6,6 +6,8 @@ import importlib.util
 import json
 import pathlib
 import struct
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -46,9 +48,11 @@ def make_bundle(directory, commit=COMMIT, mutate=None, exe_imports=("swiftCore.d
     directory.mkdir(parents=True, exist_ok=True)
     target = windows_msix.windows_targets.target(architecture)
     machine = target["processMachine"]
-    executable = BUNDLE_TESTS.build_pe(imports=exe_imports, machine=machine)
+    executable = BUNDLE_TESTS.build_pe(imports=exe_imports, machine=machine, subsystem=2)
+    cli = BUNDLE_TESTS.build_pe(imports=["swiftCore.dll", "KERNEL32.dll"], machine=machine)
     entries = {
         "SpeakWindows.exe": executable,
+        "speak.exe": cli,
         "swiftCore.dll": BUNDLE_TESTS.build_pe(imports=["KERNEL32.dll"], dll=True, machine=machine),
         "SpeakApp_SpeakCore.resources/ReleaseNotes.json": b'{"entries": [{"version": "1"}]}',
         # Larger than one 64 KiB block, so block maps have several blocks.
@@ -56,18 +60,26 @@ def make_bundle(directory, commit=COMMIT, mutate=None, exe_imports=("swiftCore.d
         "licenses/LICENSE-JustSpeakToIt.txt": b"MIT License\n",
         "README.txt": b"Developer bundle\n",
     }
-    sources = {"SpeakWindows.exe": "application", "swiftCore.dll": "swift-runtime", "README.txt": "generated",
+    sources = {"SpeakWindows.exe": "application", "speak.exe": "application",
+               "swiftCore.dll": "swift-runtime", "README.txt": "generated",
                "licenses/LICENSE-JustSpeakToIt.txt": "application-license"}
+    # Invalid executable-import fixtures still need a producer-shaped graph;
+    # the consumer must re-read their PEs rather than trust this graph.
+    graph_images = dict(entries, **{"SpeakWindows.exe": BUNDLE_TESTS.build_pe(
+        imports=["swiftCore.dll", "KERNEL32.dll"], machine=machine)})
+    def read_imports(name, category):
+        image = windows_msix.windows_pe.PEImage(graph_images[name], name)
+        return image.imports(), image.delay_imports()
+    closure = BUILD.resolve_closure(BUILD.EXECUTABLES, read_imports, BUILD.Policy.load())
     manifest = {
         "schemaVersion": 1,
         "bundle": {"kind": "unsigned Windows %s developer runtime bundle" % target["displayName"],
                    "architecture": target["bundleArchitecture"], "notInstaller": True, "codeSigned": False},
         "application": {"sourceCommit": commit, "configuration": "release", "appBuiltForTesting": False,
-                        "executableSHA256": sha256(executable)},
-        "dependencies": {"bundled": {"swiftcore.dll": {"name": "swiftCore.dll", "source": "swift-runtime",
-                                                       "importedBy": [{"importer": "SpeakWindows.exe",
-                                                                       "kind": "static"}]}},
-                         "system": {}},
+                        "executableSHA256": sha256(executable),
+                        "executables": {"SpeakWindows.exe": sha256(executable), "speak.exe": sha256(cli)},
+                        "target": target["swiftTriple"], "buildHost": BUILD.APPLICATION_HOSTS[architecture]},
+        "dependencies": dict(closure, additionalRuntimeModules=BUILD.Policy.load().additional),
         "policy": BUILD.Policy.load().data,
     }
     if mutate is not None:
@@ -75,6 +87,12 @@ def make_bundle(directory, commit=COMMIT, mutate=None, exe_imports=("swiftCore.d
     manifest["files"] = [{"path": path, "bytes": len(data), "sha256": sha256(data),
                           "source": sources.get(path, "application-resources")}
                          for path, data in sorted(entries.items()) if path != "bundle-manifest.json"]
+    return write_bundle(directory, entries, manifest, architecture)
+
+
+def write_bundle(directory, entries, manifest, architecture):
+    directory.mkdir(parents=True, exist_ok=True)
+    commit = manifest["application"]["sourceCommit"]
     manifest_bytes = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode()
     entries["bundle-manifest.json"] = manifest_bytes
     archive = directory / ("justspeaktoit-windows-%s-developer-%s.zip" % (architecture, commit[:7]))
@@ -83,7 +101,9 @@ def make_bundle(directory, commit=COMMIT, mutate=None, exe_imports=("swiftCore.d
     evidence = {"schemaVersion": 1,
                 "zip": {"name": archive.name, "sha256": sha256(data), "bytes": len(data), "entries": len(entries)},
                 "manifest": {"name": "bundle-manifest.json", "sha256": sha256(manifest_bytes)},
-                "application": {"sourceCommit": commit, "executableSHA256": sha256(executable)}}
+                "application": {"sourceCommit": commit,
+                                "executableSHA256": manifest["application"]["executableSHA256"],
+                                "executables": manifest["application"]["executables"]}}
     (directory / "bundle-evidence.json").write_text(json.dumps(evidence, indent=2), encoding="utf-8")
     return directory
 
@@ -147,6 +167,14 @@ class IdentityTests(unittest.TestCase):
         self.assertIn('constexpr wchar_t launchArgument[] = L"%s";' % startup["parameters"], native)
         self.assertIn('public static let launchArgument = "%s"' % startup["parameters"], shared)
 
+    def test_cli_alias_matches_the_automation_setup_dialog(self):
+        # General › CLI and MCP setup locates the packaged speak command by
+        # this alias; a rename on one side must fail here.
+        alias = windows_msix.load_identity()["cli"]["executionAlias"]
+        native = (windows_msix.REPOSITORY / "Sources/CWindowsSupport/WindowsAutomationSettings.cpp").read_text(
+            encoding="utf-8")
+        self.assertIn('L"\\\\Microsoft\\\\WindowsApps\\\\%s"' % alias, native)
+
     def test_publisher_id_matches_windows_for_known_publishers(self):
         self.assertEqual(windows_msix.publisher_id(
             "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"), "8wekyb3d8bbwe")
@@ -186,6 +214,18 @@ class IdentityTests(unittest.TestCase):
             lambda data: data["identity"].update(processorArchitectures=["x64", "x64"]),
             lambda data: data["identity"].update(processorArchitectures="x64"),
             lambda data: data["application"].update(executionAlias="nested\\alias.exe"),
+            lambda data: data["application"].update(executable="speak.exe"),
+            lambda data: data["application"].update(id="ChangedGUI"),
+            lambda data: data["application"].update(executionAlias="JustSpeakToItDeveloperCLI.exe"),
+            lambda data: data["cli"].update(executable="SpeakWindows.exe"),
+            lambda data: data["cli"].update(id="ChangedCLI"),
+            lambda data: data["cli"].update(id="JustSpeakToIt"),
+            lambda data: data["cli"].pop("id"),
+            lambda data: data["cli"].update(startupTask={"id": "Extra", "parameters": "--background"}),
+            lambda data: data["cli"].update(executionAlias="speak.exe"),
+            lambda data: data["cli"].update(executionAlias="nested\\alias.exe"),
+            lambda data: data["cli"].update(executable="..\\speak.exe"),
+            lambda data: data.pop("cli"),
             lambda data: data["application"]["startupTask"].update(parameters="--minimised"),
             lambda data: data["application"]["startupTask"].update(id="bad id"),
             lambda data: data["application"].pop("startupTask"),
@@ -219,6 +259,21 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(application.get("{%s}TrustLevel" % ns["uap10"]), "mediumIL")
         alias = application.find(".//desktop:ExecutionAlias", ns)
         self.assertEqual(alias.get("Alias"), "JustSpeakToItDeveloper.exe")
+        applications = root.findall("f:Applications/f:Application", ns)
+        self.assertEqual([app.get("Id") for app in applications], ["JustSpeakToIt", "JustSpeakToItCLI"])
+        cli_application = applications[1]
+        self.assertEqual(cli_application.get("Executable"), "speak.exe")
+        self.assertEqual(cli_application.find("uap:VisualElements", ns).get("AppListEntry"), "none")
+        self.assertIsNone(application.find("uap:VisualElements", ns).get("AppListEntry"))
+        self.assertEqual(cli_application.get("{%s}SupportsMultipleInstances" % ns["uap10"]), "true")
+        self.assertIsNone(application.get("{%s}SupportsMultipleInstances" % ns["uap10"]))
+        cli_extension = cli_application.find("f:Extensions/uap5:Extension", ns)
+        self.assertEqual(cli_extension.get("Executable"), "speak.exe")
+        cli_alias = cli_extension.find("uap5:AppExecutionAlias", ns)
+        self.assertEqual(cli_alias.get("{%s}Subsystem" % ns["uap10"]), "console")
+        self.assertEqual(cli_alias.find("uap5:ExecutionAlias", ns).get("Alias"), "JustSpeakToItDeveloperCLI.exe")
+        self.assertEqual(len(cli_application.find("f:Extensions", ns)), 1)
+        self.assertIsNone(cli_application.find(".//desktop:StartupTask", ns))
         startup = application.find("f:Extensions/desktop:Extension[@Category='windows.startupTask']", ns)
         self.assertEqual((startup.get("Executable"), startup.get("{%s}Parameters" % ns["uap10"])),
                          ("SpeakWindows.exe", "--background"))
@@ -244,6 +299,15 @@ class ManifestTests(unittest.TestCase):
         x64_only["identity"]["processorArchitectures"] = ["x64"]
         with self.assertRaisesRegex(windows_msix.PackageError, "does not allow the arm64"):
             windows_msix.render_manifest(x64_only, "0.0.7.1", "CN=Just Speak to It Developer", architecture="arm64")
+
+    def test_qualified_logo_families_require_generated_unqualified_assets(self):
+        for root in ("Assets/StoreLogo.png", "Assets/Square44x44Logo.png", "Assets/Square150x150Logo.png"):
+            with self.subTest(root=root):
+                identity = copy.deepcopy(self.identity)
+                del identity["assets"]["images"][root]
+                self.assertTrue(any(path.startswith(root[:-4] + ".") for path in identity["assets"]["images"]))
+                with self.assertRaisesRegex(windows_msix.PackageError, "generated unqualified assets"):
+                    windows_msix.render_manifest(identity, "0.0.7.1", "CN=Just Speak to It Developer")
 
     def test_text_values_are_escaped(self):
         identity = copy.deepcopy(self.identity)
@@ -271,6 +335,257 @@ class ManifestTests(unittest.TestCase):
             with self.assertRaises(windows_msix.PackageError):
                 windows_msix.check_manifest(data.replace(original, changed), self.identity, "0.0.7.1",
                                             "CN=Just Speak to It Developer")
+
+    def test_cli_alias_retarget_duplicates_path_injection_and_subsystem_changes_are_refused(self):
+        data = windows_msix.render_manifest(self.identity, "0.0.7.1", "CN=Just Speak to It Developer")
+        for original, changed in (
+            (b'Executable="speak.exe"', b'Executable="SpeakWindows.exe"'),
+            (b'Executable="speak.exe"', b'Executable="nested\\speak.exe"'),
+            (b'Alias="JustSpeakToItDeveloperCLI.exe"', b'Alias="JustSpeakToItDeveloper.exe"'),
+            (b'Alias="JustSpeakToItDeveloperCLI.exe"', b'Alias="speak.exe"'),
+            (b'Alias="JustSpeakToItDeveloperCLI.exe"', b'Alias="..\\CLI.exe"'),
+            (b'uap10:Subsystem="console"', b'uap10:Subsystem="windows"'),
+            (b'uap10:Subsystem="console"', b''),
+            (b'<uap5:ExecutionAlias Alias="JustSpeakToItDeveloperCLI.exe"/>',
+             b'<uap5:ExecutionAlias Alias="JustSpeakToItDeveloperCLI.exe"/>'
+             b'<uap5:ExecutionAlias Alias="extra.exe"/>'),
+        ):
+            with self.subTest(changed=changed), self.assertRaises(windows_msix.PackageError):
+                windows_msix.check_manifest(data.replace(original, changed), self.identity, "0.0.7.1",
+                                            "CN=Just Speak to It Developer")
+        root = ET.fromstring(data)
+        ns = windows_msix.NAMESPACES
+        extensions = root.findall("f:Applications/f:Application", ns)[1].find("f:Extensions", ns)
+        extensions.append(copy.deepcopy(extensions.find("uap5:Extension", ns)))
+        with self.assertRaisesRegex(windows_msix.PackageError, "exactly"):
+            windows_msix.check_manifest(ET.tostring(root), self.identity, "0.0.7.1", "CN=Just Speak to It Developer")
+
+    def test_application_topology_visuals_and_extension_ownership_are_exact_on_both_architectures(self):
+        ns = windows_msix.NAMESPACES
+        for architecture in ("x64", "arm64"):
+            original = windows_msix.render_manifest(self.identity, "0.0.7.1", "CN=Just Speak to It Developer",
+                                                    architecture=architecture)
+            for mutation in ("old-topology", "extra-hidden-app", "duplicate-app-id", "wrong-cli-id",
+                             "cli-visible", "gui-hidden", "cli-missing-visual", "cli-foreign-logo",
+                             "gui-foreign-logo", "cli-startup", "extra-extension", "swapped-aliases",
+                             "cli-extra-visual", "cli-wrong-trust", "gui-extra-activation",
+                             "duplicate-category", "cli-wrong-executable", "cli-wrong-alias",
+                             "cli-wrong-subsystem", "cli-missing-subsystem", "cli-extra-alias",
+                             "cli-missing-supports-multiple-instances",
+                             "cli-false-supports-multiple-instances",
+                             "cli-unqualified-supports-multiple-instances",
+                             "cli-supports-multiple-instances-wrong-location",
+                             "gui-extra-supports-multiple-instances"):
+                with self.subTest(architecture=architecture, mutation=mutation):
+                    root = ET.fromstring(original)
+                    apps = root.find("f:Applications", ns)
+                    gui, cli = list(apps)
+                    gui_extensions = gui.find("f:Extensions", ns)
+                    cli_extensions = cli.find("f:Extensions", ns)
+                    visual = cli.find("uap:VisualElements", ns)
+                    if mutation == "old-topology":
+                        gui_extensions.append(cli_extensions[0])
+                        apps.remove(cli)
+                    elif mutation == "extra-hidden-app":
+                        apps.append(copy.deepcopy(cli))
+                    elif mutation == "duplicate-app-id":
+                        cli.set("Id", gui.get("Id"))
+                    elif mutation == "wrong-cli-id":
+                        cli.set("Id", "UnreviewedCLI")
+                    elif mutation == "cli-visible":
+                        visual.attrib.pop("AppListEntry")
+                    elif mutation == "gui-hidden":
+                        gui.find("uap:VisualElements", ns).set("AppListEntry", "none")
+                    elif mutation == "cli-missing-visual":
+                        cli.remove(visual)
+                    elif mutation == "cli-foreign-logo":
+                        visual.set("Square44x44Logo", "Assets\\StoreLogo.png")
+                    elif mutation == "gui-foreign-logo":
+                        gui.find("uap:VisualElements", ns).set("Square150x150Logo", "Assets\\StoreLogo.png")
+                    elif mutation == "cli-startup":
+                        cli_extensions.append(copy.deepcopy(gui_extensions[1]))
+                    elif mutation == "extra-extension":
+                        ET.SubElement(cli_extensions, "{%s}Extension" % ns["uap5"], Category="windows.userActivity")
+                    elif mutation == "swapped-aliases":
+                        gui_alias, cli_alias = gui_extensions[0], cli_extensions[0]
+                        gui_extensions.remove(gui_alias)
+                        cli_extensions.remove(cli_alias)
+                        gui_extensions.insert(0, cli_alias)
+                        cli_extensions.append(gui_alias)
+                    elif mutation == "cli-extra-visual":
+                        ET.SubElement(visual, "{%s}DefaultTile" % ns["uap"])
+                    elif mutation == "cli-wrong-trust":
+                        cli.set("{%s}TrustLevel" % ns["uap10"], "appContainer")
+                    elif mutation == "duplicate-category":
+                        gui_extensions.append(copy.deepcopy(cli_extensions[0]))
+                    elif mutation == "cli-wrong-executable":
+                        cli.set("Executable", "SpeakWindows.exe")
+                    elif mutation == "cli-wrong-alias":
+                        cli_extensions[0][0][0].set("Alias", "JustSpeakToItDeveloper.exe")
+                    elif mutation == "cli-wrong-subsystem":
+                        cli_extensions[0][0].set("{%s}Subsystem" % ns["uap10"], "windows")
+                    elif mutation == "cli-missing-subsystem":
+                        cli_extensions[0][0].attrib.pop("{%s}Subsystem" % ns["uap10"])
+                    elif mutation == "cli-extra-alias":
+                        cli_extensions[0][0].append(copy.deepcopy(cli_extensions[0][0][0]))
+                    elif mutation == "cli-missing-supports-multiple-instances":
+                        cli.attrib.pop("{%s}SupportsMultipleInstances" % ns["uap10"])
+                    elif mutation == "cli-false-supports-multiple-instances":
+                        cli.set("{%s}SupportsMultipleInstances" % ns["uap10"], "false")
+                    elif mutation == "cli-unqualified-supports-multiple-instances":
+                        cli.attrib.pop("{%s}SupportsMultipleInstances" % ns["uap10"])
+                        cli.set("SupportsMultipleInstances", "true")
+                    elif mutation == "cli-supports-multiple-instances-wrong-location":
+                        cli.attrib.pop("{%s}SupportsMultipleInstances" % ns["uap10"])
+                        cli_extensions.set("{%s}SupportsMultipleInstances" % ns["uap10"], "true")
+                    elif mutation == "gui-extra-supports-multiple-instances":
+                        gui.set("{%s}SupportsMultipleInstances" % ns["uap10"], "true")
+                    else:
+                        gui.set("EntryPoint", "Unreviewed.Activation")
+                    with self.assertRaises(windows_msix.PackageError):
+                        windows_msix.check_manifest(ET.tostring(root), self.identity, "0.0.7.1",
+                                                    "CN=Just Speak to It Developer", architecture=architecture)
+
+
+class StartEntryMockTests(unittest.TestCase):
+    def test_native_family_entry_projection_with_mock_startapps(self):
+        pwsh = shutil.which("pwsh")
+        if pwsh is None:
+            self.skipTest("PowerShell 7 is unavailable; no tools are downloaded")
+        script = r"""
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$tokens = $null; $errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($args[0], [ref] $tokens, [ref] $errors)
+if ($errors.Count) { throw ($errors | Out-String) }
+foreach ($name in @('Get-StartMenuEntry', 'Wait-StartMenuEntry')) {
+    $function = @($ast.FindAll({ param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
+    }, $true))
+    if ($function.Count -ne 1) { throw "Expected one $name function" }
+    . ([scriptblock]::Create($function[0].Extent.Text))
+}
+$base = @{ packageFamilyName = 'developer_family'; displayName = 'Developer GUI' }
+$aumid = 'developer_family!JustSpeakToIt'
+$script:waiting = $false
+function Get-FakeStartItems {
+    if ($script:waiting) {
+        $index = [Math]::Min($script:polls, $script:frames.Count - 1)
+        $script:items = $script:frames[$index].items
+        $script:polls++
+    }
+    $script:items
+}
+function Get-StartApps { Get-FakeStartItems }
+function Get-Command {
+    param($Name, $ErrorAction)
+    if (-not $script:useShell) { [pscustomobject]@{ Name = 'Get-StartApps' } }
+}
+function New-Object {
+    param($ComObject)
+    if ($ComObject -ne 'Shell.Application') { throw 'Unexpected COM request' }
+    $script:folder = [pscustomobject]@{}
+    $script:folder | Add-Member ScriptMethod Items {
+        Get-FakeStartItems | ForEach-Object { [pscustomobject]@{ Path = $_.AppID; Name = $_.Name } }
+    }
+    $shell = [pscustomobject]@{}
+    $shell | Add-Member ScriptMethod NameSpace {
+        param($Path)
+        if ($Path -ne 'shell:AppsFolder') { throw 'Unexpected shell namespace' }
+        $script:folder
+    }
+    $shell
+}
+$gui = [pscustomobject]@{ AppID = $aumid; Name = 'Developer GUI' }
+$cli = [pscustomobject]@{ AppID = 'developer_family!JustSpeakToItCLI'; Name = 'Unexpected CLI' }
+$other = [pscustomobject]@{ AppID = 'other_family!Other'; Name = 'Other app' }
+$near = [pscustomobject]@{ AppID = 'developer_family_extra!Other'; Name = 'Similar family' }
+foreach ($script:useShell in @($false, $true)) {
+foreach ($case in @(
+    @{ items = @(); count = 0; present = $false },
+    @{ items = @($other); count = 0; present = $false },
+    @{ items = @($gui, $other); count = 1; present = $true },
+    @{ items = @($gui, $cli); count = 2; present = $true },
+    @{ items = @($cli); count = 1; present = $false },
+    @{ items = @($gui, $gui); count = 2; present = $true },
+    @{ items = @($near); count = 0; present = $false }
+)) {
+    $script:items = $case.items
+    $entry = Get-StartMenuEntry
+    if ($entry.entries.Count -ne $case.count -or $entry.present -ne $case.present) {
+        throw 'Incorrect family entry projection'
+    }
+}
+}
+Write-Output 'PASS fourteen mock-only Start entry projections (StartApps and shell fallback)'
+function Get-Date { ([datetime]'2026-01-01T00:00:00').AddSeconds($script:elapsed) }
+function Start-Sleep {
+    param([int] $Seconds)
+    if ($Seconds -ne 1) { throw 'The existing polling interval must remain one second' }
+    $script:elapsed += $Seconds
+}
+$wrongName = [pscustomobject]@{ AppID = $aumid; Name = 'Unreviewed name' }
+$cases = @(
+    @{ present = $true; frames = @(@{ items = @($gui, $cli) }, @{ items = @($gui) })
+       count = 1; gui = $true; polls = 2; elapsed = 1; ids = $aumid },
+    @{ present = $false; frames = @(@{ items = @($cli) }, @{ items = @() })
+       count = 0; gui = $false; polls = 2; elapsed = 1; ids = '' },
+    @{ present = $true; frames = @(@{ items = @($wrongName) }, @{ items = @($gui) })
+       count = 1; gui = $true; polls = 2; elapsed = 1; ids = $aumid },
+    @{ present = $true; frames = @(@{ items = @($cli) }, @{ items = @($gui) })
+       count = 1; gui = $true; polls = 2; elapsed = 1; ids = $aumid },
+    @{ present = $true; frames = @(@{ items = @($gui, $cli) })
+       count = 2; gui = $true; polls = 3; elapsed = 3; ids = "$aumid,developer_family!JustSpeakToItCLI" },
+    @{ present = $true; frames = @(@{ items = @($cli) })
+       count = 1; gui = $false; polls = 3; elapsed = 3; ids = 'developer_family!JustSpeakToItCLI' },
+    @{ present = $false; frames = @(@{ items = @($gui, $cli) })
+       count = 2; gui = $true; polls = 3; elapsed = 3; ids = "$aumid,developer_family!JustSpeakToItCLI" },
+    @{ present = $false; frames = @(@{ items = @($cli) })
+       count = 1; gui = $false; polls = 3; elapsed = 3; ids = 'developer_family!JustSpeakToItCLI' }
+)
+$script:waiting = $true
+foreach ($script:useShell in @($false, $true)) {
+    foreach ($case in $cases) {
+        $script:frames = $case.frames; $script:polls = 0; $script:elapsed = 0
+        $entry = Wait-StartMenuEntry -Present $case.present -Seconds 3
+        $ids = ($entry.entries | ForEach-Object { $_.id }) -join ','
+        if ($entry.entries.Count -ne $case.count -or $entry.present -ne $case.gui -or
+            $script:polls -ne $case.polls -or $script:elapsed -ne $case.elapsed -or $ids -cne $case.ids) {
+            throw "Incorrect bounded family convergence or final evidence: $($case.ids)"
+        }
+    }
+}
+Write-Output 'PASS sixteen deterministic mock-only family waits (no real sleeps or native queries)'
+"""
+        with tempfile.TemporaryDirectory() as scratch:
+            fixture = pathlib.Path(scratch) / "start-entry-mock.ps1"
+            fixture.write_text(script, encoding="utf-8")
+            result = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-File", str(fixture),
+                                     str(HERE / "test-windows-package-lifecycle.ps1")],
+                                    capture_output=True, text=True, encoding="utf-8", timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("PASS fourteen mock-only", result.stdout)
+        self.assertIn("PASS sixteen deterministic mock-only", result.stdout)
+
+
+class AppDataOwnershipTests(unittest.TestCase):
+    def test_normal_startup_prepares_private_root_before_any_controller_io(self):
+        source = (HERE.parents[1] / "Sources/SpeakWindows/SpeakWindowsMain.swift").read_text(encoding="utf-8")
+        main = source[source.index("@main"):]
+        prepare = main.index("try WindowsHostPlatform.preparePrivateDirectory(directory)")
+        self.assertLess(main.index('appendingPathComponent("JustSpeakToIt")'), prepare)
+        self.assertLess(prepare, main.index("DesktopHostOnboarding.adoptExistingInstall"))
+        self.assertLess(prepare, main.index("WindowsAppController(directory: directory)"))
+
+    def test_newly_copied_fixtures_use_current_user_not_elevated_default_group_owner(self):
+        for name in ("test-windows-package-lifecycle.ps1", "test-windows-package-admission.ps1"):
+            with self.subTest(script=name):
+                source = (HERE / name).read_text(encoding="utf-8")
+                copied = source.index("Copy-Item -LiteralPath $staging -Destination $dataDirectory -Recurse")
+                fixture = source[copied:source.index("$expectations = Read-JstiJson", copied)]
+                self.assertIn("$fixtureAccess = Get-Acl -LiteralPath $dataDirectory", fixture)
+                self.assertIn("$fixtureAccess.SetOwner([Security.Principal.WindowsIdentity]::GetCurrent().User)", fixture)
+                self.assertIn("Set-Acl -LiteralPath $dataDirectory -AclObject $fixtureAccess", fixture)
 
 
 class AssetTests(unittest.TestCase):
@@ -345,17 +660,22 @@ class LayoutTests(unittest.TestCase):
                 self.assertEqual((layout / name).read_bytes(), archive.read(name), name)
                 self.assertEqual(hashes[name], sha256(archive.read(name)))
         generated = {row["path"]: row["origin"] for row in package_manifest["files"] if row["origin"] != "bundle"}
-        self.assertEqual(generated, {"AppxManifest.xml": "generated-manifest",
-                                     "Assets/Square150x150Logo.png": "generated-asset",
-                                     "Assets/Square44x44Logo.png": "generated-asset",
-                                     "Assets/StoreLogo.png": "generated-asset"})
+        expected = {path: "generated-asset" for path in windows_msix.load_identity()["assets"]["images"]}
+        expected["AppxManifest.xml"] = "generated-manifest"
+        self.assertEqual(generated, expected)
         self.assertEqual(package_manifest["package"]["packageFamilyName"],
                          "com.justspeaktoit.windows.developer_" + windows_msix.publisher_id(
                              "CN=Just Speak to It Developer"))
         self.assertFalse(package_manifest["package"]["signed"])
         self.assertEqual(package_manifest["bundle"]["sourceCommit"], COMMIT)
         self.assertEqual(package_manifest["bundle"]["runtimeModules"], ["swiftCore.dll"])
-        self.assertEqual(package_manifest["executable"]["subsystem"], "console")
+        self.assertEqual(package_manifest["executable"]["subsystem"], "windows")
+        self.assertEqual(set(package_manifest["executables"]), set(BUILD.EXECUTABLES))
+        self.assertEqual(package_manifest["executables"]["speak.exe"]["subsystem"], "console")
+        self.assertEqual(package_manifest["package"]["cliExecutionAlias"], "JustSpeakToItDeveloperCLI.exe")
+        self.assertEqual(package_manifest["package"]["cliApplicationId"], "JustSpeakToItCLI")
+        self.assertEqual(package_manifest["package"]["cliAppUserModelId"],
+                         package_manifest["package"]["packageFamilyName"] + "!JustSpeakToItCLI")
         self.assertEqual(evidence["layout"]["files"], len(hashes))
 
     def test_arm64_bundle_becomes_an_arm64_package_of_the_same_identity(self):
@@ -367,6 +687,9 @@ class LayoutTests(unittest.TestCase):
         self.assertEqual(package_manifest["package"]["kind"], "unsigned Windows ARM64 developer MSIX payload")
         manifest = ET.fromstring((self.root / "out/layout/AppxManifest.xml").read_bytes())
         self.assertEqual(manifest.find("f:Identity", windows_msix.NAMESPACES).get("ProcessorArchitecture"), "arm64")
+        self.assertEqual(package_manifest["package"]["cliApplicationId"], "JustSpeakToItCLI")
+        self.assertEqual(package_manifest["package"]["cliAppUserModelId"],
+                         package_manifest["package"]["packageFamilyName"] + "!JustSpeakToItCLI")
         x64 = self.build(make_bundle(self.root / "x64-bundle"), output="x64")
         self.assertEqual(x64["package"]["packageFamilyName"], evidence["package"]["packageFamilyName"])
         self.assertEqual(x64["package"]["architecture"], "x64")
@@ -382,7 +705,8 @@ class LayoutTests(unittest.TestCase):
              "not a native arm64 DLL \\(it is arm64ec\\)"),
             ("arm64-exe-in-x64", "x64", lambda entries, manifest: entries.update(
                 {"SpeakWindows.exe": BUNDLE_TESTS.build_pe(imports=["KERNEL32.dll"], machine=arm64)}) or
-             manifest["application"].update(executableSHA256=sha256(entries["SpeakWindows.exe"])),
+             manifest["application"].update(executableSHA256=sha256(entries["SpeakWindows.exe"])) or
+             manifest["application"]["executables"].update({"SpeakWindows.exe": sha256(entries["SpeakWindows.exe"])}),
              "not a Windows x64 executable \\(it is arm64\\)"),
             ("no-architecture", "x64", lambda entries, manifest: manifest["bundle"].pop("architecture"),
              "unsupported bundle architecture"),
@@ -407,6 +731,68 @@ class LayoutTests(unittest.TestCase):
         second = {path.relative_to(self.root / "second").as_posix(): path.read_bytes()
                   for path in (self.root / "second").rglob("*") if path.is_file()}
         self.assertEqual(first, second)
+
+    def test_missing_tampered_retargeted_cli_and_false_root_attribution_are_refused(self):
+        def replace_cli(entries, manifest, data):
+            entries["speak.exe"] = data
+            manifest["application"]["executables"]["speak.exe"] = sha256(data)
+
+        cases = [
+            ("missing", lambda entries, manifest: entries.pop("speak.exe"), "production executable"),
+            ("tampered", lambda entries, manifest: entries.update({"speak.exe": entries["speak.exe"] + b"tamper"}),
+             "production executable"),
+            ("no-cli-receipt", lambda entries, manifest: manifest["application"]["executables"].pop("speak.exe"),
+             "production executable"),
+            ("foreign-cli", lambda entries, manifest: replace_cli(entries, manifest, BUNDLE_TESTS.build_pe(
+                machine=windows_msix.windows_pe.IMAGE_FILE_MACHINE_ARM64)), "speak.exe is not a Windows x64"),
+            ("cli-test", lambda entries, manifest: replace_cli(entries, manifest, BUNDLE_TESTS.build_pe(
+                delay_imports=["Testing.dll"])), "speak.exe imports the test library Testing.dll"),
+            ("gui-as-cli", lambda entries, manifest: replace_cli(entries, manifest, entries["SpeakWindows.exe"]),
+             "console subsystem"),
+            ("cli-unknown", lambda entries, manifest: replace_cli(entries, manifest, BUNDLE_TESTS.build_pe(
+                imports=["unreviewed.dll"])), "speak.exe imports unreviewed.dll"),
+            ("false-importer", lambda entries, manifest: manifest["dependencies"]["bundled"]["swiftcore.dll"]
+             ["importedBy"].pop(), "importer attribution"),
+            ("false-root", lambda entries, manifest: manifest["dependencies"]["roots"]["speak.exe"].update(
+                staticModules=[]), "multi-root dependency closure"),
+            ("cli-source", lambda entries, manifest: manifest["application"].update(buildHost="unreviewed"),
+             "source provenance"),
+            ("cli-target", lambda entries, manifest: manifest["application"].update(target="x86_64-unknown-linux-gnu"),
+             "source provenance"),
+            ("extra-executable", lambda entries, manifest: entries.update({"other.exe": entries["speak.exe"]}),
+             "exact production multi-root closure"),
+        ]
+        for name, mutate, reason in cases:
+            with self.subTest(name=name):
+                bundle = make_bundle(self.root / name, mutate=mutate)
+                with self.assertRaisesRegex(windows_msix.PackageError, reason):
+                    self.build(bundle, output="out-" + name)
+                self.assertFalse((self.root / ("out-" + name)).exists())
+
+    def test_producer_multi_root_graph_round_trips_with_resources_and_miniz_licence(self):
+        for architecture in ("x64", "arm64"):
+            with self.subTest(architecture=architecture):
+                fixture = BUNDLE_TESTS.AssemblyTests()
+                fixture.setUp(architecture)
+                try:
+                    cli = BUNDLE_TESTS.build_pe(imports=["swiftWinSDK.dll"], delay_imports=["Foundation.dll"],
+                                               machine=windows_msix.windows_targets.target(architecture)["processMachine"])
+                    fixture.application["executables"]["speak.exe"] = cli
+                    fixture.application["metadata"]["executables"]["speak.exe"] = sha256(cli)
+                    fixture.application["resources"]["SpeakApp_Future.resources/nested/payload.json"] = b"{}"
+                    licence = BUNDLE_TESTS.MIGRATION.license_entry(windows_msix.REPOSITORY)
+                    entries, manifest = fixture.assemble(architecture=architecture, licenses=fixture.licenses + [licence])
+                    bundle = write_bundle(self.root / ("producer-" + architecture), entries, manifest, architecture)
+                    result = windows_msix.verify_bundle(bundle, fixture.application["metadata"]["sourceCommit"])
+                    self.assertEqual(result["manifest"]["dependencies"], manifest["dependencies"])
+                    self.assertNotIn("swiftWinSDK.dll", manifest["dependencies"]["roots"]["SpeakWindows.exe"]["staticModules"])
+                    self.build(bundle, output="producer-out-" + architecture)
+                    layout = self.root / ("producer-out-" + architecture) / "layout"
+                    self.assertEqual((layout / "speak.exe").read_bytes(), cli)
+                    self.assertEqual((layout / "SpeakApp_Future.resources/nested/payload.json").read_bytes(), b"{}")
+                    self.assertEqual((layout / "licenses/LICENSE-miniz.txt").read_bytes(), licence["data"])
+                finally:
+                    fixture.doCleanups()
 
     def test_external_publisher_changes_the_package_family(self):
         publisher = "CN=Contoso Software, O=Contoso Corporation, C=US"
@@ -640,6 +1026,7 @@ class LifecycleSupportTests(unittest.TestCase):
         struct.pack_into("<I", audio, 4, payload + 36)
         struct.pack_into("<I", audio, 40, payload)
         audio_path.write_bytes(bytes(audio))
+        (self.data / "onboarding.json").write_text('{"hasCompletedOnboarding":true}', encoding="utf-8")
 
     def test_fixture_uses_the_apps_formats(self):
         completed = json.loads((self.data / ("History/%s.json" % lifecycle_support.COMPLETED_ID)).read_text(encoding="utf-8"))
@@ -668,8 +1055,27 @@ class LifecycleSupportTests(unittest.TestCase):
         (self.data / "OpenRouterAudioCatalog.json").write_text("{}", encoding="utf-8")
         report = lifecycle_support.check_data(self.data, self.expectations, "recovered")
         self.assertEqual(report["failures"], [])
-        self.assertEqual(report["appCreatedFiles"], ["OpenRouterAudioCatalog.json"])
+        self.assertEqual(report["appCreatedFiles"], ["OpenRouterAudioCatalog.json", "onboarding.json"])
         self.assertTrue(lifecycle_support.check_data(self.data, self.expectations, "seeded")["failures"])
+
+    def test_legacy_onboarding_completion_is_required_and_validated(self):
+        self.recover_like_the_app()
+        state = self.data / "onboarding.json"
+        for invalid in (None, "not json", "[]", '{"hasCompletedOnboarding":false}',
+                        '{"hasCompletedOnboarding":1}', '{"hasCompletedOnboarding":true,"unknown":true}'):
+            with self.subTest(state=invalid):
+                if invalid is None:
+                    state.unlink()
+                else:
+                    state.write_text(invalid, encoding="utf-8")
+                report = lifecycle_support.check_data(self.data, self.expectations, "recovered")
+                self.assertTrue(any("legacy onboarding" in failure for failure in report["failures"]), report)
+
+    def test_unrecognized_app_metadata_remains_a_preservation_failure(self):
+        self.recover_like_the_app()
+        (self.data / "other-state.json").write_text("{}", encoding="utf-8")
+        report = lifecycle_support.check_data(self.data, self.expectations, "recovered")
+        self.assertIn("unexpected files: other-state.json", report["failures"])
 
     def test_lost_or_changed_user_data_is_reported(self):
         self.recover_like_the_app()

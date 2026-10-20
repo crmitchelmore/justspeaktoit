@@ -39,7 +39,7 @@ extension DesktopHostController {
             // Re-check after the suspension: the selection, a recording or
             // shutdown may have changed while the store resolved the file.
             guard playbackRequests.isCurrent(ticket), !closed, canUseHistory, selectedHistoryID == id else { return }
-            try playback.play(recordID: id, path: audio.path, knownDuration: record.result?.duration)
+            try playback.play(recordID: id, path: audio.path, knownDuration: record.recordingDuration)
         } catch {
             guard playbackRequests.isCurrent(ticket), !busy, recording == nil else { return }
             update("Could not play recording: \(error.localizedDescription)")
@@ -53,9 +53,25 @@ extension DesktopHostController {
     package func playbackStop() {
         guard !closed else { return }
         let reading = Platform.isReadingAloud(readAloudState)
+        let generating = voiceGenerationTask != nil
         stopReadAloud()
         playback.stop(announcing: true)
-        guard reading, !busy, recording == nil else { return }
-        update("Reading aloud stopped.")
+        guard reading || generating, !busy, recording == nil else { return }
+        update(generating ? "Generated voice audio stopped. Completed audio remains available." :
+            "Reading aloud stopped.")
+    }
+}
+
+extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
+    package func pauseResumeSpeech() {
+        guard !closed else { return }
+        guard canUseHistory else {
+            update("Finish recording or the current data operation before changing speech playback.")
+            return
+        }
+        guard let speech = readAloudState.speech, playback.togglePause(speech: speech) else {
+            update("No active speech to pause or resume.")
+            return
+        }
     }
 }

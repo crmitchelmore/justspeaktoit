@@ -42,17 +42,10 @@ enum DeepgramSpeechWAV {
         0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71
     ]
 
-    static func canonical(_ body: Data, sampleRate: Int) throws -> DeepgramSpeechAudio {
-        guard !body.isEmpty else { throw DeepgramSpeechError.emptyAudio }
-        guard body.count >= 12, fourCC(body, at: 0) == "RIFF", fourCC(body, at: 8) == "WAVE" else {
-            throw DeepgramSpeechError.unsupportedAudioFormat
-        }
-        let riff = uint32(body, at: 4)
-        let streamed = sentinels.first { $0.riff == riff }
-        if streamed == nil {
-            guard Int(riff) <= body.count - 8 else { throw DeepgramSpeechError.incompleteAudio }
-            guard Int(riff) == body.count - 8 else { throw DeepgramSpeechError.unsupportedAudioFormat }
-        }
+    static func canonical(
+        _ body: Data, sampleRate: Int, requireComplete: Bool = false
+    ) throws -> DeepgramSpeechAudio {
+        let streamed = try validateContainer(body, requireComplete: requireComplete)
         var offset = 12
         var hasFormat = false
         while offset <= body.count - 8 {
@@ -63,17 +56,64 @@ enum DeepgramSpeechWAV {
             if identifier == "data" {
                 guard hasFormat else { throw DeepgramSpeechError.unsupportedAudioFormat }
                 let length = try dataLength(declared, available, streamed)
+                if requireComplete { try validateTrailingChunks(body, offset: start + length + Int(declared & 1)) }
                 return try audio(body[(body.startIndex + start)...].prefix(length), sampleRate: sampleRate)
             }
             guard Int(declared) <= available else { throw DeepgramSpeechError.incompleteAudio }
             if identifier == "fmt " {
                 try validateFormat(body, start: start, length: Int(declared), sampleRate: sampleRate)
+                if requireComplete {
+                    guard !hasFormat else { throw DeepgramSpeechError.unsupportedAudioFormat }
+                    try validateCompleteFormat(body, start: start, length: Int(declared), sampleRate: sampleRate)
+                }
                 hasFormat = true
             }
             // Chunks are word aligned: an odd length is followed by a pad byte.
             offset = start + Int(declared) + Int(declared & 1)
         }
         throw DeepgramSpeechError.unsupportedAudioFormat
+    }
+
+    private static func validateContainer(_ body: Data, requireComplete: Bool) throws -> Sentinel? {
+        guard !body.isEmpty else { throw DeepgramSpeechError.emptyAudio }
+        guard body.count >= 12, fourCC(body, at: 0) == "RIFF", fourCC(body, at: 8) == "WAVE" else {
+            throw DeepgramSpeechError.unsupportedAudioFormat
+        }
+        let riff = uint32(body, at: 4)
+        let streamed = requireComplete ? nil : sentinels.first { $0.riff == riff }
+        if streamed == nil {
+            guard Int(riff) <= body.count - 8 else { throw DeepgramSpeechError.incompleteAudio }
+            guard Int(riff) == body.count - 8 else { throw DeepgramSpeechError.unsupportedAudioFormat }
+        }
+        return streamed
+    }
+
+    private static func validateCompleteFormat(_ body: Data, start: Int, length: Int, sampleRate: Int) throws {
+        guard uint32(body, at: start + 8) == UInt32(sampleRate * 2) else {
+            throw DeepgramSpeechError.unsupportedAudioFormat
+        }
+        if uint16(body, at: start) == extensibleFormat {
+            guard uint16(body, at: start + 16) >= 22,
+                  uint16(body, at: start + 16) <= length - 18,
+                  uint16(body, at: start + 18) == 16 else {
+                throw DeepgramSpeechError.unsupportedAudioFormat
+            }
+        }
+    }
+
+    private static func validateTrailingChunks(_ body: Data, offset: Int) throws {
+        var offset = offset
+        while offset < body.count {
+            guard offset <= body.count - 8 else { throw DeepgramSpeechError.incompleteAudio }
+            let identifier = fourCC(body, at: offset)
+            guard identifier != "data", identifier != "fmt " else {
+                throw DeepgramSpeechError.unsupportedAudioFormat
+            }
+            let length = Int(uint32(body, at: offset + 4))
+            guard length <= body.count - offset - 8 else { throw DeepgramSpeechError.incompleteAudio }
+            offset += 8 + length + (length & 1)
+        }
+        guard offset == body.count else { throw DeepgramSpeechError.incompleteAudio }
     }
 
     /// A streamed header must carry its sentinel's `data` value, and its

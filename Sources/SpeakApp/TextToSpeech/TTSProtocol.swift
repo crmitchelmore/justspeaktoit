@@ -48,22 +48,22 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
 
   var apiKeyIdentifier: String {
     switch self {
-    case .elevenlabs: return "elevenlabs.apiKey"
-    case .openai: return "openai.tts.apiKey"
+    case .elevenlabs: return ElevenLabsTTSCatalog.credentialIdentifier
+    case .openai: return OpenAITTSCatalog.credentialIdentifier
     case .openrouter: return "openrouter.apiKey"
     case .azure: return "azure.speech.apiKey"
     case .deepgram: return "deepgram.apiKey"
     // One Soniox key covers transcription and speech generation.
     case .soniox: return "soniox.apiKey"
     // One Cartesia key covers Ink transcription and Sonic speech generation.
-    case .cartesia: return "cartesia.apiKey"
+    case .cartesia: return CartesiaTTSCatalog.credentialIdentifier
     // These four each use one account key for transcription and for speech
     // generation, so they reuse the identifier the transcription provider
     // already writes.
-    case .groq: return "groq.apiKey"
-    case .gemini: return "google.apiKey"
+    case .groq: return GroqTTSCatalog.credentialIdentifier
+    case .gemini: return GeminiTTSCatalog.credentialIdentifier
     case .mistral: return "mistral.apiKey"
-    case .speechmatics: return "speechmatics.apiKey"
+    case .speechmatics: return SpeechmaticsTTSCatalog.credentialIdentifier
     // One xAI key covers Grok Voice transcription, dedicated speech to text
     // and speech generation.
     case .xai: return "xai.apiKey"
@@ -122,49 +122,9 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
   }
 }
 
-enum TTSQuality: String, Codable, CaseIterable, Identifiable {
-  case standard
-  case high
-  case highest
+typealias TTSQuality = VoiceSynthesisQuality
 
-  var id: String { rawValue }
-
-  var displayName: String {
-    switch self {
-    case .standard: return "Fast (Low Latency)"
-    case .high: return "Balanced"
-    case .highest: return "Best Quality"
-    }
-  }
-
-  var description: String {
-    switch self {
-    case .standard: return "Optimized for speed, ~75ms latency"
-    case .high: return "Good balance of quality and speed"
-    case .highest: return "Maximum quality, higher latency"
-    }
-  }
-}
-
-enum AudioFormat: String, Codable, CaseIterable, Identifiable {
-  case mp3
-  case m4a
-  case wav
-
-  var id: String { rawValue }
-
-  var displayName: String {
-    switch self {
-    case .mp3: return "MP3"
-    case .m4a: return "AAC (M4A)"
-    case .wav: return "WAV"
-    }
-  }
-
-  var fileExtension: String {
-    rawValue
-  }
-}
+typealias AudioFormat = VoiceAudioFormat
 
 struct TTSSettings {
   var speed: Double
@@ -182,7 +142,7 @@ struct TTSSettings {
     speed: Double = 1.0,
     pitch: Double = 0.0,
     quality: TTSQuality = .high,
-    format: AudioFormat = .mp3,
+    format: AudioFormat = .macDefault,
     useSSML: Bool = false,
     language: String? = nil,
     sonioxRegion: SonioxTTSRegion = .unitedStates
@@ -344,65 +304,28 @@ protocol ProgressiveTextToSpeechClient: TextToSpeechClient {
 // The provider lists form one static catalogue and are easier to audit as a single type.
 // swiftlint:disable:next type_body_length
 struct VoiceCatalog {
-  static let elevenlabsVoices: [TTSVoice] = [
-    // Recommended voices
-    TTSVoice(
-      id: "elevenlabs/21m00Tcm4TlvDq8ikWAM",
-      name: "Rachel",
-      provider: .elevenlabs,
-      traits: [.female, .american, .professional, .clear, .multilingual],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "elevenlabs/pNInz6obpgDQGcFmaJgB",
-      name: "Adam",
-      provider: .elevenlabs,
-      traits: [.male, .american, .deep, .professional, .multilingual],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "elevenlabs/EXAVITQu4vr4xnSDxMaL",
-      name: "Sarah",
-      provider: .elevenlabs,
-      traits: [.female, .american, .warm, .multilingual],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "elevenlabs/ErXwobaYiN019PkySvjV",
-      name: "Antoni",
-      provider: .elevenlabs,
-      traits: [.male, .american, .clear, .multilingual],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "elevenlabs/TxGEqnHWrfWFTfGW9XjX",
-      name: "Josh",
-      provider: .elevenlabs,
-      traits: [.male, .american, .energetic, .multilingual],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "elevenlabs/MF3mGyEYCl7XYWbV9V6O",
-      name: "Elli",
-      provider: .elevenlabs,
-      traits: [.female, .american, .warm, .casual],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "elevenlabs/D38z5RcWu1voky8WS1ja",
-      name: "Fin",
-      provider: .elevenlabs,
-      traits: [.male, .british, .professional],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "elevenlabs/jBpfuIE2acCO8z3wKNLl",
-      name: "Gigi",
-      provider: .elevenlabs,
-      traits: [.female, .american, .energetic, .casual],
-      previewURL: nil
-    )
-  ]
+  static let elevenlabsVoices: [TTSVoice] = ElevenLabsTTSCatalog.voices.map { voice in
+    TTSVoice(id: voice.providerVoiceID, name: voice.displayName, provider: .elevenlabs,
+      traits: voice.traits.map(elevenLabsTrait), previewURL: nil)
+  }
+
+  // exhaustive 1:1 enum-case mapping across the existing provider trait catalogue.
+  // swiftlint:disable:next cyclomatic_complexity
+  private static func elevenLabsTrait(_ trait: ElevenLabsTTSVoice.Trait) -> TTSVoice.VoiceTrait {
+    switch trait {
+    case .female: .female
+    case .male: .male
+    case .american: .american
+    case .british: .british
+    case .professional: .professional
+    case .clear: .clear
+    case .multilingual: .multilingual
+    case .deep: .deep
+    case .warm: .warm
+    case .energetic: .energetic
+    case .casual: .casual
+    }
+  }
 
   static let openaiVoices: [TTSVoice] = [
     TTSVoice(
@@ -510,57 +433,25 @@ struct VoiceCatalog {
     return TTSVoice(id: voice.id, name: voice.name, provider: .azure, traits: traits, previewURL: nil)
   }
 
-  static let azureNeuralVoices: [TTSVoice] = [
+  static let azureNeuralVoices: [TTSVoice] = AzureNeuralVoiceCatalog.voices.map { voice in
     TTSVoice(
-      id: "azure/en-US-AriaNeural",
-      name: "Aria",
-      provider: .azure,
-      traits: [.female, .american, .professional],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "azure/en-US-GuyNeural",
-      name: "Guy",
-      provider: .azure,
-      traits: [.male, .american, .professional],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "azure/en-US-JennyNeural",
-      name: "Jenny",
-      provider: .azure,
-      traits: [.female, .american, .casual, .warm],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "azure/en-US-DavisNeural",
-      name: "Davis",
-      provider: .azure,
-      traits: [.male, .american, .professional],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "azure/en-GB-SoniaNeural",
-      name: "Sonia",
-      provider: .azure,
-      traits: [.female, .british, .professional],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "azure/en-GB-RyanNeural",
-      name: "Ryan",
-      provider: .azure,
-      traits: [.male, .british, .professional],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "azure/en-AU-NatashaNeural",
-      name: "Natasha",
-      provider: .azure,
-      traits: [.female, .australian, .professional],
-      previewURL: nil
+      id: voice.id, name: voice.name, provider: .azure,
+      traits: voice.traits.map(azureNeuralTrait), previewURL: nil
     )
-  ]
+  }
+
+  private static func azureNeuralTrait(_ trait: AzureNeuralVoice.Trait) -> TTSVoice.VoiceTrait {
+    switch trait {
+    case .female: .female
+    case .male: .male
+    case .american: .american
+    case .british: .british
+    case .australian: .australian
+    case .professional: .professional
+    case .casual: .casual
+    case .warm: .warm
+    }
+  }
 
   static let systemVoices: [TTSVoice] = [
     TTSVoice(
@@ -743,12 +634,7 @@ struct VoiceCatalog {
 
   // Migrate old voice IDs to new ones
   private static func migrateLegacyVoiceID(_ id: String) -> String {
-    let legacyMappings: [String: String] = [
-      "elevenlabs/rachel": "elevenlabs/21m00Tcm4TlvDq8ikWAM",
-      "elevenlabs/adam": "elevenlabs/pNInz6obpgDQGcFmaJgB",
-      "elevenlabs/bella": "elevenlabs/EXAVITQu4vr4xnSDxMaL"
-    ]
-    return legacyMappings[id] ?? id
+    ElevenLabsTTSCatalog.legacyVoiceIdentifiers[id] ?? id
   }
 
   private static func deepgramTraits(for voice: DeepgramSpeechCatalog.Voice) -> [TTSVoice.VoiceTrait] {

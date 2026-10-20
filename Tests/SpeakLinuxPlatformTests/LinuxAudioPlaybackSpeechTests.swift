@@ -66,6 +66,36 @@ final class LinuxAudioPlaybackSpeechTests: XCTestCase {
         playback.endSpeech(speech)
     }
 
+    func testSpeechPause_RequiresTheExactActiveHandleAndNeverPausesHistory() throws {
+        let id = UUID()
+        let old = try playback.beginSpeech(recordID: id)
+        XCTAssertTrue(playback.togglePause(speech: old))
+        XCTAssertEqual(audio.displays.last?.state, 2)
+        XCTAssertTrue(playback.togglePause(speech: old))
+        XCTAssertEqual(audio.displays.last?.state, 1)
+        let current = try playback.beginSpeech(recordID: id)
+        XCTAssertFalse(playback.togglePause(speech: old))
+        XCTAssertEqual(audio.displays.last?.state, 1)
+        playback.endSpeech(current)
+        XCTAssertFalse(playback.togglePause(speech: current))
+        try playback.play(recordID: id, path: segmentPath, knownDuration: nil)
+        XCTAssertFalse(playback.togglePause(speech: current))
+        XCTAssertTrue(try XCTUnwrap(audio.players.last).pauses.isEmpty)
+        playback.stop()
+        XCTAssertFalse(playback.togglePause(speech: current))
+    }
+
+    func testAudioHousekeeping_DoesNotStopSpeechOrItsNextSegment() async throws {
+        let speech = try playback.beginSpeech(recordID: UUID())
+        try await playback.stopSavedAudioAndWait()
+        let (operation, player) = try await segment(speech)
+        try await playback.stopSavedAudioAndWait()
+        XCTAssertFalse(player.destroyed)
+        player.finish()
+        _ = try await operation.value
+        playback.endSpeech(speech)
+    }
+
     /// The user's Stop ends speech while it is synthesized or playing, and
     /// refuses every segment still queued behind it.
     func testStop_EndsSpeechAndRefusesItsQueuedSegments() async throws {
@@ -141,7 +171,7 @@ final class LinuxAudioPlaybackSpeechTests: XCTestCase {
         let id = UUID()
         let speech = try playback.beginSpeech(recordID: id)
         let (first, player) = try await segment(speech)
-        XCTAssertTrue(playback.togglePause(recordID: id))
+        XCTAssertTrue(playback.togglePause(speech: speech))
         XCTAssertEqual(player.pauses, [true])
         XCTAssertEqual(audio.displays.last?.state, 2)
         player.finish()

@@ -1,6 +1,8 @@
-# Screenshot provenance
+# Image provenance
 
-These files show native app UI, not HTML reproductions or generated mockups.
+## Native screenshots
+
+The PNG screenshot files below show native app UI, not HTML reproductions or generated mockups.
 Capture dates use Europe/London (BST, UTC+01:00): the captures made shortly after
 midnight on 9 September are dated 8 September in UTC.
 
@@ -31,3 +33,20 @@ midnight on 9 September are dated 8 September in UTC.
 The website links screenshots to the original image for full-size viewing.
 Do not enlarge raster screenshots beyond their captured pixel dimensions or
 alter controls/text in an image editor. Recapture the actual app to update UI.
+
+
+## HDR wordmark asset (not a screenshot)
+
+`wordmark-white-1.5x.jpg` is a locally authored 64 × 64 uniform-white SDR JPEG
+with an embedded uniform gain map, encoded with Google libultrahdr commit
+`66821e0a261aa3a06c0e7c889f52eced52850be1`. ISO 21496-1 and XMP metadata cap
+both gain and capacity at 1.5× (+0.585 stop). It contains no native capture,
+logo artwork or personal data. Its SHA-256 is
+`511edb2c416eb20f902d7b6c5015063ee1169ea9b34c085e02b07a9cc5406d32`.
+
+Keep this gain-map JPEG byte-for-byte through the static build. Do not apply
+screenshot recapture rules, resize it or run it through an SDR-only image
+optimiser. Replacements must retain a white SDR base and verified 1.5× gain-map
+metadata; verify the built asset identity with `npm test`. Only existing small
+header/footer wordmarks consume it; physical HDR luminance is not verified by
+headless browser tests.

@@ -124,7 +124,7 @@ public enum ModelCredentialResolver {
             return .apiKey(identifier: "deepgram.apiKey", providerName: "Deepgram")
         }
         if lowered.hasPrefix("elevenlabs/") {
-            return .apiKey(identifier: "elevenlabs.apiKey", providerName: "ElevenLabs")
+            return .apiKey(identifier: ElevenLabsTTSCatalog.credentialIdentifier, providerName: "ElevenLabs")
         }
         if lowered.hasPrefix("openai/") {
             return .apiKey(identifier: "openai.tts.apiKey", providerName: "OpenAI")

@@ -80,9 +80,9 @@ extension OpenRouterBranding {
 /// Portable, one-shot OpenRouter chat transport. Missing credentials always fail;
 /// local cleanup is a separate, explicit product choice rather than an HTTP fallback.
 public actor OpenRouterChatClient: ChatLLMClient {
-    private let apiKey: String
-    private let session: URLSession
-    private let branding: OpenRouterBranding
+    let apiKey: String
+    let session: URLSession
+    let branding: OpenRouterBranding
 
     public init(
         apiKey: String,

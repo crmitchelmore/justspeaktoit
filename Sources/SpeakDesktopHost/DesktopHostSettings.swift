@@ -4,7 +4,10 @@ import SpeakDesktop
 
 extension DesktopHostController {
     package func selectedMicrophone() -> String { settings.microphoneDeviceID ?? "" }
-    package func setMicrophoneWarning(_ warning: String?) { microphoneWarning = warning }
+    package func setMicrophoneWarning(_ warning: String?) {
+        invalidateConnectionPreWarming(resetCapture: true)
+        microphoneWarning = warning
+    }
 
     package func selectMicrophone(_ identifier: String) {
         guard canUseHistory else { return }
@@ -40,11 +43,14 @@ package struct DesktopHostShortcutRequest<Platform: DesktopHostPlatform>: Sendab
     package let textOutput: Task<Platform.TextOutputOptions, Never>
     package let modelIndex: Int
     package let deviceID: String
+    package let profile: DesktopProfileSession?
+    let event: DesktopHostRecordingEvent<Platform>?
 
     package init(
         input: HotKeySessionPolicy.Input, style: HotKeyActivationStyle, recognisedAt: TimeInterval,
-        target: Platform.InsertionTarget?, targetExecutablePath: String?,
-        textOutput: Task<Platform.TextOutputOptions, Never>, modelIndex: Int, deviceID: String
+        target: Platform.InsertionTarget?, targetExecutablePath: String? = nil,
+        textOutput: Task<Platform.TextOutputOptions, Never>, modelIndex: Int, deviceID: String,
+        profile: DesktopProfileSession? = nil
     ) {
         self.input = input
         self.style = style
@@ -54,6 +60,25 @@ package struct DesktopHostShortcutRequest<Platform: DesktopHostPlatform>: Sendab
         self.textOutput = textOutput
         self.modelIndex = modelIndex
         self.deviceID = deviceID
+        self.profile = profile
+        self.event = nil
+    }
+
+    func capturing(_ event: DesktopHostRecordingEvent<Platform>) -> Self {
+        .init(capturing: event, request: self)
+    }
+
+    private init(capturing event: DesktopHostRecordingEvent<Platform>, request: Self) {
+        self.input = request.input
+        self.style = request.style
+        self.recognisedAt = request.recognisedAt
+        self.target = request.target
+        self.targetExecutablePath = request.targetExecutablePath
+        self.textOutput = Task { event.textOutput }
+        self.modelIndex = request.modelIndex
+        self.deviceID = request.deviceID
+        self.profile = event.profile
+        self.event = event
     }
 }
 
@@ -65,34 +90,90 @@ extension DesktopHostController {
     /// checked again afterwards and a shortcut whose state changed does
     /// nothing: it never stops a recording it did not see, or starts one.
     package func shortcut(_ request: DesktopHostShortcutRequest<Platform>) async {
+        await routeShortcut(request, waitForOwnedStartup: true)
+    }
+
+    /// The native gesture serializer awaits admission, not microphone readiness.
+    /// The admitted startup/stop remains owned and counted by this controller.
+    package func admitShortcut(_ request: DesktopHostShortcutRequest<Platform>) async {
+        await routeShortcut(request, waitForOwnedStartup: false)
+    }
+
+    private func routeShortcut(
+        _ request: DesktopHostShortcutRequest<Platform>, waitForOwnedStartup: Bool
+    ) async {
         guard !closed else { return }
         if case .gesture(.doubleTap) = request.input {
             let interval = request.recognisedAt - hotKeySession.lastDoubleTap
             guard interval >= HotKeyGestureTiming.doubleTapCommandInterval else { return }
             hotKeySession.lastDoubleTap = request.recognisedAt
         }
+        if await handsFreeShortcut(request) { return }
+        await manualShortcut(request, waitForOwnedStartup: waitForOwnedStartup)
+    }
+
+    private func manualShortcut(
+        _ request: DesktopHostShortcutRequest<Platform>, waitForOwnedStartup: Bool
+    ) async {
         guard let command = HotKeySessionPolicy.command(
-            for: request.input, style: request.style, active: recording?.trigger
+            for: request.input, style: request.style, active: dictationTrigger
         ) else { return }
         switch command {
         case .start(let trigger):
-            guard canStartFromShortcut(request) else { return }
-            let textOutput = await request.textOutput.value
-            guard canStartFromShortcut(request) else { return }
+            await startFromShortcut(request, trigger: trigger, waitForOwnedStartup: waitForOwnedStartup)
+        case .stop:
+            await stopFromShortcut(request, waitForOwnedStartup: waitForOwnedStartup)
+        }
+    }
+
+    private func startFromShortcut(
+        _ request: DesktopHostShortcutRequest<Platform>, trigger: HotKeySessionTrigger, waitForOwnedStartup: Bool
+    ) async {
+        guard canStartFromShortcut(request) else { return }
+        if ownedDictationCapability != nil {
+            await admitOwnedDictation(
+                target: request.target, modelIndex: request.modelIndex, deviceID: request.deviceID,
+                targetExecutablePath: request.targetExecutablePath, textOutput: request.textOutput,
+                trigger: trigger, wait: waitForOwnedStartup, profile: request.profile, event: request.event
+            )
+            return
+        }
+        let textOutput = await request.textOutput.value
+        guard canStartFromShortcut(request) else { return }
+        if let event = request.event {
+            await toggleCaptured(
+                event, target: request.target, modelIndex: request.modelIndex,
+                deviceID: request.deviceID, trigger: trigger
+            )
+        } else if let profile = request.profile {
+            await toggleCaptured(
+                target: request.target, modelIndex: request.modelIndex, deviceID: request.deviceID,
+                textOutput: textOutput, profile: profile, trigger: trigger
+            )
+        } else {
             await toggle(
                 target: request.target, modelIndex: request.modelIndex, deviceID: request.deviceID,
                 targetExecutablePath: request.targetExecutablePath, textOutput: textOutput, trigger: trigger
             )
-        case .stop:
-            guard let active = recording?.record.id, !busy else { return }
-            let textOutput = await request.textOutput.value
-            guard !closed, recording?.record.id == active, !busy else { return }
-            await toggle(
-                target: request.target, modelIndex: request.modelIndex, deviceID: request.deviceID,
-                targetExecutablePath: request.targetExecutablePath, textOutput: textOutput
-            )
-            hotKeySession.startsAfter = ProcessInfo.processInfo.systemUptime
         }
+    }
+
+    private func stopFromShortcut(
+        _ request: DesktopHostShortcutRequest<Platform>, waitForOwnedStartup: Bool
+    ) async {
+        if ownedDictation != nil || ownedDictationAdmission != nil {
+            await stopOwnedDictationAdmission(wait: waitForOwnedStartup)
+            hotKeySession.startsAfter = ProcessInfo.processInfo.systemUptime
+            return
+        }
+        guard let active = recording?.record.id, !busy else { return }
+        let textOutput = await request.textOutput.value
+        guard !closed, recording?.record.id == active, !busy else { return }
+        await toggle(
+            target: request.target, modelIndex: request.modelIndex, deviceID: request.deviceID,
+            targetExecutablePath: request.targetExecutablePath, textOutput: textOutput
+        )
+        hotKeySession.startsAfter = ProcessInfo.processInfo.systemUptime
     }
 
     private func canStartFromShortcut(_ request: DesktopHostShortcutRequest<Platform>) -> Bool {
@@ -107,6 +188,14 @@ extension DesktopHostController {
     /// resolving its audio never starts. The ended request reports nothing,
     /// because whatever ended it owns the status.
     package func stopReadAloud() {
+        if let requestID = voiceTextImportRequestID { cancelVoiceTextImport(requestID: requestID) }
+        voiceGenerationTask?.cancel()
+        Platform.voiceGenerated(.init(
+            resultID: generatedVoice?.id.uuidString ?? "", working: false,
+            message: "Stopped. Completed generated audio remains available.",
+            format: generatedVoice?.audio.format ?? .wav
+        ))
+        voiceOutputRecordID = nil
         playbackRequests.end()
         Platform.stopReadAloud(&readAloudState, playback: playback)
     }

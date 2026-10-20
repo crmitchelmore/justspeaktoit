@@ -12,6 +12,8 @@ public enum GroqTTSModel: String, CaseIterable, Codable, Hashable, Identifiable,
 
     public var id: String { rawValue }
 
+    public var desktopModelIdentifier: String { "\(GroqTTSCatalog.voiceIDPrefix)\(rawValue)" }
+
     public var displayName: String {
         switch self {
         case .orpheusEnglish: "Orpheus v1 English"
@@ -91,6 +93,11 @@ public struct GroqTTSVoice: Identifiable, Codable, Hashable, Sendable {
 
 /// Canonical Groq Orpheus catalogue and voice-identifier conventions.
 public enum GroqTTSCatalog {
+    public static let providerIdentifier = "groq"
+    public static let credentialIdentifier = "groq.apiKey"
+    public static let pricingEstimateBasis =
+        "Groq estimates use submitted characters after canonical segmentation, not Unicode-scalar counts "
+        + "or provider billing receipts. Each segment is a separate request."
     /// Prefix that routes a stored voice identifier back to this provider.
     public static let voiceIDPrefix = "groq/"
 

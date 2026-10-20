@@ -791,6 +791,8 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         uniquingKeysWith: { first, _ in first }
     )
 
+    // existing owned catalogue-matching surface; no behavior change.
+    // swiftlint:disable:next function_body_length
     public static func friendlyName(for identifier: String) -> String { // swiftlint:disable:this cyclomatic_complexity
         let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "—" }
@@ -798,8 +800,24 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         if let exact = optionsByID[trimmed.lowercased()] {
             return exact.displayName
         }
+        if let local = localPostProcessing.first(where: { $0.id.lowercased() == trimmed.lowercased() }) {
+            return local.displayName
+        }
 
         let lowercased = trimmed.lowercased()
+        if lowercased.hasPrefix(LocalModelIdentity.postProcessingHuggingFacePrefix) {
+            let parts = trimmed
+                .dropFirst(LocalModelIdentity.postProcessingHuggingFacePrefix.count)
+                .split(separator: "/")
+            if parts.count == 3 {
+                let filename = String(parts[2])
+                let stem = filename.lowercased().hasSuffix("-gguf") ? String(filename.dropLast(5)) : filename
+                return LocalPostProcessingModel.importedDisplayName(
+                    repoID: "\(parts[0])/\(parts[1])", filename: stem
+                )
+            }
+        }
+        if let imported = HuggingFaceWhisperModel.fallbackDisplayName(for: lowercased) { return imported }
         if lowercased.hasPrefix("local/") {
             if lowercased == "local/streaming/fluidaudio/parakeet-realtime-eou-120m" {
                 return "Parakeet Realtime EOU 120M"

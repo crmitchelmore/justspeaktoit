@@ -37,9 +37,9 @@ actor DeepgramTTSClient: TextToSpeechClient {
 
             // Add sample rate for better quality
             if settings.quality == .highest {
-                queryItems.append(URLQueryItem(name: "sample_rate", value: "48000"))
+                queryItems.append(URLQueryItem(name: "sample_rate", value: String(settings.quality.neuralSampleRate)))
             } else if settings.quality == .high {
-                queryItems.append(URLQueryItem(name: "sample_rate", value: "24000"))
+                queryItems.append(URLQueryItem(name: "sample_rate", value: String(settings.quality.neuralSampleRate)))
             }
         }
 

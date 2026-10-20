@@ -37,10 +37,14 @@ final class LinuxMicrophoneMonitor: @unchecked Sendable {
         guard schedule else { return }
         let controller = controller
         Task.detached { [self] in
+            await controller.connectionWarmEnvironmentChanged()
             try? await Task.sleep(nanoseconds: 250_000_000)
             lock.withLock { scheduled = false }
             guard lock.withLock({ running }) else { return }
-            _ = LinuxWindow.configureMicrophones(selected: await controller.selectedMicrophone(), synthetic: false)
+            let warning = LinuxWindow.configureMicrophones(
+                selected: await controller.selectedMicrophone(), synthetic: false
+            )
+            await controller.setMicrophoneWarning(warning)
         }
     }
 }

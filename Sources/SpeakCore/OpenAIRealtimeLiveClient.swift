@@ -296,3 +296,7 @@ public final class OpenAIRealtimeLiveClient: FinalizingStreamingTranscriptionCli
         #endif
     }
 }
+
+extension OpenAIRealtimeLiveClient: StreamingAudioReadyProviding {
+    public var isReadyForAudio: Bool { isReady }
+}

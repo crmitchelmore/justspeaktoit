@@ -19,6 +19,8 @@ final class FakeLocalState: @unchecked Sendable {
     private var digest = ""
     private var hashes = 0
     private var transportValue: any LocalModelDownloadTransport = HeldTransport()
+    private var metadataValue: any HuggingFaceModelMetadataTransport = RefusedWhisperMetadata()
+    private var importedPayload: Data?
     let runtime = FakeRuntime()
 
     func reset() {
@@ -31,6 +33,8 @@ final class FakeLocalState: @unchecked Sendable {
             digest = ""
             hashes = 0
             transportValue = HeldTransport()
+            metadataValue = RefusedWhisperMetadata()
+            importedPayload = nil
         }
         runtime.reset()
     }
@@ -58,6 +62,14 @@ final class FakeLocalState: @unchecked Sendable {
         get { lock.withLock { transportValue } }
         set { lock.withLock { transportValue = newValue } }
     }
+    var metadataTransport: any HuggingFaceModelMetadataTransport {
+        get { lock.withLock { metadataValue } }
+        set { lock.withLock { metadataValue = newValue } }
+    }
+    var importPayload: Data? {
+        get { lock.withLock { importedPayload } }
+        set { lock.withLock { importedPayload = newValue } }
+    }
 
     func present(_ rows: [DesktopHostLocalModelRow], status: String, useGPU: Bool) {
         lock.withLock {
@@ -81,6 +93,7 @@ final class FakeRuntime: DesktopHostLocalRuntime, @unchecked Sendable {
     private var arrivals = 0
     private var loaded: (path: String, digest: String)?
     private var loadCount = 0
+    private var lastRequest: (model: String, language: String?)?
 
     func reset() {
         lock.withLock {
@@ -89,6 +102,7 @@ final class FakeRuntime: DesktopHostLocalRuntime, @unchecked Sendable {
             gate = Gate(open: true)
             loaded = nil
             loadCount = 0
+            lastRequest = nil
         }
     }
 
@@ -98,6 +112,8 @@ final class FakeRuntime: DesktopHostLocalRuntime, @unchecked Sendable {
     var releasedPaths: [String] { lock.withLock { released } }
     /// How many times a model file was read to load it.
     var loads: Int { lock.withLock { loadCount } }
+    var request: (model: String, language: String?)? { lock.withLock { lastRequest } }
+    func remember(model: String, language: String?) { lock.withLock { lastRequest = (model, language) } }
 
     var recognizer: any DesktopLocalRecognizer { FakeRecognizer(runtime: self) }
 
@@ -122,6 +138,7 @@ final class FakeRuntime: DesktopHostLocalRuntime, @unchecked Sendable {
     }
 
     private static func holdsOnlyZeros(_ file: URL) throws -> Bool {
+        if let payload = FakeLocalState.shared.importPayload { return try Data(contentsOf: file) == payload }
         let handle = try FileHandle(forReadingFrom: file)
         defer { try? handle.close() }
         let zeros = Data(count: 1 << 20)
@@ -146,6 +163,7 @@ struct FakeRecognizer: DesktopLocalRecognizer {
         samples: [Float], modelFile: URL, model: WhisperCppModel, language: String?
     ) async throws -> String {
         try runtime.load(modelFile, digest: model.artifact.sha256)
+        runtime.remember(model: model.catalogueID, language: language)
         await runtime.arrive().pass()
         try Task.checkCancellation()
         return "  Local words   from \(model.displayName). "
@@ -158,10 +176,23 @@ struct FakeRecognizer: DesktopLocalRecognizer {
 private final class PinnedDigest: LocalModelSHA256Hasher {
     private let digest: String
     private var tampered = false
-    init(_ digest: String) { self.digest = digest }
+    private let importedPayload: Data?
+    private var received = 0
+    init(_ digest: String) {
+        self.digest = digest
+        self.importedPayload = FakeLocalState.shared.importPayload
+    }
     private static let zeros = Data(count: 1 << 20)
 
     func update(_ bytes: UnsafeRawBufferPointer) throws {
+        if let importedPayload {
+            let end = received + bytes.count
+            if end > importedPayload.count || Data(bytes) != importedPayload.subdata(in: received..<end) {
+                tampered = true
+            }
+            received = end
+            return
+        }
         var offset = 0
         while !tampered, offset < bytes.count, let base = bytes.baseAddress {
             let count = min(bytes.count - offset, Self.zeros.count)
@@ -174,6 +205,7 @@ private final class PinnedDigest: LocalModelSHA256Hasher {
     }
     func finish() throws -> String {
         FakeLocalState.shared.countHash()
+        if let importedPayload, received != importedPayload.count { tampered = true }
         return tampered ? String(repeating: "0", count: 64) : digest
     }
 }
@@ -215,6 +247,7 @@ final class HeldTransport: LocalModelDownloadTransport, @unchecked Sendable {
 }
 
 enum FakeLocalPlatform: DesktopHostLocalModelPlatform {
+    static func requiresInsertionTarget(_ options: FakeTextOutput) -> Bool { options.label != "copy" }
     typealias VoiceOutputSettings = FakeHotKey
     typealias LocalRuntime = FakeRuntime
     typealias LocalModelsState = DesktopHostLocalModelsState<FakeRuntime>
@@ -256,6 +289,9 @@ enum FakeLocalPlatform: DesktopHostLocalModelPlatform {
         return LocalModelDigestProvider(name: "pinned stand-in") { PinnedDigest(digest) }
     }
     static var localModelTransport: any LocalModelDownloadTransport { FakeLocalState.shared.transport }
+    static var localModelMetadataTransport: any HuggingFaceModelMetadataTransport {
+        FakeLocalState.shared.metadataTransport
+    }
     static var localRuntimeMissing: String? { FakeLocalState.shared.runtimeMissing }
     static func openLocalRuntime(allowGPU: Bool) throws -> FakeRuntime {
         if let failure = FakeLocalState.shared.runtimeOpenFailure { throw DesktopHostError(message: failure) }
@@ -289,7 +325,9 @@ final class LocalEffects: DesktopHostEffects, @unchecked Sendable {
             language: request.language
         )
     }
-    func perform(_ job: FakeJob, text: String) -> String { "Delivered." }
+    func perform(_ job: FakeJob, text: String) -> DesktopTextOutputResult {
+        DesktopTextOutputResult(.confirmedInsertion, status: "Delivered.")
+    }
     func writeSettings(_ data: Data, to url: URL) throws { try data.write(to: url, options: .atomic) }
 }
 

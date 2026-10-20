@@ -5,6 +5,7 @@ import SpeakDesktop
 /// Hooks the controller calls into a host's History sync once it is configured.
 package struct DesktopHostSyncHooks: Sendable {
     package var historyChanged: (@Sendable () -> Void)?
+    package var deleteHistory: (@Sendable (_ id: UUID, _ deleteAudio: Bool) async throws -> Void)?
     /// Saves a provider key typed in Settings or the post-processing dialog
     /// (removes it when empty) and marks it saved by hand in the same step, so
     /// a key imported from the Mac and deleted there cannot take a newly typed
@@ -13,9 +14,11 @@ package struct DesktopHostSyncHooks: Sendable {
 
     package init(
         historyChanged: (@Sendable () -> Void)? = nil,
+        deleteHistory: (@Sendable (_ id: UUID, _ deleteAudio: Bool) async throws -> Void)? = nil,
         saveKeyByHand: (@Sendable (_ value: String, _ identifier: String) async throws -> Void)? = nil
     ) {
         self.historyChanged = historyChanged
+        self.deleteHistory = deleteHistory
         self.saveKeyByHand = saveKeyByHand
     }
 }
@@ -42,6 +45,10 @@ package extension DesktopHostPlatform where ReadAloudState == Void {
 }
 
 package extension DesktopHostPlatform {
+    static func loadLocalModels(directory: URL) throws -> LocalModelsState { makeLocalModelsState() }
+
+    static func cancelLocalModels(controller: isolated DesktopHostController<Self>) {}
+
     static var localDeviceName: String { "this computer" }
 
     static func localReadiness(_ model: String, controller: isolated DesktopHostController<Self>) -> String? {
@@ -57,6 +64,10 @@ package extension DesktopHostPlatform {
     static func beginLocalUse(_ model: String, controller: isolated DesktopHostController<Self>) -> String? { nil }
 
     static func endLocalUse(_ held: String, controller: isolated DesktopHostController<Self>) {}
+
+    static func makeLocalLiveClient(
+        _ model: String, language: String?, controller: isolated DesktopHostController<Self>
+    ) async throws -> (any FinalizingStreamingTranscriptionClient)? { nil }
 }
 
 extension DesktopHostController {
@@ -111,6 +122,8 @@ extension DesktopHostController {
     package static func rememberModelSlot(in settings: inout Settings) {
         if DesktopHostModels.isLive(settings.model) {
             settings.liveModel = settings.model
+        } else if DesktopHostModels.isLocalLive(settings.model) {
+            settings.localLiveModel = settings.model
         } else if DesktopHostModels.isLocal(settings.model) {
             settings.localModel = settings.model
         } else {

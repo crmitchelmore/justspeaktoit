@@ -2,7 +2,7 @@ import Foundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
-import SpeakCore
+@testable import SpeakCore
 import SpeakTestSupport
 import XCTest
 @testable import SpeakDesktop
@@ -29,6 +29,7 @@ final class DesktopTranscriptionTests: XCTestCase {
                 XCTAssertEqual(descriptor.apiKeyURL, OpenRouterService.apiKeysURL)
                 continue
             }
+
             XCTAssertEqual(descriptor.id, ModelRouting.family(for: model.id).providerID)
             let accountURL: URL?
             if let fileProvider = FileSpeechProvider(rawValue: descriptor.id) {
@@ -272,6 +273,83 @@ final class DesktopTranscriptionTests: XCTestCase {
 
 }
 
+extension DesktopTranscriptionTests {
+    // existing owned test covering every batch-provider vocabulary contract; no behavior change.
+    // swiftlint:disable:next function_body_length
+    func testVocabularyHintsReachOnlySupportedBatchProviderContracts() async throws {
+        let audio = try fixture()
+        defer { try? FileManager.default.removeItem(at: audio) }
+        // "openai/whisper-1" genuinely supports the batch "prompt" field per the canonical
+        // OpenAITranscriptionModels.supportsBatchPrompt contract; "openai/gpt-4o-transcribe-diarize"
+        // is a real unsupported OpenAI batch route and keeps the negative-coverage slot.
+        let models = [
+            XAISpeechToText.batchCatalogID, AzureTranscriptionModels.fast,
+            "openai/whisper-1", "openai/gpt-4o-transcribe-diarize"
+        ]
+        for model in models {
+            StubURLProtocol.reset()
+            let multipart = DesktopMultipartFixture()
+            defer { multipart.remove() }
+            StubURLProtocol.handler = { request in
+                if model == AzureTranscriptionModels.fast {
+                    let body = StubURLProtocol.body(of: request)
+                    XCTAssertNotNil(body.range(of: Data("\"phraseList\"".utf8)))
+                    XCTAssertNotNil(body.range(of: Data("SyntheticCanonical".utf8)))
+                    let response = #"{"combinedPhrases":[{"text":"fixture"}],"durationMilliseconds":1000}"#
+                    return .ok(Data(response.utf8), url: request.url!)
+                }
+                // OpenAI batch uploads clear httpBody/httpBodyStream and upload from a staged
+                // file (OpenAICompatibleBatchTranscriptionClient); StubURLProtocol.body(of:)
+                // cannot observe that upload on every platform, so read the real owned
+                // multipart body the production code actually wrote instead (prior art:
+                // DesktopKeywordBatchDeliveryTests).
+                let bodyData = try multipart.body(for: request)
+                let body = try XCTUnwrap(String(data: bodyData, encoding: .isoLatin1))
+                if model == "openai/whisper-1" {
+                    XCTAssertEqual(
+                        Self.multipartFieldValue("prompt", in: body), "SyntheticCanonical",
+                        "whisper-1 must acquire the exact prompt field value"
+                    )
+                } else {
+                    XCTAssertNil(
+                        Self.multipartFieldValue("prompt", in: body),
+                        "Unsupported OpenAI routes must not acquire the prompt field"
+                    )
+                }
+                return .ok(Data(#"{"text":"fixture"}"#.utf8), url: request.url!)
+            }
+            var xaiClient = XAIBatchTranscriptionClient(session: StubURLProtocol.makeSession())
+            xaiClient.uploadRecording = { request, file in
+                let body = try Data(contentsOf: file)
+                XCTAssertNotNil(body.range(of: Data("name=\"keyterm\"".utf8)))
+                XCTAssertNotNil(body.range(of: Data("SyntheticCanonical".utf8)))
+                let url = try XCTUnwrap(request.url)
+                let response = try XCTUnwrap(HTTPURLResponse(
+                    url: url, statusCode: 200, httpVersion: nil, headerFields: nil
+                ))
+                return (Data(#"{"text":"fixture"}"#.utf8), response)
+            }
+            let result = try await DesktopTranscription.transcribe(
+                audioURL: audio, model: model, apiKey: "fixture-key", duration: 1,
+                azureEndpoint: "https://fixture.cognitiveservices.azure.com",
+                staging: multipart.staging, keywords: ["SyntheticCanonical"], session: StubURLProtocol.makeSession(),
+                xaiClient: xaiClient
+            )
+            XCTAssertEqual(result.text, "fixture")
+        }
+    }
+
+    /// Extracts the exact value of a named multipart form-data field from a raw
+    /// decoded body, matching the "--boundary\r\nContent-Disposition: ...; name=\"x\"\r\n\r\nVALUE\r\n"
+    /// framing OpenAICompatibleBatchTranscriptionClient.writeBody actually emits.
+    private static func multipartFieldValue(_ name: String, in body: String) -> String? {
+        guard let headerRange = body.range(of: "name=\"\(name)\"\r\n\r\n") else { return nil }
+        let afterHeader = body[headerRange.upperBound...]
+        guard let terminator = afterHeader.range(of: "\r\n") else { return nil }
+        return String(afterHeader[afterHeader.startIndex..<terminator.lowerBound])
+    }
+}
+
 private extension DesktopTranscriptionTests {
     static let rejection = #"{"error":{"message":"provider rejection"}}"#
 
@@ -335,4 +413,5 @@ private extension DesktopTranscriptionTests {
       {"type":"word","start_time":0.7,"end_time":1.2,"alternatives":[{"content":"Speechmatics","confidence":0.9}]},
       {"type":"punctuation","attaches_to":"previous","alternatives":[{"content":"."}]}]}
     """#
-}
+// existing owned test suite covering batch-provider contracts; no behavior change.
+} // swiftlint:disable:this file_length

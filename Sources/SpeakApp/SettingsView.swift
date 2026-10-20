@@ -1037,64 +1037,22 @@ struct SettingsView: View {
     }
   }
 
-  private func parseAssemblyAIKeyterms(_ raw: String) -> [String] {
-    raw
-      .split(separator: ",")
-      .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-      .filter(isValidAssemblyAIKeyterm)
-  }
-
-  private func canonicalKeyterm(_ term: String) -> String {
-    term.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-  }
-
-  private func isValidAssemblyAIKeyterm(_ term: String) -> Bool {
-    let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
-    return !trimmed.isEmpty && !trimmed.contains(",") && trimmed.count <= 50
-  }
-
   private func pronunciationSeedKeyterms() -> [String] {
     let modernDictionaryTerms = environment.pronunciationManager.entries
       .filter { !$0.isRegex }
       .map(\.word)
-    let legacyDictionaryTerms = settings.ttsPronunciationDictionary.keys.sorted()
-
-    var terms: [String] = []
-    var seen: Set<String> = []
-    for raw in modernDictionaryTerms + legacyDictionaryTerms {
-      let term = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-      let canonical = canonicalKeyterm(term)
-      guard
-        isValidAssemblyAIKeyterm(term),
-        seen.insert(canonical).inserted
-      else { continue }
-      terms.append(term)
-    }
-    return terms
+    return AssemblyAIPronunciationKeyterms.seeds(
+      modern: modernDictionaryTerms, legacy: Array(settings.ttsPronunciationDictionary.keys))
   }
 
   private func syncAssemblyAIKeytermsFromPronunciation() {
     guard settings.isActiveAssemblyAILiveModel else { return }
 
     let seedTerms = pronunciationSeedKeyterms()
-    let ignoredPronunciationTerms = Set(
-      settings.assemblyAIIgnoredPronunciationTerms.map(canonicalKeyterm))
-    let currentTerms = parseAssemblyAIKeyterms(settings.assemblyAIKeyterms)
-
-    var mergedTerms: [String] = []
-    var seen: Set<String> = []
-    for term in currentTerms {
-      let canonical = canonicalKeyterm(term)
-      guard seen.insert(canonical).inserted else { continue }
-      mergedTerms.append(term)
-    }
-    for term in seedTerms where !ignoredPronunciationTerms.contains(canonicalKeyterm(term)) {
-      let canonical = canonicalKeyterm(term)
-      guard seen.insert(canonical).inserted else { continue }
-      mergedTerms.append(term)
-    }
-
-    let mergedKeyterms = Array(mergedTerms.prefix(100)).joined(separator: ", ")
+    let mergedKeyterms = AssemblyAIPronunciationKeyterms.merged(
+      current: AssemblyAIPronunciationKeyterms.parse(settings.assemblyAIKeyterms),
+      seeds: seedTerms, ignored: settings.assemblyAIIgnoredPronunciationTerms
+    ).joined(separator: ", ")
     if mergedKeyterms != settings.assemblyAIKeyterms {
       settings.assemblyAIKeyterms = mergedKeyterms
     }
@@ -1106,19 +1064,9 @@ struct SettingsView: View {
     guard settings.isActiveAssemblyAILiveModel else { return }
 
     let pronunciationTerms = seedTerms ?? pronunciationSeedKeyterms()
-    let selectedTermSet = Set(parseAssemblyAIKeyterms(settings.assemblyAIKeyterms).map(canonicalKeyterm))
-    var ignoredSet = Set(settings.assemblyAIIgnoredPronunciationTerms.map(canonicalKeyterm))
-
-    for term in pronunciationTerms {
-      let canonical = canonicalKeyterm(term)
-      if selectedTermSet.contains(canonical) {
-        ignoredSet.remove(canonical)
-      } else {
-        ignoredSet.insert(canonical)
-      }
-    }
-
-    let updatedIgnored = ignoredSet.sorted()
+    let updatedIgnored = AssemblyAIPronunciationKeyterms.ignored(
+      selected: settings.assemblyAIKeyterms, seeds: pronunciationTerms,
+      stored: settings.assemblyAIIgnoredPronunciationTerms)
     if updatedIgnored != settings.assemblyAIIgnoredPronunciationTerms {
       settings.assemblyAIIgnoredPronunciationTerms = updatedIgnored
     }

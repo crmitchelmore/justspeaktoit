@@ -35,7 +35,7 @@ final class WindowsAutomationHost: AutomationCommandHost, @unchecked Sendable {
 }
 
 extension WindowsAppController {
-    func automationSessionActive() -> Bool { recording != nil }
+    func automationSessionActive() -> Bool { dictationSessionID != nil }
 
     /// Newest first, from every saved record rather than the visible search.
     func automationHistory(limit: Int) -> [AutomationHistoryEntry] {
@@ -43,7 +43,7 @@ extension WindowsAppController {
             let text = record.displayText ?? ""
             return AutomationHistoryEntry(
                 id: record.id.uuidString, text: text, createdAt: record.createdAt,
-                model: record.modelIdentifier, durationSeconds: record.result?.duration,
+                model: record.modelIdentifier, durationSeconds: record.recordingDuration,
                 wordCount: AutomationHistoryEntry.wordCount(of: text)
             )
         }
@@ -80,12 +80,12 @@ extension WindowsAppController {
     /// Starts the same pipeline as Record, with no captured field, and returns
     /// once capture is live.
     func automationStartDictation() async throws -> AutomationResult {
-        guard recording == nil, !busy else { throw AutomationError.dictationAlreadyRunning }
+        guard dictationSessionID == nil, !busy else { throw AutomationError.dictationAlreadyRunning }
         await toggle(
             target: nil, modelIndex: selectedIndex(), deviceID: selectedMicrophone(), targetExecutablePath: nil,
             textOutput: textOutputOptions()
         )
-        guard recording != nil else {
+        guard await dictationSessionReady() else {
             throw AutomationError(code: .internalError, message: "Dictation could not start. See the app for details.")
         }
         return AutomationResult(sessionActive: true)
@@ -93,18 +93,36 @@ extension WindowsAppController {
 
     /// Stops the active session and returns its saved transcript.
     func automationStopDictation() async throws -> AutomationResult {
-        guard let active = recording, !busy else { throw AutomationError.noDictationRunning }
-        let id = active.record.id
+        guard canStopDictationSession, let id = dictationSessionID else {
+            throw AutomationError.noDictationRunning
+        }
+        let owned = hasOwnedDictation
         await toggle(
             target: nil, modelIndex: selectedIndex(), deviceID: selectedMicrophone(), targetExecutablePath: nil,
             textOutput: textOutputOptions()
         )
-        let record = history[id]
-        if let failure = record?.failure, record?.displayText == nil {
-            throw AutomationError(code: .transcriptionFailed, message: failure)
+        let record: DesktopRecordingStore.Record
+        if owned {
+            record = try completedDictationRecord(id)
+        } else {
+            guard dictationSessionID != id else {
+                throw AutomationError(
+                    code: .internalError, message: "Capture retirement is incomplete; audio remains owned."
+                )
+            }
+            guard let saved = history[id] else {
+                throw AutomationError(
+                    code: .transcriptionFailed,
+                    message: "Dictation ended before capture was ready; no transcript was produced."
+                )
+            }
+            if let failure = saved.failure, saved.displayText == nil {
+                throw AutomationError(code: .transcriptionFailed, message: failure)
+            }
+            record = saved
         }
         return AutomationResult(
-            text: record?.displayText ?? "", model: record?.modelIdentifier, durationSeconds: record?.result?.duration
+            text: record.displayText ?? "", model: record.modelIdentifier, durationSeconds: record.result?.duration
         )
     }
 }

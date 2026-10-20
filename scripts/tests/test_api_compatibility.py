@@ -27,10 +27,13 @@ class APICompatibilityTests(unittest.TestCase):
             blob = subprocess.check_output(
                 ["git", "hash-object", "-w", "--stdin"], cwd=repository, input=MANIFEST, text=True
             ).strip()
+            resources = subprocess.check_output(
+                ["git", "mktree"], cwd=repository, input=f"100644 blob {blob}\tSound.caf\n", text=True
+            ).strip()
             # A real baseline tree, with no commits, hooks or repository build.
             baseline = subprocess.check_output(
                 ["git", "mktree"], cwd=repository,
-                input=f"100644 blob {blob}\tPackage.swift\n", text=True
+                input=f"100644 blob {blob}\tPackage.swift\n040000 tree {resources}\tResources\n", text=True
             ).strip()
             if missing_baseline:
                 baseline = "missing-baseline"
@@ -55,6 +58,10 @@ class APICompatibilityTests(unittest.TestCase):
                     package = Path(args[2])
                     call["manifest"] = (package / "Package.swift").read_text()
                     call["directory"] = str(package)
+                    call["entries"] = sorted(
+                        str(path.relative_to(package)) for path in package.rglob("*")
+                        if path.name not in ("Package.swift", "package.json")
+                    )
                     result = os.environ["DUMP_JSON"]
                     status = int(os.environ["DUMP_STATUS"])
                 else:
@@ -103,6 +110,11 @@ class APICompatibilityTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Baseline has no SpeakWatchCore product", result.stdout)
         self.assert_products(calls, EXISTING_PRODUCTS)
+
+    def test_baseline_directories_are_recreated_empty_for_manifest_evaluation(self):
+        result, calls = self.run_gate()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([call["entries"] for call in calls if "entries" in call], [["Resources"]])
 
     def test_present_product_is_compared(self):
         result, calls = self.run_gate(products=EXISTING_PRODUCTS + ["SpeakWatchCore"])
@@ -207,6 +219,7 @@ class APICompatibilityTests(unittest.TestCase):
             "AnalyticsProviderType.reson8", "AnalyticsProviderType.stepfun",
             "OpenRouterInlineAudioTranscriptionClient.InputError.inklingAudioLimit",
             "ConfigTransferError.compressionFailed", "ConfigTransferError.payloadTooLarge",
+            "DictationProfileMatcher.Kind.linuxExecutablePath", "GroqTTSAPIError.excessiveFanOut",
         ]
         diagnostic = "\n".join(
             f"  💔 API breakage: enumelement {symbol} has been added as a new enum case"
@@ -228,6 +241,29 @@ class APICompatibilityTests(unittest.TestCase):
                 result, _ = self.run_gate(diagnose_status=1, diagnostic=allowed + "\n" + finding)
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
                 self.assertIn(finding, result.stderr)
+
+    def test_linux_and_groq_allowlist_entries_do_not_allow_removals_or_unknown_cases(self):
+        allowed = "API breakage: enumelement GroqTTSAPIError.excessiveFanOut has been added as a new enum case"
+        for finding in [
+            "API breakage: enumelement DictationProfileMatcher.Kind.linuxExecutablePath has been removed",
+            "API breakage: enumelement GroqTTSAPIError.unknownCase has been added as a new enum case",
+        ]:
+            with self.subTest(finding=finding):
+                result, _ = self.run_gate(diagnose_status=1, diagnostic=allowed + "\n" + finding)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn(finding, result.stderr)
+
+        # A tool-error diagnostic line (not an "API breakage:" finding) takes
+        # the early tool-error path: the raw diagnose output, including this
+        # line, is echoed to stdout, while only the "tool error; comparison is
+        # incomplete" summary goes to stderr. It must still fail non-zero and
+        # never be waived as a successful comparison.
+        tool_error = "error: failed to read API digester output for SpeakCore"
+        result, _ = self.run_gate(diagnose_status=1, diagnostic=allowed + "\n" + tool_error)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn(tool_error, result.stdout)
+        self.assertIn("tool error; comparison is incomplete", result.stderr)
+        self.assertNotIn("No unreviewed public API breakage", result.stdout)
 
     def test_diagnostic_words_in_findings_and_warnings_preserve_declared_migration(self):
         diagnostic = "\n".join([

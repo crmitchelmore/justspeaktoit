@@ -6,8 +6,9 @@ import FoundationNetworking
 import os.log
 #endif
 
-/// Shared Azure Voice Live input-transcription client used by macOS, iOS and
-/// Windows, for both canonical routes (`azure-speech` and `mai-transcribe`).
+/// Shared Azure input-transcription lifecycle used by macOS, iOS and Windows.
+/// Azure Speech and turn-based MAI use Voice Live; MAI-Transcribe-2-Streaming
+/// uses its dedicated Realtime API with a deployment named `mai-transcribe-2-streaming`.
 ///
 /// Voice Live is used only for input transcription: the session is text-only,
 /// turn detection never creates a response, and `response.create` is never
@@ -16,7 +17,7 @@ import os.log
 /// real handshake; PCM16 frames are admitted synchronously into a queue bounded
 /// by bytes and by frames and sent one at a time once Azure's `session.updated`
 /// has acknowledged that configuration. A finish sends every admitted frame,
-/// then the commit, then the barrier described in `AzureVoiceLiveProtocol`, and
+/// then the commit and, for Voice Live, the `AzureVoiceLiveProtocol` barrier, and
 /// returns once the commit and the barrier are acknowledged and every announced
 /// item has settled, all inside the route's catalogue finish budget.
 ///
@@ -29,7 +30,8 @@ import os.log
 ///
 /// The transport is injected (`URLSessionStreamingConnection` on Apple, WinHTTP
 /// on Windows); framing, admission and lifecycle stay here.
-public final class AzureVoiceLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
+public final class AzureVoiceLiveClient: FinalizingStreamingTranscriptionClient,
+    StreamingTranscriptSnapshotProviding, @unchecked Sendable {
     public typealias ConnectionFactory = @Sendable (URLRequest) -> any StreamingWebSocketConnection
     public typealias Scheduler = @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void
 
@@ -51,6 +53,7 @@ public final class AzureVoiceLiveClient: FinalizingStreamingTranscriptionClient,
     let credentials: String
     let endpoint: String
     let model: String
+    var isMAIStreaming: Bool { model == AzureMAIStreamingProtocol.model }
     let language: String?
     let sampleRate: Int
     let finishBudget: TimeInterval
@@ -120,6 +123,15 @@ public final class AzureVoiceLiveClient: FinalizingStreamingTranscriptionClient,
         sampleRate * AzureVoiceLiveProtocol.bytesPerSample * Int(StreamingAudioPreroll.defaultBudgetSeconds)
     }
 
+    public func transcriptSnapshot(captureDuration: TimeInterval) -> StreamingTranscriptSnapshot {
+        synchronized {
+            StreamingTranscriptSnapshot(
+                confirmedText: run.transcript.confirmed, displayText: run.transcript.display,
+                duration: captureDuration, isTerminal: run.phase == .closed
+            )
+        }
+    }
+
     // MARK: - StreamingTranscriptionClient
 
     /// Replaces any current session. An invalid key, region, endpoint, rate or
@@ -131,13 +143,17 @@ public final class AzureVoiceLiveClient: FinalizingStreamingTranscriptionClient,
             let request: URLRequest
             let update: String
             do {
-                request = try Self.connectionRequest(credentials: credentials, endpoint: endpoint)
+                request = try Self.connectionRequest(credentials: credentials, endpoint: endpoint, model: model)
                 guard AzureVoiceLiveProtocol.supportedSampleRates.contains(sampleRate) else {
                     throw AzureVoiceLiveError.unsupportedSampleRate(sampleRate)
                 }
-                update = try AzureVoiceLiveProtocol.sessionUpdateJSON(
-                    model: model, language: language, sampleRate: sampleRate, eventID: active.sessionEventID
-                )
+                update = try isMAIStreaming
+                    ? AzureMAIStreamingProtocol.sessionUpdateJSON(
+                        language: language, sampleRate: sampleRate, eventID: active.sessionEventID
+                    )
+                    : AzureVoiceLiveProtocol.sessionUpdateJSON(
+                        model: model, language: language, sampleRate: sampleRate, eventID: active.sessionEventID
+                    )
             } catch {
                 fail(error, active)
                 return
@@ -320,4 +336,8 @@ public final class AzureVoiceLiveClient: FinalizingStreamingTranscriptionClient,
         SpeakLogger.logger(category: "AzureVoiceLiveClient").info("\(event, privacy: .public)")
         #endif
     }
+}
+
+extension AzureVoiceLiveClient: StreamingAudioReadyProviding {
+    public var isReadyForAudio: Bool { isSessionReady }
 }

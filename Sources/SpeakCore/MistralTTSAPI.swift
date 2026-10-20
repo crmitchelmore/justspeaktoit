@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Errors surfaced by the shared Mistral Voxtral speech-generation transport.
 public enum MistralTTSAPIError: Error, Sendable, Equatable {
@@ -77,11 +80,11 @@ public struct MistralTTSAPI: Sendable {
     /// under 300 words. 1,800 characters is a conservative reading of that, so
     /// longer text is spoken as a sequence of requests.
     public static let maxInputCharacters = 1_800
-    private static let voicePageSize = 100
+    static let voicePageSize = 100
     /// Pages one listing will walk. A key with more voices than this has more
     /// than a picker can usefully hold, and the bound keeps a paging endpoint
     /// that never terminates from looping.
-    private static let maxVoicePages = 10
+    static let maxVoicePages = 10
 
     private let session: URLSession
 
@@ -89,14 +92,11 @@ public struct MistralTTSAPI: Sendable {
         self.session = session
     }
 
-    /// POSTs `input` to `/v1/audio/speech` and returns the decoded audio bytes.
-    ///
-    /// The non-streaming response is JSON carrying base64, not raw audio.
-    public func synthesize(
+    static func synthesisRequest(
         input: String,
         apiKey: String,
         request: MistralTTSRequest
-    ) async throws -> Data {
+    ) throws -> URLRequest {
         guard !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw MistralTTSAPIError.emptyText
         }
@@ -111,7 +111,16 @@ public struct MistralTTSAPI: Sendable {
         urlRequest.httpBody = try JSONSerialization.data(
             withJSONObject: request.jsonBody(input: input)
         )
+        return urlRequest
+    }
 
+    /// The non-streaming response is JSON carrying base64, not raw audio.
+    public func synthesize(
+        input: String,
+        apiKey: String,
+        request: MistralTTSRequest
+    ) async throws -> Data {
+        let urlRequest = try Self.synthesisRequest(input: input, apiKey: apiKey, request: request)
         try Task.checkCancellation()
         let (data, response) = try await session.data(for: urlRequest)
         try Task.checkCancellation()
@@ -122,6 +131,10 @@ public struct MistralTTSAPI: Sendable {
         guard (200..<300).contains(httpResponse.statusCode) else {
             throw Self.error(from: data, statusCode: httpResponse.statusCode)
         }
+        return try Self.decodedAudio(from: data)
+    }
+
+    static func decodedAudio(from data: Data) throws -> Data {
         guard let payload = try? JSONDecoder().decode(SpeechResponse.self, from: data),
               let audio = Data(base64Encoded: payload.audioData),
               !audio.isEmpty
@@ -159,11 +172,14 @@ public struct MistralTTSAPI: Sendable {
         return collected
     }
 
-    private func voicePage(
+    static func voiceListRequest(
         apiKey: String,
-        presetsOnly: Bool,
-        offset: Int
-    ) async throws -> [MistralTTSVoice] {
+        presetsOnly: Bool = false,
+        offset: Int = 0
+    ) throws -> URLRequest {
+        guard offset >= 0, offset < voicePageSize * maxVoicePages else {
+            throw MistralTTSAPIError.invalidResponse
+        }
         guard var components = URLComponents(
             url: Self.voicesEndpoint,
             resolvingAgainstBaseURL: false
@@ -182,7 +198,15 @@ public struct MistralTTSAPI: Sendable {
 
         var request = URLRequest(url: url)
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        return request
+    }
 
+    private func voicePage(
+        apiKey: String,
+        presetsOnly: Bool,
+        offset: Int
+    ) async throws -> [MistralTTSVoice] {
+        let request = try Self.voiceListRequest(apiKey: apiKey, presetsOnly: presetsOnly, offset: offset)
         let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw MistralTTSAPIError.invalidResponse
@@ -213,8 +237,9 @@ public struct MistralTTSAPI: Sendable {
     /// before.
     static func decodeVoices(from data: Data) throws -> [MistralTTSVoice] {
         let decoder = JSONDecoder()
-        if let page = try? decoder.decode(VoicePage.self, from: data) {
-            return page.items ?? page.data ?? page.voices ?? []
+        if let page = try? decoder.decode(VoicePage.self, from: data),
+           let voices = page.items ?? page.data ?? page.voices {
+            return voices
         }
         if let voices = try? decoder.decode([MistralTTSVoice].self, from: data) {
             return voices

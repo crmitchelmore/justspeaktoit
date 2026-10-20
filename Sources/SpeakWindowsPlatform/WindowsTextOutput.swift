@@ -1,12 +1,16 @@
+// swiftlint:disable file_length
 import Foundation
+import SpeakCore
+import SpeakDesktop
 import CWindowsSupport
 
 /// Text output preferences for the Windows host. These mirror the macOS
 /// product semantics (`TextOutputMethod` and `AccessibilityInsertionMode`)
 /// rather than any Windows API: `smart` prefers direct insertion and falls
-/// back to a guarded paste, `directOnly` never touches the clipboard or
-/// keyboard, and `clipboardOnly` copies without inserting.
-public struct WindowsTextOutputOptions: Codable, Equatable, Sendable {
+/// back to a guarded paste, `directOnly` never sends paste keys, and
+/// `clipboardOnly` copies without inserting. An explicit app-switch policy
+/// may use a recovery copy even when direct insertion is selected.
+public struct WindowsTextOutputOptions: Codable, Equatable, Sendable, DesktopAppSwitchOutputOptions {
     public enum Method: String, Codable, Sendable {
         case smart
         case directOnly
@@ -21,19 +25,27 @@ public struct WindowsTextOutputOptions: Codable, Equatable, Sendable {
     public var method: Method
     public var insertion: Insertion
     public var restoreClipboard: Bool
+    /// Nil preserves the pre-policy captured-target behavior.
+    public var appSwitchDelivery: AppSwitchDelivery?
 
     public init(method: Method = .smart, insertion: Insertion = .insertAtCursor, restoreClipboard: Bool = true) {
         self.method = method
         self.insertion = insertion
         self.restoreClipboard = restoreClipboard
+        self.appSwitchDelivery = nil
     }
 
     private enum CodingKeys: String, CodingKey {
-        case method, insertion, restoreClipboard
+        case method, insertion, restoreClipboard, appSwitchDelivery
     }
 
-    /// Hand-edited settings may omit keys or carry unknown values; every field
-    /// falls back to its default instead of failing the whole settings file.
+    public init(appSwitchDelivery: AppSwitchDelivery?) {
+        self.init()
+        self.appSwitchDelivery = appSwitchDelivery
+    }
+
+    /// Legacy fields retain their defaults. A supplied destination policy is
+    /// strict: invalid intent must not silently become unrelated insertion.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let method = try container.decodeIfPresent(String.self, forKey: .method)
@@ -45,6 +57,7 @@ public struct WindowsTextOutputOptions: Codable, Equatable, Sendable {
             insertion: insertion ?? .insertAtCursor,
             restoreClipboard: try container.decodeIfPresent(Bool.self, forKey: .restoreClipboard) ?? true
         )
+        appSwitchDelivery = try container.decodeIfPresent(AppSwitchDelivery.self, forKey: .appSwitchDelivery)
     }
 
     /// Native flag bits for `jsti_insertion_insert`.
@@ -53,6 +66,12 @@ public struct WindowsTextOutputOptions: Codable, Equatable, Sendable {
         if insertion == .replaceField { flags |= UInt32(JSTI_INSERTION_REPLACE_FIELD.rawValue) }
         if !restoreClipboard { flags |= UInt32(JSTI_INSERTION_KEEP_TRANSCRIPT_ON_CLIPBOARD.rawValue) }
         if method == .directOnly { flags |= UInt32(JSTI_INSERTION_NO_PASTE_FALLBACK.rawValue) }
+        switch appSwitchDelivery {
+        case .originalApp: flags |= UInt32(JSTI_INSERTION_ORIGINAL_APP.rawValue)
+        case .currentApp: flags |= UInt32(JSTI_INSERTION_CURRENT_APP.rawValue)
+        case .onlyIfOriginalAppInFront: flags |= UInt32(JSTI_INSERTION_ONLY_ORIGINAL_FRONT.rawValue)
+        case nil: break
+        }
         return flags
     }
 
@@ -134,6 +153,7 @@ public final class WindowsInsertionTarget: @unchecked Sendable {
         case nativeEdit
         case automationValue
         case paste
+        case clipboard
     }
 
     public enum ClipboardState: Equatable, Sendable {
@@ -170,7 +190,7 @@ public final class WindowsInsertionTarget: @unchecked Sendable {
         }
     }
 
-    private let handle: OpaquePointer
+    let handle: OpaquePointer
     private let lock = NSLock()
     private var inserting = false
 
@@ -191,6 +211,46 @@ public final class WindowsInsertionTarget: @unchecked Sendable {
         return WindowsInsertionTarget(handle: handle)
     }
 
+    /// Capture the focused selection's identity before the settings queue hop.
+    /// This native target also permits our own app, but cannot insert or copy.
+    public static func captureSelection() throws -> WindowsInsertionTarget {
+        var error = [CChar](repeating: 0, count: 1_024)
+        guard let handle = jsti_selection_capture(&error, error.count) else {
+            throw WindowsTextOutputError(String(cString: error))
+        }
+        return WindowsInsertionTarget(handle: handle)
+    }
+
+    /// Capture on the native UI callback. The bounded selection read retains an
+    /// editable UIA range; insertion cannot redirect it or replace the whole field.
+    public static func captureVoiceEdit() throws -> WindowsInsertionTarget {
+        var error = [CChar](repeating: 0, count: 1_024)
+        guard let handle = jsti_voice_edit_capture(&error, error.count) else {
+            throw WindowsTextOutputError(String(cString: error))
+        }
+        return WindowsInsertionTarget(handle: handle)
+    }
+
+    public func selectedText() async throws -> String {
+        let task = Task.detached(priority: .userInitiated) { [self] in
+            try Task.checkCancellation()
+            var text = [CChar](repeating: 0, count: 800_001)
+            var error = [CChar](repeating: 0, count: 1_024)
+            guard jsti_selection_read(self.handle, &text, text.count, &error, error.count) == 0 else {
+                throw WindowsTextOutputError(String(cString: error))
+            }
+            return String(cString: text)
+        }
+        return try await withTaskCancellationHandler {
+            let text = try await task.value
+            try Task.checkCancellation()
+            return text
+        } onCancel: {
+            self.cancel()
+            task.cancel()
+        }
+    }
+
     /// Requests abandonment without waiting for a blocked provider. Keep this
     /// object alive until the insertion call returns; its worker owns native state.
     public func cancel() { jsti_insertion_cancel(handle) }
@@ -198,15 +258,31 @@ public final class WindowsInsertionTarget: @unchecked Sendable {
     /// Full executable path from the process retained at capture. This performs
     /// no focus lookup or accessibility query, including after focus has moved.
     public var executablePath: String? {
+        try? executablePathChecked()
+    }
+
+    public func executablePathChecked() throws -> String {
         var required = 0
         var error = [CChar](repeating: 0, count: 512)
         let status = jsti_insertion_executable_path(handle, nil, 0, &required, &error, error.count)
-        guard status == 2, required > 1, required <= 131_073 else { return nil }
+        guard status == 2, required > 1, required <= 131_073 else {
+            throw WindowsTextOutputError(String(cString: error))
+        }
         var path = [CChar](repeating: 0, count: required)
         guard jsti_insertion_executable_path(
             handle, &path, path.count, &required, &error, error.count
-        ) == 0 else { return nil }
+        ) == 0 else { throw WindowsTextOutputError(String(cString: error)) }
         return String(cString: path)
+    }
+
+    public static func foregroundExecutablePath() throws -> String? {
+        var path = [CChar](repeating: 0, count: 131_073)
+        var error = [CChar](repeating: 0, count: 512)
+        guard jsti_foreground_executable_path(&path, path.count, &error, error.count) == 0 else {
+            throw WindowsTextOutputError(String(cString: error))
+        }
+        let value = String(cString: path)
+        return value.isEmpty ? nil : value
     }
 
     /// Copies for an explicit clipboard-only output request. Native cancellation
@@ -253,9 +329,11 @@ public final class WindowsInsertionTarget: @unchecked Sendable {
         case Int32(JSTI_INSERTION_METHOD_NATIVE_EDIT.rawValue): method = .nativeEdit
         case Int32(JSTI_INSERTION_METHOD_UIA_VALUE.rawValue): method = .automationValue
         case Int32(JSTI_INSERTION_METHOD_PASTE.rawValue): method = .paste
+        case Int32(JSTI_INSERTION_METHOD_CLIPBOARD.rawValue): method = .clipboard
         default:
             throw WindowsTextOutputError(
-                "The native adapter reported success without an insertion method.", clipboard: clipboard
+                "The native adapter reported success without an insertion method.", clipboard: clipboard,
+                mayHaveInserted: true
             )
         }
         return Outcome(
@@ -269,6 +347,19 @@ public final class WindowsInsertionTarget: @unchecked Sendable {
 /// User-facing status text for insertion outcomes. Never includes transcript
 /// or clipboard contents.
 public enum WindowsInsertionStatus {
+    public static func delivery(for outcome: WindowsInsertionTarget.Outcome) -> DesktopTextOutputResult {
+        if outcome.method == .clipboard {
+            return DesktopTextOutputResult(
+                .recoveryCopy, status: "Transcript copied; app-switch delivery did not insert text."
+            )
+        }
+        return DesktopTextOutputResult(
+            outcome.verified && (outcome.method == .nativeEdit || outcome.fieldIdentity)
+                ? .confirmedInsertion : .unconfirmedInsertion,
+            status: message(for: outcome)
+        )
+    }
+
     public static func message(for outcome: WindowsInsertionTarget.Outcome) -> String {
         var status: String
         switch outcome.method {
@@ -278,7 +369,12 @@ public enum WindowsInsertionStatus {
         case .paste:
             status = outcome.verified
                 ? "Pasted into the original text field and saved to History."
-                : "Pasted into the original text field; the result could not be confirmed. Saved to History."
+                : "Paste keys sent; insertion could not be confirmed. Saved to History."
+        case .clipboard:
+            return "Transcript copied; app-switch delivery did not insert text."
+        }
+        if outcome.method != .nativeEdit, !outcome.fieldIdentity {
+            status = "Insertion attempted; the original field could not be confirmed. Saved to History."
         }
         if let note = clipboardNote(for: outcome.clipboard) { status += " " + note }
         return status

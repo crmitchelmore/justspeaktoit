@@ -8,6 +8,46 @@ import Foundation
 /// between a running command and the caller's patience. Shared by every local
 /// transport (the macOS UNIX socket and the Windows named pipe).
 enum AutomationDeadline {
+    /// Coordinator runs publish once to removable waiters. A timed-out retry
+    /// must not leave another observer task awaiting an uncooperative command.
+    static func value(
+        of completion: AutomationCompletion, within seconds: TimeInterval,
+        id: String, command: AutomationCommand
+    ) async -> AutomationResponse {
+        let gate = Gate()
+        let observation = UUID()
+        let outcome: AutomationResponse? = await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                gate.install(continuation)
+                completion.observe(observation) { gate.settle($0) }
+                let timer = Task.detached {
+                    do { try await Task.sleep(for: .seconds(seconds)) } catch { return }
+                    completion.remove(observation)
+                    gate.settle(nil)
+                }
+                gate.setTimer(timer)
+                if Task.isCancelled {
+                    completion.remove(observation)
+                    gate.settle(.failure(
+                        id: id, command: command,
+                        error: AutomationError(code: .appUnavailable, message: "Automation stopped.")
+                    ))
+                }
+            }
+        } onCancel: {
+            completion.remove(observation)
+            gate.settle(.failure(
+                id: id, command: command,
+                error: AutomationError(code: .appUnavailable, message: "Automation stopped.")
+            ))
+        }
+        completion.remove(observation)
+        return outcome ?? .failure(
+            id: id, command: command,
+            error: AutomationError(code: .timedOut, message: "Automation timed out. Retry with the same request id.")
+        )
+    }
+
     /// Answers with whichever lands first: the command's own result, or the
     /// caller's deadline expiring.
     ///
@@ -41,26 +81,27 @@ enum AutomationDeadline {
         command: AutomationCommand,
         beforeSettling: (@Sendable (Task<Void, Never>) async -> Void)?
     ) async -> AutomationResponse {
-        let outcome: AutomationResponse? = await withCheckedContinuation { continuation in
-            let gate = Gate(continuation: continuation)
-            let deadline = Task.detached {
-                try? await Task.sleep(for: .seconds(seconds))
-                // A cancelled timer lost the race. Without this guard the sleep
-                // returns the instant the command cancels it, and on a starved
-                // machine the timer could reach the gate before the command's own
-                // result did — reporting a finished command as timed out.
-                guard !Task.isCancelled else { return }
-                await gate.settle(nil)
+        let gate = Gate()
+        let outcome: AutomationResponse? = await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                gate.install(continuation)
+                let deadline = Task.detached {
+                    try? await Task.sleep(for: .seconds(seconds))
+                    guard !Task.isCancelled else { return }
+                    gate.settle(nil)
+                }
+                gate.setTimer(deadline)
+                Task.detached {
+                    let response = await work.value
+                    await beforeSettling?(deadline)
+                    gate.settle(response)
+                }
             }
-            Task.detached {
-                let response = await work.value
-                await beforeSettling?(deadline)
-                // Settle first, so the result is what answers the waiter; then
-                // release the timer rather than leaving it asleep for the rest of
-                // a long deadline.
-                await gate.settle(response)
-                deadline.cancel()
-            }
+        } onCancel: {
+            gate.settle(.failure(
+                id: id, command: command,
+                error: AutomationError(code: .appUnavailable, message: "Automation stopped before the reply completed.")
+            ))
         }
         return outcome ?? .failure(
             id: id,
@@ -76,21 +117,74 @@ enum AutomationDeadline {
     /// One-shot gate: the first caller to `settle` answers the waiter and every
     /// later one is a no-op.
     ///
-    /// An actor rather than a lock because both racers are already async, and the
-    /// once-only guarantee is what makes resuming a checked continuation from two
-    /// separate tasks safe.
-    private actor Gate {
+    /// Cancellation handlers settle synchronously, including cancellation before
+    /// continuation registration. No IO or suspension happens under this lock.
+    private final class Gate: @unchecked Sendable {
+        private let lock = NSLock()
         private var continuation: CheckedContinuation<AutomationResponse?, Never>?
+        private var settled = false
+        private var result: AutomationResponse?
+        private var timer: Task<Void, Never>?
 
-        init(continuation: CheckedContinuation<AutomationResponse?, Never>) {
-            self.continuation = continuation
+        func setTimer(_ timer: Task<Void, Never>) {
+            let cancel = lock.withLock {
+                if settled { return true }
+                self.timer = timer
+                return false
+            }
+            if cancel { timer.cancel() }
+        }
+
+        func install(_ continuation: CheckedContinuation<AutomationResponse?, Never>) {
+            let alreadySettled = lock.withLock {
+                if settled { return true }
+                self.continuation = continuation
+                return false
+            }
+            if alreadySettled { continuation.resume(returning: result) }
         }
 
         /// `nil` means the deadline won.
         func settle(_ response: AutomationResponse?) {
-            guard let continuation = self.continuation else { return }
-            self.continuation = nil
-            continuation.resume(returning: response)
+            let (continuation, timer) = lock.withLock {
+                () -> (CheckedContinuation<AutomationResponse?, Never>?, Task<Void, Never>?) in
+                guard !settled else { return (nil, nil) }
+                settled = true
+                result = response
+                defer { self.continuation = nil; self.timer = nil }
+                return (self.continuation, self.timer)
+            }
+            continuation?.resume(returning: response)
+            timer?.cancel()
         }
+
+    }
+}
+
+/// One command completion, independent of the lifetime of its socket waiters.
+final class AutomationCompletion: @unchecked Sendable {
+    private let lock = NSLock()
+    private var result: AutomationResponse?
+    private var observers: [UUID: @Sendable (AutomationResponse) -> Void] = [:]
+
+    func observe(_ id: UUID, _ observer: @escaping @Sendable (AutomationResponse) -> Void) {
+        let completed = lock.withLock { () -> AutomationResponse? in
+            if let result { return result }
+            observers[id] = observer
+            return nil
+        }
+        if let completed { observer(completed) }
+    }
+
+    func remove(_ id: UUID) { lock.withLock { _ = observers.removeValue(forKey: id) } }
+
+    func finish(_ response: AutomationResponse) {
+        let callbacks = lock.withLock { () -> [@Sendable (AutomationResponse) -> Void] in
+            guard result == nil else { return [] }
+            result = response
+            defer { observers.removeAll() }
+            return Array(observers.values)
+        }
+        callbacks.forEach { $0(response) }
     }
 }

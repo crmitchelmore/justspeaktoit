@@ -48,6 +48,7 @@ extension WindowsHostPlatform {
         _ rows: [DesktopHostLocalModelRow], status: String, useGPU: Bool, presenter: UnsafeMutableRawPointer?
     ) {
         guard let presenter else { return }
+        jsti_window_set_local_model_import_callback(localModelImportEvent)
         withCStrings(rows.flatMap { [$0.name, $0.detail, $0.about] } + [status]) { pointers in
             let native = rows.indices.map { index in
                 JSTILocalModelRow(
@@ -99,8 +100,12 @@ extension SpeakWindowsMain {
     /// Source and Mode pickers, then the Local models dialog.
     static func configureModelPickers(_ controller: WindowsAppController, holder: WindowsEventContext) async throws {
         let preferences = await controller.preferredModelIDs()
-        try WindowsModels.configureModes(batch: preferences.batch, live: preferences.live, local: preferences.local)
+        try WindowsModels.configureModes(
+            batch: preferences.batch, live: preferences.live, local: preferences.local,
+            localLive: preferences.localLive
+        )
         await controller.configureLocalModels(context: Unmanaged.passUnretained(holder).toOpaque())
+        await controller.configureLocalCleanup(presenter: Unmanaged.passUnretained(holder).toOpaque())
     }
 }
 
@@ -121,4 +126,19 @@ func localModelEvent(_ action: Int32, _ index: Int32, _ context: UnsafeMutableRa
     guard let context else { return }
     let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
     holder.enqueueSettings { await holder.controller.localModelAction(action, index: Int(index)) }
+}
+
+func localModelImportEvent(
+    _ repository: UnsafePointer<CChar>?, _ filename: UnsafePointer<CChar>?,
+    _ cancel: Int32, _ context: UnsafeMutableRawPointer?
+) {
+    guard let context else { return }
+    let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
+    if cancel != 0 {
+        holder.enqueueSettings { await holder.controller.cancelLocalModelImport() }
+    } else {
+        let repo = repository.map(String.init(cString:)) ?? ""
+        let file = filename.map(String.init(cString:)) ?? ""
+        holder.enqueueSettings { await holder.controller.importLocalModel(repository: repo, filename: file) }
+    }
 }

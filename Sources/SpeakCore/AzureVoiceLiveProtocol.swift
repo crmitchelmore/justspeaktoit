@@ -78,12 +78,13 @@ enum AzureVoiceLiveProtocol {
     }
 
     /// The Speak selection in the form each model documents: `azure-speech`
-    /// takes a locale (`en_GB` becomes `en-GB`) and `mai-transcribe` a language
+    /// takes a locale (`en_GB` becomes `en-GB`) and MAI models a language
     /// code (`en`). Blank, `auto` and Automatic send nothing, which selects
     /// Azure's multilingual detection.
     static func languageValue(for selection: String?, model: String) -> String? {
         guard let language = TranscriptionLanguageCatalog.providerLanguage(for: selection ?? "") else { return nil }
-        let value = model == maiModel ? language.localeLanguageCode : language.replacingOccurrences(of: "_", with: "-")
+        let value = model == speechModel
+            ? language.replacingOccurrences(of: "_", with: "-") : language.localeLanguageCode
         return value.isEmpty ? nil : value
     }
 
@@ -128,6 +129,7 @@ enum AzureVoiceLiveServerEvent: Equatable, Sendable {
     /// A commit, by server VAD or by this client, created this user item.
     case committed(itemID: String?)
     case transcriptionDelta(itemID: String, delta: String)
+    case transcriptionIntermediate(itemID: String, suffix: String)
     case transcriptionCompleted(itemID: String, transcript: String)
     /// One item could not be transcribed; the session continues.
     case transcriptionFailed(itemID: String)
@@ -137,10 +139,12 @@ enum AzureVoiceLiveServerEvent: Equatable, Sendable {
 
     /// `nil` for a frame that is not a typed JSON object. Transcription events
     /// without an item cannot be attributed to a turn and are ignored.
-    static func parse(_ data: Data) -> AzureVoiceLiveServerEvent? {
+    static func parse(_ data: Data, singleIntervalID: String? = nil) -> AzureVoiceLiveServerEvent? {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = object["type"] as? String else { return nil }
-        let item = (object["item_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let item = singleIntervalID ?? (object["item_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        if singleIntervalID != nil, type == "conversation.item.input_audio_transcription.completed",
+           !(object["transcript"] is String) { return nil }
         switch type {
         case "session.created": return .sessionCreated
         case "session.updated": return .sessionUpdated
@@ -162,6 +166,9 @@ enum AzureVoiceLiveServerEvent: Equatable, Sendable {
         case "conversation.item.input_audio_transcription.delta":
             let delta = object["delta"] as? String ?? ""
             return delta.isEmpty ? .ignored : .transcriptionDelta(itemID: item, delta: delta)
+        case "conversation.item.input_audio_transcription.intermediate":
+            guard let suffix = object["intermediate"] as? String else { return .ignored }
+            return .transcriptionIntermediate(itemID: item, suffix: suffix)
         case "conversation.item.input_audio_transcription.completed":
             return .transcriptionCompleted(itemID: item, transcript: object["transcript"] as? String ?? "")
         case "conversation.item.input_audio_transcription.failed":
@@ -172,7 +179,7 @@ enum AzureVoiceLiveServerEvent: Equatable, Sendable {
     }
 }
 
-/// Voice Live session failures that `AzureSpeechError` does not already name.
+/// Shared Azure streaming failures that `AzureSpeechError` does not already name.
 /// Nothing here echoes a key, a request or provider text.
 public enum AzureVoiceLiveError: LocalizedError, Equatable, Sendable {
     /// Only 16 or 24 kHz PCM16 can be declared to Azure; nothing is resampled.
@@ -190,16 +197,21 @@ public enum AzureVoiceLiveError: LocalizedError, Equatable, Sendable {
     public var errorDescription: String? {
         switch self {
         case .unsupportedSampleRate(let rate):
-            return "Azure Voice Live transcription needs 16 or 24 kHz PCM16 audio; \(rate) Hz is not supported."
+            return "Azure live transcription needs 16 or 24 kHz PCM16 audio; \(rate) Hz is not supported."
         case .invalidPCM:
-            return "Azure Voice Live needs complete 16-bit PCM samples."
+            return "Azure live transcription needs complete 16-bit PCM samples."
         case .sessionNotReady:
-            return "Azure Voice Live did not confirm the transcription session in time. "
+            return "Azure did not confirm the transcription session in time. "
                 + "Check your network and the resource endpoint."
         case .sessionRejected(let code):
-            return "Azure Voice Live rejected the session (\(code)). Check model access and resource region."
+            if code == "transcription_upstream_not_configured" {
+                return "Azure has not enabled this transcription model in your resource region. "
+                    + "Choose a resource with MAI streaming access, or select the turn-based MAI model."
+            }
+            return "Azure rejected the transcription session (\(code)). "
+                + "Check model access, deployment name and resource region."
         case .serverError(let code):
-            return "Azure Voice Live reported an error (\(code)) and stopped transcribing."
+            return "Azure reported an error (\(code)) and stopped transcribing."
         }
     }
 }
@@ -208,11 +220,14 @@ public enum AzureVoiceLiveError: LocalizedError, Equatable, Sendable {
 extension AzureVoiceLiveClient {
     static let finalizationBarrier = #"{"type":"session.update","session":{"modalities":["text"]}}"#
 
-    static func connectionRequest(credentials: String, endpoint: String) throws -> URLRequest {
+    static func connectionRequest(
+        credentials: String, endpoint: String, model: String = AzureVoiceLiveProtocol.speechModel
+    ) throws -> URLRequest {
         let connection = try AzureSpeechConfiguration.liveConnection(credentials: credentials, endpoint: endpoint)
-        guard let request = AzureVoiceLiveProtocol.webSocketRequest(
-            origin: connection.origin, apiKey: connection.apiKey
-        ) else {
+        let request = model == AzureMAIStreamingProtocol.model
+            ? AzureMAIStreamingProtocol.webSocketRequest(origin: connection.origin, apiKey: connection.apiKey)
+            : AzureVoiceLiveProtocol.webSocketRequest(origin: connection.origin, apiKey: connection.apiKey)
+        guard let request else {
             throw StreamingClientError.invalidURL
         }
         return request

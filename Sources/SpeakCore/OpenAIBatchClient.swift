@@ -15,6 +15,7 @@ public struct OpenAIBatchClient: TranscriptionProvider {
   private let baseURL: URL
   private let session: URLSession
   private let staging: SharedMultipartUploadStaging?
+  private let keywords: [String]
   private let validationServiceName: String
   private let durationResolver: @Sendable (URL) async -> TimeInterval
 
@@ -23,13 +24,29 @@ public struct OpenAIBatchClient: TranscriptionProvider {
     baseURL: URL = URL(string: "https://api.openai.com/v1")!,
     validationServiceName: String = "OpenAI",
     staging: SharedMultipartUploadStaging? = nil,
+    keywords: [String],
     durationResolver: @escaping @Sendable (URL) async -> TimeInterval = { _ in 0 }
   ) {
     self.session = session
     self.staging = staging
+    self.keywords = keywords
     self.baseURL = baseURL
     self.validationServiceName = validationServiceName
     self.durationResolver = durationResolver
+  }
+
+  /// Source-compatible overload preserved for callers predating keyword hints.
+  public init(
+    session: URLSession = .shared,
+    baseURL: URL = URL(string: "https://api.openai.com/v1")!,
+    validationServiceName: String = "OpenAI",
+    staging: SharedMultipartUploadStaging? = nil,
+    durationResolver: @escaping @Sendable (URL) async -> TimeInterval = { _ in 0 }
+  ) {
+    self.init(
+      session: session, baseURL: baseURL, validationServiceName: validationServiceName,
+      staging: staging, keywords: [], durationResolver: durationResolver
+    )
   }
 
   public func transcribeFile(
@@ -50,6 +67,10 @@ public struct OpenAIBatchClient: TranscriptionProvider {
       .init(name: "response_format", value: responseFormat(for: modelName))
     ]
     if requiresChunkingStrategy(modelName) { fields.append(.init(name: "chunking_strategy", value: "auto")) }
+    if OpenAITranscriptionModels.supportsBatchPrompt(modelName),
+       let prompt = TranscriptionKeywordPolicy.prompt(keywords) {
+      fields.append(.init(name: "prompt", value: prompt))
+    }
     if let language {
       fields.append(.init(name: OpenAITranscriptionModels.batchLanguageFieldName(for: modelName),
                           value: language.localeLanguageCode))

@@ -69,7 +69,7 @@ extension SettingsView {
             .accessibilityHint("Shows what changed in this version and earlier versions")
 
             if updaterManager.allowsCrossChannelMessaging {
-              Link(destination: URL(string: "https://github.com/crmitchelmore/justspeaktoit/releases")!) {
+              Link(destination: AppInformationLink.releases.url) {
                 Label("View Releases", systemImage: "shippingbox")
               }
               .buttonStyle(.bordered)
@@ -88,19 +88,17 @@ extension SettingsView {
             .foregroundStyle(.secondary)
 
           HStack(spacing: 12) {
-            Link(destination: URL(string: "https://github.com/crmitchelmore/justspeaktoit/issues")!) {
+            Link(destination: AppInformationLink.issues.url) {
               Label("Report Issue", systemImage: "ladybug")
             }
             .buttonStyle(.bordered)
 
-            Link(destination:
-              URL(string: "https://github.com/crmitchelmore/justspeaktoit/issues/new?template=feature_request.md")!
-            ) {
+            Link(destination: AppInformationLink.featureRequest.url) {
               Label("Request Feature", systemImage: "lightbulb")
             }
             .buttonStyle(.bordered)
 
-            Link(destination: URL(string: "https://github.com/crmitchelmore/justspeaktoit")!) {
+            Link(destination: AppInformationLink.repository.url) {
               Label("View on GitHub", systemImage: "link")
             }
             .buttonStyle(.bordered)
@@ -205,7 +203,7 @@ extension SettingsView {
             .font(.callout)
             .foregroundStyle(.secondary)
 
-          Link(destination: URL(string: "https://github.com/crmitchelmore/justspeaktoit/blob/main/LICENSE")!) {
+          Link(destination: AppInformationLink.license.url) {
             Label("View License (MIT)", systemImage: "doc.plaintext")
           }
           .buttonStyle(.bordered)

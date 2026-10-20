@@ -20,7 +20,7 @@ extension LinuxAppController {
             settings = changed
             // Recording and transcription keep the status line until they finish.
             guard !busy, recording == nil else { return }
-            update(options.savedStatus)
+            update(options.savedStatus(canRestoreClipboard: LinuxHostPlatform.session.canUseX11Injection))
         } catch { update("Could not save text output settings: \(error.localizedDescription)") }
     }
 

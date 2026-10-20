@@ -311,3 +311,7 @@ extension GladiaLiveClient {
         #endif
     }
 }
+
+extension GladiaLiveClient: StreamingAudioReadyProviding {
+    public var isReadyForAudio: Bool { lock.withLock { run.stage == .open && !run.finishing } }
+}

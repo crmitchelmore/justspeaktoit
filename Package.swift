@@ -31,7 +31,6 @@ let portableCoreBuild = true
 let appleCoreSources: [String] = [
     "AlibabaSpeechConfigurationFields.swift",
     "AppGroupAvailability.swift",
-    "AppVisualDensity.swift",
     "AppleSpeechAnalyzerLiveSession.swift",
     "AppleSpeechAnalyzerTranscriber.swift",
     "AppleSpeechAssets.swift",
@@ -41,7 +40,6 @@ let appleCoreSources: [String] = [
     "AppleSpeechPreparationOperations.swift",
     "AudioTapInstallation.swift",
     "AutoCorrectionEngine.swift",
-    "AutoCorrectionStore.swift",
     "AutomationIntentSupport.swift",
     "AzureSpeechEndpointField.swift",
     "BrandColors.swift",
@@ -54,18 +52,13 @@ let appleCoreSources: [String] = [
     "CaptureSafetyClaim.swift",
     "CaptureSelfTest.swift",
     "CaptureWatchdogs.swift",
-    "CartesiaTTSAPI.swift",
     "DeepgramBalanceClient.swift",
     "DeprecatedCompatibility.swift",
     "DeviceIdentityStore.swift",
     "ElevenLabsBalanceClient.swift",
     "FileProductAnalyticsStateStore.swift",
-    "GeminiLiveClient.swift",
-    "GeminiLiveProtocol.swift",
-    "GeminiTTSAPI.swift",
-    "GroqTTSAPI.swift",
     "HandsFreeAudioPreRollBuffer.swift",
-    "HandsFreeDictation.swift",
+    "HandsFreeDictationApple.swift",
     "KeyDerivation.swift",
     "KeyboardDelivery.swift",
     "KeyboardDeliveryPolicies.swift",
@@ -85,9 +78,6 @@ let appleCoreSources: [String] = [
     "LiveTranscriptionClientFactory.swift",
     "Logging.swift",
     "MacConnection.swift",
-    "MetaMuseLiveClient.swift",
-    "MistralTTSAPI.swift",
-    "ModulateLiveClient.swift",
     "OpenClawClient.swift",
     "OpenClawClientReceive.swift",
     "OpenRouterAPIClient.swift",
@@ -102,7 +92,6 @@ let appleCoreSources: [String] = [
     "PaidAccess/PaidAudioPayload.swift",
     "PaidAccess/PaidStoreKitSync.swift",
     "PersonalLexiconService.swift",
-    "PersonalLexiconStore.swift",
     "ProductAnalytics.swift",
     "ProductAnalyticsDimensions.swift",
     "PronunciationManager.swift",
@@ -126,7 +115,6 @@ let appleCoreSources: [String] = [
     "SpeechInsights/SpeechInsightsSummaryBuilder.swift",
     "SpeechInsights/SpeechSessionRecord.swift",
     "SpeechInsights/SpeechTokenizer.swift",
-    "SpeechmaticsTTSAPI.swift",
     "StartupDiagnostics.swift",
     "TranscriptHandoffActivity.swift",
     "TranscriptionActivityHandle.swift",
@@ -135,10 +123,6 @@ let appleCoreSources: [String] = [
     "TransportChannel.swift",
     "TransportProtocol.swift",
     "WatchCaptureImportJournal.swift",
-    "XAILiveClient.swift",
-    "XAILiveFinalisation.swift",
-    "XAILiveProtocol.swift",
-    "XAITTSAPI.swift",
     "XAITTSRealtime.swift"
 ]
 
@@ -170,6 +154,37 @@ let appleSyncTestSources: [String] = [
     "NativeRecordParityTests.swift"
 ]
 
+let migrationArchiveTarget = Target.target(
+    name: "CMigrationArchive",
+    exclude: ["miniz/LICENSE", "miniz/dependency.json"],
+    publicHeadersPath: "include",
+    cSettings: [
+        .define("MINIZ_NO_STDIO"), .define("MINIZ_NO_TIME"),
+        .define("MINIZ_NO_ZLIB_COMPATIBLE_NAMES")
+    ]
+)
+
+let recordingFileSupportTarget = Target.target(name: "CRecordingFileSupport", publicHeadersPath: "include")
+// Public pinned llama.cpp declarations and a native in-process adapter. No
+// binary is downloaded/resolved by SwiftPM; absent provisioning fails closed.
+let llamaCppTarget = Target.target(
+    name: "CLlamaCpp", exclude: ["upstream/LICENSE", "upstream/PROVENANCE.md"],
+    publicHeadersPath: "include",
+    cxxSettings: [.define("_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH", .when(platforms: [.windows]))],
+    linkerSettings: [.linkedLibrary("dl", .when(platforms: [.linux]))]
+)
+
+// Keep the existing root assets in one resource target, without collecting
+// unrelated branding or platform icon directories added by other targets.
+let feedbackResourceDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+    .appendingPathComponent("Resources")
+let feedbackResourceExclusions = try FileManager.default.contentsOfDirectory(atPath: feedbackResourceDirectory.path)
+    .filter { $0 != "Sounds" && $0 != "RecordingFeedbackResources.swift" }.sorted()
+let feedbackResourcesTarget = Target.target(
+    name: "SpeakFeedbackResources", dependencies: ["SpeakCore"], path: "Resources",
+    exclude: feedbackResourceExclusions, sources: ["RecordingFeedbackResources.swift"], resources: [.copy("Sounds")]
+)
+
 let portablePackage = Package(
     name: "SpeakApp",
     defaultLocalization: "en",
@@ -179,6 +194,7 @@ let portablePackage = Package(
         .library(name: "SpeakDesktop", targets: ["SpeakDesktop"])
     ],
     targets: [
+        feedbackResourcesTarget,
         // Release-train identity moved with WatchCore. Keep the native Watch
         // surfaces excluded from the portable graph as they were before the move.
         .target(name: "SpeakWatchCore", path: "Sources/SpeakWatchCore", exclude: [
@@ -193,7 +209,12 @@ let portablePackage = Package(
             resources: [.process("Resources")],
             swiftSettings: [.define("SPEAK_PORTABLE_CORE")]
         ),
-        .target(name: "SpeakDesktop", dependencies: ["SpeakCore"]),
+        migrationArchiveTarget,
+        recordingFileSupportTarget,
+        llamaCppTarget,
+        .target(
+            name: "SpeakDesktop", dependencies: ["SpeakCore", "CMigrationArchive", "CRecordingFileSupport", "CLlamaCpp"]
+        ),
         // Recording, History, output, settings and iCloud sync orchestration
         // shared by the Windows and Linux hosts behind DesktopHostPlatform.
         .target(
@@ -209,8 +230,15 @@ let portablePackage = Package(
         // Desktop History and API-key sync over CloudKit Web Services. Portable
         // only: Apple apps keep their native CloudKit engines.
         .target(name: "SpeakDesktopSync", dependencies: ["SpeakDesktop", "SpeakSync", "SpeakCore"]),
-        .target(name: "SpeakTestSupport", path: "Tests/SpeakTestSupport"),
-        .testTarget(name: "SpeakDesktopTests", dependencies: ["SpeakDesktop", "SpeakCore", "SpeakTestSupport"]),
+        .target(
+            name: "SpeakTestSupport", path: "Tests/SpeakTestSupport",
+            resources: [.copy("MigrationArchiveFixtures")]
+        ),
+        .testTarget(
+            name: "SpeakDesktopTests",
+            dependencies: ["SpeakDesktop", "SpeakCore", "SpeakTestSupport", "SpeakFeedbackResources"]
+                + (windowsTargetBuild ? [.target(name: "SpeakWindowsPlatform")] : [])
+        ),
         .testTarget(
             name: "SpeakDesktopHostTests",
             dependencies: [
@@ -270,7 +298,11 @@ if windowsTargetBuild {
                 .linkedLibrary("gdiplus"), .linkedLibrary("dwmapi"), .linkedLibrary("uxtheme"),
                 .linkedLibrary("shcore"),
                 // CNG SHA-256 for downloaded local models.
-                .linkedLibrary("bcrypt")
+                .linkedLibrary("bcrypt"),
+                // Architecture-neutral Win32 resources: Explorer/shortcuts and
+                // native window/tray icons use the same canonical Mac exports.
+                .unsafeFlags(["-Xlinker", URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+                    .appendingPathComponent("Resources/Desktop/AppIcon.res").path])
             ]
         ),
         // Same-user named pipes for `speak` and the app; kept apart so the CLI
@@ -294,7 +326,10 @@ if windowsTargetBuild {
         ),
         .target(
             name: "SpeakWindowsPlatform",
-            dependencies: ["SpeakCore", "SpeakDesktop", "SpeakSync", "CWindowsSupport", "CWindowsAutomation"]
+            dependencies: [
+                "SpeakCore", "SpeakDesktop", "SpeakSync", "SpeakFeedbackResources", "CWindowsSupport",
+                "CWindowsAutomation"
+            ]
         ),
         .executableTarget(
             name: "SpeakWindows", dependencies: [
@@ -310,7 +345,7 @@ if windowsTargetBuild {
         .testTarget(
             name: "SpeakWindowsPlatformTests",
             dependencies: [
-                "SpeakCore", "SpeakSync", "SpeakWindowsPlatform", "CWindowsSupport", "SpeakTestSupport",
+                "SpeakCore", "SpeakSync", "SpeakDesktop", "SpeakWindowsPlatform", "CWindowsSupport", "SpeakTestSupport",
                 "SpeakAutomationKit"
             ],
             resources: [.copy("Fixtures")]
@@ -318,6 +353,26 @@ if windowsTargetBuild {
     ])
     portablePackage.cxxLanguageStandard = .cxx17
 }
+
+#if os(Linux)
+if !windowsTargetBuild {
+    portablePackage.products.append(.executable(name: "speak", targets: ["SpeakCLI"]))
+    portablePackage.targets.append(contentsOf: [
+        .target(
+            name: "CLinuxAutomation", publicHeadersPath: "include",
+            linkerSettings: [.linkedLibrary("pthread")]
+        ),
+        .target(name: "SpeakAutomationKit", dependencies: ["SpeakCore", "CLinuxAutomation"]),
+        .target(name: "SpeakLinuxAutomation", dependencies: ["SpeakCore", "SpeakAutomationKit", "CLinuxAutomation"]),
+        .executableTarget(name: "SpeakCLI", dependencies: ["SpeakCore", "SpeakAutomationKit"]),
+        .testTarget(name: "SpeakAutomationKitTests", dependencies: ["SpeakAutomationKit", "SpeakCore"]),
+        .testTarget(
+            name: "SpeakLinuxAutomationTests",
+            dependencies: ["SpeakLinuxAutomation", "SpeakAutomationKit", "SpeakCore", "CLinuxAutomation"]
+        )
+    ])
+}
+#endif
 
 if linuxTargetBuild {
     // System libraries resolved with pkg-config. Only the C adapter includes
@@ -354,11 +409,13 @@ if linuxTargetBuild {
             cSettings: [.define("_GNU_SOURCE")],
             // xtst.pc links only libXtst; the core Xlib calls need libX11.
             // libdl opens the whisper.cpp runtime (part of libc since glibc 2.34).
-            linkerSettings: [.linkedLibrary("X11"), .linkedLibrary("dl")]
+            linkerSettings: [.linkedLibrary("X11"), .linkedLibrary("dl"), .linkedLibrary("m")]
         ),
         .target(
             name: "SpeakLinuxPlatform",
-            dependencies: ["SpeakCore", "SpeakDesktop", "SpeakSync", "SpeakDesktopSync", "CLinuxSupport"]
+            dependencies: [
+                "SpeakCore", "SpeakDesktop", "SpeakSync", "SpeakDesktopSync", "SpeakFeedbackResources", "CLinuxSupport"
+            ]
         ),
         .target(
             name: "SpeakLinuxWebSocket",
@@ -375,8 +432,9 @@ if linuxTargetBuild {
             name: "SpeakLinux",
             dependencies: [
                 "SpeakCore", "SpeakDesktop", "SpeakDesktopHost", "SpeakLinuxPlatform", "SpeakLinuxWebSocket",
-                "CLinuxSupport", "SpeakDesktopSync", "SpeakSync"
-            ]
+                "CLinuxSupport", "SpeakDesktopSync", "SpeakSync", "SpeakLinuxAutomation"
+            ],
+            resources: [.copy("Resources/hicolor")]
         ),
         .testTarget(
             name: "SpeakLinuxPlatformTests",
@@ -387,7 +445,7 @@ if linuxTargetBuild {
         ),
         .testTarget(
             name: "SpeakLinuxWebSocketTests",
-            dependencies: ["SpeakCore", "SpeakDesktop", "SpeakLinuxWebSocket"]
+            dependencies: ["SpeakCore", "SpeakDesktop", "SpeakLinuxWebSocket", "SpeakTestSupport"]
         )
     ])
 }
@@ -444,8 +502,17 @@ let package = portableCoreBuild ? portablePackage : Package(
         )
     ],
     targets: [
-        .target(name: "SpeakDesktop", dependencies: ["SpeakCore"]),
-        .testTarget(name: "SpeakDesktopTests", dependencies: ["SpeakDesktop", "SpeakCore", "SpeakTestSupport"]),
+        migrationArchiveTarget,
+        recordingFileSupportTarget,
+        feedbackResourcesTarget,
+        llamaCppTarget,
+        .target(
+            name: "SpeakDesktop", dependencies: ["SpeakCore", "CMigrationArchive", "CRecordingFileSupport", "CLlamaCpp"]
+        ),
+        .testTarget(
+            name: "SpeakDesktopTests",
+            dependencies: ["SpeakDesktop", "SpeakCore", "SpeakTestSupport", "SpeakFeedbackResources"]
+        ),
         .target(
             name: "SpeakHotKeys",
             path: "Sources/SpeakHotKeys"
@@ -528,7 +595,8 @@ let package = portableCoreBuild ? portablePackage : Package(
         // sources through its own glob.
         .target(
             name: "SpeakTestSupport",
-            path: "Tests/SpeakTestSupport"
+            path: "Tests/SpeakTestSupport",
+            resources: [.copy("MigrationArchiveFixtures")]
         ),
         .testTarget(
             name: "SpeakCoreTests",
@@ -550,6 +618,7 @@ let package = portableCoreBuild ? portablePackage : Package(
             name: "SpeakAppTests",
             dependencies: [
                 "SpeakApp",
+                "SpeakDesktop",
                 "SpeakAutomationKit",
                 "SpeakHotKeys",
                 "SpeakTestSupport",

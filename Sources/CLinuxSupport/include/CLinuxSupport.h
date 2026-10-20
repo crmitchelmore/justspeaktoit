@@ -3,6 +3,21 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "LinuxAtspi.h"
+#include "VoiceSources.h"
+#include "VoiceAudioCodec.h"
+#include "../../CWindowsSupport/include/VoiceCredentials.h"
+#include "../../CWindowsSupport/include/LocalCleanup.h"
+
+int32_t jsti_comparison_present(const char *models, const char *rounds, const char *detail,
+                               const char *selected, int32_t busy, int32_t recording, int32_t judgeable,
+                               int32_t sync_enabled, int32_t sync_available,
+                               const char *references, const char *reference);
+int32_t jsti_comparison_present_batch(const char *models, const char *rounds, const char *detail,
+                                     const char *selected, int32_t busy, int32_t recording, int32_t judgeable,
+                                     int32_t sync_enabled, int32_t sync_available,
+                                     const char *references, const char *reference,
+                                     const char *batch_round, int32_t batch_remaining, int32_t can_next);
 
 #ifdef __cplusplus
 extern "C" {
@@ -43,11 +58,28 @@ enum {
     JSTI_EVENT_TEXT_OUTPUT = 30,       /* index: method, text: "restore" or "" */
     JSTI_EVENT_COMMAND_TOGGLE = 31,    /* --toggle from another process or action */
     JSTI_EVENT_SHORTCUT_STYLE = 32,    /* index: 0 press, 1 hold, 2 double-tap, 3 hold and double-tap */
-    /* Apply in Post-processing. index: model index, or -1 - index when
-     * disabled; text: prompt, U+001F, then a new OpenRouter key or nothing. */
+    /* Apply in Post-processing. index: full-catalog model index, or -1 - index when
+     * disabled; text: percent-encoded prompt<TAB>percent-encoded new key<TAB>
+     * directives 0/1<TAB>context tags 0/1. Local sends no key. */
     JSTI_EVENT_POST_PROCESSING = 33,
     /* Apply in Azure Speech resource. text: the endpoint as typed ("" clears). */
-    JSTI_EVENT_AZURE_RESOURCE = 34
+    JSTI_EVENT_AZURE_RESOURCE = 34,
+    JSTI_EVENT_HISTORY_FILTERS = 90, /* text: DesktopHistoryFilter JSON */
+    JSTI_EVENT_HISTORY_DELETE = 91, /* text: frozen newline-separated UUIDs; index: 1 removes owned audio */
+    JSTI_EVENT_RECORDINGS_FOLDER = 93,
+    JSTI_EVENT_AUDIO_CLEANUP = 94,
+    JSTI_EVENT_AUDIO_CLEANUP_RESPONSE = 95, /* text: confirmation UUID; index: 1 confirms, 0 cancels */
+    JSTI_EVENT_MIGRATION_EXPORT = 96, /* text: ZIP destination; index bits: 1 saved audio, 2 app profiles */
+    JSTI_EVENT_MIGRATION_INSPECT = 97, /* text: selected ZIP source; no application changes */
+    JSTI_EVENT_QUICK_VOICE = 110, /* index: canonical favorite slot 1...3 */
+    JSTI_EVENT_SPEAK_CLIPBOARD = 113, /* captures through the owned Host speech task, not History */
+    JSTI_EVENT_ACTION_SHORTCUT_EDIT = 115, /* revision/request header, then percent-escaped draft rows */
+    JSTI_EVENT_SPEECH_PAUSE = 116, /* exact active speech only; never starts History audio */
+    JSTI_EVENT_API_KEYS = 117,
+    JSTI_EVENT_PERMISSIONS = 118,
+    /* Profiles: percent-escaped TAB fields, starting with revision/action/UUID;
+     * "refresh" opens a new immutable catalogue/editor revision. */
+    JSTI_EVENT_PROFILES = 140
 };
 
 /* Read aloud, Appearance and Launch at login. Linux-only numbers 40-46. */
@@ -60,7 +92,12 @@ enum {
     JSTI_EVENT_APPEARANCE = 45,
     /* General › Launch at login. index: 1 on, 0 off. The switch stays
      * insensitive until jsti_window_set_login_item reports the state reached. */
-    JSTI_EVENT_LOGIN_ITEM = 46
+    JSTI_EVENT_LOGIN_ITEM = 46,
+    JSTI_EVENT_AUTOMATION = 47,
+    /* Housekeeping › New recordings folder. text: chosen absolute local folder,
+     * or "" to save new recordings in History again. Nothing is moved. */
+    JSTI_EVENT_RECORDINGS_LOCATION = 98,
+    JSTI_EVENT_USER_ABSENT = 120
 };
 
 /* The argument the login item starts the app with (the shared
@@ -71,6 +108,55 @@ enum {
 enum { JSTI_STATE_IDLE = 0, JSTI_STATE_RECORDING = 1, JSTI_STATE_WORKING = 2 };
 
 typedef void (*jsti_window_event_fn)(int32_t event, const char *text, int32_t index, void *context);
+/* Linux window-local projection of customShortcutBindings. Global/unsupported
+ * rows remain visible but disabled; this does not change dictation registration.
+ * run: 0 unavailable, 1 record, 2 page, 3 stop, 4 troubleshooting,
+ * 5 comparison, 6 quick voice, 7 clipboard speech, 8 speech pause,
+ * 9 API Keys, 10 Permissions. Strings are copied before return. */
+typedef struct JSTILinuxActionShortcut {
+    const char *title, *chord, *note, *page, *identifier;
+    uint32_t keysym, modifiers;
+    int32_t run, slot, enabled, binding_enabled, binding_global, can_be_global, has_key;
+} JSTILinuxActionShortcut;
+int32_t jsti_window_set_action_shortcuts(const JSTILinuxActionShortcut *rows, size_t count);
+/* Presets come from the canonical catalogue, flattened in names/row order.
+ * Save completion is asynchronous and correlated to one editor request. */
+int32_t jsti_window_set_action_shortcut_editor(const char *revision, const char *const *names,
+    const JSTILinuxActionShortcut *presets, size_t preset_count, size_t row_count, int32_t reset_index);
+int32_t jsti_action_shortcuts_edit_finished(const char *request, int32_t success, const char *message);
+int32_t jsti_action_shortcuts_editor_is_open(void);
+typedef struct JSTIConfigurationField {
+    const char *title;
+    const char *value;
+    const char *group;
+    int32_t is_boolean;
+    int32_t requires_hud_overlay;
+    /* Optional newline-separated choices: raw value, tab, display title. */
+    const char *choices;
+    int32_t requires_hands_free_guard;
+    /* -1: unavailable/read-only, retained for transfer. Zero: independent.
+     * Positive: the 1-based index of a boolean enabling field. */
+    int32_t enabled_by_field;
+} JSTIConfigurationField;
+typedef int32_t (*JSTIConfigurationCallback)(int32_t action, const char *const *values, size_t count,
+                                            void *context, char *error, size_t capacity);
+/* Recovery action 3 carries all fields followed by the exact selected edit,
+ * which the host verifies is still recoverable before persisting.
+ * Actions 4/5 carry all fields for save-and-preview start/stop sound. */
+int32_t jsti_window_set_configuration(const JSTIConfigurationField *fields, size_t count,
+                                      const char *const *recovered_keywords, size_t recovered_count,
+                                      JSTIConfigurationCallback callback, void *context);
+/* Revision mode acknowledges rendered fields with action 6, then appends that
+ * revision to actions 0/3/4/5 so queued edits retain their actual view identity. */
+int32_t jsti_window_set_configuration_revision(const JSTIConfigurationField *fields, size_t count,
+    const char *const *recovered_keywords, size_t recovered_count,
+    JSTIConfigurationCallback callback, void *context, const char *revision);
+/* Queues a label-only update without replacing an unsaved entry value. */
+int32_t jsti_window_set_configuration_field_title(size_t index, const char *title);
+/* Queues route availability for a field with no enabling-field dependency. */
+int32_t jsti_window_set_configuration_field_enabled(size_t index, int32_t enabled);
+/* False when logind/screen-lock observation is unavailable; manual capture is unaffected. */
+int32_t jsti_window_hands_free_guard_ready(void);
 
 typedef struct JSTIModelRow {
     const char *id;
@@ -94,6 +180,14 @@ typedef struct JSTIHistoryRow {
     int32_t tone;
 } JSTIHistoryRow;
 
+typedef struct JSTIHistoryFilterModel {
+    const char *id;
+    const char *name;
+    int32_t selected;
+} JSTIHistoryFilterModel;
+int32_t jsti_window_set_history_filters(const JSTIHistoryFilterModel *models, size_t count,
+                                        int32_t errors_only, const char *from_day, const char *through_day);
+
 /* Preformatted History totals, as the Mac dashboard shows them. */
 typedef struct JSTIInsights {
     const char *sessions;
@@ -111,13 +205,24 @@ enum {
     JSTI_PAGE_GENERAL,
     JSTI_PAGE_TRANSCRIPTION,
     JSTI_PAGE_POST_PROCESSING,
+    JSTI_PAGE_CORRECTIONS,
+    JSTI_PAGE_PRONUNCIATION,
+    JSTI_PAGE_PROFILES,
     JSTI_PAGE_KEYBOARD,
     JSTI_PAGE_CLOUD_SYNC,
     JSTI_PAGE_ABOUT,
     JSTI_PAGE_COUNT
 };
 
+/* Owned, ordered main-thread update. replace=0 only reports an error and keeps
+ * unsaved form contents; replace=1 carries the full H/T/P/L/R profile projection.
+ * Every string is copied before returning; queued strings are freed on close. */
+int32_t jsti_profiles_set(const char *wire, int32_t replacing);
+
 enum { JSTI_WINDOW_SMOKE_TEST = 1 };
+
+/* Before running GTK: root contains the executable's bundled hicolor theme. */
+int32_t jsti_app_icon_configure(const char *root, char *error, size_t error_capacity);
 
 /* Runs the GTK application on the calling (main) thread until the window
  * closes. `app_id` is the reverse-DNS application ID. A second instance
@@ -130,19 +235,98 @@ int32_t jsti_window_run(
 /* Safe from any thread; applied on the GTK main thread. No-ops before the
  * window exists or after it closes. `status` or `transcript` may be NULL. */
 int32_t jsti_window_update(const char *status, const char *transcript, int32_t state);
+/* Preview-only; one pending value. Native navigation retires the ticket.
+ * Offer returns 1 for a stale ticket, -1 for an enqueue/validation failure. */
+uint64_t jsti_window_begin_cleanup_preview(void);
+int32_t jsti_window_cleanup_preview(const char *text, uint64_t ticket);
+void jsti_window_end_cleanup_preview(uint64_t ticket);
+/* Events 70 (action), 71 (load), index 0 corrections / 1 pronunciation;
+ * event 72 reads a selected recording's correction snapshot (kind 2).
+ * Kind 4 edits the separate legacy word-to-pronunciation preference map. */
+int32_t jsti_vocabulary_set(int32_t kind, const char *payload, int32_t refresh);
 int32_t jsti_window_set_model_catalog(
     const JSTIModelRow *rows, size_t count, int32_t selected, const char *status, int32_t refreshing);
 int32_t jsti_window_set_microphones(
     const char *const *ids, const char *const *names, size_t count, const char *selected);
 int32_t jsti_window_set_history(const JSTIHistoryRow *rows, size_t count, const char *selected_id);
+/* Complete retained IDs, including filtered-out rows. Copied for Clear confirmation. */
+int32_t jsti_window_set_history_management(const char *identifiers);
+int32_t jsti_window_confirm_audio_cleanup(const char *token, size_t count);
+int32_t jsti_window_show_migration_report(const char *text);
 /* The dashboard totals (`all` saved records) and the History header totals
  * (`visible`, the records the search shows). */
 int32_t jsti_window_set_insights(const JSTIInsights *all, const JSTIInsights *visible);
 /* Applies and shows the saved appearance, indexed as JSTI_EVENT_APPEARANCE. */
 int32_t jsti_window_set_appearance(int32_t appearance);
+typedef struct JSTIAboutLink {
+    const char *title;
+    const char *url;
+} JSTIAboutLink;
+/* Copies metadata and up to eight HTTPS links onto the GTK queue. No update
+ * check, download or installation is implied. */
+int32_t jsti_window_configure_about(const char *details, const JSTIAboutLink *links, size_t count);
+enum {
+    JSTI_LINUX_TROUBLESHOOTING_API_KEYS = -1,
+    JSTI_LINUX_TROUBLESHOOTING_PERMISSIONS = -2,
+    JSTI_LINUX_TROUBLESHOOTING_CHECK = 1,
+    JSTI_LINUX_TROUBLESHOOTING_KEEP_CLIPBOARD = 2,
+    JSTI_LINUX_TROUBLESHOOTING_DISABLE_PROCESSING = 3
+};
+typedef void (*jsti_troubleshooting_fn)(int32_t command, uint64_t revision, void *context);
+typedef struct JSTILinuxTroubleshootingRow {
+    const char *title;
+    const char *detail;
+    const char *status;
+    const char *navigation_title;
+    const char *fix_title;
+    int32_t navigation_page;
+    int32_t fix_command;
+} JSTILinuxTroubleshootingRow;
+int32_t jsti_troubleshooting_configure(jsti_troubleshooting_fn callback, void *context);
+void jsti_troubleshooting_clear(void);
+uint64_t jsti_troubleshooting_revision(void);
+/* Copies up to 32 rows onto the GTK queue. Old/closed revisions are ignored.
+ * 0 means queued, -1 means invalid input or an unavailable window queue. */
+int32_t jsti_troubleshooting_set_rows(const JSTILinuxTroubleshootingRow *rows, size_t count,
+                                      const char *summary, uint64_t revision);
+enum {
+    JSTI_LINUX_API_KEY_REFRESH = 0, JSTI_LINUX_API_KEY_SAVE = 1, JSTI_LINUX_API_KEY_REMOVE = 2,
+    JSTI_LINUX_API_KEY_VALIDATE = 3, JSTI_LINUX_API_KEY_CANCEL = 4
+};
+typedef struct {
+    const char *identifier, *label, *uses, *status, *url, *hint;
+    int32_t saved;
+} JSTILinuxAPIKeyRow;
+/* Keys exist only during this callback and are erased from the native form.
+ * Rows returned to GTK contain masked metadata only. */
+typedef void (*jsti_api_keys_fn)(int32_t action, const char *request, const char *identifier,
+                                const char *key, void *context);
+int32_t jsti_api_keys_configure(jsti_api_keys_fn callback, void *context);
+void jsti_api_keys_clear(void);
+int32_t jsti_api_keys_is_open(void);
+int32_t jsti_api_keys_request_is_current(const char *request);
+int32_t jsti_window_request_api_keys(void);
+int32_t jsti_api_keys_finish(const JSTILinuxAPIKeyRow *rows, size_t count,
+                           const char *request, const char *status);
+typedef struct {
+    const char *title, *status, *detail, *action;
+    int32_t page;
+} JSTILinuxPermissionRow;
+typedef void (*jsti_permissions_fn)(uint64_t revision, void *context);
+int32_t jsti_permissions_configure(jsti_permissions_fn callback, void *context);
+void jsti_permissions_clear(void);
+uint64_t jsti_permissions_revision(void);
+int32_t jsti_window_request_permissions(void);
+/* Passive report; no capture, key injection or portal approval is requested. */
+int32_t jsti_permissions_set_rows(const JSTILinuxPermissionRow *rows, size_t count,
+                                  const char *summary, uint64_t revision);
+/* Updates only the saved enabled state, preserving unsaved prompt/model drafts. */
+int32_t jsti_window_set_post_processing_enabled(int32_t enabled);
 /* General › Launch at login: the shared DesktopLoginItemState (0 off, 1 on,
  * 2 off by the system, 3 on by policy, 4 unavailable) and the note under it. */
 int32_t jsti_window_set_login_item(int32_t state, const char *detail);
+/* Actual listener state after local approval, not merely imported intent. */
+int32_t jsti_window_set_automation(int32_t enabled, const char *detail);
 /* The recording HUD. phase is the shared DesktopHUDState.Phase: 0 hidden,
  * 1 recording (level meter and live_text), 2 transcribing, 3 post-processing,
  * 4 delivering, 5 success (hides after 2.4 s), 6 failure (hides after 6 s);
@@ -150,18 +334,44 @@ int32_t jsti_window_set_login_item(int32_t state, const char *detail);
  * windows at the bottom centre of the active monitor that never takes focus;
  * on Wayland the result only, as a notification while the window is inactive.
  * Thread safe; -1 for an invalid phase or UTF-8. */
-int32_t jsti_window_set_hud(int32_t phase, const char *headline, const char *subheadline, const char *live_text);
+int32_t jsti_window_set_hud(int32_t phase, const char *headline, const char *subheadline, const char *live_text,
+                            int32_t display_milliseconds, int32_t compact);
+int32_t jsti_window_set_hud_layout(int32_t phase, const char *headline, const char *subheadline, const char *live_text,
+                                   int32_t display_milliseconds, int32_t compact, int32_t expanded);
 /* Shows a JSTI_PAGE_* page, as choosing it in the sidebar does. */
 int32_t jsti_window_show_page(int32_t page);
+/* Window-local bindings from SpeakCore; strings are copied before return.
+ * Missing destinations are unavailable. Hints never control navigation. */
+typedef struct {
+    const char *destination;
+    int32_t digit;
+    const char *hint;
+} JSTISidebarShortcut;
+int32_t jsti_window_set_sidebar_shortcuts(const JSTISidebarShortcut *bindings, size_t count, int32_t show_hints);
+
+typedef struct {
+    int32_t compact;
+    int32_t page_padding, section_spacing, card_padding, content_spacing, inline_spacing, group_spacing;
+    int32_t minimum_row_height;
+} JSTIVisualDensity;
+int32_t jsti_window_set_visual_density(JSTIVisualDensity density);
 /* variant: 0 processed, 1 original, -1 none. */
 int32_t jsti_window_set_history_presentation(
     const char *record_id, int32_t variant, int32_t switchable, const char *text, const char *status);
 int32_t jsti_window_set_transcript_variant(const char *record_id, int32_t variant, int32_t switchable);
 /* method: 0 paste into the focused app, 1 clipboard only. */
-int32_t jsti_window_set_text_output(int32_t method, int32_t restore_clipboard, const char *shortcut_hint);
-/* The Post-processing group: shared remote model names and saved choices. */
+int32_t jsti_window_set_text_output(int32_t method, int32_t restore_clipboard,
+                                   int32_t can_restore_clipboard, const char *shortcut_hint);
+int32_t jsti_window_set_text_output_policy(
+    int32_t method, int32_t restore_clipboard, int32_t can_restore_clipboard, const char *shortcut_hint,
+    const char *policy_title, const char *policy_labels, int32_t policy_selection, const char *policy_help);
+/* Full shared projection; local_index identifies built-in rules. Callback
+ * indexes remain full-projection indexes; selected -1 requires a user choice.
+ * remembered_remote_index is dormant picker recall; -1 requires explicit choice. */
 int32_t jsti_window_set_post_processing(
-    const char *const *models, size_t count, int32_t enabled, int32_t selected, const char *prompt);
+    const char *const *models, size_t count, int32_t enabled, int32_t selected,
+    int32_t local_index, int32_t remembered_remote_index, const char *local_notice,
+    int32_t include_directives, int32_t include_tags, const char *prompt);
 /* Shows the saved Azure Speech resource endpoint ("" for none). */
 int32_t jsti_window_set_azure_resource(const char *endpoint);
 /* The shortcut behaviour picker, indexed as JSTI_EVENT_SHORTCUT_STYLE. */
@@ -192,8 +402,16 @@ int32_t jsti_window_screenshot_tour(const char *directory, char *error, size_t e
  * on the GTK main thread and the caller waits (bounded). Wayland compositors
  * only accept a selection from the focused client; see jsti_portal_*. */
 int32_t jsti_clipboard_write(const char *text, char *error, size_t error_capacity);
+/* X11-only owned selection and atomic restore. Restore returns 2 when another
+ * copy superseded the receipt, even if its text is identical. */
+int32_t jsti_clipboard_write_owned(const char *text, uint64_t *ownership, char *error, size_t error_capacity);
+int32_t jsti_clipboard_restore(const char *text, uint64_t ownership, char *error, size_t error_capacity);
+int32_t jsti_clipboard_ownership_self_test(char *error, size_t error_capacity);
 /* Returns 1 when the clipboard holds no text. `*text` is malloc'ed. */
 int32_t jsti_clipboard_read(char **text, char *error, size_t error_capacity);
+/* Read-only, bounded GTK async stream with a 2.5 second cancellation budget.
+ * Must be called off the GTK thread. Returns 1 for non-text. Free with jsti_free. */
+int32_t jsti_voice_command_clipboard_read(char **text, char *error, size_t error_capacity);
 void jsti_free(void *pointer);
 
 /* ------------------------------------------------------------- credentials */
@@ -323,6 +541,28 @@ int32_t jsti_audio_decode(
 
 /* ---------------------------------------------------------------- playback */
 
+int32_t jsti_audio_decode_bounded(
+    const char *path, uint32_t sample_rate, jsti_capture_audio_fn chunk, void *context,
+    const volatile int32_t *cancelled, char *error, size_t error_capacity);
+
+typedef struct jsti_recording_feedback jsti_recording_feedback;
+typedef void (*jsti_recording_feedback_failure_fn)(const char *message, void *context);
+jsti_recording_feedback *jsti_recording_feedback_create(
+    jsti_recording_feedback_failure_fn failure, void *context);
+/* Preparation runs on a worker; cancellation may be requested concurrently. */
+int32_t jsti_recording_feedback_prepare(
+    jsti_recording_feedback *feedback, const char *start, const char *stop, char *error, size_t capacity);
+void jsti_recording_feedback_cancel_preparation(jsti_recording_feedback *feedback);
+int32_t jsti_recording_feedback_play(
+    jsti_recording_feedback *feedback, int32_t sound, float gain, char *error, size_t capacity);
+void jsti_recording_feedback_stop(jsti_recording_feedback *feedback);
+/* Call only after preparation returns. No callback runs after destroy returns. */
+void jsti_recording_feedback_destroy(jsti_recording_feedback *feedback);
+/* Device-free check: decodes and bounds the asset using the production decoder. */
+int32_t jsti_recording_feedback_check_asset(const char *path, char *error, size_t capacity);
+/* Self-test measurement: seconds from play to first queued native samples, 0 while pending, -1 on failure. */
+double jsti_recording_feedback_queued_latency(jsti_recording_feedback *feedback);
+
 /* Plays mono PCM16 through the sound server. The samples are copied. */
 typedef struct jsti_player jsti_player;
 enum { JSTI_PLAYER_PLAYING = 0, JSTI_PLAYER_PAUSED = 1, JSTI_PLAYER_FINISHED = 2, JSTI_PLAYER_FAILED = 3 };
@@ -344,8 +584,17 @@ int32_t jsti_window_set_playback(const char *record_id, int32_t state, const cha
 /* Creates a directory (and parents) readable only by the current user, or
  * tightens an existing one. Refuses symbolic links. */
 int32_t jsti_private_directory_prepare(const char *path, char *error, size_t error_capacity);
+int32_t jsti_private_directory_create(const char *path, char *error, size_t error_capacity);
 /* Creates a new empty file with mode 0600; refuses existing paths and links. */
 int32_t jsti_private_file_create(const char *path, char *error, size_t error_capacity);
+/* Private bounded copy and exclusive publication; source retained.
+ * Returns 0 committed, 2 cancelled before commit, -1 failed, or 3 committed
+ * with a cleanup/durability error. Never retry or remove a result-3 destination.
+ * A filesystem without exclusive publication support fails explicitly. */
+typedef int (*jsti_file_publication_cancelled_fn)(void *context);
+int32_t jsti_private_file_publish(const char *source, const char *destination,
+                                  jsti_file_publication_cancelled_fn cancelled, void *context,
+                                  char *error, size_t error_capacity);
 int32_t jsti_open_path(const char *path, char *error, size_t error_capacity);
 
 /* ------------------------------------------------------------ local models */
@@ -355,7 +604,9 @@ enum {
     JSTI_EVENT_LOCAL_MODEL_DOWNLOAD = 50, /* index: row; downloads or resumes */
     JSTI_EVENT_LOCAL_MODEL_CANCEL = 51,   /* index: row */
     JSTI_EVENT_LOCAL_MODEL_REMOVE = 52,   /* index: row */
-    JSTI_EVENT_LOCAL_MODEL_GPU = 53       /* index: 1 on, 0 off */
+    JSTI_EVENT_LOCAL_MODEL_GPU = 53,      /* index: 1 on, 0 off */
+    JSTI_EVENT_LOCAL_MODEL_IMPORT = 54,   /* text: owner/repo newline GGML basename */
+    JSTI_EVENT_LOCAL_MODEL_IMPORT_CANCEL = 55
 };
 
 enum {

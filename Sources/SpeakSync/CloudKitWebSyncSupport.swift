@@ -20,12 +20,14 @@ enum CloudKitWebRecordBatch {
         _ names: [String],
         zoneName: String,
         client: CloudKitWebServicesClient,
-        session: CloudKitWebSession
+        session: CloudKitWebSession,
+        beforeRequest: @Sendable () async throws -> Void = {}
     ) async throws -> [String: CloudKitWebLookupOutcome] {
         var outcomes: [String: CloudKitWebLookupOutcome] = [:]
         var pending = chunks(of: names)
         while let chunk = pending.popLast() {
             do {
+                try await beforeRequest()
                 let results = try await client.lookupRecords(zoneName: zoneName, recordNames: chunk, in: session)
                 for (name, result) in attribute(results, to: chunk) {
                     outcomes[name] = lookupOutcome(for: result)
@@ -45,12 +47,14 @@ enum CloudKitWebRecordBatch {
         _ writes: [(id: UUID, operation: CloudKitWebRecordOperation)],
         zoneName: String,
         client: CloudKitWebServicesClient,
-        session: CloudKitWebSession
+        session: CloudKitWebSession,
+        beforeRequest: @Sendable () async throws -> Void = {}
     ) async -> [(id: UUID, result: Result<Void, Error>)] {
         var outcomes: [(id: UUID, result: Result<Void, Error>)] = []
         for chunk in chunks(of: writes) {
             let names = chunk.map(\.operation.record.recordName)
             do {
+                try await beforeRequest()
                 let results = try await client.modifyRecords(
                     zoneName: zoneName,
                     operations: chunk.map(\.operation),

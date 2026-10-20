@@ -1,12 +1,34 @@
 # macOS data export and import
 
-Open **Settings → Data & Migration**. This feature is manual and macOS-only.
+Open **Settings → Data & Migration** for full manual export/import on macOS.
+Windows/Linux provide History backups with optional saved audio and app profiles, plus read-only inspection;
+full native category collection and transactional import remain unfinished.
+Native ZIP inspection also validates profile structure and declared coverage
+through the shared profile catalogue. Missing profile data is not an empty
+collection; prompts and identifiers are never displayed. Profile checks are not
+current-store merge counts, import approval or native application of profiles.
+In General, **App profiles** on Windows or **Include app profiles** on Linux adds per-app overrides and prompts
+to the unencrypted ZIP; it starts off, preserving existing History-only choices.
+The source is read through the shared bounded owned-file reader and exact-byte,
+file and directory-chain revalidation. Unsupported identity metadata, changed
+sources and malformed collections fail the backup rather than becoming empty
+replacement authority. Profiles preserved as unreadable on startup must be
+recovered before selecting them. These read receipts are not write/CAS authority
+or an atomic multi-store transaction; native import remains unavailable.
 
 ## Export
 
 One unencrypted ZIP contains `manifest.json`, a readable JSON file for each
 selected category, and any selected recordings. All categories start selected
 except **API keys & credentials**. Select all/none shortcuts are available.
+
+New exports use format version 2; version-1 exports remain readable. Version 2
+can declare covered record kinds and keys, so a partial source cannot clear
+uncollected kinds or unsupported preferences during replacement. Older
+version-1-only apps explicitly reject these exports; update the receiving app.
+Native recording-store backups select recording `history` records only, not
+the separate per-attempt Voice usage ledger. Standalone saved speech WAVs are
+audio-only records without fabricated usage or History ownership.
 
 | Category | Contents |
 | --- | --- |
@@ -45,7 +67,8 @@ for each included category. Review the preview before confirming the import.
 - Configuration conflicts show existing/imported values and require an explicit
   choice. Profile and vocabulary records match by their stable identifiers.
 - Replace changes the selected category. For a filtered history/audio export,
-  only the exported IDs/date range are replaced; outside entries stay intact.
+  only the exported IDs/date range and covered kinds/keys are replaced;
+  outside entries stay intact.
   Superseded audio in managed recording folders is removed after recovery is
   saved and the import succeeds; original files outside those folders are preserved.
 - History and recordings reconnect by session identity, regardless of import
@@ -80,6 +103,15 @@ in a separate AES-GCM encrypted file; its random key is stored in a separate,
 non-synchronising, device-only Keychain item, outside the exportable key registry.
 Losing that Keychain item prevents credential recovery on another Mac. Ordinary
 exports remain portable and unencrypted as requested.
+
+Profile prompts are stored in each `profiles` / `profile` record's `polishPrompt`,
+not a global Mac preference. Shared collection projection retains original raw
+values, array order, identifier spelling and unknown matcher/routing members;
+typed decoding validates existing acceptance rules without replacing payloads.
+Native `profiles.json` uses the same format. Backups must read original bytes,
+not re-encode the runtime profile list, whose tolerant decoder drops unknown
+matcher kinds and newer routing values. This codec does not itself establish
+owned-file read authority, multi-store consistency or native import availability.
 
 ## Verification
 

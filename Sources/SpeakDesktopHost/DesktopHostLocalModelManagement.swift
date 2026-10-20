@@ -8,12 +8,27 @@ extension DesktopHostController where Platform: DesktopHostLocalModelPlatform {
     package static var localModelsFolder: String { "LocalModels" }
 
     /// The on-device models this host offers, in catalogue order.
-    package var localModelSpecs: [WhisperCppModel] { DesktopLocalTranscription.models(host: Platform.localModelHost) }
+    package var localModelSpecs: [WhisperCppModel] {
+        DesktopLocalTranscription.models(host: Platform.localModelHost)
+            + localModels.imported.filter { Platform.localModelHost.canExecute(model: $0) }.map(\.model)
+    }
+
+    /// The model behind a batch identifier or, for live use, the batch model
+    /// a `local/streaming/whisperkit/...` identifier streams with.
+    package func localModelSpec(for identifier: String) -> WhisperCppModel? {
+        let batch = DesktopLocalStreaming.batchModelID(forLiveModelID: identifier) ?? identifier
+        return localModelSpecs.first { $0.catalogueID == batch }
+    }
 
     package var localInstaller: LocalModelInstaller {
         let root = directory.appendingPathComponent(Self.localModelsFolder, isDirectory: true)
         return LocalModelInstaller(
             root: root, digests: Platform.localModelDigests, transport: Platform.localModelTransport,
+            validateArtifact: { item, file in
+                if item.identifier.hasPrefix(HuggingFaceWhisperModel.identifierPrefix) {
+                    try WhisperGGMLImportValidation.validate(file, filename: item.artifact.filename)
+                }
+            },
             prepareDirectory: { url in
                 // Both levels are private to the user; a model folder's parent must exist first.
                 for folder in [root, url] { try Platform.preparePrivateDirectory(folder) }
@@ -27,7 +42,7 @@ extension DesktopHostController where Platform: DesktopHostLocalModelPlatform {
     /// that failed to start is not a reason: the next use opens it again, so a
     /// library that was being installed or repaired needs no restart.
     package func localReadiness(_ model: String) -> String? {
-        guard let spec = DesktopLocalTranscription.model(for: model, host: Platform.localModelHost) else {
+        guard let spec = localModelSpec(for: model) else {
             return "This on-device model is not available in this \(Platform.displayName) build."
         }
         if localModels.ownership.isRemoving(spec.catalogueID) {
@@ -60,7 +75,7 @@ extension DesktopHostController where Platform: DesktopHostLocalModelPlatform {
     }
 
     package func transcribeLocally(_ audio: URL, model: String, language: String?) async throws -> TranscriptionResult {
-        guard let spec = DesktopLocalTranscription.model(for: model, host: Platform.localModelHost) else {
+        guard let spec = localModelSpec(for: model) else {
             throw DesktopTranscriptionError.unsupportedModel
         }
         if let problem = localReadiness(model) { throw DesktopHostError(message: problem) }
@@ -83,6 +98,22 @@ extension DesktopHostController where Platform: DesktopHostLocalModelPlatform {
         } catch DesktopLocalTranscriptionError.modelDoesNotMatchDigest {
             throw discardMismatchedModel(spec)
         }
+    }
+
+    /// Streams a pinned downloaded model in process. The recording holds the
+    /// model through `beginLocalUse`, so it cannot be removed meanwhile.
+    package func makeLocalLiveClient(
+        _ model: String, language: String?
+    ) async throws -> (any FinalizingStreamingTranscriptionClient)? {
+        guard DesktopHostModels.isLocalLive(model),
+              let spec = DesktopLocalStreaming.model(forLiveID: model, host: Platform.localModelHost),
+              localModelSpec(for: model)?.catalogueID == spec.catalogueID else { return nil }
+        if let problem = localReadiness(model) { throw DesktopHostError(message: problem) }
+        let file = try localInstaller.verifiedFile(for: .init(spec))
+        let runtime = try await localRuntime()
+        return DesktopLocalStreamingClient(
+            recognizer: runtime.recognizer, model: spec, modelFile: file, language: language
+        )
     }
 
     // MARK: - Local models
@@ -123,6 +154,7 @@ extension DesktopHostController where Platform: DesktopHostLocalModelPlatform {
         let identifier = spec.catalogueID
         let item = LocalModelInstaller.Item(spec)
         localModels.progress[identifier] = 0
+        activeOperations += 1
         localModels.downloads[identifier] = Task { [self] in
             do {
                 try await installer.install(item) { received, _ in
@@ -141,8 +173,7 @@ extension DesktopHostController where Platform: DesktopHostLocalModelPlatform {
 
     private func localProgress(_ identifier: String, received: Int64) {
         guard localModels.downloads[identifier] != nil else { return }
-        let total = DesktopLocalTranscription.model(for: identifier, host: Platform.localModelHost)?
-            .artifact.byteCount ?? 1
+        guard let total = localModelSpec(for: identifier)?.artifact.byteCount else { return }
         let previous = localModels.progress[identifier] ?? 0
         // Progress hops arrive as separate tasks; never move backwards.
         guard received > previous else { return }
@@ -152,9 +183,14 @@ extension DesktopHostController where Platform: DesktopHostLocalModelPlatform {
     }
 
     private func finishDownload(_ spec: WhisperCppModel, failure: String?) {
+        defer { finishOperation() }
         localModels.ownership.endDownload(spec.catalogueID)
         localModels.downloads[spec.catalogueID] = nil
         localModels.progress[spec.catalogueID] = nil
+        if spec.catalogueID.hasPrefix(HuggingFaceWhisperModel.identifierPrefix) {
+            localModels.importStatus = failure.map { "\(spec.displayName): \($0)" }
+                ?? "\(spec.displayName) downloaded and verified. \(Platform.localModelChoiceHint)"
+        }
         if let failure {
             update("\(spec.displayName): \(failure)")
         } else {
@@ -172,6 +208,11 @@ extension DesktopHostController where Platform: DesktopHostLocalModelPlatform {
 
     /// The runtime line shown in Local models.
     package var localRuntimeStatus: String {
+        let notice = localModels.importStatus.map { " " + $0 } ?? ""
+        return localRuntimeSummary + notice
+    }
+
+    private var localRuntimeSummary: String {
         let models = localModelSpecs
         let installer = localInstaller
         let downloaded = models.filter { installer.state(of: .init($0)) == .installed }.count
@@ -194,6 +235,9 @@ extension DesktopHostController where Platform: DesktopHostLocalModelPlatform {
             let (row, label) = localModelRow(spec, installer: installer)
             rows.append(row)
             labels[spec.catalogueID] = label
+            // A live model shares its batch model's download.
+            let live = DesktopLocalStreaming.liveModelID(for: spec)
+            if DesktopHostModels.isLocalLive(live) { labels[live] = label }
         }
         if labels != DesktopHostModels.labelledSnapshot.1 {
             DesktopHostModels.setLocalLabels(labels)
@@ -237,7 +281,7 @@ extension DesktopHostController where Platform: DesktopHostLocalModelPlatform {
             }
         }
         let about = "\(spec.summary) Whisper weights (\(spec.quantization), \(spec.artifact.license) licence) "
-            + "from huggingface.co/\(WhisperCppModels.repository), pinned by SHA-256 "
+            + "from \(spec.artifact.provenance), pinned by SHA-256 "
             + "\(spec.artifact.sha256.prefix(12))\u{2026} and verified after download."
         return (DesktopHostLocalModelRow(name: spec.displayName, detail: detail, about: about, state: state), label)
     }

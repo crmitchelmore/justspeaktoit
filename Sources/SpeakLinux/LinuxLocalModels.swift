@@ -75,10 +75,21 @@ extension LinuxHostPlatform: DesktopHostLocalModelPlatform {
 }
 
 /// Local models events, applied in settings order. Returns false for others.
-func linuxLocalModelEvent(_ event: Int, slot: Int, holder: LinuxEventContext) -> Bool {
+func linuxLocalModelEvent(_ event: Int, value: String, slot: Int, holder: LinuxEventContext) -> Bool {
     let controller = holder.controller
     let action: DesktopHostLocalModelAction
     switch event {
+    case Int(JSTI_EVENT_LOCAL_MODEL_IMPORT):
+        let fields = value.components(separatedBy: "\n")
+        guard fields.count == 2 else {
+            LinuxHostPlatform.update("Enter an owner/repository and a GGML filename.", transcript: nil, state: -1)
+            return true
+        }
+        holder.enqueueSettings { await controller.importLocalModel(repository: fields[0], filename: fields[1]) }
+        return true
+    case Int(JSTI_EVENT_LOCAL_MODEL_IMPORT_CANCEL):
+        holder.enqueueSettings { await controller.cancelLocalModelImport() }
+        return true
     case Int(JSTI_EVENT_LOCAL_MODEL_DOWNLOAD): action = .download
     case Int(JSTI_EVENT_LOCAL_MODEL_CANCEL): action = .cancel
     case Int(JSTI_EVENT_LOCAL_MODEL_REMOVE): action = .remove

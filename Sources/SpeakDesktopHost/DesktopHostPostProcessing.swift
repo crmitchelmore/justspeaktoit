@@ -11,64 +11,187 @@ extension DesktopHostController {
     /// remove it; the choices are then applied to the settings as they are
     /// after that save, and not at all if the controller closed meanwhile.
     package func savePostProcessing(enabled: Bool, modelIndex: Int, prompt: String, key: String) async {
-        guard !closed, DesktopPostProcessing.remoteModels.indices.contains(modelIndex) else { return }
+        guard DesktopPostProcessing.remoteModels.indices.contains(modelIndex) else {
+            updateProviderCredentialEditor("Could not save post-processing settings: invalid remote model selection.")
+            return
+        }
+        await savePostProcessing(
+            enabled: enabled, modelIdentifier: DesktopPostProcessing.remoteModels[modelIndex].id,
+            prompt: prompt, key: key
+        )
+    }
+
+    // swiftlint:disable:next cyclomatic_complexity
+    package func savePostProcessing(
+        enabled: Bool, modelIdentifier model: String, prompt: String, key: String,
+        includeLexiconDirectives: Bool? = nil, includeContextTags: Bool? = nil
+    ) async {
+        guard !closed, !Task.isCancelled else { return }
         do {
-            let model = DesktopPostProcessing.remoteModels[modelIndex].id
-            let options = DesktopPostProcessing.Options(
-                mode: enabled ? .remote : .disabled, modelIdentifier: model,
-                customPrompt: prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : prompt
-            )
+            guard let mode = DesktopPostProcessing.mode(for: model) else {
+                throw DesktopPostProcessingError.unsupportedModel
+            }
+            guard mode != .localLLM || localCleanup != nil else {
+                throw LocalLLMError.runtimeUnavailable("This host has no downloaded-model cleanup adapter.")
+            }
+            var options = settings.postProcessing ?? .init()
+            options.mode = enabled ? mode : .disabled
+            options.modelIdentifier = model
+            if let includeLexiconDirectives { options.includeLexiconDirectives = includeLexiconDirectives }
+            if let includeContextTags { options.includeContextTags = includeContextTags }
+            if mode == .remote || mode == .localLLM {
+                options.customPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : prompt
+                if mode == .remote { options.lastRemoteModelIdentifier = model }
+            }
             let typed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !typed.isEmpty {
-                let identifier = try postProcessingCredential(for: model)
-                if let saveByHand = cloudSync.saveKeyByHand {
-                    try await saveByHand(typed, identifier)
-                    guard !closed else { return }
-                } else {
-                    try Platform.saveAPIKey(typed, name: identifier)
-                }
+            if mode == .remote, !typed.isEmpty {
+                try await savePostProcessingKey(typed, for: model)
+                guard !closed, !Task.isCancelled else { return }
             }
             var changed = settings
             changed.postProcessing = options
+            if let configuration = changed.configuration {
+                changed.configuration = try DesktopPostProcessingConfiguration.removingMirrors(from: configuration)
+            }
+            changed.livePolishApproved = try retainedLivePolishApproval(after: changed)
             try effects.writeSettings(
                 JSONEncoder().encode(changed), to: directory.appendingPathComponent("settings.json")
             )
             settings = changed
-            update(enabled ? "Remote post-processing enabled. Transcripts will be sent to OpenRouter."
-                : "Post-processing disabled.")
-        } catch { update("Could not save post-processing settings: \(error.localizedDescription)") }
+            let enabledStatus: String
+            switch mode {
+            case .local: enabledStatus = DesktopPostProcessing.localRulesNotice
+            case .localLLM: enabledStatus = "Local post-processing enabled. Transcripts stay on this computer."
+            case .remote, .disabled:
+                enabledStatus = "Remote post-processing enabled. Transcripts will be sent to OpenRouter."
+            }
+            updateProviderCredentialEditor(enabled ? enabledStatus : "Post-processing disabled.")
+        } catch {
+            updateProviderCredentialEditor("Could not save post-processing settings: \(error.localizedDescription)")
+        }
+    }
+
+    private func savePostProcessingKey(_ key: String, for model: String) async throws {
+        let identifier = try postProcessingCredential(for: model)
+        try await writeProviderAPIKey(key, identifier: identifier)
+        guard !closed, !Task.isCancelled else { return }
+        await refreshComparison()
     }
 
     func postProcess(
         _ original: DesktopRecordingStore.Record, options: DesktopPostProcessing.Options
     ) async -> DesktopRecordingStore.Record {
+        await postProcess(original, options: options, inputText: nil)
+    }
+
+    // swiftlint:disable:next cyclomatic_complexity function_body_length
+    func postProcess(
+        _ original: DesktopRecordingStore.Record, options: DesktopPostProcessing.Options, inputText: String?
+    ) async -> DesktopRecordingStore.Record {
         var record = original
+        defer { capturedCleanup.removeValue(forKey: original.id) }
         guard let result = record.result else { return record }
         if TranscriptPostProcessingPolicy.isEffectivelyEmptyTranscript(result.text) {
             record.processedText = ""
             return record
         }
-        guard !closed, !cancellationRequested, options.mode == .remote else { return record }
+        let snapshot = capturedCleanup[record.id]
+        let options = snapshot?.options ?? options
+        guard !closed, !cancellationRequested, options.mode != .disabled else { return record }
+        let input = inputText ?? record.correctedText ?? result.text
+        if TranscriptPostProcessingPolicy.isEffectivelyEmptyTranscript(input) {
+            record.processedText = ""
+            return record
+        }
+        let captured = snapshot ?? captureCleanup(options)
+        let context = options.lexiconContext(
+            directives: record.lexiconDirectives ?? [], tags: record.lexiconContextTags ?? []
+        )
         do {
-            let key = try Platform.apiKey(
-                name: postProcessingCredential(for: options.modelIdentifier)
-            )
+            guard DesktopPostProcessing.mode(for: options.modelIdentifier) == options.mode else {
+                throw DesktopPostProcessingError.unsupportedModel
+            }
+            if let failure = captured?.failure { throw DesktopHostError(message: failure) }
+            let key: String
+            if let captured { key = captured.key } else {
+                key = options.mode == .remote
+                    ? try Platform.apiKey(name: postProcessingCredential(for: options.modelIdentifier)) : ""
+            }
+            if options.mode == .remote, !options.streamingEnabled {
+                acknowledgeConnectionWarmCleanupCredential(
+                    recordID: record.id, model: options.modelIdentifier,
+                    available: !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                )
+            }
             update("Polishing transcript… The original is saved in History.", state: 2)
             hud(record.id, .postProcessing)
+            postProcessingTask?.cancel()
+            let requestID = UUID()
+            postProcessingID = requestID
+            if options.mode == .remote, options.streamingEnabled, hudRecording == record.id {
+                selectedHistoryID = record.id
+                transcriptVariant = .processed
+                refreshHistory(selectRecord: true)
+            }
+            let presentation = cleanupPresentationEpoch
+            let nativeTicket = options.mode == .remote && options.streamingEnabled
+                ? Platform.beginCleanupPreview() : nil
+            cleanupNativeTicket = nativeTicket
+            defer {
+                if let nativeTicket { Platform.endCleanupPreview(nativeTicket) }
+                if cleanupNativeTicket == nativeTicket { cleanupNativeTicket = nil }
+            }
+            let recordID = record.id
+            let previews = DesktopEventDispatcher<String> { [weak self] text in
+                await self?.publishCleanupPreview(
+                    text, recordID: recordID, requestID: requestID, presentation: presentation,
+                    nativeTicket: nativeTicket ?? 0
+                )
+            }
+            let effects = effects
+            let localCleanup = localCleanup
             let task = Task {
                 try Task.checkCancellation()
-                return try await DesktopPostProcessing.process(rawText: result.text, options: options, apiKey: key)
+                let outcome: DesktopPostProcessing.Outcome
+                if options.mode == .localLLM {
+                    outcome = try await DesktopPostProcessing.process(
+                        rawText: input, options: options, apiKey: "", lexiconDirectives: context.directives,
+                        lexiconContextTags: context.tags, localLLM: localCleanup
+                    )
+                } else if options.mode == .remote, options.streamingEnabled {
+                    outcome = try await effects.postProcessStreaming(
+                        text: input, options: options, key: key, directives: context.directives, tags: context.tags,
+                        onUpdate: { text in
+                            guard text.utf8.count <= OpenRouterChatClient.maximumStreamingTextBytes else { return }
+                            previews.submit(text)
+                        }
+                    )
+                } else {
+                    outcome = try await effects.postProcess(
+                        text: input, options: options, key: key, directives: context.directives, tags: context.tags
+                    )
+                }
+                try Task.checkCancellation()
+                return outcome
             }
             postProcessingTask = task
-            defer { postProcessingTask = nil }
+            defer {
+                if postProcessingID == requestID {
+                    postProcessingID = nil
+                    postProcessingTask = nil
+                }
+            }
             let outcome = try await task.value
+            guard !closed, !cancellationRequested, postProcessingID == requestID else {
+                throw CancellationError()
+            }
             record.processedText = outcome.processedText
             record.postProcessingModelIdentifier = outcome.modelIdentifier
         } catch { record.postProcessingFailure = error.localizedDescription }
         return record
     }
 
-    private func postProcessingCredential(for model: String) throws -> String {
+    func postProcessingCredential(for model: String) throws -> String {
         guard case .apiKey(let identifier, _) = ModelCredentialResolver.requirement(
             for: model, purpose: .postProcessing
         ) else { throw DesktopPostProcessingError.unsupportedModel }

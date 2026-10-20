@@ -29,6 +29,7 @@ public struct LiveClientOptions: Sendable, Equatable {
     public let modulate: ModulateLiveOptions
     public let postStopFinalizeBudget: TimeInterval?
     public let stopGracePeriod: TimeInterval
+    public private(set) var pronunciationKeyterms: AssemblyAIPronunciationKeyterms.Selection?
 
     public init(
         keywords: [String] = [],
@@ -54,6 +55,21 @@ public struct LiveClientOptions: Sendable, Equatable {
         self.modulate = modulate
         self.postStopFinalizeBudget = Self.sanitized(postStopFinalizeBudget)
         self.stopGracePeriod = Self.sanitized(stopGracePeriod) ?? 0
+    }
+
+    public func capturingPronunciationKeyterms(_ selection: AssemblyAIPronunciationKeyterms.Selection?) -> Self {
+        var captured = self
+        captured.pronunciationKeyterms = selection
+        return captured
+    }
+
+    public func includingPronunciationWords(_ words: [String]) -> Self {
+        guard let pronunciationKeyterms, pronunciationKeyterms.modern == nil else { return self }
+        let selection = pronunciationKeyterms.capturingModernWords(words)
+        return Self(
+            keywords: keywords, assemblyAIKeyterms: selection.keyterms, modulate: modulate,
+            postStopFinalizeBudget: postStopFinalizeBudget, stopGracePeriod: stopGracePeriod
+        ).capturingPronunciationKeyterms(selection)
     }
 
     private static func sanitized(_ value: TimeInterval?) -> TimeInterval? {

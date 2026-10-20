@@ -14,6 +14,7 @@ public struct AssemblyAIBatchClient: TranscriptionProvider {
 
   private let baseURL = URL(string: "https://api.assemblyai.com/v2")!
   private let session: URLSession
+  private let keywords: [String]
 
   private let durationResolver: @Sendable (URL) async throws -> TimeInterval
   var pollingDelay: Duration = .seconds(1)
@@ -21,10 +22,20 @@ public struct AssemblyAIBatchClient: TranscriptionProvider {
 
   public init(
     session: URLSession = .shared,
+    keywords: [String],
     durationResolver: @escaping @Sendable (URL) async throws -> TimeInterval = { _ in 0 }
   ) {
     self.session = session
+    self.keywords = keywords
     self.durationResolver = durationResolver
+  }
+
+  /// Source-compatible overload preserved for callers predating keyword hints.
+  public init(
+    session: URLSession = .shared,
+    durationResolver: @escaping @Sendable (URL) async throws -> TimeInterval = { _ in 0 }
+  ) {
+    self.init(session: session, keywords: [], durationResolver: durationResolver)
   }
 
   // MARK: - Batch Transcription
@@ -97,6 +108,14 @@ public struct AssemblyAIBatchClient: TranscriptionProvider {
     let speechModels = mapSpeechModels(from: model)
     if !speechModels.isEmpty {
       body["speech_models"] = speechModels
+    }
+    let terms = TranscriptionKeywordPolicy.bounded(keywords, count: 100, length: 50)
+    if !terms.isEmpty {
+      if speechModels.contains(AssemblyAIModels.universal35ProAPIName) {
+        body["keyterms_prompt"] = terms
+      } else if speechModels == [AssemblyAIModels.universal2APIName] {
+        body["word_boost"] = terms
+      }
     }
 
     if let language {

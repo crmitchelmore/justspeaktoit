@@ -33,16 +33,26 @@ enum OpenRouterAudioDownload {
     ) async throws {
         let policy = OpenRouterAudioRedirectPolicy()
         defer { policy.cancel() }
+        try Task.checkCancellation()
+        // Arm the redirect-policy cancellation latch for the header-acquisition await itself,
+        // closing the gap between Task cancellation and `bytes(for:)` creating its URLSessionTask.
+        let (bytes, response) = try await withTaskCancellationHandler {
+            try await session.bytes(for: request, delegate: policy)
+        } onCancel: {
+            policy.cancel()
+        }
+        // The concrete response task is cancelled explicitly during body reads and on exit,
+        // matching `OpenRouterBoundedResponseTransport.receiveApple`, rather than relying
+        // only on the redirect policy's weakly-held `didCreateTask` task reference.
+        defer { bytes.task.cancel() }
+        try Task.checkCancellation()
+        try validate(response, limit: limit, speech: speech)
+        guard FileManager.default.createFile(
+            atPath: destination.path, contents: nil, attributes: [.posixPermissions: 0o600]
+        ) else { throw OpenRouterAudioError.transportFailure }
+        let handle = try FileHandle(forWritingTo: destination)
+        defer { try? handle.close() }
         try await withTaskCancellationHandler {
-            try Task.checkCancellation()
-            let (bytes, response) = try await session.bytes(for: request, delegate: policy)
-            try Task.checkCancellation()
-            try validate(response, limit: limit, speech: speech)
-            guard FileManager.default.createFile(
-                atPath: destination.path, contents: nil, attributes: [.posixPermissions: 0o600]
-            ) else { throw OpenRouterAudioError.transportFailure }
-            let handle = try FileHandle(forWritingTo: destination)
-            defer { try? handle.close() }
             var buffer = Data()
             var count = 0
             for try await byte in bytes {
@@ -59,7 +69,7 @@ enum OpenRouterAudioDownload {
             guard count > 0 else { throw OpenRouterAudioError.invalidResponse }
             if !buffer.isEmpty { try handle.write(contentsOf: buffer) }
         } onCancel: {
-            policy.cancel()
+            bytes.task.cancel()
         }
     }
 

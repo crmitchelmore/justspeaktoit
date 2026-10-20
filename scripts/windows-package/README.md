@@ -25,6 +25,11 @@ developer identity. ARM64 packages are built and exercised by
 Design, data behaviour, signing, evidence and remaining gates are in
 [Docs/windows-installer.md](../../Docs/windows-installer.md).
 
+The admission control drains only its newly owned app's redirected stderr and
+retains at most 16,384 characters plus an explicit truncation marker in
+`installed-startup-stderr.log`. Capture failures remain failures; no alternate
+launch, process inspection or startup-success fallback is inferred from the log.
+
 ```sh
 python3 -B -m unittest discover -s scripts/windows-package -p 'test_*.py'
 pwsh -NoProfile -File scripts/windows-package/test-lifecycle-ownership.ps1

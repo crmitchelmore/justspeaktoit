@@ -1,6 +1,7 @@
 #include "include/CWindowsSupport.h"
 #include "WindowsSupportInternal.hpp"
 #include "WindowsTextOutputInternal.hpp"
+#include <richedit.h>
 #include <atomic>
 #include <condition_variable>
 #include <map>
@@ -273,6 +274,8 @@ struct Fixture {
     std::atomic<uint64_t> focusRevision{1};
     std::atomic<unsigned> releasedKeys{0};
     bool markersSeen = false;
+    bool switchForegroundIsOwn = false;
+    bool switchForegroundSameApp = false;
     std::wstring pastedText;
     // Blocking hook for timeout/lifetime checks.
     jsti::Handle release;
@@ -282,6 +285,14 @@ struct Fixture {
 Fixture *fixture = nullptr;
 
 HWND fakeForeground() { return fixture->foreground; }
+bool fakeOwnApplication(HWND) { return fixture->switchForegroundIsOwn; }
+bool fakeSameApplication(HWND first, HWND second) { return first == second || fixture->switchForegroundSameApp; }
+void switchAgainBeforeRedirect(void *) {
+    fixture->foreground = fixture->host.window;
+    ++fixture->focusRevision;
+}
+void changeRevisionBeforeRedirect(void *) { ++fixture->focusRevision; }
+void cancelBeforeRedirect(void *) { jsti_insertion_cancel(fixture->pendingTarget); }
 Clipboard *fakeClipboard() { return &fixture->clipboard; }
 bool stubPreparePaste(std::string &) {
     if (fixture->prepareMode == Fixture::PrepareMode::Cancel) jsti_insertion_cancel(fixture->pendingTarget);
@@ -439,6 +450,34 @@ int supportsTextPattern(HWND control) {
 
 // ---- steps ---------------------------------------------------------------------
 
+std::string checkSelectionRangeBudget() {
+    if (maximumSelectedTextUnits != 200000) return "The native selection staging limit changed.";
+    std::wstring text;
+    if (!appendSelectedRange(text, L"") || !text.empty() ||
+        !appendSelectedRange(text, L"first") || !appendSelectedRange(text, L"") ||
+        !appendSelectedRange(text, L"second") || text != L"first\nsecond")
+        return "Empty selected ranges introduced separators or dropped selected text.";
+    text.assign(199998, L'x');
+    if (!appendSelectedRange(text, L"y") || text.size() != 200000 ||
+        text.substr(199998) != L"\ny" || !appendSelectedRange(text, L"") || text.size() != 200000)
+        return "An exact-limit selection or its trailing empty range was rejected.";
+    const std::wstring maximum = text;
+    if (appendSelectedRange(text, L"z") || text != maximum)
+        return "An oversized selection was accepted or partially appended.";
+    text.assign(199999, L'x');
+    const std::wstring beforeSeparator = text;
+    if (appendSelectedRange(text, L"y") || text != beforeSeparator)
+        return "The inter-range separator escaped the selection budget.";
+    text.clear();
+    if (!appendSelectedRange(text, std::wstring(200000, L'x')) || text.size() != 200000)
+        return "A single exact-limit range was rejected.";
+    text.clear();
+    if (appendSelectedRange(text, std::wstring(200001, L'x')) || !text.empty() ||
+        appendSelectedRange(text, std::wstring(L"x\0y", 3)) || !text.empty())
+        return "An oversized or embedded-NUL range was accepted or partially appended.";
+    return {};
+}
+
 std::string checkPureHelpers() {
     INPUT inputs[4];
     pasteInputs(inputs);
@@ -462,7 +501,158 @@ std::string checkPureHelpers() {
     if (jsti_insertion_insert(nullptr, "text", 0, &result, error, sizeof(error)) != -1 || result.method != JSTI_INSERTION_METHOD_NONE) {
         return describe("null target", "a missing target was not rejected");
     }
+    if (jsti_insertion_learning(nullptr, "text", nullptr, 0, error, sizeof(error)) != -1) {
+        return describe("learning null target", "a missing owned range was not rejected");
+    }
     jsti_insertion_destroy(nullptr);
+    return {};
+}
+
+std::string checkAppSwitchPolicies(Fixture &state) {
+    SyntheticHost destination;
+    std::string error;
+    if (!destination.start(error)) return describe("app-switch destination", "setup failed", error.c_str());
+    Environment environment = testEnvironment(true);
+    environment.ownApplication = &fakeOwnApplication;
+    environment.sameApplication = &fakeSameApplication;
+    Target target;
+    auto prepare = [&] {
+        state.foreground = state.host.window;
+        state.switchForegroundIsOwn = false;
+        state.switchForegroundSameApp = false;
+        setEnvironment(environment);
+        setText(state.host.edit, L"original");
+        setText(destination.edit, L"destination");
+        select(state.host.edit, 8, 8);
+        select(destination.edit, 11, 11);
+        if (!state.host.focus(state.host.edit)) {
+            error = "Could not focus the synthetic original field.";
+            return false;
+        }
+        if (!capture(target, error)) return false;
+        // UIA can attach the synthetic GUI queues: capture before moving focus.
+        if (!destination.focus(destination.edit)) {
+            error = "Could not focus the synthetic destination field.";
+            return false;
+        }
+        state.pendingTarget = target.value;
+        return true;
+    };
+    const int beforePaste = state.pasteCalls.load();
+
+    if (!prepare()) return describe("app-switch original", "capture failed", error.c_str());
+    state.foreground = destination.window;
+    auto attempt = insert(target, " text", JSTI_INSERTION_ORIGINAL_APP);
+    if (attempt.status != 0 || attempt.result.method != JSTI_INSERTION_METHOD_NATIVE_EDIT ||
+        textOf(state.host.edit) != L"original text" || textOf(destination.edit) != L"destination")
+        return describe("app-switch original", "background native delivery touched the wrong destination", attempt.error);
+
+    if (!prepare()) return describe("app-switch original field", "capture failed", error.c_str());
+    setText(state.host.second, L"other field");
+    if (!state.host.focus(state.host.second)) return describe("app-switch original field", "could not move field focus");
+    attempt = insert(target, " text", JSTI_INSERTION_ORIGINAL_APP);
+    if (attempt.status != 0 || textOf(state.host.edit) != L"original text" ||
+        textOf(state.host.second) != L"other field")
+        return describe("app-switch original field", "the newly focused field replaced the captured destination", attempt.error);
+
+    if (!prepare()) return describe("app-switch strict", "capture failed", error.c_str());
+    state.foreground = destination.window;
+    attempt = insert(target, "clipboard", JSTI_INSERTION_ONLY_ORIGINAL_FRONT);
+    if (attempt.status != 0 || attempt.result.method != JSTI_INSERTION_METHOD_CLIPBOARD || attempt.result.verified ||
+        state.clipboard.unicodeText() != L"clipboard" || textOf(state.host.edit) != L"original" ||
+        textOf(destination.edit) != L"destination")
+        return describe("app-switch strict", "copy-only delivery inserted or claimed confirmation", attempt.error);
+
+    if (!prepare()) return describe("app-switch same app", "capture failed", error.c_str());
+    state.foreground = destination.window;
+    state.switchForegroundSameApp = true;
+    attempt = insert(target, " text", JSTI_INSERTION_ONLY_ORIGINAL_FRONT);
+    if (attempt.status != 0 || attempt.result.method != JSTI_INSERTION_METHOD_NATIVE_EDIT ||
+        textOf(state.host.edit) != L"original text" || textOf(destination.edit) != L"destination")
+        return describe("app-switch same app", "another window of the same app was treated as another app", attempt.error);
+
+    if (!prepare()) return describe("app-switch current", "capture failed", error.c_str());
+    state.foreground = destination.window;
+    attempt = insert(target, " text", JSTI_INSERTION_CURRENT_APP);
+    if (attempt.status != 0 || attempt.result.method != JSTI_INSERTION_METHOD_NATIVE_EDIT ||
+        textOf(state.host.edit) != L"original" || textOf(destination.edit) != L"destination text")
+        return describe("app-switch current", "did not use the captured delivery-time field", attempt.error);
+    char learningError[256]{};
+    if (jsti_insertion_learning(target.value, " text", nullptr, 0, learningError, sizeof(learningError)) != -1)
+        return describe("app-switch learning", "redirect granted the original field correction authority");
+
+    if (!prepare()) return describe("app-switch sensitive destination", "capture failed", error.c_str());
+    if (!destination.focus(destination.password))
+        return describe("app-switch sensitive destination", "could not focus the synthetic password field");
+    state.foreground = destination.window;
+    attempt = insert(target, " text", JSTI_INSERTION_CURRENT_APP);
+    if (attempt.status != -1 || textOf(state.host.edit) != L"original" ||
+        textOf(destination.edit) != L"destination")
+        return describe("app-switch sensitive destination", "a password destination was not refused", attempt.error);
+
+    if (!prepare()) return describe("app-switch own UI", "capture failed", error.c_str());
+    state.foreground = destination.window;
+    state.switchForegroundIsOwn = true;
+    attempt = insert(target, " text", JSTI_INSERTION_CURRENT_APP);
+    if (attempt.status != 0 || textOf(state.host.edit) != L"original text" ||
+        textOf(destination.edit) != L"destination")
+        return describe("app-switch own UI", "own UI became a new delivery destination", attempt.error);
+
+    if (!prepare()) return describe("app-switch strict own UI", "capture failed", error.c_str());
+    state.foreground = destination.window;
+    state.switchForegroundIsOwn = true;
+    attempt = insert(target, "clipboard", JSTI_INSERTION_ONLY_ORIGINAL_FRONT);
+    if (attempt.status != 0 || attempt.result.method != JSTI_INSERTION_METHOD_CLIPBOARD ||
+        textOf(state.host.edit) != L"original")
+        return describe("app-switch strict own UI", "own UI bypassed strict original-front policy", attempt.error);
+
+    environment.nativeDirectPath = false;
+    if (!prepare()) return describe("app-switch unsupported background", "capture failed", error.c_str());
+    state.foreground = destination.window;
+    attempt = insert(target, "clipboard", JSTI_INSERTION_ORIGINAL_APP);
+    if (attempt.status != 0 || attempt.result.method != JSTI_INSERTION_METHOD_CLIPBOARD ||
+        textOf(state.host.edit) != L"original" || textOf(destination.edit) != L"destination")
+        return describe("app-switch unsupported background", "unsafe background UIA/paste was attempted", attempt.error);
+    environment.nativeDirectPath = true;
+
+    for (auto hook : {&switchAgainBeforeRedirect, &changeRevisionBeforeRedirect, &cancelBeforeRedirect}) {
+        environment.beforeRedirectedInsert = hook;
+        if (!prepare()) return describe("app-switch second focus/cancel", "capture failed", error.c_str());
+        state.foreground = destination.window;
+        attempt = insert(target, " text", JSTI_INSERTION_CURRENT_APP);
+        if (attempt.status != -1 || attempt.result.method != JSTI_INSERTION_METHOD_NONE ||
+            textOf(state.host.edit) != L"original" || textOf(destination.edit) != L"destination")
+            return describe("app-switch second focus/cancel", "a changed or cancelled child still inserted", attempt.error);
+    }
+    environment.beforeRedirectedInsert = nullptr;
+
+    if (!prepare()) return describe("app-switch clipboard failure", "capture failed", error.c_str());
+    state.foreground = destination.window;
+    state.clipboard.failUnicodeSet = true;
+    attempt = insert(target, "clipboard", JSTI_INSERTION_ONLY_ORIGINAL_FRONT);
+    if (attempt.status != -1 || attempt.result.method != JSTI_INSERTION_METHOD_NONE ||
+        textOf(state.host.edit) != L"original" || textOf(destination.edit) != L"destination")
+        return describe("app-switch clipboard failure", "a failed copy reported success", attempt.error);
+
+    if (!prepare()) return describe("app-switch stale", "capture failed", error.c_str());
+    HWND stale = nullptr;
+    state.host.run([&] {
+        stale = CreateWindowExW(0, L"EDIT", L"stale", WS_CHILD | WS_VISIBLE, 0, 0, 100, 20,
+                               state.host.window, nullptr, GetModuleHandleW(nullptr), nullptr);
+    });
+    if (!stale || !state.host.focus(stale) || !capture(target, error))
+        return describe("app-switch stale", "could not capture a disposable field", error.c_str());
+    state.host.run([&] { DestroyWindow(stale); });
+    state.foreground = destination.window;
+    attempt = insert(target, " text", JSTI_INSERTION_CURRENT_APP);
+    if (attempt.status != -1 || textOf(destination.edit) != L"destination")
+        return describe("app-switch stale", "a destroyed original field authorized an unrelated insert", attempt.error);
+    state.foreground = state.host.window;
+    state.pendingTarget = nullptr;
+    state.switchForegroundIsOwn = false;
+    state.switchForegroundSameApp = false;
+    if (state.pasteCalls != beforePaste) return describe("app-switch native policy", "unexpected paste-key dispatch");
+    setEnvironment(testEnvironment(true));
     return {};
 }
 
@@ -578,6 +768,8 @@ std::string checkNativePaths(Fixture &state) {
 
 std::string checkAutomationPaths(Fixture &state) {
     SyntheticHost &host = state.host;
+    // App-switch cases share this host but leave a different sibling value.
+    setText(host.second, L"other");
     setEnvironment(testEnvironment(false));
     Target target;
     std::string error;
@@ -645,7 +837,9 @@ std::string checkAutomationPaths(Fixture &state) {
     state.resolveOverride = host.window;
     attempt = insert(target, "late");
     state.resolveOverride = nullptr;
-    if (attempt.status != -1 || !contains(attempt.error, "changed") || textOf(host.edit) != L"Hello dear world" ||
+    if (attempt.status != -1 || !contains(attempt.error, "changed") ||
+        attempt.result.method != JSTI_INSERTION_METHOD_NONE || attempt.result.verified ||
+        state.clipboard.sequence() != beforeRefusals || textOf(host.edit) != L"Hello dear world" ||
         textOf(host.second) != L"other" || state.pasteCalls.load() != 1) {
         return describe("uia identity", "a different focused element was not rejected", attempt.error);
     }
@@ -655,7 +849,9 @@ std::string checkAutomationPaths(Fixture &state) {
     state.resolveOverride = host.second;
     attempt = insert(target, "late");
     state.resolveOverride = nullptr;
-    if (attempt.status != -1 || !contains(attempt.error, "no longer focused") || textOf(host.second) != L"other" ||
+    if (attempt.status != -1 || !contains(attempt.error, "no longer focused") ||
+        attempt.result.method != JSTI_INSERTION_METHOD_NONE || attempt.result.verified ||
+        state.clipboard.sequence() != beforeRefusals || textOf(host.second) != L"other" ||
         state.pasteCalls.load() != 1) {
         return describe("uia sibling", "an element outside the captured control was not rejected", attempt.error);
     }
@@ -952,6 +1148,21 @@ std::string checkCapturedProcessAndWorkerBounds(Fixture &state) {
     if (jsti_insertion_executable_path(target.value, path.data(), path.size(), &required, message, sizeof(message)) != 0 ||
         std::strlen(path.data()) + 1 != required) return describe("captured process", "path query failed", message);
     const std::string original(path.data());
+    std::vector<char> foregroundPath(131073);
+    const size_t workers = liveWorkerCount();
+    if (jsti_foreground_executable_path(foregroundPath.data(), foregroundPath.size(), message, sizeof(message)) != 0 ||
+        original != foregroundPath.data() || liveWorkerCount() != workers) {
+        return describe("foreground profile", "app lookup changed workers or returned another process", message);
+    }
+    if (jsti_foreground_executable_path(shortBuffer, 1, message, sizeof(message)) != -1 || shortBuffer[0]) {
+        return describe("foreground profile", "short-buffer failure was not explicit", message);
+    }
+    environment.allowCurrentProcess = false;
+    setEnvironment(environment);
+    if (jsti_foreground_executable_path(foregroundPath.data(), foregroundPath.size(), message, sizeof(message)) != 0 ||
+        foregroundPath[0]) return describe("foreground profile", "the app matched its own process", message);
+    environment.allowCurrentProcess = true;
+    setEnvironment(environment);
     state.foreground = GetDesktopWindow();
     jsti_insertion_cancel(target.value);
     const int status = jsti_insertion_executable_path(target.value, path.data(), path.size(), &required, message, sizeof(message));
@@ -1033,6 +1244,341 @@ std::string checkDeferredFocusAndUncertainTimeout(Fixture &state) {
     return {};
 }
 
+std::string checkCorrectionLearning(Fixture &state) {
+    setEnvironment(testEnvironment(true));
+    SyntheticHost &host = state.host;
+    Target target;
+    std::string reason;
+    char error[512]{}, edited[32769]{};
+    auto arm = [&] {
+        return jsti_insertion_learning(target.value, "Susie", nullptr, 0, error, sizeof(error));
+    };
+    auto sample = [&] {
+        return jsti_insertion_learning(target.value, nullptr, edited, sizeof(edited), error, sizeof(error));
+    };
+    auto prepare = [&] {
+        setText(host.richEdit, L"Left  right");
+        if (!host.focus(host.richEdit)) return false;
+        select(host.richEdit, 5, 5);
+        return capture(target, reason);
+    };
+    if (!prepare()) return describe("learning capture", "synthetic capture failed", reason.c_str());
+    if (arm() != -1) return describe("learning acknowledgement", "an unacknowledged target was observed");
+    Attempt attempt = insert(target, "Susie");
+    if (attempt.status != 0 || attempt.result.verified != 1) {
+        return describe("learning insertion", "synthetic native insertion was not confirmed", attempt.error);
+    }
+    const int supported = supportsTextPattern(host.richEdit);
+    if (supported < 0) return describe("learning capability", "TextPattern capability could not be established");
+    if (!supported) {
+        if (arm() != -1) return describe("learning unsupported", "a field without TextPattern was observed");
+        return {};
+    }
+    if (arm() != 0) return describe("learning range", "the acknowledged span was not retained", error);
+    select(host.richEdit, 7, 8);
+    SendMessageW(host.richEdit, EM_REPLACESEL, TRUE, reinterpret_cast<LPARAM>(L"z"));
+    if (sample() != 0 || std::strcmp(edited, "Suzie") != 0) {
+        return describe("learning exact span", "readback included unrelated field content or lost its range", error);
+    }
+    if (sample() != -1 || arm() != -1) return describe("learning one-shot", "a consumed lease was reused");
+
+    if (!prepare() || insert(target, "Susie").status != 0 || arm() != 0) {
+        return describe("learning password", "setup failed", error);
+    }
+    const LONG_PTR savedStyle = GetWindowLongPtrW(host.richEdit, GWL_STYLE);
+    SetWindowLongPtrW(host.richEdit, GWL_STYLE, savedStyle | ES_PASSWORD);
+    const int sensitive = sample();
+    SetWindowLongPtrW(host.richEdit, GWL_STYLE, savedStyle);
+    if (sensitive != -1) return describe("learning password", "a password control was observed");
+
+    if (!prepare() || insert(target, "Susie").status != 0) return describe("learning caret", "setup failed");
+    select(host.richEdit, 5, 5);
+    if (arm() != -1) return describe("learning caret", "a moved caret was mistaken for the insertion receipt");
+
+    if (!prepare() || insert(target, "Susie").status != 0 || arm() != 0) {
+        return describe("learning context", "setup failed", error);
+    }
+    select(host.richEdit, 0, 1);
+    SendMessageW(host.richEdit, EM_REPLACESEL, TRUE, reinterpret_cast<LPARAM>(L"R"));
+    if (sample() != -1) return describe("learning context", "an unrelated prefix edit was learned");
+
+    if (!prepare() || insert(target, "Susie").status != 0 || arm() != 0) {
+        return describe("learning focus", "setup failed", error);
+    }
+    ++state.focusRevision;
+    if (sample() != -1) return describe("learning focus", "a focus transition retained observation authority");
+
+    if (!prepare() || insert(target, "Susie").status != 0 || arm() != 0) {
+        return describe("learning identity", "setup failed", error);
+    }
+    state.resolveOverride = host.edit;
+    const int otherControl = sample();
+    state.resolveOverride = nullptr;
+    if (otherControl != -1) return describe("learning identity", "another UIA control was read");
+
+    if (!prepare() || insert(target, "Susie").status != 0 || arm() != 0) {
+        return describe("learning window", "setup failed", error);
+    }
+    state.foreground = GetDesktopWindow();
+    const int otherWindow = sample();
+    state.foreground = host.window;
+    if (otherWindow != -1) return describe("learning window", "another foreground window retained authority");
+
+    if (!prepare() || insert(target, "Susie").status != 0 || arm() != 0) {
+        return describe("learning cancellation", "setup failed", error);
+    }
+    jsti_insertion_cancel(target.value);
+    if (sample() != -1) return describe("learning cancellation", "a cancelled target returned text");
+    return {};
+}
+
+std::string checkSelectionSources(Fixture &state) {
+    auto &host = state.host;
+    Environment environment = testEnvironment(false);
+    environment.allowCurrentProcess = false;
+    setEnvironment(environment);
+    state.foreground = host.window;
+    state.resolveOverride = nullptr;
+    state.failFocusResolution = false;
+    if (!host.focus(host.richEdit)) return "The selected-text fixture could not focus its RichEdit.";
+    if (supportsTextPattern(host.richEdit) != 1)
+        return "The selected-text RichEdit fixture did not expose its required TextPattern.";
+    setText(host.richEdit, L"private prefix Speak this private suffix");
+    select(host.richEdit, 15, 25);
+    Target target;
+    char error[512]{}, selected[128]{};
+    auto captureSelection = [&] {
+        target.destroy();
+        target.value = jsti_selection_capture(error, sizeof(error));
+        return target.value != nullptr;
+    };
+    auto read = [&] {
+        std::memset(selected, 0, sizeof(selected));
+        return jsti_selection_read(target.value, selected, sizeof(selected), error, sizeof(error));
+    };
+    const DWORD sequence = state.clipboard.sequence();
+    const int pastes = state.pasteCalls.load();
+    SendMessageW(host.richEdit, EM_SETREADONLY, TRUE, 0);
+    if (!captureSelection() || read() != 0 || std::strcmp(selected, "Speak this") != 0)
+        return describe("read-only selection", "did not read only the selected range", error);
+    if (read() != -1 || selected[0])
+        return describe("selection one-shot", "a consumed snapshot returned text again");
+    SendMessageW(host.richEdit, EM_SETREADONLY, FALSE, 0);
+    const Attempt forbidden = insert(target, "forbidden");
+    if (forbidden.status != -1 || !contains(forbidden.error, "read-only"))
+        return describe("selection authority", "a read-only target permitted insertion");
+    JSTIInsertionResult result{};
+    if (jsti_insertion_copy_text(target.value, "forbidden", &result, error, sizeof(error)) != -1 ||
+        !contains(error, "read-only"))
+        return describe("selection authority", "a read-only target permitted clipboard replacement");
+    if (textOf(host.richEdit) != L"private prefix Speak this private suffix" ||
+        state.clipboard.sequence() != sequence || state.pasteCalls != pastes)
+        return describe("selection side effects", "text, clipboard or keyboard input changed");
+
+    state.resolveOverride = host.second;
+    if (!captureSelection()) return describe("selection identity", "capture failed", error);
+    const int differentField = read();
+    state.resolveOverride = nullptr;
+    if (differentField != -1 || selected[0])
+        return describe("selection identity", "another field supplied selected text");
+    if (!captureSelection()) return describe("selection focus", "capture failed", error);
+    ++state.focusRevision;
+    if (read() != -1 || selected[0])
+        return describe("selection focus", "a focus transition retained selection authority");
+    if (!captureSelection()) return describe("selection foreground", "capture failed", error);
+    state.foreground = GetDesktopWindow();
+    const int differentWindow = read();
+    state.foreground = host.window;
+    if (differentWindow != -1 || selected[0])
+        return describe("selection foreground", "a different foreground window retained authority");
+
+    const LONG_PTR savedStyle = GetWindowLongPtrW(host.richEdit, GWL_STYLE);
+    SetWindowLongPtrW(host.richEdit, GWL_STYLE, savedStyle | ES_PASSWORD);
+    const bool passwordCaptured = captureSelection();
+    const int passwordRead = passwordCaptured ? read() : -1;
+    SetWindowLongPtrW(host.richEdit, GWL_STYLE, savedStyle);
+    if (passwordRead != -1 || selected[0])
+        return describe("selection password", "a password control supplied selected text");
+    select(host.richEdit, 15, 15);
+    if (!captureSelection() || read() != -1 || selected[0])
+        return describe("selection caret", "a caret fell back to whole-field text");
+    select(host.richEdit, 15, 25);
+    if (!captureSelection()) return describe("selection buffer", "capture failed", error);
+    char undersized[2]{'x', 0};
+    if (jsti_selection_read(target.value, undersized, sizeof(undersized), error, sizeof(error)) != -1 ||
+        undersized[0])
+        return describe("selection buffer", "a too-small buffer returned partial text");
+    if (!captureSelection()) return describe("selection cancellation", "capture failed", error);
+    jsti_insertion_cancel(target.value);
+    if (read() != -1 || selected[0])
+        return describe("selection cancellation", "a cancelled snapshot returned text");
+    target.destroy();
+
+    SendMessageW(host.richEdit, EM_EXLIMITTEXT, 0, 200001);
+    std::wstring maximum(200000, L'x');
+    setText(host.richEdit, maximum.c_str());
+    select(host.richEdit, 0, 200000);
+    std::vector<char> bounded(600004, 0);
+    if (!captureSelection() || jsti_selection_read(
+        target.value, bounded.data(), bounded.size(), error, sizeof(error)) != 0 ||
+        std::strlen(bounded.data()) != maximum.size())
+        return describe("selection exact limit", "the 200,000-unit boundary was not preserved", error);
+    maximum += L'x';
+    setText(host.richEdit, maximum.c_str());
+    select(host.richEdit, 0, 200001);
+    if (textOf(host.richEdit).size() != maximum.size())
+        return describe("selection over limit", "the fixture did not contain the required oversized selection");
+    if (!captureSelection() || jsti_selection_read(
+        target.value, bounded.data(), bounded.size(), error, sizeof(error)) != -1 ||
+        bounded[0] || !contains(error, "200,000"))
+        return describe("selection over limit", "oversized input was truncated or accepted", error);
+    target.destroy();
+
+    if (!state.release.value) state.release.value = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!state.release.value) return "Could not create the selected-text timeout gate.";
+    ResetEvent(state.release.value);
+    state.hookCalls = 0;
+    state.blockOnCall = -1;
+    struct ReleaseGate {
+        Fixture &state;
+        ~ReleaseGate() { SetEvent(state.release.value); }
+    } release{state};
+    environment.beforeAutomation = &blockingHook;
+    environment.insertTimeoutMs = 80;
+    environment.destroyWaitMs = 0;
+    setEnvironment(environment);
+    if (!captureSelection() || !waitForHook(1))
+        return describe("selection timeout", "the provider gate was not entered", error);
+    const ULONGLONG started = GetTickCount64();
+    if (read() != -1 || selected[0] || GetTickCount64() - started > 2000)
+        return describe("selection timeout", "a blocked provider escaped the bounded read", error);
+    SetEvent(state.release.value);
+    target.destroy();
+    if (!waitForWorkersToExit(5000)) return "A selected-text worker outlived its cancelled request.";
+    return {};
+}
+
+std::string checkVoiceEditAnchors(Fixture &state) {
+    auto &host = state.host;
+    Environment environment = testEnvironment(true);
+    setEnvironment(environment);
+    state.foreground = host.window;
+    state.resolveOverride = nullptr;
+    state.failFocusResolution = false;
+    if (!host.focus(host.richEdit)) return "The voice-edit fixture could not focus its RichEdit.";
+    Target target;
+    char error[512]{}, selected[128]{};
+    auto capture = [&](bool read = true) {
+        target.destroy();
+        target.value = jsti_voice_edit_capture(error, sizeof(error));
+        return target.value && (!read ||
+            jsti_selection_read(target.value, selected, sizeof(selected), error, sizeof(error)) == 0);
+    };
+    setText(host.richEdit, L"prefix original suffix");
+    select(host.richEdit, 7, 15);
+    if (!capture() || std::strcmp(selected, "original") != 0)
+        return describe("voice edit capture", "did not retain just the selected text", error);
+    const Attempt replaced = insert(target, "changed");
+    if (replaced.status != 0 || !replaced.result.verified ||
+        replaced.result.method == JSTI_INSERTION_METHOD_NATIVE_EDIT ||
+        textOf(host.richEdit) != L"prefix changed suffix")
+        return describe("voice edit anchored replacement", "did not replace only the original range", replaced.error);
+
+    auto original = [&] {
+        setText(host.richEdit, L"same same");
+        select(host.richEdit, 0, 4);
+        return capture();
+    };
+    auto refusedWithoutEffects = [&](unsigned flags = 0) {
+        const std::wstring before = textOf(host.richEdit);
+        const DWORD sequence = state.clipboard.sequence();
+        const int pastes = state.pasteCalls.load();
+        const Attempt attempt = insert(target, "forbidden", flags);
+        return attempt.status == -1 && textOf(host.richEdit) == before &&
+            sequence == state.clipboard.sequence() && pastes == state.pasteCalls.load();
+    };
+    if (!original()) return describe("voice edit moved range", "capture failed", error);
+    select(host.richEdit, 5, 9);
+    if (!refusedWithoutEffects())
+        return describe("voice edit moved range", "identical text at a different range retained authority");
+    if (!original()) return describe("voice edit document", "capture failed", error);
+    setText(host.richEdit, L"same newer");
+    select(host.richEdit, 0, 4);
+    if (!refusedWithoutEffects())
+        return describe("voice edit document", "changed surrounding text retained authority");
+    if (!original()) return describe("voice edit focus", "capture failed", error);
+    ++state.focusRevision;
+    if (!refusedWithoutEffects())
+        return describe("voice edit focus", "a focus transition retained authority");
+    environment.preparePaste = +[](std::string &) {
+        select(fixture->host.richEdit, 5, 9);
+        return true;
+    };
+    setEnvironment(environment);
+    // A captured target retains its environment, so recapture with the dispatch hook.
+    if (!original()) return describe("voice edit dispatch anchor", "hooked capture failed", error);
+    const int dispatches = state.pasteCalls.load();
+    const Attempt lateRangeChange = insert(target, "must not reach either range");
+    environment = testEnvironment(true);
+    setEnvironment(environment);
+    if (lateRangeChange.status != -1 || state.pasteCalls.load() != dispatches || textOf(host.richEdit) != L"same same")
+        return describe("voice edit dispatch anchor", "a changed range escaped the final mutation check");
+    if (!original()) return describe("voice edit replace all", "capture failed", error);
+    if (!refusedWithoutEffects(JSTI_INSERTION_REPLACE_FIELD))
+        return describe("voice edit replace all", "whole-field replacement bypassed the range anchor");
+    for (const unsigned flag : {JSTI_INSERTION_ORIGINAL_APP, JSTI_INSERTION_CURRENT_APP,
+                                JSTI_INSERTION_ONLY_ORIGINAL_FRONT}) {
+        if (!original()) return describe("voice edit app switch", "capture failed", error);
+        if (!refusedWithoutEffects(flag))
+            return describe("voice edit app switch", "destination policy bypassed the anchor");
+    }
+    if (!original()) return describe("voice edit cancellation", "capture failed", error);
+    jsti_insertion_cancel(target.value);
+    if (!refusedWithoutEffects())
+        return describe("voice edit cancellation", "a cancelled target retained write authority");
+    if (!original()) return describe("voice edit read only", "capture failed", error);
+    SendMessageW(host.richEdit, EM_SETREADONLY, TRUE, 0);
+    const bool readOnlyRefused = refusedWithoutEffects();
+    SendMessageW(host.richEdit, EM_SETREADONLY, FALSE, 0);
+    if (!readOnlyRefused) return describe("voice edit read only", "a read-only field accepted a mutation");
+    SendMessageW(host.richEdit, EM_SETREADONLY, TRUE, 0);
+    const bool readOnlyCaptured = capture();
+    SendMessageW(host.richEdit, EM_SETREADONLY, FALSE, 0);
+    if (readOnlyCaptured) return describe("voice edit read only", "a read-only field admitted instruction capture");
+    if (!original()) return describe("voice edit password", "capture failed", error);
+    const LONG_PTR style = GetWindowLongPtrW(host.richEdit, GWL_STYLE);
+    SetWindowLongPtrW(host.richEdit, GWL_STYLE, style | ES_PASSWORD);
+    const bool passwordRefused = refusedWithoutEffects();
+    SetWindowLongPtrW(host.richEdit, GWL_STYLE, style);
+    if (!passwordRefused) return describe("voice edit password", "a password field accepted a mutation");
+    setText(host.richEdit, L"same same");
+    select(host.richEdit, 0, 4);
+    if (!capture(false) || !refusedWithoutEffects())
+        return describe("voice edit unacknowledged capture", "write authority preceded the bounded selection read");
+    target.destroy();
+    if (!state.release.value) state.release.value = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!state.release.value) return "Could not create the voice-edit cancellation gate.";
+    ResetEvent(state.release.value);
+    state.hookCalls = 0;
+    state.blockOnCall = -1;
+    struct ReleaseVoiceEditGate {
+        Fixture &state;
+        ~ReleaseVoiceEditGate() { SetEvent(state.release.value); }
+    } release{state};
+    environment.beforeAutomation = &blockingHook;
+    environment.destroyWaitMs = 0;
+    setEnvironment(environment);
+    if (!capture(false) || !waitForHook(1))
+        return describe("voice edit blocked capture", "the provider gate was not entered", error);
+    jsti_insertion_cancel(target.value);
+    if (jsti_selection_read(target.value, selected, sizeof(selected), error, sizeof(error)) != -1 || selected[0])
+        return describe("voice edit blocked capture", "a cancelled provider retained selection authority");
+    SetEvent(state.release.value);
+    target.destroy();
+    if (!waitForWorkersToExit(5000)) return "A voice-edit worker outlived its retired target.";
+    return {};
+}
+
 } // namespace
 
 int jsti_text_output_self_test(char *error, size_t capacity) {
@@ -1040,17 +1586,23 @@ int jsti_text_output_self_test(char *error, size_t capacity) {
     std::string failure = checkPureHelpers();
     if (!failure.empty()) return jsti::fail(failure, error, capacity);
     try {
+        failure = checkSelectionRangeBudget();
+        if (!failure.empty()) return jsti::fail(failure, error, capacity);
         auto state = std::make_unique<Fixture>();
         fixture = state.get();
         EnvironmentGuard environmentGuard;
         if (!state->host.start(failure)) { fixture = nullptr; return jsti::fail(failure, error, capacity); }
         state->foreground = state->host.window;
         failure = checkNativePaths(*state);
+        if (failure.empty()) failure = checkAppSwitchPolicies(*state);
+        if (failure.empty()) failure = checkCorrectionLearning(*state);
         if (failure.empty()) failure = checkAutomationPaths(*state);
         if (failure.empty()) failure = checkLifetimes(*state);
         if (failure.empty()) failure = checkClipboardRacesAndCancellation(*state);
         if (failure.empty()) failure = checkCapturedProcessAndWorkerBounds(*state);
         if (failure.empty()) failure = checkDeferredFocusAndUncertainTimeout(*state);
+        if (failure.empty()) failure = checkSelectionSources(*state);
+        if (failure.empty()) failure = checkVoiceEditAnchors(*state);
         if (state->release.value) SetEvent(state->release.value);
         if (!waitForWorkersToExit(10000)) {
             // A worker that never exited may still call the seams; keep the

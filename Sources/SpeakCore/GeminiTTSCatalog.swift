@@ -12,6 +12,8 @@ public enum GeminiTTSModel: String, CaseIterable, Codable, Hashable, Identifiabl
 
     public var id: String { rawValue }
 
+    public var desktopModelIdentifier: String { "\(GeminiTTSCatalog.voiceIDPrefix)\(rawValue)" }
+
     public var displayName: String {
         switch self {
         case .flash31TTSPreview: "Gemini 3.1 Flash TTS"
@@ -75,6 +77,13 @@ public struct GeminiTTSVoice: Identifiable, Codable, Hashable, Sendable {
 
 /// Canonical Gemini speech-generation catalogue.
 public enum GeminiTTSCatalog {
+    public static let providerIdentifier = "google"
+    public static let credentialIdentifier = "google.apiKey"
+    public static var desktopModelIdentifier: String { defaultModel.desktopModelIdentifier }
+    public static let pricingEstimateBasis =
+        "Gemini audio cost is estimated from validated PCM seconds; input cost uses only reported text tokens. "
+        + "Missing tokens leave input and total cost unknown. No billing receipt is available."
+
     /// Prefix that routes a stored voice identifier back to this provider.
     ///
     /// It matches the `google` provider naming used by Gemini transcription, so
@@ -83,6 +92,11 @@ public enum GeminiTTSCatalog {
 
     public static let defaultModel: GeminiTTSModel = .flash31TTSPreview
     public static let models = GeminiTTSModel.allCases
+
+    public static func model(forID identifier: String) -> GeminiTTSModel? {
+        let normalized = identifier.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return models.first { $0.rawValue == normalized || $0.desktopModelIdentifier == normalized }
+    }
 
     /// The thirty prebuilt voices the speech-generation guide documents.
     public static let voices: [GeminiTTSVoice] = [

@@ -26,6 +26,7 @@ final class SyntheticEffects: WindowsControllerEffects, @unchecked Sendable {
     private var failWrite = false
     private var requests: [WindowsTranscriptionRequest] = []
     private var scripted: [Result<String, WindowsNativeError>] = []
+    private var syntheticAPIKey: String? = "synthetic-self-test-credential"
 
     var lastOutput: SelfTestOutput? { lock.withLock { outputs.last } }
     var completedOutputs: Int { lock.withLock { outputs.filter { $0.delivered != nil }.count } }
@@ -35,6 +36,7 @@ final class SyntheticEffects: WindowsControllerEffects, @unchecked Sendable {
     var transcriptionRequests: [WindowsTranscriptionRequest] { lock.withLock { requests } }
 
     func failNextSettingsWrite() { lock.withLock { failWrite = true } }
+    func setSyntheticAPIKey(_ value: String?) { lock.withLock { syntheticAPIKey = value } }
 
     /// The next transcription returns `text` instead of `batchText`.
     func scriptNextTranscription(_ text: String) { lock.withLock { scripted.append(.success(text)) } }
@@ -58,7 +60,12 @@ final class SyntheticEffects: WindowsControllerEffects, @unchecked Sendable {
         return wave
     }
 
-    func apiKey(name: String) throws -> String { "synthetic-self-test-credential" }
+    func apiKey(name: String) throws -> String {
+        try lock.withLock {
+            guard let syntheticAPIKey else { throw selfTestFailure("synthetic credential read failure") }
+            return syntheticAPIKey
+        }
+    }
 
     func makeCapture(
         context: WindowsCaptureContext, deviceID: String, sampleRate: Int, frameMilliseconds: Int
@@ -86,7 +93,7 @@ final class SyntheticEffects: WindowsControllerEffects, @unchecked Sendable {
 
     /// Holds the output like a slow target application until released or
     /// cancelled. Never touches the clipboard or a field.
-    func perform(_ job: WindowsOutputJob, text: String) -> String {
+    func perform(_ job: WindowsOutputJob, text: String) -> DesktopTextOutputResult {
         let index = lock.withLock { () -> Int in
             var copies = false
             if case .clipboard(let output) = job {
@@ -100,11 +107,16 @@ final class SyntheticEffects: WindowsControllerEffects, @unchecked Sendable {
         while !Task.isCancelled, !delivery.isOpen, Date() < deadline { Thread.sleep(forTimeInterval: 0.002) }
         let delivered = !Task.isCancelled && delivery.isOpen
         lock.withLock { outputs[index].delivered = delivered }
-        return delivered ? "Synthetic output delivered." : "Synthetic output cancelled."
+        return DesktopTextOutputResult(
+            delivered ? .confirmedInsertion : .cancelled,
+            status: delivered ? "Synthetic output delivered." : "Synthetic output cancelled."
+        )
     }
 
     func writeSettings(_ data: Data, to url: URL) throws {
-        let fail = lock.withLock { () -> Bool in
+        // Side indexes such as tracked API keys must not consume the failure
+        // aimed at the settings file.
+        let fail = url.lastPathComponent == "settings.json" && lock.withLock { () -> Bool in
             let fail = failWrite
             failWrite = false
             return fail

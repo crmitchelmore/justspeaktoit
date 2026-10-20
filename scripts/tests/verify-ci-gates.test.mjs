@@ -19,6 +19,98 @@ const jobBodies = Object.fromEntries([...workflow.matchAll(/^  ([a-z][a-z0-9-]+)
 const nativeEligibleJobs = [
   'build-macos', 'release-validation', 'api-compatibility', 'lint', 'core-journey-e2e',
 ];
+const journeyStages = readFileSync(new URL('../run-core-journey-stages.py', import.meta.url), 'utf8');
+
+test('product checks cover stacked pull requests without broadening push or credential permissions', () => {
+  for (const name of ['ci', 'windows', 'linux']) {
+    const source = readFileSync(new URL(`../../.github/workflows/${name}.yml`, import.meta.url), 'utf8');
+    assert.match(source, /^  push:\n    branches: \[main\]$/m, `${name}: pushes must remain main-only`);
+    const pullRequest = source.match(/^  pull_request:[ \t]*\n((?: {4}[^\n]*\n|\n)*)/m);
+    assert.ok(pullRequest, `${name}: ordinary pull-request checks must exist`);
+    assert.doesNotMatch(pullRequest[1], /^\s+branches(?:-ignore)?:/m,
+      `${name}: non-main target branches must receive product checks`);
+    assert.doesNotMatch(source, /^  pull_request_target:/m, `${name}: no privileged PR event`);
+    if (name !== 'ci') {
+      assert.match(pullRequest[1], /^    paths:$/m, `${name}: retain product path gates`);
+    }
+  }
+});
+
+test('desktop native dependency changes select every native and cross-build workflow', () => {
+  for (const name of ['windows', 'linux', 'windows-arm64', 'windows-cross-proof']) {
+    const source = readFileSync(new URL(`../../.github/workflows/${name}.yml`, import.meta.url), 'utf8');
+    for (const event of ['push', 'pull_request']) {
+      const trigger = source.match(new RegExp(`^  ${event}:\\n((?: {4}[^\\n]*\\n|\\n)*)`, 'm'));
+      assert.ok(trigger, `${name}: ${event} must exist`);
+      for (const target of ['CLlamaCpp', 'CMigrationArchive', 'CRecordingFileSupport']) {
+        assert.ok(trigger[1].includes(`      - Sources/${target}/**\n`),
+          `${name}: ${event} must include native dependency ${target}`);
+      }
+    }
+  }
+});
+
+test('journey cold preparation and actual runtime have separate finite budgets and always-uploaded evidence', () => {
+  const swift = jobBodies['core-journey-e2e'];
+  const ui = jobBodies['core-journey-fixture-ui'];
+  assert.match(swift, /^\s+timeout-minutes: 40$/m);
+  assert.match(ui, /^\s+timeout-minutes: 42$/m);
+  assert.match(swift, /timeout-minutes: 17\n\s+run: scripts\/run-core-journey-e2e.sh --phase build/);
+  assert.match(swift, /timeout-minutes: 10\n\s+run: scripts\/run-core-journey-e2e.sh --phase test/);
+  assert.ok(swift.indexOf('--phase build') < swift.indexOf('--phase test'));
+  for (const phase of ['setup', 'build', 'test']) {
+    assert.match(ui, new RegExp(`run: python3 scripts/run-core-journey-stages.py ui --phase ${phase}`));
+  }
+  assert.ok(ui.indexOf('--phase setup') < ui.indexOf('--phase build'));
+  assert.ok(ui.indexOf('--phase build') < ui.indexOf('--phase test'));
+  for (const body of [swift, ui]) {
+    assert.doesNotMatch(body, /continue-on-error:|if:.*(?:failure|cancelled)/);
+    assert.match(body, /if: always\(\)\n\s+timeout-minutes: 3\n\s+uses: actions\/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7\.0\.2/);
+    assert.match(body, /if-no-files-found: error/);
+    assert.match(body, /uses: actions\/checkout@v7.0.1/);
+    assert.doesNotMatch(body, /ref:.*head|workflow_dispatch|retry|--skip.*test/);
+  }
+  assert.match(ui, /include-hidden-files: true/);
+  assert.match(ui, /path: \|\n\s+\.artifacts\/core-journey-fixture-ui\n\s+!\.artifacts\/core-journey-fixture-ui\/DerivedData/);
+  assert.match(journeyStages, /BUILD_BUDGET = 900/);
+  assert.match(journeyStages, /SETUP_BUDGET = 300/);
+  assert.match(journeyStages, /RUNTIME_BUDGET = \{"swift": 480, "ui": 600\}/);
+  assert.match(journeyStages, /RECEIPT_BUDGET = 60/);
+  assert.match(journeyStages, /"swift", "build", "--build-tests", "--enable-code-coverage"/);
+  assert.match(journeyStages, /"swift", "test", "--skip-build", "--disable-automatic-resolution",\s+"--enable-code-coverage"/);
+  assert.match(journeyStages, /"xcodebuild", "build-for-testing"/);
+  assert.match(journeyStages, /"xcodebuild", "test-without-building", "-xctestrun"/);
+  assert.match(journeyStages, /"GITHUB_SHA"/);
+  assert.match(journeyStages, /"Apple Swift"/);
+  assert.doesNotMatch(journeyStages, /CORE_JOURNEY_BUDGET_SECONDS|--skip-test|--skip-testing/);
+  for (const path of ['scripts/run-core-journey-stages.py', 'scripts/tests/test_core_journey_stages.py',
+    'scripts/tests/verify-ci-gates.test.mjs']) {
+    assert.ok(jobBodies['release-paths'].includes(`- '${path}'`), `path filter must include ${path}`);
+  }
+});
+
+test('macOS Debug and Core Journey share coverage instrumentation and cache keys', () => {
+  const body = jobBodies['build-macos'];
+  const journey = jobBodies['core-journey-e2e'];
+  for (const pattern of [/^\s+key:\s*(.+)$/m, /restore-keys:\s*\|\s*\n\s+([^\n]+)/]) {
+    const producer = body.match(pattern);
+    const consumer = journey.match(pattern);
+    assert.ok(producer && consumer, 'Debug and Core Journey must declare matching cache keys');
+    assert.equal(consumer[1].trim(), producer[1].trim());
+  }
+  assert.match(body, /^\s+timeout-minutes: 30$/m);
+  assert.match(body, /name: Build\n(?:\s+#[^\n]*\n)*\s+run: SWIFT_FLAGS=--enable-code-coverage make build/);
+  assert.match(body, /name: Test \(Debug\)\n(?:\s+id: [\w-]+\n)?\s+run: python3 scripts\/with-test-keychain.py swift test --enable-code-coverage/);
+  assert.ok(body.indexOf('name: Build') < body.indexOf('name: Test (Debug)'),
+    'Build must run before Test (Debug) so the coverage-enabled cache is already warm');
+  assert.ok(body.indexOf('name: Test (Debug)') < body.indexOf('name: Build SpeakCore (App Store flavour)'),
+    'App Store flavour rebuild must stay after tests, not before');
+  assert.doesNotMatch(body, /\n\s+run: make build\n/, 'Build step must not regress to an uninstrumented build');
+  // Non-test steps unaffected: still a real build, no dropped checks.
+  assert.match(body, /name: Verify brand asset sizes and appearance variants/);
+  assert.match(body, /name: Check Package.resolved drift/);
+  assert.match(body, /name: Report Coverage/);
+});
 
 function route(id, github, vars = {}) {
   const expression = jobBodies[id].match(/runs-on: \$\{\{ (.+) \}\}/)?.[1];
@@ -241,7 +333,7 @@ test('tooling gate delegates to the complete local discovery target', () => {
 
 const platformPythonTestRoots = [
   'scripts/linux-local-runtime', 'scripts/windows-local-runtime', 'scripts/windows-bundle',
-  'scripts/windows-cross', 'scripts/windows-cloudkit', 'scripts/windows-package',
+  'scripts/windows-cross', 'scripts/windows-cloudkit', 'scripts/windows-package', 'scripts/migration',
 ];
 const platformPythonCommand = root => `\tpython3 -B -m unittest discover -s ${root} -p 'test_*.py' -v\n`;
 

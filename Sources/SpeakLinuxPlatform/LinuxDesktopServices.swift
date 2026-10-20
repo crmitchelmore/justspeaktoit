@@ -4,8 +4,32 @@ import CLinuxSupport
 /// Thin Swift wrappers over the clipboard, file, X11 and portal parts of the
 /// C adapter.
 public enum LinuxClipboard {
+    public static func voiceCommandSnapshot() throws -> String? {
+        var pointer: UnsafeMutablePointer<CChar>?
+        let result = try LinuxNative.checked(accepting: [1]) {
+            jsti_voice_command_clipboard_read(&pointer, $0, $1)
+        }
+        defer { jsti_free(pointer) }
+        guard result == 0, let pointer else { return nil }
+        return String(cString: pointer)
+    }
+
     public static func write(_ text: String) throws {
         try text.withCString { text in try LinuxNative.call { jsti_clipboard_write(text, $0, $1) } }
+    }
+
+    public static func writeOwned(_ text: String) throws -> UInt64 {
+        var ownership: UInt64 = 0
+        try text.withCString { text in
+            try LinuxNative.call { jsti_clipboard_write_owned(text, &ownership, $0, $1) }
+        }
+        return ownership
+    }
+
+    public static func restore(_ text: String, ownership: UInt64) throws -> Bool {
+        try text.withCString { text in
+            try LinuxNative.checked(accepting: [2]) { jsti_clipboard_restore(text, ownership, $0, $1) } == 0
+        }
     }
 
     /// The clipboard text, or nil when it holds something other than text.
@@ -19,6 +43,11 @@ public enum LinuxClipboard {
 }
 
 public enum LinuxFiles {
+    /// Creates only a new private leaf; never repairs an existing directory.
+    public static func createPrivateDirectory(_ url: URL) throws {
+        try url.path.withCString { path in try LinuxNative.call { jsti_private_directory_create(path, $0, $1) } }
+    }
+
     /// Creates (or tightens) a folder only the current user can read.
     public static func preparePrivateDirectory(_ url: URL) throws {
         try url.path.withCString { path in try LinuxNative.call { jsti_private_directory_prepare(path, $0, $1) } }
@@ -50,18 +79,45 @@ public enum LinuxX11 {
 
     /// The focused X11 top-level window, unless it belongs to this process.
     public static func captureTarget() -> LinuxInsertionTarget? {
+        guard let target = try? captureTargetChecked() else { return nil }
+        return LinuxInsertionTarget(
+            kind: target.kind, windowClass: target.windowClass, executablePath: target.executablePath,
+            processID: target.processID, processIdentity: target.processIdentity,
+            observationalTarget: LinuxAtspiTarget.captureAdmitted()
+        )
+    }
+
+    public static func captureTargetChecked() throws -> LinuxInsertionTarget? {
         var window: UInt64 = 0
         var windowClass = [CChar](repeating: 0, count: 256)
         var pid: Int32 = 0
         var error = [CChar](repeating: 0, count: 256)
-        guard jsti_x11_active_window(&window, &windowClass, windowClass.count, &pid, &error, error.count) == 0,
-              window != 0, pid != getpid() else { return nil }
+        guard jsti_x11_active_window(&window, &windowClass, windowClass.count, &pid, &error, error.count) == 0 else {
+            throw LinuxNativeError(message: String(cString: error))
+        }
+        guard window != 0, pid != getpid() else { return nil }
         let executable = pid > 0
             ? try? FileManager.default.destinationOfSymbolicLink(atPath: "/proc/\(pid)/exe") : nil
         let className = String(cString: windowClass)
         return LinuxInsertionTarget(
-            kind: .x11Window(window), windowClass: className.isEmpty ? nil : className, executablePath: executable
+            kind: .x11Window(window), windowClass: className.isEmpty ? nil : className, executablePath: executable,
+            processID: pid, processIdentity: processIdentity(pid)
         )
+    }
+
+    private static func processIdentity(_ pid: Int32) -> String? {
+        guard pid > 0, let stat = try? String(contentsOfFile: "/proc/\(pid)/stat", encoding: .utf8),
+              let end = stat.lastIndex(of: ")") else { return nil }
+        let fields = stat[stat.index(after: end)...].split(whereSeparator: \.isWhitespace)
+        guard fields.count > 19, UInt64(fields[19]) != nil else { return nil }
+        return String(fields[19])
+    }
+
+    public static func targetIsFront(_ target: LinuxInsertionTarget) throws -> Bool {
+        guard case .x11Window(let window) = target.kind, let pid = target.processID,
+              let birth = target.processIdentity, processIdentity(pid) == birth,
+              let current = try captureTargetChecked() else { return false }
+        return current.kind == .x11Window(window) && current.processID == pid && current.processIdentity == birth
     }
 
     /// Returns false when `window` is no longer the active window.
@@ -116,8 +172,22 @@ public struct LinuxOutputNativeAdapter: LinuxOutputNative {
 
     public init() {}
 
+    public func x11TargetIsFront(_ target: LinuxInsertionTarget) throws -> Bool {
+        try LinuxX11.targetIsFront(target)
+    }
+
+    public func x11Paste(target: LinuxInsertionTarget, shift: Bool) throws -> Bool {
+        Thread.sleep(forTimeInterval: 0.05)
+        guard try LinuxX11.targetIsFront(target), case .x11Window(let window) = target.kind else { return false }
+        return try LinuxX11.paste(window: window, shift: shift)
+    }
+
     public func readClipboard() throws -> String? { try LinuxClipboard.read() }
     public func writeClipboard(_ text: String) throws { try LinuxClipboard.write(text) }
+    public func writeOwnedClipboard(_ text: String) throws -> UInt64 { try LinuxClipboard.writeOwned(text) }
+    public func restoreClipboard(_ text: String, ownership: UInt64) throws -> Bool {
+        try LinuxClipboard.restore(text, ownership: ownership)
+    }
     public func x11Paste(window: UInt64, shift: Bool) throws -> Bool {
         // Let the clipboard owner settle before the target asks for it.
         Thread.sleep(forTimeInterval: 0.05)

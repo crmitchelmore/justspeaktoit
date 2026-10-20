@@ -29,7 +29,7 @@ public final class VoiceCommandProcessor {
     private let configuration: Configuration
 
     /// Built-in voice commands and their variations
-    private static let clipboardTriggers: [String] = [
+    nonisolated private static let clipboardTriggers: [String] = [
         "copy pasta",
         "copypasta",
         "copy paste",
@@ -45,7 +45,7 @@ public final class VoiceCommandProcessor {
     /// Maximum recursion depth for clipboard expansion to prevent DoS attacks
     /// when clipboard content contains trigger phrases. Set to 10 to allow
     /// reasonable legitimate nested triggers while preventing infinite loops.
-    private static let maxClipboardExpansionDepth = 10
+    nonisolated private static let maxClipboardExpansionDepth = 10
 
     public init(configuration: Configuration) {
         self.configuration = configuration
@@ -67,30 +67,51 @@ public final class VoiceCommandProcessor {
 
     /// Expand clipboard insertion triggers ("copy pasta" etc.) with actual clipboard content
     private func expandClipboardCommands(in text: String) -> String {
-        expandClipboardCommands(in: text, depth: 0)
+        Self.expandClipboardCommands(
+            in: text, depth: 0, triggers: { Self.resolvedTriggers(configuration.customTriggers()) },
+            clipboardText: configuration.clipboardText
+        )
+    }
+
+    /// Allows asynchronous hosts to acquire a clipboard snapshot only when needed.
+    nonisolated public static func containsClipboardCommand(in text: String, customTriggers: String) -> Bool {
+        triggerRange(in: text, triggers: resolvedTriggers(customTriggers)) != nil
+    }
+
+    /// The same expansion using an already captured native clipboard snapshot.
+    /// Does not require the native UI thread to service Swift MainActor work.
+    nonisolated public static func process(
+        _ text: String, enabled: Bool, customTriggers: String, clipboardText: String?
+    ) -> String {
+        guard enabled else { return text }
+        let triggers = resolvedTriggers(customTriggers)
+        return expandClipboardCommands(in: text, depth: 0, triggers: { triggers }, clipboardText: { clipboardText })
     }
 
     /// Expand clipboard insertion triggers with depth limit to prevent infinite recursion
-    private func expandClipboardCommands(in text: String, depth: Int) -> String {
+    nonisolated private static func expandClipboardCommands(
+        in text: String, depth: Int, triggers: () -> [String], clipboardText: () -> String?
+    ) -> String {
         guard depth < Self.maxClipboardExpansionDepth else { return text }
 
-        let clipboardContent = configuration.clipboardText() ?? ""
-        guard !clipboardContent.isEmpty else { return text }
+        // Recognise before reading so ordinary text never queries the clipboard.
+        guard let range = Self.triggerRange(in: text, triggers: triggers()) else { return text }
 
-        guard let range = Self.triggerRange(in: text, triggers: resolvedTriggers()) else { return text }
+        let clipboardContent = clipboardText() ?? ""
+        guard !clipboardContent.isEmpty else { return text }
 
         var result = text
         result.replaceSubrange(range, with: clipboardContent)
         // Re-process in case there are multiple triggers (with updated positions).
-        return expandClipboardCommands(in: result, depth: depth + 1)
+        return expandClipboardCommands(in: result, depth: depth + 1, triggers: triggers, clipboardText: clipboardText)
     }
 
     /// The trigger phrases to match, in a stable order.
     ///
     /// Custom phrases come first and duplicates collapse case-insensitively, so a
     /// custom phrase that repeats a built-in is one trigger, not two.
-    private func resolvedTriggers() -> [String] {
-        let customTriggers = configuration.customTriggers()
+    nonisolated private static func resolvedTriggers(_ configured: String) -> [String] {
+        let customTriggers = configured
             .split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
             .filter { !$0.isEmpty }
@@ -109,7 +130,7 @@ public final class VoiceCommandProcessor {
     /// Set iteration order used to decide this, so "paste clipboard" expanded to
     /// either the clipboard content or `<clipboard content> clipboard` across
     /// launches when a custom "paste" trigger was also configured (issue #687).
-    private static func triggerRange(in text: String, triggers: [String]) -> Range<String.Index>? {
+    nonisolated private static func triggerRange(in text: String, triggers: [String]) -> Range<String.Index>? {
         var best: Range<String.Index>?
         for trigger in triggers {
             guard let range = earliestWholePhraseRange(of: trigger, in: text) else { continue }
@@ -130,7 +151,7 @@ public final class VoiceCommandProcessor {
     ///
     /// Triggers never fire inside a longer word: "copypasta" must not expand in
     /// "copypastas".
-    private static func earliestWholePhraseRange(
+    nonisolated private static func earliestWholePhraseRange(
         of trigger: String,
         in text: String
     ) -> Range<String.Index>? {
@@ -147,7 +168,7 @@ public final class VoiceCommandProcessor {
         return nil
     }
 
-    private static func isWholePhrase(_ range: Range<String.Index>, in text: String) -> Bool {
+    nonisolated private static func isWholePhrase(_ range: Range<String.Index>, in text: String) -> Bool {
         if range.lowerBound > text.startIndex,
             isWordCharacter(text[text.index(before: range.lowerBound)]) {
             return false
@@ -158,7 +179,7 @@ public final class VoiceCommandProcessor {
         return true
     }
 
-    private static func isWordCharacter(_ character: Character) -> Bool {
+    nonisolated private static func isWordCharacter(_ character: Character) -> Bool {
         character.isLetter || character.isNumber
     }
 }

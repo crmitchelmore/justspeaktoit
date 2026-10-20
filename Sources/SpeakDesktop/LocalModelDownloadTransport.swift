@@ -79,6 +79,7 @@ public final class LocalModelURLSessionTransport: LocalModelDownloadTransport {
         configuration.urlCache = nil
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.httpCookieStorage = nil
+        configuration.urlCredentialStorage = nil
         configuration.timeoutIntervalForRequest = 60
         configuration.timeoutIntervalForResource = 6 * 3_600
         self.configuration = configuration

@@ -192,7 +192,7 @@ struct PersonalCorrectionsView: View {
             Stepper(
               "\(settings.autoCorrectionsPromotionThreshold) occurrences",
               value: $settings.autoCorrectionsPromotionThreshold,
-              in: 2...10
+              in: AutoCorrectionLearningPolicy.promotionThresholdRange
             )
             .font(.callout)
           }

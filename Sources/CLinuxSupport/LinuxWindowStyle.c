@@ -135,42 +135,11 @@ void jsti_style_install(void) {
 
 /* ------------------------------------------------------------ brand icon */
 
-static void rounded_rectangle(cairo_t *cr, double x, double y, double width, double height, double radius) {
-    cairo_new_sub_path(cr);
-    cairo_arc(cr, x + width - radius, y + radius, radius, -M_PI_2, 0);
-    cairo_arc(cr, x + width - radius, y + height - radius, radius, 0, M_PI_2);
-    cairo_arc(cr, x + radius, y + height - radius, radius, M_PI_2, M_PI);
-    cairo_arc(cr, x + radius, y + radius, radius, M_PI, 3 * M_PI_2);
-    cairo_close_path(cr);
-}
-
-/* Resources/Brand/AppIcon.svg on a 1024 grid: an orange rounded square and
- * five dark bars. */
 static void draw_brand_icon(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer data) {
     (void)area; (void)data;
     double size = MIN(width, height);
     cairo_translate(cr, (width - size) / 2, (height - size) / 2);
     jsti_brand_icon_paint(cr, size);
-}
-
-void jsti_brand_icon_paint(cairo_t *cr, double size) {
-    cairo_save(cr);
-    cairo_scale(cr, size / 1024.0, size / 1024.0);
-    cairo_pattern_t *surface = cairo_pattern_create_linear(0, 0, 0, 1024);
-    cairo_pattern_add_color_stop_rgb(surface, 0, 1.0, 0.42, 0.24);
-    cairo_pattern_add_color_stop_rgb(surface, 1, 1.0, 0.61, 0.29);
-    rounded_rectangle(cr, 0, 0, 1024, 1024, 224);
-    cairo_set_source(cr, surface);
-    cairo_fill(cr);
-    cairo_pattern_destroy(surface);
-    static const double bars[5][2] = { { 224, 408 }, { 348, 328 }, { 472, 240 }, { 596, 328 }, { 720, 408 } };
-    cairo_set_source_rgb(cr, 0x18 / 255.0, 0x1b / 255.0, 0x1d / 255.0);
-    for (int index = 0; index < 5; index++) {
-        double top = bars[index][1];
-        rounded_rectangle(cr, bars[index][0], top, 80, 1024 - 2 * top, 40);
-        cairo_fill(cr);
-    }
-    cairo_restore(cr);
 }
 
 GtkWidget *jsti_brand_icon_new(int size) {
@@ -184,6 +153,149 @@ GtkWidget *jsti_brand_icon_new(int size) {
 }
 
 /* ------------------------------------------------------------- builders */
+
+static JSTIVisualDensity visual_density;
+static GtkCssProvider *density_provider;
+
+enum { DENSITY_INLINE = 1, DENSITY_PAGE, DENSITY_CARD, DENSITY_CONTENT };
+
+static void density_project_box(GtkWidget *widget) {
+    const gint role = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(widget), "jsti-density-role"));
+    if (role == 0) return;
+    const gint original = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(widget), "jsti-density-spacing")) - 1;
+    gint spacing = visual_density.inline_spacing;
+    if (role == DENSITY_PAGE) spacing = visual_density.section_spacing;
+    if (role == DENSITY_CARD) spacing = visual_density.group_spacing;
+    if (role == DENSITY_CONTENT) spacing = visual_density.content_spacing;
+    gtk_box_set_spacing(GTK_BOX(widget), visual_density.compact ? MIN(original, spacing) : original);
+    if (role == DENSITY_PAGE) {
+        const gint margin = visual_density.compact ? visual_density.page_padding : 24;
+        gtk_widget_set_margin_top(widget, margin);
+        gtk_widget_set_margin_bottom(widget, margin);
+        gtk_widget_set_margin_start(widget, margin);
+        gtk_widget_set_margin_end(widget, margin);
+    }
+}
+
+static GtkWidget *density_box_new(GtkOrientation orientation, gint spacing, gint role) {
+    GtkWidget *widget = gtk_box_new(orientation, spacing);
+    g_object_set_data(G_OBJECT(widget), "jsti-density-role", GINT_TO_POINTER(role));
+    g_object_set_data(G_OBJECT(widget), "jsti-density-spacing", GINT_TO_POINTER(spacing + 1));
+    density_project_box(widget);
+    return widget;
+}
+
+static void density_project_tree(GtkWidget *widget) {
+    density_project_box(widget);
+    for (GtkWidget *child = gtk_widget_get_first_child(widget); child != NULL;
+         child = gtk_widget_get_next_sibling(child)) density_project_tree(child);
+}
+
+void jsti_visual_density_apply(GtkWidget *root, const JSTIVisualDensity *density) {
+    visual_density = *density;
+    if (density_provider == NULL) {
+        density_provider = gtk_css_provider_new();
+        gtk_style_context_add_provider_for_display(gtk_widget_get_display(root),
+            GTK_STYLE_PROVIDER(density_provider), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
+    }
+    gchar *css = g_strdup_printf(
+        ".jsti-density-compact .jsti-card, .jsti-density-compact .jsti-hero { padding: %dpx; }\n"
+        ".jsti-density-compact .jsti-chip, .jsti-density-compact .jsti-stat,"
+        " .jsti-density-compact .jsti-setup-tile { padding: %dpx %dpx; }\n"
+        ".jsti-density-compact .jsti-history-row { padding: %dpx; }\n"
+        ".jsti-density-compact list.jsti-history > row { margin-bottom: %dpx; }\n"
+        ".jsti-density-compact .jsti-sidebar row { min-height: %dpx; padding-top: 0; padding-bottom: 0; }\n"
+        ".jsti-density-compact .jsti-sidebar-heading { margin-top: %dpx; margin-left: %dpx; }\n",
+        density->card_padding, density->inline_spacing, density->card_padding,
+        density->card_padding, density->section_spacing, MAX(44, density->minimum_row_height),
+        density->group_spacing, density->page_padding);
+    gtk_css_provider_load_from_string(density_provider, css);
+    g_free(css);
+    if (density->compact) gtk_widget_add_css_class(root, "jsti-density-compact");
+    else gtk_widget_remove_css_class(root, "jsti-density-compact");
+    density_project_tree(root);
+}
+
+typedef struct {
+    GtkWidget *widget;
+    gint spacing, margin, minimum, natural;
+} DensityGeometry;
+
+static void density_snapshot(GtkWidget *widget, GArray *snapshot) {
+    const gint role = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(widget), "jsti-density-role"));
+    if (role != 0) {
+        DensityGeometry item = { widget, gtk_box_get_spacing(GTK_BOX(widget)), gtk_widget_get_margin_top(widget), 0, 0 };
+        gtk_widget_measure(widget, GTK_ORIENTATION_VERTICAL, 500, &item.minimum, &item.natural, NULL, NULL);
+        g_array_append_val(snapshot, item);
+    }
+    for (GtkWidget *child = gtk_widget_get_first_child(widget); child != NULL;
+         child = gtk_widget_get_next_sibling(child)) density_snapshot(child, snapshot);
+}
+
+static gboolean density_sidebar_targets(GtkWidget *widget) {
+    if (GTK_IS_LIST_BOX_ROW(widget) &&
+        gtk_widget_has_css_class(gtk_widget_get_parent(widget), "jsti-sidebar")) {
+        gint minimum = 0;
+        gtk_widget_measure(widget, GTK_ORIENTATION_VERTICAL, -1, &minimum, NULL, NULL, NULL);
+        if (minimum < MAX(44, visual_density.minimum_row_height)) return FALSE;
+    }
+    for (GtkWidget *child = gtk_widget_get_first_child(widget); child != NULL;
+         child = gtk_widget_get_next_sibling(child))
+        if (!density_sidebar_targets(child)) return FALSE;
+    return TRUE;
+}
+
+int32_t jsti_visual_density_self_test(GtkWidget *root) {
+    const JSTIVisualDensity saved = visual_density;
+    JSTIVisualDensity normal = saved;
+    normal.compact = 0;
+    const JSTIVisualDensity compact = { 1, 8, 6, 8, 6, 6, 8, 30 };
+    GtkWidget *focus = gtk_window_get_focus(GTK_WINDOW(root));
+    gchar *text = GTK_IS_EDITABLE(focus) ? g_strdup(gtk_editable_get_text(GTK_EDITABLE(focus))) : NULL;
+    jsti_visual_density_apply(root, &normal);
+    GArray *snapshot = g_array_new(FALSE, FALSE, sizeof(DensityGeometry));
+    density_snapshot(root, snapshot);
+    jsti_visual_density_apply(root, &compact);
+    gboolean okay = snapshot->len > 0;
+    guint pages = 0, cards = 0, measured_cards = 0;
+    for (guint index = 0; index < snapshot->len; ++index) {
+        const DensityGeometry *item = &g_array_index(snapshot, DensityGeometry, index);
+        const gint role = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(item->widget), "jsti-density-role"));
+        const gint spacing = gtk_box_get_spacing(GTK_BOX(item->widget));
+        okay = okay && spacing <= item->spacing;
+        if (role == DENSITY_PAGE) {
+            pages++;
+            okay = okay && item->spacing == 20 && item->margin == 24 && spacing == 6 &&
+                gtk_widget_get_margin_top(item->widget) == 8 && gtk_widget_get_margin_bottom(item->widget) == 8 &&
+                gtk_widget_get_margin_start(item->widget) == 8 && gtk_widget_get_margin_end(item->widget) == 8;
+        }
+        if (role == DENSITY_CARD) {
+            cards++;
+            gint minimum = 0, natural = 0;
+            gtk_widget_measure(item->widget, GTK_ORIENTATION_VERTICAL, 500, &minimum, &natural, NULL, NULL);
+            okay = okay && item->spacing == 16 && spacing == 8 &&
+                minimum <= item->minimum && natural <= item->natural;
+            if (natural < item->natural) measured_cards++;
+        }
+    }
+    okay = okay && density_sidebar_targets(root);
+    jsti_visual_density_apply(root, &normal);
+    for (guint index = 0; index < snapshot->len; ++index) {
+        const DensityGeometry *item = &g_array_index(snapshot, DensityGeometry, index);
+        gint minimum = 0, natural = 0;
+        gtk_widget_measure(item->widget, GTK_ORIENTATION_VERTICAL, 500, &minimum, &natural, NULL, NULL);
+        okay = okay && gtk_box_get_spacing(GTK_BOX(item->widget)) == item->spacing &&
+            gtk_widget_get_margin_top(item->widget) == item->margin &&
+            minimum == item->minimum && natural == item->natural;
+    }
+    okay = okay && pages > 0 && cards > 0 && measured_cards > 0 &&
+        gtk_window_get_focus(GTK_WINDOW(root)) == focus;
+    if (text != NULL) okay = okay && g_strcmp0(text, gtk_editable_get_text(GTK_EDITABLE(focus))) == 0;
+    g_free(text);
+    g_array_unref(snapshot);
+    jsti_visual_density_apply(root, &saved);
+    return okay ? 0 : -1;
+}
 
 static GtkWidget *label_with(const char *text, const char *css_class) {
     GtkWidget *label = gtk_label_new(text);
@@ -200,11 +312,7 @@ GtkWidget *jsti_page_new(GtkWidget **content) {
     GtkWidget *clamp = adw_clamp_new();
     adw_clamp_set_maximum_size(ADW_CLAMP(clamp), 1000);
     adw_clamp_set_tightening_threshold(ADW_CLAMP(clamp), 760);
-    GtkWidget *column = gtk_box_new(GTK_ORIENTATION_VERTICAL, 20);
-    gtk_widget_set_margin_top(column, 24);
-    gtk_widget_set_margin_bottom(column, 24);
-    gtk_widget_set_margin_start(column, 24);
-    gtk_widget_set_margin_end(column, 24);
+    GtkWidget *column = density_box_new(GTK_ORIENTATION_VERTICAL, 20, DENSITY_PAGE);
     adw_clamp_set_child(ADW_CLAMP(clamp), column);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroller), clamp);
     *content = column;
@@ -213,16 +321,16 @@ GtkWidget *jsti_page_new(GtkWidget **content) {
 
 GtkWidget *jsti_hero_new(const char *variant, const char *title, const char *subtitle, GtkWidget **chips,
                          GtkWidget **trailing) {
-    GtkWidget *hero = gtk_box_new(GTK_ORIENTATION_VERTICAL, 18);
+    GtkWidget *hero = density_box_new(GTK_ORIENTATION_VERTICAL, 18, DENSITY_CONTENT);
     gtk_widget_add_css_class(hero, "jsti-hero");
     if (variant != NULL) gtk_widget_add_css_class(hero, variant);
-    GtkWidget *top = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 18);
-    GtkWidget *text = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    GtkWidget *top = density_box_new(GTK_ORIENTATION_HORIZONTAL, 18, DENSITY_INLINE);
+    GtkWidget *text = density_box_new(GTK_ORIENTATION_VERTICAL, 6, DENSITY_INLINE);
     gtk_widget_set_hexpand(text, TRUE);
     gtk_box_append(GTK_BOX(text), label_with(title, "jsti-hero-title"));
     gtk_box_append(GTK_BOX(text), label_with(subtitle, "jsti-hero-subtitle"));
     gtk_box_append(GTK_BOX(top), text);
-    GtkWidget *slot = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    GtkWidget *slot = density_box_new(GTK_ORIENTATION_HORIZONTAL, 8, DENSITY_INLINE);
     gtk_widget_set_valign(slot, GTK_ALIGN_START);
     gtk_box_append(GTK_BOX(top), slot);
     gtk_box_append(GTK_BOX(hero), top);
@@ -254,9 +362,9 @@ GtkWidget *jsti_chip_new(const char *label, GtkLabel **value) {
 }
 
 GtkWidget *jsti_card_new(const char *icon, const char *title, GtkWidget **body) {
-    GtkWidget *card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
+    GtkWidget *card = density_box_new(GTK_ORIENTATION_VERTICAL, 16, DENSITY_CARD);
     gtk_widget_add_css_class(card, "jsti-card");
-    GtkWidget *header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    GtkWidget *header = density_box_new(GTK_ORIENTATION_HORIZONTAL, 12, DENSITY_INLINE);
     GtkWidget *tile = gtk_image_new_from_icon_name(icon);
     gtk_image_set_pixel_size(GTK_IMAGE(tile), 20);
     gtk_widget_add_css_class(tile, "jsti-card-icon");
@@ -267,7 +375,7 @@ GtkWidget *jsti_card_new(const char *icon, const char *title, GtkWidget **body) 
     gtk_widget_set_valign(heading, GTK_ALIGN_CENTER);
     gtk_box_append(GTK_BOX(header), heading);
     gtk_box_append(GTK_BOX(card), header);
-    GtkWidget *content = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+    GtkWidget *content = density_box_new(GTK_ORIENTATION_VERTICAL, 12, DENSITY_CONTENT);
     gtk_box_append(GTK_BOX(card), content);
     if (body != NULL) *body = content;
     return card;

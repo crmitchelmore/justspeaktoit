@@ -3,6 +3,17 @@ import Foundation
 /// Canonical contract for voice-driven selection rewrites ("edit mode"): the user selects
 /// text anywhere, speaks an instruction, and the model returns replacement text only.
 public enum VoiceEditPolicy {
+    /// Cleanup-only local engines cannot follow arbitrary editing instructions.
+    public static func modelIdentifier(configured: String) -> String {
+        let model = configured.trimmingCharacters(in: .whitespacesAndNewlines)
+        if model.isEmpty || model == AppleLocalModels.foundationModelID
+            || model.lowercased() == LocalPostProcessingModel.builtInRulesModelID
+            || LocalPostProcessingModel.isDownloadedModelID(model) {
+            return ModelCatalog.defaultPostProcessingModel
+        }
+        return model
+    }
+
     public static let systemPrompt = """
     You are a precise text editor. You receive selected text and a spoken editing instruction.
 
@@ -125,7 +136,10 @@ public enum VoiceEditPolicy {
     }
 
     private static func jsonString<T: Encodable>(_ value: T) -> String {
-        guard let data = try? JSONEncoder().encode(value),
+        // Darwin's JSONEncoder does not guarantee key order; keep prompts byte-stable.
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(value),
               let string = String(data: data, encoding: .utf8) else {
             preconditionFailure("Voice edit payload must be JSON encodable")
         }

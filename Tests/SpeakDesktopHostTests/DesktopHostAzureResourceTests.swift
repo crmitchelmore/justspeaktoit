@@ -78,6 +78,22 @@ final class DesktopHostAzureResourceTests: XCTestCase {
         )
     }
 
+    /// Batch transcription forwards an optional endpoint override; every
+    /// existing caller still gets nil, so transcribePreparedAudio falls back
+    /// to the saved resource exactly as before this plumbing was added.
+    func testBatchTranscriptionRequestCarriesAnOptionalAzureEndpointOverride() {
+        let audio = directory.appendingPathComponent("sample.wav")
+        let defaulted = DesktopHostTranscriptionRequest(
+            audio: audio, model: "whisper-1", key: "key", duration: 1, language: nil
+        )
+        XCTAssertNil(defaulted.azureEndpoint)
+        let overridden = DesktopHostTranscriptionRequest(
+            audio: audio, model: "whisper-1", key: "key", duration: 1, language: nil,
+            azureEndpoint: "https://example.cognitiveservices.azure.com"
+        )
+        XCTAssertEqual(overridden.azureEndpoint, "https://example.cognitiveservices.azure.com")
+    }
+
     func testSelectingALiveAzureModelSaysWhereTheEndpointGoes() {
         XCTAssertTrue(
             DesktopHostAzureResource.selectionHint(for: AzureTranscriptionModels.speechLive)

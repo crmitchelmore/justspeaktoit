@@ -40,6 +40,13 @@ extension LinuxAudioPlayback {
         return speech
     }
 
+    public func togglePause(speech: Speech) -> Bool {
+        lock.withLock {
+            guard !closed, speechState?.speech == speech else { return false }
+            return togglePauseLocked(recordID: speech.recordID)
+        }
+    }
+
     /// Ends `speech` once its last segment has played or its reader stopped.
     /// A speech that has already ended or been replaced is left alone.
     public func endSpeech(_ speech: Speech) {

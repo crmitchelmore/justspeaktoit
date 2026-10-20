@@ -74,9 +74,23 @@ public struct LocalModelInstaller: Sendable {
     public let transport: LocalModelDownloadTransport
     /// Creates a directory with the host's private permissions.
     public let prepareDirectory: @Sendable (URL) throws -> Void
+    private let validateArtifact: @Sendable (Item, URL) throws -> Void
 
     public init(
         root: URL, digests: LocalModelDigestProvider, transport: LocalModelDownloadTransport,
+        prepareDirectory: @escaping @Sendable (URL) throws -> Void = { url in
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        }
+    ) {
+        self.init(
+            root: root, digests: digests, transport: transport,
+            validateArtifact: { _, _ in }, prepareDirectory: prepareDirectory
+        )
+    }
+
+    public init(
+        root: URL, digests: LocalModelDigestProvider, transport: LocalModelDownloadTransport,
+        validateArtifact: @escaping @Sendable (Item, URL) throws -> Void,
         prepareDirectory: @escaping @Sendable (URL) throws -> Void = { url in
             try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         }
@@ -85,6 +99,7 @@ public struct LocalModelInstaller: Sendable {
         self.digests = digests
         self.transport = transport
         self.prepareDirectory = prepareDirectory
+        self.validateArtifact = validateArtifact
     }
 
     static let receiptName = "install-receipt.json"
@@ -137,6 +152,7 @@ public struct LocalModelInstaller: Sendable {
         guard actual == item.artifact.byteCount else {
             throw LocalModelInstallError.sizeMismatch(expected: item.artifact.byteCount, actual: actual)
         }
+        try validateArtifact(item, file)
         return file
     }
 
@@ -187,6 +203,8 @@ public struct LocalModelInstaller: Sendable {
             try? FileManager.default.removeItem(at: partial)
             throw LocalModelInstallError.checksumMismatch
         }
+        try validateArtifact(item, partial)
+        try Task.checkCancellation()
         let file = fileURL(for: item)
         try FileManager.default.moveItem(at: partial, to: file)
         let receipt = LocalModelInstallReceipt(

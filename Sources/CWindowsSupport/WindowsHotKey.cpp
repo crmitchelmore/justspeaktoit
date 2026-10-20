@@ -314,6 +314,11 @@ HWND createDialog(HWND owner, Dialog &dialog) {
 
 // ---- window integration ----------------------------------------------------
 
+bool jsti_hotkey_reserves_sidebar_digit(int digit) {
+    return runtime.registered && runtime.modifiers == MOD_CONTROL &&
+        runtime.key == static_cast<UINT>('0' + digit);
+}
+
 bool jsti_hotkey_available() {
     std::lock_guard<std::mutex> lock(configurationMutex);
     return configuration.callback != nullptr && !configuration.names.empty();

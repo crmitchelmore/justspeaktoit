@@ -14,6 +14,7 @@ public struct SonioxBatchClient: TranscriptionProvider {
     )
 
     private let session: URLSession
+    private let keywords: [String]
     private let baseURL = URL(string: "https://api.soniox.com/v1")!
     private let pollingDelay: Duration
     private let maximumPollingAttempts: Int
@@ -23,16 +24,33 @@ public struct SonioxBatchClient: TranscriptionProvider {
 
     public init(
         session: URLSession = .shared,
+        keywords: [String],
         pollingDelay: Duration = .seconds(2),
         maximumPollingAttempts: Int = 90,
         multipartStaging: SharedMultipartUploadStaging,
         reportCleanupFailure: @escaping @Sendable (String) -> Void = { _ in }
     ) {
         self.session = session
+        self.keywords = keywords
         self.pollingDelay = pollingDelay
         self.maximumPollingAttempts = maximumPollingAttempts
         self.multipartStaging = multipartStaging
         self.reportCleanupFailure = reportCleanupFailure
+    }
+
+    /// Source-compatible overload preserved for callers predating keyword hints.
+    public init(
+        session: URLSession = .shared,
+        pollingDelay: Duration = .seconds(2),
+        maximumPollingAttempts: Int = 90,
+        multipartStaging: SharedMultipartUploadStaging,
+        reportCleanupFailure: @escaping @Sendable (String) -> Void = { _ in }
+    ) {
+        self.init(
+            session: session, keywords: [], pollingDelay: pollingDelay,
+            maximumPollingAttempts: maximumPollingAttempts, multipartStaging: multipartStaging,
+            reportCleanupFailure: reportCleanupFailure
+        )
     }
 
     public func transcribeFile(
@@ -138,13 +156,15 @@ public struct SonioxBatchClient: TranscriptionProvider {
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let payload = SonioxCreateTranscriptionPayload(
+        var payload = SonioxCreateTranscriptionPayload(
             model: self.extractModelName(from: model),
             fileID: fileID,
             languageHints: language.map { [$0.localeLanguageCode] },
             enableSpeakerDiarization: true,
             enableLanguageIdentification: true
         )
+        let terms = TranscriptionKeywordPolicy.budgeted(keywords, maximumBytes: 7_500)
+        if !terms.isEmpty { payload.context = ["terms": terms] }
         request.httpBody = try JSONEncoder().encode(payload)
 
         let data = try await self.send(request, expectedStatusCodes: 200..<300)

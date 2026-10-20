@@ -27,7 +27,7 @@ final class DesktopPostProcessingTests: XCTestCase {
 
     func testSilenceNeverBecomesPlaceholderTextOrInvokesRemoteProcessing() async throws {
         for raw in ["", " \t\n", "[BLANK_AUDIO]", " \n[blank_audio] [BLANK_AUDIO]\t"] {
-            for mode in [DesktopPostProcessing.Mode.disabled, .remote] {
+            for mode in [DesktopPostProcessing.Mode.disabled, .remote, .local] {
                 let result = try await process(raw, options: .init(mode: mode), apiKey: "")
                 XCTAssertEqual(result.original, raw)
                 XCTAssertEqual(result.processedText, "")
@@ -117,7 +117,7 @@ final class DesktopPostProcessingTests: XCTestCase {
         XCTAssertFalse(TranscriptPostProcessingPolicy.isEffectivelyEmptyTranscript("[BLANK_AUDIO] speech"))
     }
 
-    func testPersistedOptionsMigrateLikeAppleAndNeverSubstituteALocalModel() throws {
+    func testPersistedOptionsMigrateLikeAppleAndRecognizeExplicitBuiltInRules() throws {
         let remote = try XCTUnwrap(DesktopPostProcessing.remoteModels.last?.id)
         let valid = DesktopPostProcessing.Options(mode: .remote, modelIdentifier: remote, customPrompt: "Keep")
         XCTAssertEqual(DesktopPostProcessing.migrated(valid), valid)
@@ -127,9 +127,11 @@ final class DesktopPostProcessingTests: XCTestCase {
         XCTAssertEqual(DesktopPostProcessing.migrated(retired),
                        DesktopPostProcessing.Options(mode: .remote, modelIdentifier: successor))
 
-        let local = DesktopPostProcessing.Options(mode: .remote, modelIdentifier: "local/post-processing/rules")
+        let local = DesktopPostProcessing.Options(
+            mode: .remote, modelIdentifier: LocalPostProcessingModel.builtInRulesModelID
+        )
         XCTAssertEqual(DesktopPostProcessing.migrated(local), DesktopPostProcessing.Options(
-            mode: .disabled, modelIdentifier: ModelCatalog.defaultPostProcessingModel
+            mode: .local, modelIdentifier: LocalPostProcessingModel.builtInRulesModelID
         ))
         let disabled = DesktopPostProcessing.Options(mode: .disabled, modelIdentifier: " \(remote) ")
         XCTAssertEqual(DesktopPostProcessing.migrated(disabled).modelIdentifier, remote)

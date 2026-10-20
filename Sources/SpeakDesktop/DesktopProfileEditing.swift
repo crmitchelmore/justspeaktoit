@@ -140,6 +140,7 @@ public enum DesktopProfileEditing {
     private static func transcriptionChoice(
         for profile: DictationProfile, catalogue: Catalogue
     ) -> TranscriptionChoice {
+        guard profile.unsupportedTranscriptionRouting == nil else { return .preserved }
         guard let override = profile.resolvedTranscriptionOverride else { return .appSetting }
         switch override.routing {
         case .remoteBatch:
@@ -159,6 +160,9 @@ public enum DesktopProfileEditing {
     public static func notes(for profile: DictationProfile, catalogue: Catalogue) -> [String] {
         var notes = DesktopProfileSessionResolver.limitations(of: profile, capabilities: catalogue.capabilities)
             .map(\.message)
+        if profile.polishModelID == LocalPostProcessingModel.builtInRulesModelID {
+            notes.append(DesktopPostProcessing.localRulesNotice)
+        }
         if let language = trimmedNonEmpty(profile.languageIdentifier),
            !catalogue.languages.contains(where: { $0.id == language }) {
             notes.append("Spoken language “\(language)” is not in this build's language list and is kept as stored.")
@@ -185,7 +189,14 @@ public enum DesktopProfileEditing {
     ) -> DictationProfile {
         var profile = original ?? DictationProfile(id: draft.id ?? UUID(), name: "")
         profile.name = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        profile = profile.replacingWindowsExecutablePaths(cleanedPaths(draft.executablePaths))
+        // Only rewrite the Windows matchers when they actually changed. Always
+        // replacing them would move them to the end of `matchers` even when a
+        // different platform's editor (e.g. Linux) is the one making an edit,
+        // reordering relative to any matcher it had already appended.
+        let windowsPaths = cleanedPaths(draft.executablePaths)
+        if windowsPaths != (original?.windowsExecutablePaths ?? []) {
+            profile = profile.replacingWindowsExecutablePaths(windowsPaths)
+        }
 
         applyTranscription(draft, to: &profile, original: original, catalogue: catalogue)
 
@@ -221,6 +232,7 @@ public enum DesktopProfileEditing {
     private static func applyTranscription(
         _ draft: Draft, to profile: inout DictationProfile, original: DictationProfile?, catalogue: Catalogue
     ) {
+        if draft.transcription != .preserved { profile.unsupportedTranscriptionRouting = nil }
         switch draft.transcription {
         case .appSetting:
             profile.transcriptionModelID = nil

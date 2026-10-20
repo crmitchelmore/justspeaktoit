@@ -48,6 +48,7 @@ public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClien
     let apiKey: String
     let accuracyModel: String
     let language: String?
+    let keywords: [String]
     let sampleRate: Int
     let makeConnection: ConnectionFactory
     let schedule: Scheduler
@@ -80,6 +81,7 @@ public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClien
         model: String = SpeechmaticsRealtime.defaultModel,
         language: String? = nil,
         sampleRate: Int = 16_000,
+        keywords: [String],
         makeConnection: @escaping ConnectionFactory,
         schedule: @escaping Scheduler = { seconds, action in
             DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
@@ -88,6 +90,30 @@ public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClien
         self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         self.accuracyModel = SpeechmaticsRealtime.accuracyModel(from: model)
         self.language = language
+        self.keywords = keywords
+        self.sampleRate = sampleRate
+        self.makeConnection = makeConnection
+        self.schedule = schedule
+        self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
+        self.run = SpeechmaticsLiveRun(sampleRate: sampleRate)
+        queue.setSpecific(key: queueKey, value: true)
+    }
+
+    /// Source-compatible overload preserved for callers predating keyword hints.
+    public init(
+        apiKey: String,
+        model: String = SpeechmaticsRealtime.defaultModel,
+        language: String? = nil,
+        sampleRate: Int = 16_000,
+        makeConnection: @escaping ConnectionFactory,
+        schedule: @escaping Scheduler = { seconds, action in
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
+        }
+    ) {
+        self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.accuracyModel = SpeechmaticsRealtime.accuracyModel(from: model)
+        self.language = language
+        self.keywords = []
         self.sampleRate = sampleRate
         self.makeConnection = makeConnection
         self.schedule = schedule
@@ -316,8 +342,17 @@ extension SpeechmaticsLiveClient {
         language: String?,
         accuracyModel: String,
         sampleRate: Int,
-        systemLocaleIdentifier: String = Locale.current.identifier
+        systemLocaleIdentifier: String = Locale.current.identifier,
+        keywords: [String] = []
     ) -> String? {
+        var config: [String: Any] = [
+            "language": SpeechmaticsRealtime.languageCode(
+                for: language, systemLocaleIdentifier: systemLocaleIdentifier
+            ),
+            "model": accuracyModel, "max_delay": 0.7, "enable_partials": true
+        ]
+        let terms = TranscriptionKeywordPolicy.bounded(keywords, count: 100, length: 100)
+        if !terms.isEmpty { config["additional_vocab"] = terms.map { ["content": $0] } }
         let payload: [String: Any] = [
             "message": "StartRecognition",
             "audio_format": [
@@ -325,14 +360,7 @@ extension SpeechmaticsLiveClient {
                 "encoding": "pcm_s16le",
                 "sample_rate": sampleRate
             ],
-            "transcription_config": [
-                "language": SpeechmaticsRealtime.languageCode(
-                    for: language, systemLocaleIdentifier: systemLocaleIdentifier
-                ),
-                "model": accuracyModel,
-                "max_delay": 0.7,
-                "enable_partials": true
-            ]
+            "transcription_config": config
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) else {
             return nil
@@ -388,3 +416,8 @@ extension SpeechmaticsLiveClient {
         return ([pending], Data())
     }
 }
+
+extension SpeechmaticsLiveClient: StreamingAudioReadyProviding {
+    public var isReadyForAudio: Bool { isSessionReady }
+// existing owned WebSocket lifecycle/state surface; no behavior change.
+} // swiftlint:disable:this file_length

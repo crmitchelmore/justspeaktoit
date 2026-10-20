@@ -32,6 +32,11 @@
       "parameters": "--background"
     }
   },
+  "cli": {
+    "id": "JustSpeakToItCLI",
+    "executable": "speak.exe",
+    "executionAlias": "JustSpeakToItDeveloperCLI.exe"
+  },
   "targetDeviceFamily": {
     "name": "Windows.Desktop",
     "minVersion": "10.0.19041.0",
@@ -47,11 +52,31 @@
     "dataDirectoryName": "JustSpeakToIt"
   },
   "assets": {
-    "source": "Resources/AppIcon.iconset/icon_256x256.png",
+    "source": "Resources/AppIcon.iconset/icon_512x512@2x.png",
     "images": {
       "Assets/StoreLogo.png": 50,
+      "Assets/StoreLogo.scale-200.png": 100,
+      "Assets/StoreLogo.scale-400.png": 200,
       "Assets/Square44x44Logo.png": 44,
-      "Assets/Square150x150Logo.png": 150
+      "Assets/Square44x44Logo.scale-125.png": 55,
+      "Assets/Square44x44Logo.scale-150.png": 66,
+      "Assets/Square44x44Logo.scale-200.png": 88,
+      "Assets/Square44x44Logo.scale-400.png": 176,
+      "Assets/Square44x44Logo.targetsize-16_altform-unplated.png": 16,
+      "Assets/Square44x44Logo.targetsize-24_altform-unplated.png": 24,
+      "Assets/Square44x44Logo.targetsize-32_altform-unplated.png": 32,
+      "Assets/Square44x44Logo.targetsize-48_altform-unplated.png": 48,
+      "Assets/Square44x44Logo.targetsize-256_altform-unplated.png": 256,
+      "Assets/Square44x44Logo.targetsize-16_altform-lightunplated.png": 16,
+      "Assets/Square44x44Logo.targetsize-24_altform-lightunplated.png": 24,
+      "Assets/Square44x44Logo.targetsize-32_altform-lightunplated.png": 32,
+      "Assets/Square44x44Logo.targetsize-48_altform-lightunplated.png": 48,
+      "Assets/Square44x44Logo.targetsize-256_altform-lightunplated.png": 256,
+      "Assets/Square150x150Logo.png": 150,
+      "Assets/Square150x150Logo.scale-125.png": 188,
+      "Assets/Square150x150Logo.scale-150.png": 225,
+      "Assets/Square150x150Logo.scale-200.png": 300,
+      "Assets/Square150x150Logo.scale-400.png": 600
     }
   }
 }

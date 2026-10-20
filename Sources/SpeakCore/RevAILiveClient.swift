@@ -385,3 +385,7 @@ extension RevAILiveClient {
         #endif
     }
 }
+
+extension RevAILiveClient: StreamingAudioReadyProviding {
+    public var isReadyForAudio: Bool { lock.withLock { run.phase == .streaming && run.ready } }
+}

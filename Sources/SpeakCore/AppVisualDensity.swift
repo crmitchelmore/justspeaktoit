@@ -1,4 +1,7 @@
+import Foundation
+#if canImport(SwiftUI)
 import SwiftUI
+#endif
 
 /// A user-selected presentation density shared by the macOS and iOS apps.
 /// Normal intentionally preserves the existing spacing. Compact is a distinct
@@ -60,11 +63,14 @@ public enum AppVisualDensity: String, CaseIterable, Identifiable, Sendable {
         #endif
     }
 
+    #if canImport(SwiftUI)
     public func prefersInlineLayout(dynamicTypeSize: DynamicTypeSize) -> Bool {
         isCompact && !dynamicTypeSize.isAccessibilitySize
     }
+    #endif
 }
 
+#if canImport(SwiftUI)
 private struct AppVisualDensityKey: EnvironmentKey {
     static let defaultValue = AppVisualDensity.normal
 }
@@ -75,6 +81,7 @@ public extension EnvironmentValues {
         set { self[AppVisualDensityKey.self] = newValue }
     }
 }
+#endif
 
 public enum APIKeyStatusFilter: String, CaseIterable, Identifiable, Sendable {
     case all

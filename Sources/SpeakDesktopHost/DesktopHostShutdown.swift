@@ -43,10 +43,14 @@ package struct DesktopHostShutdownReport: Equatable, Sendable {
     /// the audio and marks the record interrupted at the next launch.
     package var unfinishedOperations = 0
     package var playbackClosed = true
+    package var recordingFeedbackClosed = true
+    package var handsFreeClosed = true
     package var discoveryEnded = true
+    package var localCleanupClosed = true
 
     package var isComplete: Bool {
-        recordingSaved && unfinishedOperations == 0 && playbackClosed && discoveryEnded
+        recordingSaved && unfinishedOperations == 0 && playbackClosed && recordingFeedbackClosed
+            && handsFreeClosed && discoveryEnded && localCleanupClosed
     }
 
     package init() {}
@@ -56,7 +60,10 @@ package struct DesktopHostShutdownReport: Equatable, Sendable {
         if !recordingSaved { parts.append("the open recording still stopping") }
         if unfinishedOperations > 0 { parts.append("\(unfinishedOperations) background operation(s) still running") }
         if !playbackClosed { parts.append("audio playback still stopping") }
+        if !recordingFeedbackClosed { parts.append("recording sounds still stopping") }
+        if !handsFreeClosed { parts.append("hands-free microphone still stopping") }
         if !discoveryEnded { parts.append("model discovery still running") }
+        if !localCleanupClosed { parts.append("local cleanup still stopping") }
         return "Closed after the shutdown grace period with " + parts.joined(separator: ", ")
             + ". Saved recordings are kept; an interrupted one is recovered at the next launch.\n"
     }
@@ -99,26 +106,68 @@ extension DesktopHostController {
     /// when it begins and again before any request, and one left without an
     /// outcome is recovered, audio retained, at next launch.
     @discardableResult
+    // existing owned ordered shutdown orchestration; no behavior change.
+    // swiftlint:disable:next cyclomatic_complexity function_body_length
     package func close() async -> DesktopHostShutdownReport {
         if closed {
             if shutdownReport == nil { await withCheckedContinuation { shutdownWaiters.append($0) } }
             return shutdownReport ?? DesktopHostShutdownReport()
         }
         closed = true
+        cancelVoiceEdit(status: "Voice edit stopped when the app closed.")
+        automationTranscriptions.values.forEach { $0.cancel() }
+        recording?.live?.livePolish?.cancel()
+        liveFinalisation?.livePolish?.cancel()
+        Platform.cancelLocalModels(controller: self)
+        let ownedAdmission = ownedDictationAdmission
+        let ownedDictationID = ownedDictation?.id
+        if let ownedDictationID {
+            requestOwnedDictationStop(
+                requestID: ownedDictationID, reason: "Recording stopped when the app closed. Audio retained."
+            )
+        }
+        ownedAdmission?.operation.cancel()
+        localCleanupTask?.cancel()
+        let ownedStartup = ownedCaptureStartup
+        requestOwnedStartupAbort()
         let deadline = ContinuousClock.now.advanced(by: shutdownGrace)
-        modelDiscoveryTask?.cancel()
-        cancelOutput()
-        cancellationRequested = true
-        transcriptionTask?.cancel()
-        postProcessingTask?.cancel()
-        liveFinalisation?.cancel()
+        let localCleanup = localCleanup
+        async let localCleanupClosed = DesktopHostShutdown.wait(until: deadline) { await localCleanup?.close() }
+        await cancelInFlightWork(until: deadline)
         var report = DesktopHostShutdownReport()
+        recordingFeedbackPreview?.cancel()
+        async let feedbackClosed = closeRecordingFeedback(until: deadline)
+        let detector = handsFreeRun
+        handsFreeRun = nil
+        _ = handsFreeMachine.handle(.userDisarmed)
+        async let detectorClosed = DesktopHostShutdown.wait(until: deadline) {
+            do { try detector?.stopDetector() } catch {
+                FileHandle.standardError.write(Data("Hands-free cleanup failed: \(error.localizedDescription)\n".utf8))
+            }
+        }
         // Ending the live session, stopping capture and writing the WAV and
         // record run off this actor, so a provider, device or file system that
         // stalls cannot hold closing past its deadline.
         if let open = takeRecordingOnClose() {
             let store = store
             report.recordingSaved = await DesktopHostShutdown.wait(until: deadline) { await open.save(in: store) }
+        }
+        if let ownedStartup {
+            let settled = await DesktopHostShutdown.wait(until: deadline) {
+                await ownedStartup.owner.waitForDisposition()
+            }
+            report.recordingSaved = report.recordingSaved && settled
+        }
+        if let ownedDictationID {
+            let operation = ownedDictation?.stop
+            let settled = await DesktopHostShutdown.wait(until: deadline) {
+                await operation?.value
+            }
+            report.recordingSaved = report.recordingSaved && settled && ownedDictation?.id != ownedDictationID
+        }
+        if let ownedAdmission {
+            let settled = await DesktopHostShutdown.wait(until: deadline) { await ownedAdmission.operation.value }
+            report.recordingSaved = report.recordingSaved && settled && ownedDictation == nil
         }
         // Includes admitted opens and every background release attempt.
         let playback = playback
@@ -133,12 +182,86 @@ extension DesktopHostController {
             let ended = await DesktopHostShutdown.wait(until: deadline) { await self.operationsEnded() }
             if !ended { report.unfinishedOperations = activeOperations }
         }
+        if voiceEdit.workers > 0 {
+            _ = await DesktopHostShutdown.wait(until: deadline) { await self.voiceEditWorkersEnded() }
+            let alreadyCounted = voiceEdit.active?.busyHeld == true ? 1 : 0
+            report.unfinishedOperations += max(0, voiceEdit.workers - alreadyCounted)
+        }
+        if voiceEdit.workers == 0 { voiceEdit.scratchOwner = nil }
+        if let warm = connectionWarmTask {
+            let ended = await DesktopHostShutdown.wait(until: deadline) { await warm.task.value }
+            if !ended { report.unfinishedOperations += 1 }
+        }
+        report.unfinishedOperations += comparisonOperations.activeCount
         if let discovery = modelDiscoveryTask {
             report.discoveryEnded = await DesktopHostShutdown.wait(until: deadline) { await discovery.value }
         }
         modelDiscoveryTask = nil
+        report.recordingFeedbackClosed = await feedbackClosed
+        report.handsFreeClosed = await detectorClosed
+        report.localCleanupClosed = await localCleanupClosed
+        // Late work could still append ownership; then process exit releases the namespace.
+        if report.isComplete { releaseRecordingLocations() }
         finishShutdown(report)
         return report
+    }
+
+    /// Cancels every in-flight task and request so none can reach the window
+    /// or start new work once `closed` is set, stopping the closing
+    /// comparison capture within `deadline` before the rest proceed.
+    private func cancelInFlightWork(until deadline: ContinuousClock.Instant) async {
+        discardComparisonBatch()
+        comparisonOperations.cancelAll()
+        comparisonAdmissionTask?.cancel()
+        comparisonTask?.cancel()
+        comparisonInitialization?.task.cancel()
+        comparisonFinalization?.cancel()
+        comparisonUpdates?.cancel()
+        comparisonLive?.cancel()
+        if let active = comparisonCapture {
+            comparisonCapture = nil
+            let captured = DesktopHostComparisonClosingCapture(active)
+            await DesktopHostShutdown.wait(until: deadline) { captured.stop() }
+        }
+        modelDiscoveryTask?.cancel()
+        voiceDiscovery.requestID = nil
+        voiceDiscovery.task?.cancel()
+        voiceCredentialTask?.cancel()
+        stopProviderCredentialEdits()
+        voiceCredentialReadTask?.cancel()
+        voiceDiscovery.inventories = [:]
+        voiceDiscovery.context = nil
+        voiceDiscovery.listing = nil
+        voiceDiscovery.listingContext = nil
+        voiceProviderIssuedSlot = nil
+        voiceCredentialReadDestination = nil
+        cancelOutput()
+        // Completed audio belongs to the controller lifetime, not the cancelled operation.
+        // Closed entrypoints still refuse replay/export, and late work cannot replace it.
+        voiceTextImportTask?.cancel()
+        cancellationRequested = true
+        transcriptionTask?.cancel()
+        voiceCommandTask?.cancel()
+        historyDeletionTask?.cancel()
+        folderRevealTask?.cancel()
+        recordingLocation.cancel?()
+        audioCleanupTask?.cancel()
+        migrationExportWorker?.cancel()
+        migrationExportTask?.cancel()
+        migrationInspectionWorker?.cancel()
+        migrationInspectionTask?.cancel()
+        audioCleanupConfirmation = nil
+        migrationRestoreWorker?.cancel()
+        migrationRestoreApplyWorker?.cancel()
+        migrationRestoreTask?.cancel()
+        migrationRestoreConfirmation = nil
+        postProcessingTask?.cancel()
+        liveFinalisation?.cancel()
+    }
+
+    private func closeRecordingFeedback(until deadline: ContinuousClock.Instant) async -> Bool {
+        guard let feedback = recordingFeedback else { return true }
+        return await DesktopHostShutdown.wait(until: deadline) { await feedback.close() }
     }
 
     /// Hands the open recording over for closing to end, stop and save; the
@@ -146,10 +269,12 @@ extension DesktopHostController {
     private func takeRecordingOnClose() -> DesktopHostClosingRecording? {
         guard let active = recording else { return nil }
         recording = nil
+        recordingCapturePolicy = nil
+        cancelRecordingTail()
         liveUpdates?.cancel()
         liveUpdates = nil
         return DesktopHostClosingRecording(
-            capture: active.capture, file: active.context.file, live: active.live, record: active.record
+            capture: active.capture, file: active.file, live: active.live, record: active.record
         )
     }
 

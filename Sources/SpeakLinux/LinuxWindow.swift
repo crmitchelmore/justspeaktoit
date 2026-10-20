@@ -100,14 +100,13 @@ enum LinuxWindow {
             }) else { return -1 }
             return Int32(index)
         }
-        try LinuxNative.call { _, _ in
-            jsti_window_set_preferred_models(
-                index(preferences.batch, local: false, live: false),
-                index(preferences.live, local: false, live: true),
-                index(preferences.local, local: true, live: false),
-                index(preferences.localLive, local: true, live: true)
-            )
-        }
+        let result = jsti_window_set_preferred_models(
+            index(preferences.batch, local: false, live: false),
+            index(preferences.live, local: false, live: true),
+            index(preferences.local, local: true, live: false),
+            index(preferences.localLive, local: true, live: true)
+        )
+        guard result == 0 else { throw DesktopHostError(message: "Could not restore the saved model choices.") }
     }
 
     /// Lists microphones; an unavailable saved choice keeps its own row so the

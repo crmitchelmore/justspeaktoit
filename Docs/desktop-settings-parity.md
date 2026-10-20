@@ -2477,12 +2477,12 @@ replacement/nearest implemented surface; they do not assert hidden support.
 |---|---|---|
 | appearance | Equivalent / Equivalent | General; system/light/dark native schemes |
 | visualDensity | Wired; native acceptance pending / Wired; native acceptance pending | General Normal/Compact choice; strict shared configuration, JSON transfer and native page/card/sidebar spacing |
-| transcriptionMode | Equivalent / Equivalent | Models; Remote Batch/Live; Local Batch, plus Local Live on Windows (source only, see local live transcription) |
+| transcriptionMode | Equivalent / Equivalent | Models; Remote Batch/Live; Local Batch, plus Local Live on Windows and Linux (source only, see local live transcription) |
 | liveTranscriptionModel | Partial / Partial | Models; implemented transport routes only; Apple Speech and unavailable providers are not substitutes |
 | batchTranscriptionModel | Equivalent / Equivalent | Models; independent remembered batch model |
 | localTranscriptionModel | Partial / Partial | Models; pinned whisper.cpp catalogue plus explicit Hugging Face GGML imports (`desktop-huggingface-import.md`); not the Mac WhisperKit/Core ML or sherpa-onnx runtimes |
-| localTranscriptionMode | Source wired, unqualified / Partial | Windows Local Batch and Live: Live streams a pinned downloaded whisper.cpp model in process with VAD-bounded windows and shares the remembered `localLiveModel` slot; Linux remains Local batch only |
-| localStreamingModelSource | Partial / Missing | Windows Local Live selections use the Mac's WhisperKit live identity (`local/streaming/whisperkit/...`) for pinned Whisper models, saved in the host `localLiveModel` slot; configuration transfer does not map the Mac key yet. Sherpa-onnx and Parakeet sources are not offered because no desktop host runs them |
+| localTranscriptionMode | Source wired, unqualified / Source wired, unqualified | Windows and Linux Local Batch and Live: Live streams a pinned downloaded whisper.cpp model in process with VAD-bounded windows and shares the remembered `localLiveModel` slot; native/runtime acceptance remains open |
+| localStreamingModelSource | Partial / Partial | Windows and Linux Local Live selections use the Mac's WhisperKit live identity (`local/streaming/whisperkit/...`) for pinned Whisper models, saved in the host `localLiveModel` slot; configuration transfer does not map the Mac key yet. Sherpa-onnx and Parakeet sources are not offered because no desktop host runs them |
 | postProcessingEnabled | Equivalent / Equivalent | `DesktopHostPostProcessing.swift`; desktop default remains disabled. Source proposal adds explicit local rules opt-in without credential access; remote remains opt-in |
 | postProcessingModel | Partial / Partial | Shared remote catalogue, built-in Local Cleanup and downloaded GGUF LLMs through the native llama.cpp runtime (`desktop-local-llm-cleanup.md`, source only); Apple Foundation Models and MLX remain unavailable |
 | postProcessingTemperature | Wired / Wired | Config; range 0...1, OpenRouter request |

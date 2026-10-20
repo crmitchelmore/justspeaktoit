@@ -158,8 +158,9 @@ final class LinuxEventContext: @unchecked Sendable {
         switch LinuxHostPlatform.session.displayServer {
         case .x11:
             if includeObservation { return LinuxX11.captureTarget() }
-            do { return try LinuxX11.captureTargetChecked() }
-            catch {
+            do {
+                return try LinuxX11.captureTargetChecked()
+            } catch {
                 LinuxHostPlatform.update("Could not capture the paste target: \(error.localizedDescription)")
                 return nil
             }

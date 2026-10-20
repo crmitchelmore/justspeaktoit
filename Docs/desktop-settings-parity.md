@@ -306,8 +306,10 @@ canonical Mac keys, and unrelated preference edits do not leave stale mirrors.
 Unsupported or wrong-mode choices remain opaque and survive round-trip export.
 An explicit model selection replaces that mode's pending imported choice, even
 when the user reselects the current model. Missing keys do not clear a saved slot.
-The Mac's `localTranscriptionMode` intent is still retained, not used to switch
-the active route automatically.
+The Mac's `localTranscriptionMode` intent is retained, not used to switch the
+active route automatically. An explicit Local model selection replaces pending
+submode intent too; JSON export then derives `batch` or `streaming` from that
+active model, so an old imported mode cannot contradict the user's choice.
 
 Both native presenters update inactive Local choices quietly, preserving active
 selection, remote preferences and callback identity. GTK uses its existing owned

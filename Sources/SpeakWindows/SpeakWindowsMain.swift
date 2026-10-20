@@ -391,6 +391,7 @@ enum SpeakWindowsMain {
         holder.microphoneMonitor = nil
         WindowsNative.endVoiceProviderCallbacks(providerCallbacks)
         await holder.finishSettings()
+        await controller.stopProviderCredentialEdits()
         // A drained Apply may have refreshed the dialog; never leave it holding
         // this context once the holder can be released.
         jsti_window_clear_text_output()

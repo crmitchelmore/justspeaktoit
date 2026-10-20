@@ -4,8 +4,19 @@ import SpeakDesktop
 
 /// Provider API keys typed in the window.
 extension DesktopHostController {
+    /// Native settings queues admit this work without waiting for the vault.
+    package func beginKeySave(_ key: String, modelIndex: Int) {
+        admitProviderCredentialEdit {
+            await self.saveAdmittedKey(key, modelIndex: modelIndex)
+        }
+    }
+
     package func saveKey(_ key: String, modelIndex: Int) async {
         guard !closed, !busy, recording == nil else { return }
+        await saveAdmittedKey(key, modelIndex: modelIndex)
+    }
+
+    private func saveAdmittedKey(_ key: String, modelIndex: Int) async {
         do {
             guard DesktopHostModels.all.indices.contains(modelIndex),
                   let provider = DesktopHostModels.provider(
@@ -27,8 +38,10 @@ extension DesktopHostController {
             try await writeProviderAPIKey(cleaned, identifier: provider.apiKeyIdentifier)
             guard !closed, !Task.isCancelled else { return }
             if provider.id == OpenRouterService.providerID { refreshModels(force: true) }
-            update(cleaned.isEmpty ? "API key removed." : "API key saved in \(Platform.credentialStoreName).")
+            updateProviderCredentialEditor(
+                cleaned.isEmpty ? "API key removed." : "API key saved in \(Platform.credentialStoreName)."
+            )
             await refreshComparison()
-        } catch { update(error.localizedDescription) }
+        } catch { updateProviderCredentialEditor(error.localizedDescription) }
     }
 }

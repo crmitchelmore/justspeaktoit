@@ -350,7 +350,7 @@ private func linuxAppearanceEvent(_ event: Int, slot: Int, holder: LinuxEventCon
 private func linuxSettingsEvent(_ event: Int, value: String, slot: Int, holder: LinuxEventContext) -> Bool {
     let controller = holder.controller
     switch event {
-    case Int(JSTI_EVENT_SAVE_KEY): holder.enqueueSettings { await controller.saveKey(value, modelIndex: slot) }
+    case Int(JSTI_EVENT_SAVE_KEY): holder.enqueueSettings { await controller.beginKeySave(value, modelIndex: slot) }
     case Int(JSTI_EVENT_SELECT_MODEL): holder.enqueueSettings { await controller.selectModel(slot) }
     case Int(JSTI_EVENT_SELECT_MICROPHONE): holder.enqueueSettings { await controller.selectMicrophone(value) }
     case Int(JSTI_EVENT_TEXT_OUTPUT):

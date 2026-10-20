@@ -227,7 +227,7 @@ extension DesktopHostController {
         voiceDiscovery.requestID = nil
         voiceDiscovery.task?.cancel()
         voiceCredentialTask?.cancel()
-        providerCredentialWriteTask?.cancel()
+        stopProviderCredentialEdits()
         voiceCredentialReadTask?.cancel()
         voiceDiscovery.inventories = [:]
         voiceDiscovery.context = nil

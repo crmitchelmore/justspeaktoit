@@ -140,7 +140,7 @@ func cloudSyncEvent(
 /// with sync configured the controller saves and marks it in one step.
 func saveKeyEvent(_ value: String, index: Int, holder: WindowsEventContext) {
     let controller = holder.controller
-    holder.enqueueSettings { await controller.saveKey(value, modelIndex: index) }
+    holder.enqueueSettings { await controller.beginKeySave(value, modelIndex: index) }
 }
 
 extension SpeakWindowsMain {

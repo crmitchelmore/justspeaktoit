@@ -266,6 +266,10 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package var voiceCredentialEpoch = UUID()
     package var voiceCredentialTask: Task<Void, Never>?
     package var providerCredentialWriteTask: Task<Void, Error>?
+    package var providerCredentialEditTask: Task<Void, Never>?
+    var providerCredentialEditorsStopped = false
+    var pendingProviderCredentialEdits: [DesktopHostCredentialEdit] = []
+    var providerCredentialEditorStatus = ""
     package var voiceCredentialRequestID: UUID?
     package var voiceCredentialWriteDestination: VoiceOutputCredentialDestination?
     package var voiceCredentialReadTask: Task<Void, Never>?

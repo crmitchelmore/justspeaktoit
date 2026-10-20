@@ -18,6 +18,7 @@ public enum DesktopLocalTranscriptionError: LocalizedError, Equatable {
     case unsupportedAudio(String)
     case tooLong(maximumMinutes: Int)
     case runtimeUnavailable(String)
+    case streamingBacklogExceeded
     /// The bytes the runtime read do not match the model's pinned SHA-256.
     case modelDoesNotMatchDigest
 
@@ -29,6 +30,8 @@ public enum DesktopLocalTranscriptionError: LocalizedError, Equatable {
             return "Local transcription accepts recordings up to \(minutes) minutes."
         case .runtimeUnavailable(let detail):
             return "The on-device speech runtime is unavailable. \(detail)"
+        case .streamingBacklogExceeded:
+            return "On-device live recognition exceeded its audio backlog. Try a smaller model."
         case .modelDoesNotMatchDigest:
             return "The downloaded model does not match its pinned SHA-256, so it was not used."
         }

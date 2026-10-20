@@ -36,6 +36,20 @@ test('product checks cover stacked pull requests without broadening push or cred
   }
 });
 
+test('desktop native dependency changes select every native and cross-build workflow', () => {
+  for (const name of ['windows', 'linux', 'windows-arm64', 'windows-cross-proof']) {
+    const source = readFileSync(new URL(`../../.github/workflows/${name}.yml`, import.meta.url), 'utf8');
+    for (const event of ['push', 'pull_request']) {
+      const trigger = source.match(new RegExp(`^  ${event}:\\n((?: {4}[^\\n]*\\n|\\n)*)`, 'm'));
+      assert.ok(trigger, `${name}: ${event} must exist`);
+      for (const target of ['CLlamaCpp', 'CMigrationArchive', 'CRecordingFileSupport']) {
+        assert.ok(trigger[1].includes(`      - Sources/${target}/**\n`),
+          `${name}: ${event} must include native dependency ${target}`);
+      }
+    }
+  }
+});
+
 test('journey cold preparation and actual runtime have separate finite budgets and always-uploaded evidence', () => {
   const swift = jobBodies['core-journey-e2e'];
   const ui = jobBodies['core-journey-fixture-ui'];

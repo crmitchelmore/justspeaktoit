@@ -52,7 +52,8 @@ public enum DesktopLocalStreaming {
 /// second and reported as interim text. A pause, or a window reaching its
 /// limit, commits the window as a standalone final. Finishing recognises what
 /// remains and returns the whole session. Silence never reaches the model, so
-/// a silent recording stays empty.
+/// a silent recording stays empty. At most three windows wait behind recognition;
+/// overflowing that backlog terminates live recognition with an explicit error.
 public final class DesktopLocalStreamingClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable { // swiftlint:disable:this type_body_length line_length
     public struct Tuning: Sendable, Equatable {
         public var sampleRate: Int
@@ -86,6 +87,12 @@ public final class DesktopLocalStreamingClient: FinalizingStreamingTranscription
         case commit([Float])
     }
 
+    private struct CloseAction {
+        let task: Task<Void, Never>?
+        let signal: AsyncStream<Void>.Continuation?
+        let report: ((Error) -> Void)?
+    }
+
     public let finalShape = TranscriptFinalShape.standaloneSegments
 
     private let recognizer: any DesktopLocalRecognizer
@@ -96,6 +103,7 @@ public final class DesktopLocalStreamingClient: FinalizingStreamingTranscription
     private let interimSamples: Int
     private let commitSamples: Int
     private let maximumSamples: Int
+    private let maximumPendingSamples: Int
     private let preRollSamples: Int
 
     private let lock = NSLock()
@@ -127,7 +135,9 @@ public final class DesktopLocalStreamingClient: FinalizingStreamingTranscription
         let rate = Double(max(tuning.sampleRate, 1))
         interimSamples = max(1, Int(tuning.interimInterval * rate))
         commitSamples = max(1, Int(tuning.commitSilence * rate))
-        maximumSamples = max(tuning.sampleRate, Int(tuning.maximumWindow * rate))
+        let windowSamples = max(tuning.sampleRate, Int(tuning.maximumWindow * rate))
+        maximumSamples = windowSamples
+        maximumPendingSamples = windowSamples * 3
         preRollSamples = max(0, Int(tuning.preRoll * rate))
     }
 
@@ -151,6 +161,11 @@ public final class DesktopLocalStreamingClient: FinalizingStreamingTranscription
     public func sendAudio(_ audioData: Data) {
         let count = audioData.count / 2
         guard count > 0 else { return }
+        guard lock.withLock({ worker != nil && !closed && !finishing }) else { return }
+        guard count <= maximumPendingSamples else {
+            close(error: DesktopLocalTranscriptionError.streamingBacklogExceeded)
+            return
+        }
         var samples = [Float]()
         samples.reserveCapacity(count)
         audioData.withUnsafeBytes { raw in
@@ -159,20 +174,25 @@ public final class DesktopLocalStreamingClient: FinalizingStreamingTranscription
                 samples.append(Float(Int16(bitPattern: bits)) / 32_768)
             }
         }
-        let signal: AsyncStream<Void>.Continuation? = lock.withLock {
-            guard worker != nil, !closed, !finishing else { return nil }
+        let admission: (signal: AsyncStream<Void>.Continuation?, overflow: Bool) = lock.withLock {
+            guard worker != nil, !closed, !finishing else { return (nil, false) }
+            guard count <= maximumPendingSamples - pending.count else { return (nil, true) }
             pending.append(contentsOf: samples)
             detectSpeech(in: samples)
             guard hasSpeech else {
                 if pending.count > preRollSamples { pending.removeFirst(pending.count - preRollSamples) }
-                return nil
+                return (nil, false)
             }
             samplesSinceInterim += count
             let due = trailingSilence >= commitSamples || pending.count >= maximumSamples
                 || samplesSinceInterim >= interimSamples
-            return due ? wake : nil
+            return (due ? wake : nil, false)
         }
-        signal?.yield(())
+        if admission.overflow {
+            close(error: DesktopLocalTranscriptionError.streamingBacklogExceeded)
+        } else {
+            admission.signal?.yield(())
+        }
     }
 
     /// Caller holds the lock. A 20 ms frame is speech when its RMS clears both
@@ -216,17 +236,21 @@ public final class DesktopLocalStreamingClient: FinalizingStreamingTranscription
 
     public func cancel() { close() }
 
-    private func close() {
-        let (task, signal): (Task<Void, Never>?, AsyncStream<Void>.Continuation?) = lock.withLock {
+    private func close(error: Error? = nil) {
+        let completion: CloseAction? = lock.withLock {
+            guard !closed else { return nil }
             closed = true
+            pending.removeAll()
+            let current = CloseAction(task: worker, signal: wake, report: onError)
             onTranscript = nil
             onError = nil
-            let current = (worker, wake)
             wake = nil
             return current
         }
-        signal?.finish()
-        task?.cancel()
+        guard let completion else { return }
+        completion.signal?.finish()
+        completion.task?.cancel()
+        if let error { completion.report?(error) }
     }
 
     // MARK: - Worker
@@ -244,8 +268,7 @@ public final class DesktopLocalStreamingClient: FinalizingStreamingTranscription
         } catch is CancellationError {
             return
         } catch {
-            let report = lock.withLock { closed ? nil : onError }
-            report?(error)
+            close(error: error)
         }
     }
 

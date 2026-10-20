@@ -61,6 +61,7 @@ public final class DesktopOwnedCaptureFile: @unchecked Sendable {
     private let writer: any DesktopOwnedCaptureWriter
     private let lock = NSLock()
     private var retained = false
+    private var ownershipPublished = false
     private var closed = false
     private var pristine = true
 
@@ -131,6 +132,11 @@ public final class DesktopOwnedCaptureFile: @unchecked Sendable {
         }
     }
 
+    /// Registry publication preserves recovery audio, but still permits its first PCM initialization.
+    func markOwnershipPublished() {
+        lock.withLock { ownershipPublished = true }
+    }
+
     func initializePCM(header: Data) throws {
         try locked {
             guard pristine, !retained else { throw DesktopOwnedCaptureError.notFresh }
@@ -143,7 +149,9 @@ public final class DesktopOwnedCaptureFile: @unchecked Sendable {
             } catch {
                 let original = error
                 closed = true
-                do { try cleanup(writer) } catch {
+                do {
+                    if ownershipPublished { try writer.close() } else { try cleanup(writer) }
+                } catch {
                     throw DesktopOwnedCaptureError.cleanupFailure(
                         original: original.localizedDescription, cleanup: error.localizedDescription
                     )
@@ -159,7 +167,7 @@ public final class DesktopOwnedCaptureFile: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         guard !closed else { throw DesktopOwnedCaptureError.closed }
-        guard !retained else { throw DesktopOwnedCaptureError.alreadyRetained }
+        guard !retained, !ownershipPublished else { throw DesktopOwnedCaptureError.alreadyRetained }
         closed = true
         try cleanup(writer)
     }
@@ -169,7 +177,7 @@ public final class DesktopOwnedCaptureFile: @unchecked Sendable {
         defer { lock.unlock() }
         guard !closed else { return }
         closed = true
-        if retained { try writer.close() } else { try cleanup(writer) }
+        if retained || ownershipPublished { try writer.close() } else { try cleanup(writer) }
     }
 
     private func locked(_ body: () throws -> Void) throws {

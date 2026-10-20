@@ -16,6 +16,9 @@ on:
       - scripts/tests/test_desktop_icons.py
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
+      - Sources/CLlamaCpp/**
+      - Sources/CMigrationArchive/**
+      - Sources/CRecordingFileSupport/**
       - Sources/SpeakDesktopHost/**
       - Sources/SpeakDesktopSync/**
       - Sources/SpeakSync/**
@@ -52,6 +55,9 @@ on:
       - scripts/tests/test_desktop_icons.py
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
+      - Sources/CLlamaCpp/**
+      - Sources/CMigrationArchive/**
+      - Sources/CRecordingFileSupport/**
       - Sources/SpeakDesktopHost/**
       - Sources/SpeakDesktopSync/**
       - Sources/SpeakSync/**

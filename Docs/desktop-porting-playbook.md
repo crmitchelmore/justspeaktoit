@@ -203,8 +203,10 @@ validation before mutation, an explicit conflict policy, preview freshness,
 rollback/recovery and idempotent identities. Missing or damaged data must not
 mean "replace the destination with empty." Keep credentials opt-in and redacted
 in previews; do not migrate permission grants, device identities, sync cursors,
-caches or executable runtimes. See [the original migration contract](data-migration.md);
-its macOS-only description is not evidence that desktop transfer has shipped.
+caches or executable runtimes. The [migration guide](data-migration.md) documents
+Windows/Linux History backups, optional saved audio and app profiles, and read-only
+inspection. Full native category collection and transactional import remain
+unfinished; the macOS import contract is not evidence of equivalent desktop support.
 
 ## 7. Qualify the real native surfaces, not just the model
 

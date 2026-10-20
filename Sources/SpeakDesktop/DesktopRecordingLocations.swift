@@ -50,6 +50,7 @@ public struct DesktopRecordingAudioReference: Codable, Equatable, Sendable {
 public protocol DesktopRecordingLocationPersistence: Sendable {
     func loadVerified() throws -> DesktopRecordingLocationState
     func appendRegistration(_ registration: DesktopRecordingLocationRegistration) throws
+    /// Report a committed-but-unconfirmed append as `DesktopRecordingRegistryWriteFailure` with `.published`.
     func appendRecording(_ recording: DesktopRecordingLocationOwnership) throws
 }
 
@@ -195,15 +196,21 @@ public struct DesktopRecordingLocations: Sendable {
             )
             try checkCancellation()
             try validate(registration)
-            try persistence.appendRecording(ownership)
-            try checkCancellation()
-            try file.synchronize()
-            try validate(registration)
+            do {
+                try persistence.appendRecording(ownership)
+            } catch let failure as DesktopRecordingRegistryWriteFailure {
+                if case .published = failure.effect {
+                    file.markOwnershipPublished()
+                    recordings[recordingID] = ownership
+                }
+                throw failure
+            }
+            file.markOwnershipPublished()
             recordings[recordingID] = ownership
             return Capture(file: file, recordingID: recordingID, reference: reference)
         } catch {
             let original = error
-            do { try file.discard() } catch {
+            do { try file.close() } catch {
                 throw DesktopRecordingLocationCleanupFailure(
                     primaryError: original, cleanupError: error
                 )

@@ -10,6 +10,7 @@ final class RecordingLocationMemoryPersistence: DesktopRecordingLocationPersiste
     private var recordings: [DesktopRecordingLocationOwnership] = []
     var failure: Failure?
     var recordingError: Error?
+    var didAppendRecording: (() throws -> Void)?
     var overrideState: DesktopRecordingLocationState?
 
     func loadVerified() throws -> DesktopRecordingLocationState {
@@ -38,6 +39,7 @@ final class RecordingLocationMemoryPersistence: DesktopRecordingLocationPersiste
             throw DesktopRecordingLocationError.duplicateIdentity
         }
         recordings.append(recording)
+        try didAppendRecording?()
     }
 }
 
@@ -59,6 +61,7 @@ final class RecordingCleanupWriter: DesktopOwnedCaptureWriter, @unchecked Sendab
     private(set) var removals = 0
     private(set) var closes = 0
     let bytes = Data([27, 91, 42])
+    var writeError: Error?
 
     var factory: DesktopOwnedCaptureFile.Factory {
         .init { [self] root, directoryID, recordingID in
@@ -74,7 +77,10 @@ final class RecordingCleanupWriter: DesktopOwnedCaptureWriter, @unchecked Sendab
         }
     }
 
-    func write(_ data: Data) throws { try heldHandle().write(contentsOf: data) }
+    func write(_ data: Data) throws {
+        if let writeError { throw writeError }
+        try heldHandle().write(contentsOf: data)
+    }
     func seek(toOffset offset: UInt64) throws { try heldHandle().seek(toOffset: offset) }
     func synchronize() throws { try heldHandle().synchronize() }
     func validateLocation() throws { _ = try heldHandle() }

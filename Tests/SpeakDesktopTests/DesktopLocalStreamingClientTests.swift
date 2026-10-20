@@ -29,8 +29,32 @@ final class DesktopLocalStreamingClientTests: XCTestCase {
     private final class Events: @unchecked Sendable {
         private let lock = NSLock()
         private var values: [(String, Bool)] = []
+        private var failures: [Error] = []
         var all: [(String, Bool)] { lock.withLock { values } }
+        var errors: [Error] { lock.withLock { failures } }
         func record(_ text: String, _ isFinal: Bool) { lock.withLock { values.append((text, isFinal)) } }
+        func report(_ error: Error) { lock.withLock { failures.append(error) } }
+    }
+
+    private actor HeldRecognizer: DesktopLocalRecognizer {
+        let entered: XCTestExpectation
+        private var continuation: CheckedContinuation<String, Never>?
+
+        init(entered: XCTestExpectation) { self.entered = entered }
+
+        func transcribe(
+            samples: [Float], modelFile: URL, model: WhisperCppModel, language: String?
+        ) async throws -> String {
+            await withCheckedContinuation {
+                continuation = $0
+                entered.fulfill()
+            }
+        }
+
+        func release() {
+            continuation?.resume(returning: "late words")
+            continuation = nil
+        }
     }
 
     private let model = WhisperCppModels.all[0]
@@ -147,5 +171,51 @@ final class DesktopLocalStreamingClientTests: XCTestCase {
         let result = await client.finishAndWait()
         XCTAssertNil(result)
         XCTAssertTrue(events.all.isEmpty)
+    }
+
+    func testBlockedInterimAndCommit_OverflowFailsOnceWithoutJoiningRecognition() async {
+        for initialSeconds in [0.1, 1.0] {
+            let entered = expectation(description: "recognizer holds \(initialSeconds)-second window")
+            let recognizer = HeldRecognizer(entered: entered)
+            let events = Events()
+            let client = DesktopLocalStreamingClient(
+                recognizer: recognizer, model: model, modelFile: URL(fileURLWithPath: "model.bin"), language: nil,
+                tuning: .init(interimInterval: 0.1, maximumWindow: 1)
+            )
+            client.start(onTranscript: { events.record($0, $1) }, onError: { events.report($0) })
+            client.sendAudio(pcm(seconds: initialSeconds, amplitude: 4_000))
+            await fulfillment(of: [entered], timeout: 5)
+            send(client, pcm(seconds: initialSeconds == 1 ? 3 : 2.9, amplitude: 4_000))
+            XCTAssertTrue(events.errors.isEmpty, "Exactly three pending windows must remain admissible")
+            send(client, pcm(seconds: 0.1, amplitude: 4_000))
+            send(client, pcm(seconds: 3, amplitude: 4_000))
+            XCTAssertEqual(events.errors.count, 1)
+            XCTAssertEqual(events.errors.first as? DesktopLocalTranscriptionError, .streamingBacklogExceeded)
+            let finished = expectation(description: "overflow finish does not join the held recognizer")
+            let finish = Task {
+                let result = await client.finishAndWait()
+                XCTAssertNil(result)
+                finished.fulfill()
+            }
+            await fulfillment(of: [finished], timeout: 1)
+            await recognizer.release()
+            await finish.value
+            XCTAssertTrue(events.all.isEmpty, "Failed recognition must not publish late text")
+        }
+    }
+
+    func testOversizedAudioFrame_FailsBeforeStartingRecognition() async {
+        let recognizer = Recognizer()
+        let events = Events()
+        let client = DesktopLocalStreamingClient(
+            recognizer: recognizer, model: model, modelFile: URL(fileURLWithPath: "model.bin"), language: nil,
+            tuning: .init(maximumWindow: 1)
+        )
+        client.start(onTranscript: { events.record($0, $1) }, onError: { events.report($0) })
+        client.sendAudio(pcm(seconds: 3.1, amplitude: 4_000))
+        XCTAssertEqual(events.errors.first as? DesktopLocalTranscriptionError, .streamingBacklogExceeded)
+        XCTAssertTrue(recognizer.calls.isEmpty)
+        let result = await client.finishAndWait()
+        XCTAssertNil(result)
     }
 }

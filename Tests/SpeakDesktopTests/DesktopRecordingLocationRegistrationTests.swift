@@ -36,37 +36,35 @@ final class DesktopRecordingLocationProofTests: XCTestCase {
     }
 
     func testCancellationAndRemoveFailurePreserveTypedCausesAndCloseOnce() throws {
-        for cancellationCheck in [4, 5] {
-            let fixture = try RecordingLocationFixture()
-            defer { try? fixture.clean() }
-            var locations = try DesktopRecordingLocations(
-                historyDirectory: fixture.history, persistence: fixture.memory
-            )
-            let id = try locations.authorizeLocallySelectedRoot(fixture.first)
-            let unrelated = fixture.first.appendingPathComponent("unrelated.wav")
-            try Data([92]).write(to: unrelated)
-            let writer = RecordingCleanupWriter()
-            var checks = 0
-            XCTAssertThrowsError(try locations.createCapture(
-                at: id, using: writer.factory, checkCancellation: {
-                    checks += 1
-                    if checks == cancellationCheck { throw CancellationError() }
-                }
-            )) { error in
-                guard let failure = error as? DesktopRecordingLocationCleanupFailure else {
-                    return XCTFail("Expected typed location cleanup failure.")
-                }
-                XCTAssertTrue(failure.primaryError is CancellationError)
-                XCTAssertEqual(
-                    failure.cleanupError as? RecordingCleanupInjectedError, .remove(writer.url.path)
-                )
-                XCTAssertFalse(failure.localizedDescription.contains(fixture.root.path))
+        let fixture = try RecordingLocationFixture()
+        defer { try? fixture.clean() }
+        var locations = try DesktopRecordingLocations(
+            historyDirectory: fixture.history, persistence: fixture.memory
+        )
+        let id = try locations.authorizeLocallySelectedRoot(fixture.first)
+        let unrelated = fixture.first.appendingPathComponent("unrelated.wav")
+        try Data([92]).write(to: unrelated)
+        let writer = RecordingCleanupWriter()
+        var checks = 0
+        XCTAssertThrowsError(try locations.createCapture(
+            at: id, using: writer.factory, checkCancellation: {
+                checks += 1
+                if checks == 4 { throw CancellationError() }
             }
-            XCTAssertEqual(checks, cancellationCheck)
-            try assertFailedCleanup(writer, unrelated: unrelated)
-            XCTAssertTrue(locations.recordings.isEmpty)
-            XCTAssertEqual(try fixture.memory.loadVerified().recordings.count, cancellationCheck == 5 ? 1 : 0)
+        )) { error in
+            guard let failure = error as? DesktopRecordingLocationCleanupFailure else {
+                return XCTFail("Expected typed location cleanup failure.")
+            }
+            XCTAssertTrue(failure.primaryError is CancellationError)
+            XCTAssertEqual(
+                failure.cleanupError as? RecordingCleanupInjectedError, .remove(writer.url.path)
+            )
+            XCTAssertFalse(failure.localizedDescription.contains(fixture.root.path))
         }
+        XCTAssertEqual(checks, 4)
+        try assertFailedCleanup(writer, unrelated: unrelated)
+        XCTAssertTrue(locations.recordings.isEmpty)
+        XCTAssertTrue(try fixture.memory.loadVerified().recordings.isEmpty)
     }
 
     private func assertFailedCleanup(_ writer: RecordingCleanupWriter, unrelated: URL) throws {
@@ -139,11 +137,11 @@ final class DesktopRecordingLocationProofTests: XCTestCase {
         }
     }
 
-    func testCancellationBeforeAndAfterImmutableAppendCleansOnlyUnpublishedAudio() throws {
+    func testCancellationBeforeImmutableAppendCleansOnlyUnpublishedAudio() throws {
         #if !os(Linux)
         throw XCTSkip("Requires qualified Linux held creation.")
         #else
-        for cancellationCheck in [3, 5] {
+        for cancellationCheck in [3, 4] {
             let fixture = try RecordingLocationFixture()
             defer { try? fixture.clean() }
             var locations = try DesktopRecordingLocations(
@@ -167,7 +165,7 @@ final class DesktopRecordingLocationProofTests: XCTestCase {
             ).isEmpty)
             XCTAssertEqual(try Data(contentsOf: unrelated), Data([92]))
             let restored = try DesktopRecordingLocations(historyDirectory: fixture.history, persistence: fixture.memory)
-            XCTAssertEqual(restored.recordings.count, cancellationCheck == 5 ? 1 : 0)
+            XCTAssertTrue(restored.recordings.isEmpty)
         }
         #endif
     }

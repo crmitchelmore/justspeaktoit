@@ -76,6 +76,7 @@ enum {
     JSTI_EVENT_ACTION_SHORTCUT_EDIT = 115, /* revision/request header, then percent-escaped draft rows */
     JSTI_EVENT_SPEECH_PAUSE = 116, /* exact active speech only; never starts History audio */
     JSTI_EVENT_API_KEYS = 117,
+    JSTI_EVENT_PERMISSIONS = 118,
     /* Profiles: percent-escaped TAB fields, starting with revision/action/UUID;
      * "refresh" opens a new immutable catalogue/editor revision. */
     JSTI_EVENT_PROFILES = 140
@@ -111,7 +112,7 @@ typedef void (*jsti_window_event_fn)(int32_t event, const char *text, int32_t in
  * rows remain visible but disabled; this does not change dictation registration.
  * run: 0 unavailable, 1 record, 2 page, 3 stop, 4 troubleshooting,
  * 5 comparison, 6 quick voice, 7 clipboard speech, 8 speech pause,
- * 9 API Keys. Strings are copied before return. */
+ * 9 API Keys, 10 Permissions. Strings are copied before return. */
 typedef struct JSTILinuxActionShortcut {
     const char *title, *chord, *note, *page, *identifier;
     uint32_t keysym, modifiers;
@@ -266,6 +267,7 @@ typedef struct JSTIAboutLink {
 int32_t jsti_window_configure_about(const char *details, const JSTIAboutLink *links, size_t count);
 enum {
     JSTI_LINUX_TROUBLESHOOTING_API_KEYS = -1,
+    JSTI_LINUX_TROUBLESHOOTING_PERMISSIONS = -2,
     JSTI_LINUX_TROUBLESHOOTING_CHECK = 1,
     JSTI_LINUX_TROUBLESHOOTING_KEEP_CLIPBOARD = 2,
     JSTI_LINUX_TROUBLESHOOTING_DISABLE_PROCESSING = 3
@@ -306,6 +308,18 @@ int32_t jsti_api_keys_request_is_current(const char *request);
 int32_t jsti_window_request_api_keys(void);
 int32_t jsti_api_keys_finish(const JSTILinuxAPIKeyRow *rows, size_t count,
                            const char *request, const char *status);
+typedef struct {
+    const char *title, *status, *detail, *action;
+    int32_t page;
+} JSTILinuxPermissionRow;
+typedef void (*jsti_permissions_fn)(uint64_t revision, void *context);
+int32_t jsti_permissions_configure(jsti_permissions_fn callback, void *context);
+void jsti_permissions_clear(void);
+uint64_t jsti_permissions_revision(void);
+int32_t jsti_window_request_permissions(void);
+/* Passive report; no capture, key injection or portal approval is requested. */
+int32_t jsti_permissions_set_rows(const JSTILinuxPermissionRow *rows, size_t count,
+                                  const char *summary, uint64_t revision);
 /* Updates only the saved enabled state, preserving unsaved prompt/model drafts. */
 int32_t jsti_window_set_post_processing_enabled(int32_t enabled);
 /* General › Launch at login: the shared DesktopLoginItemState (0 off, 1 on,

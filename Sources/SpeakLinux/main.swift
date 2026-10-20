@@ -59,6 +59,8 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
     defer { jsti_troubleshooting_clear() }
     try LinuxWindow.configureAPIKeys(holder)
     defer { jsti_api_keys_clear() }
+    try LinuxWindow.configurePermissions(holder)
+    defer { jsti_permissions_clear() }
     try configureApplicationIcon()
     let providerCallbacks = try LinuxWindow.beginVoiceProviderCallbacks(holder)
     defer { LinuxWindow.endVoiceProviderCallbacks(providerCallbacks) }

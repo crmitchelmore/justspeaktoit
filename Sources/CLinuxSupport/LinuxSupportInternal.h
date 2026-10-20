@@ -28,6 +28,9 @@ int32_t jsti_window_post(jsti_window_apply_fn apply, gpointer data, GDestroyNoti
 void jsti_window_emit(gint32 event, const char *text, gint32 index);
 struct _GtkEventControllerKey;
 struct _GtkWindow;
+void jsti_permissions_open(struct _GtkWindow *owner);
+void jsti_permissions_close(void);
+int32_t jsti_permissions_self_test(struct _GtkWindow *owner, char *error, size_t capacity);
 void jsti_api_keys_open(struct _GtkWindow *owner);
 void jsti_api_keys_close(void);
 void jsti_api_keys_set_idle(gboolean idle);

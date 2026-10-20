@@ -5,7 +5,7 @@ import CLinuxSupport
 
 enum LinuxActionShortcutRun: Equatable {
     case record, page(String), stop, troubleshooting, comparison, quickVoice(Int), clipboard, pauseSpeech
-    case apiKeys, unavailable
+    case apiKeys, permissions, unavailable
 
     // swiftlint:disable:next cyclomatic_complexity
     init(_ action: DesktopShortcutAction) {
@@ -31,8 +31,9 @@ enum LinuxActionShortcutRun: Equatable {
         case .speakClipboard: self = .clipboard
         case .pauseResumeTTS: self = .pauseSpeech
         case .openAPIKeysSettings: self = .apiKeys
+        case .openPermissionsSettings: self = .permissions
         case .speakSelectedText,
-             .openPermissionsSettings, .pasteLastHistoryItem, .editSelectionByVoice:
+             .pasteLastHistoryItem, .editSelectionByVoice:
             self = .unavailable
         }
     }
@@ -49,6 +50,7 @@ enum LinuxActionShortcutRun: Equatable {
         case .clipboard: 7
         case .pauseSpeech: 8
         case .apiKeys: 9
+        case .permissions: 10
         }
     }
     var page: String { if case .page(let name) = self { name } else { "" } }
@@ -144,11 +146,11 @@ extension LinuxActionShortcutRun {
             (.openPronunciationSettings, .page("pronunciation")), (.openKeyboardSettings, .page("keyboard")),
             (.openCompareModelsSettings, .comparison), (.openAboutSettings, .page("about")),
             (.quickVoice1, .quickVoice(1)), (.quickVoice2, .quickVoice(2)), (.quickVoice3, .quickVoice(3)),
-            (.speakClipboard, .clipboard), (.pauseResumeTTS, .pauseSpeech), (.openAPIKeysSettings, .apiKeys)
+            (.speakClipboard, .clipboard), (.pauseResumeTTS, .pauseSpeech), (.openAPIKeysSettings, .apiKeys),
+            (.openPermissionsSettings, .permissions)
         ]
         let unavailable: [DesktopShortcutAction] = [
-            .speakSelectedText,
-            .openPermissionsSettings, .pasteLastHistoryItem, .editSelectionByVoice
+            .speakSelectedText, .pasteLastHistoryItem, .editSelectionByVoice
         ]
         guard expected.allSatisfy({ Self($0.0) == $0.1 }),
               unavailable.allSatisfy({ Self($0) == .unavailable }),

@@ -217,6 +217,12 @@ func linuxWindowEvent( // swiftlint:disable:this cyclomatic_complexity
         }
         return
     }
+    if event == Int(JSTI_EVENT_PERMISSIONS) {
+        if jsti_window_request_permissions() != 0 {
+            LinuxHostPlatform.update("Permissions could not be opened. Try again after closing other dialogs.")
+        }
+        return
+    }
     if event == Int(JSTI_EVENT_SPEECH_PAUSE) {
         holder.enqueueSettings { await holder.controller.pauseResumeSpeech() }
         return

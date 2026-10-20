@@ -29,6 +29,33 @@ The earlier timeout was therefore not deterministic; the coverage mismatch
 remains an unnecessary invalidation, not a proven sole cause. Qualification
 of the aligned commands and later feature descendants is separate.
 
+## Linux Permissions destination (source only; NOT_RUN)
+
+About's **Permissions** button, Open Permissions action (run 10/event 118)
+and Troubleshooting's permission finding open a distinct modeless libadwaita
+window. It presents shared permission kinds with Linux-specific guidance for
+microphone, insertion, command automation, notifications and startup, plus the
+actual dictation listener hint. Check again reads current saved app settings
+in event order, without opening devices, contacting a provider, probing another
+app's text, launching a system settings process or requesting a portal grant.
+General and Keyboard remediation buttons open the existing native controls.
+
+Detected X11/Wayland sessions and enumerated input devices never become an
+Allowed status. Clipboard-only output does not need keyboard injection.
+Microphone, notification and automatic-insertion permission grants remain
+unknown where Linux exposes no authoritative query. Observed microphone
+warnings remain visible, Flatpak audio restrictions and GNOME/KDE privacy
+guidance are explicit, and a saved startup request is not presented as an OS
+grant. Actual local automation approval is the one granted state this passive
+report can establish. Desktop privacy changes remain user actions; Wayland's
+existing explicit paste workflow requests RemoteDesktop access when needed.
+
+Revision fencing ignores late reports after Check again or close/reopen.
+Four pure Linux presentation tests and native lifecycle/invalid-row/dispatch
+fixtures are authored but NOT_RUN locally. This is a usable permission recovery
+destination, not evidence that capture, insertion or desktop permissions have
+been exercised on a physical system.
+
 ## Correction learning preferences (source only)
 
 GTK now presents the canonical learning enable/threshold fields directly above
@@ -2296,7 +2323,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | modulatePIIPhiTagging | Live/batch source wired; unqualified / Same | Native default/on/off choice, strict transfer/restart and captured live/batch provider flags; absent stays off. Native/provider acceptance pending. |
 | accessibilityInsertionMode | Equivalent / Missing | Output; Windows cursor/replace-field; Linux paste cannot claim AX replace-all equivalence |
 | selectedHotKey | Equivalent / Partial | Shortcuts; Windows Ctrl/Alt native key; Linux desktop/portal-owned binding, never Mac Fn key translation |
-| customShortcutBindings | Complete source mapping; unqualified / Partial window-local source | Windows Keyboard **Action shortcuts** dialog: all 27 actions source-wired; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Voice editing additionally requires an editable UIA selection and a rewrite API key. Linux projects 23 actions into window-local bindings and edits all saved bindings with presets/reset; four execution actions and global registration remain unimplemented. Native/physical acceptance pending. |
+| customShortcutBindings | Complete source mapping; unqualified / Partial window-local source | Windows Keyboard **Action shortcuts** dialog: all 27 actions source-wired; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Voice editing additionally requires an editable UIA selection and a rewrite API key. Linux projects 24 actions into window-local bindings and edits all saved bindings with presets/reset; three execution actions and global registration remain unimplemented. Native/physical acceptance pending. |
 | paidAccessRoutingEnabled | Apple-specific / Apple-specific | BYOK desktop providers; no paid-access entitlement/routing journey. Retained opaque through import/export |
 | simpleModelChoices | Missing / Missing | Native catalogue picker without simplified paid-model chooser |
 | rememberedLocalTranscriptionSource | Partial / Partial | Models remembers Local selection; no Apple on-device source |
@@ -2325,7 +2352,8 @@ Permissions, Compare Models, Data & Migration and About
 (`Sources/SpeakApp/Views/Settings/SettingsTab.swift:3-15`). Native desktops expose
 General/Transcription/Post-processing/Voice Output/Keyboard/About and iCloud sync;
 Windows also exposes Profiles and a separate native Permissions window (About, or
-the setup guide); the GTK Profiles destination is added by this
+the setup guide); Linux has a passive Permissions guidance window in About,
+and the GTK Profiles destination is added by this
 unqualified source-only candidate. Both desktops now have dedicated API Keys windows
 (see "API Keys pages" above; source only, NOT_RUN), sharing the same store as
 their embedded provider controls. Comparison is implemented as a
@@ -2340,7 +2368,7 @@ Corrections page exists on native desktops; Desktop's separate `DesktopVocabular
 CRUD and auto-correction candidate review journey, reused from Read aloud/Generate above — not
 a missing journey, just not a `SettingsTab` destination. Windows permission
 troubleshooting/remediation is source wired (see first-run setup and permissions above); Linux
-permission remediation and full archive migration remain missing journeys; Linux profile editing still needs
+system-level permission changes and full archive migration remain unqualified journeys; Linux profile editing still needs
 compilation and native acceptance. Strict acknowledged mutation attribution remains an **open Linux
 parity gap**: neither paste keys nor a top-level window supplies an editable-span receipt.
 The separate Linux source-only observational route is described below; it does not close that
@@ -2565,8 +2593,8 @@ duplicate that the user did not edit is not refused.
 Linux now projects the shared key table to GDK/X11 key values without loading a
 native framework into SpeakCore. Its Keyboard page shows every canonical
 action, the saved combination and an explicit availability/scope note. There
-are 23 window-local execution mappings: recording; Stop speech; Pause/Resume TTS;
-Speak Clipboard; API Keys; Dashboard,
+are 24 window-local execution mappings: recording; Stop speech; Pause/Resume TTS;
+Speak Clipboard; API Keys; Permissions; Dashboard,
 History, Voice Output (both), General, Transcription, Post-processing,
 Corrections, Pronunciation, Profiles, Keyboard and About; Data & Migration
 (General); Troubleshooting; Compare Models; and Quick Voice 1-3. The actual
@@ -2593,10 +2621,10 @@ not run local actions. An imported duplicate retains its value and shows a
 conflict note; the first listed action owns that combination. Sidebar
 Ctrl+digit chords retain precedence and corresponding action notes disclose it.
 
-Four Linux actions remain unavailable: Speak Selected Text,
-Permissions, Paste Last History Item and Edit
-Selection by Voice. No Permissions action is redirected to an
-unrelated page. Enabled global bindings remain saved and visibly unregistered;
+Three Linux actions remain unavailable: Speak Selected Text,
+Paste Last History Item and Edit Selection by Voice. The Permissions action
+opens its own Linux-specific recovery guidance, not an unrelated page.
+Enabled global bindings remain saved and visibly unregistered;
 they are not silently downgraded to local shortcuts. The existing single X11 /
 Wayland-portal dictation shortcut is unchanged. Multi-action global registration
 remains build-out work. Because this is only

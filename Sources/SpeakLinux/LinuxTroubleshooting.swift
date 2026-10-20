@@ -45,7 +45,7 @@ extension LinuxAppController {
             detail: "This check does not open your microphone or request desktop access. "
                 + "A detected desktop session is not proof that capture or insertion is permitted. "
                 + "If either fails, review your desktop's privacy settings and the app's error message.",
-            severity: .info, destination: .general, systemImage: "lock.shield"
+            severity: .info, destination: .permissions, systemImage: "lock.shield"
         ))
         if session.displayServer == .unknown {
             findings.append(.init(
@@ -100,7 +100,8 @@ private enum LinuxTroubleshooting {
         switch destination {
         case .apiKeys: return ("Open API Keys", Int32(JSTI_LINUX_TROUBLESHOOTING_API_KEYS))
         case .shortcuts: return ("Open Keyboard", Int32(JSTI_PAGE_KEYBOARD))
-        case .general, .permissions: return ("Open General", Int32(JSTI_PAGE_GENERAL))
+        case .permissions: return ("Open Permissions", Int32(JSTI_LINUX_TROUBLESHOOTING_PERMISSIONS))
+        case .general: return ("Open General", Int32(JSTI_PAGE_GENERAL))
         }
     }
 

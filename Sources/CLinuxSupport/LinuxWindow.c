@@ -966,6 +966,7 @@ static gboolean on_close_request(GtkWindow *window, gpointer data) {
     retire_cleanup_preview();
     jsti_troubleshooting_close();
     jsti_api_keys_close();
+    jsti_permissions_close();
     jsti_voice_sources_close();
     jsti_voice_credentials_close();
     jsti_action_shortcut_editor_close();
@@ -1836,6 +1837,18 @@ static void on_troubleshooting(GtkButton *button, gpointer data) {
     jsti_troubleshooting_open(ui.window);
 }
 
+static void on_permissions(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    jsti_permissions_open(ui.window);
+}
+
+static void request_permissions(gpointer data) {
+    (void)data;
+    if (!ui.closing) jsti_permissions_open(ui.window);
+}
+
+int32_t jsti_window_request_permissions(void) { return jsti_window_post(request_permissions, NULL, NULL); }
+
 static void request_api_keys(gpointer data) {
     (void)data;
     if (!ui.closing && ui.state == JSTI_STATE_IDLE) jsti_api_keys_open(ui.window);
@@ -1885,6 +1898,9 @@ static gboolean action_shortcut_run(gint run, const char *page, gint slot) {
         if (ui.state != JSTI_STATE_IDLE) return FALSE;
         emit(JSTI_EVENT_API_KEYS, "", 0);
         return TRUE;
+    case 10:
+        emit(JSTI_EVENT_PERMISSIONS, "", 0);
+        return TRUE;
     default: return FALSE;
     }
 }
@@ -1929,6 +1945,11 @@ static GtkWidget *build_about(void) {
     gtk_widget_set_halign(troubleshooting, GTK_ALIGN_START);
     g_signal_connect(troubleshooting, "clicked", G_CALLBACK(on_troubleshooting), NULL);
     gtk_box_append(GTK_BOX(body), troubleshooting);
+    GtkWidget *permissions = gtk_button_new_with_mnemonic("_Permissions");
+    gtk_widget_set_size_request(permissions, -1, 44);
+    gtk_widget_set_halign(permissions, GTK_ALIGN_START);
+    g_signal_connect(permissions, "clicked", G_CALLBACK(on_permissions), NULL);
+    gtk_box_append(GTK_BOX(body), permissions);
     gtk_box_append(GTK_BOX(column), card);
     return page;
 }
@@ -4650,15 +4671,17 @@ static gboolean action_execution_self_test(void) {
         capture.slot == 0 && capture.calls == 7;
     okay = okay && action_shortcut_run(9, "", 0) && capture.event == JSTI_EVENT_API_KEYS &&
         capture.slot == 0 && capture.calls == 8;
+    okay = okay && action_shortcut_run(10, "", 0) && capture.event == JSTI_EVENT_PERMISSIONS &&
+        capture.slot == 0 && capture.calls == 9;
     ui.state = JSTI_STATE_WORKING;
     okay = okay && !action_shortcut_run(6, "", 1) && !action_shortcut_run(5, "", 0) &&
         !action_shortcut_run(7, "", 0) && !action_shortcut_run(8, "", 0) &&
-        !action_shortcut_run(9, "", 0) && capture.calls == 8;
+        !action_shortcut_run(9, "", 0) && capture.calls == 9;
     gtk_widget_set_sensitive(GTK_WIDGET(ui.window), FALSE);
     ui.state = JSTI_STATE_IDLE;
     okay = okay && !action_shortcut_run(4, "", 0) && !action_shortcut_run(2, "about", 0) &&
         !action_shortcut_run(7, "", 0) && !action_shortcut_run(8, "", 0) &&
-        !action_shortcut_run(9, "", 0) && capture.calls == 8;
+        !action_shortcut_run(9, "", 0) && !action_shortcut_run(10, "", 0) && capture.calls == 9;
     gtk_widget_set_sensitive(GTK_WIDGET(ui.window), window_sensitive);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.record), record_sensitive);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), stop_sensitive);
@@ -5069,6 +5092,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (jsti_profiles_self_test(error, capacity) != 0) return -1;
     if (jsti_troubleshooting_self_test(ui.window, error, capacity) != 0) return -1;
     if (jsti_api_keys_self_test(ui.window, error, capacity) != 0) return -1;
+    if (jsti_permissions_self_test(ui.window, error, capacity) != 0) return -1;
     {
         GtkTextBuffer *prompt = gtk_text_view_get_buffer(ui.polish_prompt_row);
         GtkTextIter prompt_start, prompt_end;

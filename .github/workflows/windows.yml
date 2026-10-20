@@ -99,7 +99,9 @@ jobs:
     name: Native Windows x64 (Swift 6.2.3)
     needs: local-runtime
     runs-on: windows-2022
-    timeout-minutes: 30
+    # Setup plus the release test build and suite take ~30 min, leaving the
+    # screenshot, on-device and staging steps their own headroom.
+    timeout-minutes: 45
     env:
       # The pinned whisper.cpp runtime, its JFK sample and a cached model
       # folder, so the on-device tests run the real runtime instead of skipping.

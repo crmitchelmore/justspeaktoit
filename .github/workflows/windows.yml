@@ -96,7 +96,7 @@ jobs:
           persist-credentials: false
 
       - name: Install pinned Swift toolchain
-        uses: compnerd/gha-setup-swift@bbae8ce86bac5a3449f3992b3d88bc4ca25f2057
+        uses: compnerd/gha-setup-swift@9ff1ee4c44888c5817fc14d1b257ac8cabb4935f
         with:
           source: swift.org
           swift-version: swift-6.2.3-release
@@ -238,7 +238,7 @@ jobs:
 
       - name: Upload page screenshots
         if: ${{ !cancelled() && steps.page-screenshots.outcome != 'skipped' }}
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: windows-ui-screenshots-${{ github.sha }}
           path: windows-ui-screenshots/
@@ -293,7 +293,7 @@ jobs:
 
       - name: Upload developer executable
         if: ${{ !cancelled() && steps.developer-stage.outcome == 'success' }}
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: justspeaktoit-windows-x64-developer-${{ github.sha }}
           path: windows-developer-build/
@@ -302,7 +302,7 @@ jobs:
 
       - name: Upload native test evidence
         if: always()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: windows-test-evidence-${{ github.sha }}
           path: |

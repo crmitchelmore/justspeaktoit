@@ -554,6 +554,10 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     didSet { store(appSwitchDelivery.rawValue, key: .appSwitchDelivery) }
   }
 
+  @Published var cancelRecordingOnEscape: Bool {
+    didSet { store(cancelRecordingOnEscape, key: .cancelRecordingOnEscape) }
+  }
+
   @Published var showHUDDuringSessions: Bool {
     didSet { store(showHUDDuringSessions, key: .showHUD) }
   }
@@ -1161,6 +1165,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     appSwitchDelivery =
       defaults.string(forKey: DefaultsKey.appSwitchDelivery.rawValue)
         .flatMap(AppSwitchDelivery.init(rawValue:)) ?? AppSwitchDelivery.defaultValue
+    cancelRecordingOnEscape =
+      defaults.object(forKey: DefaultsKey.cancelRecordingOnEscape.rawValue) as? Bool ?? true
     showHUDDuringSessions = defaults.object(forKey: DefaultsKey.showHUD.rawValue) as? Bool ?? SpeechDefaults.showHUD
     showLiveTranscriptInHUD =
       defaults.object(forKey: DefaultsKey.showLiveTranscriptInHUD.rawValue) as? Bool ?? SpeechDefaults.liveTranscriptHUD
@@ -1404,6 +1410,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     self.accessibilityInsertionMode = restored.accessibilityInsertionMode
     self.restoreClipboardAfterPaste = restored.restoreClipboardAfterPaste
     self.appSwitchDelivery = restored.appSwitchDelivery
+    self.cancelRecordingOnEscape = restored.cancelRecordingOnEscape
     self.showHUDDuringSessions = restored.showHUDDuringSessions
     self.showLiveTranscriptInHUD = restored.showLiveTranscriptInHUD
   }

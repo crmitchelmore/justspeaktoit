@@ -36,6 +36,16 @@ final class KeyBindingSwiftUIBridgeTests: XCTestCase {
     XCTAssertEqual(binding.eventModifiers, [.command, .shift, .option, .control])
   }
 
+  func testProfilesCommandPlus_mapsToShiftCommandEqualsInBothMenus() {
+    let binding = ShortcutAction.openProfilesSettings.defaultKeyBinding
+    XCTAssertEqual(binding.keyCode, 24)
+    XCTAssertEqual(binding.displayString, "⌘+")
+    XCTAssertEqual(binding.keyEquivalent?.character, "=")
+    XCTAssertEqual(binding.menuKeyEquivalent, "=")
+    XCTAssertEqual(binding.eventModifiers, [.command, .shift])
+    XCTAssertEqual(binding.modifiers, [.command, .shift])
+  }
+
   // MARK: - Both menu surfaces render the same bindings (issue #852)
 
   func testModifiedReturn_isAdvertisedByBothMenuSurfaces() {

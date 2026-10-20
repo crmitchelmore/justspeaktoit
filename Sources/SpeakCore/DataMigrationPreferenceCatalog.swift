@@ -110,7 +110,7 @@ public enum DataMigrationPreferenceCatalog {
         switch key {
         case .trackedKeyIdentifiers, .transcriptionKeywordsLastReconciled:
             return nil
-        case .analyticsEnabled, .audioPreWarmingEnabled, .autoCorrectionsEnabled,
+        case .analyticsEnabled, .audioPreWarmingEnabled, .autoCorrectionsEnabled, .cancelRecordingOnEscape,
              .compactStatusBarIcon, .connectionPreWarmingEnabled, .enableAutomationServer,
              .enableSendToMac, .handsFreeDictationEnabled, .modulateAccentSignal,
              .modulateEmotionSignal, .modulatePIIPhiTagging, .modulateSpeakerDiarization,

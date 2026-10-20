@@ -23,6 +23,7 @@ public enum ApplicationPreferenceKey: String, CaseIterable, Sendable {
     case runAtLogin
     case recordingsDirectory
     case hotKeyActivation
+    case cancelRecordingOnEscape
     case holdThreshold
     case doubleTapWindow
     case trackedKeyIdentifiers

@@ -18,6 +18,7 @@ final class HotKeyManagerGlobalMonitorTests: XCTestCase {
     private var defaults: UserDefaults!
     private var monitoring: MonitorSpy!
     private var recordingState: CurrentValueSubject<Bool, Never>!
+    private var settings: AppSettings!
     private var manager: HotKeyManager!
 
     override func setUp() {
@@ -26,7 +27,7 @@ final class HotKeyManagerGlobalMonitorTests: XCTestCase {
         defaults = UserDefaults(suiteName: suiteName)
         monitoring = MonitorSpy()
         recordingState = CurrentValueSubject(false)
-        let settings = AppSettings(defaults: defaults)
+        settings = AppSettings(defaults: defaults)
         // The hotkey backend is a separate mechanism and is deliberately kept out of these
         // tests: an unsupported binding makes `HotKeyEngine.start` refuse, so no real event
         // tap or Carbon registration happens while the NSEvent monitors are under test.
@@ -41,6 +42,7 @@ final class HotKeyManagerGlobalMonitorTests: XCTestCase {
     override func tearDown() {
         manager.stopMonitoring()
         manager = nil
+        settings = nil
         recordingState = nil
         monitoring = nil
         defaults.removePersistentDomain(forName: suiteName)
@@ -139,6 +141,129 @@ final class HotKeyManagerGlobalMonitorTests: XCTestCase {
         manager.setGlobalEscapeNeeded(false, for: .voiceEdit)
 
         XCTAssertEqual(monitoring.liveGlobalMonitors, 0)
+    }
+
+    func testEscapeCancellationDisabled_recordingInstallsNoSystemWideMonitor() {
+        settings.cancelRecordingOnEscape = false
+        manager.trackRecordingState(recordingState)
+        manager.startMonitoring()
+
+        recordingState.send(true)
+
+        XCTAssertEqual(monitoring.liveGlobalMonitors, 0)
+        XCTAssertEqual(monitoring.liveLocalMonitors, 1)
+    }
+
+    func testChangingEscapeCancellationDuringRecording_updatesMonitorImmediately() {
+        manager.trackRecordingState(recordingState)
+        manager.startMonitoring()
+        recordingState.send(true)
+        XCTAssertEqual(monitoring.liveGlobalMonitors, 1)
+
+        settings.cancelRecordingOnEscape = false
+        XCTAssertEqual(monitoring.liveGlobalMonitors, 0)
+        settings.cancelRecordingOnEscape = true
+        XCTAssertEqual(monitoring.liveGlobalMonitors, 1)
+
+        recordingState.send(false)
+        settings.cancelRecordingOnEscape = false
+        settings.cancelRecordingOnEscape = true
+        XCTAssertEqual(monitoring.liveGlobalMonitors, 0)
+    }
+
+    func testEscapeCancellationDisabled_voiceEditStillGetsEscape() {
+        settings.cancelRecordingOnEscape = false
+        var cancels = 0
+        manager.register(shortcut: .escape) { cancels += 1 }
+        manager.trackRecordingState(recordingState)
+        manager.startMonitoring()
+        recordingState.send(true)
+        manager.setGlobalEscapeNeeded(true, for: .voiceEdit)
+
+        XCTAssertEqual(monitoring.liveGlobalMonitors, 1)
+        monitoring.sendGlobal(Self.keyDown(keyCode: 53, modifiers: []))
+        XCTAssertEqual(cancels, 1)
+
+        manager.setGlobalEscapeNeeded(false, for: .voiceEdit)
+        XCTAssertEqual(monitoring.liveGlobalMonitors, 0)
+    }
+
+    // MARK: - Activation recovery
+
+    func testAppActivationDuringRecording_doesNotEndHeldRecording() async throws {
+        settings.appSwitchDelivery = .currentApp
+        settings.cancelRecordingOnEscape = false
+        manager.trackRecordingState(recordingState)
+        manager.startMonitoring()
+        recordingState.send(true)
+        try await beginHold()
+
+        NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: nil)
+        try await Task.sleep(for: .milliseconds(700))
+
+        XCTAssertTrue(manager.engine.gestureDetector.isHoldInProgress)
+        XCTAssertEqual(
+            SmartTextOutput.appSwitchDecision(
+                policy: settings.appSwitchDelivery,
+                capturedApplicationIsFrontmost: false,
+                capturedApplicationIsRunning: true,
+                frontmostProcessIdentifier: 200,
+                ownProcessIdentifier: 100
+            ),
+            .deliverToCurrentApp
+        )
+        manager.engine.gestureDetector.keyUp()
+        XCTAssertFalse(manager.engine.gestureDetector.isHoldInProgress, "releasing the trigger still stops normally")
+    }
+
+    func testActivationRecoveryQueuedBeforeRecording_doesNotEndNewHold() async throws {
+        manager.trackRecordingState(recordingState)
+        manager.startMonitoring()
+        NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: nil)
+        // Let the observer enqueue its delayed recovery before starting capture.
+        try await Task.sleep(for: .milliseconds(50))
+        recordingState.send(true)
+        try await beginHold()
+
+        try await Task.sleep(for: .milliseconds(700))
+
+        XCTAssertTrue(manager.engine.gestureDetector.isHoldInProgress)
+    }
+
+    func testAppActivationWhileIdle_stillRearmsMonitoring() async throws {
+        manager.trackRecordingState(recordingState)
+        manager.startMonitoring()
+        var resets = 0
+        let token = manager.engine.registerPress { event in
+            if event.phase == .reset { resets += 1 }
+        }
+        defer { manager.engine.unregister(token) }
+
+        NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: nil)
+        try await Task.sleep(for: .milliseconds(700))
+
+        XCTAssertGreaterThan(resets, 0)
+        XCTAssertEqual(monitoring.liveLocalMonitors, 1)
+    }
+
+    func testSystemWakeDuringRecording_stillRecoversAndBalancesHold() async throws {
+        manager.trackRecordingState(recordingState)
+        manager.startMonitoring()
+        recordingState.send(true)
+        try await beginHold()
+
+        NSWorkspace.shared.notificationCenter.post(name: NSWorkspace.didWakeNotification, object: nil)
+        try await Task.sleep(for: .milliseconds(700))
+
+        XCTAssertFalse(manager.engine.gestureDetector.isHoldInProgress)
+        XCTAssertEqual(monitoring.liveGlobalMonitors, 1)
+    }
+
+    private func beginHold() async throws {
+        manager.engine.updateConfiguration(HotKeyConfiguration(holdThreshold: 0.01, doubleTapWindow: 0.2))
+        manager.engine.gestureDetector.keyDown()
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertTrue(manager.engine.gestureDetector.isHoldInProgress)
     }
 
     // MARK: - What the system-wide monitor may fire

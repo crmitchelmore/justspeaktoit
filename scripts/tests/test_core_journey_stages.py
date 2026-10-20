@@ -314,7 +314,9 @@ class StageTests(unittest.TestCase):
 
     def test_build_cancellation_kills_descendants_and_retains_failure_receipt(self):
         marker = self.directory / "leaked-compiler"
-        child = f"import time; from pathlib import Path; time.sleep(1); Path({str(marker)!r}).touch()"
+        # The descendant waits well beyond cancellation latency on a loaded runner,
+        # so the marker only appears if cancellation failed to kill the group.
+        child = f"import time; from pathlib import Path; time.sleep(3); Path({str(marker)!r}).touch()"
         compiler = ("import subprocess, sys, time; "
                     f"subprocess.Popen([sys.executable, '-c', {child!r}]); "
                     "print('compiler started', flush=True); time.sleep(60)")
@@ -348,7 +350,7 @@ class StageTests(unittest.TestCase):
         result = json.loads((self.artifacts / "build/result.json").read_text())
         self.assertEqual(result["stage"], "build")
         self.assertTrue(any("cancellation" in error for error in result["errors"]))
-        time.sleep(1.1)
+        time.sleep(3.2)
         self.assertFalse(marker.exists(), "Cancellation leaked a compiler descendant")
 
     def test_missing_products_or_expired_hashing_is_fail_closed(self):

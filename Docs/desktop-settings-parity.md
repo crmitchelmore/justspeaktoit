@@ -266,6 +266,30 @@ repeat/mixed/unknown flags and cold refusal. These and the Swift wrapper remain
 NOT_RUN locally. Automatic native qualification and real AT-SPI field,
 provider/audio and compositor acceptance remain open; this is not full parity.
 
+The integration harness now also authors an actual D-Bus selection protocol
+fixture, separately nested inside a fresh private session bus for each registry
+cleanup shape (event-only, event/application, and unsupported). The fake external
+process refuses a nonempty bus; the native client verifies that all three service
+names belong to that launched process before granting fixture-only consent.
+The real private worker performs metadata admission and bounded reads. A gated,
+low-priority worker idle fence acknowledges completed metadata work rather than
+guessing readiness from a sleep or an early remote method response.
+
+Cases cover exact selected-range reads, the supplementary-Unicode and combining
+boundaries, missing/empty/multiple/oversized/out-of-field selections, short text
+replies, password/protected/read-only refusal without text I/O, stale receipts
+after selection changes, mid-read selection/privacy changes, actual monotonic
+expiry, 1,000-attempt burst admission, controlled in-flight revocation, restart
+admission and independent correction/selection consent. The backend enforces registry subscription
+filtering and legacy prefix cleanup and counts writes and out-of-range reads.
+Revocation must leave no private registry registrations. An unsupported registry
+must be rejected before any registration or text access. Each schema invocation
+has a 60-second harness ceiling; ordinary success paths have no readiness sleeps
+other than bounded test polling, and the expiry case deliberately waits for the
+real 2.5-second lease to expire. No provider, clipboard, actual field or device is
+used. This fixture is also NOT_RUN locally; automatic native evidence remains
+required and cannot replace physical-desktop/provider acceptance.
+
 ## Linux shortcut listener lifetime (source only; NOT_RUN)
 
 X11 registration now reads the actual modifier/key maps rather than ignoring

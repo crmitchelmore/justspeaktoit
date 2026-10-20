@@ -39,6 +39,11 @@ trap cleanup EXIT
 
 step() { printf '\n== %s\n' "$1"; }
 
+step "selected-text speech (isolated AT-SPI protocol, no desktop field or provider)"
+for shape in event application unsupported; do
+    dbus-run-session -- bash "$repo/scripts/linux-atspi-selection-checks.sh" "$binary" "$python" "$shape"
+done
+
 step "keyring (gnome-keyring, Secret Service)"
 printf 'integration' | gnome-keyring-daemon --unlock --components=secrets >/dev/null
 "$binary" --integration-test keyring

@@ -429,6 +429,28 @@ still excludes external selection because opening it changes focus.
 Pure contract and command fixtures are authored, NOT_RUN locally; real field,
 provider/audio and compositor acceptance remain unverified.
 
+Before the keyring and desktop integration checks, the harness runs
+`--integration-test atspi-selection` against an external synthetic AT-SPI
+service, each time on its own nested private bus. The fixture refuses a
+nonempty bus, and the client checks the launched server's process identity and
+service ownership before allowing any test access. It exercises the production
+worker, not a replacement text-reader implementation. Metadata readiness is
+acknowledged on that worker after admission/cleanup, not inferred from an early
+server reply.
+
+Both supported registry cleanup signatures and unsupported-schema refusal are
+covered. Cases check exact range and Unicode limits, protected/password/read-only
+refusals without text sampling, missing/multiple/empty/oversized/out-of-field
+selections, short replies, stale receipts after selection changes, selection and
+role changes during a read, real lease expiry, held-read revocation, burst and
+restart admission, and independent correction consent.
+The server models subscription filtering and prefix cleanup, records text reads,
+rejects mutations and counts remaining registrations after shutdown. Each
+schema process has a 60-second ceiling; normal readiness polling ends as soon as
+the condition is met. The expiry case intentionally measures the real 2.5-second
+lease. This authored fixture is NOT_RUN locally. It cannot qualify real
+compositor/AT-SPI app behavior, consent UI, provider requests or audible output.
+
 `scripts/linux-desktop-checks.sh` also opts into a cross-process fixture only
 inside its private session bus. It launches 39 real command-client processes
 against the production native command handler with a synthetic event callback:

@@ -85,6 +85,14 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
     let context = Unmanaged.passUnretained(holder).toOpaque()
     let windowFailure = runGTKEventLoop(selected: selected, context: context, holder: holder)
     LinuxWindow.endVoiceProviderCallbacks(providerCallbacks)
+    try shutDownWindow(controller: controller, holder: holder)
+    withExtendedLifetime(holder) {}
+    if let windowFailure { throw windowFailure }
+    if let smokeFailure = holder.smokeTestFailure { throw smokeFailure }
+}
+
+/// Fences callbacks, drains settings and closes the controller after the window closes.
+private func shutDownWindow(controller: LinuxAppController, holder: LinuxEventContext) throws {
     try blocking {
         holder.shortcuts.stop()
         holder.historyPaste.stop()
@@ -104,9 +112,6 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
         }
         LinuxPortal.stopRemoteDesktop()
     }
-    withExtendedLifetime(holder) {}
-    if let windowFailure { throw windowFailure }
-    if let smokeFailure = holder.smokeTestFailure { throw smokeFailure }
 }
 
 /// Runs the GTK event loop until the window closes, returning any error

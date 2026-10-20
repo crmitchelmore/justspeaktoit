@@ -219,7 +219,10 @@ The automatic desktop-check harness additionally enables 39 real child
 command processes on its private bus with synthetic native event capture, bounded
 waits, refusal diagnostics, hidden-window/page invariants and an empty isolated
 data-directory requirement, including malformed toggle options with and without
-a primary. Stop cases use production action refresh, not a fabricated enabled
+a primary. Clients share a 180-second monotonic group budget; each child gets
+at most 15 seconds or the shorter remaining group time and completes without a
+fixed wait. The 600-second timeout covers the whole smoke window, so command
+ceilings no longer consume almost all of it. Stop cases use production action refresh, not a fabricated enabled
 control during work, and cover all three states plus modal/closing refusal.
 A separate scripted Host regression checks speech cancellation while retaining
 busy state and status; it is also authored, NOT_RUN locally. This does not

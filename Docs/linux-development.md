@@ -443,8 +443,12 @@ commands with no primary. Malformed toggle options are additionally refused both
 with and without a primary; no real toggle/provider action is delivered.
 The fixture applies production `refresh_actions` for each state, not a synthetic
 Stop-sensitivity override, including explicit Stop modal/closing refusals.
-Each child has a 15-second deadline and is reaped; the smoke-test envelope is
-600 seconds. The fixture requires exact callback identity/count/slot, unchanged page
+All command clients share one 180-second monotonic budget. Each child is reaped
+and receives at most 15 seconds, shortened to the group's remaining time; there
+are no success-path waits. The whole smoke window, not just these clients, has
+the unchanged 600-second envelope, leaving 420 seconds for its other checks
+instead of multiplying 39 independent ceilings. Budget exhaustion fails loudly.
+The fixture requires exact callback identity/count/slot, unchanged page
 and hidden-window visibility, refusal diagnostics, and an empty isolated data
 directory after all clients. A separate smoke-window application path avoids
 colliding with the fixture's real GApplication identity; a private main context

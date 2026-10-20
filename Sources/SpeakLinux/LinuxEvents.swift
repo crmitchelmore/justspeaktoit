@@ -27,6 +27,7 @@ final class LinuxEventContext: @unchecked Sendable {
     let shortcuts: LinuxShortcuts
     let automation: LinuxAutomationSwitch
     let apiKeys = DesktopAPIKeyRequests()
+    let historyPaste = DesktopHistoryPasteAdmission()
     private(set) var gestures: LinuxShortcutGestures!
     lazy var microphones = LinuxMicrophoneMonitor(controller: controller)
     /// Set before the window opens, when iCloud sync is configured.
@@ -71,6 +72,21 @@ final class LinuxEventContext: @unchecked Sendable {
     func enqueueSettings(_ action: @escaping @Sendable () async -> Void) { settings.submit(action) }
     var currentSettingsTask: Task<Void, Never>? { settings.current }
     func finishSettings() async { await settings.drain() }
+
+    func pasteLastHistory() {
+        guard let request = historyPaste.begin() else {
+            LinuxHostPlatform.update(
+                "History paste is already pending or the app is closing. No new target was captured."
+            )
+            return
+        }
+        let target = Self.captureTarget(includeObservation: false)
+        let controller = controller
+        enqueueSettings {
+            defer { request.finish() }
+            await controller.pasteLastHistoryItem(target: target, request: request)
+        }
+    }
 
     /// Text output as of this event in settings order, however late the
     /// recording task runs.
@@ -249,8 +265,7 @@ private func linuxActionEvent(_ event: Int, value: String, slot: Int, holder: Li
     case Int(JSTI_EVENT_SPEECH_PAUSE):
         holder.enqueueSettings { await holder.controller.pauseResumeSpeech() }
     case Int(JSTI_EVENT_PASTE_LAST_HISTORY):
-        let target = LinuxEventContext.captureTarget(includeObservation: false)
-        holder.enqueueSettings { await holder.controller.pasteLastHistoryItem(target: target) }
+        holder.pasteLastHistory()
     default: return false
     }
     return true

@@ -117,7 +117,9 @@ extension DesktopHostController {
 }
 
 extension DesktopHostController where Platform: DesktopHostDefaultTextOutputPlatform {
-    package func pasteLastHistoryItem(target: Platform.InsertionTarget?) {
+    package func pasteLastHistoryItem(
+        target: Platform.InsertionTarget?, request: DesktopHistoryPasteAdmission.Request? = nil
+    ) {
         guard !closed else { return }
         guard canUseHistory, outputSlot.task == nil else {
             update("Finish the current recording or text output before pasting from History.")
@@ -126,6 +128,10 @@ extension DesktopHostController where Platform: DesktopHostDefaultTextOutputPlat
         guard let record = DesktopHistorySearch.ordered(Array(history.values)).first,
               let text = record.displayText, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             update("Nothing to paste. The most recent History item has no text.")
+            return
+        }
+        guard request?.isCurrent != false else {
+            update("History paste was not sent: its captured target expired or the request was cancelled.")
             return
         }
         let output = DesktopHostRecordingOutput<Platform>(

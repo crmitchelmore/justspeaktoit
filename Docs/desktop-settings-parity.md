@@ -175,6 +175,18 @@ target. X11 never substitutes a stale external window when this app has focus.
 Wayland retains its documented delivery-time-focus portal and recovery-copy
 policy; it does not acquire an anchored external-field guarantee.
 
+Both hosts now bound History-paste admission **before target capture**: only one
+request can wait in the settings queue. Further invocations report that paste is
+pending rather than capturing and retaining more external targets. The Host checks
+the request's one-second monotonic capture budget immediately before starting
+output; an expired or shutdown-invalidated request reports refusal, never retries,
+and releases its admission slot only when its queued consumer returns. Shutdown
+invalidates this gate before draining settings. The existing separate output slot
+still refuses overlapping output. This bounds delayed requests; it does not expand
+X11/Wayland target guarantees or change ordinary Copy or recording output. Portable
+burst/expiry/concurrent-admission tests and Host queued-expiry/cancellation tests
+are authored but NOT_RUN locally, pending automatic native/portable qualification.
+
 Linux now has **25 of 27 source-wired window-local actions**; selected-text speech,
 voice editing and global action registration remain open. Mapping, native row
 validation and busy/recording/parent/page-independent dispatch fixtures are

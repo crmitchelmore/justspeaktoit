@@ -76,6 +76,7 @@ CHILD_EXPECTS_ISOLATION = textwrap.dedent('''\
     state = json.load(open(os.environ['FAKE_SECURITY_STATE']))
     default = state['default']
     ok = 'jsti-ci-keychain-' in default and os.path.exists(default) and state['search'] == [default]
+    open(os.environ['CHILD_READY_FILE'], 'w').close()
     time.sleep(float(sys.argv[1]))
     sys.exit(int(sys.argv[2]) if ok else 99)
 ''')
@@ -137,6 +138,7 @@ class WithTestKeychainTests(unittest.TestCase):
             'FAKE_SECURITY_STATE': str(self.fake_state),
             'CI': 'true',
             'CHILD_PID_FILE': str(self.root / 'child-pids'),
+            'CHILD_READY_FILE': str(self.root / 'child-ready'),
             'JSTI_TEST_KEYCHAIN_GRACE_SECONDS': '1',
         })
 
@@ -181,11 +183,14 @@ class WithTestKeychainTests(unittest.TestCase):
     def wait_for_swap(self):
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
-            if keychain_script.TEMP_PREFIX in self.state()['default'] and (self.state_dir / 'state.json').exists():
-                time.sleep(0.2)
+            if (keychain_script.TEMP_PREFIX in self.state()['default']
+                    and (self.state_dir / 'state.json').exists()
+                    and (self.root / 'child-ready').exists()):
+                # Signal the running fixture, including installed signal handlers,
+                # rather than racing the wrapper's activation/child-launch gap.
                 return
             time.sleep(0.05)
-        self.fail('test Keychain was never activated')
+        self.fail('test Keychain and fixture child were never ready')
 
     def assert_restored(self, search=None):
         state = self.state()

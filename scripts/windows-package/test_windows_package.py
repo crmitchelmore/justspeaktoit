@@ -1026,6 +1026,7 @@ class LifecycleSupportTests(unittest.TestCase):
         struct.pack_into("<I", audio, 4, payload + 36)
         struct.pack_into("<I", audio, 40, payload)
         audio_path.write_bytes(bytes(audio))
+        (self.data / "onboarding.json").write_text('{"hasCompletedOnboarding":true}', encoding="utf-8")
 
     def test_fixture_uses_the_apps_formats(self):
         completed = json.loads((self.data / ("History/%s.json" % lifecycle_support.COMPLETED_ID)).read_text(encoding="utf-8"))
@@ -1054,8 +1055,27 @@ class LifecycleSupportTests(unittest.TestCase):
         (self.data / "OpenRouterAudioCatalog.json").write_text("{}", encoding="utf-8")
         report = lifecycle_support.check_data(self.data, self.expectations, "recovered")
         self.assertEqual(report["failures"], [])
-        self.assertEqual(report["appCreatedFiles"], ["OpenRouterAudioCatalog.json"])
+        self.assertEqual(report["appCreatedFiles"], ["OpenRouterAudioCatalog.json", "onboarding.json"])
         self.assertTrue(lifecycle_support.check_data(self.data, self.expectations, "seeded")["failures"])
+
+    def test_legacy_onboarding_completion_is_required_and_validated(self):
+        self.recover_like_the_app()
+        state = self.data / "onboarding.json"
+        for invalid in (None, "not json", "[]", '{"hasCompletedOnboarding":false}',
+                        '{"hasCompletedOnboarding":1}', '{"hasCompletedOnboarding":true,"unknown":true}'):
+            with self.subTest(state=invalid):
+                if invalid is None:
+                    state.unlink()
+                else:
+                    state.write_text(invalid, encoding="utf-8")
+                report = lifecycle_support.check_data(self.data, self.expectations, "recovered")
+                self.assertTrue(any("legacy onboarding" in failure for failure in report["failures"]), report)
+
+    def test_unrecognized_app_metadata_remains_a_preservation_failure(self):
+        self.recover_like_the_app()
+        (self.data / "other-state.json").write_text("{}", encoding="utf-8")
+        report = lifecycle_support.check_data(self.data, self.expectations, "recovered")
+        self.assertIn("unexpected files: other-state.json", report["failures"])
 
     def test_lost_or_changed_user_data_is_reported(self):
         self.recover_like_the_app()

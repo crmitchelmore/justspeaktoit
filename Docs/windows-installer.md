@@ -369,7 +369,10 @@ the unsigned upgrade package, and then, under Windows PowerShell:
    lengths, and unknown user files. An untrusted package is refused. The base
    version installs, shows both records and the fixture transcript, and
    recovers the interrupted record in the real directory without changing any
-   audio sample or other file.
+   audio sample or other user file. It also requires the app's legacy setup
+   migration to create `onboarding.json` with the canonical completed state.
+   Missing, malformed or incomplete setup state and every other unexpected
+   metadata file still fail the preservation check.
 7. With the base installed, a cancelled upgrade, a tampered upgrade, an
    untrusted upgrade and an upgrade while the app runs (expected
    `ERROR_PACKAGES_IN_USE`) each leave the previous registration, its

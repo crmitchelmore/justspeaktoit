@@ -29,7 +29,7 @@ TRANSCRIPT = ("Lifecycle fixture transcript: \N{GREEK SMALL LETTER KAPPA}\N{GREE
 RECOVERED_FAILURE = "Recording was interrupted. Audio recovered for retry."  # DesktopRecordingStore
 SAMPLE_RATE = 16_000
 # Files the app itself may create beside user data; never user data.
-APP_CREATED_FILES = {"OpenRouterAudioCatalog.json"}
+APP_CREATED_FILES = {"OpenRouterAudioCatalog.json", "onboarding.json"}
 
 
 def sha256(data):
@@ -151,6 +151,15 @@ def check_data(directory, expectations, state):
             failures.append("recovered WAV header was not patched to the payload length")
     elif state not in ("seeded", "recovered"):
         raise SystemExit("unknown state: " + state)
+    if state == "recovered" or "onboarding.json" in current:
+        try:
+            onboarding = json.loads((directory / "onboarding.json").read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            failures.append("legacy onboarding completion could not be read: " + str(error))
+        else:
+            if (not isinstance(onboarding, dict) or set(onboarding) != {"hasCompletedOnboarding"}
+                    or onboarding["hasCompletedOnboarding"] is not True):
+                failures.append("legacy onboarding completion is not the canonical completed state")
     extra = sorted(path for path in current if path not in expectations["files"])
     unexpected = [path for path in extra if path not in expectations["appCreatedFiles"]]
     if unexpected:

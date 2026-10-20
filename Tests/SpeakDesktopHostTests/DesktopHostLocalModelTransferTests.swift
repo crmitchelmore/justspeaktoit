@@ -105,7 +105,10 @@ final class DesktopHostLocalModelTransferTests: XCTestCase {
     func testActiveLiveChoice_IsPreservedUntilExplicitModelSelection() async throws {
         try await select(live)
         let other = try XCTUnwrap(DesktopHostModels.localLive.last { $0.id != live }?.id)
-        try await controller.importConfiguration(path: document([liveKey: AnyCodable(.string(other))]).path)
+        let file = try document([
+            liveKey: AnyCodable(.string(other)), "localTranscriptionMode": AnyCodable(.string("batch"))
+        ])
+        try await controller.importConfiguration(path: file.path)
         let retained = await controller.settings
         XCTAssertEqual(retained.model, live)
         XCTAssertEqual(retained.localLiveModel, live)
@@ -114,11 +117,16 @@ final class DesktopHostLocalModelTransferTests: XCTestCase {
         XCTAssertTrue(FakeLog.shared.allStatuses.last?.contains("changes to the active mode") == true)
         let pending = try await exported()
         XCTAssertEqual(pending.values[liveKey], AnyCodable(.string(other)))
+        XCTAssertEqual(pending.values["localTranscriptionMode"], AnyCodable(.string("batch")))
         try await select(live)
         let selected = await controller.settings
         XCTAssertNil(selected.configuration?.values[liveKey])
         let result = try await exported()
         XCTAssertEqual(result.values[liveKey], AnyCodable(.string(live)))
+        XCTAssertEqual(result.values["localTranscriptionMode"], AnyCodable(.string("streaming")))
+        try await select(batch)
+        let batchResult = try await exported()
+        XCTAssertEqual(batchResult.values["localTranscriptionMode"], AnyCodable(.string("batch")))
     }
 
     func testInvalidTypes_RejectTheWholeImportBeforePersistenceOrPublication() async throws {

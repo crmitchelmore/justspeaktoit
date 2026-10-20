@@ -5,6 +5,7 @@ import SpeakDesktop
 package enum DesktopHostLocalModelTransfer {
     static let batchKey = ApplicationPreferenceKey.localTranscriptionModel.rawValue
     static let liveKey = ApplicationPreferenceKey.localStreamingModelSource.rawValue
+    static let modeKey = ApplicationPreferenceKey.localTranscriptionMode.rawValue
     static let keys: Set<String> = [batchKey, liveKey]
 
     static func importing<Platform: DesktopHostPlatform>(
@@ -36,14 +37,17 @@ package enum DesktopHostLocalModelTransfer {
         for (key, identifier) in [(batchKey, settings.localModel), (liveKey, settings.localLiveModel)] {
             if values[key] == nil, let identifier { values[key] = AnyCodable(.string(identifier)) }
         }
+        if DesktopHostModels.isLocal(settings.model), values[modeKey] == nil {
+            values[modeKey] = AnyCodable(.string(DesktopHostModels.isLocalLive(settings.model) ? "streaming" : "batch"))
+        }
         return try DesktopConfiguration(values: values)
     }
 
     static func removingChoice(
         _ key: String, from configuration: DesktopConfiguration?
     ) throws -> DesktopConfiguration? {
-        guard let configuration, configuration.values[key] != nil else { return configuration }
-        return try DesktopConfiguration(values: configuration.values.filter { $0.key != key })
+        guard let configuration else { return nil }
+        return try DesktopConfiguration(values: configuration.values.filter { $0.key != key && $0.key != modeKey })
     }
 
     static func removingMirrors<Platform: DesktopHostPlatform>(
@@ -52,6 +56,10 @@ package enum DesktopHostLocalModelTransfer {
         var values = configuration.values
         for (key, identifier) in [(batchKey, settings.localModel), (liveKey, settings.localLiveModel)] {
             if let identifier, values[key]?.storage == .string(identifier) { values.removeValue(forKey: key) }
+        }
+        if DesktopHostModels.isLocal(settings.model) {
+            let mode = DesktopHostModels.isLocalLive(settings.model) ? "streaming" : "batch"
+            if values[modeKey]?.storage == .string(mode) { values.removeValue(forKey: modeKey) }
         }
         return try DesktopConfiguration(values: values)
     }

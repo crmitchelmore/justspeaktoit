@@ -113,7 +113,9 @@ struct RecordingLocationFixture {
 
     init() throws {
         root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-            .appendingPathComponent(".build/recording-location-" + UUID().uuidString, isDirectory: true)
+            .appendingPathComponent(".build", isDirectory: true)
+            .resolvingSymlinksInPath()
+            .appendingPathComponent("recording-location-" + UUID().uuidString, isDirectory: true)
         history = root.appendingPathComponent("History", isDirectory: true)
         first = root.appendingPathComponent("Audio A", isDirectory: true)
         second = root.appendingPathComponent("Audio B", isDirectory: true)

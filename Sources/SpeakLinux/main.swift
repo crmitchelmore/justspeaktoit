@@ -197,6 +197,9 @@ let integrationCheck = arguments.firstIndex(of: "--integration-test").flatMap {
     arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil
 }
 switch integrationCheck {
+case "atspi-selection":
+    do { try LinuxSelectionIntegrationCheck.run() } catch { fail(error) }
+    exit(0)
 case "keyring", "capture", "portal", "x11-hotkey", "x11-hotkey-locks":
     do {
         switch integrationCheck {

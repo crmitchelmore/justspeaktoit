@@ -44,6 +44,10 @@ void jsti_atspi_selection_release(JSTIAtspiSelection *lease);
 /* Pure fixtures: no bus, UI, services or field access. */
 int32_t jsti_atspi_contract_self_test(void);
 int32_t jsti_atspi_selection_contract_self_test(void);
+/* Disposable-bus integration fixture only. The idle fence acknowledges the
+ * real private worker after metadata admission; it grants/reads nothing. */
+int32_t jsti_atspi_selection_fixture_idle(void);
+int32_t jsti_atspi_selection_integration_check(char *error, size_t capacity);
 int32_t jsti_vocabulary_learning_controls_contract_self_test(void);
 #ifdef __cplusplus
 }

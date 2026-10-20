@@ -101,6 +101,38 @@ for _ in $(seq 1 100); do [ -e "$work/grab-ready" ] && break; sleep 0.05; done
 xdotool key ctrl+alt+space
 wait "$grab"
 
+step "X11 shortcut lock states (extra Shift refused, CapsLock/NumLock preserved)"
+JSTI_TEST_READY_FILE="$work/lock-ready" timeout 150 "$binary" --integration-test x11-hotkey-locks & lock_grab=$!
+lock_grab_index=${#pids[@]}
+pids+=($lock_grab)
+for _ in $(seq 1 200); do [ -e "$work/lock-ready" ] && break; sleep 0.05; done
+[ -e "$work/lock-ready" ] || { echo "The X11 lock-state listener never became ready." >&2; exit 1; }
+lock_phase() {
+    local phase="$1"
+    shift
+    xdotool key "$@"
+    : >"$work/lock-ready.phase-$phase"
+    for _ in $(seq 1 300); do
+        [ -e "$work/lock-ready.ack-$phase" ] && return 0
+        kill -0 "$lock_grab" 2>/dev/null || break
+        sleep 0.05
+    done
+    echo "X11 lock-state phase $phase was not acknowledged." >&2
+    return 1
+}
+# Fresh private Xvfb starts with locks off; every phase waits for its exact
+# callback prefix, so a false activation cannot offset a missing lock variant.
+lock_phase 0 ctrl+alt+shift+space
+lock_phase 1 ctrl+alt+space
+lock_phase 2 Caps_Lock ctrl+alt+space
+lock_phase 3 Num_Lock ctrl+alt+space
+lock_phase 4 Caps_Lock ctrl+alt+space
+lock_phase 5 Num_Lock ctrl+alt+space
+lock_status=0
+wait "$lock_grab" || lock_status=$?
+unset 'pids[lock_grab_index]'
+[ "$lock_status" -eq 0 ] || exit "$lock_status"
+
 zenity --entry --title "JSTI target" --text "Paste here" >"$work/zenity.out" 2>/dev/null & zenity=$!
 pids+=($zenity)
 target="$(timeout 30 xdotool search --sync --name 'JSTI target' | head -1)"

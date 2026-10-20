@@ -354,6 +354,16 @@ Runtime key/modifier remapping still needs a listener restart: automatic
 remapping/rebinding, multiple global actions and real keyboard/layout acceptance
 remain open gates. No-display native fixtures cover the classification and mask
 invariants, including the 256-variant bound; these changes are NOT_RUN locally.
+The disposable Xvfb integration harness also authors an
+`--integration-test x11-hotkey-locks` check: reject Ctrl+Alt+Shift+Space, then
+require exact press/release receipts with locks off, CapsLock, CapsLock+NumLock,
+NumLock, and locks off again. Each producer phase waits for its own
+acknowledgement; a false extra-modifier activation cannot compensate for a missed
+lock-state action. Readiness, phase waits and the child process are bounded; native
+stop is deferred on every exit. The rejection uses a 250 ms test-only quiet
+window, not a production readiness delay. The private server is discarded after
+the harness; no real desktop key map is modified. This check is NOT_RUN locally
+and does not qualify AltGr, arbitrary layouts, runtime remapping or Wayland.
 
 With the app **already running**, desktop keyboard settings can also bind
 `justspeaktoit --speak-clipboard` and `justspeaktoit --paste-last-history`.

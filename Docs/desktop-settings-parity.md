@@ -212,6 +212,11 @@ cover relocated ScrollLock, AltGr, mixed/unknown keys, explicit lock modifiers
 and zero/all-eight-bit subset bounds. These are authored but NOT_RUN locally.
 Runtime remapping/rebinding, safe multi-action registration and physical
 keyboard/layout qualification remain open, not inferred from this repair.
+An additional authored private-Xvfb integration sequence rejects an extra Shift,
+then requires one press/release in each off/Caps/Caps+Num/Num/off lock state with
+per-phase producer acknowledgements and exact event prefixes. Cleanup is
+deferred and all waits are bounded. This is NOT_RUN locally; it covers only the
+disposable server's default map, not AltGr or runtime layout changes.
 
 The existing dictation listener now owns its startup and actual native cleanup,
 not just flags set after registration returns. Stop permanently fences new

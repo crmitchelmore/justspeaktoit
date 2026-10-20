@@ -129,8 +129,8 @@ private final class LinuxShortcutCallback: @unchecked Sendable {
     var acceptsCallbacks: Bool { lifetime?.acceptsCallbacks == true }
 
     func receive(_ pressed: Bool) {
-        guard acceptsCallbacks else { return }
-        holder?.shortcutKey(pressed: pressed)
+        guard let lifetime, let holder, lifetime.acceptsCallbacks else { return }
+        holder.shortcutKey(pressed: pressed, lifetime: lifetime)
     }
 }
 

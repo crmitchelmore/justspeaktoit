@@ -143,20 +143,23 @@ final class LinuxEventContext: @unchecked Sendable {
 
     /// A global shortcut press or release from the X11 or portal thread. The
     /// target and text output are captured at the press.
-    func shortcutKey(pressed: Bool) {
-        if pressed {
-            guard jsti_action_shortcuts_editor_is_open() == 0, jsti_api_keys_is_open() == 0 else { return }
-            let target = Self.captureTarget()
+    func shortcutKey(pressed: Bool, lifetime: DesktopShortcutListenerLifetime) {
+        guard pressed else {
+            lifetime.admitCallback { gestures.keyUp() }
+            return
+        }
+        guard jsti_action_shortcuts_editor_is_open() == 0, jsti_api_keys_is_open() == 0 else { return }
+        let target = Self.captureTarget()
+        let shouldWarmMicrophone = !smokeTest && gestures.currentStyle != .pressToToggle
+        lifetime.admitCallback {
             let selection = recordingSettings(target: target)
-            if !smokeTest, gestures.currentStyle != .pressToToggle {
+            if shouldWarmMicrophone {
                 let controller = controller
                 Task { await controller.warmMicrophoneForShortcutPress() }
             }
             gestures.keyDown(
                 target: target, textOutput: Task { await selection.value.textOutput }, selection: selection
             )
-        } else {
-            gestures.keyUp()
         }
     }
 

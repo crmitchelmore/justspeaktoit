@@ -187,13 +187,16 @@ X11/Wayland target guarantees or change ordinary Copy or recording output. Porta
 burst/expiry/concurrent-admission tests and Host queued-expiry/cancellation tests
 are authored but NOT_RUN locally, pending automatic native/portable qualification.
 
-Linux now has **25 of 27 source-wired window-local actions**; selected-text speech,
-voice editing and global action registration remain open. Mapping, native row
+Linux now has **26 of 27 source-wired action destinations**; voice editing and
+automatic global action registration remain open. Selected-text speech needs
+separate session access and an external focused control, not this app's window.
+Its saved window-local binding remains disabled with desktop-command guidance.
+Mapping, native row
 validation and busy/recording/parent/page-independent dispatch fixtures are
 authored but NOT_RUN locally. They need automatic qualification. Clipboard
 delivery alone is not evidence of external-field paste or global-shortcut parity.
 
-Linux also exposes `--speak-clipboard`, `--paste-last-history`, `--stop-speech`,
+Linux also exposes `--speak-clipboard`, `--speak-selected-text`, `--paste-last-history`, `--stop-speech`,
 `--pause-resume-speech` and `--quick-voice-1` / `--quick-voice-2` /
 `--quick-voice-3` through the existing GApplication command-forwarding path.
 Quick Voice selects a saved favorite without reading text or starting speech.
@@ -212,7 +215,7 @@ Legacy `--toggle` also receives pure preflight before model/controller/store
 initialization: malformed options or conflicting actions are refused, while a
 valid toggle retains its cold-launch/remote behavior. The native command handler
 independently rejects unknown options for every action, including toggle.
-The automatic desktop-check harness additionally enables 34 real child
+The automatic desktop-check harness additionally enables 39 real child
 command processes on its private bus with synthetic native event capture, bounded
 waits, refusal diagnostics, hidden-window/page invariants and an empty isolated
 data-directory requirement, including malformed toggle options with and without
@@ -223,6 +226,42 @@ busy state and status; it is also authored, NOT_RUN locally. This does not
 deliver a native/provider/field action.
 The cross-process fixture is also NOT_RUN locally; automatic qualification,
 compositor/provider and external-field acceptance remain open.
+
+### Linux selected-text speech (source only; NOT_RUN)
+
+Voice Output now contains a dedicated native **Selection access** disclosure.
+It is off every launch and never restored by settings or imports. Only its
+affirmative session dialog allows a separate read-only AT-SPI session; correction
+learning consent and insertion targets cannot authorize selection reads. Stop
+access revokes pending reads synchronously and requests speech Stop. Shutdown
+revokes access before draining settings. No desktop accessibility setting is
+changed.
+
+After allowing access, refocus an ordinary external editable AT-SPI control,
+select text, then invoke `justspeaktoit --speak-selected-text` through desktop
+keyboard settings. Forwarding does not raise the app. The source editor still
+excludes external selection because opening it changes focus. Read-only
+documents, password/ambiguous fields and apps without the required AT-SPI
+interfaces are not supported. Availability is per control, not an X11/Wayland
+blanket claim; there is no clipboard or PRIMARY-selection substitute.
+
+Invocation captures cached field metadata only. One process-wide pending lease
+is held across consent restarts and native request completion; repeated commands
+cannot accumulate targets behind settings. The private worker has a 2.5-second
+budget from invocation, reads exactly one nonempty selection of at most 8,192
+Unicode scalars / 32,768 UTF-8 bytes, and rechecks identity, privacy, range and
+text before returning a snapshot. Selection/caret changes invalidate the old
+receipt and only re-admit the same known control off the action path. Text
+mutation listening exists only during an explicit read. The shared owned Host
+speech task performs capture before provider work, so Stop/replacement/recording
+and shutdown retain their cancellation policy.
+
+Pure native contracts cover range limits, authority separation, consent-ledger
+independence, selection invalidation and a 1,000-attempt admission burst with a
+retained native request. Native command fixtures include selected-text dispatch,
+repeat/mixed/unknown flags and cold refusal. These and the Swift wrapper remain
+NOT_RUN locally. Automatic native qualification and real AT-SPI field,
+provider/audio and compositor acceptance remain open; this is not full parity.
 
 ## Linux shortcut listener lifetime (source only; NOT_RUN)
 
@@ -2477,7 +2516,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | modulatePIIPhiTagging | Live/batch source wired; unqualified / Same | Native default/on/off choice, strict transfer/restart and captured live/batch provider flags; absent stays off. Native/provider acceptance pending. |
 | accessibilityInsertionMode | Equivalent / Missing | Output; Windows cursor/replace-field; Linux paste cannot claim AX replace-all equivalence |
 | selectedHotKey | Equivalent / Partial | Shortcuts; Windows Ctrl/Alt native key; Linux desktop/portal-owned binding, never Mac Fn key translation |
-| customShortcutBindings | Complete source mapping; unqualified / Partial window-local source | Windows Keyboard **Action shortcuts** dialog: all 27 actions source-wired; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Voice editing additionally requires an editable UIA selection and a rewrite API key. Linux projects 25 actions into window-local bindings and edits all saved bindings with presets/reset; selected-text speech, voice editing and global registration remain unimplemented. Native/physical acceptance pending. |
+| customShortcutBindings | Complete source mapping; unqualified / Partial native source | Windows Keyboard **Action shortcuts** dialog: all 27 actions source-wired; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Voice editing additionally requires an editable UIA selection and a rewrite API key. Linux projects 26 action destinations and edits all saved bindings with presets/reset. Selected-text speech needs separate session access and a focused external editable AT-SPI field via desktop command; voice editing and automatic global registration remain unimplemented. Native/physical acceptance pending. |
 | paidAccessRoutingEnabled | Apple-specific / Apple-specific | BYOK desktop providers; no paid-access entitlement/routing journey. Retained opaque through import/export |
 | simpleModelChoices | Missing / Missing | Native catalogue picker without simplified paid-model chooser |
 | rememberedLocalTranscriptionSource | Partial / Partial | Models remembers Local selection; no Apple on-device source |

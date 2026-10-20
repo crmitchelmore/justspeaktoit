@@ -87,6 +87,7 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
     try blocking {
         holder.shortcuts.stop()
         holder.historyPaste.stop()
+        LinuxSelectedTextTarget.stopSessionAccess()
         if !holder.smokeTest { holder.microphones.stop() }
         await holder.finishSettings()
         await controller.stopProviderCredentialEdits()

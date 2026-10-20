@@ -1472,7 +1472,8 @@ static GtkWidget *build_voice_output(void) {
     gtk_box_append(GTK_BOX(body), jsti_voice_credentials_group_new());
     GtkWidget *note = gtk_label_new(
         "Choose a recording in History, or open Text and export for typed/pasted text and an explicit clipboard "
-        "snapshot. External selected text is unavailable. Recording, another playback or Stop ends voice output.");
+        "snapshot. For external selected text, allow session access below and use a desktop shortcut after "
+        "refocusing the external field. Recording, another playback or Stop ends voice output.");
     gtk_label_set_wrap(GTK_LABEL(note), TRUE);
     gtk_label_set_xalign(GTK_LABEL(note), 0);
     gtk_widget_add_css_class(note, "dim-label");
@@ -1491,6 +1492,7 @@ static GtkWidget *build_voice_output(void) {
     gtk_box_append(GTK_BOX(actions), GTK_WIDGET(ui.voice_read));
     gtk_box_append(GTK_BOX(body), actions);
     gtk_box_append(GTK_BOX(column), card);
+    gtk_box_append(GTK_BOX(column), jsti_selection_access_group_new());
     return page;
 }
 
@@ -1909,6 +1911,10 @@ static gboolean action_shortcut_run(gint run, const char *page, gint slot) {
         if (ui.state != JSTI_STATE_IDLE) return FALSE;
         emit(JSTI_EVENT_PASTE_LAST_HISTORY, "", 0);
         return TRUE;
+    case 12:
+        if (ui.state != JSTI_STATE_IDLE) return FALSE;
+        emit(JSTI_EVENT_SPEAK_SELECTED_TEXT, "", 0);
+        return TRUE;
     default: return FALSE;
     }
 }
@@ -2119,6 +2125,7 @@ static gboolean parse_window_command(gint argc, const gchar *const *argv, Window
     const struct { const gchar *argument; gint run, slot; } actions[] = {
         { JSTI_TOGGLE_ARGUMENT, 1, 0 }, { JSTI_SPEAK_CLIPBOARD_ARGUMENT, 7, 0 },
         { JSTI_PASTE_LAST_HISTORY_ARGUMENT, 11, 0 },
+        { JSTI_SPEAK_SELECTED_TEXT_ARGUMENT, 12, 0 },
         { JSTI_STOP_SPEECH_ARGUMENT, 3, 0 }, { JSTI_PAUSE_SPEECH_ARGUMENT, 8, 0 },
         { JSTI_QUICK_VOICE_1_ARGUMENT, 6, 1 }, { JSTI_QUICK_VOICE_2_ARGUMENT, 6, 2 },
         { JSTI_QUICK_VOICE_3_ARGUMENT, 6, 3 }
@@ -2142,7 +2149,7 @@ static gboolean parse_window_command(gint argc, const gchar *const *argv, Window
 
 static gboolean is_forwardable_command(gint run, gint slot) {
     if (run == 6) return slot >= 1 && slot <= 3;
-    return slot == 0 && (run == 3 || run == 7 || run == 8 || run == 11);
+    return slot == 0 && (run == 3 || run == 7 || run == 8 || run == 11 || run == 12);
 }
 
 static gboolean parse_action_command(int argc, const gchar *const *argv, WindowCommand *command) {
@@ -4822,6 +4829,7 @@ static gboolean command_forwarding_self_test(void) {
     const gchar *mixed_output[] = { "justspeaktoit", JSTI_PASTE_LAST_HISTORY_ARGUMENT, JSTI_SPEAK_CLIPBOARD_ARGUMENT };
     const gchar *unknown[] = { "justspeaktoit", JSTI_SPEAK_CLIPBOARD_ARGUMENT, "--gapplication-service" };
     const struct { const gchar *argument; gint run, slot, event; } controls[] = {
+        { JSTI_SPEAK_SELECTED_TEXT_ARGUMENT, 12, 0, JSTI_EVENT_SPEAK_SELECTED_TEXT },
         { JSTI_STOP_SPEECH_ARGUMENT, 3, 0, JSTI_EVENT_PLAYBACK_STOP },
         { JSTI_PAUSE_SPEECH_ARGUMENT, 8, 0, JSTI_EVENT_SPEECH_PAUSE },
         { JSTI_QUICK_VOICE_1_ARGUMENT, 6, 1, JSTI_EVENT_QUICK_VOICE },
@@ -5038,6 +5046,13 @@ static gboolean command_process_self_test(char *error, size_t capacity) {
         gboolean sensitive, closing;
         const gchar *refusal;
     } cases[] = {
+        { JSTI_SPEAK_SELECTED_TEXT_ARGUMENT, NULL, JSTI_STATE_IDLE, JSTI_EVENT_SPEAK_SELECTED_TEXT, 0, TRUE, FALSE, NULL },
+        { JSTI_SPEAK_SELECTED_TEXT_ARGUMENT, JSTI_SPEAK_SELECTED_TEXT_ARGUMENT,
+            JSTI_STATE_IDLE, JSTI_EVENT_SPEAK_SELECTED_TEXT, 0, TRUE, FALSE, NULL },
+        { JSTI_SPEAK_SELECTED_TEXT_ARGUMENT, "--typo",
+            JSTI_STATE_IDLE, 0, 0, TRUE, FALSE, "Choose exactly one supported desktop action command" },
+        { JSTI_SPEAK_SELECTED_TEXT_ARGUMENT, JSTI_SPEAK_CLIPBOARD_ARGUMENT,
+            JSTI_STATE_IDLE, 0, 0, TRUE, FALSE, "Choose exactly one supported desktop action command" },
         { JSTI_SPEAK_CLIPBOARD_ARGUMENT, NULL, JSTI_STATE_IDLE, JSTI_EVENT_SPEAK_CLIPBOARD, 0, TRUE, FALSE, NULL },
         { JSTI_PASTE_LAST_HISTORY_ARGUMENT, NULL, JSTI_STATE_IDLE, JSTI_EVENT_PASTE_LAST_HISTORY, 0, TRUE, FALSE, NULL },
         { JSTI_PASTE_LAST_HISTORY_ARGUMENT, JSTI_PASTE_LAST_HISTORY_ARGUMENT,
@@ -5089,6 +5104,7 @@ static gboolean command_process_self_test(char *error, size_t capacity) {
     }
     g_clear_object(&primary);
     const gchar *cold[] = {
+        JSTI_SPEAK_SELECTED_TEXT_ARGUMENT,
         JSTI_SPEAK_CLIPBOARD_ARGUMENT, JSTI_PASTE_LAST_HISTORY_ARGUMENT, JSTI_STOP_SPEECH_ARGUMENT,
         JSTI_PAUSE_SPEECH_ARGUMENT, JSTI_QUICK_VOICE_1_ARGUMENT, JSTI_QUICK_VOICE_2_ARGUMENT, JSTI_QUICK_VOICE_3_ARGUMENT
     };

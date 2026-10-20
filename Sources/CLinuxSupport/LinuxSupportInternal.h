@@ -39,6 +39,7 @@ struct _GtkWidget *jsti_api_keys_group_new(struct _GtkWindow *owner);
 int32_t jsti_api_keys_self_test(struct _GtkWindow *owner, char *error, size_t capacity);
 typedef gboolean (*jsti_action_run_fn)(gint run, const char *page, gint slot);
 struct _GtkWidget *jsti_action_shortcuts_group_new(struct _GtkWindow *owner);
+struct _GtkWidget *jsti_selection_access_group_new(void);
 gboolean jsti_action_shortcuts_key(struct _GtkEventControllerKey *controller,
     guint keyval, guint keycode, guint modifiers, struct _GtkWidget *focused, jsti_action_run_fn run);
 void jsti_action_shortcuts_release(guint keycode);

@@ -257,6 +257,8 @@ private func linuxActionEvent(_ event: Int, value: String, slot: Int, holder: Li
         linuxActionShortcutEdit(value, holder: holder)
     case Int(JSTI_EVENT_SPEAK_CLIPBOARD):
         holder.enqueueSettings { await holder.controller.readClipboardAloud() }
+    case Int(JSTI_EVENT_SPEAK_SELECTED_TEXT):
+        holder.speakSelectedText()
     case Int(JSTI_EVENT_API_KEYS):
         if jsti_window_request_api_keys() != 0 {
             LinuxHostPlatform.update("API Keys could not be opened. Try again when the app is idle.")

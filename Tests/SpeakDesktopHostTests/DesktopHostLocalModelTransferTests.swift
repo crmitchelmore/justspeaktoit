@@ -133,8 +133,10 @@ final class DesktopHostLocalModelTransferTests: XCTestCase {
         let before = await controller.settings
         for value in [AnyCodable(.bool(true)), AnyCodable(.array([.string(live)])), AnyCodable(.int(1))] {
             let file = try document([batchKey: AnyCodable(.string(batch)), liveKey: value])
-            do { try await controller.importConfiguration(path: file.path); XCTFail("Invalid model choice accepted") }
-            catch { XCTAssertTrue(error.localizedDescription.contains("Local model choice")) }
+            do {
+                try await controller.importConfiguration(path: file.path)
+                XCTFail("Invalid model choice accepted")
+            } catch { XCTAssertTrue(error.localizedDescription.contains("Local model choice")) }
             let after = await controller.settings
             XCTAssertEqual(after.model, before.model)
             XCTAssertEqual(after.localModel, before.localModel)
@@ -154,8 +156,10 @@ final class DesktopHostLocalModelTransferTests: XCTestCase {
         let before = try Data(contentsOf: file)
         effects.refusesWrites = true
         let source = try document([liveKey: AnyCodable(.string(live))])
-        do { try await controller.importConfiguration(path: source.path); XCTFail("Failed write accepted") }
-        catch { XCTAssertEqual((error as NSError).code, CocoaError.fileWriteOutOfSpace.rawValue) }
+        do {
+            try await controller.importConfiguration(path: source.path)
+            XCTFail("Failed write accepted")
+        } catch { XCTAssertEqual((error as NSError).code, CocoaError.fileWriteOutOfSpace.rawValue) }
         let saved = await controller.settings
         XCTAssertNil(saved.localLiveModel)
         XCTAssertEqual(try Data(contentsOf: file), before)
@@ -165,8 +169,10 @@ final class DesktopHostLocalModelTransferTests: XCTestCase {
     func testFailedNativePublication_ReportsSavedStateAndSurvivesRestart() async throws {
         FakeLog.shared.refuseLocalChoices(true)
         let source = try document([liveKey: AnyCodable(.string(live))])
-        do { try await controller.importConfiguration(path: source.path); XCTFail("Publication failure ignored") }
-        catch {
+        do {
+            try await controller.importConfiguration(path: source.path)
+            XCTFail("Publication failure ignored")
+        } catch {
             XCTAssertTrue(error.localizedDescription.contains("Configuration saved"))
             XCTAssertTrue(error.localizedDescription.contains("Reopen the app"))
         }

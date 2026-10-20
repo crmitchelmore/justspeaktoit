@@ -3,26 +3,30 @@
 
 static struct {
     AdwComboRow *source, *mode;
-    gboolean suppress, idle, remote_live;
+    gboolean suppress, idle, remote_live, local_live;
     void (*changed)(gboolean local, gboolean live);
 } filters;
 
 gboolean jsti_model_filters_local(void) { return adw_combo_row_get_selected(filters.source) == 1; }
 gboolean jsti_model_filters_live(void) {
-    return !jsti_model_filters_local() && adw_combo_row_get_selected(filters.mode) == 1;
+    return adw_combo_row_get_selected(filters.mode) == 1;
+}
+gboolean jsti_model_filters_preferred_live(gboolean local) {
+    return local ? filters.local_live : filters.remote_live;
 }
 
 void jsti_model_filters_set_idle(gboolean idle) {
     filters.idle = idle;
     gtk_widget_set_sensitive(GTK_WIDGET(filters.source), idle);
-    gtk_widget_set_sensitive(GTK_WIDGET(filters.mode), idle && !jsti_model_filters_local());
+    gtk_widget_set_sensitive(GTK_WIDGET(filters.mode), idle);
 }
 
 void jsti_model_filters_select(gboolean local, gboolean live) {
     filters.suppress = TRUE;
     adw_combo_row_set_selected(filters.source, local ? 1 : 0);
-    if (!local) filters.remote_live = live;
-    adw_combo_row_set_selected(filters.mode, local ? 0 : (live ? 1 : 0));
+    if (local) filters.local_live = live;
+    else filters.remote_live = live;
+    adw_combo_row_set_selected(filters.mode, live ? 1 : 0);
     jsti_model_filters_set_idle(filters.idle);
     filters.suppress = FALSE;
 }
@@ -31,19 +35,17 @@ static void on_source(GObject *object, GParamSpec *spec, gpointer data) {
     (void)object; (void)spec; (void)data;
     if (filters.suppress) return;
     gboolean local = jsti_model_filters_local();
-    jsti_model_filters_select(local, filters.remote_live);
+    jsti_model_filters_select(local, local ? filters.local_live : filters.remote_live);
     if (filters.changed) filters.changed(local, jsti_model_filters_live());
 }
 
 static void on_mode(GObject *object, GParamSpec *spec, gpointer data) {
     (void)object; (void)spec; (void)data;
     if (filters.suppress) return;
-    if (jsti_model_filters_local()) {
-        jsti_model_filters_select(TRUE, FALSE);
-        return;
-    }
-    filters.remote_live = jsti_model_filters_live();
-    if (filters.changed) filters.changed(FALSE, filters.remote_live);
+    gboolean local = jsti_model_filters_local(), live = jsti_model_filters_live();
+    if (local) filters.local_live = live;
+    else filters.remote_live = live;
+    if (filters.changed) filters.changed(local, live);
 }
 
 void jsti_model_filters_add(struct _GtkWidget *group, void (*changed)(gboolean local, gboolean live)) {
@@ -74,26 +76,42 @@ static void record_change(gboolean local, gboolean live) {
 
 int32_t jsti_model_filters_self_test(char *error, size_t capacity) {
     gboolean local = jsti_model_filters_local(), live = jsti_model_filters_live();
-    gboolean idle = filters.idle, remote_live = filters.remote_live;
+    gboolean idle = filters.idle, remote_live = filters.remote_live, local_live = filters.local_live;
     void (*changed)(gboolean, gboolean) = filters.changed;
     filters.changed = record_change;
     guint before = recorded.count;
     jsti_model_filters_select(TRUE, FALSE);
-    gboolean batch_only = jsti_model_filters_local() && !jsti_model_filters_live() &&
-        !gtk_widget_get_sensitive(GTK_WIDGET(filters.mode)) && recorded.count == before;
-    adw_combo_row_set_selected(filters.mode, 1);
-    batch_only = batch_only && !jsti_model_filters_live() && adw_combo_row_get_selected(filters.mode) == 0;
     jsti_model_filters_select(FALSE, FALSE);
     jsti_model_filters_set_idle(TRUE);
+    gboolean quiet = recorded.count == before;
     adw_combo_row_set_selected(filters.mode, 1);
     gboolean remote = recorded.count == before + 1 && !recorded.local && recorded.live &&
         gtk_widget_get_sensitive(GTK_WIDGET(filters.mode));
+    adw_combo_row_set_selected(filters.source, 1);
+    gboolean local_batch = recorded.count == before + 2 && recorded.local && !recorded.live &&
+        jsti_model_filters_local() && !jsti_model_filters_live() &&
+        gtk_widget_get_sensitive(GTK_WIDGET(filters.mode));
+    adw_combo_row_set_selected(filters.mode, 1);
+    gboolean local_live_selected = recorded.count == before + 3 && recorded.local && recorded.live &&
+        jsti_model_filters_local() && jsti_model_filters_live();
+    adw_combo_row_set_selected(filters.source, 0);
+    gboolean remote_remembered = recorded.count == before + 4 && !recorded.local && recorded.live;
+    adw_combo_row_set_selected(filters.mode, 0);
+    adw_combo_row_set_selected(filters.source, 1);
+    gboolean local_remembered = recorded.count == before + 6 && recorded.local && recorded.live;
+    jsti_model_filters_set_idle(FALSE);
+    gboolean busy = !gtk_widget_get_sensitive(GTK_WIDGET(filters.source)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(filters.mode));
+    jsti_model_filters_set_idle(TRUE);
+    busy = busy && gtk_widget_get_sensitive(GTK_WIDGET(filters.source)) &&
+        gtk_widget_get_sensitive(GTK_WIDGET(filters.mode));
     jsti_model_filters_select(local, live);
     filters.remote_live = remote_live;
+    filters.local_live = local_live;
     jsti_model_filters_set_idle(idle);
     filters.changed = changed;
-    if (!batch_only || !remote) {
-        jsti_set_error(error, capacity, "Model filters did not keep Local batch-only or preserve Remote live.");
+    if (!quiet || !remote || !local_batch || !local_live_selected || !remote_remembered || !local_remembered || !busy) {
+        jsti_set_error(error, capacity, "Model filters did not preserve independent Local/Remote Batch/Live modes.");
         return -1;
     }
     return 0;

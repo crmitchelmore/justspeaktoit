@@ -429,6 +429,21 @@ still excludes external selection because opening it changes focus.
 Pure contract and command fixtures are authored, NOT_RUN locally; real field,
 provider/audio and compositor acceptance remain unverified.
 
+Linux also offers **Local > Live** for the pinned executable Whisper catalogue.
+It uses the shared in-process streaming engine with the same downloaded model,
+runtime and install/removal ownership as Local Batch; imported models remain
+batch-only. The Mode picker stays available under either source while idle, and
+four saved model choices survive restart independently. Local Live never needs a
+provider key or a qualified WebSocket transport.
+
+The existing native local-transcription CLI check now sends its WAV fixture
+through `DesktopLiveSession` and the Linux recognizer as well: text must arrive
+before finish, and finish must preserve the expected phrase. Readiness polling
+has a 30-second bound and returns as soon as text arrives. The existing model
+step/job ceilings are unchanged. The GTK smoke checks cover actual row filtering,
+four remembered slots and Local/Remote mode memory. These additions are authored
+NOT_RUN locally and do not prove microphone performance or installed acceptance.
+
 Before the keyring and desktop integration checks, the harness runs
 `--integration-test atspi-selection` against an external synthetic AT-SPI
 service, each time on its own nested private bus. The fixture refuses a

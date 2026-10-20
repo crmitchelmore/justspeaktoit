@@ -247,3 +247,36 @@ final class DesktopHostLocalModelsTests: XCTestCase {
         XCTAssertEqual(saved?["localUseGPU"] as? Bool, false)
     }
 }
+
+extension DesktopHostLocalModelsTests {
+    func testLinuxBatchAndLiveChoicesSurviveRestartInFourSeparateSlots() async throws {
+        DesktopHostModels.configure(
+            streamingQualified: true, local: DesktopLocalTranscription.options(host: .linux),
+            localLive: DesktopLocalStreaming.options(host: .linux)
+        )
+        let batch = try XCTUnwrap(DesktopTranscription.batchModels.first).id
+        let remoteLive = try XCTUnwrap(DesktopHostModels.live.first).id
+        let localLive = DesktopLocalStreaming.liveModelID(for: tiny)
+        for identifier in [batch, remoteLive, tiny.catalogueID, localLive] {
+            let slot = try XCTUnwrap(DesktopHostModels.all.firstIndex { $0.id == identifier })
+            let saved = await controller.selectModel(slot)
+            XCTAssertTrue(saved)
+        }
+        let preferences = await controller.preferredModelIDs()
+        XCTAssertEqual(preferences.batch, batch)
+        XCTAssertEqual(preferences.live, remoteLive)
+        XCTAssertEqual(preferences.local, tiny.catalogueID)
+        XCTAssertEqual(preferences.localLive, localLive)
+        await controller.close()
+        controller = try DesktopHostController<FakeLocalPlatform>(directory: directory, effects: LocalEffects())
+        let restored = await controller.preferredModelIDs()
+        XCTAssertEqual(restored.batch, batch)
+        XCTAssertEqual(restored.live, remoteLive)
+        XCTAssertEqual(restored.local, tiny.catalogueID)
+        XCTAssertEqual(restored.localLive, localLive)
+        let selected = await controller.selectedIndex()
+        XCTAssertEqual(DesktopHostModels.all[selected].id, localLive)
+        XCTAssertTrue(DesktopHostModels.isLocal(localLive))
+        XCTAssertFalse(DesktopHostModels.isLive(localLive), "The remote transport must never receive local audio")
+    }
+}

@@ -267,6 +267,9 @@ void jsti_window_end_cleanup_preview(uint64_t ticket);
 int32_t jsti_vocabulary_set(int32_t kind, const char *payload, int32_t refresh);
 int32_t jsti_window_set_model_catalog(
     const JSTIModelRow *rows, size_t count, int32_t selected, const char *status, int32_t refreshing);
+/* Remembered global slots for Remote Batch/Live and Local Batch/Live.
+ * Queued before window construction; -1 means no saved model for that mode. */
+int32_t jsti_window_set_preferred_models(int32_t batch, int32_t live, int32_t local, int32_t local_live);
 int32_t jsti_window_set_microphones(
     const char *const *ids, const char *const *names, size_t count, const char *selected);
 int32_t jsti_window_set_history(const JSTIHistoryRow *rows, size_t count, const char *selected_id);

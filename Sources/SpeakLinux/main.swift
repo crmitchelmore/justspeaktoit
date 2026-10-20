@@ -154,7 +154,8 @@ func forwardDesktopAction(_ arguments: [String]) throws {
 }
 
 let arguments = CommandLine.arguments
-if arguments.contains(JSTI_SPEAK_CLIPBOARD_ARGUMENT) || arguments.contains(JSTI_PASTE_LAST_HISTORY_ARGUMENT) {
+let actionArguments = LinuxActionShortcutRun.forwardedCommandArguments
+if arguments.contains(where: { actionArguments.contains($0) }) {
     do { try forwardDesktopAction(arguments) } catch { fail(error) }
     exit(0)
 }

@@ -107,6 +107,11 @@ enum {
 #define JSTI_TOGGLE_ARGUMENT "--toggle"
 #define JSTI_SPEAK_CLIPBOARD_ARGUMENT "--speak-clipboard"
 #define JSTI_PASTE_LAST_HISTORY_ARGUMENT "--paste-last-history"
+#define JSTI_STOP_SPEECH_ARGUMENT "--stop-speech"
+#define JSTI_PAUSE_SPEECH_ARGUMENT "--pause-resume-speech"
+#define JSTI_QUICK_VOICE_1_ARGUMENT "--quick-voice-1"
+#define JSTI_QUICK_VOICE_2_ARGUMENT "--quick-voice-2"
+#define JSTI_QUICK_VOICE_3_ARGUMENT "--quick-voice-3"
 
 /* Forward an action command before constructing a controller or opening stores.
  * Refuses a missing primary instance without activating any window. */

@@ -357,6 +357,13 @@ invariants, including the 256-variant bound; these changes are NOT_RUN locally.
 
 With the app **already running**, desktop keyboard settings can also bind
 `justspeaktoit --speak-clipboard` and `justspeaktoit --paste-last-history`.
+The same running-app forwarding path supports `--stop-speech`,
+`--pause-resume-speech`, and `--quick-voice-1`, `--quick-voice-2` or
+`--quick-voice-3`. Quick Voice selects the corresponding saved favorite; it does
+not start speech, record an instruction, or read selection/clipboard text.
+Pause/Resume acts on the active speech through the existing Host policy.
+Stop uses the existing Playback Stop action and is refused when that control is
+unavailable; it remains usable during other work when Playback Stop is enabled.
 Inside Flatpak use `flatpak run com.justspeaktoit.JustSpeakToIt` followed by the
 same argument. These commands forward without presenting the window, preserving
 the external app's focus. Speak Clipboard uses the saved Voice Output settings;
@@ -365,12 +372,15 @@ not the selected History row. Clipboard-only output requires no external field.
 X11 requires a captured external window for paste; Wayland retains the existing
 portal delivery-time-focus and recovery-copy behavior, not an anchored-field
 guarantee. Forwarding happens before model/controller construction or opening
-application stores. A cold invocation of either new command exits nonzero
+application stores. A cold invocation of any of these commands exits nonzero
 instead of opening a window and acting on the wrong focus.
 
 Choose one action per invocation; different action flags together or unsupported
-options are refused before dispatch. A busy, recording, closing or modal-disabled
-app refuses the new commands with a nonzero exit status. Status 0 means admitted
+options are refused before dispatch, including two different Quick Voice slots.
+Busy/recording states refuse clipboard speech, History paste, Pause/Resume and
+Quick Voice; closing or modal-disabled windows refuse all commands. Stop follows
+its own control's availability as described above. Refusal returns a nonzero exit
+status. Status 0 means admitted
 to the running app, not that speech or paste completed; results and provider
 errors appear in the app.
 Bindings remain user-owned desktop configuration: the saved Global switch
@@ -378,12 +388,14 @@ does not automatically register these actions. Parser and native dispatch
 fixtures are authored but NOT_RUN locally.
 
 `scripts/linux-desktop-checks.sh` also opts into a cross-process fixture only
-inside its private session bus. It launches 13 real command-client processes
+inside its private session bus. It launches 28 real command-client processes
 against the production native command handler with a synthetic event callback:
 valid and repeated commands, `--background`, mixed action flags, unsupported
-options, busy/recording/modal/closing refusal, and both commands with no primary.
+options, Quick Voice slot identity/conflicts, Stop availability during idle and
+working states, busy/recording/modal/closing refusal, and all seven commands with
+no primary.
 Each child has a 15-second deadline and is reaped; the smoke-test envelope is
-240 seconds. The fixture requires exact callback identity/count, unchanged page
+540 seconds. The fixture requires exact callback identity/count/slot, unchanged page
 and hidden-window visibility, refusal diagnostics, and an empty isolated data
 directory after all clients. A separate smoke-window application path avoids
 colliding with the fixture's real GApplication identity; a private main context

@@ -181,15 +181,20 @@ validation and busy/recording/parent/page-independent dispatch fixtures are
 authored but NOT_RUN locally. They need automatic qualification. Clipboard
 delivery alone is not evidence of external-field paste or global-shortcut parity.
 
-Linux also exposes `--speak-clipboard` and `--paste-last-history` through the
-existing GApplication command-forwarding path. The app must already be running:
+Linux also exposes `--speak-clipboard`, `--paste-last-history`, `--stop-speech`,
+`--pause-resume-speech` and `--quick-voice-1` / `--quick-voice-2` /
+`--quick-voice-3` through the existing GApplication command-forwarding path.
+Quick Voice selects a saved favorite without reading text or starting speech.
+Stop reuses Playback Stop availability, including during other work, while the
+other commands reuse their existing idle gates. The app must already be running:
 cold invocations are refused, and forwarding never raises the app window.
 Users can bind them in desktop keyboard settings; global action rows explain
 this fallback without presenting the saved binding as registered. Different
 action flags or unsupported options together are refused before dispatch. Busy,
-recording, closing and modal-disabled states refuse the commands through the
-existing action gates. Command parser/dispatch fixtures are authored but NOT_RUN
-locally. The automatic desktop-check harness additionally enables 13 real child
+recording, closing and modal-disabled states refuse commands according to those
+existing action gates; distinct Quick Voice slots conflict before dispatch.
+Command parser/dispatch fixtures are authored but NOT_RUN locally.
+The automatic desktop-check harness additionally enables 28 real child
 command processes on its private bus with synthetic native event capture, bounded
 waits, refusal diagnostics, hidden-window/page invariants and an empty isolated
 data-directory requirement. This does not deliver a Host/provider/field action.

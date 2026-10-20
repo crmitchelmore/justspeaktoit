@@ -155,17 +155,16 @@ enum LinuxLocalSelfTest {
         let result = try await DesktopLocalTranscription.transcribe(
             audioURL: URL(fileURLWithPath: audio), model: spec, modelFile: file, language: "en", recognizer: recognizer
         )
-        let elapsed = Date().timeIntervalSince(started)
-        let normalised = { (text: String) in
-            text.lowercased().unicodeScalars.filter { CharacterSet.letters.contains($0) || $0 == " " }
-                .reduce(into: "") { $0.unicodeScalars.append($1) }
-        }
         print("Runtime: \(runtime.description)")
         print("Transcript: \(result.text)")
-        guard normalised(result.text).contains(normalised(expected)) else {
+        guard normalisedTranscript(result.text).contains(normalisedTranscript(expected)) else {
             throw DesktopHostError(message: "Local transcription did not contain the expected phrase.")
         }
+        try await checkLive(
+            runtime: runtime, spec: spec, file: file, audio: URL(fileURLWithPath: audio), expected: expected
+        )
         try await checkSilenceAndCancellation(runtime: runtime, spec: spec, file: file)
+        let elapsed = Date().timeIntervalSince(started)
         let timing = String(format: "%.2f s (audio %.2f s)", elapsed, result.duration)
         print("Local transcription self-test passed in \(timing).")
     }
@@ -210,6 +209,53 @@ enum LinuxLocalSelfTest {
 
     private static func failure(_ message: String) -> DesktopHostError {
         DesktopHostError(message: "Local model self-test: \(message).")
+    }
+}
+
+extension LinuxLocalSelfTest {
+    private static func normalisedTranscript(_ text: String) -> String {
+        text.lowercased().unicodeScalars.filter { CharacterSet.letters.contains($0) || $0 == " " }
+            .reduce(into: "") { $0.unicodeScalars.append($1) }
+    }
+
+    private static func checkLive(
+        runtime: LinuxWhisperRuntime, spec: WhisperCppModel, file: URL, audio: URL, expected: String
+    ) async throws {
+        let input = try DesktopLocalAudio.read(audio, maximumBytes: DesktopLocalTranscription.maximumAudioBytes)
+        let session = DesktopLiveSession(client: DesktopLocalStreamingClient(
+            recognizer: LinuxWhisperRecognizer(runtime: runtime), model: spec, modelFile: file, language: "en"
+        ))
+        defer { session.cancel() }
+        session.start()
+        var offset = 0
+        while offset < input.samples.count {
+            try Task.checkCancellation()
+            let end = min(offset + 1_600, input.samples.count)
+            var frame = Data(capacity: (end - offset) * 2)
+            for sample in input.samples[offset..<end] {
+                let bits = UInt16(bitPattern: Int16(clamping: Int((sample * 32_768).rounded())))
+                frame.append(UInt8(truncatingIfNeeded: bits))
+                frame.append(UInt8(truncatingIfNeeded: bits >> 8))
+            }
+            session.sendAudio(frame)
+            offset = end
+        }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(30))
+        while session.snapshot().text.isEmpty, session.snapshot().error == nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let preview = session.snapshot()
+        guard preview.phase == .recording, preview.error == nil, !preview.text.isEmpty else {
+            throw DesktopHostError(
+                message: "Local live transcription produced no pre-finish transcript: \(preview.error ?? "timed out")."
+            )
+        }
+        let completed = await session.finish()
+        guard completed.phase == .finished, completed.error == nil,
+              normalisedTranscript(completed.text).contains(normalisedTranscript(expected)) else {
+            throw DesktopHostError(message: "Local live transcription did not finish with the expected phrase.")
+        }
+        print("Local live runtime: transcript delivered before finish; expected phrase retained in the final session.")
     }
 }
 

@@ -23,6 +23,7 @@ typedef struct Slot {
 typedef struct Models Models;
 static void models_free(gpointer pointer);
 static void on_model_filter(gboolean local, gboolean live);
+static guint model_mode(gboolean local, gboolean live) { return (local ? 2 : 0) + (live ? 1 : 0); }
 
 static GMutex cleanup_lock;
 static guint64 cleanup_ticket;
@@ -55,7 +56,7 @@ typedef struct UI {
     GtkStringList *model_names;
     GArray *model_slots;
     Models *model_catalog;
-    gint32 preferred_model_slots[3];
+    gint32 preferred_model_slots[4];
     AdwComboRow *model_row;
     GtkLabel *catalog_status;
     GtkButton *catalog_refresh;
@@ -397,7 +398,7 @@ static void on_model(GObject *object, GParamSpec *spec, gpointer data) {
     refresh_setup();
     gint32 slot = selected_model_slot();
     if (!ui.suppress && slot >= 0) {
-        guint mode = jsti_model_filters_local() ? 2 : (jsti_model_filters_live() ? 1 : 0);
+        guint mode = model_mode(jsti_model_filters_local(), jsti_model_filters_live());
         ui.preferred_model_slots[mode] = slot;
     }
     if (slot >= 0) emit(JSTI_EVENT_SELECT_MODEL, "", slot);
@@ -2556,7 +2557,7 @@ static void filter_models(gint32 keep) {
 }
 
 static void on_model_filter(gboolean local, gboolean live) {
-    guint mode = local ? 2 : (live ? 1 : 0);
+    guint mode = model_mode(local, live);
     filter_models(ui.preferred_model_slots[mode]);
     gint32 selected = selected_model_slot();
     if (selected >= 0) {
@@ -2580,7 +2581,7 @@ static void models_apply(gpointer pointer) {
         if (slot.global == keep) {
             gboolean local = g_str_has_prefix(slot.id, "local/");
             jsti_model_filters_select(local, slot.live);
-            ui.preferred_model_slots[local ? 2 : (slot.live ? 1 : 0)] = keep;
+            ui.preferred_model_slots[model_mode(local, slot.live)] = keep;
         }
     }
     filter_models(keep);
@@ -2600,6 +2601,16 @@ int32_t jsti_window_set_model_catalog(
     models->status = g_strdup(status);
     models->refreshing = refreshing != 0;
     return post(models_apply, models, models_free);
+}
+
+static void model_preferences_apply(gpointer pointer) {
+    memcpy(ui.preferred_model_slots, pointer, sizeof(ui.preferred_model_slots));
+}
+
+int32_t jsti_window_set_preferred_models(int32_t batch, int32_t live, int32_t local, int32_t local_live) {
+    if (batch < -1 || live < -1 || local < -1 || local_live < -1) return -1;
+    const gint32 values[] = { batch, live, local, local_live };
+    return post(model_preferences_apply, g_memdup2(values, sizeof(values)), g_free);
 }
 
 typedef struct Microphones {
@@ -4423,6 +4434,49 @@ static void observe_event(gint32 event, const char *text, gint32 index, void *co
     observed.index = index;
 }
 
+/* Real model rows must remain distinct across all four source/mode pairs. */
+static gboolean model_modes_self_test(void) {
+    if (ui.model_catalog == NULL) return FALSE;
+    gint32 saved[4], preferred[] = { -1, -1, -1, -1 };
+    guint counts[4] = {0};
+    memcpy(saved, ui.preferred_model_slots, sizeof(saved));
+    gint32 selection = selected_model_slot();
+    gboolean local = jsti_model_filters_local(), live = jsti_model_filters_live();
+    gboolean remote_live = jsti_model_filters_preferred_live(FALSE);
+    gboolean local_live = jsti_model_filters_preferred_live(TRUE), suppress = ui.suppress;
+    jsti_window_event_fn callback = ui.callback;
+    for (guint i = 0; i < ui.model_catalog->slots->len; ++i) {
+        Slot slot = g_array_index(ui.model_catalog->slots, Slot, i);
+        guint mode = model_mode(g_str_has_prefix(slot.id, "local/"), slot.live);
+        preferred[mode] = slot.global;
+        ++counts[mode];
+    }
+    gboolean okay = counts[0] > 0 && counts[2] > 0 && counts[3] > 0 &&
+        jsti_window_set_preferred_models(-2, -1, -1, -1) == -1;
+    model_preferences_apply(preferred);
+    ui.callback = observe_event;
+    const guint modes[] = { 0, 2, 3, 1, 3, 2 };
+    for (guint i = 0; okay && i < G_N_ELEMENTS(modes); ++i) {
+        guint mode = modes[i];
+        if (counts[mode] == 0) continue;
+        jsti_model_filters_select(mode >= 2, (mode & 1) != 0);
+        observed.event = 0;
+        on_model_filter(mode >= 2, (mode & 1) != 0);
+        okay = selected_model_slot() == preferred[mode] && ui.model_slots->len == counts[mode] &&
+            observed.event == JSTI_EVENT_SELECT_MODEL && observed.index == preferred[mode] &&
+            gtk_widget_get_visible(GTK_WIDGET(ui.key_row)) == (mode < 2);
+    }
+    jsti_model_filters_select(FALSE, remote_live);
+    jsti_model_filters_select(TRUE, local_live);
+    jsti_model_filters_select(local, live);
+    model_preferences_apply(saved);
+    filter_models(selection);
+    ui.suppress = suppress;
+    ui.callback = callback;
+    g_clear_pointer(&observed.text, g_free);
+    return okay;
+}
+
 /* Read aloud follows the presented record: offered while its text is shown
  * and the window is idle, it reports that record, and the voice picker
  * reports the chosen position. */
@@ -5565,6 +5619,8 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     }
     if (jsti_local_models_self_test(error, capacity) != 0) return -1;
     if (jsti_model_filters_self_test(error, capacity) != 0) return -1;
+    if (!model_modes_self_test())
+        return fail(error, capacity, "Model picker did not isolate and restore all four Source/Mode choices");
     if (jsti_cloud_sync_self_test(error, capacity) != 0) return -1;
     if (jsti_history_filters_self_test(error, capacity) != 0) return -1;
     if (jsti_vocabulary_self_test(error, capacity) != 0) return -1;

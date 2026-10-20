@@ -59,6 +59,7 @@ void jsti_model_filters_select(gboolean local, gboolean live);
 void jsti_model_filters_set_idle(gboolean idle);
 gboolean jsti_model_filters_local(void);
 gboolean jsti_model_filters_live(void);
+gboolean jsti_model_filters_preferred_live(gboolean local);
 int32_t jsti_model_filters_self_test(char *error, size_t capacity);
 
 /* The iCloud sync group (LinuxCloudSync.c): built once for the window's

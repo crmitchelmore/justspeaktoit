@@ -146,9 +146,9 @@ final class BlockingVoiceVaultGate: @unchecked Sendable {
         condition.unlock()
     }
 
-    func watchdog() -> Task<Void, Never> {
+    func watchdog(after delay: Duration = .seconds(10)) -> Task<Void, Never> {
         Task.detached {
-            do { try await Task.sleep(for: .seconds(10)) } catch { return }
+            do { try await Task.sleep(for: delay) } catch { return }
             self.release()
         }
     }

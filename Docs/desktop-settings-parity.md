@@ -56,6 +56,11 @@ saved state instead of announcing success. Cancelled per-feature saves do not
 continue applying post-processing settings. Four regressions cover blocked
 native and saved-by-hand writes, cross-editor exclusion, bounded Host close
 and partial-write error redaction. They are authored but NOT_RUN locally.
+Readiness is signalled from inside the actual vault call, not inferred from
+elapsed time. The new fixtures allow ten seconds for native entry and use a
+thirty-second emergency release; their Host shutdown grace remains forty
+milliseconds and must return while the vault gate is still blocked. Existing
+Voice fixture watchdog defaults are unchanged.
 This is Host write ownership, not a new queue-drain contract for the native
 Transcription and Post-processing settings event queues.
 

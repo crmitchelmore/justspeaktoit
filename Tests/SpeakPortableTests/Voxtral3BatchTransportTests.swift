@@ -14,7 +14,12 @@ final class Voxtral3BatchTransportTests: DeepgramSpeechStubTestCase {
         let audioURL = directory.appendingPathComponent("speech.wav")
         try DeepgramSpeechFixture.canonicalWAV(pcm: pcm).write(to: audioURL)
         let stagingURL = directory.appendingPathComponent("uploads")
-        let staging = SharedMultipartUploadStaging(directory: stagingURL, securityPolicy: .posix)
+        let staging = SharedMultipartUploadStaging(directory: stagingURL, securityPolicy: .init(
+            prepareDirectory: { url, manager in
+                try manager.createDirectory(at: url, withIntermediateDirectories: true)
+            },
+            createFile: { url, manager in manager.createFile(atPath: url.path, contents: nil) }
+        ))
         let client = MistralBatchClient(
             session: session, multipartStaging: staging, keywords: ["Alder Creek Design"],
             durationResolver: { _ in 2 })

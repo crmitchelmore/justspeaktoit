@@ -5,6 +5,9 @@ import XCTest
 import WinSDK
 #endif
 
+// WinSDK also exports a C `UUID` (GUID), which makes bare `UUID()` ambiguous on Windows.
+private typealias UUID = Foundation.UUID
+
 final class DesktopVoiceEditScratchTests: XCTestCase {
     private var directory: URL!
 
@@ -126,8 +129,8 @@ final class DesktopVoiceEditScratchTests: XCTestCase {
         let other = directory.appendingPathComponent("other.wav")
         try Data("keep".utf8).write(to: audio)
         #if os(Windows)
-        let source = try XCTUnwrap(audio.withUnsafeFileSystemRepresentation { $0.map(String.init(cString:)) })
-        let target = try XCTUnwrap(other.withUnsafeFileSystemRepresentation { $0.map(String.init(cString:)) })
+        let source = try XCTUnwrap(fileSystemPath(audio))
+        let target = try XCTUnwrap(fileSystemPath(other))
         let sourceWide = Array(source.utf16) + [0]
         let targetWide = Array(target.utf16) + [0]
         let created = targetWide.withUnsafeBufferPointer { targetBuffer in
@@ -141,6 +144,14 @@ final class DesktopVoiceEditScratchTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: audio), Data("keep".utf8))
         XCTAssertEqual(try Data(contentsOf: other), Data("keep".utf8))
     }
+
+    #if os(Windows)
+    private func fileSystemPath(_ url: URL) -> String? {
+        url.withUnsafeFileSystemRepresentation { (path: UnsafePointer<CChar>?) -> String? in
+            path.map { String(cString: $0) }
+        }
+    }
+    #endif
 
     #if !os(Windows)
     func testPublicDirectory_IsNotAcceptedAsPrivateScratch() throws {

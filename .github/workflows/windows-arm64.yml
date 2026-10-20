@@ -309,7 +309,7 @@ jobs:
 
       - name: Upload developer executable
         if: ${{ !cancelled() && steps.developer-stage.outcome == 'success' }}
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: justspeaktoit-windows-arm64-developer-${{ github.sha }}
           path: windows-arm64-developer-build/
@@ -320,7 +320,7 @@ jobs:
       # this production executable.
       - name: Upload the production ARM64 app for bundling
         if: ${{ !cancelled() && steps.production.outcome == 'success' }}
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-arm64-app
           path: windows-arm64-app/
@@ -329,7 +329,7 @@ jobs:
 
       - name: Upload native test and execution evidence
         if: always()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-arm64-test-evidence-${{ github.sha }}
           path: |
@@ -405,7 +405,7 @@ jobs:
             tee "$output/bootstrap.log"
       - name: Upload the self-contained ARM64 runtime bundle
         if: always()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-runtime-bundle-arm64
           path: ${{ runner.temp }}/windows-runtime-bundle-arm64/
@@ -452,7 +452,7 @@ jobs:
             -LocalModelDirectory (Join-Path $env:GITHUB_WORKSPACE 'local-models')
       - name: Upload bundle execution evidence
         if: always()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-runtime-bundle-arm64-execution-evidence
           path: ${{ runner.temp }}/bundle-run/evidence/
@@ -514,7 +514,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
       - name: Upload the unsigned ARM64 developer package
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-developer-msix-arm64-unsigned
           path: |
@@ -556,7 +556,7 @@ jobs:
             -Workspace (Join-Path $env:RUNNER_TEMP 'package-admission-control')
       - name: Upload lifecycle evidence
         if: always()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-developer-msix-arm64-lifecycle-evidence
           path: |

@@ -253,7 +253,7 @@ jobs:
 
       - name: Upload snapshot failures
         if: failure()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: snapshot-failures
           path: ${{ runner.temp }}/snapshot-failures
@@ -405,7 +405,7 @@ jobs:
       - name: Upload stage diagnostics
         if: always()
         timeout-minutes: 3
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: core-journey-e2e-${{ github.run_attempt }}
           path: .artifacts/core-journey-e2e
@@ -441,7 +441,7 @@ jobs:
       - name: Upload launched-app diagnostics
         if: always()
         timeout-minutes: 3
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: core-journey-fixture-ui-${{ github.run_attempt }}
           path: |
@@ -511,7 +511,7 @@ jobs:
             "$RUNNER_TEMP/SpeakiOS.xctestproducts" "$RUNNER_TEMP/ios-test-products.tar.gz"
       - name: Upload immutable test products
         id: products
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ios-test-products-${{ github.run_attempt }}
           path: ${{ runner.temp }}/ios-test-products.tar.gz
@@ -519,7 +519,7 @@ jobs:
           if-no-files-found: error
       - name: Upload simulator compilation log
         if: always()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ios-build-tests-log-${{ github.run_attempt }}
           path: ${{ runner.temp }}/ios-build-tests.log
@@ -610,7 +610,7 @@ jobs:
 
       - name: Upload iOS test execution summary
         if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ios-test-summary-${{ github.run_attempt }}
           path: ${{ runner.temp }}/ios-test-summary.json
@@ -630,7 +630,7 @@ jobs:
 
       - name: Upload iOS test results
         if: ${{ failure() || cancelled() }}
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ios-test-results
           path: |
@@ -640,7 +640,7 @@ jobs:
 
       - name: Upload complete iOS XCTest log separately
         if: always()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ios-tests-log-${{ github.run_attempt }}
           path: ${{ runner.temp }}/ios-tests.log

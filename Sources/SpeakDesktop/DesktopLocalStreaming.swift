@@ -118,6 +118,8 @@ public final class DesktopLocalStreamingClient: FinalizingStreamingTranscription
     private var finals: [String] = []
     private var onTranscript: ((String, Bool) -> Void)?
     private var onError: ((Error) -> Void)?
+    private var callbackInFlight = false
+    private var deferredFailure: (error: Error, report: (Error) -> Void)?
     private var wake: AsyncStream<Void>.Continuation?
     private var worker: Task<Void, Never>?
     private var finishing = false
@@ -241,7 +243,13 @@ public final class DesktopLocalStreamingClient: FinalizingStreamingTranscription
             guard !closed else { return nil }
             closed = true
             pending.removeAll()
-            let current = CloseAction(task: worker, signal: wake, report: onError)
+            var report = onError
+            // Terminal failure must not overtake a transcript callback already admitted by the worker.
+            if let error, callbackInFlight, let handler = report {
+                deferredFailure = (error, handler)
+                report = nil
+            }
+            let current = CloseAction(task: worker, signal: wake, report: report)
             onTranscript = nil
             onError = nil
             wake = nil
@@ -323,23 +331,37 @@ public final class DesktopLocalStreamingClient: FinalizingStreamingTranscription
         case .interim(let samples):
             let text = try await recognise(samples)
             let callback: ((String, Bool) -> Void)? = lock.withLock {
-                guard !closed, !finishing, !text.isEmpty else { return nil }
+                guard !closed, !finishing, !text.isEmpty, let callback = onTranscript else { return nil }
                 showingInterim = true
-                return onTranscript
+                callbackInFlight = true
+                return callback
             }
-            callback?(text, false)
+            deliver(text, isFinal: false, using: callback)
         case .commit(let samples):
             let text = try await recognise(samples)
             let callback: ((String, Bool) -> Void)? = lock.withLock {
                 guard !closed else { return nil }
                 if !text.isEmpty { finals.append(text) }
                 // An empty final still clears an interim the window showed.
-                guard !text.isEmpty || showingInterim else { return nil }
+                guard !text.isEmpty || showingInterim, let callback = onTranscript else { return nil }
                 showingInterim = false
-                return onTranscript
+                callbackInFlight = true
+                return callback
             }
-            callback?(text, true)
+            deliver(text, isFinal: true, using: callback)
         }
+    }
+
+    private func deliver(_ text: String, isFinal: Bool, using callback: ((String, Bool) -> Void)?) {
+        guard let callback else { return }
+        callback(text, isFinal)
+        let failure = lock.withLock {
+            callbackInFlight = false
+            let failure = deferredFailure
+            deferredFailure = nil
+            return failure
+        }
+        if let failure { failure.report(failure.error) }
     }
 
     /// Recognises the rest after finishing. These finals are returned by

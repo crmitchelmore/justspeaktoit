@@ -372,8 +372,10 @@ The same running-app forwarding path supports `--stop-speech`,
 `--quick-voice-3`. Quick Voice selects the corresponding saved favorite; it does
 not start speech, record an instruction, or read selection/clipboard text.
 Pause/Resume acts on the active speech through the existing Host policy.
-Stop uses the existing Playback Stop action and is refused when that control is
-unavailable; it remains usable during other work when Playback Stop is enabled.
+Stop uses the existing Playback Stop action. Its native control remains enabled
+while idle, recording or working; Stop is idempotent if no audio is playing.
+It cancels speech/playback without cancelling dictation or clearing a busy
+operation's state/status. Modal-disabled or closing windows still refuse it.
 Inside Flatpak use `flatpak run com.justspeaktoit.JustSpeakToIt` followed by the
 same argument. These commands forward without presenting the window, preserving
 the external app's focus. Speak Clipboard uses the saved Voice Output settings;
@@ -403,15 +405,17 @@ does not automatically register these actions. Parser and native dispatch
 fixtures are authored but NOT_RUN locally.
 
 `scripts/linux-desktop-checks.sh` also opts into a cross-process fixture only
-inside its private session bus. It launches 32 real command-client processes
+inside its private session bus. It launches 34 real command-client processes
 against the production native command handler with a synthetic event callback:
 valid and repeated commands, `--background`, mixed action flags, unsupported
-options, Quick Voice slot identity/conflicts, Stop availability during idle and
-working states, busy/recording/modal/closing refusal, and all seven running-only
+options, Quick Voice slot identity/conflicts, Stop availability during idle,
+working and recording states, busy/recording/modal/closing refusal, and all seven running-only
 commands with no primary. Malformed toggle options are additionally refused both
 with and without a primary; no real toggle/provider action is delivered.
+The fixture applies production `refresh_actions` for each state, not a synthetic
+Stop-sensitivity override, including explicit Stop modal/closing refusals.
 Each child has a 15-second deadline and is reaped; the smoke-test envelope is
-540 seconds. The fixture requires exact callback identity/count/slot, unchanged page
+600 seconds. The fixture requires exact callback identity/count/slot, unchanged page
 and hidden-window visibility, refusal diagnostics, and an empty isolated data
 directory after all clients. A separate smoke-window application path avoids
 colliding with the fixture's real GApplication identity; a private main context

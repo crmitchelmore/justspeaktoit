@@ -270,6 +270,8 @@ int32_t jsti_window_set_model_catalog(
 /* Remembered global slots for Remote Batch/Live and Local Batch/Live.
  * Queued before window construction; -1 means no saved model for that mode. */
 int32_t jsti_window_set_preferred_models(int32_t batch, int32_t live, int32_t local, int32_t local_live);
+/* Queued inactive Local choices only; -1 leaves a slot unchanged. No selection event. */
+int32_t jsti_window_set_local_model_preferences(int32_t batch, int32_t live);
 int32_t jsti_window_set_microphones(
     const char *const *ids, const char *const *names, size_t count, const char *selected);
 int32_t jsti_window_set_history(const JSTIHistoryRow *rows, size_t count, const char *selected_id);

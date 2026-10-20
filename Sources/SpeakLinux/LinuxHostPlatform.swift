@@ -162,6 +162,10 @@ enum LinuxHostPlatform: DesktopHostAutomationPlatform {
         try LinuxWindow.publishModels(status: status, refreshing: refreshing, selected: -1)
     }
 
+    package static func publishLocalModelPreferences(batch: String?, live: String?) throws {
+        try LinuxWindow.publishLocalModelPreferences(batch: batch, live: live)
+    }
+
     // MARK: Credentials, files and audio
 
     package static func apiKey(name: String) throws -> String { try LinuxCredentialStore.read(name: name) }

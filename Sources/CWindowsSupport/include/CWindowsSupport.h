@@ -1343,6 +1343,9 @@ int jsti_recording_feedback_check_assets(const char *start_path, const char *sto
  * window_run. -1 chooses the first local live row. Returns -1 when the index is
  * not a configured mode-3 row or the window is running. */
 int jsti_window_set_preferred_local_live_model(int index);
+/* Thread-safe inactive Local preferences; -1 leaves a slot unchanged.
+ * Does not change the active model, populate a picker or emit a callback. */
+int jsti_window_set_local_model_preferences(int batch, int live);
 
 /* General > CLI and MCP setup dialog: the automation pipe name, the installed
  * speak.exe path (empty when it is not beside the app) and the copyable

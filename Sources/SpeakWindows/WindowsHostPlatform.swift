@@ -103,6 +103,10 @@ enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPla
         try WindowsModels.publish(status: status, refreshing: refreshing)
     }
 
+    package static func publishLocalModelPreferences(batch: String?, live: String?) throws {
+        try WindowsModels.publishLocalPreferences(batch: batch, live: live)
+    }
+
     package static func apiKey(name: String) throws -> String { try WindowsNative.apiKey(name: name) }
 
     package static func saveAPIKey(_ key: String, name: String) throws { try WindowsNative.saveAPIKey(key, name: name) }

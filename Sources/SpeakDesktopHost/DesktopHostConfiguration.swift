@@ -18,7 +18,8 @@ extension DesktopHostController {
             values["postProcessingOutputLanguage"] = AnyCodable(.string(polish.outputLanguage ?? ""))
         }
         return try DesktopAppSwitchOutput.project(
-            Platform.appSwitchPolicy(settings.textOutput), over: DesktopConfiguration(values: values)
+            Platform.appSwitchPolicy(settings.textOutput),
+            over: DesktopHostLocalModelTransfer.project(settings, over: DesktopConfiguration(values: values))
         )
     }
 
@@ -147,6 +148,10 @@ extension DesktopHostController {
         changed.configuration = try Platform.importingAppSwitchPolicy(
             from: changed.configuration ?? configuration, into: &changed.textOutput
         )
+        let localConfiguration = try DesktopHostLocalModelTransfer.removingMirrors(
+            changed.configuration ?? configuration, settings: changed
+        )
+        changed.configuration = localConfiguration
         var polish = changed.postProcessing ?? .init()
         polish.temperature = configuration.number("postProcessingTemperature")
         polish.outputLanguage = configuration.text("postProcessingOutputLanguage")
@@ -258,6 +263,7 @@ extension DesktopHostController {
         }
         let changed = try prepareConfigurationImport(document)
         invalidateConnectionPreWarming(resetCapture: true)
+        let previous = settings
         let previousVoice = settings.voiceOutput
         try await persistAutomationAwareSettings(changed)
         connectionWarmApproved = false
@@ -267,6 +273,7 @@ extension DesktopHostController {
         try await configureRecordingFeedback(document.preferences)
         Platform.applyShell(document.preferences.shellPreferences)
         Platform.hud(.hidden)
+        try publishImportedLocalChoices(from: previous)
         update(configurationImportStatus(document, settings: changed) + cleanup)
     }
 
@@ -322,6 +329,10 @@ extension DesktopHostController {
             }
             changed.postProcessing = polish
         }
+        let localConfiguration = try DesktopHostLocalModelTransfer.importing(
+            changed.configuration ?? document.preferences, into: &changed
+        )
+        changed.configuration = localConfiguration
         return changed
     }
 
@@ -361,6 +372,7 @@ extension DesktopHostController {
                 + "Approve on this device, then complete a successful capture; live/streaming warming is unavailable."
             : ""
         return status + autoClean + preparation + automationImportNotice()
+            + localModelImportNotice(document, settings: changed)
             + (unknown.isEmpty ? "" : " Preserved but not applied: \(unknown.joined(separator: ", ")).")
     }
 

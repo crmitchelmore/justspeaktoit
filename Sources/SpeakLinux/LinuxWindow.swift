@@ -109,6 +109,18 @@ enum LinuxWindow {
         guard result == 0 else { throw DesktopHostError(message: "Could not restore the saved model choices.") }
     }
 
+    static func publishLocalModelPreferences(batch: String?, live: String?) throws {
+        let entries = DesktopHostModels.snapshot.entries
+        func index(_ identifier: String?, live: Bool) -> Int32 {
+            guard let identifier, let index = entries.firstIndex(where: {
+                $0.option.id == identifier && $0.isLocal && $0.isLive == live
+            }) else { return -1 }
+            return Int32(index)
+        }
+        let result = jsti_window_set_local_model_preferences(index(batch, live: false), index(live, live: true))
+        guard result == 0 else { throw DesktopHostError(message: "Could not display the saved Local model choices.") }
+    }
+
     /// Lists microphones; an unavailable saved choice keeps its own row so the
     /// app never silently switches microphones.
     static func configureMicrophones(selected: String, synthetic: Bool) -> String? {

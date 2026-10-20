@@ -15,7 +15,7 @@ final class DataMigrationPreferenceCatalogTests: XCTestCase {
 
     func testCanonicalKeys_PreserveInventoryOrderAndUniquePersistedNames() {
         let keys = ApplicationPreferenceKey.allCases.map(\.rawValue)
-        XCTAssertEqual(keys.count, 91)
+        XCTAssertEqual(keys.count, 92)
         XCTAssertEqual(Set(keys).count, keys.count)
         XCTAssertEqual(keys.first, "appearance")
         XCTAssertEqual(keys.last, "analyticsEnabled")
@@ -24,7 +24,7 @@ final class DataMigrationPreferenceCatalogTests: XCTestCase {
 
     func testDefinitions_CoverEveryPortableKeyWithoutDuplicateOrImplicitTypeFallback() {
         let definitions = DataMigrationPreferenceCatalog.definitions
-        XCTAssertEqual(definitions.count, 96)
+        XCTAssertEqual(definitions.count, 97)
         XCTAssertEqual(Set(definitions.map(\.key)).count, definitions.count)
         let excluded: Set<ApplicationPreferenceKey> = [.trackedKeyIdentifiers, .transcriptionKeywordsLastReconciled]
         for key in ApplicationPreferenceKey.allCases {
@@ -56,7 +56,10 @@ final class DataMigrationPreferenceCatalogTests: XCTestCase {
     }
 
     func testBooleanSettings_PreviouslyRejectedByMacSchemaAcceptOnlyBooleans() throws {
-        for key in ["paidAccessRoutingEnabled", "simpleModelChoices", "pasteRemoteTranscriptsAtCursor"] {
+        for key in [
+            "paidAccessRoutingEnabled", "simpleModelChoices",
+            "pasteRemoteTranscriptsAtCursor", "cancelRecordingOnEscape"
+        ] {
             XCTAssertEqual(DataMigrationPreferenceCatalog.definition(for: key)?.kind, .boolean)
             try validate(record(key, .bool(true)))
             try validate(record(key, .bool(false)))

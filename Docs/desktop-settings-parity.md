@@ -1,7 +1,7 @@
 # Desktop settings coverage
 
 This is a settings slice, **not full Windows/Linux feature parity**. Baseline:
-macOS `AppSettings.DefaultsKey` aliases the shared 91-key
+macOS `AppSettings.DefaultsKey` aliases the shared 92-key
 `ApplicationPreferenceKey` (`Sources/SpeakCore/ApplicationPreferenceKey.swift`),
 plus preferences and collections
 outside that enum. Track remaining product acceptance in #1157.
@@ -2264,7 +2264,7 @@ remediation missing on Windows are superseded by this source.
 
 ## Evidence legend
 
-The table is exhaustive for the 91 enum keys. "Equivalent" denotes a working
+The table is exhaustive for the 92 enum keys. "Equivalent" denotes a working
 native replacement, not identical Apple APIs or identifiers; "Partial" is not
 parity. Evidence labels refer to executable surfaces:
 
@@ -2310,6 +2310,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | runAtLogin | Equivalent / Equivalent | General; native startup task/login entry, OS status displayed |
 | recordingsDirectory | Partial: fenced / Partial: source only | Mac path retained, never executed. Device-local chosen folder via verified recording locations: Linux Housekeeping chooser; Windows reports unavailable while `WindowsRecordingRegistry` identity/restart integration is fenced. Existing audio never moves. See recordings folder above |
 | hotKeyActivation | Equivalent / Equivalent | Shortcuts; press/hold/double-tap/combined styles; Linux portal availability caveat |
+| cancelRecordingOnEscape | Mac only / Mac only | Boolean preserved through the shared migration catalogue; the Mac configures Escape cancellation, while native desktop hosts do not apply it |
 | holdThreshold | Wired / Wired | Config + shared gesture machine; 0.2...1.5 s |
 | doubleTapWindow | Wired / Wired | Config + shared gesture machine; 0.2...1 s |
 | trackedKeyIdentifiers | Equivalent source only; NOT_RUN | Keys; identifiers only, in `trackedKeyIdentifiers.json`. Saving a key from the shared editors registers its identifier and removing it unregisters it. Both desktop API Keys windows reconcile the list against the store; cancellation skips reconciliation. |

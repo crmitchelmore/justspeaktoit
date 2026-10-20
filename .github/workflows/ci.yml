@@ -46,7 +46,7 @@ jobs:
       - name: Upload installed sample contract evidence (not runtime qualification)
         if: always() && steps.sample_contract.outputs.artifact_ready == 'true'
         continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: macos-installed-sample-contract
           path: ${{ runner.temp }}/jsti-installed-sample-contract-${{ github.run_id }}-${{ github.run_attempt }}
@@ -108,7 +108,7 @@ jobs:
 
       - name: Upload Debug XCTest crash diagnostics
         if: failure() && steps.debug_tests.outcome == 'failure' && steps.debug_crash_collection.outputs.artifact_ready == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: macos-debug-xctest-crash-diagnostics
           path: ${{ runner.temp }}/jsti-xctest-debug-${{ github.run_id }}-${{ github.run_attempt }}
@@ -232,7 +232,7 @@ jobs:
       - name: Upload isolated History fixture diagnostic
         if: always() && steps.debug_tests.outcome == 'failure' && steps.history_isolated.outputs.artifact_ready == 'true'
         continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: macos-history-isolated-${{ steps.history_isolated.outcome }}
           path: ${{ runner.temp }}/jsti-history-isolated-${{ github.run_id }}-${{ github.run_attempt }}

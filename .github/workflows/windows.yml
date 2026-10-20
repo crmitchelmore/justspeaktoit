@@ -979,7 +979,7 @@ jobs:
         # missing errors the upload (rather than warning) because this
         # artifact is the mandatory record of an opt-in diagnostic run.
         if: ${{ !cancelled() && steps.owned-capture-diagnostics.outcome != 'skipped' }}
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-owned-capture-diagnostics-${{ github.sha }}
           path: |
@@ -1500,7 +1500,7 @@ jobs:
         # step actually executed (opted in), regardless of its own outcome,
         # so a broken-capability failure's partial logs are never lost.
         if: ${{ !cancelled() && steps.condition-lock-probe.outcome != 'skipped' }}
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-condition-lock-probe-${{ github.sha }}
           path: |

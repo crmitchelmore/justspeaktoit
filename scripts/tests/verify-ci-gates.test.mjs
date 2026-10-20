@@ -51,7 +51,7 @@ test('journey cold preparation and actual runtime have separate finite budgets a
   assert.ok(ui.indexOf('--phase build') < ui.indexOf('--phase test'));
   for (const body of [swift, ui]) {
     assert.doesNotMatch(body, /continue-on-error:|if:.*(?:failure|cancelled)/);
-    assert.match(body, /if: always\(\)\n\s+timeout-minutes: 3\n\s+uses: actions\/upload-artifact@v7.0.1/);
+    assert.match(body, /if: always\(\)\n\s+timeout-minutes: 3\n\s+uses: actions\/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7\.0\.2/);
     assert.match(body, /if-no-files-found: error/);
     assert.match(body, /uses: actions\/checkout@v7.0.1/);
     assert.doesNotMatch(body, /ref:.*head|workflow_dispatch|retry|--skip.*test/);

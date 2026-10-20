@@ -135,22 +135,6 @@ final class DataMigrationTests: XCTestCase {
         XCTAssertEqual(MigrationCatalog.category(for: "speakTransportPairedDevices"), .credentials)
     }
 
-    func testEscapeCancellationExport_acceptsBothBooleanValuesAndRejectsStrings() throws {
-        let key = AppSettings.DefaultsKey.cancelRecordingOnEscape.rawValue
-        XCTAssertEqual(MigrationCatalog.category(for: key), .settings)
-        for value in [false, true] {
-            let exported = try MigrationCatalog.defaultsRecord(key: key, value: value)
-            XCTAssertNoThrow(try MigrationCatalog.validate(exported, category: .settings))
-            let decoded = try MigrationCoding.decoder.decode(
-                MigrationRecord.self,
-                from: MigrationCoding.encoder.encode(exported)
-            )
-            XCTAssertEqual(decoded.value.storage, .bool(value))
-            XCTAssertNoThrow(try MigrationCatalog.validate(decoded, category: .settings))
-        }
-        let invalid = try MigrationCatalog.defaultsRecord(key: key, value: "false")
-        XCTAssertThrowsError(try MigrationCatalog.validate(invalid, category: .settings))
-    }
     func testArchive_RoundTripsReadableJSONAndRecordingBytes() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -171,6 +155,7 @@ final class DataMigrationTests: XCTestCase {
             if let directory = restored.directory {
                 try? FileManager.default.removeItem(at: directory)
             }
+
         }
         XCTAssertEqual(restored.records[.recordings], [record])
         XCTAssertEqual(try Data(contentsOf: XCTUnwrap(restored.files[record.file!])), bytes)
@@ -274,5 +259,24 @@ final class DataMigrationTests: XCTestCase {
         defer { if let directory = restored.directory { try? FileManager.default.removeItem(at: directory) } }
         XCTAssertEqual(restored.records[.history], [updated])
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path), ["export.zip"])
+    }
+}
+
+extension DataMigrationTests {
+    func testEscapeCancellationExport_acceptsBothBooleanValuesAndRejectsStrings() throws {
+        let key = AppSettings.DefaultsKey.cancelRecordingOnEscape.rawValue
+        XCTAssertEqual(MigrationCatalog.category(for: key), .settings)
+        for value in [false, true] {
+            let exported = try MigrationCatalog.defaultsRecord(key: key, value: value)
+            XCTAssertNoThrow(try MigrationCatalog.validate(exported, category: .settings))
+            let decoded = try MigrationCoding.decoder.decode(
+                MigrationRecord.self,
+                from: MigrationCoding.encoder.encode(exported)
+            )
+            XCTAssertEqual(decoded.value.storage, .bool(value))
+            XCTAssertNoThrow(try MigrationCatalog.validate(decoded, category: .settings))
+        }
+        let invalid = try MigrationCatalog.defaultsRecord(key: key, value: "false")
+        XCTAssertThrowsError(try MigrationCatalog.validate(invalid, category: .settings))
     }
 }

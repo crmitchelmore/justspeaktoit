@@ -26,7 +26,10 @@ final class DesktopShortcutCatalogTests: XCTestCase {
         )
         XCTAssertEqual(DesktopShortcutAction.stopTTS.defaultBinding.keyCode, 53)
         XCTAssertTrue(DesktopShortcutAction.stopTTS.defaultBinding.modifiers.isEmpty)
-        XCTAssertFalse(DesktopShortcutAction.openDataMigrationSettings.defaultBinding.isEnabled)
+        XCTAssertTrue(DesktopShortcutAction.openDataMigrationSettings.defaultBinding.isEnabled)
+        XCTAssertEqual(DesktopShortcutAction.openDataMigrationSettings.defaultBinding.keyCode, 29)
+        XCTAssertEqual(DesktopShortcutAction.openCompareModelsSettings.defaultBinding.keyCode, 25)
+        XCTAssertEqual(DesktopShortcutAction.openAboutSettings.defaultBinding.keyCode, 27)
         XCTAssertEqual(
             DesktopShortcutAction.allCases.filter(\.supportsGlobalShortcut),
             [.startStopRecording, .speakSelectedText, .speakClipboard, .pasteLastHistoryItem, .editSelectionByVoice]

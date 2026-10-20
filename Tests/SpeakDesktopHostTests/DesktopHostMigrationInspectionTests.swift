@@ -40,7 +40,8 @@ final class DesktopHostMigrationInspectionTests: XCTestCase {
         XCTAssertFalse(children.contains { $0.hasPrefix("migration-") })
         let operations = await fixture.controller.activeOperations
         XCTAssertEqual(operations, 0)
-        XCTAssertTrue(FakeLog.shared.allStatuses.last?.contains("Backup inspected") == true)
+        let statuses = FakeLog.shared.allStatuses
+        XCTAssertTrue(statuses.last?.contains("Backup inspected") == true, statuses.joined(separator: "\n"))
         await fixture.controller.close()
     }
 

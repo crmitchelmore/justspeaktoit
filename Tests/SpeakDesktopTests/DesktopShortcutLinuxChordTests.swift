@@ -57,4 +57,28 @@ final class DesktopShortcutLinuxChordTests: XCTestCase {
             XCTAssertEqual(try encoder.encode(binding), data)
         }
     }
+
+    func testSettingsDefaultsAndLegacyBindings_MigrateTogetherAcrossDesktopHosts() throws {
+        let expected: [DesktopShortcutAction: DesktopShortcutBinding] = [
+            .openDataMigrationSettings: .init(keyCode: 29, modifiers: .command, isGlobal: false),
+            .openCompareModelsSettings: .init(keyCode: 25, modifiers: .command, isGlobal: false),
+            .openProfilesSettings: .init(keyCode: 24, modifiers: [.command, .shift], isGlobal: false),
+            .openAboutSettings: .init(keyCode: 27, modifiers: .command, isGlobal: false)
+        ]
+        for (action, binding) in expected {
+            let current = action.defaultBinding
+            XCTAssertEqual(current, binding, action.rawValue)
+            XCTAssertTrue(current.isEnabled, action.rawValue)
+            XCTAssertNotNil(current.windowsChord, action.rawValue)
+            XCTAssertNotNil(current.linuxChord, action.rawValue)
+            for legacy in action.legacyDefaultBindings {
+                let value = try JSONDecoder().decode(AnyCodable.self, from: JSONEncoder().encode(legacy))
+                let bindings = DesktopShortcutBindings(preference: AnyCodable(.array([
+                    .string(action.rawValue), value.storage
+                ])))
+                XCTAssertEqual(bindings[action], current, action.rawValue)
+            }
+        }
+        XCTAssertTrue(DesktopShortcutBindings.defaults.conflicts().filter(\.isBlocking).isEmpty)
+    }
 }

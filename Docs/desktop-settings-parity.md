@@ -78,7 +78,7 @@ Post-processing drains, keyless ordering, ordered live completion, later Apply,
 bounded overflow and permanent shutdown refusal. These native wiring and test changes remain
 NOT_RUN locally; this is not yet automatic qualification of the drain contract.
 
-## Linux Permissions destination (source only; NOT_RUN)
+## Linux Permissions destination (native CI qualified; physical acceptance open)
 
 About's **Permissions** button, Open Permissions action (run 10/event 118)
 and Troubleshooting's permission finding open a distinct modeless libadwaita
@@ -101,7 +101,9 @@ existing explicit paste workflow requests RemoteDesktop access when needed.
 
 Revision fencing ignores late reports after Check again or close/reopen.
 Four pure Linux presentation tests and native lifecycle/invalid-row/dispatch
-fixtures are authored but NOT_RUN locally. This is a usable permission recovery
+fixtures were NOT_RUN locally. Automatic `1667ee83` qualification passed native
+Windows (job `118642699896`) and Linux desktop (job `118642912114`), plus Debug,
+Core Journey, Fixture UI and API compatibility. This is a usable permission recovery
 destination, not evidence that capture, insertion or desktop permissions have
 been exercised on a physical system.
 
@@ -163,7 +165,21 @@ These checks are **NOT_RUN** locally. Windows maps the Paste Last History Item
 action shortcut to it (`JSTI_ACTION_RUN_PASTE_LAST_HISTORY` emits
 `JSTI_EVENT_PASTE_LAST_HISTORY`); the callback captures the focused field on the
 UI thread before queueing the Host action, as the Record event does. Linux does
-not yet map the Paste Last History Item action.
+the same through window-local run 11/event 111. It captures the invocation target
+before joining the settings queue, without acquiring the one-shot AT-SPI
+observational target or starting correction learning. Native admission refuses
+recording, work and an insensitive parent, but is independent of the History
+page, selected row and speech controls. The saved output policy remains
+authoritative: clipboard-only works without a field; paste requires a captured
+target. X11 never substitutes a stale external window when this app has focus.
+Wayland retains its documented delivery-time-focus portal and recovery-copy
+policy; it does not acquire an anchored external-field guarantee.
+
+Linux now has **25 of 27 source-wired window-local actions**; selected-text speech,
+voice editing and global action registration remain open. Mapping, native row
+validation and busy/recording/parent/page-independent dispatch fixtures are
+authored but NOT_RUN locally. They need automatic qualification. Clipboard
+delivery alone is not evidence of external-field paste or global-shortcut parity.
 
 ## Troubleshooting (source only)
 
@@ -2372,7 +2388,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | modulatePIIPhiTagging | Live/batch source wired; unqualified / Same | Native default/on/off choice, strict transfer/restart and captured live/batch provider flags; absent stays off. Native/provider acceptance pending. |
 | accessibilityInsertionMode | Equivalent / Missing | Output; Windows cursor/replace-field; Linux paste cannot claim AX replace-all equivalence |
 | selectedHotKey | Equivalent / Partial | Shortcuts; Windows Ctrl/Alt native key; Linux desktop/portal-owned binding, never Mac Fn key translation |
-| customShortcutBindings | Complete source mapping; unqualified / Partial window-local source | Windows Keyboard **Action shortcuts** dialog: all 27 actions source-wired; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Voice editing additionally requires an editable UIA selection and a rewrite API key. Linux projects 24 actions into window-local bindings and edits all saved bindings with presets/reset; three execution actions and global registration remain unimplemented. Native/physical acceptance pending. |
+| customShortcutBindings | Complete source mapping; unqualified / Partial window-local source | Windows Keyboard **Action shortcuts** dialog: all 27 actions source-wired; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Voice editing additionally requires an editable UIA selection and a rewrite API key. Linux projects 25 actions into window-local bindings and edits all saved bindings with presets/reset; selected-text speech, voice editing and global registration remain unimplemented. Native/physical acceptance pending. |
 | paidAccessRoutingEnabled | Apple-specific / Apple-specific | BYOK desktop providers; no paid-access entitlement/routing journey. Retained opaque through import/export |
 | simpleModelChoices | Missing / Missing | Native catalogue picker without simplified paid-model chooser |
 | rememberedLocalTranscriptionSource | Partial / Partial | Models remembers Local selection; no Apple on-device source |

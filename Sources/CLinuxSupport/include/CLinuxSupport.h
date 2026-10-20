@@ -72,6 +72,7 @@ enum {
     JSTI_EVENT_MIGRATION_EXPORT = 96, /* text: ZIP destination; index bits: 1 saved audio, 2 app profiles */
     JSTI_EVENT_MIGRATION_INSPECT = 97, /* text: selected ZIP source; no application changes */
     JSTI_EVENT_QUICK_VOICE = 110, /* index: canonical favorite slot 1...3 */
+    JSTI_EVENT_PASTE_LAST_HISTORY = 111, /* capture the invocation target before queueing */
     JSTI_EVENT_SPEAK_CLIPBOARD = 113, /* captures through the owned Host speech task, not History */
     JSTI_EVENT_ACTION_SHORTCUT_EDIT = 115, /* revision/request header, then percent-escaped draft rows */
     JSTI_EVENT_SPEECH_PAUSE = 116, /* exact active speech only; never starts History audio */
@@ -112,7 +113,7 @@ typedef void (*jsti_window_event_fn)(int32_t event, const char *text, int32_t in
  * rows remain visible but disabled; this does not change dictation registration.
  * run: 0 unavailable, 1 record, 2 page, 3 stop, 4 troubleshooting,
  * 5 comparison, 6 quick voice, 7 clipboard speech, 8 speech pause,
- * 9 API Keys, 10 Permissions. Strings are copied before return. */
+ * 9 API Keys, 10 Permissions, 11 paste last History. Strings are copied before return. */
 typedef struct JSTILinuxActionShortcut {
     const char *title, *chord, *note, *page, *identifier;
     uint32_t keysym, modifiers;

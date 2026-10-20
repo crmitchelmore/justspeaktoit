@@ -1901,6 +1901,10 @@ static gboolean action_shortcut_run(gint run, const char *page, gint slot) {
     case 10:
         emit(JSTI_EVENT_PERMISSIONS, "", 0);
         return TRUE;
+    case 11:
+        if (ui.state != JSTI_STATE_IDLE) return FALSE;
+        emit(JSTI_EVENT_PASTE_LAST_HISTORY, "", 0);
+        return TRUE;
     default: return FALSE;
     }
 }
@@ -4673,15 +4677,25 @@ static gboolean action_execution_self_test(void) {
         capture.slot == 0 && capture.calls == 8;
     okay = okay && action_shortcut_run(10, "", 0) && capture.event == JSTI_EVENT_PERMISSIONS &&
         capture.slot == 0 && capture.calls == 9;
+    gint paste_page = ui.page;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), FALSE);
+    gtk_widget_set_sensitive(history, FALSE);
+    okay = okay && action_shortcut_run(11, "", 0) && capture.event == JSTI_EVENT_PASTE_LAST_HISTORY &&
+        capture.slot == 0 && capture.calls == 10 && ui.page == paste_page;
+    gtk_widget_set_sensitive(history, history_sensitive);
+    okay = okay && !action_shortcut_run(12, "", 0) && capture.calls == 10;
     ui.state = JSTI_STATE_WORKING;
     okay = okay && !action_shortcut_run(6, "", 1) && !action_shortcut_run(5, "", 0) &&
         !action_shortcut_run(7, "", 0) && !action_shortcut_run(8, "", 0) &&
-        !action_shortcut_run(9, "", 0) && capture.calls == 9;
+        !action_shortcut_run(9, "", 0) && !action_shortcut_run(11, "", 0) && capture.calls == 10;
+    ui.state = JSTI_STATE_RECORDING;
+    okay = okay && !action_shortcut_run(11, "", 0) && capture.calls == 10;
     gtk_widget_set_sensitive(GTK_WIDGET(ui.window), FALSE);
     ui.state = JSTI_STATE_IDLE;
     okay = okay && !action_shortcut_run(4, "", 0) && !action_shortcut_run(2, "about", 0) &&
         !action_shortcut_run(7, "", 0) && !action_shortcut_run(8, "", 0) &&
-        !action_shortcut_run(9, "", 0) && !action_shortcut_run(10, "", 0) && capture.calls == 9;
+        !action_shortcut_run(9, "", 0) && !action_shortcut_run(10, "", 0) &&
+        !action_shortcut_run(11, "", 0) && capture.calls == 10;
     gtk_widget_set_sensitive(GTK_WIDGET(ui.window), window_sensitive);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.record), record_sensitive);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), stop_sensitive);

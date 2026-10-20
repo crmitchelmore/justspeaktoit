@@ -5,7 +5,7 @@ import CLinuxSupport
 
 enum LinuxActionShortcutRun: Equatable {
     case record, page(String), stop, troubleshooting, comparison, quickVoice(Int), clipboard, pauseSpeech
-    case apiKeys, permissions, unavailable
+    case apiKeys, permissions, pasteLastHistory, unavailable
 
     // swiftlint:disable:next cyclomatic_complexity
     init(_ action: DesktopShortcutAction) {
@@ -32,8 +32,8 @@ enum LinuxActionShortcutRun: Equatable {
         case .pauseResumeTTS: self = .pauseSpeech
         case .openAPIKeysSettings: self = .apiKeys
         case .openPermissionsSettings: self = .permissions
-        case .speakSelectedText,
-             .pasteLastHistoryItem, .editSelectionByVoice:
+        case .pasteLastHistoryItem: self = .pasteLastHistory
+        case .speakSelectedText, .editSelectionByVoice:
             self = .unavailable
         }
     }
@@ -51,6 +51,7 @@ enum LinuxActionShortcutRun: Equatable {
         case .pauseSpeech: 8
         case .apiKeys: 9
         case .permissions: 10
+        case .pasteLastHistory: 11
         }
     }
     var page: String { if case .page(let name) = self { name } else { "" } }
@@ -147,13 +148,15 @@ extension LinuxActionShortcutRun {
             (.openCompareModelsSettings, .comparison), (.openAboutSettings, .page("about")),
             (.quickVoice1, .quickVoice(1)), (.quickVoice2, .quickVoice(2)), (.quickVoice3, .quickVoice(3)),
             (.speakClipboard, .clipboard), (.pauseResumeTTS, .pauseSpeech), (.openAPIKeysSettings, .apiKeys),
-            (.openPermissionsSettings, .permissions)
+            (.openPermissionsSettings, .permissions), (.pasteLastHistoryItem, .pasteLastHistory)
         ]
         let unavailable: [DesktopShortcutAction] = [
-            .speakSelectedText, .pasteLastHistoryItem, .editSelectionByVoice
+            .speakSelectedText, .editSelectionByVoice
         ]
         guard expected.allSatisfy({ Self($0.0) == $0.1 }),
               unavailable.allSatisfy({ Self($0) == .unavailable }),
+              Self(.pasteLastHistoryItem).code == 11,
+              Self(.pasteLastHistoryItem).page.isEmpty, Self(.pasteLastHistoryItem).slot == 0,
               Set(expected.map(\.0) + unavailable) == Set(DesktopShortcutAction.allCases) else {
             throw DesktopHostError(
                 message: "Linux action shortcut execution coverage differs from its declared projection."

@@ -78,6 +78,7 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
         _ = jsti_window_set_appearance(Int32(await controller.appearance().rawValue))
         await controller.configureLocalModels()
         await controller.configureLocalCleanup(presenter: Unmanaged.passUnretained(holder).toOpaque())
+        try LinuxWindow.configureModelPreferences(await controller.preferredModelIDs())
         return await controller.selectedIndex()
     }
     LinuxCloudSync.configure(holder)
@@ -167,7 +168,8 @@ if forwardsAction || arguments.contains(JSTI_TOGGLE_ARGUMENT) {
     if forwardsAction { exit(0) }
 }
 DesktopHostModels.configure(
-    streamingQualified: LinuxLiveTransport.qualified, local: DesktopLocalTranscription.options(host: .linux)
+    streamingQualified: LinuxLiveTransport.qualified, local: DesktopLocalTranscription.options(host: .linux),
+    localLive: DesktopLocalStreaming.options(host: .linux)
 )
 if arguments.contains("--version") {
     print("JustSpeakToIt for Linux (developer preview)")

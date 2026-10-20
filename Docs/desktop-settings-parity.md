@@ -290,6 +290,31 @@ real 2.5-second lease to expire. No provider, clipboard, actual field or device 
 used. This fixture is also NOT_RUN locally; automatic native evidence remains
 required and cannot replace physical-desktop/provider acceptance.
 
+## Linux Local Live transcription (source only; NOT_RUN)
+
+Linux now projects the same executable pinned Whisper models into **Local >
+Batch** and **Local > Live**, using canonical live identifiers and the existing
+`DesktopLocalStreamingClient` with `LinuxWhisperRuntime`. Both modes share one
+verified model download, install status, GPU preference and removal/use lease.
+There is no network transport, helper process, audio-path IPC or second model
+download. Imported GGML models remain batch-only.
+
+The GTK Mode control is usable for either source when idle and disabled during
+recording/work. Local and Remote retain independent Batch/Live choices, and all
+four model slots are restored from saved host settings before interaction.
+Catalogue refresh keeps those stable slot identities. Local Live hides provider
+key controls and does not depend on remote streaming transport qualification.
+
+Authored checks cover canonical Linux/Windows live catalogue projection,
+four-slot settings restart, independent GTK source/mode memory, busy-state
+sensitivity and actual catalogue row filtering/callback indices. The existing
+native model CLI additionally feeds the real Linux runtime through the shared
+live session: it must produce text before finish and preserve the expected
+phrase after finish. This uses the existing synthetic WAV/model fixture and
+timeout envelope; no CI job timeout is raised. All additions are NOT_RUN locally.
+Automatic native evidence, microphone/device latency and installed acceptance
+are still required; this does not close full local-model or desktop parity.
+
 ## Linux shortcut listener lifetime (source only; NOT_RUN)
 
 X11 registration now reads the actual modifier/key maps rather than ignoring
@@ -2349,9 +2374,9 @@ Not yet done:
 - Restored History is not pushed to iCloud sync immediately.
 - There is no native self-test or screenshot receipt for the dialog yet.
 
-## Local live transcription (Windows source only)
+## Local live transcription (Windows/Linux source only)
 
-Local now offers Batch and Live on Windows. Live lists one entry per pinned
+Local now offers Batch and Live on Windows and Linux. Live lists one entry per pinned
 whisper.cpp catalogue model the host executes (`DesktopLocalStreaming.options`),
 named `<model> (on-device, live)` and identified by the Mac's
 `local/streaming/whisperkit/...` value, so History, profiles and selections
@@ -2375,7 +2400,7 @@ Model comparison excludes live entries because their batch model is already a
 candidate. File import and automation transcription of a local live
 selection use its batch model.
 
-Remaining gaps: no compiled or device receipt; Linux stays Local batch only;
+Remaining gaps: no compiled or device receipt for the new Linux picker/runtime path;
 imported Hugging Face models are batch only; Auto-Clean live polish is not
 offered for local live; profiles cannot override to a local live model;
 configuration transfer does not map `localStreamingModelSource`; a model whose

@@ -160,11 +160,13 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         guard case .success = validation.outcome else { return report(Self.message(validation)) }
         guard canSaveVoiceCredential else { return Self.apiKeysBusyMessage }
         do {
-            try await writeAPIKey(cleaned, identifier: identifier)
+            try await writeProviderAPIKey(cleaned, identifier: identifier)
         } catch {
+            guard !Task.isCancelled else { return Self.apiKeysCancelledMessage }
             return report("Failed to store key: \(error.localizedDescription)")
         }
         await apiKeyChanged(identifier)
+        guard !closed, !Task.isCancelled else { return Self.apiKeysWriteFinishedMessage }
         return report("\(entry.label) API key saved and validated successfully.")
     }
 
@@ -176,11 +178,13 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             return report(APIKeyEntryError.unknownProvider.localizedDescription)
         }
         do {
-            try await writeAPIKey("", identifier: identifier)
+            try await writeProviderAPIKey("", identifier: identifier)
         } catch {
+            guard !Task.isCancelled else { return Self.apiKeysCancelledMessage }
             return report("Failed to remove key: \(error.localizedDescription)")
         }
         await apiKeyChanged(identifier)
+        guard !closed, !Task.isCancelled else { return Self.apiKeysWriteFinishedMessage }
         return report("\(entry.label) key removed from \(Platform.credentialStoreName).")
     }
 
@@ -221,26 +225,15 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         )
     }
 
-    /// The same write and "saved by hand" path as the per-feature editors, so
-    /// both surfaces always show one stored value.
-    private func writeAPIKey(_ value: String, identifier: String) async throws {
-        invalidateConnectionPreWarming(resetCapture: true)
-        if let saveByHand = cloudSync.saveKeyByHand {
-            try await saveByHand(value, identifier)
-        } else {
-            try Platform.saveAPIKey(value, name: identifier)
-        }
-        recordTrackedAPIKey(identifier, value: value)
-    }
-
     private func apiKeyChanged(_ identifier: String) async {
         invalidateConnectionPreWarming(resetCapture: true)
-        if identifier == "openrouter.apiKey" { refreshModels(force: true) }
         if let slot = VoiceAccountProvider.all.lazy
             .compactMap({ try? VoiceOutputCredentialSlot(provider: $0) })
             .first(where: { $0.identifier == identifier }) {
             invalidateVoiceInventory(for: slot)
         }
+        guard !closed, !Task.isCancelled else { return }
+        if identifier == "openrouter.apiKey" { refreshModels(force: true) }
         await refreshComparison()
     }
 
@@ -254,6 +247,10 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     }
 
     private static var apiKeysCancelledMessage: String { "The API key request was cancelled." }
+
+    private static var apiKeysWriteFinishedMessage: String {
+        "The key operation finished after cancellation or closing. Reopen API Keys to check its saved state."
+    }
 
     private static func message(_ result: APIKeyValidationResult) -> String {
         switch result.outcome {

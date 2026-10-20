@@ -182,7 +182,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     }
 
     package var canSaveVoiceCredential: Bool {
-        !closed && !busy && recording == nil && voiceCredentialTask == nil
+        !closed && !busy && recording == nil && voiceCredentialTask == nil && providerCredentialWriteTask == nil
             && voiceTextImportTask == nil && voiceDiscovery.task == nil && voiceGenerationTask == nil
             && readAloudState.task == nil && readAloudState.exportTask == nil
             && voiceSynthesisWorkers == 0

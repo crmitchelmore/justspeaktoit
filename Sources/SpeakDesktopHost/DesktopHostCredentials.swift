@@ -12,7 +12,6 @@ extension DesktopHostController {
                     for: DesktopHostModels.all[modelIndex].id
                   ) else { throw DesktopTranscriptionError.unsupportedModel }
             let cleaned = key.trimmingCharacters(in: .whitespacesAndNewlines)
-            invalidateConnectionPreWarming(resetCapture: true)
             if !cleaned.isEmpty, provider.apiKeyIdentifier == AzureSpeechConfiguration.credentialIdentifier {
                 let model = DesktopHostModels.all[modelIndex].id
                 if AzureTranscriptionModels.batchIDs.contains(model) {
@@ -25,15 +24,8 @@ extension DesktopHostController {
                     )
                 }
             }
-            if let saveByHand = cloudSync.saveKeyByHand {
-                // With iCloud sync, the key and its "saved by hand" mark change in
-                // one step, so a deletion synced from the Mac cannot remove it.
-                try await saveByHand(cleaned, provider.apiKeyIdentifier)
-            } else {
-                try Platform.saveAPIKey(cleaned, name: provider.apiKeyIdentifier)
-            }
-            recordTrackedAPIKey(provider.apiKeyIdentifier, value: cleaned)
-            invalidateConnectionPreWarming(resetCapture: true)
+            try await writeProviderAPIKey(cleaned, identifier: provider.apiKeyIdentifier)
+            guard !closed, !Task.isCancelled else { return }
             if provider.id == OpenRouterService.providerID { refreshModels(force: true) }
             update(cleaned.isEmpty ? "API key removed." : "API key saved in \(Platform.credentialStoreName).")
             await refreshComparison()

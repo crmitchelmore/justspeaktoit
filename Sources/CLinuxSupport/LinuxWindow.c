@@ -2145,6 +2145,20 @@ static gboolean is_forwardable_command(gint run, gint slot) {
     return slot == 0 && (run == 3 || run == 7 || run == 8 || run == 11);
 }
 
+static gboolean parse_action_command(int argc, const gchar *const *argv, WindowCommand *command) {
+    return argc >= 1 && argv != NULL && parse_window_command(argc, argv, command) &&
+        command->run != 0 && !command->unknown_argument;
+}
+
+int32_t jsti_window_validate_action_command(int argc, char **argv, char *error, size_t capacity) {
+    WindowCommand command;
+    if (!parse_action_command(argc, (const gchar *const *)argv, &command)) {
+        jsti_set_error(error, capacity, "Choose exactly one supported desktop action command.");
+        return -1;
+    }
+    return 0;
+}
+
 /* 0 means admitted, not completed; 2 requires the running app, 3 means unavailable now. */
 static gint forward_window_command(gint run, gint slot, gboolean remote) {
     if (!remote || ui.window == NULL) return 2;
@@ -2160,8 +2174,8 @@ static int reject_local_action(GApplication *application, GApplicationCommandLin
 
 int32_t jsti_window_forward_action(const char *app_id, int argc, char **argv, char *error, size_t capacity) {
     WindowCommand command;
-    if (app_id == NULL || !g_application_id_is_valid(app_id) || argc < 1 || argv == NULL ||
-        !parse_window_command(argc, (const gchar *const *)argv, &command) || command.unknown_argument ||
+    if (app_id == NULL || !g_application_id_is_valid(app_id) ||
+        !parse_action_command(argc, (const gchar *const *)argv, &command) ||
         !is_forwardable_command(command.run, command.slot)) {
         jsti_set_error(error, capacity, "Choose exactly one supported desktop action command.");
         return -1;
@@ -2188,12 +2202,12 @@ static int on_command_line(GApplication *application, GApplicationCommandLine *l
         g_application_command_line_printerr(line, "Choose only one action command per invocation.\n");
         return 2;
     }
+    if (command.run != 0 && command.unknown_argument) {
+        g_application_command_line_printerr(line, "Unsupported option for this desktop action command.\n");
+        return 2;
+    }
     gboolean remote = g_application_command_line_get_is_remote(line);
     if (command.run != 0 && command.run != 1) {
-        if (command.unknown_argument) {
-            g_application_command_line_printerr(line, "Unsupported option for this desktop action command.\n");
-            return 2;
-        }
         gint status = forward_window_command(command.run, command.slot, remote);
         if (status == 2)
             g_application_command_line_printerr(line, "Open JustSpeakToIt before using this action command.\n");
@@ -4820,6 +4834,11 @@ static gboolean command_forwarding_self_test(void) {
     okay = okay && parse_window_command(3, paste, &command) && command.run == 11;
     okay = okay && !parse_window_command(3, mixed, &command) && !parse_window_command(3, mixed_output, &command);
     okay = okay && parse_window_command(3, unknown, &command) && command.unknown_argument;
+    const gchar *toggle_unknown[] = { "justspeaktoit", JSTI_TOGGLE_ARGUMENT, "--typo" };
+    okay = okay && parse_window_command(3, toggle_unknown, &command) && command.run == 1 &&
+        command.unknown_argument && !parse_action_command(3, toggle_unknown, &command) &&
+        parse_action_command(3, toggle, &command) && command.run == 1 && command.background &&
+        !parse_action_command(2, background, &command) && !parse_action_command(0, NULL, &command);
     for (guint index = 0; index < G_N_ELEMENTS(controls); ++index) {
         const gchar *arguments[] = { "justspeaktoit", controls[index].argument };
         okay = okay && parse_window_command(2, arguments, &command) &&
@@ -4831,6 +4850,12 @@ static gboolean command_forwarding_self_test(void) {
         !is_forwardable_command(6, 4) && !is_forwardable_command(1, 0) && !is_forwardable_command(3, 1);
     char *invalid[] = { "justspeaktoit", JSTI_SPEAK_CLIPBOARD_ARGUMENT, "--gapplication-service", NULL };
     char error[256] = { 0 };
+    char *valid_toggle[] = { "justspeaktoit", JSTI_TOGGLE_ARGUMENT, JSTI_LOGIN_LAUNCH_ARGUMENT, NULL };
+    char *repeated_toggle[] = { "justspeaktoit", JSTI_TOGGLE_ARGUMENT, JSTI_TOGGLE_ARGUMENT, NULL };
+    char *invalid_toggle[] = { "justspeaktoit", JSTI_TOGGLE_ARGUMENT, "--gapplication-service", NULL };
+    okay = okay && jsti_window_validate_action_command(3, valid_toggle, error, sizeof(error)) == 0 &&
+        jsti_window_validate_action_command(3, repeated_toggle, error, sizeof(error)) == 0 &&
+        jsti_window_validate_action_command(3, invalid_toggle, error, sizeof(error)) == -1 && error[0] != '\0';
     okay = okay && jsti_window_forward_action(
         "com.justspeaktoit.JustSpeakToIt", 3, invalid, error, sizeof(error)) == -1 && error[0] != '\0';
     jsti_window_event_fn callback = ui.callback;
@@ -5029,6 +5054,10 @@ static gboolean command_process_self_test(char *error, size_t capacity) {
             JSTI_STATE_IDLE, 0, 0, TRUE, FALSE, FALSE, "Choose exactly one supported desktop action command" },
         { JSTI_SPEAK_CLIPBOARD_ARGUMENT, "--gapplication-service",
             JSTI_STATE_IDLE, 0, 0, TRUE, FALSE, FALSE, "Choose exactly one supported desktop action command" },
+        { JSTI_TOGGLE_ARGUMENT, "--typo",
+            JSTI_STATE_IDLE, 0, 0, TRUE, FALSE, FALSE, "Choose exactly one supported desktop action command" },
+        { JSTI_TOGGLE_ARGUMENT, "--gapplication-service",
+            JSTI_STATE_IDLE, 0, 0, TRUE, FALSE, FALSE, "Choose exactly one supported desktop action command" },
         { JSTI_STOP_SPEECH_ARGUMENT, NULL, JSTI_STATE_IDLE, JSTI_EVENT_PLAYBACK_STOP, 0, TRUE, FALSE, TRUE, NULL },
         { JSTI_STOP_SPEECH_ARGUMENT, NULL, JSTI_STATE_WORKING, JSTI_EVENT_PLAYBACK_STOP, 0, TRUE, FALSE, TRUE, NULL },
         { JSTI_STOP_SPEECH_ARGUMENT, NULL, JSTI_STATE_IDLE, 0, 0, TRUE, FALSE, FALSE, "Playback Stop is unavailable" },
@@ -5066,6 +5095,12 @@ static gboolean command_process_self_test(char *error, size_t capacity) {
         okay = check_command_process(arguments, directory, FALSE,
             "Open JustSpeakToIt before using this action command", error, capacity);
     }
+    const gchar *cold_invalid[] = { "--typo", "--gapplication-service" };
+    for (guint index = 0; okay && index < G_N_ELEMENTS(cold_invalid); ++index) {
+        const gchar *arguments[] = { executable, JSTI_TOGGLE_ARGUMENT, cold_invalid[index], NULL };
+        okay = check_command_process(arguments, directory, FALSE,
+            "Choose exactly one supported desktop action command", error, capacity);
+    }
     ui.state = state;
     ui.closing = closing;
     ui.callback = callback;
@@ -5093,7 +5128,7 @@ static gboolean command_process_self_test(char *error, size_t capacity) {
     g_main_context_pop_thread_default(context);
     g_main_context_unref(context);
     if (okay) g_print("Desktop commands: %u real client processes passed forwarding, refusal and store-isolation checks.\n",
-        (guint)(G_N_ELEMENTS(cases) + G_N_ELEMENTS(cold)));
+        (guint)(G_N_ELEMENTS(cases) + G_N_ELEMENTS(cold) + G_N_ELEMENTS(cold_invalid)));
     return okay;
 }
 

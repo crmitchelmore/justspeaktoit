@@ -113,6 +113,10 @@ enum {
 #define JSTI_QUICK_VOICE_2_ARGUMENT "--quick-voice-2"
 #define JSTI_QUICK_VOICE_3_ARGUMENT "--quick-voice-3"
 
+/* Pure preflight for exactly one supported action (including legacy --toggle).
+ * Rejects unknown options without registering, activating or opening stores. */
+int32_t jsti_window_validate_action_command(int argc, char **argv, char *error, size_t error_capacity);
+
 /* Forward an action command before constructing a controller or opening stores.
  * Refuses a missing primary instance without activating any window. */
 int32_t jsti_window_forward_action(const char *app_id, int argc, char **argv, char *error, size_t error_capacity);

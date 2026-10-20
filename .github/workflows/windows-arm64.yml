@@ -120,7 +120,7 @@ jobs:
           persist-credentials: false
 
       - name: Install pinned Swift toolchain (ARM64)
-        uses: compnerd/gha-setup-swift@bbae8ce86bac5a3449f3992b3d88bc4ca25f2057
+        uses: compnerd/gha-setup-swift@9ff1ee4c44888c5817fc14d1b257ac8cabb4935f
         with:
           source: swift.org
           swift-version: swift-6.2.3-release

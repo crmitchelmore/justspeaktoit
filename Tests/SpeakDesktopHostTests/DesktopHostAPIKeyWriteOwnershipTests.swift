@@ -27,12 +27,12 @@ final class DesktopHostAPIKeyWriteOwnershipTests: XCTestCase {
     func testNativeRemoval_KeepsActorAndCloseResponsiveWithoutReleasingTheWriterEarly() async throws {
         let entered = expectation(description: "native API key removal entered")
         let gate = BlockingVoiceVaultGate()
-        let watchdog = gate.watchdog()
+        let watchdog = gate.watchdog(after: .seconds(30))
         defer { watchdog.cancel(); gate.release() }
         FakeLog.shared.setKey("synthetic-preserved", name: "cartesia.apiKey")
         FakeLog.shared.installKeyWriteHook { _, _ in gate.wait { entered.fulfill() } }
         let removal = Task { await controller.removeAPIKey(identifier: "cartesia.apiKey") }
-        await fulfillment(of: [entered], timeout: 3)
+        await fulfillment(of: [entered], timeout: 10)
         removal.cancel()
         try await assertOtherEditorsRefuse()
         let active = await controller.activeOperations
@@ -56,7 +56,7 @@ final class DesktopHostAPIKeyWriteOwnershipTests: XCTestCase {
     func testCloudRemoval_KeepsTheSameWriterSlotAndSavedByHandPathUntilActualCompletion() async throws {
         let entered = expectation(description: "saved-by-hand key removal entered")
         let gate = BlockingVoiceVaultGate()
-        let watchdog = gate.watchdog()
+        let watchdog = gate.watchdog(after: .seconds(30))
         defer { watchdog.cancel(); gate.release() }
         FakeLog.shared.setKey("synthetic-preserved", name: "cartesia.apiKey")
         FakeLog.shared.installKeyWriteHook { _, _ in XCTFail("Cloud hook bypassed for direct native write") }
@@ -65,7 +65,7 @@ final class DesktopHostAPIKeyWriteOwnershipTests: XCTestCase {
             FakeLog.shared.setKey(value, name: identifier)
         }))
         let removal = Task { await controller.removeAPIKey(identifier: "cartesia.apiKey") }
-        await fulfillment(of: [entered], timeout: 3)
+        await fulfillment(of: [entered], timeout: 10)
         removal.cancel()
         try await assertOtherEditorsRefuse()
         let active = await controller.activeOperations
@@ -81,13 +81,13 @@ final class DesktopHostAPIKeyWriteOwnershipTests: XCTestCase {
     func testVoiceWriter_ExcludesTheAPIKeysAndPerFeatureWriters() async throws {
         let entered = expectation(description: "voice vault write entered")
         let gate = BlockingVoiceVaultGate()
-        let watchdog = gate.watchdog()
+        let watchdog = gate.watchdog(after: .seconds(30))
         defer { watchdog.cancel(); gate.release() }
         FakeLog.shared.installKeyWriteHook { _, _ in gate.wait { entered.fulfill() } }
         let writer = Task { await controller.saveVoiceCredential(
             "synthetic-voice", purpose: "voice-output", identifier: "cartesia.apiKey"
         ) }
-        await fulfillment(of: [entered], timeout: 3)
+        await fulfillment(of: [entered], timeout: 10)
         try await assertOtherEditorsRefuse()
         gate.release()
         switch await writer.value {

@@ -19,6 +19,12 @@ stages = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(stages)
 
 
+def cancellation_fixture_ready(log, owned):
+    if not owned.is_file() or not log.is_file():
+        return False
+    return {"compiler started", "descendant started"} <= set(log.read_text().splitlines())
+
+
 class CommandTests(unittest.TestCase):
     def test_swift_build_once_and_runtime_cannot_build_or_resolve_dependencies(self):
         self.assertEqual(
@@ -312,11 +318,27 @@ class StageTests(unittest.TestCase):
         self.assertIn("0.1s build budget", result["errors"][0])
         self.assertFalse((self.artifacts / "prepared.json").exists())
 
+    def test_cancellation_readiness_rejects_command_header_and_unowned_process(self):
+        log = self.directory / "cancellation.log"
+        owned = self.directory / "gate-owns-process"
+        owned.touch()
+        header = "command: print('compiler started'); print('descendant started')\n"
+        log.write_text(header)
+        self.assertFalse(cancellation_fixture_ready(log, owned))
+        log.write_text(header + "compiler started\n")
+        self.assertFalse(cancellation_fixture_ready(log, owned))
+        log.write_text(header + "compiler started\ndescendant started\n")
+        self.assertTrue(cancellation_fixture_ready(log, owned))
+        owned.unlink()
+        self.assertFalse(cancellation_fixture_ready(log, owned))
+
     def test_build_cancellation_kills_descendants_and_retains_failure_receipt(self):
         marker = self.directory / "leaked-compiler"
+        owned = self.directory / "gate-owns-process"
         # The descendant waits well beyond cancellation latency on a loaded runner,
         # so the marker only appears if cancellation failed to kill the group.
-        child = f"import time; from pathlib import Path; time.sleep(3); Path({str(marker)!r}).touch()"
+        child = ("import time; from pathlib import Path; print('descendant started', flush=True); "
+                 f"time.sleep(3); Path({str(marker)!r}).touch()")
         compiler = ("import subprocess, sys, time; "
                     f"subprocess.Popen([sys.executable, '-c', {child!r}]); "
                     "print('compiler started', flush=True); time.sleep(60)")
@@ -325,8 +347,16 @@ class StageTests(unittest.TestCase):
         gate_path.write_bytes(SCRIPT.with_name("run-core-journey-e2e.py").read_bytes())
         gate_path = str(gate_path)
         source = (
-            "import runpy, signal, sys\n"
+            "import runpy, signal, subprocess, sys\n"
+            "from pathlib import Path\n"
             f"gate = runpy.run_path({gate_path!r})\n"
+            # wait() is called only after run_gate assigns the process handle;
+            # output from the child alone cannot establish parent ownership.
+            "class OwnedProcess(subprocess.Popen):\n"
+            "    def wait(self, *args, **kwargs):\n"
+            f"        Path({str(owned)!r}).touch()\n"
+            "        return super().wait(*args, **kwargs)\n"
+            "gate['subprocess'].Popen = OwnedProcess\n"
             "def interrupted(*_):\n"
             "    raise InterruptedError('fixture build cancellation')\n"
             "signal.signal(signal.SIGTERM, interrupted)\n"
@@ -336,7 +366,7 @@ class StageTests(unittest.TestCase):
         try:
             deadline = time.monotonic() + 30
             log = self.artifacts / "build/test.log"
-            while not (log.exists() and "compiler started" in log.read_text()):
+            while not cancellation_fixture_ready(log, owned):
                 if time.monotonic() >= deadline or process.poll() is not None:
                     self.fail("Synthetic compiler did not start")
                 time.sleep(0.01)

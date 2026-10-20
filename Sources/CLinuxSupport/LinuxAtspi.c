@@ -939,6 +939,47 @@ int32_t jsti_atspi_selection_read(JSTIAtspiSelection *lease, char *out, size_t c
     return submit(lease->target, 3, NULL, out, capacity, lease);
 }
 
+typedef struct {
+    gint refs;
+    Session *session;
+    GMutex lock;
+    GCond changed;
+    gboolean done, idle;
+} FixtureFence;
+static void fixture_fence_free(gpointer data) {
+    FixtureFence *f = data;
+    if (!g_atomic_int_dec_and_test(&f->refs)) return;
+    session_unref(f->session); g_mutex_clear(&f->lock); g_cond_clear(&f->changed); g_free(f);
+}
+static gboolean fixture_fence_ready(gpointer data) {
+    FixtureFence *f = data; Session *s = f->session;
+    gboolean stopped = g_atomic_int_get(&s->stopped);
+    if (!stopped && (s->busy || s->admission_queued)) return G_SOURCE_CONTINUE;
+    g_mutex_lock(&f->lock); f->idle = !stopped; f->done = TRUE;
+    g_cond_broadcast(&f->changed); g_mutex_unlock(&f->lock);
+    return G_SOURCE_REMOVE;
+}
+int32_t jsti_atspi_selection_fixture_idle(void) {
+    if (g_strcmp0(g_getenv("JSTI_ATSPI_SELECTION_FIXTURE"), "1") != 0) return 0;
+    g_mutex_lock(&state_lock);
+    Session *s = selection_current;
+    if (s == NULL || g_atomic_int_get(&s->stopped)) { g_mutex_unlock(&state_lock); return 0; }
+    FixtureFence *f = g_new0(FixtureFence, 1);
+    f->refs = 2; f->session = session_ref(s); g_mutex_init(&f->lock); g_cond_init(&f->changed);
+    GSource *source = g_timeout_source_new(1);
+    g_source_set_priority(source, G_PRIORITY_LOW);
+    g_source_set_callback(source, fixture_fence_ready, f, fixture_fence_free);
+    g_source_attach(source, s->context);
+    g_mutex_unlock(&state_lock);
+    g_mutex_lock(&f->lock);
+    const gint64 deadline = g_get_monotonic_time() + BUDGET_US + 500000;
+    while (!f->done && g_cond_wait_until(&f->changed, &f->lock, deadline)) {}
+    gboolean idle = f->done && f->idle;
+    g_mutex_unlock(&f->lock);
+    g_source_destroy(source); g_source_unref(source); fixture_fence_free(f);
+    return idle ? 1 : 0;
+}
+
 static gboolean selection_admission_contract(void) {
     SelectionAdmission gate = {0};
     Session *s = g_new0(Session, 1);

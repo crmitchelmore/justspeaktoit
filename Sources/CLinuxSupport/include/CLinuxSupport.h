@@ -713,8 +713,11 @@ int32_t jsti_x11_active_window(
 int32_t jsti_x11_paste(uint64_t window, int32_t shift, char *error, size_t error_capacity);
 
 typedef void (*jsti_hotkey_fn)(int32_t pressed, void *context);
-/* Grabs `keysym` with `modifiers` (X11 masks) on the root window from a
- * dedicated thread and reports presses and releases. */
+/* Grabs `keysym` with `modifiers` (the low eight X11 modifier bits) on the root
+ * window from a dedicated thread and reports presses and releases. Requires a
+ * non-null callback. Lock-only slots are discovered at registration, never
+ * guessed from Mod2/Mod5; mixed or explicitly required slots are not ignored.
+ * Runtime keyboard remapping still requires restarting the listener. */
 int32_t jsti_x11_hotkey_start(
     uint32_t keysym, uint32_t modifiers, jsti_hotkey_fn callback, void *context, char *error, size_t error_capacity);
 void jsti_x11_hotkey_stop(void);

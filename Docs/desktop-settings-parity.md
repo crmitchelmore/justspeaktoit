@@ -197,8 +197,10 @@ Linux also exposes `--speak-clipboard`, `--paste-last-history`, `--stop-speech`,
 `--pause-resume-speech` and `--quick-voice-1` / `--quick-voice-2` /
 `--quick-voice-3` through the existing GApplication command-forwarding path.
 Quick Voice selects a saved favorite without reading text or starting speech.
-Stop reuses Playback Stop availability, including during other work, while the
-other commands reuse their existing idle gates. The app must already be running:
+Stop reuses Playback Stop, whose native control now stays enabled across idle,
+recording and working states. Stop is idempotent when silent and does not cancel
+dictation or clear another operation's busy status; modal/closing gates still
+apply. Other commands retain their idle gates. The app must already be running:
 cold invocations are refused, and forwarding never raises the app window.
 Users can bind them in desktop keyboard settings; global action rows explain
 this fallback without presenting the saved binding as registered. Different
@@ -210,11 +212,15 @@ Legacy `--toggle` also receives pure preflight before model/controller/store
 initialization: malformed options or conflicting actions are refused, while a
 valid toggle retains its cold-launch/remote behavior. The native command handler
 independently rejects unknown options for every action, including toggle.
-The automatic desktop-check harness additionally enables 32 real child
+The automatic desktop-check harness additionally enables 34 real child
 command processes on its private bus with synthetic native event capture, bounded
 waits, refusal diagnostics, hidden-window/page invariants and an empty isolated
 data-directory requirement, including malformed toggle options with and without
-a primary. This does not deliver a Host/provider/field action.
+a primary. Stop cases use production action refresh, not a fabricated enabled
+control during work, and cover all three states plus modal/closing refusal.
+A separate scripted Host regression checks speech cancellation while retaining
+busy state and status; it is also authored, NOT_RUN locally. This does not
+deliver a native/provider/field action.
 The cross-process fixture is also NOT_RUN locally; automatic qualification,
 compositor/provider and external-field acceptance remain open.
 

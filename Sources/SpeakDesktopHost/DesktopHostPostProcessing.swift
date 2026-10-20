@@ -12,7 +12,7 @@ extension DesktopHostController {
     /// after that save, and not at all if the controller closed meanwhile.
     package func savePostProcessing(enabled: Bool, modelIndex: Int, prompt: String, key: String) async {
         guard DesktopPostProcessing.remoteModels.indices.contains(modelIndex) else {
-            update("Could not save post-processing settings: invalid remote model selection.")
+            updateProviderCredentialEditor("Could not save post-processing settings: invalid remote model selection.")
             return
         }
         await savePostProcessing(
@@ -65,8 +65,10 @@ extension DesktopHostController {
             case .remote, .disabled:
                 enabledStatus = "Remote post-processing enabled. Transcripts will be sent to OpenRouter."
             }
-            update(enabled ? enabledStatus : "Post-processing disabled.")
-        } catch { update("Could not save post-processing settings: \(error.localizedDescription)") }
+            updateProviderCredentialEditor(enabled ? enabledStatus : "Post-processing disabled.")
+        } catch {
+            updateProviderCredentialEditor("Could not save post-processing settings: \(error.localizedDescription)")
+        }
     }
 
     private func savePostProcessingKey(_ key: String, for model: String) async throws {

@@ -116,8 +116,8 @@ enum WindowsPostProcessingSelfTest {
         await bench.close()
     }
 
-    /// Shutdown drains the settings queue before closing; if the controller
-    /// closes first anyway, an Apply resuming from its key save writes nothing.
+    /// Queue drain cannot wait for the vault. Close cancels the separately
+    /// owned Apply, which writes no settings after the vault eventually returns.
     private static func checkClosingDuringTheKeySave(_ bench: PostProcessingBench) async throws {
         try await bench.holdNextKeySave { bench.apply(enabled: true, prompt: "Too late.", key: "synthetic-late-key") }
         await bench.controller.close()
@@ -164,8 +164,16 @@ private final class PostProcessingBench: @unchecked Sendable {
     /// Queues an Apply the way the dialog's native callback does.
     func apply(enabled: Bool, prompt: String, key: String) {
         let controller = controller
+        let fields = DesktopPostProcessing.NativeFields(
+            prompt: prompt, key: key,
+            includeLexiconDirectives: SpeechDefaults.postProcessingIncludeLexiconDirectives,
+            includeContextTags: SpeechDefaults.postProcessingIncludeContextTags
+        )
+        let model = DesktopPostProcessing.remoteModels[0].id
         holder.enqueueSettings {
-            await controller.savePostProcessing(enabled: enabled, modelIndex: 0, prompt: prompt, key: key)
+            await controller.applyPostProcessingFromEditor(
+                enabled: enabled, modelIdentifier: model, fields: fields
+            ) {}
         }
     }
 
@@ -198,10 +206,15 @@ private final class PostProcessingBench: @unchecked Sendable {
         try await eventually("an Apply reached the sync key hook") { self.hook.gate.arrivals > arrivals }
     }
 
-    func settle() async { await holder.finishSettings() }
+    func settle() async {
+        await holder.finishSettings()
+        let edit = await controller.providerCredentialEditTask
+        await edit?.value
+    }
 
     func close() async {
         await holder.finishSettings()
+        await controller.stopProviderCredentialEdits()
         await controller.close()
     }
 

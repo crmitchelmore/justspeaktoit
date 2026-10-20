@@ -104,6 +104,13 @@ public enum DesktopPostProcessing { // swiftlint:disable:this type_body_length
         public let key: String
         public let includeLexiconDirectives: Bool
         public let includeContextTags: Bool
+
+        public init(prompt: String, key: String, includeLexiconDirectives: Bool, includeContextTags: Bool) {
+            self.prompt = prompt
+            self.key = key
+            self.includeLexiconDirectives = includeLexiconDirectives
+            self.includeContextTags = includeContextTags
+        }
     }
 
     public static var remoteModels: [ModelCatalog.Option] { ModelCatalog.cloudPostProcessing }

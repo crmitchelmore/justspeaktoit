@@ -59,14 +59,19 @@ func postProcessingEvent(
     }
     let prompt = prompt.map(String.init(cString:)) ?? ""
     let key = newKey.map(String.init(cString:)) ?? ""
+    let fields = DesktopPostProcessing.NativeFields(
+        prompt: prompt, key: key, includeLexiconDirectives: includeDirectives != 0,
+        includeContextTags: includeTags != 0
+    )
     holder.enqueueSettings {
-        await holder.controller.savePostProcessing(
-            enabled: enabled != 0, modelIdentifier: model, prompt: prompt, key: key,
-            includeLexiconDirectives: includeDirectives != 0, includeContextTags: includeTags != 0
-        )
-        let saved = await holder.controller.postProcessingOptions()
-        do {
-            try WindowsNative.configurePostProcessing(saved, context: Unmanaged.passUnretained(holder).toOpaque())
-        } catch { WindowsNative.update(error.localizedDescription) }
+        await holder.controller.applyPostProcessingFromEditor(
+            enabled: enabled != 0, modelIdentifier: model, fields: fields
+        ) {
+            let saved = await holder.controller.postProcessingOptions()
+            guard !Task.isCancelled else { return }
+            do {
+                try WindowsNative.configurePostProcessing(saved, context: Unmanaged.passUnretained(holder).toOpaque())
+            } catch { await holder.controller.updateProviderCredentialEditor(error.localizedDescription) }
+        }
     }
 }

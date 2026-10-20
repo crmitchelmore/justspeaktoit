@@ -88,6 +88,7 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
         holder.shortcuts.stop()
         if !holder.smokeTest { holder.microphones.stop() }
         await holder.finishSettings()
+        await controller.stopProviderCredentialEdits()
         holder.apiKeys.stop()
         _ = await holder.automation.applyOffThread(enabled: false)
         await LinuxCloudSync.shutDown(holder)

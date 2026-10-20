@@ -187,10 +187,10 @@ func linuxPostProcessingEvent(_ value: String, slot: Int, holder: LinuxEventCont
     }
     let controller = holder.controller
     holder.enqueueSettings {
-        await controller.savePostProcessing(
-            enabled: enabled, modelIdentifier: model, prompt: fields.prompt, key: fields.key,
-            includeLexiconDirectives: fields.includeLexiconDirectives, includeContextTags: fields.includeContextTags
-        )
-        LinuxWindow.postProcessing(await controller.postProcessingOptions())
+        await controller.applyPostProcessingFromEditor(enabled: enabled, modelIdentifier: model, fields: fields) {
+            let saved = await controller.postProcessingOptions()
+            guard !Task.isCancelled else { return }
+            LinuxWindow.postProcessing(saved)
+        }
     }
 }

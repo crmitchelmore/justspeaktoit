@@ -61,8 +61,22 @@ elapsed time. The new fixtures allow ten seconds for native entry and use a
 thirty-second emergency release; their Host shutdown grace remains forty
 milliseconds and must return while the vault gate is still blocked. Existing
 Voice fixture watchdog defaults are unchanged.
-This is Host write ownership, not a new queue-drain contract for the native
-Transcription and Post-processing settings event queues.
+Both native Transcription callbacks now queue only admission into a separately
+owned editor task. Key-bearing remote Post-processing Apply uses that same
+admission path and republishes native controls only on live completion.
+Keyless Apply still completes in settings order before the next snapshot.
+Pending edits hold the normal Host/native busy state, so Record cannot overtake
+them. Later Applies keep their event order in the separately owned edit FIFO,
+with at most eight pending edits; excess admission is explicitly refused.
+The final busy-state reset retains the actual save success or failure message.
+After settings drain, both hosts stop editor admission and cancel its work
+before clearing native callbacks or services; close also cancels the owner.
+Storage that has already started may still finish, but cancelled Apply cannot
+continue changing post-processing settings or republish a closed editor.
+Six additional queue/owner regressions cover blocked Transcription and
+Post-processing drains, keyless ordering, ordered live completion, later Apply,
+bounded overflow and permanent shutdown refusal. These native wiring and test changes remain
+NOT_RUN locally; this is not yet automatic qualification of the drain contract.
 
 ## Linux Permissions destination (source only; NOT_RUN)
 

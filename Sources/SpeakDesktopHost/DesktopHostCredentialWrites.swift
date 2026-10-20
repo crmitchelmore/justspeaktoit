@@ -4,7 +4,9 @@ extension DesktopHostController {
     /// Native vault calls may outlive cancellation. Keep their writer slot until
     /// the actual call returns, without holding the Host actor or shutdown open.
     func writeProviderAPIKey(_ value: String, identifier: String) async throws {
-        guard !closed else { throw DesktopHostError(message: "Speak is closing.") }
+        guard !closed, !providerCredentialEditorsStopped else {
+            throw DesktopHostError(message: "Speak is closing.")
+        }
         try Task.checkCancellation()
         guard providerCredentialWriteTask == nil, voiceCredentialTask == nil else {
             throw DesktopHostError(message: "Wait for the current provider key operation to finish before retrying.")

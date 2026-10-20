@@ -139,7 +139,25 @@ func configureApplicationIcon() throws {
     try LinuxNative.call { jsti_app_icon_configure(theme.deletingLastPathComponent().path, $0, $1) }
 }
 
+func forwardDesktopAction(_ arguments: [String]) throws {
+    var nativeArguments = arguments.map { strdup($0) }
+    defer { nativeArguments.forEach { free($0) } }
+    guard nativeArguments.allSatisfy({ $0 != nil }) else {
+        throw DesktopHostError(message: "Could not allocate desktop action command arguments.")
+    }
+    nativeArguments.append(nil)
+    try LinuxNative.call {
+        jsti_window_forward_action(
+            linuxApplicationID, Int32(arguments.count), &nativeArguments, $0, $1
+        )
+    }
+}
+
 let arguments = CommandLine.arguments
+if arguments.contains(JSTI_SPEAK_CLIPBOARD_ARGUMENT) || arguments.contains(JSTI_PASTE_LAST_HISTORY_ARGUMENT) {
+    do { try forwardDesktopAction(arguments) } catch { fail(error) }
+    exit(0)
+}
 DesktopHostModels.configure(
     streamingQualified: LinuxLiveTransport.qualified, local: DesktopLocalTranscription.options(host: .linux)
 )

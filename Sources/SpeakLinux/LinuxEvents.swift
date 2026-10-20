@@ -153,12 +153,21 @@ final class LinuxEventContext: @unchecked Sendable {
 
     /// X11 reports the focused window; Wayland hides it, so the paste goes to
     /// whatever is focused at delivery, never to this app's own window.
-    static func captureTarget() -> LinuxInsertionTarget? {
+    /// History paste must not consume the one-shot correction-learning target.
+    static func captureTarget(includeObservation: Bool = true) -> LinuxInsertionTarget? {
         switch LinuxHostPlatform.session.displayServer {
-        case .x11: return LinuxX11.captureTarget()
+        case .x11:
+            if includeObservation { return LinuxX11.captureTarget() }
+            do {
+                return try LinuxX11.captureTargetChecked()
+            } catch {
+                LinuxHostPlatform.update("Could not capture the paste target: \(error.localizedDescription)")
+                return nil
+            }
         case .wayland:
             return LinuxInsertionTarget(
-                kind: .focusedApplication, observationalTarget: LinuxAtspiTarget.captureAdmitted()
+                kind: .focusedApplication,
+                observationalTarget: includeObservation ? LinuxAtspiTarget.captureAdmitted() : nil
             )
         case .unknown: return nil
         }
@@ -239,6 +248,9 @@ private func linuxActionEvent(_ event: Int, value: String, slot: Int, holder: Li
         }
     case Int(JSTI_EVENT_SPEECH_PAUSE):
         holder.enqueueSettings { await holder.controller.pauseResumeSpeech() }
+    case Int(JSTI_EVENT_PASTE_LAST_HISTORY):
+        let target = LinuxEventContext.captureTarget(includeObservation: false)
+        holder.enqueueSettings { await holder.controller.pasteLastHistoryItem(target: target) }
     default: return false
     }
     return true

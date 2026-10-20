@@ -72,6 +72,7 @@ enum {
     JSTI_EVENT_MIGRATION_EXPORT = 96, /* text: ZIP destination; index bits: 1 saved audio, 2 app profiles */
     JSTI_EVENT_MIGRATION_INSPECT = 97, /* text: selected ZIP source; no application changes */
     JSTI_EVENT_QUICK_VOICE = 110, /* index: canonical favorite slot 1...3 */
+    JSTI_EVENT_PASTE_LAST_HISTORY = 111, /* capture the invocation target before queueing */
     JSTI_EVENT_SPEAK_CLIPBOARD = 113, /* captures through the owned Host speech task, not History */
     JSTI_EVENT_ACTION_SHORTCUT_EDIT = 115, /* revision/request header, then percent-escaped draft rows */
     JSTI_EVENT_SPEECH_PAUSE = 116, /* exact active speech only; never starts History audio */
@@ -103,6 +104,13 @@ enum {
 /* The argument the login item starts the app with (the shared
  * DesktopLoginItem.launchArgument): the window starts minimised. */
 #define JSTI_LOGIN_LAUNCH_ARGUMENT "--background"
+#define JSTI_TOGGLE_ARGUMENT "--toggle"
+#define JSTI_SPEAK_CLIPBOARD_ARGUMENT "--speak-clipboard"
+#define JSTI_PASTE_LAST_HISTORY_ARGUMENT "--paste-last-history"
+
+/* Forward an action command before constructing a controller or opening stores.
+ * Refuses a missing primary instance without activating any window. */
+int32_t jsti_window_forward_action(const char *app_id, int argc, char **argv, char *error, size_t error_capacity);
 
 /* Recording state for jsti_window_update: -1 keeps the current state. */
 enum { JSTI_STATE_IDLE = 0, JSTI_STATE_RECORDING = 1, JSTI_STATE_WORKING = 2 };
@@ -112,7 +120,7 @@ typedef void (*jsti_window_event_fn)(int32_t event, const char *text, int32_t in
  * rows remain visible but disabled; this does not change dictation registration.
  * run: 0 unavailable, 1 record, 2 page, 3 stop, 4 troubleshooting,
  * 5 comparison, 6 quick voice, 7 clipboard speech, 8 speech pause,
- * 9 API Keys, 10 Permissions. Strings are copied before return. */
+ * 9 API Keys, 10 Permissions, 11 paste last History. Strings are copied before return. */
 typedef struct JSTILinuxActionShortcut {
     const char *title, *chord, *note, *page, *identifier;
     uint32_t keysym, modifiers;

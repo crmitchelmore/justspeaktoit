@@ -5,7 +5,7 @@ import CLinuxSupport
 
 enum LinuxActionShortcutRun: Equatable {
     case record, page(String), stop, troubleshooting, comparison, quickVoice(Int), clipboard, pauseSpeech
-    case apiKeys, permissions, unavailable
+    case apiKeys, permissions, pasteLastHistory, unavailable
 
     // swiftlint:disable:next cyclomatic_complexity
     init(_ action: DesktopShortcutAction) {
@@ -32,8 +32,8 @@ enum LinuxActionShortcutRun: Equatable {
         case .pauseResumeTTS: self = .pauseSpeech
         case .openAPIKeysSettings: self = .apiKeys
         case .openPermissionsSettings: self = .permissions
-        case .speakSelectedText,
-             .pasteLastHistoryItem, .editSelectionByVoice:
+        case .pasteLastHistoryItem: self = .pasteLastHistory
+        case .speakSelectedText, .editSelectionByVoice:
             self = .unavailable
         }
     }
@@ -51,10 +51,19 @@ enum LinuxActionShortcutRun: Equatable {
         case .pauseSpeech: 8
         case .apiKeys: 9
         case .permissions: 10
+        case .pasteLastHistory: 11
         }
     }
     var page: String { if case .page(let name) = self { name } else { "" } }
     var slot: Int32 { if case .quickVoice(let slot) = self { Int32(slot) } else { 0 } }
+    var desktopCommandArgument: String? {
+        switch self {
+        case .record: JSTI_TOGGLE_ARGUMENT
+        case .clipboard: JSTI_SPEAK_CLIPBOARD_ARGUMENT
+        case .pasteLastHistory: JSTI_PASTE_LAST_HISTORY_ARGUMENT
+        default: nil
+        }
+    }
 }
 
 extension LinuxWindow {
@@ -115,7 +124,13 @@ extension LinuxWindow {
         let run = LinuxActionShortcutRun(action)
         if !binding.isEnabled { return "Off" }
         if run == .unavailable { return "Not implemented on Linux yet. The binding stays saved." }
-        if binding.isGlobal { return "Global action registration is not available yet. The binding stays saved." }
+        if binding.isGlobal {
+            if let argument = run.desktopCommandArgument {
+                return "Bind `\(LinuxShortcuts.toggleCommand) \(argument)` in your desktop's keyboard settings. "
+                    + "Keep the app running; this saved global binding is not registered automatically."
+            }
+            return "Global action registration is not available yet. The binding stays saved."
+        }
         guard let chord = binding.linuxChord else {
             return "This Mac-specific combination stays saved, not registered."
         }
@@ -147,13 +162,17 @@ extension LinuxActionShortcutRun {
             (.openCompareModelsSettings, .comparison), (.openAboutSettings, .page("about")),
             (.quickVoice1, .quickVoice(1)), (.quickVoice2, .quickVoice(2)), (.quickVoice3, .quickVoice(3)),
             (.speakClipboard, .clipboard), (.pauseResumeTTS, .pauseSpeech), (.openAPIKeysSettings, .apiKeys),
-            (.openPermissionsSettings, .permissions)
+            (.openPermissionsSettings, .permissions), (.pasteLastHistoryItem, .pasteLastHistory)
         ]
         let unavailable: [DesktopShortcutAction] = [
-            .speakSelectedText, .pasteLastHistoryItem, .editSelectionByVoice
+            .speakSelectedText, .editSelectionByVoice
         ]
         guard expected.allSatisfy({ Self($0.0) == $0.1 }),
               unavailable.allSatisfy({ Self($0) == .unavailable }),
+              Self(.pasteLastHistoryItem).code == 11,
+              Self(.pasteLastHistoryItem).page.isEmpty, Self(.pasteLastHistoryItem).slot == 0,
+              Self(.pasteLastHistoryItem).desktopCommandArgument == JSTI_PASTE_LAST_HISTORY_ARGUMENT,
+              Self(.speakClipboard).desktopCommandArgument == JSTI_SPEAK_CLIPBOARD_ARGUMENT,
               Set(expected.map(\.0) + unavailable) == Set(DesktopShortcutAction.allCases) else {
             throw DesktopHostError(
                 message: "Linux action shortcut execution coverage differs from its declared projection."

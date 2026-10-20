@@ -145,13 +145,10 @@ extension DesktopHostController {
         )
         applyingAutomationRevocation(to: &changed)
         changed.voiceOutput = voice
-        changed.configuration = try Platform.importingAppSwitchPolicy(
-            from: changed.configuration ?? configuration, into: &changed.textOutput
+        changed.configuration = try DesktopHostLocalModelTransfer.removingMirrors(
+            Platform.importingAppSwitchPolicy(from: changed.configuration ?? configuration, into: &changed.textOutput),
+            settings: changed
         )
-        let localConfiguration = try DesktopHostLocalModelTransfer.removingMirrors(
-            changed.configuration ?? configuration, settings: changed
-        )
-        changed.configuration = localConfiguration
         var polish = changed.postProcessing ?? .init()
         polish.temperature = configuration.number("postProcessingTemperature")
         polish.outputLanguage = configuration.text("postProcessingOutputLanguage")

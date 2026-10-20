@@ -186,10 +186,15 @@ existing GApplication command-forwarding path. The app must already be running:
 cold invocations are refused, and forwarding never raises the app window.
 Users can bind them in desktop keyboard settings; global action rows explain
 this fallback without presenting the saved binding as registered. Different
-action flags or unsupported options together are refused before dispatch. Busy, recording, closing and
-modal-disabled states refuse the commands through the existing action gates.
-Command parser/dispatch fixtures are authored but NOT_RUN locally; actual
-cross-process/compositor/provider and external-field acceptance remains open.
+action flags or unsupported options together are refused before dispatch. Busy,
+recording, closing and modal-disabled states refuse the commands through the
+existing action gates. Command parser/dispatch fixtures are authored but NOT_RUN
+locally. The automatic desktop-check harness additionally enables 13 real child
+command processes on its private bus with synthetic native event capture, bounded
+waits, refusal diagnostics, hidden-window/page invariants and an empty isolated
+data-directory requirement. This does not deliver a Host/provider/field action.
+The cross-process fixture is also NOT_RUN locally; automatic qualification,
+compositor/provider and external-field acceptance remain open.
 
 ## Linux shortcut listener lifetime (source only; NOT_RUN)
 

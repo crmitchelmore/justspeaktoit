@@ -1,6 +1,7 @@
 #include "LinuxActionShortcutsInternal.h"
 
 #include <adwaita.h>
+#include <glib/gstdio.h>
 #include <string.h>
 
 #define JSTI_MAXIMUM_CONFIGURATION_FIELDS 64
@@ -2210,7 +2211,13 @@ int32_t jsti_window_run(
     }
     GApplicationFlags application_flags = G_APPLICATION_HANDLES_COMMAND_LINE;
     if (flags & JSTI_WINDOW_SMOKE_TEST) application_flags |= G_APPLICATION_NON_UNIQUE;
-    ui.application = adw_application_new(app_id, application_flags);
+    /* NON_UNIQUE still exports an object path. Keep the smoke window's path
+     * separate from the private command fixture's real application identity. */
+    gchar *fixture_id = (flags & JSTI_WINDOW_SMOKE_TEST) &&
+        g_strcmp0(g_getenv("JSTI_COMMAND_FORWARDING_CHECK"), "1") == 0
+        ? g_strconcat(app_id, ".CommandFixture", NULL) : NULL;
+    ui.application = adw_application_new(fixture_id != NULL ? fixture_id : app_id, application_flags);
+    g_free(fixture_id);
     if (ui.application == NULL) {
         jsti_set_error(error, capacity, "Could not create the application.");
         return -1;
@@ -4834,6 +4841,187 @@ static gboolean command_forwarding_self_test(void) {
     return okay;
 }
 
+typedef struct CommandProcessResult {
+    GMainLoop *loop;
+    GSubprocess *child;
+    gboolean completed, timed_out;
+    gchar *diagnostic;
+    GError *failure;
+} CommandProcessResult;
+
+static void command_process_finished(GObject *object, GAsyncResult *result, gpointer data) {
+    CommandProcessResult *check = data;
+    check->completed = g_subprocess_communicate_utf8_finish(
+        G_SUBPROCESS(object), result, NULL, &check->diagnostic, &check->failure);
+    g_main_loop_quit(check->loop);
+}
+
+static gboolean command_process_expired(gpointer data) {
+    CommandProcessResult *check = data;
+    check->timed_out = TRUE;
+    g_subprocess_force_exit(check->child);
+    return G_SOURCE_REMOVE;
+}
+
+static gboolean check_command_process(
+    const gchar *const *arguments, const gchar *directory, gboolean success,
+    const gchar *refusal, char *error, size_t capacity
+) {
+    GSubprocessLauncher *launcher = g_subprocess_launcher_new(
+        G_SUBPROCESS_FLAGS_STDOUT_SILENCE | G_SUBPROCESS_FLAGS_STDERR_PIPE);
+    g_subprocess_launcher_setenv(launcher, "XDG_DATA_HOME", directory, TRUE);
+    CommandProcessResult check = { 0 };
+    check.child = g_subprocess_launcher_spawnv(launcher, arguments, &check.failure);
+    g_object_unref(launcher);
+    if (check.child == NULL) {
+        jsti_set_error(error, capacity, "Could not start the command client: %s", check.failure->message);
+        g_clear_error(&check.failure);
+        return FALSE;
+    }
+    GMainContext *context = g_main_context_get_thread_default();
+    check.loop = g_main_loop_new(context, FALSE);
+    GSource *deadline = g_timeout_source_new_seconds(15);
+    g_source_set_callback(deadline, command_process_expired, &check, NULL);
+    g_source_attach(deadline, context);
+    g_subprocess_communicate_utf8_async(check.child, NULL, NULL, command_process_finished, &check);
+    g_main_loop_run(check.loop);
+    g_source_destroy(deadline);
+    g_source_unref(deadline);
+    if (!check.completed) {
+        g_subprocess_force_exit(check.child);
+        g_subprocess_wait(check.child, NULL, NULL);
+    }
+    gboolean okay = check.completed && !check.timed_out && g_subprocess_get_if_exited(check.child) &&
+        g_subprocess_get_successful(check.child) == success &&
+        (refusal == NULL || (check.diagnostic != NULL && strstr(check.diagnostic, refusal) != NULL));
+    if (!okay) jsti_set_error(error, capacity, "Command %s failed its process contract: %s%s",
+        arguments[1], check.timed_out ? "timed out; " : "",
+        check.failure != NULL ? check.failure->message :
+            (check.diagnostic != NULL ? check.diagnostic : "unexpected process status"));
+    g_clear_error(&check.failure);
+    g_free(check.diagnostic);
+    g_main_loop_unref(check.loop);
+    g_object_unref(check.child);
+    return okay;
+}
+
+static gboolean command_process_self_test(char *error, size_t capacity) {
+    /* Opt in only from the harness's private session bus. No provider/Host event
+     * is delivered: a private context serves the real handler with a test callback. */
+    if (g_strcmp0(g_getenv("JSTI_COMMAND_FORWARDING_CHECK"), "1") != 0) return TRUE;
+    if (!(ui.flags & JSTI_WINDOW_SMOKE_TEST)) {
+        jsti_set_error(error, capacity, "Command process checks require the isolated smoke-test window.");
+        return FALSE;
+    }
+    GMainContext *context = g_main_context_new();
+    g_main_context_push_thread_default(context);
+    GApplication *primary = g_application_new(
+        "com.justspeaktoit.JustSpeakToIt", G_APPLICATION_HANDLES_COMMAND_LINE);
+    g_signal_connect(primary, "command-line", G_CALLBACK(on_command_line), NULL);
+    GError *failure = NULL;
+    gboolean okay = g_application_register(primary, NULL, &failure);
+    if (!okay || g_application_get_is_remote(primary)) {
+        jsti_set_error(error, capacity, "Command fixture could not own its private application name: %s",
+            failure != NULL ? failure->message : "another instance is running");
+        g_clear_error(&failure);
+        g_object_unref(primary);
+        g_main_context_pop_thread_default(context);
+        g_main_context_unref(context);
+        return FALSE;
+    }
+    gchar *executable = g_file_read_link("/proc/self/exe", &failure);
+    gchar *directory = executable != NULL ? g_dir_make_tmp("jsti-command-check-XXXXXX", &failure) : NULL;
+    if (directory == NULL) {
+        jsti_set_error(error, capacity, "Command fixture setup failed: %s", failure->message);
+        g_clear_error(&failure);
+        g_free(executable);
+        g_object_unref(primary);
+        g_main_context_pop_thread_default(context);
+        g_main_context_unref(context);
+        return FALSE;
+    }
+    jsti_window_event_fn callback = ui.callback;
+    void *callback_context = ui.context;
+    gint state = ui.state, page = ui.page;
+    gboolean closing = ui.closing, sensitive = gtk_widget_get_sensitive(GTK_WIDGET(ui.window));
+    gboolean visible = gtk_widget_get_visible(GTK_WIDGET(ui.window));
+    ActionShortcutCapture capture = { 0 };
+    ui.callback = action_shortcut_capture;
+    ui.context = &capture;
+    gtk_widget_set_visible(GTK_WIDGET(ui.window), FALSE);
+    const struct {
+        const gchar *argument, *second;
+        gint state, event;
+        gboolean sensitive, closing;
+        const gchar *refusal;
+    } cases[] = {
+        { JSTI_SPEAK_CLIPBOARD_ARGUMENT, NULL, JSTI_STATE_IDLE, JSTI_EVENT_SPEAK_CLIPBOARD, TRUE, FALSE, NULL },
+        { JSTI_PASTE_LAST_HISTORY_ARGUMENT, NULL, JSTI_STATE_IDLE, JSTI_EVENT_PASTE_LAST_HISTORY, TRUE, FALSE, NULL },
+        { JSTI_PASTE_LAST_HISTORY_ARGUMENT, JSTI_PASTE_LAST_HISTORY_ARGUMENT,
+            JSTI_STATE_IDLE, JSTI_EVENT_PASTE_LAST_HISTORY, TRUE, FALSE, NULL },
+        { JSTI_SPEAK_CLIPBOARD_ARGUMENT, JSTI_LOGIN_LAUNCH_ARGUMENT,
+            JSTI_STATE_IDLE, JSTI_EVENT_SPEAK_CLIPBOARD, TRUE, FALSE, NULL },
+        { JSTI_SPEAK_CLIPBOARD_ARGUMENT, NULL, JSTI_STATE_WORKING, 0, TRUE, FALSE, "Finish the current operation" },
+        { JSTI_PASTE_LAST_HISTORY_ARGUMENT, NULL, JSTI_STATE_RECORDING, 0, TRUE, FALSE, "Finish the current operation" },
+        { JSTI_SPEAK_CLIPBOARD_ARGUMENT, NULL, JSTI_STATE_IDLE, 0, FALSE, FALSE, "Finish the current operation" },
+        { JSTI_PASTE_LAST_HISTORY_ARGUMENT, NULL, JSTI_STATE_IDLE, 0, TRUE, TRUE, "Finish the current operation" },
+        { JSTI_SPEAK_CLIPBOARD_ARGUMENT, JSTI_PASTE_LAST_HISTORY_ARGUMENT,
+            JSTI_STATE_IDLE, 0, TRUE, FALSE, "Choose exactly one supported desktop action command" },
+        { JSTI_TOGGLE_ARGUMENT, JSTI_SPEAK_CLIPBOARD_ARGUMENT,
+            JSTI_STATE_IDLE, 0, TRUE, FALSE, "Choose exactly one supported desktop action command" },
+        { JSTI_SPEAK_CLIPBOARD_ARGUMENT, "--gapplication-service",
+            JSTI_STATE_IDLE, 0, TRUE, FALSE, "Choose exactly one supported desktop action command" }
+    };
+    for (guint index = 0; okay && index < G_N_ELEMENTS(cases); ++index) {
+        const gchar *arguments[] = { executable, cases[index].argument, cases[index].second, NULL };
+        capture = (ActionShortcutCapture){ 0 };
+        ui.state = cases[index].state;
+        ui.closing = cases[index].closing;
+        gtk_widget_set_sensitive(GTK_WIDGET(ui.window), cases[index].sensitive);
+        okay = check_command_process(arguments, directory, cases[index].event != 0, cases[index].refusal, error, capacity);
+        if (okay && (capture.calls != (cases[index].event != 0 ? 1u : 0u) ||
+            capture.event != cases[index].event || capture.slot != 0 || ui.page != page ||
+            gtk_widget_get_visible(GTK_WIDGET(ui.window)))) {
+            jsti_set_error(error, capacity, "Command fixture %u changed page/visibility or emitted the wrong event.", index);
+            okay = FALSE;
+        }
+    }
+    g_clear_object(&primary);
+    const gchar *cold[] = { JSTI_SPEAK_CLIPBOARD_ARGUMENT, JSTI_PASTE_LAST_HISTORY_ARGUMENT };
+    for (guint index = 0; okay && index < G_N_ELEMENTS(cold); ++index) {
+        const gchar *arguments[] = { executable, cold[index], NULL };
+        okay = check_command_process(arguments, directory, FALSE,
+            "Open JustSpeakToIt before using this action command", error, capacity);
+    }
+    ui.state = state;
+    ui.closing = closing;
+    ui.callback = callback;
+    ui.context = callback_context;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.window), sensitive);
+    gtk_widget_set_visible(GTK_WIDGET(ui.window), visible);
+    GDir *contents = g_dir_open(directory, 0, &failure);
+    gboolean empty = contents != NULL && g_dir_read_name(contents) == NULL;
+    if (contents != NULL) g_dir_close(contents);
+    if (!empty) {
+        if (okay) jsti_set_error(
+            error, capacity, "Command clients created data in %s or the fixture could not inspect it.", directory);
+        g_printerr("Retaining command fixture directory for diagnosis: %s\n", directory);
+        okay = FALSE;
+    }
+    g_clear_error(&failure);
+    if (empty && g_rmdir(directory) != 0) {
+        if (okay) jsti_set_error(error, capacity, "Could not remove the empty command fixture directory.");
+        g_printerr("Could not remove command fixture directory: %s\n", directory);
+        okay = FALSE;
+    }
+    g_free(directory);
+    g_free(executable);
+    g_main_context_pop_thread_default(context);
+    g_main_context_unref(context);
+    if (okay) g_print("Desktop commands: 13 real client processes passed forwarding, refusal and store-isolation checks.\n");
+    return okay;
+}
+
 static gboolean post_processing_self_test(void) {
     if (ui.polish_catalog == NULL || ui.polish_local_notice == NULL) return FALSE;
     guint row = adw_combo_row_get_selected(ui.polish_model_row);
@@ -5109,6 +5297,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
         return fail(error, capacity, "action shortcut native page, event, slot or sensitivity routing failed");
     if (!command_forwarding_self_test())
         return fail(error, capacity, "desktop-bound command parsing, dispatch or lifetime admission failed");
+    if (!command_process_self_test(error, capacity)) return -1;
     if (!post_processing_self_test())
         return fail(error, capacity, "Local/Remote post-processing controls, key isolation or callback indexes failed");
     if (ui.recordings_folder == NULL || ui.audio_cleanup == NULL ||

@@ -28,8 +28,8 @@ for _ in $(seq 1 50); do
     [ -e "/tmp/.X11-unix/X${display#:}" ] && break
     sleep 0.1
 done
-DISPLAY="$display" GDK_BACKEND=x11 GSK_RENDERER=cairo GTK_A11Y=none NO_AT_BRIDGE=1 \
-    timeout 120 dbus-run-session -- "$binary" --ui-smoke-test
+DISPLAY="$display" GDK_BACKEND=x11 GSK_RENDERER=cairo GTK_A11Y=none NO_AT_BRIDGE=1 JSTI_COMMAND_FORWARDING_CHECK=1 \
+    timeout 240 dbus-run-session -- "$binary" --ui-smoke-test
 
 if [ -n "${JSTI_UI_SCREENSHOT_DIR:-}" ]; then
     echo "== screenshot tour (sample History, every page)"

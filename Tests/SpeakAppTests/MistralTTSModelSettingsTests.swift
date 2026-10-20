@@ -65,6 +65,6 @@ private actor MistralSettingsCaptureClient: TextToSpeechClient {
     func listVoices() async throws -> [TTSVoice] { [] }
 
     func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
-        APIKeyValidationResult(outcome: .success(message: "Synthetic key"))
+        APIKeyValidationResult(outcome: .success(message: "Synthetic key"), debug: nil)
     }
 }

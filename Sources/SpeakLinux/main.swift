@@ -57,6 +57,8 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
     try LinuxWindow.configureAbout()
     try LinuxWindow.configureTroubleshooting(holder)
     defer { jsti_troubleshooting_clear() }
+    try LinuxWindow.configureAPIKeys(holder)
+    defer { jsti_api_keys_clear() }
     try configureApplicationIcon()
     let providerCallbacks = try LinuxWindow.beginVoiceProviderCallbacks(holder)
     defer { LinuxWindow.endVoiceProviderCallbacks(providerCallbacks) }
@@ -84,6 +86,7 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
         holder.shortcuts.stop()
         if !holder.smokeTest { holder.microphones.stop() }
         await holder.finishSettings()
+        holder.apiKeys.stop()
         _ = await holder.automation.applyOffThread(enabled: false)
         await LinuxCloudSync.shutDown(holder)
         // Closing first cancels a shortcut's transcription instead of waiting
@@ -91,6 +94,7 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
         let report = await controller.close()
         await DesktopHostShutdown.wait(within: report.isComplete ? DesktopHostShutdown.grace : .zero) {
             await holder.drainShortcuts()
+            await holder.apiKeys.drain()
         }
         LinuxPortal.stopRemoteDesktop()
     }

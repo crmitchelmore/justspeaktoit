@@ -98,7 +98,7 @@ extension LinuxAppController {
 private enum LinuxTroubleshooting {
     static func navigation(_ destination: DesktopTroubleshooting.Destination) -> (String, Int32) {
         switch destination {
-        case .apiKeys: return ("Open Post-processing", Int32(JSTI_PAGE_POST_PROCESSING))
+        case .apiKeys: return ("Open API Keys", Int32(JSTI_LINUX_TROUBLESHOOTING_API_KEYS))
         case .shortcuts: return ("Open Keyboard", Int32(JSTI_PAGE_KEYBOARD))
         case .general, .permissions: return ("Open General", Int32(JSTI_PAGE_GENERAL))
         }

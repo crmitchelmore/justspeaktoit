@@ -74,7 +74,7 @@ GPtrArray *jsti_action_shortcuts_copy_rows(const JSTILinuxActionShortcut *rows, 
             row->identifier == NULL || !g_utf8_validate(row->identifier, -1, NULL) ||
             !g_utf8_validate(row->title, -1, NULL) || !g_utf8_validate(row->chord, -1, NULL) ||
             !g_utf8_validate(row->note, -1, NULL) || !g_utf8_validate(row->page, -1, NULL) ||
-            row->run < 0 || row->run > 8 || (row->modifiers & ~13u) != 0 ||
+            row->run < 0 || row->run > 9 || (row->modifiers & ~13u) != 0 ||
             row->identifier[0] == '\0' || strlen(row->identifier) > 128 ||
             (row->binding_enabled != 0 && row->binding_enabled != 1) ||
             (row->binding_global != 0 && row->binding_global != 1) ||

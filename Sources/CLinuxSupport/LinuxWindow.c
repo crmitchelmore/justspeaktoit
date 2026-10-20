@@ -268,6 +268,7 @@ static void refresh_setup(void) {
 static void refresh_actions(void) {
     gboolean idle = ui.state == JSTI_STATE_IDLE;
     jsti_action_shortcut_editor_set_idle(idle);
+    jsti_api_keys_set_idle(idle);
     gchar *text = displayed_transcript();
     gboolean has_text = text != NULL && text[0] != '\0';
     g_free(text);
@@ -964,6 +965,7 @@ static gboolean on_close_request(GtkWindow *window, gpointer data) {
     (void)window; (void)data;
     retire_cleanup_preview();
     jsti_troubleshooting_close();
+    jsti_api_keys_close();
     jsti_voice_sources_close();
     jsti_voice_credentials_close();
     jsti_action_shortcut_editor_close();
@@ -1539,6 +1541,7 @@ static GtkWidget *build_general(void) {
     gtk_widget_set_margin_end(GTK_WIDGET(ui.app_switch_help), 12);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(output), GTK_WIDGET(ui.app_switch_help));
     gtk_box_append(GTK_BOX(column), output);
+    gtk_box_append(GTK_BOX(column), jsti_api_keys_group_new(ui.window));
 
     GtkWidget *startup = group("Startup");
     ui.login_row = ADW_SWITCH_ROW(adw_switch_row_new());
@@ -1833,6 +1836,14 @@ static void on_troubleshooting(GtkButton *button, gpointer data) {
     jsti_troubleshooting_open(ui.window);
 }
 
+static void request_api_keys(gpointer data) {
+    (void)data;
+    if (!ui.closing && ui.state == JSTI_STATE_IDLE) jsti_api_keys_open(ui.window);
+    else (void)jsti_window_update("Finish the current operation before opening API Keys.", NULL, -1);
+}
+
+int32_t jsti_window_request_api_keys(void) { return jsti_window_post(request_api_keys, NULL, NULL); }
+
 static gboolean action_shortcut_run(gint run, const char *page, gint slot) {
     if (ui.closing || !gtk_widget_is_sensitive(GTK_WIDGET(ui.window))) return FALSE;
     switch (run) {
@@ -1869,6 +1880,10 @@ static gboolean action_shortcut_run(gint run, const char *page, gint slot) {
     case 8:
         if (ui.state != JSTI_STATE_IDLE) return FALSE;
         emit(JSTI_EVENT_SPEECH_PAUSE, "", 0);
+        return TRUE;
+    case 9:
+        if (ui.state != JSTI_STATE_IDLE) return FALSE;
+        emit(JSTI_EVENT_API_KEYS, "", 0);
         return TRUE;
     default: return FALSE;
     }
@@ -4633,13 +4648,17 @@ static gboolean action_execution_self_test(void) {
         capture.slot == 0 && capture.calls == 6;
     okay = okay && action_shortcut_run(8, "", 0) && capture.event == JSTI_EVENT_SPEECH_PAUSE &&
         capture.slot == 0 && capture.calls == 7;
+    okay = okay && action_shortcut_run(9, "", 0) && capture.event == JSTI_EVENT_API_KEYS &&
+        capture.slot == 0 && capture.calls == 8;
     ui.state = JSTI_STATE_WORKING;
     okay = okay && !action_shortcut_run(6, "", 1) && !action_shortcut_run(5, "", 0) &&
-        !action_shortcut_run(7, "", 0) && !action_shortcut_run(8, "", 0) && capture.calls == 7;
+        !action_shortcut_run(7, "", 0) && !action_shortcut_run(8, "", 0) &&
+        !action_shortcut_run(9, "", 0) && capture.calls == 8;
     gtk_widget_set_sensitive(GTK_WIDGET(ui.window), FALSE);
     ui.state = JSTI_STATE_IDLE;
     okay = okay && !action_shortcut_run(4, "", 0) && !action_shortcut_run(2, "about", 0) &&
-        !action_shortcut_run(7, "", 0) && !action_shortcut_run(8, "", 0) && capture.calls == 7;
+        !action_shortcut_run(7, "", 0) && !action_shortcut_run(8, "", 0) &&
+        !action_shortcut_run(9, "", 0) && capture.calls == 8;
     gtk_widget_set_sensitive(GTK_WIDGET(ui.window), window_sensitive);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.record), record_sensitive);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), stop_sensitive);
@@ -5049,6 +5068,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (jsti_vocabulary_self_test(error, capacity) != 0) return -1;
     if (jsti_profiles_self_test(error, capacity) != 0) return -1;
     if (jsti_troubleshooting_self_test(ui.window, error, capacity) != 0) return -1;
+    if (jsti_api_keys_self_test(ui.window, error, capacity) != 0) return -1;
     {
         GtkTextBuffer *prompt = gtk_text_view_get_buffer(ui.polish_prompt_row);
         GtkTextIter prompt_start, prompt_end;

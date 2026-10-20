@@ -75,6 +75,7 @@ enum {
     JSTI_EVENT_SPEAK_CLIPBOARD = 113, /* captures through the owned Host speech task, not History */
     JSTI_EVENT_ACTION_SHORTCUT_EDIT = 115, /* revision/request header, then percent-escaped draft rows */
     JSTI_EVENT_SPEECH_PAUSE = 116, /* exact active speech only; never starts History audio */
+    JSTI_EVENT_API_KEYS = 117,
     /* Profiles: percent-escaped TAB fields, starting with revision/action/UUID;
      * "refresh" opens a new immutable catalogue/editor revision. */
     JSTI_EVENT_PROFILES = 140
@@ -109,7 +110,8 @@ typedef void (*jsti_window_event_fn)(int32_t event, const char *text, int32_t in
 /* Linux window-local projection of customShortcutBindings. Global/unsupported
  * rows remain visible but disabled; this does not change dictation registration.
  * run: 0 unavailable, 1 record, 2 page, 3 stop, 4 troubleshooting,
- * 5 comparison, 6 quick voice. Strings are copied before return. */
+ * 5 comparison, 6 quick voice, 7 clipboard speech, 8 speech pause,
+ * 9 API Keys. Strings are copied before return. */
 typedef struct JSTILinuxActionShortcut {
     const char *title, *chord, *note, *page, *identifier;
     uint32_t keysym, modifiers;
@@ -263,6 +265,7 @@ typedef struct JSTIAboutLink {
  * check, download or installation is implied. */
 int32_t jsti_window_configure_about(const char *details, const JSTIAboutLink *links, size_t count);
 enum {
+    JSTI_LINUX_TROUBLESHOOTING_API_KEYS = -1,
     JSTI_LINUX_TROUBLESHOOTING_CHECK = 1,
     JSTI_LINUX_TROUBLESHOOTING_KEEP_CLIPBOARD = 2,
     JSTI_LINUX_TROUBLESHOOTING_DISABLE_PROCESSING = 3
@@ -284,6 +287,25 @@ uint64_t jsti_troubleshooting_revision(void);
  * 0 means queued, -1 means invalid input or an unavailable window queue. */
 int32_t jsti_troubleshooting_set_rows(const JSTILinuxTroubleshootingRow *rows, size_t count,
                                       const char *summary, uint64_t revision);
+enum {
+    JSTI_LINUX_API_KEY_REFRESH = 0, JSTI_LINUX_API_KEY_SAVE = 1, JSTI_LINUX_API_KEY_REMOVE = 2,
+    JSTI_LINUX_API_KEY_VALIDATE = 3, JSTI_LINUX_API_KEY_CANCEL = 4
+};
+typedef struct {
+    const char *identifier, *label, *uses, *status, *url, *hint;
+    int32_t saved;
+} JSTILinuxAPIKeyRow;
+/* Keys exist only during this callback and are erased from the native form.
+ * Rows returned to GTK contain masked metadata only. */
+typedef void (*jsti_api_keys_fn)(int32_t action, const char *request, const char *identifier,
+                                const char *key, void *context);
+int32_t jsti_api_keys_configure(jsti_api_keys_fn callback, void *context);
+void jsti_api_keys_clear(void);
+int32_t jsti_api_keys_is_open(void);
+int32_t jsti_api_keys_request_is_current(const char *request);
+int32_t jsti_window_request_api_keys(void);
+int32_t jsti_api_keys_finish(const JSTILinuxAPIKeyRow *rows, size_t count,
+                           const char *request, const char *status);
 /* Updates only the saved enabled state, preserving unsaved prompt/model drafts. */
 int32_t jsti_window_set_post_processing_enabled(int32_t enabled);
 /* General › Launch at login: the shared DesktopLoginItemState (0 off, 1 on,

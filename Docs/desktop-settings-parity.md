@@ -23,6 +23,12 @@ Command and workflow contracts now enforce matching instrumentation and cache
 keys. These source changes are NOT_RUN locally; an automatic run must still
 show whether alignment is sufficient for the changed-source build to fit.
 
+The later unaligned `f1852488` run passed Core Journey automatically
+(job `118306904661`): preparation took 657 seconds and runtime 33 seconds.
+The earlier timeout was therefore not deterministic; the coverage mismatch
+remains an unnecessary invalidation, not a proven sole cause. Qualification
+of the aligned commands and later feature descendants is separate.
+
 ## Correction learning preferences (source only)
 
 GTK now presents the canonical learning enable/threshold fields directly above
@@ -1928,7 +1934,7 @@ Policy/configuration/transfer/restart/recording-snapshot regressions and native
 adapter/chooser fixtures are authored, not run. No native behavioral acceptance
 or complete three-policy Linux parity is claimed.
 
-## API Keys page (Windows source only; NOT_RUN)
+## API Keys pages (Windows/Linux source only; NOT_RUN)
 
 The Mac's API Keys destination
 (`Sources/SpeakApp/Views/Settings/SettingsView+APIKeys.swift`) now has a native
@@ -1971,7 +1977,34 @@ used when checking.
   masking, tracking and validation tests (`Tests/SpeakPortableTests/APIKeyCatalogTests.swift`)
   and the native dialog self-test (`jsti_api_keys_self_test`) are authored, but
   none has been built or run, and no physical credential lifecycle evidence
-  exists. Linux has no API Keys page.
+  exists.
+
+Linux now has a dedicated libadwaita **API Keys** window, opened from General's
+**Manage API Keys...**, the Open API Keys action shortcut, or Troubleshooting's
+credential findings. Its searchable provider picker consumes the same shared
+`apiKeyRows` catalogue and masked state; it does not copy provider entries or
+redirect to an unrelated feature. Save and validate, Check key, confirmed Remove
+saved key, Refresh and Get provider key reuse the shared Host workflow and the
+same Secret Service entries as the embedded editors. Azure resource configuration
+remains in Transcription. Opening/refreshing reads local key state only; checking
+or saving explicitly contacts the selected provider.
+
+The form never prefills stored secrets, disables undo, clears typed input on
+selection, dispatch, loss of availability and close, and wipes its native
+callback buffer after handoff. Request UUIDs fence stale/closed-window results;
+removal confirmation is also bound to the current window and provider selection.
+The settings queue admits a separately owned cancellable operation rather than
+waiting for keyring/network work. Closing cancels pending validation; a vault
+write already admitted may finish, which the form states explicitly. Cancelled
+Host requests cannot newly admit validation/storage or reconcile the tracked
+index after cancellation.
+
+Portable owner/cancellation regressions and a synthetic native lifecycle fixture
+cover held work, stale requests, selection/privacy clearing, removal fencing
+and invalid row rejection. They are **NOT_RUN** locally. Actual keyring unlock,
+provider validation and physical/native acceptance remain required. Mac status
+filters, sorting, account balances and the complete paid/sync management surface
+are not implied by this core credential-management window.
 
 ## Configuration transfer is not the Mac backup format
 
@@ -2203,7 +2236,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | hotKeyActivation | Equivalent / Equivalent | Shortcuts; press/hold/double-tap/combined styles; Linux portal availability caveat |
 | holdThreshold | Wired / Wired | Config + shared gesture machine; 0.2...1.5 s |
 | doubleTapWindow | Wired / Wired | Config + shared gesture machine; 0.2...1 s |
-| trackedKeyIdentifiers | Equivalent (source only; NOT_RUN) / Partial | Keys; identifiers only, in `trackedKeyIdentifiers.json`. Saving a key from the shared editors registers its identifier and removing it unregisters it. Windows' API Keys page also reconciles the list against the store; Linux has no page, so keys written outside those editors stay untracked |
+| trackedKeyIdentifiers | Equivalent source only; NOT_RUN | Keys; identifiers only, in `trackedKeyIdentifiers.json`. Saving a key from the shared editors registers its identifier and removing it unregisters it. Both desktop API Keys windows reconcile the list against the store; cancellation skips reconciliation. |
 | preferredLocale | Wired / Wired | Config + `DesktopProfileSession.swift`; provider language capability gates; automation language remains a separate gap |
 | postRecordingTailDuration | Wired / Wired | Config + `DesktopHostRecordingTail.swift`; owned 0...2 s capture buffer, immediate cancel/failure/shutdown cleanup, no stale finalisation |
 | deepgramStopGracePeriod | Equivalent migration / Equivalent migration | Valid legacy value initializes absent liveStopGracePeriod; canonical value, including zero, wins; legacy retained for downgrade |
@@ -2263,7 +2296,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | modulatePIIPhiTagging | Live/batch source wired; unqualified / Same | Native default/on/off choice, strict transfer/restart and captured live/batch provider flags; absent stays off. Native/provider acceptance pending. |
 | accessibilityInsertionMode | Equivalent / Missing | Output; Windows cursor/replace-field; Linux paste cannot claim AX replace-all equivalence |
 | selectedHotKey | Equivalent / Partial | Shortcuts; Windows Ctrl/Alt native key; Linux desktop/portal-owned binding, never Mac Fn key translation |
-| customShortcutBindings | Complete source mapping; unqualified / Partial window-local source | Windows Keyboard **Action shortcuts** dialog: all 27 actions source-wired; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Voice editing additionally requires an editable UIA selection and a rewrite API key. Linux projects 22 actions into window-local bindings and edits all saved bindings with presets/reset; five execution actions and global registration remain unimplemented. Native/physical acceptance pending. |
+| customShortcutBindings | Complete source mapping; unqualified / Partial window-local source | Windows Keyboard **Action shortcuts** dialog: all 27 actions source-wired; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Voice editing additionally requires an editable UIA selection and a rewrite API key. Linux projects 23 actions into window-local bindings and edits all saved bindings with presets/reset; four execution actions and global registration remain unimplemented. Native/physical acceptance pending. |
 | paidAccessRoutingEnabled | Apple-specific / Apple-specific | BYOK desktop providers; no paid-access entitlement/routing journey. Retained opaque through import/export |
 | simpleModelChoices | Missing / Missing | Native catalogue picker without simplified paid-model chooser |
 | rememberedLocalTranscriptionSource | Partial / Partial | Models remembers Local selection; no Apple on-device source |
@@ -2293,9 +2326,9 @@ Permissions, Compare Models, Data & Migration and About
 General/Transcription/Post-processing/Voice Output/Keyboard/About and iCloud sync;
 Windows also exposes Profiles and a separate native Permissions window (About, or
 the setup guide); the GTK Profiles destination is added by this
-unqualified source-only candidate. Windows now has an API Keys page (see
-"API Keys page" above; source only, NOT_RUN); Linux provider keys remain
-embedded under Transcription and Voice. Comparison is implemented as a
+unqualified source-only candidate. Both desktops now have dedicated API Keys windows
+(see "API Keys pages" above; source only, NOT_RUN), sharing the same store as
+their embedded provider controls. Comparison is implemented as a
 separate native window outside this `SettingsTab` list — live/file multi-model
 capture, blind judging/ranking, playback and scoreboard export
 (`DesktopHostComparison.swift`, `WindowsComparison.swift`,
@@ -2532,8 +2565,8 @@ duplicate that the user did not edit is not refused.
 Linux now projects the shared key table to GDK/X11 key values without loading a
 native framework into SpeakCore. Its Keyboard page shows every canonical
 action, the saved combination and an explicit availability/scope note. There
-are 22 window-local execution mappings: recording; Stop speech; Pause/Resume TTS;
-Speak Clipboard; Dashboard,
+are 23 window-local execution mappings: recording; Stop speech; Pause/Resume TTS;
+Speak Clipboard; API Keys; Dashboard,
 History, Voice Output (both), General, Transcription, Post-processing,
 Corrections, Pronunciation, Profiles, Keyboard and About; Data & Migration
 (General); Troubleshooting; Compare Models; and Quick Voice 1-3. The actual
@@ -2560,9 +2593,9 @@ not run local actions. An imported duplicate retains its value and shows a
 conflict note; the first listed action owns that combination. Sidebar
 Ctrl+digit chords retain precedence and corresponding action notes disclose it.
 
-Five Linux actions remain unavailable: Speak Selected Text,
-API Keys, Permissions, Paste Last History Item and Edit
-Selection by Voice. No API Keys/Permissions action is redirected to an
+Four Linux actions remain unavailable: Speak Selected Text,
+Permissions, Paste Last History Item and Edit
+Selection by Voice. No Permissions action is redirected to an
 unrelated page. Enabled global bindings remain saved and visibly unregistered;
 they are not silently downgraded to local shortcuts. The existing single X11 /
 Wayland-portal dictation shortcut is unchanged. Multi-action global registration

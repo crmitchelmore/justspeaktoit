@@ -43,16 +43,11 @@ private func linuxAPIKeyEvent(
         let admitted = holder.apiKeys.start(ticket) {
             guard !Task.isCancelled, jsti_api_keys_request_is_current(ticket.uuidString) == 1 else { return }
             let controller = holder.controller
-            let status: String
-            switch action {
-            case Int32(JSTI_LINUX_API_KEY_REFRESH): status = ""
-            case Int32(JSTI_LINUX_API_KEY_SAVE): status = await controller.saveAPIKey(identifier: name, key: typed)
-            case Int32(JSTI_LINUX_API_KEY_REMOVE): status = await controller.removeAPIKey(identifier: name)
-            case Int32(JSTI_LINUX_API_KEY_VALIDATE):
-                status = await controller.validateAPIKey(identifier: name, typed: typed)
-            default:
+            guard let status = await linuxAPIKeyStatus(action, name: name, typed: typed, controller: controller) else {
                 LinuxHostPlatform.update("The API Keys request is not supported.")
-                LinuxWindow.deliverAPIKeys([], request: ticket, status: "Unsupported API Keys request. Refresh to retry.")
+                LinuxWindow.deliverAPIKeys(
+                    [], request: ticket, status: "Unsupported API Keys request. Refresh to retry."
+                )
                 return
             }
             guard !Task.isCancelled else { return }
@@ -65,5 +60,18 @@ private func linuxAPIKeyEvent(
                 [], request: ticket, status: "An earlier key request is still finishing. Refresh again afterward."
             )
         }
+    }
+}
+
+/// Runs one admitted API Keys action; nil means the native action code is unsupported.
+private func linuxAPIKeyStatus(
+    _ action: Int32, name: String, typed: String, controller: LinuxAppController
+) async -> String? {
+    switch action {
+    case Int32(JSTI_LINUX_API_KEY_REFRESH): return ""
+    case Int32(JSTI_LINUX_API_KEY_SAVE): return await controller.saveAPIKey(identifier: name, key: typed)
+    case Int32(JSTI_LINUX_API_KEY_REMOVE): return await controller.removeAPIKey(identifier: name)
+    case Int32(JSTI_LINUX_API_KEY_VALIDATE): return await controller.validateAPIKey(identifier: name, typed: typed)
+    default: return nil
     }
 }

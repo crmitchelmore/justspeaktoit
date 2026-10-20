@@ -29,6 +29,16 @@ The earlier timeout was therefore not deterministic; the coverage mismatch
 remains an unnecessary invalidation, not a proven sole cause. Qualification
 of the aligned commands and later feature descendants is separate.
 
+The later `1667ee83` tooling job `118642531254` passed SwiftLint with zero
+violations but its cancellation fixture timed out. Its readiness substring
+also matched the flushed command header before the compiler was launched.
+The fixture now requires exact standalone compiler and descendant output
+lines, plus a marker from the owned process's `wait()` call after the gate
+assigns its handle. A negative contract rejects the command header and an
+unowned process. Production cancellation behavior, build/runtime budgets and
+the existing leak observation window are unchanged. This fixture repair is
+NOT_RUN locally and still needs automatic qualification.
+
 ## Shared provider credential write ownership (source only; NOT_RUN)
 
 The API Keys, Transcription and Post-processing editors now share an owned

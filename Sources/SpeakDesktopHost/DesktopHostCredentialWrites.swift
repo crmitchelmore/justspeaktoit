@@ -24,7 +24,8 @@ extension DesktopHostController {
                 throw CancellationError()
             } catch {
                 throw DesktopHostError(
-                    message: "The provider key write could not be confirmed. Check the credential store before retrying."
+                    message: "The provider key write could not be confirmed. "
+                        + "Check the credential store before retrying."
                 )
             }
         }

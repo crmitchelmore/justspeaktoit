@@ -71,6 +71,8 @@ enum {
     JSTI_EVENT_AUDIO_CLEANUP_RESPONSE = 95, /* text: confirmation UUID; index: 1 confirms, 0 cancels */
     JSTI_EVENT_MIGRATION_EXPORT = 96, /* text: ZIP destination; index bits: 1 saved audio, 2 app profiles */
     JSTI_EVENT_MIGRATION_INSPECT = 97, /* text: selected ZIP source; no application changes */
+    JSTI_EVENT_MIGRATION_RESTORE = 98, /* text: selected ZIP source; prepares a preview only */
+    JSTI_EVENT_MIGRATION_RESTORE_RESPONSE = 99, /* text: preview token; 0 cancel, 1 merge, 2 replace profiles */
     JSTI_EVENT_QUICK_VOICE = 110, /* index: canonical favorite slot 1...3 */
     JSTI_EVENT_PASTE_LAST_HISTORY = 111, /* capture the invocation target before queueing */
     JSTI_EVENT_SPEAK_CLIPBOARD = 113, /* captures through the owned Host speech task, not History */
@@ -279,6 +281,9 @@ int32_t jsti_window_set_history(const JSTIHistoryRow *rows, size_t count, const 
 int32_t jsti_window_set_history_management(const char *identifiers);
 int32_t jsti_window_confirm_audio_cleanup(const char *token, size_t count);
 int32_t jsti_window_show_migration_report(const char *text);
+/* Owned, modal preview; Replace profiles requires a second affirmative response.
+ * Both stages default to Cancel. Called from the Host's ordered publication path. */
+int32_t jsti_window_confirm_migration_restore(const char *token, const char *text, int32_t offers_replace);
 /* The dashboard totals (`all` saved records) and the History header totals
  * (`visible`, the records the search shows). */
 int32_t jsti_window_set_insights(const JSTIInsights *all, const JSTIInsights *visible);

@@ -106,7 +106,9 @@ static void navigate_clicked(GtkButton *button, gpointer data) {
     (void)button;
     gint page = GPOINTER_TO_INT(data);
     jsti_troubleshooting_close();
-    if (jsti_window_show_page(page) != 0)
+    int32_t result = page == JSTI_LINUX_TROUBLESHOOTING_API_KEYS
+        ? jsti_window_request_api_keys() : jsti_window_show_page(page);
+    if (result != 0)
         (void)jsti_window_update("The requested settings page could not be opened.", NULL, -1);
 }
 
@@ -235,7 +237,8 @@ static Report *report_copy(const JSTILinuxTroubleshootingRow *rows, size_t count
         if (!valid_text(row->title, 512) || !valid_text(row->detail, 16384) ||
             !valid_text(row->status, 32) || !valid_text(row->navigation_title, 128) ||
             !valid_text(row->fix_title, 128) || row->title[0] == '\0' || row->status[0] == '\0' ||
-            row->navigation_page < 0 || row->navigation_page >= JSTI_PAGE_COUNT ||
+            (row->navigation_page != JSTI_LINUX_TROUBLESHOOTING_API_KEYS &&
+             (row->navigation_page < 0 || row->navigation_page >= JSTI_PAGE_COUNT)) ||
             (row->fix_command != 0 && row->fix_command != JSTI_LINUX_TROUBLESHOOTING_KEEP_CLIPBOARD &&
              row->fix_command != JSTI_LINUX_TROUBLESHOOTING_DISABLE_PROCESSING) ||
             (row->fix_command != 0 && row->fix_title[0] == '\0')) return NULL;
@@ -300,6 +303,10 @@ int32_t jsti_troubleshooting_self_test(GtkWindow *owner, char *error, size_t cap
         report_apply(report); report_free(report);
         valid = valid && ui.pending && ui.first_fix == NULL;
     }
+    row.navigation_page = JSTI_LINUX_TROUBLESHOOTING_API_KEYS;
+    report = report_copy(&row, 1, "API Keys destination", fixture.ticket);
+    valid = valid && report != NULL;
+    if (report != NULL) report_free(report);
     row.fix_command = 999;
     valid = valid && jsti_troubleshooting_set_rows(&row, 1, "Invalid", fixture.ticket) == -1;
     row.fix_command = 0;

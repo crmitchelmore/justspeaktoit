@@ -4,7 +4,8 @@ import SpeakDesktopHost
 import CLinuxSupport
 
 enum LinuxActionShortcutRun: Equatable {
-    case record, page(String), stop, troubleshooting, comparison, quickVoice(Int), clipboard, pauseSpeech, unavailable
+    case record, page(String), stop, troubleshooting, comparison, quickVoice(Int), clipboard, pauseSpeech
+    case apiKeys, unavailable
 
     // swiftlint:disable:next cyclomatic_complexity
     init(_ action: DesktopShortcutAction) {
@@ -29,7 +30,8 @@ enum LinuxActionShortcutRun: Equatable {
         case .quickVoice3: self = .quickVoice(3)
         case .speakClipboard: self = .clipboard
         case .pauseResumeTTS: self = .pauseSpeech
-        case .speakSelectedText, .openAPIKeysSettings,
+        case .openAPIKeysSettings: self = .apiKeys
+        case .speakSelectedText,
              .openPermissionsSettings, .pasteLastHistoryItem, .editSelectionByVoice:
             self = .unavailable
         }
@@ -46,6 +48,7 @@ enum LinuxActionShortcutRun: Equatable {
         case .quickVoice: 6
         case .clipboard: 7
         case .pauseSpeech: 8
+        case .apiKeys: 9
         }
     }
     var page: String { if case .page(let name) = self { name } else { "" } }
@@ -141,10 +144,10 @@ extension LinuxActionShortcutRun {
             (.openPronunciationSettings, .page("pronunciation")), (.openKeyboardSettings, .page("keyboard")),
             (.openCompareModelsSettings, .comparison), (.openAboutSettings, .page("about")),
             (.quickVoice1, .quickVoice(1)), (.quickVoice2, .quickVoice(2)), (.quickVoice3, .quickVoice(3)),
-            (.speakClipboard, .clipboard), (.pauseResumeTTS, .pauseSpeech)
+            (.speakClipboard, .clipboard), (.pauseResumeTTS, .pauseSpeech), (.openAPIKeysSettings, .apiKeys)
         ]
         let unavailable: [DesktopShortcutAction] = [
-            .speakSelectedText, .openAPIKeysSettings,
+            .speakSelectedText,
             .openPermissionsSettings, .pasteLastHistoryItem, .editSelectionByVoice
         ]
         guard expected.allSatisfy({ Self($0.0) == $0.1 }),

@@ -87,21 +87,8 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     package func apiKeyRows() async -> [DesktopAPIKeyRow] {
         let entries = Self.apiKeyCatalogEntries()
         let probed = Set(entries.map(\.identifier)).union(ModelCredentialResolver.allKnownAPIKeyIdentifiers)
-        let effects = effects
-        let states = await Task.detached { () -> [String: DesktopAPIKeyReadState] in
-            var states: [String: DesktopAPIKeyReadState] = [:]
-            for identifier in probed {
-                do {
-                    let key = try effects.apiKey(name: identifier)
-                    states[identifier] = key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        ? .notSet : .saved(mask: APIKeyCatalog.maskedSuffix(key, identifier: identifier))
-                } catch {
-                    states[identifier] = .unreadable
-                }
-            }
-            return states
-        }.value
-        reconcileTrackedAPIKeys(states)
+        let states = await readAPIKeyStates(probed)
+        if !Task.isCancelled, !closed { reconcileTrackedAPIKeys(states) }
         return entries.map { entry in
             let state = states[entry.identifier] ?? .unreadable
             let status: String
@@ -124,6 +111,29 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         }
     }
 
+    private func readAPIKeyStates(_ identifiers: Set<String>) async -> [String: DesktopAPIKeyReadState] {
+        let effects = effects
+        let worker = Task.detached { () -> [String: DesktopAPIKeyReadState] in
+            var states: [String: DesktopAPIKeyReadState] = [:]
+            for identifier in identifiers {
+                if Task.isCancelled { break }
+                do {
+                    let key = try effects.apiKey(name: identifier)
+                    states[identifier] = key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        ? .notSet : .saved(mask: APIKeyCatalog.maskedSuffix(key, identifier: identifier))
+                } catch {
+                    states[identifier] = .unreadable
+                }
+            }
+            return states
+        }
+        return await withTaskCancellationHandler {
+            await worker.value
+        } onCancel: {
+            worker.cancel()
+        }
+    }
+
     /// Unreadable identifiers keep their previous tracked state; identifiers
     /// outside the probed set are kept because they cannot be checked here.
     private func reconcileTrackedAPIKeys(_ states: [String: DesktopAPIKeyReadState]) {
@@ -138,6 +148,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     /// Validates first and stores only a key the provider accepts, as the Mac does.
     @discardableResult
     package func saveAPIKey(identifier: String, key: String) async -> String {
+        guard !Task.isCancelled else { return Self.apiKeysCancelledMessage }
         guard canSaveVoiceCredential else { return Self.apiKeysBusyMessage }
         guard let entry = Self.apiKeyCatalogEntries().first(where: { $0.identifier == identifier }) else {
             return report(APIKeyEntryError.unknownProvider.localizedDescription)
@@ -145,6 +156,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         let cleaned: String
         do { cleaned = try APIKeyCatalog.sanitizedKey(key) } catch { return report(error.localizedDescription) }
         let validation = await checkAPIKey(cleaned, identifier: identifier)
+        guard !Task.isCancelled else { return Self.apiKeysCancelledMessage }
         guard case .success = validation.outcome else { return report(Self.message(validation)) }
         guard canSaveVoiceCredential else { return Self.apiKeysBusyMessage }
         do {
@@ -158,6 +170,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
 
     @discardableResult
     package func removeAPIKey(identifier: String) async -> String {
+        guard !Task.isCancelled else { return Self.apiKeysCancelledMessage }
         guard canSaveVoiceCredential else { return Self.apiKeysBusyMessage }
         guard let entry = Self.apiKeyCatalogEntries().first(where: { $0.identifier == identifier }) else {
             return report(APIKeyEntryError.unknownProvider.localizedDescription)
@@ -174,6 +187,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     /// Checks the typed key, or the saved key when nothing is typed. Network
     /// checks count as an operation for shutdown but never block recording.
     package func validateAPIKey(identifier: String, typed: String) async -> String {
+        guard !Task.isCancelled else { return Self.apiKeysCancelledMessage }
         guard !closed else { return "Speak is closing." }
         guard let entry = Self.apiKeyCatalogEntries().first(where: { $0.identifier == identifier }) else {
             return APIKeyEntryError.unknownProvider.localizedDescription
@@ -192,7 +206,10 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         } else {
             do { key = try APIKeyCatalog.sanitizedKey(key) } catch { return error.localizedDescription }
         }
-        return Self.message(await checkAPIKey(key, identifier: identifier))
+        guard !Task.isCancelled else { return Self.apiKeysCancelledMessage }
+        let result = await checkAPIKey(key, identifier: identifier)
+        guard !Task.isCancelled else { return Self.apiKeysCancelledMessage }
+        return Self.message(result)
     }
 
     private func checkAPIKey(_ key: String, identifier: String) async -> APIKeyValidationResult {
@@ -235,6 +252,8 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     private static var apiKeysBusyMessage: String {
         "Finish recording or the current Voice Output task before changing API keys."
     }
+
+    private static var apiKeysCancelledMessage: String { "The API key request was cancelled." }
 
     private static func message(_ result: APIKeyValidationResult) -> String {
         switch result.outcome {

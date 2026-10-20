@@ -28,6 +28,11 @@ int32_t jsti_window_post(jsti_window_apply_fn apply, gpointer data, GDestroyNoti
 void jsti_window_emit(gint32 event, const char *text, gint32 index);
 struct _GtkEventControllerKey;
 struct _GtkWindow;
+void jsti_api_keys_open(struct _GtkWindow *owner);
+void jsti_api_keys_close(void);
+void jsti_api_keys_set_idle(gboolean idle);
+struct _GtkWidget *jsti_api_keys_group_new(struct _GtkWindow *owner);
+int32_t jsti_api_keys_self_test(struct _GtkWindow *owner, char *error, size_t capacity);
 typedef gboolean (*jsti_action_run_fn)(gint run, const char *page, gint slot);
 struct _GtkWidget *jsti_action_shortcuts_group_new(struct _GtkWindow *owner);
 gboolean jsti_action_shortcuts_key(struct _GtkEventControllerKey *controller,

@@ -26,6 +26,7 @@ final class LinuxEventContext: @unchecked Sendable {
     private var shortcutTail: Task<Void, Never>?
     let shortcuts: LinuxShortcuts
     let automation: LinuxAutomationSwitch
+    let apiKeys = DesktopAPIKeyRequests()
     private(set) var gestures: LinuxShortcutGestures!
     lazy var microphones = LinuxMicrophoneMonitor(controller: controller)
     /// Set before the window opens, when iCloud sync is configured.
@@ -40,6 +41,7 @@ final class LinuxEventContext: @unchecked Sendable {
             gestures = LinuxShortcutGestures(style: .pressToToggle) { [weak self] request in
                 guard let self else { return }
                 await self.ready?.value
+                guard jsti_api_keys_is_open() == 0 || request.input == .gesture(.holdEnd) else { return }
                 await controller.admitShortcut(request)
             }
         }
@@ -95,8 +97,8 @@ final class LinuxEventContext: @unchecked Sendable {
     /// A shortcut, `--toggle` or the app action. The target is captured now,
     /// before anything else can take focus; toggles run one at a time.
     func shortcutToggle(modelIndex: Int?, deviceID: String?) {
-        guard jsti_action_shortcuts_editor_is_open() == 0 else {
-            LinuxHostPlatform.update("Close the action shortcut editor before recording.")
+        guard jsti_action_shortcuts_editor_is_open() == 0, jsti_api_keys_is_open() == 0 else {
+            LinuxHostPlatform.update("Close the shortcut or API Keys editor before recording.")
             return
         }
         let target = LinuxEventContext.captureTarget()
@@ -109,6 +111,7 @@ final class LinuxEventContext: @unchecked Sendable {
                 await previous?.value
                 await ready?.value
                 let saved = await selection.value
+                guard jsti_api_keys_is_open() == 0 else { return }
                 await controller.admitCaptured(
                     target: target, modelIndex: saved.modelIndex, deviceID: deviceID ?? saved.deviceID,
                     textOutput: saved.textOutput, profile: saved.profile, trigger: .press
@@ -126,7 +129,7 @@ final class LinuxEventContext: @unchecked Sendable {
     /// target and text output are captured at the press.
     func shortcutKey(pressed: Bool) {
         if pressed {
-            guard jsti_action_shortcuts_editor_is_open() == 0 else { return }
+            guard jsti_action_shortcuts_editor_is_open() == 0, jsti_api_keys_is_open() == 0 else { return }
             let target = Self.captureTarget()
             let selection = recordingSettings(target: target)
             if !smokeTest, gestures.currentStyle != .pressToToggle {
@@ -206,6 +209,12 @@ func linuxWindowEvent( // swiftlint:disable:this cyclomatic_complexity
     }
     if event == Int(JSTI_EVENT_SPEAK_CLIPBOARD) {
         holder.enqueueSettings { await holder.controller.readClipboardAloud() }
+        return
+    }
+    if event == Int(JSTI_EVENT_API_KEYS) {
+        if jsti_window_request_api_keys() != 0 {
+            LinuxHostPlatform.update("API Keys could not be opened. Try again when the app is idle.")
+        }
         return
     }
     if event == Int(JSTI_EVENT_SPEECH_PAUSE) {

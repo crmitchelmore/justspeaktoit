@@ -15,7 +15,7 @@ final class DataMigrationPreferenceCatalogTests: XCTestCase {
 
     func testCanonicalKeys_PreserveInventoryOrderAndUniquePersistedNames() {
         let keys = ApplicationPreferenceKey.allCases.map(\.rawValue)
-        XCTAssertEqual(keys.count, 92)
+        XCTAssertEqual(keys.count, 93)
         XCTAssertEqual(Set(keys).count, keys.count)
         XCTAssertEqual(keys.first, "appearance")
         XCTAssertEqual(keys.last, "analyticsEnabled")

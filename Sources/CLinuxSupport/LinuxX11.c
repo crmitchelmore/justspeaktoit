@@ -138,6 +138,81 @@ int32_t jsti_x11_paste(uint64_t window, int32_t shift, char *error, size_t capac
 
 /* --------------------------------------------------------------- hotkey */
 
+typedef struct HotKeyMasks {
+    unsigned int ignored, values[256];
+    guint count;
+} HotKeyMasks;
+
+enum { MODIFIER_LOCK = 1, MODIFIER_OTHER = 2 };
+
+static guint8 modifier_key_traits(const KeySym *symbols, gint count) {
+    guint8 traits = 0;
+    for (gint index = 0; index < count; ++index) {
+        if (symbols[index] == NoSymbol) continue;
+        gboolean lock = symbols[index] == XK_Caps_Lock || symbols[index] == XK_Shift_Lock ||
+            symbols[index] == XK_Num_Lock || symbols[index] == XK_Scroll_Lock;
+        traits |= lock ? MODIFIER_LOCK : MODIFIER_OTHER;
+    }
+    return traits != 0 ? traits : MODIFIER_OTHER;
+}
+
+static unsigned int modifier_lock_bits(const XModifierKeymap *map, const guint8 traits[256]) {
+    unsigned int ignored = 0;
+    for (gint modifier = 0; modifier < 8; ++modifier) {
+        guint8 combined = 0;
+        for (gint key = 0; key < map->max_keypermod; ++key) {
+            KeyCode code = map->modifiermap[modifier * map->max_keypermod + key];
+            if (code != 0) combined |= traits[code];
+        }
+        /* A slot shared with AltGr, a group switch or any ordinary key is not
+         * a lock-only slot, even if one of its keys is NumLock/ScrollLock. */
+        if (combined == MODIFIER_LOCK) ignored |= 1u << modifier;
+    }
+    return ignored;
+}
+
+static HotKeyMasks hotkey_masks(unsigned int lock_bits, unsigned int required) {
+    HotKeyMasks masks = { .ignored = lock_bits & ~required, .count = 1 };
+    for (guint bit = 0; bit < 8; ++bit) {
+        unsigned int modifier = 1u << bit;
+        if (!(masks.ignored & modifier)) continue;
+        guint count = masks.count;
+        for (guint index = 0; index < count; ++index)
+            masks.values[masks.count++] = masks.values[index] | modifier;
+    }
+    return masks;
+}
+
+static gboolean read_hotkey_masks(
+    Display *display, unsigned int required, HotKeyMasks *result, char *error, size_t capacity
+) {
+    XModifierKeymap *map = XGetModifierMapping(display);
+    gint minimum, maximum, symbols_per_key = 0;
+    XDisplayKeycodes(display, &minimum, &maximum);
+    KeySym *symbols = minimum > 0 && maximum >= minimum && maximum < 256
+        ? XGetKeyboardMapping(display, (KeyCode)minimum, maximum - minimum + 1, &symbols_per_key) : NULL;
+    if (map == NULL || map->max_keypermod < 0 || map->max_keypermod > 256 ||
+        (map->max_keypermod > 0 && map->modifiermap == NULL) ||
+        symbols == NULL || symbols_per_key <= 0) {
+        if (map != NULL) XFreeModifiermap(map);
+        if (symbols != NULL) XFree(symbols);
+        jsti_set_error(error, capacity, "The keyboard modifier map could not be read safely.");
+        return FALSE;
+    }
+    guint8 traits[256];
+    memset(traits, MODIFIER_OTHER, sizeof(traits));
+    for (gint code = minimum; code <= maximum; ++code)
+        traits[code] = modifier_key_traits(symbols + (code - minimum) * symbols_per_key, symbols_per_key);
+    *result = hotkey_masks(modifier_lock_bits(map, traits), required);
+    XFree(symbols);
+    XFreeModifiermap(map);
+    return TRUE;
+}
+
+static gboolean hotkey_modifiers_match(unsigned int state, unsigned int required, unsigned int ignored) {
+    return (state & 0xffu & ~ignored) == required;
+}
+
 typedef struct HotKeyThread {
     GThread *thread;
     int wake[2];
@@ -147,15 +222,11 @@ typedef struct HotKeyThread {
     void *context;
     Display *display;
     KeyCode code;
+    HotKeyMasks masks;
 } HotKeyThread;
 
 static GMutex hotkey_lock;
 static HotKeyThread *hotkey;
-
-/* NumLock, CapsLock and ScrollLock must not defeat the grab. */
-static const unsigned int lock_masks[] = { 0, LockMask, Mod2Mask, LockMask | Mod2Mask, Mod5Mask,
-                                           Mod5Mask | LockMask, Mod5Mask | Mod2Mask,
-                                           Mod5Mask | LockMask | Mod2Mask };
 
 static gpointer hotkey_run(gpointer data) {
     HotKeyThread *state = data;
@@ -169,7 +240,8 @@ static gpointer hotkey_run(gpointer data) {
         while (XPending(display) > 0) {
             XEvent event;
             XNextEvent(display, &event);
-            if (event.type == KeyPress && event.xkey.keycode == state->code && !pressed) {
+            if (event.type == KeyPress && event.xkey.keycode == state->code && !pressed &&
+                hotkey_modifiers_match(event.xkey.state, state->modifiers, state->masks.ignored)) {
                 pressed = TRUE;
                 state->callback(1, state->context);
             } else if (event.type == KeyRelease && event.xkey.keycode == state->code && pressed) {
@@ -180,8 +252,8 @@ static gpointer hotkey_run(gpointer data) {
         if (poll(descriptors, 2, -1) < 0) continue;
         if (descriptors[1].revents & POLLIN) break;
     }
-    for (size_t index = 0; index < G_N_ELEMENTS(lock_masks); index++) {
-        XUngrabKey(display, state->code, state->modifiers | lock_masks[index], root);
+    for (guint index = 0; index < state->masks.count; index++) {
+        XUngrabKey(display, state->code, state->modifiers | state->masks.values[index], root);
     }
     XSync(display, False);
     return NULL;
@@ -196,6 +268,10 @@ static int record_grab_error(Display *display, XErrorEvent *event) {
 
 int32_t jsti_x11_hotkey_start(
     uint32_t keysym, uint32_t modifiers, jsti_hotkey_fn callback, void *context, char *error, size_t capacity) {
+    if (keysym == NoSymbol || (modifiers & ~0xffu) != 0 || callback == NULL) {
+        jsti_set_error(error, capacity, "The shortcut key, callback or modifier bits are invalid.");
+        return -1;
+    }
     jsti_x11_hotkey_stop();
     Display *display = XOpenDisplay(NULL);
     if (display == NULL) {
@@ -208,11 +284,16 @@ int32_t jsti_x11_hotkey_start(
         jsti_set_error(error, capacity, "The shortcut key is not on this keyboard layout.");
         return -1;
     }
+    HotKeyMasks masks;
+    if (!read_hotkey_masks(display, modifiers, &masks, error, capacity)) {
+        XCloseDisplay(display);
+        return -1;
+    }
     Window root = DefaultRootWindow(display);
     grab_failed = 0;
     XErrorHandler previous = XSetErrorHandler(record_grab_error);
-    for (size_t index = 0; index < G_N_ELEMENTS(lock_masks); index++) {
-        XGrabKey(display, code, modifiers | lock_masks[index], root, False, GrabModeAsync, GrabModeAsync);
+    for (guint index = 0; index < masks.count; index++) {
+        XGrabKey(display, code, modifiers | masks.values[index], root, False, GrabModeAsync, GrabModeAsync);
     }
     XSync(display, False);
     XSetErrorHandler(previous);
@@ -235,6 +316,7 @@ int32_t jsti_x11_hotkey_start(
     state->context = context;
     state->display = display;
     state->code = code;
+    state->masks = masks;
     g_mutex_lock(&hotkey_lock);
     hotkey = state;
     state->thread = g_thread_new("jsti-x11-hotkey", hotkey_run, state);
@@ -255,4 +337,58 @@ void jsti_x11_hotkey_stop(void) {
     close(state->wake[0]);
     close(state->wake[1]);
     g_free(state);
+}
+
+int32_t jsti_x11_modifier_self_test(char *error, size_t capacity) {
+    guint8 traits[256];
+    memset(traits, MODIFIER_OTHER, sizeof(traits));
+    traits[10] = traits[11] = traits[13] = MODIFIER_LOCK;
+    KeyCode keys[16] = { 0 };
+    keys[2] = 10;  /* Lock: CapsLock. */
+    keys[8] = 11;  /* Mod2: NumLock. */
+    keys[10] = 13; /* Mod3: ScrollLock, not the historical Mod5 guess. */
+    keys[14] = 12; /* Mod5: AltGr. */
+    XModifierKeymap map = { .max_keypermod = 2, .modifiermap = keys };
+    unsigned int locks = LockMask | Mod2Mask | Mod3Mask;
+    gboolean okay = modifier_lock_bits(&map, traits) == locks;
+    HotKeyMasks masks = hotkey_masks(locks, ControlMask | Mod1Mask);
+    okay = okay && masks.count == 8 && masks.ignored == locks;
+    unsigned int seen = 0;
+    for (guint index = 0; index < masks.count; ++index) {
+        unsigned int compact = ((masks.values[index] & LockMask) ? 1u : 0u) |
+            ((masks.values[index] & Mod2Mask) ? 2u : 0u) | ((masks.values[index] & Mod3Mask) ? 4u : 0u);
+        okay = okay && !(masks.values[index] & ~locks) && !(seen & (1u << compact));
+        seen |= 1u << compact;
+        okay = okay && hotkey_modifiers_match(
+            ControlMask | Mod1Mask | masks.values[index] | Button1Mask, ControlMask | Mod1Mask, masks.ignored);
+    }
+    okay = okay && seen == 0xffu && !hotkey_modifiers_match(
+        ControlMask | Mod1Mask | Mod5Mask, ControlMask | Mod1Mask, masks.ignored);
+    okay = okay && !hotkey_modifiers_match(
+        ControlMask | Mod1Mask | ShiftMask, ControlMask | Mod1Mask, masks.ignored);
+    masks = hotkey_masks(locks, ControlMask | Mod2Mask);
+    okay = okay && masks.count == 4 && !(masks.ignored & Mod2Mask) &&
+        !hotkey_modifiers_match(ControlMask, ControlMask | Mod2Mask, masks.ignored);
+    keys[9] = 12;
+    okay = okay && modifier_lock_bits(&map, traits) == (LockMask | Mod3Mask);
+    keys[9] = 0;
+    traits[11] = MODIFIER_LOCK | MODIFIER_OTHER;
+    okay = okay && modifier_lock_bits(&map, traits) == (LockMask | Mod3Mask);
+    const KeySym lock[] = { XK_Num_Lock, NoSymbol, XK_Num_Lock };
+    const KeySym mixed[] = { XK_Scroll_Lock, XK_ISO_Level3_Shift };
+    const KeySym unknown[] = { NoSymbol };
+    okay = okay && modifier_key_traits(lock, G_N_ELEMENTS(lock)) == MODIFIER_LOCK &&
+        modifier_key_traits(mixed, G_N_ELEMENTS(mixed)) == (MODIFIER_LOCK | MODIFIER_OTHER) &&
+        modifier_key_traits(unknown, G_N_ELEMENTS(unknown)) == MODIFIER_OTHER;
+    masks = hotkey_masks(0, ControlMask);
+    okay = okay && masks.count == 1 && masks.values[0] == 0 && masks.ignored == 0;
+    masks = hotkey_masks(0xffu, 0);
+    okay = okay && masks.count == 256;
+    for (guint index = 0; index < masks.count; ++index)
+        okay = okay && masks.values[index] == index;
+    if (!okay) {
+        jsti_set_error(error, capacity, "X11 lock-only modifier discovery, expansion or matching failed.");
+        return -1;
+    }
+    return 0;
 }

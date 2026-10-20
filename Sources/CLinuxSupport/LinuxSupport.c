@@ -182,6 +182,7 @@ int32_t jsti_open_path(const char *path, char *error, size_t capacity) {
 /* -------------------------------------------------------------- self-test */
 
 int32_t jsti_native_self_test(char *error, size_t capacity) {
+    if (jsti_x11_modifier_self_test(error, capacity) != 0) return -1;
     gchar *root = g_dir_make_tmp("jsti-linux-self-test-XXXXXX", NULL);
     if (root == NULL) {
         jsti_set_error(error, capacity, "Self-test could not create a temporary folder.");

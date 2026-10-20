@@ -198,6 +198,16 @@ compositor/provider and external-field acceptance remain open.
 
 ## Linux shortcut listener lifetime (source only; NOT_RUN)
 
+X11 registration now reads the actual modifier/key maps rather than ignoring
+guessed Mod2/Mod5 lock bits. Only lock-only slots are ignored, across every
+symbol level; AltGr/group-switch/mixed slots and explicitly required modifiers
+remain significant. The listener owns the exact unique grab/ungrab variants and
+checks event modifiers before admitting a press. No-display native fixtures
+cover relocated ScrollLock, AltGr, mixed/unknown keys, explicit lock modifiers
+and zero/all-eight-bit subset bounds. These are authored but NOT_RUN locally.
+Runtime remapping/rebinding, safe multi-action registration and physical
+keyboard/layout qualification remain open, not inferred from this repair.
+
 The existing dictation listener now owns its startup and actual native cleanup,
 not just flags set after registration returns. Stop permanently fences new
 callback admission and result publication. An already-started X11 or portal

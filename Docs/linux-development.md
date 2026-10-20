@@ -347,6 +347,18 @@ app without raising its window (GApplication forwards the command line), so it
 can be bound to a key in any desktop. The `app.toggle-recording` action does
 the same over D-Bus.
 
+The X11 listener discovers CapsLock/ShiftLock, NumLock and ScrollLock slots from
+the actual modifier and key maps when registering, rather than assuming Mod2
+and Mod5 are locks. A slot that also contains AltGr, a group-switch key or another
+ordinary key is deliberately not ignored; explicitly required modifiers also
+remain required. Grab and release use the same owned set of unique lock-state
+variants, and event admission rejects extra non-lock modifiers. Custom maps with
+mixed lock/non-lock slots may need the desktop-owned `--toggle` binding instead.
+Runtime key/modifier remapping still needs a listener restart: automatic
+remapping/rebinding, multiple global actions and real keyboard/layout acceptance
+remain open gates. No-display native fixtures cover the classification and mask
+invariants, including the 256-variant bound; these changes are NOT_RUN locally.
+
 With the app **already running**, desktop keyboard settings can also bind
 `justspeaktoit --speak-clipboard` and `justspeaktoit --paste-last-history`.
 Inside Flatpak use `flatpak run com.justspeaktoit.JustSpeakToIt` followed by the

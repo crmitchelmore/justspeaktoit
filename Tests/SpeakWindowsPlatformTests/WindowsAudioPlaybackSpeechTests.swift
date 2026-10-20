@@ -77,9 +77,10 @@ final class WindowsAudioPlaybackSpeechTests: XCTestCase {
         controller.endSpeech(current)
         XCTAssertFalse(controller.togglePause(speech: current))
         try controller.play(recordID: id, path: "history.wav", knownDuration: 1)
-        await playbackEventually {
-            self.backend.handles.first?.counts.started == 1 && self.controller.activity?.state == .playing
-        }
+        await playbackEventually { self.backend.handles.first?.counts.started == 1 }
+        // The fake handle reports `.preparing` until the test makes its output audible.
+        try XCTUnwrap(backend.handles.first).set(state: .playing, position: 0.1)
+        await playbackEventually { self.controller.activity?.state == .playing }
         XCTAssertFalse(controller.togglePause(speech: current))
         XCTAssertEqual(controller.activity?.state, .playing)
         try await controller.stopAndWait()

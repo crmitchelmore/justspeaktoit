@@ -126,7 +126,10 @@ final class DesktopVoiceEditScratchTests: XCTestCase {
         let id = UUID()
         let run = try owner.createRun(id)
         let audio = run.appendingPathComponent("instruction.wav")
-        let other = directory.appendingPathComponent("other.wav")
+        // Outside the owned root: on Windows the owner denies write sharing on it, so no new
+        // name can be added there. The temporary directory keeps both names on one volume.
+        let other = FileManager.default.temporaryDirectory.appendingPathComponent("voice-edit-link-\(UUID()).wav")
+        defer { try? FileManager.default.removeItem(at: other) }
         try Data("keep".utf8).write(to: audio)
         #if os(Windows)
         let source = try XCTUnwrap(fileSystemPath(audio))

@@ -181,6 +181,25 @@ validation and busy/recording/parent/page-independent dispatch fixtures are
 authored but NOT_RUN locally. They need automatic qualification. Clipboard
 delivery alone is not evidence of external-field paste or global-shortcut parity.
 
+## Linux shortcut listener lifetime (source only; NOT_RUN)
+
+The existing dictation listener now owns its startup and actual native cleanup,
+not just flags set after registration returns. Stop permanently fences new
+callback admission and result publication. An already-started X11 or portal
+registration may still finish, but its late success is immediately closed and
+cannot republish controls. Shutdown does not wait for a blocked startup dialog.
+The native callback context stays alive through the actual stop call and holds
+the window/controller only weakly. A settings read already in flight rechecks
+the publication fence afterward.
+
+Six authored portable regressions cover stop-before-start, single admission,
+blocked startup and late cleanup, explicit failure hints, reentrant cleanup
+outside the state lock, and racing stop/completion. These are NOT_RUN locally;
+automatic portable/native qualification remains required. Existing X11/portal
+binding protocols, dictation gestures and fallback commands are unchanged.
+This closes a listener-lifetime prerequisite; multi-action global registration
+and physical shortcut acceptance remain open.
+
 ## Troubleshooting (source only)
 
 Windows About and the Open Troubleshooting action now open a distinct modeless

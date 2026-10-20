@@ -453,6 +453,16 @@ choice. The queued GTK update emits no selection callback. Source-only restart,
 round-trip, failure and native smoke assertions accompany this mapping; all are
 NOT_RUN here. History-backup restore still does not apply settings.
 
+General > Data backup > **Restore...** now uses the shared cancellable ZIP
+reader, privacy-safe preview, current single-use confirmation and transactional
+rollback. History text merges; app profiles can merge or, after a second
+confirmation, replace. Both GTK dialogs default to Cancel. The owned picker
+rejects late or cancelled results, the preview copies its token/report, busy
+state disables apply, and shutdown retires the dialog. Settings, saved audio,
+credentials, vocabulary, connections and models remain unapplied. Native
+smoke assertions and seven shared Host regressions are authored but NOT_RUN
+locally; this is source wiring, not an installed-desktop acceptance receipt.
+
 Before the keyring and desktop integration checks, the harness runs
 `--integration-test atspi-selection` against an external synthetic AT-SPI
 service, each time on its own nested private bus. The fixture refuses a

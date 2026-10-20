@@ -2353,15 +2353,15 @@ profiles/history/connections/credentials and optional audio
 (`Sources/SpeakApp/DataMigration/MigrationArchive.swift:7-59`,
 `MigrationCatalog.swift:13-77`, `MigrationPreferenceSchema.swift:6-70`).
 General's **Save ZIP backup** already writes a Mac-compatible archive
-(`DesktopMigrationBackup`). **Restore backup** on Windows now reads one, maps
+(`DesktopMigrationBackup`). **Restore backup** on Windows and Linux now reads one, maps
 its categories, previews merge and replace, asks for confirmation and rolls
 back on failure for History text and app profiles only; see below. Restoring
 settings, audio, credentials, vocabulary, connections and models remains a
 gap. No ZIP is misidentified or silently imported as portable preferences.
 
-### Restore backup (Windows source only)
+### Restore backup (Windows/Linux source only)
 
-General > **Restore backup...** opens a Mac-compatible ZIP through a native
+Windows General and Linux General > Data backup > **Restore...** open a Mac-compatible ZIP through a native
 picker. The settings queue only admits the request. Reading, validation and
 planning run on an owned, cancellable worker that writes nothing and removes
 its private staging directory (`DesktopMigrationRestore.prepare`,
@@ -2374,9 +2374,15 @@ The preview lists each applied category's counts (new, updated, removed,
 before and after), conflicts, skipped items and every category that is kept in
 the backup but not applied. It never shows transcript text, profile contents,
 identifiers or credential values. Nothing is written until the user picks an
-action in the native dialog (`WindowsMigrationRestore.cpp`). Cancel is the
+action in the native dialog (`WindowsMigrationRestore.cpp`, Linux's `LinuxWindow.c`). Cancel is the
 default button. Replace needs a second confirmation that defaults to No. Each
 preview has a single-use token, so a stale or repeated answer is refused.
+Linux reuses the owned ZIP picker and its cancellation/parent-identity fence.
+Its modal GTK preview copies the report and token; Replace opens a separate
+destructive confirmation that also defaults to Cancel. A previous dialog's
+late response cannot answer the current dialog. Merge and Replace are disabled
+while the app is working, and an unoffered or stale response cannot apply.
+Closing retires the native dialog before callbacks and the queue are released.
 
 - **History text** always merges. It follows the canonical planner, so
   equivalence ignores the root ID and `desktopHistory.id`. A differing backup
@@ -2404,11 +2410,19 @@ it restores those bytes, removes the files it added and reports whether the
 rollback succeeded. Portable tests are in
 `Tests/SpeakDesktopTests/DesktopMigrationRestoreTests.swift`.
 
+Source-only checks:
+- GTK smoke assertions cover the Restore chooser's event/flags, copied
+  preview data, Cancel defaults, two-stage Replace, stale-dialog refusal,
+  busy-state rejection and close cleanup. Seven Host tests cover real ZIP
+  History-text restore without audio or source mutation, current
+  single-use confirmation, cancel, unoffered Replace, explicit profile
+  replacement, held-reader shutdown and native preview failure. They are
+  authored but NOT_RUN locally; native/portable automatic qualification is
+  still required.
+
 Not yet done:
-- Linux has the shared code but no GTK entry point; `LinuxHostPlatform` keeps
-  the default nil restorer.
 - Restored History is not pushed to iCloud sync immediately.
-- There is no native self-test or screenshot receipt for the dialog yet.
+- There is no installed Linux restore or screenshot receipt for the dialog yet.
 
 ## Local live transcription (Windows/Linux source only)
 

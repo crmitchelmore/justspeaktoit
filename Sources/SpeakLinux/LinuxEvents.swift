@@ -314,6 +314,7 @@ private func linuxSessionEvent(_ event: Int, value: String, slot: Int, holder: L
 
 /// History list, export and playback events. Returns false for others.
 private func linuxHistoryManagementEvent(_ event: Int, value: String, slot: Int, holder: LinuxEventContext) -> Bool {
+    if linuxMigrationEvent(event, value: value, slot: slot, holder: holder) { return true }
     switch event {
     case Int(JSTI_EVENT_HISTORY_FILTERS): holder.submitHistoryPlayback(.filter(value))
     case Int(JSTI_EVENT_HISTORY_DELETE):
@@ -326,14 +327,6 @@ private func linuxHistoryManagementEvent(_ event: Int, value: String, slot: Int,
         holder.enqueueSettings { await holder.controller.beginAudioCleanupConfirmation() }
     case Int(JSTI_EVENT_AUDIO_CLEANUP_RESPONSE):
         holder.enqueueSettings { await holder.controller.answerAudioCleanup(value, delete: slot == 1) }
-    case Int(JSTI_EVENT_MIGRATION_INSPECT):
-        holder.enqueueSettings {
-            await holder.controller.beginMigrationInspection(URL(fileURLWithPath: value))
-        }
-    case Int(JSTI_EVENT_MIGRATION_EXPORT):
-        holder.enqueueSettings {
-            await holder.controller.beginMigrationExport(URL(fileURLWithPath: value), nativeFlags: slot)
-        }
     default: return false
     }
     return true

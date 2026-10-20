@@ -126,6 +126,8 @@ typedef struct UI {
     AdwSwitchRow *backup_profiles;
     GtkButton *backup_export;
     GtkButton *backup_inspect;
+    GtkButton *backup_restore;
+    GtkWidget *restore_dialog;
     GCancellable *backup_chooser;
     gboolean closing;
     GtkButton *import_button;
@@ -211,6 +213,8 @@ static gboolean window_closed;
 static GQueue early_posts = G_QUEUE_INIT;
 static void open_posts(void);
 static void close_posts(void);
+static void retire_migration_restore(void);
+static void refresh_migration_restore(void);
 
 gboolean jsti_window_loop_running(void) { return g_atomic_int_get(&loop_running) != 0; }
 
@@ -332,11 +336,14 @@ static void refresh_actions(void) {
         gtk_widget_set_sensitive(GTK_WIDGET(ui.recordings_default), idle && ui.location_chooser == NULL);
     }
     if (ui.backup_audio != NULL) {
-        gtk_widget_set_sensitive(GTK_WIDGET(ui.backup_audio), idle && ui.backup_chooser == NULL);
-        gtk_widget_set_sensitive(GTK_WIDGET(ui.backup_profiles), idle && ui.backup_chooser == NULL);
-        gtk_widget_set_sensitive(GTK_WIDGET(ui.backup_export), idle && ui.backup_chooser == NULL);
-        gtk_widget_set_sensitive(GTK_WIDGET(ui.backup_inspect), idle && ui.backup_chooser == NULL);
+        gboolean backup_idle = idle && ui.backup_chooser == NULL && ui.restore_dialog == NULL;
+        gtk_widget_set_sensitive(GTK_WIDGET(ui.backup_audio), backup_idle);
+        gtk_widget_set_sensitive(GTK_WIDGET(ui.backup_profiles), backup_idle);
+        gtk_widget_set_sensitive(GTK_WIDGET(ui.backup_export), backup_idle);
+        gtk_widget_set_sensitive(GTK_WIDGET(ui.backup_inspect), backup_idle);
+        gtk_widget_set_sensitive(GTK_WIDGET(ui.backup_restore), backup_idle);
     }
+    refresh_migration_restore();
     gtk_widget_set_sensitive(GTK_WIDGET(ui.model_row), idle);
     jsti_model_filters_set_idle(idle);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.microphone_row), idle);
@@ -808,7 +815,7 @@ typedef struct BackupChoice {
     GCancellable *cancelled;
     gint32 include_audio;
     gint32 include_profiles;
-    gboolean inspect;
+    gint action; /* 0 export, 1 inspect, 2 restore */
 } BackupChoice;
 
 static gboolean backup_choice_active(const BackupChoice *choice, GObject *parent) {
@@ -817,14 +824,18 @@ static gboolean backup_choice_active(const BackupChoice *choice, GObject *parent
 }
 
 static void backup_emit_path(const BackupChoice *choice, const char *path) {
-    emit(choice->inspect ? JSTI_EVENT_MIGRATION_INSPECT : JSTI_EVENT_MIGRATION_EXPORT,
-         path, choice->inspect ? 0 : (choice->include_audio | choice->include_profiles));
+    const gint32 events[] = {JSTI_EVENT_MIGRATION_EXPORT, JSTI_EVENT_MIGRATION_INSPECT, JSTI_EVENT_MIGRATION_RESTORE};
+    if (choice->action < 0 || choice->action >= (gint)G_N_ELEMENTS(events)) {
+        jsti_window_update("Could not choose backup action: invalid request.", NULL, -1);
+        return;
+    }
+    emit(events[choice->action], path, choice->action != 0 ? 0 : (choice->include_audio | choice->include_profiles));
 }
 
 static void backup_chosen(GObject *source, GAsyncResult *result, gpointer data) {
     BackupChoice *choice = data;
     GError *error = NULL;
-    GFile *file = choice->inspect ? gtk_file_dialog_open_finish(GTK_FILE_DIALOG(source), result, &error)
+    GFile *file = choice->action != 0 ? gtk_file_dialog_open_finish(GTK_FILE_DIALOG(source), result, &error)
                                 : gtk_file_dialog_save_finish(GTK_FILE_DIALOG(source), result, &error);
     GObject *parent = g_weak_ref_get(&choice->parent);
     gboolean active = backup_choice_active(choice, parent);
@@ -857,19 +868,20 @@ static void backup_chosen(GObject *source, GAsyncResult *result, gpointer data) 
 
 static void on_backup(GtkButton *button, gpointer data) {
     (void)button;
-    if (ui.closing || ui.state != 0 || ui.backup_chooser != NULL) return;
+    if (ui.closing || ui.state != 0 || ui.backup_chooser != NULL || ui.restore_dialog != NULL) return;
     BackupChoice *choice = g_new0(BackupChoice, 1);
     g_weak_ref_init(&choice->parent, G_OBJECT(ui.window));
     choice->cancelled = g_cancellable_new();
     choice->include_audio = adw_switch_row_get_active(ui.backup_audio) ? 1 : 0;
     choice->include_profiles = adw_switch_row_get_active(ui.backup_profiles) ? 2 : 0;
-    choice->inspect = GPOINTER_TO_INT(data) != 0;
+    choice->action = GPOINTER_TO_INT(data);
     ui.backup_chooser = g_object_ref(choice->cancelled);
     refresh_actions();
     GtkFileDialog *dialog = gtk_file_dialog_new();
-    gtk_file_dialog_set_title(dialog, choice->inspect ? "Inspect backup (no data will be imported)"
-                                                    : "Save ZIP backup (existing files are never replaced)");
-    if (!choice->inspect) gtk_file_dialog_set_initial_name(dialog, "JustSpeakToIt-History.zip");
+    gtk_file_dialog_set_title(dialog, choice->action == 2 ? "Restore backup (preview before changes)"
+        : choice->action == 1 ? "Inspect backup (no data will be imported)"
+                             : "Save ZIP backup (existing files are never replaced)");
+    if (choice->action == 0) gtk_file_dialog_set_initial_name(dialog, "JustSpeakToIt-History.zip");
     GtkFileFilter *filter = gtk_file_filter_new();
     gtk_file_filter_set_name(filter, "ZIP backups");
     gtk_file_filter_add_pattern(filter, "*.zip");
@@ -877,7 +889,7 @@ static void on_backup(GtkButton *button, gpointer data) {
     g_list_store_append(filters, filter);
     gtk_file_dialog_set_filters(dialog, G_LIST_MODEL(filters));
     gtk_file_dialog_set_default_filter(dialog, filter);
-    if (choice->inspect) gtk_file_dialog_open(dialog, ui.window, choice->cancelled, backup_chosen, choice);
+    if (choice->action != 0) gtk_file_dialog_open(dialog, ui.window, choice->cancelled, backup_chosen, choice);
     else gtk_file_dialog_save(dialog, ui.window, choice->cancelled, backup_chosen, choice);
     g_object_unref(filters);
     g_object_unref(filter);
@@ -973,6 +985,7 @@ static gboolean on_close_request(GtkWindow *window, gpointer data) {
     jsti_voice_credentials_close();
     jsti_action_shortcut_editor_close();
     ui.closing = TRUE;
+    retire_migration_restore();
     if (ui.backup_chooser != NULL) g_cancellable_cancel(ui.backup_chooser);
     g_clear_object(&ui.backup_chooser);
     if (ui.location_chooser != NULL) g_cancellable_cancel(ui.location_chooser);
@@ -1639,6 +1652,15 @@ static GtkWidget *build_general(void) {
     g_signal_connect(ui.backup_inspect, "clicked", G_CALLBACK(on_backup), GINT_TO_POINTER(1));
     adw_action_row_add_suffix(ADW_ACTION_ROW(inspect_row), GTK_WIDGET(ui.backup_inspect));
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(backup), inspect_row);
+    GtkWidget *restore_row = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(restore_row), "Restore a ZIP backup");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(restore_row),
+        "Preview and confirm History text and app profiles. Settings, audio and credentials stay unchanged.");
+    ui.backup_restore = GTK_BUTTON(gtk_button_new_with_mnemonic("_Restore..."));
+    gtk_widget_set_valign(GTK_WIDGET(ui.backup_restore), GTK_ALIGN_CENTER);
+    g_signal_connect(ui.backup_restore, "clicked", G_CALLBACK(on_backup), GINT_TO_POINTER(2));
+    adw_action_row_add_suffix(ADW_ACTION_ROW(restore_row), GTK_WIDGET(ui.backup_restore));
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(backup), restore_row);
     gtk_box_append(GTK_BOX(column), backup);
     return page;
 }
@@ -2271,6 +2293,7 @@ int32_t jsti_window_run(
     g_signal_connect(ui.application, "command-line", G_CALLBACK(on_command_line), NULL);
     int status = g_application_run(G_APPLICATION(ui.application), argc, argv);
     jsti_hands_free_guard_stop();
+    retire_migration_restore();
     close_posts();
     ui.callback = NULL;
     read_aloud.picker_callback = NULL;
@@ -2876,6 +2899,117 @@ static void migration_report_apply(gpointer pointer) {
 int32_t jsti_window_show_migration_report(const char *text) {
     if (text == NULL || text[0] == '\0' || !g_utf8_validate(text, -1, NULL)) return -1;
     return post(migration_report_apply, g_strdup(text), g_free);
+}
+
+static void migration_restore_response(AdwMessageDialog *dialog, const char *response, gpointer data);
+
+static GtkWidget *migration_restore_dialog_new(
+    const char *token, const char *text, gboolean offers_replace, gboolean confirming
+) {
+    GtkWidget *dialog = adw_message_dialog_new(ui.window,
+        confirming ? "Replace app profiles?" : "Restore backup: review before anything is written",
+        confirming ? "Replace your app profiles with the profiles in this backup?\n\n"
+            "Profiles absent from the backup will be removed. History is still only merged. "
+            "Settings, audio and credentials stay unchanged. Changes are rolled back if anything fails."
+            : text);
+    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+    adw_message_dialog_set_body_use_markup(ADW_MESSAGE_DIALOG(dialog), FALSE);
+    adw_message_dialog_add_response(ADW_MESSAGE_DIALOG(dialog), "cancel", "Cancel");
+    if (!confirming) adw_message_dialog_add_response(ADW_MESSAGE_DIALOG(dialog), "merge", "Merge backup");
+    if (offers_replace) {
+        adw_message_dialog_add_response(ADW_MESSAGE_DIALOG(dialog), "replace",
+            confirming ? "Replace profiles" : "Replace profiles...");
+        adw_message_dialog_set_response_appearance(ADW_MESSAGE_DIALOG(dialog), "replace", ADW_RESPONSE_DESTRUCTIVE);
+    }
+    adw_message_dialog_set_default_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
+    adw_message_dialog_set_close_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
+    g_object_set_data_full(G_OBJECT(dialog), "jsti-restore-token", g_strdup(token), g_free);
+    g_object_set_data(G_OBJECT(dialog), "jsti-restore-replace", GINT_TO_POINTER(offers_replace));
+    g_object_set_data(G_OBJECT(dialog), "jsti-restore-confirming", GINT_TO_POINTER(confirming));
+    g_signal_connect(dialog, "response", G_CALLBACK(migration_restore_response), NULL);
+    return g_object_ref_sink(dialog);
+}
+
+static void retire_migration_restore(void) {
+    GtkWidget *dialog = ui.restore_dialog;
+    ui.restore_dialog = NULL;
+    if (dialog == NULL) return;
+    gtk_window_destroy(GTK_WINDOW(dialog));
+    g_object_unref(dialog);
+}
+
+static void refresh_migration_restore(void) {
+    if (ui.restore_dialog == NULL) return;
+    AdwMessageDialog *dialog = ADW_MESSAGE_DIALOG(ui.restore_dialog);
+    gboolean idle = ui.state == JSTI_STATE_IDLE && !ui.closing;
+    if (adw_message_dialog_has_response(dialog, "merge"))
+        adw_message_dialog_set_response_enabled(dialog, "merge", idle);
+    if (adw_message_dialog_has_response(dialog, "replace"))
+        adw_message_dialog_set_response_enabled(dialog, "replace", idle);
+}
+
+static void migration_restore_response(AdwMessageDialog *dialog, const char *response, gpointer data) {
+    (void)data;
+    if (ui.restore_dialog != GTK_WIDGET(dialog)) return;
+    gchar *token = g_strdup(g_object_get_data(G_OBJECT(dialog), "jsti-restore-token"));
+    gboolean offers_replace = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(dialog), "jsti-restore-replace"));
+    gboolean confirming = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(dialog), "jsti-restore-confirming"));
+    gboolean available = !ui.closing && ui.state == JSTI_STATE_IDLE;
+    gboolean replace = available && offers_replace && g_strcmp0(response, "replace") == 0;
+    if (replace && !confirming) {
+        retire_migration_restore();
+        ui.restore_dialog = migration_restore_dialog_new(token, "", TRUE, TRUE);
+        refresh_actions();
+        gtk_window_present(GTK_WINDOW(ui.restore_dialog));
+    } else {
+        gint choice = replace && confirming ? 2 : available && !confirming && g_strcmp0(response, "merge") == 0 ? 1 : 0;
+        retire_migration_restore();
+        refresh_actions();
+        emit(JSTI_EVENT_MIGRATION_RESTORE_RESPONSE, token, choice);
+    }
+    g_free(token);
+}
+
+typedef struct MigrationRestoreConfirmation {
+    gchar *token;
+    gchar *text;
+    gboolean offers_replace;
+} MigrationRestoreConfirmation;
+
+static void migration_restore_confirmation_free(gpointer pointer) {
+    MigrationRestoreConfirmation *confirmation = pointer;
+    g_free(confirmation->token);
+    g_free(confirmation->text);
+    g_free(confirmation);
+}
+
+static gboolean migration_restore_stage(const MigrationRestoreConfirmation *confirmation) {
+    if (ui.restore_dialog != NULL &&
+        g_strcmp0(g_object_get_data(G_OBJECT(ui.restore_dialog), "jsti-restore-token"), confirmation->token) == 0) {
+        return FALSE;
+    }
+    if (ui.window == NULL || ui.closing || ui.restore_dialog != NULL) {
+        emit(JSTI_EVENT_MIGRATION_RESTORE_RESPONSE, confirmation->token, 0);
+        return FALSE;
+    }
+    ui.restore_dialog = migration_restore_dialog_new(
+        confirmation->token, confirmation->text, confirmation->offers_replace, FALSE);
+    refresh_actions();
+    return TRUE;
+}
+
+static void migration_restore_confirmation_apply(gpointer pointer) {
+    if (migration_restore_stage(pointer)) gtk_window_present(GTK_WINDOW(ui.restore_dialog));
+}
+
+int32_t jsti_window_confirm_migration_restore(const char *token, const char *text, int32_t offers_replace) {
+    if (token == NULL || !g_uuid_string_is_valid(token) || text == NULL || text[0] == '\0' ||
+        !g_utf8_validate(text, -1, NULL) || (offers_replace != 0 && offers_replace != 1)) return -1;
+    MigrationRestoreConfirmation *confirmation = g_new0(MigrationRestoreConfirmation, 1);
+    confirmation->token = g_strdup(token);
+    confirmation->text = g_strdup(text);
+    confirmation->offers_replace = offers_replace != 0;
+    return post(migration_restore_confirmation_apply, confirmation, migration_restore_confirmation_free);
 }
 
 typedef struct Insights {
@@ -5509,6 +5643,110 @@ static gboolean cleanup_preview_self_test(void) {
     return okay;
 }
 
+static gboolean migration_restore_self_test(void) {
+    if (ui.restore_dialog != NULL) return FALSE;
+    jsti_window_event_fn saved = ui.callback;
+    gint32 state = ui.state;
+    ui.callback = observe_event;
+    ui.state = JSTI_STATE_IDLE;
+    gchar token[] = "00000000-0000-0000-0000-000000000098";
+    gchar text[] = "Synthetic restore counts. Nothing has been written yet.";
+    MigrationRestoreConfirmation request = {.token = token, .text = text, .offers_replace = FALSE};
+    gboolean okay = jsti_window_confirm_migration_restore(NULL, text, 0) == -1 &&
+        jsti_window_confirm_migration_restore("bad-token", text, 0) == -1 &&
+        jsti_window_confirm_migration_restore(token, NULL, 0) == -1 &&
+        jsti_window_confirm_migration_restore(token, "", 0) == -1 &&
+        jsti_window_confirm_migration_restore(token, "\xff", 0) == -1 &&
+        jsti_window_confirm_migration_restore(token, text, 2) == -1;
+    observed.event = -500;
+    okay = okay && migration_restore_stage(&request) && ui.restore_dialog != NULL;
+    if (ui.restore_dialog != NULL) {
+        AdwMessageDialog *dialog = ADW_MESSAGE_DIALOG(ui.restore_dialog);
+        token[0] = 'x';
+        text[0] = 'x';
+        okay = okay &&
+            g_strcmp0(adw_message_dialog_get_default_response(dialog), "cancel") == 0 &&
+            g_strcmp0(adw_message_dialog_get_close_response(dialog), "cancel") == 0 &&
+            !adw_message_dialog_has_response(dialog, "replace") &&
+            g_str_has_prefix(adw_message_dialog_get_body(dialog), "Synthetic restore counts.") &&
+            !gtk_widget_get_sensitive(GTK_WIDGET(ui.backup_restore)) && observed.event == -500;
+        migration_restore_response(dialog, "merge", NULL);
+        okay = okay && ui.restore_dialog == NULL && observed.event == JSTI_EVENT_MIGRATION_RESTORE_RESPONSE &&
+            observed.index == 1 && g_strcmp0(observed.text, "00000000-0000-0000-0000-000000000098") == 0;
+    }
+    token[0] = '0';
+    observed.event = -500;
+    okay = migration_restore_stage(&request) && okay;
+    if (ui.restore_dialog != NULL) {
+        GtkWidget *current = ui.restore_dialog;
+        okay = !migration_restore_stage(&request) && ui.restore_dialog == current && observed.event == -500 && okay;
+        migration_restore_response(ADW_MESSAGE_DIALOG(ui.restore_dialog), "replace", NULL);
+        okay = okay && ui.restore_dialog == NULL && observed.index == 0 &&
+            observed.event == JSTI_EVENT_MIGRATION_RESTORE_RESPONSE;
+    }
+    request.offers_replace = TRUE;
+    observed.event = -500;
+    okay = migration_restore_stage(&request) && okay;
+    if (ui.restore_dialog != NULL) {
+        GtkWidget *old = g_object_ref(ui.restore_dialog);
+        migration_restore_response(ADW_MESSAGE_DIALOG(old), "replace", NULL);
+        okay = okay && ui.restore_dialog != NULL && ui.restore_dialog != old && observed.event == -500;
+        migration_restore_response(ADW_MESSAGE_DIALOG(old), "merge", NULL);
+        okay = okay && observed.event == -500;
+        g_object_unref(old);
+        if (ui.restore_dialog != NULL) {
+            AdwMessageDialog *dialog = ADW_MESSAGE_DIALOG(ui.restore_dialog);
+            okay = okay && !adw_message_dialog_has_response(dialog, "merge") &&
+                g_strcmp0(adw_message_dialog_get_default_response(dialog), "cancel") == 0 &&
+                g_strcmp0(adw_message_dialog_get_close_response(dialog), "cancel") == 0 &&
+                strstr(adw_message_dialog_get_body(dialog), "History is still only merged") != NULL;
+            migration_restore_response(dialog, "replace", NULL);
+            okay = okay && ui.restore_dialog == NULL && observed.index == 2 &&
+                observed.event == JSTI_EVENT_MIGRATION_RESTORE_RESPONSE;
+        }
+    }
+    for (gint scenario = 0; scenario < 3; ++scenario) {
+        observed.event = -500;
+        okay = migration_restore_stage(&request) && okay;
+        if (ui.restore_dialog == NULL) { okay = FALSE; continue; }
+        ui.state = scenario == 1 ? JSTI_STATE_WORKING : JSTI_STATE_IDLE;
+        refresh_actions();
+        if (scenario == 2) {
+            migration_restore_response(ADW_MESSAGE_DIALOG(ui.restore_dialog), "replace", NULL);
+            okay = okay && ui.restore_dialog != NULL && observed.event == -500;
+        }
+        if (ui.restore_dialog == NULL) { okay = FALSE; continue; }
+        if (scenario == 1)
+            okay = okay && !adw_message_dialog_get_response_enabled(ADW_MESSAGE_DIALOG(ui.restore_dialog), "merge");
+        migration_restore_response(ADW_MESSAGE_DIALOG(ui.restore_dialog), scenario == 1 ? "merge" : "cancel", NULL);
+        okay = okay && observed.event == JSTI_EVENT_MIGRATION_RESTORE_RESPONSE && observed.index == 0;
+    }
+    ui.state = JSTI_STATE_WORKING;
+    okay = migration_restore_stage(&request) && okay;
+    if (ui.restore_dialog != NULL) {
+        AdwMessageDialog *dialog = ADW_MESSAGE_DIALOG(ui.restore_dialog);
+        okay = okay && !adw_message_dialog_get_response_enabled(dialog, "merge");
+        ui.state = JSTI_STATE_IDLE;
+        refresh_actions();
+        okay = okay && adw_message_dialog_get_response_enabled(dialog, "merge");
+        migration_restore_response(dialog, "cancel", NULL);
+    }
+    ui.state = JSTI_STATE_IDLE;
+    okay = migration_restore_stage(&request) && okay;
+    observed.event = -500;
+    retire_migration_restore();
+    okay = okay && ui.restore_dialog == NULL && observed.event == -500;
+    ui.closing = TRUE;
+    okay = !migration_restore_stage(&request) && okay;
+    okay = okay && ui.restore_dialog == NULL && observed.index == 0;
+    ui.closing = FALSE;
+    ui.state = state;
+    ui.callback = saved;
+    g_clear_pointer(&observed.text, g_free);
+    refresh_actions();
+    return okay;
+}
+
 int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (jsti_hands_free_guard_self_test(error, capacity) != 0) return -1;
     if (ui.window == NULL) return fail(error, capacity, "the window was not created");
@@ -5547,7 +5785,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
         return fail(error, capacity, "Local/Remote post-processing controls, key isolation or callback indexes failed");
     if (ui.recordings_folder == NULL || ui.audio_cleanup == NULL ||
         ui.backup_audio == NULL || ui.backup_profiles == NULL ||
-        ui.backup_export == NULL || ui.backup_inspect == NULL ||
+        ui.backup_export == NULL || ui.backup_inspect == NULL || ui.backup_restore == NULL ||
         !adw_switch_row_get_active(ui.backup_audio) ||
         adw_switch_row_get_active(ui.backup_profiles) ||
         jsti_window_confirm_audio_cleanup(NULL, 1) != -1 ||
@@ -5564,7 +5802,8 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
         !gtk_widget_get_sensitive(GTK_WIDGET(ui.backup_audio)) &&
         !gtk_widget_get_sensitive(GTK_WIDGET(ui.backup_profiles)) &&
         !gtk_widget_get_sensitive(GTK_WIDGET(ui.backup_export)) &&
-        !gtk_widget_get_sensitive(GTK_WIDGET(ui.backup_inspect));
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.backup_inspect)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.backup_restore));
     jsti_window_event_fn backup_callback = ui.callback;
     ui.callback = observe_event;
     for (gint32 flags = 0; flags < 4; ++flags) {
@@ -5574,11 +5813,15 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
         backup_ok = backup_ok && observed.event == JSTI_EVENT_MIGRATION_EXPORT && observed.index == flags &&
             g_strcmp0(observed.text, "synthetic-export.zip") == 0;
     }
-    choice.inspect = TRUE;
+    choice.action = 1;
     choice.include_audio = 1;
     backup_emit_path(&choice, "synthetic-review.zip");
     backup_ok = backup_ok && observed.event == JSTI_EVENT_MIGRATION_INSPECT && observed.index == 0 &&
         g_strcmp0(observed.text, "synthetic-review.zip") == 0;
+    choice.action = 2;
+    backup_emit_path(&choice, "synthetic-restore.zip");
+    backup_ok = backup_ok && observed.event == JSTI_EVENT_MIGRATION_RESTORE && observed.index == 0 &&
+        g_strcmp0(observed.text, "synthetic-restore.zip") == 0;
     ui.callback = backup_callback;
     g_clear_pointer(&observed.text, g_free);
     ui.closing = TRUE;
@@ -5603,6 +5846,8 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     gtk_window_destroy(GTK_WINDOW(report_dialog));
     g_object_unref(report_dialog);
     if (!report_ok) return fail(error, capacity, "Backup inspection report text ownership or close defaults changed");
+    if (!migration_restore_self_test())
+        return fail(error, capacity, "Backup restore preview, two-stage confirmation or lifecycle fence failed");
     gchar audio_token[] = "00000000-0000-0000-0000-000000000093";
     GtkWidget *audio_confirmation = audio_cleanup_dialog(audio_token, 2);
     g_object_ref_sink(audio_confirmation);

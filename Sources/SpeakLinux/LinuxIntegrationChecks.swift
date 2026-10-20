@@ -295,7 +295,7 @@ extension LinuxIntegrationChecks {
             }
         }
         let events = presses.lock.withLock { presses.events }
-        let expected = Array(repeating: [Int32(1), 0], count: lockStates ? 5 : 1).flatMap { $0 }
+        let expected: [Int32] = Array([[Int32]](repeating: [1, 0], count: lockStates ? 5 : 1).joined())
         try require(events == expected, "the grab reported \(events), expected \(expected)")
         print(lockStates
             ? "X11 shortcut: extra Shift refused; five exact presses/releases survived CapsLock/NumLock states."
@@ -308,7 +308,7 @@ extension LinuxIntegrationChecks {
             Thread.sleep(forTimeInterval: 0.01)
         }
         try require(FileManager.default.fileExists(atPath: produced), "X11 key producer never finished phase \(phase)")
-        let expected = Array(repeating: [Int32(1), 0], count: phase).flatMap { $0 }
+        let expected: [Int32] = Array([[Int32]](repeating: [1, 0], count: phase).joined())
         if phase == 0 {
             // Test-only quiet window: a rejected extra modifier must emit nothing.
             for _ in 0..<25 {

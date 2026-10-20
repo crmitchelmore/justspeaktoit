@@ -51,7 +51,7 @@ final class LinuxShortcuts: @unchecked Sendable {
             Task { [self, weak holder] in
                 guard let controller = holder?.controller else { return }
                 let options = await controller.textOutputOptions()
-                lifetime.publish { LinuxWindow.textOutput(options, hint: registration.hint) }
+                self.lifetime.publish { LinuxWindow.textOutput(options, hint: registration.hint) }
             }
         }
     }

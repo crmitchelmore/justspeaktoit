@@ -220,6 +220,7 @@ class APICompatibilityTests(unittest.TestCase):
             "OpenRouterInlineAudioTranscriptionClient.InputError.inklingAudioLimit",
             "ConfigTransferError.compressionFailed", "ConfigTransferError.payloadTooLarge",
             "DictationProfileMatcher.Kind.linuxExecutablePath", "GroqTTSAPIError.excessiveFanOut",
+            "ApplicationPreferenceKey.mistralTTSModel", "MistralTTSModel.voxtralMiniTTS3",
         ]
         diagnostic = "\n".join(
             f"  💔 API breakage: enumelement {symbol} has been added as a new enum case"
@@ -264,6 +265,21 @@ class APICompatibilityTests(unittest.TestCase):
         self.assertIn(tool_error, result.stdout)
         self.assertIn("tool error; comparison is incomplete", result.stderr)
         self.assertNotIn("No unreviewed public API breakage", result.stdout)
+
+    def test_voxtral_additions_do_not_allow_removals_or_unknown_cases(self):
+        allowed = "\n".join(
+            f"API breakage: enumelement {symbol} has been added as a new enum case"
+            for symbol in ["ApplicationPreferenceKey.mistralTTSModel", "MistralTTSModel.voxtralMiniTTS3"]
+        )
+        for finding in [
+            "API breakage: enumelement ApplicationPreferenceKey.mistralTTSModel has been removed",
+            "API breakage: enumelement MistralTTSModel.voxtralMiniTTS3 has been removed",
+            "API breakage: enumelement MistralTTSModel.unreviewed has been added as a new enum case",
+        ]:
+            with self.subTest(finding=finding):
+                result, _ = self.run_gate(diagnose_status=1, diagnostic=allowed + "\n" + finding)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn(finding, result.stderr)
 
     def test_diagnostic_words_in_findings_and_warnings_preserve_declared_migration(self):
         diagnostic = "\n".join([

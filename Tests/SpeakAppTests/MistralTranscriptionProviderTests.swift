@@ -15,15 +15,11 @@ final class MistralTranscriptionProviderTests: XCTestCase {
   func testSupportedModels_returnsVoxtralModels() {
     let ids = MistralTranscriptionProvider().supportedModels().map(\.id)
 
-    XCTAssertEqual(ids, [
-      "mistral/voxtral-mini-latest"
-    ])
+    XCTAssertEqual(ids, MistralVoxtral3.batchIDs + ["mistral/voxtral-mini-latest"])
   }
 
   func testProviderRegistry_routesVoxtralModelsToMistralProvider() async {
-    for model in [
-      "mistral/voxtral-mini-latest"
-    ] {
+    for model in MistralVoxtral3.batchIDs + ["mistral/voxtral-mini-latest"] {
       let provider = await TranscriptionProviderRegistry.shared.provider(forModel: model)
 
       XCTAssertEqual(provider?.metadata.id, "mistral", "\(model) should route to Mistral provider")

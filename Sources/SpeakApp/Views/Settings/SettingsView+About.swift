@@ -14,8 +14,7 @@ extension SettingsView {
               .resizable()
               .frame(width: 64, height: 64)
             VStack(alignment: .leading, spacing: 4) {
-              Text(ReleaseTrain.current.displayName)
-                .font(.title2.bold())
+              AboutWordmark(title: ReleaseTrain.current.displayName)
               Text("Voice-to-text made simple")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -261,6 +260,28 @@ extension SettingsView {
       }
       .buttonStyle(.plain)
       .foregroundStyle(.blue)
+    }
+  }
+}
+
+// Keep extended-range rendering local to this small, already-neutral title.
+private struct AboutWordmark: View {
+  @Environment(\.colorScheme) private var colorScheme
+  @Environment(\.colorSchemeContrast) private var contrast
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+  let title: String
+
+  var body: some View {
+    if #available(macOS 26.0, *), colorScheme == .dark,
+       contrast == .standard, !reduceTransparency {
+      Text(title)
+        .font(.title2.bold())
+        .foregroundStyle(Color.primary.exposureAdjust(log2(1.5)))
+        .allowedDynamicRange(.constrainedHigh)
+    } else {
+      Text(title)
+        .font(.title2.bold())
     }
   }
 }

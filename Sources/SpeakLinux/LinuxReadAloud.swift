@@ -258,14 +258,17 @@ func linuxReadAloudEvent(_ event: Int, value: String, slot: Int, holder: LinuxEv
 }
 
 extension LinuxEventContext {
-    func speakSelectedText() {
+    func speakSelectedText(lifetime: DesktopShortcutListenerLifetime? = nil) {
         guard let target = LinuxSelectedTextTarget.captureAdmitted() else {
             LinuxHostPlatform.update(LinuxSelectedTextTarget.availability)
             return
         }
-        enqueueSettings {
-            await self.controller.readVoiceSource(.externalSelection) { try await target.selectedText() }
+        let deliver = {
+            self.enqueueSettings {
+                await self.controller.readVoiceSource(.externalSelection) { try await target.selectedText() }
+            }
         }
+        if let lifetime { lifetime.admitCallback(deliver) } else { deliver() }
     }
 
     /// Like Export, Read aloud captures the displayed text on the GTK thread

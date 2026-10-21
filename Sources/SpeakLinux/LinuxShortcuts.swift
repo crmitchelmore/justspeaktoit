@@ -49,8 +49,9 @@ final class LinuxShortcuts: @unchecked Sendable {
                 lock.withLock { currentHint = registration.hint }
             }
             Task { [self, weak holder] in
-                guard let controller = holder?.controller else { return }
-                let options = await controller.textOutputOptions()
+                guard let holder else { return }
+                holder.globalActionShortcuts.start(holder)
+                let options = await holder.controller.textOutputOptions()
                 self.lifetime.publish { LinuxWindow.textOutput(options, hint: registration.hint) }
             }
         }

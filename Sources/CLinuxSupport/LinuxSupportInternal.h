@@ -7,6 +7,7 @@
 /* Writes a formatted, always-terminated message into a caller buffer. */
 void jsti_set_error(char *error, size_t capacity, const char *format, ...) G_GNUC_PRINTF(3, 4);
 int32_t jsti_x11_modifier_self_test(char *error, size_t capacity);
+int32_t jsti_x11_action_shortcuts_self_test(char *error, size_t capacity);
 
 /* Runs `work(data)` on the default (GTK) main context and waits for it, at
  * most `timeout_ms`. Runs inline on the owning thread. Returns FALSE on

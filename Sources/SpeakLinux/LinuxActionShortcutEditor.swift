@@ -1,5 +1,6 @@
 import Foundation
 import SpeakCore
+import SpeakDesktop
 import SpeakDesktopHost
 import CLinuxSupport
 
@@ -53,9 +54,7 @@ func linuxActionShortcutEdit(_ wire: String, holder: LinuxEventContext) {
     let edit = base.editingLinux(
         request.rows, runnable: runnable,
         blocking: { action, chord in
-            guard globals[action] != true else { return nil }
-            let dictation = DesktopShortcutLinuxChord(keysym: 0x20, modifiers: 12)
-            return chord == dictation ? "the Linux dictation shortcut" : nil
+            linuxShortcutBlocker(chord, isGlobal: globals[action] == true)
         },
         warning: { action, chord in
             guard globals[action] != true, chord.modifiers == DesktopShortcutLinuxChord.control,
@@ -75,6 +74,15 @@ func linuxActionShortcutEdit(_ wire: String, holder: LinuxEventContext) {
             )
         }
     }
+}
+
+private func linuxShortcutBlocker(_ chord: DesktopShortcutLinuxChord, isGlobal: Bool) -> String? {
+    let dictation = DesktopShortcutLinuxChord(keysym: LinuxShortcuts.x11Keysym, modifiers: LinuxShortcuts.x11Modifiers)
+    if chord == dictation { return "the Linux dictation shortcut" }
+    if isGlobal, LinuxHostPlatform.session.displayServer == .x11, !DesktopLinuxGlobalShortcutPlan.isSafe(chord) {
+        return "ordinary typing (global actions need Ctrl or Alt, or F13-F24)"
+    }
+    return nil
 }
 
 private func saveLinuxActionShortcuts(

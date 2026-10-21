@@ -613,6 +613,49 @@ offline, so a submission must also list them as git sources.
 
 ## Desktop support
 
+### X11 global action shortcuts (source only; NOT_RUN)
+
+On X11, enabled **Work in other apps** bindings now request a separate native
+action group after the existing dictation listener finishes registration.
+Eligible routes are Start/Stop Recording, Speak Clipboard Content, Paste Last
+History Item and Speak Selected Text. The action list and presets come from
+the shared catalogue; unsupported actions and Mac-specific combinations stay
+saved with an explicit refusal rather than being downgraded to window-local.
+Wayland keeps its existing single dictation portal and desktop keyboard
+settings commands; this change does not add a multi-action portal session.
+
+The main Keyboard page reports each X11 row's registration result, including
+another application's grab, keyboard-layout aliases, unsupported combinations
+and listener failure. Ctrl+Alt+Space remains reserved for dictation. New global
+edits require Ctrl or Alt, or F13-F24, so ordinary typing is not grabbed.
+Imported invalid combinations remain saved but unregistered. Exact modifier
+matching retains lock-only CapsLock/NumLock tolerance without ignoring AltGr;
+repeated admitted key presses and modifier changes while held do not dispatch
+another action. The original single-hotkey and portal callback contracts are
+unchanged.
+
+Rebinding fences the previous generation before submitting cleanup and a
+replacement on the owned native queue. Late rejected startup closes inline on
+that queue before the next registration begins. Native registration and joins
+stay off the settings/GTK queues. Closing fences callbacks immediately;
+native stop retains callback context until its worker has joined. Target and
+consented selection capture precede the final bounded callback admission.
+Already-admitted actions keep the existing settings order, output ownership
+and shutdown behavior; rebind does not cancel an already-admitted action.
+Selected-text speech still requires explicit Voice Output session access and
+an external editable AT-SPI field; registration grants no selection access.
+
+Portable projection/queue regressions and a display-free native event-handler
+fixture are authored; the latter joins the existing native self-test rather
+than adding another fixture child or runtime budget. **Compiler, test and
+native execution are NOT_RUN here.** Exact-head Apple/portable checks,
+X11/GTK coexistence, registration failures, physical repeat/lock/layout
+behavior and shutdown still need native qualification. Xlib server loss can
+remain fatal despite reporting poll-detected listener failures. Linux
+system-wide Escape and voice editing remain separate gaps.
+
+### Escape and dictation delivery
+
 Plain Escape in the active main window is source-wired to the existing Cancel
 operation while recording/working. Idle Escape, modified combinations, dialogs
 and popovers keep their own behavior. The main window's capture-phase key
@@ -629,7 +672,7 @@ keyboard acceptance and system-wide Escape cancellation remain outstanding.
 | Hyprland | Portal (xdg-desktop-portal-hyprland) | Portal path if its RemoteDesktop is available | Copy |
 | Sway, niri, other wlroots | No portal: bind `justspeaktoit --toggle` | No RemoteDesktop portal: copy | Copy |
 | COSMIC | Portal or `--toggle` binding | Portal path (restore tokens reported not to persist) | Copy |
-| X11 (any) | Ctrl+Alt+Space by XGrabKey | Clipboard + XTest Ctrl+V into the window focused at the shortcut, re-verified before the keystroke; Ctrl+Shift+V for terminals by WM_CLASS; previous clipboard text restored after 750 ms unless the user copied something else | Copy + notification |
+| X11 (any) | Ctrl+Alt+Space by XGrabKey; separate source-wired action group above, unqualified | Clipboard + XTest Ctrl+V into the window focused at the shortcut, re-verified before the keystroke; Ctrl+Shift+V for terminals by WM_CLASS; previous clipboard text restored after 750 ms unless the user copied something else | Copy + notification |
 
 Policy carried over from Windows: the target and text-output choice are fixed
 when dictation starts; Record in the app's own window never pastes (the app

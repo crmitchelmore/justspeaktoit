@@ -6,6 +6,35 @@ macOS `AppSettings.DefaultsKey` aliases the shared 91-key
 plus preferences and collections
 outside that enum. Track remaining product acceptance in #1157.
 
+## X11 global action registration (source only; NOT_RUN)
+
+Linux now has a separate native action group for enabled canonical global
+bindings whose routes actually exist: recording toggle, clipboard speech,
+Paste Last History and consented selected-text speech. Dictation registers
+first; its single-hotkey/portal API and press/release contract stay unchanged.
+The group uses the shared catalogue, bindings and presets, not another
+platform-owned action list. Wayland still uses desktop keyboard commands and
+the existing single dictation portal; it gains no automatic action group.
+
+Keyboard rows show per-action registration or refusal, including native grabs
+owned elsewhere and physical aliases. Ctrl+Alt+Space is reserved; new X11
+global edits require Ctrl/Alt or F13-F24. Invalid imported values remain saved
+but unregistered, never silently converted to window-local. Reconfiguration
+serializes cleanup and replacement off the settings/GTK queues, fences stale
+callbacks and retains native callback ownership until join. Native target
+capture happens before final bounded callback admission; admitted work keeps
+its existing settings ordering and shutdown behavior. Selected-text access
+still needs explicit session consent and an external editable AT-SPI field.
+
+Projection and registration-queue regressions plus display-free native event
+fixtures are authored, not executed. Exact-head compiler/test gates and native
+X11/GTK, keyboard lock/repeat/layout, failure and shutdown qualification remain
+outstanding. Physical keys held across re-registration and Xlib server-loss
+behavior also need native acceptance; no stronger guarantee is inferred from
+the synthetic fixture. See [Linux desktop support](linux-development.md#desktop-support).
+This is not full feature parity: Linux voice editing, Wayland automatic global
+actions and system-wide Escape remain open.
+
 ## Core Journey qualification cache (source only)
 
 Automatic #1229 head `a729af1e` restored its exact Swift cache successfully,
@@ -143,8 +172,8 @@ These checks are **NOT_RUN** locally. Windows maps the Quick Voice 1-3 action
 shortcuts to this action (`JSTI_ACTION_RUN_QUICK_VOICE_1`-`3` emit
 `JSTI_EVENT_QUICK_VOICE` with the slot, queued on the settings queue; ignored
 while Voice Output settings are locked). Linux now has source-wired window-local
-Quick Voice 1-3 actions through the same Host, gated while recording or working;
-global action registration and physical keyboard qualification remain open.
+Quick Voice 1-3 actions through the same Host, gated while recording or working.
+These actions remain window-local; physical keyboard qualification is open.
 
 ## Paste last History action foundation (source only)
 
@@ -188,9 +217,11 @@ burst/expiry/concurrent-admission tests and Host queued-expiry/cancellation test
 are authored but NOT_RUN locally, pending automatic native/portable qualification.
 
 Linux now has **26 of 27 source-wired action destinations**; voice editing and
-automatic global action registration remain open. Selected-text speech needs
+Wayland automatic global action registration remain open. X11 has the
+source-only action group described above. Selected-text speech needs
 separate session access and an external focused control, not this app's window.
-Its saved window-local binding remains disabled with desktop-command guidance.
+Its saved window-local binding remains disabled with desktop-command guidance;
+an eligible global binding can register on X11 without granting selection access.
 Mapping, native row
 validation and busy/recording/parent/page-independent dispatch fixtures are
 authored but NOT_RUN locally. They need automatic qualification. Clipboard
@@ -2674,7 +2705,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | modulatePIIPhiTagging | Live/batch source wired; unqualified / Same | Native default/on/off choice, strict transfer/restart and captured live/batch provider flags; absent stays off. Native/provider acceptance pending. |
 | accessibilityInsertionMode | Equivalent / Missing | Output; Windows cursor/replace-field; Linux paste cannot claim AX replace-all equivalence |
 | selectedHotKey | Equivalent / Partial | Shortcuts; Windows Ctrl/Alt native key; Linux desktop/portal-owned binding, never Mac Fn key translation |
-| customShortcutBindings | Complete source mapping; unqualified / Partial native source | Windows Keyboard **Action shortcuts** dialog: all 27 actions source-wired; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Voice editing additionally requires an editable UIA selection and a rewrite API key. Linux projects 26 action destinations and edits all saved bindings with presets/reset. Selected-text speech needs separate session access and a focused external editable AT-SPI field via desktop command; voice editing and automatic global registration remain unimplemented. Native/physical acceptance pending. |
+| customShortcutBindings | Complete source mapping; unqualified / Partial native source | Windows Keyboard **Action shortcuts** dialog: all 27 actions source-wired; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Voice editing additionally requires an editable UIA selection and a rewrite API key. Linux projects 26 action destinations and edits saved bindings with presets/reset; eligible X11 global actions use a separate native group with per-row refusals. Selected-text speech needs session access and an external editable AT-SPI field. Linux voice editing and Wayland automatic action registration remain open. Native/physical acceptance pending. |
 | paidAccessRoutingEnabled | Apple-specific / Apple-specific | BYOK desktop providers; no paid-access entitlement/routing journey. Retained opaque through import/export |
 | simpleModelChoices | Missing / Missing | Native catalogue picker without simplified paid-model chooser |
 | rememberedLocalTranscriptionSource | Partial / Partial | Models remembers Local selection; no Apple on-device source |
@@ -2690,8 +2721,9 @@ an actually present legacy desktop scalar is a distinct opt-in captured source,
 not silently mapped to a profile. `customShortcutBindings`/individual action
 shortcuts, Shortcut presets/reset and conflict reporting are source wired on
 Windows (partial; see [Individual action shortcuts](#individual-action-shortcuts))
-and partially window-local on Linux, with a source-wired editor and presets;
-Linux global registration remains a gap. Main-window Escape cancellation is
+and partially window-local on Linux, with a source-wired editor and presets.
+Eligible X11 global actions now have the unqualified native group above;
+Wayland automatic action registration remains a gap. Main-window Escape cancellation is
 source-wired on both hosts as described below. The subsequent source-only
 Windows change adds active-only passive system-wide Escape observation; Linux
 system-wide Escape and exact-head Windows native acceptance remain gaps.
@@ -3030,22 +3062,24 @@ not run local actions. An imported duplicate retains its value and shows a
 conflict note; the first listed action owns that combination. Sidebar
 Ctrl+digit chords retain precedence and corresponding action notes disclose it.
 
-Three Linux actions remain unavailable: Speak Selected Text,
-Paste Last History Item and Edit Selection by Voice. The Permissions action
+Linux voice editing remains unavailable. Paste Last History now uses its
+existing bounded admission/target path, and selected-text speech uses the
+consented external AT-SPI path described above. The Permissions action
 opens its own Linux-specific recovery guidance, not an unrelated page.
-Enabled global bindings remain saved and visibly unregistered;
-they are not silently downgraded to local shortcuts. The existing single X11 /
-Wayland-portal dictation shortcut is unchanged. Multi-action global registration
-remains build-out work. Because this is only
+Enabled eligible global bindings now register on X11 with explicit per-row
+status; unsupported bindings stay saved and visibly unregistered, never
+silently downgraded to local shortcuts. The existing single X11 /
+Wayland-portal dictation shortcut is unchanged. Wayland multi-action automatic
+registration remains build-out work. Because this is only
 partial application of `customShortcutBindings`, migration continues to
 preserve the whole value rather than claiming full Linux coverage.
 
 The Linux Keyboard **Edit action shortcuts...** dialog edits a draft with
 native key capture, Clear, Enabled and Work in other apps switches. It uses the
 same canonical presets and reset defaults as macOS/Windows. Global switches
-explicitly say the binding is saved but not registered. The shared editor
+explain X11 availability and the Wayland desktop-settings fallback. The shared editor
 validation refuses newly introduced duplicates, unmodified typing keys and
-local collisions with Linux's separate Ctrl+Alt+Space dictation shortcut;
+local/global collisions with Linux's separate Ctrl+Alt+Space dictation shortcut;
 sidebar collisions and shared reserved-key policy produce visible warnings.
 Restoring canonical defaults explicitly permits the default Space/Escape media
 keys without permitting arbitrary unmodified typing keys.

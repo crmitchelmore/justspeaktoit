@@ -43,4 +43,17 @@ final class LinuxOnboardingPageTests: XCTestCase {
         XCTAssertEqual(practice.actions, [.chooseShortcut])
         XCTAssertTrue(practice.detail.contains("shortcut"))
     }
+
+    func testEveryGuideActionRoutesToItsImplementedDestination() {
+        let expected: [(DesktopOnboardingAction, LinuxOnboardingPage.Destination?)] = [
+            (.openPermissions, .permissions), (.openMicrophoneSettings, .permissions),
+            (.chooseMicrophone, .general), (.chooseTextOutput, .general),
+            (.chooseRemoteProvider, .apiKeys), (.downloadLocalModel, .transcription),
+            (.chooseShortcut, .keyboard), (.openPostProcessing, .postProcessing), (.testDictation, nil)
+        ]
+        XCTAssertEqual(Set(expected.map(\.0)), Set(DesktopOnboardingAction.allCases))
+        for (action, destination) in expected {
+            XCTAssertEqual(LinuxOnboardingPage.destination(for: action), destination, action.rawValue)
+        }
+    }
 }

@@ -92,6 +92,46 @@ final class DesktopHostRecordingCancelTests: XCTestCase {
         XCTAssertEqual(effects.transcriptions, 0)
         XCTAssertTrue(effects.outputs.isEmpty)
     }
+
+    func testGuardedCancellationRefusesStaleRequestWithoutTouchingActiveCapture() async throws {
+        await start()
+        let original = await controller.recording?.record.id
+        XCTAssertNotNil(original)
+        await controller.cancelTranscription(ifCurrent: { false })
+        let remaining = await controller.recording?.record.id
+        XCTAssertEqual(remaining, original)
+        XCTAssertEqual(effects.stops, 0)
+        XCTAssertEqual(effects.destructions, 0)
+        XCTAssertEqual(effects.transcriptions, 0)
+        XCTAssertTrue(effects.outputs.isEmpty)
+        await controller.cancelTranscription(ifCurrent: { true })
+        let stopped = await controller.recording?.record.id
+        XCTAssertNil(stopped)
+        XCTAssertEqual(effects.stops, 1)
+        XCTAssertEqual(effects.destructions, 1)
+    }
+
+    func testGuardedCancellationAfterRestartPreservesNewCapture() async throws {
+        await start()
+        let first = await controller.recording?.record.id
+        await controller.cancelTranscription()
+        await start()
+        let second = await controller.recording?.record.id
+        XCTAssertNotNil(second)
+        XCTAssertNotEqual(second, first)
+        await controller.cancelTranscription(ifCurrent: { false })
+        let remaining = await controller.recording?.record.id
+        XCTAssertEqual(remaining, second)
+        XCTAssertEqual(effects.stops, 1)
+        XCTAssertEqual(effects.destructions, 1)
+        await controller.cancelTranscription(ifCurrent: { true })
+        let stopped = await controller.recording?.record.id
+        XCTAssertNil(stopped)
+        XCTAssertEqual(effects.stops, 2)
+        XCTAssertEqual(effects.destructions, 2)
+        XCTAssertEqual(effects.transcriptions, 0)
+        XCTAssertTrue(effects.outputs.isEmpty)
+    }
 }
 
 private final class RecordingCancelEffects: DesktopHostEffects, @unchecked Sendable {

@@ -26,6 +26,7 @@
 #include "WindowsOnboarding.hpp"
 #include "WindowsAppIcon.hpp"
 #include "WindowsMigrationRestore.hpp"
+#include "WindowsGlobalEscape.hpp"
 
 bool jsti_postprocessing_available();
 void jsti_show_postprocessing(HWND owner);
@@ -404,6 +405,7 @@ struct WindowState {
     int pendingPlaybackState = playbackIdle;
     std::wstring pendingPlaybackText;
     int recording = 0;
+    bool globalEscapeEnabled = false;
     bool cancelKeyHeld = false;
     std::wstring status;
     std::wstring transcript;
@@ -2361,6 +2363,9 @@ void applyUpdate(HWND window) {
     }
     updateSourceControls(window);
     if (statusChanged) SetDlgItemTextW(window, statusID, status.c_str());
+    std::string escapeFailure;
+    if (!jsti::globalEscape::reconcile(window, state.globalEscapeEnabled, showFailure, escapeFailure) &&
+        !escapeFailure.empty()) showFailure(window, escapeFailure);
     applyInsights(window);
 
     SetDlgItemTextW(window, recordID, recording == 1 ? L"&Stop recording" : (recording == 2 ? L"&Cancel" : L"&Record"));
@@ -2785,6 +2790,16 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         return 0;
     case updateMessage:
         applyUpdate(window); return 0;
+    case jsti::globalEscape::message:
+        if (jsti::globalEscape::take(window, wparam)) {
+            const int recording = jsti_window_recording_state();
+            if (recording == 1 || recording == 2) {
+                retireCleanupPreview();
+                const auto token = std::to_string(static_cast<uint64_t>(wparam));
+                emit(window, JSTI_EVENT_CANCEL_TRANSCRIPTION, token.c_str());
+            }
+        }
+        return 0;
     case audioCleanupMessage: {
         std::string token;
         size_t count;
@@ -3231,11 +3246,16 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         }
         break;
     case WM_CLOSE:
+        jsti::globalEscape::publish(0);
         retireCleanupPreview();
         emit(window, JSTI_EVENT_CLOSING);
         DestroyWindow(window); return 0;
     case WM_DESTROY:
         retireCleanupPreview();
+        {
+            std::string failure;
+            if (!jsti::globalEscape::stop(failure) && !failure.empty()) showFailure(window, failure);
+        }
         stopHandsFreeGuard(window);
         jsti::tray::remove();
         backdrop.release();
@@ -3631,6 +3651,7 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
         if (state.microphones.empty()) state.microphones.push_back({"", L"Default communications microphone"});
         state.running = true;
         state.recording = 0;
+        jsti::globalEscape::publish(0);
         state.cancelKeyHeld = false;
         state.microphonesChanged = false;
         state.pendingMicrophones.clear(); state.microphoneError.clear();
@@ -3738,6 +3759,13 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
             DestroyWindow(window);
         }
     }
+    {
+        std::string failure;
+        if (!jsti::globalEscape::stop(failure) && !outcome) {
+            outcome = jsti::fail(
+                failure.empty() ? "The active-only Escape listener could not be removed." : failure, error, capacity);
+        }
+    }
     jsti::hud::destroy();
     releaseShell();
     state.font = nullptr;
@@ -3754,6 +3782,18 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
         state.shellDelivery.retire();
     }
     return outcome;
+}
+
+int jsti_window_configure_global_escape(int enabled) {
+    if (enabled != 0 && enabled != 1) return -1;
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (state.running) return -1;
+    state.globalEscapeEnabled = enabled == 1;
+    return 0;
+}
+
+int jsti_window_global_escape_is_current(uint64_t token) {
+    return jsti::globalEscape::current(token) ? 1 : 0;
 }
 
 int jsti_window_set_model_modes(const int *rowModes, size_t count, int preferredBatch, int preferredLive,
@@ -3957,7 +3997,10 @@ int jsti_window_update(const char *status, const char *transcript, int recording
     if (!state.window) return -1;
     if (status) { state.status = std::move(wideStatus); state.statusChanged = true; }
     if (transcript) { state.transcript = std::move(wideTranscript); state.transcriptChanged = true; }
-    if (recording >= 0) state.recording = recording;
+    if (recording >= 0) {
+        state.recording = recording;
+        jsti::globalEscape::publish(recording);
+    }
     if (!state.posted) {
         state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
         if (!state.posted) return -1;
@@ -4396,6 +4439,14 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     { std::lock_guard<std::mutex> lock(state.mutex); window = state.window; }
     if (!window || GetWindowThreadProcessId(window, nullptr) != GetCurrentThreadId()) {
         return jsti::fail("Window checks must run on the UI thread after READY.", error, errorCapacity);
+    }
+    std::string escapeFailure;
+    if (!jsti::globalEscape::selfTest(window, escapeFailure)) {
+        return jsti::fail(escapeFailure, error, errorCapacity);
+    }
+    if (jsti_window_configure_global_escape(0) != -1 || jsti_window_configure_global_escape(2) != -1 ||
+        jsti_window_global_escape_is_current(0) != 0) {
+        return jsti::fail("Global Escape configuration or invalid-token admission lost its guard.", error, errorCapacity);
     }
     if (!GetDlgItem(window, troubleshootingID) || !onPage(troubleshootingID, aboutPage) ||
         onPage(troubleshootingID, dashboardPage) || !jsti_troubleshooting_self_test(window))

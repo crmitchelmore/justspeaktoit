@@ -307,8 +307,33 @@ held repeats emit only one cancellation, even if the app becomes idle before
 release. Modified Escape remains available to Windows. The shared Host also
 stops legacy active capture without transcription and retains its audio.
 Three portable regressions and native smoke assertions are authored but
-**NOT_RUN** here. This adds no system-wide Escape listener; cancellation while
-another app is focused and installed-keyboard acceptance remain unqualified.
+**NOT_RUN** here.
+
+The next source-only Windows change adds passive system-wide Escape observation
+while recording/working. It uses a UI-thread low-level keyboard hook, not an
+unmodified `RegisterHotKey` grab: every callback continues the native hook chain
+and the foreground app still receives its Escape. Only a first plain physical
+Escape in another process queues cancellation; modified/injected keys, held
+repeats and this app's own windows are excluded. No keystrokes or foreground
+text are retained or logged. Idle publication immediately fences callbacks,
+even before the UI removes the hook. No modifier/foreground query or event
+payload inspection takes place through this callback while fenced.
+
+The native work epoch advances across every idle/active transition, independently
+of coalesced window updates. Queued cancellation is checked against that epoch
+at native message delivery and again inside the shared Host actor before it
+touches the current run. A held Escape at registration cannot cancel a new run.
+Shutdown retires the epoch before teardown, retains a failed-to-remove handle
+in a fenced state rather than stacking another listener, and reports failures.
+Installation is attempted once per active epoch; failure leaves the app's Cancel
+button/window-local Escape available and is explicitly reported. The hook is
+opted out for smoke/screenshot windows. Its native fixture injects registration,
+key-state, delivery and teardown operations and never installs a real hook.
+Two additional portable regressions cover refused stale cancellation and
+cancellation after recording restarts. All compilation, fixtures and physical
+other-app keyboard acceptance for this change are **NOT_RUN** here. Secure
+desktop, session boundaries and real Windows hook delivery remain platform
+qualification requirements, not inferred support.
 The portable `DesktopPressCaptureLease` and `DesktopPressCapturePCMRelay` are
 **ownership scaffolding, not an enabled microphone-on-key-press feature**.
 No native worker, host handoff, preference control or permission adapter is

@@ -2692,8 +2692,9 @@ shortcuts, Shortcut presets/reset and conflict reporting are source wired on
 Windows (partial; see [Individual action shortcuts](#individual-action-shortcuts))
 and partially window-local on Linux, with a source-wired editor and presets;
 Linux global registration remains a gap. Main-window Escape cancellation is
-source-wired on both hosts as described below; system-wide Escape cancellation
-while another app is focused remains a gap.
+source-wired on both hosts as described below. The subsequent source-only
+Windows change adds active-only passive system-wide Escape observation; Linux
+system-wide Escape and exact-head Windows native acceptance remain gaps.
 Profiles have a Windows native editor with
 shared ordering/session snapshots; this separate source-only candidate adds
 the GTK editor and actual recording selection described above. Apple bundle-ID matchers are preserved but
@@ -2706,8 +2707,9 @@ operation while recording or working. Idle Escape keeps the existing action
 shortcut/search behavior. Modified Escape is left to the platform, as are
 disabled owners, other windows, dialogs and GTK popovers. One held cancellation
 key cannot repeatedly cancel or fall through to Stop speech after the app
-becomes idle; release or deactivation retires that latch. No global keyboard
-monitor or idle key grab is added.
+becomes idle; release or deactivation retires that latch. This window-local
+change adds no global monitor or idle key grab; the subsequent Windows-only
+extension is described separately below.
 
 The shared cancellation entry point now also stops a legacy non-owned recording
 before transcription, retains its audio/partial result through the existing
@@ -2718,6 +2720,38 @@ independent restart and idle cancellation; both native smoke fixtures exercise
 the Escape ownership/state/repeat rules. All are authored but **NOT_RUN** here.
 Compilation, exact-head native/portable qualification and physical keyboard
 acceptance remain required; this does not complete system-wide Escape parity.
+
+### Windows active-only system-wide Escape (source only)
+
+Windows additionally opts real application windows into passive low-level
+keyboard observation only while recording/working. The hook always continues
+the chain: Escape still reaches the foreground app rather than being grabbed.
+A first unmodified, non-injected Escape in another process queues the existing
+Cancel event; the app's own windows keep the local route. Held repeats and an
+Escape already down when registration begins cannot start another cancellation.
+Neither key text nor foreground content is captured, persisted or logged.
+
+Every native state publication updates an atomic idle/active epoch, even if
+presentation updates coalesce. Idle/close publication immediately fences the
+callback before UI-thread removal. A queued message must match the current
+epoch and pending delivery; its opaque token is rechecked on final Host actor
+admission so a delayed task cannot cancel a later idle-to-active run. This does
+not introduce provider, capture, clipboard or insertion work on the hook path.
+Install, queue and removal failures are explicit; failed installation is not
+retried on each transcript repaint, and an unremoved listener stays fenced
+rather than being forgotten or duplicated. The native window also returns a
+failure if teardown still cannot retire it.
+
+Smoke/screenshot windows opt out before launch. The existing native smoke suite
+includes a separate injected-operations listener fixture covering idle/synthetic
+scope, exact modifier matching, injected events, Caps/Num/Scroll Lock, held-key
+suppression, delivery ownership, pending duplicates, coalesced generation
+changes, stale messages, registration/queue/removal failure and shutdown.
+No fixture installs a real hook or injects a key. Two additional portable Host
+regressions cover guarded cancellation and preserving a restarted capture.
+Compiler, portable/native fixtures and physical external-app acceptance are
+all **NOT_RUN** here. Linux system-wide Escape remains unimplemented; Windows
+secure desktop/session-boundary behavior still requires platform evidence.
 
 ### Remaining destination and selection-learning gaps
 

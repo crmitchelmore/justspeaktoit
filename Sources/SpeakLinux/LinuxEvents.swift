@@ -17,6 +17,7 @@ final class LinuxEventContext: @unchecked Sendable {
     var windowCheck: (@Sendable () throws -> Void)?
     /// With --ui-screenshots: loads the sample History, then saves every page here.
     var screenshotDirectory: String?
+    var needsSetupAtLaunch = false
     private let historyEvents: DesktopEventDispatcher<DesktopHistoryEvent>
     private let searches: DesktopEventDispatcher<String>
     private let copies: DesktopTranscriptCopyDispatcher
@@ -454,6 +455,7 @@ private func linuxReady(_ holder: LinuxEventContext) { // swiftlint:disable:this
             await ready.value
             await controller.refreshLoginItem()
             await LinuxAutomationSwitch.restore(holder)
+            LinuxOnboarding.openIfNeeded(holder)
         }
         LinuxCloudSync.start(holder, after: ready)
         holder.shortcuts.start(holder)

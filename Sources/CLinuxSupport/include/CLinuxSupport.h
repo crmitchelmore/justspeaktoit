@@ -284,6 +284,21 @@ int32_t jsti_window_show_migration_report(const char *text);
 /* Owned, modal preview; Replace profiles requires a second affirmative response.
  * Both stages default to Cancel. Called from the Host's ordered publication path. */
 int32_t jsti_window_confirm_migration_restore(const char *token, const char *text, int32_t offers_replace);
+/* Modeless setup guide. Commands: 0 opened, 1 next, 2 back, 3 skip,
+ * 4 finish, 5 step action, 6 check again. A revision admits one response. */
+typedef void (*jsti_setup_fn)(uint64_t revision, int32_t command, int32_t step, const char *action, void *context);
+typedef struct { const char *title; const char *action; } JSTILinuxSetupAction;
+typedef struct {
+    int32_t step, has_previous, is_last;
+    const char *title, *progress, *detail, *status;
+} JSTILinuxSetupPage;
+int32_t jsti_setup_configure(jsti_setup_fn callback, void *context);
+void jsti_setup_clear(void);
+uint64_t jsti_setup_revision(void);
+int32_t jsti_setup_set_page(
+    const JSTILinuxSetupPage *page, const JSTILinuxSetupAction *actions, size_t count, uint64_t revision);
+int32_t jsti_setup_finish(uint64_t revision);
+int32_t jsti_window_request_setup(void);
 /* The dashboard totals (`all` saved records) and the History header totals
  * (`visible`, the records the search shows). */
 int32_t jsti_window_set_insights(const JSTIInsights *all, const JSTIInsights *visible);

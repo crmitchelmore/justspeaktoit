@@ -2464,12 +2464,12 @@ full settings-archive restore remains incomplete. A model whose
 file fails its digest during streaming is reported, not removed automatically
 as in batch; sherpa-onnx and Parakeet streaming sources are Mac only.
 
-## First-run setup and permissions (Windows source wired; Linux model only)
+## First-run setup and permissions (Windows/Linux source wired)
 
 The Mac's `OnboardingView`, `PermissionsManager`, `PermissionRecoveryHelp` and
-`DashboardPermissionsSection` journeys have a shared desktop model and a Windows
-native surface. Earlier baseline notes that called onboarding and permission
-remediation missing on Windows are superseded by this source.
+`DashboardPermissionsSection` journeys have a shared desktop model and native
+Windows/Linux surfaces. Earlier baseline notes that called these surfaces
+missing are superseded by the source below; runtime qualification is separate.
 
 - **Shared model** (`SpeakCore/DesktopOnboarding.swift`,
   `SpeakDesktopHost/DesktopHostOnboarding.swift`): ordered steps (welcome,
@@ -2510,9 +2510,35 @@ remediation missing on Windows are superseded by this source.
 - **Limits**: the automation row reflects the saved setting, not whether the
   pipe is currently listening; there is no notification-area "Run setup"
   entry; all native and Swift code is uncompiled and unqualified on Windows.
-- **Linux**: shares the step and permission model; no native GTK guide or
-  Permissions page yet. Portal/PipeWire microphone access and Wayland
-  insertion limits need their own adapter before Linux can present the model.
+- **Linux setup guide** (`SpeakLinux/LinuxOnboarding.swift`,
+  `CLinuxSupport/LinuxSetup.c`): a modeless GTK window projects the same canonical
+  steps/actions after normal startup and from About, **Run setup again**. The
+  startup decision is read before controller creation: existing settings with
+  no guide state suppress automatic setup without silently writing an adoption
+  file; incomplete saved progress resumes, while a completed guide reopens at
+  Welcome manually. A manual rerun on an upgraded install keeps completion
+  sticky. Smoke, screenshot and integration paths never auto-open it.
+  Navigation, Skip and Finish acknowledge only successful checked persistence.
+  Read/write failures are reported and leave the guide open; closing or Escape
+  does not complete it. Owned page/action strings, revision-fenced publications
+  and one pending request protect close/reopen and delayed responses.
+- **Linux destinations and limits**: guide actions open the existing passive
+  Permissions/API Keys windows or General, Transcription (microphone and Local
+  models), Keyboard and Post-processing pages. The existing native Permissions
+  window already reports PipeWire/microphone warnings and X11/Wayland insertion
+  guidance; it was not missing. Rendering the guide does not read credentials,
+  open the microphone, request portal permission or contact a provider. Route
+  readiness is not inferred from a selected model: users check API Keys/Local
+  models explicitly. The Windows administrator-app wording is replaced with
+  Linux insertion/paste guidance. Practice uses the real shortcut in another
+  app; an unimplemented test-dictation button is not shown. Desktop permission
+  changes and real-device acceptance remain unqualified.
+- **Linux guide evidence**: ten new Host regressions cover checked persistence,
+  settings isolation, closed/write/read failures and prelaunch eligibility.
+  GTK smoke assertions cover owned strings, actions, pending admission,
+  navigation controls, stale page/Finish responses, modeless ownership, the
+  canonical app icon, close, reopen and Escape. These additions are authored
+  only, **NOT_RUN** here; they do not transfer qualification from earlier Linux heads.
 
 ## Evidence legend
 

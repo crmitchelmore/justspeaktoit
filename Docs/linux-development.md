@@ -467,6 +467,24 @@ credentials, vocabulary, connections and models remain unapplied. Native
 smoke assertions and seven shared Host regressions are authored but NOT_RUN
 locally; this is source wiring, not an installed-desktop acceptance receipt.
 
+The modeless first-run setup guide shares SpeakCore's seven-step catalogue and
+completion key, and can be reopened from About > **Run setup again**. It resumes
+unfinished progress; existing installs with settings but no guide state do not
+auto-open it. Eligibility is read before controller creation, and smoke,
+screenshot and integration modes do not auto-open it. Next/Back, Skip and Finish
+acknowledge successful writes only; read/write failures remain explicit.
+Closing or Escape does not mark setup complete. Revision-fenced owned pages
+reject delayed responses after close/reopen.
+
+Guide actions reuse Permissions, API Keys and the existing settings pages.
+Microphone guidance is passive, text-insertion advice distinguishes X11 and
+Wayland, and practice uses the real global shortcut in another app rather than
+an unimplemented test-record button. Guide rendering does not read keys,
+activate capture, request desktop access or contact a provider; a selected
+model alone is not a readiness receipt. Ten new shared Host regressions and
+native GTK smoke assertions are authored but **NOT_RUN** here. This slice does
+not qualify real-desktop permission, microphone, provider or shortcut behavior.
+
 Before the keyring and desktop integration checks, the harness runs
 `--integration-test atspi-selection` against an external synthetic AT-SPI
 service, each time on its own nested private bus. The fixture refuses a

@@ -984,6 +984,7 @@ static gboolean on_close_request(GtkWindow *window, gpointer data) {
     jsti_voice_sources_close();
     jsti_voice_credentials_close();
     jsti_action_shortcut_editor_close();
+    jsti_setup_close();
     ui.closing = TRUE;
     retire_migration_restore();
     if (ui.backup_chooser != NULL) g_cancellable_cancel(ui.backup_chooser);
@@ -1871,6 +1872,14 @@ static void on_permissions(GtkButton *button, gpointer data) {
     jsti_permissions_open(ui.window);
 }
 
+static void on_setup(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    if (!ui.closing) jsti_setup_open(ui.window);
+}
+
+static void request_setup(gpointer data) { (void)data; on_setup(NULL, NULL); }
+int32_t jsti_window_request_setup(void) { return jsti_window_post(request_setup, NULL, NULL); }
+
 static void request_permissions(gpointer data) {
     (void)data;
     if (!ui.closing) jsti_permissions_open(ui.window);
@@ -1986,6 +1995,11 @@ static GtkWidget *build_about(void) {
     gtk_widget_set_size_request(permissions, -1, 44);
     gtk_widget_set_halign(permissions, GTK_ALIGN_START);
     g_signal_connect(permissions, "clicked", G_CALLBACK(on_permissions), NULL);
+    GtkWidget *setup = gtk_button_new_with_label("Run setup again");
+    gtk_widget_set_size_request(setup, -1, 44);
+    gtk_widget_set_halign(setup, GTK_ALIGN_START);
+    g_signal_connect(setup, "clicked", G_CALLBACK(on_setup), NULL);
+    gtk_box_append(GTK_BOX(body), setup);
     gtk_box_append(GTK_BOX(body), permissions);
     gtk_box_append(GTK_BOX(column), card);
     return page;
@@ -2293,6 +2307,7 @@ int32_t jsti_window_run(
     g_signal_connect(ui.application, "command-line", G_CALLBACK(on_command_line), NULL);
     int status = g_application_run(G_APPLICATION(ui.application), argc, argv);
     jsti_hands_free_guard_stop();
+    jsti_setup_close();
     retire_migration_restore();
     close_posts();
     ui.callback = NULL;
@@ -5918,6 +5933,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (jsti_troubleshooting_self_test(ui.window, error, capacity) != 0) return -1;
     if (jsti_api_keys_self_test(ui.window, error, capacity) != 0) return -1;
     if (jsti_permissions_self_test(ui.window, error, capacity) != 0) return -1;
+    if (jsti_setup_self_test(ui.window, error, capacity) != 0) return -1;
     {
         GtkTextBuffer *prompt = gtk_text_view_get_buffer(ui.polish_prompt_row);
         GtkTextIter prompt_start, prompt_end;

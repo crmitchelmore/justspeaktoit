@@ -660,7 +660,8 @@ system-wide Escape and voice editing remain separate gaps.
 
 ### Escape and dictation delivery
 
-Plain Escape in the active main window is source-wired to the existing Cancel
+With Keyboard's default-on **Cancel recording with Escape** enabled, plain
+Escape in the active main window is source-wired to the existing Cancel
 operation while recording/working. Idle Escape, modified combinations, dialogs
 and popovers keep their own behavior. The main window's capture-phase key
 controller owns only this active cancellation; release and deactivation retire
@@ -668,6 +669,14 @@ its repeat latch. No global key monitor, X11 Escape grab or portal binding is
 installed. The shared Host retains legacy captured audio without transcription.
 Portable and GTK smoke assertions are authored but **NOT_RUN** here; physical
 keyboard acceptance and system-wide Escape cancellation remain outstanding.
+
+The canonical `cancelRecordingOnEscape` value now transfers, persists and drives
+the native main-window policy. Explicit Cancel stays unconditional. Local Escape
+carries an opaque work token, rechecked with the saved policy inside Host
+admission. Native state publication uses the post lock before GTK application;
+policy toggles retire old tokens, and close cannot be undone by late updates.
+New preference/restart/Host regressions and extended GTK policy/event fixtures
+are authored but **NOT_RUN**, with no new monitor or global Escape registration.
 
 | Desktop (2026) | Shortcut | Paste into the focused app | Fallback |
 |---|---|---|---|

@@ -1,16 +1,42 @@
 #include "WindowsGlobalEscape.hpp"
 #include <atomic>
+#include <mutex>
 
 namespace jsti::globalEscape {
 namespace {
 class Epoch {
     std::atomic<UINT_PTR> value{0};
+    std::mutex mutex;
+    bool recording = false, allowed = true, voiceEdit = false;
+    void refresh() {
+        const auto prior = value.load();
+        if (static_cast<bool>(prior & 1u) != ((recording && allowed) || voiceEdit)) value.store(prior + 1);
+    }
 public:
     UINT_PTR current() const { return value.load(); }
     void publish(bool active) {
-        auto prior = value.load();
-        while (static_cast<bool>(prior & 1u) != active &&
-               !value.compare_exchange_weak(prior, prior + 1)) {}
+        std::lock_guard<std::mutex> lock(mutex);
+        recording = active;
+        refresh();
+    }
+    void configure(bool enabled) {
+        std::lock_guard<std::mutex> lock(mutex);
+        allowed = enabled;
+        refresh();
+    }
+    bool enabled() {
+        std::lock_guard<std::mutex> lock(mutex);
+        return allowed || voiceEdit;
+    }
+    void editing(bool active) {
+        std::lock_guard<std::mutex> lock(mutex);
+        voiceEdit = active;
+        refresh();
+    }
+    void close() {
+        std::lock_guard<std::mutex> lock(mutex);
+        recording = voiceEdit = false;
+        refresh();
     }
 };
 
@@ -265,9 +291,48 @@ bool checkLifecycle(HWND window, std::string &failure) {
     fixture = nullptr;
     return okay;
 }
+
+bool checkPolicy(HWND window, std::string &failure) {
+    Fixture state;
+    fixture = &state;
+    Epoch epoch;
+    Listener test(epoch, {installFixture, removeFixture, keyFixture, postFixture, nextFixture, externalFixture});
+    epoch.publish(true);
+    bool okay = test.reconcile(window, true, reportFixture, failure) && state.installs == 1;
+    const auto first = epoch.current();
+    epoch.configure(false);
+    okay = !epoch.enabled() && !(epoch.current() & 1u) && !test.accepting() &&
+        test.reconcile(window, true, reportFixture, failure) && state.removals == 1 && okay;
+    epoch.publish(false); epoch.publish(true);
+    okay = !(epoch.current() & 1u) && okay;
+    epoch.configure(true);
+    okay = epoch.enabled() && epoch.current() != first && (epoch.current() & 1u) &&
+        test.reconcile(window, true, reportFixture, failure) && state.installs == 2 && okay;
+    epoch.configure(false);
+    epoch.editing(true);
+    const auto editing = epoch.current();
+    okay = epoch.enabled() && (editing & 1u) &&
+        test.reconcile(window, true, reportFixture, failure) && test.accepting() && okay;
+    epoch.publish(false);
+    okay = epoch.current() == editing && okay;
+    epoch.editing(false);
+    okay = !epoch.enabled() && !(epoch.current() & 1u) && !test.accepting() && okay;
+    epoch.editing(true);
+    epoch.close();
+    okay = !(epoch.current() & 1u) && !test.accepting() && test.stop(failure) && okay;
+    fixture = nullptr;
+    return okay;
+}
 }
 
 void publish(int recording) { requested.publish(recording == 1 || recording == 2); }
+void configure(bool enabled) { requested.configure(enabled); }
+void editing(bool active) { requested.editing(active); }
+bool enabled() { return requested.enabled(); }
+uint64_t token() {
+    const auto value = requested.current();
+    return value & 1u ? value : 0;
+}
 
 bool reconcile(HWND window, bool enabled, Failure report, std::string &failure) {
     return listener.reconcile(window, enabled, report, failure);
@@ -278,12 +343,12 @@ bool take(HWND window, WPARAM token) { return listener.take(window, token); }
 bool current(uint64_t token) { return (token & 1u) && token == requested.current(); }
 
 bool stop(std::string &failure) {
-    requested.publish(false);
+    requested.close();
     return listener.stop(failure);
 }
 
 bool selfTest(HWND window, std::string &failure) {
-    if (!checkKeys(window, failure) || !checkLifecycle(window, failure)) {
+    if (!checkKeys(window, failure) || !checkLifecycle(window, failure) || !checkPolicy(window, failure)) {
         failure = "Active-only global Escape lost passive delivery, scope, generation or teardown guards.";
         return false;
     }

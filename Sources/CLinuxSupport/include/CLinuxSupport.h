@@ -258,6 +258,10 @@ int32_t jsti_window_run(
 /* Safe from any thread; applied on the GTK main thread. No-ops before the
  * window exists or after it closes. `status` or `transcript` may be NULL. */
 int32_t jsti_window_update(const char *status, const char *transcript, int32_t state);
+/* Thread-safe saved policy and final Host admission check for window-local Escape.
+ * Policy/state transitions retire old tokens before queued GTK presentation. */
+int32_t jsti_window_set_escape_cancellation(int32_t enabled);
+int32_t jsti_window_escape_is_current(uint64_t token);
 /* Preview-only; one pending value. Native navigation retires the ticket.
  * Offer returns 1 for a stale ticket, -1 for an enqueue/validation failure. */
 uint64_t jsti_window_begin_cleanup_preview(void);

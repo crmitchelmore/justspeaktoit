@@ -1954,18 +1954,24 @@ bool cancelKey(HWND window, const MSG &message, bool plain, bool active) {
     if (message.message == WM_KEYUP || message.message == WM_SYSKEYUP) {
         const bool held = state.cancelKeyHeld;
         state.cancelKeyHeld = false;
-        return held;
+        return held && jsti::globalEscape::enabled();
     }
     if (message.message != WM_KEYDOWN) return false;
+    if (!jsti::globalEscape::enabled()) {
+        if (plain) state.cancelKeyHeld = true;
+        return false;
+    }
     if (state.cancelKeyHeld) return true;
     if (!plain) return false;
     if (message.lParam & (static_cast<LPARAM>(1) << 30)) return false;
     int recording;
     { std::lock_guard<std::mutex> lock(state.mutex); recording = state.recording; }
     if (recording != 1 && recording != 2) return false;
+    const auto token = jsti::globalEscape::token();
+    if (!token) return false;
     state.cancelKeyHeld = true;
     retireCleanupPreview();
-    emit(window, JSTI_EVENT_CANCEL_TRANSCRIPTION);
+    emit(window, JSTI_EVENT_CANCEL_TRANSCRIPTION, std::to_string(token).c_str());
     return true;
 }
 
@@ -3796,6 +3802,23 @@ int jsti_window_global_escape_is_current(uint64_t token) {
     return jsti::globalEscape::current(token) ? 1 : 0;
 }
 
+int jsti_window_set_voice_edit_escape(int active) {
+    if (active != 0 && active != 1) return -1;
+    jsti::globalEscape::editing(active == 1);
+    return 0;
+}
+
+int jsti_window_set_escape_cancellation(int enabled) {
+    if (enabled != 0 && enabled != 1) return -1;
+    std::lock_guard<std::mutex> lock(state.mutex);
+    jsti::globalEscape::configure(enabled == 1);
+    if (state.window && !state.posted) {
+        state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
+        if (!state.posted) return -1;
+    }
+    return 0;
+}
+
 int jsti_window_set_model_modes(const int *rowModes, size_t count, int preferredBatch, int preferredLive,
                                 int preferredLocal) {
     if (count > 10000 || (count && !rowModes)) return -1;
@@ -5331,7 +5354,8 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             escape.hwnd = GetDlgItem(window, transcriptID);
             escape.message = WM_KEYDOWN; escape.wParam = VK_ESCAPE;
             const int before = observed.calls;
-            bool okay = !cancelKey(window, escape, true, true);
+            const bool savedPolicy = jsti::globalEscape::enabled();
+            bool okay = jsti_window_set_escape_cancellation(1) == 0 && !cancelKey(window, escape, true, true);
             jsti_window_update(nullptr, nullptr, 1);
             applyUpdate(window);
             okay = !cancelKey(window, escape, false, true) && !cancelKey(window, escape, true, false) && okay;
@@ -5343,7 +5367,8 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             okay = !cancelKey(window, escape, true, true) && okay;
             EnableWindow(window, TRUE);
             okay = cancelKey(window, escape, true, true) && observed.calls == before + 1 &&
-                observed.event == JSTI_EVENT_CANCEL_TRANSCRIPTION && okay;
+                observed.event == JSTI_EVENT_CANCEL_TRANSCRIPTION &&
+                observed.id == std::to_string(jsti::globalEscape::token()) && okay;
             escape.lParam = static_cast<LPARAM>(1) << 30;
             okay = cancelKey(window, escape, true, true) && observed.calls == before + 1 && okay;
             jsti_window_update(nullptr, nullptr, 0);
@@ -5357,10 +5382,30 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             applyUpdate(window);
             escape.lParam = 0;
             okay = cancelKey(window, escape, true, true) && observed.calls == before + 2 && okay;
+            const auto oldToken = jsti::globalEscape::token();
+            okay = jsti_window_set_escape_cancellation(-1) == -1 &&
+                jsti_window_set_escape_cancellation(2) == -1 &&
+                jsti_window_set_voice_edit_escape(-1) == -1 &&
+                jsti_window_set_voice_edit_escape(2) == -1 &&
+                jsti_window_global_escape_is_current(oldToken) == 1 && okay;
+            okay = jsti_window_set_escape_cancellation(0) == 0 &&
+                !cancelKey(window, escape, true, true) && observed.calls == before + 2 &&
+                !jsti_window_global_escape_is_current(oldToken) && okay;
+            SendMessageW(window, WM_COMMAND, MAKEWPARAM(recordID, BN_CLICKED), 0);
+            okay = observed.calls == before + 3 && observed.event == JSTI_EVENT_CANCEL_TRANSCRIPTION &&
+                observed.id.empty() && okay;
+            okay = jsti_window_set_escape_cancellation(1) == 0 &&
+                !jsti_window_global_escape_is_current(oldToken) &&
+                cancelKey(window, escape, true, true) && observed.calls == before + 3 && okay;
             SendMessageW(window, WM_ACTIVATE, WA_INACTIVE, 0);
             okay = !state.cancelKeyHeld && okay;
+            okay = cancelKey(window, escape, true, true) && observed.calls == before + 4 &&
+                observed.id == std::to_string(jsti::globalEscape::token()) && okay;
+            escape.message = WM_KEYUP;
+            okay = cancelKey(window, escape, true, true) && !state.cancelKeyHeld && okay;
             jsti_window_update(nullptr, nullptr, 0);
             applyUpdate(window);
+            okay = jsti_window_set_escape_cancellation(savedPolicy ? 1 : 0) == 0 && okay;
             if (!okay) { failure = "Escape cancellation lost ownership, idle or repeat guards."; return false; }
         }
         state.modelModes.assign(state.modelNames.size(), 0);

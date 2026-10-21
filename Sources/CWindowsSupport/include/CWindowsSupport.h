@@ -138,7 +138,11 @@ int jsti_window_run(const char *const *model_names, size_t model_count, int sele
 /* Pre-run only: opt in to passive Escape observation while recording/working.
  * Pass 0 for synthetic/screenshot windows. No listener is installed while idle. */
 int jsti_window_configure_global_escape(int enabled);
-/* Thread-safe final Host admission check for a queued global cancellation token. */
+/* Thread-safe saved preference, independent of the pre-run synthetic-window opt-in. */
+int jsti_window_set_escape_cancellation(int enabled);
+/* Publish the independent Voice Edit reason before its usual window state update. */
+int jsti_window_set_voice_edit_escape(int active);
+/* Thread-safe final Host admission check for a queued local/global Escape token. */
 int jsti_window_global_escape_is_current(uint64_t token);
 /* Optional pre-run mode catalogue with the same count/order as window_run's
  * full model array. Each mode is 0 remote batch, 1 remote live, 2 local batch

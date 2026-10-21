@@ -2676,7 +2676,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | runAtLogin | Equivalent / Equivalent | General; native startup task/login entry, OS status displayed |
 | recordingsDirectory | Partial: fenced / Partial: source only | Mac path retained, never executed. Device-local chosen folder via verified recording locations: Linux Housekeeping chooser; Windows reports unavailable while `WindowsRecordingRegistry` identity/restart integration is fenced. Existing audio never moves. See recordings folder above |
 | hotKeyActivation | Equivalent / Equivalent | Shortcuts; press/hold/double-tap/combined styles; Linux portal availability caveat |
-| cancelRecordingOnEscape | Mac only / Mac only | Boolean preserved through the shared migration catalogue; the Mac configures Escape cancellation, while native desktop hosts do not apply it |
+| cancelRecordingOnEscape | Applied (source only) / Applied (source only) | Shared default-on Boolean in Keyboard; Windows local/global and Linux main-window Escape honor it, with final Host admission and native epoch guards; explicit Cancel and Windows Voice Edit cancellation remain independent. Compiler/native qualification is NOT_RUN |
 | holdThreshold | Wired / Wired | Config + shared gesture machine; 0.2...1.5 s |
 | doubleTapWindow | Wired / Wired | Config + shared gesture machine; 0.2...1 s |
 | trackedKeyIdentifiers | Equivalent source only; NOT_RUN | Keys; identifiers only, in `trackedKeyIdentifiers.json`. Saving a key from the shared editors registers its identifier and removing it unregisters it. Both desktop API Keys windows reconcile the list against the store; cancellation skips reconciliation. |
@@ -2768,8 +2768,8 @@ not silently converted to executable paths.
 
 ### Main-window Escape cancellation (source only)
 
-Plain Escape in the active native main window now emits the existing Cancel
-operation while recording or working. Idle Escape keeps the existing action
+With `cancelRecordingOnEscape` enabled, plain Escape in the active native main
+window emits the existing Cancel operation while recording or working. Idle Escape keeps the existing action
 shortcut/search behavior. Modified Escape is left to the platform, as are
 disabled owners, other windows, dialogs and GTK popovers. One held cancellation
 key cannot repeatedly cancel or fall through to Stop speech after the app
@@ -2790,7 +2790,8 @@ acceptance remain required; this does not complete system-wide Escape parity.
 ### Windows active-only system-wide Escape (source only)
 
 Windows additionally opts real application windows into passive low-level
-keyboard observation only while recording/working. The hook always continues
+keyboard observation only while recording/working with Escape cancellation enabled,
+or while Voice Edit owns its independent cancellation reason. The hook always continues
 the chain: Escape still reaches the foreground app rather than being grabbed.
 A first unmodified, non-injected Escape in another process queues the existing
 Cancel event; the app's own windows keep the local route. Held repeats and an
@@ -2818,6 +2819,36 @@ regressions cover guarded cancellation and preserving a restarted capture.
 Compiler, portable/native fixtures and physical external-app acceptance are
 all **NOT_RUN** here. Linux system-wide Escape remains unimplemented; Windows
 secure desktop/session-boundary behavior still requires platform evidence.
+
+### Canonical Escape cancellation preference (source only)
+
+Keyboard now exposes the Mac's default-on `cancelRecordingOnEscape` Boolean
+through the shared field catalogue. Missing values use `SpeechDefaults` on
+Mac and portable hosts; explicit false survives editor, configuration transfer
+and restart. Both native configuration publishers apply the saved policy before
+presentation. Turning it off leaves ordinary Escape handling alone; the explicit
+Cancel control still stops work and retains recorded audio.
+
+Local Escape events now carry the native work token, just like Windows global
+Escape. Policy and recording-state publication fence old tokens before queued
+window updates apply. Off/on and idle/active transitions cannot reuse a previous
+active token. Linux admits state publication under its existing post lock and
+fences close permanently, so a late update cannot reactivate cancellation after
+the window closes. The Host rechecks the native token and its own saved policy
+inside actual cancellation admission, without an intervening await.
+
+As on Mac, Windows Voice Edit owns a separate Escape reason: disabling recording
+cancellation does not disable cancelling an edit. Admission/retirement publish
+that reason from the actual Host run, not from a shortcut's queued request.
+Synthetic Windows windows still cannot install the real global listener.
+
+Authored regressions cover Boolean/default metadata, Codable/editor transfer,
+disabled/default/enabled capture cancellation, persistence after restart, stale
+requests and Voice Edit independence. Existing native fixtures additionally
+exercise policy toggles, invalid setters, token payloads, explicit Cancel,
+held-key suppression, close fencing and the separate Windows edit reason.
+These additions are **NOT_RUN**: no compiler, linter, parser, test or native
+execution was performed here. Linux system-wide Escape remains a gap.
 
 ### Remaining destination and selection-learning gaps
 

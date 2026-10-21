@@ -132,6 +132,78 @@ final class DesktopHostRecordingCancelTests: XCTestCase {
         XCTAssertEqual(effects.transcriptions, 0)
         XCTAssertTrue(effects.outputs.isEmpty)
     }
+
+    func testDisabledEscapePreservesCaptureButExplicitCancelStillRetainsAudio() async throws {
+        try await setEscapeCancellation(false)
+        await start()
+        let original = await controller.recording?.record.id
+        XCTAssertNotNil(original)
+        await controller.cancelTranscription(fromEscape: true, ifCurrent: { true })
+        let remaining = await controller.recording?.record.id
+        XCTAssertEqual(remaining, original)
+        XCTAssertEqual(effects.stops, 0)
+        XCTAssertEqual(effects.destructions, 0)
+        await controller.cancelTranscription()
+        let saved = try await records()
+        XCTAssertEqual(saved.count, 1)
+        XCTAssertEqual(saved.first?.failure, "Recording cancelled. Audio retained.")
+        XCTAssertEqual(effects.stops, 1)
+        XCTAssertEqual(effects.transcriptions, 0)
+        XCTAssertTrue(effects.outputs.isEmpty)
+    }
+
+    func testDefaultAndExplicitEnabledEscapeCancelWithoutTranscription() async throws {
+        for explicit in [false, true] {
+            if explicit { try await setEscapeCancellation(true) }
+            await start()
+            let active = await controller.recording?.record.id
+            XCTAssertNotNil(active)
+            await controller.cancelTranscription(fromEscape: true)
+            let remaining = await controller.recording?.record.id
+            XCTAssertNil(remaining)
+        }
+        XCTAssertEqual(effects.stops, 2)
+        XCTAssertEqual(effects.destructions, 2)
+        XCTAssertEqual(effects.transcriptions, 0)
+        XCTAssertTrue(effects.outputs.isEmpty)
+    }
+
+    func testDisabledEscapeSurvivesRestartAndStaleEnabledEscapeCannotCancelNewRun() async throws {
+        try await setEscapeCancellation(false)
+        await controller.close()
+        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        await controller.markReadyForSelfTest()
+        await start()
+        let original = await controller.recording?.record.id
+        XCTAssertNotNil(original)
+        await controller.cancelTranscription(fromEscape: true)
+        let remaining = await controller.recording?.record.id
+        XCTAssertEqual(remaining, original)
+        XCTAssertEqual(effects.stops, 0)
+        await controller.cancelTranscription()
+        try await setEscapeCancellation(true)
+        await start()
+        let restarted = await controller.recording?.record.id
+        XCTAssertNotNil(restarted)
+        XCTAssertNotEqual(restarted, original)
+        await controller.cancelTranscription(fromEscape: true, ifCurrent: { false })
+        let guarded = await controller.recording?.record.id
+        XCTAssertEqual(guarded, restarted)
+        XCTAssertEqual(effects.stops, 1)
+        await controller.cancelTranscription(fromEscape: true, ifCurrent: { true })
+        let stopped = await controller.recording?.record.id
+        XCTAssertNil(stopped)
+        XCTAssertEqual(effects.stops, 2)
+    }
+
+    private func setEscapeCancellation(_ enabled: Bool) async throws {
+        let file = directory.appendingPathComponent("escape-preferences.json")
+        let preferences = try DesktopConfiguration(values: [
+            ApplicationPreferenceKey.cancelRecordingOnEscape.rawValue: AnyCodable(.bool(enabled))
+        ])
+        try JSONEncoder().encode(DesktopConfigurationDocument(preferences: preferences)).write(to: file)
+        try await controller.importConfiguration(path: file.path)
+    }
 }
 
 private final class RecordingCancelEffects: DesktopHostEffects, @unchecked Sendable {

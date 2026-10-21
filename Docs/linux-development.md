@@ -482,7 +482,9 @@ native GTK smoke assertions are authored but **NOT_RUN** here. This slice does
 not qualify real-desktop permission, microphone, provider or shortcut behavior.
 
 The guide's passive page projection is additionally checked against every shared
-step in three authored platform tests. Nine authored Host progress regressions
+step/action in four authored platform tests. Its typed action destinations route
+microphone selection to the actual General picker, while Local models open
+Transcription. Nine authored Host progress regressions
 cover the shared completion transition, sticky upgrades and cancellation/failure
 paths. Native revision checks execute inside the Host actor at read/write
 admission, including Finish/Skip, rather than relying solely on a pre-await

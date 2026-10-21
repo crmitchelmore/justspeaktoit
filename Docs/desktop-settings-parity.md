@@ -2517,9 +2517,9 @@ missing are superseded by the source below; runtime qualification is separate.
   does not complete it. Owned page/action strings, revision-fenced publications
   and one pending request protect close/reopen and delayed responses.
 - **Linux destinations and limits**: guide actions open the existing passive
-  Permissions/API Keys windows or General, Transcription (microphone and Local
-  models), Keyboard and Post-processing pages. The existing native Permissions
-  window already reports PipeWire/microphone warnings and X11/Wayland insertion
+  Permissions/API Keys windows or General (microphone and text output),
+  Transcription (Local models), Keyboard and Post-processing pages. The existing
+  native Permissions window already reports PipeWire/microphone warnings and X11/Wayland insertion
   guidance; it was not missing. Rendering the guide does not read credentials,
   open the microphone, request portal permission or contact a provider. Route
   readiness is not inferred from a selected model: users check API Keys/Local
@@ -2537,14 +2537,17 @@ missing are superseded by the source below; runtime qualification is separate.
 The follow-up isolates the passive page projection in
 `SpeakLinuxPlatform/LinuxOnboardingPage.swift`: catalogue-wide tests check every
 canonical step's index, metadata, navigation and supported actions, plus Linux
-insertion/privacy guidance. Checked Host progress now owns the completion
+insertion/privacy guidance. The typed destination projection is consumed by the
+native adapter and checked for every canonical action; microphone selection
+routes to General, where the actual picker lives, not Transcription.
+Checked Host progress now owns the completion
 transition, shared with the existing Windows entry point. Nine additional Host
 regressions exercise all steps, sticky completion, manual upgrades, actual task
 cancellation, revocation after reading state, closed/read/write failures and
 unchanged settings. Linux's native revision is checked inside the Host actor
 before reading progress and again before writing; Finish/Skip are also checked
 inside the actor. A guide closed while its actor call is queued cannot later
-persist stale progress. The three projection tests and nine Host regressions are
+persist stale progress. The four projection tests and nine Host regressions are
 authored **NOT_RUN**, not an executable qualification receipt.
 
 ## Evidence legend

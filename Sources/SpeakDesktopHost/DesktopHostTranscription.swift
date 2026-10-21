@@ -144,9 +144,9 @@ extension DesktopHostController {
         }
     }
 
-    // existing owned cancellation dispatch across capture modes; no behavior change.
+    // Retain captured audio instead of sending cancelled recordings for transcription.
     // swiftlint:disable:next cyclomatic_complexity function_body_length
-    package func cancelTranscription() {
+    package func cancelTranscription() async {
         guard !closed else { return }
         if voiceEdit.active != nil {
             cancelVoiceEdit()
@@ -169,6 +169,13 @@ extension DesktopHostController {
         }
         if ownedCaptureStartup != nil {
             requestOwnedStartupAbort()
+            return
+        }
+        if let active = recording, !busy, !active.handsFree {
+            cancellationRequested = true
+            beginBusyOperation()
+            defer { finishBusyOperation() }
+            await captureFailed("Recording cancelled. Audio retained.", recordingID: active.record.id)
             return
         }
         if let inspection = migrationInspectionWorker {

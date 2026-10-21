@@ -130,6 +130,7 @@ typedef struct UI {
     GtkWidget *restore_dialog;
     GCancellable *backup_chooser;
     gboolean closing;
+    gboolean cancel_key_held;
     GtkButton *import_button;
     GtkButton *play;
     GtkButton *stop_play;
@@ -1111,6 +1112,30 @@ static gboolean sidebar_navigate(guint keyval, GdkModifierType modifiers, GtkWid
 
 static gboolean action_shortcut_run(gint run, const char *page, gint slot);
 
+static gboolean cancel_key(guint keyval, GdkModifierType modifiers, GtkWidget *focused, gboolean active) {
+    if (keyval != GDK_KEY_Escape || !active || ui.closing || ui.suppress ||
+        !gtk_widget_is_sensitive(GTK_WIDGET(ui.window))) return FALSE;
+    for (GtkWidget *focus = focused; focus != NULL; focus = gtk_widget_get_parent(focus)) {
+        if (GTK_IS_POPOVER(focus) || (GTK_IS_WINDOW(focus) && focus != GTK_WIDGET(ui.window))) return FALSE;
+#if ADW_CHECK_VERSION(1, 5, 0)
+        if (ADW_IS_DIALOG(focus)) return FALSE;
+#endif
+    }
+    if (ui.cancel_key_held) return TRUE;
+    GdkModifierType relevant = modifiers & (GDK_CONTROL_MASK | GDK_SHIFT_MASK | GDK_ALT_MASK |
+                                            GDK_SUPER_MASK | GDK_HYPER_MASK | GDK_META_MASK);
+    if (relevant != 0 || (ui.state != JSTI_STATE_RECORDING && ui.state != JSTI_STATE_WORKING)) return FALSE;
+    ui.cancel_key_held = TRUE;
+    on_cancel(NULL, NULL);
+    return TRUE;
+}
+
+static gboolean cancel_key_pressed(GtkEventControllerKey *controller, guint keyval, guint keycode,
+                                   GdkModifierType modifiers, gpointer data) {
+    (void)controller; (void)keycode; (void)data;
+    return cancel_key(keyval, modifiers, gtk_window_get_focus(ui.window), gtk_window_is_active(ui.window));
+}
+
 static gboolean sidebar_key_pressed(GtkEventControllerKey *controller, guint keyval, guint keycode,
                                     GdkModifierType modifiers, gpointer data) {
     (void)data;
@@ -1123,13 +1148,17 @@ static gboolean sidebar_key_pressed(GtkEventControllerKey *controller, guint key
 
 static void action_key_released(GtkEventControllerKey *controller, guint keyval, guint keycode,
                                 GdkModifierType modifiers, gpointer data) {
-    (void)controller; (void)keyval; (void)modifiers; (void)data;
+    (void)controller; (void)modifiers; (void)data;
+    if (keyval == GDK_KEY_Escape) ui.cancel_key_held = FALSE;
     jsti_action_shortcuts_release(keycode);
 }
 
 static void action_window_active(GObject *object, GParamSpec *spec, gpointer data) {
     (void)spec; (void)data;
-    if (!gtk_window_is_active(GTK_WINDOW(object))) jsti_action_shortcuts_reset();
+    if (!gtk_window_is_active(GTK_WINDOW(object))) {
+        ui.cancel_key_held = FALSE;
+        jsti_action_shortcuts_reset();
+    }
 }
 
 static void sidebar_header(GtkListBoxRow *row, GtkListBoxRow *before, gpointer data) {
@@ -2013,6 +2042,11 @@ static void build_window(void) {
     gtk_window_set_default_size(ui.window, 1080, 760);
     gtk_widget_set_size_request(window, 360, 480);
     g_signal_connect(window, "close-request", G_CALLBACK(on_close_request), NULL);
+    GtkEventController *cancel_keys = gtk_event_controller_key_new();
+    gtk_event_controller_set_propagation_phase(cancel_keys, GTK_PHASE_CAPTURE);
+    g_signal_connect(cancel_keys, "key-pressed", G_CALLBACK(cancel_key_pressed), NULL);
+    g_signal_connect(cancel_keys, "key-released", G_CALLBACK(action_key_released), NULL);
+    gtk_widget_add_controller(window, cancel_keys);
     GtkEventController *navigation_keys = gtk_event_controller_key_new();
     gtk_event_controller_set_propagation_phase(navigation_keys, GTK_PHASE_BUBBLE);
     g_signal_connect(navigation_keys, "key-pressed", G_CALLBACK(sidebar_key_pressed), NULL);
@@ -4607,6 +4641,65 @@ static void observe_event(gint32 event, const char *text, gint32 index, void *co
     observed.index = index;
 }
 
+static void observe_cancel(gint32 event, const char *text, gint32 index, void *context) {
+    (void)text; (void)index;
+    gint32 *calls = context;
+    ++calls[0];
+    calls[1] = event;
+}
+
+static gboolean cancel_key_self_test(void) {
+    jsti_window_event_fn callback = ui.callback;
+    void *context = ui.context;
+    gint32 state = ui.state, calls[2] = {0};
+    gboolean held = ui.cancel_key_held, suppress = ui.suppress, closing = ui.closing;
+    gboolean sensitive = gtk_widget_get_sensitive(GTK_WIDGET(ui.window));
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.window), TRUE);
+    ui.callback = observe_cancel; ui.context = calls;
+    ui.cancel_key_held = FALSE; ui.suppress = FALSE; ui.closing = FALSE; ui.state = JSTI_STATE_IDLE;
+    gboolean okay = !cancel_key(GDK_KEY_Escape, 0, NULL, TRUE);
+    ui.state = JSTI_STATE_RECORDING;
+    const GdkModifierType modified[] = {
+        GDK_CONTROL_MASK, GDK_SHIFT_MASK, GDK_ALT_MASK, GDK_SUPER_MASK, GDK_HYPER_MASK, GDK_META_MASK
+    };
+    for (guint i = 0; i < G_N_ELEMENTS(modified); ++i)
+        okay = !cancel_key(GDK_KEY_Escape, modified[i], NULL, TRUE) && okay;
+    okay = !cancel_key(GDK_KEY_Escape, 0, NULL, FALSE) && !cancel_key(GDK_KEY_a, 0, NULL, TRUE) && okay;
+    GtkWidget *popover = gtk_popover_new();
+    g_object_ref_sink(popover);
+    okay = !cancel_key(GDK_KEY_Escape, 0, popover, TRUE) && okay;
+    g_object_unref(popover);
+    GtkWidget *dialog = adw_message_dialog_new(ui.window, "Cancel fixture", NULL);
+    g_object_ref_sink(dialog);
+    okay = !cancel_key(GDK_KEY_Escape, 0, dialog, TRUE) && calls[0] == 0 && okay;
+    gtk_window_destroy(GTK_WINDOW(dialog));
+    g_object_unref(dialog);
+#if ADW_CHECK_VERSION(1, 5, 0)
+    AdwDialog *embedded = adw_dialog_new();
+    g_object_ref_sink(embedded);
+    okay = !cancel_key(GDK_KEY_Escape, 0, GTK_WIDGET(embedded), TRUE) && calls[0] == 0 && okay;
+    g_object_unref(embedded);
+#endif
+    okay = cancel_key(GDK_KEY_Escape, GDK_LOCK_MASK, GTK_WIDGET(ui.transcript), TRUE) &&
+        calls[0] == 1 && calls[1] == JSTI_EVENT_CANCEL && okay;
+    ui.state = JSTI_STATE_IDLE;
+    okay = cancel_key(GDK_KEY_Escape, 0, NULL, TRUE) && calls[0] == 1 && okay;
+    action_key_released(NULL, GDK_KEY_Escape, 9, 0, NULL);
+    okay = !cancel_key(GDK_KEY_Escape, 0, NULL, TRUE) && !ui.cancel_key_held && okay;
+    ui.state = JSTI_STATE_WORKING;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.window), FALSE);
+    okay = !cancel_key(GDK_KEY_Escape, 0, NULL, TRUE) && okay;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.window), TRUE);
+    ui.closing = TRUE;
+    okay = !cancel_key(GDK_KEY_Escape, 0, NULL, TRUE) && okay;
+    ui.closing = FALSE;
+    okay = cancel_key(GDK_KEY_Escape, 0, NULL, TRUE) && calls[0] == 2 && okay;
+    ui.callback = callback; ui.context = context; ui.state = state;
+    ui.cancel_key_held = held; ui.suppress = suppress; ui.closing = closing;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.window), sensitive);
+    return okay;
+}
+
 /* Real model rows must remain distinct across all four source/mode pairs. */
 static gboolean model_modes_self_test(void) {
     if (ui.model_catalog == NULL) return FALSE;
@@ -5934,6 +6027,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (jsti_api_keys_self_test(ui.window, error, capacity) != 0) return -1;
     if (jsti_permissions_self_test(ui.window, error, capacity) != 0) return -1;
     if (jsti_setup_self_test(ui.window, error, capacity) != 0) return -1;
+    if (!cancel_key_self_test()) return fail(error, capacity, "Escape cancellation ownership or repeat guards failed");
     {
         GtkTextBuffer *prompt = gtk_text_view_get_buffer(ui.polish_prompt_row);
         GtkTextIter prompt_start, prompt_end;

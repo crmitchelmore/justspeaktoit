@@ -2534,6 +2534,19 @@ missing are superseded by the source below; runtime qualification is separate.
   canonical app icon, close, reopen and Escape. These additions are authored
   only, **NOT_RUN** here; they do not transfer qualification from earlier Linux heads.
 
+The follow-up isolates the passive page projection in
+`SpeakLinuxPlatform/LinuxOnboardingPage.swift`: catalogue-wide tests check every
+canonical step's index, metadata, navigation and supported actions, plus Linux
+insertion/privacy guidance. Checked Host progress now owns the completion
+transition, shared with the existing Windows entry point. Nine additional Host
+regressions exercise all steps, sticky completion, manual upgrades, actual task
+cancellation, revocation after reading state, closed/read/write failures and
+unchanged settings. Linux's native revision is checked inside the Host actor
+before reading progress and again before writing; Finish/Skip are also checked
+inside the actor. A guide closed while its actor call is queued cannot later
+persist stale progress. The three projection tests and nine Host regressions are
+authored **NOT_RUN**, not an executable qualification receipt.
+
 ## Evidence legend
 
 The table is exhaustive for the 91 enum keys. "Equivalent" denotes a working

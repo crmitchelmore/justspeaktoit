@@ -31,7 +31,7 @@ extension DesktopRecordingStore {
     /// Writes restored History, rolling every touched file back to its prior
     /// bytes (or removing a file it added) when a write or checkpoint fails.
     /// Records are never deleted through the tombstone ledger here.
-    func applyMigrationRestore( // swiftlint:disable:this cyclomatic_complexity
+    func applyMigrationRestore(
         _ writes: [DesktopMigrationRestore.HistoryWrite],
         expectedHistory: [DataMigrationRecord], digests: LocalModelDigestProvider,
         checkpoint: @Sendable (DesktopMigrationRestore.Step) throws -> Void

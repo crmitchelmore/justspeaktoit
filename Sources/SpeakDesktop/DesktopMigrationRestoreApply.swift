@@ -18,7 +18,7 @@ extension DesktopMigrationRestore {
     /// Applies a confirmed choice. Application data is compared with the
     /// preview first; profiles and History are rolled back on any failure.
     /// Run on an owned cancellable off-actor worker, not a settings queue.
-    public static func apply( // swiftlint:disable:this function_body_length
+    public static func apply(
         _ plan: Plan, choice: Choice, targets: Targets,
         checkpoint: @escaping @Sendable (Step) throws -> Void = { _ in try Task.checkCancellation() }
     ) async -> Outcome {
@@ -59,16 +59,8 @@ extension DesktopMigrationRestore {
         } catch {
             var failures = (error as? DesktopMigrationRestoreWriteError)?.rollbackFailures ?? []
             let underlying = (error as? DesktopMigrationRestoreWriteError)?.underlying ?? error
-            if let prior = profileRollback {
-                do {
-                    if let prior {
-                        try prior.write(to: targets.profiles.fileURL, options: .atomic)
-                    } else if FileManager.default.fileExists(atPath: targets.profiles.fileURL.path) {
-                        try FileManager.default.removeItem(at: targets.profiles.fileURL)
-                    }
-                } catch {
-                    failures.append("app profiles (\(error.localizedDescription))")
-                }
+            if let prior = profileRollback, let failure = rollBackProfiles(to: prior, at: targets.profiles.fileURL) {
+                failures.append(failure)
             }
             let restored = failures.isEmpty
             if underlying is StaleHistory && restored { return .stale(staleMessage) }
@@ -79,6 +71,21 @@ extension DesktopMigrationRestore {
                 return .cancelled(restored: restored, "Restore was cancelled. " + state)
             }
             return .failed(restored: restored, "Restore failed: \(underlying.localizedDescription) " + state)
+        }
+    }
+
+    /// Puts the profile document back to its pre-restore bytes, removing it
+    /// when it did not exist. Returns a failure description, or nil.
+    private static func rollBackProfiles(to prior: Data?, at url: URL) -> String? {
+        do {
+            if let prior {
+                try prior.write(to: url, options: .atomic)
+            } else if FileManager.default.fileExists(atPath: url.path) {
+                try FileManager.default.removeItem(at: url)
+            }
+            return nil
+        } catch {
+            return "app profiles (\(error.localizedDescription))"
         }
     }
 }

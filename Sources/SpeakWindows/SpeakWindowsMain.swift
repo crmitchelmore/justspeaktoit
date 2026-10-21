@@ -244,7 +244,7 @@ private func otherWindowEvent(_ event: Int32, value: String, holder: WindowsEven
     case 10: Task { await controller.retryHistory(value) }
     case 11: exportHistoryWindowEvent(value, holder: holder)
     case 12: Task { await controller.openHistoryAudio(value) }
-    case 14: Task { await controller.cancelTranscription() }
+    case 14: windowsCancelOperation(value, holder: holder)
     case 120: Task { await controller.handsFreeUserAbsent(value) }
     case 20: Task { await controller.refreshModels(force: true) }
     case 110:
@@ -344,6 +344,9 @@ enum SpeakWindowsMain {
 
     /// Restores native dialog state and services before the window opens.
     private static func configureWindow(controller: WindowsAppController, holder: WindowsEventContext) async throws {
+        guard jsti_window_configure_global_escape(holder.smokeTest ? 0 : 1) == 0 else {
+            throw WindowsNativeError(message: "Could not configure active-only Escape cancellation.")
+        }
         let microphone = await controller.selectedMicrophone()
         let smokeTest = holder.smokeTest
         let warning = try await Task.detached {

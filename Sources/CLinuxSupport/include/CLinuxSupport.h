@@ -760,6 +760,23 @@ int32_t jsti_x11_hotkey_start(
     uint32_t keysym, uint32_t modifiers, jsti_hotkey_fn callback, void *context, char *error, size_t error_capacity);
 void jsti_x11_hotkey_stop(void);
 
+/* Separate action group: never replaces the dictation listener. Each row needs
+ * Ctrl/Alt or F13-F24. Result lookup is valid until stop; failures are per row.
+ * callback receives a canonical action index on first press, -1 on listener loss.
+ * Stop joins callbacks and must not run on that callback thread. */
+typedef struct JSTIX11ActionShortcuts JSTIX11ActionShortcuts;
+typedef struct JSTIX11ActionShortcut {
+    uint32_t keysym, modifiers;
+    int32_t identifier;
+} JSTIX11ActionShortcut;
+typedef void (*jsti_action_shortcut_fn)(int32_t identifier, void *context);
+JSTIX11ActionShortcuts *jsti_x11_action_shortcuts_start(
+    const JSTIX11ActionShortcut *rows, size_t count, jsti_action_shortcut_fn callback, void *context,
+    char *error, size_t error_capacity);
+int32_t jsti_x11_action_shortcuts_result(
+    JSTIX11ActionShortcuts *listener, size_t row, char *error, size_t error_capacity);
+void jsti_x11_action_shortcuts_stop(JSTIX11ActionShortcuts *listener);
+
 /* ------------------------------------------------------------------ portals */
 
 /* 1 when org.freedesktop.portal.Desktop exposes `interface` (for example

@@ -26,6 +26,7 @@ final class LinuxEventContext: @unchecked Sendable {
     private var readyTask: Task<Void, Never>?
     private var shortcutTail: Task<Void, Never>?
     let shortcuts: LinuxShortcuts
+    let globalActionShortcuts = LinuxGlobalActionShortcuts()
     let automation: LinuxAutomationSwitch
     let apiKeys = DesktopAPIKeyRequests()
     let historyPaste = DesktopHistoryPasteAdmission()
@@ -74,7 +75,7 @@ final class LinuxEventContext: @unchecked Sendable {
     var currentSettingsTask: Task<Void, Never>? { settings.current }
     func finishSettings() async { await settings.drain() }
 
-    func pasteLastHistory() {
+    func pasteLastHistory(lifetime: DesktopShortcutListenerLifetime? = nil) {
         guard let request = historyPaste.begin() else {
             LinuxHostPlatform.update(
                 "History paste is already pending or the app is closing. No new target was captured."
@@ -83,10 +84,15 @@ final class LinuxEventContext: @unchecked Sendable {
         }
         let target = Self.captureTarget(includeObservation: false)
         let controller = controller
-        enqueueSettings {
-            defer { request.finish() }
-            await controller.pasteLastHistoryItem(target: target, request: request)
+        let deliver = {
+            self.enqueueSettings {
+                defer { request.finish() }
+                await controller.pasteLastHistoryItem(target: target, request: request)
+            }
         }
+        if let lifetime {
+            if !lifetime.admitCallback(deliver) { request.finish() }
+        } else { deliver() }
     }
 
     /// Text output as of this event in settings order, however late the
@@ -113,28 +119,33 @@ final class LinuxEventContext: @unchecked Sendable {
 
     /// A shortcut, `--toggle` or the app action. The target is captured now,
     /// before anything else can take focus; toggles run one at a time.
-    func shortcutToggle(modelIndex: Int?, deviceID: String?) {
+    func shortcutToggle(
+        modelIndex: Int?, deviceID: String?, lifetime: DesktopShortcutListenerLifetime? = nil
+    ) {
         guard jsti_action_shortcuts_editor_is_open() == 0, jsti_api_keys_is_open() == 0 else {
             LinuxHostPlatform.update("Close the shortcut or API Keys editor before recording.")
             return
         }
         let target = LinuxEventContext.captureTarget()
-        let selection = recordingSettings(modelIndex: modelIndex, target: target)
-        let controller = controller
-        let ready = ready
-        lock.withLock {
-            let previous = shortcutTail
-            shortcutTail = Task {
-                await previous?.value
-                await ready?.value
-                let saved = await selection.value
-                guard jsti_api_keys_is_open() == 0 else { return }
-                await controller.admitCaptured(
-                    target: target, modelIndex: saved.modelIndex, deviceID: deviceID ?? saved.deviceID,
-                    textOutput: saved.textOutput, profile: saved.profile, trigger: .press
-                )
+        let deliver = {
+            let selection = self.recordingSettings(modelIndex: modelIndex, target: target)
+            let controller = self.controller
+            let ready = self.ready
+            self.lock.withLock {
+                let previous = self.shortcutTail
+                self.shortcutTail = Task {
+                    await previous?.value
+                    await ready?.value
+                    let saved = await selection.value
+                    guard jsti_api_keys_is_open() == 0 else { return }
+                    await controller.admitCaptured(
+                        target: target, modelIndex: saved.modelIndex, deviceID: deviceID ?? saved.deviceID,
+                        textOutput: saved.textOutput, profile: saved.profile, trigger: .press
+                    )
+                }
             }
         }
+        if let lifetime { lifetime.admitCallback(deliver) } else { deliver() }
     }
 
     func drainShortcuts() async {

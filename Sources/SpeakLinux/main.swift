@@ -94,6 +94,7 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
 /// Fences callbacks, drains settings and closes the controller after the window closes.
 private func shutDownWindow(controller: LinuxAppController, holder: LinuxEventContext) throws {
     try blocking {
+        holder.globalActionShortcuts.stop()
         holder.shortcuts.stop()
         holder.historyPaste.stop()
         LinuxSelectedTextTarget.stopSessionAccess()

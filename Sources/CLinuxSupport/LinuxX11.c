@@ -1,4 +1,6 @@
 #include "LinuxSupportInternal.h"
+#include "LinuxX11Shortcuts.h"
+#include <stdatomic.h>
 
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
@@ -15,6 +17,8 @@
  * clients; there the portal paths in LinuxPortal.c apply. Each call opens its
  * own display connection, so nothing here shares Xlib state with GTK.
  */
+
+static GMutex x11_error_lock;
 
 static int ignore_errors(Display *display, XErrorEvent *event) {
     (void)display;
@@ -59,10 +63,12 @@ int32_t jsti_x11_active_window(
         jsti_set_error(error, capacity, "The X server is unavailable.");
         return -1;
     }
+    g_mutex_lock(&x11_error_lock);
     XErrorHandler previous = XSetErrorHandler(ignore_errors);
     Window active = active_window(display);
     if (active == None) {
         XSetErrorHandler(previous);
+        g_mutex_unlock(&x11_error_lock);
         XCloseDisplay(display);
         return 1;
     }
@@ -87,6 +93,7 @@ int32_t jsti_x11_active_window(
     }
     XSync(display, False);
     XSetErrorHandler(previous);
+    g_mutex_unlock(&x11_error_lock);
     XCloseDisplay(display);
     return 0;
 }
@@ -109,11 +116,13 @@ int32_t jsti_x11_paste(uint64_t window, int32_t shift, char *error, size_t capac
         jsti_set_error(error, capacity, "The X server does not offer the XTest extension.");
         return -1;
     }
+    g_mutex_lock(&x11_error_lock);
     XErrorHandler previous = XSetErrorHandler(ignore_errors);
     /* Re-verify focus immediately before delivery: text never goes to a
      * window the user switched to after pressing the shortcut. */
     if (window == 0 || active_window(display) != (Window)window) {
         XSetErrorHandler(previous);
+        g_mutex_unlock(&x11_error_lock);
         XCloseDisplay(display);
         jsti_set_error(error, capacity, "The focused window changed.");
         return 2;
@@ -128,6 +137,7 @@ int32_t jsti_x11_paste(uint64_t window, int32_t shift, char *error, size_t capac
     send_key(display, XK_Control_L, False);
     XSync(display, False);
     XSetErrorHandler(previous);
+    g_mutex_unlock(&x11_error_lock);
     XCloseDisplay(display);
     if (!sent) {
         jsti_set_error(error, capacity, "The paste keystroke could not be sent.");
@@ -137,11 +147,6 @@ int32_t jsti_x11_paste(uint64_t window, int32_t shift, char *error, size_t capac
 }
 
 /* --------------------------------------------------------------- hotkey */
-
-typedef struct HotKeyMasks {
-    unsigned int ignored, values[256];
-    guint count;
-} HotKeyMasks;
 
 enum { MODIFIER_LOCK = 1, MODIFIER_OTHER = 2 };
 
@@ -259,11 +264,75 @@ static gpointer hotkey_run(gpointer data) {
     return NULL;
 }
 
-static int grab_failed;
+static atomic_int grab_failed;
+static _Atomic(Display *) grab_display;
+static _Atomic(XErrorHandler) grab_previous;
 static int record_grab_error(Display *display, XErrorEvent *event) {
-    (void)display;
-    if (event->error_code == BadAccess) grab_failed = 1;
+    if (display != atomic_load(&grab_display)) {
+        XErrorHandler previous = atomic_load(&grab_previous);
+        return previous && previous != record_grab_error ? previous(display, event) : 0;
+    }
+    atomic_store(&grab_failed, event->error_code == BadAccess ? 1 : 2);
     return 0;
+}
+
+gboolean jsti_x11_prepare_grab(
+    Display *display, uint32_t keysym, uint32_t modifiers, JSTIX11Grab *grab, char *error, size_t capacity
+) {
+    if (keysym == NoSymbol || (modifiers & ~0xffu) != 0) {
+        jsti_set_error(error, capacity, "The shortcut key or modifier bits are invalid.");
+        return FALSE;
+    }
+    grab->code = XKeysymToKeycode(display, keysym);
+    grab->modifiers = modifiers;
+    if (grab->code == 0) {
+        jsti_set_error(error, capacity, "The shortcut key is not on this keyboard layout.");
+        return FALSE;
+    }
+    return read_hotkey_masks(display, modifiers, &grab->masks, error, capacity);
+}
+
+void jsti_x11_release_grab(Display *display, const JSTIX11Grab *grab) {
+    for (guint index = 0; index < grab->masks.count; ++index)
+        XUngrabKey(display, grab->code, grab->modifiers | grab->masks.values[index], DefaultRootWindow(display));
+}
+
+gboolean jsti_x11_register_grab(Display *display, const JSTIX11Grab *grab, char *error, size_t capacity) {
+    g_mutex_lock(&x11_error_lock);
+    atomic_store(&grab_failed, 0);
+    atomic_store(&grab_display, display);
+    XErrorHandler previous = XSetErrorHandler(record_grab_error);
+    atomic_store(&grab_previous, previous);
+    for (guint index = 0; index < grab->masks.count; ++index)
+        XGrabKey(display, grab->code, grab->modifiers | grab->masks.values[index], DefaultRootWindow(display),
+            False, GrabModeAsync, GrabModeAsync);
+    XSync(display, False);
+    const int failure = atomic_load(&grab_failed);
+    if (failure) {
+        jsti_x11_release_grab(display, grab);
+        XSync(display, False);
+    }
+    XSetErrorHandler(previous);
+    atomic_store(&grab_display, NULL);
+    g_mutex_unlock(&x11_error_lock);
+    if (failure) {
+        jsti_set_error(error, capacity, "%s", failure == 1
+            ? "Another application already uses this shortcut." : "The X server refused this shortcut.");
+    }
+    return failure == 0;
+}
+
+gboolean jsti_x11_grabs_overlap(const JSTIX11Grab *left, const JSTIX11Grab *right) {
+    if (left->code != right->code) return FALSE;
+    for (guint first = 0; first < left->masks.count; ++first)
+        for (guint second = 0; second < right->masks.count; ++second)
+            if ((left->modifiers | left->masks.values[first]) ==
+                (right->modifiers | right->masks.values[second])) return TRUE;
+    return FALSE;
+}
+
+gboolean jsti_x11_grab_matches(const JSTIX11Grab *grab, unsigned int code, unsigned int modifiers) {
+    return code == grab->code && hotkey_modifiers_match(modifiers, grab->modifiers, grab->masks.ignored);
 }
 
 int32_t jsti_x11_hotkey_start(
@@ -278,31 +347,13 @@ int32_t jsti_x11_hotkey_start(
         jsti_set_error(error, capacity, "The X server is unavailable.");
         return -1;
     }
-    KeyCode code = XKeysymToKeycode(display, keysym);
-    if (code == 0) {
-        XCloseDisplay(display);
-        jsti_set_error(error, capacity, "The shortcut key is not on this keyboard layout.");
-        return -1;
-    }
-    HotKeyMasks masks;
-    if (!read_hotkey_masks(display, modifiers, &masks, error, capacity)) {
+    JSTIX11Grab grab;
+    if (!jsti_x11_prepare_grab(display, keysym, modifiers, &grab, error, capacity) ||
+        !jsti_x11_register_grab(display, &grab, error, capacity)) {
         XCloseDisplay(display);
         return -1;
     }
-    Window root = DefaultRootWindow(display);
-    grab_failed = 0;
-    XErrorHandler previous = XSetErrorHandler(record_grab_error);
-    for (guint index = 0; index < masks.count; index++) {
-        XGrabKey(display, code, modifiers | masks.values[index], root, False, GrabModeAsync, GrabModeAsync);
-    }
-    XSync(display, False);
-    XSetErrorHandler(previous);
-    if (grab_failed) {
-        XCloseDisplay(display);
-        jsti_set_error(error, capacity, "Another application already uses this shortcut.");
-        return -1;
-    }
-    XSelectInput(display, root, KeyPressMask | KeyReleaseMask);
+    XSelectInput(display, DefaultRootWindow(display), KeyPressMask | KeyReleaseMask);
     HotKeyThread *state = g_new0(HotKeyThread, 1);
     if (pipe(state->wake) != 0) {
         XCloseDisplay(display);
@@ -315,8 +366,8 @@ int32_t jsti_x11_hotkey_start(
     state->callback = callback;
     state->context = context;
     state->display = display;
-    state->code = code;
-    state->masks = masks;
+    state->code = grab.code;
+    state->masks = grab.masks;
     g_mutex_lock(&hotkey_lock);
     hotkey = state;
     state->thread = g_thread_new("jsti-x11-hotkey", hotkey_run, state);

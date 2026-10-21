@@ -109,14 +109,18 @@ enum LinuxOnboarding {
     }
 
     private static func requestDestination(_ action: DesktopOnboardingAction) throws -> Int32 {
-        switch action {
-        case .openPermissions, .openMicrophoneSettings: return jsti_window_request_permissions()
-        case .chooseRemoteProvider: return jsti_window_request_api_keys()
-        case .chooseMicrophone, .downloadLocalModel: return jsti_window_show_page(Int32(JSTI_PAGE_TRANSCRIPTION))
-        case .chooseTextOutput: return jsti_window_show_page(Int32(JSTI_PAGE_GENERAL))
-        case .chooseShortcut: return jsti_window_show_page(Int32(JSTI_PAGE_KEYBOARD))
-        case .openPostProcessing: return jsti_window_show_page(Int32(JSTI_PAGE_POST_PROCESSING))
-        case .testDictation: throw DesktopHostError(message: "Practise with the dictation shortcut in another app.")
+        guard let destination = LinuxOnboardingPage.destination(for: action) else {
+            throw DesktopHostError(
+                message: "That setup action is unavailable. Practise with the shortcut in another app."
+            )
+        }
+        switch destination {
+        case .permissions: return jsti_window_request_permissions()
+        case .apiKeys: return jsti_window_request_api_keys()
+        case .general: return jsti_window_show_page(Int32(JSTI_PAGE_GENERAL))
+        case .transcription: return jsti_window_show_page(Int32(JSTI_PAGE_TRANSCRIPTION))
+        case .keyboard: return jsti_window_show_page(Int32(JSTI_PAGE_KEYBOARD))
+        case .postProcessing: return jsti_window_show_page(Int32(JSTI_PAGE_POST_PROCESSING))
         }
     }
 

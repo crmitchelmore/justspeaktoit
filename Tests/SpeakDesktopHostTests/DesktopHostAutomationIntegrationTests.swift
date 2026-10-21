@@ -277,7 +277,7 @@ extension DesktopHostAutomationTests {
 }
 
 extension DesktopHostController where Platform == FakePlatform {
-    fileprivate func automationFixtureProfile(_ profile: DictationProfile) throws {
+    func automationFixtureProfile(_ profile: DictationProfile) throws {
         if let model = profile.transcriptionModelID {
             FakeLog.shared.setKey("synthetic-profile-key", name: try credentialIdentifier(for: model))
         }
@@ -304,6 +304,8 @@ final class AutomationFixtureEffects: DesktopHostEffects, @unchecked Sendable {
         self.refuseCapture = refuseCapture
         self.onEnter = onEnter
     }
+
+    func release() { gate?.release() }
 
     func apiKey(name: String) throws -> String { try base.apiKey(name: name) }
     func makeCapture(
@@ -350,9 +352,9 @@ private final class AutomationCommandGate: @unchecked Sendable {
                 }
                 if completed { continuation.resume() }
             }
-        } onCancel: { self.cancel() }
+        } onCancel: { self.release() }
     }
-    private func cancel() {
+    func release() {
         let continuation = lock.withLock { () -> CheckedContinuation<Void, Never>? in
             ended = true
             defer { waiter = nil }

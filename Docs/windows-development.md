@@ -317,6 +317,14 @@ before the working one is released. Gesture styles report the native press and
 the release, observed by polling the key only while it is held, to the shared
 SpeakCore gesture machine and session policy that state the macOS rules; a
 gesture stops only the kind of session it started.
+Plain Escape is source-wired to Cancel while this app's main window is active
+and recording/working. Idle Escape and other dialogs keep their native behavior;
+held repeats emit only one cancellation, even if the app becomes idle before
+release. Modified Escape remains available to Windows. The shared Host also
+stops legacy active capture without transcription and retains its audio.
+Three portable regressions and native smoke assertions are authored but
+**NOT_RUN** here. This adds no system-wide Escape listener; cancellation while
+another app is focused and installed-keyboard acceptance remain unqualified.
 The portable `DesktopPressCaptureLease` and `DesktopPressCapturePCMRelay` are
 **ownership scaffolding, not an enabled microphone-on-key-press feature**.
 No native worker, host handoff, preference control or permission adapter is

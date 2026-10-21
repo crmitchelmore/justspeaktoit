@@ -2698,11 +2698,35 @@ not silently mapped to a profile. `customShortcutBindings`/individual action
 shortcuts, Shortcut presets/reset and conflict reporting are source wired on
 Windows (partial; see [Individual action shortcuts](#individual-action-shortcuts))
 and partially window-local on Linux, with a source-wired editor and presets;
-Linux global registration remains a gap. Escape recording cancellation remains a gap.
+Linux global registration remains a gap. Main-window Escape cancellation is
+source-wired on both hosts as described below; system-wide Escape cancellation
+while another app is focused remains a gap.
 Profiles have a Windows native editor with
 shared ordering/session snapshots; this separate source-only candidate adds
 the GTK editor and actual recording selection described above. Apple bundle-ID matchers are preserved but
 not silently converted to executable paths.
+
+### Main-window Escape cancellation (source only)
+
+Plain Escape in the active native main window now emits the existing Cancel
+operation while recording or working. Idle Escape keeps the existing action
+shortcut/search behavior. Modified Escape is left to the platform, as are
+disabled owners, other windows, dialogs and GTK popovers. One held cancellation
+key cannot repeatedly cancel or fall through to Stop speech after the app
+becomes idle; release or deactivation retires that latch. No global keyboard
+monitor or idle key grab is added.
+
+The shared cancellation entry point now also stops a legacy non-owned recording
+before transcription, retains its audio/partial result through the existing
+capture-failure cleanup path, and holds busy admission across that cleanup.
+Owned recording/startup, hands-free and already-running operation cancellation
+keep their existing routes. Three portable regressions cover active capture,
+independent restart and idle cancellation; both native smoke fixtures exercise
+the Escape ownership/state/repeat rules. All are authored but **NOT_RUN** here.
+Compilation, exact-head native/portable qualification and physical keyboard
+acceptance remain required; this does not complete system-wide Escape parity.
+
+### Remaining destination and selection-learning gaps
 
 The Mac's 12 `SettingsTab` destinations are General, Transcription,
 Post-processing, Profiles, Voice Output, Pronunciation, API Keys, Keyboard,

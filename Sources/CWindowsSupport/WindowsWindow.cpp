@@ -404,6 +404,7 @@ struct WindowState {
     int pendingPlaybackState = playbackIdle;
     std::wstring pendingPlaybackText;
     int recording = 0;
+    bool cancelKeyHeld = false;
     std::wstring status;
     std::wstring transcript;
     std::vector<MicrophoneRow> microphones;
@@ -1945,6 +1946,35 @@ bool sidebarKeyMessage(HWND window, const MSG &message) {
     return navigateSidebar(window, static_cast<int>(message.wParam - '0'), exactControl, GetFocus());
 }
 
+bool cancelKey(HWND window, const MSG &message, bool plain, bool active) {
+    if (message.wParam != VK_ESCAPE || !active || !IsWindowEnabled(window) ||
+        !(message.hwnd == window || IsChild(window, message.hwnd))) return false;
+    if (message.message == WM_KEYUP || message.message == WM_SYSKEYUP) {
+        const bool held = state.cancelKeyHeld;
+        state.cancelKeyHeld = false;
+        return held;
+    }
+    if (message.message != WM_KEYDOWN) return false;
+    if (state.cancelKeyHeld) return true;
+    if (!plain) return false;
+    if (message.lParam & (static_cast<LPARAM>(1) << 30)) return false;
+    int recording;
+    { std::lock_guard<std::mutex> lock(state.mutex); recording = state.recording; }
+    if (recording != 1 && recording != 2) return false;
+    state.cancelKeyHeld = true;
+    retireCleanupPreview();
+    emit(window, JSTI_EVENT_CANCEL_TRANSCRIPTION);
+    return true;
+}
+
+bool cancelKeyMessage(HWND window, const MSG &message) {
+    if (message.wParam != VK_ESCAPE) return false;
+    const bool plain = !(GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000) &&
+        !(GetKeyState(VK_SHIFT) & 0x8000) && !(GetKeyState(VK_LWIN) & 0x8000) &&
+        !(GetKeyState(VK_RWIN) & 0x8000);
+    return cancelKey(window, message, plain, GetForegroundWindow() == window);
+}
+
 // The dashboard's Setup card and the header subtitle echo the settings.
 void refreshSetup(HWND window) {
     auto comboText = [&](int identifier) {
@@ -2642,6 +2672,9 @@ void tourStep(HWND window) {
 
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     switch (message) {
+    case WM_ACTIVATE:
+        if (LOWORD(wparam) == WA_INACTIVE) state.cancelKeyHeld = false;
+        break;
     case WM_CREATE:
         if (!createControls(window)) return -1;
         startHandsFreeGuard(window);
@@ -3598,6 +3631,7 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
         if (state.microphones.empty()) state.microphones.push_back({"", L"Default communications microphone"});
         state.running = true;
         state.recording = 0;
+        state.cancelKeyHeld = false;
         state.microphonesChanged = false;
         state.pendingMicrophones.clear(); state.microphoneError.clear();
         state.posted = false;
@@ -3691,6 +3725,7 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
         MSG message{};
         BOOL result;
         while ((result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
+            if (cancelKeyMessage(window, message)) continue;
             if (sidebarKeyMessage(window, message)) continue;
             if (jsti_action_shortcut_key_message(window, message)) continue;
             if (!jsti_history_filters_message(&message) && !jsti_guide_message(&message) &&
@@ -4537,10 +4572,10 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     // The model, source and mode checks read the Transcription page's controls.
     const int originalPage = state.page;
     showPage(window, transcriptionPage);
-    struct Event { int event = 0; std::string id; int model = -1; } observed;
+    struct Event { int event = 0; std::string id; int model = -1; int calls = 0; } observed;
     state.callback = [](int event, const char *id, int model, void *context) {
         auto &observed = *static_cast<Event *>(context);
-        observed.event = event; observed.id = id ? id : ""; observed.model = model;
+        observed.event = event; observed.id = id ? id : ""; observed.model = model; ++observed.calls;
     };
     state.context = &observed;
     const unsigned originalAbsence = handsFreeAbsence.exchange(0);
@@ -5240,6 +5275,43 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         jsti_window_update(nullptr, nullptr, 0);
         applyUpdate(window);
         if (!cancellation) { failure = "Busy transcription could not be cancelled from the native control."; return false; }
+        {
+            MSG escape{};
+            escape.hwnd = GetDlgItem(window, transcriptID);
+            escape.message = WM_KEYDOWN; escape.wParam = VK_ESCAPE;
+            const int before = observed.calls;
+            bool okay = !cancelKey(window, escape, true, true);
+            jsti_window_update(nullptr, nullptr, 1);
+            applyUpdate(window);
+            okay = !cancelKey(window, escape, false, true) && !cancelKey(window, escape, true, false) && okay;
+            HWND child = escape.hwnd;
+            escape.hwnd = GetDesktopWindow();
+            okay = !cancelKey(window, escape, true, true) && okay;
+            escape.hwnd = child;
+            EnableWindow(window, FALSE);
+            okay = !cancelKey(window, escape, true, true) && okay;
+            EnableWindow(window, TRUE);
+            okay = cancelKey(window, escape, true, true) && observed.calls == before + 1 &&
+                observed.event == JSTI_EVENT_CANCEL_TRANSCRIPTION && okay;
+            escape.lParam = static_cast<LPARAM>(1) << 30;
+            okay = cancelKey(window, escape, true, true) && observed.calls == before + 1 && okay;
+            jsti_window_update(nullptr, nullptr, 0);
+            applyUpdate(window);
+            okay = cancelKey(window, escape, true, true) && observed.calls == before + 1 && okay;
+            escape.message = WM_KEYUP;
+            okay = cancelKey(window, escape, true, true) && !state.cancelKeyHeld && okay;
+            escape.message = WM_KEYDOWN;
+            okay = !cancelKey(window, escape, true, true) && okay;
+            jsti_window_update(nullptr, nullptr, 2);
+            applyUpdate(window);
+            escape.lParam = 0;
+            okay = cancelKey(window, escape, true, true) && observed.calls == before + 2 && okay;
+            SendMessageW(window, WM_ACTIVATE, WA_INACTIVE, 0);
+            okay = !state.cancelKeyHeld && okay;
+            jsti_window_update(nullptr, nullptr, 0);
+            applyUpdate(window);
+            if (!okay) { failure = "Escape cancellation lost ownership, idle or repeat guards."; return false; }
+        }
         state.modelModes.assign(state.modelNames.size(), 0);
         state.preferredModels[0] = 2;
         state.preferredModels[1] = -1;

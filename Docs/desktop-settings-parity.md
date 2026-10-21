@@ -6,6 +6,33 @@ macOS `AppSettings.DefaultsKey` aliases the shared 92-key
 plus preferences and collections
 outside that enum. Track remaining product acceptance in #1157.
 
+## Automation spoken-language snapshots (source only; NOT_RUN)
+
+The automation-language table entry previously described a missing path that
+is already source-wired for both desktop hosts. Canonical `preferredLocale`
+becomes `DesktopConfiguration.language`; `resolveSelectedProfile` supplies it
+as the shared resolver's default language. File commands capture the resolved
+value in `DesktopHostTranscriptionRequest.language`, and vocabulary preparation
+keeps that value. Dictation start captures the same profile/session language;
+stop uses its admitted recording rather than resolving the current preference.
+
+An explicit profile language overrides the global preference, absent profile
+language inherits it, and explicit **Automatic** requests detection without
+substituting the system locale or falling back to the global language.
+Read-only file commands may overlap a later preference import: the admitted
+request keeps its captured language, while the next command resolves the new
+value. Active dictation continues to refuse ordinary configuration imports.
+
+Five new Host regressions exercise restart without a selected profile,
+explicit-to-Automatic changes, inherited/explicit/Automatic profile language,
+held file-command preference changes and dictation's captured language/active
+import refusal. They inspect actual injected transcription requests and
+History/no-History behavior. Existing cancellation coverage keeps its
+cancellation-aware fixture; explicit release only adds deterministic progress
+for the held-command case. No production forwarding logic was duplicated.
+These regressions are authored **NOT_RUN**; this source trace does not claim
+provider, compiler or native/runtime language acceptance.
+
 ## X11 global action registration (source only; NOT_RUN)
 
 Linux now has a separate native action group for enabled canonical global
@@ -2653,7 +2680,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | holdThreshold | Wired / Wired | Config + shared gesture machine; 0.2...1.5 s |
 | doubleTapWindow | Wired / Wired | Config + shared gesture machine; 0.2...1 s |
 | trackedKeyIdentifiers | Equivalent source only; NOT_RUN | Keys; identifiers only, in `trackedKeyIdentifiers.json`. Saving a key from the shared editors registers its identifier and removing it unregisters it. Both desktop API Keys windows reconcile the list against the store; cancellation skips reconciliation. |
-| preferredLocale | Wired / Wired | Config + `DesktopProfileSession.swift`; provider language capability gates; automation language remains a separate gap |
+| preferredLocale | Source wired; qualification pending / Same | Config + shared profile resolver/provider language gates; automation file and dictation requests capture the resolved language, including profile inheritance/override and Automatic. Explicit Host regressions above are authored NOT_RUN; native/provider language acceptance remains unqualified. |
 | postRecordingTailDuration | Wired / Wired | Config + `DesktopHostRecordingTail.swift`; owned 0...2 s capture buffer, immediate cancel/failure/shutdown cleanup, no stale finalisation |
 | deepgramStopGracePeriod | Equivalent migration / Equivalent migration | Valid legacy value initializes absent liveStopGracePeriod; canonical value, including zero, wins; legacy retained for downgrade |
 | liveStopGracePeriod | Partial / Partial | Config; AssemblyAI/Cartesia only; range 0...2 s |

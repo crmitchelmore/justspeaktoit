@@ -135,6 +135,11 @@ int jsti_comparison_present_batch(const char *models, const char *rounds, const 
                                  const char *batch_round, int batch_remaining, int can_next);
 int jsti_window_run(const char *const *model_names, size_t model_count, int selected_index,
                     JSTIWindowCallback callback, void *context, char *error, size_t error_capacity);
+/* Pre-run only: opt in to passive Escape observation while recording/working.
+ * Pass 0 for synthetic/screenshot windows. No listener is installed while idle. */
+int jsti_window_configure_global_escape(int enabled);
+/* Thread-safe final Host admission check for a queued global cancellation token. */
+int jsti_window_global_escape_is_current(uint64_t token);
 /* Optional pre-run mode catalogue with the same count/order as window_run's
  * full model array. Each mode is 0 remote batch, 1 remote live, 2 local batch
  * or 3 local live: bit 0 is live, bit 1 is local. The window shows a Source

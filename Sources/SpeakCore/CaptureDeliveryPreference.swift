@@ -26,12 +26,16 @@ public enum CaptureDeliveryPreference {
         .init(key: ApplicationPreferenceKey.historyFlushInterval.rawValue,
               title: "Mac History save interval in seconds (History is saved immediately here)",
               group: "General", kind: .number(0...30),
-              defaultValue: AnyCodable(.double(defaultHistoryFlushInterval)))
+              defaultValue: AnyCodable(.double(defaultHistoryFlushInterval))),
+        .init(key: ApplicationPreferenceKey.cancelRecordingOnEscape.rawValue,
+              title: "Cancel recording with Escape", group: "Keyboard", kind: .boolean,
+              defaultValue: AnyCodable(.bool(SpeechDefaults.cancelRecordingOnEscape)))
     ]
     public static let keys = Set(fields.map(\.key))
 }
 
 extension DesktopConfiguration {
+    public var cancelRecordingOnEscape: Bool { enabled(ApplicationPreferenceKey.cancelRecordingOnEscape.rawValue) }
     public var audioPreWarmingEnabled: Bool { enabled(ApplicationPreferenceKey.audioPreWarmingEnabled.rawValue) }
     public var warmMicrophoneOnKeyPress: Bool { enabled(ApplicationPreferenceKey.warmMicrophoneOnKeyPress.rawValue) }
     public var pasteRemoteTranscriptsAtCursor: Bool {

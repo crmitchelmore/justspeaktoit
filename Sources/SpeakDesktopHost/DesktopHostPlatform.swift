@@ -77,6 +77,8 @@ package protocol DesktopHostPlatform: Sendable {
     static func cleanupPreview(_ text: String, ticket: UInt64) throws
     static func endCleanupPreview(_ ticket: UInt64)
     static func recordingState(_ state: Int32)
+    /// Voice Edit owns an independent Escape reason, as on the Mac.
+    static func voiceEditEscape(_ active: Bool)
     static func voiceGenerated(_ presentation: DesktopVoiceResultPresentation)
     static func voiceUsage(_ presentation: DesktopVoiceUsagePresentation)
     static func voiceDiscovery(_ presentation: DesktopVoiceDiscoveryPresentation)
@@ -243,6 +245,7 @@ package extension DesktopHostPlatform {
         update("Streaming cleanup preview. The original is saved in History.", transcript: text, state: 2)
     }
     static func endCleanupPreview(_ ticket: UInt64) {}
+    static func voiceEditEscape(_ active: Bool) {}
     /// Hosts without a dashboard or History header show no totals.
     static func historyInsights(all: DesktopHistoryInsights, visible: DesktopHistoryInsights) {}
     static func historyFilters(models: [String], selection: DesktopHistoryFilter) {}

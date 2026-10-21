@@ -6,6 +6,48 @@
 
 #define JSTI_MAXIMUM_CONFIGURATION_FIELDS 64
 
+typedef struct EscapePolicy {
+    GMutex mutex;
+    guint64 epoch;
+    gboolean enabled, recording, closed;
+} EscapePolicy;
+
+static EscapePolicy escape_policy = { .enabled = TRUE };
+
+static void escape_publish(EscapePolicy *policy, gint32 recording, gint32 enabled, gboolean close) {
+    g_mutex_lock(&policy->mutex);
+    if (recording >= 0) policy->recording = recording == JSTI_STATE_RECORDING || recording == JSTI_STATE_WORKING;
+    if (enabled >= 0) policy->enabled = enabled != 0;
+    if (close) policy->closed = TRUE;
+    gboolean active = policy->recording && policy->enabled && !policy->closed;
+    if ((gboolean)(policy->epoch & 1u) != active) ++policy->epoch;
+    g_mutex_unlock(&policy->mutex);
+}
+
+static guint64 escape_token(EscapePolicy *policy) {
+    g_mutex_lock(&policy->mutex);
+    guint64 token = policy->epoch & 1u ? policy->epoch : 0;
+    g_mutex_unlock(&policy->mutex);
+    return token;
+}
+
+static gboolean escape_enabled(void) {
+    g_mutex_lock(&escape_policy.mutex);
+    gboolean enabled = escape_policy.enabled;
+    g_mutex_unlock(&escape_policy.mutex);
+    return enabled;
+}
+
+int32_t jsti_window_set_escape_cancellation(int32_t enabled) {
+    if (enabled != 0 && enabled != 1) return -1;
+    escape_publish(&escape_policy, -1, enabled, FALSE);
+    return 0;
+}
+
+int32_t jsti_window_escape_is_current(uint64_t token) {
+    return (token & 1u) && token == escape_token(&escape_policy);
+}
+
 /*
  * The GTK 4 / libadwaita window. It owns no application state: every control
  * reports an event to Swift, and Swift pushes display state back through the
@@ -987,6 +1029,7 @@ static gboolean on_close_request(GtkWindow *window, gpointer data) {
     jsti_action_shortcut_editor_close();
     jsti_setup_close();
     ui.closing = TRUE;
+    escape_publish(&escape_policy, -1, -1, TRUE);
     retire_migration_restore();
     if (ui.backup_chooser != NULL) g_cancellable_cancel(ui.backup_chooser);
     g_clear_object(&ui.backup_chooser);
@@ -1121,12 +1164,21 @@ static gboolean cancel_key(guint keyval, GdkModifierType modifiers, GtkWidget *f
         if (ADW_IS_DIALOG(focus)) return FALSE;
 #endif
     }
-    if (ui.cancel_key_held) return TRUE;
     GdkModifierType relevant = modifiers & (GDK_CONTROL_MASK | GDK_SHIFT_MASK | GDK_ALT_MASK |
                                             GDK_SUPER_MASK | GDK_HYPER_MASK | GDK_META_MASK);
+    if (!escape_enabled()) {
+        if (relevant == 0) ui.cancel_key_held = TRUE;
+        return FALSE;
+    }
+    if (ui.cancel_key_held) return TRUE;
     if (relevant != 0 || (ui.state != JSTI_STATE_RECORDING && ui.state != JSTI_STATE_WORKING)) return FALSE;
+    guint64 token = escape_token(&escape_policy);
+    if (token == 0) return FALSE;
     ui.cancel_key_held = TRUE;
-    on_cancel(NULL, NULL);
+    gchar value[32];
+    g_snprintf(value, sizeof(value), "%" G_GUINT64_FORMAT, token);
+    retire_cleanup_preview();
+    emit(JSTI_EVENT_CANCEL, value, 0);
     return TRUE;
 }
 
@@ -2408,7 +2460,7 @@ static void attach(Pending *pending) {
 
 /* Updates made before the window exists (initial microphones, text output)
  * wait here and are applied first, in order; after it closes they are dropped. */
-static int32_t post(apply_fn apply, gpointer data, GDestroyNotify destroy) {
+static int32_t post_with_recording(apply_fn apply, gpointer data, GDestroyNotify destroy, gint32 recording) {
     Pending *pending = g_new0(Pending, 1);
     pending->apply = apply;
     pending->destroy = destroy;
@@ -2419,6 +2471,7 @@ static int32_t post(apply_fn apply, gpointer data, GDestroyNotify destroy) {
         pending_free(pending);
         return 0;
     }
+    if (recording >= 0) escape_publish(&escape_policy, recording, -1, FALSE);
     if (!jsti_window_loop_running()) {
         g_queue_push_tail(&early_posts, pending);
         g_mutex_unlock(&post_lock);
@@ -2427,6 +2480,10 @@ static int32_t post(apply_fn apply, gpointer data, GDestroyNotify destroy) {
     attach(pending);
     g_mutex_unlock(&post_lock);
     return 0;
+}
+
+static int32_t post(apply_fn apply, gpointer data, GDestroyNotify destroy) {
+    return post_with_recording(apply, data, destroy, -1);
 }
 
 int32_t jsti_window_post(jsti_window_apply_fn apply, gpointer data, GDestroyNotify destroy) {
@@ -2446,6 +2503,7 @@ static void open_posts(void) {
 static void close_posts(void) {
     g_mutex_lock(&post_lock);
     window_closed = TRUE;
+    escape_publish(&escape_policy, -1, -1, TRUE);
     g_atomic_int_set(&loop_running, 0);
     Pending *pending;
     while ((pending = g_queue_pop_head(&early_posts)) != NULL) pending_free(pending);
@@ -2550,7 +2608,7 @@ int32_t jsti_window_update(const char *status, const char *transcript, int32_t s
     update->transcript = g_strdup(transcript);
     update->has_transcript = transcript != NULL;
     update->state = state;
-    return post(update_apply, update, update_free);
+    return post_with_recording(update_apply, update, update_free, state);
 }
 
 struct Models {
@@ -4642,23 +4700,57 @@ static void observe_event(gint32 event, const char *text, gint32 index, void *co
 }
 
 static void observe_cancel(gint32 event, const char *text, gint32 index, void *context) {
-    (void)text; (void)index;
+    (void)index;
     gint32 *calls = context;
     ++calls[0];
     calls[1] = event;
+    gchar expected[32];
+    guint64 token = escape_token(&escape_policy);
+    g_snprintf(expected, sizeof(expected), "%" G_GUINT64_FORMAT, token);
+    calls[2] = token != 0 && g_strcmp0(text, expected) == 0;
+    calls[3] = text != NULL && *text == '\0';
+}
+
+static gboolean escape_policy_self_test(void) {
+    EscapePolicy policy = { .enabled = TRUE };
+    gboolean okay = escape_token(&policy) == 0;
+    escape_publish(&policy, JSTI_STATE_RECORDING, -1, FALSE);
+    guint64 first = escape_token(&policy);
+    escape_publish(&policy, JSTI_STATE_WORKING, -1, FALSE);
+    okay = first != 0 && escape_token(&policy) == first && okay;
+    escape_publish(&policy, -1, 0, FALSE);
+    okay = escape_token(&policy) == 0 && okay;
+    escape_publish(&policy, JSTI_STATE_RECORDING, -1, FALSE);
+    okay = escape_token(&policy) == 0 && okay;
+    escape_publish(&policy, -1, 1, FALSE);
+    guint64 second = escape_token(&policy);
+    okay = second != 0 && second != first && okay;
+    escape_publish(&policy, JSTI_STATE_IDLE, -1, FALSE);
+    escape_publish(&policy, JSTI_STATE_RECORDING, -1, FALSE);
+    okay = escape_token(&policy) != 0 && escape_token(&policy) != second && okay;
+    escape_publish(&policy, -1, -1, TRUE);
+    escape_publish(&policy, JSTI_STATE_RECORDING, 1, FALSE);
+    okay = escape_token(&policy) == 0 && okay;
+    g_mutex_clear(&policy.mutex);
+    return okay;
 }
 
 static gboolean cancel_key_self_test(void) {
     jsti_window_event_fn callback = ui.callback;
     void *context = ui.context;
-    gint32 state = ui.state, calls[2] = {0};
+    gint32 state = ui.state, calls[4] = {0};
+    g_mutex_lock(&escape_policy.mutex);
+    gboolean saved_policy = escape_policy.enabled, saved_recording = escape_policy.recording;
+    g_mutex_unlock(&escape_policy.mutex);
     gboolean held = ui.cancel_key_held, suppress = ui.suppress, closing = ui.closing;
     gboolean sensitive = gtk_widget_get_sensitive(GTK_WIDGET(ui.window));
     gtk_widget_set_sensitive(GTK_WIDGET(ui.window), TRUE);
     ui.callback = observe_cancel; ui.context = calls;
     ui.cancel_key_held = FALSE; ui.suppress = FALSE; ui.closing = FALSE; ui.state = JSTI_STATE_IDLE;
-    gboolean okay = !cancel_key(GDK_KEY_Escape, 0, NULL, TRUE);
+    escape_publish(&escape_policy, JSTI_STATE_IDLE, 1, FALSE);
+    gboolean okay = escape_policy_self_test() && !cancel_key(GDK_KEY_Escape, 0, NULL, TRUE);
     ui.state = JSTI_STATE_RECORDING;
+    escape_publish(&escape_policy, ui.state, -1, FALSE);
     const GdkModifierType modified[] = {
         GDK_CONTROL_MASK, GDK_SHIFT_MASK, GDK_ALT_MASK, GDK_SUPER_MASK, GDK_HYPER_MASK, GDK_META_MASK
     };
@@ -4681,12 +4773,14 @@ static gboolean cancel_key_self_test(void) {
     g_object_unref(embedded);
 #endif
     okay = cancel_key(GDK_KEY_Escape, GDK_LOCK_MASK, GTK_WIDGET(ui.transcript), TRUE) &&
-        calls[0] == 1 && calls[1] == JSTI_EVENT_CANCEL && okay;
+        calls[0] == 1 && calls[1] == JSTI_EVENT_CANCEL && calls[2] && okay;
     ui.state = JSTI_STATE_IDLE;
+    escape_publish(&escape_policy, ui.state, -1, FALSE);
     okay = cancel_key(GDK_KEY_Escape, 0, NULL, TRUE) && calls[0] == 1 && okay;
     action_key_released(NULL, GDK_KEY_Escape, 9, 0, NULL);
     okay = !cancel_key(GDK_KEY_Escape, 0, NULL, TRUE) && !ui.cancel_key_held && okay;
     ui.state = JSTI_STATE_WORKING;
+    escape_publish(&escape_policy, ui.state, -1, FALSE);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.window), FALSE);
     okay = !cancel_key(GDK_KEY_Escape, 0, NULL, TRUE) && okay;
     gtk_widget_set_sensitive(GTK_WIDGET(ui.window), TRUE);
@@ -4694,6 +4788,20 @@ static gboolean cancel_key_self_test(void) {
     okay = !cancel_key(GDK_KEY_Escape, 0, NULL, TRUE) && okay;
     ui.closing = FALSE;
     okay = cancel_key(GDK_KEY_Escape, 0, NULL, TRUE) && calls[0] == 2 && okay;
+    guint64 old_token = escape_token(&escape_policy);
+    okay = jsti_window_set_escape_cancellation(-1) == -1 &&
+        jsti_window_set_escape_cancellation(2) == -1 && jsti_window_escape_is_current(old_token) && okay;
+    okay = jsti_window_set_escape_cancellation(0) == 0 &&
+        !cancel_key(GDK_KEY_Escape, 0, NULL, TRUE) && calls[0] == 2 &&
+        !jsti_window_escape_is_current(old_token) && okay;
+    on_cancel(NULL, NULL);
+    okay = calls[0] == 3 && calls[1] == JSTI_EVENT_CANCEL && calls[3] && okay;
+    okay = jsti_window_set_escape_cancellation(1) == 0 &&
+        !jsti_window_escape_is_current(old_token) &&
+        cancel_key(GDK_KEY_Escape, 0, NULL, TRUE) && calls[0] == 3 && okay;
+    action_key_released(NULL, GDK_KEY_Escape, 9, 0, NULL);
+    okay = cancel_key(GDK_KEY_Escape, 0, NULL, TRUE) && calls[0] == 4 && calls[2] && okay;
+    escape_publish(&escape_policy, saved_recording ? JSTI_STATE_RECORDING : JSTI_STATE_IDLE, saved_policy, FALSE);
     ui.callback = callback; ui.context = context; ui.state = state;
     ui.cancel_key_held = held; ui.suppress = suppress; ui.closing = closing;
     gtk_widget_set_sensitive(GTK_WIDGET(ui.window), sensitive);

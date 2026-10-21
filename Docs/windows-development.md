@@ -317,16 +317,18 @@ before the working one is released. Gesture styles report the native press and
 the release, observed by polling the key only while it is held, to the shared
 SpeakCore gesture machine and session policy that state the macOS rules; a
 gesture stops only the kind of session it started.
-Plain Escape is source-wired to Cancel while this app's main window is active
-and recording/working. Idle Escape and other dialogs keep their native behavior;
+With Keyboard's default-on **Cancel recording with Escape** enabled, plain
+Escape is source-wired to Cancel while this app's main window is active and
+recording/working. Idle Escape and other dialogs keep their native behavior;
 held repeats emit only one cancellation, even if the app becomes idle before
 release. Modified Escape remains available to Windows. The shared Host also
 stops legacy active capture without transcription and retains its audio.
 Three portable regressions and native smoke assertions are authored but
 **NOT_RUN** here.
 
-The next source-only Windows change adds passive system-wide Escape observation
-while recording/working. It uses a UI-thread low-level keyboard hook, not an
+The source-only Windows extension adds passive system-wide Escape observation
+while recording/working with the saved preference enabled, or while Voice Edit
+owns its independent cancellation reason. It uses a UI-thread low-level keyboard hook, not an
 unmodified `RegisterHotKey` grab: every callback continues the native hook chain
 and the foreground app still receives its Escape. Only a first plain physical
 Escape in another process queues cancellation; modified/injected keys, held
@@ -350,6 +352,16 @@ cancellation after recording restarts. All compilation, fixtures and physical
 other-app keyboard acceptance for this change are **NOT_RUN** here. Secure
 desktop, session boundaries and real Windows hook delivery remain platform
 qualification requirements, not inferred support.
+
+The canonical `cancelRecordingOnEscape` Boolean now transfers, persists and
+appears in Keyboard. Its default is shared with Mac. Native publication fences
+local and global Escape tokens across off/on transitions, and final Host
+admission also checks the saved policy. Disabling it neither consumes local
+Escape nor disables the explicit Cancel control. Voice Edit still cancels with
+Escape independently, as on Mac. Preference, restart, Voice Edit and native
+policy fixtures are authored but **NOT_RUN**; no additional real hook or
+keyboard activity was used to qualify them.
+
 The portable `DesktopPressCaptureLease` and `DesktopPressCapturePCMRelay` are
 **ownership scaffolding, not an enabled microphone-on-key-press feature**.
 No native worker, host handoff, preference control or permission adapter is

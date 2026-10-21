@@ -87,19 +87,20 @@ final class DesktopHostVoiceEditTests: XCTestCase {
         XCTAssertEqual(FakeLog.shared.huds.last?.headline, "Check voice edit")
     }
 
-    func testNormalDictationCannotStealVoiceEditingAndCancelStopsCaptureOnce() async {
+    func testNormalDictationCannotStealVoiceEditingAndEscapeIgnoresRecordingPreference() async throws {
+        try Data(#"{"version":1,"preferences":{"cancelRecordingOnEscape":false}}"#.utf8)
+            .write(to: directory.appendingPathComponent("escape.json"))
+        try await controller.importConfiguration(path: directory.appendingPathComponent("escape.json").path)
         let selection = VoiceEditFixtureSelection()
         await controller.toggleVoiceEdit(source: selection.source(), deviceID: "")
         await listening()
         let index = await controller.selectedIndex()
-        await controller.toggle(
-            target: "other field", modelIndex: index, deviceID: "", targetExecutablePath: nil,
-            textOutput: FakeTextOutput(label: "insert")
-        )
+        await controller.toggle(target: "other field", modelIndex: index, deviceID: "",
+                                targetExecutablePath: nil, textOutput: FakeTextOutput(label: "insert"))
         let stillListening = await controller.voiceEditIsListening
         XCTAssertTrue(stillListening)
-        await controller.cancelVoiceEdit()
-        await controller.cancelVoiceEdit()
+        await controller.cancelTranscription(fromEscape: true, ifCurrent: { true })
+        await controller.cancelTranscription(fromEscape: true)
         await idle()
         await controller.voiceEditWorkersEnded()
         XCTAssertEqual(effects.lifecycle, [1, 1, 1])

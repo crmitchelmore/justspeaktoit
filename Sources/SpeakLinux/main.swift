@@ -242,8 +242,12 @@ do {
     if screenshotDirectory != nil {
         try blocking { try await DesktopHostSampleHistory.seed(directory: directory) }
     }
+    let needsSetup = !smokeTest && LinuxOnboarding.needsAutomaticSetup(in: directory)
     let controller = try LinuxAppController(directory: directory, effects: LinuxNativeEffects())
     let holder = LinuxEventContext(controller: controller, smokeTest: smokeTest)
+    holder.needsSetupAtLaunch = needsSetup
+    try LinuxOnboarding.configure(holder)
+    defer { jsti_setup_clear() }
     holder.screenshotDirectory = screenshotDirectory
     if integrationCheck == "x11" { holder.windowCheck = { try LinuxIntegrationChecks.x11() } }
     defer { if smokeTest { try? FileManager.default.removeItem(at: directory) } }

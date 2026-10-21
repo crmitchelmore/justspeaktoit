@@ -42,6 +42,9 @@ extension WindowsNative {
     static func configureConfiguration(_ holder: WindowsEventContext) async throws {
         let snapshot = try await holder.controller.nativeConfigurationEditorSnapshot()
         let preferences = snapshot.preferences
+        guard jsti_window_set_escape_cancellation(preferences.cancelRecordingOnEscape ? 1 : 0) == 0 else {
+            throw WindowsNativeError(message: "Could not apply Escape cancellation.")
+        }
         holder.hotKeys.configureTiming(
             hold: preferences.number("holdThreshold"), doubleTap: preferences.number("doubleTapWindow")
         )

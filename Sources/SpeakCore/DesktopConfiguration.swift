@@ -13,6 +13,7 @@ public enum SpeechDefaults {
     public static let liveStopGracePeriod = 0.0
     public static let recordingTailDuration = 0.5
     public static let voiceCommandsEnabled = true
+    public static let cancelRecordingOnEscape = true
     public static let clipboardInsertionTriggers = ""
     public static let showHUD = true
     public static let liveTranscriptHUD = true

@@ -147,12 +147,16 @@ extension DesktopHostController {
     // Retain captured audio instead of sending cancelled recordings for transcription.
     // Revalidate queued native requests on actor admission, before touching the current run.
     // swiftlint:disable:next cyclomatic_complexity function_body_length
-    package func cancelTranscription(ifCurrent: @Sendable () -> Bool = { true }) async {
+    package func cancelTranscription(
+        fromEscape: Bool = false, ifCurrent: @Sendable () -> Bool = { true }
+    ) async {
         guard !closed, ifCurrent() else { return }
         if voiceEdit.active != nil {
             cancelVoiceEdit()
             return
         }
+        guard !fromEscape ||
+            (settings.configuration?.cancelRecordingOnEscape ?? SpeechDefaults.cancelRecordingOnEscape) else { return }
         if ownedDictation == nil, let admission = ownedDictationAdmission {
             cancellationRequested = true
             admission.operation.cancel()

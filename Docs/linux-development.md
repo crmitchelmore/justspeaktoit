@@ -485,6 +485,13 @@ model alone is not a readiness receipt. Ten new shared Host regressions and
 native GTK smoke assertions are authored but **NOT_RUN** here. This slice does
 not qualify real-desktop permission, microphone, provider or shortcut behavior.
 
+The guide's passive page projection is additionally checked against every shared
+step in three authored platform tests. Nine authored Host progress regressions
+cover the shared completion transition, sticky upgrades and cancellation/failure
+paths. Native revision checks execute inside the Host actor at read/write
+admission, including Finish/Skip, rather than relying solely on a pre-await
+check in the GTK adapter. These follow-up tests are also **NOT_RUN** here.
+
 Before the keyring and desktop integration checks, the harness runs
 `--integration-test atspi-selection` against an external synthetic AT-SPI
 service, each time on its own nested private bus. The fixture refuses a

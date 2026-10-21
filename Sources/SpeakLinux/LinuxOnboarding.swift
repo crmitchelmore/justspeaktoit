@@ -2,6 +2,7 @@ import Foundation
 import CLinuxSupport
 import SpeakCore
 import SpeakDesktopHost
+import SpeakLinuxPlatform
 
 enum LinuxOnboarding {
     static func needsAutomaticSetup(in directory: URL) -> Bool {
@@ -74,23 +75,28 @@ enum LinuxOnboarding {
         guard let target = command == 1 ? shown.next : shown.previous else {
             throw DesktopHostError(message: "That setup step is unavailable.")
         }
-        var state = try await holder.controller.readOnboardingState()
-        guard jsti_setup_revision() == revision else { throw CancellationError() }
-        state.lastStep = target
-        // A manually reopened upgrade guide must not turn the install into first-run work.
-        state.hasCompletedOnboarding = state.hasCompletedOnboarding || !holder.needsSetupAtLaunch || target == .done
-        try await holder.controller.persistOnboardingState(state)
+        try await holder.controller.persistOnboardingStep(
+            target, preservingCompletion: !holder.needsSetupAtLaunch,
+            checkCancellation: { try checkRevision(revision) }
+        )
         return target
     }
 
     private static func complete(revision: UInt64, holder: LinuxEventContext) async throws {
-        guard jsti_setup_revision() == revision else { throw CancellationError() }
-        try await holder.controller.persistOnboardingState(.init(hasCompletedOnboarding: true, lastStep: .done))
+        try await holder.controller.persistOnboardingState(
+            .init(hasCompletedOnboarding: true, lastStep: .done),
+            checkCancellation: { try checkRevision(revision) }
+        )
         guard jsti_setup_revision() == revision else { return }
         guard jsti_setup_finish(revision) == 0 else {
             throw DesktopHostError(message: "Setup was saved, but its window could not be closed.")
         }
         LinuxHostPlatform.update("Setup is complete. Run it again from About.")
+    }
+
+    private static func checkRevision(_ revision: UInt64) throws {
+        try Task.checkCancellation()
+        guard jsti_setup_revision() == revision else { throw CancellationError() }
     }
 
     private static func perform(_ raw: String, for step: DesktopOnboardingStep) throws {
@@ -136,21 +142,14 @@ enum LinuxOnboarding {
         let message = await status(step, holder: holder)
         guard jsti_setup_revision() == revision else { return }
         let strings = LinuxWindow.Strings()
-        let actions = step.actions.filter { $0 != .testDictation }.map {
-            JSTILinuxSetupAction(
-                title: strings.add($0 == .openMicrophoneSettings ? "Check microphone permissions..." : $0.title),
-                action: strings.add($0.rawValue)
-            )
+        let content = LinuxOnboardingPage(step)
+        let actions = content.actions.map {
+            JSTILinuxSetupAction(title: strings.add(content.title(for: $0)), action: strings.add($0.rawValue))
         }
-        let detail = step == .textInsertion
-            ? "X11 can paste into the captured app. Wayland depends on your compositor's RemoteDesktop portal; "
-                + "when insertion is unavailable, text is copied for manual paste. No access is granted by this guide."
-            : step.detail
         var page = JSTILinuxSetupPage(
-            step: Int32(DesktopOnboardingStep.allCases.firstIndex(of: step) ?? 0),
-            has_previous: step.previous == nil ? 0 : 1, is_last: step.next == nil ? 1 : 0,
-            title: strings.add(step.title), progress: strings.add(step.progress), detail: strings.add(detail),
-            status: strings.add(notice ?? message)
+            step: content.index, has_previous: content.hasPrevious ? 1 : 0, is_last: content.isLast ? 1 : 0,
+            title: strings.add(content.title), progress: strings.add(content.progress),
+            detail: strings.add(content.detail), status: strings.add(notice ?? message)
         )
         let result = withExtendedLifetime(strings) {
             actions.withUnsafeBufferPointer { jsti_setup_set_page(&page, $0.baseAddress, $0.count, revision) }

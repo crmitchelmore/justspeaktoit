@@ -76,14 +76,24 @@ enum LinuxActionShortcutRun: Equatable {
         Set(DesktopShortcutAction.allCases.compactMap { Self($0).desktopCommandArgument })
             .subtracting([JSTI_TOGGLE_ARGUMENT])
     }
+
+    var supportsAutomaticGlobalRegistration: Bool {
+        switch self {
+        case .record, .clipboard, .pasteLastHistory, .selectedText: true
+        default: false
+        }
+    }
 }
 
 extension LinuxWindow {
     static func configureActionShortcuts(_ holder: LinuxEventContext) async throws {
         let bindings = await holder.controller.shortcutBindings
+        holder.globalActionShortcuts.configure(bindings, holder: holder)
         let revision = LinuxActionShortcutEditorState.shared.configure(bindings)
         let strings = Strings()
-        let rows = actionShortcutRows(bindings, strings: strings)
+        let rows = actionShortcutRows(
+            bindings, strings: strings, globalNotes: holder.globalActionShortcuts.notes(for: bindings)
+        )
         let presets = DesktopShortcutPreset.allCases
         guard let reset = presets.firstIndex(of: .standard) else {
             throw DesktopHostError(message: "The canonical shortcut defaults are unavailable.")
@@ -108,13 +118,14 @@ extension LinuxWindow {
     }
 
     private static func actionShortcutRows(
-        _ bindings: DesktopShortcutBindings, strings: Strings
+        _ bindings: DesktopShortcutBindings, strings: Strings,
+        globalNotes: [DesktopShortcutAction: String] = [:]
     ) -> [JSTILinuxActionShortcut] {
         DesktopShortcutAction.allCases.map { action in
             let binding = bindings[action]
             let chord = binding.linuxChord
             let run = LinuxActionShortcutRun(action)
-            let note = actionShortcutNote(action, bindings: bindings)
+            let note = actionShortcutNote(action, bindings: bindings, globalNote: globalNotes[action])
             let unset = binding.keyCode == 0 && binding.modifiers.isEmpty && !binding.isEnabled
             return JSTILinuxActionShortcut(
                 title: strings.add(action.displayName),
@@ -131,25 +142,16 @@ extension LinuxWindow {
     }
 
     private static func actionShortcutNote(
-        _ action: DesktopShortcutAction, bindings: DesktopShortcutBindings
+        _ action: DesktopShortcutAction, bindings: DesktopShortcutBindings, globalNote: String?
     ) -> String {
         let binding = bindings[action]
         let run = LinuxActionShortcutRun(action)
         if !binding.isEnabled { return "Off" }
         if run == .unavailable { return "Not implemented on Linux yet. The binding stays saved." }
         if run == .selectedText {
-            return "External editable AT-SPI fields only. Allow session access in Voice Output, then bind "
-                + "`\(LinuxShortcuts.toggleCommand) \(JSTI_SPEAK_SELECTED_TEXT_ARGUMENT)` "
-                + "in desktop keyboard settings. This app's fields are excluded; the saved binding "
-                + "is not registered automatically."
+            return selectedTextShortcutNote(binding: binding, globalNote: globalNote)
         }
-        if binding.isGlobal {
-            if let argument = run.desktopCommandArgument {
-                return "Bind `\(LinuxShortcuts.toggleCommand) \(argument)` in your desktop's keyboard settings. "
-                    + "Keep the app running; this saved global binding is not registered automatically."
-            }
-            return "Global action registration is not available yet. The binding stays saved."
-        }
+        if binding.isGlobal { return globalShortcutNote(run: run, note: globalNote) }
         guard let chord = binding.linuxChord else {
             return "This Mac-specific combination stays saved, not registered."
         }
@@ -169,6 +171,28 @@ extension LinuxWindow {
                 + "in desktop keyboard settings while the app is running."
         }
         return "This window"
+    }
+
+    private static func globalShortcutNote(run: LinuxActionShortcutRun, note: String?) -> String {
+        if LinuxHostPlatform.session.displayServer == .x11 {
+            return note ?? "X11 global shortcut starts when the app is ready; subject to availability."
+        }
+        if let argument = run.desktopCommandArgument {
+            return "Bind `\(LinuxShortcuts.toggleCommand) \(argument)` in your desktop's keyboard settings. "
+                + "Keep the app running; this saved global binding is not registered automatically."
+        }
+        return "Global action registration is not available yet. The binding stays saved."
+    }
+
+    private static func selectedTextShortcutNote(binding: DesktopShortcutBinding, globalNote: String?) -> String {
+        if binding.isGlobal, LinuxHostPlatform.session.displayServer == .x11 {
+            return (globalNote ?? "X11 global shortcut starts when the app is ready.")
+                + " External editable AT-SPI fields only; allow session access in Voice Output."
+        }
+        return "External editable AT-SPI fields only. Allow session access in Voice Output, then bind "
+            + "`\(LinuxShortcuts.toggleCommand) \(JSTI_SPEAK_SELECTED_TEXT_ARGUMENT)` "
+            + "in desktop keyboard settings. This app's fields are excluded; the saved binding "
+            + "is not registered automatically."
     }
 }
 

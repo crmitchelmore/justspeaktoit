@@ -42,7 +42,8 @@ GtkWidget *jsti_action_shortcuts_group_new(GtkWindow *owner) {
     adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(group), "Action shortcuts");
     adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(group),
         "Saved bindings run while this window is active, outside typing controls. Sidebar shortcuts run first. "
-        "Edit keys, switches and presets below. Global action registration is not available yet.");
+        "Edit keys, switches and presets below. Supported global actions register on X11; "
+        "Wayland uses desktop keyboard settings.");
     preferences = GTK_LIST_BOX(gtk_list_box_new());
     g_object_add_weak_pointer(G_OBJECT(preferences), (gpointer *)&preferences);
     gtk_list_box_set_selection_mode(preferences, GTK_SELECTION_NONE);

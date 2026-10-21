@@ -613,6 +613,15 @@ offline, so a submission must also list them as git sources.
 
 ## Desktop support
 
+Plain Escape in the active main window is source-wired to the existing Cancel
+operation while recording/working. Idle Escape, modified combinations, dialogs
+and popovers keep their own behavior. The main window's capture-phase key
+controller owns only this active cancellation; release and deactivation retire
+its repeat latch. No global key monitor, X11 Escape grab or portal binding is
+installed. The shared Host retains legacy captured audio without transcription.
+Portable and GTK smoke assertions are authored but **NOT_RUN** here; physical
+keyboard acceptance and system-wide Escape cancellation remain outstanding.
+
 | Desktop (2026) | Shortcut | Paste into the focused app | Fallback |
 |---|---|---|---|
 | GNOME 48+ Wayland | GlobalShortcuts portal (asks once) | RemoteDesktop portal, keyboard only, persist mode 2, restore token in the keyring; transcript offered through the Clipboard portal; Ctrl+V as keysyms | Copied + notification "press Ctrl+V" |

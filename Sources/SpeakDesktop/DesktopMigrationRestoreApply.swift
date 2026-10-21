@@ -2,6 +2,12 @@ import Foundation
 import SpeakCore
 
 extension DesktopMigrationRestore {
+    struct StaleHistory: LocalizedError {
+        var errorDescription: String? { "History changed after the preview." }
+    }
+    static let staleMessage = "History or app profiles changed after the preview. Nothing was restored; "
+        + "choose Restore backup again to see a new preview."
+
     /// Points where apply checks for cancellation. Tests inject failures here.
     public enum Step: Equatable, Sendable {
         case profiles
@@ -20,8 +26,7 @@ extension DesktopMigrationRestore {
         do {
             try Task.checkCancellation()
             guard try await currentBaseline(targets) == plan.baseline else {
-                return .stale("History or app profiles changed after the preview. Nothing was restored; "
-                    + "choose Restore backup again to see a new preview.")
+                return .stale(staleMessage)
             }
             let guards = try await targets.history.migrationRestoreGuards()
             computed = try compute(
@@ -44,7 +49,10 @@ extension DesktopMigrationRestore {
                 )
                 try document.write(to: targets.profiles.fileURL, options: .atomic)
             }
-            let written = try await targets.history.applyMigrationRestore(computed.history, checkpoint: checkpoint)
+            let written = try await targets.history.applyMigrationRestore(
+                computed.history, expectedHistory: plan.baseline.history, digests: targets.digests,
+                checkpoint: checkpoint
+            )
             return .applied(Applied(
                 choice: choice, history: written, profilesChanged: computed.profiles != nil, preview: plan.preview
             ))
@@ -63,6 +71,7 @@ extension DesktopMigrationRestore {
                 }
             }
             let restored = failures.isEmpty
+            if underlying is StaleHistory && restored { return .stale(staleMessage) }
             let state = restored
                 ? "Everything was put back as it was."
                 : "Rollback could not restore: " + failures.joined(separator: "; ") + "."

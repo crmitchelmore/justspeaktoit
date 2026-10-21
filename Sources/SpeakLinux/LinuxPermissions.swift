@@ -5,7 +5,7 @@ import SpeakLinuxPlatform
 import CLinuxSupport
 
 extension LinuxAppController {
-    fileprivate func permissionItems() -> [DesktopPermissionItem] {
+    func permissionItems() -> [DesktopPermissionItem] {
         LinuxPermissions.items(
             session: LinuxHostPlatform.session, output: textOutputOptions(), automation: automationEnabled(),
             runAtLogin: settings.runAtLogin, microphoneWarning: microphoneWarning

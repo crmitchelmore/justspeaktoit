@@ -83,4 +83,101 @@ final class DesktopHostOnboardingTests: XCTestCase {
         let expected = try XCTUnwrap(DesktopPermissionSummary.blockingMessage([blocked]))
         XCTAssertTrue(FakeLog.shared.allStatuses.contains { $0.contains(expected) })
     }
+
+    func testCheckedPersistenceRoundTripsWithoutRewritingSettings() async throws {
+        let settingsURL = directory.appendingPathComponent("settings.json")
+        let before = try JSONEncoder().encode(DesktopHostController<FakePlatform>.Settings())
+        try before.write(to: settingsURL)
+        let controller = try start()
+        let state = DesktopOnboardingState(lastStep: .hotkeyPractice)
+        try await controller.persistOnboardingState(state)
+        let saved = try await controller.readOnboardingState()
+        XCTAssertEqual(saved, state)
+        XCTAssertEqual(try Data(contentsOf: settingsURL), before)
+    }
+
+    func testCheckedPersistenceReportsWriteFailureWithoutCompleting() async throws {
+        let controller = try start()
+        let stateURL = DesktopHostOnboarding.stateURL(in: directory)
+        try FileManager.default.createDirectory(at: stateURL, withIntermediateDirectories: false)
+        do {
+            try await controller.persistOnboardingState(.init(hasCompletedOnboarding: true, lastStep: .done))
+            XCTFail("A guide must not acknowledge a failed write.")
+        } catch {
+            var isDirectory: ObjCBool = false
+            XCTAssertTrue(FileManager.default.fileExists(atPath: stateURL.path, isDirectory: &isDirectory))
+            XCTAssertTrue(isDirectory.boolValue)
+        }
+    }
+
+    func testCheckedReadReportsUnreadableState() async throws {
+        let controller = try start()
+        try FileManager.default.createDirectory(
+            at: DesktopHostOnboarding.stateURL(in: directory), withIntermediateDirectories: false
+        )
+        do {
+            _ = try await controller.readOnboardingState()
+            XCTFail("An unreadable state must be reported, not treated as fresh progress.")
+        } catch {
+            XCTAssertFalse(error.localizedDescription.isEmpty)
+        }
+    }
+
+    func testCheckedPersistenceRefusesAfterCloseAndPreservesLastStep() async throws {
+        let controller = try start()
+        try await controller.persistOnboardingState(.init(lastStep: .microphone))
+        let stateURL = DesktopHostOnboarding.stateURL(in: directory)
+        let before = try Data(contentsOf: stateURL)
+        await controller.close()
+        do {
+            try await controller.persistOnboardingState(.init(hasCompletedOnboarding: true, lastStep: .done))
+            XCTFail("A closed controller must not acknowledge setup completion.")
+        } catch {
+            XCTAssertEqual(try Data(contentsOf: stateURL), before)
+        }
+    }
+
+    func testPrelaunchFreshInstallNeedsSetupWithoutCreatingFiles() throws {
+        XCTAssertTrue(try DesktopHostOnboarding.needsOnboardingBeforeLaunch(in: directory))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: DesktopHostOnboarding.stateURL(in: directory).path))
+    }
+
+    func testPrelaunchUpgradeDoesNotOpenSetupOrAdoptStateSilently() throws {
+        let settingsURL = directory.appendingPathComponent("settings.json")
+        let saved = try JSONEncoder().encode(DesktopHostController<FakePlatform>.Settings())
+        try saved.write(to: settingsURL)
+        XCTAssertFalse(try DesktopHostOnboarding.needsOnboardingBeforeLaunch(in: directory))
+        XCTAssertEqual(try Data(contentsOf: settingsURL), saved)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: DesktopHostOnboarding.stateURL(in: directory).path))
+    }
+
+    func testPrelaunchUnfinishedStateOverridesExistingSettingsWithoutRewriting() throws {
+        try Data("{}".utf8).write(to: directory.appendingPathComponent("settings.json"))
+        let url = DesktopHostOnboarding.stateURL(in: directory)
+        let saved = try DesktopOnboardingState(lastStep: .textInsertion).encoded()
+        try saved.write(to: url)
+        XCTAssertTrue(try DesktopHostOnboarding.needsOnboardingBeforeLaunch(in: directory))
+        XCTAssertEqual(try Data(contentsOf: url), saved)
+    }
+
+    func testPrelaunchCompletedStateDoesNotOpenSetup() throws {
+        try DesktopOnboardingState(hasCompletedOnboarding: true, lastStep: .done).encoded()
+            .write(to: DesktopHostOnboarding.stateURL(in: directory))
+        XCTAssertFalse(try DesktopHostOnboarding.needsOnboardingBeforeLaunch(in: directory))
+    }
+
+    func testPrelaunchMalformedStateKeepsTheCanonicalNoAutomaticSetupRule() throws {
+        let url = DesktopHostOnboarding.stateURL(in: directory)
+        let saved = Data("not JSON".utf8)
+        try saved.write(to: url)
+        XCTAssertFalse(try DesktopHostOnboarding.needsOnboardingBeforeLaunch(in: directory))
+        XCTAssertEqual(try Data(contentsOf: url), saved)
+    }
+
+    func testPrelaunchUnreadableStateIsReported() throws {
+        try FileManager.default.createDirectory(
+            at: DesktopHostOnboarding.stateURL(in: directory), withIntermediateDirectories: false
+        )
+        XCTAssertThrowsError(try DesktopHostOnboarding.needsOnboardingBeforeLaunch(in: directory))
+    }
 }

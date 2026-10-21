@@ -20,6 +20,10 @@ void jsti_main_call_complete(JSTIMainCall *call);
 
 /* TRUE while the GTK window's main loop is running. */
 gboolean jsti_window_loop_running(void);
+struct _GtkWindow;
+void jsti_setup_open(struct _GtkWindow *owner);
+void jsti_setup_close(void);
+int32_t jsti_setup_self_test(struct _GtkWindow *owner, char *error, size_t capacity);
 
 /* For window sections kept in their own files: the window's ordered,
  * thread-safe setter queue (apply runs on the GTK main thread while the window

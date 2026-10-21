@@ -2404,11 +2404,25 @@ Closing retires the native dialog before callbacks and the queue are released.
 
 Apply re-reads the current History and profiles and refuses if either changed
 since the preview. It then writes profiles followed by each History item.
+History is compared again with the full preview baseline inside its store actor
+at final write admission; there is no actor suspension between this check and
+the writes. This closes the gap where a same-store sync/update could previously
+land after the early check and be overwritten by a stale plan. Enumeration
+order alone does not invalidate this final check. A late change leaves History
+untouched and rolls back any profile write before reporting a stale preview.
+If that rollback fails, the outcome remains an explicit failed restore, not a
+safe-to-retry stale response. This is a same-store actor fence, not a
+cross-process filesystem lock.
 Before writing, it snapshots the original bytes of every file it touches
 (`DesktopRecordingStore.applyMigrationRestore`). On cancellation or failure,
 it restores those bytes, removes the files it added and reports whether the
 rollback succeeded. Portable tests are in
 `Tests/SpeakDesktopTests/DesktopMigrationRestoreTests.swift`.
+Five additional regressions in `DesktopMigrationRestoreAdmissionTests.swift`
+cover changed and newly added History at actor admission, enumeration-order
+independence, full-apply rollback of existing/previously absent profiles after
+a late History change, and failed profile rollback classification. These tests
+are authored but **NOT_RUN** here; they need exact-head automatic qualification.
 
 Source-only checks:
 - GTK smoke assertions cover the Restore chooser's event/flags, copied

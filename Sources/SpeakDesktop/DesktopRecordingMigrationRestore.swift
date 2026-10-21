@@ -33,15 +33,10 @@ extension DesktopRecordingStore {
     /// Records are never deleted through the tombstone ledger here.
     func applyMigrationRestore( // swiftlint:disable:this cyclomatic_complexity
         _ writes: [DesktopMigrationRestore.HistoryWrite],
+        expectedHistory: [DataMigrationRecord], digests: LocalModelDigestProvider,
         checkpoint: @Sendable (DesktopMigrationRestore.Step) throws -> Void
     ) throws -> [Record] {
-        var files: [UUID: URL] = [:]
-        for url in try metadataFiles() {
-            guard let id = Self.recordID(ofMetadataFile: url) else { continue }
-            guard files.updateValue(url, forKey: id) == nil else {
-                throw DataMigrationError.invalid("History: two files claim one item, so nothing was restored.")
-            }
-        }
+        let files = try migrationRestoreFiles(expectedHistory: expectedHistory, digests: digests)
         // swiftlint:disable:next large_tuple
         var staged: [(url: URL, prior: Data?, record: Record)] = []
         for write in writes {
@@ -86,6 +81,25 @@ extension DesktopRecordingStore {
             throw DesktopMigrationRestoreWriteError(underlying: error, rollbackFailures: failures)
         }
         return staged.map(\.record)
+    }
+
+    private func migrationRestoreFiles(
+        expectedHistory: [DataMigrationRecord], digests: LocalModelDigestProvider
+    ) throws -> [UUID: URL] {
+        // No actor suspension is allowed between this recheck and the writes.
+        let snapshot = try migrationSnapshot(categories: [.history], digests: digests)
+        let current = snapshot.records[.history] ?? []
+        guard current.sorted(by: { $0.id < $1.id }) == expectedHistory.sorted(by: { $0.id < $1.id }) else {
+            throw DesktopMigrationRestore.StaleHistory()
+        }
+        var files: [UUID: URL] = [:]
+        for url in try metadataFiles() {
+            guard let id = Self.recordID(ofMetadataFile: url) else { continue }
+            guard files.updateValue(url, forKey: id) == nil else {
+                throw DataMigrationError.invalid("History: two files claim one item, so nothing was restored.")
+            }
+        }
+        return files
     }
 
     private func writeMigrationRecord(_ record: Record, to url: URL) throws {

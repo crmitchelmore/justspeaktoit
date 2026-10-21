@@ -227,7 +227,7 @@ final class DesktopMigrationRestoreTests: XCTestCase {
 
 private struct InjectedFailure: Error {}
 
-private struct RestoreFixture {
+struct RestoreFixture {
     static let date = Date(timeIntervalSince1970: 1_704_067_200)
     static let digests = LocalModelDigestProvider(name: "Synthetic test digest; not cryptographic") {
         RestoreDigest()

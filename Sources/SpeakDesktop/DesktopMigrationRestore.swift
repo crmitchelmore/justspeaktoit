@@ -97,7 +97,7 @@ public enum DesktopMigrationRestore {
 
     public enum Outcome: Sendable {
         case applied(Applied)
-        /// Application data changed after the preview; nothing was written.
+        /// Application data changed after the preview; no restore changes remain.
         case stale(String)
         /// Cancelled before or during apply. `restored` is false only when
         /// a rollback step itself failed and the message names it.

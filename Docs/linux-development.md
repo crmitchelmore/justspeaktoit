@@ -462,6 +462,13 @@ state disables apply, and shutdown retires the dialog. Settings, saved audio,
 credentials, vocabulary, connections and models remain unapplied. Native
 smoke assertions and seven shared Host regressions are authored but NOT_RUN
 locally; this is source wiring, not an installed-desktop acceptance receipt.
+The shared restore engine also rechecks the preview's full History baseline
+inside the History store actor immediately before staging/writing, without an
+actor suspension. A same-store update arriving after the early check is kept,
+and profiles are rolled back before a stale-preview response is returned.
+Rollback failure remains an explicit failure. Five portable admission/rollback
+regressions are authored but **NOT_RUN** here; this does not claim protection
+against independent processes writing the same files.
 
 The modeless first-run setup guide shares SpeakCore's seven-step catalogue and
 completion key, and can be reopened from About > **Run setup again**. It resumes

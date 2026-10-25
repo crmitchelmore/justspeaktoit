@@ -36,16 +36,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
     /// providers that need no credential. Matches the identifiers used by both
     /// platforms' secure storage (e.g. `deepgram.apiKey`).
     public var apiKeyIdentifier: String? {
-        switch self {
-        case .apple:
-            return nil
-        case .azure:
-            return AzureSpeechConfiguration.credentialIdentifier
-        case .openai:
-            return "openai.apiKey"
-        default:
-            return "\(rawValue).apiKey"
-        }
+        self == .apple ? nil : ProviderCredentialCatalogue.apiKeyIdentifier(for: rawValue)
     }
 
     /// PCM sample rate (Hz) the provider's streaming client expects.

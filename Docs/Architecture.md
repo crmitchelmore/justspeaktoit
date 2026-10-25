@@ -345,8 +345,14 @@ CloudKit history sync projects both records onto exactly nine `SyncableHistoryEn
 [SyncRecord.swift](../Sources/SpeakSync/SyncRecord.swift) maps that projection. Local diagnostics, error details, costs,
 model-usage arrays and audio/file references do not join that projection automatically.
 
-`CloudKitKeySync` encrypts a bounded set of credential identifiers: Deepgram, OpenAI transcription, OpenRouter,
-ElevenLabs, Cartesia, AssemblyAI, Gladia, Google, Modulate, Soniox, xAI and Meta. It is not a sync of every credential.
+`ProviderCredentialCatalogue` owns persisted API-key identity mapping, including Azure's historical
+`azure.speech.apiKey` exception, and projects known identifiers from shared model/operation routing.
+The live provider metadata, batch metadata, credential-readiness resolver, balance directory and iOS key
+settings use that mapping. Platform credential properties and supported-provider filters remain explicit.
+`CloudKitKeySync` reads its bounded allowlist through `SyncSchema.EncryptedSecret` from
+`ProviderCredentialCatalogue.cloudKitSyncable`: Alibaba, Deepgram, OpenAI transcription, OpenRouter,
+ElevenLabs, Cartesia, AssemblyAI, Gladia, Google, Modulate, Soniox, xAI and Meta. Adding a provider does not
+expand encrypted sync coverage; this remains a separate policy from the full credential catalogue.
 QR `ConfigTransferManager` has a different explicit credential allow-list and transfers only two string settings:
 `selectedModel` and `transcriptionKeywords`. `SettingsSync` remains a public `NSUbiquitousKeyValueStore` wrapper with
 six `SyncKey` cases, availability/status behaviour and local fallback; it is distinct from QR transfer.

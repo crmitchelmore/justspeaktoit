@@ -356,7 +356,7 @@ struct APIKeysView: View {
     /// the one `ProviderBalanceDirectory` resolves accounts by. Azure's is not
     /// `<entry id>.apiKey`.
     static func credentialIdentifier(for id: String) -> String {
-        id == "azure" ? AzureSpeechConfiguration.credentialIdentifier : "\(id).apiKey"
+        ProviderCredentialCatalogue.apiKeyIdentifier(for: id)
     }
 
     private var storedCredentialIdentifiers: Set<String> {

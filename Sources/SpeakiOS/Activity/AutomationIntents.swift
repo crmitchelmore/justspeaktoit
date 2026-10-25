@@ -117,9 +117,9 @@ struct StopDictationIntent: AudioRecordingIntent {
         // Captured before the stop: the polish that follows belongs to this
         // capture, and the wait must not be satisfied by an earlier one's.
         let runID = await service.activeCaptureID
-        let resolved = await service.resolvedStopDestination(explicit: destination?.destination)
+        let resolved = await service.resolvedStopSelection(explicit: destination?.destination)
         let result = await service.stopRecording(
-            destination: resolved,
+            selection: resolved,
             keyboardDeliverySource: .hardwareTrigger
         )
         let polishBudget = AutomationIntentSupport.PolishWait.remaining(

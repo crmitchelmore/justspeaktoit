@@ -253,8 +253,8 @@ struct DictateIntent: AudioRecordingIntent, ForegroundContinuableIntent {
             // Neither end-pointing nor any other surface stopped it in time.
             // Stop it ourselves so a returning intent never leaves a
             // microphone open, and use the result of that stop directly.
-            let destinationOverride = await service.resolvedStopDestination()
-            return await service.stopRecording(destination: destinationOverride).text
+            let destinationOverride = await service.resolvedStopSelection()
+            return await service.stopRecording(selection: destinationOverride).text
         }
         return await service.completedTranscript(forRun: runID) ?? ""
     }

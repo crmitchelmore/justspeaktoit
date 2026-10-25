@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 SETUP = ROOT / 'packaging/linux/swiftpm-offline-setup.sh'
@@ -81,6 +82,56 @@ class BuildRevisionTests(unittest.TestCase):
             ([self.base, self.source], {'sourceSHA': self.source, 'event': 'pull_request'})]:
             with self.subTest(parents=parents, metadata=metadata), self.assertRaises(ValueError):
                 self.verify(self.built, parents, metadata)
+
+
+QUALIFICATION = runpy.run_path(str(ROOT / 'scripts/linux-flatpak-qualification.py'))
+
+
+class QualificationPreconditionsTests(unittest.TestCase):
+    def source(self):
+        return {'head_sha': '1' * 40, 'head_repository': {'full_name': 'owner/repo'},
+                'repository': {'id': 123}, 'path': '.github/workflows/linux-flatpak.yml',
+                'status': 'completed', 'conclusion': 'success', 'event': 'push', 'pull_requests': []}
+
+    def test_successful_source_run(self):
+        metadata = QUALIFICATION['source_metadata'](self.source(), '1' * 40, 'owner/repo', '1', '2' * 40)
+        self.assertEqual(metadata['sourceSHA'], '1' * 40)
+
+    def test_failed_cancelled_or_incomplete_source_is_refused(self):
+        for status, conclusion in [('completed', 'failure'), ('completed', 'cancelled'),
+                                  ('in_progress', None), ('completed', 'skipped')]:
+            run = dict(self.source(), status=status, conclusion=conclusion)
+            with self.subTest(status=status, conclusion=conclusion), self.assertRaises(ValueError):
+                QUALIFICATION['source_metadata'](run, '1' * 40, 'owner/repo', '1', '2' * 40)
+
+    def test_wrong_run_identity_is_refused(self):
+        for change in [{'head_sha': '3' * 40}, {'head_repository': {'full_name': 'other/repo'}},
+                       {'path': '.github/workflows/other.yml'}]:
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                QUALIFICATION['source_metadata'](dict(self.source(), **change), '1' * 40, 'owner/repo', '1', '2' * 40)
+
+    def test_invalid_app_id_cannot_change_overrides(self):
+        with mock.patch('subprocess.run') as run, self.assertRaises(ValueError):
+            QUALIFICATION['check_overrides']('--reset')
+        run.assert_not_called()
+
+    def test_all_override_scopes_are_read_only_and_empty(self):
+        with mock.patch('subprocess.run', return_value=subprocess.CompletedProcess([], 0, '', '')) as run:
+            QUALIFICATION['check_overrides']('com.justspeaktoit.JustSpeakToIt')
+        self.assertEqual([call.args[0] for call in run.call_args_list], [
+            ['flatpak', 'override', scope, '--show', *target]
+            for scope in ('--user', '--system') for target in ([], ['com.justspeaktoit.JustSpeakToIt'])])
+
+    def test_each_override_scope_or_read_failure_is_refused_without_values(self):
+        for position in range(4):
+            for code, output in [(0, '[Environment]\nPRIVATE_VALUE=hidden\n'), (1, '')]:
+                results = [subprocess.CompletedProcess([], 0, '', '') for _ in range(position)]
+                results.append(subprocess.CompletedProcess([], code, output, 'private diagnostic'))
+                with self.subTest(position=position, code=code), mock.patch('subprocess.run', side_effect=results), \
+                        self.assertRaises(ValueError) as error:
+                    QUALIFICATION['check_overrides']('com.justspeaktoit.JustSpeakToIt')
+                self.assertNotIn('hidden', str(error.exception))
+                self.assertNotIn('private diagnostic', str(error.exception))
 
 
 if __name__ == '__main__':

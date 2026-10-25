@@ -25,7 +25,8 @@ module AppleRelease
   class OpReader
     MAX_OUTPUT_BYTES = 64 * 1024
     MAX_ERROR_BYTES = 64 * 1024
-    Child = Struct.new(:pid, :status, :reaped)
+    CLEANUP_GRACE = 0.25
+    Child = Struct.new(:pid, :status, :ownership)
 
     def initialize(spawn: Process.method(:spawn), timeout: 30)
       @spawn, @timeout = spawn, timeout
@@ -51,7 +52,7 @@ module AppleRelease
       deadline = monotonic + @timeout
       pid = @spawn.call('op', 'read', '--no-newline', reference,
         in: File::NULL, out: output_writer, err: error_writer)
-      child = Child.new(pid, nil, false)
+      child = Child.new(pid, nil, :owned)
       [output_writer, error_writer].each(&:close)
       value = drain(child, output, errors, deadline)
       raise CredentialError unless child.status.success?
@@ -73,7 +74,7 @@ module AppleRelease
       streams = [output, errors]
       value = ''.b
       error_bytes = 0
-      until child.reaped && streams.empty?
+      until child.ownership == :reaped && streams.empty?
         poll(child)
         remaining = deadline - monotonic
         raise CredentialError.new(:timeout) if remaining <= 0
@@ -100,35 +101,40 @@ module AppleRelease
     # This control thread is the sole reaper. An exited, unreaped child keeps
     # its PID reserved; once reaped, no cleanup path may signal that PID.
     def poll(child)
-      return child.status if child.reaped
+      return child.status unless child.ownership == :owned
       result = Process.waitpid2(child.pid, Process::WNOHANG)
       if result
         child.status = result.last
-        child.reaped = true
+        child.ownership = :reaped
       end
       child.status
     rescue Errno::ECHILD
-      child.reaped = true
+      child.ownership = :reaped
       raise CredentialError
     end
 
     def stop_owned_process(child)
-      return if child.reaped
+      return unless child.ownership == :owned
       begin
         Process.kill('TERM', child.pid)
       rescue Errno::ESRCH
         # It exited without being reaped; poll below still owns that wait.
       end
-      deadline = monotonic + 0.25
+      deadline = monotonic + CLEANUP_GRACE
       sleep 0.01 until poll(child) || monotonic >= deadline
-      return if child.reaped
+      return unless child.ownership == :owned
       begin
         Process.kill('KILL', child.pid)
       rescue Errno::ESRCH
         # Reap an already-exited owned child below.
       end
-      _, child.status = Process.waitpid2(child.pid)
-      child.reaped = true
+      deadline = monotonic + CLEANUP_GRACE
+      sleep 0.01 until poll(child) || monotonic >= deadline
+      return unless child.ownership == :owned
+      # Kernel I/O may delay even SIGKILL. Transfer the eventual wait to a reaper
+      # without holding the caller or ever signaling this PID after handoff.
+      Process.detach(child.pid)
+      child.ownership = :detached
     end
   end
 

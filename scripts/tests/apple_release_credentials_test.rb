@@ -217,4 +217,31 @@ class AppleReleaseCredentialsTest < Minitest::Test
       assert_empty err
     end
   end
+
+  def test_unreaped_child_is_handed_off_once_after_bounded_cleanup_without_later_signals
+    pid = 424242
+    events = []
+    spawn = ->(*, **_options) { pid }
+    wait = ->(actual_pid, flags) do
+      assert_equal pid, actual_pid
+      assert_equal Process::WNOHANG, flags, 'Cleanup must never make a blocking wait'
+      nil # Deterministic stand-in for kernel work that cannot finish yet.
+    end
+    signal = ->(name, actual_pid) { events << [name, actual_pid]; 1 }
+    reaper = ->(actual_pid) { events << [:detach, actual_pid]; nil }
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    Process.stub(:waitpid2, wait) do
+      Process.stub(:kill, signal) do
+        Process.stub(:detach, reaper) do
+          error = assert_raises(AppleRelease::CredentialError) do
+            AppleRelease::OpReader.new(spawn: spawn, timeout: 0.01).read(@refs.first)
+          end
+          assert_equal :timeout, error.reason
+        end
+      end
+    end
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 2
+    assert_equal [['TERM', pid], ['KILL', pid], [:detach, pid]], events,
+      'Ownership transfers once, and there must be no signal after the reaper takes it'
+  end
 end

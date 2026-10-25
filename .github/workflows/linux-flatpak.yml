@@ -159,14 +159,15 @@ jobs:
           run = json.load(urllib.request.urlopen(request, timeout=30))
           assert run['head_sha'] == sha and run['head_repository']['full_name'] == repo
           assert run['path'] == '.github/workflows/linux-flatpak.yml' and run['status'] == 'completed'
-          subprocess.run(['git', 'fetch', '--no-tags', 'origin', sha], check=True)
+          git = ['git', '-c', 'safe.directory=' + os.getcwd()]
+          subprocess.run([*git, 'fetch', '--no-tags', 'origin', sha], check=True)
           # Test-harness/workflow changes are allowed; all production package
           # inputs must remain byte-identical to the trusted artifact's source.
           inputs = ['Package.swift', 'LICENSE', '.gitattributes', 'packaging/linux', 'Sources', 'Resources',
                     'scripts/stage-linux-desktop.py', 'scripts/local-llm-runtime',
                     'scripts/generate-desktop-icons.py', 'scripts/migration/verify-miniz.py',
                     'scripts/windows-local-runtime/dependencies.json']
-          subprocess.run(['git', 'diff', '--exit-code', sha, 'HEAD', '--', *inputs], check=True)
+          subprocess.run([*git, 'diff', '--exit-code', sha, 'HEAD', '--', *inputs], check=True)
           pathlib.Path('flatpak-evidence/source-run.json').write_text(json.dumps({
               'runID': run_id, 'sourceSHA': sha, 'repository': repo, 'workflow': run['path'],
               'harnessSHA': os.environ['GITHUB_SHA']}, indent=2) + '\n')

@@ -92,6 +92,36 @@ class AppleReleaseCredentialsTest < Minitest::Test
     assert_equal :invalid_value, error.reason
   end
 
+  def test_encrypted_p256_is_rejected_without_a_password_callback_or_secret_output
+    passphrase = 'synthetic-encrypted-key-passphrase'
+    encrypted = OpenSSL::PKey::EC.new(@pem).to_pem(OpenSSL::Cipher.new('aes-256-cbc'), passphrase)
+    reader = FakeOp.new(@values.merge(@refs.last => encrypted))
+    native_read = OpenSSL::PKey.method(:read)
+    callback_calls = 0
+    guarded_read = ->(*arguments) do
+      native_read.call(*arguments) do
+        callback_calls += 1
+        raise 'Password interaction is forbidden'
+      end
+    end
+    out, err = capture_io do
+      OpenSSL::PKey.stub(:read, guarded_read) do
+        error = assert_raises(AppleRelease::CredentialError) do
+          AppleRelease::Client.new(env: @env, op_reader: reader)
+        end
+        assert_equal :invalid_key, error.reason
+        refute_includes error.full_message, encrypted
+        refute_includes error.full_message, passphrase
+        refute_includes error.full_message, 'op://'
+        refute_includes error.full_message, 'Password interaction'
+        assert_nil error.cause
+      end
+    end
+    assert_equal 0, callback_calls, 'The real OpenSSL password callback must never be consulted'
+    assert_empty out
+    assert_empty err
+  end
+
   def test_default_source_preserves_existing_ci_environment_and_file_contract
     env = {'APP_STORE_CONNECT_KEY_ID' => 'CIKEY', 'APP_STORE_CONNECT_ISSUER_ID' => 'CIISSUER',
       'APP_STORE_CONNECT_KEY_PATH' => '/synthetic-ci-key.p8'}

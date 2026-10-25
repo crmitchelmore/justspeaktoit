@@ -159,7 +159,9 @@ module AppleRelease
         raise CredentialError.new(:invalid_value)
       end
       begin
-        key = OpenSSL::PKey.read(pem)
+        # A nil/omitted password can invoke OpenSSL's interactive callback.
+        # Vault credentials must parse without consulting a terminal or stdin.
+        key = OpenSSL::PKey.read(pem, '')
       rescue OpenSSL::PKey::PKeyError, ArgumentError
         raise CredentialError.new(:invalid_key), cause: nil
       end

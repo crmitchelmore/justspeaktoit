@@ -294,6 +294,43 @@ final class AppSettingsDefaultsTests: XCTestCase {
         XCTAssertTrue(relaunched.recoveredTranscriptionKeywords.isEmpty)
     }
 
+    @MainActor
+    func testSharedNames_LoadSavedValuesAndPersistEditsUnderExistingKeys() {
+        defaults.set("groq/whisper-large-v3-turbo", forKey: "batchTranscriptionModel")
+        defaults.set("anthropic/claude-haiku-4.5", forKey: "postProcessingModel")
+        defaults.set("Saved words", forKey: "transcriptionKeywords")
+        defaults.set("fr_FR", forKey: "preferredLocale")
+        defaults.set(true, forKey: "postProcessingEnabled")
+        defaults.set(true, forKey: "handsFreeDictationEnabled")
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertEqual(settings.batchTranscriptionModel, "groq/whisper-large-v3-turbo")
+        XCTAssertEqual(settings.postProcessingModel, "anthropic/claude-haiku-4.5")
+        XCTAssertEqual(settings.transcriptionKeywords, "Saved words")
+        XCTAssertEqual(settings.preferredLocaleIdentifier, "fr_FR")
+        XCTAssertTrue(settings.postProcessingEnabled)
+        XCTAssertTrue(settings.handsFreeDictationEnabled)
+
+        settings.batchTranscriptionModel = "openai/whisper-1"
+        settings.postProcessingModel = "anthropic/claude-sonnet-4.6"
+        settings.transcriptionKeywords = "Edited words"
+        settings.preferredLocaleIdentifier = "en_GB"
+        settings.postProcessingEnabled = false
+        settings.handsFreeDictationEnabled = false
+        XCTAssertEqual(defaults.string(forKey: "batchTranscriptionModel"), "openai/whisper-1")
+        XCTAssertEqual(defaults.string(forKey: "postProcessingModel"), "anthropic/claude-sonnet-4.6")
+        XCTAssertEqual(defaults.string(forKey: "transcriptionKeywords"), "Edited words")
+        XCTAssertEqual(defaults.string(forKey: "preferredLocale"), "en_GB")
+        XCTAssertEqual(defaults.object(forKey: "postProcessingEnabled") as? Bool, false)
+        XCTAssertEqual(defaults.object(forKey: "handsFreeDictationEnabled") as? Bool, false)
+        let reloaded = AppSettings(defaults: defaults)
+        XCTAssertEqual(reloaded.batchTranscriptionModel, settings.batchTranscriptionModel)
+        XCTAssertEqual(reloaded.postProcessingModel, settings.postProcessingModel)
+        XCTAssertEqual(reloaded.transcriptionKeywords, settings.transcriptionKeywords)
+        XCTAssertEqual(reloaded.preferredLocaleIdentifier, settings.preferredLocaleIdentifier)
+        XCTAssertFalse(reloaded.postProcessingEnabled)
+        XCTAssertFalse(reloaded.handsFreeDictationEnabled)
+    }
+
     // MARK: - Core Settings
 
     @MainActor

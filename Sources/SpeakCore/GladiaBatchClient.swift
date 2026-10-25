@@ -19,12 +19,15 @@ public struct GladiaBatchClient: Sendable {
 
     var upload: @Sendable (URLRequest, URL) async throws -> (Data, URLResponse)
     var send: @Sendable (URLRequest) async throws -> (Data, URLResponse)
+    private var cleanupSend: (@Sendable (URLRequest) async throws -> (Data, URLResponse))?
+    private let cleanupSourceSession: URLSession
     var sleep: @Sendable (TimeInterval) async throws -> Void = BatchTranscriptionJob.defaultSleep
     var pollInterval: TimeInterval = 2
     var timeout: TimeInterval = 900
     let baseURL: URL
 
     public init(session: URLSession = .shared, baseURL: URL = GladiaBatchClient.defaultBaseURL) {
+        self.cleanupSourceSession = session
         self.baseURL = baseURL
         // Every request below carries `x-gladia-key`, which URLSession does not
         // strip on a cross-origin redirect the way it does `Authorization`.
@@ -34,6 +37,15 @@ public struct GladiaBatchClient: Sendable {
             try await session.upload(for: request, fromFile: file, delegate: redirects)
         }
         self.send = { request in try await session.data(for: request, delegate: redirects) }
+    }
+
+    /// Comparisons abort their work session at the deadline; accepted job deletion
+    /// still gets its own bounded transport. Ordinary callers keep their existing sender.
+    public func withIndependentCleanup() -> Self {
+        var copy = self
+        let transport = BatchCleanupTransport(session: cleanupSourceSession)
+        copy.cleanupSend = { request in try await transport.send(request) }
+        return copy
     }
 
     public func transcribeFile(
@@ -149,7 +161,7 @@ public struct GladiaBatchClient: Sendable {
         var request = URLRequest(url: self.baseURL.appendingPathComponent("v2/pre-recorded/\(id)"))
         request.httpMethod = "DELETE"
         request.setValue(apiKey, forHTTPHeaderField: "x-gladia-key")
-        let send = self.send
+        let send = self.cleanupSend ?? self.send
         let cancelled = request
         _ = await Task.detached { _ = try? await send(cancelled) }.value
     }

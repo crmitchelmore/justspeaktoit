@@ -22,6 +22,8 @@ public struct SpeechmaticsBatchClient: Sendable {
 
     var upload: @Sendable (URLRequest, URL) async throws -> (Data, URLResponse)
     var send: @Sendable (URLRequest) async throws -> (Data, URLResponse)
+    private var cleanupSend: (@Sendable (URLRequest) async throws -> (Data, URLResponse))?
+    private let cleanupSourceSession: URLSession
     var sleep: @Sendable (TimeInterval) async throws -> Void = BatchTranscriptionJob.defaultSleep
     var pollInterval: TimeInterval = 2
     var timeout: TimeInterval = 900
@@ -31,6 +33,7 @@ public struct SpeechmaticsBatchClient: Sendable {
     public init(
         session: URLSession = .shared, baseURL: URL = SpeechmaticsBatchClient.defaultBaseURL, keywords: [String]
     ) {
+        self.cleanupSourceSession = session
         self.baseURL = baseURL
         self.keywords = keywords
         // The bearer key must not follow a redirect off the Speechmatics
@@ -40,6 +43,14 @@ public struct SpeechmaticsBatchClient: Sendable {
             try await session.upload(for: request, fromFile: file, delegate: redirects)
         }
         self.send = { request in try await session.data(for: request, delegate: redirects) }
+    }
+
+    /// Keeps job deletion available when a comparison aborts its upload/poll session.
+    public func withIndependentCleanup() -> Self {
+        var copy = self
+        let transport = BatchCleanupTransport(session: cleanupSourceSession)
+        copy.cleanupSend = { request in try await transport.send(request) }
+        return copy
     }
 
     /// Source-compatible overload preserved for callers predating keyword hints.
@@ -164,7 +175,7 @@ public struct SpeechmaticsBatchClient: Sendable {
         var request = URLRequest(url: url)
         request.httpMethod = "DELETE"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        let send = self.send
+        let send = self.cleanupSend ?? self.send
         let deletion = request
         _ = await Task.detached { _ = try? await send(deletion) }.value
     }

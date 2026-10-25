@@ -138,31 +138,43 @@ public enum AppleSpeechAnalyzerTranscriber {
             localeIdentifier: localeIdentifier,
             progressive: false
         )
+        try Task.checkCancellation()
         let module = configuration.module
         let analyzer = SpeechAnalyzer(modules: [module.speechModule])
+        let cancellation = SpeechAnalyzerCancellation(analyzer: analyzer)
         let audioFile = try AVAudioFile(forReading: url)
         let duration = audioFile.processingFormat.sampleRate > 0
             ? Double(audioFile.length) / audioFile.processingFormat.sampleRate
             : 0
 
-        async let collectedSegments = collectFinalSegments(from: module.resultStream())
-        _ = try await analyzer.analyzeSequence(from: audioFile)
-        try await analyzer.finalizeAndFinishThroughEndOfInput()
-        let segments = try await collectedSegments
-        let text = segments.map(\.text).joined(separator: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { throw AppleLocalModelError.emptyTranscript }
+        return try await withTaskCancellationHandler {
+            async let collectedSegments = collectFinalSegments(from: module.resultStream())
+            do {
+                _ = try await analyzer.analyzeSequence(from: audioFile)
+                try await analyzer.finalizeAndFinishThroughEndOfInput()
+                let segments = try await collectedSegments
+                try Task.checkCancellation()
+                let text = segments.map(\.text).joined(separator: " ")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else { throw AppleLocalModelError.emptyTranscript }
 
-        return TranscriptionResult(
-            text: text,
-            segments: segments,
-            confidence: averageConfidence(in: segments),
-            duration: duration,
-            modelIdentifier: configuration.engine.modelID,
-            cost: nil,
-            rawPayload: nil,
-            debugInfo: nil
-        )
+                return TranscriptionResult(
+                    text: text,
+                    segments: segments,
+                    confidence: averageConfidence(in: segments),
+                    duration: duration,
+                    modelIdentifier: configuration.engine.modelID,
+                    cost: nil,
+                    rawPayload: nil,
+                    debugInfo: nil
+                )
+            } catch {
+                await cancellation.finish()
+                throw error
+            }
+        } onCancel: {
+            cancellation.start()
+        }
     }
 
     /// Builds the SpeechAnalyzer module for `engine`, verifying locale support

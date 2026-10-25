@@ -8,28 +8,31 @@ actor TranscriptionProviderRegistry {
 
     private var providers: [String: any TranscriptionProvider] = [:]
 
-    private init() {
+    /// Comparisons inject a session owned by one lane; normal recording keeps the shared registry.
+    init(session: URLSession = .shared, independentCleanup: Bool = false) {
         // Register all providers here - adding a new provider automatically makes it available
-        providers["alibaba"] = AlibabaTranscriptionProvider()
-        providers["azure"] = AzureTranscriptionProvider()
-        providers["openai"] = OpenAITranscriptionProvider()
-        providers["revai"] = RevAITranscriptionProvider()
-        providers["deepgram"] = DeepgramTranscriptionProvider()
-        providers["modulate"] = ModulateTranscriptionProvider()
-        providers["assemblyai"] = AssemblyAITranscriptionProvider()
-        providers["elevenlabs"] = ElevenLabsTranscriptionProvider()
-        providers["soniox"] = SonioxTranscriptionProvider()
-        providers["speechmatics"] = SpeechmaticsTranscriptionProvider()
-        providers["groq"] = GroqTranscriptionProvider()
-        providers["cartesia"] = CartesiaTranscriptionProvider()
-        providers["mistral"] = MistralTranscriptionProvider()
-        providers["gladia"] = GladiaTranscriptionProvider()
-        providers["google"] = GeminiTranscriptionProvider()
-        providers["xai"] = XAITranscriptionProvider()
-        providers["meta"] = MetaMuseTranscriptionProvider()
+        providers["alibaba"] = AlibabaTranscriptionProvider(session: session)
+        providers["azure"] = AzureTranscriptionProvider(session: session)
+        providers["openai"] = OpenAITranscriptionProvider(session: session)
+        providers["revai"] = RevAITranscriptionProvider(session: session)
+        providers["deepgram"] = DeepgramTranscriptionProvider(session: session)
+        providers["modulate"] = ModulateTranscriptionProvider(session: session)
+        providers["assemblyai"] = AssemblyAITranscriptionProvider(session: session)
+        providers["elevenlabs"] = ElevenLabsTranscriptionProvider(session: session)
+        providers["soniox"] = SonioxTranscriptionProvider(session: session, independentCleanup: independentCleanup)
+        providers["speechmatics"] = SpeechmaticsTranscriptionProvider(
+            session: session, independentCleanup: independentCleanup
+        )
+        providers["groq"] = GroqTranscriptionProvider(session: session)
+        providers["cartesia"] = CartesiaTranscriptionProvider(session: session)
+        providers["mistral"] = MistralTranscriptionProvider(session: session)
+        providers["gladia"] = GladiaTranscriptionProvider(session: session, independentCleanup: independentCleanup)
+        providers["google"] = GeminiTranscriptionProvider(session: session)
+        providers["xai"] = XAITranscriptionProvider(session: session)
+        providers["meta"] = MetaMuseTranscriptionProvider(session: session)
         for provider in FileSpeechProvider.allCases {
             providers[provider.rawValue] = FileSpeechBatchClient(
-                provider: provider,
+                provider: provider, session: session,
                 durationResolver: { url in
                     await resolvedTranscriptionDuration(reported: nil, lastSegmentEnd: nil, audioURL: url)
                 }

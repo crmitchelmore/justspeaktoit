@@ -56,6 +56,7 @@ final class CaptureFlowUITests: XCTestCase {
         // launch environment is what makes the capture path deterministic.
         app.launchEnvironment["JUSTSPEAKTOIT_SIMULATOR_TRANSCRIPT"] = Self.transcript
         app.launch()
+        try app.skipFirstRunForUITest(ready: recordToggle)
 
         XCTAssertTrue(
             recordToggle.waitForExistence(timeout: Self.launchTimeout),

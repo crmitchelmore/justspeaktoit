@@ -35,12 +35,12 @@ def remove_owned(identifier):
     uuid.UUID(identifier)
     # Cleanup must include unavailable devices; only configuration selection
     # filters for availability. Never mutate another UUID from this inventory.
-    state = next((device.get("state") for values in devices(available=False).values() for device in values
-                  if device.get("udid") == identifier), None)
-    if state is None:
+    target = next((device for values in devices(available=False).values() for device in values
+                   if device.get("udid") == identifier), None)
+    if target is None:
         return {"createdUUID": identifier, "status": "already_absent", "verifiedAbsent": True}
     shutdown_failure = None
-    if state != "Shutdown":
+    if target.get("state") != "Shutdown":
         try:
             run("shutdown", identifier)
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
@@ -83,6 +83,10 @@ def create(receipt, environment, owner):
             raise ValueError("The newly created simulator does not match the selected configuration")
         with environment.open("a") as output:
             output.write(f"SIMULATOR_ID={identifier}\nOWNED_IOS_SIMULATOR_RECEIPT={receipt}\n")
+            # JSON escapes owner Unicode/newlines so this remains one GITHUB_ENV
+            # assignment. The test runner receives no credential or host path.
+            marker = json.dumps(record, ensure_ascii=True, separators=(",", ":"))
+            output.write(f"JSTI_OWNED_SETTINGS_TARGET={marker}\n")
     except BaseException:
         remove_owned(identifier)
         raise

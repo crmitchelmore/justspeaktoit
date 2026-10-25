@@ -33,10 +33,28 @@ class OwnedSimulatorTests(unittest.TestCase):
             arguments = run.call_args.args
             self.assertEqual(arguments[0], "create")
             self.assertEqual(arguments[2:], (TYPE, RUNTIME))
-            self.assertEqual(environment.read_text(),
-                             f"SIMULATOR_ID={NEW}\nOWNED_IOS_SIMULATOR_RECEIPT={receipt}\n")
+            lines = environment.read_text().splitlines()
+            self.assertEqual(lines[:2], [f"SIMULATOR_ID={NEW}", f"OWNED_IOS_SIMULATOR_RECEIPT={receipt}"])
+            marker = json.loads(lines[2].removeprefix("JSTI_OWNED_SETTINGS_TARGET="))
+            self.assertEqual(marker, json.loads(receipt.read_text()))
+            self.assertEqual(set(marker), {"version", "owner", "createdUUID", "runtime", "deviceType"})
             self.assertNotIn(OLD, receipt.read_text())
             self.assertEqual(json.loads(receipt.read_text())["createdUUID"], NEW)
+
+    def test_runner_marker_escapes_owner_unicode_and_newline_without_environment_injection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipt, environment = Path(directory) / "owned.json", Path(directory) / "env"
+            owner = "123:1:job-é\nINJECTED=1"
+            after = {RUNTIME: inventory()[RUNTIME] + inventory(NEW)[RUNTIME]}
+            with mock.patch.object(owned, "devices", side_effect=[inventory(), after]), \
+                    mock.patch.object(owned, "run", return_value=NEW):
+                owned.create(receipt, environment, owner)
+            lines = environment.read_text().splitlines()
+            self.assertEqual(len(lines), 3)
+            marker = json.loads(lines[2].removeprefix("JSTI_OWNED_SETTINGS_TARGET="))
+            self.assertEqual(marker["owner"], owner)
+            self.assertTrue(lines[2].isascii())
+            self.assertNotIn(str(receipt), lines[2])
 
     def test_missing_exact_device_type_fails_before_creation(self):
         missing = inventory()
@@ -150,6 +168,25 @@ class OwnedSimulatorTests(unittest.TestCase):
             cleanup = json.loads(receipt.read_text())["cleanup"]
             self.assertTrue(cleanup["verifiedAbsent"])
             self.assertNotIn(OLD, receipt.read_text())
+
+    def test_owned_device_with_missing_or_null_state_is_present_and_must_be_deleted(self):
+        for missing in (True, False):
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as directory:
+                receipt = Path(directory) / "owned.json"
+                receipt.write_text(json.dumps({"version": 1, "owner": "test-run", "createdUUID": NEW,
+                                               "runtime": RUNTIME, "deviceType": TYPE}))
+                before = inventory(NEW)
+                if missing:
+                    del before[RUNTIME][0]["state"]
+                else:
+                    before[RUNTIME][0]["state"] = None
+                with mock.patch.object(owned, "devices", side_effect=[before, inventory()]), \
+                        mock.patch.object(owned, "run") as run:
+                    owned.cleanup(receipt, "test-run")
+                self.assertEqual([call.args for call in run.call_args_list], [("shutdown", NEW), ("delete", NEW)])
+                cleanup = json.loads(receipt.read_text())["cleanup"]
+                self.assertEqual(cleanup["status"], "deleted")
+                self.assertTrue(cleanup["verifiedAbsent"])
 
     def test_delete_without_actual_absence_fails_and_records_cleanup_failure(self):
         with tempfile.TemporaryDirectory() as directory:

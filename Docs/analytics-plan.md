@@ -265,10 +265,10 @@ source and runs proxies. Lean into that:
      remove user-owned exported files. Release network qualification remains
      required before rollout; opening an empty inspector alone proves no such
      audit.
-2. **Public event catalogue**: §2's table lives in this repo and is linked from
-   the opt-in prompt, the inspector, and `PRIVACY.md`. A CI test asserts the
-   typed Swift catalogue and the documented table stay in sync (names,
-   properties, classes), so the docs cannot silently drift from the binary.
+2. **Public event catalogue**: §2's table lives in this repo. Existing tests
+   verify the typed Swift catalogue; a test comparing its names, properties and
+   privacy classes with this Markdown table remains a follow-up under #776.
+   Catalogue changes must update the documentation alongside code and tests.
 3. **Auditable pipeline**: the typed event API + allowlist means a reviewer can
    read one file in `SpeakCore` and enumerate everything the app can possibly
    send. PRs adding events must update catalogue + docs + tests together.

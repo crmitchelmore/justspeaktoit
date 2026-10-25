@@ -76,7 +76,6 @@ final class AnalyticsPrivacyControlsTests: XCTestCase {
         try await fixture.controller.capture(.appActiveDaily)
         await fixture.controls.refresh()
         let previousID = try XCTUnwrap(fixture.controls.installationID)
-        try await saveInspectorPreviewIfRequested(fixture.controls)
         var exported: Data?
         await fixture.controls.export(to: fixture.directory.appendingPathComponent("export.json")) { data, _ in
             exported = data
@@ -102,8 +101,19 @@ final class AnalyticsPrivacyControlsTests: XCTestCase {
         XCTAssertNotEqual(try fixture.store.loadInstallationID(), previousID)
         await fixture.cleanUp()
     }
-    private func saveInspectorPreviewIfRequested(_ controls: AnalyticsPrivacyControls) async throws {
-        guard let path = ProcessInfo.processInfo.environment["JSTI_ANALYTICS_SMOKE_IMAGE"] else { return }
+
+    func testInspectorNativeVisualFixture_WhenExplicitlyRequested() async throws {
+        guard let path = ProcessInfo.processInfo.environment["JSTI_ANALYTICS_SMOKE_IMAGE"] else {
+            throw XCTSkip("Set JSTI_ANALYTICS_SMOKE_IMAGE to capture the isolated native fixture.")
+        }
+        let fixture = try PrivacyControlsFixture(consent: .optedIn)
+        try await fixture.controller.capture(.appActiveDaily)
+        await fixture.controls.refresh()
+        try await saveInspectorPreview(fixture.controls, to: path)
+        await fixture.cleanUp()
+    }
+
+    private func saveInspectorPreview(_ controls: AnalyticsPrivacyControls, to path: String) async throws {
         let view = NSHostingView(rootView: AnalyticsInspectorView(
             controls: controls, selection: controls.snapshot?.records.last?.id
         ).frame(width: 780, height: 620).environment(\.colorScheme, .light))

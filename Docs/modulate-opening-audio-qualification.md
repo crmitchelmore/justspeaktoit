@@ -21,17 +21,25 @@ Before release the actual Apple task must be running while its open callback,
 native sends and received PCM remain zero. This distinguishes task state from
 handshake readiness without changing production transport or buffer policy.
 
-Build the portable graph with Xcode Apple Swift first, using an isolated scratch
-location and the shared build lease where applicable. Then run:
+Use Xcode Apple Swift and a clean checkout. Coordinate the shared build lease
+where applicable; choose external temporary storage on a space-constrained Mac.
+These commands prepare testing-enabled release products and use the exact same
+isolated scratch path for build and qualification:
 
 ```sh
+modulate_scratch="$(mktemp -d "${TMPDIR%/}/modulate-opening.XXXXXX")"
+SPEAK_PORTABLE_CORE=1 xcrun swift test list --configuration release --jobs 2 \
+  --scratch-path "$modulate_scratch/build"
+# The dependency-free preparation removes this tracked Apple lockfile.
+# Restore only that generated deletion in this initially clean checkout.
+git restore --source=HEAD -- Package.resolved
 SPEAK_PORTABLE_CORE=1 python3 -B scripts/qualify-modulate-opening-audio.py \
-  --output-dir "$TMPDIR/modulate-opening-receipt" -- \
+  --output-dir "$modulate_scratch/receipt" -- \
   xcrun swift test --configuration release --jobs 2 --skip-build \
+  --scratch-path "$modulate_scratch/build" \
   --filter ModulateOpeningAudioQualificationTests
 ```
 
-Pass the same `--scratch-path` to build and test if using external build storage.
 The output directory must be new. The runner owns and bounds its child process
 groups, joins its peer reader, preserves command failures/timeouts, and writes
 `tests.log`, `peer.log` and `qualification.json`. It reuses the canonical XCTest

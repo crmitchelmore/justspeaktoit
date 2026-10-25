@@ -74,6 +74,12 @@ class HeldModulatePeerTests(unittest.TestCase):
     def held(self, ids=(1, 2), ack_after=1):
         identifier = str(uuid.uuid4())
         self.control(identifier, "configure", {"ids": list(ids), "ackAfter": ack_after})
+        sock = self.connect_upgrade(identifier)
+        self.assertEqual(self.control(identifier, "await-held")["stage"], "held")
+        self.assertFalse(select.select([sock], [], [], 0)[0], "no HTTP101 before explicit release")
+        return identifier, sock
+
+    def connect_upgrade(self, identifier):
         sock = socket.create_connection(("127.0.0.1", self.port), timeout=2)
         self.addCleanup(sock.close)
         key = base64.b64encode(b"0123456789abcdef").decode()
@@ -81,9 +87,7 @@ class HeldModulatePeerTests(unittest.TestCase):
                       "Connection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\n"
                       f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Protocol: jsti-probe\r\n"
                       f"X-JSTI-Probe: local-only\r\nX-JSTI-Opening-Session: {identifier}\r\n\r\n").encode())
-        self.assertEqual(self.control(identifier, "await-held")["stage"], "held")
-        self.assertFalse(select.select([sock], [], [], 0)[0], "no HTTP101 before explicit release")
-        return identifier, sock
+        return sock
 
     def release(self, identifier, sock):
         self.control(identifier, "release")
@@ -150,6 +154,30 @@ class HeldModulatePeerTests(unittest.TestCase):
         self.assertEqual(json.loads(read_frame(current_socket)[1]), {"type": "done"})
         self.assertEqual(self.control(old, "state")["receivedIDs"], [])
         self.assertEqual(self.control(current, "state")["receivedIDs"], [3100])
+
+    def test_seven_held_sockets_leave_control_capacity_and_eighth_is_refused(self):
+        with PEER.OpeningServer(("127.0.0.1", 0)) as server:
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            self.port = server.server_address[1]
+            sockets = []
+            try:
+                held = [self.held(ids=(index,)) for index in range(7)]
+                sockets.extend(sock for _, sock in held)
+                extra = str(uuid.uuid4())
+                self.control(extra, "configure", {"ids": [99], "ackAfter": 1})
+                refused = self.connect_upgrade(extra)
+                sockets.append(refused)
+                self.assertTrue(refused.recv(4096).startswith(b"HTTP/1.1 503 "))
+                self.assertEqual(self.control(extra, "state")["stage"], "configured")
+                for identifier, sock in held:
+                    self.release(identifier, sock)  # Every accepted socket is releasable at capacity.
+            finally:
+                for sock in sockets:
+                    sock.close()
+                del self.port
+                server.shutdown()
+                thread.join(2)
 
     def test_configuration_is_bounded_and_cannot_accept_duplicate_ids(self):
         for ids, ack in (([], 1), ([1, 1], 1), (list(range(33)), 1), ([1], 0), ([True], 1)):

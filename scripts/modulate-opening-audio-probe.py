@@ -88,6 +88,9 @@ class OpeningSession:
 class OpeningServer(WS.ProbeServer):
     def __init__(self, address):
         super().__init__(address, OpeningHandler)
+        self.slots = threading.BoundedSemaphore(8)
+        # Keep one request slot available for control through the whole socket lifetime.
+        self.websocket_slots = threading.BoundedSemaphore(7)
         self.sessions = {}
         self.session_lock = threading.Lock()
 
@@ -107,6 +110,7 @@ class OpeningServer(WS.ProbeServer):
 class OpeningHandler(WS.ProbeHandler):
     def run_connection(self):
         session = None
+        admitted = False
         try:
             while b"\r\n\r\n" not in self.pending:
                 block = self.request.recv(2048)
@@ -134,6 +138,10 @@ class OpeningHandler(WS.ProbeHandler):
             key = headers.get("sec-websocket-key", "")
             if len(base64.b64decode(key, validate=True)) != 16:
                 raise ValueError("invalid WebSocket key")
+            if not self.server.websocket_slots.acquire(blocking=False):
+                self.request.sendall(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                return
+            admitted = True
             session = self.server.session(headers.get("x-jsti-opening-session", ""))
             if session.snapshot()["stage"] != "configured":
                 raise ValueError("session upgrade reused")
@@ -173,6 +181,9 @@ class OpeningHandler(WS.ProbeHandler):
             if session and session.snapshot()["stage"] not in ("completed", "cancelled", "failed"):
                 session.update(stage="failed")
             raise
+        finally:
+            if admitted:
+                self.server.websocket_slots.release()
 
     def control(self, method, path, headers):
         parts = path.split("/")

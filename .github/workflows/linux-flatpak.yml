@@ -112,6 +112,7 @@ jobs:
         run: |
           [ -s /etc/machine-id ] || dbus-uuidgen > /etc/machine-id
           mkdir -p flatpak-evidence
+          git -c safe.directory="$GITHUB_WORKSPACE" rev-parse HEAD > flatpak-evidence/source-revision.txt
           cp "$RUNNER_TEMP/JustSpeakToIt-x86_64.flatpak" flatpak-evidence/
           cp "$RUNNER_TEMP/flatpak-manifest.json" flatpak-evidence/
           sha256sum flatpak-evidence/JustSpeakToIt-x86_64.flatpak > flatpak-evidence/flatpak-bundle.sha256
@@ -151,7 +152,7 @@ jobs:
         run: |
           mkdir -p flatpak-evidence
           python3 - <<'PY'
-          import json, os, pathlib, re, subprocess, urllib.request
+          import json, os, pathlib, re, urllib.request
           run_id, sha, repo = os.environ['SOURCE_RUN'], os.environ['SOURCE_SHA'], os.environ['GITHUB_REPOSITORY']
           assert re.fullmatch(r'[0-9]+', run_id) and re.fullmatch(r'[0-9a-f]{40}', sha)
           request = urllib.request.Request(f'https://api.github.com/repos/{repo}/actions/runs/{run_id}',
@@ -159,15 +160,6 @@ jobs:
           run = json.load(urllib.request.urlopen(request, timeout=30))
           assert run['head_sha'] == sha and run['head_repository']['full_name'] == repo
           assert run['path'] == '.github/workflows/linux-flatpak.yml' and run['status'] == 'completed'
-          git = ['git', '-c', 'safe.directory=' + os.getcwd()]
-          subprocess.run([*git, 'fetch', '--no-tags', 'origin', sha], check=True)
-          # Test-harness/workflow changes are allowed; all production package
-          # inputs must remain byte-identical to the trusted artifact's source.
-          inputs = ['Package.swift', 'LICENSE', '.gitattributes', 'packaging/linux', 'Sources', 'Resources',
-                    'scripts/stage-linux-desktop.py', 'scripts/local-llm-runtime',
-                    'scripts/generate-desktop-icons.py', 'scripts/migration/verify-miniz.py',
-                    'scripts/windows-local-runtime/dependencies.json']
-          subprocess.run([*git, 'diff', '--exit-code', sha, 'HEAD', '--', *inputs], check=True)
           pathlib.Path('flatpak-evidence/source-run.json').write_text(json.dumps({
               'runID': run_id, 'sourceSHA': sha, 'repository': repo, 'workflow': run['path'],
               'harnessSHA': os.environ['GITHUB_SHA']}, indent=2) + '\n')
@@ -187,7 +179,23 @@ jobs:
           flatpak install --user -y --noninteractive flathub org.gnome.Platform//50
           [ -s /etc/machine-id ] || dbus-uuidgen > /etc/machine-id
           python3 - <<'PY'
-          import hashlib, json, os, pathlib, shutil, urllib.request
+          import hashlib, json, os, pathlib, re, shutil, subprocess, urllib.request
+          records = list(pathlib.Path('downloaded-flatpak').rglob('source-revision.txt'))
+          assert len(records) == 1 and records[0].is_file() and not records[0].is_symlink(), 'Fresh build required: missing checked-out revision evidence'
+          built_sha = records[0].read_text().strip()
+          assert re.fullmatch(r'[0-9a-f]{40}', built_sha), 'Invalid checked-out revision'
+          git = ['git', '-c', 'safe.directory=' + os.getcwd()]
+          subprocess.run([*git, 'fetch', '--no-tags', 'origin', built_sha], check=True)
+          inputs = ['Package.swift', 'LICENSE', '.gitattributes', 'packaging/linux', 'Sources', 'Resources',
+                    'scripts/stage-linux-desktop.py', 'scripts/local-llm-runtime',
+                    'scripts/generate-desktop-icons.py', 'scripts/migration/verify-miniz.py',
+                    'scripts/windows-local-runtime/dependencies.json']
+          subprocess.run([*git, 'diff', '--exit-code', built_sha, 'HEAD', '--', *inputs], check=True)
+          evidence = pathlib.Path('flatpak-evidence/source-run.json')
+          metadata = json.loads(evidence.read_text())
+          metadata['builtRevision'] = built_sha
+          evidence.write_text(json.dumps(metadata, indent=2) + '\n')
+          shutil.copyfile(records[0], 'flatpak-evidence/source-revision.txt')
           bundles = list(pathlib.Path('downloaded-flatpak').rglob('JustSpeakToIt-x86_64.flatpak'))
           assert len(bundles) == 1 and bundles[0].is_file() and not bundles[0].is_symlink()
           shutil.copyfile(bundles[0], 'flatpak-evidence/JustSpeakToIt-x86_64.flatpak')

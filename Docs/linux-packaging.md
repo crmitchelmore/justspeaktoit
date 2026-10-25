@@ -56,7 +56,7 @@ codec and adapter self-test, CLI help, real CPU transcription of the pinned
 public-domain JFK sample with the app-downloaded/verified tiny model (including
 live folding, silence and cancellation), and the GTK window smoke test under
 Xvfb. No SDK substitution or extra filesystem permissions are used for these
-checks. The bundle, SHA-256, resolved manifest and installed-test log are retained
+checks. The bundle, SHA-256, checked-out revision, resolved manifest and installed-test log are retained
 as `justspeaktoit-flatpak-x86_64`.
 
 Qualification requires a successful [Linux Flatpak workflow receipt](https://github.com/crmitchelmore/justspeaktoit/actions/workflows/linux-flatpak.yml)

@@ -308,55 +308,22 @@ struct AccessibilityTextOutput: TextOutputting {
 
     switch appSettings.accessibilityInsertionMode {
     case .insertAtCursor:
-      return insertAtCursor(text, into: focusedElement)
+      return AccessibilityInsertionWriter.insertAtCursor(
+        text: text,
+        selectedRange: { AccessibilityStreamingTextField(element: focusedElement).readSelectedRange() },
+        destinationError: { target?.destinationChangedError() },
+        setSelectedText: {
+          AXUIElementSetAttributeValue(focusedElement, kAXSelectedTextAttribute as CFString, text as CFTypeRef)
+        },
+        setValue: { AXUIElementSetAttributeValue(focusedElement, kAXValueAttribute as CFString, text as CFTypeRef) }
+      )
 
     case .replaceAll:
-      let setResult = AXUIElementSetAttributeValue(
-        focusedElement, kAXValueAttribute as CFString, text as CFTypeRef)
-      guard setResult == .success else {
-        return TextOutputResult(
-          method: .none,
-          error: TextOutputError.unableToSetValue(setResult)
-        )
-      }
-      return TextOutputResult(
-        method: .accessibility,
-        error: nil,
-        insertedRange: VoiceEditTextRange(location: 0, length: text.utf16.count)
+      return AccessibilityInsertionWriter.replaceAll(
+        text: text, destinationError: { target?.destinationChangedError() },
+        setValue: { AXUIElementSetAttributeValue(focusedElement, kAXValueAttribute as CFString, text as CFTypeRef) }
       )
     }
-  }
-
-  /// Replaces the current selection (or inserts at the caret), falling back to
-  /// replacing the whole field when the app rejects selected-text insertion.
-  private func insertAtCursor(_ text: String, into focusedElement: AXUIElement) -> TextOutputResult {
-    // The selection about to be replaced tells us where the text will land.
-    let selectionBeforeInsert = AccessibilityStreamingTextField(element: focusedElement)
-      .readSelectedRange()
-    let setResult = AXUIElementSetAttributeValue(
-      focusedElement, kAXSelectedTextAttribute as CFString, text as CFTypeRef)
-    guard setResult == .success else {
-      let fallbackResult = AXUIElementSetAttributeValue(
-        focusedElement, kAXValueAttribute as CFString, text as CFTypeRef)
-      guard fallbackResult == .success else {
-        return TextOutputResult(
-          method: .none,
-          error: TextOutputError.unableToSetValue(fallbackResult)
-        )
-      }
-      return TextOutputResult(
-        method: .accessibility,
-        error: nil,
-        insertedRange: VoiceEditTextRange(location: 0, length: text.utf16.count)
-      )
-    }
-    return TextOutputResult(
-      method: .accessibility,
-      error: nil,
-      insertedRange: selectionBeforeInsert.map {
-        VoiceEditTextRange(location: $0.location, length: text.utf16.count)
-      }
-    )
   }
 
   /// A non-nil target is a captured-field contract: when its AX element is
@@ -678,7 +645,7 @@ struct SmartTextOutput: TextOutputting {
     let originalApp = originalTarget.applicationName ?? "unknown"
     let currentApp = current.applicationName ?? "unknown"
     logger.info(
-      "Focus moved from \(originalApp, privacy: .public) to \(currentApp, privacy: .public); delivering there"
+      "Focus moved from \(originalApp, privacy: .private) to \(currentApp, privacy: .private); delivering there"
     )
     var result = deliver(text: text, target: current)
     if case .destinationApplicationChanged? = result.error as? TextOutputError {

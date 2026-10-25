@@ -18,6 +18,13 @@ final class DeliverySettingsRemedyTests: XCTestCase {
 
   // MARK: - Remedy mapping
 
+  func testForOutput_doesNotRecommendTheAlreadySelectedOriginalAppPolicy() {
+    XCTAssertNil(DeliverySettingsRemedy.forOutput(
+      error: TextOutputError.originalApplicationNotInFront("Notes"), warning: nil,
+      focusMovedToOtherApplication: false, configuration: configuration(appSwitch: .originalApp)
+    ))
+  }
+
   func testForOutput_cleanDelivery_ReturnsNil() {
     XCTAssertNil(
       DeliverySettingsRemedy.forOutput(

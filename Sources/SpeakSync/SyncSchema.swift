@@ -68,21 +68,7 @@ public enum SyncSchema {
         /// carries. Every client reads this one list: the Apple engine uploads
         /// and applies only these, and a desktop client imports only these.
         /// Other credentials never leave the device they were entered on.
-        public static let syncableIdentifiers: Set<String> = [
-            "alibaba.apiKey",
-            "deepgram.apiKey",
-            "openai.apiKey",
-            "openrouter.apiKey",
-            "elevenlabs.apiKey",
-            "cartesia.apiKey",
-            "assemblyai.apiKey",
-            "gladia.apiKey",
-            "google.apiKey",
-            "modulate.apiKey",
-            "soniox.apiKey",
-            "xai.apiKey",
-            "meta.apiKey"
-        ]
+        public static let syncableIdentifiers: Set<String> = ProviderCredentialCatalogue.cloudKitSyncable
 
         /// `secret-` followed by the identifier's UTF-8 bytes in unpadded base64url.
         public static func recordName(for identifier: String) -> String {

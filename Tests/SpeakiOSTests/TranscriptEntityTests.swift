@@ -84,6 +84,21 @@ final class TranscriptEntityTests: XCTestCase {
         XCTAssertTrue(after.isEmpty)
     }
 
+    func testBatchRehydrationKeepsRequestedOrderAndFirstStoredDuplicateWithoutText() async throws {
+        let rows = (0..<500).map { self.item(raw: "Synthetic private row \($0)", duration: Double($0)) }
+        let first = rows[0]
+        let duplicate = iOSHistoryItem(
+            id: first.id, createdAt: first.createdAt, transcription: "Later duplicate",
+            model: "synthetic/model", duration: 999, wordCount: 2
+        )
+        let requested = rows.reversed().map(\.id)
+        let query = TranscriptEntityQuery(snapshot: { rows + [duplicate] })
+        let result = try await query.entities(for: requested + [UUID()] + requested)
+        XCTAssertEqual(result.map(\.id), requested)
+        XCTAssertEqual(result.last?.durationSeconds, first.duration)
+        XCTAssertTrue(result.allSatisfy { $0.rawText == nil && $0.polishedText == nil })
+    }
+
     func testSuggestionsAndEmptyIdentifierQueryDoNotReadHistory() async throws {
         var reads = 0
         let query = TranscriptEntityQuery(snapshot: { reads += 1; throw TranscriptEntityError.historyUnavailable })

@@ -99,9 +99,16 @@ struct TranscriptEntityHistory: Sendable {
         // No identifiers means no reason even to load private History.
         guard !identifiers.isEmpty else { return [] }
         let items = try self.snapshot()
+        let requested = Set(identifiers)
+        var matching: [UUID: iOSHistoryItem] = [:]
+        // First stored occurrence wins, matching latest()/the existing reader.
+        // Index only requested rows; work is linear in History plus identifiers.
+        for item in items where requested.contains(item.id) && matching[item.id] == nil {
+            matching[item.id] = item
+        }
         var seen = Set<UUID>()
         return try identifiers.compactMap { id in
-            guard seen.insert(id).inserted, let item = items.first(where: { $0.id == id }) else { return nil }
+            guard seen.insert(id).inserted, let item = matching[id] else { return nil }
             return try TranscriptEntity(item: item, includeText: false)
         }
     }

@@ -37,6 +37,7 @@ final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate, UNUserNotifica
         // before launch actions can start a session, never on foreground entry.
         SharedTranscriptionState.shared.clearRecordingState()
         UNUserNotificationCenter.current().delegate = self
+        TranscriptReadyNotificationRoute.reconcileDisabledPreference()
         Task { await TranscriptReadyNotificationRoute.registerCategory() }
         application.registerForRemoteNotifications()
         // Watch file transfers launch the app in the background; the session
@@ -115,14 +116,12 @@ final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate, UNUserNotifica
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let content = response.notification.request.content
-        Task { @MainActor in
-            _ = TranscriptReadyNotificationRoute.openHistory(
-                category: content.categoryIdentifier,
-                action: response.actionIdentifier,
-                userInfo: content.userInfo
-            )
-            completionHandler()
-        }
+        TranscriptReadyNotificationRoute.receive(
+            category: content.categoryIdentifier,
+            action: response.actionIdentifier,
+            userInfo: content.userInfo,
+            completion: completionHandler
+        )
     }
 
     private func handleQuickAction(_ shortcutItem: UIApplicationShortcutItem, application: UIApplication) -> Bool {

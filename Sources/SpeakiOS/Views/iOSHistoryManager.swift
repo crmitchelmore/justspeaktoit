@@ -89,7 +89,7 @@ public final class iOSHistoryManager: ObservableObject {
             fileURL: documentsURL.appendingPathComponent("transcription-history.json"),
             syncEnabled: true,
             userDefaults: .standard,
-            removeNotificationClaims: { TranscriptReadyNotificationCoordinator.shared.forgetClaims(for: $0) }
+            removeNotificationClaims: { TranscriptReadyNotificationCoordinator.shared.retireNotifications(for: $0) }
         )
     }
 

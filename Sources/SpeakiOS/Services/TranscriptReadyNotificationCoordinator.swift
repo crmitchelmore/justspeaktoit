@@ -24,6 +24,7 @@ struct TranscriptReadyNotificationCenter {
     var enqueue: (UUID) async throws -> Void
     var pendingIdentifiers: () async -> [String]
     var removePending: ([String]) -> Void
+    var removeDelivered: ([String]) -> Void = { _ in }
 }
 
 /// Serializes eligibility/claim/enqueue. A durable claim precedes enqueue and is
@@ -38,8 +39,18 @@ final class TranscriptReadyNotificationCoordinator {
     private let claim: (UUID, Date) throws -> Bool
     private let forget: (Set<UUID>) throws -> Void
     private let now: () -> Date
+    private let historyExists: (UUID) -> Bool
     private var generation = 0
-    private var queue: [TranscriptReadyNotificationInput] = []
+    /// Optional alerts admit at most 64 queued/processing candidates, coalesced
+    /// by History ID. A stalled OS operation cannot retain unlimited completions.
+    static let maximumAdmittedCandidates = 64
+    private struct Candidate {
+        let token = UUID()
+        let input: TranscriptReadyNotificationInput
+    }
+    private var queue: [Candidate] = []
+    private var processing: [UUID: UUID] = [:]
+    private var invalidated: Set<UUID> = []
     private var workers: [Int: Task<Void, Never>] = [:]
     private var enqueuing: Set<UUID> = []
     private var removal: Task<Void, Never>?
@@ -50,7 +61,8 @@ final class TranscriptReadyNotificationCoordinator {
         writeEnabled: @escaping (Bool) -> Void,
         claim: @escaping (UUID, Date) throws -> Bool,
         forget: @escaping (Set<UUID>) throws -> Void = { _ in },
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        historyExists: @escaping (UUID) -> Bool = { _ in true }
     ) {
         self.center = center
         self.isEnabled = isEnabled
@@ -58,6 +70,7 @@ final class TranscriptReadyNotificationCoordinator {
         self.claim = claim
         self.forget = forget
         self.now = now
+        self.historyExists = historyExists
     }
 
     /// Called only by an intentional Settings toggle, never launch or capture.
@@ -96,8 +109,14 @@ final class TranscriptReadyNotificationCoordinator {
     }
 
     func submit(_ input: TranscriptReadyNotificationInput) {
-        guard self.isEnabled(), input.isEligible else { return }
-        self.queue.append(input)
+        let hasWorkerCapacity = self.workers.count < Self.maximumAdmittedCandidates
+            || self.workers[self.generation] != nil
+        guard self.isEnabled(), input.isEligible, let identifier = input.historyID,
+              !self.queue.contains(where: { $0.input.historyID == identifier }),
+              !self.processing.values.contains(identifier),
+              self.queue.count + self.processing.count < Self.maximumAdmittedCandidates,
+              hasWorkerCapacity else { return }
+        self.queue.append(Candidate(input: input))
         let observedGeneration = self.generation
         guard self.workers[observedGeneration] == nil else { return }
         self.workers[observedGeneration] = Task {
@@ -109,10 +128,17 @@ final class TranscriptReadyNotificationCoordinator {
 
     private func drain(generation: Int) async {
         while !Task.isCancelled, generation == self.generation, !self.queue.isEmpty {
-            let input = self.queue.removeFirst()
+            let candidate = self.queue.removeFirst()
+            let input = candidate.input
             guard self.isEnabled(), input.isEligible, let identifier = input.historyID else { continue }
+            self.processing[candidate.token] = identifier
+            defer {
+                self.processing.removeValue(forKey: candidate.token)
+                self.invalidated.remove(candidate.token)
+            }
             let authorized = await self.center.authorized()
-            guard !Task.isCancelled, generation == self.generation, self.isEnabled(), authorized else { continue }
+            guard !Task.isCancelled, generation == self.generation, self.isEnabled(), authorized,
+                  !self.invalidated.contains(candidate.token), self.historyExists(identifier) else { continue }
             do {
                 // A previous generation may still be finishing this stable ID.
                 // Never let its late cleanup remove a newer request for that ID.
@@ -121,8 +147,9 @@ final class TranscriptReadyNotificationCoordinator {
                 defer {
                     // An uncooperative enqueue can finish after opt-out. No newer
                     // generation may enqueue this ID until its cleanup has finished.
-                    if generation != self.generation || !self.isEnabled() {
-                        self.center.removePending([TranscriptReadyNotificationRoute.requestIdentifier(for: identifier)])
+                    if generation != self.generation || !self.isEnabled()
+                        || self.invalidated.contains(candidate.token) || !self.historyExists(identifier) {
+                        self.removeRequest(for: identifier)
                     }
                     self.enqueuing.remove(identifier)
                 }
@@ -133,8 +160,30 @@ final class TranscriptReadyNotificationCoordinator {
         }
     }
 
-    func forgetClaims(for identifiers: Set<UUID>) {
+    /// Explicit durable local History deletion retires only those rows' notices.
+    /// Tokens cover awaits; the exact-row existence check also covers deletion
+    /// before a completed capture submits its frozen result.
+    func retireNotifications(for identifiers: Set<UUID>) {
+        self.queue.removeAll { candidate in
+            candidate.input.historyID.map { identifiers.contains($0) } ?? false
+        }
+        self.invalidated.formUnion(self.processing.compactMap { token, identifier in
+            identifiers.contains(identifier) ? token : nil
+        })
+        for identifier in identifiers { self.removeRequest(for: identifier) }
         try? self.forget(identifiers)
+    }
+
+    private func removeRequest(for identifier: UUID) {
+        let requests = [TranscriptReadyNotificationRoute.requestIdentifier(for: identifier)]
+        self.center.removePending(requests)
+        self.center.removeDelivered(requests)
+    }
+
+    /// Reconcile persisted opt-out on launch, even if an earlier process died
+    /// after writing false but before its asynchronous removal ran. No prompt.
+    func reconcilePersistedPreference() {
+        if !self.isEnabled() { self.disable() }
     }
 
     /// Test/lifecycle seam; scheduling callers do not wait for notification effects.

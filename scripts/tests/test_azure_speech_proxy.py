@@ -92,6 +92,51 @@ class ProxyTests(unittest.TestCase):
             with error:
                 return error.code, error.read()
 
+    def test_trickled_headers_have_total_deadline_and_release_admission(self):
+        self.server.slots = threading.BoundedSemaphore(1)
+        with patch.object(proxy, "MAX_HEADER_SECONDS", 0.2, create=True):
+            client = socket.create_connection(self.server.server_address, timeout=2)
+            stop = threading.Event()
+
+            def trickle():
+                try:
+                    client.sendall(b"GET /health HTTP/1.1\r\nX-Slow: ")
+                    while not stop.wait(0.02):
+                        client.sendall(b"a")
+                except OSError:
+                    pass
+
+            writer = threading.Thread(target=trickle, daemon=True)
+            writer.start()
+            try:
+                client.settimeout(1)
+                try:
+                    self.assertEqual(client.recv(1), b"")
+                except ConnectionResetError:
+                    pass  # Closing with incoming trickle bytes may reset TCP.
+                self.assertTrue(self.server.slots.acquire(timeout=1), "Header timeout must release admission")
+                self.server.slots.release()
+                self.assertEqual(self.request("/health", body=None)[0], 200)
+                self.assertEqual(self.transport.calls, [])
+            finally:
+                stop.set()
+                client.close()
+                writer.join(timeout=1)
+
+    def test_header_deadline_does_not_apply_to_upload_body(self):
+        with patch.object(proxy, "MAX_HEADER_SECONDS", 0.2, create=True):
+            with socket.create_connection(self.server.server_address, timeout=2) as client:
+                client.sendall(((
+                    "POST /cognitiveservices/v1 HTTP/1.1\r\n"
+                    "Host: 127.0.0.1:%d\r\nOcp-Apim-Subscription-Key: %s\r\n"
+                    "Content-Type: application/ssml+xml\r\n"
+                    "X-Microsoft-OutputFormat: riff-24khz-16bit-mono-pcm\r\n"
+                    "Content-Length: %d\r\n\r\n"
+                ) % (self.server.server_port, self.token, len(SSML))).encode())
+                time.sleep(0.4)
+                client.sendall(SSML)
+                self.assertIn(b" 200 ", client.recv(4096).split(b"\r\n")[0])
+
     def test_synthesis_preserves_azure_contract(self):
         self.assertEqual(self.request()[0], 200)
         self.assertEqual(self.transport.calls, [

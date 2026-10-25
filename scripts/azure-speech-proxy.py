@@ -413,6 +413,33 @@ class ProxyServer(http.server.ThreadingHTTPServer):
         print("Local proxy request failed.", file=sys.stderr, flush=True)
 
 
+MAX_HEADER_SECONDS = 15
+
+
+class HeaderDeadlineReader:
+    """One absolute budget for the request line and all HTTP headers."""
+
+    def __init__(self, raw, connection):
+        self.raw = raw
+        self.connection = connection
+        self.deadline = time.monotonic() + MAX_HEADER_SECONDS
+
+    def readline(self, limit=-1):
+        line = bytearray()
+        while limit < 0 or len(line) < limit:
+            remaining = self.deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("HTTP header deadline reached.")
+            self.connection.settimeout(remaining)
+            byte = self.raw.read(1)
+            if not byte:
+                break
+            line.extend(byte)
+            if byte == b"\n":
+                break
+        return bytes(line)
+
+
 class ProxyHandler(http.server.BaseHTTPRequestHandler):
     # No read-ahead: after HTTP upgrade the relay reads directly from the socket.
     rbufsize = 0
@@ -420,6 +447,23 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
     def setup(self):
         self.request.settimeout(15)
         super().setup()
+
+    def handle_one_request(self):
+        original = self.rfile
+        self.rfile = HeaderDeadlineReader(original, self.connection)
+        try:
+            super().handle_one_request()
+        finally:
+            self.rfile = original
+
+    def parse_request(self):
+        reader = self.rfile
+        try:
+            return super().parse_request()
+        finally:
+            # Uploads and upgraded WebSockets keep their separate lifetime budgets.
+            self.rfile = reader.raw
+            self.connection.settimeout(15)
 
     def log_message(self, *args):
         pass

@@ -53,7 +53,7 @@ class NativeUICoverageTests(unittest.TestCase):
     def test_native_gate_requires_each_suite_and_rejects_partial_skips(self):
         verifier = MODULE_PATH.with_name("verify-core-journey-ui.py")
         suites = ["LaunchUITests", "CoreJourneyFixtureUITests", "CoreJourneyHotKeyUITests", "CoreJourneyBatchUITests",
-                  "CoreJourneyPostProcessingUITests"]
+                  "SettingsCredentialUITests", "CoreJourneyPostProcessingUITests"]
         passing = "".join(f"Test Case '-[SpeakAppUITests.{suite} testJourney]' passed (0.001 seconds).\n"
                           for suite in suites[:-1])
         names = ["testBatchPolishing_DeliversProcessedTextAndRetainsRawHistory",
@@ -64,6 +64,9 @@ class NativeUICoverageTests(unittest.TestCase):
         cases = [
             (passing, 0),
             (passing.replace("CoreJourneyBatchUITests", "RenamedBatchUITests"), 1),
+            (passing.replace("SettingsCredentialUITests", "RenamedSettingsUITests"), 1),
+            (passing.replace("SettingsCredentialUITests testJourney]\' passed",
+                             "SettingsCredentialUITests testJourney]\' skipped"), 1),
             (passing + "Test Case '-[SpeakAppUITests.CoreJourneyBatchUITests testSkipped]' skipped (0 seconds).\n", 1),
             (passing.replace(required[0], ""), 1),
             (passing.replace(required[1], ""), 1),

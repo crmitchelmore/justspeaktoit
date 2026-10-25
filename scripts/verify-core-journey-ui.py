@@ -11,6 +11,7 @@ REQUIRED_SUITES = (
     "CoreJourneyFixtureUITests",
     "CoreJourneyHotKeyUITests",
     "CoreJourneyBatchUITests",
+    "SettingsCredentialUITests",
     "CoreJourneyPostProcessingUITests",
 )
 

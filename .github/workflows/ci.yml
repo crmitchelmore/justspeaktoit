@@ -555,16 +555,11 @@ jobs:
             "$RUNNER_TEMP/ios-test-products-download/ios-test-products.tar.gz" \
             "$RUNNER_TEMP/ios-test-products"
 
-      - name: Select iOS Simulator
+      - name: Create owned iOS Simulator matching the selected configuration
         run: |
-          set -euo pipefail
-          if ! SIMULATOR_ID=$(xcrun simctl list devices available -j | jq -er \
-            '([.devices[][] | select(.isAvailable and .name == "iPhone 17 Pro")][0].udid) //
-             ([.devices[][] | select(.isAvailable and (.name | startswith("iPhone")))][0].udid)'); then
-            echo "::error::No available iPhone simulator could be selected."
-            exit 1
-          fi
-          echo "SIMULATOR_ID=$SIMULATOR_ID" >> "$GITHUB_ENV"
+          python3 scripts/owned-ios-ci-simulator.py create \
+            --receipt "$RUNNER_TEMP/owned-ios-simulator.json" --github-env "$GITHUB_ENV" \
+            --owner "$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT:$GITHUB_JOB"
 
       - name: Prepare iOS Simulator
         run: python3 scripts/prepare-ios-ci.py "$SIMULATOR_ID"
@@ -642,12 +637,21 @@ jobs:
             ${{ runner.temp }}/ios-tests.log
           if-no-files-found: ignore
 
+      - name: Remove only the simulator created by this job
+        if: always()
+        run: |
+          python3 scripts/owned-ios-ci-simulator.py cleanup \
+            --receipt "$RUNNER_TEMP/owned-ios-simulator.json" \
+            --owner "$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT:$GITHUB_JOB"
+
       - name: Upload complete iOS XCTest log separately
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ios-tests-log-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ios-tests.log
+          path: |
+            ${{ runner.temp }}/ios-tests.log
+            ${{ runner.temp }}/owned-ios-simulator.json
           retention-days: 7
           if-no-files-found: error
 

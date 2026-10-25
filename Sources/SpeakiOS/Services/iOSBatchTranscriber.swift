@@ -251,19 +251,27 @@ enum IOSBatchTranscriptionRoute: Equatable, Sendable {
     case fileSpeech(FileSpeechProvider)
     case openRouter
 
+    // One mapping per native backend; capability policy is owned by SpeakCore.
+    // swiftlint:disable:next cyclomatic_complexity
     static func route(for model: String) -> IOSBatchTranscriptionRoute {
-        let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
-        if AppleLocalModels.isSpeechAnalyzerModel(model) { return .appleSpeechAnalyzer }
-        if AppSettings.openAIBatchModelIDs.contains(model) { return .openAI }
-        if model == CartesiaBatchClient.catalogID { return .cartesia }
-        if model == GladiaBatchClient.catalogID { return .gladia }
-        if AzureTranscriptionModels.batchIDs.contains(model) { return .azure }
-        if model.hasPrefix("alibaba/") { return .alibaba }
-        if model == MetaMuseVoiceTranscribe.batchCatalogID { return .metaMuse }
-        if GeminiTranscribeModels.directBatchModelIDs.contains(model) { return .gemini }
-        if model == XAISpeechToText.batchCatalogID { return .xai }
-        if let provider = FileSpeechProvider.provider(for: model) { return .fileSpeech(provider) }
-        return .openRouter
+        guard let route = BatchTranscriptionRouting.route(for: model, platform: .iOS) else { return .openRouter }
+        switch route.transport {
+        case .appleLocal: return .appleSpeechAnalyzer
+        case .openRouter: return .openRouter
+        case .directProvider:
+            if let provider = FileSpeechProvider(rawValue: route.providerID) { return .fileSpeech(provider) }
+            switch route.providerID {
+            case "openai": return .openAI
+            case "cartesia": return .cartesia
+            case "gladia": return .gladia
+            case "azure": return .azure
+            case "alibaba": return .alibaba
+            case "meta": return .metaMuse
+            case "google": return .gemini
+            case "xai": return .xai
+            default: return .openRouter
+            }
+        }
     }
 }
 

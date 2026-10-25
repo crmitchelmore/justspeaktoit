@@ -36,6 +36,40 @@ final class BatchProviderRoutingTests: XCTestCase {
         }
     }
 
+    func testEverySelectableBatchModelKeepsItsTransportAndCredentialOwner() throws {
+        for model in AppSettings.supportedBatchModels {
+            let route = try XCTUnwrap(BatchTranscriptionRouting.route(for: model.id, platform: .iOS))
+            let requirement = ModelCredentialResolver.requirement(for: model.id, purpose: .batchTranscription)
+            switch requirement {
+            case .notRequired:
+                XCTAssertEqual(route.transport, .appleLocal, model.id)
+                XCTAssertNil(route.apiKeyIdentifier, model.id)
+            case .apiKey(let identifier, _):
+                XCTAssertEqual(route.apiKeyIdentifier, identifier, model.id)
+            }
+            let backend = IOSBatchTranscriptionRoute.route(for: model.id)
+            XCTAssertEqual(Self.providerID(for: backend), route.providerID, model.id)
+        }
+    }
+
+    // Each existing native backend has its own expected transport owner.
+    // swiftlint:disable:next cyclomatic_complexity
+    private static func providerID(for route: IOSBatchTranscriptionRoute) -> String {
+        switch route {
+        case .appleSpeechAnalyzer: return "apple"
+        case .openAI: return "openai"
+        case .metaMuse: return "meta"
+        case .azure: return "azure"
+        case .alibaba: return "alibaba"
+        case .cartesia: return "cartesia"
+        case .gladia: return "gladia"
+        case .gemini: return "google"
+        case .xai: return "xai"
+        case .fileSpeech(let provider): return provider.rawValue
+        case .openRouter: return "openrouter"
+        }
+    }
+
     func testPaddedModelsSendCredentialsOnlyToTheirProvider() async throws {
         let audioURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".m4a")
         try Data([0, 1, 2, 3]).write(to: audioURL)

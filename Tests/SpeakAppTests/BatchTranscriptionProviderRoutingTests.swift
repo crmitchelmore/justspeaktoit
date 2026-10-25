@@ -12,13 +12,17 @@ final class BatchTranscriptionProviderRoutingTests: XCTestCase {
         let whisper = "openai/whisper-1"
         let live = "openai/gpt-live-transcribe-streaming"
         let registry = TranscriptionProviderRegistry(providers: [
-            "openai": RoutingProvider(id: "replacement", models: [live], credential: "fixture.key")
+            "openai": RoutingProvider(
+                id: "replacement", models: [live, "openai/gpt-audio", "openai/custom"], credential: "fixture.key"
+            )
         ])
         let missingBatch = await registry.provider(forModel: whisper)
         XCTAssertNil(missingBatch, "Catalogue ownership must not widen the registered instance")
-        let selected = await registry.provider(forModel: " \n" + live + "\t")
-        XCTAssertEqual(selected?.metadata.id, "replacement")
-        XCTAssertEqual(selected?.metadata.apiKeyIdentifier, "fixture.key")
+        for model in [live, "openai/gpt-audio", "openai/custom"] {
+            let selected = await registry.provider(forModel: " \n" + model + "\t")
+            XCTAssertEqual(selected?.metadata.id, "replacement", model)
+            XCTAssertEqual(selected?.metadata.apiKeyIdentifier, "fixture.key", model)
+        }
         let requiresKey = await registry.requiresAPIKey(for: live)
         XCTAssertTrue(requiresKey, "A non-batch lookup still owns the live credential")
     }

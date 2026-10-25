@@ -1,0 +1,112 @@
+name: Linux Flatpak
+
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - Package.swift
+      - Sources/SpeakCore/**
+      - Sources/SpeakDesktop*/**
+      - Sources/SpeakSync/**
+      - Sources/SpeakLinux*/**
+      - Sources/CLinux*/**
+      - Sources/CLlamaCpp/**
+      - Sources/CMigrationArchive/**
+      - Sources/CRecordingFileSupport/**
+      - Sources/SpeakAutomationKit/**
+      - Sources/SpeakCLI/**
+      - Resources/**
+      - packaging/linux/**
+      - scripts/linux-flatpak-checks.sh
+      - scripts/stage-linux-desktop.py
+      - scripts/generate-desktop-icons.py
+      - scripts/local-llm-runtime/**
+      - scripts/migration/verify-miniz.py
+      - scripts/windows-local-runtime/dependencies.json
+      - .github/workflows/linux-flatpak.yml
+  pull_request:
+    paths: *paths
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  flatpak:
+    name: Flatpak build, bundle and installed runtime
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50@sha256:1de59efef01a946d9f28f1ec3458bf6f61dcee3507d7fecdd473f8134da4ec77
+      options: --privileged
+    timeout-minutes: 90
+    env:
+      MANIFEST: packaging/linux/com.justspeaktoit.JustSpeakToIt.yml
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Check pinned sources, permissions and offline build contract
+        run: |
+          python3 packaging/linux/generate-swiftpm-sources.py --check
+          flatpak-builder --show-manifest "$MANIFEST" > "$RUNNER_TEMP/flatpak-manifest.json"
+          python3 packaging/linux/verify-flatpak-manifest.py "$RUNNER_TEMP/flatpak-manifest.json"
+          flatpak-builder-lint manifest "$MANIFEST"
+
+      - name: Install runtime and Swift SDK extension
+        run: |
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y --noninteractive flathub org.gnome.Platform//50 org.gnome.Sdk//50 org.freedesktop.Sdk.Extension.swift6//25.08
+          flatpak info --user org.freedesktop.Sdk.Extension.swift6//25.08
+
+      - name: Fetch pinned sources
+        run: >-
+          flatpak-builder --download-only --force-clean
+          --state-dir "$RUNNER_TEMP/flatpak-state" "$RUNNER_TEMP/flatpak-build" "$MANIFEST"
+
+      - name: Build offline
+        run: >-
+          flatpak-builder --disable-download --force-clean --disable-rofiles-fuse --jobs=4
+          --state-dir "$RUNNER_TEMP/flatpak-state" --repo "$RUNNER_TEMP/flatpak-repo"
+          "$RUNNER_TEMP/flatpak-build" "$MANIFEST"
+
+      - name: Bundle
+        run: >-
+          flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo
+          "$RUNNER_TEMP/flatpak-repo" "$RUNNER_TEMP/JustSpeakToIt-x86_64.flatpak" com.justspeaktoit.JustSpeakToIt
+
+      - name: Fetch and verify the pinned speech fixture
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, urllib.request
+          pin = json.loads(pathlib.Path('scripts/windows-local-runtime/dependencies.json').read_text())['whisperCpp']
+          fixture = pin['fixture']
+          url = 'https://raw.githubusercontent.com/ggml-org/whisper.cpp/' + pin['commit'] + '/' + fixture['path']
+          data = urllib.request.urlopen(url, timeout=60).read()
+          assert len(data) == fixture['bytes'] and hashlib.sha256(data).hexdigest() == fixture['sha256']
+          pathlib.Path(os.environ['RUNNER_TEMP'], 'jfk.wav').write_bytes(data)
+          PY
+
+      - name: Install bundle and qualify its real sandbox runtime
+        run: |
+          [ -s /etc/machine-id ] || dbus-uuidgen > /etc/machine-id
+          bash -o pipefail -c 'scripts/linux-flatpak-checks.sh "$RUNNER_TEMP/JustSpeakToIt-x86_64.flatpak" "$RUNNER_TEMP/jfk.wav" 2>&1 | tee "$RUNNER_TEMP/flatpak-installed-checks.log"'
+          sha256sum "$RUNNER_TEMP/JustSpeakToIt-x86_64.flatpak" > "$RUNNER_TEMP/flatpak-bundle.sha256"
+          flatpak info --user com.justspeaktoit.JustSpeakToIt >> "$RUNNER_TEMP/flatpak-installed-checks.log"
+          flatpak info --user --show-permissions com.justspeaktoit.JustSpeakToIt >> "$RUNNER_TEMP/flatpak-installed-checks.log"
+
+      - name: Upload bundle and qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: justspeaktoit-flatpak-x86_64
+          path: |
+            ${{ runner.temp }}/JustSpeakToIt-x86_64.flatpak
+            ${{ runner.temp }}/flatpak-installed-checks.log
+            ${{ runner.temp }}/flatpak-bundle.sha256
+            ${{ runner.temp }}/flatpak-manifest.json
+          if-no-files-found: error

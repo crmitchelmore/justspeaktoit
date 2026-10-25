@@ -590,6 +590,14 @@ static void polish_select_location(gint32 desired, gboolean choose_first) {
             }
         }
     }
+    /* AdwComboRow auto-selects nonempty models on newer GTK. Keep an unavailable
+       saved choice explicit rather than silently selecting a different model. */
+    if (location <= 1 && selected == GTK_INVALID_LIST_POSITION) {
+        gint32 slot = -1;
+        g_array_append_val(ui.polish_slots, slot);
+        gtk_string_list_append(ui.polish_models, "Choose a model…");
+        selected = ui.polish_slots->len - 1;
+    }
     adw_combo_row_set_selected(ui.polish_model_row, selected);
     if (selected < ui.polish_slots->len) {
         gint32 full = g_array_index(ui.polish_slots, gint32, selected);
@@ -1816,11 +1824,11 @@ static GtkWidget *build_post_processing(void) {
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(ui.polish_row));
     ui.polish_location_row = ADW_COMBO_ROW(adw_combo_row_new());
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.polish_location_row), "Model source");
-    const char *locations[] = {"Local", "Remote", NULL};
+    const char *locations[] = {"Local", "Remote", "Choose a source…", NULL};
     GtkStringList *location_names = gtk_string_list_new(locations);
     adw_combo_row_set_model(ui.polish_location_row, G_LIST_MODEL(location_names));
     g_object_unref(location_names);
-    adw_combo_row_set_selected(ui.polish_location_row, GTK_INVALID_LIST_POSITION);
+    adw_combo_row_set_selected(ui.polish_location_row, 2);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(ui.polish_location_row));
     AdwActionRow *mode = ADW_ACTION_ROW(adw_action_row_new());
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(mode), "Finished-transcript cleanup");
@@ -3655,7 +3663,7 @@ static void polish_apply(gpointer pointer) {
     ui.polish_local_selected = polish->selected >= polish->local_index ? polish->selected
         : retain_local ? local_selected : polish->local_index;
     adw_combo_row_set_selected(ui.polish_location_row, polish->selected < 0
-        ? GTK_INVALID_LIST_POSITION : (guint)polish->selected >= polish_remote_boundary() ? 0 : 1);
+        ? 2 : (guint)polish->selected >= polish_remote_boundary() ? 0 : 1);
     polish_select_location(polish->selected, FALSE);
     adw_switch_row_set_active(ui.polish_row, polish->enabled);
     adw_switch_row_set_active(ui.polish_directives_row, polish->include_directives);
@@ -4572,7 +4580,14 @@ static void voices_apply(gpointer pointer) {
         }
     }
     gboolean has_favorites = read_aloud.favorite_indices->len > 0;
-    if (!has_favorites) gtk_string_list_append(read_aloud.favorite_names, "No available favorites - add a voice below");
+    if (!has_favorites) {
+        gtk_string_list_append(read_aloud.favorite_names, "No available favorites - add a voice below");
+        favorite_selected = 0;
+    } else if (favorite_selected == GTK_INVALID_LIST_POSITION) {
+        /* A display-only row has no entry in favorite_indices and emits no voice choice. */
+        favorite_selected = read_aloud.favorite_indices->len;
+        gtk_string_list_append(read_aloud.favorite_names, "Choose a favorite…");
+    }
     adw_combo_row_set_selected(read_aloud.favorite_row, favorite_selected);
     gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.favorite_row), has_favorites);
     gboolean executable = next != NULL && *next != '\0';
@@ -4948,10 +4963,14 @@ static int32_t voice_favorites_self_test(char *error, size_t capacity) {
     favorite_observed.calls = 0;
     voices_apply(&fixture);
     gboolean okay = favorite_observed.calls == 0 && read_aloud.favorite_indices->len == 1 &&
-        g_array_index(read_aloud.favorite_indices, guint, 0) == 1;
+        g_array_index(read_aloud.favorite_indices, guint, 0) == 1 &&
+        adw_combo_row_get_selected(read_aloud.favorite_row) == read_aloud.favorite_indices->len &&
+        g_list_model_get_n_items(G_LIST_MODEL(read_aloud.favorite_names)) == 2;
     adw_combo_row_set_selected(read_aloud.favorite_row, 0);
     okay = okay && favorite_observed.calls == 1 && favorite_observed.action == 0 &&
         g_strcmp0(favorite_observed.identifier, ids[1]) == 0;
+    adw_combo_row_set_selected(read_aloud.favorite_row, read_aloud.favorite_indices->len);
+    okay = okay && favorite_observed.calls == 1;
     /* A host acknowledgement, not an optimistic UI write, updates button state. */
     fixture.selected = 1;
     voices_apply(&fixture);
@@ -5689,14 +5708,26 @@ static gboolean post_processing_self_test(void) {
     adw_combo_row_set_selected(ui.polish_location_row, 1);
     observed.event = 0;
     on_polish_apply(NULL, NULL);
-    okay = okay && observed.event == 0 &&
-        adw_combo_row_get_selected(ui.polish_model_row) == GTK_INVALID_LIST_POSITION;
+    okay = okay && observed.event == 0 && polish_selected_model() == -1 &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_prompt_row)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_key_row)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_directives_row)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_tags_row));
     fixture.selected = -1;
     polish_apply(&fixture);
     observed.event = 0;
     on_polish_apply(NULL, NULL);
-    okay = okay && observed.event == 0 &&
-        adw_combo_row_get_selected(ui.polish_model_row) == GTK_INVALID_LIST_POSITION;
+    okay = okay && observed.event == 0 && polish_selected_model() == -1 &&
+        adw_combo_row_get_selected(ui.polish_location_row) == 2 &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_model_row)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_prompt_row)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_key_row));
+    adw_combo_row_set_selected(ui.polish_location_row, 1);
+    adw_combo_row_set_selected(ui.polish_model_row, 0);
+    observed.event = 0;
+    on_polish_apply(NULL, NULL);
+    okay = okay && observed.event == JSTI_EVENT_POST_PROCESSING && observed.index == 0 &&
+        polish_selected_model() == 0 && gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_prompt_row));
     const char *labels[] = {"Remote", "Local"};
     okay = okay && jsti_window_set_post_processing(labels, 2, 1, 0, 2, -1, fixture.local_notice, 1, 1, "") == -1 &&
         jsti_window_set_post_processing(labels, 2, 2, 0, 1, -1, fixture.local_notice, 1, 1, "") == -1 &&
@@ -5797,7 +5828,11 @@ static int32_t local_cleanup_sources_self_test(char *error, size_t capacity) {
     adw_combo_row_set_selected(ui.polish_location_row, 1);
     observed.event = 0;
     on_polish_apply(NULL, NULL);
-    okay = okay && observed.event == 0 && polish_selected_model() == -1;
+    okay = okay && observed.event == 0 && polish_selected_model() == -1 &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_prompt_row)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_key_row)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_directives_row)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_tags_row));
     if (!okay && failure_stage == NULL) failure_stage = "unavailable remote stays unselected";
     adw_combo_row_set_selected(ui.polish_location_row, 0);
     okay = okay && polish_selected_model() == 4;

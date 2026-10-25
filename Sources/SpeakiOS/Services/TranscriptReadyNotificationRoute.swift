@@ -43,6 +43,25 @@ public enum TranscriptReadyNotificationRoute {
         return true
     }
 
+    /// Complete the system callback promptly; only navigation waits for MainActor.
+    public static func receive(
+        category: String, action: String, userInfo: [AnyHashable: Any], completion: () -> Void
+    ) {
+        self.dispatchResponse(route: {
+            _ = self.openHistory(category: category, action: action, userInfo: userInfo)
+        }, completion: completion)
+    }
+
+    static func dispatchResponse(route: @escaping @MainActor () -> Void, completion: () -> Void) {
+        Task { @MainActor in route() }
+        completion()
+    }
+
+    @MainActor
+    public static func reconcileDisabledPreference() {
+        TranscriptReadyNotificationCoordinator.shared.reconcilePersistedPreference()
+    }
+
     /// Merge with existing categories rather than claiming unrelated notifications.
     public static func registerCategory(in center: UNUserNotificationCenter = .current()) async {
         var categories = await center.notificationCategories()
@@ -81,12 +100,17 @@ extension TranscriptReadyNotificationCoordinator {
                     ))
                 },
                 pendingIdentifiers: { await center.pendingNotificationRequests().map(\.identifier) },
-                removePending: { center.removePendingNotificationRequests(withIdentifiers: $0) }
+                removePending: { center.removePendingNotificationRequests(withIdentifiers: $0) },
+                removeDelivered: { center.removeDeliveredNotifications(withIdentifiers: $0) }
             ),
             isEnabled: { settings.transcriptReadyNotificationsEnabled },
             writeEnabled: { settings.transcriptReadyNotificationsEnabled = $0 },
             claim: { try ledger.claim($0, at: $1) },
-            forget: { try ledger.forget($0) }
+            forget: { try ledger.forget($0) },
+            historyExists: { identifier in
+                let history = iOSHistoryManager.shared
+                return history.isStorageReady && history.items.contains { $0.id == identifier }
+            }
         )
         settings.transcriptReadyNotificationsDidDisable = { [weak coordinator] in coordinator?.disable() }
         return coordinator

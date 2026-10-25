@@ -478,7 +478,12 @@ A protected device-local ledger records each eligible attempt before enqueue, su
 enqueue failure. This is best-effort at-most-once scheduling: a crash between the claim and enqueue can
 lose an alert. Turning the option off invalidates scheduling and removes this feature's pending alerts,
 without clearing unrelated or delivered notifications. Explicit durable local History deletion retires
-that row's claim. Notification failures do not change capture receipts, History or Watch retry/ack state.
+that row's claim and removes only its pending/delivered notice; overlapping candidates are invalidated.
+Launch reconciles persisted opt-out without prompting. A late accepted request crossing opt-out is also
+removed by its exact identifier. This is best-effort cleanup: the OS cannot prove recall of an already
+shown banner. Historical unrelated delivered notices are preserved. Optional scheduling admits at most
+64 coalesced queued/processing results, including held old generations; excess notices are dropped.
+Notification failures do not change capture receipts, History or Watch retry/ack state.
 
 Apple documents intentional [notification permission requests](https://developer.apple.com/documentation/usernotifications/asking-permission-to-use-notifications)
 and [foreground actions requiring unlock as needed](https://developer.apple.com/documentation/usernotifications/unnotificationactionoptions/foreground).

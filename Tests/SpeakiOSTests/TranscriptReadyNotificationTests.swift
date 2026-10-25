@@ -201,6 +201,127 @@ final class TranscriptReadyNotificationTests: XCTestCase {
 }
 
 @MainActor
+extension TranscriptReadyNotificationTests {
+    func testLateDeliveredEnqueueAfterOptOut_RemovesOnlyThatAcceptedRequest() async {
+        let fixture = NotificationFixture()
+        fixture.deliversImmediately = true
+        let historic = TranscriptReadyNotificationRoute.requestIdentifier(for: UUID())
+        fixture.delivered = [historic, "unrelated.remote"]
+        let entered = expectation(description: "Immediate delivery enqueue")
+        let gate = NotificationGate(entered: entered)
+        fixture.enqueueGate = gate
+        let coordinator = fixture.coordinator()
+        let identifier = UUID()
+        coordinator.submit(.init(historyID: identifier))
+        await fulfillment(of: [entered], timeout: 2)
+        _ = await coordinator.setEnabledFromUser(false)
+        gate.release()
+        await coordinator.waitUntilIdle()
+        XCTAssertEqual(fixture.delivered, [historic, "unrelated.remote"])
+        XCTAssertTrue(fixture.claimed.contains(identifier))
+    }
+
+    func testPersistedOptOutLaunchReconciliation_RemovesOnlyFeaturePendingAndNeverPrompts() async {
+        let fixture = NotificationFixture()
+        fixture.enabled = false
+        fixture.pending = [TranscriptReadyNotificationRoute.requestIdentifier(for: UUID()), "unrelated.remote"]
+        fixture.delivered = [TranscriptReadyNotificationRoute.requestIdentifier(for: UUID()), "unrelated.delivered"]
+        let delivered = fixture.delivered
+        let coordinator = fixture.coordinator()
+        coordinator.reconcilePersistedPreference()
+        await coordinator.waitUntilIdle()
+        XCTAssertEqual(fixture.pending, ["unrelated.remote"])
+        XCTAssertEqual(fixture.delivered, delivered, "No historical delivered enumeration or clearing on launch")
+        XCTAssertEqual(fixture.permissionRequests, 0)
+        XCTAssertEqual(fixture.authorizationReads, 0)
+    }
+
+    func testDurableDeletion_RetiresQueuedAndHeldCandidatesWithoutAffectingOtherIDs() async {
+        let fixture = NotificationFixture()
+        let entered = expectation(description: "Authorization held")
+        let gate = NotificationGate(entered: entered)
+        fixture.authorizationGate = gate
+        let coordinator = fixture.coordinator()
+        let held = UUID()
+        let queued = UUID()
+        let survivor = UUID()
+        coordinator.submit(.init(historyID: held))
+        await fulfillment(of: [entered], timeout: 2)
+        coordinator.submit(.init(historyID: queued))
+        coordinator.submit(.init(historyID: survivor))
+        fixture.pending = [TranscriptReadyNotificationRoute.requestIdentifier(for: held), "unrelated.remote"]
+        fixture.delivered = [TranscriptReadyNotificationRoute.requestIdentifier(for: queued), "unrelated.delivered"]
+        fixture.deleted = [held, queued]
+        coordinator.retireNotifications(for: [held, queued])
+        XCTAssertEqual(fixture.pending, ["unrelated.remote"])
+        XCTAssertEqual(fixture.delivered, ["unrelated.delivered"])
+        fixture.authorizationGate = nil
+        gate.release()
+        await coordinator.waitUntilIdle()
+        XCTAssertEqual(fixture.enqueued, [survivor])
+        XCTAssertEqual(fixture.claimed, [survivor])
+    }
+
+    func testDeletionDuringAcceptedEnqueue_CannotRestoreDeletedNoticeAndRetiresClaim() async {
+        let fixture = NotificationFixture()
+        fixture.deliversImmediately = true
+        let entered = expectation(description: "Deletion during enqueue")
+        let gate = NotificationGate(entered: entered)
+        fixture.enqueueGate = gate
+        let coordinator = fixture.coordinator()
+        let identifier = UUID()
+        coordinator.submit(.init(historyID: identifier))
+        await fulfillment(of: [entered], timeout: 2)
+        fixture.deleted.insert(identifier)
+        coordinator.retireNotifications(for: [identifier])
+        gate.release()
+        await coordinator.waitUntilIdle()
+        XCTAssertTrue(fixture.pending.isEmpty)
+        XCTAssertTrue(fixture.delivered.isEmpty)
+        XCTAssertFalse(fixture.claimed.contains(identifier))
+        coordinator.submit(.init(historyID: identifier))
+        await coordinator.waitUntilIdle()
+        XCTAssertEqual(fixture.enqueued, [identifier], "Deleted exact row is never replaced with latest")
+    }
+
+    func testAdmissionCap_CoalescesDuplicatesAndCountsHeldOldGenerations() async {
+        let fixture = NotificationFixture()
+        let entered = expectation(description: "Held work counts against cap")
+        let gate = NotificationGate(entered: entered)
+        fixture.enqueueGate = gate
+        let coordinator = fixture.coordinator()
+        let first = UUID()
+        coordinator.submit(.init(historyID: first))
+        await fulfillment(of: [entered], timeout: 2)
+        for _ in 0..<100 { coordinator.submit(.init(historyID: first)) }
+        _ = await coordinator.setEnabledFromUser(false)
+        let enabled = await coordinator.setEnabledFromUser(true)
+        XCTAssertTrue(enabled)
+        fixture.enqueueGate = nil
+        for _ in 0..<100 { coordinator.submit(.init(historyID: UUID())) }
+        gate.release()
+        await coordinator.waitUntilIdle()
+        XCTAssertEqual(fixture.enqueued.count, TranscriptReadyNotificationCoordinator.maximumAdmittedCandidates)
+        XCTAssertEqual(Set(fixture.enqueued).count, fixture.enqueued.count)
+    }
+
+    func testResponseCompletion_IsImmediateExactlyOnceBeforeMainActorRouting() async {
+        var routes = 0
+        var completions = 0
+        let routed = expectation(description: "Actual route completed")
+        TranscriptReadyNotificationRoute.dispatchResponse(route: {
+            routes += 1
+            routed.fulfill()
+        }, completion: { completions += 1 })
+        XCTAssertEqual(completions, 1)
+        XCTAssertEqual(routes, 0)
+        await fulfillment(of: [routed], timeout: 2)
+        XCTAssertEqual(routes, 1)
+        XCTAssertEqual(completions, 1)
+    }
+}
+
+@MainActor
 private final class NotificationFixture {
     var enabled = true
     var authorized = true
@@ -212,6 +333,9 @@ private final class NotificationFixture {
     var claimed: Set<UUID> = []
     var enqueued: [UUID] = []
     var pending: [String] = []
+    var delivered: [String] = []
+    var deliversImmediately = false
+    var deleted: Set<UUID> = []
     var authorizationGate: NotificationGate?
     var permissionGate: NotificationGate?
     var enqueueGate: NotificationGate?
@@ -234,17 +358,21 @@ private final class NotificationFixture {
                     self.enqueued.append(identifier)
                     await self.enqueueGate?.wait()
                     if self.enqueueFails { throw CocoaError(.fileWriteUnknown) }
-                    self.pending.append(TranscriptReadyNotificationRoute.requestIdentifier(for: identifier))
+                    let request = TranscriptReadyNotificationRoute.requestIdentifier(for: identifier)
+                    if self.deliversImmediately { self.delivered.append(request) } else { self.pending.append(request) }
                 },
                 pendingIdentifiers: { self.pending },
-                removePending: { identifiers in self.pending.removeAll { identifiers.contains($0) } }
+                removePending: { identifiers in self.pending.removeAll { identifiers.contains($0) } },
+                removeDelivered: { identifiers in self.delivered.removeAll { identifiers.contains($0) } }
             ),
             isEnabled: { self.enabled },
             writeEnabled: { self.enabled = $0 },
             claim: { identifier, _ in
                 if self.claimFails { throw CocoaError(.fileWriteNoPermission) }
                 return self.claimed.insert(identifier).inserted
-            }
+            },
+            forget: { self.claimed.subtract($0) },
+            historyExists: { !self.deleted.contains($0) }
         )
     }
 }

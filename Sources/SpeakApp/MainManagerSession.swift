@@ -71,6 +71,9 @@ struct SessionTriggerTiming: Equatable {
 }
 
 final class ActiveSession {
+  /// Only a newly started microphone dictation can satisfy a named automation wait.
+  var isLocalAutomationCapture = false
+
   let id = UUID()
   let gesture: HistoryTrigger.HotKeyGesture
   /// What started this session. History only records the gesture, but the

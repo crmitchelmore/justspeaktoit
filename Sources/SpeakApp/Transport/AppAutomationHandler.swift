@@ -29,8 +29,23 @@ final class AppAutomationHandler: AutomationCommandHandling, AutomationCommandHo
         self.appVersion = appVersion
     }
 
+    private lazy var transcriptWaiter = AutomationTranscriptWaiter(history: self.history) { [weak self] in
+        guard let session = self?.main.activeSession, session.isLocalAutomationCapture else { return nil }
+        return session.id
+    }
+
     func handle(_ request: AutomationRequest) async -> AutomationResponse {
-        await AutomationCommandDispatcher.response(to: request, host: self)
+        guard request.command == .awaitTranscript else {
+            return await AutomationCommandDispatcher.response(to: request, host: self)
+        }
+        do {
+            let result = try await self.transcriptWaiter.wait(for: request)
+            return .success(id: request.id, command: request.command, result: result)
+        } catch {
+            return .failure(id: request.id, command: request.command,
+                            error: error as? AutomationError ?? AutomationError(
+                                code: .appUnavailable, message: "Capture wait cancelled."))
+        }
     }
 
     // MARK: - AutomationCommandHost
@@ -38,7 +53,8 @@ final class AppAutomationHandler: AutomationCommandHandling, AutomationCommandHo
     func automationStatus() async -> AutomationResult {
         AutomationResult(
             sessionActive: self.main.activeSession != nil,
-            appVersion: self.appVersion
+            appVersion: self.appVersion,
+            captureID: self.main.activeSession.flatMap { $0.isLocalAutomationCapture ? $0.id.uuidString : nil }
         )
     }
 
@@ -93,7 +109,7 @@ final class AppAutomationHandler: AutomationCommandHandling, AutomationCommandHo
                 message: Self.failureMessage(from: self.main.state) ?? "Dictation could not be started."
             )
         }
-        return AutomationResult(sessionActive: true)
+        return AutomationResult(sessionActive: true, captureID: self.main.activeSession?.id.uuidString)
     }
 
     private static func failureMessage(from state: MainManager.State) -> String? {
@@ -132,7 +148,7 @@ final class AppAutomationHandler: AutomationCommandHandling, AutomationCommandHo
     }
 
     /// Post-processed text when there is any, matching what History shows.
-    private static func transcript(of item: HistoryItem) -> String {
+    static func transcript(of item: HistoryItem) -> String {
         item.postProcessedTranscription?.isEmpty == false
             ? item.postProcessedTranscription ?? ""
             : item.rawTranscription ?? ""

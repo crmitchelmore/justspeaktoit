@@ -98,6 +98,9 @@ final class MainManager: ObservableObject {
       // place profile overrides are reverted back to the user's own settings —
       // and the one place capture pre-warming can safely resume.
       if activeSession == nil {
+        if let oldValue, oldValue.isLocalAutomationCapture {
+          historyManager.finishAutomationCapture(id: oldValue.id, item: nil)
+        }
         profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
         captureWarmer?.sessionDidEnd()
         captureOwnership.release(.dictation)
@@ -714,6 +717,7 @@ final class MainManager: ObservableObject {
     )
     session.outputTarget = TextOutputTarget.capture()
     session.diagnosticContext = makeHistoryDiagnosticContext()
+    session.isLocalAutomationCapture = true
     activeSession = session
     lastErrorMessage = nil
     pendingDeliveryRemedy = nil
@@ -1375,6 +1379,9 @@ final class MainManager: ObservableObject {
           displayDuration: deliveryNote == nil ? nil : hudManager.failureDisplayDuration
         )
         state = .completed(historyItem)
+        if session.isLocalAutomationCapture {
+          historyManager.finishAutomationCapture(id: session.id, item: historyItem)
+        }
         captureFirstTranscriptionSucceededIfNeeded(session: session)
       }
 

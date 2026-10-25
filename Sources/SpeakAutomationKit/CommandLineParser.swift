@@ -18,6 +18,8 @@ public struct CLIPlan: Equatable {
     public var path: String?
     public var limit: Int?
     public var timeout: TimeInterval?
+    public var captureID: String?
+    public var sinceID: String?
     public var json: Bool
 
     public init(
@@ -27,6 +29,13 @@ public struct CLIPlan: Equatable {
         timeout: TimeInterval? = nil,
         json: Bool = false
     ) {
+        self.init(command: command, path: path, limit: limit, timeout: timeout, json: json, captureID: nil)
+    }
+
+    public init(command: AutomationCommand, path: String? = nil, limit: Int? = nil,
+                timeout: TimeInterval? = nil, json: Bool = false, captureID: String?, sinceID: String? = nil) {
+        self.captureID = captureID
+        self.sinceID = sinceID
         self.command = command
         self.path = path
         self.limit = limit
@@ -42,7 +51,9 @@ public struct CLIPlan: Equatable {
             command: self.command,
             path: self.path,
             limit: self.limit,
-            timeout: self.timeout
+            timeout: self.timeout,
+            captureID: self.captureID,
+            sinceID: self.sinceID
         )
     }
 }
@@ -65,6 +76,7 @@ public enum CommandLineParser {
 
     USAGE
       speak transcribe <file> [--json] [--timeout <seconds>]
+      speak await --capture-id <uuid> [--since-id <uuid>] [--timeout <seconds>] [--json]
       speak listen [--json]
       speak stop [--json]
       speak history [--last <n>] [--json]
@@ -74,6 +86,7 @@ public enum CommandLineParser {
 
     COMMANDS
       transcribe   Transcribe an audio file with the app's configured provider.
+      await        Await one identified active local Mac capture; never starts recording.
       listen       Start a dictation session in the running app.
       stop         Stop the active dictation session and print the transcript.
       history      Print the most recent transcriptions (default 10).
@@ -101,6 +114,7 @@ public enum CommandLineParser {
     /// Verbs that map straight onto a command plus the options they accept.
     /// Table-driven so adding a verb is data, not another branch.
     private static let verbs: [String: (command: AutomationCommand, options: Set<Option>)] = [
+        "await": (.awaitTranscript, [.json, .timeout, .captureID, .sinceID]),
         "listen": (.startDictation, [.json]),
         "stop": (.stopDictation, [.json]),
         "history": (.history, [.json, .last]),
@@ -132,6 +146,12 @@ public enum CommandLineParser {
             }
             var plan = CLIPlan(command: entry.command)
             try self.rejectPositional(&plan, arguments: remaining, allowed: entry.options, verb: verb)
+            if plan.command == .awaitTranscript {
+                do { _ = try plan.request().validated() } catch {
+                    throw CLIUsageError(
+                        message: "await requires a capture UUID, optional History UUID, and timeout > 0 through 600.")
+                }
+            }
             return .run(plan)
         }
     }
@@ -161,6 +181,8 @@ public enum CommandLineParser {
         case json = "--json"
         case timeout = "--timeout"
         case last = "--last"
+        case captureID = "--capture-id"
+        case sinceID = "--since-id"
 
         var takesValue: Bool {
             self != .json
@@ -242,6 +264,10 @@ public enum CommandLineParser {
                 throw CLIUsageError(message: "--timeout must be a positive number of seconds.")
             }
             plan.timeout = seconds
+        case .captureID:
+            plan.captureID = value
+        case .sinceID:
+            plan.sinceID = value
         case .last:
             guard let count = Int(value), count >= 1, count <= AutomationLimits.maxHistoryLimit else {
                 throw CLIUsageError(

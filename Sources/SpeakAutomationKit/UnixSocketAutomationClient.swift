@@ -18,31 +18,56 @@ enum AutomationClientTiming {
 #if canImport(Darwin)
 /// Blocking UNIX-domain-socket client.
 ///
-/// Blocking is deliberate: `speak` is a one-shot process and the MCP server
-/// handles a single JSON-RPC request at a time, so an event loop would add
-/// concurrency risk for no benefit.
-public struct UnixSocketAutomationClient: AutomationRequesting {
+/// Each send blocks its worker, while an owned cancellation token can shut down
+/// only that connection. MCP await workers never block the framing reader.
+public struct UnixSocketAutomationClient: CancellableAutomationRequesting {
     /// Socket IO must outlive the app-side command deadline long enough for the
     /// server to encode and write its structured timeout response.
     static let responseGracePeriod: TimeInterval = AutomationClientTiming.responseGracePeriod
 
     public let socketPath: String
+    private let onConnectWait: (@Sendable () -> Void)?
 
     public init(socketPath: String = AutomationEndpoint.socketPath()) {
         self.socketPath = socketPath
+        self.onConnectWait = nil
+    }
+
+    init(socketPath: String, onConnectWait: @escaping @Sendable () -> Void) {
+        self.socketPath = socketPath
+        self.onConnectWait = onConnectWait
     }
 
     public func send(_ request: AutomationRequest) throws -> AutomationResponse {
+        try self.send(request, cancellation: AutomationRequestCancellation())
+    }
+
+    public func send(
+        _ request: AutomationRequest, cancellation: AutomationRequestCancellation
+    ) throws -> AutomationResponse {
+        guard !cancellation.isCancelled else {
+            throw AutomationError(code: .appUnavailable, message: "Automation request cancelled.")
+        }
         // Validated and framed before connecting, so a bad argument fails without
         // a round trip; framing and decoding are shared with every transport.
         let frame = try AutomationWireExchange.requestFrame(for: request)
 
-        let descriptor = try self.connect(timeout: request.resolvedTimeout + Self.responseGracePeriod)
-        defer { close(descriptor) }
+        let descriptor = try self.connect(timeout: request.resolvedTimeout + Self.responseGracePeriod,
+            cancellation: cancellation)
+        defer {
+            cancellation.uninstall()
+            close(descriptor)
+        }
 
         let stream = ConnectedSocket(client: self, descriptor: descriptor)
         try stream.writeAll(frame)
-        return try AutomationWireExchange.readResponse(from: stream)
+        let response = try AutomationWireExchange.readResponse(from: stream)
+        if request.command == .awaitTranscript,
+           response.id != request.id || response.command != .awaitTranscript {
+            throw AutomationError(code: .unsupportedCommand,
+                                  message: "The app does not support named capture await. Update the app and CLI.")
+        }
+        return response
     }
 
     /// The connected socket as the shared exchange reads it, keeping this
@@ -62,7 +87,7 @@ public struct UnixSocketAutomationClient: AutomationRequesting {
 
     // MARK: - Socket plumbing
 
-    private func connect(timeout: TimeInterval) throws -> Int32 {
+    private func connect(timeout: TimeInterval, cancellation: AutomationRequestCancellation) throws -> Int32 {
         var address = sockaddr_un()
         address.sun_family = sa_family_t(AF_UNIX)
         let pathBytes = Array(self.socketPath.utf8)
@@ -87,6 +112,18 @@ public struct UnixSocketAutomationClient: AutomationRequesting {
             throw AutomationError(code: .internalError, message: "Could not open a local socket.")
         }
 
+        var connected = false
+        cancellation.install { _ = shutdown(descriptor, SHUT_RDWR) }
+        defer {
+            if !connected {
+                cancellation.uninstall()
+                close(descriptor)
+            }
+        }
+        let flags = fcntl(descriptor, F_GETFL)
+        guard flags >= 0, fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) == 0 else {
+            throw AutomationError(code: .internalError, message: "Could not configure the local socket.")
+        }
         self.applyTimeout(timeout, to: descriptor)
         // Without SO_NOSIGPIPE a write to an app that has just quit kills `speak`
         // with SIGPIPE instead of reporting that the app is unavailable.
@@ -94,17 +131,58 @@ public struct UnixSocketAutomationClient: AutomationRequesting {
         setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout<Int32>.size))
 
         let size = socklen_t(MemoryLayout<sockaddr_un>.size)
-        let result = withUnsafePointer(to: &address) { pointer in
-            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
-                Darwin.connect(descriptor, sockaddrPointer, size)
+        try self.waitForConnection(descriptor, address: &address, size: size,
+                                   timeout: timeout, cancellation: cancellation)
+        guard !cancellation.isCancelled else {
+            throw AutomationError(code: .appUnavailable, message: "Automation request cancelled.")
+        }
+        guard fcntl(descriptor, F_SETFL, flags) == 0 else {
+            throw AutomationError(code: .internalError, message: "Could not configure the connected socket.")
+        }
+        connected = true
+        return descriptor
+    }
+
+    private func waitForConnection(_ descriptor: Int32, address: inout sockaddr_un, size: socklen_t,
+                                   timeout: TimeInterval, cancellation: AutomationRequestCancellation) throws {
+        let deadline = ContinuousClock().now.advanced(by: .seconds(timeout))
+        var reportedWait = false
+        while true {
+            guard !cancellation.isCancelled else {
+                throw AutomationError(code: .appUnavailable, message: "Automation request cancelled.")
+            }
+            let result = withUnsafePointer(to: &address) { pointer in
+                pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                    Darwin.connect(descriptor, sockaddrPointer, size)
+                }
+            }
+            if result == 0 || errno == EISCONN { break }
+            let failure = errno
+            guard [EINPROGRESS, EALREADY, EINTR, EAGAIN].contains(failure) else {
+                throw self.connectError(failure)
+            }
+            if !reportedWait { reportedWait = true; self.onConnectWait?() }
+            guard ContinuousClock().now < deadline else {
+                throw AutomationError(code: .timedOut, message: "Timed out connecting to the local automation socket.")
+            }
+            if failure == EAGAIN {
+                // A full local listen backlog may not have an in-progress connect to poll.
+                // Bound this retry pause; cancellation never waits for the 600-second request timeout.
+                _ = poll(nil, 0, 25)
+                continue
+            }
+            var pending = pollfd(fd: descriptor, events: Int16(POLLOUT), revents: 0)
+            let ready = poll(&pending, 1, 25)
+            if ready > 0 {
+                var socketError: Int32 = 0
+                var length = socklen_t(MemoryLayout<Int32>.size)
+                guard getsockopt(descriptor, SOL_SOCKET, SO_ERROR, &socketError, &length) == 0 else {
+                    throw AutomationError(code: .internalError, message: "Local socket connection failed.")
+                }
+                if socketError == 0 { break }
+                throw self.connectError(socketError)
             }
         }
-        guard result == 0 else {
-            let failure = errno
-            close(descriptor)
-            throw self.connectError(failure)
-        }
-        return descriptor
     }
 
     /// Only "nothing is listening" is reported as the app being unavailable;

@@ -29,6 +29,13 @@ final class AutomationServer {
     /// Holds the handler while running: the handler exists to serve this socket,
     /// so its lifetime is the socket's lifetime and `stop()` is what releases it.
     private let coordinator = AutomationRequestCoordinator()
+    private let awaitCoordinator = AutomationAwaitCoordinator()
+    private var awaitListenerEpoch = UUID()
+    var awaitSubscriptionDidChange: ((String, Int) -> Void)? {
+        get { self.awaitCoordinator.didChangeSubscribers }
+        set { self.awaitCoordinator.didChangeSubscribers = newValue }
+    }
+    var didAcceptClient: (() -> Void)?
     private var listeningSource: DispatchSourceRead?
     /// Closes the socket when the app quits, so no stale socket file is left for
     /// a client to connect to and fail against confusingly.
@@ -54,13 +61,16 @@ final class AutomationServer {
         self.coordinator.activate { request in
             await handler.handle(request)
         }
+        self.awaitCoordinator.activate { request in await handler.handle(request) }
+        let epoch = UUID()
+        self.awaitListenerEpoch = epoch
         let source = DispatchSource.makeReadSource(fileDescriptor: descriptor, queue: self.queue)
         source.setEventHandler { [weak self] in
             guard let self else { return }
             let client = accept(descriptor, nil, nil)
             guard client >= 0 else { return }
             Self.configureAcceptedSocket(client)
-            self.serve(client: client)
+            self.serve(client: client, epoch: epoch)
         }
         source.setCancelHandler {
             close(descriptor)
@@ -179,6 +189,7 @@ final class AutomationServer {
         // reference to the handler and would keep answering — and mutating the
         // caches — after automation was turned off.
         self.coordinator.deactivate()
+        self.awaitCoordinator.deactivate()
         self.isRunning = false
         SpeakLogger.transport.info("Automation socket stopped")
     }
@@ -197,7 +208,8 @@ final class AutomationServer {
     /// Reads and writes on the serving queue, hopping to the main actor only to
     /// run the command. Socket IO is blocking, so doing it on the main actor would
     /// let a stalled client freeze the UI.
-    private nonisolated func serve(client: Int32) {
+    private nonisolated func serve(client: Int32, epoch: UUID) {
+        Task { @MainActor [weak self] in self?.didAcceptClient?() }
         self.queue.async {
             let request: AutomationRequest
             do {
@@ -221,6 +233,24 @@ final class AutomationServer {
                         to: client
                     )
                     close(client)
+                    return
+                }
+                if request.command == .awaitTranscript {
+                    guard self.isRunning, self.awaitListenerEpoch == epoch else {
+                        self.queue.async {
+                            Self.send(.failure(id: request.id, command: request.command, error: AutomationError(
+                                code: .appUnavailable, message: "Automation listener restarted; register a new wait.")),
+                                to: client)
+                            close(client)
+                        }
+                        return
+                    }
+                    let connection = AutomationAwaitConnection(descriptor: client, queue: self.queue)
+                    let work = Task { @MainActor in
+                        let response = await self.awaitCoordinator.respond(to: request)
+                        connection.reply(response)
+                    }
+                    connection.observeDisconnect { work.cancel() }
                     return
                 }
                 let response = await self.coordinator.respond(to: request)

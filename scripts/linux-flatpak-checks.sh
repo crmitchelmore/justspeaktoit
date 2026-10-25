@@ -45,6 +45,9 @@ flatpak install --user -y --noninteractive --reinstall --bundle "$bundle"
 echo '== Flatpak Spawn portal (required by the sandboxed PNG loader)'
 timeout 60 flatpak run --command=flatpak-spawn "$app" --sandbox --watch-bus /usr/bin/true
 
+echo '== bounded argv probe with preseeded constructor environment'
+timeout 15 flatpak run --env=GGML_NO_BACKTRACE=1 "$app" --version
+
 echo '== installed app command-line forwarding'
 if ! timeout 15 flatpak run "$app" --version; then
   echo '== explicit executable argv diagnostic'

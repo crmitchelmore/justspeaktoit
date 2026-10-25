@@ -114,6 +114,7 @@ modules:
       env:
         SPEAK_LINUX_TARGET: "1"
     build-commands:
+      - swift --version
       - python3 scripts/migration/verify-miniz.py
       - packaging/linux/swiftpm-offline-setup.sh
       - swift build --configuration release --product SpeakLinux --static-swift-stdlib --disable-sandbox

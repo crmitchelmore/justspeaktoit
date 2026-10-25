@@ -51,8 +51,9 @@ Xvfb. No SDK substitution or extra filesystem permissions are used for these
 checks. The bundle, SHA-256, resolved manifest and installed-test log are retained
 as `justspeaktoit-flatpak-x86_64`.
 
-Current-head qualification is pending the first run of this restored workflow.
-Historical packaging-branch success is not evidence for current main. The
+Qualification requires a successful [Linux Flatpak workflow receipt](https://github.com/crmitchelmore/justspeaktoit/actions/workflows/linux-flatpak.yml)
+for the chosen revision, with its installed-test log and bundle hash. Historical
+packaging-branch success is not evidence for current main. The
 [Linux parity matrix](linux-development.md#parity-matrix) continues to distinguish
 native synthetic checks from physical desktop acceptance. Interactive GNOME/KDE
 portal consent, physical microphone/output, Wayland shortcuts/insertion, login

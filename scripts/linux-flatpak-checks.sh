@@ -13,6 +13,8 @@ if [ "${JSTI_FLATPAK_CHECK_SESSION:-}" != 1 ]; then
   trap 'rm -rf "$session_dir"' EXIT
   mkdir -m 700 "$session_dir/runtime"
   XDG_RUNTIME_DIR="$session_dir/runtime" JSTI_FLATPAK_CHECK_SESSION=1 \
+    GDK_BACKEND=x11 GSK_RENDERER=cairo GTK_A11Y=none NO_AT_BRIDGE=1 \
+    env -u WAYLAND_DISPLAY xvfb-run -a -s '-screen 0 1280x1024x24 -nolisten tcp' \
     dbus-run-session -- "$0" "$@"
   exit
 fi
@@ -71,8 +73,7 @@ timeout 480 flatpak run --env=JSTI_WHISPER_CPU_ONLY=1 --command=sh "$app" -ec '
 ' < "$fixture"
 
 echo '== GTK window smoke test in the installed sandbox (Xvfb, private bus)'
-env -u WAYLAND_DISPLAY xvfb-run -a -s '-screen 0 1280x1024x24 -nolisten tcp' \
-  timeout 600 flatpak run \
+timeout 600 flatpak run \
   --env=GDK_BACKEND=x11 --env=GSK_RENDERER=cairo --env=GTK_A11Y=none \
   --env=NO_AT_BRIDGE=1 "$app" --ui-smoke-test
 

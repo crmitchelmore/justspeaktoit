@@ -1134,9 +1134,9 @@ public final class TranscriptionRecordingService: ObservableObject {
         // copy of what the user said (issues #993, #992).
         discardDeliveredRecording()
 
-        // The outcome stays what the completion itself can prove: neither the
-        // clipboard write nor `recordTranscription` is a durable delivery
-        // receipt, and keyboard callers have not saved or inserted yet. The
+        // The outcome stays what the completion itself can prove: the
+        // clipboard write is not a delivery receipt. A non-nil History row
+        // confirms durable local storage, and keyboard callers may not have inserted yet. The
         // capture receipt (issue #1008) travels alongside it as the snippet,
         // where it reports what each lane actually did without becoming a
         // stronger claim than the outcome earns.
@@ -1164,6 +1164,17 @@ public final class TranscriptionRecordingService: ObservableObject {
             completionMessage: receipt.summary,
             resultCompletionID: publishedCompletionID
         )
+
+        // Freeze the durable row and this capture's settled facts before any
+        // notification await. Scheduling cannot change capture delivery or polish.
+        dependencies.notifyTranscriptReady(TranscriptReadyNotificationInput(
+            historyID: historyItem?.id,
+            transcriptIsEmpty: text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            failed: lastSessionError != nil,
+            isForeground: dependencies.applicationState() != .background,
+            keyboardInserted: keyboardOutcome == .insertedInField,
+            matchingResultActivity: dependencies.activity.hasActiveResult(publishedCompletionID)
+        ))
 
         // Kick off background post-processing if the chosen destination + user
         // settings call for it. Polished text stays in History; the raw clipboard

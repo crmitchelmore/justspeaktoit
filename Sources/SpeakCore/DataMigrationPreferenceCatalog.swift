@@ -108,7 +108,7 @@ public enum DataMigrationPreferenceCatalog {
 
     private static func kind(for key: ApplicationPreferenceKey) -> Kind? {
         switch key {
-        case .trackedKeyIdentifiers, .transcriptionKeywordsLastReconciled:
+        case .trackedKeyIdentifiers, .transcriptionKeywordsLastReconciled, .transcriptReadyNotificationsEnabled:
             return nil
         case .analyticsEnabled, .audioPreWarmingEnabled, .autoCorrectionsEnabled, .cancelRecordingOnEscape,
              .compactStatusBarIcon, .connectionPreWarmingEnabled, .enableAutomationServer,

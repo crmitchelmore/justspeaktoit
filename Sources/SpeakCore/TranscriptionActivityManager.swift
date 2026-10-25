@@ -224,6 +224,14 @@ public final class TranscriptionActivityManager: ObservableObject {
         }
     }
 
+    /// A matching active result already owns this completion. An unrelated or
+    /// idle activity is not a reason to suppress a private completion alert.
+    public func hasActiveResult(completionID: String) -> Bool {
+        guard !completionID.isEmpty, let activity, activity.activityState == .active,
+              let state = latestState, state.status == .completed else { return false }
+        return state.resultCompletionID == completionID
+    }
+
     /// Explicit outcome variant; the original entry point remains neutral and source-compatible.
     ///
     /// The completed row stays on screen for `resultRowDuration`. A primed

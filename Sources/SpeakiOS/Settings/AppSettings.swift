@@ -95,6 +95,7 @@ public final class AppSettings: ObservableObject {
         case batchTranscriptionModel
         case transcriptionKeywords
         case liveActivitiesEnabled
+        case transcriptReadyNotificationsEnabled
         case visualDensity
         case autoStartRecording
         case handsFreeDictationEnabled
@@ -402,6 +403,17 @@ public final class AppSettings: ObservableObject {
         didSet { defaults.set(liveActivitiesEnabled, forKey: DefaultsKey.liveActivitiesEnabled.rawValue) }
     }
 
+    var transcriptReadyNotificationsDidDisable: (() -> Void)?
+    @Published public var transcriptReadyNotificationsEnabled: Bool {
+        didSet {
+            self.defaults.set(
+                self.transcriptReadyNotificationsEnabled,
+                forKey: DefaultsKey.transcriptReadyNotificationsEnabled.storageKey
+            )
+            if !self.transcriptReadyNotificationsEnabled { self.transcriptReadyNotificationsDidDisable?() }
+        }
+    }
+
     @Published var transcriptClipboardLifetime: TranscriptClipboardLifetime {
         didSet {
             self.defaults.set(
@@ -674,6 +686,9 @@ public final class AppSettings: ObservableObject {
         self.revAIAPIKey = ""
         self.mistralAPIKey = ""
         self.transcriptionKeywords = defaults.string(forKey: DefaultsKey.transcriptionKeywords.storageKey) ?? ""
+        self.transcriptReadyNotificationsEnabled = defaults.bool(
+            forKey: DefaultsKey.transcriptReadyNotificationsEnabled.storageKey
+        )
         self.liveActivitiesEnabled = liveActivities
         self.transcriptClipboardLifetime = clipboardPolicy.lifetime
         self.transcriptAllowsUniversalClipboard = clipboardPolicy.allowsUniversalClipboard

@@ -121,5 +121,21 @@ final class FocusCaptureOverrideStoreTests: XCTestCase {
         XCTAssertTrue(try store.write(.none).override.isEmpty)
     }
 
+    func testUnreadableExistingMarkerIsUnavailableRatherThanNeverConfigured() throws {
+        let directory = try directory()
+        let original = FocusCaptureOverrideStore(directory: directory)
+        let active = try original.write(FocusCaptureOverride(destinationID: "historyOnly"))
+        let unreadable = FocusCaptureOverrideStore(directory: directory, readData: { _ in
+            throw CocoaError(.fileReadNoPermission)
+        })
+        XCTAssertThrowsError(try unreadable.snapshot()) { error in
+            guard case .unavailable = error as? FocusCaptureOverrideStore.Failure else {
+                return XCTFail("Unreadable storage must be a typed safe-start failure")
+            }
+        }
+        XCTAssertEqual(try original.snapshot(), active, "A failed read must not clear the privacy choice")
+        XCTAssertEqual(try FocusCaptureOverrideStore(directory: self.directory()).snapshot(), .none)
+    }
+
 }
 #endif

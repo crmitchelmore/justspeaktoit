@@ -40,9 +40,11 @@ final class FocusCaptureOverrideStore {
     }
 
     private let directory: URL?
+    private let readData: (URL) throws -> Data
 
-    init(directory: URL?) {
+    init(directory: URL?, readData: @escaping (URL) throws -> Data = { try Data(contentsOf: $0) }) {
         self.directory = directory
+        self.readData = readData
     }
 
     static func live() -> FocusCaptureOverrideStore {
@@ -77,12 +79,16 @@ final class FocusCaptureOverrideStore {
             }
             // A crash between these atomic writes leaves a mismatch that read() refuses.
             let marker = Marker(version: 1, generation: next, hasOverride: !value.isEmpty)
-            try JSONEncoder().encode(marker).write(to: url("generation.json"), options: .atomic)
+            try JSONEncoder().encode(marker).write(
+                to: url("generation.json"), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+            )
             if value.isEmpty {
                 if unlink(try url("override.json").path) != 0 && errno != ENOENT { throw Failure.unavailable }
             } else {
                 let envelope = Envelope(version: 1, generation: next, override: value, invalidReason: reason?.rawValue)
-                try JSONEncoder().encode(envelope).write(to: url("override.json"), options: .atomic)
+                try JSONEncoder().encode(envelope).write(
+                    to: url("override.json"), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+                )
             }
             return Snapshot(generation: next, hasBeenConfigured: true, override: value, invalidReason: reason)
         }
@@ -115,7 +121,7 @@ final class FocusCaptureOverrideStore {
             return nil
         }
         guard metadata.st_mode & S_IFMT == S_IFREG else { throw Failure.corrupt }
-        return try Data(contentsOf: path)
+        return try readData(path)
     }
 
     private func url(_ name: String) throws -> URL {
@@ -126,7 +132,12 @@ final class FocusCaptureOverrideStore {
     private func withLock<T>(_ operation: () throws -> T) throws -> T {
         guard let directory else { throw Failure.unavailable }
         do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let protection: [FileAttributeKey: Any] = [
+                .protectionKey: FileProtectionType.completeUntilFirstUserAuthentication
+            ]
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+                                                    attributes: protection)
+            try FileManager.default.setAttributes(protection, ofItemAtPath: directory.path)
             let descriptor = open(directory.appendingPathComponent("store.lock").path, O_CREAT | O_RDWR,
                                   S_IRUSR | S_IWUSR)
             guard descriptor >= 0 else { throw Failure.unavailable }

@@ -985,6 +985,13 @@ public struct ContentView: View {
                                         onboarding.dismissCard(card)
                                     }
                                 }
+                                if backgroundService.isActive,
+                                   let destination = backgroundService.captureDestinationStatus {
+                                    Label(destination, systemImage: "arrow.turn.down.right")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .accessibilityIdentifier("effectiveCaptureDestination")
+                                }
                                 if let warning = backgroundService.isRunning
                                     ? backgroundService.recordingWarning : coordinator.recordingWarning {
                                     Label(warning, systemImage: "exclamationmark.triangle")
@@ -1556,7 +1563,7 @@ public struct ContentView: View {
             // An in-app stop finishes a headless run where that run asked to
             // finish, not where the global setting points (issue #1013).
             let result = await backgroundService.stopRecording(
-                destination: backgroundService.resolvedStopDestination()
+                selection: backgroundService.resolvedStopSelection()
             )
             displayText = result.text
         } else if coordinator.isRunning {

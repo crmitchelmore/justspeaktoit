@@ -314,6 +314,8 @@ public struct SettingsView: View {
                 }
             }
 
+            FocusCaptureSettingsSection()
+
             Section("Hardware Trigger") {
                 NavigationLink {
                     HardwareTriggerSettingsView(settings: settings)

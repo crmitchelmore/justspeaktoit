@@ -60,7 +60,7 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
         partialText: { [unowned self] in self.recordingService.partialText },
         stop: { [unowned self] in
             await self.recordingService.stopRecording(
-                destination: .historyOnly,
+                selection: CaptureDestinationSelection(destination: .historyOnly, origin: .keyboardProfile),
                 saveToHistory: false,
                 primedActivityMessage: "Keyboard ready",
                 // The keyboard's own result travels the nonce-scoped hand-off

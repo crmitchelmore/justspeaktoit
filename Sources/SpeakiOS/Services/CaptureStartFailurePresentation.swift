@@ -53,6 +53,14 @@ struct CaptureStartFailurePresentation: LocalizedError, Equatable, Sendable {
            case .missingAPIKey = streamingError {
             return self.missingAPIKey
         }
+        if error is FocusCaptureOverrideStore.Failure {
+            return CaptureStartFailurePresentation(
+                message: "The Focus capture override could not be verified. Open the app's Settings to review "
+                    + "or reset it, then try again.",
+                code: "start_focus_unavailable",
+                recovery: nil
+            )
+        }
         if let failure = error as? CaptureParameterFailure {
             return CaptureStartFailurePresentation(
                 message: failure.localizedDescription,

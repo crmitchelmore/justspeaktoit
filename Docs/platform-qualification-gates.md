@@ -5,6 +5,16 @@ repository rulesets. The owner must approve activation separately after the
 exact check names and outcomes are observed. Keep the existing Apple checks
 and strict branch freshness when deciding whether to require these contexts.
 
+Activation is blocked on an enforcement design. A pull request can also edit
+the workflow that produces these checks, including its selector and terminal
+predicate. Reading immutable base policy prevents the policy-file bypass; it
+does not make PR-controlled workflow definitions an independent trust boundary.
+Requiring these GitHub Actions context names alone cannot prevent a modified
+workflow from reporting success. The owner must first choose and verify trusted
+required-workflow identity, enforced workflow-change review, or another trusted
+check authority. The current ruleset proposal must not be applied as hostile-PR
+enforcement. This limitation remains an open review finding.
+
 | Context | Required work |
 | --- | --- |
 | Windows x64 gate | Pinned runtime, native x64 build/tests, portable macOS and Linux |

@@ -153,7 +153,9 @@ final class AnalyticsInspectionTests: XCTestCase {
         let exported = try XCTUnwrap(String(data: snapshot.exportData(), encoding: .utf8))
         XCTAssertFalse(exported.contains("PATH_TOKEN"))
         XCTAssertFalse(exported.contains("SECRET"))
-        XCTAssertEqual(fixture.recorder.requests.first?.url?.path, url.path, "Transport retains its configured proxy path")
+        XCTAssertEqual(
+            fixture.recorder.requests.first?.url?.path, url.path, "Transport retains its configured proxy path"
+        )
         await fixture.sink.close()
     }
 }

@@ -137,6 +137,28 @@ class ProxyTests(unittest.TestCase):
                 client.sendall(SSML)
                 self.assertIn(b" 200 ", client.recv(4096).split(b"\r\n")[0])
 
+    def test_large_header_uses_bounded_socket_operations_without_consuming_body(self):
+        reader_socket, sender = socket.socketpair()
+        sender.settimeout(2)
+        writer = None
+        try:
+            connection = Mock(wraps=reader_socket)
+            header = b"X-Large: " + b"a" * 32_768 + b"\r\n"
+            writer = threading.Thread(target=sender.sendall, args=(header + b"\r\nbody",))
+            writer.start()
+            with reader_socket.makefile("rb", buffering=0) as raw:
+                reader = proxy.HeaderDeadlineReader(raw, connection)
+                self.assertEqual(reader.readline(65_537), header)
+                self.assertEqual(reader.readline(65_537), b"\r\n")
+                self.assertEqual(raw.read(4), b"body")
+            self.assertLessEqual(connection.settimeout.call_count, 16)
+            self.assertLessEqual(connection.recv.call_count, 8)
+        finally:
+            reader_socket.close()
+            sender.close()
+            if writer is not None:
+                writer.join(timeout=2)
+
     def test_synthesis_preserves_azure_contract(self):
         self.assertEqual(self.request()[0], 200)
         self.assertEqual(self.transport.calls, [

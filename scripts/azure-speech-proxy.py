@@ -431,11 +431,25 @@ class HeaderDeadlineReader:
             if remaining <= 0:
                 raise TimeoutError("HTTP header deadline reached.")
             self.connection.settimeout(remaining)
-            byte = self.raw.read(1)
-            if not byte:
+            # Peek a bounded chunk, then consume only through this line's LF.
+            # This avoids per-byte syscalls without reading ahead into upload
+            # or WebSocket bytes, whose owners read the original raw stream.
+            available = self.connection.recv(8192, socket.MSG_PEEK)
+            if not available:
                 break
-            line.extend(byte)
-            if byte == b"\n":
+            newline = available.find(b"\n")
+            count = newline + 1 if newline >= 0 else len(available)
+            if limit >= 0:
+                count = min(count, limit - len(line))
+            remaining = self.deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("HTTP header deadline reached.")
+            self.connection.settimeout(remaining)
+            chunk = self.raw.read(count)
+            if not chunk:
+                break
+            line.extend(chunk)
+            if chunk.endswith(b"\n"):
                 break
         return bytes(line)
 

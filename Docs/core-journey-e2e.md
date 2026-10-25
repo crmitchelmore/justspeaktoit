@@ -8,7 +8,8 @@ scripts/run-core-journey-e2e.sh
 
 It has an eight-minute test-command budget. CI first compiles the test products
 in a separate step so that budget measures the journey tests rather than hosted
-runner compile speed; the job has a 30-minute wall-clock timeout. It uses
+runner compile speed; setup/build/test have separate command budgets and the
+component job has a 40-minute wall-clock timeout. It uses
 in-memory HTTP/stream events, temporary history storage, and
 isolated defaults and pasteboards. Automation tests exchange real frames over
 an owner-only UNIX socket, with a stub command handler. No microphone, provider
@@ -34,7 +35,7 @@ status; they fail an otherwise successful gate.
 | Hotkey gesture state | `GestureDetectorTests` | Balanced down/up, reset, bounce, cancellation; injected key events, no physical key synthesis. |
 | Batch provider | `OpenAITranscriptionProviderTests`, `OpenAITranscriptionProviderErrorTests`, `MissingLiveAPIKeyAlertTests` | Real request construction and response decoding with HTTP fixtures; routing and missing/rejected-key descriptions. |
 | Streaming provider | `StreamingClientContractTests` | Provider event parsing and complete transcript finalisation with injected stream events. |
-| Processing | `PostProcessingManagerTests` | Empty input, local rules, cloud client stub, prompt payload; does not exercise MainManager's enabled/disabled routing. |
+| Processing | `PostProcessingManagerTests`, `CoreJourneyPolishFixtureTests` | Empty input, local rules, cloud client stub, prompt payload; does not exercise MainManager's enabled/disabled routing. |
 | Streaming delivery | `LiveTextInserterStreamingTests` | Actual inserter with an in-memory AX field contract; partial replacement, duplication and fallback decisions. |
 | Clipboard and target policy | `TextOutputTests`, `ClipboardFieldIdentityPolicyTests` | Isolated pasteboard, empty text preservation, target identity and changed-field warnings; no assertion of native editor delivery. |
 | Automation transport | `AutomationServerTests`, `AutomationDeadlineTests` | Real listener, framing, shipped client, owner permissions, idempotent retries, deadlines, failure followed by recovery; command execution is stubbed. |

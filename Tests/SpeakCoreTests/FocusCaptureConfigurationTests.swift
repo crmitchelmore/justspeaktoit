@@ -64,4 +64,26 @@ final class FocusCaptureConfigurationTests: XCTestCase {
         XCTAssertEqual(resolved.parameters.modelID, model.id)
     }
 
+    func testBlankExplicitFieldsCannotEraseValidFocusChoices() throws {
+        let model = try XCTUnwrap(ModelCatalog.liveTranscription.first?.id)
+        let focus = FocusCaptureOverride(destinationID: "historyOnly", modelID: model, languageIdentifier: "en_GB")
+        let explicit = CaptureRunParameters(destinationID: "  ", languageIdentifier: "", modelID: " \t\n")
+        let resolved = try EffectiveCaptureConfiguration.resolve(
+            explicit: explicit, focus: focus, globals: globals, vocabulary: .unconstrained
+        )
+        XCTAssertTrue(focus.affects(explicit))
+        XCTAssertEqual(resolved.modelID, model)
+        XCTAssertEqual(resolved.languageIdentifier, "en_GB")
+        XCTAssertEqual(resolved.destinationID, "historyOnly")
+        XCTAssertEqual(resolved.modelOrigin, .focus)
+        XCTAssertEqual(resolved.languageOrigin, .focus)
+        XCTAssertEqual(resolved.destinationOrigin, .focus)
+    }
+
+    func testAllBlankFocusFieldsMeanDefaultResetIncludingDecodedInput() throws {
+        XCTAssertEqual(FocusCaptureOverride(destinationID: "", modelID: " ", languageIdentifier: "\t\n"), .none)
+        let encoded = Data(#"{"destinationID":" ","modelID":"","languageIdentifier":"   "}"#.utf8)
+        XCTAssertEqual(try JSONDecoder().decode(FocusCaptureOverride.self, from: encoded), .none)
+    }
+
 }

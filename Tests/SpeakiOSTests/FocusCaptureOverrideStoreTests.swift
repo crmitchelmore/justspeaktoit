@@ -137,5 +137,18 @@ final class FocusCaptureOverrideStoreTests: XCTestCase {
         XCTAssertEqual(try FocusCaptureOverrideStore(directory: self.directory()).snapshot(), .none)
     }
 
+    func testBlankNativeParametersUseTheDefaultResetPath() throws {
+        let directory = try directory()
+        let store = FocusCaptureOverrideStore(directory: directory)
+        try store.write(FocusCaptureOverride(destinationID: "historyOnly"))
+        var filter = DictationFocusFilter()
+        filter.model = " \t"
+        filter.language = "\n"
+        XCTAssertTrue(filter.captureOverride.isEmpty)
+        let reset = try store.write(filter.captureOverride)
+        XCTAssertTrue(reset.override.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("override.json").path))
+    }
+
 }
 #endif

@@ -7,18 +7,31 @@ public struct FocusCaptureOverride: Codable, Equatable, Sendable {
     public let languageIdentifier: String?
 
     public init(destinationID: String? = nil, modelID: String? = nil, languageIdentifier: String? = nil) {
-        self.destinationID = destinationID
-        self.modelID = modelID
-        self.languageIdentifier = languageIdentifier
+        self.destinationID = captureNonblank(destinationID)
+        self.modelID = captureNonblank(modelID)
+        self.languageIdentifier = captureNonblank(languageIdentifier)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case destinationID, modelID, languageIdentifier
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            destinationID: try values.decodeIfPresent(String.self, forKey: .destinationID),
+            modelID: try values.decodeIfPresent(String.self, forKey: .modelID),
+            languageIdentifier: try values.decodeIfPresent(String.self, forKey: .languageIdentifier)
+        )
     }
 
     public static let none = FocusCaptureOverride()
     public var isEmpty: Bool { self == .none }
 
     public func affects(_ explicit: CaptureRunParameters) -> Bool {
-        (destinationID != nil && explicit.destinationID == nil)
-            || (modelID != nil && explicit.modelID == nil)
-            || (languageIdentifier != nil && explicit.languageIdentifier == nil)
+        (destinationID != nil && captureNonblank(explicit.destinationID) == nil)
+            || (modelID != nil && captureNonblank(explicit.modelID) == nil)
+            || (languageIdentifier != nil && captureNonblank(explicit.languageIdentifier) == nil)
     }
 }
 
@@ -59,11 +72,15 @@ public struct EffectiveCaptureConfiguration: Equatable, Sendable {
         globals: Globals,
         vocabulary: CaptureParameterVocabulary
     ) throws -> Self {
+        // Empty parameters do not erase higher-level choices. Nonempty invalid values still refuse.
+        let explicitDestination = captureNonblank(explicit.destinationID)
+        let explicitLanguage = captureNonblank(explicit.languageIdentifier)
+        let explicitModel = captureNonblank(explicit.modelID)
         // Validate only choices actually used. Explicit fields can replace invalid Focus fields.
         let parameters = try CaptureParameterResolution.resolve(
-            destinationID: explicit.destinationID ?? focus.destinationID,
-            language: explicit.languageIdentifier ?? focus.languageIdentifier,
-            model: explicit.modelID ?? focus.modelID,
+            destinationID: explicitDestination ?? focus.destinationID,
+            language: explicitLanguage ?? focus.languageIdentifier,
+            model: explicitModel ?? focus.modelID,
             source: explicit.sourceTag,
             vocabulary: vocabulary
         )
@@ -73,13 +90,18 @@ public struct EffectiveCaptureConfiguration: Equatable, Sendable {
             usesBatch: parameters.modelID == nil ? globals.usesBatch : parameters.requiresBatchMode,
             languageIdentifier: parameters.languageIdentifier ?? globals.languageIdentifier,
             destinationID: parameters.destinationID ?? globals.destinationID,
-            modelOrigin: origin(explicit.modelID, focus.modelID),
-            languageOrigin: origin(explicit.languageIdentifier, focus.languageIdentifier),
-            destinationOrigin: origin(explicit.destinationID, focus.destinationID)
+            modelOrigin: origin(explicitModel, focus.modelID),
+            languageOrigin: origin(explicitLanguage, focus.languageIdentifier),
+            destinationOrigin: origin(explicitDestination, focus.destinationID)
         )
     }
 
     private static func origin(_ explicit: String?, _ focus: String?) -> Origin {
         explicit != nil ? .explicit : focus != nil ? .focus : .global
     }
+}
+
+private func captureNonblank(_ value: String?) -> String? {
+    guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+    return value
 }

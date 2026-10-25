@@ -27,9 +27,11 @@ struct SpeechmaticsTranscriptionProvider: TranscriptionProvider {
 
   private let validationURL = URL(string: "https://eu1.asr.api.speechmatics.com/v2/jobs")!
   private let session: URLSession
+  private let independentCleanup: Bool
 
-  init(session: URLSession = .shared) {
+  init(session: URLSession = .shared, independentCleanup: Bool = false) {
     self.session = session
+    self.independentCleanup = independentCleanup
   }
 
   func transcribeFile(
@@ -43,7 +45,8 @@ struct SpeechmaticsTranscriptionProvider: TranscriptionProvider {
     ) else {
       throw BatchTranscriptionJobError.unsupportedModel("Speechmatics")
     }
-    return try await SpeechmaticsBatchClient(session: session).transcribeFile(
+    let client = SpeechmaticsBatchClient(session: session)
+    return try await (independentCleanup ? client.withIndependentCleanup() : client).transcribeFile(
       at: url, apiKey: apiKey, model: model, language: language
     )
   }

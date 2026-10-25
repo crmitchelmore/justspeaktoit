@@ -43,10 +43,15 @@ struct GladiaTranscriptionProvider: TranscriptionProvider {
 
   private let session: URLSession
   private let baseURL: URL
+  private let independentCleanup: Bool
 
-  init(session: URLSession = .shared, baseURL: URL = GladiaLiveTranscriber.defaultBaseURL) {
+  init(
+    session: URLSession = .shared, baseURL: URL = GladiaLiveTranscriber.defaultBaseURL,
+    independentCleanup: Bool = false
+  ) {
     self.session = session
     self.baseURL = baseURL
+    self.independentCleanup = independentCleanup
   }
 
   func transcribeFile(
@@ -58,7 +63,8 @@ struct GladiaTranscriptionProvider: TranscriptionProvider {
     guard model.trimmingCharacters(in: .whitespacesAndNewlines) == GladiaBatchClient.catalogID else {
       throw BatchTranscriptionJobError.unsupportedModel("Gladia")
     }
-    return try await GladiaBatchClient(session: session, baseURL: baseURL).transcribeFile(
+    let client = GladiaBatchClient(session: session, baseURL: baseURL)
+    return try await (independentCleanup ? client.withIndependentCleanup() : client).transcribeFile(
       at: url, apiKey: apiKey, model: model, language: language
     )
   }

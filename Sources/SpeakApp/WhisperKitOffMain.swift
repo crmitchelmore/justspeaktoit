@@ -27,6 +27,11 @@ enum WhisperKitOffMain {
     audioPath: String,
     decodeOptions: DecodingOptions? = nil
   ) async throws -> [TranscriptionResult] {
-    try await pipeline.transcribe(audioPath: audioPath, decodeOptions: decodeOptions)
+    try await WhisperKitFileCancellation.run { request in
+      try await pipeline.transcribe(
+        audioPath: audioPath, decodeOptions: decodeOptions,
+        callback: { _ in request.shouldContinue }
+      )
+    }
   }
 }

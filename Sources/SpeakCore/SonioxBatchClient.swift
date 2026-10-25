@@ -5,6 +5,7 @@ import FoundationNetworking
 
 /// Soniox asynchronous file transcription, shared by native desktop adapters.
 public struct SonioxBatchClient: TranscriptionProvider {
+    private var cleanupSend: (@Sendable (URLRequest) async throws -> (Data, URLResponse))?
     public let metadata = TranscriptionProviderMetadata(
         id: "soniox",
         displayName: "Soniox",
@@ -224,27 +225,12 @@ public struct SonioxBatchClient: TranscriptionProvider {
                     let _: Void = try await BatchTranscriptionJob.poll(
                         interval: 0, timeout: self.cleanupTimeout, sleep: BatchTranscriptionJob.defaultSleep
                     ) {
-                        _ = try await self.send(deletion)
+                        _ = try await self.send(deletion, isCleanup: true)
                         return .finished(())
                     }
                 } catch { self.reportCleanupFailure(error.localizedDescription) }
             }
         }.value
-    }
-
-    private func send(
-        _ request: URLRequest,
-        expectedStatusCodes: Range<Int> = 200..<300
-    ) async throws -> Data {
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw TranscriptionProviderError.invalidResponse
-        }
-        guard expectedStatusCodes.contains(http.statusCode) else {
-            let body = String(data: data, encoding: .utf8) ?? "<no-body>"
-            throw TranscriptionProviderError.httpError(http.statusCode, body)
-        }
-        return data
     }
 
     private func upload(_ request: URLRequest, fromFile fileURL: URL) async throws -> Data {
@@ -279,5 +265,37 @@ public struct SonioxBatchClient: TranscriptionProvider {
 
     private func extractModelName(from model: String) -> String {
         model.split(separator: "/").last.map(String.init) ?? model
+    }
+}
+
+extension SonioxBatchClient {
+    private func send(
+        _ request: URLRequest,
+        expectedStatusCodes: Range<Int> = 200..<300,
+        isCleanup: Bool = false
+    ) async throws -> Data {
+        let data: Data
+        let response: URLResponse
+        if isCleanup, let cleanupSend {
+            (data, response) = try await cleanupSend(request)
+        } else {
+            (data, response) = try await session.data(for: request)
+        }
+        guard let http = response as? HTTPURLResponse else {
+            throw TranscriptionProviderError.invalidResponse
+        }
+        guard expectedStatusCodes.contains(http.statusCode) else {
+            let body = String(data: data, encoding: .utf8) ?? "<no-body>"
+            throw TranscriptionProviderError.httpError(http.statusCode, body)
+        }
+        return data
+    }
+
+    /// Keeps accepted job/file deletion available after a comparison's session aborts.
+    public func withIndependentCleanup() -> Self {
+        var copy = self
+        let transport = BatchCleanupTransport(session: session)
+        copy.cleanupSend = { request in try await transport.send(request) }
+        return copy
     }
 }

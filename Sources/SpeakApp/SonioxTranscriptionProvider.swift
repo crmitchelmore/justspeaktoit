@@ -76,16 +76,18 @@ struct SonioxTranscriptionProvider: TranscriptionProvider {
         session: URLSession = .shared,
         pollingDelay: Duration = .seconds(2),
         maximumPollingAttempts: Int = 90,
-        multipartStaging: MultipartUploadStaging = .shared
+        multipartStaging: MultipartUploadStaging = .shared,
+        independentCleanup: Bool = false
     ) {
         let logger = SpeakLogger.logger(category: "SonioxTranscriptionProvider")
-        client = SonioxBatchClient(
+        let client = SonioxBatchClient(
             session: session, pollingDelay: pollingDelay, maximumPollingAttempts: maximumPollingAttempts,
             multipartStaging: multipartStaging.sharedStore,
             reportCleanupFailure: { message in
                 logger.error("Failed to clean up Soniox async resources: \(message, privacy: .public)")
             }
         )
+        self.client = independentCleanup ? client.withIndependentCleanup() : client
     }
 
     func transcribeFile(

@@ -77,7 +77,7 @@ final class SettingsCredentialUITests: XCTestCase {
     }
 
     @MainActor
-    private func openAlibaba(_ app: XCUIApplication) throws {
+    private func openAlibaba(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) throws {
         let navigation = app.descendants(matching: .any)["sidebarSettings-apiKeys"].firstMatch
         XCTAssertTrue(navigation.waitForExistence(timeout: 15))
         navigation.click()
@@ -85,8 +85,65 @@ final class SettingsCredentialUITests: XCTestCase {
         XCTAssertTrue(search.waitForExistence(timeout: 15))
         search.click()
         search.typeText("Alibaba")
+        try revealAlibabaControls(app, file: file, line: line)
         try wait { app.staticTexts["Alibaba Model Studio (Transcription)"].exists }
         XCTAssertTrue(app.secureTextFields["Alibaba Model Studio API Key"].waitForExistence(timeout: 15))
+    }
+
+    @MainActor
+    private func revealAlibabaControls(
+        _ app: XCUIApplication, file: StaticString, line: UInt
+    ) throws {
+        // Bind the actual pane while Search is visible. A query re-evaluated
+        // against Search would stop finding it once the lazy stack scrolls away.
+        let panes = app.scrollViews.containing(.textField, identifier: "Search API keys")
+            .allElementsBoundByAccessibilityElement
+        guard panes.count == 1 else {
+            try failReveal(app, stage: "Expected one Settings pane containing Search; found \(panes.count)",
+                           file: file, line: line)
+        }
+        let pane = panes[0]
+        // Reuse the original 15-second row-readiness bound. Eight 300-pixel
+        // scrolls cover the configuration/storage cards above the filtered row
+        // on the observed 1024x768 host without changing density or window size.
+        let deadline = ProcessInfo.processInfo.systemUptime + 15
+        for _ in 0..<8 {
+            if alibabaControlsAreHittable(app) { return }
+            guard ProcessInfo.processInfo.systemUptime < deadline else { break }
+            pane.scroll(byDeltaX: 0, deltaY: -300)
+        }
+        guard alibabaControlsAreHittable(app) else {
+            try failReveal(app, stage: "Alibaba row, secure field and credential actions were not revealed",
+                           file: file, line: line)
+        }
+    }
+
+    @MainActor
+    private func alibabaControlsAreHittable(_ app: XCUIApplication) -> Bool {
+        let field = app.secureTextFields["Alibaba Model Studio API Key"]
+        let action = app.buttons[app.buttons["Replace Key"].exists ? "Replace Key" : "Save Key"]
+        let remove = app.buttons["Remove Key"]
+        return app.staticTexts["Alibaba Model Studio (Transcription)"].exists
+            && field.exists && field.isHittable && action.exists && action.isHittable
+            && (!remove.exists || remove.isHittable)
+    }
+
+    @MainActor
+    private func failReveal(
+        _ app: XCUIApplication, stage: String, file: StaticString, line: UInt
+    ) throws -> Never {
+        if app.state != .notRunning {
+            let screenshot = XCTAttachment(screenshot: app.screenshot())
+            screenshot.name = "Alibaba Settings reveal: " + stage
+            screenshot.lifetime = .keepAlways
+            add(screenshot)
+            let hierarchy = XCTAttachment(string: app.debugDescription)
+            hierarchy.name = "Owned Settings accessibility hierarchy"
+            hierarchy.lifetime = .keepAlways
+            add(hierarchy)
+        }
+        XCTFail(stage, file: file, line: line)
+        throw SettingsTimeout()
     }
 
     @MainActor

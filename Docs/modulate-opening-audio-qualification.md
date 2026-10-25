@@ -28,11 +28,23 @@ isolated scratch path for build and qualification:
 
 ```sh
 modulate_scratch="$(mktemp -d "${TMPDIR%/}/modulate-opening.XXXXXX")"
-SPEAK_PORTABLE_CORE=1 xcrun swift test list --configuration release --jobs 2 \
-  --scratch-path "$modulate_scratch/build"
-# The dependency-free preparation removes this tracked Apple lockfile.
-# Restore only that generated deletion in this initially clean checkout.
-git restore --source=HEAD -- Package.resolved
+# Preparation uses the runner's tested deletion-only, exclusive lockfile restore.
+SPEAK_PORTABLE_CORE=1 python3 -B - "$modulate_scratch/build" <<'PY'
+import importlib.util
+from pathlib import Path
+import subprocess
+import sys
+
+spec = importlib.util.spec_from_file_location("modulate_gate", "scripts/qualify-modulate-opening-audio.py")
+gate = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(gate)
+lock = gate.snapshot_portable_lock(Path.cwd())
+try:
+    subprocess.run(["xcrun", "swift", "test", "list", "--configuration", "release", "--jobs", "2",
+                    "--scratch-path", sys.argv[1]], check=True)
+finally:
+    gate.restore_deleted_portable_lock(lock)
+PY
 SPEAK_PORTABLE_CORE=1 python3 -B scripts/qualify-modulate-opening-audio.py \
   --output-dir "$modulate_scratch/receipt" -- \
   xcrun swift test --configuration release --jobs 2 --skip-build \

@@ -79,9 +79,7 @@ final class FocusCaptureOverrideStore {
             let marker = Marker(version: 1, generation: next, hasOverride: !value.isEmpty)
             try JSONEncoder().encode(marker).write(to: url("generation.json"), options: .atomic)
             if value.isEmpty {
-                if FileManager.default.fileExists(atPath: url("override.json").path) {
-                    try FileManager.default.removeItem(at: url("override.json"))
-                }
+                if unlink(try url("override.json").path) != 0 && errno != ENOENT { throw Failure.unavailable }
             } else {
                 let envelope = Envelope(version: 1, generation: next, override: value, invalidReason: reason?.rawValue)
                 try JSONEncoder().encode(envelope).write(to: url("override.json"), options: .atomic)
@@ -91,24 +89,33 @@ final class FocusCaptureOverrideStore {
     }
 
     private func read() throws -> Snapshot {
-        let markerURL = try url("generation.json")
-        let envelopeURL = try url("override.json")
-        guard FileManager.default.fileExists(atPath: markerURL.path) else {
-            guard !FileManager.default.fileExists(atPath: envelopeURL.path) else { throw Failure.corrupt }
+        guard let markerData = try readOptional("generation.json") else {
+            guard try readOptional("override.json") == nil else { throw Failure.corrupt }
             return .none
         }
-        let marker = try JSONDecoder().decode(Marker.self, from: Data(contentsOf: markerURL))
+        let marker = try JSONDecoder().decode(Marker.self, from: markerData)
         guard marker.version == 1 else { throw Failure.corrupt }
-        guard FileManager.default.fileExists(atPath: envelopeURL.path) else {
+        guard let envelopeData = try readOptional("override.json") else {
             guard !marker.hasOverride else { throw Failure.corrupt }
             return Snapshot(generation: marker.generation, hasBeenConfigured: true, override: .none, invalidReason: nil)
         }
-        let envelope = try JSONDecoder().decode(Envelope.self, from: Data(contentsOf: envelopeURL))
+        let envelope = try JSONDecoder().decode(Envelope.self, from: envelopeData)
         guard marker.hasOverride, envelope.version == 1, envelope.generation == marker.generation else {
             throw Failure.corrupt
         }
         return Snapshot(generation: marker.generation, hasBeenConfigured: true, override: envelope.override,
                         invalidReason: envelope.invalidReason.flatMap(CaptureParameterFailure.init(rawValue:)))
+    }
+
+    private func readOptional(_ name: String) throws -> Data? {
+        let path = try url(name)
+        var metadata = stat()
+        guard lstat(path.path, &metadata) == 0 else {
+            guard errno == ENOENT else { throw Failure.unavailable }
+            return nil
+        }
+        guard metadata.st_mode & S_IFMT == S_IFREG else { throw Failure.corrupt }
+        return try Data(contentsOf: path)
     }
 
     private func url(_ name: String) throws -> URL {
@@ -118,13 +125,17 @@ final class FocusCaptureOverrideStore {
 
     private func withLock<T>(_ operation: () throws -> T) throws -> T {
         guard let directory else { throw Failure.unavailable }
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let descriptor = open(directory.appendingPathComponent("store.lock").path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
-        guard descriptor >= 0 else { throw Failure.unavailable }
-        defer { close(descriptor) }
-        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else { throw Failure.busy }
-        defer { flock(descriptor, LOCK_UN) }
-        do { return try operation() } catch let failure as Failure { throw failure } catch { throw Failure.unavailable }
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let descriptor = open(directory.appendingPathComponent("store.lock").path, O_CREAT | O_RDWR,
+                                  S_IRUSR | S_IWUSR)
+            guard descriptor >= 0 else { throw Failure.unavailable }
+            defer { close(descriptor) }
+            guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else { throw Failure.busy }
+            defer { flock(descriptor, LOCK_UN) }
+            return try operation()
+        } catch let failure as Failure { throw failure } catch { throw Failure.unavailable }
+
     }
 }
 #endif

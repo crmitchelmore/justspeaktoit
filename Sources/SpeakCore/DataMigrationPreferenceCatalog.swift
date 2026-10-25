@@ -137,7 +137,7 @@ public enum DataMigrationPreferenceCatalog {
              .localStreamingModelSource, .postProcessingModel, .postProcessingOutputLanguage,
              .textOutputMethod, .appSwitchDelivery, .appVisibility, .recordingsDirectory,
              .hotKeyActivation, .preferredLocale, .preferredAudioInputUID, .defaultTTSVoice,
-             .ttsLanguage, .sonioxTTSRegion, .ttsQuality, .ttsOutputFormat, .hudSizePreference,
+             .ttsLanguage, .sonioxTTSRegion, .mistralTTSModel, .ttsQuality, .ttsOutputFormat, .hudSizePreference,
              .speedMode, .livePolishModel, .clipboardInsertionTriggers, .recordingSoundProfile,
              .assemblyAIKeyterms, .transcriptionKeywords, .accessibilityInsertionMode,
              .rememberedLocalTranscriptionSource, .rememberedRemoteTranscriptionMode:

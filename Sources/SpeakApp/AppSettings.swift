@@ -704,6 +704,10 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     didSet { store(ttsLanguageIdentifier, key: .ttsLanguage) }
   }
 
+  @Published var mistralTTSModel: MistralTTSModel {
+    didSet { store(mistralTTSModel.rawValue, key: .mistralTTSModel) }
+  }
+
   @Published var sonioxTTSRegion: SonioxTTSRegion {
     didSet { store(sonioxTTSRegion.rawValue, key: .sonioxTTSRegion) }
   }
@@ -1235,6 +1239,9 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     ttsLanguageIdentifier = VoiceOutputLanguageCatalog.normalizedIdentifier(
       defaults.string(forKey: DefaultsKey.ttsLanguage.rawValue)
     )
+    mistralTTSModel = MistralTTSModel(
+      rawValue: defaults.string(forKey: DefaultsKey.mistralTTSModel.rawValue) ?? ""
+    ) ?? MistralTTSCatalog.defaultModel
     sonioxTTSRegion = SonioxTTSRegion.migrated(
       from: defaults.string(forKey: DefaultsKey.sonioxTTSRegion.rawValue)
     )
@@ -1433,6 +1440,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     self.trackedAPIKeyIdentifiers = restored.trackedAPIKeyIdentifiers
     self.defaultTTSVoice = restored.defaultTTSVoice
     self.ttsLanguageIdentifier = restored.ttsLanguageIdentifier
+    self.mistralTTSModel = restored.mistralTTSModel
     self.sonioxTTSRegion = restored.sonioxTTSRegion
     self.ttsSpeed = restored.ttsSpeed
     self.ttsPitch = restored.ttsPitch

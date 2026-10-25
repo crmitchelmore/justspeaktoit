@@ -102,6 +102,13 @@ public enum TranscriptionPricing {
         // Voxtral Mini Transcribe 2 (`voxtral-mini-latest`): $0.003/min.
         // https://docs.mistral.ai/models/voxtral-mini-transcribe-26-02
         "mistral/voxtral-mini-latest": rate("0.003"),
+        // Voxtral 3 public-preview model cards, checked 2026-10-20:
+        // https://docs.mistral.ai/models/voxtral-mini-transcribe-3-0
+        // https://docs.mistral.ai/models/voxtral-small-transcribe-3-0
+        // https://docs.mistral.ai/models/voxtral-mini-transcribe-realtime-3-0
+        MistralVoxtral3.miniBatchID: rate("0.0035"),
+        MistralVoxtral3.smallBatchID: rate("0.004"),
+        MistralVoxtral3.realtimeID: rate("0.008"),
         // Google Gemini audio input: $0.50 per 1M tokens for 3.1 Flash-Lite and
         // $1.00 for 2.5 Flash, at 32 audio tokens per second.
         "google/gemini-3.1-flash-lite": rate("0.00096"),

@@ -152,7 +152,8 @@ final class TextToSpeechManager: ObservableObject {
       speed: appSettings.ttsSpeed, pitch: appSettings.ttsPitch,
       quality: appSettings.ttsQuality, format: appSettings.ttsOutputFormat,
       useSSML: useSSML ?? appSettings.ttsUseSSML,
-      language: appSettings.ttsLanguageIdentifier, sonioxRegion: appSettings.sonioxTTSRegion
+      language: appSettings.ttsLanguageIdentifier, sonioxRegion: appSettings.sonioxTTSRegion,
+      mistralModel: appSettings.mistralTTSModel
     )
   }
 

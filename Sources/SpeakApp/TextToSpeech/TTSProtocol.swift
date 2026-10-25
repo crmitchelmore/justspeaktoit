@@ -136,6 +136,7 @@ struct TTSSettings {
   /// when they have not chosen one. Providers that need an explicit spoken
   /// language resolve it themselves; the rest ignore it.
   var language: String?
+  var mistralModel: MistralTTSModel
   var sonioxRegion: SonioxTTSRegion
 
   init(
@@ -145,7 +146,8 @@ struct TTSSettings {
     format: AudioFormat = .macDefault,
     useSSML: Bool = false,
     language: String? = nil,
-    sonioxRegion: SonioxTTSRegion = .unitedStates
+    sonioxRegion: SonioxTTSRegion = .unitedStates,
+    mistralModel: MistralTTSModel = MistralTTSCatalog.defaultModel
   ) {
     self.speed = speed
     self.pitch = pitch
@@ -154,6 +156,7 @@ struct TTSSettings {
     self.useSSML = useSSML
     self.language = language
     self.sonioxRegion = sonioxRegion
+    self.mistralModel = mistralModel
   }
 }
 

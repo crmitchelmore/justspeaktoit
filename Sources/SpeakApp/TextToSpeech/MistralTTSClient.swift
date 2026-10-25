@@ -42,6 +42,7 @@ actor MistralTTSClient: TextToSpeechClient {
 
     let format = Self.effectiveFormat(for: settings.format)
     let request = MistralTTSRequest(
+      model: settings.mistralModel,
       voiceID: voice,
       responseFormat: Self.responseFormat(for: format)
     )

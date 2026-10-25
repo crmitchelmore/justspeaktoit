@@ -71,6 +71,9 @@ final class MistralVoxtralLiveRun: @unchecked Sendable {
 
     /// Handed to the transport, which may deliver `transcription.done` before
     /// it completes the send.
+    /// Voxtral 3 ends with `input_audio.end`; the pinned Voxtral 2 transport
+    /// retains its SDK flush-before-end behavior. Set when the run is armed.
+    var usesLegacyFlush = true
     var flushHandedOff = false
     var endHandedOff = false
 
@@ -104,11 +107,13 @@ final class MistralVoxtralLiveRun: @unchecked Sendable {
         return folded.isEmpty ? unconfirmedText : folded
     }
 
-    /// Whether a `transcription.done` now completes the session. The flush is
-    /// handed off only when every admitted append has completed its send
-    /// without error (one frame in flight, in order; a failed send ends the
-    /// run), so from then on the service has all of the recording.
-    var acceptsCompletion: Bool { phase == .finishing && flushHandedOff && bufferedFrames == 0 }
+    /// Whether a `transcription.done` now completes the session. The selected
+    /// model's terminal control frame is handed off only after every admitted
+    /// append completes. Voxtral 3 requires end; Voxtral 2 accepts done during
+    /// its legacy flush, as the existing SDK transport does.
+    var acceptsCompletion: Bool {
+        phase == .finishing && (usesLegacyFlush ? flushHandedOff : endHandedOff) && bufferedFrames == 0
+    }
 
     /// Whether the head of the queue may leave now. Configuration needs the
     /// real handshake and `session.created`; everything after it needs the

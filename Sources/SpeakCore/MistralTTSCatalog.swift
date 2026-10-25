@@ -5,6 +5,8 @@ public enum MistralTTSModel: String, CaseIterable, Codable, Hashable, Identifiab
     /// Dated release. Speak pins this so a model revision cannot silently
     /// change what a saved voice sounds like.
     case voxtralMiniTTS2603 = "voxtral-mini-tts-2603"
+    /// Public-preview v3 model, explicitly selectable without changing saved voices.
+    case voxtralMiniTTS3 = "voxtral-mini-tts-3-0"
     /// Rolling alias Mistral keeps pointed at the newest Voxtral TTS release.
     case voxtralMiniTTSLatest = "voxtral-mini-tts-latest"
 
@@ -14,6 +16,7 @@ public enum MistralTTSModel: String, CaseIterable, Codable, Hashable, Identifiab
     public var displayName: String {
         switch self {
         case .voxtralMiniTTS2603: "Voxtral TTS 26.03"
+        case .voxtralMiniTTS3: "Voxtral TTS 3 (Preview)"
         case .voxtralMiniTTSLatest: "Voxtral TTS (latest)"
         }
     }

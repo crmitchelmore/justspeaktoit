@@ -15,7 +15,7 @@ final class DataMigrationPreferenceCatalogTests: XCTestCase {
 
     func testCanonicalKeys_PreserveInventoryOrderAndUniquePersistedNames() {
         let keys = ApplicationPreferenceKey.allCases.map(\.rawValue)
-        XCTAssertEqual(keys.count, 92)
+        XCTAssertEqual(keys.count, 93)
         XCTAssertEqual(Set(keys).count, keys.count)
         XCTAssertEqual(keys.first, "appearance")
         XCTAssertEqual(keys.last, "analyticsEnabled")
@@ -24,7 +24,7 @@ final class DataMigrationPreferenceCatalogTests: XCTestCase {
 
     func testDefinitions_CoverEveryPortableKeyWithoutDuplicateOrImplicitTypeFallback() {
         let definitions = DataMigrationPreferenceCatalog.definitions
-        XCTAssertEqual(definitions.count, 97)
+        XCTAssertEqual(definitions.count, 98)
         XCTAssertEqual(Set(definitions.map(\.key)).count, definitions.count)
         let excluded: Set<ApplicationPreferenceKey> = [.trackedKeyIdentifiers, .transcriptionKeywordsLastReconciled]
         for key in ApplicationPreferenceKey.allCases {

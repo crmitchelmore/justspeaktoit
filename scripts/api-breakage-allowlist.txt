@@ -50,3 +50,8 @@ API breakage: enumelement ConfigTransferError.payloadTooLarge has been added as 
 # consumed by the in-repository clients rebuilt in this run.
 API breakage: enumelement DictationProfileMatcher.Kind.linuxExecutablePath has been added as a new enum case
 API breakage: enumelement GroqTTSAPIError.excessiveFanOut has been added as a new enum case
+# Voxtral 3 adds a typed persisted TTS selection and model choice. Existing
+# preference keys, model raw values and defaults remain; repository app clients
+# are rebuilt together and selection/migration behavior is covered by tests.
+API breakage: enumelement ApplicationPreferenceKey.mistralTTSModel has been added as a new enum case
+API breakage: enumelement MistralTTSModel.voxtralMiniTTS3 has been added as a new enum case

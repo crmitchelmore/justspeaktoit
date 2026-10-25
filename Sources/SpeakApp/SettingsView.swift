@@ -815,6 +815,24 @@ struct SettingsView: View {
           }
           .pickerStyle(.menu)
 
+          if TTSProvider.from(voiceID: settings.defaultTTSVoice) == .mistral {
+            Picker("Mistral Model", selection: settingsBinding(\AppSettings.mistralTTSModel)) {
+              ForEach(MistralTTSCatalog.models) { model in
+                Text(model.displayName).tag(model)
+              }
+            }
+            .pickerStyle(.menu)
+            if settings.mistralTTSModel == .voxtralMiniTTS3 {
+              Text("Voxtral TTS 3 is a public preview. Use [emotion=happy] or [pace=slow] in your text "
+                + "to direct delivery.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            Text("Speed, pitch and SSML controls are unsupported by Mistral.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+
           if TTSProvider.from(voiceID: settings.defaultTTSVoice) == .soniox {
             Picker("Soniox Region", selection: settingsBinding(\AppSettings.sonioxTTSRegion)) {
               ForEach(SonioxTTSRegion.allCases) { region in

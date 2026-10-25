@@ -1,7 +1,7 @@
 import Foundation
 import SpeakCore
 import SpeakDesktop
-import SpeakDesktopHost
+@testable import SpeakDesktopHost
 import XCTest
 
 final class DesktopHostRecordingCancelTests: XCTestCase {

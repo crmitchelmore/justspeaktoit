@@ -178,18 +178,24 @@ notes rather than leaving the reviewer on Apple Speech alone.
 The listing must point at `https://justspeaktoit.com/privacy`, the same document
 the new in-app link opens from Settings.
 
-## The rejection already on the record
+## Historical App Store Connect observations
 
-The iOS app has never been released. App Store version **2.23.5**, created
-30 January 2026, is in the **REJECTED** state, and it is the only version the
-record has ever had. Everything since has gone to TestFlight, currently 3.1.0
-build 333.
+A prior audit observed App Store version **2.23.5**, created 30 January 2026,
+in the **REJECTED** state and TestFlight **3.1.0 build 333**. At that audit,
+the iOS app had no public release and the App Store record had one version.
+These are historical observations. Fresh App Store Connect readback is required
+to establish the current versions, review state, TestFlight build and public
+availability before preparing a submission.
 
-The reason is not recoverable from here. The App Store Connect API does not
-expose Resolution Center, and no rejection email survives in the mailbox. Read
-Resolution Center in App Store Connect before preparing a new submission,
-because the original reason may still apply and none of the work in this
-document addresses it.
+That audit could not recover the rejection reason through the API or a retained
+rejection email. Read Resolution Center in App Store Connect before preparing a
+new submission, because the original reason may still apply and the repository
+work in this document does not establish that it was resolved.
+
+For local release/reconciliation authentication, see the
+[1Password credential setup](alpha-stable-release-trains.md#local-apple-release-credentials-from-1password).
+Unlock and authorise vault access before fresh readback; configured references
+alone do not prove credential or API access.
 
 ## Regression cover
 

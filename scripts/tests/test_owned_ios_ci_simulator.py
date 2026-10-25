@@ -53,6 +53,21 @@ class OwnedSimulatorTests(unittest.TestCase):
                 owned.create(Path("unused"), Path("unused"), "test-run")
             self.assertEqual([call.args[0] for call in run.call_args_list], ["create"])
 
+    def test_never_adopts_a_preexisting_unavailable_returned_uuid(self):
+        unavailable = inventory(NEW)[RUNTIME][0]
+        unavailable["isAvailable"] = False
+        before = {RUNTIME: inventory()[RUNTIME] + [unavailable]}
+        with tempfile.TemporaryDirectory() as directory:
+            receipt, environment = Path(directory) / "owned.json", Path(directory) / "env"
+            with mock.patch.object(owned, "devices", return_value=before) as devices, \
+                    mock.patch.object(owned, "run", return_value=NEW) as run:
+                with self.assertRaises(ValueError):
+                    owned.create(receipt, environment, "test-run")
+            devices.assert_called_once_with(available=False)
+            self.assertEqual([call.args[0] for call in run.call_args_list], ["create"])
+            self.assertFalse(receipt.exists())
+            self.assertFalse(environment.exists())
+
     def test_configuration_mismatch_removes_only_new_device(self):
         wrong = inventory(NEW)
         wrong[RUNTIME][0]["deviceTypeIdentifier"] = "different"

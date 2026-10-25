@@ -33,8 +33,8 @@ def selected_configuration(inventory):
 
 def remove_owned(identifier):
     uuid.UUID(identifier)
-    # Cleanup must include unavailable devices; creation alone uses the
-    # available-only selector. Never mutate another UUID from this inventory.
+    # Cleanup must include unavailable devices; only configuration selection
+    # filters for availability. Never mutate another UUID from this inventory.
     state = next((device.get("state") for values in devices(available=False).values() for device in values
                   if device.get("udid") == identifier), None)
     if state is None:
@@ -61,7 +61,9 @@ def create(receipt, environment, owner):
         pass
     else:
         raise ValueError("Refusing an existing ownership receipt before creating a device")
-    inventory = devices()
+    # Ownership admission includes unavailable pre-existing UUIDs; the
+    # configuration selector still considers only available iPhones.
+    inventory = devices(available=False)
     runtime, device_type = selected_configuration(inventory)
     previous = {device["udid"] for values in inventory.values() for device in values}
     identifier = run("create", f"JSTI owned CI {uuid.uuid4()}", device_type, runtime)

@@ -29,12 +29,12 @@ audit. No request was made to an analytics endpoint during this work.
 
 | Area | Evidence and remaining gap |
 | --- | --- |
-| Transport | `PostHogAnalytics.swift` contains a minimal `/capture` client, excluded by `APP_STORE`. Missing configuration is no-op. The source comment explains avoiding SDK remote config; it is not the required current-SDK spike or release network capture. |
+| Transport | `PostHogAnalytics.swift` contains a minimal `/capture` client, excluded by `APP_STORE`. Missing configuration is no-op. The approved narrowed scope retains this client rather than replacing it with an SDK; full-process release network capture remains required. |
 | Consent | `AppSettings.analyticsEnabled` defaults false. `WireUp` synchronizes consent into `ProductAnalyticsController`; macOS onboarding and Settings expose an explicit choice. Core tests cover unknown/opted-out silence, cleanup errors, rapid consent changes, and suspended opt-in/capture after withdrawal. Transition revisions prevent stale resumptions and new opt-ins await withdrawal cleanup. Real UI withdrawal and release-build zero-traffic evidence still need validation. |
 | Queue | Durable queue has 1,000-entry/seven-day limits. This change serializes flushes, cancels active requests on purge/close, rejects stale responses after reopening, removes acknowledged entries by local queue ID, and persists pruning before replay. Legacy queue files remain readable. |
 | Identity | `FileProductAnalyticsStateStore` stores a random install UUID in app data; core tests cover deletion and anonymous counters without that UUID. Backend separation from Sentry still needs evidence. |
 | Kill switches | `AnalyticsLocalPolicy` supplies one synchronized gate to controller and sink. A persisted device-local override, build plist flag and controlled-launch environment flag can force collection off. Applying the local override immediately cancels controlled requests/retries and purges local queue, inspection history and identity while preserving consent. Production release-network and server key-rotation qualification remain pending. |
-| Inspector | Direct macOS Settings exposes a native inspector using the same event-envelope builder as transport, with ingestion credentials omitted. It shows consent/effective policy, sanitized endpoint, existing identity, queue depth and at most 100 launch-local records; valid persisted queued records are seeded on relaunch. Reset preserves consent, clears local identity/queue/history and creates no event. Export writes only after a native destination choice. Native Debug/Release tests and release-network qualification remain gates; iOS/store expansion is excluded. |
+| Inspector | Direct macOS Settings exposes a native inspector using the same event-envelope builder as transport, with ingestion credentials omitted. It shows consent/effective policy, sanitized endpoint, existing identity, queue depth and at most 100 launch-local records; valid persisted queued records are seeded on relaunch. Reset preserves consent, clears local identity/queue/history and creates no event. Export writes only after a native destination choice. Native Debug/Release privacy tests and an isolated native visual fixture pass; full-process release-network qualification remains open. iOS/store expansion is excluded. |
 | Phase-one events | macOS has daily activity, onboarding call sites, and first-transcription success. Daily deduplication occurs at app startup and records the date after a best-effort capture; this does not establish multi-day-running-app coverage or successful durable delivery. |
 | Typed catalogue | Closed event/dimension types, scalar encoding, language/context bounding, and catalogue tests exist. The catalogue test checks Swift cases/properties; it does not read the Markdown table, so automatic catalogue-to-docs drift coverage remains missing. |
 | Disclosures | `Docs/PRIVACY.md`, `SECURITY.md`, and `landing-page/privacy.html` describe initial direct-macOS collection. A checked-in web page does not prove publication or server retention enforcement. Store disclosures/archive manifests remain separate gated work. |
@@ -86,9 +86,18 @@ qualification.
 The direct-macOS inspector and local controls now have source coverage and privacy
 regressions for credential-free envelope equality, scalar/anonymous identity
 semantics, retention, retry identity, local persistence failures, policy/reset
-races, read-only inspection and export feedback. Native execution is still
-pending for this patch. No backend request, key rotation or production rollout
-was performed to implement it.
+races, read-only inspection and export feedback. On 25 October 2026, Apple
+Swift 6.2.3 / macOS SDK 26.2 passed all 59 relevant tests in both Debug and
+Release. An isolated native window rendered the inspector and selected event
+JSON using temporary state and intercepted requests. This proves native UI
+rendering, not a full-process Release network audit. No production backend
+request, key rotation or rollout was performed to implement it.
+
+An unsigned SwiftPM Release executable compiled with `-DAPP_STORE` also built
+successfully. Its strings and symbol tables contain none of the PostHog sink,
+inspector, privacy-controls or local-policy type names, the PostHog endpoint,
+or the local override key. This is compile/exclusion evidence, not a signed
+App Store archive, binary privacy report or runtime traffic audit.
 
 Before enabling or widening production, retain the release network capture,
 12-month retention/aggregate-or-delete verification, server privacy settings,

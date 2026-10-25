@@ -387,6 +387,7 @@ public actor ProductAnalyticsController {
     private var sinkIsClosed = true
     private var consentRevision = UUID()
     private var suspensionTask: Task<Void, Error>?
+    private var requiresCleanupRetry = false
 
     public init(
         context: ProductAnalyticsContext,
@@ -410,7 +411,7 @@ public actor ProductAnalyticsController {
         consentRevision = revision
         guard newConsent != .optedIn else {
             // A newer opt-in must not reopen a client whose withdrawal is still purging/closing it.
-            if let suspensionTask { try await suspensionTask.value }
+            try await awaitPendingCleanup()
             guard consentRevision == revision else { return }
             try stateStore.saveConsent(newConsent)
             guard !forceDisabled() else {
@@ -454,7 +455,7 @@ public actor ProductAnalyticsController {
             try await suspendCollection()
             return
         }
-        if let suspensionTask { try await suspensionTask.value }
+        try await awaitPendingCleanup()
         guard consentRevision == revision, consent.permitsCollection else { return }
         guard !forceDisabled() else {
             try await suspendCollection()
@@ -471,6 +472,23 @@ public actor ProductAnalyticsController {
         }
         let distinctID = event.privacyClass == .pseudonymous ? try installationID() : nil
         try await sink.capture(ProductAnalyticsPayload(event: event, context: context, distinctID: distinctID))
+    }
+
+    /// Reads existing local identity without creating one or admitting an event.
+    public func existingInstallationID() throws -> UUID? { try stateStore.loadInstallationID() }
+
+    /// Invalidates admitted work before cleanup, preserving the user's consent.
+    /// A future approved event may lazily create a new identity after cleanup.
+    public func resetInstallationIdentity() async throws {
+        consentRevision = UUID()
+        try await suspendCollection()
+    }
+
+    /// Applies a changed local collection gate immediately, even without a new
+    /// event. Clearing the gate never opts in or creates an identity/event.
+    public func refreshCollectionPolicy() async throws {
+        consentRevision = UUID()
+        if forceDisabled() || requiresCleanupRetry { try await suspendCollection() }
     }
 
     public func preview(_ event: ProductAnalyticsEvent) throws -> Data {
@@ -492,13 +510,20 @@ public actor ProductAnalyticsController {
         return id
     }
 
+    private func awaitPendingCleanup() async throws {
+        if let suspensionTask { try await suspensionTask.value }
+        if requiresCleanupRetry { try await suspendCollection() }
+    }
+
     private func suspendCollection(deleteIdentity: Bool = true) async throws {
         if let suspensionTask { return try await suspensionTask.value }
         sinkIsClosed = true
+        requiresCleanupRetry = true
         let cleanup = Task { try await self.performSuspension(deleteIdentity: deleteIdentity) }
         suspensionTask = cleanup
         defer { suspensionTask = nil }
         try await cleanup.value
+        requiresCleanupRetry = false
     }
 
     private func performSuspension(deleteIdentity: Bool) async throws {

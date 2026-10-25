@@ -26,6 +26,7 @@ on:
       - scripts/generate-desktop-icons.py
       - scripts/local-llm-runtime/**
       - scripts/migration/verify-miniz.py
+      - scripts/migration/migration_dependency.py
       - scripts/windows-local-runtime/dependencies.json
       - .github/workflows/linux-flatpak.yml
   pull_request:
@@ -197,6 +198,7 @@ jobs:
           inputs = ['Package.swift', 'LICENSE', '.gitattributes', 'packaging/linux', 'Sources', 'Resources',
                     'scripts/stage-linux-desktop.py', 'scripts/local-llm-runtime',
                     'scripts/generate-desktop-icons.py', 'scripts/migration/verify-miniz.py',
+                    'scripts/migration/migration_dependency.py',
                     'scripts/windows-local-runtime/dependencies.json']
           subprocess.run([*git, 'diff', '--exit-code', built_sha, 'HEAD', '--', *inputs], check=True)
           metadata['builtRevision'] = built_sha

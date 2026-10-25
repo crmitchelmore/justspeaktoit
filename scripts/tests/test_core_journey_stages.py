@@ -38,7 +38,7 @@ class CommandTests(unittest.TestCase):
         ])
         self.assertEqual(len(stages.GATE["REQUIRED_SUITES"]), 15)
 
-    def test_ui_uses_same_built_manifest_destination_and_all_four_suites(self):
+    def test_ui_uses_same_built_manifest_destination_and_all_required_suites(self):
         with tempfile.TemporaryDirectory() as temp:
             directory = Path(temp)
             manifest = directory / "DerivedData/Build/Products/SpeakApp_macosx.xctestrun"
@@ -59,7 +59,8 @@ class CommandTests(unittest.TestCase):
             self.assertNotIn("-scheme", runtime)
             self.assertIn("-disableAutomaticPackageResolution", runtime)
             self.assertIn("-skipPackageUpdates", runtime)
-            self.assertEqual(len(stages.ui_selection()), 4)
+            self.assertEqual(len(stages.ui_selection()), 5)
+            self.assertIn("-only-testing:SpeakAppUITests/SettingsCredentialUITests", stages.ui_selection())
             for argument in stages.ui_selection() + [
                 "-skipPackagePluginValidation", "CODE_SIGN_IDENTITY=-",
                 "DEVELOPMENT_TEAM=", "CODE_SIGN_STYLE=Manual",

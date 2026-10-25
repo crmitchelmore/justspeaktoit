@@ -12,6 +12,7 @@ PARSER = runpy.run_path(str(Path(__file__).with_name("run-core-journey-e2e.py"))
 REQUIRED_TARGETS = ("SpeakiOSTests", "SpeakiOSUITests")
 REQUIRED_SUITES = {
     "SpeakiOSTests": ("OpenRouterAudioSettingsTests", "OpenRouterVoiceCancellationTests"),
+    "SpeakiOSUITests": ("SettingsCredentialUITests",),
 }
 STATUSES = ("passed", "failed", "skipped")
 MAX_LOG_BYTES = 64 * 1024 * 1024

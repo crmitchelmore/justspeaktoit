@@ -245,10 +245,10 @@ source and runs proxies. Lean into that:
    excluded from this implementation.
    - The JSON contains the same serialized event/properties fields as transport,
      including transport-added fields, with `api_key` omitted. It is not raw
-     authenticated request bytes. Endpoint display/export removes URL userinfo,
-     query values and fragments.
-   - At most 100 events are retained in memory for this launch. Valid queued
-     entries seed that bounded view after relaunch; sent history is not persisted.
+     authenticated request bytes. Endpoint display/export shows only the origin; URL userinfo, paths, query
+     values and fragments are omitted because a proxy path may contain a token.
+   - At most 100 recent records are retained in memory, including surviving
+     queued entries from earlier launches. Sent history is not persisted.
      Queue retention remains 1,000 events/seven days. Retries update one row;
      HTTP acknowledged means an observed 2xx response, not backend processing or
      exactly-once delivery.

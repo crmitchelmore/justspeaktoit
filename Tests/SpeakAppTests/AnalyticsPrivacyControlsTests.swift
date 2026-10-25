@@ -31,6 +31,7 @@ final class AnalyticsPrivacyControlsTests: XCTestCase {
         XCTAssertEqual(fixture.controls.snapshot?.records.first?.status, .sending)
 
         await fixture.controls.setDisabled(true)
+        XCTAssertEqual(fixture.controls.collectionLabel, "Disabled by local override")
 
         XCTAssertEqual(fixture.controls.consent, .optedIn)
         XCTAssertNil(try fixture.store.loadInstallationID())
@@ -58,17 +59,22 @@ final class AnalyticsPrivacyControlsTests: XCTestCase {
         await fixture.cleanUp()
     }
 
-    func testBuildAndEnvironmentDisable_CannotBeClearedByLocalOverride() throws {
-        let suite = "AnalyticsLocalPolicy.\(UUID())"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let build = AnalyticsLocalPolicy(defaults: defaults, buildDisabled: true, environment: [:])
-        build.setLocallyDisabled(false)
-        XCTAssertTrue(build.isDisabled)
-        let environment = AnalyticsLocalPolicy(defaults: defaults, buildDisabled: false,
-                                               environment: ["POSTHOG_DISABLED": "true"])
-        environment.setLocallyDisabled(false)
-        XCTAssertTrue(environment.isDisabled)
+    func testBuildAndEnvironmentDisable_CannotBeClearedOrMislabelledAsLocalOverride() async throws {
+        let sources: [(build: Bool, environment: [String: String])] = [
+            (true, [:]), (false, ["POSTHOG_DISABLED": "true"])
+        ]
+        for source in sources {
+            let fixture = try PrivacyControlsFixture(
+                consent: .optedIn, buildDisabled: source.build, environment: source.environment
+            )
+            await fixture.controls.setDisabled(false)
+            try await fixture.controller.capture(.appActiveDaily)
+            XCTAssertTrue(fixture.controls.policy.isDisabled)
+            XCTAssertEqual(fixture.controls.collectionLabel, "Disabled by build or launch policy")
+            XCTAssertTrue(fixture.recorder.requests.isEmpty)
+            XCTAssertNil(try fixture.store.loadInstallationID())
+            await fixture.cleanUp()
+        }
     }
 
     func testResetAndExport_PreserveConsentAndReportLocalWriteOutcomes() async throws {
@@ -149,11 +155,12 @@ private final class PrivacyControlsFixture {
     var queueURL: URL { directory.appendingPathComponent("queue.json") }
 
     init(
-        recorder: AnalyticsRequestRecorder = AnalyticsRequestRecorder(), consent: AnalyticsConsentState = .unknown
+        recorder: AnalyticsRequestRecorder = AnalyticsRequestRecorder(), consent: AnalyticsConsentState = .unknown,
+        buildDisabled: Bool = false, environment: [String: String] = [:]
     ) throws {
         self.recorder = recorder
         self.defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        let policy = AnalyticsLocalPolicy(defaults: defaults, buildDisabled: false, environment: [:])
+        let policy = AnalyticsLocalPolicy(defaults: defaults, buildDisabled: buildDisabled, environment: environment)
         recorder.installAsStubHandler()
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StubURLProtocol.self]

@@ -21,6 +21,7 @@ struct AnalyticsInspectionRecord: Identifiable, Sendable {
 }
 
 struct AnalyticsInspectionSnapshot: Sendable {
+    static let historyScope = "At most 100 recent records, including surviving queued events from earlier launches."
     let endpoint: String
     let configured: Bool
     let isOpen: Bool
@@ -34,6 +35,9 @@ struct AnalyticsInspectionSnapshot: Sendable {
         }
         components.user = nil
         components.password = nil
+        // Proxy paths can contain access tokens. Inspection exposes only the
+        // endpoint origin; the actual transport URL remains unchanged.
+        components.path = ""
         components.query = nil
         components.fragment = nil
         return components.string ?? "Not configured"
@@ -46,7 +50,7 @@ struct AnalyticsInspectionSnapshot: Sendable {
         }
         return try JSONSerialization.data(withJSONObject: [
             "endpoint": endpoint, "queue_depth": queueDepth, "records": records,
-            "scope": "At most 100 events from this launch; valid queued events survive relaunch.",
+            "scope": Self.historyScope,
             "authentication": "Ingestion credential omitted"
         ], options: [.prettyPrinted, .sortedKeys])
     }

@@ -122,13 +122,30 @@ private final class PolishJourney {
     }
 
     func assertVisibleFailure() {
-        let headline = self.app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Post-processing failed"))
-        XCTAssertTrue(headline.firstMatch.waitForExistence(timeout: 3), "The real production HUD must show failure")
-        let retry = self.app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "⌘R"))
-        XCTAssertTrue(retry.firstMatch.exists, "The real production HUD must expose retry guidance")
-        XCTAssertTrue(self.app.staticTexts.matching(NSPredicate(
-            format: "label CONTAINS %@", "Synthetic post-processing rejection"
-        )).firstMatch.exists, "The actual controlled rejection must be visible")
+        // The nonactivating HUD panel is a top-level AX Dialog, separate from
+        // the background app's main window. Resolve that actual subtree first.
+        let hud = self.app.dialogs.descendants(matching: .any)
+            .matching(identifier: "hudOverlay").firstMatch
+        let required = ["Post-processing failed", "Synthetic post-processing rejection", "⌘R"]
+        var observedLabels: [String] = []
+        let visibleFailure = NSPredicate { _, _ in
+            guard hud.exists else { return false }
+            observedLabels = hud.descendants(matching: .staticText).allElementsBoundByIndex.map(\.label)
+            return observedLabels.contains { label in required.allSatisfy { label.contains($0) } }
+        }
+        let result = XCTWaiter.wait(
+            for: [XCTNSPredicateExpectation(predicate: visibleFailure, object: nil)], timeout: 3
+        )
+        if result != .completed {
+            let overlay = hud.exists ? hud.debugDescription : "hudOverlay was absent"
+            let details = [self.app.dialogs.debugDescription, overlay, observedLabels.joined(separator: "\n")]
+            let diagnostic = XCTAttachment(string: details.map { String($0.prefix(12_000)) }.joined(separator: "\n"))
+            diagnostic.name = "Scoped production failure HUD accessibility"
+            diagnostic.lifetime = .keepAlways
+            self.owner.add(diagnostic)
+        }
+        XCTAssertEqual(result, .completed,
+                       "The actual HUD must expose failure, controlled rejection and retry in one accessibility label")
         let attachment = XCTAttachment(screenshot: self.app.screenshot())
         attachment.name = "Visible production post-processing failure and retry"
         attachment.lifetime = .keepAlways

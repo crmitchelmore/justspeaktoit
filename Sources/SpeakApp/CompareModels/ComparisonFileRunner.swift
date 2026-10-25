@@ -10,6 +10,8 @@ import SpeakCore
 /// model per call instead of reading the app's configured model, and never
 /// applies lexicon, live polish or LLM cleanup: the comparison measures the
 /// speech model alone.
+/// Each lane can cancel its own transport. Cancelling local requests cannot
+/// recall server-side work a provider already accepted.
 struct ComparisonFileRunner {
     let secureStorage: SecureAppStorage
     let openRouter: OpenRouterAPIClient
@@ -29,9 +31,12 @@ struct ComparisonFileRunner {
         await withTaskGroup(of: ModelComparisonEntry.self) { group in
             for candidate in candidates {
                 group.addTask {
-                    let outcome = await BoundedOperation.run(timeout: .seconds(120)) {
-                        await self.transcribe(request, with: candidate)
-                    }
+                    let transport = await openRouter.makeIsolatedFileTranscriptionClient()
+                    defer { transport.session.finishTasksAndInvalidate() }
+                    let outcome = await BoundedOperation.run(
+                        timeout: .seconds(120), onCancel: { transport.session.invalidateAndCancel() },
+                        operation: { await self.transcribe(request, with: candidate, transport: transport) }
+                    )
                     let entry: ModelComparisonEntry
                     if case .success(let result) = outcome {
                         entry = result
@@ -56,7 +61,10 @@ struct ComparisonFileRunner {
         }
     }
 
-    private func transcribe(_ request: Request, with candidate: ComparisonCandidate) async -> ModelComparisonEntry {
+    private func transcribe(
+        _ request: Request, with candidate: ComparisonCandidate,
+        transport: (client: OpenRouterAPIClient, session: URLSession)
+    ) async -> ModelComparisonEntry {
         var entry = ModelComparisonEntry(
             modelID: candidate.modelID,
             modelDisplayName: candidate.displayName,
@@ -64,7 +72,7 @@ struct ComparisonFileRunner {
         )
         let started = Date()
         do {
-            let result = try await transcribeFile(request, with: candidate)
+            let result = try await transcribeFile(request, with: candidate, transport: transport)
             entry.timeToFinalMs = SessionLatencyMetrics.milliseconds(from: started, to: Date())
             entry.transcript = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
             entry.estimatedCostUSD = Self.cost(
@@ -82,7 +90,10 @@ struct ComparisonFileRunner {
         return entry
     }
 
-    private func transcribeFile(_ request: Request, with candidate: ComparisonCandidate) async throws
+    private func transcribeFile(
+        _ request: Request, with candidate: ComparisonCandidate,
+        transport: (client: OpenRouterAPIClient, session: URLSession)
+    ) async throws
         -> TranscriptionResult {
         switch candidate.engine {
         case .appleSpeechAnalyzer:
@@ -93,14 +104,18 @@ struct ComparisonFileRunner {
                 engine: AppleSpeechAnalyzerEngine(modelID: candidate.modelID)
             )
         case .downloadedLocal:
+            // WhisperKit has a request-local stop callback at decoder boundaries.
+            // Keep its model-file lease until inference unwinds, including in-flight Core ML work.
             return try await LocalModelManager.shared.transcribeFile(
                 at: request.fileURL,
                 modelID: candidate.modelID,
                 language: request.language
             )
         case .cloudBatch:
-            if let provider = await TranscriptionProviderRegistry.shared.provider(forModel: candidate.modelID) {
+            let registry = TranscriptionProviderRegistry(session: transport.session, independentCleanup: true)
+            if let provider = await registry.provider(forModel: candidate.modelID) {
                 let apiKey = try await loadAPIKey(identifier: provider.metadata.apiKeyIdentifier)
+                try Task.checkCancellation()
                 return try await provider.transcribeFile(
                     at: request.fileURL,
                     apiKey: apiKey,
@@ -108,7 +123,7 @@ struct ComparisonFileRunner {
                     language: request.language
                 )
             }
-            return try await openRouter.transcribeFile(
+            return try await transport.client.transcribeFile(
                 at: request.fileURL,
                 model: candidate.modelID,
                 language: request.language

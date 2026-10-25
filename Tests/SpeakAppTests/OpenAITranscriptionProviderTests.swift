@@ -33,6 +33,23 @@ final class OpenAITranscriptionProviderTests: XCTestCase {
         }
     }
 
+    func testProviderRegistry_usesComparisonOwnedSession() async throws {
+        StubURLProtocol.respond { request in
+            try Self.makeResponse(for: request, body: #"{"text":"owned session","duration":1}"#)
+        }
+        defer { StubURLProtocol.reset() }
+        let session = makeMockSession()
+        defer { session.invalidateAndCancel() }
+        let registry = TranscriptionProviderRegistry(session: session)
+        let registered = await registry.provider(forModel: "openai/gpt-4o-transcribe")
+        let provider = try XCTUnwrap(registered)
+        let result = try await provider.transcribeFile(
+            at: try makeAudioFile(), apiKey: "test-owned-key", model: "openai/gpt-4o-transcribe", language: nil
+        )
+        XCTAssertEqual(result.text, "owned session")
+        XCTAssertEqual(StubURLProtocol.recordedRequests.count, 1)
+    }
+
     func testTranscribeFileWithGPTTranscribe_usesJSONAndPluralLanguageHints() async throws {
         let requestObserver = OpenAIRequestObserver()
         StubURLProtocol.respond {  request in

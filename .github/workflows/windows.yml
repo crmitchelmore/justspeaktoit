@@ -35,6 +35,10 @@ on:
       - scripts/verify-portable-core-boundary.py
       - scripts/windows-cloudkit/**
       - scripts/websocket-loopback-probe.py
+      - scripts/modulate-opening-audio-probe.py
+      - scripts/qualify-modulate-opening-audio.py
+      - scripts/run-core-journey-e2e.py
+      - scripts/tests/test_modulate_opening_audio_probe.py
       - scripts/windows-local-runtime/**
       - scripts/windows-bundle/runtime-policy.json
       - Docs/windows-development.md
@@ -73,6 +77,10 @@ on:
       - scripts/verify-portable-core-boundary.py
       - scripts/windows-cloudkit/**
       - scripts/websocket-loopback-probe.py
+      - scripts/modulate-opening-audio-probe.py
+      - scripts/qualify-modulate-opening-audio.py
+      - scripts/run-core-journey-e2e.py
+      - scripts/tests/test_modulate_opening_audio_probe.py
       - scripts/windows-local-runtime/**
       - scripts/windows-bundle/runtime-policy.json
       - Docs/windows-development.md
@@ -1719,7 +1727,9 @@ jobs:
       - name: Verify portable source boundary
         run: python3 scripts/verify-portable-core-boundary.py
       - name: Verify additional provider loopback peer contracts
-        run: python3 -B -m unittest discover -s scripts/tests -p test_additional_provider_loopback.py
+        run: |
+          python3 -B -m unittest discover -s scripts/tests -p test_additional_provider_loopback.py
+          python3 -B -m unittest discover -s scripts/tests -p test_modulate_opening_audio_probe.py
       - name: Test portable graph with Xcode Apple Swift
         run: |
           xcrun swift --version
@@ -1742,6 +1752,18 @@ jobs:
           JSTI_WEBSOCKET_PROBE_PORT=$(python3 -c \
             'import json,sys; p=json.load(open(sys.argv[1])); assert p["host"]=="127.0.0.1"; print(p["port"])' "$ready")
           xcrun swift test --configuration release --skip-build --filter AdditionalProviderLoopbackTests
+      - name: Qualify Modulate opening PCM across an explicitly held HTTP101
+        run: |
+          python3 -B scripts/qualify-modulate-opening-audio.py \
+            --output-dir "$RUNNER_TEMP/modulate-opening-qualification" -- \
+            xcrun swift test --configuration release --jobs 2 --skip-build --filter ModulateOpeningAudioQualificationTests
+      - name: Preserve Modulate synthetic transport receipt
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: modulate-opening-apple-receipt
+          path: ${{ runner.temp }}/modulate-opening-qualification
+          if-no-files-found: warn
       - name: Preserve Apple dependency lockfile
         if: always()
         # The dependency-free graph removes pins it does not need. It must not

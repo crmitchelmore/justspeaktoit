@@ -162,7 +162,10 @@ jobs:
           assert run['path'] == '.github/workflows/linux-flatpak.yml' and run['status'] == 'completed'
           pathlib.Path('flatpak-evidence/source-run.json').write_text(json.dumps({
               'runID': run_id, 'sourceSHA': sha, 'repository': repo, 'workflow': run['path'],
-              'harnessSHA': os.environ['GITHUB_SHA']}, indent=2) + '\n')
+              'harnessSHA': os.environ['GITHUB_SHA'], 'event': run['event'],
+              'pullRequestParents': [{'baseSHA': pr['base']['sha']} for pr in run.get('pull_requests', [])
+                  if pr['head']['sha'] == sha and pr['head']['repo']['id'] == run['repository']['id']
+                  and pr['base']['repo']['id'] == run['repository']['id']]}, indent=2) + '\n')
           PY
 
       - name: Download that run's authenticated bundle artifact
@@ -179,20 +182,22 @@ jobs:
           flatpak install --user -y --noninteractive flathub org.gnome.Platform//50
           [ -s /etc/machine-id ] || dbus-uuidgen > /etc/machine-id
           python3 - <<'PY'
-          import hashlib, json, os, pathlib, re, shutil, subprocess, urllib.request
+          import hashlib, json, os, pathlib, re, runpy, shutil, subprocess, urllib.request
           records = list(pathlib.Path('downloaded-flatpak').rglob('source-revision.txt'))
           assert len(records) == 1 and records[0].is_file() and not records[0].is_symlink(), 'Fresh build required: missing checked-out revision evidence'
           built_sha = records[0].read_text().strip()
           assert re.fullmatch(r'[0-9a-f]{40}', built_sha), 'Invalid checked-out revision'
           git = ['git', '-c', 'safe.directory=' + os.getcwd()]
           subprocess.run([*git, 'fetch', '--no-tags', 'origin', built_sha], check=True)
+          evidence = pathlib.Path('flatpak-evidence/source-run.json')
+          metadata = json.loads(evidence.read_text())
+          parents = subprocess.check_output([*git, 'show', '-s', '--format=%P', built_sha], text=True).split()
+          runpy.run_path('packaging/linux/verify_build_revision.py')['verify_revision'](built_sha, parents, metadata)
           inputs = ['Package.swift', 'LICENSE', '.gitattributes', 'packaging/linux', 'Sources', 'Resources',
                     'scripts/stage-linux-desktop.py', 'scripts/local-llm-runtime',
                     'scripts/generate-desktop-icons.py', 'scripts/migration/verify-miniz.py',
                     'scripts/windows-local-runtime/dependencies.json']
           subprocess.run([*git, 'diff', '--exit-code', built_sha, 'HEAD', '--', *inputs], check=True)
-          evidence = pathlib.Path('flatpak-evidence/source-run.json')
-          metadata = json.loads(evidence.read_text())
           metadata['builtRevision'] = built_sha
           evidence.write_text(json.dumps(metadata, indent=2) + '\n')
           shutil.copyfile(records[0], 'flatpak-evidence/source-revision.txt')

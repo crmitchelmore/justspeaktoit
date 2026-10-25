@@ -1,5 +1,6 @@
 #if os(iOS) && DEBUG && targetEnvironment(simulator)
 import AVFoundation
+import Combine
 import SpeakCore
 import UIKit
 import XCTest
@@ -42,7 +43,12 @@ final class RecordingServiceDependenciesTests: XCTestCase {
         let service = harness.makeService()
         try await service.startRecording(requiresLiveActivity: false)
         _ = await service.stopRecording()
-        for _ in 0..<1_000 where service.isPostProcessing { await Task.yield() }
+        let polished = expectation(description: "Automatic polish completed")
+        let observation = service.$isPostProcessing.filter { !$0 }.prefix(1).sink { _ in polished.fulfill() }
+        defer { observation.cancel() }
+        guard await XCTWaiter.fulfillment(of: [polished], timeout: 2) == .completed else {
+            return XCTFail("Automatic polish did not complete before the timeout")
+        }
 
         XCTAssertEqual(harness.polishRequests.map(\.0), ["Raw transcript"])
         XCTAssertEqual(harness.polishRequests.map(\.1), ["openai/gpt-4o-mini"])
@@ -109,30 +115,71 @@ final class RecordingServiceDependenciesTests: XCTestCase {
     func testCancellationDuringInjectedKeyLoad_PreventsSessionAllocation() async throws {
         let harness = try DependencyHarness()
         defer { harness.cleanUp() }
-        var resumeKeys: CheckedContinuation<Void, Never>?
+        let keys = DependencyKeyLoadGate(entered: expectation(description: "Key loading entered"))
         var allocations = 0
-        let service = harness.makeService(ensureKeysLoaded: {
-            await withCheckedContinuation { resumeKeys = $0 }
-        })
+        let service = harness.makeService(ensureKeysLoaded: { await keys.wait() })
         service.makeSession = {
             allocations += 1
             throw CancellationError()
         }
-        let start = Task { try await service.startRecording(requiresLiveActivity: false) }
-        for _ in 0..<1_000 where resumeKeys == nil { await Task.yield() }
-        XCTAssertNotNil(resumeKeys)
-        service.cancelRecording()
-        resumeKeys?.resume()
-        do {
-            try await start.value
-            XCTFail("Cancelled startup must not complete")
-        } catch is CancellationError {
-            // Expected: the retired run cannot acquire a microphone.
+        let completed = expectation(description: "Cancelled startup completed")
+        var startError: Error?
+        let start = Task {
+            do {
+                try await service.startRecording(requiresLiveActivity: false)
+            } catch {
+                startError = error
+            }
+            completed.fulfill()
         }
+        defer {
+            start.cancel()
+            service.cancelRecording()
+            keys.release()
+        }
+        guard await XCTWaiter.fulfillment(of: [keys.entered], timeout: 2) == .completed else {
+            return XCTFail("Startup did not enter key loading before the timeout")
+        }
+        service.cancelRecording()
+        keys.release()
+        guard await XCTWaiter.fulfillment(of: [completed], timeout: 2) == .completed else {
+            return XCTFail("Cancelled startup did not complete before the timeout")
+        }
+        XCTAssertTrue(startError is CancellationError, "Cancelled startup must throw CancellationError")
         XCTAssertEqual(allocations, 0)
         XCTAssertTrue(harness.activityStarts.isEmpty)
         XCTAssertTrue(harness.dictations.isEmpty)
         XCTAssertTrue(harness.deliveredRecordings.isEmpty)
+    }
+}
+
+@MainActor
+private final class DependencyKeyLoadGate {
+    let entered: XCTestExpectation
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var isReleased = false
+
+    init(entered: XCTestExpectation) {
+        self.entered = entered
+    }
+
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            // Timeout cleanup can run before startup reaches this suspension point.
+            if self.isReleased {
+                continuation.resume()
+            } else {
+                self.continuation = continuation
+            }
+            self.entered.fulfill()
+        }
+    }
+
+    func release() {
+        self.isReleased = true
+        let continuation = self.continuation
+        self.continuation = nil
+        continuation?.resume()
     }
 }
 

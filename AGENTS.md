@@ -375,6 +375,12 @@ version/baseline authority. `VERSION` is a build hint only.
 - The keyboard extension accepts `IOS_KEYBOARD_APPSTORE_PROFILE` when set and otherwise uses the validated portal-profile fallback; see [`Docs/ios-testflight-release.md`](Docs/ios-testflight-release.md) before changing portal capabilities or regenerating profiles.
 - Never commit private keys or provisioning profile contents.
 
+## PostHog Maintenance
+
+For PostHog errors, feature flags and post-release event checks, use the hosted
+MCP connection and [maintenance guide](Docs/posthog-maintenance.md). Verify the
+active project before querying; retain evidence and deduplicate follow-up issues.
+
 ## Sentry Error Monitoring
 - **Region:** EU (de.sentry.io) — use `https://de.sentry.io/api/0/` for all API calls
 - **Org slug:** `tally-lz`

@@ -45,7 +45,8 @@ class AppleReleaseCredentialsTest < Minitest::Test
       missing == :all ? AppleRelease::VaultCredentials::REFERENCES.each { |name| env.delete(name) } : env.delete(missing)
       reader = FakeOp.new(@values)
       File.stub(:read, ->(*) { flunk 'Missing vault configuration must not fall back' }) do
-        assert_raises(AppleRelease::CredentialError) { AppleRelease::Client.new(env: env, op_reader: reader) }
+        error = assert_raises(AppleRelease::CredentialError) { AppleRelease::Client.new(env: env, op_reader: reader) }
+        assert_equal :references, error.reason
       end
       assert_empty reader.calls
     end
@@ -55,6 +56,7 @@ class AppleReleaseCredentialsTest < Minitest::Test
     reader = FakeOp.new(error: RuntimeError.new("sensitive #{@refs.first} #{@pem}"))
     File.stub(:read, ->(*) { flunk 'Failed vault read must not fall back' }) do
       error = assert_raises(AppleRelease::CredentialError) { AppleRelease::Client.new(env: @env, op_reader: reader) }
+      assert_equal :unavailable, error.reason
       refute_includes error.full_message, 'sensitive'
       refute_includes error.full_message, 'op://'
       refute_includes error.full_message, 'PRIVATE KEY'
@@ -71,6 +73,7 @@ class AppleReleaseCredentialsTest < Minitest::Test
       public_der, 'invalid-secret-pem'].each do |pem|
       reader = FakeOp.new(@values.merge(@refs.last => pem))
       error = assert_raises(AppleRelease::CredentialError) { AppleRelease::Client.new(env: @env, op_reader: reader) }
+      assert_equal :invalid_key, error.reason
       refute_includes error.full_message.b, pem.b
       assert_nil error.cause
     end
@@ -84,7 +87,8 @@ class AppleReleaseCredentialsTest < Minitest::Test
       assert_empty reader.calls
     end
     reader = FakeOp.new(@values.merge(@refs.first => ' '))
-    assert_raises(AppleRelease::CredentialError) { AppleRelease::Client.new(env: @env, op_reader: reader) }
+    error = assert_raises(AppleRelease::CredentialError) { AppleRelease::Client.new(env: @env, op_reader: reader) }
+    assert_equal :invalid_value, error.reason
   end
 
   def test_default_source_preserves_existing_ci_environment_and_file_contract
@@ -106,15 +110,17 @@ class AppleReleaseCredentialsTest < Minitest::Test
         AppleRelease::Client.new(env: @env.merge('APP_STORE_CONNECT_CREDENTIAL_SOURCE' => 'untrusted-value'), op_reader: reader)
       end
       refute_includes error.message, 'untrusted-value'
+      assert_equal :source, error.reason
     end
     assert_empty reader.calls
   end
 
   def test_fake_op_captures_secret_without_output_and_uses_literal_argv
     calls = []
-    spawn = ->(*argv, &block) do
+    spawn = ->(*argv, **options) do
       calls << argv
-      Open3.popen3(RbConfig.ruby, '-e', 'STDOUT.write("synthetic-value")', &block)
+      assert_equal File::NULL, options.fetch(:in)
+      Process.spawn(RbConfig.ruby, '-e', 'STDOUT.write("synthetic-value")', **options)
     end
     reader = AppleRelease::OpReader.new(spawn: spawn)
     reference = 'op://Vault/Item/field$(no-shell);literal'
@@ -125,8 +131,8 @@ class AppleReleaseCredentialsTest < Minitest::Test
   end
 
   def test_fake_op_failure_redacts_both_streams_and_exception_cause
-    spawn = ->(*, &block) do
-      Open3.popen3(RbConfig.ruby, '-e', 'STDOUT.write("secret-output"); STDERR.write("secret-error op://vault/item/field"); exit 2', &block)
+    spawn = ->(*, **options) do
+      Process.spawn(RbConfig.ruby, '-e', 'STDOUT.write("secret-output"); STDERR.write("secret-error op://vault/item/field"); exit 2', **options)
     end
     out, err = capture_io do
       error = assert_raises(AppleRelease::CredentialError) { AppleRelease::OpReader.new(spawn: spawn).read(@refs.first) }
@@ -141,17 +147,15 @@ class AppleReleaseCredentialsTest < Minitest::Test
   def test_fake_op_timeout_terminates_and_reaps_only_its_owned_process
     owned_pid = nil
     unrelated = Process.spawn(RbConfig.ruby, '-e', 'sleep 30', out: File::NULL, err: File::NULL)
-    spawn = ->(*, &block) do
-      Open3.popen3(RbConfig.ruby, '-e', 'trap("TERM") {}; STDERR.write("secret-timeout"); sleep 30') do |*handles|
-        owned_pid = handles.last.pid
-        block.call(*handles)
-      end
+    spawn = ->(*, **options) do
+      owned_pid = Process.spawn(RbConfig.ruby, '-e', 'trap("TERM") {}; STDERR.write("secret-timeout"); sleep 30', **options)
     end
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     out, err = capture_io do
       error = assert_raises(AppleRelease::CredentialError) do
         AppleRelease::OpReader.new(spawn: spawn, timeout: 0.2).read(@refs.first)
       end
+      assert_equal :timeout, error.reason
       refute_includes error.full_message, 'secret-timeout'
       refute_includes error.full_message, 'op://'
       assert_nil error.cause
@@ -165,5 +169,28 @@ class AppleReleaseCredentialsTest < Minitest::Test
   ensure
     Process.kill('TERM', unrelated) if unrelated
     Process.waitpid(unrelated) if unrelated
+  end
+
+  def test_fake_op_stdout_and_stderr_overflow_fail_bounded_redacted_and_reaped
+    %w[STDOUT STDERR].each do |stream|
+      owned_pid = nil
+      script = "#{stream}.write('secret-overflow-' * 6000); #{stream}.flush; sleep 30"
+      spawn = ->(*, **options) { owned_pid = Process.spawn(RbConfig.ruby, '-e', script, **options) }
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      out, err = capture_io do
+        error = assert_raises(AppleRelease::CredentialError) do
+          AppleRelease::OpReader.new(spawn: spawn, timeout: 2).read(@refs.first)
+        end
+        assert_equal :output_limit, error.reason
+        refute_includes error.full_message, 'secret-overflow'
+        refute_includes error.full_message, 'op://'
+        assert_nil error.cause
+      end
+      assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 2
+      assert_raises(Errno::ESRCH) { Process.kill(0, owned_pid) }
+      assert_raises(Errno::ECHILD) { Process.waitpid(owned_pid, Process::WNOHANG) }
+      assert_empty out
+      assert_empty err
+    end
   end
 end

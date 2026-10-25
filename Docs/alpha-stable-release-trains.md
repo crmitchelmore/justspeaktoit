@@ -44,9 +44,13 @@ export APP_STORE_CONNECT_PRIVATE_KEY_REF='op://Release/Apple/private-key'
 ```
 
 The private-key field must contain the complete PEM for a private P-256 key.
-The scripts capture `op read --no-newline` output in memory, validate the key,
-and never print credential values, references or CLI error output or write a
-temporary key file. Any selected-vault failure stops authentication; it never
+The scripts capture at most 64 KiB of `op read --no-newline` output in memory,
+discard diagnostics with a separate 64 KiB limit, and validate the key. They
+never print credential values, references or CLI error output or write a
+temporary key file. Overflow and deadline failures terminate and reap only the
+owned CLI process. Redacted error categories distinguish reference configuration,
+unavailable access, deadlines, output limits and invalid values/keys.
+Any selected-vault failure stops authentication; it never
 falls back to environment credential values or a local `.p8` file. Do not add
 shell tracing or print the captured values.
 

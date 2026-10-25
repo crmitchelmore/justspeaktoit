@@ -19,7 +19,7 @@ module AppleRelease
         @issuer = env.fetch('APP_STORE_CONNECT_ISSUER_ID')
         @key = OpenSSL::PKey.read(File.read(env.fetch('APP_STORE_CONNECT_KEY_PATH', File.expand_path("~/.appstoreconnect/private_keys/AuthKey_#{@key_id}.p8"))))
       else
-        raise CredentialError, 'Unsupported Apple release credential source'
+        raise CredentialError.new(:source)
       end
     end
 

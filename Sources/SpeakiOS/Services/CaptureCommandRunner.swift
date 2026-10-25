@@ -269,16 +269,11 @@ public enum CaptureCommandRunner {
     ///   its caller. Every other caller discards it.
     /// Internal rather than private: `dictate` owns its own stop.
     static func stop(_ service: TranscriptionRecordingService) async -> String {
-        // Honoured only for the capture this runner actually started. Anything
-        // else — a capture begun elsewhere, or a stale override left behind when
-        // a runner-started capture was stopped from another surface — falls back
-        // to the configured destination.
-        let ownsCapture = startedCaptureID != nil && startedCaptureID == service.currentSessionID
-        let destination = (ownsCapture ? startedDestination : nil)
-            ?? AppSettings.shared.hardwareTriggerDestination
+        // A resolved Start/Focus/global choice retains its origin through an owned stop.
+        let selection = service.resolvedStopSelection()
         startedDestination = nil
         startedCaptureID = nil
-        return await service.stopRecording(destination: destination).text
+        return await service.stopRecording(selection: selection).text
     }
 }
 #endif

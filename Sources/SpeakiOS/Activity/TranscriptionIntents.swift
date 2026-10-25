@@ -100,12 +100,15 @@ func startRecordingContinuingInForegroundIfNeeded(
     endPointing: CaptureEndPointingRequest? = nil
 ) async throws {
     let service = await TranscriptionRecordingService.shared
+    let configurationRequest = await CaptureConfigurationRequest()
     do {
         try await service.startRecording(
             trigger: trigger,
             parameters: parameters,
             endPointing: endPointing,
-            entry: entry
+            destination: nil,
+            entry: entry,
+            configurationRequest: configurationRequest
         )
     } catch iOSTranscriptionError.liveActivityUnavailable {
         try await intent.requestToContinueInForeground {
@@ -113,7 +116,9 @@ func startRecordingContinuingInForegroundIfNeeded(
                 trigger: trigger,
                 parameters: parameters,
                 endPointing: endPointing,
-                entry: entry
+                destination: nil,
+                entry: entry,
+                configurationRequest: configurationRequest
             )
         }
     }
@@ -336,7 +341,7 @@ public struct StartTranscriptionRecordingIntent: AudioRecordingIntent, LiveActiv
 
         if isActive {
             await service.stopRecording(
-                destination: await service.resolvedStopDestination(explicit: destination?.destination),
+                selection: await service.resolvedStopSelection(explicit: destination?.destination),
                 keyboardDeliverySource: .hardwareTrigger
             )
             return .result()
@@ -427,15 +432,15 @@ public struct StopTranscriptionRecordingIntent: AudioRecordingIntent, LiveActivi
 
         // Explicit beats the override the start carried, which beats the
         // global setting.
-        let resolved = await service.resolvedStopDestination(explicit: destination?.destination)
+        let resolved = await service.resolvedStopSelection(explicit: destination?.destination)
         let canPostProcess = await AppSettings.shared.hasOpenRouterKey
         let result = await service.stopRecording(
-            destination: resolved,
+            selection: resolved,
             keyboardDeliverySource: .hardwareTrigger
         )
         return .result(dialog: stopResultDialog(
             for: result,
-            destination: resolved,
+            destination: resolved.destination,
             receipt: await service.lastCaptureReceipt,
             canPostProcess: canPostProcess
         ))
@@ -513,7 +518,7 @@ public struct ToggleTranscriptionControlIntent: SetValueIntent, AudioRecordingIn
             // would change what an already-placed one means), but a Control
             // stop still honours the override the start carried.
             await service.stopRecording(
-                destination: service.resolvedStopDestination(),
+                selection: service.resolvedStopSelection(),
                 keyboardDeliverySource: .hardwareTrigger
             )
         case .none:

@@ -39,6 +39,7 @@ final class RecordingServiceDependenciesTests: XCTestCase {
         defer { harness.cleanUp() }
         harness.defaults.set("Raw transcript", forKey: "simulatorValidationTranscript")
         harness.settings.autoPostProcess = true
+        harness.settings.hardwareTriggerDestination = .clipboardAndPostProcess
         harness.settings.postProcessingModel = "openai/gpt-4o-mini"
         let service = harness.makeService()
         try await service.startRecording(requiresLiveActivity: false)
@@ -151,10 +152,11 @@ final class RecordingServiceDependenciesTests: XCTestCase {
         XCTAssertTrue(harness.dictations.isEmpty)
         XCTAssertTrue(harness.deliveredRecordings.isEmpty)
     }
+
 }
 
 @MainActor
-private final class DependencyKeyLoadGate {
+final class DependencyKeyLoadGate {
     let entered: XCTestExpectation
     private var continuation: CheckedContinuation<Void, Never>?
     private var isReleased = false
@@ -184,7 +186,7 @@ private final class DependencyKeyLoadGate {
 }
 
 @MainActor
-private final class DependencyHarness {
+final class DependencyHarness {
     let suite = "RecordingServiceDependencies.\(UUID())"
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     let defaults: UserDefaults
@@ -200,6 +202,8 @@ private final class DependencyHarness {
     var dictations: [(CaptureTrigger, String)] = []
     var deliveredRecordings: [UUID] = []
     var polishRequests: [(String, String)] = []
+    var focus: FocusCaptureOverride = .none
+    var focusReads = 0
     private var service: TranscriptionRecordingService?
 
     init() throws {
@@ -214,7 +218,11 @@ private final class DependencyHarness {
         )
     }
 
-    func makeService(ensureKeysLoaded: (@MainActor () async -> Void)? = nil) -> TranscriptionRecordingService {
+    func makeService(
+        ensureKeysLoaded: (@MainActor () async -> Void)? = nil,
+        networkSnapshot: @escaping CaptureNetworkPathMonitor.SnapshotProvider = { .unknown },
+        capability: @escaping @MainActor (String) -> AppleLocalRecognitionCapability = { _ in .available }
+    ) -> TranscriptionRecordingService {
         let dependencies = RecordingServiceDependencies(
             settings: self.settings,
             activity: RecordingServiceActivity(
@@ -230,7 +238,11 @@ private final class DependencyHarness {
             keyboardDelivery: self.keyboard,
             recordDictation: { [unowned self] in self.dictations.append(($0, $1)) },
             markDelivered: { [unowned self] in self.deliveredRecordings.append($0) },
-            applicationState: { [unowned self] in self.applicationState }
+            applicationState: { [unowned self] in self.applicationState },
+            focusOverride: { [unowned self] _ in
+                self.focusReads += 1
+                return self.focus
+            }
         )
         let service = TranscriptionRecordingService(
             sharedState: SharedTranscriptionState(defaults: self.defaults),
@@ -243,6 +255,8 @@ private final class DependencyHarness {
             },
             foregroundOwnership: ForegroundRecordingOwnership(),
             ensureKeysLoaded: ensureKeysLoaded,
+            networkSnapshot: networkSnapshot,
+            localRecognitionCapability: capability,
             dependencies: dependencies
         )
         self.service = service
@@ -257,7 +271,7 @@ private final class DependencyHarness {
 }
 
 @MainActor
-private final class DependencySession: IOSRecordingSession {
+final class DependencySession: IOSRecordingSession {
     let isBatch = false
     let stopCompletionTimeout: TimeInterval = 1
     let resolution = IOSTranscriptionSession.Resolution(modelID: "test", backend: .apple, route: nil)
@@ -276,8 +290,10 @@ private final class DependencySession: IOSRecordingSession {
     func discardTemporaryRecording() -> Bool { false }
     func start() async throws {}
     func start(preRollBuffers: [AVAudioPCMBuffer], analyzerFallbackAllowed: Bool) async throws {}
+    var finish: (() async throws -> TranscriptionResult)?
     func stop() async throws -> TranscriptionResult {
-        TranscriptionResult(
+        if let finish { return try await finish() }
+        return TranscriptionResult(
             text: self.partialText, segments: [], confidence: nil, duration: 1,
             modelIdentifier: "test", cost: nil, rawPayload: nil, debugInfo: nil
         )
@@ -287,7 +303,7 @@ private final class DependencySession: IOSRecordingSession {
 }
 
 @MainActor
-private final class DependencyPasteboard: PolishPasteboard {
+final class DependencyPasteboard: PolishPasteboard {
     var writes: [String] = []
     func write(_ text: String) { self.writes.append(text) }
 }

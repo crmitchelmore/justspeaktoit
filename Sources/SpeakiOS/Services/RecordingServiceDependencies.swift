@@ -55,6 +55,7 @@ struct RecordingServiceDependencies {
     let recordDictation: (CaptureTrigger, String) -> Void
     let markDelivered: (UUID) -> Void
     let applicationState: () -> UIApplication.State
+    var focusOverride: @MainActor (CaptureRunParameters) async throws -> FocusCaptureOverride = { _ in .none }
 
     static func live(settings: AppSettings = .shared) -> Self {
         Self(
@@ -63,7 +64,8 @@ struct RecordingServiceDependencies {
             keyboardDelivery: .shared,
             recordDictation: { CaptureOnboardingStore.shared.recordDictation(trigger: $0, transcript: $1) },
             markDelivered: { CaptureSafetyClaimStore.shared.markDelivered(recording: $0) },
-            applicationState: { UIApplication.shared.applicationState }
+            applicationState: { UIApplication.shared.applicationState },
+            focusOverride: FocusCaptureReconciliation.live(explicit:)
         )
     }
 }

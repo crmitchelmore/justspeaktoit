@@ -95,7 +95,7 @@ extension TranscriptionRecordingService {
             "Capture end-pointed: \(reason.rawValue, privacy: .public)"
         )
         endPointingTask = nil
-        await stopRecording(destination: resolvedStopDestination())
+        await stopRecording(selection: resolvedStopSelection())
     }
 
     /// A soft haptic a second before the capture ends itself.

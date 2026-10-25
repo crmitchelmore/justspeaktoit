@@ -109,6 +109,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     private let audioSessionManager = AudioSessionManager()
     private let dependencies: RecordingServiceDependencies
     private let settings: AppSettings
+    private let focusOverride: @MainActor (CaptureRunParameters) async throws -> FocusCaptureOverride
     private let activityManager: RecordingServiceActivity
     private let sharedState: SharedTranscriptionState
     private let historyManager: iOSHistoryManager
@@ -139,6 +140,16 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// — finishes where the caller asked, not where the global setting says.
     /// `.none` is the pre-parameter behaviour in every respect.
     private var currentRunParameters: CaptureRunParameters = .none
+    private(set) var effectiveConfiguration: EffectiveCaptureConfiguration?
+    private(set) var effectiveDestination: CaptureDestinationSelection?
+    private(set) var lastCompletedDestination: CaptureDestinationSelection?
+
+    public var captureDestinationStatus: String? {
+        guard let effectiveConfiguration,
+              let destination = HardwareTriggerDestination(rawValue: effectiveConfiguration.destinationID)
+        else { return nil }
+        return destination.displayName + (effectiveConfiguration.destinationOrigin == .focus ? " · Focus" : "")
+    }
     /// Identity of the capture in flight, so a caller that started one can
     /// recognise its own result. `nil` once that capture has settled.
     private var currentRunID: UUID?
@@ -229,6 +240,8 @@ public final class TranscriptionRecordingService: ObservableObject {
             { _ in .available },
         dependencies: RecordingServiceDependencies? = nil
     ) {
+        // Injected constructors without dependencies retain a no-op Focus seam.
+        self.focusOverride = dependencies?.focusOverride ?? { _ in .none }
         let dependencies = dependencies ?? .live()
         self.dependencies = dependencies
         self.settings = dependencies.settings
@@ -326,6 +339,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         endPointing: CaptureEndPointingRequest? = nil,
         destination: HardwareTriggerDestination?,
         entry: StartupEntry? = nil,
+        configurationRequest: CaptureConfigurationRequest? = nil,
         onCaptureDisruption: (() async -> Void)? = nil
     ) async throws {
         try foregroundOwnership.requireUnowned()
@@ -345,6 +359,14 @@ public final class TranscriptionRecordingService: ObservableObject {
         defer { state = lifecycle.state }
 
         let settings = self.settings
+        let configuration = try await admittedConfiguration(
+            parameters: parameters, keyboardProfile: keyboardProfile, destination: destination,
+            request: configurationRequest, run: runID
+        )
+        effectiveConfiguration = configuration
+        effectiveDestination = CaptureDestinationSelection(
+            configuration: configuration, keyboardProfile: keyboardProfile != nil
+        )
         // AppSettings.init publishes empty API keys and loads the real values
         // from the keychain asynchronously. A cold launch from the Action
         // Button could read those empty keys and silently fall back to Apple
@@ -372,14 +394,9 @@ public final class TranscriptionRecordingService: ObservableObject {
         // streaming mode, so an explicit `model=` (from a capture link or a
         // Shortcut) decides the mode rather than being started in a mode it has
         // no client for. `modelSelection` owns that rule for every surface.
-        let runParameters = adoptRunParameters(parameters, keyboardProfile: keyboardProfile)
-        let selection = Self.modelSelection(
-            keyboardProfile: keyboardProfile,
-            parameters: runParameters,
-            settings: settings
-        )
-        let usesBatchTranscription = selection.usesBatch
-        currentModel = selection.modelID
+        let runParameters = adoptRunParameters(configuration.parameters, keyboardProfile: keyboardProfile)
+        let usesBatchTranscription = configuration.usesBatch
+        currentModel = configuration.modelID
         try validateCredentialAvailability(
             settings: settings,
             usesBatchTranscription: usesBatchTranscription,
@@ -392,11 +409,10 @@ public final class TranscriptionRecordingService: ObservableObject {
         currentSessionID = runID
         startTime = Date()
         self.sharesLiveTranscript = sharesLiveTranscript
+            && configuration.destinationID != HardwareTriggerDestination.historyOnly.rawValue
         // Explicit internal destination beats the override the run carried,
         // which beats the global setting (issue #1013).
-        self.automaticStopDestination = destination
-            ?? runDestinationOverride
-            ?? settings.hardwareTriggerDestination
+        self.automaticStopDestination = HardwareTriggerDestination(rawValue: configuration.destinationID) ?? .clipboard
         self.onCaptureDisruption = onCaptureDisruption
         sharedState.clear()
         sharedState.isRecording = true
@@ -414,9 +430,7 @@ public final class TranscriptionRecordingService: ObservableObject {
             run: runID
         )
 
-        let languageIdentifier = keyboardProfile?.languageIdentifier
-            ?? runParameters.languageIdentifier
-            ?? settings.preferredLocaleIdentifier
+        let languageIdentifier = configuration.languageIdentifier
         let localeIdentifier = TranscriptionLanguageCatalog.localeIdentifier(for: languageIdentifier)
         let strictOnDeviceRecognition = try applyOfflineRouting(
             usesBatch: usesBatchTranscription,
@@ -575,10 +589,63 @@ public final class TranscriptionRecordingService: ObservableObject {
             presentation.finish()
             // A capture that never went live completes empty for its own run.
             completeRun(with: "")
+            effectiveConfiguration = nil
+            effectiveDestination = nil
             lifecycle.finishStartUnwind()
             state = lifecycle.state
             throw error
         }
+    }
+
+    private func admittedConfiguration(
+        parameters: CaptureRunParameters,
+        keyboardProfile: KeyboardDictationProfileOption?,
+        destination: HardwareTriggerDestination?,
+        request: CaptureConfigurationRequest?,
+        run runID: UUID
+    ) async throws -> EffectiveCaptureConfiguration {
+        do {
+            let configuration = try await prepareCaptureConfiguration(
+                parameters: parameters, keyboardProfile: keyboardProfile, destination: destination, request: request
+            )
+            try requireForegroundUnownedForAcquisition(run: runID)
+            guard lifecycle.isCurrentStartRun(runID) else { throw CancellationError() }
+            request?.configuration = configuration
+            return configuration
+        } catch {
+            // Admission has allocated no shared state, activity or microphone.
+            disarmWatchdogs()
+            diagnostics.finish(outcome(for: error), run: runID)
+            presentation.finish()
+            completeRun(with: "")
+            lifecycle.finishStartUnwind()
+            throw error
+        }
+    }
+
+    private func prepareCaptureConfiguration(
+        parameters: CaptureRunParameters,
+        keyboardProfile: KeyboardDictationProfileOption?,
+        destination: HardwareTriggerDestination?,
+        request: CaptureConfigurationRequest?
+    ) async throws -> EffectiveCaptureConfiguration {
+        if let prepared = request?.configuration { return prepared }
+        // Read every global before either native lookup or credentials can suspend.
+        let selection = Self.modelSelection(keyboardProfile: keyboardProfile, parameters: .none, settings: settings)
+        let globals = EffectiveCaptureConfiguration.Globals(
+            modelID: selection.modelID, usesBatch: selection.usesBatch,
+            languageIdentifier: keyboardProfile?.languageIdentifier ?? settings.preferredLocaleIdentifier,
+            destinationID: (destination ?? settings.hardwareTriggerDestination).rawValue
+        )
+        let explicit = keyboardProfile == nil ? CaptureRunParameters(
+            destinationID: destination?.rawValue ?? parameters.destinationID,
+            languageIdentifier: parameters.languageIdentifier,
+            modelID: parameters.modelID, sourceTag: parameters.sourceTag
+        ) : .none
+        let focus = keyboardProfile == nil ? try await focusOverride(explicit) : .none
+        return try EffectiveCaptureConfiguration.resolve(
+            explicit: explicit, focus: focus, globals: globals, vocabulary: CaptureModelSupport.vocabulary
+        )
     }
 
     /// Stores the overrides this run will carry, and logs them so a capture's
@@ -797,13 +864,13 @@ public final class TranscriptionRecordingService: ObservableObject {
     public func resolvedStopDestination(
         explicit: HardwareTriggerDestination? = nil
     ) -> HardwareTriggerDestination {
-        let identifier = CaptureParameterResolution.stopDestinationID(
-            explicit: explicit?.rawValue,
-            runOverride: currentRunParameters.destinationID,
-            global: settings.hardwareTriggerDestination.rawValue
-        )
-        return HardwareTriggerDestination(rawValue: identifier)
-            ?? settings.hardwareTriggerDestination
+        resolvedStopSelection(explicit: explicit).destination
+    }
+
+    func resolvedStopSelection(explicit: HardwareTriggerDestination? = nil) -> CaptureDestinationSelection {
+        if let explicit { return CaptureDestinationSelection(destination: explicit, origin: .explicitStop) }
+        if let effectiveDestination { return effectiveDestination }
+        return CaptureDestinationSelection(destination: settings.hardwareTriggerDestination, origin: .global)
     }
 
     /// The destination the running capture was started with, or `nil` when the
@@ -877,6 +944,8 @@ public final class TranscriptionRecordingService: ObservableObject {
         presentation.finish()
         activityManager.endActivity()
         currentRunParameters = .none
+        effectiveConfiguration = nil
+        effectiveDestination = nil
         // A capture that never went live completes empty rather than leaving a
         // waiter to fall back on an older run's transcript.
         completeRun(with: "")
@@ -900,9 +969,23 @@ public final class TranscriptionRecordingService: ObservableObject {
     ///   were configurable. Hardware-trigger callers (Action Button, Siri,
     ///   Shortcuts) pass `settings.hardwareTriggerDestination`.
     @discardableResult
-    // swiftlint:disable:next function_body_length
     public func stopRecording(
         destination: HardwareTriggerDestination? = nil,
+        saveToHistory: Bool = true,
+        primedActivityMessage: String = "Ready for the Action Button",
+        keyboardDeliverySource: KeyboardPickupOffer.Source? = .app
+    ) async -> TranscriptionResult {
+        await stopRecording(
+            selection: destination.map { CaptureDestinationSelection(destination: $0, origin: .explicitStop) },
+            saveToHistory: saveToHistory, primedActivityMessage: primedActivityMessage,
+            keyboardDeliverySource: keyboardDeliverySource
+        )
+    }
+
+    @discardableResult
+    // swiftlint:disable:next function_body_length
+    func stopRecording(
+        selection: CaptureDestinationSelection?,
         saveToHistory: Bool = true,
         primedActivityMessage: String = "Ready for the Action Button",
         keyboardDeliverySource: KeyboardPickupOffer.Source? = .app
@@ -949,6 +1032,10 @@ public final class TranscriptionRecordingService: ObservableObject {
                 debugInfo: nil
             )
         }
+        let selected = selection ?? effectiveDestination
+            ?? CaptureDestinationSelection(destination: .clipboard, origin: .legacy)
+        let destination: HardwareTriggerDestination? = selected.origin == .legacy ? nil : selected.destination
+        lastCompletedDestination = selected
         state = lifecycle.state
         isRunning = false
         presentation.finish()
@@ -985,6 +1072,8 @@ public final class TranscriptionRecordingService: ObservableObject {
             deliveringSession = nil
             currentTrigger = nil
             currentRunParameters = .none
+            effectiveConfiguration = nil
+            effectiveDestination = nil
             publishFinishedCapture(text: "", failure: nil)
             completeRun(with: "")
             partialText = ""
@@ -1037,9 +1126,11 @@ public final class TranscriptionRecordingService: ObservableObject {
         // `.auto` routes on and what the receipt reports, so the decision can
         // never disagree with the delivery. The keyboard hand-off passes `nil`
         // because its result already travels the nonce-scoped record.
-        let keyboardOffer = keyboardDeliverySource.flatMap {
-            KeyboardDeliveryPublisher.publish(transcript: text, source: $0, store: dependencies.keyboardDelivery)
-        }
+        let requestedDestination: HardwareTriggerDestination = destination ?? .clipboard
+        let permitsExternalDelivery = requestedDestination != .historyOnly
+        let keyboardOffer = publishKeyboardOffer(
+            text: text, source: keyboardDeliverySource, destination: requestedDestination
+        )
         // Publishing an offer is not delivering it. For an offer bound to the
         // document the keyboard is open in, wait briefly for the extension to
         // claim it — that claim is written after the proxy accepted the text,
@@ -1053,7 +1144,6 @@ public final class TranscriptionRecordingService: ObservableObject {
 
         // Resolve the destination. When nil (legacy callers), preserve the
         // pre-destination behaviour: clipboard + post-process if user opted in.
-        let requestedDestination: HardwareTriggerDestination = destination ?? .clipboard
         let autoPlan = AutoDestinationPolicy.plan(
             AutoDestinationPolicy.Inputs(
                 transcriptIsEmpty: text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -1067,10 +1157,11 @@ public final class TranscriptionRecordingService: ObservableObject {
             : requestedDestination
         // Read before the side effects reset the flag: only a shared completion
         // leaves a transcript the result row's actions can retrieve.
-        let publishesCompletedTranscript = sharesLiveTranscript
+        let publishesCompletedTranscript = sharesLiveTranscript && permitsExternalDelivery
         let clipboardOutcome = await applyDestinationSideEffects(
             text: text,
-            destination: resolvedDestination
+            destination: resolvedDestination,
+            sharesCompletedTranscript: publishesCompletedTranscript
         )
 
         // The transcript has landed, so *this* capture's safety audio no longer
@@ -1103,15 +1194,14 @@ public final class TranscriptionRecordingService: ObservableObject {
 
         // The "Continue on Mac" pointer (issue #1006). It carries the History
         // entry id, not the words — see `TranscriptHandoffActivity`.
-        TranscriptHandoffPublisher.publish(
-            entryID: historyItem?.id,
-            createdAt: historyItem?.createdAt ?? Date(),
-            wordCount: wordCount
+        publishHandoff(
+            entryID: historyItem?.id, createdAt: historyItem?.createdAt ?? Date(),
+            wordCount: wordCount, allowed: permitsExternalDelivery
         )
 
         // Update shared state. Live writes are throttled, so commit the
         // complete transcript exactly once at stop.
-        if sharesLiveTranscript {
+        if publishesCompletedTranscript {
             sharedState.updateTranscript(text)
         }
         // Stamp the published transcript with this completion so the Live
@@ -1203,9 +1293,23 @@ public final class TranscriptionRecordingService: ObservableObject {
         partialText = ""
         wordCount = 0
 
+        effectiveConfiguration = nil
+        effectiveDestination = nil
         lifecycle.finishStopping()
         state = lifecycle.state
         return result
+    }
+
+    private func publishHandoff(entryID: UUID?, createdAt: Date, wordCount: Int, allowed: Bool) {
+        guard allowed else { return }
+        TranscriptHandoffPublisher.publish(entryID: entryID, createdAt: createdAt, wordCount: wordCount)
+    }
+
+    private func publishKeyboardOffer(
+        text: String, source: KeyboardPickupOffer.Source?, destination: HardwareTriggerDestination
+    ) -> KeyboardPickupOffer? {
+        guard destination != .historyOnly, let source else { return nil }
+        return KeyboardDeliveryPublisher.publish(transcript: text, source: source, store: dependencies.keyboardDelivery)
     }
 
     /// Discards the temporary recording of the capture whose transcript has
@@ -1259,6 +1363,9 @@ public final class TranscriptionRecordingService: ObservableObject {
         self.publishFinishedCapture(text: "", failure: nil)
         transcriptionSession?.cancel()
         transcriptionSession = nil
+        currentRunParameters = .none
+        effectiveConfiguration = nil
+        effectiveDestination = nil
         sharesLiveTranscript = true
         isRunning = false
         presentation.finish()
@@ -1417,7 +1524,7 @@ public final class TranscriptionRecordingService: ObservableObject {
             return
         }
         await stopRecording(
-            destination: automaticStopDestination,
+            selection: resolvedStopSelection(),
             primedActivityMessage: lastSessionError?.localizedDescription ?? stoppedMessage
         )
     }

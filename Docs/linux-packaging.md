@@ -1,7 +1,8 @@
 # Linux Flatpak qualification
 
 The Flatpak is a developer preview, not a Flathub or Stable release. The
-`Linux Flatpak` workflow builds current pull requests and main for x86-64 with
+`Linux Flatpak` workflow builds repository-owned pull requests and main when
+package inputs change, and supports manual dispatch. It targets x86-64 with
 the GNOME 50 SDK/runtime and the freedesktop 25.08 Swift 6 extension. Its pinned
 container previously provided Swift 6.3.3; the build log records the actual
 compiler used. No signing or publication is performed.

@@ -85,6 +85,12 @@ modules:
       - -DWHISPER_SDL2=OFF
       - -DWHISPER_CURL=OFF
     post-install:
+      # The production loader refuses symlinks, including CMake SONAME links.
+      # Keep the exact SONAME paths as regular files, as the native stager does.
+      - for name in libggml-base.so.0 libggml.so.0 libwhisper.so.1; do
+          cp -L /app/lib/justspeaktoit/$name /app/lib/justspeaktoit/$name.tmp &&
+          mv -f /app/lib/justspeaktoit/$name.tmp /app/lib/justspeaktoit/$name || exit 1;
+        done
       - install -Dm644 "$FLATPAK_BUILDER_BUILDDIR/LICENSE"
         /app/share/licenses/com.justspeaktoit.JustSpeakToIt/whisper.cpp/LICENSE
     cleanup:

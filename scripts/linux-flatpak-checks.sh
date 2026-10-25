@@ -17,9 +17,10 @@ flatpak run --command=speak "$app" --help
 echo '== pinned runtime and license in the installed package'
 flatpak run --command=sh "$app" -ec '
   test "$JSTI_WHISPER_RUNTIME_DIRECTORY" = /app/lib/justspeaktoit
-  test -f /app/lib/justspeaktoit/libwhisper.so.1
-  test -f /app/lib/justspeaktoit/libggml-base.so.0
-  test -f /app/lib/justspeaktoit/libggml.so.0
+  for name in libggml-base.so.0 libggml.so.0 libwhisper.so.1; do
+    test -f "/app/lib/justspeaktoit/$name"
+    test ! -L "/app/lib/justspeaktoit/$name"
+  done
   test -f /app/share/licenses/com.justspeaktoit.JustSpeakToIt/whisper.cpp/LICENSE
   ls /app/lib/justspeaktoit/libggml-cpu-*.so
 '

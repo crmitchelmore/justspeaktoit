@@ -4,10 +4,10 @@ import SpeakCore
 
 /// Opt-in through Settings > Focus. Defaults also represent native deactivation.
 public struct DictationFocusFilter: SetFocusFilterIntent {
-    public static var title: LocalizedStringResource = "Capture Overrides"
-    public static var description = IntentDescription(
-        "Choose destination, model or language for Action Button, Siri and Shortcuts captures."
-    )
+    public static var title: LocalizedStringResource { "Capture Overrides" }
+    public static var description: IntentDescription {
+        IntentDescription("Choose destination, model or language for Action Button, Siri and Shortcuts captures.")
+    }
 
     @Parameter(title: "Destination")
     public var destination: CaptureDestinationAppEnum?
@@ -21,7 +21,22 @@ public struct DictationFocusFilter: SetFocusFilterIntent {
     public init() {}
 
     public var displayRepresentation: DisplayRepresentation {
-        DisplayRepresentation(title: "Capture overrides", subtitle: "Action Button, Siri and Shortcuts")
+        var fields: [String] = []
+        if let destination { fields.append(destination.destination.displayName) }
+        if let model {
+            if let canonical = CaptureParameterResolution.model(from: model) {
+                fields.append(ModelCatalog.transcriptionDisplayName(
+                    for: canonical, isBatch: CaptureParameterResolution.requiresBatchMode(canonical)
+                ))
+            } else { fields.append("Unavailable model") }
+        }
+        if let language {
+            let canonical = CaptureParameterResolution.language(from: language)
+            fields.append(TranscriptionLanguageCatalog.options.first { $0.id == canonical }?.displayName
+                          ?? "Unavailable language")
+        }
+        let summary = fields.isEmpty ? "Use app defaults" : fields.joined(separator: " · ")
+        return DisplayRepresentation(title: "Capture overrides", subtitle: "\(summary)")
     }
 
     var captureOverride: FocusCaptureOverride {

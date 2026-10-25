@@ -1,0 +1,30 @@
+{
+  "createdAt" : "2023-11-14T22:13:20Z",
+  "errors" : [
+
+  ],
+  "events" : [
+
+  ],
+  "id" : "00000000-0000-0000-0000-000000000001",
+  "modelUsages" : [
+
+  ],
+  "modelsUsed" : [
+    "legacy/model"
+  ],
+  "networkExchanges" : [
+
+  ],
+  "phaseTimestamps" : {
+
+  },
+  "postProcessedTranscription" : "",
+  "recordingDuration" : 0,
+  "trigger" : {
+    "gesture" : "uiButton",
+    "hotKeyDescription" : "",
+    "outputMethod" : "none"
+  },
+  "updatedAt" : "2023-11-14T22:13:20Z"
+}

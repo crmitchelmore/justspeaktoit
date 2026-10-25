@@ -21,6 +21,10 @@ public struct iOSHistoryItem: Identifiable, Codable {
     /// surfaced in the history UI. Local-only — not synced.
     public let errorMessage: String?
 
+    // Rich display conversions retain their source in memory only. The existing
+    // ten-key iOS Codable/store format intentionally does not persist this value.
+    private let sourceHistoryRecord: HistoryRecord?
+
     public init(
         id: UUID = UUID(),
         createdAt: Date = Date(),
@@ -43,6 +47,7 @@ public struct iOSHistoryItem: Identifiable, Codable {
         self.wordCount = wordCount
         self.originPlatform = originPlatform
         self.errorMessage = errorMessage
+        self.sourceHistoryRecord = nil
     }
 
     /// The best available transcript for copy/display: polished if present, else raw.
@@ -57,34 +62,17 @@ public struct iOSHistoryItem: Identifiable, Codable {
 
     /// Returns a copy with the polished transcript set and any prior error cleared.
     public func withPostProcessed(_ text: String, updatedAt: Date = Date()) -> iOSHistoryItem {
-        iOSHistoryItem(
-            id: id,
-            createdAt: createdAt,
-            updatedAt: updatedAt,
-            transcription: transcription,
-            postProcessedTranscription: text,
-            model: model,
-            duration: duration,
-            wordCount: wordCount,
-            originPlatform: originPlatform,
-            errorMessage: nil
-        )
+        iOSHistoryItem(historyRecord: self.historyRecord.replacingLocalText(
+            postProcessedTranscription: text, errorMessage: nil, updatedAt: updatedAt
+        ))
     }
 
-    /// Returns a copy carrying an error message (e.g. a failed reprocess).
+    /// Returns a copy carrying an error message without advancing its timestamp.
     public func withError(_ message: String?) -> iOSHistoryItem {
-        iOSHistoryItem(
-            id: id,
-            createdAt: createdAt,
-            updatedAt: updatedAt,
-            transcription: transcription,
-            postProcessedTranscription: postProcessedTranscription,
-            model: model,
-            duration: duration,
-            wordCount: wordCount,
-            originPlatform: originPlatform,
-            errorMessage: message
-        )
+        iOSHistoryItem(historyRecord: self.historyRecord.replacingLocalText(
+            postProcessedTranscription: self.postProcessedTranscription,
+            errorMessage: message, updatedAt: self.updatedAt
+        ))
     }
 
     /// Convert to a syncable entry for CloudKit.
@@ -142,21 +130,36 @@ public struct iOSHistoryItem: Identifiable, Codable {
         wordCount = try container.decode(Int.self, forKey: .wordCount)
         originPlatform = try container.decodeIfPresent(String.self, forKey: .originPlatform) ?? "ios"
         errorMessage = try container.decodeIfPresent(String.self, forKey: .errorMessage)
+        sourceHistoryRecord = nil
     }
 }
 
 extension iOSHistoryItem {
-    var presentationItem: HistoryPresentationItem {
-        HistoryPresentationItem(
-            id: id,
-            createdAt: createdAt,
-            rawTranscription: transcription,
-            processedTranscription: postProcessedTranscription,
-            modelIdentifiers: [model],
-            recordingDuration: duration,
-            errorCount: errorMessage == nil ? 0 : 1,
-            originPlatform: originPlatform
+    /// Lossless while this display adapter remains in memory. Encoding it still
+    /// uses the original iOS schema, so rich records must use their own local encoding.
+    public init(historyRecord record: HistoryRecord) {
+        self.id = record.id
+        self.createdAt = record.createdAt
+        self.updatedAt = record.updatedAt
+        self.transcription = record.rawTranscription ?? ""
+        self.postProcessedTranscription = record.postProcessedTranscription
+        self.model = record.model ?? record.modelUsages.first?.modelIdentifier ?? record.modelsUsed.first ?? ""
+        self.duration = record.recordingDuration
+        self.wordCount = record.wordCount ?? record.presentation.wordCount
+        self.originPlatform = record.originPlatform
+        self.errorMessage = record.errorMessage
+        self.sourceHistoryRecord = record
+    }
+
+    public var historyRecord: HistoryRecord {
+        self.sourceHistoryRecord ?? HistoryRecord(
+            id: self.id, createdAt: self.createdAt, updatedAt: self.updatedAt,
+            rawTranscription: self.transcription, postProcessedTranscription: self.postProcessedTranscription,
+            recordingDuration: self.duration, model: self.model, wordCount: self.wordCount,
+            originPlatform: self.originPlatform, errorMessage: self.errorMessage
         )
     }
+
+    var presentationItem: HistoryPresentationItem { self.historyRecord.presentation }
 }
 #endif

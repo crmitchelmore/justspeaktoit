@@ -1,0 +1,8 @@
+{
+  "createdAt" : "2023-11-14T22:13:20Z",
+  "duration" : 3.75,
+  "id" : "00000000-0000-0000-0000-000000000001",
+  "model" : "openai/whisper-1",
+  "transcription" : "synthetic ios words",
+  "wordCount" : 3
+}

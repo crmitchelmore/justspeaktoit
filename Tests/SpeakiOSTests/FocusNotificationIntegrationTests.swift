@@ -13,7 +13,7 @@ final class FocusNotificationIntegrationTests: XCTestCase {
         let manager = self.makeManager()
         defer { manager.endActivity() }
         let service = harness.makeService(activity: .live(manager))
-        try await service.startRecording(requiresLiveActivity: false)
+        try await service.startRecording(requiresLiveActivity: true)
         harness.focus = .none
         harness.settings.hardwareTriggerDestination = .clipboardAndPostProcess
         _ = await service.stopRecording(selection: service.resolvedStopSelection())
@@ -41,7 +41,7 @@ final class FocusNotificationIntegrationTests: XCTestCase {
             )
         }
         let service = harness.makeService(activity: activity)
-        try await service.startRecording(requiresLiveActivity: false)
+        try await service.startRecording(requiresLiveActivity: true)
         _ = await service.stopRecording(selection: service.resolvedStopSelection())
         let input = try XCTUnwrap(harness.notifications.first)
         XCTAssertFalse(input.matchingResultActivity)
@@ -60,11 +60,12 @@ final class FocusNotificationIntegrationTests: XCTestCase {
         defer { harness.cleanUp() }
         let manager = self.makeManager()
         defer { manager.endActivity() }
+        harness.defaults.removeObject(forKey: "simulatorValidationTranscript")
         let session = DependencySession()
         session.stopError = URLError(.timedOut)
         let service = harness.makeService(activity: .live(manager))
         service.makeSession = { session }
-        try await service.startRecording(requiresLiveActivity: false)
+        try await service.startRecording(requiresLiveActivity: true)
         session.onPartialResult?("Private salvaged words", false)
         _ = await service.stopRecording(selection: service.resolvedStopSelection())
         let input = try XCTUnwrap(harness.notifications.first)
@@ -84,6 +85,7 @@ final class FocusNotificationIntegrationTests: XCTestCase {
         let manager = self.makeManager()
         defer { manager.endActivity() }
         let gate = DependencyKeyLoadGate(entered: expectation(description: "owned drain entered"))
+        harness.defaults.removeObject(forKey: "simulatorValidationTranscript")
         let session = DependencySession()
         session.finish = {
             await gate.wait()
@@ -94,7 +96,7 @@ final class FocusNotificationIntegrationTests: XCTestCase {
         }
         let service = harness.makeService(activity: .live(manager))
         service.makeSession = { session }
-        try await service.startRecording(requiresLiveActivity: false)
+        try await service.startRecording(requiresLiveActivity: true)
         let done = expectation(description: "owned stop settled")
         let stop = Task { _ = await service.stopRecording(selection: service.resolvedStopSelection()); done.fulfill() }
         defer { service.cancelRecording(); gate.release(); stop.cancel() }
@@ -118,11 +120,16 @@ final class FocusNotificationIntegrationTests: XCTestCase {
         for saveToHistory in [false, true] {
             let harness = try self.makeHarness()
             defer { harness.cleanUp() }
-            if saveToHistory { harness.defaults.set(" \n ", forKey: "simulatorValidationTranscript") }
             let manager = self.makeManager()
             defer { manager.endActivity() }
             let service = harness.makeService(activity: .live(manager))
-            try await service.startRecording(requiresLiveActivity: false)
+            if saveToHistory {
+                harness.defaults.removeObject(forKey: "simulatorValidationTranscript")
+                let session = DependencySession()
+                session.partialText = ""
+                service.makeSession = { session }
+            }
+            try await service.startRecording(requiresLiveActivity: true)
             _ = await service.stopRecording(
                 selection: service.resolvedStopSelection(), saveToHistory: saveToHistory
             )
@@ -144,7 +151,7 @@ final class FocusNotificationIntegrationTests: XCTestCase {
         let service = harness.makeService(
             activity: .live(manager), completion: { _, _, _, _, _, _, _ in completions += 1 }
         )
-        try await service.startRecording(requiresLiveActivity: false)
+        try await service.startRecording(requiresLiveActivity: true)
         _ = await service.stopRecording(selection: service.resolvedStopSelection())
         XCTAssertEqual(completions, 1)
         XCTAssertNotEqual(manager.latestState?.status, .completed, "The live owned callback must not bypass injection")

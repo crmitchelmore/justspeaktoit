@@ -363,7 +363,7 @@ final class DependencySession: IOSRecordingSession {
     let isBatch = false
     let stopCompletionTimeout: TimeInterval = 1
     let resolution = IOSTranscriptionSession.Resolution(modelID: "test", backend: .apple, route: nil)
-    let partialText = "Safety transcript"
+    var partialText = "Safety transcript"
     var stopError: Error?
     let confidence: Double? = nil
     var onPartialResult: ((String, Bool) -> Void)?

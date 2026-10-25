@@ -8,6 +8,34 @@ import XCTest
 
 @MainActor
 final class BatchProviderRoutingTests: XCTestCase {
+    func testExistingBatchRoutePrecedenceAndFallback() {
+        let cases: [(String, IOSBatchTranscriptionRoute)] = [
+            (AppleLocalModels.speechTranscriberModelID, .appleSpeechAnalyzer),
+            ("openai/whisper-1", .openAI),
+            (CartesiaBatchClient.catalogID, .cartesia),
+            (GladiaBatchClient.catalogID, .gladia),
+            (AzureTranscriptionModels.mai2, .azure),
+            ("alibaba/unknown", .alibaba),
+            (MetaMuseVoiceTranscribe.batchCatalogID, .metaMuse),
+            (GeminiTranscribeModels.batchCatalogID, .gemini),
+            (XAISpeechToText.batchCatalogID, .xai),
+            (FileSpeechProvider.smallest.modelID, .fileSpeech(.smallest)),
+            ("google/gemini-3.1-flash-lite", .openRouter),
+            ("openai/gpt-audio", .openRouter),
+            ("openrouter/transcription/openai/gpt-transcribe", .openRouter),
+            ("elevenlabs/scribe_v2", .openRouter),
+            ("OpenAI/whisper-1", .openRouter),
+            ("/alibaba/unknown", .openRouter),
+            ("alibaba", .openRouter),
+            ("unknown/model", .openRouter),
+            ("", .openRouter)
+        ]
+        for (model, expected) in cases {
+            XCTAssertEqual(IOSBatchTranscriptionRoute.route(for: model), expected, model)
+            XCTAssertEqual(IOSBatchTranscriptionRoute.route(for: " \n" + model + "\t"), expected, model)
+        }
+    }
+
     func testPaddedModelsSendCredentialsOnlyToTheirProvider() async throws {
         let audioURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".m4a")
         try Data([0, 1, 2, 3]).write(to: audioURL)

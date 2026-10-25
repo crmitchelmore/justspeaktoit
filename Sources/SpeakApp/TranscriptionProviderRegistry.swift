@@ -8,6 +8,11 @@ actor TranscriptionProviderRegistry {
 
     private var providers: [String: any TranscriptionProvider] = [:]
 
+    /// Characterizes registered-instance ownership without constructing transports.
+    init(providers: [String: any TranscriptionProvider]) {
+        self.providers = providers
+    }
+
     /// Comparisons inject a session owned by one lane; normal recording keeps the shared registry.
     init(session: URLSession = .shared, independentCleanup: Bool = false) {
         // Register all providers here - adding a new provider automatically makes it available

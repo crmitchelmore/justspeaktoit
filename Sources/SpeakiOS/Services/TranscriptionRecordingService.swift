@@ -280,6 +280,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         ModelCatalog.transcriptionDisplayName(
             for: currentModel,
             isBatch: transcriptionSession?.isBatch
+                ?? effectiveConfiguration?.usesBatch
                 ?? (settings.transcriptionMode == .batch)
         )
     }

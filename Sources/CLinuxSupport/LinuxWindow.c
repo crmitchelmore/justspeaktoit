@@ -5743,6 +5743,7 @@ static int32_t local_cleanup_sources_self_test(char *error, size_t capacity) {
     polish_apply(&fixture);
     polish_remote_count = G_MAXUINT;
     cleanup_sources_apply(GUINT_TO_POINTER(2));
+    const char *failure_stage = NULL;
     gboolean okay = adw_combo_row_get_selected(ui.polish_location_row) == 0
         && adw_combo_row_get_selected(ui.polish_model_row) == 2 && polish_selected_model() == 4
         && g_list_model_get_n_items(G_LIST_MODEL(ui.polish_models)) == 3
@@ -5751,8 +5752,10 @@ static int32_t local_cleanup_sources_self_test(char *error, size_t capacity) {
         && gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_prompt_row))
         && gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_directives_row))
         && gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_tags_row));
+    if (!okay && failure_stage == NULL) failure_stage = "initial local source, selection and controls";
     gchar *actual_prompt = polish_prompt_text();
     okay = okay && g_strcmp0(actual_prompt, fixture.prompt) == 0;
+    if (!okay && failure_stage == NULL) failure_stage = "prompt preservation";
     jsti_window_event_fn saved_callback = ui.callback;
     ui.callback = observe_event;
     gtk_editable_set_text(GTK_EDITABLE(ui.polish_key_row), "must-not-reach-local-callback");
@@ -5760,38 +5763,47 @@ static int32_t local_cleanup_sources_self_test(char *error, size_t capacity) {
     on_polish_apply(NULL, NULL);
     okay = okay && observed.event == JSTI_EVENT_POST_PROCESSING && observed.index == 4
         && g_strcmp0(observed.text, "One%20stop%20after%20each%20word.%0AExact%09second%20line.\t\t0\t1") == 0;
+    if (!okay && failure_stage == NULL) failure_stage = "local callback and private key filtering";
     observed.event = 0;
     adw_combo_row_set_selected(ui.polish_location_row, 1);
     okay = okay && gtk_widget_get_visible(GTK_WIDGET(ui.polish_key_row))
         && !gtk_widget_get_visible(polish_local_group)
         && polish_selected_model() == 1 && observed.event == 0;
+    if (!okay && failure_stage == NULL) failure_stage = "remembered remote selection";
     gtk_editable_set_text(GTK_EDITABLE(ui.polish_key_row), "clear-on-local-switch");
     adw_combo_row_set_selected(ui.polish_location_row, 0);
     okay = okay && polish_selected_model() == 4 &&
         g_strcmp0(gtk_editable_get_text(GTK_EDITABLE(ui.polish_key_row)), "") == 0;
+    if (!okay && failure_stage == NULL) failure_stage = "local return clears remote key";
     adw_combo_row_set_selected(ui.polish_model_row, 0);
     okay = okay && polish_selected_model() == 2 &&
         !gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_prompt_row)) &&
         !gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_directives_row)) &&
         !gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_tags_row));
+    if (!okay && failure_stage == NULL) failure_stage = "built-in rules disable prompt and context";
     adw_combo_row_set_selected(ui.polish_model_row, 1);
     okay = okay && polish_selected_model() == 3 &&
         gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_prompt_row)) &&
         gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_directives_row)) &&
         gtk_widget_get_sensitive(GTK_WIDGET(ui.polish_tags_row)) &&
         !adw_switch_row_get_active(ui.polish_directives_row) && adw_switch_row_get_active(ui.polish_tags_row);
+    if (!okay && failure_stage == NULL) failure_stage = "downloaded local controls and context";
     on_polish_apply(NULL, NULL);
     okay = okay && observed.index == 3 &&
         g_strcmp0(observed.text, "One%20stop%20after%20each%20word.%0AExact%09second%20line.\t\t0\t1") == 0;
+    if (!okay && failure_stage == NULL) failure_stage = "downloaded local callback";
     fixture.remembered_remote_index = -1;
     polish_apply(&fixture);
     adw_combo_row_set_selected(ui.polish_location_row, 1);
     observed.event = 0;
     on_polish_apply(NULL, NULL);
     okay = okay && observed.event == 0 && polish_selected_model() == -1;
+    if (!okay && failure_stage == NULL) failure_stage = "unavailable remote stays unselected";
     adw_combo_row_set_selected(ui.polish_location_row, 0);
     okay = okay && polish_selected_model() == 4;
+    if (!okay && failure_stage == NULL) failure_stage = "unavailable remote retains local selection";
     okay = okay && jsti_window_set_cleanup_sources(10001) == -1;
+    if (!okay && failure_stage == NULL) failure_stage = "source count boundary";
     polish_apply(&saved);
     polish_remote_count = saved_remote;
     ui.suppress = TRUE;
@@ -5803,7 +5815,11 @@ static int32_t local_cleanup_sources_self_test(char *error, size_t capacity) {
     g_clear_pointer(&observed.text, g_free);
     g_free(saved.local_notice); g_free(saved.prompt); g_free(actual_prompt);
     g_ptr_array_unref(saved.models); g_ptr_array_unref(fixture.models);
-    return okay ? 0 : fail(error, capacity, "local cleanup source/index/prompt/privacy controls failed");
+    if (okay) return 0;
+    gchar *detail = g_strdup_printf("local cleanup source/index/prompt/privacy controls failed: %s", failure_stage);
+    int32_t result = fail(error, capacity, detail);
+    g_free(detail);
+    return result;
 }
 
 static gboolean cleanup_preview_self_test(void) {

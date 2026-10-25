@@ -8,12 +8,13 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def verify(manifest):
-    # Preserve the existing desktop/microphone permissions; the only new finish
-    # argument configures the app-owned inference runtime, not sandbox access.
+    # Preserve existing desktop/microphone access. Environment defaults select
+    # the app-owned runtime and preseed its existing debugger policy; no new access.
     assert set(manifest['finish-args']) == {
         '--share=network', '--share=ipc', '--socket=wayland', '--socket=fallback-x11',
         '--socket=pulseaudio', '--device=dri', '--talk-name=org.kde.StatusNotifierWatcher',
         '--env=JSTI_WHISPER_RUNTIME_DIRECTORY=/app/lib/justspeaktoit',
+        '--env=GGML_NO_BACKTRACE=1',
     }, 'sandbox permissions changed: owner review required'
     assert not manifest.get('build-options', {}).get('build-args'), 'build must be offline'
     modules = {module['name']: module for module in manifest['modules']}

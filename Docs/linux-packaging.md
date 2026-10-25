@@ -68,8 +68,11 @@ commit and bundle bytes before checking unchanged package inputs. Current PR hea
 metadata and an association disappearing after merge cannot rewrite the build-time
 record. The record has authority only inside that authenticated artifact; copying or
 inventing one alone does not establish qualification. Missing legacy records require
-a fresh build. Override and sandbox checks are unchanged. This new provenance path
-has Python regression coverage; its fresh hosted build/install/retest remains pending.
+a fresh build. Override and sandbox checks are unchanged. This provenance path has
+Python regression coverage and passed its [fresh hosted build/install](https://github.com/crmitchelmore/justspeaktoit/actions/runs/40227762194/job/121272697098)
+and [trusted installed retest](https://github.com/crmitchelmore/justspeaktoit/actions/runs/40229920326/job/121279237420)
+at code revision [`da07071f`](https://github.com/crmitchelmore/justspeaktoit/commit/da07071f5ffd96caa4a7ea3a0b0919a128851479).
+Normal PR/merge, public-distribution and physical acceptance gates remain open.
 
 Qualification requires a successful [Linux Flatpak workflow receipt](https://github.com/crmitchelmore/justspeaktoit/actions/workflows/linux-flatpak.yml)
 for the chosen revision, with its installed-test log and bundle hash. Historical

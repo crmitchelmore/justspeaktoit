@@ -178,6 +178,47 @@ final class AutomationAwaitCoordinatorTests: XCTestCase {
         XCTAssertEqual(admitted.result?.text, "new")
         coordinator.deactivate()
     }
+
+    func testUnicodeWireIDs_KeepIndependentWaitsCancellationAndTerminalReplay() async {
+        let gate = AwaitCoordinatorGate()
+        let coordinator = AutomationAwaitCoordinator()
+        coordinator.activate { await gate.answer($0) }
+        let firstRequest = self.request("é")
+        let secondRequest = self.request("e\u{0301}")
+        let firstDone = expectation(description: "first Unicode owner disconnected")
+        let secondDone = expectation(description: "other Unicode owner survived")
+        var firstResponse: AutomationResponse?
+        var secondResponse: AutomationResponse?
+        let first = Task { firstResponse = await coordinator.respond(to: firstRequest); firstDone.fulfill() }
+        let second = Task { secondResponse = await coordinator.respond(to: secondRequest); secondDone.fulfill() }
+        defer { first.cancel(); second.cancel(); coordinator.deactivate(); gate.finishAll("cleanup") }
+        guard await self.waitForCalls(2, gate: gate, coordinator: coordinator) else { return }
+        first.cancel()
+        guard await XCTWaiter.fulfillment(of: [firstDone], timeout: 2) == .completed else {
+            return XCTFail("First Unicode owner did not disconnect")
+        }
+        XCTAssertEqual(firstResponse?.error?.code, .appUnavailable)
+        XCTAssertEqual(firstResponse.map { Data($0.id.utf8) }, Data(firstRequest.id.utf8))
+        gate.finishAll("survivor")
+        guard await XCTWaiter.fulfillment(of: [secondDone], timeout: 2) == .completed else {
+            return XCTFail("Other Unicode owner did not settle")
+        }
+        XCTAssertEqual(secondResponse?.result?.text, "survivor")
+        XCTAssertEqual(secondResponse.map { Data($0.id.utf8) }, Data(secondRequest.id.utf8))
+        let replayed = expectation(description: "each UTF-8 identity replays its own terminal result")
+        let replay = Task {
+            let firstCached = await coordinator.respond(to: firstRequest)
+            let secondCached = await coordinator.respond(to: secondRequest)
+            XCTAssertEqual(firstCached.error?.code, .appUnavailable)
+            XCTAssertEqual(secondCached.result?.text, "survivor")
+            replayed.fulfill()
+        }
+        defer { replay.cancel() }
+        guard await XCTWaiter.fulfillment(of: [replayed], timeout: 2) == .completed else {
+            return XCTFail("Unicode terminal replay did not settle")
+        }
+        XCTAssertEqual(gate.calls, 2)
+    }
 }
 
 @MainActor

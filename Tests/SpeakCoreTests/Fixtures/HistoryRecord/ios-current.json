@@ -1,0 +1,12 @@
+{
+  "createdAt" : "2023-11-14T22:13:20Z",
+  "duration" : 3.75,
+  "errorMessage" : "Synthetic retry",
+  "id" : "00000000-0000-0000-0000-000000000001",
+  "model" : "openai/whisper-1",
+  "originPlatform" : "macos",
+  "postProcessedTranscription" : "",
+  "transcription" : "synthetic ios words",
+  "updatedAt" : "2023-11-14T22:13:28Z",
+  "wordCount" : 3
+}

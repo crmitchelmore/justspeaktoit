@@ -1,0 +1,131 @@
+{
+  "audioFileURL" : "file:///synthetic-local/recording.wav",
+  "cost" : {
+    "breakdown" : {
+      "currency" : "USD",
+      "inputTokens" : 12,
+      "outputTokens" : 8,
+      "totalCost" : 0.01
+    },
+    "currency" : "USD",
+    "total" : 0.123456789
+  },
+  "createdAt" : "2023-11-14T22:13:20Z",
+  "desktopHistory" : {
+    "syntheticLocalState" : "retained"
+  },
+  "diagnosticContext" : {
+    "appBuild" : "0",
+    "appVersion" : "0.0.0",
+    "capturedAt" : "2023-11-14T22:13:20Z",
+    "inputDeviceName" : "Synthetic input",
+    "latencyTier" : "fast",
+    "microphonePermission" : "synthetic",
+    "operatingSystem" : "Synthetic OS",
+    "postProcessingModel" : "synthetic/polish",
+    "processIdentifier" : 123,
+    "providerLabel" : "Synthetic provider",
+    "speedMode" : "instant",
+    "transcriptionMode" : "live",
+    "transcriptionModel" : "deepgram/nova-3"
+  },
+  "errors" : [
+    {
+      "id" : "00000000-0000-0000-0000-000000000001",
+      "message" : "Synthetic error",
+      "occurredAt" : "2023-11-14T22:13:20Z",
+      "phase" : "output"
+    }
+  ],
+  "events" : [
+    {
+      "description" : "Synthetic event",
+      "id" : "00000000-0000-0000-0000-000000000001",
+      "kind" : "transcriptionReceived",
+      "timestamp" : "2023-11-14T22:13:20Z"
+    }
+  ],
+  "id" : "00000000-0000-0000-0000-000000000001",
+  "latency" : {
+    "captureStartMs" : 12,
+    "firstInsertMs" : 345,
+    "firstPartialMs" : 234,
+    "stopToFinalMs" : 456
+  },
+  "modelUsages" : [
+    {
+      "modelIdentifier" : "deepgram/nova-3",
+      "phase" : "live"
+    },
+    {
+      "modelIdentifier" : "synthetic/polish",
+      "phase" : "post-processing"
+    }
+  ],
+  "modelsUsed" : [
+    "legacy/model"
+  ],
+  "networkExchanges" : [
+    {
+      "id" : "00000000-0000-0000-0000-000000000001",
+      "method" : "POST",
+      "requestBodyPreview" : "synthetic request",
+      "requestHeaders" : {
+        "X-Synthetic" : "fixture"
+      },
+      "responseBodyPreview" : "synthetic response",
+      "responseCode" : 200,
+      "responseHeaders" : {
+
+      },
+      "url" : "https://example.invalid/transcribe"
+    }
+  ],
+  "personalCorrections" : {
+    "applied" : [
+      {
+        "alias" : "synthetic",
+        "canonical" : "Synthetic",
+        "confidence" : "high",
+        "id" : "00000000-0000-0000-0000-000000000001",
+        "occurrences" : 1,
+        "reason" : "Synthetic correction",
+        "ruleID" : "00000000-0000-0000-0000-000000000001",
+        "wasApplied" : true
+      }
+    ],
+    "contextTags" : [
+      "fixture"
+    ],
+    "destinationApplication" : "Synthetic app",
+    "suggestions" : [
+
+    ]
+  },
+  "phaseTimestamps" : {
+    "outputDelivered" : "2023-11-14T22:13:27Z",
+    "postProcessingEnded" : "2023-11-14T22:13:26Z",
+    "postProcessingStarted" : "2023-11-14T22:13:25Z",
+    "recordingEnded" : "2023-11-14T22:13:24Z",
+    "recordingStarted" : "2023-11-14T22:13:20Z",
+    "transcriptionEnded" : "2023-11-14T22:13:25Z",
+    "transcriptionStarted" : "2023-11-14T22:13:20Z"
+  },
+  "postProcessedTranscription" : "Synthetic polished words.",
+  "postProcessingPrompt" : {
+    "customPrompt" : "Synthetic custom",
+    "modelIdentifier" : "synthetic/polish",
+    "systemPrompt" : "Synthetic system",
+    "userPrompt" : "Synthetic user"
+  },
+  "rawTranscription" : "synthetic raw words",
+  "recordingDuration" : 4.25,
+  "source" : "importedFile",
+  "trigger" : {
+    "destinationApplication" : "Synthetic app",
+    "gesture" : "hold",
+    "hotKeyDescription" : "Fn",
+    "outputMethod" : "clipboard"
+  },
+  "updatedAt" : "2023-11-14T22:13:35Z"
+}

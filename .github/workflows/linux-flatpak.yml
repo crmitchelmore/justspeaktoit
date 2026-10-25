@@ -160,11 +160,12 @@ jobs:
           run = json.load(urllib.request.urlopen(request, timeout=30))
           assert run['head_sha'] == sha and run['head_repository']['full_name'] == repo
           assert run['path'] == '.github/workflows/linux-flatpak.yml' and run['status'] == 'completed'
+          # PR association head.sha follows later pushes; run.head_sha is the immutable source binding.
           pathlib.Path('flatpak-evidence/source-run.json').write_text(json.dumps({
               'runID': run_id, 'sourceSHA': sha, 'repository': repo, 'workflow': run['path'],
               'harnessSHA': os.environ['GITHUB_SHA'], 'event': run['event'],
               'pullRequestParents': [{'baseSHA': pr['base']['sha']} for pr in run.get('pull_requests', [])
-                  if pr['head']['sha'] == sha and pr['head']['repo']['id'] == run['repository']['id']
+                  if pr['head']['repo']['id'] == run['repository']['id']
                   and pr['base']['repo']['id'] == run['repository']['id']]}, indent=2) + '\n')
           PY
 

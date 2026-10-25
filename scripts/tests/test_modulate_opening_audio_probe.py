@@ -261,6 +261,54 @@ class OwnedRunnerTests(unittest.TestCase):
                     process.terminate()
                     process.communicate(timeout=10)
 
+    def test_edited_symlink_directory_or_unverifiable_lock_refuses_command_before_any_child(self):
+        runner = Path(__file__).resolve().parents[1] / "qualify-modulate-opening-audio.py"
+        with tempfile.TemporaryDirectory(prefix="modulate-lock-admission-") as directory:
+            for kind in ("edited", "symlink", "directory", "unverifiable"):
+                root = Path(directory) / kind
+                root.mkdir()
+                lock = root / "Package.resolved"
+                original = b'{"pins": []}\n'
+                subprocess.run(["git", "init", "-q", str(root)], check=True)
+                lock.write_bytes(original)
+                if kind != "unverifiable":
+                    subprocess.run(["git", "add", "Package.resolved"], cwd=root, check=True)
+                    subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
+                                    "-c", "user.name=Qualification", "-c", "user.email=qualification@example.invalid",
+                                    "commit", "-qm", "fixture"], cwd=root, check=True)
+                target = root / "user-data"
+                target.write_bytes(b"retain user data")
+                if kind == "edited":
+                    lock.write_bytes(b"retain user edit")
+                elif kind == "symlink":
+                    lock.unlink()
+                    lock.symlink_to(target)
+                elif kind == "directory":
+                    lock.unlink()
+                    lock.mkdir()
+                sentinel = root / "command-ran"
+                code = "from pathlib import Path; Path('command-ran').write_text('unsafe')"
+                output = root / "receipt"
+                result = subprocess.run([sys.executable, "-B", str(runner), "--output-dir", str(output), "--",
+                                         sys.executable, "-B", "-c", code], cwd=root,
+                                        env={**os.environ, "SPEAK_PORTABLE_CORE": "1"},
+                                        capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertFalse(sentinel.exists())
+                receipt = json.loads((output / "qualification.json").read_text())
+                self.assertIsNone(receipt["ownedCommandPID"])
+                self.assertIsNone(receipt["ownedPeerPID"])
+                self.assertTrue(any("command refused" in error for error in receipt["errors"]))
+                self.assertEqual(target.read_bytes(), b"retain user data")
+                if kind == "edited":
+                    self.assertEqual(lock.read_bytes(), b"retain user edit")
+                elif kind == "symlink":
+                    self.assertTrue(lock.is_symlink())
+                elif kind == "directory":
+                    self.assertTrue(lock.is_dir())
+                else:
+                    self.assertEqual(lock.read_bytes(), original)
+
     def test_portable_lock_restores_only_initial_head_bytes_deleted_by_the_command(self):
         with tempfile.TemporaryDirectory(prefix="modulate-owned-lock-") as directory:
             root = Path(directory)
@@ -273,8 +321,10 @@ class OwnedRunnerTests(unittest.TestCase):
                             "-c", "user.name=Qualification", "-c", "user.email=qualification@example.invalid",
                             "commit", "-qm", "fixture"], cwd=root, check=True)
             with patch.dict(os.environ, {"SPEAK_PORTABLE_CORE": "1"}):
-                snapshot = RUNNER.snapshot_portable_lock(root)
+                snapshot = RUNNER.admit_portable_lock(root)
+                self.assertIsNotNone(snapshot)
                 lock.unlink()
+                self.assertIsNone(RUNNER.admit_portable_lock(root), "absence is safe and never invented as owned data")
                 self.assertTrue(RUNNER.restore_deleted_portable_lock(snapshot))
                 self.assertEqual(lock.read_bytes(), original)
                 snapshot = RUNNER.snapshot_portable_lock(root)

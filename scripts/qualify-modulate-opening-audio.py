@@ -59,6 +59,18 @@ def snapshot_portable_lock(root):
         return None
 
 
+def admit_portable_lock(root):
+    snapshot = snapshot_portable_lock(root)
+    if os.environ.get("SPEAK_PORTABLE_CORE") == "1":
+        try:
+            (root / "Package.resolved").lstat()
+        except FileNotFoundError:
+            return None
+        if snapshot is None:
+            raise RuntimeError("Portable lockfile is not an owned HEAD-identical regular file; command refused")
+    return snapshot
+
+
 def restore_deleted_portable_lock(snapshot):
     if snapshot is None:
         return False
@@ -110,7 +122,7 @@ def main():
     if not command or not 1 <= args.test_timeout <= 300 or os.name != "posix":
         parser.error("requires a POSIX test command and timeout between 1 and 300 seconds")
     args.output_dir.mkdir(parents=True, exist_ok=False)
-    lock_snapshot = snapshot_portable_lock(Path.cwd())
+    lock_snapshot = None
 
     def interrupted(number, _frame):
         raise OwnedSignal(number)
@@ -125,6 +137,7 @@ def main():
     errors = []
     with (args.output_dir / "peer.log").open("w") as log:
         try:
+            lock_snapshot = admit_portable_lock(Path.cwd())
             peer = subprocess.Popen([
                 sys.executable, "-B", str(Path(__file__).with_name("modulate-opening-audio-probe.py")),
                 "--ready-file", str(ready_file), "--max-seconds", str(args.test_timeout + 10),

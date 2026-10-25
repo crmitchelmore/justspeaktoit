@@ -38,7 +38,7 @@ import sys
 spec = importlib.util.spec_from_file_location("modulate_gate", "scripts/qualify-modulate-opening-audio.py")
 gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
-lock = gate.snapshot_portable_lock(Path.cwd())
+lock = gate.admit_portable_lock(Path.cwd())
 try:
     subprocess.run(["xcrun", "swift", "test", "list", "--configuration", "release", "--jobs", "2",
                     "--scratch-path", sys.argv[1]], check=True)
@@ -52,7 +52,11 @@ SPEAK_PORTABLE_CORE=1 python3 -B scripts/qualify-modulate-opening-audio.py \
   --filter ModulateOpeningAudioQualificationTests
 ```
 
-The output directory must be new. The runner owns and bounds its child process
+The output directory must be new. Both preparation and qualification refuse an
+existing edited, nonregular or unverifiable portable lockfile before starting
+their command. If another writer changes it between phases, stop and reconcile
+in a separate owned checkout; do not force restoration over that writer's data.
+The runner owns and bounds its child process
 groups, joins its peer reader, preserves command failures/timeouts, and writes
 `tests.log`, `peer.log` and `qualification.json`. It reuses the canonical XCTest
 completion parser and requires all four exact `SpeakPortableTests` cases once

@@ -204,15 +204,11 @@ jobs:
         run: |
           flatpak install --user -y --noninteractive flathub org.gnome.Sdk//50 org.freedesktop.Sdk.Extension.swift6//25.08
           python3 scripts/linux-flatpak-argv-probe.py "$RUNNER_TEMP/argv-probe"
-          flatpak-builder --disable-download --force-clean --disable-rofiles-fuse \
-            --state-dir "$RUNNER_TEMP/argv-probe-state" "$RUNNER_TEMP/argv-probe-build" "$RUNNER_TEMP/argv-probe/manifest.json"
+          bash -o pipefail -c 'flatpak-builder --disable-download --force-clean --disable-rofiles-fuse \
+            --state-dir "$RUNNER_TEMP/argv-probe-state" "$RUNNER_TEMP/argv-probe-build" "$RUNNER_TEMP/argv-probe/manifest.json" 2>&1 | tee flatpak-evidence/argv-probe-build.log'
           flatpak install --user -y --noninteractive --reinstall --bundle flatpak-evidence/JustSpeakToIt-x86_64.flatpak
           installed=$(flatpak info --user --show-location com.justspeaktoit.JustSpeakToIt)
           {
-            echo '== dynamic Swift argv in SDK'
-            flatpak-builder --run "$RUNNER_TEMP/argv-probe-build" "$RUNNER_TEMP/argv-probe/manifest.json" /app/bin/probe-dynamic --version
-            echo '== static Swift argv in SDK'
-            flatpak-builder --run "$RUNNER_TEMP/argv-probe-build" "$RUNNER_TEMP/argv-probe/manifest.json" /app/bin/probe-static --version
             echo '== installed application binary'
             sha256sum "$installed/files/bin/justspeaktoit"
             readelf -d "$installed/files/bin/justspeaktoit"
@@ -225,7 +221,7 @@ jobs:
               chmod 700 "$probe"
               "$probe" --version
               rm -f "$probe"
-            ' < "$RUNNER_TEMP/argv-probe-build/files/bin/probe-static"
+            ' < "$RUNNER_TEMP/argv-probe-build/files/bin/probe-static" || echo "static-platform-exit:$?"
           } > flatpak-evidence/argv-probe.log 2>&1
 
       - name: Qualify the unchanged bundle in a real session

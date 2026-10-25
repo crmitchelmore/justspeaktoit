@@ -17,6 +17,7 @@ final class AutomationAwaitCoordinator {
         let response: AutomationResponse
     }
     private struct Run {
+        let identifier: String
         let epoch: UUID
         let fingerprint: Fingerprint
         let deadline: ContinuousClock.Instant
@@ -26,9 +27,9 @@ final class AutomationAwaitCoordinator {
     }
     var didChangeSubscribers: ((String, Int) -> Void)?
     private var handler: Handler?
-    private var runs: [String: Run] = [:]
-    private var terminal: [String: Terminal] = [:]
-    private var order: [String] = []
+    private var runs: [Data: Run] = [:]
+    private var terminal: [Data: Terminal] = [:]
+    private var order: [Data] = []
     private let now: () -> ContinuousClock.Instant
 
     init(now: @escaping () -> ContinuousClock.Instant = { ContinuousClock().now }) {
@@ -43,10 +44,11 @@ final class AutomationAwaitCoordinator {
         self.runs.removeAll()
         self.terminal.removeAll()
         self.order.removeAll()
-        for (id, run) in oldRuns {
+        for run in oldRuns.values {
             run.work.cancel()
             run.timer.cancel()
-            let response = Self.failure(id, .appUnavailable, "Automation stopped; waits cannot resume across restart.")
+            let response = Self.failure(run.identifier, .appUnavailable,
+                                        "Automation stopped; waits cannot resume across restart.")
             for subscriber in run.subscribers.values { subscriber.resume(returning: response) }
         }
     }
@@ -67,29 +69,26 @@ final class AutomationAwaitCoordinator {
                            continuation: CheckedContinuation<AutomationResponse, Never>) {
         let fingerprint: Fingerprint
         do {
-            _ = try request.validated()
-            guard request.command == .awaitTranscript, let capture = request.captureID.flatMap(UUID.init(uuidString:))
-            else { throw AutomationError(code: .invalidArgument, message: "A named capture is required.") }
-            fingerprint = Fingerprint(capture: capture, since: request.sinceID.flatMap(UUID.init(uuidString:)),
-                                      timeout: request.resolvedTimeout)
+            fingerprint = try Self.fingerprint(for: request)
         } catch {
             continuation.resume(returning: .failure(id: request.id, command: .awaitTranscript,
                 error: error as? AutomationError ?? AutomationError(code: .invalidArgument, message: "Invalid wait.")))
             return
         }
-        let prior = self.runs[request.id]?.fingerprint ?? self.terminal[request.id]?.fingerprint
+        let key = Data(request.id.utf8)
+        let prior = self.runs[key]?.fingerprint ?? self.terminal[key]?.fingerprint
         guard prior == nil || prior == fingerprint else {
             continuation.resume(returning: Self.failure(request.id, .invalidArgument,
                                                        "Request ID was already used with different await arguments."))
             return
         }
-        if let cached = self.terminal[request.id] {
+        if let cached = self.terminal[key] {
             continuation.resume(returning: cached.response)
             return
         }
-        if self.runs[request.id] != nil {
-            self.runs[request.id]?.subscribers[subscriber] = continuation
-            self.didChangeSubscribers?(request.id, self.runs[request.id]?.subscribers.count ?? 0)
+        if self.runs[key] != nil {
+            self.runs[key]?.subscribers[subscriber] = continuation
+            self.didChangeSubscribers?(request.id, self.runs[key]?.subscribers.count ?? 0)
             return
         }
         guard let handler = self.handler else {
@@ -112,31 +111,41 @@ final class AutomationAwaitCoordinator {
             self?.finish(id: request.id, epoch: epoch,
                          response: Self.failure(request.id, .timedOut, "Capture wait timed out."))
         }
-        self.runs[request.id] = Run(epoch: epoch, fingerprint: fingerprint, deadline: deadline,
-                                    work: work, timer: timer, subscribers: [subscriber: continuation])
+        self.runs[key] = Run(identifier: request.id, epoch: epoch, fingerprint: fingerprint, deadline: deadline,
+                             work: work, timer: timer, subscribers: [subscriber: continuation])
         self.didChangeSubscribers?(request.id, 1)
     }
 
+    private static func fingerprint(for request: AutomationRequest) throws -> Fingerprint {
+        _ = try request.validated()
+        guard request.command == .awaitTranscript, let capture = request.captureID.flatMap(UUID.init(uuidString:))
+        else { throw AutomationError(code: .invalidArgument, message: "A named capture is required.") }
+        return Fingerprint(capture: capture, since: request.sinceID.flatMap(UUID.init(uuidString:)),
+                           timeout: request.resolvedTimeout)
+    }
+
     private func disconnect(id: String, subscriber: UUID) {
-        guard var run = self.runs[id],
+        let key = Data(id.utf8)
+        guard var run = self.runs[key],
             let continuation = run.subscribers.removeValue(forKey: subscriber) else { return }
         let response = Self.failure(id, .appUnavailable, "Capture wait connection cancelled.")
         continuation.resume(returning: response)
-        self.runs[id] = run
+        self.runs[key] = run
         self.didChangeSubscribers?(id, run.subscribers.count)
         if run.subscribers.isEmpty { self.finish(id: id, epoch: run.epoch, response: response) }
     }
 
     private func finish(id: String, epoch: UUID, response: AutomationResponse) {
-        guard let run = self.runs[id], run.epoch == epoch else { return }
-        self.runs.removeValue(forKey: id)
+        let key = Data(id.utf8)
+        guard let run = self.runs[key], run.epoch == epoch else { return }
+        self.runs.removeValue(forKey: key)
         // A result processed at or after the original monotonic deadline loses, including a starved timer.
         let settled = self.now() >= run.deadline
             ? Self.failure(id, .timedOut, "Capture wait timed out.") : response
         run.work.cancel()
         run.timer.cancel()
-        self.terminal[id] = Terminal(fingerprint: run.fingerprint, response: settled)
-        self.order.append(id)
+        self.terminal[key] = Terminal(fingerprint: run.fingerprint, response: settled)
+        self.order.append(key)
         while self.order.count > AutomationRequestCoordinator.maxRememberedRequests {
             self.terminal.removeValue(forKey: self.order.removeFirst())
         }

@@ -109,7 +109,7 @@ final class MCPAwaitLifecycleTests: XCTestCase {
         let client = CapturingMCPAwaitClient()
         let handler = MCPRequestHandler(client: client, version: "fixture")
         let prefix = String(repeating: "a", count: 512)
-        let identifiers: [Any] = [1, "1", prefix + "first", prefix + "second", 1]
+        let identifiers: [Any] = [1, "1", prefix + "first", prefix + "second", 1, "é", "e\u{0301}", "é"]
         let capture = UUID().uuidString
         for id in identifiers {
             let data = try JSONSerialization.data(withJSONObject: ["jsonrpc": "2.0", "id": id,
@@ -119,10 +119,40 @@ final class MCPAwaitLifecycleTests: XCTestCase {
             XCTAssertNotNil(handler.handle(line: line))
         }
         let ids = client.identifiers
-        XCTAssertEqual(ids.count, 5)
+        XCTAssertEqual(ids.count, 8)
         XCTAssertEqual(Set(ids.prefix(4)).count, 4)
-        XCTAssertEqual(ids.first, ids.last)
+        XCTAssertEqual(ids.first, ids[4])
+        XCTAssertNotEqual(ids[5], ids[6])
+        XCTAssertEqual(ids[5], ids[7])
         XCTAssertTrue(ids.allSatisfy { $0.count <= AutomationLimits.maxIdentifierLength })
+    }
+
+    func testUnicodeAwaitIDs_AdmitTwoAndCancelOnlyTheExactDecodedUTF8Identity() async throws {
+        let entered = expectation(description: "two distinct UTF-8 identities admitted")
+        entered.expectedFulfillmentCount = 2
+        let returned = expectation(description: "both exact owners cancelled")
+        returned.expectedFulfillmentCount = 2
+        let client = HeldMCPAwaitClient(entered: { entered.fulfill() }, returned: { returned.fulfill() })
+        let sink = MCPTestOutput()
+        let dispatcher = MCPStdioDispatch(handler: .init(client: client, version: "fixture"), writeData: sink.write)
+        defer { dispatcher.close() }
+        for rawID in [#""\u00e9""#, #""e\u0301""#] {
+            dispatcher.dispatch(Data("""
+                {"id":\(rawID),"method":"tools/call","params":{"name":"await_transcript",
+                "arguments":{"capture_id":"\(UUID().uuidString)"}}}
+                """.utf8))
+        }
+        guard await XCTWaiter.fulfillment(of: [entered], timeout: 2) == .completed else {
+            return XCTFail("Unicode identities shared an await slot")
+        }
+        XCTAssertEqual(dispatcher.activeAwaitWorkerCount, 2)
+        dispatcher.dispatch(Data(#"{"method":"notifications/cancelled","params":{"requestId":"é"}}"#.utf8))
+        XCTAssertEqual(client.cancellationCount, 1, "Escaped and literal forms of the same code units match")
+        dispatcher.dispatch(Data(#"{"method":"notifications/cancelled","params":{"requestId":"e\u0301"}}"#.utf8))
+        XCTAssertEqual(client.cancellationCount, 2)
+        guard await XCTWaiter.fulfillment(of: [returned], timeout: 2) == .completed else {
+            return XCTFail("Exact Unicode cancellation did not settle both transports")
+        }
     }
 
     func testEOF_CancelsAwaitAndNoWorkerOutputAfterCloseReturns() async throws {

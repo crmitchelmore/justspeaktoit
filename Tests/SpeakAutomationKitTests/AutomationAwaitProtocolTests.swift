@@ -103,6 +103,11 @@ final class AutomationAwaitProtocolTests: XCTestCase {
         let cancel = Data(#"{"id":999,"params":{"nested":{"requestId":2},"request\u0049d":"same"}}"#.utf8)
         XCTAssertEqual(MCPRequestHandler.awaitIdentity(in: cancel, cancellation: true), "s:same")
         XCTAssertNil(MCPRequestHandler.awaitIdentity(in: Data(#"{"params":[]}"#.utf8), cancellation: true))
+        let composed = MCPRequestHandler.awaitIdentity(in: Data(#"{"id":"\u00e9"}"#.utf8))
+        let decomposed = MCPRequestHandler.awaitIdentity(in: Data(#"{"id":"e\u0301"}"#.utf8))
+        XCTAssertNotEqual(composed.map { Data($0.utf8) }, decomposed.map { Data($0.utf8) })
+        let literal = MCPRequestHandler.awaitIdentity(in: Data(#"{"id":"é"}"#.utf8))
+        XCTAssertEqual(composed.map { Data($0.utf8) }, literal.map { Data($0.utf8) })
     }
 
     func testRawAwaitIdentity_RejectsDuplicateDecodedIdentityEnvelopeKeys() {

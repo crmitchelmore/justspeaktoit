@@ -439,7 +439,9 @@ Every tool also returns `structuredContent` with the same fields as the CLI's
   optional minus and decimal digits. Decimal points (including `1.0`), exponents,
   fractional values and oversized integers fail closed before any wait or
   cancellation lookup; inspected duplicate keys also fail closed. Use string IDs
-  for other identifiers. This follows the
+  for other identifiers. String ownership compares the decoded UTF-8 bytes without
+  Unicode normalization; escaped and literal representations of the same code units
+  match. This follows the
   [JSON-RPC recommendation against fractional IDs](https://www.jsonrpc.org/specification#request_object),
   whose binary conversion can otherwise merge distinct decimal identifiers.
 - **Tool failures are results, not protocol errors.** "App not running" comes back

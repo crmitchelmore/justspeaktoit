@@ -8,7 +8,7 @@ final class MCPStdioDispatch: @unchecked Sendable {
     private let writeData: (Data, () -> Bool) -> Bool
     private let lock = NSLock()
     private let outputLock = NSLock()
-    private var waits: [String: AutomationRequestCancellation] = [:]
+    private var waits: [Data: AutomationRequestCancellation] = [:]
     private var closed = false
     var activeAwaitWorkerCount: Int { self.lock.withLock { self.waits.count } }
 
@@ -48,11 +48,12 @@ final class MCPStdioDispatch: @unchecked Sendable {
 
     private func dispatchAwait(line: String, message: [String: Any], data: Data) {
         guard message["id"] != nil else { return }
-        guard let key = MCPRequestHandler.awaitIdentity(in: data) else {
+        guard let identity = MCPRequestHandler.awaitIdentity(in: data) else {
             self.write(MCPRequestHandler.encode(MCPRequestHandler.errorResponse(
                 id: nil, code: -32600, message: "Await requires a string or 64-bit integer JSON-RPC ID.")))
             return
         }
+        let key = Data(identity.utf8)
         let cancellation = AutomationRequestCancellation()
         let admitted = self.lock.withLock {
             guard !self.closed, self.waits[key] == nil,
@@ -74,8 +75,8 @@ final class MCPStdioDispatch: @unchecked Sendable {
 
     private func handleCancellation(_ message: [String: Any]?, data: Data) -> Bool {
         guard message?["method"] as? String == "notifications/cancelled", message?["id"] == nil else { return false }
-        if let key = MCPRequestHandler.awaitIdentity(in: data, cancellation: true) {
-            let wait = self.lock.withLock { self.waits[key] }
+        if let identity = MCPRequestHandler.awaitIdentity(in: data, cancellation: true) {
+            let wait = self.lock.withLock { self.waits[Data(identity.utf8)] }
             wait?.cancel()
         }
         return true

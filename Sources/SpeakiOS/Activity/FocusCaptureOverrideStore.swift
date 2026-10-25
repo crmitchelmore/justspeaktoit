@@ -106,7 +106,8 @@ final class FocusCaptureOverrideStore {
             return Snapshot(generation: marker.generation, hasBeenConfigured: true, override: .none, invalidReason: nil)
         }
         let envelope = try JSONDecoder().decode(Envelope.self, from: envelopeData)
-        guard marker.hasOverride, envelope.version == 1, envelope.generation == marker.generation else {
+        guard marker.hasOverride, !envelope.override.isEmpty,
+              envelope.version == 1, envelope.generation == marker.generation else {
             throw Failure.corrupt
         }
         return Snapshot(generation: marker.generation, hasBeenConfigured: true, override: envelope.override,

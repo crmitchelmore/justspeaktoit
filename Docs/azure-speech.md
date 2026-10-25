@@ -252,6 +252,11 @@ never sent to the proxy, and a proxy credential is never sent to Azure.
 Direct Azure HTTPS endpoint validation is unchanged. Direct TTS still rejects
 proxy credentials; the app's TTS settings do not route through this endpoint.
 
+The local credential health check accepts at most 4,096 response bytes and has
+a ten-second total deadline, including an incomplete response body. It cancels
+oversized or overdue exchanges and refuses redirects. A successful health check
+verifies the local proxy's compatibility, not Azure sign-in or model access.
+
 **Alpha builds predating loopback support reject these endpoints; use a compatible
 build. The dedicated incremental model also requires its new catalogue/API
 implementation.** No installed app or saved

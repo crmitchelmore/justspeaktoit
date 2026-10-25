@@ -63,6 +63,7 @@ class CommandTests(unittest.TestCase):
                 self.assertEqual(build[build.index(option) + 1], value)
             self.assertEqual(runtime[:4], ["xcodebuild", "test-without-building", "-xctestrun", str(manifest)])
             self.assertEqual(runtime[runtime.index("-destination") + 1], "platform=macOS")
+            self.assertEqual(runtime[runtime.index("-derivedDataPath") + 1], str(directory / "DerivedData"))
             self.assertNotIn("-workspace", runtime)
             self.assertNotIn("-scheme", runtime)
             self.assertIn("-disableAutomaticPackageResolution", runtime)

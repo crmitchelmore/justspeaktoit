@@ -123,7 +123,7 @@ def test_command(kind, directory):
         raise ValueError("The prepared xctestrun manifest is missing or ambiguous.")
     return [
         "xcodebuild", "test-without-building", "-xctestrun", str(manifests[0]),
-        "-destination", "platform=macOS", *ui_selection(),
+        "-destination", "platform=macOS", "-derivedDataPath", str(directory / "DerivedData"), *ui_selection(),
         "-resultBundlePath", str(directory / "CoreJourneyFixture.xcresult"),
         "-disableAutomaticPackageResolution", "-skipPackageUpdates",
         "-skipPackagePluginValidation", "CODE_SIGN_IDENTITY=-",

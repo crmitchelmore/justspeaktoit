@@ -51,6 +51,7 @@ final class AzureProxyHealthBoundsTests: XCTestCase {
         UserDefaults.standard.set("http://127.0.0.1:8765", forKey: endpointKey)
         defer { UserDefaults.standard.set(previous, forKey: endpointKey) }
         StubURLProtocol.handler = { request in
+            XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalAndRemoteCacheData)
             var headers = ["Content-Type": "application/json"]
             if let declaredLength { headers["Content-Length"] = String(declaredLength) }
             let response = HTTPURLResponse(

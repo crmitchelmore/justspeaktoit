@@ -30,7 +30,10 @@ struct AzureTranscriptionProvider: TranscriptionProvider {
                 endpoint: UserDefaults.standard.string(forKey: AzureSpeechConfiguration.endpointDefaultsKey) ?? ""
             )
             if connection.origin.scheme == "http" {
-                var request = URLRequest(url: connection.origin.appendingPathComponent("health"), timeoutInterval: 10)
+                var request = URLRequest(
+                    url: connection.origin.appendingPathComponent("health"),
+                    cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 10
+                )
                 request.setValue(connection.apiKey, forHTTPHeaderField: "Ocp-Apim-Subscription-Key")
                 // A health response is tiny. Bound the complete exchange even if
                 // the loopback server keeps trickling bytes, and refuse redirects.

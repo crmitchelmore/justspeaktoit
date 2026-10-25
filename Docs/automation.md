@@ -145,6 +145,32 @@ and a recording that never goes quiet still stops after 15 minutes.
 Works even when the recording happened via the Action Button, Live Activity,
 or the app itself — it reads the same history the app shows.
 
+### Structured transcript properties (iOS)
+
+The new **Get Last Transcript** action returns one authenticated local History
+record with its stable UUID, Raw Text, optional Polished Text, Created At and
+optional Duration in Seconds. It selects the same newest useful row as **Get
+Last Transcription**. Existing String actions keep their names and result types.
+No recording, polishing, clipboard write or remote lookup is requested.
+
+Only the authenticated action populates transcript properties. Passive entity
+identifier resolution returns metadata with both text fields unavailable, and
+there are no suggestions, search indexing or donations. Deleted identifiers are
+omitted rather than replaced with the latest transcript. Rehydrating an entity
+saved by a Shortcut therefore does not repopulate its text automatically. A
+Shortcut can retain text deliberately returned to it; later app locking or
+History deletion cannot retract that copy.
+
+Unavailable protected storage produces a safe error. A 64 KiB local UTF-8
+payload budget includes a 1 KiB metadata reserve; oversized results are refused
+without truncation, with guidance to use the existing text action. The framework
+handles authentication, which can include an already-unlocked companion device.
+
+Physical locked-device authentication, discovery, cancelled authentication and
+existing saved String Shortcuts remain #1016 acceptance gates; metadata and unit
+tests alone do not establish those behaviors. No Siri snippet or cross-device
+entity lookup is implemented.
+
 ### The gallery in the app (iOS)
 
 **Settings → Action Button & Shortcuts → Shortcuts Gallery** lists the same

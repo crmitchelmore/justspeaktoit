@@ -147,10 +147,14 @@ test('native pool still requires the exact reviewed source and trusted event', (
     }), ['mac-mini-3-local', 'macOS']);
     assert.deepEqual(route(id, routingContext(), { JSTI_NATIVE_APPROVED_SHA: 'merge-sha' }),
       fallback, 'PR approval must match the source head, not merge SHA');
+    assert.deepEqual(route(id, routingContext()), fallback, 'unset approval must stay hosted');
+    assert.deepEqual(route(id, routingContext(), { JSTI_NATIVE_APPROVED_SHA: 'stale-sha' }), fallback);
     assert.deepEqual(route(id, routingContext('pull_request', 'fork/repo'), { JSTI_NATIVE_APPROVED_SHA: 'head-sha' }),
       fallback, 'forks cannot enter the native pool');
     assert.deepEqual(route(id, routingContext('push'), { JSTI_NATIVE_APPROVED_SHA: 'merge-sha' }),
       ['jsti-macos-build', 'macOS']);
+    assert.deepEqual(route(id, routingContext('push')), fallback);
+    assert.deepEqual(route(id, routingContext('push'), { JSTI_NATIVE_APPROVED_SHA: 'stale-sha' }), fallback);
     assert.deepEqual(route(id, { ...routingContext('push'), ref: 'refs/heads/feature' },
       { JSTI_NATIVE_APPROVED_SHA: 'merge-sha' }), fallback);
     assert.deepEqual(route(id, routingContext('workflow_dispatch'), { JSTI_NATIVE_APPROVED_SHA: 'merge-sha' }),

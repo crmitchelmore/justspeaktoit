@@ -39,12 +39,23 @@ jobs:
       - name: Stamp immutable app metadata
         run: python3 scripts/stamp-release-train.py ios
 
+      # Older selected Alpha sources may predate the local composite. Keep
+      # their original setup without changing the immutable source checkout.
+      - name: Set up Apple toolchain
+        if: hashFiles('.github/actions/setup-apple-toolchain/action.yml') != ''
+        uses: ./.github/actions/setup-apple-toolchain
+        with:
+          xcode-version: "26.2"
+          install-tuist: "true"
+
       - name: Setup Xcode
+        if: hashFiles('.github/actions/setup-apple-toolchain/action.yml') == ''
         uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
         with:
           xcode-version: "26.2"
 
       - name: Install Tuist
+        if: hashFiles('.github/actions/setup-apple-toolchain/action.yml') == ''
         run: brew install tuist
 
       - name: Install App Store Connect API Key

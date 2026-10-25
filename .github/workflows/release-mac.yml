@@ -48,8 +48,16 @@ jobs:
           MANIFEST: ${{ inputs.manifest }}
         run: node scripts/release-train.mjs status --tag "$MANIFEST" --surface mac-direct
 
+      # Older selected Alpha sources may predate the local composite. Keep
+      # their original setup without changing the immutable source checkout.
+      - name: Set up Xcode with shared toolchain
+        if: steps.receipt.outputs.status != 'verified' && hashFiles('.github/actions/setup-apple-toolchain/action.yml') != ''
+        uses: ./.github/actions/setup-apple-toolchain
+        with:
+          xcode-version: "26.2"
+
       - name: Setup Xcode
-        if: steps.receipt.outputs.status != 'verified'
+        if: steps.receipt.outputs.status != 'verified' && hashFiles('.github/actions/setup-apple-toolchain/action.yml') == ''
         uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
         with:
           xcode-version: "26.2"
@@ -79,8 +87,14 @@ jobs:
         if: steps.receipt.outputs.status != 'verified'
         run: python3 scripts/stamp-release-train.py mac-direct
 
+      - name: Set up Tuist with shared toolchain
+        if: steps.receipt.outputs.status != 'verified' && hashFiles('.github/actions/setup-apple-toolchain/action.yml') != ''
+        uses: ./.github/actions/setup-apple-toolchain
+        with:
+          install-tuist: "true"
+
       - name: Install Tuist
-        if: steps.receipt.outputs.status != 'verified'
+        if: steps.receipt.outputs.status != 'verified' && hashFiles('.github/actions/setup-apple-toolchain/action.yml') == ''
         run: |
           brew install tuist
 

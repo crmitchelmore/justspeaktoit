@@ -21,6 +21,7 @@ on:
       - Resources/**
       - packaging/linux/**
       - scripts/linux-flatpak-checks.sh
+      - scripts/linux-flatpak-qualification.py
       - scripts/tests/test_linux_flatpak_sources.py
       - scripts/stage-linux-desktop.py
       - scripts/generate-desktop-icons.py
@@ -153,21 +154,15 @@ jobs:
         run: |
           mkdir -p flatpak-evidence
           python3 - <<'PY'
-          import json, os, pathlib, re, urllib.request
+          import json, os, pathlib, re, runpy, urllib.request
           run_id, sha, repo = os.environ['SOURCE_RUN'], os.environ['SOURCE_SHA'], os.environ['GITHUB_REPOSITORY']
           assert re.fullmatch(r'[0-9]+', run_id) and re.fullmatch(r'[0-9a-f]{40}', sha)
           request = urllib.request.Request(f'https://api.github.com/repos/{repo}/actions/runs/{run_id}',
               headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'Accept': 'application/vnd.github+json'})
           run = json.load(urllib.request.urlopen(request, timeout=30))
-          assert run['head_sha'] == sha and run['head_repository']['full_name'] == repo
-          assert run['path'] == '.github/workflows/linux-flatpak.yml' and run['status'] == 'completed'
-          # PR association head.sha follows later pushes; run.head_sha is the immutable source binding.
-          pathlib.Path('flatpak-evidence/source-run.json').write_text(json.dumps({
-              'runID': run_id, 'sourceSHA': sha, 'repository': repo, 'workflow': run['path'],
-              'harnessSHA': os.environ['GITHUB_SHA'], 'event': run['event'],
-              'pullRequestParents': [{'baseSHA': pr['base']['sha']} for pr in run.get('pull_requests', [])
-                  if pr['head']['repo']['id'] == run['repository']['id']
-                  and pr['base']['repo']['id'] == run['repository']['id']]}, indent=2) + '\n')
+          verify = runpy.run_path('scripts/linux-flatpak-qualification.py')['source_metadata']
+          metadata = verify(run, sha, repo, run_id, os.environ['GITHUB_SHA'])
+          pathlib.Path('flatpak-evidence/source-run.json').write_text(json.dumps(metadata, indent=2) + '\n')
           PY
 
       - name: Download that run's authenticated bundle artifact

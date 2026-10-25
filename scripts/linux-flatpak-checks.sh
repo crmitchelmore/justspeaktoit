@@ -5,6 +5,9 @@ set -euo pipefail
 bundle="${1:?usage: $0 <bundle.flatpak> <verified-jfk.wav>}"
 fixture="${2:?usage: $0 <bundle.flatpak> <verified-jfk.wav>}"
 app=com.justspeaktoit.JustSpeakToIt
+# Inspect all persisted scopes without changing a real user's installation or
+# exposing override values. Recheck inside the private session before install.
+python3 "$(dirname "$0")/linux-flatpak-qualification.py" check-overrides "$app"
 
 # GNOME 50's Glycin loader uses the Flatpak Spawn portal for its tighter image
 # sandbox. A desktop session supplies this bus; a headless runner must do so too.

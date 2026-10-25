@@ -5,8 +5,22 @@ set -euo pipefail
 bundle="${1:?usage: $0 <bundle.flatpak> <verified-jfk.wav>}"
 fixture="${2:?usage: $0 <bundle.flatpak> <verified-jfk.wav>}"
 app=com.justspeaktoit.JustSpeakToIt
+
+# GNOME 50's Glycin loader uses the Flatpak Spawn portal for its tighter image
+# sandbox. A desktop session supplies this bus; a headless runner must do so too.
+if [ "${JSTI_FLATPAK_CHECK_SESSION:-}" != 1 ]; then
+  session_dir=$(mktemp -d)
+  trap 'rm -rf "$session_dir"' EXIT
+  mkdir -m 700 "$session_dir/runtime"
+  XDG_RUNTIME_DIR="$session_dir/runtime" JSTI_FLATPAK_CHECK_SESSION=1 \
+    dbus-run-session -- "$0" "$@"
+  exit
+fi
 command -v xvfb-run >/dev/null
 flatpak install --user -y --noninteractive --reinstall --bundle "$bundle"
+
+echo '== Flatpak Spawn portal (required by the sandboxed PNG loader)'
+timeout 60 flatpak run --command=flatpak-spawn "$app" --sandbox --watch-bus /usr/bin/true
 
 echo '== installed app self-test: resources, icons, recording codecs and adapters'
 timeout 180 flatpak run "$app" --self-test
@@ -37,7 +51,7 @@ timeout 480 flatpak run --env=JSTI_WHISPER_CPU_ONLY=1 --command=sh "$app" -ec '
 
 echo '== GTK window smoke test in the installed sandbox (Xvfb, private bus)'
 env -u WAYLAND_DISPLAY xvfb-run -a -s '-screen 0 1280x1024x24 -nolisten tcp' \
-  dbus-run-session -- timeout 600 flatpak run \
+  timeout 600 flatpak run \
   --env=GDK_BACKEND=x11 --env=GSK_RENDERER=cairo --env=GTK_A11Y=none \
   --env=NO_AT_BRIDGE=1 "$app" --ui-smoke-test
 

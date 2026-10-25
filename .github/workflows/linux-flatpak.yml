@@ -31,6 +31,15 @@ on:
   pull_request:
     paths: *paths
   workflow_dispatch:
+    inputs:
+      qualification_run_id:
+        description: 'Optional trusted build run to retest without rebuilding (requires exact source SHA)'
+        type: string
+        default: ''
+      qualification_source_sha:
+        description: 'Exact source SHA recorded by that build run'
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -44,7 +53,7 @@ jobs:
     name: Flatpak build, bundle and installed runtime
     # Bubblewrap/Flatpak require a privileged disposable hosted container.
     # Only repository-owned branches may execute in that context.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    if: inputs.qualification_run_id == '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50@sha256:1de59efef01a946d9f28f1ec3458bf6f61dcee3507d7fecdd473f8134da4ec77
@@ -102,19 +111,104 @@ jobs:
       - name: Install bundle and qualify its real sandbox runtime
         run: |
           [ -s /etc/machine-id ] || dbus-uuidgen > /etc/machine-id
-          bash -o pipefail -c 'scripts/linux-flatpak-checks.sh "$RUNNER_TEMP/JustSpeakToIt-x86_64.flatpak" "$RUNNER_TEMP/jfk.wav" 2>&1 | tee "$RUNNER_TEMP/flatpak-installed-checks.log"'
-          sha256sum "$RUNNER_TEMP/JustSpeakToIt-x86_64.flatpak" > "$RUNNER_TEMP/flatpak-bundle.sha256"
-          flatpak info --user com.justspeaktoit.JustSpeakToIt >> "$RUNNER_TEMP/flatpak-installed-checks.log"
-          flatpak info --user --show-permissions com.justspeaktoit.JustSpeakToIt >> "$RUNNER_TEMP/flatpak-installed-checks.log"
+          mkdir -p flatpak-evidence
+          cp "$RUNNER_TEMP/JustSpeakToIt-x86_64.flatpak" flatpak-evidence/
+          cp "$RUNNER_TEMP/flatpak-manifest.json" flatpak-evidence/
+          sha256sum flatpak-evidence/JustSpeakToIt-x86_64.flatpak > flatpak-evidence/flatpak-bundle.sha256
+          bash -o pipefail -c 'scripts/linux-flatpak-checks.sh "$RUNNER_TEMP/JustSpeakToIt-x86_64.flatpak" "$RUNNER_TEMP/jfk.wav" 2>&1 | tee flatpak-evidence/flatpak-installed-checks.log'
+          flatpak info --user com.justspeaktoit.JustSpeakToIt >> flatpak-evidence/flatpak-installed-checks.log
+          flatpak info --user --show-permissions com.justspeaktoit.JustSpeakToIt >> flatpak-evidence/flatpak-installed-checks.log
 
       - name: Upload bundle and qualification evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: justspeaktoit-flatpak-x86_64
-          path: |
-            ${{ runner.temp }}/JustSpeakToIt-x86_64.flatpak
-            ${{ runner.temp }}/flatpak-installed-checks.log
-            ${{ runner.temp }}/flatpak-bundle.sha256
-            ${{ runner.temp }}/flatpak-manifest.json
+          path: flatpak-evidence/
+          if-no-files-found: error
+
+  retest:
+    name: Retest trusted installed Flatpak bundle
+    if: github.event_name == 'workflow_dispatch' && inputs.qualification_run_id != ''
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50@sha256:1de59efef01a946d9f28f1ec3458bf6f61dcee3507d7fecdd473f8134da4ec77
+      options: --privileged
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Verify source-run provenance and unchanged package inputs
+        env:
+          SOURCE_RUN: ${{ inputs.qualification_run_id }}
+          SOURCE_SHA: ${{ inputs.qualification_source_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p flatpak-evidence
+          python3 - <<'PY'
+          import json, os, pathlib, re, subprocess, urllib.request
+          run_id, sha, repo = os.environ['SOURCE_RUN'], os.environ['SOURCE_SHA'], os.environ['GITHUB_REPOSITORY']
+          assert re.fullmatch(r'[0-9]+', run_id) and re.fullmatch(r'[0-9a-f]{40}', sha)
+          request = urllib.request.Request(f'https://api.github.com/repos/{repo}/actions/runs/{run_id}',
+              headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'Accept': 'application/vnd.github+json'})
+          run = json.load(urllib.request.urlopen(request, timeout=30))
+          assert run['head_sha'] == sha and run['head_repository']['full_name'] == repo
+          assert run['path'] == '.github/workflows/linux-flatpak.yml' and run['status'] == 'completed'
+          subprocess.run(['git', 'fetch', '--no-tags', 'origin', sha], check=True)
+          # Test-harness/workflow changes are allowed; all production package
+          # inputs must remain byte-identical to the trusted artifact's source.
+          inputs = ['Package.swift', 'LICENSE', '.gitattributes', 'packaging/linux', 'Sources', 'Resources',
+                    'scripts/stage-linux-desktop.py', 'scripts/local-llm-runtime',
+                    'scripts/generate-desktop-icons.py', 'scripts/migration/verify-miniz.py',
+                    'scripts/windows-local-runtime/dependencies.json']
+          subprocess.run(['git', 'diff', '--exit-code', sha, 'HEAD', '--', *inputs], check=True)
+          pathlib.Path('flatpak-evidence/source-run.json').write_text(json.dumps({
+              'runID': run_id, 'sourceSHA': sha, 'repository': repo, 'workflow': run['path'],
+              'harnessSHA': os.environ['GITHUB_SHA']}, indent=2) + '\n')
+          PY
+
+      - name: Download that run's authenticated bundle artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: justspeaktoit-flatpak-x86_64
+          run-id: ${{ inputs.qualification_run_id }}
+          github-token: ${{ github.token }}
+          path: downloaded-flatpak
+
+      - name: Prepare runtime, bundle and verified speech fixture
+        run: |
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y --noninteractive flathub org.gnome.Platform//50
+          [ -s /etc/machine-id ] || dbus-uuidgen > /etc/machine-id
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, shutil, urllib.request
+          bundles = list(pathlib.Path('downloaded-flatpak').rglob('JustSpeakToIt-x86_64.flatpak'))
+          assert len(bundles) == 1 and bundles[0].is_file() and not bundles[0].is_symlink()
+          shutil.copyfile(bundles[0], 'flatpak-evidence/JustSpeakToIt-x86_64.flatpak')
+          pin = json.loads(pathlib.Path('scripts/windows-local-runtime/dependencies.json').read_text())['whisperCpp']
+          fixture = pin['fixture']
+          url = 'https://raw.githubusercontent.com/ggml-org/whisper.cpp/' + pin['commit'] + '/' + fixture['path']
+          data = urllib.request.urlopen(url, timeout=60).read()
+          assert len(data) == fixture['bytes'] and hashlib.sha256(data).hexdigest() == fixture['sha256']
+          pathlib.Path(os.environ['RUNNER_TEMP'], 'jfk.wav').write_bytes(data)
+          PY
+          sha256sum flatpak-evidence/JustSpeakToIt-x86_64.flatpak > flatpak-evidence/flatpak-bundle.sha256
+
+      - name: Qualify the unchanged bundle in a real session
+        run: >-
+          bash -o pipefail -c 'scripts/linux-flatpak-checks.sh
+          flatpak-evidence/JustSpeakToIt-x86_64.flatpak "$RUNNER_TEMP/jfk.wav"
+          2>&1 | tee flatpak-evidence/flatpak-installed-checks.log'
+
+      - name: Upload retest evidence and bundle
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: justspeaktoit-flatpak-retest-x86_64
+          path: flatpak-evidence/
           if-no-files-found: error

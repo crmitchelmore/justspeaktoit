@@ -80,7 +80,7 @@ public struct MCPRequestHandler {
         let identity = isAwait ? Self.awaitIdentity(in: rawData) : nil
         if isAwait, identity == nil {
             return Self.encode(Self.errorResponse(
-                id: nil, code: -32600, message: "Await requires a string or numeric JSON-RPC ID."))
+                id: nil, code: -32600, message: "Await requires a string or 64-bit integer JSON-RPC ID."))
         }
         return Self.encode(self.callTool(id: id, params: params, cancellation: cancellation, awaitIdentity: identity))
     }

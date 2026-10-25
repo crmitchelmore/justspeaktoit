@@ -50,7 +50,7 @@ final class MCPStdioDispatch: @unchecked Sendable {
         guard message["id"] != nil else { return }
         guard let key = MCPRequestHandler.awaitIdentity(in: data) else {
             self.write(MCPRequestHandler.encode(MCPRequestHandler.errorResponse(
-                id: nil, code: -32600, message: "Await requires a string or numeric JSON-RPC ID.")))
+                id: nil, code: -32600, message: "Await requires a string or 64-bit integer JSON-RPC ID.")))
             return
         }
         let cancellation = AutomationRequestCancellation()

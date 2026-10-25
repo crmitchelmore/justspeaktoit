@@ -435,9 +435,11 @@ Every tool also returns `structuredContent` with the same fields as the CLI's
   ID with SHA-256 under a full per-process UUID scope. Numeric `1` and string `"1"`,
   and long IDs with a shared prefix, remain distinct. Retries with identical
   normalized capture/cursor/timeout arguments share the original bounded wait.
-  Numeric IDs support exact signed/unsigned 64-bit integers and finite fractional
-  values; unsupported oversized integer IDs fail closed. Use string IDs for larger
-  identifiers.
+  Await numeric IDs support exact signed/unsigned 64-bit integers only. Fractional
+  values and oversized integer IDs fail closed before any wait or cancellation
+  lookup. Use string IDs for other identifiers. This follows the
+  [JSON-RPC recommendation against fractional IDs](https://www.jsonrpc.org/specification#request_object),
+  whose binary conversion can otherwise merge distinct decimal identifiers.
 - **Tool failures are results, not protocol errors.** "App not running" comes back
   as `isError: true` content the agent can act on, leaving the session usable.
 - **Bounded inputs.** Paths, identifiers, history limits and message sizes are

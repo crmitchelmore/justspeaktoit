@@ -107,7 +107,9 @@ public final class TranscriptionRecordingService: ObservableObject {
     @Published public private(set) var lastFinishedCapture: FinishedCapture?
 
     private let audioSessionManager = AudioSessionManager()
-    private let activityManager = TranscriptionActivityManager.shared
+    private let dependencies: RecordingServiceDependencies
+    private let settings: AppSettings
+    private let activityManager: RecordingServiceActivity
     private let sharedState: SharedTranscriptionState
     private let historyManager: iOSHistoryManager
     private let foregroundOwnership: ForegroundRecordingOwnership
@@ -191,16 +193,23 @@ public final class TranscriptionRecordingService: ObservableObject {
     private let sessionFactory: (() throws -> IOSTranscriptionSession)?
 
     private convenience init() {
+        let settings = AppSettings.shared
+        let clipboard = TranscriptClipboard(
+            pasteboard: UIPasteboard.general,
+            now: Date.init,
+            policy: { settings.transcriptClipboardPolicy }
+        )
         self.init(
             sharedState: .shared,
             historyManager: .shared,
-            polishClipboard: PolishClipboard(),
-            hasPolishingKey: { AppSettings.shared.hasOpenRouterKey },
+            polishClipboard: PolishClipboard(pasteboard: SystemPolishPasteboard(clipboard: clipboard)),
+            hasPolishingKey: { settings.hasOpenRouterKey },
             polish: { text, model, apiKey in
                 try await iOSPostProcessingManager.shared.polish(text: text, model: model, apiKey: apiKey)
             },
             networkSnapshot: CaptureNetworkPathMonitor.liveSnapshotProvider(),
-            localRecognitionCapability: AppleLegacyRecognitionCapabilityProbe.capability(for:)
+            localRecognitionCapability: AppleLegacyRecognitionCapabilityProbe.capability(for:),
+            dependencies: .live(settings: settings)
         )
     }
 
@@ -211,17 +220,22 @@ public final class TranscriptionRecordingService: ObservableObject {
         polishClipboard: PolishClipboard,
         hasPolishingKey: @escaping @MainActor () -> Bool,
         polish: @escaping @MainActor (String, String, String) async throws -> String,
-        completeActivity: @escaping ActivityCompletion = TranscriptionRecordingService.completeSharedActivity,
+        completeActivity: ActivityCompletion? = nil,
         sessionFactory: (() throws -> IOSTranscriptionSession)? = nil,
         foregroundOwnership: ForegroundRecordingOwnership? = nil,
-        ensureKeysLoaded: @escaping @MainActor () async -> Void = { await AppSettings.shared.ensureKeysLoaded() },
+        ensureKeysLoaded: (@MainActor () async -> Void)? = nil,
         networkSnapshot: @escaping CaptureNetworkPathMonitor.SnapshotProvider = { .unknown },
         localRecognitionCapability: @escaping @MainActor (String) -> AppleLocalRecognitionCapability =
-            { _ in .available }
+            { _ in .available },
+        dependencies: RecordingServiceDependencies? = nil
     ) {
+        let dependencies = dependencies ?? .live()
+        self.dependencies = dependencies
+        self.settings = dependencies.settings
+        self.activityManager = dependencies.activity
         self.sessionFactory = sessionFactory
         self.foregroundOwnership = foregroundOwnership ?? .shared
-        self.ensureKeysLoaded = ensureKeysLoaded
+        self.ensureKeysLoaded = ensureKeysLoaded ?? { await dependencies.settings.ensureKeysLoaded() }
         self.networkSnapshot = networkSnapshot
         self.localRecognitionCapability = localRecognitionCapability
         self.sharedState = sharedState
@@ -229,32 +243,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         self.polishClipboard = polishClipboard
         self.hasPolishingKey = hasPolishingKey
         self.polish = polish
-        self.completeActivity = completeActivity
-    }
-
-    // The default completion sink: the real Live Activity. A named function
-    // rather than an inline default closure so the seam's parameters stay
-    // readable; it forwards them unchanged, which is why it carries all seven.
-    // swiftlint:disable:next function_parameter_count
-    private static func completeSharedActivity(
-        wordCount: Int,
-        duration: Int,
-        primedMessage: String,
-        outcome: TranscriptionCompletionOutcome,
-        preview: String,
-        completionMessage: String?,
-        resultCompletionID: String
-    ) {
-        TranscriptionActivityManager.shared.completeActivity(
-            finalWordCount: wordCount,
-            duration: duration,
-            keepPrimed: true,
-            primedMessage: primedMessage,
-            completionOutcome: outcome,
-            resultPreview: preview,
-            completionMessage: completionMessage,
-            resultCompletionID: resultCompletionID
-        )
+        self.completeActivity = completeActivity ?? dependencies.activity.complete
     }
 
     /// Picks the first non-blank candidate, else the fallback. Extracted as a
@@ -277,7 +266,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         ModelCatalog.transcriptionDisplayName(
             for: currentModel,
             isBatch: transcriptionSession?.isBatch
-                ?? (AppSettings.shared.transcriptionMode == .batch)
+                ?? (settings.transcriptionMode == .batch)
         )
     }
 
@@ -355,7 +344,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         state = lifecycle.state
         defer { state = lifecycle.state }
 
-        let settings = AppSettings.shared
+        let settings = self.settings
         // AppSettings.init publishes empty API keys and loads the real values
         // from the keychain asynchronously. A cold launch from the Action
         // Button could read those empty keys and silently fall back to Apple
@@ -454,7 +443,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         // AudioRecordingIntent — without one the AppIntents system-policy check
         // asserts (EXC_BREAKPOINT). In the foreground a Live Activity is optional,
         // so only enforce this when the app isn't active.
-        let appIsActive = UIApplication.shared.applicationState == .active
+        let appIsActive = dependencies.applicationState() == .active
         let activityProvider = providerFallbackNotice == OfflineCaptureRouting.fallbackNotice
             ? "\(modelDisplayName) (Offline)"
             : providerFallbackNotice == nil
@@ -811,10 +800,10 @@ public final class TranscriptionRecordingService: ObservableObject {
         let identifier = CaptureParameterResolution.stopDestinationID(
             explicit: explicit?.rawValue,
             runOverride: currentRunParameters.destinationID,
-            global: AppSettings.shared.hardwareTriggerDestination.rawValue
+            global: settings.hardwareTriggerDestination.rawValue
         )
         return HardwareTriggerDestination(rawValue: identifier)
-            ?? AppSettings.shared.hardwareTriggerDestination
+            ?? settings.hardwareTriggerDestination
     }
 
     /// The destination the running capture was started with, or `nil` when the
@@ -909,7 +898,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     ///   to `.clipboardAndPostProcess` if the user has post-processing turned on,
     ///   else `.clipboard` — i.e., the original behaviour before destinations
     ///   were configurable. Hardware-trigger callers (Action Button, Siri,
-    ///   Shortcuts) pass `AppSettings.shared.hardwareTriggerDestination`.
+    ///   Shortcuts) pass `settings.hardwareTriggerDestination`.
     @discardableResult
     // swiftlint:disable:next function_body_length
     public func stopRecording(
@@ -1015,7 +1004,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         // Onboarding progress is earned by evidence only: an unidentified
         // caller, or a run that produced no text, proves nothing.
         if let currentTrigger {
-            CaptureOnboardingStore.shared.recordDictation(trigger: currentTrigger, transcript: text)
+            dependencies.recordDictation(currentTrigger, text)
         }
         currentTrigger = nil
         // The overrides belong to the run that just ended; the next capture
@@ -1049,7 +1038,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         // never disagree with the delivery. The keyboard hand-off passes `nil`
         // because its result already travels the nonce-scoped record.
         let keyboardOffer = keyboardDeliverySource.flatMap {
-            KeyboardDeliveryPublisher.publish(transcript: text, source: $0)
+            KeyboardDeliveryPublisher.publish(transcript: text, source: $0, store: dependencies.keyboardDelivery)
         }
         // Publishing an offer is not delivering it. For an offer bound to the
         // document the keyboard is open in, wait briefly for the extension to
@@ -1058,7 +1047,9 @@ public final class TranscriptionRecordingService: ObservableObject {
         // it the capture falls back to the clipboard below and the receipt
         // says the keyboard did not take it, rather than reporting a field
         // delivery for a transcript that is only in History.
-        let keyboardOutcome = await KeyboardDeliveryPublisher.awaitOutcome(for: keyboardOffer)
+        let keyboardOutcome = await KeyboardDeliveryPublisher.awaitOutcome(
+            for: keyboardOffer, store: dependencies.keyboardDelivery
+        )
 
         // Resolve the destination. When nil (legacy callers), preserve the
         // pre-destination behaviour: clipboard + post-process if user opted in.
@@ -1068,7 +1059,7 @@ public final class TranscriptionRecordingService: ObservableObject {
                 transcriptIsEmpty: text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                 keyboardInsertedIntoField: keyboardOutcome == .insertedInField,
                 keyboardOfferAvailable: keyboardDeliverySource != nil
-                    && KeyboardDeliveryStore.shared.isAvailable
+                    && dependencies.keyboardDelivery.isAvailable
             )
         )
         let resolvedDestination = requestedDestination == .auto
@@ -1090,7 +1081,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         // capture of this process may still be pending, and calling it
         // delivered would withhold its audio from recovery.
         if let recording = deliveringSession?.safetyRecordingID {
-            CaptureSafetyClaimStore.shared.markDelivered(recording: recording)
+            dependencies.markDelivered(recording)
         }
         if lastSessionError == nil {
             CaptureOutcomeJournal.record(text.isEmpty ? .cancelled : .delivered)
@@ -1452,7 +1443,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         runID: UUID?,
         assertion: BackgroundTaskAssertion
     ) {
-        let settings = AppSettings.shared
+        let settings = self.settings
         let model = settings.postProcessingModel
         let apiKey = settings.openRouterAPIKey
         let historyManager = self.historyManager
@@ -1495,7 +1486,7 @@ public final class TranscriptionRecordingService: ObservableObject {
                 assertion.end()
             }
         )
-        operation.start(under: assertion, isActive: UIApplication.shared.applicationState == .active) {
+        operation.start(under: assertion, isActive: dependencies.applicationState() == .active) {
             try await polish(text, model, apiKey)
         }
     }
@@ -1725,7 +1716,7 @@ private extension TranscriptionRecordingService {
         destination: HardwareTriggerDestination,
         isLegacyCaller: Bool
     ) -> Bool {
-        let settings = AppSettings.shared
+        let settings = self.settings
         switch destination {
         case .clipboardAndPostProcess:
             return hasPolishingKey()

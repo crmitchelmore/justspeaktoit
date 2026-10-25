@@ -98,6 +98,8 @@ test('fails closed when the capture worker dies rather than accepting a blocked 
   const result = fixture(t, 'exec sleep 30', { captureFailure: true });
   assert.equal(result.status, 1);
   assert.match(result.stdout, /Output capture failed/);
+  assert.ok(existsSync(join(result.diagnostics, 'launch.txt')));
+  assert.ok(existsSync(join(result.diagnostics, 'collection.json')));
   assert.doesNotMatch(result.stdout, /Launch verification passed/);
 });
 

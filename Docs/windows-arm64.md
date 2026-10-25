@@ -9,17 +9,16 @@ bundle and a developer MSIX from the same executable and exercises them. Every
 ARM64 program it runs must be a native ARM64 image running as an ARM64
 process, not an x64 build running under Windows' x64 emulation.
 
-**Status.** This is CI wiring and tooling, not a receipt. No run of
-`windows-arm64.yml` had completed when it was written, so there is no ARM64
-test count, executable hash or bundle hash yet. ARM64 is not verified until a
-run for the exact revision passes. The ARM64 Swift runtime the bundle uses is
-now pinned and was authenticated locally from the official installer (see
-[ARM64 Swift runtime pin](#arm64-swift-runtime-pin)); that is a check of
-pinned inputs on a Mac, not ARM64 execution. It is still a developer build,
-not a signed release or an updater. It does not claim feature parity,
-physical-device acceptance or measured performance; see
-[Remaining gates](#remaining-gates). [Windows development](windows-development.md)
-is the parity matrix.
+**Status — 25 October 2026.** [Native ARM64 run 40190709985](https://github.com/crmitchelmore/justspeaktoit/actions/runs/40190709985)
+passed at `a6b5b53912af4e6024d0d65542df8dd0786005fc`, including the native
+host/tests, runtime provenance, standalone bundle execution without installed
+Swift and developer-MSIX install/launch/failed-upgrade/upgrade/removal checks.
+[PR #1238](https://github.com/crmitchelmore/justspeaktoit/pull/1238) merged as
+`ec1f53159c61b023f9dba5152e359a44fb6a9fdb` with the same tree. Runtime, bundle
+and lifecycle artifacts belong to that exact tested source. This is a qualified
+developer build; physical-device acceptance, GPU/performance measurement,
+public signing and updates remain open. See [Remaining gates](#remaining-gates)
+and the [Windows parity matrix](windows-development.md#feature-parity-matrix).
 
 ## Primary sources (checked 23 September 2026)
 
@@ -201,23 +200,18 @@ ARM64.
   provenance fields and by the runtime policy other work changed since.
 - The ARM64 Visual C++ package was read from the real pinned redistributable
   with the bundle builder's own loader.
-- Not run here: actionlint (it needed approval in this session; a strict
-  structural check of the workflow YAML was used instead; the integrator's
-  actionlint run then passed), PowerShell parsing (no PowerShell on the Mac)
-  and any Windows ARM64 execution. Those are CI's first receipt.
+- These initial local checks did not execute Windows ARM64. The current
+  native CI receipt above supersedes that historical qualification gap.
 
 ## Remaining gates
 
-- **First CI receipt** of `windows-arm64.yml` for an exact revision: test and
-  skip counts, WinHTTP probes, native-execution evidence, bundle and MSIX
-  hashes, and the regenerated ARM64 runtime lock equal to the committed one.
 - **Import cross-check in ARM64 CI.** For an ARM64X image, `llvm-readobj`
   also prints the ARM64EC view under `HybridObject`. The cross-check now reads
   only the native view, which a native ARM64 process loads and `windows_pe.py`
   reads; before, it rejected Microsoft's ARM64X runtime. It passed the local
   ARM64 dry run above and still runs for x64. CI's ARM64 bundle job does not
-  run it: that job has no pinned LLVM, and adding one waits for the first
-  ARM64 receipt.
+  run it: that job has no pinned LLVM. The native ARM64 receipt above does
+  not substitute for this additional independent import cross-check.
 - **GPU inference on ARM64** (Vulkan or OpenCL Adreno), and CPU feature
   levels above ARMv8-A. These need a verified dispatch and physical-device
   measurements.

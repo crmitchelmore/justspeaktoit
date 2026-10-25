@@ -2475,8 +2475,14 @@ land after the early check and be overwritten by a stale plan. Enumeration
 order alone does not invalidate this final check. A late change leaves History
 untouched and rolls back any profile write before reporting a stale preview.
 If that rollback fails, the outcome remains an explicit failed restore, not a
-safe-to-retry stale response. This is a same-store actor fence, not a
-cross-process filesystem lock.
+safe-to-retry stale response. Profile loads, saves, edits, backups and restore
+now share one synchronous host mutation boundary. Restore holds it inside the
+History actor's non-suspending apply interval, rechecks the raw profile baseline
+immediately before writing, checks profile identity at History write boundaries
+and rechecks profile bytes before commit. Rollback replaces only its own profile
+file identity and bytes; an observed newer save is preserved and reported as an
+incomplete rollback. This coordinates participating stores in one host, not
+independent processes or arbitrary external file writers.
 Before writing, it snapshots the original bytes of every file it touches
 (`DesktopRecordingStore.applyMigrationRestore`). On cancellation or failure,
 it restores those bytes, removes the files it added and reports whether the
@@ -2485,8 +2491,12 @@ rollback succeeded. Portable tests are in
 Five additional regressions in `DesktopMigrationRestoreAdmissionTests.swift`
 cover changed and newly added History at actor admission, enumeration-order
 independence, full-apply rollback of existing/previously absent profiles after
-a late History change, and failed profile rollback classification. These tests
-are authored but **NOT_RUN** here; they need exact-head automatic qualification.
+a late History change, and failed profile rollback classification. Four more
+regressions in `DesktopRestoreProfileAdmissionTests.swift` cover newer profile
+and History saves immediately before restore writes and newer profile saves
+afterward, with and without another History failure. The first three reproduced
+the data loss before the fix. All 25 focused store/edit/restore tests pass on
+Apple Swift; final native qualification remains pending.
 
 Source-only checks:
 - GTK smoke assertions cover the Restore chooser's event/flags, copied

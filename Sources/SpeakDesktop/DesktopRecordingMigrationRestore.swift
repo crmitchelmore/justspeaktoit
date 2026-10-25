@@ -34,9 +34,11 @@ extension DesktopRecordingStore {
     func applyMigrationRestore(
         _ writes: [DesktopMigrationRestore.HistoryWrite],
         expectedHistory: [DataMigrationRecord], digests: LocalModelDigestProvider,
+        validateProfiles: (Bool) throws -> Void = { _ in },
         checkpoint: @Sendable (DesktopMigrationRestore.Step) throws -> Void
     ) throws -> [Record] {
         let files = try migrationRestoreFiles(expectedHistory: expectedHistory, digests: digests)
+        try validateProfiles(false)
         // swiftlint:disable:next large_tuple
         var staged: [(url: URL, prior: Data?, record: Record)] = []
         for write in writes {
@@ -61,10 +63,12 @@ extension DesktopRecordingStore {
         do {
             for (index, entry) in staged.enumerated() {
                 try checkpoint(.history(index))
+                try validateProfiles(false)
                 attempted = index + 1
                 try writeMigrationRecord(entry.record, to: entry.url)
             }
             try checkpoint(.finished)
+            try validateProfiles(true)
         } catch {
             var failures: [String] = []
             for entry in staged.prefix(attempted).reversed() {
@@ -81,6 +85,24 @@ extension DesktopRecordingStore {
             throw DesktopMigrationRestoreWriteError(underlying: error, rollbackFailures: failures)
         }
         return staged.map(\.record)
+    }
+
+    /// Both categories share History's non-suspending admission interval and
+    /// the mutation lock used by every profile-store writer.
+    func applyMigrationRestore(
+        _ writes: [DesktopMigrationRestore.HistoryWrite],
+        expectedHistory: [DataMigrationRecord], digests: LocalModelDigestProvider,
+        profileTransaction: DesktopProfileRestoreTransaction,
+        checkpoint: @Sendable (DesktopMigrationRestore.Step) throws -> Void
+    ) throws -> [Record] {
+        try profileTransaction.store.withRestoreTransaction(
+            expected: profileTransaction.expected, replacement: profileTransaction.replacement, checkpoint: checkpoint
+        ) { validate in
+            try applyMigrationRestore(
+                writes, expectedHistory: expectedHistory, digests: digests,
+                validateProfiles: validate, checkpoint: checkpoint
+            )
+        }
     }
 
     private func migrationRestoreFiles(

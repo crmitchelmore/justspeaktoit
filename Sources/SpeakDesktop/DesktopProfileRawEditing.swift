@@ -3,7 +3,9 @@ import SpeakCore
 
 extension DesktopDictationProfileStore {
     public func rawDocument() throws -> Data {
-        FileManager.default.fileExists(atPath: fileURL.path) ? try Data(contentsOf: fileURL) : Data()
+        try DesktopProfileDocumentAccess.withMutation {
+            FileManager.default.fileExists(atPath: fileURL.path) ? try Data(contentsOf: fileURL) : Data()
+        }
     }
 
     public func loadForEditing() throws -> (profiles: [DictationProfile], document: Data) {
@@ -17,6 +19,16 @@ extension DesktopDictationProfileStore {
     /// routing values and unknown matcher objects remain in the canonical file.
     public func savePreservingUnknownFields(
         _ profiles: [DictationProfile], copiedFrom: [UUID: UUID] = [:], expectedDocument: Data? = nil
+    ) throws {
+        try DesktopProfileDocumentAccess.withMutation {
+            try savePreservingUnknownFieldsUnlocked(
+                profiles, copiedFrom: copiedFrom, expectedDocument: expectedDocument
+            )
+        }
+    }
+
+    private func savePreservingUnknownFieldsUnlocked(
+        _ profiles: [DictationProfile], copiedFrom: [UUID: UUID], expectedDocument: Data?
     ) throws {
         let document = try rawDocument()
         if let expectedDocument, expectedDocument != document {

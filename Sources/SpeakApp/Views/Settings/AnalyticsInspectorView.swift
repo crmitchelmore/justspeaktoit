@@ -35,16 +35,16 @@ struct AnalyticsInspectorView: View {
                 Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
             }
             Group {
-                Text("Consent: \(consentLabel) · Collection: \(collectionLabel)")
-                Text("Endpoint: \(controls.snapshot?.endpoint ?? "Loading…")")
+                Text("Consent: \(consentLabel) · Collection: \(controls.collectionLabel)")
+                Text("Endpoint origin: \(controls.snapshot?.endpoint ?? "Loading…")")
                 Text("Local identity: \(controls.installationID?.uuidString ?? "Not created")")
                     .font(.caption.monospaced()).textSelection(.enabled)
                 Text("Queue: \(controls.snapshot?.queueDepth ?? 0) events")
             }
             .font(.callout)
             Text(
-                "Ingestion credential omitted. At most 100 events from this launch are shown; "
-                    + "valid queued events survive relaunch. HTTP acknowledged means a 2xx response, "
+                "Ingestion credential omitted. " + AnalyticsInspectionSnapshot.historyScope
+                    + " Sent-event history is not retained across relaunch. HTTP acknowledged means a 2xx response, "
                     + "not independently verified backend processing."
             )
             .font(.caption).foregroundStyle(.secondary)
@@ -114,12 +114,6 @@ struct AnalyticsInspectorView: View {
         case .optedIn: return "Opted in"
         case .optedOut: return "Opted out"
         }
-    }
-
-    private var collectionLabel: String {
-        guard let snapshot = controls.snapshot else { return "Loading…" }
-        if snapshot.isDisabled { return "Locally disabled" }
-        return snapshot.isOpen && controls.consent.permitsCollection ? "Enabled" : "Closed"
     }
 
     private func export() {

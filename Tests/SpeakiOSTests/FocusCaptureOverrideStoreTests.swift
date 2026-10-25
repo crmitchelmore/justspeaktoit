@@ -76,14 +76,14 @@ final class FocusCaptureOverrideStoreTests: XCTestCase {
         try store.write(FocusCaptureOverride(destinationID: "historyOnly"))
         do {
             _ = try await FocusCaptureReconciliation.reconcile(store: store, explicit: .none) {
-                throw CancellationError()
+                throw FocusCaptureOverrideStore.Failure.nativeLookup
             }
             XCTFail("An unverifiable active privacy choice must refuse startup")
         } catch { XCTAssertEqual(CaptureStartFailurePresentation.make(for: error).code, "start_focus_unavailable") }
         XCTAssertEqual(try store.snapshot().override.destinationID, "historyOnly")
         let explicit = CaptureRunParameters(destinationID: "clipboard")
         let result = try await FocusCaptureReconciliation.reconcile(store: store, explicit: explicit) {
-            throw CancellationError()
+            throw FocusCaptureOverrideStore.Failure.nativeLookup
         }
         XCTAssertEqual(result.destinationID, "historyOnly",
                        "The resolver, not store mutation, applies explicit precedence")
@@ -101,5 +101,25 @@ final class FocusCaptureOverrideStoreTests: XCTestCase {
         XCTAssertTrue(reset.isEmpty)
         XCTAssertTrue(try store.snapshot().hasBeenConfigured)
     }
+    func testNonregularMarkerAndCancelledNativeLookupFailSafelyWithoutClearingChoices() async throws {
+        let directory = try directory()
+        let store = FocusCaptureOverrideStore(directory: directory)
+        let active = try store.write(FocusCaptureOverride(destinationID: "historyOnly"))
+        do {
+            _ = try await FocusCaptureReconciliation.reconcile(store: store, explicit: .none) {
+                throw CancellationError()
+            }
+            XCTFail("Cancelled native lookup must not admit a capture")
+        } catch { XCTAssertTrue(error is CancellationError) }
+        XCTAssertEqual(try store.snapshot(), active)
+        try FileManager.default.removeItem(at: directory.appendingPathComponent("generation.json"))
+        try FileManager.default.createSymbolicLink(
+            at: directory.appendingPathComponent("generation.json"),
+            withDestinationURL: directory.appendingPathComponent("missing.json")
+        )
+        XCTAssertThrowsError(try store.snapshot(), "A broken symlink is not proven absent state")
+        XCTAssertTrue(try store.write(.none).override.isEmpty)
+    }
+
 }
 #endif

@@ -48,6 +48,8 @@ enum FocusCaptureReconciliation {
         let native: FocusCaptureOverride
         do {
             native = try await current()
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             // Preserve diagnostic state; a concurrent perform/reset is authoritative.
             let latest = try store.snapshot()

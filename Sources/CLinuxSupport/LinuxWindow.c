@@ -5245,19 +5245,21 @@ static gboolean action_execution_self_test(void) {
     okay = okay && action_shortcut_run(11, "", 0) && capture.event == JSTI_EVENT_PASTE_LAST_HISTORY &&
         capture.slot == 0 && capture.calls == 10 && ui.page == paste_page;
     gtk_widget_set_sensitive(history, history_sensitive);
-    okay = okay && !action_shortcut_run(12, "", 0) && capture.calls == 10;
+    okay = okay && action_shortcut_run(12, "", 0) && capture.event == JSTI_EVENT_SPEAK_SELECTED_TEXT &&
+        capture.slot == 0 && capture.calls == 11;
     ui.state = JSTI_STATE_WORKING;
     okay = okay && !action_shortcut_run(6, "", 1) && !action_shortcut_run(5, "", 0) &&
         !action_shortcut_run(7, "", 0) && !action_shortcut_run(8, "", 0) &&
-        !action_shortcut_run(9, "", 0) && !action_shortcut_run(11, "", 0) && capture.calls == 10;
+        !action_shortcut_run(9, "", 0) && !action_shortcut_run(11, "", 0) &&
+        !action_shortcut_run(12, "", 0) && capture.calls == 11;
     ui.state = JSTI_STATE_RECORDING;
-    okay = okay && !action_shortcut_run(11, "", 0) && capture.calls == 10;
+    okay = okay && !action_shortcut_run(11, "", 0) && !action_shortcut_run(12, "", 0) && capture.calls == 11;
     gtk_widget_set_sensitive(GTK_WIDGET(ui.window), FALSE);
     ui.state = JSTI_STATE_IDLE;
     okay = okay && !action_shortcut_run(4, "", 0) && !action_shortcut_run(2, "about", 0) &&
         !action_shortcut_run(7, "", 0) && !action_shortcut_run(8, "", 0) &&
         !action_shortcut_run(9, "", 0) && !action_shortcut_run(10, "", 0) &&
-        !action_shortcut_run(11, "", 0) && capture.calls == 10;
+        !action_shortcut_run(11, "", 0) && !action_shortcut_run(12, "", 0) && capture.calls == 11;
     gtk_widget_set_sensitive(GTK_WIDGET(ui.window), window_sensitive);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.record), record_sensitive);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), stop_sensitive);

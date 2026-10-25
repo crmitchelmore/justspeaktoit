@@ -325,6 +325,7 @@ test('tooling gate delegates to the complete local discovery target', () => {
   assert.match(makefile, /node --test scripts\/tests\/\*\.test\.mjs/);
   assert.match(makefile, /^\tnode --test \.github\/scripts\/dependabot-merge\.test\.mjs$/m);
   assert.match(makefile, /ruby scripts\/tests\/release_apple_test\.rb/);
+  assert.match(makefile, /ruby scripts\/tests\/apple_release_credentials_test\.rb/);
   assert.match(makefile, /ruby scripts\/tests\/create_ios_app_store_profile_test\.rb/);
   assert.match(makefile, /python3 -m unittest discover -s scripts\/tests -p 'test_\*\.py' -v/);
   assert.match(makefile, /python3 scripts\/generate-release-train-config\.py --check/);
@@ -370,6 +371,15 @@ test('dependency policy discovery requires its exact execution command', () => {
     'listing or tracking the dependency test alone must not count as execution');
   assert.equal(toolingTestIsDiscovered('.github/scripts/unwired.test.mjs', tracked, makefile), false,
     'other tests beside the dependency policy still need explicit execution');
+});
+
+test('Apple vault credential tests require their exact Ruby execution command', () => {
+  const path = 'scripts/tests/apple_release_credentials_test.rb';
+  const tracked = new Set([path]);
+  assert.equal(toolingTestIsDiscovered(path, tracked, makefile), true);
+  const withoutExecution = makefile.replace(`\truby ${path}\n`, '');
+  assert.equal(toolingTestIsDiscovered(path, tracked, withoutExecution), false,
+    'tracking a credential test without executing it must not satisfy the tooling gate');
 });
 
 test('platform Python discovery requires each actual execution command', () => {

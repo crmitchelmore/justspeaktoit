@@ -28,6 +28,9 @@ finish-args:
   - --device=dri
   # The current native loader accepts an explicit, app-owned runtime directory.
   - --env=JSTI_WHISPER_RUNTIME_DIRECTORY=/app/lib/justspeaktoit
+  # Seed before static Swift captures argv from the initial environment stack.
+  # The native constructor keeps an explicit choice and need not call setenv.
+  - --env=GGML_NO_BACKTRACE=1
   # libsecret reaches the Secret portal from inside the sandbox; the
   # GlobalShortcuts, RemoteDesktop, Clipboard, Background (Launch at login) and
   # notification portals need no extra permissions.

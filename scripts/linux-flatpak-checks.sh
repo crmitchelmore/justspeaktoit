@@ -41,30 +41,14 @@ gdbus wait --session --timeout 15 org.freedesktop.portal.Flatpak
 
 command -v xvfb-run >/dev/null
 flatpak install --user -y --noninteractive --reinstall --bundle "$bundle"
-if [ "${JSTI_FLATPAK_TEST_GGML_PRESEED:-}" = 1 ]; then
-  echo '== TEST-ONLY environment override: GGML_NO_BACKTRACE=1; final manifest rebuild still required'
-  flatpak override --user --env=GGML_NO_BACKTRACE=1 "$app"
-  flatpak info --user --show-permissions "$app"
-fi
 
 echo '== Flatpak Spawn portal (required by the sandboxed PNG loader)'
 timeout 60 flatpak run --command=flatpak-spawn "$app" --sandbox --watch-bus /usr/bin/true
 
-echo '== bounded argv probe with preseeded constructor environment'
-timeout 15 flatpak run --env=GGML_NO_BACKTRACE=1 "$app" --version
+echo '== installed app version (normal packaged environment)'
+timeout 15 flatpak run "$app" --version
 
-echo '== installed app command-line forwarding'
-if ! timeout 15 flatpak run "$app" --version; then
-  echo '== explicit executable argv diagnostic'
-  timeout 15 flatpak run --command=sh "$app" -ec '
-    printf "Explicit argv: %s\n" "$@"
-    exec /app/bin/justspeaktoit "$@"
-  ' sh --version
-  echo 'Default Flatpak command did not honour --version.' >&2
-  exit 1
-fi
-
-echo '== installed app self-test: resources, icons, recording codecs and adapters'
+echo '== installed app self-test: resources, recording codecs and adapters'
 timeout 180 flatpak run "$app" --self-test
 
 echo '== installed automation CLI'
@@ -91,7 +75,7 @@ timeout 480 flatpak run --env=JSTI_WHISPER_CPU_ONLY=1 --command=sh "$app" -ec '
   justspeaktoit --local-transcription-self-test "$sample" --expect "ask not what your country can do for you"
 ' < "$fixture"
 
-echo '== GTK window smoke test in the installed sandbox (Xvfb, private bus)'
+echo '== GTK window and canonical icon smoke test in the installed sandbox (Xvfb, private bus)'
 timeout 600 flatpak run \
   --env=GDK_BACKEND=x11 --env=GSK_RENDERER=cairo --env=GTK_A11Y=none \
   --env=NO_AT_BRIDGE=1 "$app" --ui-smoke-test

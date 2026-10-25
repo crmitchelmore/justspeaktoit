@@ -13,6 +13,14 @@ The runtime lives under `/app/lib/justspeaktoit`, configured through the manifes
 `JSTI_WHISPER_RUNTIME_DIRECTORY`, and its MIT license is installed. Existing
 network, graphics, audio, X11/Wayland and panel permissions are unchanged.
 
+`GGML_NO_BACKTRACE=1` is a package environment default, matching the native
+runtime's existing default. It must exist before static Swift captures argv:
+the native constructor's early `setenv` can otherwise move `environ` and lose
+all command arguments. The same installed binary accepted `--version` only
+when the value was preseeded in [the causal probe](https://github.com/crmitchelmore/justspeaktoit/actions/runs/40202256191).
+Normal Flatpak user environment overrides retain priority, including `0`.
+The final qualification uses ordinary installed commands without test overrides.
+
 SwiftPM dependencies are git sources pinned from `packaging/linux/Package.resolved`.
 After changing that resolved file, run:
 

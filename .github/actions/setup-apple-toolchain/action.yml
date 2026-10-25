@@ -1,0 +1,36 @@
+name: Set up Apple toolchain
+description: Select Xcode when requested and optionally install Tuist without handling release identity or signing.
+
+inputs:
+  xcode-version:
+    description: Xcode version to select; empty preserves the runner's selected Xcode.
+    required: false
+    default: ""
+  install-tuist:
+    description: Whether to install Tuist with the existing Homebrew mechanism (true or false).
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Validate toolchain options
+      shell: bash
+      env:
+        INSTALL_TUIST: ${{ inputs.install-tuist }}
+      run: |
+        case "$INSTALL_TUIST" in
+          true|false) ;;
+          *) echo "::error::install-tuist must be true or false"; exit 1 ;;
+        esac
+
+    - name: Setup Xcode
+      if: inputs.xcode-version != ''
+      uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
+      with:
+        xcode-version: ${{ inputs.xcode-version }}
+
+    - name: Install Tuist
+      if: inputs.install-tuist == 'true'
+      shell: bash
+      run: brew install tuist

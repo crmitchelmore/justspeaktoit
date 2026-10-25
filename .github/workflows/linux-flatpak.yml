@@ -206,24 +206,27 @@ jobs:
           python3 scripts/linux-flatpak-argv-probe.py "$RUNNER_TEMP/argv-probe"
           flatpak-builder --disable-download --force-clean --disable-rofiles-fuse \
             --state-dir "$RUNNER_TEMP/argv-probe-state" "$RUNNER_TEMP/argv-probe-build" "$RUNNER_TEMP/argv-probe/manifest.json"
-          bash -o pipefail -c 'flatpak-builder --run "$RUNNER_TEMP/argv-probe-build" "$RUNNER_TEMP/argv-probe/manifest.json" sh -ec '''
-            echo "== dynamic Swift argv in SDK"
-            /app/bin/probe-dynamic --version
-            echo "== static Swift argv in SDK"
-            /app/bin/probe-static --version
-          ''' 2>&1 | tee flatpak-evidence/argv-probe.log'
           flatpak install --user -y --noninteractive --reinstall --bundle flatpak-evidence/JustSpeakToIt-x86_64.flatpak
           installed=$(flatpak info --user --show-location com.justspeaktoit.JustSpeakToIt)
-          sha256sum "$installed/files/bin/justspeaktoit" >> flatpak-evidence/argv-probe.log
-          readelf -d "$installed/files/bin/justspeaktoit" >> flatpak-evidence/argv-probe.log
-          strings "$installed/files/bin/justspeaktoit" | python3 -c 'import sys; wanted=("JustSpeakToIt for Linux (developer preview)", "Native Linux adapter and canonical model self-test passed."); print("\n".join(line.strip() for line in sys.stdin if line.strip() in wanted))' >> flatpak-evidence/argv-probe.log
-          flatpak run --command=sh com.justspeaktoit.JustSpeakToIt -ec '
-            probe=$(mktemp)
-            trap '''rm -f "$probe"''' EXIT
-            cat > "$probe"
-            chmod 700 "$probe"
-            "$probe" --version
-          ' < "$RUNNER_TEMP/argv-probe-build/files/bin/probe-static" >> flatpak-evidence/argv-probe.log 2>&1
+          {
+            echo '== dynamic Swift argv in SDK'
+            flatpak-builder --run "$RUNNER_TEMP/argv-probe-build" "$RUNNER_TEMP/argv-probe/manifest.json" /app/bin/probe-dynamic --version
+            echo '== static Swift argv in SDK'
+            flatpak-builder --run "$RUNNER_TEMP/argv-probe-build" "$RUNNER_TEMP/argv-probe/manifest.json" /app/bin/probe-static --version
+            echo '== installed application binary'
+            sha256sum "$installed/files/bin/justspeaktoit"
+            readelf -d "$installed/files/bin/justspeaktoit"
+            strings "$installed/files/bin/justspeaktoit" | python3 -c 'import sys; wanted=("JustSpeakToIt for Linux (developer preview)", "Native Linux adapter and canonical model self-test passed."); print("\n".join(line.strip() for line in sys.stdin if line.strip() in wanted))'
+            echo '== static Swift argv in normal Platform sandbox'
+            # shellcheck disable=SC2016
+            flatpak run --command=sh com.justspeaktoit.JustSpeakToIt -ec '
+              probe=$(mktemp)
+              cat > "$probe"
+              chmod 700 "$probe"
+              "$probe" --version
+              rm -f "$probe"
+            ' < "$RUNNER_TEMP/argv-probe-build/files/bin/probe-static"
+          } > flatpak-evidence/argv-probe.log 2>&1
 
       - name: Qualify the unchanged bundle in a real session
         run: >-

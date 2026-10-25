@@ -39,7 +39,6 @@ final class RecordingServiceDependenciesTests: XCTestCase {
         defer { harness.cleanUp() }
         harness.defaults.set("Raw transcript", forKey: "simulatorValidationTranscript")
         harness.settings.autoPostProcess = true
-        harness.settings.hardwareTriggerDestination = .clipboardAndPostProcess
         harness.settings.postProcessingModel = "openai/gpt-4o-mini"
         let service = harness.makeService()
         try await service.startRecording(requiresLiveActivity: false)
@@ -206,6 +205,7 @@ final class DependencyHarness {
     var polishRequests: [(String, String)] = []
     var focus: FocusCaptureOverride = .none
     var focusReads = 0
+    var focusGate: DependencyKeyLoadGate?
     private var service: TranscriptionRecordingService?
 
     init() throws {
@@ -249,6 +249,7 @@ final class DependencyHarness {
             applicationState: { [unowned self] in self.applicationState },
             focusOverride: { [unowned self] _ in
                 self.focusReads += 1
+                if let gate = self.focusGate { await gate.wait() }
                 return self.focus
             }
         )

@@ -626,8 +626,13 @@ enum WireUp {
     }
     let secureStorage = buildSecureStorage(options: options, settings: settings, permissions: permissions)
     #if DEBUG
-    let openRouter = profile?.runsBatchJourney == true
-      ? CoreJourneyBatchFixture.makeClient() : OpenRouterAPIClient(secureStorage: secureStorage)
+    let openRouter: OpenRouterAPIClient
+    if let profile, profile.runsBatchJourney {
+      openRouter = profile.batchScenario.polishes
+        ? profile.polishFixture.makeClient() : CoreJourneyBatchFixture.makeClient()
+    } else {
+      openRouter = OpenRouterAPIClient(secureStorage: secureStorage)
+    }
     #else
     let openRouter = OpenRouterAPIClient(secureStorage: secureStorage)
     #endif

@@ -80,6 +80,28 @@ final class CoreJourneyRecordingSourceTests: XCTestCase {
         XCTAssertFalse(CoreJourneyBatchURLProtocol.accepts(try makeRequest(streaming: true)))
     }
 
+    func testHTTPFixture_rejectsMissingRolesExtraContentAndWrongPrompt() throws {
+        let request = try makeRequest()
+        let body = try XCTUnwrap(request.httpBody)
+        let valid = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        for mutation in 0..<4 {
+            var payload = valid
+            var messages = try XCTUnwrap(payload["messages"] as? [[String: Any]])
+            var content = try XCTUnwrap(messages[0]["content"] as? [[String: Any]])
+            switch mutation {
+            case 0: messages[0].removeValue(forKey: "role")
+            case 1: messages[0]["role"] = "system"
+            case 2: content.append(["type": "text", "text": "Unexpected instructions"])
+            default: content[0]["text"] = "Unexpected prompt"
+            }
+            messages[0]["content"] = content
+            payload["messages"] = messages
+            var changed = request
+            changed.httpBody = try JSONSerialization.data(withJSONObject: payload)
+            XCTAssertFalse(CoreJourneyBatchURLProtocol.accepts(changed), "Mutation \(mutation)")
+        }
+    }
+
     func testCancelledSuspendedStart_cannotPublishLateCaptureAndAllowsNextRun() async throws {
         let gate = CaptureSourceGate()
         let source = SuspendedRecordingSource(startGate: gate)
@@ -181,10 +203,12 @@ final class CoreJourneyRecordingSourceTests: XCTestCase {
     ) throws -> URLRequest {
         var request = URLRequest(url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!)
         request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer core-journey-fixture-not-a-real-key", forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONSerialization.data(withJSONObject: [
-            "model": model, "stream": streaming,
-            "messages": [["content": [[
+            "model": model, "stream": streaming, "temperature": 0,
+            "messages": [["role": "user", "content": [
+                ["type": "text", "text": CoreJourneyBatchFixture.audioPrompt], [
                 "type": "input_audio", "input_audio": ["data": audio.base64EncodedString(), "format": "wav"]
             ]]]]
         ])

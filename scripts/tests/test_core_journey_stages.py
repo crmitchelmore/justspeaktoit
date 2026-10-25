@@ -19,6 +19,14 @@ stages = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(stages)
 
 
+def passing_ui_output():
+    return "".join(
+        f"Test Case '-[SpeakAppUITests.{suite} {case}]' passed (0.001 seconds).\n"
+        for suite in stages.UI["REQUIRED_SUITES"]
+        for case in stages.UI["REQUIRED_CASES"].get(suite, ("testJourney",))
+    )
+
+
 def cancellation_fixture_ready(log, owned):
     if not owned.is_file() or not log.is_file():
         return False
@@ -36,9 +44,9 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(command[4:], [
             "--enable-code-coverage", "--filter", "|".join(f"{s}/" for s in stages.GATE["REQUIRED_SUITES"]),
         ])
-        self.assertEqual(len(stages.GATE["REQUIRED_SUITES"]), 15)
+        self.assertEqual(len(stages.GATE["REQUIRED_SUITES"]), 16)
 
-    def test_ui_uses_same_built_manifest_destination_and_all_four_suites(self):
+    def test_ui_uses_same_built_manifest_destination_and_all_five_suites(self):
         with tempfile.TemporaryDirectory() as temp:
             directory = Path(temp)
             manifest = directory / "DerivedData/Build/Products/SpeakApp_macosx.xctestrun"
@@ -55,11 +63,12 @@ class CommandTests(unittest.TestCase):
                 self.assertEqual(build[build.index(option) + 1], value)
             self.assertEqual(runtime[:4], ["xcodebuild", "test-without-building", "-xctestrun", str(manifest)])
             self.assertEqual(runtime[runtime.index("-destination") + 1], "platform=macOS")
+            self.assertEqual(runtime[runtime.index("-derivedDataPath") + 1], str(directory / "DerivedData"))
             self.assertNotIn("-workspace", runtime)
             self.assertNotIn("-scheme", runtime)
             self.assertIn("-disableAutomaticPackageResolution", runtime)
             self.assertIn("-skipPackageUpdates", runtime)
-            self.assertEqual(len(stages.ui_selection()), 4)
+            self.assertEqual(len(stages.ui_selection()), 5)
             for argument in stages.ui_selection() + [
                 "-skipPackagePluginValidation", "CODE_SIGN_IDENTITY=-",
                 "DEVELOPMENT_TEAM=", "CODE_SIGN_STYLE=Manual",
@@ -165,8 +174,7 @@ class StageTests(unittest.TestCase):
     def test_successful_build_receipt_admits_only_unchanged_products_and_options(self):
         command = self.prepare()
         suites = stages.UI["REQUIRED_SUITES"]
-        passing = "".join(f"Test Case '-[SpeakAppUITests.{suite} testJourney]' passed (0.001 seconds).\n"
-                          for suite in suites)
+        passing = passing_ui_output()
         runtime = [sys.executable, "-c", f"print({passing!r})"]
         with mock.patch.object(stages, "identity", return_value=self.identity):
             with mock.patch.object(stages, "build_command", return_value=command):
@@ -187,6 +195,39 @@ class StageTests(unittest.TestCase):
                         stages.execute("ui", self.artifacts)
                     run.assert_not_called()
 
+    def test_staged_ui_runtime_rejects_missing_or_duplicate_required_cases(self):
+        command = self.prepare()
+        passing = passing_ui_output()
+        first = next(iter(stages.UI["REQUIRED_CASES"].values()))[0]
+        required = next(line for line in passing.splitlines(keepends=True) if first in line)
+        for output in (passing.replace(required, ""), passing + required):
+            runtime = [sys.executable, "-c", f"print({output!r})"]
+            with mock.patch.object(stages, "identity", return_value=self.identity), \
+                    mock.patch.object(stages, "build_command", return_value=command), \
+                    mock.patch.object(stages, "test_command", return_value=runtime), self.muted():
+                self.assertEqual(stages.execute("ui", self.artifacts), 1)
+            coverage = json.loads((self.artifacts / "coverage.json").read_text())
+            self.assertTrue(coverage["errors"])
+            receipt = json.loads((self.artifacts / "runtime/result.json").read_text())
+            self.assertEqual(receipt["exit_code"], 1)
+            self.assertTrue(receipt["errors"])
+            self.assertEqual(coverage["required_cases"],
+                             {suite: list(cases) for suite, cases in stages.UI["REQUIRED_CASES"].items()})
+
+    def test_failed_runtime_preserves_status_and_required_case_diagnostics(self):
+        command = self.prepare()
+        first = next(iter(stages.UI["REQUIRED_CASES"].values()))[0]
+        output = "\n".join(line for line in passing_ui_output().splitlines() if first not in line)
+        runtime = [sys.executable, "-c", f"print({output!r}); raise SystemExit(17)"]
+        with mock.patch.object(stages, "identity", return_value=self.identity), \
+                mock.patch.object(stages, "build_command", return_value=command), \
+                mock.patch.object(stages, "test_command", return_value=runtime), self.muted():
+            self.assertEqual(stages.execute("ui", self.artifacts), 17)
+        for path in ("runtime/result.json", "coverage.json"):
+            receipt = json.loads((self.artifacts / path).read_text())
+            self.assertEqual(receipt["exit_code"], 17)
+            self.assertTrue(any(first in error for error in receipt["errors"]))
+
     def test_setup_failure_cannot_enter_ui_build_or_runtime(self):
         with mock.patch.object(stages, "artifact_directory", return_value=self.artifacts):
             with mock.patch.object(stages, "setup", return_value=17):
@@ -198,8 +239,7 @@ class StageTests(unittest.TestCase):
 
     def test_cold_build_does_not_spend_runtime_budget(self):
         suites = stages.UI["REQUIRED_SUITES"]
-        passing = "".join(f"Test Case '-[SpeakAppUITests.{suite} testJourney]' passed (0.001 seconds).\n"
-                          for suite in suites)
+        passing = passing_ui_output()
         clock = [0.0]
         durations = {"build": 458.35, "test": 30, "combined": 488.35}
 
@@ -244,8 +284,7 @@ class StageTests(unittest.TestCase):
     def test_failed_skipped_or_timed_out_ui_runtime_cannot_publish_green_coverage(self):
         command = self.prepare()
         suites = stages.UI["REQUIRED_SUITES"]
-        passing = "".join(f"Test Case '-[SpeakAppUITests.{suite} testJourney]' passed (0.001 seconds).\n"
-                          for suite in suites)
+        passing = passing_ui_output()
         for source, budget, expected in [
             (f"print({passing!r}); raise SystemExit(17)", 2, 17),
             (f"print({passing.replace('passed', 'skipped')!r})", 2, 1),

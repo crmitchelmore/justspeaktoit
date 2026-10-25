@@ -8,7 +8,8 @@ scripts/run-core-journey-e2e.sh
 
 It has an eight-minute test-command budget. CI first compiles the test products
 in a separate step so that budget measures the journey tests rather than hosted
-runner compile speed; the job has a 30-minute wall-clock timeout. It uses
+runner compile speed; setup/build/test have separate command budgets and the
+component job has a 40-minute wall-clock timeout. It uses
 in-memory HTTP/stream events, temporary history storage, and
 isolated defaults and pasteboards. Automation tests exchange real frames over
 an owner-only UNIX socket, with a stub command handler. No microphone, provider
@@ -34,7 +35,7 @@ status; they fail an otherwise successful gate.
 | Hotkey gesture state | `GestureDetectorTests` | Balanced down/up, reset, bounce, cancellation; injected key events, no physical key synthesis. |
 | Batch provider | `OpenAITranscriptionProviderTests`, `OpenAITranscriptionProviderErrorTests`, `MissingLiveAPIKeyAlertTests` | Real request construction and response decoding with HTTP fixtures; routing and missing/rejected-key descriptions. |
 | Streaming provider | `StreamingClientContractTests` | Provider event parsing and complete transcript finalisation with injected stream events. |
-| Processing | `PostProcessingManagerTests` | Empty input, local rules, cloud client stub, prompt payload; does not exercise MainManager's enabled/disabled routing. |
+| Processing | `PostProcessingManagerTests`, `CoreJourneyPolishFixtureTests` | Empty input, local rules, cloud client stub, prompt payload; does not exercise MainManager's enabled/disabled routing. |
 | Streaming delivery | `LiveTextInserterStreamingTests` | Actual inserter with an in-memory AX field contract; partial replacement, duplication and fallback decisions. |
 | Clipboard and target policy | `TextOutputTests`, `ClipboardFieldIdentityPolicyTests` | Isolated pasteboard, empty text preservation, target identity and changed-field warnings; no assertion of native editor delivery. |
 | Automation transport | `AutomationServerTests`, `AutomationDeadlineTests` | Real listener, framing, shipped client, owner permissions, idempotent retries, deadlines, failure followed by recovery; command execution is stubbed. |
@@ -103,7 +104,7 @@ registration status, process identity, ordered events, and the actual
 screenshots to `xcresult` before cleanup. Registration/input failures fail the
 test; no permission-denied skip or internal event injection exists. The existing
 `Core Journey Fixture UI` job selects this suite with the bootstrap/fixture suites
-under its ten-minute timeout. This is new native coverage pending cold-runner CI
+within its 42-minute job limit. This is native coverage pending cold-runner CI
 validation, not an established flake-rate or full-journey claim.
 
 This probe intentionally leaves MainManager's recording listeners disabled; its
@@ -153,12 +154,37 @@ attached to `xcresult`. This is a full batch **clipboard-route** journey; it doe
 not claim a physical microphone, permission-denial regression, direct AX
 insertion, or native editor delivery on a runner without posting permission.
 
-The native CI job selects all four UI suites under its ten-minute timeout.
-`scripts/verify-core-journey-ui.py` reuses the required gate's XCTest parser and
-fails missing, all-skipped, partially-skipped, or zero-test suites, even after a
-successful xcodebuild exit. Its `coverage.json` is uploaded with the native logs.
-Native compilation and repeated cold-runner execution remain necessary before
-claiming the expanded journey is validated or the flake/time targets are met.
+The native CI job selects all five UI suites within its existing 42-minute
+job limit. The staged command budgets are 300 seconds for setup, 900 seconds for
+build, and 600 seconds for tests, with separately bounded source/product receipts.
+`scripts/verify-core-journey-ui.py` and the active staged runner share the exact
+suite and named-case checks. Missing, skipped, failed, zero-test, or duplicated
+required post-processing cases fail closed, even after a successful xcodebuild
+exit. Both named cases must pass exactly once. `coverage.json`, runtime receipts,
+logs, screenshots and `xcresult` are retained. Repeated cold-runner execution
+remains necessary before claiming the flake/time targets are met.
+
+### Enabled post-processing and recovery
+
+`CoreJourneyPostProcessingUITests` selects a Debug-only typed scenario through
+`SPEAK_CORE_JOURNEY_SCENARIO`: `batchPolishSuccess` or
+`batchPolishFailureThenSuccess`. Unknown names fail closed; the original batch
+flag retains post-processing off. Each UUID profile owns its HTTP conversation,
+private ephemeral session, fake credential, isolated defaults and durable files.
+Every request is intercepted, including unexpected destinations; nothing is
+forwarded. Exact audio bytes, JSON key sets, model, messages, temperature and
+nonstreaming serialization are validated before advancing the sequence.
+
+The success case requires processed clipboard output and retained raw/processed
+History. The recovery case admits a controlled HTTP 400, requires the production
+HUD's failure message and retry guidance, and verifies raw delivery plus durable
+error metadata. It then records fresh synthetic audio in the same live Speak PID
+and verifies successful processed output, a distinct History ID, and an unchanged
+first failed row. No relaunch, History clearing, automatic retry or prior-item
+Retry action stands in for recovery. Both routes use the same real Carbon
+gestures and genuine event-posting permission branch as the original off case.
+This increment does not establish physical microphone, Fn, streaming, direct AX,
+permission bootstrap or the full #802 flake target.
 
 The native P0 matrix is not complete. Before promoting the launched-app layer
 as capture-to-delivery protection, #802 needs the following concrete evidence:
@@ -168,8 +194,8 @@ as capture-to-delivery protection, #802 needs the following concrete evidence:
 | Cold runner bootstrap | Launch the signed Speak app with isolated settings/history/keychain; establish AX/Input Monitoring permission readiness without skipping or reusing warm-host state. |
 | Batch direct insertion | The clipboard-route journey above covers orchestration; direct AX insertion still requires genuine permission bootstrap and exact captured-field delivery on cold runners. |
 | Streaming recording | Deliver changing partials and a final; assert replacement in the captured field, no duplicate final, and the final History text. |
-| Processing off/on | Run both routes through MainManager and assert the expected raw/processed editor text and History metadata. |
-| Provider failure and recovery | Fail a recording, verify actionable UI plus recoverable History, then successfully dictate again in the same process. |
+| Processing off/on | The native off and enabled fixtures cover MainManager clipboard delivery and raw/processed History; exact target insertion remains conditional on genuine posting permission. |
+| Provider failure and recovery | The controlled post-processing HTTP 400 fixture checks visible failure, raw delivery, retained error History and fresh same-process recovery; other provider failures remain separate. |
 | Target change and empty input | Switch focus during recording and verify the intended delivery/fallback policy; silence must preserve editor and clipboard contents. |
 | Physical host release smoke | Exercise Fn with Secure Keyboard Entry, microphone/device interruption, and permission denial using the actual signed release artifact. |
 

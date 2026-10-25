@@ -214,6 +214,20 @@ class StageTests(unittest.TestCase):
             self.assertEqual(coverage["required_cases"],
                              {suite: list(cases) for suite, cases in stages.UI["REQUIRED_CASES"].items()})
 
+    def test_failed_runtime_preserves_status_and_required_case_diagnostics(self):
+        command = self.prepare()
+        first = next(iter(stages.UI["REQUIRED_CASES"].values()))[0]
+        output = "\n".join(line for line in passing_ui_output().splitlines() if first not in line)
+        runtime = [sys.executable, "-c", f"print({output!r}); raise SystemExit(17)"]
+        with mock.patch.object(stages, "identity", return_value=self.identity), \
+                mock.patch.object(stages, "build_command", return_value=command), \
+                mock.patch.object(stages, "test_command", return_value=runtime), self.muted():
+            self.assertEqual(stages.execute("ui", self.artifacts), 17)
+        for path in ("runtime/result.json", "coverage.json"):
+            receipt = json.loads((self.artifacts / path).read_text())
+            self.assertEqual(receipt["exit_code"], 17)
+            self.assertTrue(any(first in error for error in receipt["errors"]))
+
     def test_setup_failure_cannot_enter_ui_build_or_runtime(self):
         with mock.patch.object(stages, "artifact_directory", return_value=self.artifacts):
             with mock.patch.object(stages, "setup", return_value=17):

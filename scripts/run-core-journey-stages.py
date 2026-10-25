@@ -168,12 +168,12 @@ def execute(kind, directory):
         log = directory / "runtime/test.log"
         if log.exists():
             errors, counts = UI["coverage_errors"](log.read_text(encoding="utf-8", errors="replace"))
-            if errors and code == 0:
-                code = 1
+            if errors:
+                code = code or 1
                 result_path = directory / "runtime/result.json"
                 result = json.loads(result_path.read_text(encoding="utf-8"))
                 result["exit_code"] = code
-                result["errors"].extend(errors)
+                result["errors"].extend(error for error in errors if error not in result["errors"])
                 result_path.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
             if code:
                 errors.append(f"UI runtime failed with status {code}; see runtime/result.json.")

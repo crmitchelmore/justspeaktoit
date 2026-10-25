@@ -377,9 +377,10 @@ version/baseline authority. `VERSION` is a build hint only.
 
 ## PostHog Maintenance
 
-For PostHog errors, feature flags and post-release event checks, use the hosted
+For PostHog feature flags and consented post-release product-event checks, use the hosted
 MCP connection and [maintenance guide](Docs/posthog-maintenance.md). Verify the
-active project before querying; retain evidence and deduplicate follow-up issues.
+Production project before querying; retain evidence and deduplicate follow-up issues.
+Use Sentry below for production crashes and exceptions; PostHog does not capture them.
 
 ## Sentry Error Monitoring
 - **Region:** EU (de.sentry.io) — use `https://de.sentry.io/api/0/` for all API calls

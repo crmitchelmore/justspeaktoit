@@ -1,8 +1,10 @@
 # PostHog maintenance
 
 VS Code/Copilot uses `posthog` in `.vscode/mcp.json`. Start that MCP server and
-complete its OAuth prompt; select the JustSpeakToIt organization/project and
-verify its identity before reading data. The hosted endpoint routes US/EU from
+complete its OAuth prompt; select the organization's approved **Production**
+project and verify its identity before reading data. Do not create or fund a
+Development project; see the [analytics audit](analytics-implementation-audit.md).
+The hosted endpoint routes US/EU from
 the authenticated account. Keep OAuth tokens in the client's credential store.
 
 Other MCP clients can add `https://mcp.posthog.com/mcp` using their HTTP/OAuth
@@ -13,12 +15,14 @@ authorized credential vault when needed.
 
 For an authorized maintenance or release check:
 
-1. Inspect top errors and new exceptions since the previous shipped version;
+1. Inspect production crashes and exceptions in **Sentry** (`tally-lz`, project
+   `justspeaktoit`, EU region), using the reliability-monitoring configuration
+   in `AGENTS.md`. The app's PostHog transport excludes error capture. For Sentry,
    retain issue links, affected versions/counts and the query's time window.
    Reproduce actionable defects and deduplicate GitHub/Beads issues before filing.
 2. Inspect stale and fully rolled-out flags against current callers; propose
    removal with evidence before changing production flag behavior.
-3. Compare key event/insight trends across the release boundary. Verify event
+3. In PostHog, compare consented product-event trends across the release boundary. Verify event
    names, consent coverage and sample size first; absent telemetry is unknown.
 
 Report observations separately from installed-app and release acceptance.

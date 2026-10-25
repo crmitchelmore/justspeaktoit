@@ -23,7 +23,10 @@ contains transcripts, Focus names or credentials, and neither is exported with
 settings. Native default perform removes the envelope while advancing generation.
 A stable, nonblocking interprocess lock protects reads and writes. Reconciliation
 reads the native current filter only after this store has been configured and
-commits only if its generation remains unchanged. A newer perform or reset wins.
+commits only if its generation remains unchanged. A newer perform or reset wins. An interrupted marker/envelope update is refused
+rather than guessed or silently reverted to a different delivery destination.
+Reset Stored Override repairs that state without reading the damaged envelope;
+no uninterrupted-write or data-loss guarantee is claimed.
 A missing envelope in a verified never-configured store means no override;
 unavailable, corrupt or incomplete storage cannot establish that and refuses start.
 Native lookup failure preserves the latest stored choice and refuses an affected

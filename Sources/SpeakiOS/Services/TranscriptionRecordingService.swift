@@ -971,11 +971,12 @@ public final class TranscriptionRecordingService: ObservableObject {
 
     /// Stops recording, applies the requested result destination, and returns the result.
     ///
-    /// - Parameter destination: Where the transcript should go. When `nil`, defaults
-    ///   to `.clipboardAndPostProcess` if the user has post-processing turned on,
-    ///   else `.clipboard` — i.e., the original behaviour before destinations
-    ///   were configurable. Hardware-trigger callers (Action Button, Siri,
-    ///   Shortcuts) pass `settings.hardwareTriggerDestination`.
+    /// - Parameter destination: An explicit Stop destination intentionally redirects the run.
+    ///   When omitted, a frozen Focus, explicit Start or keyboard destination remains authoritative.
+    ///   With no such destination override, this exported legacy API keeps clipboard delivery and
+    ///   the existing `autoPostProcess` policy, independently of the hardware destination preference.
+    ///   Internal hardware and automatic stops use the frozen typed selection instead; they do not
+    ///   reinterpret a resolved destination as a new explicit Stop request.
     @discardableResult
     public func stopRecording(
         destination: HardwareTriggerDestination? = nil,

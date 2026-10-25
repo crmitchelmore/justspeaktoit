@@ -62,7 +62,7 @@ public struct MCPRequestHandler {
         case "tools/list":
             return Self.encode(Self.result(id: identifier, value: ["tools": Self.toolDefinitions]))
         case "tools/call":
-            return self.callToolResponse(id: identifier, params: params, rawID: message["id"],
+            return self.callToolResponse(id: identifier, params: params, rawData: data,
                                          cancellation: cancellation)
         default:
             return Self.encode(Self.errorResponse(
@@ -74,13 +74,15 @@ public struct MCPRequestHandler {
     }
 
     private func callToolResponse(
-        id: Any?, params: [String: Any], rawID: Any?, cancellation: AutomationRequestCancellation?
+        id: Any?, params: [String: Any], rawData: Data, cancellation: AutomationRequestCancellation?
     ) -> String {
-        if params["name"] as? String == AutomationCommand.awaitTranscript.rawValue, !Self.validAwaitID(rawID) {
+        let isAwait = params["name"] as? String == AutomationCommand.awaitTranscript.rawValue
+        let identity = isAwait ? Self.awaitIdentity(in: rawData) : nil
+        if isAwait, identity == nil {
             return Self.encode(Self.errorResponse(
                 id: nil, code: -32600, message: "Await requires a string or numeric JSON-RPC ID."))
         }
-        return Self.encode(self.callTool(id: id, params: params, cancellation: cancellation))
+        return Self.encode(self.callTool(id: id, params: params, cancellation: cancellation, awaitIdentity: identity))
     }
 
     // MARK: - Handlers
@@ -96,7 +98,7 @@ public struct MCPRequestHandler {
     }
 
     private func callTool(
-        id: Any?, params: [String: Any], cancellation: AutomationRequestCancellation?
+        id: Any?, params: [String: Any], cancellation: AutomationRequestCancellation?, awaitIdentity: String?
     ) -> [String: Any] {
         guard let name = params["name"] as? String else {
             return Self.errorResponse(id: id, code: -32602, message: "tools/call requires a \"name\".")
@@ -108,7 +110,7 @@ public struct MCPRequestHandler {
         let arguments = params["arguments"] as? [String: Any] ?? [:]
 
         do {
-            let request = try self.request(for: command, arguments: arguments, callID: id)
+            let request = try self.request(for: command, arguments: arguments, callID: id, awaitIdentity: awaitIdentity)
             let response: AutomationResponse
             if command == .awaitTranscript {
                 guard let client = self.client as? any CancellableAutomationRequesting else {
@@ -136,10 +138,10 @@ public struct MCPRequestHandler {
         }
     }
 
-    private func request(for command: AutomationCommand, arguments: [String: Any], callID: Any?) throws
-        -> AutomationRequest {
-        let identifier = command == .awaitTranscript
-            ? try Self.awaitRequestID(for: callID) : Self.requestID(for: callID)
+    private func request(
+        for command: AutomationCommand, arguments: [String: Any], callID: Any?, awaitIdentity: String?
+    ) throws -> AutomationRequest {
+        let identifier = try Self.socketRequestID(command: command, callID: callID, awaitIdentity: awaitIdentity)
         var request = AutomationRequest(id: identifier, command: command)
         for (key, value) in [("capture_id", arguments["capture_id"]), ("since_id", arguments["since_id"])] {
             guard let value else { continue }
@@ -170,6 +172,19 @@ public struct MCPRequestHandler {
             request.timeout = timeout
         }
         return try request.validated()
+    }
+
+    private static func socketRequestID(
+        command: AutomationCommand, callID: Any?, awaitIdentity: String?
+    ) throws -> String {
+        if command == .awaitTranscript {
+            guard let awaitIdentity else {
+                throw AutomationError(code: .invalidArgument, message: "Await requires a typed JSON-RPC ID.")
+            }
+            return try Self.awaitRequestID(for: awaitIdentity)
+        } else {
+            return Self.requestID(for: callID)
+        }
     }
 
     /// Distinguishes this MCP server process from every other client of the

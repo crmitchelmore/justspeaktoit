@@ -1,4 +1,3 @@
-import CoreFoundation
 import Foundation
 import SpeakCore
 
@@ -38,18 +37,18 @@ final class MCPStdioDispatch: @unchecked Sendable {
         }
         let message = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         let params = message?["params"] as? [String: Any]
-        if self.handleCancellation(message) { return }
+        if self.handleCancellation(message, data: data) { return }
         guard let message, message["method"] as? String == "tools/call",
               params?["name"] as? String == AutomationCommand.awaitTranscript.rawValue else {
             if let response = self.handler.handle(line: line) { self.write(response) }
             return
         }
-        self.dispatchAwait(line: line, message: message)
+        self.dispatchAwait(line: line, message: message, data: data)
     }
 
-    private func dispatchAwait(line: String, message: [String: Any]) {
+    private func dispatchAwait(line: String, message: [String: Any], data: Data) {
         guard message["id"] != nil else { return }
-        guard let key = Self.key(message["id"]) else {
+        guard let key = MCPRequestHandler.awaitIdentity(in: data) else {
             self.write(MCPRequestHandler.encode(MCPRequestHandler.errorResponse(
                 id: nil, code: -32600, message: "Await requires a string or numeric JSON-RPC ID.")))
             return
@@ -73,10 +72,9 @@ final class MCPStdioDispatch: @unchecked Sendable {
         }
     }
 
-    private func handleCancellation(_ message: [String: Any]?) -> Bool {
+    private func handleCancellation(_ message: [String: Any]?, data: Data) -> Bool {
         guard message?["method"] as? String == "notifications/cancelled", message?["id"] == nil else { return false }
-        let params = message?["params"] as? [String: Any]
-        if let key = Self.key(params?["requestId"]) {
+        if let key = MCPRequestHandler.awaitIdentity(in: data, cancellation: true) {
             let wait = self.lock.withLock { self.waits[key] }
             wait?.cancel()
         }
@@ -109,10 +107,4 @@ final class MCPStdioDispatch: @unchecked Sendable {
         }
     }
 
-    private static func key(_ id: Any?) -> String? {
-        guard let id, id is String || (id is NSNumber && CFGetTypeID(id as CFTypeRef) != CFBooleanGetTypeID()),
-              let data = try? JSONSerialization.data(withJSONObject: ["id": id],
-                  options: [.sortedKeys]) else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
 }

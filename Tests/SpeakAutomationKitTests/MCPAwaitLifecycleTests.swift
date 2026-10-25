@@ -68,7 +68,27 @@ final class MCPAwaitLifecycleTests: XCTestCase {
         dispatcher.close()
         XCTAssertEqual(count.value, 0)
         XCTAssertEqual(sink.lines.count, 3)
-        XCTAssertThrowsError(try MCPRequestHandler.awaitRequestID(for: true))
+        XCTAssertNil(MCPRequestHandler.awaitIdentity(in: Data(#"{"id":true}"#.utf8)))
+    }
+
+    func testAwaitHandler_UsesCompleteTypedSocketIdentityAndStableRetries() throws {
+        let client = CapturingMCPAwaitClient()
+        let handler = MCPRequestHandler(client: client, version: "fixture")
+        let prefix = String(repeating: "a", count: 512)
+        let identifiers: [Any] = [1, "1", prefix + "first", prefix + "second", 1]
+        let capture = UUID().uuidString
+        for id in identifiers {
+            let data = try JSONSerialization.data(withJSONObject: ["jsonrpc": "2.0", "id": id,
+                "method": "tools/call", "params": ["name": "await_transcript",
+                    "arguments": ["capture_id": capture]]])
+            let line = try XCTUnwrap(String(data: data, encoding: .utf8))
+            XCTAssertNotNil(handler.handle(line: line))
+        }
+        let ids = client.identifiers
+        XCTAssertEqual(ids.count, 5)
+        XCTAssertEqual(Set(ids.prefix(4)).count, 4)
+        XCTAssertEqual(ids.first, ids.last)
+        XCTAssertTrue(ids.allSatisfy { $0.count <= AutomationLimits.maxIdentifierLength })
     }
 
     func testEOF_CancelsAwaitAndNoWorkerOutputAfterCloseReturns() async throws {
@@ -260,4 +280,17 @@ private final class MCPInvocationCount: @unchecked Sendable {
     private var count = 0
     var value: Int { self.lock.withLock { self.count } }
     func increment() { self.lock.withLock { self.count += 1 } }
+}
+
+private final class CapturingMCPAwaitClient: CancellableAutomationRequesting, @unchecked Sendable {
+    private let lock = NSLock()
+    private var ids: [String] = []
+    var identifiers: [String] { self.lock.withLock { self.ids } }
+    func send(_ request: AutomationRequest) throws -> AutomationResponse {
+        .success(id: request.id, command: request.command, result: .init())
+    }
+    func send(_ request: AutomationRequest, cancellation: AutomationRequestCancellation) throws -> AutomationResponse {
+        self.lock.withLock { self.ids.append(request.id) }
+        return try self.send(request)
+    }
 }

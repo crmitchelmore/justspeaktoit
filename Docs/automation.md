@@ -46,7 +46,9 @@ ID and normalized arguments join/replay the original deadline and terminal resul
 Changed arguments fail. Timeout, final connection EOF, Automation off and shutdown
 remove subscriptions; one disconnected retry does not cancel another subscriber.
 Off/on or restart resets the epoch. No cross-restart resumption is promised.
-CLI Ctrl-C terminates its process and closes its owned connection. MCP handles
+CLI Ctrl-C terminates its process and closes its owned connection. The one-shot CLI
+does not consume stdin, so `/dev/null` is supported; EOF here means process/socket
+closure. MCP handles
 `notifications/cancelled` by JSON-RPC `requestId` and EOF; only awaits run concurrently,
 while existing mutators remain ordered. Output frames are serialized; Mac stdout
 writes are close-aware and bounded to two seconds, with partial/broken output ending
@@ -293,6 +295,7 @@ bundle; the universal (Intel-compatible) legacy download still does, at
 
 ```text
 speak transcribe <file> [--json] [--timeout <seconds>]
+speak await --capture-id <uuid> [--since-id <uuid>] [--timeout <seconds>] [--json]
 speak listen [--json]
 speak stop [--json]
 speak history [--last <n>] [--json]
@@ -412,13 +415,15 @@ of the client's PATH (replace `<you>` with your user name, or use
 | `get_history` | `limit` (1–200, default 10) | Recent transcriptions, newest first |
 | `start_dictation` | — | Confirmation once the session is live |
 | `stop_dictation` | — | Transcript of the finished session |
+| `status` | — | App state and active local capture identity, when present |
+| `await_transcript` | `capture_id` (required), `since_id`, `timeout_seconds` (>0–600; default 60) | Exact successful local capture and frozen History entry |
 
 Every tool also returns `structuredContent` with the same fields as the CLI's
 `--json` `data` object.
 
 ### Behaviour worth knowing
 
-- **Process-scoped idempotent calls.** The JSON-RPC call id becomes an automation
+- **Legacy process-scoped idempotent calls.** Existing tools retain an automation
   request id shaped like `mcp-<process-scope>-<call-id>`, where the process scope
   is an eight-character UUID prefix. The final identifier is truncated to
   `AutomationLimits.maxIdentifierLength`. Reusing a call id within the same MCP
@@ -426,6 +431,13 @@ Every tool also returns `structuredContent` with the same fields as the CLI's
   timed-out `start_dictation` does not open a second session. A new server process
   receives a new scope: this does not promise exactly-once execution across
   processes or unlimited cache retention.
+- **Await identity.** `await_transcript` instead hashes the complete typed JSON-RPC
+  ID with SHA-256 under a full per-process UUID scope. Numeric `1` and string `"1"`,
+  and long IDs with a shared prefix, remain distinct. Retries with identical
+  normalized capture/cursor/timeout arguments share the original bounded wait.
+  Numeric IDs support exact signed/unsigned 64-bit integers and finite fractional
+  values; unsupported oversized integer IDs fail closed. Use string IDs for larger
+  identifiers.
 - **Tool failures are results, not protocol errors.** "App not running" comes back
   as `isError: true` content the agent can act on, leaving the session usable.
 - **Bounded inputs.** Paths, identifiers, history limits and message sizes are
@@ -461,7 +473,7 @@ client/account, running app, installed standalone CLI, and explicitly
 non-sensitive History entry. Use a local registration and preserve any existing
 target-server configuration. Do not install software, change account/provider
 state, or enable Automation without authorisation. Configuration output alone is
-not a pass: the real client must discover exactly the four tools and complete
+not a pass: the real client must discover the six tools listed above and complete
 `get_history({"limit":1})`. Disabling Automation prevents new access but does not
 erase content already returned to a client.
 

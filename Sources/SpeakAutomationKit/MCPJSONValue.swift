@@ -15,6 +15,7 @@ enum MCPJSONValue: Decodable, Equatable {
     case null
     case bool(Bool)
     case integer(Int64)
+    case unsigned(UInt64)
     case double(Double)
     case string(String)
     case array([MCPJSONValue])
@@ -30,6 +31,8 @@ enum MCPJSONValue: Decodable, Equatable {
             self = .bool(value)
         } else if let value = try? container.decode(Int64.self) {
             self = .integer(value)
+        } else if let value = try? container.decode(UInt64.self) {
+            self = .unsigned(value)
         } else if let value = try? container.decode(Double.self) {
             self = .double(value)
         } else if let value = try? container.decode(String.self) {
@@ -50,6 +53,8 @@ enum MCPJSONValue: Decodable, Equatable {
         case .bool(let value):
             return value
         case .integer(let value):
+            return value
+        case .unsigned(let value):
             return value
         case .double(let value):
             return value

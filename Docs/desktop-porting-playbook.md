@@ -12,22 +12,15 @@ contracts, capability projection, native text output, packaging, platform
 acceptance matrices and the current integration PR. It was a source/document
 and existing-CI review, not a new hardware walkthrough or exhaustive code audit.
 
-Two revisions must be kept distinct:
-
-| Snapshot | What it establishes |
-|---|---|
-| Main checkout `9b9938221bcb81d91c6d1a14dba174d3e9fd97a4` | The existing portable kernel, shared Windows/Linux host and native adapters. The platform guides include historical receipts and explicitly pending acceptance work. |
-| Open integration [#1218](https://github.com/crmitchelmore/justspeaktoit/pull/1218), head `1e978f3680f42d703e53daf49744763da53a94f5` | Composition of the desktop settings, icons, History management, streaming, vocabulary, comparison and Voice work from #1211-#1217, plus integration corrections. This work is not merged into the reviewed main checkout. |
-
-GitHub reported successful workflows for that exact integration head:
-[native Windows](https://github.com/crmitchelmore/justspeaktoit/actions/runs/38718442908),
-[Linux](https://github.com/crmitchelmore/justspeaktoit/actions/runs/38718442823),
-[Apple CI](https://github.com/crmitchelmore/justspeaktoit/actions/runs/38718442855)
-and [cross-build/Windows bundle execution](https://github.com/crmitchelmore/justspeaktoit/actions/runs/38718442866).
-Its PR checks also reported successful native ARM64, ARM64 bundle and developer
-MSIX lifecycle jobs. These are automated receipts, not physical-device or
-real-service acceptance. Recheck the head and checks before using them for a
-later revision; component receipts alone do not qualify a composed branch.
+The current merged checkpoint is [PR #1238](https://github.com/crmitchelmore/justspeaktoit/pull/1238),
+main `ec1f53159c61b023f9dba5152e359a44fb6a9fdb`, whose tree matches tested
+`a6b5b53912af4e6024d0d65542df8dd0786005fc`. It includes the earlier desktop
+integration and recovery work. [Current qualification](windows-development.md#current-qualification--25-october-2026)
+links passing Apple, Linux and native Windows x64/ARM64 checks, standalone
+bundles and both developer-MSIX lifecycles. These are automated receipts;
+physical-device, real-service, Flatpak and public distribution gates remain.
+The engineering lessons below originated in the 15 October review; the current
+checkpoint was reconciled on 25 October 2026.
 
 **What worked:** sharing policy and orchestration while keeping OS effects
 native made the second desktop host reuse much more than domain models.

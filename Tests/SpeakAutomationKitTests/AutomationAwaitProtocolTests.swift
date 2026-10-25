@@ -68,7 +68,7 @@ final class AutomationAwaitProtocolTests: XCTestCase {
 
     func testRawAwaitIdentity_PreservesPortableTypesPrecisionAndCancellationKeys() throws {
         let cases: [(String, String?)] = [
-            ("1", "n:1"), ("1.0", "n:1"), ("-1", "n:-1"), ("0", "n:0"),
+            ("1", "n:1"), ("1.0", nil), ("-1", "n:-1"), ("0", "n:0"), ("-0", "n:0"),
             ("9007199254740993", "n:9007199254740993"),
             ("-9223372036854775808", "n:-9223372036854775808"),
             ("-9223372036854775809", nil),
@@ -78,6 +78,8 @@ final class AutomationAwaitProtocolTests: XCTestCase {
             ("1.25", nil), ("1.2500000000000001", nil),
             ("0.1", nil), ("0.10000000000000001", nil),
             ("-1.25", nil), ("-1.2500000000000001", nil), (#""1""#, "s:1"),
+            ("1.0000000000000001", nil), ("1.00000000000000001", nil),
+            ("-0.00000000000000000000000000000001", nil), ("1e0", nil), ("0e-100", nil),
             ("true", nil), ("false", nil), ("null", nil), (#"{"nested":1}"#, nil), ("[]", nil)
         ]
         for (rawID, expected) in cases {
@@ -93,6 +95,37 @@ final class AutomationAwaitProtocolTests: XCTestCase {
         let projected = try JSONDecoder().decode(MCPJSONValue.self, from: Data("18446744073709551615".utf8))
         XCTAssertEqual(projected, .unsigned(UInt64.max))
         XCTAssertEqual(projected.foundationValue as? UInt64, UInt64.max)
+    }
+
+    func testRawAwaitIdentity_InspectsDecodedKeysAndStringsWithoutNestedDecoys() {
+        let request = Data(#"{"ignored":[{"id":1.25,"text":"}\\\"["}],"\u0069d":"a\"b\\c\uD83D\uDE00"}"#.utf8)
+        XCTAssertEqual(MCPRequestHandler.awaitIdentity(in: request), "s:a\"b\\c😀")
+        let cancel = Data(#"{"id":999,"params":{"nested":{"requestId":2},"request\u0049d":"same"}}"#.utf8)
+        XCTAssertEqual(MCPRequestHandler.awaitIdentity(in: cancel, cancellation: true), "s:same")
+        XCTAssertNil(MCPRequestHandler.awaitIdentity(in: Data(#"{"params":[]}"#.utf8), cancellation: true))
+    }
+
+    func testRawAwaitIdentity_RejectsDuplicateDecodedIdentityEnvelopeKeys() {
+        for text in [#"{"id":1,"id":2}"#, #"{"id":1,"\u0069d":2}"#,
+                     #"{"id":1,"params":{},"params":{}}"#] {
+            XCTAssertNil(MCPRequestHandler.awaitIdentity(in: Data(text.utf8)))
+        }
+        for text in [#"{"params":{"requestId":1,"requestId":2}}"#,
+                     #"{"params":{"requestId":1,"request\u0049d":2}}"#,
+                     #"{"params":{},"\u0070arams":{"requestId":1}}"#] {
+            XCTAssertNil(MCPRequestHandler.awaitIdentity(in: Data(text.utf8), cancellation: true))
+        }
+    }
+
+    func testRawAwaitIdentity_RejectsOversizeDeepAndMalformedInputAtDirectBoundary() {
+        let nested = String(repeating: "[", count: 129) + "0" + String(repeating: "]", count: 129)
+        XCTAssertNil(MCPRequestHandler.awaitIdentity(in: Data(("{\"id\":1,\"ignored\":" + nested + "}").utf8)))
+        let shallow = Data(#"{"id":1,"ignored":[{"nested":[0]}]}"#.utf8)
+        XCTAssertEqual(MCPRequestHandler.awaitIdentity(in: shallow), "n:1")
+        XCTAssertNil(MCPRequestHandler.awaitIdentity(in: Data(#"{"id":1,"missing":}"#.utf8)))
+        var oversized = Data(#"{"id":1}"#.utf8)
+        oversized.append(Data(repeating: 0x20, count: AutomationLimits.maxFrameBytes))
+        XCTAssertNil(MCPRequestHandler.awaitIdentity(in: oversized))
     }
 
     #if canImport(CryptoKit)

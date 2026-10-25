@@ -55,7 +55,8 @@ final class MCPAwaitLifecycleTests: XCTestCase {
         let handler = MCPRequestHandler(client: client, version: "fixture")
         let dispatcher = MCPStdioDispatch(handler: handler, writeData: sink.write)
         let identifiers = ["true", "null", #"{"nested":1}"#, "1.25", "1.2500000000000001",
-                           "0.1", "0.10000000000000001"]
+                           "0.1", "0.10000000000000001", "1.0000000000000001", "1.00000000000000001",
+                           "-0.00000000000000000000000000000001", "1.0", "1e0"]
         for rawID in identifiers {
             // Preserve the original numeric token; JSONSerialization would round the precision pair.
             let data = Data("""
@@ -67,11 +68,41 @@ final class MCPAwaitLifecycleTests: XCTestCase {
             let response = try XCTUnwrap(handler.handle(line: line))
             let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(response.utf8)) as? [String: Any])
             XCTAssertNotNil(object["error"])
+            XCTAssertTrue(object["id"] is NSNull, "A rejected fraction must not reply with a rounded caller's ID")
         }
         dispatcher.close()
         XCTAssertEqual(count.value, 0)
         XCTAssertEqual(sink.lines.count, identifiers.count)
+        for line in sink.lines {
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: line) as? [String: Any])
+            XCTAssertTrue(object["id"] is NSNull)
+        }
         XCTAssertNil(MCPRequestHandler.awaitIdentity(in: Data(#"{"id":true}"#.utf8)))
+    }
+
+    func testInvalidFractionalCancellation_CannotCancelIntegerAwait() async throws {
+        let entered = expectation(description: "integer await owns transport")
+        let returned = expectation(description: "integer await cancelled by its exact owner")
+        let client = HeldMCPAwaitClient(entered: { entered.fulfill() }, returned: { returned.fulfill() })
+        let sink = MCPTestOutput()
+        let dispatcher = MCPStdioDispatch(handler: .init(client: client, version: "fixture"), writeData: sink.write)
+        defer { dispatcher.close() }
+        dispatcher.dispatch(try self.line(1))
+        guard await XCTWaiter.fulfillment(of: [entered], timeout: 2) == .completed else {
+            return XCTFail("Integer await did not register")
+        }
+        for rawID in ["1.0000000000000001", "1.00000000000000001", "1.0", "1e0"] {
+            dispatcher.dispatch(Data("""
+                {"method":"notifications/cancelled","params":{"requestId":\(rawID)}}
+                """.utf8))
+        }
+        XCTAssertEqual(client.cancellationCount, 0)
+        XCTAssertEqual(dispatcher.activeAwaitWorkerCount, 1)
+        dispatcher.dispatch(Data(#"{"method":"notifications/cancelled","params":{"requestId":1}}"#.utf8))
+        guard await XCTWaiter.fulfillment(of: [returned], timeout: 2) == .completed else {
+            return XCTFail("Exact integer cancellation did not settle")
+        }
+        XCTAssertEqual(client.cancellationCount, 1)
     }
 
     func testAwaitHandler_UsesCompleteTypedSocketIdentityAndStableRetries() throws {
@@ -195,6 +226,7 @@ private final class HeldMCPAwaitClient: CancellableAutomationRequesting, @unchec
         self.returned = returned
     }
     var legacyCommands: [AutomationCommand] { self.condition.withLock { self.commands } }
+    var cancellationCount: Int { self.condition.withLock { self.cancelled.count } }
     func send(_ request: AutomationRequest) throws -> AutomationResponse {
         self.condition.withLock { self.commands.append(request.command) }
         return .success(id: request.id, command: request.command, result: .init())

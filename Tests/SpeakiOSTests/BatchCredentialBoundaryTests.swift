@@ -33,7 +33,7 @@ final class BatchCredentialBoundaryTests: XCTestCase {
         XCTAssertTrue(StubURLProtocol.recordedRequests.isEmpty)
     }
 
-    func testUnsupportedDirectAndLocalFallbacks_RefuseBeforeKeyOrAudioRead() async {
+    func testUnsupportedDirectAndLocalFallbacks_RefuseBeforeSuppliedKeyValidationOrAudioRead() async {
         let session = StubURLProtocol.makeSession()
         defer { session.invalidateAndCancel(); StubURLProtocol.reset() }
         StubURLProtocol.handler = { _ in

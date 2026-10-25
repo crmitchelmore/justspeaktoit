@@ -90,7 +90,7 @@ struct IOSBatchTranscriptionClient {
         case .openRouter:
             // Unknown/manual IDs may resolve to a direct provider's stored key
             // even when iOS has no corresponding file route. Refuse that
-            // mismatch before reading a key or uploading audio to OpenRouter.
+            // mismatch before validating/using the supplied key or reading audio.
             guard case .apiKey(let identifier, _) = ModelCredentialResolver.requirement(
                 for: model, purpose: .batchTranscription
             ), identifier == ProviderCredentialCatalogue.apiKeyIdentifier(for: "openrouter") else {

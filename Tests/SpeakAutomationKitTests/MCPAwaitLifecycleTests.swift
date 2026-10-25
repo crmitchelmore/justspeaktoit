@@ -54,11 +54,14 @@ final class MCPAwaitLifecycleTests: XCTestCase {
         let client = ImmediateMCPAwaitClient(entered: { count.increment() })
         let handler = MCPRequestHandler(client: client, version: "fixture")
         let dispatcher = MCPStdioDispatch(handler: handler, writeData: sink.write)
-        let identifiers: [Any] = [true, NSNull(), ["nested": 1]]
-        for id in identifiers {
-            let data = try JSONSerialization.data(withJSONObject: ["jsonrpc": "2.0", "id": id,
-                "method": "tools/call", "params": ["name": "await_transcript",
-                    "arguments": ["capture_id": UUID().uuidString]]])
+        let identifiers = ["true", "null", #"{"nested":1}"#, "1.25", "1.2500000000000001",
+                           "0.1", "0.10000000000000001"]
+        for rawID in identifiers {
+            // Preserve the original numeric token; JSONSerialization would round the precision pair.
+            let data = Data("""
+                {"jsonrpc":"2.0","id":\(rawID),"method":"tools/call",
+                "params":{"name":"await_transcript","arguments":{"capture_id":"\(UUID().uuidString)"}}}
+                """.utf8)
             dispatcher.dispatch(data)
             let line = try XCTUnwrap(String(data: data, encoding: .utf8))
             let response = try XCTUnwrap(handler.handle(line: line))
@@ -67,7 +70,7 @@ final class MCPAwaitLifecycleTests: XCTestCase {
         }
         dispatcher.close()
         XCTAssertEqual(count.value, 0)
-        XCTAssertEqual(sink.lines.count, 3)
+        XCTAssertEqual(sink.lines.count, identifiers.count)
         XCTAssertNil(MCPRequestHandler.awaitIdentity(in: Data(#"{"id":true}"#.utf8)))
     }
 

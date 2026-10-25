@@ -23,10 +23,8 @@ extension MCPRequestHandler {
         case .string(let value)?: return "s:" + value
         case .integer(let value)?: return "n:" + String(value)
         case .unsigned(let value)?: return "n:" + String(value)
-        case .double(let value)? where value.isFinite && value.rounded(.towardZero) != value:
-            // Exact integers were decoded above. Reject integral Double fallback: an oversized
-            // integer can round into Int64.min or another caller's ID. Use a string for larger IDs.
-            return "n:" + String(value)
+        // Double decoding can merge distinct fractional or oversized integer IDs.
+        // Only the exact integer cases above may own an await or its cancellation.
         default: return nil
         }
     }

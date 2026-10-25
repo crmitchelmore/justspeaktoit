@@ -45,6 +45,17 @@ flatpak install --user -y --noninteractive --reinstall --bundle "$bundle"
 echo '== Flatpak Spawn portal (required by the sandboxed PNG loader)'
 timeout 60 flatpak run --command=flatpak-spawn "$app" --sandbox --watch-bus /usr/bin/true
 
+echo '== installed app command-line forwarding'
+if ! timeout 15 flatpak run "$app" --version; then
+  echo '== explicit executable argv diagnostic'
+  timeout 15 flatpak run --command=sh "$app" -ec '
+    printf "Explicit argv: %s\n" "$@"
+    exec /app/bin/justspeaktoit "$@"
+  ' sh --version
+  echo 'Default Flatpak command did not honour --version.' >&2
+  exit 1
+fi
+
 echo '== installed app self-test: resources, icons, recording codecs and adapters'
 timeout 180 flatpak run "$app" --self-test
 

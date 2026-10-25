@@ -101,6 +101,87 @@ final class ProductAnalyticsConsentConcurrencyTests: XCTestCase {
         XCTAssertFalse(isOpen)
     }
 
+    func testResetIdentity_PreservesConsentAndWaitsForAnActualEventToCreateNewIdentity() async throws {
+        let fixture = try Fixture()
+        try await fixture.controller.setConsent(.optedIn)
+        try await fixture.controller.capture(.appActiveDaily)
+        let previousIdentity = try XCTUnwrap(fixture.store.loadInstallationID())
+
+        try await fixture.controller.resetInstallationIdentity()
+
+        let consent = await fixture.controller.consentState()
+        let resetPayloads = await fixture.sink.payloads
+        XCTAssertEqual(consent, .optedIn)
+        XCTAssertEqual(try fixture.store.loadConsent(), .optedIn)
+        XCTAssertNil(try fixture.store.loadInstallationID())
+        XCTAssertTrue(resetPayloads.isEmpty)
+        try await fixture.controller.capture(.appActiveDaily)
+        XCTAssertNotEqual(try fixture.store.loadInstallationID(), previousIdentity)
+        let nextPayloads = await fixture.sink.payloads
+        XCTAssertEqual(nextPayloads.count, 1)
+    }
+
+    func testResetDuringSuspendedCapture_CannotReviveOldIdentityOrEvent() async throws {
+        let fixture = try Fixture()
+        try await fixture.prepareClosedConsentedSink()
+        let entered = expectation(description: "Capture is reopening")
+        let gate = SuspensionGate(entered: entered)
+        await fixture.sink.pauseNextReopen(at: gate)
+        let capture = Task { try await fixture.controller.capture(.appActiveDaily) }
+        await fulfillment(of: [entered], timeout: 2)
+
+        try await fixture.controller.resetInstallationIdentity()
+        await gate.release()
+        try await capture.value
+
+        XCTAssertNil(try fixture.store.loadInstallationID())
+        let payloads = await fixture.sink.payloads
+        XCTAssertTrue(payloads.isEmpty)
+    }
+
+    func testPolicyRefresh_DisablesImmediatelyWithoutAnotherCaptureAndRetainsConsent() async throws {
+        let fixture = try Fixture()
+        try await fixture.controller.setConsent(.optedIn)
+        try await fixture.controller.capture(.appActiveDaily)
+        fixture.killSwitch.value = true
+
+        try await fixture.controller.refreshCollectionPolicy()
+
+        XCTAssertNil(try fixture.store.loadInstallationID())
+        let consent = await fixture.controller.consentState()
+        let isOpen = await fixture.sink.isOpen
+        let payloads = await fixture.sink.payloads
+        XCTAssertEqual(consent, .optedIn)
+        XCTAssertFalse(isOpen)
+        XCTAssertTrue(payloads.isEmpty)
+        fixture.killSwitch.value = false
+        try await fixture.controller.refreshCollectionPolicy()
+        XCTAssertNil(try fixture.store.loadInstallationID())
+    }
+
+    func testFailedReset_CannotReopenUntilCleanupSucceeds() async throws {
+        let fixture = try Fixture()
+        try await fixture.controller.setConsent(.optedIn)
+        try await fixture.controller.capture(.appActiveDaily)
+        await fixture.sink.setPurgeFailure(true)
+        do {
+            try await fixture.controller.resetInstallationIdentity()
+            XCTFail("Expected cleanup failure")
+        } catch {}
+        do {
+            try await fixture.controller.capture(.appActiveDaily)
+            XCTFail("Capture must retry cleanup before reopening")
+        } catch {}
+        let closed = await fixture.sink.isOpen
+        let payloads = await fixture.sink.payloads
+        XCTAssertFalse(closed)
+        XCTAssertTrue(payloads.isEmpty)
+        await fixture.sink.setPurgeFailure(false)
+        try await fixture.controller.capture(.appActiveDaily)
+        let recovered = await fixture.sink.payloads
+        XCTAssertEqual(recovered.count, 1)
+    }
+
     func testRestoredConsent_ReopensSinkBeforeFirstCapture() async throws {
         let fixture = try Fixture(initialConsent: .optedIn)
 
@@ -172,6 +253,8 @@ private extension ProductAnalyticsConsentConcurrencyTests {
         var payloads: [ProductAnalyticsPayload] = []
         private var reopenGate: SuspensionGate?
         private var purgeGate: SuspensionGate?
+        private var purgeFails = false
+        func setPurgeFailure(_ fails: Bool) { purgeFails = fails }
 
         func pauseNextReopen(at gate: SuspensionGate) { reopenGate = gate }
         func pauseNextPurge(at gate: SuspensionGate) { purgeGate = gate }
@@ -191,6 +274,7 @@ private extension ProductAnalyticsConsentConcurrencyTests {
         func purge() async throws {
             isOpen = false
             payloads.removeAll()
+            if purgeFails { throw URLError(.cannotWriteToFile) }
             if let gate = purgeGate {
                 purgeGate = nil
                 await gate.pause()

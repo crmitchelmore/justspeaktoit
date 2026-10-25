@@ -83,6 +83,15 @@ CAPTURE_PID=""
 verify_capture_alive() {
     if ! kill -0 "$CAPTURE_PID" 2>/dev/null; then
         echo "❌ Output capture failed; launch cannot be verified"
+        # A blocked FIFO writer can still be alive. Stop only our child before
+        # reaping it for diagnostics; waiting first could hang the gate.
+        kill "$APP_PID" 2>/dev/null || true
+        for _ in {1..10}; do
+            if ! kill -0 "$APP_PID" 2>/dev/null; then break; fi
+            sleep 0.1
+        done
+        if kill -0 "$APP_PID" 2>/dev/null; then kill -9 "$APP_PID" 2>/dev/null || true; fi
+        collect_failure_diagnostics
         exit 1
     fi
 }

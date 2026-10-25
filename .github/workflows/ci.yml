@@ -566,6 +566,8 @@ jobs:
 
       - name: Test iOS App and Action Button Settings
         id: ios-tests
+        env:
+          TEST_RUNNER_JSTI_OWNED_SETTINGS_TARGET: ${{ env.JSTI_OWNED_SETTINGS_TARGET }}
         # The full log is kept: `tail` only shows the closing summary, which
         # names a failed test without the assertion that failed (issue #793).
         run: |

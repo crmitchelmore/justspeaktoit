@@ -7,6 +7,9 @@ import XCTest
 /// Alibaba validates configuration locally and has no balance HTTP transport.
 final class SettingsCredentialUITests: XCTestCase {
     override func setUpWithError() throws {
+        #if !DEBUG
+        throw XCTSkip("Credential UI qualification requires the DEBUG-only UUID CoreJourney bootstrap")
+        #endif
         continueAfterFailure = false
     }
 

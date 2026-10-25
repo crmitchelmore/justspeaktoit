@@ -7,26 +7,43 @@ final class SettingsCredentialUITests: XCTestCase {
         #if !targetEnvironment(simulator)
         throw XCTSkip("This credential qualification requires a fresh owned Simulator")
         #endif
+        // xcodebuild's documented TEST_RUNNER_ propagation supplies this only
+        // after CI creates a fresh owned device. Refuse manual/personal targets
+        // before constructing or launching the app (and therefore its vault).
+        let environment = ProcessInfo.processInfo.environment
+        guard let marker = environment["JSTI_OWNED_SETTINGS_TARGET"]?.data(using: .utf8),
+              let target = try? JSONDecoder().decode(OwnedSettingsTarget.self, from: marker),
+              target.version == 1,
+              target.owner.split(separator: ":", omittingEmptySubsequences: false).count == 3,
+              !target.owner.contains(where: { $0.isWhitespace }),
+              target.owner.split(separator: ":", omittingEmptySubsequences: false).allSatisfy({ !$0.isEmpty }),
+              target.runtime.hasPrefix("com.apple.CoreSimulator.SimRuntime."),
+              target.deviceType.hasPrefix("com.apple.CoreSimulator.SimDeviceType."),
+              let ownedID = UUID(uuidString: target.createdUUID),
+              let actual = environment["SIMULATOR_UDID"].flatMap({ UUID(uuidString: $0) }),
+              ownedID == actual else {
+            throw XCTSkip("Credential UI qualification requires the matching fresh job-owned Simulator receipt")
+        }
         continueAfterFailure = false
     }
 
     func testSyntheticAlibabaSettingsErrorRecoverySaveReplaceRelaunchAndRemove() throws {
         let app = XCUIApplication()
         addTeardownBlock { if app.state != .notRunning { app.terminate() } }
-        launch(app, region: "invalid-fixture-region")
+        try launch(app, region: "invalid-fixture-region")
         try openAlibaba(app)
         XCTAssertFalse(app.buttons["Clear Stored Key"].exists, "The fresh Simulator must have no Alibaba key")
         try save(app, value: "synthetic-alibaba-first", success: false)
         XCTAssertFalse(app.buttons["Clear Stored Key"].exists)
 
         app.terminate()
-        launch(app, region: "ap-southeast-1")
+        try launch(app, region: "ap-southeast-1")
         try openAlibaba(app)
         try save(app, value: "synthetic-alibaba-first", success: true)
         try save(app, value: "synthetic-alibaba-replacement", success: true)
 
         app.terminate()
-        launch(app, region: "ap-southeast-1")
+        try launch(app, region: "ap-southeast-1")
         try openAlibaba(app)
         let clear = app.buttons["Clear Stored Key"]
         XCTAssertTrue(clear.waitForExistence(timeout: 15), "Startup must load the saved row")
@@ -35,19 +52,19 @@ final class SettingsCredentialUITests: XCTestCase {
         try wait { !app.buttons["Clear Stored Key"].exists }
 
         app.terminate()
-        launch(app, region: "ap-southeast-1")
+        try launch(app, region: "ap-southeast-1")
         try openAlibaba(app)
         XCTAssertFalse(app.buttons["Clear Stored Key"].exists, "The deletion must survive startup")
         XCTAssertTrue(app.staticTexts["Missing"].exists)
     }
 
-    private func launch(_ app: XCUIApplication, region: String) {
+    private func launch(_ app: XCUIApplication, region: String) throws {
         app.launchArguments = [
             "-AppleLanguages", "(en)", "-AppleLocale", "en_GB", "-visualDensity", "normal",
             "-alibaba.newKey.region", region, "-alibaba.newKey.workspace", "synthetic-settings"
         ]
         app.launch()
-        XCTAssertTrue(app.buttons["settingsNavLink"].waitForExistence(timeout: 60))
+        try app.skipFirstRunForUITest(ready: app.buttons["settingsNavLink"])
     }
 
     private func openAlibaba(_ app: XCUIApplication) throws {
@@ -101,6 +118,14 @@ final class SettingsCredentialUITests: XCTestCase {
             XCTFail("The actual Settings control did not reach its expected state")
             throw SettingsTimeout()
         }
+    }
+
+    private struct OwnedSettingsTarget: Decodable {
+        let version: Int
+        let owner: String
+        let createdUUID: String
+        let runtime: String
+        let deviceType: String
     }
 
     private struct SettingsTimeout: Error {}

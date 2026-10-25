@@ -3,7 +3,7 @@ name: Linux Flatpak
 on:
   push:
     branches: [main]
-    paths: &paths
+    paths:
       - Package.swift
       - LICENSE
       - .gitattributes
@@ -30,8 +30,9 @@ on:
       - scripts/migration/migration_dependency.py
       - scripts/windows-local-runtime/dependencies.json
       - .github/workflows/linux-flatpak.yml
+      - Package.resolved
+      - .github/desktop-platform-paths.yml
   pull_request:
-    paths: *paths
   workflow_dispatch:
     inputs:
       qualification_run_id:
@@ -51,11 +52,54 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  desktop-paths:
+    name: Detect desktop-relevant changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      selected: ${{ steps.select.outputs.selected }}
+      mode: ${{ steps.select.outputs.mode }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Classify changed files
+        if: github.event_name == 'pull_request'
+        id: filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          filters: .github/desktop-platform-paths.yml
+      - name: Select an explicit boolean and qualification mode
+        id: select
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          SELECTED: ${{ steps.filter.outputs.linux-flatpak }}
+          SOURCE_RUN: ${{ inputs.qualification_run_id }}
+          SOURCE_SHA: ${{ inputs.qualification_source_sha }}
+        run: |
+          set -eu
+          case "$EVENT_NAME" in pull_request|push|workflow_dispatch) ;; *) exit 1 ;; esac
+          if [ "$EVENT_NAME" != "pull_request" ]; then SELECTED=true; fi
+          case "$SELECTED" in true|false) ;; *) exit 1 ;; esac
+          mode=build
+          if [ -n "$SOURCE_RUN$SOURCE_SHA" ]; then
+            [ "$EVENT_NAME" = workflow_dispatch ] || exit 1
+            [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]] || exit 1
+            [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+            mode=retest
+          fi
+          echo "selected=$SELECTED" >> "$GITHUB_OUTPUT"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+
   flatpak:
+    needs: desktop-paths
     name: Flatpak build, bundle and installed runtime
     # Bubblewrap/Flatpak require a privileged disposable hosted container.
     # Only repository-owned branches may execute in that context.
-    if: inputs.qualification_run_id == '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    if: needs.desktop-paths.outputs.selected == 'true' && needs.desktop-paths.outputs.mode == 'build' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50@sha256:1de59efef01a946d9f28f1ec3458bf6f61dcee3507d7fecdd473f8134da4ec77
@@ -131,8 +175,9 @@ jobs:
           if-no-files-found: error
 
   retest:
+    needs: desktop-paths
     name: Retest trusted installed Flatpak bundle
-    if: github.event_name == 'workflow_dispatch' && inputs.qualification_run_id != ''
+    if: needs.desktop-paths.outputs.selected == 'true' && needs.desktop-paths.outputs.mode == 'retest'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -224,3 +269,34 @@ jobs:
           name: justspeaktoit-flatpak-retest-x86_64
           path: flatpak-evidence/
           if-no-files-found: error
+
+  required-desktop:
+    name: Linux Flatpak gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+    permissions: {}
+    needs: [desktop-paths, flatpak, retest]
+    steps:
+      - name: Reject unsuccessful or missing selected work
+        if: >-
+          always() && (
+            needs.desktop-paths.result != 'success' ||
+            (github.event_name != 'pull_request' && needs.desktop-paths.outputs.selected != 'true') ||
+            (needs.desktop-paths.outputs.selected != 'true' && needs.desktop-paths.outputs.selected != 'false') ||
+            (needs.desktop-paths.outputs.mode != 'build' && needs.desktop-paths.outputs.mode != 'retest') ||
+            (needs.desktop-paths.outputs.mode == 'retest' && github.event_name != 'workflow_dispatch') ||
+            !(
+              (needs.desktop-paths.outputs.selected == 'false' && needs.flatpak.result == 'skipped' && needs.retest.result == 'skipped') ||
+              (needs.desktop-paths.outputs.selected == 'true' && needs.desktop-paths.outputs.mode == 'build' && needs.flatpak.result == 'success' && needs.retest.result == 'skipped') ||
+              (needs.desktop-paths.outputs.selected == 'true' && needs.desktop-paths.outputs.mode == 'retest' && needs.retest.result == 'success' && needs.flatpak.result == 'skipped')
+            )
+          )
+        env:
+          GATE_NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "::error::Flatpak qualification failed, was cancelled, or skipped unexpectedly."
+          printf '%s\n' "$GATE_NEEDS"
+          exit 1
+      - name: Confirm successful selected work
+        run: echo "Selected Flatpak qualification passed; explicit unrelated-path exclusions may skip."

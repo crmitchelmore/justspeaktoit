@@ -49,53 +49,9 @@ on:
       - packaging/linux/**
       - .github/workflows/linux.yml
       - .github/workflows/linux-local-runtime.yml
+      - Package.resolved
+      - .github/desktop-platform-paths.yml
   pull_request:
-    paths:
-      - .gitattributes
-      - Package.swift
-      - Resources/AppIcon.iconset/**
-      - scripts/generate-desktop-icons.py
-      - scripts/stage-linux-desktop.py
-      - scripts/tests/test_desktop_icons.py
-      - scripts/tests/test_linux_automation_staging.py
-      - Sources/CLinuxAutomation/**
-      - Sources/SpeakLinuxAutomation/**
-      - Sources/SpeakAutomationKit/**
-      - Sources/SpeakCLI/**
-      - Tests/SpeakLinuxAutomationTests/**
-      - Tests/SpeakAutomationKitTests/**
-      - Sources/SpeakCore/**
-      - Sources/SpeakDesktop/**
-      - Sources/CLlamaCpp/**
-      - Sources/CMigrationArchive/**
-      - Sources/CRecordingFileSupport/**
-      - Sources/SpeakDesktopHost/**
-      - Sources/SpeakDesktopSync/**
-      - Sources/SpeakSync/**
-      - Sources/SpeakLinux/**
-      - Sources/SpeakLinuxPlatform/**
-      - Sources/SpeakLinuxWebSocket/**
-      - Sources/CLinuxSupport/**
-      - Sources/CLinuxSystem/**
-      - Sources/SpeakWindows/**
-      - Sources/SpeakWindowsPlatform/**
-      - Tests/SpeakDesktopHostTests/**
-      - Tests/SpeakDesktopSyncTests/**
-      - Tests/SpeakSyncTests/**
-      - Tests/SpeakTestSupport/**
-      - Tests/SpeakLinuxPlatformTests/**
-      - Tests/SpeakLinuxWebSocketTests/**
-      - Tests/SpeakDesktopTests/**
-      - Tests/SpeakPortableTests/**
-      - scripts/linux-*
-      - scripts/linux-local-runtime/**
-      - scripts/windows-local-runtime/**
-      - Sources/CWindowsSupport/whisper-cpp/**
-      - scripts/typecheck-windows-swift.sh
-      - scripts/verify-portable-core-boundary.py
-      - packaging/linux/**
-      - .github/workflows/linux.yml
-      - .github/workflows/linux-local-runtime.yml
   workflow_dispatch:
 
 permissions:
@@ -106,7 +62,40 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  desktop-paths:
+    name: Detect desktop-relevant changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      selected: ${{ steps.select.outputs.selected }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Classify changed files
+        if: github.event_name == 'pull_request'
+        id: filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # existing CI v4.0.3 pin
+        with:
+          filters: .github/desktop-platform-paths.yml
+      - name: Select an explicit boolean
+        id: select
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          SELECTED: ${{ steps.filter.outputs.linux-desktop }}
+        run: |
+          set -eu
+          case "$EVENT_NAME" in pull_request|push|workflow_dispatch) ;; *) exit 1 ;; esac
+          if [ "$EVENT_NAME" != "pull_request" ]; then SELECTED=true; fi
+          case "$SELECTED" in true|false) ;; *) exit 1 ;; esac
+          echo "selected=$SELECTED" >> "$GITHUB_OUTPUT"
+
   local-runtime:
+    needs: desktop-paths
+    if: needs.desktop-paths.outputs.selected == 'true'
     uses: ./.github/workflows/linux-local-runtime.yml
 
   linux-desktop:
@@ -232,3 +221,29 @@ jobs:
           name: linux-ui-screenshots
           path: ${{ runner.temp }}/linux-ui-screenshots
           if-no-files-found: ignore
+
+  required-desktop:
+    name: Linux desktop gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+    permissions: {}
+    needs: [desktop-paths, local-runtime, linux-desktop]
+    steps:
+      - name: Reject unsuccessful or missing selected work
+        if: >-
+          always() && (
+            needs.desktop-paths.result != 'success' ||
+            (github.event_name != 'pull_request' && needs.desktop-paths.outputs.selected != 'true') ||
+            (needs.desktop-paths.outputs.selected != 'true' && needs.desktop-paths.outputs.selected != 'false') ||
+            (needs.local-runtime.result != 'success' && !(needs.desktop-paths.outputs.selected == 'false' && needs.local-runtime.result == 'skipped')) ||
+            (needs.linux-desktop.result != 'success' && !(needs.desktop-paths.outputs.selected == 'false' && needs.linux-desktop.result == 'skipped'))
+          )
+        env:
+          GATE_NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "::error::A desktop gate failed, was cancelled, or skipped unexpectedly."
+          printf '%s\n' "$GATE_NEEDS"
+          exit 1
+      - name: Confirm successful selected work
+        run: echo "Selected platform jobs passed; explicit unrelated-path exclusions may skip."

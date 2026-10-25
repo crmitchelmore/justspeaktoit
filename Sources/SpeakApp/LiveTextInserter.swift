@@ -16,6 +16,8 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
     case applied
     case deferred
     case failed(Error)
+    case redirected(TextOutputTarget)
+    case clipboard(TextOutputError)
   }
 
   /// How live text reaches the target app during a session.
@@ -96,6 +98,11 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
   /// before reading it back. Shortened by tests, which have no real app to wait for.
   var streamingVerificationDelay: TimeInterval = 0.05
 
+  /// Injectable focus observations keep routing tests independent of the desktop.
+  var appSwitchDecisionProvider: ((TextOutputTarget) -> SmartTextOutput.AppSwitchDecision)?
+  var redirectedTargetProvider: (() -> TextOutputTarget)?
+  private var writeBlockedByAppSwitch = false
+
   var shouldUseLiveFinalization: Bool {
     isActive && !usingClipboardFallback
   }
@@ -128,6 +135,7 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
     isActive = true
     lastError = nil
     self.target = target ?? .capture()
+    writeBlockedByAppSwitch = false
     let targetApp = self.target?.applicationName ?? "unknown"
     let strategyName = String(describing: strategy)
     logger.info(
@@ -169,6 +177,7 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
     guard !usingClipboardFallback else { return }
     guard !shouldPauseIncrementalUpdates else { return }
     guard !newText.isEmpty else { return }
+    guard capturedTargetAllowsWrite() else { return }
 
     // Calculate what's new since last confirmed insertion
     let trimmedNew = newText.trimmingCharacters(in: .whitespaces)
@@ -197,18 +206,50 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
   /// Apply final polished text - replaces what was inserted with polished version
   func applyPolishedFinal(_ polishedText: String) -> FinalizationResult {
     guard shouldUseLiveFinalization else { return .deferred }
-
+    writeBlockedByAppSwitch = false
+    if let result = appSwitchFinalizationOverride() { return result }
+    let result: FinalizationResult
     if self.strategy == .rangedStreaming {
-      return streamingFinalize(with: polishedText)
-    }
-
-    guard !insertedText.isEmpty else {
+      result = streamingFinalize(with: polishedText)
+    } else if insertedText.isEmpty {
       // Nothing was inserted live, just do normal insertion
-      return insertFresh(polishedText)
+      result = insertFresh(polishedText)
+    } else {
+      result = replaceInsertedText(with: polishedText)
     }
+    guard writeBlockedByAppSwitch else { return result }
+    // Focus changed during AX reads. A pinned redirect may proceed, but if
+    // focus raced back, copy instead of pasting a second copy over partial text.
+    return appSwitchFinalizationOverride() ?? .clipboard(.destinationApplicationChanged)
+  }
 
-    // Replace the live-inserted text with the polished version
-    return replaceInsertedText(with: polishedText)
+  private func appSwitchDecision(for target: TextOutputTarget) -> SmartTextOutput.AppSwitchDecision {
+    appSwitchDecisionProvider?(target)
+      ?? SmartTextOutput.currentAppSwitchDecision(policy: appSettings.appSwitchDelivery, target: target)
+  }
+
+  private func capturedTargetAllowsWrite() -> Bool {
+    guard let target else { return false }
+    if case .deliverToOriginal = appSwitchDecision(for: target) { return true }
+    writeBlockedByAppSwitch = true
+    return false
+  }
+
+  private func appSwitchFinalizationOverride() -> FinalizationResult? {
+    guard let target else { return nil }
+    switch appSwitchDecision(for: target) {
+    case .deliverToOriginal: return nil
+    case .keepOnClipboard: return .clipboard(.originalApplicationNotInFront(target.applicationName))
+    case .deliverToCurrentApp:
+      var destination = redirectedTargetProvider?() ?? TextOutputTarget.capture()
+      // Returning to the original field can still finalize its owned region.
+      if destination.processIdentifier == target.processIdentifier { return nil }
+      guard SmartTextOutput.isUsableRedirectDestination(processIdentifier: destination.processIdentifier) else {
+        return .clipboard(.destinationApplicationChanged)
+      }
+      destination.requiresFrontmostAtDelivery = true
+      return .redirected(destination)
+    }
   }
 
   // MARK: - Private Methods
@@ -281,6 +322,7 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
       newValue = insertedText + text
     }
 
+    guard capturedTargetAllowsWrite() else { return }
     let setResult = AXUIElementSetAttributeValue(
       focusedElement, kAXValueAttribute as CFString, newValue as CFTypeRef
     )
@@ -348,6 +390,7 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
       insertedLocation = 0
     }
 
+    guard capturedTargetAllowsWrite() else { return .deferred }
     let setResult = AXUIElementSetAttributeValue(
       focusedElement, kAXValueAttribute as CFString, finalValue as CFTypeRef
     )
@@ -391,6 +434,7 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
       newValue = text
     }
 
+    guard capturedTargetAllowsWrite() else { return .deferred }
     let setResult = AXUIElementSetAttributeValue(
       focusedElement, kAXValueAttribute as CFString, newValue as CFTypeRef
     )
@@ -604,6 +648,7 @@ extension LiveTextInserter {
       location: anchor + diff.replaceLocationUTF16,
       length: diff.replaceLengthUTF16 + self.streamingPendingSelectionUTF16
     )
+    guard capturedTargetAllowsWrite() else { return false }
     let rangeStatus = field.setSelectedRange(range)
     guard rangeStatus == .success else {
       abandonStreaming(
@@ -613,12 +658,15 @@ extension LiveTextInserter {
       return false
     }
 
+    guard capturedTargetAllowsWrite() else { return false }
     let insertStatus = field.setSelectedText(diff.replacement)
     guard insertStatus == .success else {
       // The selection landed but the replacement did not: leaving the user's
       // text highlighted would make their next keystroke delete it, so collapse
       // back to a caret at the region start before giving up.
-      _ = field.setSelectedRange(CFRange(location: range.location, length: 0))
+      if capturedTargetAllowsWrite() {
+        _ = field.setSelectedRange(CFRange(location: range.location, length: 0))
+      }
       abandonStreaming(
         reason: "replacing selected text failed (AXError \(insertStatus.rawValue))",
         error: TextOutputError.unableToSetValue(insertStatus)

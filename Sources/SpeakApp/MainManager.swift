@@ -1252,9 +1252,14 @@ final class MainManager: ObservableObject {
           range: liveTextInserter.lastInsertedRange,
           target: session.outputTarget
         )
-      case .deferred:
+      case .deferred, .redirected, .clipboard:
         let output = SmartTextOutput(permissionsManager: permissionsManager, appSettings: appSettings)
-        let outputResult = output.output(text: finalText, target: session.outputTarget)
+        let outputResult: TextOutputResult
+        switch liveFinalizationResult {
+        case .redirected(let target): outputResult = output.output(text: finalText, target: target)
+        case .clipboard(let error): outputResult = SmartTextOutput.keepOnClipboard(text: finalText, error: error)
+        default: outputResult = output.output(text: finalText, target: session.outputTarget)
+        }
         outputWarning = outputResult.warning
         focusMovedToOtherApplication = outputResult.focusMovedToOtherApplication
         deliveryTarget = outputResult.redirectedTarget ?? session.outputTarget

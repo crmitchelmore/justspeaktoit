@@ -207,7 +207,7 @@ private final class PolishJourney {
     }
 
     private func registerCleanup(suite: String) {
-        let previous = NSPasteboard.general.pasteboardItems?.map { item in
+        let previous: [NSPasteboardItem] = NSPasteboard.general.pasteboardItems?.map { item in
             let copy = NSPasteboardItem()
             for type in item.types { if let data = item.data(forType: type) { copy.setData(data, forType: type) } }
             return copy

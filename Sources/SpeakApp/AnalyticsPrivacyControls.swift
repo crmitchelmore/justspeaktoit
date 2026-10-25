@@ -17,6 +17,14 @@ final class AnalyticsPrivacyControls: ObservableObject {
     private let sink: PostHogProductAnalyticsSink
     private var revision = UUID()
 
+    var collectionLabel: String {
+        guard let snapshot else { return "Loading…" }
+        if snapshot.isDisabled {
+            return policy.isBuildDisabled ? "Disabled by build or launch policy" : "Disabled by local override"
+        }
+        return snapshot.isOpen && consent.permitsCollection ? "Enabled" : "Closed"
+    }
+
     init(controller: ProductAnalyticsController, sink: PostHogProductAnalyticsSink, policy: AnalyticsLocalPolicy) {
         self.controller = controller
         self.sink = sink

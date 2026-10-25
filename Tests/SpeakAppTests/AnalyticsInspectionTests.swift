@@ -76,6 +76,9 @@ final class AnalyticsInspectionTests: XCTestCase {
         let initial = await restored.sink.inspectionSnapshot()
         XCTAssertEqual(initial.records.count, 1)
         XCTAssertEqual(initial.queueDepth, 1)
+        let exported = try XCTUnwrap(JSONSerialization.jsonObject(with: initial.exportData()) as? [String: Any])
+        XCTAssertEqual(exported["scope"] as? String, AnalyticsInspectionSnapshot.historyScope)
+        XCTAssertTrue(AnalyticsInspectionSnapshot.historyScope.contains("earlier launches"))
         XCTAssertTrue(restored.recorder.requests.isEmpty)
         clock.advance(by: 8 * 24 * 60 * 60)
         let expired = await restored.sink.inspectionSnapshot()
@@ -140,9 +143,18 @@ final class AnalyticsInspectionTests: XCTestCase {
         try await fixture.sink.purge()
     }
 
-    func testEndpointInspection_StripsUserInfoQueryAndFragment() {
-        let url = URL(string: "https://user:SECRET@example.test/capture?token=SECRET#SECRET")!
-        XCTAssertEqual(AnalyticsInspectionSnapshot.sanitizedEndpoint(url), "https://example.test/capture")
+    func testEndpointInspectionAndExport_ExcludeCredentialsIncludingProxyPathWithoutChangingTransport() async throws {
+        let url = URL(string: "https://user:SECRET@example.test/proxy/PATH_TOKEN/capture?token=SECRET#SECRET")!
+        let fixture = InspectionFixture(endpoint: url)
+        try await fixture.sink.reopen()
+        try await fixture.sink.capture(fixture.payload())
+        let snapshot = await fixture.sink.inspectionSnapshot()
+        XCTAssertEqual(snapshot.endpoint, "https://example.test")
+        let exported = try XCTUnwrap(String(data: snapshot.exportData(), encoding: .utf8))
+        XCTAssertFalse(exported.contains("PATH_TOKEN"))
+        XCTAssertFalse(exported.contains("SECRET"))
+        XCTAssertEqual(fixture.recorder.requests.first?.url?.path, url.path, "Transport retains its configured proxy path")
+        await fixture.sink.close()
     }
 }
 
@@ -160,7 +172,8 @@ private struct InspectionFixture {
         queueURL: URL? = nil,
         now: @escaping @Sendable () -> Date = { Date() },
         retryDelays: [Duration] = [],
-        forceDisabled: @escaping @Sendable () -> Bool = { false }
+        forceDisabled: @escaping @Sendable () -> Bool = { false },
+        endpoint: URL = URL(string: "https://eu.i.posthog.com/capture")!
     ) {
         self.recorder = recorder
         self.queueURL = queueURL ?? FileManager.default.temporaryDirectory
@@ -171,7 +184,7 @@ private struct InspectionFixture {
         self.sink = PostHogProductAnalyticsSink(
             queueURL: self.queueURL,
             session: URLSession(configuration: configuration),
-            configuration: (projectKey: Self.keySentinel, endpoint: URL(string: "https://eu.i.posthog.com/capture")!),
+            configuration: (projectKey: Self.keySentinel, endpoint: endpoint),
             now: now,
             retryDelays: retryDelays,
             forceDisabled: forceDisabled

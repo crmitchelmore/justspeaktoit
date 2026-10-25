@@ -3,6 +3,7 @@ import SpeakCore
 import SpeakiOSLib
 import SpeakSync
 import UIKit
+import UserNotifications
 
 /// Calls a background-fetch completion handler exactly once, whichever of the
 /// reconciliation and its time bound gets there first. Calling it twice is a
@@ -23,7 +24,7 @@ private final class OneShotBackgroundFetchCompletion {
     }
 }
 
-final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate {
+final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     /// Well inside iOS's background-notification allowance, and far longer
     /// than a routine incremental sync needs.
     static let historyPushCompletionBudget: TimeInterval = 20
@@ -35,6 +36,8 @@ final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate {
         // A new app process cannot own the previous process's recording. Reset
         // before launch actions can start a session, never on foreground entry.
         SharedTranscriptionState.shared.clearRecordingState()
+        UNUserNotificationCenter.current().delegate = self
+        Task { await TranscriptReadyNotificationRoute.registerCategory() }
         application.registerForRemoteNotifications()
         // Watch file transfers launch the app in the background; the session
         // must be activated during launch so queued captures are delivered.
@@ -94,6 +97,32 @@ final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate {
         completionHandler: @escaping (Bool) -> Void
     ) {
         completionHandler(handleQuickAction(shortcutItem, application: application))
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        // Generic completion notices are background-only. Unrelated notifications
+        // retain the preexisting default (no foreground presentation).
+        completionHandler([])
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let content = response.notification.request.content
+        Task { @MainActor in
+            _ = TranscriptReadyNotificationRoute.openHistory(
+                category: content.categoryIdentifier,
+                action: response.actionIdentifier,
+                userInfo: content.userInfo
+            )
+            completionHandler()
+        }
     }
 
     private func handleQuickAction(_ shortcutItem: UIApplicationShortcutItem, application: UIApplication) -> Bool {

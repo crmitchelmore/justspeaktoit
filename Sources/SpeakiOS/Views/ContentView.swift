@@ -859,6 +859,7 @@ public struct ContentView: View {
     @State private var presentedSessionError: UUID?
     @State private var copied = false
     @State private var showingPostProcessing = false
+    @ObservedObject private var historyRouter = DeepLinkRouter.shared
     @State private var displayText = ""  // Text shown in UI (may be post-processed)
     @Namespace private var controlsNamespace
 
@@ -1128,6 +1129,14 @@ public struct ContentView: View {
                 Button("Not now", role: .cancel) {}
             } message: {
                 Text(recovery.recoverable.first.map(recovery.promptMessage) ?? "")
+            }
+            .navigationDestination(isPresented: Binding(
+                get: { self.historyRouter.pendingHistoryID != nil },
+                set: { if !$0 { self.historyRouter.pendingHistoryID = nil } }
+            )) {
+                if let identifier = self.historyRouter.pendingHistoryID {
+                    IdentifiedHistoryView(identifier: identifier)
+                }
             }
             .onChange(of: coordinator.error?.localizedDescription) { _, newError in
                 if let error = newError {

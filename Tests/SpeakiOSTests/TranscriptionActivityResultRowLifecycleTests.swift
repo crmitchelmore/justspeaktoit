@@ -7,6 +7,25 @@ import XCTest
 // completed row's state, the Copy receipt bound to its completion, and the
 // provider a run publishes while its first write is still in flight.
 extension TranscriptionActivityLifecycleTests {
+    func testMatchingActiveResult_UsesSubmittedCompletionAndNeverAnUnrelatedOrReusedRun() async {
+        let activity = FakeActivity()
+        let manager = makeManager(activity)
+        XCTAssertTrue(manager.startActivity(provider: "First"))
+        XCTAssertFalse(manager.hasActiveResult(completionID: "first"))
+        manager.completeActivity(
+            finalWordCount: 1, duration: 1, keepPrimed: true,
+            completionOutcome: .ready, resultCompletionID: "first"
+        )
+        XCTAssertTrue(manager.hasActiveResult(completionID: "first"), "Submitted state may precede ActivityKit content")
+        XCTAssertFalse(manager.hasActiveResult(completionID: "unrelated"))
+        XCTAssertFalse(manager.hasActiveResult(completionID: ""))
+        XCTAssertTrue(manager.startActivity(provider: "Second"))
+        XCTAssertFalse(manager.hasActiveResult(completionID: "first"))
+        manager.endActivity()
+        XCTAssertFalse(manager.hasActiveResult(completionID: "first"))
+        await drainTasks()
+    }
+
     func testCompletionOutcomePublishesResultRowAndCopyMarksOnlyThatCompletion() async {
         let activity = FakeActivity()
         let manager = makeManager(activity)

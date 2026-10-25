@@ -54,6 +54,33 @@ final class HistoryManagerPersistenceTests: XCTestCase {
 
     // MARK: - Tests
 
+    func testNotificationClaimsRetireOnlyAfterDurableLocalDeletionOrClear() throws {
+        let first = makeItem("First")
+        let second = makeItem("Second")
+        try writeHistory([first, second])
+        var blocked = true
+        var retired: [Set<UUID>] = []
+        let manager = iOSHistoryManager(
+            fileURL: fileURL, syncEnabled: false,
+            storageIO: .init(write: { data, url in
+                if blocked { throw CocoaError(.fileWriteNoPermission) }
+                try data.write(to: url, options: .atomic)
+            }),
+            removeNotificationClaims: { retired.append($0) }
+        )
+        manager.remove(first)
+        manager.clearAll()
+        XCTAssertTrue(retired.isEmpty)
+        XCTAssertEqual(Set(manager.items.map(\.id)), [first.id, second.id])
+        blocked = false
+        manager.retryPersistence()
+        XCTAssertTrue(manager.isStorageReady)
+        manager.remove(first)
+        XCTAssertEqual(retired, [[first.id]])
+        manager.clearAll()
+        XCTAssertEqual(retired, [[first.id], [second.id]])
+    }
+
     func testColdManagerLoadsExistingHistoryImmediately() throws {
         // Arrange: a prior recording already on disk.
         try writeHistory([makeItem("hello there")])

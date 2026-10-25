@@ -16,6 +16,27 @@ if [ "${JSTI_FLATPAK_CHECK_SESSION:-}" != 1 ]; then
     dbus-run-session -- "$0" "$@"
   exit
 fi
+
+# The builder image strips D-Bus activation files to stay small. Start the real
+# host Flatpak portal explicitly, just as a desktop session would activate it.
+portal_pid=
+portal_log=$(mktemp)
+cleanup_portal() {
+  if [ -n "$portal_pid" ]; then kill "$portal_pid" 2>/dev/null || true; wait "$portal_pid" 2>/dev/null || true; fi
+  cat "$portal_log"
+  rm -f "$portal_log"
+}
+trap cleanup_portal EXIT
+for portal in /app/libexec/flatpak-portal /usr/libexec/flatpak-portal /usr/lib/flatpak/flatpak-portal; do
+  if [ -x "$portal" ]; then
+    "$portal" --no-idle-exit >"$portal_log" 2>&1 &
+    portal_pid=$!
+    break
+  fi
+done
+[ -n "$portal_pid" ] || { echo 'The host flatpak-portal executable is required.' >&2; exit 1; }
+gdbus wait --session --timeout 15 org.freedesktop.portal.Flatpak
+
 command -v xvfb-run >/dev/null
 flatpak install --user -y --noninteractive --reinstall --bundle "$bundle"
 

@@ -19,12 +19,19 @@ struct AnalyticsInspectorView: View {
   @Environment(\.dismiss) private var dismiss
   @State private var selection: UUID?
 
+  init(controls: AnalyticsPrivacyControls, selection: UUID? = nil) {
+    self.controls = controls
+    self._selection = State(initialValue: selection)
+  }
+
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
       HStack {
         Text("Analytics Inspector").font(.title2.bold())
         Spacer()
-        if controls.isBusy { ProgressView().controlSize(.small) }
+        if controls.isBusy {
+          ProgressView().controlSize(.small).accessibilityLabel("Updating analytics privacy controls")
+        }
         Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
       }
       Group {

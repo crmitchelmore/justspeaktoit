@@ -22,7 +22,9 @@ manifest = {
     'modules': [{'name': 'argv-probe', 'buildsystem': 'simple', 'build-commands': [
         'swift --version', 'mkdir -p /app/bin',
         'swiftc main.swift -o /app/bin/probe-dynamic',
-        'swiftc -static-stdlib main.swift -o /app/bin/probe-static'],
+        'swiftc -static-stdlib main.swift -o /app/bin/probe-static',
+        "sh -c '/app/bin/probe-dynamic --version; result=$?; echo dynamic-exit:$result; exit 0'",
+        "sh -c '/app/bin/probe-static --version; result=$?; echo static-exit:$result; exit 0'"],
         'sources': [{'type': 'file', 'path': 'main.swift'}]}],
 }
 (root / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')

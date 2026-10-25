@@ -86,18 +86,34 @@ public struct HistoryRecord: Codable, Identifiable, Hashable, Sendable {
         self.errorMessage = errorMessage
     }
 
-    /// iOS's explicit primary model selects its original single-model presentation,
-    /// even when a synced entry's originPlatform is macos. Mac records retain usage fallback.
+    /// Native records keep their original platform's presentation choices.
     public var presentation: HistoryPresentationItem {
+        if self.model != nil { return self.iosPresentation }
+        return self.makePresentation(
+            raw: self.rawTranscription,
+            models: self.modelUsages.isEmpty ? self.modelsUsed : self.modelUsages.map(\.modelIdentifier),
+            cost: self.cost?.total ?? 0, errors: self.errors.count
+        )
+    }
+
+    /// An iOS display adapter may retain a richer source without adopting its
+    /// multi-model/cost/capture-error presentation. Local errors remain filterable.
+    public var iosPresentation: HistoryPresentationItem {
+        self.makePresentation(
+            raw: self.rawTranscription ?? "",
+            models: [self.model ?? self.modelUsages.first?.modelIdentifier ?? self.modelsUsed.first ?? ""],
+            cost: 0, errors: self.errorMessage == nil ? 0 : 1
+        )
+    }
+
+    private func makePresentation(
+        raw: String?, models: [String], cost: Decimal, errors: Int
+    ) -> HistoryPresentationItem {
         HistoryPresentationItem(
             id: self.id, createdAt: self.createdAt,
-            rawTranscription: self.rawTranscription, processedTranscription: self.postProcessedTranscription,
-            modelIdentifiers: self.model.map { [$0] }
-                ?? (self.modelUsages.isEmpty ? self.modelsUsed : self.modelUsages.map(\.modelIdentifier)),
-            recordingDuration: self.recordingDuration,
-            cost: self.model == nil ? self.cost?.total ?? 0 : 0,
-            errorCount: self.model == nil ? self.errors.count : (self.errorMessage == nil ? 0 : 1),
-            originPlatform: self.originPlatform
+            rawTranscription: raw, processedTranscription: self.postProcessedTranscription,
+            modelIdentifiers: models, recordingDuration: self.recordingDuration,
+            cost: cost, errorCount: errors, originPlatform: self.originPlatform
         )
     }
 

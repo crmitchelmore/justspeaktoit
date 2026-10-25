@@ -54,7 +54,7 @@ final class HistoryRecordAdapterTests: XCTestCase {
         let record = self.richRecord()
         let adapter = iOSHistoryItem(historyRecord: record)
         XCTAssertEqual(adapter.historyRecord, record)
-        XCTAssertEqual(adapter.presentationItem, record.presentation)
+        XCTAssertEqual(adapter.presentationItem, record.iosPresentation)
         XCTAssertEqual(adapter.transcription, "", "The String display adapter must retain a nil raw source separately")
         let polished = adapter.withError("Synthetic retry").withPostProcessed("Polished", updatedAt: self.date)
         XCTAssertNil(polished.errorMessage)
@@ -72,6 +72,27 @@ final class HistoryRecordAdapterTests: XCTestCase {
         XCTAssertNotEqual(reloaded.historyRecord, record, "Legacy iOS persistence does not promise rich retention")
     }
 
+    func testRichDisplayPresentation_LocalErrorsStayFilterableWithoutDiscardingRichFields() {
+        let record = self.richRecord()
+        let adapter = iOSHistoryItem(historyRecord: record)
+        XCTAssertEqual(adapter.presentationItem.modelIdentifiers, ["legacy/model"])
+        XCTAssertEqual(adapter.presentationItem.rawTranscription, "")
+        XCTAssertEqual(adapter.presentationItem.cost, 0)
+        XCTAssertEqual(adapter.presentationItem.errorCount, 0)
+        let errored = adapter.withError("Local display error")
+        XCTAssertEqual(errored.presentationItem.errorCount, 1)
+        XCTAssertTrue(HistorySearchQuery(includeErrorsOnly: true).matches(errored.presentationItem))
+        XCTAssertEqual(errored.historyRecord.modelsUsed, ["legacy/model", "other/model"])
+        XCTAssertNil(errored.historyRecord.model)
+        XCTAssertEqual(errored.historyRecord.cost, record.cost)
+        XCTAssertEqual(errored.historyRecord.networkExchanges, record.networkExchanges)
+        XCTAssertTrue(errored.historyRecord.errors.isEmpty)
+        let captureErrors = self.richRecord(errors: [.init(phase: .output, message: "Capture diagnostic")])
+        let diagnosticAdapter = iOSHistoryItem(historyRecord: captureErrors)
+        XCTAssertEqual(diagnosticAdapter.presentationItem.errorCount, 0)
+        XCTAssertEqual(diagnosticAdapter.historyRecord.errors.count, 1)
+    }
+
     func testLocalRecordAndError_DoNotExpandNineFieldSyncDisclosure() throws {
         let adapter = iOSHistoryItem(historyRecord: self.richRecord()).withError("Private local error")
         let encoded = try self.encoder().encode(adapter.toSyncable())
@@ -87,9 +108,9 @@ final class HistoryRecordAdapterTests: XCTestCase {
         XCTAssertNil(iOSHistoryItem.fromSyncable(adapter.toSyncable()).errorMessage)
     }
 
-    private func richRecord() -> HistoryRecord {
+    private func richRecord(errors: [ApplicationHistoryError] = []) -> HistoryRecord {
         HistoryRecord(
-            createdAt: self.date, updatedAt: self.date, modelsUsed: ["legacy/model"],
+            createdAt: self.date, updatedAt: self.date, modelsUsed: ["legacy/model", "other/model"],
             rawTranscription: nil, postProcessedTranscription: "", recordingDuration: 3,
             cost: .init(total: 0.25, currency: "USD"),
             audioFileURL: URL(string: "file:///synthetic-local/recording.wav"),
@@ -98,7 +119,7 @@ final class HistoryRecordAdapterTests: XCTestCase {
                 requestHeaders: [:], requestBodyPreview: "Private request", responseCode: 200,
                 responseHeaders: [:], responseBodyPreview: "Private response"
             )],
-            desktopHistory: AnyCodable(.object(["local": .string("Private metadata")]))
+            errors: errors, desktopHistory: AnyCodable(.object(["local": .string("Private metadata")]))
         )
     }
 

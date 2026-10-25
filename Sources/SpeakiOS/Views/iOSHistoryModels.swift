@@ -143,7 +143,7 @@ extension iOSHistoryItem {
         self.updatedAt = record.updatedAt
         self.transcription = record.rawTranscription ?? ""
         self.postProcessedTranscription = record.postProcessedTranscription
-        self.model = record.model ?? record.modelUsages.first?.modelIdentifier ?? record.modelsUsed.first ?? ""
+        self.model = record.iosPresentation.modelIdentifiers.first ?? ""
         self.duration = record.recordingDuration
         self.wordCount = record.wordCount ?? record.presentation.wordCount
         self.originPlatform = record.originPlatform
@@ -160,6 +160,6 @@ extension iOSHistoryItem {
         )
     }
 
-    var presentationItem: HistoryPresentationItem { self.historyRecord.presentation }
+    var presentationItem: HistoryPresentationItem { self.historyRecord.iosPresentation }
 }
 #endif

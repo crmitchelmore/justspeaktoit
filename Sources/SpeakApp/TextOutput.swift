@@ -253,10 +253,10 @@ enum TextOutputError: LocalizedError {
       return "The focused field changed since recording started. "
         + "The transcript was kept on the clipboard."
     case .originalApplicationNotInFront(let name):
-      return "You'd switched away from \(name ?? "the app where recording started"), so nothing was inserted. "
+      return "You'd switched away from \(name ?? "the app where recording started") before final delivery. "
         + "The transcript was kept on the clipboard."
     case .destinationApplicationChanged:
-      return "You switched apps again before the transcript could be inserted, so nothing was inserted. "
+      return "You switched apps again before final delivery. "
         + "The transcript was kept on the clipboard."
     }
   }
@@ -610,15 +610,17 @@ struct SmartTextOutput: TextOutputting {
     guard let target else {
       return deliver(text: text, target: nil)
     }
-    let frontmostProcessIdentifier = NSWorkspace.shared.frontmostApplication?.processIdentifier
-    let decision = Self.appSwitchDecision(
-      policy: appSettings.appSwitchDelivery,
-      capturedApplicationIsFrontmost: target.capturedApplicationIsFrontmost(
-        frontmostProcessIdentifier: frontmostProcessIdentifier
-      ),
-      capturedApplicationIsRunning: target.isApplicationRunning,
-      frontmostProcessIdentifier: frontmostProcessIdentifier
-    )
+    if target.requiresFrontmostAtDelivery {
+      // The destination was already chosen by live finalization. Never follow
+      // another app switch back into a field holding this session's partials.
+      if let error = target.destinationChangedError() {
+        return Self.keepOnClipboard(text: text, error: error)
+      }
+      var result = deliver(text: text, target: target)
+      result.redirectedTarget = target
+      return result
+    }
+    let decision = Self.currentAppSwitchDecision(policy: appSettings.appSwitchDelivery, target: target)
     switch decision {
     case .deliverToOriginal(let focusMoved):
       var result = deliver(text: text, target: target)
@@ -628,11 +630,22 @@ struct SmartTextOutput: TextOutputting {
       return deliverToCurrentApp(text: text, originalTarget: target)
     case .keepOnClipboard:
       logger.info("Original app is not in front; keeping the transcript on the clipboard")
-      return keepOnClipboard(
-        text: text,
-        error: .originalApplicationNotInFront(target.applicationName)
-      )
+      return Self.keepOnClipboard(text: text, error: .originalApplicationNotInFront(target.applicationName))
     }
+  }
+
+  static func currentAppSwitchDecision(
+    policy: AppSettings.AppSwitchDelivery, target: TextOutputTarget
+  ) -> AppSwitchDecision {
+    let frontmostProcessIdentifier = NSWorkspace.shared.frontmostApplication?.processIdentifier
+    return appSwitchDecision(
+      policy: policy,
+      capturedApplicationIsFrontmost: target.capturedApplicationIsFrontmost(
+        frontmostProcessIdentifier: frontmostProcessIdentifier
+      ),
+      capturedApplicationIsRunning: target.isApplicationRunning,
+      frontmostProcessIdentifier: frontmostProcessIdentifier
+    )
   }
 
   private func deliverToCurrentApp(text: String, originalTarget: TextOutputTarget) -> TextOutputResult {
@@ -640,7 +653,7 @@ struct SmartTextOutput: TextOutputting {
     current.requiresFrontmostAtDelivery = true
     guard Self.isUsableRedirectDestination(processIdentifier: current.processIdentifier) else {
       logger.info("No other app is in front any more; keeping the transcript on the clipboard")
-      return keepOnClipboard(text: text, error: .destinationApplicationChanged)
+      return Self.keepOnClipboard(text: text, error: .destinationApplicationChanged)
     }
     let originalApp = originalTarget.applicationName ?? "unknown"
     let currentApp = current.applicationName ?? "unknown"
@@ -652,7 +665,7 @@ struct SmartTextOutput: TextOutputting {
       logger.info("Focus moved again before insertion; keeping the transcript on the clipboard")
       // Accessibility-only delivery never touched the clipboard.
       if result.method != .clipboard {
-        result = keepOnClipboard(text: text, error: .destinationApplicationChanged)
+        result = Self.keepOnClipboard(text: text, error: .destinationApplicationChanged)
       }
       return result
     }
@@ -708,7 +721,7 @@ struct SmartTextOutput: TextOutputting {
     }
   }
 
-  private func keepOnClipboard(text: String, error: TextOutputError) -> TextOutputResult {
+  static func keepOnClipboard(text: String, error: TextOutputError) -> TextOutputResult {
     guard PasteTextOutput.hasDeliverableText(text) else {
       return TextOutputResult(method: .none, error: nil)
     }

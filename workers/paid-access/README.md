@@ -90,6 +90,12 @@ The test runtime enables `unhandled_rejection_after_microtask_checkpoint` so
 already-caught async rejections are not misreported under the older deployment
 compatibility date. Genuine unhandled rejections still fail the suite.
 
+The development graph overrides Miniflare's exact `sharp` and `undici` pins to
+0.35.5 and 7.30.1, and the test plugin's `zod` pin to 4.6.6, for upstream security
+fixes. Remove these overrides when the supported Cloudflare packages pin patched
+versions themselves. Keep `npm audit`, the worker suite, typecheck and lint green
+when updating this graph.
+
 ## Endpoints
 
 Every response is JSON and carries an `x-correlation-id` header. Quote that id when reporting a failure — it is enough to trace a request without any request content.

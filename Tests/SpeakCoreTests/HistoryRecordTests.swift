@@ -84,7 +84,7 @@ final class HistoryRecordTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(HistoryRecord.self, from: data), record)
     }
 
-    func testUnknownVersion_RejectsBothLegacyShapesBeforeDroppingFields() throws {
+    func testExplicitVersion_RejectsUnknownOrMalformedMarkersBeforeLegacyDecoding() throws {
         for name in ["mac-rich", "ios-current"] {
             var object = try self.object(self.fixture(name))
             object["schemaVersion"] = 2
@@ -93,6 +93,10 @@ final class HistoryRecordTests: XCTestCase {
                     return XCTFail("Unexpected error: \(error)")
                 }
                 XCTAssertTrue(context.debugDescription.contains("Unsupported local history schema version: 2"))
+            }
+            for malformed: Any in [NSNull(), "1", true] {
+                object["schemaVersion"] = malformed
+                XCTAssertThrowsError(try self.decode(JSONSerialization.data(withJSONObject: object)))
             }
         }
     }

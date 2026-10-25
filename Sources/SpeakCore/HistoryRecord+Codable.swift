@@ -3,7 +3,8 @@ import Foundation
 extension HistoryRecord {
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
-        if let version = try values.decodeIfPresent(Int.self, forKey: .schemaVersion) {
+        if values.contains(.schemaVersion) {
+            let version = try values.decode(Int.self, forKey: .schemaVersion)
             guard version == Self.currentSchemaVersion else {
                 throw DecodingError.dataCorruptedError(
                     forKey: .schemaVersion, in: values,

@@ -20,7 +20,8 @@ class AppleReleaseCredentialsTest < Minitest::Test
     @env = {'APP_STORE_CONNECT_CREDENTIAL_SOURCE' => '1password'}
     @refs = %w[op://Release/Apple/key-id op://Release/Apple/issuer-id op://Release/Apple/private-key]
     AppleRelease::VaultCredentials::REFERENCES.zip(@refs).each { |name, reference| @env[name] = reference }
-    @values = @refs.zip(['SYNTHETIC1', 'synthetic-issuer', @pem]).to_h
+    @issuer = '12345678-1234-1234-1234-123456789abc'
+    @values = @refs.zip(['SYNTHETIC1', @issuer, @pem]).to_h
   end
 
   def test_selected_vault_source_signs_existing_jwt_entirely_in_memory
@@ -32,7 +33,7 @@ class AppleReleaseCredentialsTest < Minitest::Test
         private_key: client.instance_variable_get(:@key))
       header, payload, signature = token.split('.')
       assert_equal 'SYNTHETIC1', JSON.parse(Base64.urlsafe_decode64(header)).fetch('kid')
-      assert_equal 'synthetic-issuer', JSON.parse(Base64.urlsafe_decode64(payload)).fetch('iss')
+      assert_equal @issuer, JSON.parse(Base64.urlsafe_decode64(payload)).fetch('iss')
       assert_equal 64, Base64.urlsafe_decode64(signature).bytesize
     end
     assert_equal @refs, reader.calls
@@ -101,6 +102,29 @@ class AppleReleaseCredentialsTest < Minitest::Test
       assert_equal 'CIISSUER', client.instance_variable_get(:@issuer)
     end
     assert_empty reader.calls
+  end
+
+  def test_pem_and_garbage_identifier_fields_never_enter_jwt_credentials
+    invalid = [
+      {@refs.first => @pem}, {@refs[1] => @pem},
+      {@refs.first => 'lowercase1'}, {@refs.first => 'TOOSHORT'},
+      {@refs.first => "ABCDE\nFGHIJ"}, {@refs[1] => 'synthetic-issuer'},
+      {@refs[1] => '12345678123412341234123456789abc'}, {@refs[1] => 'zzzzzzzz-1234-1234-1234-123456789abc'}
+    ]
+    invalid.each do |changes|
+      error = assert_raises(AppleRelease::CredentialError) do
+        AppleRelease::Client.new(env: @env, op_reader: FakeOp.new(@values.merge(changes)))
+      end
+      assert_equal :invalid_value, error.reason
+      changes.each_value { |value| refute_includes error.full_message, value }
+      assert_nil error.cause
+    end
+  end
+
+  def test_issuer_uuid_format_does_not_impose_a_version_or_variant
+    issuer = 'ABCDEFAB-0000-0000-0000-ABCDEFABCDEF'
+    client = AppleRelease::Client.new(env: @env, op_reader: FakeOp.new(@values.merge(@refs[1] => issuer)))
+    assert_equal issuer, client.instance_variable_get(:@issuer)
   end
 
   def test_unknown_source_fails_without_reading_any_credential

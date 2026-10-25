@@ -146,6 +146,12 @@ module AppleRelease
       end
       key_id, issuer, pem = refs.map { |ref| reader.read(ref) }
       raise CredentialError.new(:invalid_value) if [key_id, issuer, pem].any? { |value| !value.is_a?(String) || value.strip.empty? }
+      key_id, issuer = key_id.strip, issuer.strip
+      # These enter JWT claims directly. Reject a miswired PEM/value before it
+      # can become part of the bearer token. UUID syntax imposes no version rule.
+      unless key_id.match?(/\A[A-Z0-9]{10}\z/) && issuer.match?(/\A[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\z/)
+        raise CredentialError.new(:invalid_value)
+      end
       begin
         key = OpenSSL::PKey.read(pem)
       rescue OpenSSL::PKey::PKeyError, ArgumentError
@@ -154,7 +160,7 @@ module AppleRelease
       unless key.is_a?(OpenSSL::PKey::EC) && key.private? && key.group.curve_name == 'prime256v1'
         raise CredentialError.new(:invalid_key)
       end
-      [key_id.strip, issuer.strip, key]
+      [key_id, issuer, key]
     rescue CredentialError => error
       raise CredentialError.new(error.reason), cause: nil
     rescue StandardError

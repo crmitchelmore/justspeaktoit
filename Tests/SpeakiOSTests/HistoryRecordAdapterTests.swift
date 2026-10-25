@@ -58,6 +58,8 @@ final class HistoryRecordAdapterTests: XCTestCase {
         XCTAssertEqual(adapter.transcription, "", "The String display adapter must retain a nil raw source separately")
         let polished = adapter.withError("Synthetic retry").withPostProcessed("Polished", updatedAt: self.date)
         XCTAssertNil(polished.errorMessage)
+        XCTAssertEqual(polished.wordCount, adapter.wordCount, "Polishing retains the adapter's original word count")
+        XCTAssertNil(polished.historyRecord.wordCount, "The source record must not be coerced into the display shape")
         XCTAssertNil(polished.historyRecord.rawTranscription)
         XCTAssertEqual(polished.historyRecord.postProcessedTranscription, "Polished")
         XCTAssertEqual(polished.historyRecord.audioFileURL, record.audioFileURL)

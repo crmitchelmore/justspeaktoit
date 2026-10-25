@@ -62,17 +62,17 @@ public struct iOSHistoryItem: Identifiable, Codable {
 
     /// Returns a copy with the polished transcript set and any prior error cleared.
     public func withPostProcessed(_ text: String, updatedAt: Date = Date()) -> iOSHistoryItem {
-        iOSHistoryItem(historyRecord: self.historyRecord.replacingLocalText(
+        iOSHistoryItem(retaining: self.historyRecord.replacingLocalText(
             postProcessedTranscription: text, errorMessage: nil, updatedAt: updatedAt
-        ))
+        ), wordCount: self.wordCount)
     }
 
     /// Returns a copy carrying an error message without advancing its timestamp.
     public func withError(_ message: String?) -> iOSHistoryItem {
-        iOSHistoryItem(historyRecord: self.historyRecord.replacingLocalText(
+        iOSHistoryItem(retaining: self.historyRecord.replacingLocalText(
             postProcessedTranscription: self.postProcessedTranscription,
             errorMessage: message, updatedAt: self.updatedAt
-        ))
+        ), wordCount: self.wordCount)
     }
 
     /// Convert to a syncable entry for CloudKit.
@@ -138,6 +138,10 @@ extension iOSHistoryItem {
     /// Lossless while this display adapter remains in memory. Encoding it still
     /// uses the original iOS schema, so rich records must use their own local encoding.
     public init(historyRecord record: HistoryRecord) {
+        self.init(retaining: record, wordCount: record.wordCount ?? record.presentation.wordCount)
+    }
+
+    private init(retaining record: HistoryRecord, wordCount: Int) {
         self.id = record.id
         self.createdAt = record.createdAt
         self.updatedAt = record.updatedAt
@@ -145,7 +149,7 @@ extension iOSHistoryItem {
         self.postProcessedTranscription = record.postProcessedTranscription
         self.model = record.iosPresentation.modelIdentifiers.first ?? ""
         self.duration = record.recordingDuration
-        self.wordCount = record.wordCount ?? record.presentation.wordCount
+        self.wordCount = wordCount
         self.originPlatform = record.originPlatform
         self.errorMessage = record.errorMessage
         self.sourceHistoryRecord = record

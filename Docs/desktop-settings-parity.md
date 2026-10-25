@@ -2884,8 +2884,12 @@ Corrections page exists on native desktops; Desktop's separate `DesktopVocabular
 CRUD and auto-correction candidate review journey, reused from Read aloud/Generate above — not
 a missing journey, just not a `SettingsTab` destination. Windows permission
 troubleshooting/remediation is source wired (see first-run setup and permissions above); Linux
-system-level permission changes and full archive migration remain unqualified journeys; Linux profile editing still needs
-compilation and native acceptance. Strict acknowledged mutation attribution remains an **open Linux
+system-level permission changes and full archive migration remain unqualified journeys. Linux profile
+matching and editing compile in merged `ec1f5315`, whose shared tests and
+[native Linux CI](https://github.com/crmitchelmore/justspeaktoit/actions/runs/40190710062) pass.
+Actual X11 app switching, profile ordering and manual/automatic recording acceptance remain open in
+[#1219](https://github.com/crmitchelmore/justspeaktoit/issues/1219); Wayland remains explicitly default-only.
+Strict acknowledged mutation attribution remains an **open Linux
 parity gap**: neither paste keys nor a top-level window supplies an editable-span receipt.
 The separate Linux source-only observational route is described below; it does not close that
 acknowledgment gap. The Windows source-only learning

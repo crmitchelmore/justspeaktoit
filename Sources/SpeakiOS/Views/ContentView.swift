@@ -859,6 +859,7 @@ public struct ContentView: View {
     @State private var presentedSessionError: UUID?
     @State private var copied = false
     @State private var showingPostProcessing = false
+    @ObservedObject private var historyRouter = DeepLinkRouter.shared
     @State private var displayText = ""  // Text shown in UI (may be post-processed)
     @Namespace private var controlsNamespace
 
@@ -984,6 +985,13 @@ public struct ContentView: View {
                                     ) {
                                         onboarding.dismissCard(card)
                                     }
+                                }
+                                if backgroundService.isActive,
+                                   let destination = backgroundService.captureDestinationStatus {
+                                    Label(destination, systemImage: "arrow.turn.down.right")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .accessibilityIdentifier("effectiveCaptureDestination")
                                 }
                                 if let warning = backgroundService.isRunning
                                     ? backgroundService.recordingWarning : coordinator.recordingWarning {
@@ -1128,6 +1136,14 @@ public struct ContentView: View {
                 Button("Not now", role: .cancel) {}
             } message: {
                 Text(recovery.recoverable.first.map(recovery.promptMessage) ?? "")
+            }
+            .navigationDestination(isPresented: Binding(
+                get: { self.historyRouter.pendingHistoryID != nil },
+                set: { if !$0 { self.historyRouter.pendingHistoryID = nil } }
+            )) {
+                if let identifier = self.historyRouter.pendingHistoryID {
+                    IdentifiedHistoryView(identifier: identifier)
+                }
             }
             .onChange(of: coordinator.error?.localizedDescription) { _, newError in
                 if let error = newError {
@@ -1556,7 +1572,7 @@ public struct ContentView: View {
             // An in-app stop finishes a headless run where that run asked to
             // finish, not where the global setting points (issue #1013).
             let result = await backgroundService.stopRecording(
-                destination: backgroundService.resolvedStopDestination()
+                selection: backgroundService.resolvedStopSelection()
             )
             displayText = result.text
         } else if coordinator.isRunning {

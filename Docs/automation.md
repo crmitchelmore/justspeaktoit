@@ -532,3 +532,41 @@ the default; raise it with `--timeout 900`.
 
 **`schema_mismatch`.** The CLI and the app were built from different releases.
 Update whichever is older.
+
+### Private saved-result alerts
+
+iOS Settings → Saved Results offers **Transcript Ready Alerts**, off by default on each device.
+Enabling it intentionally requests alert permission only; denial keeps it off. Allow notifications
+in iOS Settings before trying again. Launch, capture and Watch import never prompt for permission.
+The option is not synced or exported with configuration.
+
+Eligible background phone completions and Watch imports can schedule a generic **Transcript ready**
+alert after History is durably saved. Watch imports also require their durable success acknowledgment.
+Alerts contain no transcript, model, filename or source: only a schema version and the exact History UUID.
+Open History opens that saved record after foreground activation/unlock; a deleted record shows an
+unavailable message. There is no notification Copy action or latest-record fallback.
+
+Foreground, empty, cancelled, failed, unsaved and confirmed keyboard-inserted results are suppressed,
+as are results already owned by a matching active Live Activity. A late keyboard pickup offer is not
+confirmed insertion. Optional polishing updates the saved row without a second alert.
+
+A protected device-local ledger records each eligible attempt before enqueue, surviving restart and
+enqueue failure. This is best-effort at-most-once scheduling: a crash between the claim and enqueue can
+lose an alert. Turning the option off invalidates scheduling and removes this feature's pending alerts,
+without clearing unrelated or delivered notifications. Explicit durable local History deletion retires
+that row's claim and removes only its pending/delivered notice; overlapping candidates are invalidated.
+Launch reconciles persisted opt-out without prompting. A late accepted request crossing opt-out is also
+removed by its exact identifier. This is best-effort cleanup: the OS cannot prove recall of an already
+shown banner. Opt-out preserves alerts delivered before it as well as unrelated notifications.
+Remote-sync tombstones do not retire notification state in this local-deletion increment; stale taps
+still resolve the exact ID to the neutral unavailable state. Optional scheduling admits at most
+64 coalesced queued/processing results, including held old generations; excess notices are dropped.
+If 64 OS operations never return, admission remains closed until they return or the app restarts.
+Notification failures do not change capture receipts, History or Watch retry/ack state.
+
+Apple documents intentional [notification permission requests](https://developer.apple.com/documentation/usernotifications/asking-permission-to-use-notifications)
+and [foreground actions requiring unlock as needed](https://developer.apple.com/documentation/usernotifications/unnotificationactionoptions/foreground).
+Enqueue success is not physical delivery proof. Locked-device visibility, background delivery,
+permission denial, notification taps, concurrent captures and Watch retries still need device acceptance.
+No iOS 27 automation trigger, available Shortcuts variables, sub-second latency, unattended fan-out or
+new background execution is established by this feature.

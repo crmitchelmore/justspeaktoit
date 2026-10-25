@@ -1,4 +1,6 @@
 #if os(iOS)
+import SpeakCore
+import SpeakSync
 import XCTest
 
 @testable import SpeakiOSLib
@@ -63,6 +65,22 @@ final class AppSettingsDefaultsKeyTests: XCTestCase {
         XCTAssertNil(defaults.object(forKey: "assemblyAIKeyterms"), "iOS must not adopt macOS keyword mirrors")
     }
 
+    func testTranscriptReadyAlerts_DefaultOffPersistLocallyAndStayOutOfTransfer() throws {
+        let suite = "TranscriptReadySettings.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults, loadsSecureStorage: false)
+        XCTAssertFalse(settings.transcriptReadyNotificationsEnabled)
+        settings.transcriptReadyNotificationsEnabled = true
+        XCTAssertTrue(AppSettings(defaults: defaults, loadsSecureStorage: false).transcriptReadyNotificationsEnabled)
+        let key = AppSettings.DefaultsKey.transcriptReadyNotificationsEnabled.storageKey
+        XCTAssertEqual(key, "transcriptReadyNotificationsEnabled")
+        XCTAssertEqual(key, AppSettings.DefaultsKey.transcriptReadyNotificationsEnabled.rawValue)
+        XCTAssertFalse(ConfigTransferManager.transferableSettingKeys.contains(key))
+        XCTAssertFalse(CloudKitKeySync.syncableIdentifiers.contains(key))
+        XCTAssertNil(DataMigrationPreferenceCatalog.definition(for: key))
+    }
+
     func testDefaultsKeysPreserveExactPersistedContract() {
         let expected = Set([
             "selectedModel",
@@ -71,6 +89,7 @@ final class AppSettingsDefaultsKeyTests: XCTestCase {
             "batchTranscriptionModel",
             "transcriptionKeywords",
             "liveActivitiesEnabled",
+            "transcriptReadyNotificationsEnabled",
             "visualDensity",
             "autoStartRecording",
             "handsFreeDictationEnabled",

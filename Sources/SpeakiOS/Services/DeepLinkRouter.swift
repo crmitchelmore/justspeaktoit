@@ -45,6 +45,20 @@ public final class DeepLinkRouter: ObservableObject {
     /// Set when a capture deep link arrived and has not been performed yet.
     @Published public var pendingCaptureAction: CaptureDeepLink?
 
+    @Published public var pendingHistoryID: UUID?
+
+    var reportSupersededCapture: (CaptureDeepLink) -> Void = { capture in
+        if let callback = capture.callback { CaptureCommandRunner.reportSuperseded(to: callback) }
+    }
+
+    public func openHistory(identifier: UUID) {
+        if let previous = self.pendingCaptureAction { self.reportSupersededCapture(previous) }
+        self.pendingCaptureAction = nil
+        self.pendingConversationId = nil
+        self.selectedTab = 0
+        self.pendingHistoryID = identifier
+    }
+
     public init() {}
 
     /// Handles an incoming deep link URL. Returns `true` if handled.
@@ -59,6 +73,7 @@ public final class DeepLinkRouter: ObservableObject {
         // Capture verbs are checked first: `transcribe?action=start` is both a
         // tab link and a command, and the command is the point of it.
         if let capture = CaptureDeepLink.parse(url) {
+            self.pendingHistoryID = nil
             selectedTab = 0
             pendingConversationId = nil
             // Latest wins. Two capture links can only race inside the cold-launch
@@ -79,6 +94,7 @@ public final class DeepLinkRouter: ObservableObject {
 
         switch url.host?.lowercased() {
         case "openclaw":
+            self.pendingHistoryID = nil
             selectedTab = 1
             // Check for /conversation/<id> path
             let components = url.pathComponents.filter { $0 != "/" }
@@ -91,6 +107,7 @@ public final class DeepLinkRouter: ObservableObject {
             return true
 
         case "transcribe":
+            self.pendingHistoryID = nil
             selectedTab = 0
             pendingConversationId = nil
             return true
@@ -110,11 +127,11 @@ public final class DeepLinkRouter: ObservableObject {
         replacing previous: CaptureDeepLink?,
         with replacement: CaptureDeepLink
     ) {
-        guard let previous, let callback = previous.callback, previous != replacement else { return }
+        guard let previous, previous.callback != nil, previous != replacement else { return }
         SpeakLogger.transcription.info(
             "Queued capture link superseded before the scene was active; answering its caller"
         )
-        CaptureCommandRunner.reportSuperseded(to: callback)
+        self.reportSupersededCapture(previous)
     }
 
     /// Consumes and returns the pending conversation ID (if any).

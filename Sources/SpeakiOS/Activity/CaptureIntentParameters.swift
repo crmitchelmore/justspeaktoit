@@ -18,7 +18,7 @@ import SpeakCore
 /// An `AppEnum` rather than a text field because the set is closed and lives
 /// in source: four cases that only change when the app changes. The language
 /// and model parameters are catalogue-driven instead (see below).
-@available(iOS 18, *)
+@available(iOS 16, *)
 public enum CaptureDestinationAppEnum: String, AppEnum {
     /// Mirrors `HardwareTriggerDestination.auto` (issue #1008): the field the
     /// Just Speak keyboard is open in when there is one, otherwise the

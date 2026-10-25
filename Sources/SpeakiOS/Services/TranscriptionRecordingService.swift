@@ -379,10 +379,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         try requireForegroundUnownedForAcquisition(run: runID)
         // A stop/cancel during the suspension above retires the run; nothing
         // has been allocated yet, so unwinding only settles the state machine.
-        guard lifecycle.isCurrentStartRun(runID) else {
-            unwindCancelledStart(outcome: .cancelled, run: runID)
-            throw CancellationError()
-        }
+        try requireUncancelledStart(run: runID)
 
         lastSessionError = nil
         sessionErrorToken = nil
@@ -597,6 +594,13 @@ public final class TranscriptionRecordingService: ObservableObject {
         }
     }
 
+    private func requireUncancelledStart(run runID: UUID) throws {
+        guard !Task.isCancelled, lifecycle.isCurrentStartRun(runID) else {
+            unwindCancelledStart(outcome: .cancelled, run: runID)
+            throw CancellationError()
+        }
+    }
+
     private func admittedConfiguration(
         parameters: CaptureRunParameters,
         keyboardProfile: KeyboardDictationProfileOption?,
@@ -609,6 +613,7 @@ public final class TranscriptionRecordingService: ObservableObject {
                 parameters: parameters, keyboardProfile: keyboardProfile, destination: destination, request: request
             )
             try requireForegroundUnownedForAcquisition(run: runID)
+            try Task.checkCancellation()
             guard lifecycle.isCurrentStartRun(runID) else { throw CancellationError() }
             request?.configuration = configuration
             return configuration
@@ -977,6 +982,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     ) async -> TranscriptionResult {
         await stopRecording(
             selection: destination.map { CaptureDestinationSelection(destination: $0, origin: .explicitStop) },
+            legacyCaller: destination == nil,
             saveToHistory: saveToHistory, primedActivityMessage: primedActivityMessage,
             keyboardDeliverySource: keyboardDeliverySource
         )
@@ -986,6 +992,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     // swiftlint:disable:next function_body_length
     func stopRecording(
         selection: CaptureDestinationSelection?,
+        legacyCaller: Bool = false,
         saveToHistory: Bool = true,
         primedActivityMessage: String = "Ready for the Action Button",
         keyboardDeliverySource: KeyboardPickupOffer.Source? = .app
@@ -1261,8 +1268,10 @@ public final class TranscriptionRecordingService: ObservableObject {
         // A new stop supersedes whatever the previous one polished, so an
         // intent that waits can never be handed the run before last's text.
         lastPolishedTranscript = nil
-        if shouldPostProcess(destination: resolvedDestination, isLegacyCaller: destination == nil)
-            && !text.isEmpty {
+        if shouldPostProcess(
+            destination: resolvedDestination,
+            isLegacyCaller: legacyCaller && (selected.origin == .global || selected.origin == .legacy)
+        ) && !text.isEmpty {
             if let historyItem {
                 historyManager.beginPostProcessing(for: historyItem.id)
             }

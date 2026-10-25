@@ -221,4 +221,77 @@ final class FocusRecordingServiceTests: XCTestCase {
     }
 
 }
+
+@MainActor
+final class FocusCaptureCancellationTests: XCTestCase {
+    func testCancelledParentDuringUncooperativeFocusLookupCannotAcceptConfigurationOrAllocate() async throws {
+        let harness = try DependencyHarness()
+        defer { harness.cleanUp() }
+        let gate = DependencyKeyLoadGate(entered: expectation(description: "Focus lookup entered"))
+        harness.focusGate = gate
+        harness.focus = FocusCaptureOverride(destinationID: "historyOnly")
+        var keyReads = 0
+        var allocations = 0
+        let service = harness.makeService(ensureKeysLoaded: { keyReads += 1 })
+        service.makeSession = { allocations += 1; return DependencySession() }
+        let request = CaptureConfigurationRequest()
+        let settled = expectation(description: "Cancelled Focus startup settled")
+        var failure: Error?
+        let task = Task {
+            do {
+                try await service.startRecording(requiresLiveActivity: false, destination: nil,
+                                                 configurationRequest: request)
+            } catch { failure = error }
+            settled.fulfill()
+        }
+        defer { gate.release(); task.cancel() }
+        guard await XCTWaiter.fulfillment(of: [gate.entered], timeout: 2) == .completed else {
+            return XCTFail("Focus lookup was not entered")
+        }
+        task.cancel()
+        gate.release() // The injected lookup ignores cancellation until explicitly released.
+        guard await XCTWaiter.fulfillment(of: [settled], timeout: 2) == .completed else {
+            return XCTFail("Cancelled Focus startup did not settle")
+        }
+        XCTAssertTrue(failure is CancellationError)
+        XCTAssertNil(request.configuration)
+        XCTAssertNil(service.effectiveConfiguration)
+        XCTAssertEqual(keyReads, 0)
+        XCTAssertEqual(allocations, 0)
+        XCTAssertTrue(harness.activityStarts.isEmpty)
+        XCTAssertFalse(harness.defaults.bool(forKey: "isRecording"))
+        XCTAssertFalse(service.isActive)
+    }
+
+    func testCancelledParentDuringCredentialsCannotAllocateAfterUncooperativeWait() async throws {
+        let harness = try DependencyHarness()
+        defer { harness.cleanUp() }
+        let gate = DependencyKeyLoadGate(entered: expectation(description: "Credential wait entered"))
+        let service = harness.makeService(ensureKeysLoaded: { await gate.wait() })
+        var allocations = 0
+        service.makeSession = { allocations += 1; return DependencySession() }
+        let settled = expectation(description: "Cancelled credential startup settled")
+        var failure: Error?
+        let task = Task {
+            do { try await service.startRecording(requiresLiveActivity: false) } catch { failure = error }
+            settled.fulfill()
+        }
+        defer { gate.release(); task.cancel() }
+        guard await XCTWaiter.fulfillment(of: [gate.entered], timeout: 2) == .completed else {
+            return XCTFail("Credential wait was not entered")
+        }
+        task.cancel()
+        gate.release()
+        guard await XCTWaiter.fulfillment(of: [settled], timeout: 2) == .completed else {
+            return XCTFail("Cancelled credential startup did not settle")
+        }
+        XCTAssertTrue(failure is CancellationError)
+        XCTAssertNil(service.effectiveConfiguration)
+        XCTAssertEqual(allocations, 0)
+        XCTAssertTrue(harness.activityStarts.isEmpty)
+        XCTAssertFalse(harness.defaults.bool(forKey: "isRecording"))
+        XCTAssertFalse(service.isActive)
+    }
+
+}
 #endif

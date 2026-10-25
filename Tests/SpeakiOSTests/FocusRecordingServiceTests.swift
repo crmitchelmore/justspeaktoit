@@ -29,6 +29,8 @@ final class FocusRecordingServiceTests: XCTestCase {
             XCTAssertNil(harness.keyboard.pendingOffer())
             XCTAssertTrue(harness.pasteboard.writes.isEmpty)
             XCTAssertTrue(harness.polishRequests.isEmpty)
+            XCTAssertFalse(harness.activitySnippets.contains { $0.contains("Private Focus words") })
+            XCTAssertEqual(harness.resultPreviews, [""])
             XCTAssertNotEqual(harness.defaults.string(forKey: "lastCompletedTranscript"), "Private Focus words")
             XCTAssertNotEqual(harness.defaults.string(forKey: "currentTranscriptText"), "Private Focus words")
         }

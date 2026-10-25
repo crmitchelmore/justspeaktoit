@@ -198,6 +198,8 @@ final class DependencyHarness {
     var activityStartsSuccessfully = true
     var activityStarts: [TranscriptionActivityAttributes.TranscriptionStatus] = []
     var activityUpdates: [TranscriptionActivityAttributes.TranscriptionStatus] = []
+    var activitySnippets: [String] = []
+    var resultPreviews: [String] = []
     var completions: [TranscriptionCompletionOutcome] = []
     var dictations: [(CaptureTrigger, String)] = []
     var deliveredRecordings: [UUID] = []
@@ -230,10 +232,16 @@ final class DependencyHarness {
                     self.activityStarts.append(status)
                     return self.activityStartsSuccessfully
                 },
-                update: { [unowned self] status, _, _, _ in self.activityUpdates.append(status) },
+                update: { [unowned self] status, snippet, _, _ in
+                    self.activityUpdates.append(status)
+                    self.activitySnippets.append(snippet)
+                },
                 endActivity: {},
                 reportError: { message in XCTFail("Unexpected activity error: \(message)") },
-                complete: { [unowned self] _, _, _, outcome, _, _, _ in self.completions.append(outcome) }
+                complete: { [unowned self] _, _, _, outcome, preview, _, _ in
+                    self.completions.append(outcome)
+                    self.resultPreviews.append(preview)
+                }
             ),
             keyboardDelivery: self.keyboard,
             recordDictation: { [unowned self] in self.dictations.append(($0, $1)) },

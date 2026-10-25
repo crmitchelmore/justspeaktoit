@@ -1410,7 +1410,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         }
         activityManager.updateActivity(
             status: .listening,
-            lastSnippet: text,
+            lastSnippet: sharesLiveTranscript ? text : "",
             wordCount: wordCount,
             duration: elapsedSeconds
         )
@@ -1469,7 +1469,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         guard promoted else { return }
         activityManager.updateActivity(
             status: .recording,
-            lastSnippet: partialText,
+            lastSnippet: sharesLiveTranscript ? partialText : "",
             wordCount: wordCount,
             duration: elapsedSeconds
         )

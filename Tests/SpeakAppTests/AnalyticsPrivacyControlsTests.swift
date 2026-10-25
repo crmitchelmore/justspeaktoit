@@ -8,8 +8,25 @@ import XCTest
 
 @MainActor
 final class AnalyticsPrivacyControlsTests: XCTestCase {
+    private var fixtures: [PrivacyControlsFixture] = []
+    private var captures: [Task<Void, Never>] = []
+
+    override func setUp() async throws {
+        try await super.setUp()
+        StubURLProtocol.reset()
+    }
+
+    override func tearDown() async throws {
+        for fixture in fixtures { await fixture.cleanUp() }
+        for capture in captures { await capture.value }
+        fixtures.removeAll()
+        captures.removeAll()
+        StubURLProtocol.reset()
+        try await super.tearDown()
+    }
+
     func testReadOnlyInspection_CreatesNoIdentityOrTraffic() async throws {
-        let fixture = try PrivacyControlsFixture()
+        let fixture = try makeFixture()
         await fixture.controls.refresh()
         XCTAssertNil(fixture.controls.installationID)
         XCTAssertNil(try fixture.store.loadInstallationID())
@@ -22,9 +39,10 @@ final class AnalyticsPrivacyControlsTests: XCTestCase {
     func testDisableDuringRequest_PurgesQueueIdentityAndInspectionWithoutChangingConsent() async throws {
         let started = expectation(description: "Request started")
         let recorder = AnalyticsRequestRecorder(holdResponses: true) { _ in started.fulfill() }
-        let fixture = try PrivacyControlsFixture(recorder: recorder, consent: .optedIn)
+        let fixture = try makeFixture(recorder: recorder, consent: .optedIn)
         try await fixture.controller.setConsent(.optedIn)
-        let capture = Task { try? await fixture.controller.capture(.appActiveDaily) }
+        let capture = Task { _ = try? await fixture.controller.capture(.appActiveDaily) }
+        captures.append(capture)
         await fulfillment(of: [started], timeout: 2)
         await fixture.controls.refresh()
         XCTAssertNotNil(fixture.controls.installationID)
@@ -47,7 +65,7 @@ final class AnalyticsPrivacyControlsTests: XCTestCase {
     }
 
     func testLocalOverride_PersistsAndClearingItWithoutConsentRemainsSilent() async throws {
-        let fixture = try PrivacyControlsFixture(consent: .optedOut)
+        let fixture = try makeFixture(consent: .optedOut)
         await fixture.controls.setDisabled(true)
         let restarted = AnalyticsLocalPolicy(defaults: fixture.defaults, buildDisabled: false, environment: [:])
         XCTAssertTrue(restarted.isDisabled)
@@ -64,7 +82,7 @@ final class AnalyticsPrivacyControlsTests: XCTestCase {
             (true, [:]), (false, ["POSTHOG_DISABLED": "true"])
         ]
         for source in sources {
-            let fixture = try PrivacyControlsFixture(
+            let fixture = try makeFixture(
                 consent: .optedIn, buildDisabled: source.build, environment: source.environment
             )
             await fixture.controls.setDisabled(false)
@@ -78,7 +96,7 @@ final class AnalyticsPrivacyControlsTests: XCTestCase {
     }
 
     func testResetAndExport_PreserveConsentAndReportLocalWriteOutcomes() async throws {
-        let fixture = try PrivacyControlsFixture(consent: .optedIn)
+        let fixture = try makeFixture(consent: .optedIn)
         try await fixture.controller.capture(.appActiveDaily)
         await fixture.controls.refresh()
         let previousID = try XCTUnwrap(fixture.controls.installationID)
@@ -112,11 +130,22 @@ final class AnalyticsPrivacyControlsTests: XCTestCase {
         guard let path = ProcessInfo.processInfo.environment["JSTI_ANALYTICS_SMOKE_IMAGE"] else {
             throw XCTSkip("Set JSTI_ANALYTICS_SMOKE_IMAGE to capture the isolated native fixture.")
         }
-        let fixture = try PrivacyControlsFixture(consent: .optedIn)
+        let fixture = try makeFixture(consent: .optedIn)
         try await fixture.controller.capture(.appActiveDaily)
         await fixture.controls.refresh()
         try await saveInspectorPreview(fixture.controls, to: path)
         await fixture.cleanUp()
+    }
+
+    private func makeFixture(
+        recorder: AnalyticsRequestRecorder = AnalyticsRequestRecorder(), consent: AnalyticsConsentState = .unknown,
+        buildDisabled: Bool = false, environment: [String: String] = [:]
+    ) throws -> PrivacyControlsFixture {
+        let fixture = try PrivacyControlsFixture(
+            recorder: recorder, consent: consent, buildDisabled: buildDisabled, environment: environment
+        )
+        fixtures.append(fixture)
+        return fixture
     }
 
     private func saveInspectorPreview(_ controls: AnalyticsPrivacyControls, to path: String) async throws {
@@ -150,6 +179,7 @@ private final class PrivacyControlsFixture {
     let recorder: AnalyticsRequestRecorder
     let store: FileProductAnalyticsStateStore
     let sink: PostHogProductAnalyticsSink
+    let session: URLSession
     let controller: ProductAnalyticsController
     let controls: AnalyticsPrivacyControls
     var queueURL: URL { directory.appendingPathComponent("queue.json") }
@@ -164,9 +194,11 @@ private final class PrivacyControlsFixture {
         recorder.installAsStubHandler()
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StubURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        self.session = session
         self.sink = PostHogProductAnalyticsSink(
             queueURL: directory.appendingPathComponent("queue.json"),
-            session: URLSession(configuration: configuration),
+            session: session,
             configuration: (
                 projectKey: "INGESTION_KEY_SENTINEL", endpoint: URL(string: "https://eu.i.posthog.com/capture")!
             ),
@@ -189,6 +221,8 @@ private final class PrivacyControlsFixture {
 
     func cleanUp() async {
         await sink.close()
+        recorder.releaseResponses()
+        session.invalidateAndCancel()
         defaults.removePersistentDomain(forName: suite)
         try? FileManager.default.removeItem(at: directory)
     }

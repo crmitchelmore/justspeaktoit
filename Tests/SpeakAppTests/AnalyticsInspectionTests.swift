@@ -6,8 +6,25 @@ import SpeakTestSupport
 import XCTest
 
 final class AnalyticsInspectionTests: XCTestCase {
+    private var fixtures: [InspectionFixture] = []
+    private var captures: [Task<Void, Never>] = []
+
+    override func setUp() async throws {
+        try await super.setUp()
+        StubURLProtocol.reset()
+    }
+
+    override func tearDown() async throws {
+        for fixture in fixtures { await fixture.cleanUp() }
+        for capture in captures { await capture.value }
+        fixtures.removeAll()
+        captures.removeAll()
+        StubURLProtocol.reset()
+        try await super.tearDown()
+    }
+
     func testEnvelopeMatchesRequestMinusCredential_ForPseudonymousAndAnonymousEvents() async throws {
-        let fixture = InspectionFixture()
+        let fixture = makeFixture()
         try await fixture.sink.reopen()
         let events: [ProductAnalyticsEvent] = [
             .keyboardEnabledState(enabled: true), .errorDisplayed(error: .connectivity, surface: .recording)
@@ -36,7 +53,7 @@ final class AnalyticsInspectionTests: XCTestCase {
     }
 
     func testRecentHistory_IsBoundedTo100AndClearedByPurge() async throws {
-        let fixture = InspectionFixture()
+        let fixture = makeFixture()
         try await fixture.sink.reopen()
         for _ in 0..<105 { try await fixture.sink.capture(fixture.payload()) }
         let snapshot = await fixture.sink.inspectionSnapshot()
@@ -64,7 +81,7 @@ final class AnalyticsInspectionTests: XCTestCase {
         let recorder = AnalyticsRequestRecorder(statusCodes: [503, 200, 200]) { count in
             if count == 3 { delivered.fulfill() }
         }
-        let fixture = InspectionFixture(recorder: recorder, queueURL: queueURL, retryDelays: [.milliseconds(20)])
+        let fixture = makeFixture(recorder: recorder, queueURL: queueURL, retryDelays: [.milliseconds(20)])
         let seeded = await fixture.sink.inspectionSnapshot()
         XCTAssertEqual(seeded.records.count, 2)
         for record in seeded.records { try assertGeoIPDisabled(in: record.envelope) }
@@ -92,7 +109,7 @@ final class AnalyticsInspectionTests: XCTestCase {
         let recorder = AnalyticsRequestRecorder(statusCodes: [503, 200]) { count in
             if count == 2 { delivered.fulfill() }
         }
-        let fixture = InspectionFixture(recorder: recorder, retryDelays: [.milliseconds(20)])
+        let fixture = makeFixture(recorder: recorder, retryDelays: [.milliseconds(20)])
         try await fixture.sink.reopen()
         try? await fixture.sink.capture(fixture.payload())
         let pending = await fixture.sink.inspectionSnapshot()
@@ -110,11 +127,11 @@ final class AnalyticsInspectionTests: XCTestCase {
 
     func testPersistedQueue_SeedsInspectionWithoutTrafficAndExpiresInMemory() async throws {
         let clock = AnalyticsTestClock(Date())
-        let fixture = InspectionFixture(recorder: AnalyticsRequestRecorder(statusCode: 503), now: { clock.now })
+        let fixture = makeFixture(recorder: AnalyticsRequestRecorder(statusCode: 503), now: { clock.now })
         try await fixture.sink.reopen()
         try? await fixture.sink.capture(fixture.payload())
         await fixture.sink.close()
-        let restored = InspectionFixture(queueURL: fixture.queueURL, now: { clock.now })
+        let restored = makeFixture(queueURL: fixture.queueURL, now: { clock.now })
         let initial = await restored.sink.inspectionSnapshot()
         XCTAssertEqual(initial.records.count, 1)
         XCTAssertEqual(initial.queueDepth, 1)
@@ -140,7 +157,7 @@ final class AnalyticsInspectionTests: XCTestCase {
              "distinctID": "legacy-\(index)", "properties": ["analytics_schema_version": 2]]
         }
         try JSONSerialization.data(withJSONObject: entries).write(to: queueURL)
-        let fixture = InspectionFixture(queueURL: queueURL)
+        let fixture = makeFixture(queueURL: queueURL)
         let snapshot = await fixture.sink.inspectionSnapshot()
         XCTAssertEqual(snapshot.records.count, 100)
         XCTAssertEqual(snapshot.queueDepth, 1_000)
@@ -151,7 +168,7 @@ final class AnalyticsInspectionTests: XCTestCase {
         let blockedParent = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try Data().write(to: blockedParent)
         defer { try? FileManager.default.removeItem(at: blockedParent) }
-        let fixture = InspectionFixture(queueURL: blockedParent.appendingPathComponent("queue.json"))
+        let fixture = makeFixture(queueURL: blockedParent.appendingPathComponent("queue.json"))
         try await fixture.sink.reopen()
         do {
             try await fixture.sink.capture(fixture.payload())
@@ -167,9 +184,10 @@ final class AnalyticsInspectionTests: XCTestCase {
         let clock = AnalyticsTestClock(Date())
         let started = expectation(description: "Old event is in flight")
         let recorder = AnalyticsRequestRecorder(statusCode: 503, holdResponses: true) { _ in started.fulfill() }
-        let fixture = InspectionFixture(recorder: recorder, now: { clock.now })
+        let fixture = makeFixture(recorder: recorder, now: { clock.now })
         try await fixture.sink.reopen()
-        let first = Task { try? await fixture.sink.capture(fixture.payload()) }
+        let first = Task { _ = try? await fixture.sink.capture(fixture.payload()) }
+        captures.append(first)
         await fulfillment(of: [started], timeout: 2)
         let sending = await fixture.sink.inspectionSnapshot()
         let oldID = try XCTUnwrap(sending.records.first?.id)
@@ -187,7 +205,7 @@ final class AnalyticsInspectionTests: XCTestCase {
 
     func testEndpointInspectionAndExport_ExcludeCredentialsIncludingProxyPathWithoutChangingTransport() async throws {
         let url = URL(string: "https://user:SECRET@example.test/proxy/PATH_TOKEN/capture?token=SECRET#SECRET")!
-        let fixture = InspectionFixture(endpoint: url)
+        let fixture = makeFixture(endpoint: url)
         try await fixture.sink.reopen()
         try await fixture.sink.capture(fixture.payload())
         let snapshot = await fixture.sink.inspectionSnapshot()
@@ -199,6 +217,24 @@ final class AnalyticsInspectionTests: XCTestCase {
             fixture.recorder.requests.first?.url?.path, url.path, "Transport retains its configured proxy path"
         )
         await fixture.sink.close()
+    }
+
+    private func makeFixture(
+        recorder: AnalyticsRequestRecorder = AnalyticsRequestRecorder(
+            responseBody: Data(InspectionFixture.responseSentinel.utf8)
+        ),
+        queueURL: URL? = nil,
+        now: @escaping @Sendable () -> Date = { Date() },
+        retryDelays: [Duration] = [],
+        forceDisabled: @escaping @Sendable () -> Bool = { false },
+        endpoint: URL = URL(string: "https://eu.i.posthog.com/capture")!
+    ) -> InspectionFixture {
+        let fixture = InspectionFixture(
+            recorder: recorder, queueURL: queueURL, now: now, retryDelays: retryDelays,
+            forceDisabled: forceDisabled, endpoint: endpoint
+        )
+        fixtures.append(fixture)
+        return fixture
     }
 
     private func assertGeoIPDisabled(in data: Data, file: StaticString = #filePath, line: UInt = #line) throws {
@@ -219,6 +255,7 @@ private struct InspectionFixture {
     let queueURL: URL
     let recorder: AnalyticsRequestRecorder
     let sink: PostHogProductAnalyticsSink
+    let session: URLSession
 
     init(
         recorder: AnalyticsRequestRecorder = AnalyticsRequestRecorder(
@@ -236,14 +273,22 @@ private struct InspectionFixture {
         recorder.installAsStubHandler()
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StubURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        self.session = session
         self.sink = PostHogProductAnalyticsSink(
             queueURL: self.queueURL,
-            session: URLSession(configuration: configuration),
+            session: session,
             configuration: (projectKey: Self.keySentinel, endpoint: endpoint),
             now: now,
             retryDelays: retryDelays,
             forceDisabled: forceDisabled
         )
+    }
+
+    func cleanUp() async {
+        await sink.close()
+        recorder.releaseResponses()
+        session.invalidateAndCancel()
     }
 
     func payload(_ event: ProductAnalyticsEvent = .appActiveDaily) -> ProductAnalyticsPayload {

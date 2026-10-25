@@ -1,5 +1,6 @@
 #if os(iOS)
 import SpeakCore
+import SpeakSync
 import XCTest
 
 @testable import SpeakiOSLib
@@ -72,9 +73,12 @@ final class AppSettingsDefaultsKeyTests: XCTestCase {
         XCTAssertFalse(settings.transcriptReadyNotificationsEnabled)
         settings.transcriptReadyNotificationsEnabled = true
         XCTAssertTrue(AppSettings(defaults: defaults, loadsSecureStorage: false).transcriptReadyNotificationsEnabled)
-        XCTAssertEqual(AppSettings.DefaultsKey.transcriptReadyNotificationsEnabled.storageKey,
-                       ApplicationPreferenceKey.transcriptReadyNotificationsEnabled.rawValue)
-        XCTAssertFalse(ConfigTransferManager.transferableSettingKeys.contains("transcriptReadyNotificationsEnabled"))
+        let key = AppSettings.DefaultsKey.transcriptReadyNotificationsEnabled.storageKey
+        XCTAssertEqual(key, "transcriptReadyNotificationsEnabled")
+        XCTAssertEqual(key, AppSettings.DefaultsKey.transcriptReadyNotificationsEnabled.rawValue)
+        XCTAssertFalse(ConfigTransferManager.transferableSettingKeys.contains(key))
+        XCTAssertFalse(CloudKitKeySync.syncableIdentifiers.contains(key))
+        XCTAssertNil(DataMigrationPreferenceCatalog.definition(for: key))
     }
 
     func testDefaultsKeysPreserveExactPersistedContract() {

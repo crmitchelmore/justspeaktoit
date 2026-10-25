@@ -481,8 +481,11 @@ without clearing unrelated or delivered notifications. Explicit durable local Hi
 that row's claim and removes only its pending/delivered notice; overlapping candidates are invalidated.
 Launch reconciles persisted opt-out without prompting. A late accepted request crossing opt-out is also
 removed by its exact identifier. This is best-effort cleanup: the OS cannot prove recall of an already
-shown banner. Historical unrelated delivered notices are preserved. Optional scheduling admits at most
+shown banner. Opt-out preserves alerts delivered before it as well as unrelated notifications.
+Remote-sync tombstones do not retire notification state in this local-deletion increment; stale taps
+still resolve the exact ID to the neutral unavailable state. Optional scheduling admits at most
 64 coalesced queued/processing results, including held old generations; excess notices are dropped.
+If 64 OS operations never return, admission remains closed until they return or the app restarts.
 Notification failures do not change capture receipts, History or Watch retry/ack state.
 
 Apple documents intentional [notification permission requests](https://developer.apple.com/documentation/usernotifications/asking-permission-to-use-notifications)

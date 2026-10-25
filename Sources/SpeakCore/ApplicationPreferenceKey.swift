@@ -91,6 +91,5 @@ public enum ApplicationPreferenceKey: String, CaseIterable, Sendable {
     case simpleModelChoices
     case rememberedLocalTranscriptionSource
     case rememberedRemoteTranscriptionMode
-    case transcriptReadyNotificationsEnabled
     case analyticsEnabled
 }

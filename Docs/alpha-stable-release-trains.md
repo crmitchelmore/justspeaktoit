@@ -28,8 +28,8 @@ Alpha links live in the README only; the website and Homebrew advertise Stable.
 `scripts/release-apple.rb` and `scripts/reconcile-apple-releases.rb` can explicitly
 read their App Store Connect credentials from 1Password. Install the 1Password
 CLI, unlock the desktop app, and authorise CLI access yourself before running
-either script. Each read has a 30-second deadline; a locked or unavailable vault
-fails the command rather than waiting indefinitely. See the official
+either script. Each read has a 30-second deadline with bounded cleanup; a locked
+or unavailable vault fails the command rather than waiting indefinitely. See the official
 [CLI setup](https://developer.1password.com/docs/cli/get-started/) and
 [`op read` reference](https://developer.1password.com/docs/cli/reference/commands/read/).
 
@@ -50,8 +50,11 @@ complete PEM for a private P-256 key. These correspond to Apple's
 The scripts capture at most 64 KiB of `op read --no-newline` output in memory,
 discard diagnostics with a separate 64 KiB limit, and validate the key. They
 never print credential values, references or CLI error output or write a
-temporary key file. Overflow and deadline failures terminate and reap only the
-owned CLI process. Redacted error categories distinguish reference configuration,
+temporary key file. Overflow and deadline failures signal only the owned CLI
+process, with up to 250 ms each for TERM and KILL cleanup. If kernel I/O still
+prevents exit, ownership transfers to an eventual reaper so the caller can fail
+without another signal to that PID. Cancellation cannot preempt kernel work.
+Redacted error categories distinguish reference configuration,
 unavailable access, deadlines, output limits and invalid values/keys.
 Any selected-vault failure stops authentication; it never
 falls back to environment credential values or a local `.p8` file. Do not add

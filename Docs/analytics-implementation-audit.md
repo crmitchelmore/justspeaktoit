@@ -33,8 +33,8 @@ audit. No request was made to an analytics endpoint during this work.
 | Consent | `AppSettings.analyticsEnabled` defaults false. `WireUp` synchronizes consent into `ProductAnalyticsController`; macOS onboarding and Settings expose an explicit choice. Core tests cover unknown/opted-out silence, cleanup errors, rapid consent changes, and suspended opt-in/capture after withdrawal. Transition revisions prevent stale resumptions and new opt-ins await withdrawal cleanup. Real UI withdrawal and release-build zero-traffic evidence still need validation. |
 | Queue | Durable queue has 1,000-entry/seven-day limits. This change serializes flushes, cancels active requests on purge/close, rejects stale responses after reopening, removes acknowledged entries by local queue ID, and persists pruning before replay. Legacy queue files remain readable. |
 | Identity | `FileProductAnalyticsStateStore` stores a random install UUID in app data; core tests cover deletion and anonymous counters without that UUID. Backend separation from Sentry still needs evidence. |
-| Kill switches | Core exposes a tested `forceDisabled` closure, but the production factory does not supply an override. The build/defaults kill switch and server key-rotation drill are not established by source tests. |
-| Inspector | Core `preview` produces a sample payload. There is no release inspector with actual queued/sent wire JSON, endpoint, queue depth, reset, last-100 export, or activity feedback. Sample preview is not wire parity: the transport adds envelope properties. |
+| Kill switches | `AnalyticsLocalPolicy` supplies one synchronized gate to controller and sink. A persisted device-local override, build plist flag and controlled-launch environment flag can force collection off. Applying the local override immediately cancels controlled requests/retries and purges local queue, inspection history and identity while preserving consent. Production release-network and server key-rotation qualification remain pending. |
+| Inspector | Direct macOS Settings exposes a native inspector using the same event-envelope builder as transport, with ingestion credentials omitted. It shows consent/effective policy, sanitized endpoint, existing identity, queue depth and at most 100 launch-local records; valid persisted queued records are seeded on relaunch. Reset preserves consent, clears local identity/queue/history and creates no event. Export writes only after a native destination choice. Native Debug/Release tests and release-network qualification remain gates; iOS/store expansion is excluded. |
 | Phase-one events | macOS has daily activity, onboarding call sites, and first-transcription success. Daily deduplication occurs at app startup and records the date after a best-effort capture; this does not establish multi-day-running-app coverage or successful durable delivery. |
 | Typed catalogue | Closed event/dimension types, scalar encoding, language/context bounding, and catalogue tests exist. The catalogue test checks Swift cases/properties; it does not read the Markdown table, so automatic catalogue-to-docs drift coverage remains missing. |
 | Disclosures | `Docs/PRIVACY.md`, `SECURITY.md`, and `landing-page/privacy.html` describe initial direct-macOS collection. A checked-in web page does not prove publication or server retention enforcement. Store disclosures/archive manifests remain separate gated work. |
@@ -83,9 +83,15 @@ rechecks. Native Debug CI passed all 2,446 tests at PR head `d1f3fe5`, including
 these consent and delivery regressions; this does not replace release-network
 qualification.
 
-The next engineering step is to validate the local kill switch and real UI
-withdrawal, then implement the exact-payload release inspector without expanding
-the collected catalogue. Before enabling or widening production, record the
-remaining retention verification, release network capture, inspector checks,
-server kill-switch drill, and identity-separation evidence. Existing project,
-key, contact, and membership decisions do not need to be requested again.
+The direct-macOS inspector and local controls now have source coverage and privacy
+regressions for credential-free envelope equality, scalar/anonymous identity
+semantics, retention, retry identity, local persistence failures, policy/reset
+races, read-only inspection and export feedback. Native execution is still
+pending for this patch. No backend request, key rotation or production rollout
+was performed to implement it.
+
+Before enabling or widening production, retain the release network capture,
+12-month retention/aggregate-or-delete verification, server privacy settings,
+policy publication, approved ingestion-key rotation/revoke drill, Sentry identity
+separation and clean phase-one inspection week. Daily-active date correctness
+and typed-catalogue-to-Markdown drift coverage remain separately scoped gaps.

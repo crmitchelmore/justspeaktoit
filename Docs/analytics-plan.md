@@ -242,15 +242,31 @@ join.
 The app is open source and its users are exactly the demographic that reads
 source and runs proxies. Lean into that:
 
-1. **In-app Analytics Inspector** (both platforms, shipped in *release* builds,
-   reachable from Settings → Privacy → Analytics, no secret gesture):
-   - a live, scrollable feed of every event as the **exact JSON payload**
-     queued/sent — same bytes as the wire, pretty-printed;
-   - current consent state, install ID (with a "reset" button), queue depth,
-     and endpoint hostname;
-   - an "export last 100 events" action so users can diff against the docs;
-   - works in `unknown`/`optedOut` states too — it then shows "nothing is
-     collected" backed by an empty queue, which is itself the proof.
+1. **In-app Analytics Inspector** is available in configured direct-macOS builds
+   from Settings → About → Privacy. iOS, extensions and Mac App Store remain
+   excluded from this implementation.
+   - The JSON contains the same serialized event/properties fields as transport,
+     including transport-added fields, with `api_key` omitted. It is not raw
+     authenticated request bytes. Endpoint display/export removes URL userinfo,
+     query values and fragments.
+   - At most 100 events are retained in memory for this launch. Valid queued
+     entries seed that bounded view after relaunch; sent history is not persisted.
+     Queue retention remains 1,000 events/seven days. Retries update one row;
+     HTTP acknowledged means an observed 2xx response, not backend processing or
+     exactly-once delivery.
+   - Read-only inspection creates no identity, event or network request. Native
+     Reset and Export controls report local success/failure; export cancellation
+     is neutral. Reset preserves consent, purges queued/inspected events and
+     deletes the local identity. A later legitimate event creates any new ID.
+   - "Disable collection on this Mac" preserves consent and immediately closes
+     controlled requests/retries, purges queue/history and deletes identity.
+     Clearing the override only permits existing opt-in to apply. A build/plist
+     or controlled-launch disable cannot be cleared in the inspector. Local
+     cleanup failure keeps admission closed until cleanup succeeds.
+   - Local cancellation/reset cannot recall bytes already accepted remotely or
+     remove user-owned exported files. Release network qualification remains
+     required before rollout; opening an empty inspector alone proves no such
+     audit.
 2. **Public event catalogue**: §2's table lives in this repo and is linked from
    the opt-in prompt, the inspector, and `PRIVACY.md`. A CI test asserts the
    typed Swift catalogue and the documented table stay in sync (names,
@@ -262,6 +278,32 @@ source and runs proxies. Lean into that:
    release checklist so anyone can watch a store-signed build's traffic and
    confirm it matches the inspector. This is the exact audit that exposed
    Wispr Flow — we publish the instructions for running it against us.
+
+### Local operator disable
+
+Quit the relevant direct app, then set its device-local override and restart:
+
+```sh
+defaults write com.justspeaktoit.mac posthog.forceDisabled -bool true
+defaults write com.justspeaktoit.mac.alpha posthog.forceDisabled -bool true
+```
+
+Use the applicable train's command; these overrides are never synced/transferred.
+To clear only the local override, use `-bool false` for that same bundle ID and
+restart. A restart is required for deterministic cross-process observation;
+defaults notifications are not promised to update an already running process.
+The native inspector control applies the policy immediately in its own process.
+`PostHogForceDisabled=true` in the app plist or `POSTHOG_DISABLED=true` for a
+controlled launch also wins over consent. None of these controls changes server
+settings or rotates an ingestion key.
+
+Release qualification must use an authorized direct Release build with full
+process network capture: unknown/opt-out silence; opt-in phase-one envelopes;
+offline queue/reconnect; withdrawal during a held request; local override; and
+identity reset. Compare inspector/export fields to captured JSON after removing
+`api_key`, and retain only redacted aggregate receipts privately. Check Sentry
+identity separation independently. No production key, raw response, exported
+identity or user-level server record belongs in public test evidence.
 
 ---
 

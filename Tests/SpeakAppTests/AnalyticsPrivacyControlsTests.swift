@@ -76,7 +76,7 @@ final class AnalyticsPrivacyControlsTests: XCTestCase {
         try await fixture.controller.capture(.appActiveDaily)
         await fixture.controls.refresh()
         let previousID = try XCTUnwrap(fixture.controls.installationID)
-        try saveInspectorPreviewIfRequested(fixture.controls)
+        try await saveInspectorPreviewIfRequested(fixture.controls)
         var exported: Data?
         await fixture.controls.export(to: fixture.directory.appendingPathComponent("export.json")) { data, _ in
             exported = data
@@ -102,16 +102,27 @@ final class AnalyticsPrivacyControlsTests: XCTestCase {
         XCTAssertNotEqual(try fixture.store.loadInstallationID(), previousID)
         await fixture.cleanUp()
     }
-    private func saveInspectorPreviewIfRequested(_ controls: AnalyticsPrivacyControls) throws {
+    private func saveInspectorPreviewIfRequested(_ controls: AnalyticsPrivacyControls) async throws {
         guard let path = ProcessInfo.processInfo.environment["JSTI_ANALYTICS_SMOKE_IMAGE"] else { return }
-        let renderer = ImageRenderer(content: AnalyticsInspectorView(
+        let view = NSHostingView(rootView: AnalyticsInspectorView(
             controls: controls, selection: controls.snapshot?.records.last?.id
         ).frame(width: 780, height: 620).environment(\.colorScheme, .light))
-        renderer.scale = 1
-        let image = try XCTUnwrap(renderer.nsImage)
-        let representation = try XCTUnwrap(NSBitmapImageRep(data: try XCTUnwrap(image.tiffRepresentation)))
-        let data = try XCTUnwrap(representation.representation(using: .png, properties: [:]))
-        try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+        let window = NSWindow(
+            contentRect: NSRect(x: 100, y: 100, width: 780, height: 620),
+            styleMask: [.borderless], backing: .buffered, defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        defer { window.close() }
+        window.orderBack(nil)
+        try await Task.sleep(for: .milliseconds(200))
+        view.layoutSubtreeIfNeeded()
+        let capture = Process()
+        capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        capture.arguments = ["-x", "-o", "-l", String(window.windowNumber), path]
+        try capture.run()
+        capture.waitUntilExit()
+        XCTAssertEqual(capture.terminationStatus, 0)
     }
 }
 

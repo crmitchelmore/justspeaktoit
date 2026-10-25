@@ -41,6 +41,11 @@ gdbus wait --session --timeout 15 org.freedesktop.portal.Flatpak
 
 command -v xvfb-run >/dev/null
 flatpak install --user -y --noninteractive --reinstall --bundle "$bundle"
+if [ "${JSTI_FLATPAK_TEST_GGML_PRESEED:-}" = 1 ]; then
+  echo '== TEST-ONLY environment override: GGML_NO_BACKTRACE=1; final manifest rebuild still required'
+  flatpak override --user --env=GGML_NO_BACKTRACE=1 "$app"
+  flatpak info --user --show-permissions "$app"
+fi
 
 echo '== Flatpak Spawn portal (required by the sandboxed PNG loader)'
 timeout 60 flatpak run --command=flatpak-spawn "$app" --sandbox --watch-bus /usr/bin/true

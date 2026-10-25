@@ -1,6 +1,7 @@
 """Regression checks for the Flatpak's pinned offline SwiftPM mirror setup."""
 import json
 import os
+import runpy
 from pathlib import Path
 import subprocess
 import tempfile
@@ -56,6 +57,30 @@ class OfflineMirrorTests(unittest.TestCase):
                                     capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('missing checkout for missing', result.stderr)
+
+
+class BuildRevisionTests(unittest.TestCase):
+    verify = staticmethod(runpy.run_path(str(ROOT / 'packaging/linux/verify_build_revision.py'))['verify_revision'])
+    source = '1' * 40
+    base = '2' * 40
+    built = '3' * 40
+
+    def metadata(self, event='pull_request'):
+        return {'sourceSHA': self.source, 'event': event, 'pullRequestParents': [{'baseSHA': self.base}]}
+
+    def test_exact_requested_source(self):
+        self.verify(self.source, [], self.metadata('workflow_dispatch'))
+
+    def test_authenticated_pr_merge_parents(self):
+        self.verify(self.built, [self.base, self.source], self.metadata())
+
+    def test_unrelated_revisions_and_unverified_merges_are_refused(self):
+        for parents, metadata in [([], self.metadata()), ([self.base], self.metadata()),
+            ([self.source, self.base], self.metadata()), (['4' * 40, self.source], self.metadata()),
+            ([self.base, '4' * 40], self.metadata()), ([self.base, self.source], self.metadata('push')),
+            ([self.base, self.source], {'sourceSHA': self.source, 'event': 'pull_request'})]:
+            with self.subTest(parents=parents, metadata=metadata), self.assertRaises(ValueError):
+                self.verify(self.built, parents, metadata)
 
 
 if __name__ == '__main__':

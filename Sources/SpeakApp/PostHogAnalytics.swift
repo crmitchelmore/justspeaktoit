@@ -234,6 +234,9 @@ extension PostHogProductAnalyticsSink {
   /// The sole event-envelope builder. Authentication is added only by makeRequest.
   private static func eventEnvelope(_ event: QueuedEvent) -> [String: Any] {
     var properties = event.properties.mapValues(\.foundationValue)
+    // IP discard alone permits server enrichment. Apply this processing
+    // control at serialization so restored queues and every retry inherit it.
+    properties["$geoip_disable"] = true
     properties["distinct_id"] = event.distinctID
     properties["$lib"] = "just-speak-to-it"
     properties["$lib_version"] = "1"

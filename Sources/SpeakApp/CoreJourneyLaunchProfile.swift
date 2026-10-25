@@ -11,6 +11,7 @@ final class CoreJourneyLaunchProfile {
     nonisolated static let environmentKey = "SPEAK_CORE_JOURNEY_PROFILE"
     nonisolated static let directoryKey = "SPEAK_CORE_JOURNEY_DIRECTORY"
     nonisolated static let batchJourneyKey = "SPEAK_CORE_JOURNEY_BATCH"
+    nonisolated static let scenarioKey = "SPEAK_CORE_JOURNEY_SCENARIO"
     nonisolated static let hotKeyProbeKey = "SPEAK_CORE_JOURNEY_HOTKEY_PROBE"
 
     nonisolated static var isRequested: Bool {
@@ -22,11 +23,22 @@ final class CoreJourneyLaunchProfile {
         guard let identifier = UUID(uuidString: value) else {
             preconditionFailure("SPEAK_CORE_JOURNEY_PROFILE must contain a UUID")
         }
+        let requestedScenario = ProcessInfo.processInfo.environment[scenarioKey]
+        let scenario: CoreJourneyBatchScenario
+        if let requestedScenario {
+            guard let parsed = CoreJourneyBatchScenario(rawValue: requestedScenario) else {
+                preconditionFailure("Unknown isolated core journey scenario")
+            }
+            scenario = parsed
+        } else {
+            scenario = .batchOff
+        }
         return CoreJourneyLaunchProfile(
             identifier: identifier,
             temporaryDirectory: launchDirectory(for: identifier).deletingLastPathComponent(),
             probesHotKey: ProcessInfo.processInfo.environment[hotKeyProbeKey] == "1",
-            runsBatchJourney: ProcessInfo.processInfo.environment[batchJourneyKey] == "1"
+            runsBatchJourney: ProcessInfo.processInfo.environment[batchJourneyKey] == "1" || requestedScenario != nil,
+            batchScenario: scenario
         )
     }()
 
@@ -61,16 +73,25 @@ final class CoreJourneyLaunchProfile {
     let suiteName: String
     let probesHotKey: Bool
     let runsBatchJourney: Bool
+    let batchScenario: CoreJourneyBatchScenario
+    let identifier: UUID
+    lazy var polishFixture = CoreJourneyPolishFixture(
+        identifier: identifier,
+        directory: directory, scenario: batchScenario
+    )
     private var hotKeyProbe: CoreJourneyHotKeyProbe?
 
     init(
         identifier: UUID,
         temporaryDirectory: URL = FileManager.default.temporaryDirectory,
         probesHotKey: Bool = false,
-        runsBatchJourney: Bool = false
+        runsBatchJourney: Bool = false,
+        batchScenario: CoreJourneyBatchScenario = .batchOff
     ) {
         self.probesHotKey = probesHotKey
-        self.runsBatchJourney = runsBatchJourney
+        self.identifier = identifier
+        self.runsBatchJourney = runsBatchJourney || batchScenario.polishes
+        self.batchScenario = batchScenario
         let suiteName = "com.justspeaktoit.tests.core-journey.\(identifier.uuidString)"
         let directory = temporaryDirectory.appendingPathComponent(suiteName, isDirectory: true)
         guard let defaults = UserDefaults(suiteName: suiteName) else {
@@ -92,28 +113,42 @@ final class CoreJourneyLaunchProfile {
         }
         defaults.set(directory.appendingPathComponent("Recordings").path, forKey: "recordingsDirectory")
         settings = AppSettings(defaults: defaults)
-        if probesHotKey || runsBatchJourney {
+        if probesHotKey || self.runsBatchJourney {
             settings.selectedHotKey = .custom(keyCode: UInt16(kVK_ANSI_K), modifiers: [.control, .option, .shift])
             // XCTest may hold a globally consumed key for about five seconds
             // while awaiting synthesis acknowledgement from the foreground app.
             settings.holdThreshold = 20
             settings.doubleTapWindow = 0.1
         }
-        if runsBatchJourney {
-            settings.transcriptionMode = .batchRemote
-            settings.batchTranscriptionModel = CoreJourneyBatchFixture.model
-            settings.postProcessingEnabled = false
-            settings.textOutputMethod = .clipboardOnly
-            settings.restoreClipboardAfterPaste = false
-            settings.recordingSoundsEnabled = false
-            settings.silenceDetectionEnabled = false
-            settings.hotKeyActivationStyle = .doubleTapToggle
-            settings.showHUDDuringSessions = false
-            settings.voiceCommandsEnabled = false
-            settings.postRecordingTailDuration = 0
-            settings.historyFlushInterval = 0.2
-            // Consecutive XCUI typeKey calls can be ten seconds apart on macOS.
-            settings.doubleTapWindow = 15
+        if self.runsBatchJourney { self.configureBatchSettings() }
+    }
+
+    private func configureBatchSettings() {
+        settings.transcriptionMode = .batchRemote
+        settings.batchTranscriptionModel = CoreJourneyBatchFixture.model
+        settings.preferredLocaleIdentifier = "auto"
+        settings.postProcessingEnabled = false
+        settings.textOutputMethod = .clipboardOnly
+        settings.restoreClipboardAfterPaste = false
+        settings.recordingSoundsEnabled = false
+        settings.silenceDetectionEnabled = false
+        settings.hotKeyActivationStyle = .doubleTapToggle
+        settings.showHUDDuringSessions = false
+        settings.voiceCommandsEnabled = false
+        settings.postRecordingTailDuration = 0
+        settings.historyFlushInterval = 0.2
+        // Consecutive XCUI typeKey calls can be ten seconds apart on macOS.
+        settings.doubleTapWindow = 15
+        if batchScenario.polishes {
+            settings.postProcessingEnabled = true
+            settings.postProcessingModel = CoreJourneyBatchScenario.polishModel
+            settings.postProcessingStreamingEnabled = false
+            settings.postProcessingOutputLanguage = CoreJourneyBatchScenario.outputLanguage
+            settings.postProcessingIncludeLexiconDirectives = false
+            settings.postProcessingIncludeContextTags = false
+            settings.postProcessingTemperature = 0
+            settings.showHUDDuringSessions = true
+            settings.shortenErrorDisplay = false
         }
     }
 

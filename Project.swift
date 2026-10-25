@@ -582,7 +582,8 @@ let macUITestsTarget: Target = .target(
     sources: ["Tests/SpeakAppUITests/**"],
     dependencies: [
         .target(name: "SpeakApp"),
-        .target(name: "CoreJourneyFixtureApp")
+        .target(name: "CoreJourneyFixtureApp"),
+        .package(product: "SpeakCore")
     ]
 )
 

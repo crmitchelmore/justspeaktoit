@@ -167,12 +167,20 @@ def execute(kind, directory):
         # Preserve the existing coverage.json contract as well as stage result.json.
         log = directory / "runtime/test.log"
         if log.exists():
-            errors, counts = GATE["coverage_errors"](log.read_text(encoding="utf-8", errors="replace"), suites)
+            errors, counts = UI["coverage_errors"](log.read_text(encoding="utf-8", errors="replace"))
+            if errors and code == 0:
+                code = 1
+                result_path = directory / "runtime/result.json"
+                result = json.loads(result_path.read_text(encoding="utf-8"))
+                result["exit_code"] = code
+                result["errors"].extend(errors)
+                result_path.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
             if code:
                 errors.append(f"UI runtime failed with status {code}; see runtime/result.json.")
             (directory / "coverage.json").write_text(
                 json.dumps({
-                    "required_suites": suites, "counts": counts, "errors": errors, "exit_code": code,
+                    "required_suites": suites, "required_cases": UI["REQUIRED_CASES"],
+                    "counts": counts, "errors": errors, "exit_code": code,
                 }, indent=2) + "\n",
                 encoding="utf-8",
             )

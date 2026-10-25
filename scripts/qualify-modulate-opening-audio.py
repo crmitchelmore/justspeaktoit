@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Run a test command against one owned held-upgrade peer with bounded cleanup."""
+"""Run a test command in an exclusively owned checkout with bounded peer cleanup.
+
+The caller must retain exclusive checkout ownership from admission through cleanup;
+no editor, agent or watcher may write concurrently. Admission and exclusive restore
+protect preexisting/current paths, not deletion attribution against outside writers.
+Stop and reconcile if checkout ownership is lost.
+"""
 import argparse
 import collections
 import importlib.util
@@ -72,6 +78,7 @@ def admit_portable_lock(root):
 
 
 def restore_deleted_portable_lock(snapshot):
+    """Restore an admitted deletion under the caller's exclusive-checkout contract."""
     if snapshot is None:
         return False
     path = snapshot["path"]

@@ -117,6 +117,11 @@ extension SettingsView {
             )
               .font(.callout)
               .foregroundStyle(.secondary)
+            #if !APP_STORE
+            if let controls = environment.analyticsPrivacyControls {
+              AnalyticsInspectorButton(controls: controls)
+            }
+            #endif
             Link("Privacy policy", destination: PrivacyPolicy.url)
               .font(.callout)
           }

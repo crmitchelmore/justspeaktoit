@@ -11,8 +11,11 @@ Each admitted capture freezes explicit Start inputs, reconciled Focus choices an
 global model, mode, language and destination before credential loading. Explicit
 fields win over Focus, which wins over global preferences. A foreground-continuation
 retry reuses that same snapshot. An explicit Stop destination can intentionally
-redirect the run; automatic, interruption and parameterless stops retain its frozen
-selection and origin. Named Focus models follow the same strict capability,
+redirect the run; typed hardware, automatic and interruption stops retain its
+frozen selection and origin. The exported legacy Stop with no destination retains
+clipboard and automatic-polish behavior when there is no destination override;
+Focus, explicit Start and keyboard destination contexts remain authoritative.
+Named Focus models follow the same strict capability,
 credential and offline rules as named Start models, with no silent provider fallback.
 
 The App Group contains a versioned local envelope and a generation marker; neither

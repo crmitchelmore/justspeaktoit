@@ -133,7 +133,7 @@ extension TranscriptionRecordingService {
     private func abandonStart(_ error: Error) async {
         guard state == .starting else { return }
         lastSessionError = error
-        await stopRecording()
+        await stopRecording(selection: resolvedStopSelection())
     }
 
     /// Ends a capture whose microphone is delivering nothing.
@@ -149,7 +149,7 @@ extension TranscriptionRecordingService {
                 stoppedMessage: iOSTranscriptionError.microphoneDeliveredNoAudio.localizedDescription
             )
         } else if state == .starting {
-            await stopRecording()
+            await stopRecording(selection: resolvedStopSelection())
         }
     }
 

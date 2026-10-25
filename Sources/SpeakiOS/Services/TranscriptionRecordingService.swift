@@ -128,6 +128,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     private var startTime: Date?
     private var currentModel: String = ""
     private var sharesLiveTranscript = true
+    private var sharedTranscriptRequested = true
     private(set) var automaticStopDestination: HardwareTriggerDestination = .clipboard
     private var onCaptureDisruption: (() async -> Void)?
     /// Which trigger started the session in flight, so onboarding can only
@@ -405,6 +406,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         lastSharedStateWriteAt = .distantPast
         currentSessionID = runID
         startTime = Date()
+        self.sharedTranscriptRequested = sharesLiveTranscript
         self.sharesLiveTranscript = sharesLiveTranscript
             && configuration.destinationID != HardwareTriggerDestination.historyOnly.rawValue
         // Explicit internal destination beats the override the run carried,
@@ -980,8 +982,18 @@ public final class TranscriptionRecordingService: ObservableObject {
         primedActivityMessage: String = "Ready for the Action Button",
         keyboardDeliverySource: KeyboardPickupOffer.Source? = .app
     ) async -> TranscriptionResult {
-        await stopRecording(
-            selection: destination.map { CaptureDestinationSelection(destination: $0, origin: .explicitStop) },
+        let selection: CaptureDestinationSelection?
+        if let destination {
+            selection = CaptureDestinationSelection(destination: destination, origin: .explicitStop)
+        } else if effectiveDestination?.origin == .global {
+            // The exported nil Stop keeps its clipboard/auto-polish contract. Internal
+            // hardware stops pass the frozen typed selection instead of coming here.
+            selection = CaptureDestinationSelection(destination: .clipboard, origin: .legacy)
+        } else {
+            selection = effectiveDestination
+        }
+        return await stopRecording(
+            selection: selection,
             legacyCaller: destination == nil,
             saveToHistory: saveToHistory, primedActivityMessage: primedActivityMessage,
             keyboardDeliverySource: keyboardDeliverySource
@@ -1164,7 +1176,7 @@ public final class TranscriptionRecordingService: ObservableObject {
             : requestedDestination
         // Read before the side effects reset the flag: only a shared completion
         // leaves a transcript the result row's actions can retrieve.
-        let publishesCompletedTranscript = sharesLiveTranscript && permitsExternalDelivery
+        let publishesCompletedTranscript = permitsSharedCompletion(selected) && permitsExternalDelivery
         let clipboardOutcome = await applyDestinationSideEffects(
             text: text,
             destination: resolvedDestination,
@@ -1307,6 +1319,13 @@ public final class TranscriptionRecordingService: ObservableObject {
         lifecycle.finishStopping()
         state = lifecycle.state
         return result
+    }
+
+    private func permitsSharedCompletion(_ selection: CaptureDestinationSelection) -> Bool {
+        switch selection.origin {
+        case .explicitStop, .legacy: return sharedTranscriptRequested
+        default: return sharesLiveTranscript
+        }
     }
 
     private func publishHandoff(entryID: UUID?, createdAt: Date, wordCount: Int, allowed: Bool) {

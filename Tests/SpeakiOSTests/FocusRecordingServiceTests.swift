@@ -82,7 +82,7 @@ final class FocusRecordingServiceTests: XCTestCase {
         XCTAssertEqual(frozen.languageIdentifier, "en_GB")
         XCTAssertFalse(frozen.usesBatch)
         XCTAssertEqual(service.resolvedStopDestination(), .historyOnly)
-        _ = await service.stopRecording()
+        _ = await service.stopRecording(selection: service.resolvedStopSelection())
         XCTAssertTrue(harness.pasteboard.writes.isEmpty)
     }
 
@@ -218,6 +218,43 @@ final class FocusRecordingServiceTests: XCTestCase {
         XCTAssertTrue(harness.pasteboard.writes.isEmpty)
         XCTAssertNil(harness.keyboard.pendingOffer())
         XCTAssertTrue(harness.polishRequests.isEmpty)
+    }
+
+}
+
+@MainActor
+final class FocusCaptureLegacyCompatibilityTests: XCTestCase {
+    func testLegacyPublicNilStopKeepsClipboardAndPolishDespiteHardwareGlobalHistoryOnly() async throws {
+        let harness = try DependencyHarness()
+        defer { harness.cleanUp() }
+        harness.settings.hardwareTriggerDestination = .historyOnly
+        harness.settings.autoPostProcess = true
+        harness.defaults.set("Legacy words", forKey: "simulatorValidationTranscript")
+        let service = harness.makeService()
+        try await service.startRecording(requiresLiveActivity: false)
+        let run = service.activeCaptureID
+        _ = await service.stopRecording()
+        let polished = await service.awaitPolishedTranscript(timeout: 2, forRun: run)
+        XCTAssertEqual(polished, "Polished transcript")
+        XCTAssertEqual(harness.pasteboard.writes, ["Legacy words"])
+        XCTAssertEqual(harness.polishRequests.map(\.0), ["Legacy words"])
+        XCTAssertEqual(service.lastCompletedDestination?.origin, .legacy)
+    }
+
+    func testTypedGlobalHistoryOnlyRemainsPrivateAndKeepsItsGlobalOrigin() async throws {
+        let harness = try DependencyHarness()
+        defer { harness.cleanUp() }
+        harness.settings.hardwareTriggerDestination = .historyOnly
+        harness.settings.autoPostProcess = true
+        harness.defaults.set("Hardware private words", forKey: "simulatorValidationTranscript")
+        let service = harness.makeService()
+        try await service.startRecording(requiresLiveActivity: false)
+        _ = await service.stopRecording(selection: service.resolvedStopSelection())
+        XCTAssertEqual(service.lastCompletedDestination?.origin, .global)
+        XCTAssertTrue(harness.pasteboard.writes.isEmpty)
+        XCTAssertTrue(harness.polishRequests.isEmpty)
+        XCTAssertNil(harness.keyboard.pendingOffer())
+        XCTAssertEqual(harness.resultPreviews, [""])
     }
 
 }

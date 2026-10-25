@@ -1,5 +1,7 @@
 #if !APP_STORE
 @testable import SpeakApp
+import AppKit
+import SwiftUI
 import SpeakCore
 import SpeakTestSupport
 import XCTest
@@ -74,6 +76,7 @@ final class AnalyticsPrivacyControlsTests: XCTestCase {
         try await fixture.controller.capture(.appActiveDaily)
         await fixture.controls.refresh()
         let previousID = try XCTUnwrap(fixture.controls.installationID)
+        try saveInspectorPreviewIfRequested(fixture.controls)
         var exported: Data?
         await fixture.controls.export(to: fixture.directory.appendingPathComponent("export.json")) { data, _ in
             exported = data
@@ -98,6 +101,17 @@ final class AnalyticsPrivacyControlsTests: XCTestCase {
         try await fixture.controller.capture(.appActiveDaily)
         XCTAssertNotEqual(try fixture.store.loadInstallationID(), previousID)
         await fixture.cleanUp()
+    }
+    private func saveInspectorPreviewIfRequested(_ controls: AnalyticsPrivacyControls) throws {
+        guard let path = ProcessInfo.processInfo.environment["JSTI_ANALYTICS_SMOKE_IMAGE"] else { return }
+        let renderer = ImageRenderer(content: AnalyticsInspectorView(
+            controls: controls, selection: controls.snapshot?.records.last?.id
+        ).frame(width: 780, height: 620).environment(\.colorScheme, .light))
+        renderer.scale = 1
+        let image = try XCTUnwrap(renderer.nsImage)
+        let representation = try XCTUnwrap(NSBitmapImageRep(data: try XCTUnwrap(image.tiffRepresentation)))
+        let data = try XCTUnwrap(representation.representation(using: .png, properties: [:]))
+        try data.write(to: URL(fileURLWithPath: path), options: .atomic)
     }
 }
 

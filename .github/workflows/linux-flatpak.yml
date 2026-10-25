@@ -200,6 +200,31 @@ jobs:
           PY
           sha256sum flatpak-evidence/JustSpeakToIt-x86_64.flatpak > flatpak-evidence/flatpak-bundle.sha256
 
+      - name: Diagnose Swift static and dynamic argv in the same SDK
+        run: |
+          flatpak install --user -y --noninteractive flathub org.gnome.Sdk//50 org.freedesktop.Sdk.Extension.swift6//25.08
+          python3 scripts/linux-flatpak-argv-probe.py "$RUNNER_TEMP/argv-probe"
+          flatpak-builder --disable-download --force-clean --disable-rofiles-fuse \
+            --state-dir "$RUNNER_TEMP/argv-probe-state" "$RUNNER_TEMP/argv-probe-build" "$RUNNER_TEMP/argv-probe/manifest.json"
+          bash -o pipefail -c 'flatpak-builder --run "$RUNNER_TEMP/argv-probe-build" "$RUNNER_TEMP/argv-probe/manifest.json" sh -ec '''
+            echo "== dynamic Swift argv in SDK"
+            /app/bin/probe-dynamic --version
+            echo "== static Swift argv in SDK"
+            /app/bin/probe-static --version
+          ''' 2>&1 | tee flatpak-evidence/argv-probe.log'
+          flatpak install --user -y --noninteractive --reinstall --bundle flatpak-evidence/JustSpeakToIt-x86_64.flatpak
+          installed=$(flatpak info --user --show-location com.justspeaktoit.JustSpeakToIt)
+          sha256sum "$installed/files/bin/justspeaktoit" >> flatpak-evidence/argv-probe.log
+          readelf -d "$installed/files/bin/justspeaktoit" >> flatpak-evidence/argv-probe.log
+          strings "$installed/files/bin/justspeaktoit" | python3 -c 'import sys; wanted=("JustSpeakToIt for Linux (developer preview)", "Native Linux adapter and canonical model self-test passed."); print("\n".join(line.strip() for line in sys.stdin if line.strip() in wanted))' >> flatpak-evidence/argv-probe.log
+          flatpak run --command=sh com.justspeaktoit.JustSpeakToIt -ec '
+            probe=$(mktemp)
+            trap '''rm -f "$probe"''' EXIT
+            cat > "$probe"
+            chmod 700 "$probe"
+            "$probe" --version
+          ' < "$RUNNER_TEMP/argv-probe-build/files/bin/probe-static" >> flatpak-evidence/argv-probe.log 2>&1
+
       - name: Qualify the unchanged bundle in a real session
         run: >-
           bash -o pipefail -c 'scripts/linux-flatpak-checks.sh

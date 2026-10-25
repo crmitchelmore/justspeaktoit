@@ -7,8 +7,6 @@ extension AppSettings.DefaultsKey {
     /// This projection does not add keys to transfer or automatic sync policies.
     var storageKey: String {
         switch self {
-        case .transcriptReadyNotificationsEnabled:
-            ApplicationPreferenceKey.transcriptReadyNotificationsEnabled.rawValue
         case .batchTranscriptionModel: ApplicationPreferenceKey.batchTranscriptionModel.rawValue
         case .postProcessingModel: ApplicationPreferenceKey.postProcessingModel.rawValue
         case .transcriptionKeywords: ApplicationPreferenceKey.transcriptionKeywords.rawValue

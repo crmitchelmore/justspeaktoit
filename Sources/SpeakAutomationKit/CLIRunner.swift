@@ -129,7 +129,7 @@ public struct CLIRunner {
 
     static func humanText(for result: AutomationResult, command: AutomationCommand) -> String {
         switch command {
-        case .transcribeFile, .stopDictation:
+        case .transcribeFile, .stopDictation, .awaitTranscript:
             let text = result.text ?? ""
             return text.isEmpty ? "" : text + "\n"
         case .startDictation:

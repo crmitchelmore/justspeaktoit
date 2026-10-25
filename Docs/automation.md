@@ -16,10 +16,48 @@ directly between them:
 | Verb | Shortcuts action | CLI | MCP tool |
 | --- | --- | --- | --- |
 | listen | Start Dictation | `speak listen` | `start_dictation` |
+| await (local Mac) | — | `speak await --capture-id <uuid>` | `await_transcript` |
+| status | — | `speak status` | `status` |
 | stop | Stop Dictation | `speak stop` | `stop_dictation` |
 | transcribe | Transcribe Audio File | `speak transcribe <file>` | `transcribe_file` |
 | history | Get Last Transcription | `speak history` | `get_history` |
 | polish | Polish Text | — | — |
+
+## Named local capture await (qualification pending)
+
+The new `await_transcript` path waits for one **already active local Mac capture**.
+Use the `captureID` returned by `speak listen --json` or active `speak status --json`,
+then register before stopping that capture through the UI/hotkey or a separate command:
+
+```sh
+speak await --capture-id <capture-uuid> --timeout 60 --json
+```
+
+MCP arguments are `capture_id`, optional `since_id`, and `timeout_seconds`.
+Default timeout is 60 seconds; the finite allowed range is greater than zero through
+600. `since_id` must name an existing History row and is a baseline, never replay.
+Missing, unrelated, deleted-baseline and already-completed captures fail. Await
+never starts recording or accepts a later capture, phone/Watch sync, import or edit.
+Only the exact nonempty successful local result qualifies; JSON/structured output
+includes `captureID` and a frozen `entry` (History identity plus text/metadata).
+
+At most 16 underlying waits run; same-capture fan-out is intentional. Same request
+ID and normalized arguments join/replay the original deadline and terminal result.
+Changed arguments fail. Timeout, final connection EOF, Automation off and shutdown
+remove subscriptions; one disconnected retry does not cancel another subscriber.
+Off/on or restart resets the epoch. No cross-restart resumption is promised.
+CLI Ctrl-C terminates its process and closes its owned connection. MCP handles
+`notifications/cancelled` by JSON-RPC `requestId` and EOF; only awaits run concurrently,
+while existing mutators remain ordered. Output frames are serialized; Mac stdout
+writes are close-aware and bounded to two seconds, with partial/broken output ending
+dispatch rather than emitting another corrupt frame. No writes occur after close returns.
+
+Existing Automation opt-in, socket ownership/permissions and provider ownership stay
+unchanged. This is a captured-result receipt under existing History WAL/recovery
+semantics, not proof of forced disk flush, cloud arrival or delivered text insertion.
+Older apps report unsupported; update both app and bundled CLI. Installed standalone
+CLI + actual MCP/local-speech proof, native/API suites and physical relay acceptance
+are not established by this source implementation. Phone/Watch remain outside scope.
 
 ## Shortcuts / App Intents
 
@@ -413,7 +451,7 @@ each result PASS, FAIL, or NOT RUN.
 | Date; macOS/architecture | NOT RUN — `<date>; <macOS>; <architecture>` |
 | App version/build; standalone `speak` path and version; `claude --version` | NOT RUN — `<versions and resolved absolute path>` |
 | Original Automation state; local registration name/scope; restoration | NOT RUN — `<state; name; local scope; restored yes/no>` |
-| Real client connection and discovered tools | NOT RUN — expect exactly `transcribe_file`, `get_history`, `start_dictation`, `stop_dictation` |
+| Real client connection and discovered tools | NOT RUN — expect `transcribe_file`, `get_history`, `start_dictation`, `stop_dictation`, `status`, `await_transcript` |
 | Invoked argument and response shape/count | NOT RUN — `get_history({"limit":1})`; record `content`, `structuredContent`, and item count without text |
 | Failure classification | NOT RUN — `<none, PATH, opt-in/socket, account/client permission, or protocol mismatch; redacted code>` |
 | Disabled-access check and final state | NOT RUN — `<fresh call blocked; socket absent where applicable; original state restored>` |

@@ -38,6 +38,10 @@ public enum AutomationCommandDispatcher {
             try AutomationRequestPolicy.rejectUnappliedOptions(in: request)
             let result: AutomationResult
             switch request.command {
+            case .awaitTranscript:
+                throw AutomationError(code: .unsupportedCommand,
+                                      message: "Named capture await requires a compatible Mac app. "
+                                        + "Update the app and CLI.")
             case .status:
                 result = await host.automationStatus()
             case .history:

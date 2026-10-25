@@ -25,6 +25,10 @@ public struct MCPRequestHandler {
     ///
     /// Returns nil for notifications, which must not produce a reply.
     public func handle(line: String) -> String? {
+        self.handle(line: line, cancellation: nil)
+    }
+
+    func handle(line: String, cancellation: AutomationRequestCancellation?) -> String? {
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         guard trimmed.utf8.count <= AutomationLimits.maxFrameBytes else {
@@ -58,7 +62,8 @@ public struct MCPRequestHandler {
         case "tools/list":
             return Self.encode(Self.result(id: identifier, value: ["tools": Self.toolDefinitions]))
         case "tools/call":
-            return Self.encode(self.callTool(id: identifier, params: params))
+            return self.callToolResponse(id: identifier, params: params, rawID: message["id"],
+                                         cancellation: cancellation)
         default:
             return Self.encode(Self.errorResponse(
                 id: identifier,
@@ -66,6 +71,16 @@ public struct MCPRequestHandler {
                 message: "Method not found: \(method)."
             ))
         }
+    }
+
+    private func callToolResponse(
+        id: Any?, params: [String: Any], rawID: Any?, cancellation: AutomationRequestCancellation?
+    ) -> String {
+        if params["name"] as? String == AutomationCommand.awaitTranscript.rawValue, !Self.validAwaitID(rawID) {
+            return Self.encode(Self.errorResponse(
+                id: nil, code: -32600, message: "Await requires a string or numeric JSON-RPC ID."))
+        }
+        return Self.encode(self.callTool(id: id, params: params, cancellation: cancellation))
     }
 
     // MARK: - Handlers
@@ -80,13 +95,13 @@ public struct MCPRequestHandler {
         ])
     }
 
-    private func callTool(id: Any?, params: [String: Any]) -> [String: Any] {
+    private func callTool(
+        id: Any?, params: [String: Any], cancellation: AutomationRequestCancellation?
+    ) -> [String: Any] {
         guard let name = params["name"] as? String else {
             return Self.errorResponse(id: id, code: -32602, message: "tools/call requires a \"name\".")
         }
-        // The accepted surface must equal the advertised one: `AutomationCommand`
-        // carries verbs the socket understands but this server never lists
-        // (`status`), and answering those would make `tools/list` a lie.
+        // The accepted surface must equal the advertised tool surface.
         guard let command = AutomationCommand(rawValue: name), Self.advertisedToolNames.contains(name) else {
             return Self.errorResponse(id: id, code: -32602, message: "Unknown tool: \(name).")
         }
@@ -94,7 +109,16 @@ public struct MCPRequestHandler {
 
         do {
             let request = try self.request(for: command, arguments: arguments, callID: id)
-            let response = try self.client.send(request)
+            let response: AutomationResponse
+            if command == .awaitTranscript {
+                guard let client = self.client as? any CancellableAutomationRequesting else {
+                    throw AutomationError(code: .unsupportedCommand,
+                                          message: "This transport cannot cancel named capture waits. Update the CLI.")
+                }
+                response = try client.send(request, cancellation: cancellation ?? AutomationRequestCancellation())
+            } else {
+                response = try self.client.send(request)
+            }
             if response.ok, let result = response.result {
                 return Self.result(id: id, value: Self.toolResult(for: result, command: command, isError: false))
             }
@@ -114,7 +138,16 @@ public struct MCPRequestHandler {
 
     private func request(for command: AutomationCommand, arguments: [String: Any], callID: Any?) throws
         -> AutomationRequest {
-        var request = AutomationRequest(id: Self.requestID(for: callID), command: command)
+        let identifier = command == .awaitTranscript
+            ? try Self.awaitRequestID(for: callID) : Self.requestID(for: callID)
+        var request = AutomationRequest(id: identifier, command: command)
+        for (key, value) in [("capture_id", arguments["capture_id"]), ("since_id", arguments["since_id"])] {
+            guard let value else { continue }
+            guard let identifier = value as? String else {
+                throw AutomationError(code: .invalidArgument, message: "Capture and cursor must be UUID strings.")
+            }
+            if key == "capture_id" { request.captureID = identifier } else { request.sinceID = identifier }
+        }
         if let path = arguments["path"] {
             guard let path = path as? String else {
                 throw AutomationError(code: .invalidArgument, message: "\"path\" must be a string.")
@@ -198,46 +231,6 @@ public struct MCPRequestHandler {
     static let advertisedToolNames: Set<String> = Set(
         Self.toolDefinitions.compactMap { $0["name"] as? String }
     )
-
-    static let toolDefinitions: [[String: Any]] = [
-        [
-            "name": AutomationCommand.transcribeFile.rawValue,
-            "description": "Transcribe a local audio file using the user's configured provider.",
-            "inputSchema": [
-                "type": "object",
-                "properties": [
-                    "path": ["type": "string", "description": "Absolute path to an audio file."],
-                    "timeout_seconds": ["type": "number", "description": "Deadline in seconds."]
-                ],
-                "required": ["path"]
-            ]
-        ],
-        [
-            "name": AutomationCommand.getHistoryToolName,
-            "description": "Return the most recent transcriptions, newest first.",
-            "inputSchema": [
-                "type": "object",
-                "properties": [
-                    "limit": [
-                        "type": "integer",
-                        "minimum": 1,
-                        "maximum": AutomationLimits.maxHistoryLimit,
-                        "description": "How many entries to return (default \(AutomationLimits.defaultHistoryLimit))."
-                    ]
-                ]
-            ]
-        ],
-        [
-            "name": AutomationCommand.startDictation.rawValue,
-            "description": "Start a dictation session in the app. Idempotent per call id.",
-            "inputSchema": ["type": "object", "properties": [:]]
-        ],
-        [
-            "name": AutomationCommand.stopDictation.rawValue,
-            "description": "Stop the active dictation session and return its transcript.",
-            "inputSchema": ["type": "object", "properties": [:]]
-        ]
-    ]
 
     // MARK: - JSON-RPC scaffolding
 

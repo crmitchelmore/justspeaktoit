@@ -31,6 +31,9 @@ public enum AutomationLimits {
     public static let defaultTimeout: TimeInterval = 15
     /// Deadline for file transcription, which is bounded by provider latency.
     public static let transcriptionTimeout: TimeInterval = 600
+    public static let awaitTimeout: TimeInterval = 60
+    public static let maxAwaitTimeout: TimeInterval = 600
+    public static let maxTranscriptWaits = 16
     public static let maxTimeout: TimeInterval = 3600
 }
 
@@ -44,6 +47,7 @@ public enum AutomationCommand: String, Codable, Sendable, CaseIterable {
     case startDictation = "start_dictation"
     case stopDictation = "stop_dictation"
     case history = "get_history"
+    case awaitTranscript = "await_transcript"
 }
 
 /// Stable machine-readable failure codes.
@@ -104,6 +108,8 @@ public struct AutomationRequest: Codable, Sendable, Equatable {
     public var provider: String?
     public var limit: Int?
     public var timeout: TimeInterval?
+    public var captureID: String?
+    public var sinceID: String?
 
     public init(
         schemaVersion: Int = AutomationSchema.currentVersion,
@@ -115,19 +121,14 @@ public struct AutomationRequest: Codable, Sendable, Equatable {
         limit: Int? = nil,
         timeout: TimeInterval? = nil
     ) {
-        self.schemaVersion = schemaVersion
-        self.id = id
-        self.command = command
-        self.path = path
-        self.profile = profile
-        self.provider = provider
-        self.limit = limit
-        self.timeout = timeout
+        self.init(schemaVersion: schemaVersion, id: id, command: command, path: path,
+                  profile: profile, provider: provider, limit: limit, timeout: timeout, captureID: nil)
     }
 
     /// The deadline to apply to this request, clamped to something a caller
     /// cannot use to pin a transcription slot open indefinitely.
     public var resolvedTimeout: TimeInterval {
+        if self.command == .awaitTranscript { return self.timeout ?? AutomationLimits.awaitTimeout }
         let fallback = self.command == .transcribeFile
             ? AutomationLimits.transcriptionTimeout
             : AutomationLimits.defaultTimeout
@@ -156,7 +157,12 @@ public struct AutomationRequest: Codable, Sendable, Equatable {
         try self.validateOptionalIdentifier(self.profile, label: "profile")
         try self.validateOptionalIdentifier(self.provider, label: "provider")
 
+        if self.command != .awaitTranscript, self.captureID != nil || self.sinceID != nil {
+            throw AutomationError(code: .invalidArgument, message: "Capture cursors require await_transcript.")
+        }
         switch self.command {
+        case .awaitTranscript:
+            try self.validateAwait()
         case .transcribeFile:
             guard let path, !path.isEmpty else {
                 throw AutomationError(code: .invalidArgument, message: "transcribe_file requires a file path.")
@@ -236,6 +242,8 @@ public struct AutomationResult: Codable, Sendable, Equatable {
     public var sessionActive: Bool?
     public var appVersion: String?
     public var entries: [AutomationHistoryEntry]?
+    public var captureID: String?
+    public var entry: AutomationHistoryEntry?
 
     public init(
         text: String? = nil,
@@ -245,13 +253,10 @@ public struct AutomationResult: Codable, Sendable, Equatable {
         appVersion: String? = nil,
         entries: [AutomationHistoryEntry]? = nil
     ) {
-        self.text = text
-        self.model = model
-        self.durationSeconds = durationSeconds
-        self.sessionActive = sessionActive
-        self.appVersion = appVersion
-        self.entries = entries
+        self.init(text: text, model: model, durationSeconds: durationSeconds, sessionActive: sessionActive,
+                  appVersion: appVersion, entries: entries, captureID: nil)
     }
+
 }
 
 public struct AutomationResponse: Codable, Sendable, Equatable {

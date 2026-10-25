@@ -167,6 +167,38 @@ final class HistoryManager: ObservableObject, RepeatingTimerTarget {
   /// Batch size threshold for triggering flush
   var batchSizeThreshold: Int
 
+  /// Append-only in-memory cursor; reset with this History/server lifetime, never a persisted sync cursor.
+  private(set) var automationAppendRevision: UInt64 = 0
+  private var automationCaptureObservers: [UUID: (AutomationCaptureCompletion) -> Void] = [:]
+
+  struct AutomationCaptureCompletion {
+    let captureID: UUID
+    let revision: UInt64
+    let item: HistoryItem?
+  }
+
+  func prepareForAutomationObservation() async {
+    await waitUntilLoaded()
+    await waitForMigration()
+  }
+
+  func observeAutomationCapture(_ observer: @escaping (AutomationCaptureCompletion) -> Void) -> UUID {
+    let token = UUID()
+    automationCaptureObservers[token] = observer
+    return token
+  }
+
+  func removeAutomationCaptureObserver(_ token: UUID) {
+    automationCaptureObservers.removeValue(forKey: token)
+  }
+
+  /// Called only by the local capture owner after its final append/outcome, never by sync or edits.
+  /// The existing WAL recovery contract remains unchanged; this is not a forced disk-flush receipt.
+  func finishAutomationCapture(id: UUID, item: HistoryItem?) {
+    let event = AutomationCaptureCompletion(captureID: id, revision: automationAppendRevision, item: item)
+    for observer in Array(automationCaptureObservers.values) { observer(event) }
+  }
+
   /// Fired after a locally created item is committed, so history sync can
   /// upload it. Wired by `MacHistorySyncAdapter` at bootstrap.
   var onItemAppended: ((HistoryItem) -> Void)?
@@ -453,6 +485,7 @@ final class HistoryManager: ObservableObject, RepeatingTimerTarget {
     items = current
 
     updateStatisticsForAppend(item)
+    automationAppendRevision &+= 1
     contentRevision &+= 1
 
     // Write to WAL instead of directly to disk

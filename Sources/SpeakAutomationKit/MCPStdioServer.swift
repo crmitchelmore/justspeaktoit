@@ -21,27 +21,28 @@ public struct MCPStdioServer {
         self.output = output
     }
 
-    /// Serves until stdin closes. Blocking and single-threaded: MCP stdio clients
-    /// send one request at a time, and serialising them keeps dictation start/stop
-    /// ordering predictable.
+    /// Serves until stdin closes. Only await calls use bounded concurrent workers;
+    /// existing commands retain their serial ordering on the framing reader.
     public func serve() {
+        let dispatcher = MCPStdioDispatch(handler: self.handler, output: self.output)
+        defer { dispatcher.close() }
         var buffer = Data()
         var skippingOversizedLine = false
         while true {
             let chunk = self.input.availableData
             if chunk.isEmpty {
-                self.drain(&buffer, skipping: &skippingOversizedLine, isFinal: true)
+                self.drain(&buffer, skipping: &skippingOversizedLine, isFinal: true, dispatcher: dispatcher)
                 return
             }
             buffer.append(chunk)
-            self.drain(&buffer, skipping: &skippingOversizedLine, isFinal: false)
+            self.drain(&buffer, skipping: &skippingOversizedLine, isFinal: false, dispatcher: dispatcher)
             // Guard against a client that never sends a newline. Complete messages
             // have already been answered above, so only an unterminated line can be
             // this large: report it once and resync on the next newline instead of
             // emitting an error for every following fragment.
             if buffer.count > AutomationLimits.maxFrameBytes {
                 if !skippingOversizedLine {
-                    self.write(MCPRequestHandler.encode(MCPRequestHandler.errorResponse(
+                    dispatcher.write(MCPRequestHandler.encode(MCPRequestHandler.errorResponse(
                         id: nil,
                         code: -32600,
                         message: "Request exceeds the size limit."
@@ -53,7 +54,7 @@ public struct MCPStdioServer {
         }
     }
 
-    private func drain(_ buffer: inout Data, skipping: inout Bool, isFinal: Bool) {
+    private func drain(_ buffer: inout Data, skipping: inout Bool, isFinal: Bool, dispatcher: MCPStdioDispatch) {
         let newline = UInt8(ascii: "\n")
         while let index = buffer.firstIndex(of: newline) {
             let lineData = buffer[buffer.startIndex..<index]
@@ -63,31 +64,14 @@ public struct MCPStdioServer {
                 skipping = false
                 continue
             }
-            self.dispatch(lineData)
+            dispatcher.dispatch(Data(lineData))
         }
         if isFinal, !buffer.isEmpty {
             if !skipping {
-                self.dispatch(buffer)
+                dispatcher.dispatch(buffer)
             }
             buffer.removeAll(keepingCapacity: false)
         }
     }
 
-    private func dispatch(_ lineData: Data) {
-        guard let line = String(data: Data(lineData), encoding: .utf8) else {
-            self.write(MCPRequestHandler.encode(MCPRequestHandler.errorResponse(
-                id: nil,
-                code: -32700,
-                message: "Parse error: request was not valid UTF-8."
-            )))
-            return
-        }
-        guard let response = self.handler.handle(line: line) else { return }
-        self.write(response)
-    }
-
-    private func write(_ line: String) {
-        guard let data = (line + "\n").data(using: .utf8) else { return }
-        self.output.write(data)
-    }
 }

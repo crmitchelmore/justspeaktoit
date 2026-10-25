@@ -37,6 +37,10 @@ admission. An explicit valid field can supersede an invalid Focus field without
 discarding other valid Focus fields. History-only captures save History according
 to existing policy, including configured sync, but publish no immediate keyboard
 offer, clipboard, shared result preview, Handoff pointer or polish request.
+The independent, disabled-by-default saved-result alert may still report readiness
+without transcript content. A same-run active generic completion surface suppresses
+that alert using an in-process owner identity; this identity is separate from the
+Copy token and never appears in Activity content or notification payloads.
 
 Phone capture status shows the frozen destination and a Focus label when Focus
 supplied it. Settings shows the last received local selection and a reset action.

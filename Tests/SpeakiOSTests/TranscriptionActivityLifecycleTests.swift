@@ -334,6 +334,7 @@ final class FakeActivity: TranscriptionActivityHandle {
     var activityState: ActivityState
     var transcriptionState = TranscriptionActivityAttributes.ContentState()
     var updates: [TranscriptionActivityAttributes.ContentState] = []
+    var didUpdate: ((TranscriptionActivityAttributes.ContentState) -> Void)?
     var observers: [@MainActor (ActivityState) -> Void] = []
     var suspendUpdates = false
     var updateWaiter: CheckedContinuation<Void, Never>?
@@ -351,6 +352,7 @@ final class FakeActivity: TranscriptionActivityHandle {
         lastTimestamp = timestamp
         updates.append(state)
         transcriptionState = state
+        didUpdate?(state)
     }
 
     func endTranscription(_ state: TranscriptionActivityAttributes.ContentState?, timestamp: Date) async {

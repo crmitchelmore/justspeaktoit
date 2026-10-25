@@ -14,6 +14,8 @@ struct RecordingServiceActivity {
     var reportError: (String) -> Void
     var complete: TranscriptionRecordingService.ActivityCompletion
     var hasActiveResult: (String) -> Bool = { _ in false }
+    var completeOwned: TranscriptionRecordingService.OwnedActivityCompletion?
+    var hasActiveResultSurface: (UUID) -> Bool = { _ in false }
 
     func startActivity(provider: String, initialStatus: Status) -> Bool {
         self.start(provider, initialStatus)
@@ -41,7 +43,16 @@ struct RecordingServiceActivity {
                     resultCompletionID: identifier
                 )
             },
-            hasActiveResult: { manager.hasActiveResult(completionID: $0) }
+            hasActiveResult: { manager.hasActiveResult(completionID: $0) },
+            completeOwned: { count, duration, primedMessage, outcome, preview, message, identifier, owner in
+                manager.completeActivity(
+                    finalWordCount: count, duration: duration, keepPrimed: true,
+                    primedMessage: primedMessage, completionOutcome: outcome,
+                    resultPreview: preview, completionMessage: message, resultCompletionID: identifier,
+                    surfaceOwnerID: owner
+                )
+            },
+            hasActiveResultSurface: { manager.hasActiveResult(surfaceOwnerID: $0) }
         )
     }
 }

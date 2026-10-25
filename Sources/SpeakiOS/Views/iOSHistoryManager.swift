@@ -13,7 +13,7 @@ private let logger = SpeakLogger.logger(category: "iOSHistoryManager")
 /// Manages transcription history persistence for iOS with CloudKit sync.
 @MainActor
 // swiftlint:disable:next type_body_length
-public final class iOSHistoryManager: ObservableObject {
+public final class iOSHistoryManager: ObservableObject { // swiftlint:disable:this type_name
     public static let shared = iOSHistoryManager()
 
     @Published public private(set) var items: [iOSHistoryItem] = []

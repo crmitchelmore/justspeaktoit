@@ -201,7 +201,10 @@ public final class TranscriptionRecordingService: ObservableObject {
     private var latestCompletionID: UUID?
     typealias ActivityCompletion =
         @MainActor (Int, Int, String, TranscriptionCompletionOutcome, String, String?, String) -> Void
+    typealias OwnedActivityCompletion =
+        @MainActor (Int, Int, String, TranscriptionCompletionOutcome, String, String?, String, UUID) -> Void
     private let completeActivity: ActivityCompletion
+    private let completeOwnedActivity: OwnedActivityCompletion?
     private let sessionFactory: (() throws -> IOSTranscriptionSession)?
 
     private convenience init() {
@@ -258,6 +261,8 @@ public final class TranscriptionRecordingService: ObservableObject {
         self.hasPolishingKey = hasPolishingKey
         self.polish = polish
         self.completeActivity = completeActivity ?? dependencies.activity.complete
+        // An existing injected completion callback keeps complete ownership of its effects.
+        self.completeOwnedActivity = completeActivity == nil ? dependencies.activity.completeOwned : nil
     }
 
     /// Picks the first non-blank candidate, else the fallback. Extracted as a
@@ -1273,7 +1278,7 @@ public final class TranscriptionRecordingService: ObservableObject {
             // preview and the result row offers no actions it cannot honour.
             resultPreview: publishesCompletedTranscript ? TranscriptionResultRow.preview(for: text) : "",
             completionMessage: receipt.summary,
-            resultCompletionID: publishedCompletionID
+            identity: (copyToken: publishedCompletionID, surfaceOwnerID: completionID)
         )
 
         // Freeze the durable row and this capture's settled facts before any
@@ -1284,7 +1289,7 @@ public final class TranscriptionRecordingService: ObservableObject {
             failed: lastSessionError != nil,
             isForeground: dependencies.applicationState() != .background,
             keyboardInserted: keyboardOutcome == .insertedInField,
-            matchingResultActivity: dependencies.activity.hasActiveResult(publishedCompletionID)
+            matchingResultActivity: dependencies.activity.hasActiveResultSurface(completionID)
         ))
 
         // Kick off background post-processing if the chosen destination + user
@@ -1369,10 +1374,17 @@ public final class TranscriptionRecordingService: ObservableObject {
         outcome: TranscriptionCompletionOutcome,
         resultPreview: String,
         completionMessage: String? = nil,
-        resultCompletionID: String
+        identity: (copyToken: String, surfaceOwnerID: UUID)
     ) {
+        if let completeOwnedActivity {
+            completeOwnedActivity(
+                wordCount, duration, primedMessage, outcome, resultPreview, completionMessage,
+                identity.copyToken, identity.surfaceOwnerID
+            )
+            return
+        }
         completeActivity(
-            wordCount, duration, primedMessage, outcome, resultPreview, completionMessage, resultCompletionID
+            wordCount, duration, primedMessage, outcome, resultPreview, completionMessage, identity.copyToken
         )
     }
 

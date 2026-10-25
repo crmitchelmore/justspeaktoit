@@ -283,14 +283,10 @@ final class DependencyHarness {
         )
     }
 
-    func makeService(
-        ensureKeysLoaded: (@MainActor () async -> Void)? = nil,
-        networkSnapshot: @escaping CaptureNetworkPathMonitor.SnapshotProvider = { .unknown },
-        capability: @escaping @MainActor (String) -> AppleLocalRecognitionCapability = { _ in .available }
-    ) -> TranscriptionRecordingService {
-        let dependencies = RecordingServiceDependencies(
+    private func makeDependencies(activity: RecordingServiceActivity?) -> RecordingServiceDependencies {
+        RecordingServiceDependencies(
             settings: self.settings,
-            activity: RecordingServiceActivity(
+            activity: activity ?? RecordingServiceActivity(
                 start: { [unowned self] _, status in
                     self.activityStarts.append(status)
                     return self.activityStartsSuccessfully
@@ -325,6 +321,16 @@ final class DependencyHarness {
                 return self.focus
             }
         )
+    }
+
+    func makeService(
+        ensureKeysLoaded: (@MainActor () async -> Void)? = nil,
+        networkSnapshot: @escaping CaptureNetworkPathMonitor.SnapshotProvider = { .unknown },
+        capability: @escaping @MainActor (String) -> AppleLocalRecognitionCapability = { _ in .available },
+        activity: RecordingServiceActivity? = nil,
+        completion: TranscriptionRecordingService.ActivityCompletion? = nil
+    ) -> TranscriptionRecordingService {
+        let dependencies = self.makeDependencies(activity: activity)
         let service = TranscriptionRecordingService(
             sharedState: SharedTranscriptionState(defaults: self.defaults),
             historyManager: self.history,
@@ -334,6 +340,7 @@ final class DependencyHarness {
                 self.polishRequests.append((text, model))
                 return "Polished transcript"
             },
+            completeActivity: completion,
             foregroundOwnership: ForegroundRecordingOwnership(),
             ensureKeysLoaded: ensureKeysLoaded,
             networkSnapshot: networkSnapshot,

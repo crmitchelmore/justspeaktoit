@@ -93,9 +93,13 @@ static void apply_inventory(gpointer data) {
     dialog->loading = TRUE;
     g_strfreev(dialog->identifiers); dialog->identifiers = g_strdupv(inventory->identifiers);
     GtkStringList *model = gtk_string_list_new((const char *const *)inventory->labels);
+    guint selected = inventory->selected < 0 ? g_strv_length(dialog->identifiers) : (guint)inventory->selected;
+    if (inventory->selected < 0) {
+        /* Display-only: outside identifiers, so choose cannot emit a different voice. */
+        gtk_string_list_append(model, "Choose an account voice…");
+    }
     gtk_drop_down_set_model(dialog->voices, G_LIST_MODEL(model)); g_object_unref(model);
-    gtk_drop_down_set_selected(dialog->voices,
-        inventory->selected < 0 ? GTK_INVALID_LIST_POSITION : (guint)inventory->selected);
+    gtk_drop_down_set_selected(dialog->voices, selected);
     gtk_label_set_text(dialog->status, inventory->status);
     dialog->loading = inventory->loading; sensitivity(dialog);
 }
@@ -309,6 +313,20 @@ int32_t jsti_voice_discovery_self_test(GtkWindow *owner, char *error, size_t cap
     fixture_inventory(dialog);
     choose(dialog->choose, dialog);
     passed = passed && g_strcmp0(calls.choice, "xai/Account-A") == 0;
+    Inventory unavailable = {dialog->token, g_strsplit("Eve\nAccount A", "\n", -1),
+        g_strsplit("xai/eve\nxai/Account-A", "\n", -1), "Choose an available voice.", -1, FALSE, 0};
+    apply_inventory(&unavailable);
+    g_clear_pointer(&calls.choice, g_free);
+    choose(dialog->choose, dialog);
+    passed = passed && calls.choice == NULL &&
+        gtk_drop_down_get_selected(dialog->voices) == 2 &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(dialog->choose));
+    gtk_drop_down_set_selected(dialog->voices, 0);
+    choose(dialog->choose, dialog);
+    passed = passed && gtk_widget_get_sensitive(GTK_WIDGET(dialog->choose)) &&
+        g_strcmp0(calls.choice, "xai/eve") == 0;
+    g_strfreev(unavailable.labels); g_strfreev(unavailable.identifiers);
+    fixture_inventory(dialog);
     refresh(dialog->refresh, dialog);
     passed = passed && calls.refreshed == 1 && !gtk_widget_get_sensitive(GTK_WIDGET(dialog->choose));
     Inventory stale = {"obsolete", NULL, NULL, NULL, 0, FALSE, 0};

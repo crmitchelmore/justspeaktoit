@@ -964,11 +964,22 @@ static gboolean format_self_test(Dialog *dialog) {
     g_free(dialog->result_format); dialog->result_format = g_strdup("m4a");
     passed = strcmp(selected_format(dialog), "mp3") == 0 &&
         gtk_widget_get_sensitive(GTK_WIDGET(dialog->export_result)) && passed;
-    format_state.selected = GTK_INVALID_LIST_POSITION; show_formats(dialog);
-    passed = !gtk_widget_get_sensitive(GTK_WIDGET(dialog->generate)) &&
+    /* Match the production parser's explicit non-executable stored-format row. */
+    g_strfreev(format_state.labels); g_strfreev(format_state.identifiers);
+    format_state.labels = g_strsplit("MP3\nAAC (M4A)\nWAV\nUnavailable stored format", "\n", -1);
+    format_state.identifiers = g_strsplit("mp3\nm4a\nwav\n", "\n", -1);
+    format_state.selected = 3; show_formats(dialog);
+    passed = strcmp(selected_format(dialog), "") == 0 &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(dialog->generate)) &&
         !gtk_widget_get_sensitive(GTK_WIDGET(dialog->export_button)) &&
         gtk_widget_get_sensitive(GTK_WIDGET(dialog->read)) &&
         gtk_widget_get_sensitive(GTK_WIDGET(dialog->export_result)) && passed;
+    gtk_drop_down_set_selected(dialog->format, 0);
+    passed = dialog->format_pending && !gtk_widget_get_sensitive(GTK_WIDGET(dialog->generate)) && passed;
+    format_state.selected = 0; show_formats(dialog);
+    generate_audio(NULL, dialog);
+    passed = g_strcmp0(received.generate_flags, "2|mp3") == 0 &&
+        gtk_widget_get_sensitive(GTK_WIDGET(dialog->generate)) && passed;
     dialog->callback = callback; dialog->context = context;
     g_free(received.generate_flags); g_free(received.played_result);
     clear_formats(&format_state);
@@ -1047,7 +1058,19 @@ int32_t jsti_voice_sources_self_test(GtkWindow *owner, char *error, size_t capac
     gboolean passed = history && typed && unavailable && history_snapshot && typed_snapshot &&
         clipboard_snapshot && file_snapshot && stale_import && failed_import && edited_import &&
         generated_snapshot && busy_result && retained_result && markup && formats;
-    if (!passed) jsti_set_error(error, capacity, "Voice sources state/snapshot checks failed.");
+    if (!passed) {
+        const gboolean checks[] = {history, typed, unavailable, history_snapshot, typed_snapshot,
+            clipboard_snapshot, file_snapshot, stale_import, failed_import, edited_import,
+            generated_snapshot, busy_result, retained_result, markup, formats};
+        const char *names[] = {"history", "typed", "unavailable", "history snapshot", "typed snapshot",
+            "clipboard snapshot", "file snapshot", "stale import", "failed import", "edited import",
+            "generated snapshot", "busy result", "retained result", "markup", "formats"};
+        GString *detail = g_string_new("Voice sources state/snapshot checks failed:");
+        for (guint index = 0; index < G_N_ELEMENTS(checks); ++index)
+            if (!checks[index]) g_string_append_printf(detail, " %s;", names[index]);
+        jsti_set_error(error, capacity, "%s", detail->str);
+        g_string_free(detail, TRUE);
+    }
     return passed && jsti_voice_controls_self_test(owner, error, capacity) == 0 &&
         jsti_voice_usage_self_test(owner, error, capacity) == 0
         ? jsti_voice_discovery_self_test(owner, error, capacity) : -1;

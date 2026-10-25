@@ -18,8 +18,14 @@ resolved=packaging/linux/Package.resolved
 
 cp "$resolved" Package.resolved
 
-# identity<TAB>location for every pin, without needing python or jq.
-pins=$(sed -n -e 's/^ *"identity" : "\(.*\)",$/\1/p' -e 's/^ *"location" : "\(.*\)",$/\1/p' "$resolved" | paste - -)
+# Parse each pin object; JSON field order is not significant.
+pins=$(python3 - "$resolved" <<'PYTHON'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as source:
+    for pin in json.load(source)["pins"]:
+        print(pin["identity"] + "\t" + pin["location"])
+PYTHON
+)
 [ -n "$pins" ] || { echo "no pins in $resolved" >&2; exit 1; }
 
 echo "$pins" | while IFS="$(printf '\t')" read -r identity location; do

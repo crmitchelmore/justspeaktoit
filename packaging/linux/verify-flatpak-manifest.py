@@ -17,6 +17,7 @@ def verify(manifest):
     }, 'sandbox permissions changed: owner review required'
     assert not manifest.get('build-options', {}).get('build-args'), 'build must be offline'
     modules = {module['name']: module for module in manifest['modules']}
+    assert len(modules) == len(manifest['modules']), 'module names must be unique'
     for module in modules.values():
         assert not module.get('build-options', {}).get('build-args'), 'build must be offline'
     pin = json.loads((ROOT / 'scripts/windows-local-runtime/dependencies.json').read_text())['whisperCpp']

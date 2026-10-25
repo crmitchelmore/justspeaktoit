@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths: &paths
       - Package.swift
+      - LICENSE
+      - .gitattributes
+      - Sources/SpeakWatchCore/**
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop*/**
       - Sources/SpeakSync/**
@@ -18,6 +21,7 @@ on:
       - Resources/**
       - packaging/linux/**
       - scripts/linux-flatpak-checks.sh
+      - scripts/tests/test_linux_flatpak_sources.py
       - scripts/stage-linux-desktop.py
       - scripts/generate-desktop-icons.py
       - scripts/local-llm-runtime/**
@@ -38,6 +42,9 @@ concurrency:
 jobs:
   flatpak:
     name: Flatpak build, bundle and installed runtime
+    # Bubblewrap/Flatpak require a privileged disposable hosted container.
+    # Only repository-owned branches may execute in that context.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50@sha256:1de59efef01a946d9f28f1ec3458bf6f61dcee3507d7fecdd473f8134da4ec77
@@ -46,13 +53,14 @@ jobs:
     env:
       MANIFEST: packaging/linux/com.justspeaktoit.JustSpeakToIt.yml
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
 
       - name: Check pinned sources, permissions and offline build contract
         run: |
           python3 packaging/linux/generate-swiftpm-sources.py --check
+          python3 -B -m unittest discover -s scripts/tests -p test_linux_flatpak_sources.py
           flatpak-builder --show-manifest "$MANIFEST" > "$RUNNER_TEMP/flatpak-manifest.json"
           python3 packaging/linux/verify-flatpak-manifest.py "$RUNNER_TEMP/flatpak-manifest.json"
           flatpak-builder-lint manifest "$MANIFEST"
@@ -101,7 +109,7 @@ jobs:
 
       - name: Upload bundle and qualification evidence
         if: always()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: justspeaktoit-flatpak-x86_64
           path: |

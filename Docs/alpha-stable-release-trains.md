@@ -43,7 +43,10 @@ export APP_STORE_CONNECT_ISSUER_ID_REF='op://Release/Apple/issuer-id'
 export APP_STORE_CONNECT_PRIVATE_KEY_REF='op://Release/Apple/private-key'
 ```
 
-The private-key field must contain the complete PEM for a private P-256 key.
+The key-ID field must contain its 10-character uppercase ASCII alphanumeric ID;
+the issuer field must contain its UUID. The private-key field must contain the
+complete PEM for a private P-256 key. These correspond to Apple's
+[team-key JWT header and claims](https://developer.apple.com/documentation/appstoreconnectapi/generating-tokens-for-api-requests).
 The scripts capture at most 64 KiB of `op read --no-newline` output in memory,
 discard diagnostics with a separate 64 KiB limit, and validate the key. They
 never print credential values, references or CLI error output or write a

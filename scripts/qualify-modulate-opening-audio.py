@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import stat
 import subprocess
 import sys
 import threading
@@ -27,10 +28,58 @@ _SPEC.loader.exec_module(COVERAGE)
 def qualification(output):
     errors, counts = COVERAGE.coverage_errors(output, (SUITE,))
     results = [result for result in COVERAGE.case_results(output) if result["suite"] == SUITE]
+    if any(result["module"] != "SpeakPortableTests" for result in results):
+        errors.append("Required Modulate cases must belong to the actual SpeakPortableTests module")
     actual = collections.Counter(result["case"] for result in results)
     if actual != collections.Counter(REQUIRED_CASES):
         errors.append("Every exact required Modulate XCTest case must complete once, without missing/extra/duplicate cases")
     return errors, counts, results
+
+
+class OwnedSignal(RuntimeError):
+    def __init__(self, number):
+        super().__init__(f"Owned runner interrupted by signal {number}")
+        self.number = number
+
+
+def snapshot_portable_lock(root):
+    if os.environ.get("SPEAK_PORTABLE_CORE") != "1":
+        return None
+    path = root / "Package.resolved"
+    try:
+        metadata = path.lstat()
+        if not stat.S_ISREG(metadata.st_mode):
+            return None
+        expected = subprocess.check_output(["git", "show", "HEAD:Package.resolved"], cwd=root,
+                                           stderr=subprocess.DEVNULL)
+        if path.read_bytes() != expected:
+            return None
+        return {"path": path, "bytes": expected, "mode": stat.S_IMODE(metadata.st_mode), "root": root}
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+def restore_deleted_portable_lock(snapshot):
+    if snapshot is None:
+        return False
+    path = snapshot["path"]
+    try:
+        path.lstat()
+        return False  # Never replace an existing regular file, symlink or user edit.
+    except FileNotFoundError:
+        pass
+    change = subprocess.check_output(["git", "diff", "--name-status", "--", "Package.resolved"],
+                                     cwd=snapshot["root"], text=True).strip()
+    if change != "D\tPackage.resolved":
+        return False
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, snapshot["mode"])
+    except FileExistsError:
+        return False  # Another writer won; its contents must remain untouched.
+    with os.fdopen(descriptor, "wb") as restored:
+        os.fchmod(restored.fileno(), snapshot["mode"])
+        restored.write(snapshot["bytes"])
+    return True
 
 
 def stop_owned(process):
@@ -61,6 +110,13 @@ def main():
     if not command or not 1 <= args.test_timeout <= 300 or os.name != "posix":
         parser.error("requires a POSIX test command and timeout between 1 and 300 seconds")
     args.output_dir.mkdir(parents=True, exist_ok=False)
+    lock_snapshot = snapshot_portable_lock(Path.cwd())
+
+    def interrupted(number, _frame):
+        raise OwnedSignal(number)
+
+    signal.signal(signal.SIGTERM, interrupted)
+    signal.signal(signal.SIGINT, interrupted)
     ready_file = args.output_dir / "peer-ready.json"
     ready = threading.Event()
     state = {}
@@ -94,14 +150,20 @@ def main():
             with (args.output_dir / "tests.log").open("w") as test_log:
                 child = subprocess.Popen(command, env=environment, stdout=test_log, stderr=subprocess.STDOUT,
                                          start_new_session=True)
+                print("Owned Modulate test command started", flush=True)
                 try:
                     status = child.wait(timeout=args.test_timeout)
                 except subprocess.TimeoutExpired:
                     errors.append("Synthetic test command exceeded its owned-process deadline")
                     status = 124
+        except OwnedSignal as error:
+            status = 128 + error.number
+            errors.append(str(error))
         except (OSError, RuntimeError) as error:
             errors.append(str(error))
         finally:
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
             for process in (child, peer):
                 try:
                     stop_owned(process)
@@ -111,6 +173,12 @@ def main():
                 reader.join(timeout=3)
                 if reader.is_alive():
                     errors.append("Owned peer output reader did not terminate")
+    restored_lockfile = False
+    if child is not None:
+        try:
+            restored_lockfile = restore_deleted_portable_lock(lock_snapshot)
+        except (OSError, subprocess.CalledProcessError) as error:
+            errors.append(f"Owned portable lockfile restoration failed: {type(error).__name__}")
     test_log_path = args.output_dir / "tests.log"
     output = test_log_path.read_text(errors="replace") if test_log_path.exists() else ""
     print(output, end="", flush=True)
@@ -125,7 +193,8 @@ def main():
         errors.append("Could not record qualification source revision")
         if exit_code == 0:
             exit_code = 1
-    receipt = {"sourceRevision": revision, "sourceDirty": dirty, "suite": SUITE, "requiredCases": REQUIRED_CASES, "caseResults": results,
+    receipt = {"restoredPortableLockfile": restored_lockfile, "ownedCommandPID": child.pid if child else None,
+               "ownedPeerPID": peer.pid if peer else None, "sourceRevision": revision, "sourceDirty": dirty, "suite": SUITE, "requiredCases": REQUIRED_CASES, "caseResults": results,
                "counts": counts, "errors": errors, "commandExitCode": status, "qualificationExitCode": exit_code}
     (args.output_dir / "qualification.json").write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
     for error in errors:

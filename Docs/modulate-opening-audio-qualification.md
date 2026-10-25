@@ -35,10 +35,13 @@ Pass the same `--scratch-path` to build and test if using external build storage
 The output directory must be new. The runner owns and bounds its child process
 groups, joins its peer reader, preserves command failures/timeouts, and writes
 `tests.log`, `peer.log` and `qualification.json`. It reuses the canonical XCTest
-completion parser and requires all four exact cases once with zero skips or
-failures; a missing/wrong filter, all-skipped FoundationNetworking run or bare
-exit zero fails qualification. CI runs it after the existing portable Apple
-build and retains the receipt artifact.
+completion parser and requires all four exact `SpeakPortableTests` cases once
+with zero skips or failures; a missing/wrong filter, all-skipped FoundationNetworking run or bare
+exit zero fails qualification. On interruption it cleans up its owned groups.
+For the portable graph it restores only an initially HEAD-identical regular
+`Package.resolved` deleted by its command, using exclusive creation to preserve
+other writers' edits. CI runs it after the existing portable Apple build and
+retains the receipt artifact.
 
 A passing synthetic result establishes only these bounded scenarios on the
 current shared client. It does not establish physical iPhone/TestFlight opening

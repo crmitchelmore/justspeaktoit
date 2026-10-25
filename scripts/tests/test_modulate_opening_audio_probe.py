@@ -13,6 +13,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 import uuid
 
 SPEC = importlib.util.spec_from_file_location("modulate_opening", Path(__file__).resolve().parents[1] / "modulate-opening-audio-probe.py")
@@ -177,7 +178,8 @@ class OwnedRunnerTests(unittest.TestCase):
         for output in ("", "Test Suite passed. Executed 0 tests.\n", "4 tests passed.\n",
                        VALID_OUTPUT.replace("passed", "skipped", 1), VALID_OUTPUT.replace("passed", "failed", 1),
                        VALID_OUTPUT + VALID_OUTPUT.splitlines()[0] + "\n", "\n".join(VALID_OUTPUT.splitlines()[1:]),
-                       VALID_OUTPUT.replace("ModulateOpeningAudioQualificationTests", "WrongFilterTests")):
+                       VALID_OUTPUT.replace("ModulateOpeningAudioQualificationTests", "WrongFilterTests"),
+                       VALID_OUTPUT.replace("SpeakPortableTests.", "OtherTests.")):
             with self.subTest(output=output):
                 self.assertTrue(RUNNER.qualification(output)[0])
 
@@ -206,6 +208,70 @@ class OwnedRunnerTests(unittest.TestCase):
                 with socket.socket() as probe:
                     probe.settimeout(1)
                     self.assertNotEqual(probe.connect_ex(("127.0.0.1", port)), 0, "owned peer must be gone")
+
+
+    def test_sigterm_enters_owned_cleanup_and_writes_a_failing_receipt(self):
+        runner = Path(__file__).resolve().parents[1] / "qualify-modulate-opening-audio.py"
+        with tempfile.TemporaryDirectory(prefix="modulate-owned-signal-") as directory:
+            output = Path(directory) / "receipt"
+            process = subprocess.Popen([sys.executable, "-B", str(runner), "--output-dir", str(output), "--",
+                                        sys.executable, "-B", "-c", "import time; time.sleep(30)"],
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            try:
+                self.assertTrue(select.select([process.stdout], [], [], 5)[0], "owned child readiness was signalled")
+                self.assertEqual(process.stdout.readline().strip(), "Owned Modulate test command started")
+                process.terminate()
+                _, stderr = process.communicate(timeout=10)
+                self.assertEqual(process.returncode, 143, stderr)
+                receipt = json.loads((output / "qualification.json").read_text())
+                self.assertEqual(receipt["qualificationExitCode"], 143)
+                for name in ("ownedCommandPID", "ownedPeerPID"):
+                    with self.assertRaises(ProcessLookupError):
+                        os.kill(receipt[name], 0)
+            finally:
+                if process.poll() is None:
+                    process.terminate()
+                    process.communicate(timeout=10)
+
+    def test_portable_lock_restores_only_initial_head_bytes_deleted_by_the_command(self):
+        with tempfile.TemporaryDirectory(prefix="modulate-owned-lock-") as directory:
+            root = Path(directory)
+            lock = root / "Package.resolved"
+            original = b'{"pins": []}\n'
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            lock.write_bytes(original)
+            subprocess.run(["git", "add", "Package.resolved"], cwd=root, check=True)
+            subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
+                            "-c", "user.name=Qualification", "-c", "user.email=qualification@example.invalid",
+                            "commit", "-qm", "fixture"], cwd=root, check=True)
+            with patch.dict(os.environ, {"SPEAK_PORTABLE_CORE": "1"}):
+                snapshot = RUNNER.snapshot_portable_lock(root)
+                lock.unlink()
+                self.assertTrue(RUNNER.restore_deleted_portable_lock(snapshot))
+                self.assertEqual(lock.read_bytes(), original)
+                snapshot = RUNNER.snapshot_portable_lock(root)
+                lock.write_bytes(b"user edit")
+                self.assertFalse(RUNNER.restore_deleted_portable_lock(snapshot))
+                self.assertEqual(lock.read_bytes(), b"user edit")
+                self.assertIsNone(RUNNER.snapshot_portable_lock(root), "initial user edits are not owned")
+                lock.write_bytes(original)
+                snapshot = RUNNER.snapshot_portable_lock(root)
+                lock.unlink()
+
+                def racing_writer(*_args, **_kwargs):
+                    lock.write_bytes(b"other writer won")
+                    raise FileExistsError()
+
+                with patch.object(RUNNER.os, "open", side_effect=racing_writer):
+                    self.assertFalse(RUNNER.restore_deleted_portable_lock(snapshot))
+                self.assertEqual(lock.read_bytes(), b"other writer won")
+                lock.unlink()
+                target = root / "user-target"
+                target.write_bytes(original)
+                lock.symlink_to(target)
+                self.assertIsNone(RUNNER.snapshot_portable_lock(root), "symlinks are not owned regular lockfiles")
+                self.assertFalse(RUNNER.restore_deleted_portable_lock(snapshot))
+                self.assertEqual(target.read_bytes(), original)
 
 
 if __name__ == "__main__":

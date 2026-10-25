@@ -23,7 +23,29 @@ The comments on #776 supersede several unchecked items in its original body:
   longer a prerequisite. These are recorded decisions, not a fresh backend audit.
 
 No project, credential, collection setting, or rollout gate is changed by this
-audit. No request was made to an analytics endpoint during this work.
+patch. No production capture event was sent during this work.
+
+## GeoIP boundary
+
+The 25 October 2026 read-only Production audit verified IP discard, autocapture
+opt-out and replay opt-out, with no events in the last seven days. All seven
+events in the last 30 days nevertheless had nonempty city, latitude and postcode
+enrichment. Only aggregate counts were read; no location values or user IDs were
+retrieved. Current settings do not prove the settings at those historical
+ingestion times. IP discard is not proof of no GeoIP: PostHog's
+[storage documentation](https://posthog.com/docs/privacy/data-storage#discarding-ip-addresses-at-project-level)
+explicitly permits transformations to use the IP before discarding it.
+
+The final envelope now unconditionally adds the native Boolean
+`properties.$geoip_disable = true`, matching the
+[documented per-capture control](https://posthog.com/docs/libraries/python#geoip-properties)
+and [official SDK serialization](https://github.com/PostHog/posthog-python/blob/3f6c80eb4df1ddffd9e5b9d1d8aae8facf9f83b2/posthog/client.py#L2432).
+Fresh, legacy-queued and retried events share this serializer with inspection;
+an older queued false/missing control cannot bypass it. No location or content
+property is added. This establishes the client request, not server enforcement,
+historical erasure or a clean inspection week. Server/history cleanup, retention,
+policy publication and production qualification remain owner gates. No existing
+event or project setting was changed.
 
 ## #776: what the repository establishes
 

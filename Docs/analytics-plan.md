@@ -78,11 +78,21 @@ auditor reading our source and watching our network traffic confirms it.
 `platform`, `app_version`, `build`, `os_major_minor`, `distribution_channel`
 (direct | homebrew | mac_app_store | testflight | app_store | development),
 `locale_language_code`,
-`architecture`, `analytics_schema_version`. Nothing else. No device model, no
-device name, no timezone beyond what ingestion infers coarsely (IP capture
-disabled at the project level). The shared payload boundary validates version,
+`architecture`, `analytics_schema_version`. No device model, device name,
+timezone or location is added by the app. The shared payload boundary validates version,
 build and OS formats, restricts architecture to a closed set, and derives locale
 language from the canonical language catalogue; invalid values become `other`.
+
+The final transport envelope adds the reserved processing control
+`properties.$geoip_disable = true` as a JSON Boolean, including for restored
+queued events and retries. It is visible in the same credential-free inspector
+envelope. This is not a location dimension or a new event family. PostHog's
+[per-capture GeoIP control](https://posthog.com/docs/libraries/python#geoip-properties)
+is serialized to that property by the
+[official SDK](https://github.com/PostHog/posthog-python/blob/3f6c80eb4df1ddffd9e5b9d1d8aae8facf9f83b2/posthog/client.py#L2432).
+The [IP-discard setting permits enrichment before discarding the raw IP](https://posthog.com/docs/privacy/data-storage#discarding-ip-addresses-at-project-level);
+it does not establish absence of stored location fields. Authorized server
+verification, historical-data handling and retention remain rollout gates.
 
 ### Bucket definitions (shared, versioned with the schema)
 
@@ -311,7 +321,7 @@ identity or user-level server record belongs in public test evidence.
 
 | Phase | Scope | Gate to next phase |
 | --- | --- | --- |
-| **0. Design & governance** | Finalise this catalogue as typed code; consent copy; retention (proposal: 12 months, then aggregate-only); create dev/prod PostHog projects with replay/surveys/flags disabled server-side; land disclosure PRs | Catalogue + consent model reviewed and merged; go/no-go checklist items 1–4 pass |
+| **0. Design & governance** | Finalise the typed catalogue and consent copy; verify approved 12-month retention then aggregate/delete and Production-only privacy settings; development stays no-op; land disclosure PRs | Catalogue + consent model reviewed and merged; go/no-go checklist items 1–4 pass |
 | **1. macOS Developer ID + Homebrew (internal)** | Ship behind opt-in to direct-download builds first — no store review latency, fastest fix loop; events: `app_active_daily`, onboarding funnel, `first_transcription_succeeded` only | One week of payload inspection shows zero prohibited data; counts sane vs Sentry sessions |
 | **2. iOS TestFlight** | Same minimal event set; store-signed build tested with analytics disabled and enabled; App Store Connect privacy answers updated *before* external TestFlight | Archive privacy report matches declarations; keyboard extension confirmed traffic-free |
 | **3. Full event set, both stores** | Add transcription lifecycle, feature adoption, error events; MAS + App Store submissions with review notes | Dashboards answer the §1 questions; no schema divergence across the five channels |

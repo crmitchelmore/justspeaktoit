@@ -1,5 +1,6 @@
 #if !APP_STORE
 @testable import SpeakApp
+import CoreFoundation
 import SpeakCore
 import SpeakTestSupport
 import XCTest
@@ -22,6 +23,8 @@ final class AnalyticsInspectionTests: XCTestCase {
             XCTAssertEqual(wire.removeValue(forKey: "api_key") as? String, InspectionFixture.keySentinel)
             let inspected = try XCTUnwrap(JSONSerialization.jsonObject(with: record.envelope) as? [String: Any])
             XCTAssertEqual(wire as NSDictionary, inspected as NSDictionary)
+            try assertGeoIPDisabled(in: requestBody)
+            try assertGeoIPDisabled(in: record.envelope)
             XCTAssertEqual(record.status, .httpAcknowledged)
         }
         let exported = try XCTUnwrap(String(data: snapshot.exportData(), encoding: .utf8))
@@ -43,6 +46,45 @@ final class AnalyticsInspectionTests: XCTestCase {
         let purged = await fixture.sink.inspectionSnapshot()
         XCTAssertTrue(purged.records.isEmpty)
         XCTAssertEqual(purged.queueDepth, 0)
+    }
+
+    func testRestoredQueueAndRetry_AlwaysDisableGeoIPWithNativeBoolean() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let queueURL = directory.appendingPathComponent("queue.json")
+        let entries: [[String: Any]] = (0..<2).map { index in
+            var properties: [String: Any] = ["analytics_schema_version": 2]
+            if index == 1 { properties["$geoip_disable"] = false }
+            return ["createdAt": Date().timeIntervalSinceReferenceDate, "event": "app_active_daily",
+                    "distinctID": "legacy-\(index)", "properties": properties]
+        }
+        try JSONSerialization.data(withJSONObject: entries).write(to: queueURL)
+        let delivered = expectation(description: "Restored events delivered after transient retry")
+        let recorder = AnalyticsRequestRecorder(statusCodes: [503, 200, 200]) { count in
+            if count == 3 { delivered.fulfill() }
+        }
+        let fixture = InspectionFixture(recorder: recorder, queueURL: queueURL, retryDelays: [.milliseconds(20)])
+        let seeded = await fixture.sink.inspectionSnapshot()
+        XCTAssertEqual(seeded.records.count, 2)
+        for record in seeded.records { try assertGeoIPDisabled(in: record.envelope) }
+        do {
+            try await fixture.sink.reopen()
+            XCTFail("The first restored delivery must encounter the transient failure")
+        } catch {}
+        await fulfillment(of: [delivered], timeout: 2)
+        for _ in 0..<1_000 {
+            if await fixture.sink.inspectionSnapshot().queueDepth == 0 { break }
+            await Task.yield()
+        }
+        let completed = await fixture.sink.inspectionSnapshot()
+        XCTAssertEqual(completed.queueDepth, 0)
+        XCTAssertEqual(completed.records.map(\.id), seeded.records.map(\.id))
+        XCTAssertTrue(completed.records.allSatisfy { $0.status == .httpAcknowledged })
+        XCTAssertEqual(recorder.requests.count, 3)
+        for request in recorder.requests { try assertGeoIPDisabled(in: XCTUnwrap(request.httpBody)) }
+        for record in completed.records { try assertGeoIPDisabled(in: record.envelope) }
+        await fixture.sink.close()
     }
 
     func testRetry_UpdatesTheSameInspectionRow() async throws {
@@ -157,6 +199,17 @@ final class AnalyticsInspectionTests: XCTestCase {
             fixture.recorder.requests.first?.url?.path, url.path, "Transport retains its configured proxy path"
         )
         await fixture.sink.close()
+    }
+
+    private func assertGeoIPDisabled(in data: Data, file: StaticString = #filePath, line: UInt = #line) throws {
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any], file: file, line: line)
+        let properties = try XCTUnwrap(body["properties"] as? [String: Any], file: file, line: line)
+        let control = try XCTUnwrap(properties["$geoip_disable"] as? NSNumber, file: file, line: line)
+        XCTAssertEqual(CFGetTypeID(control), CFBooleanGetTypeID(), file: file, line: line)
+        XCTAssertTrue(control.boolValue, file: file, line: line)
+        XCTAssertEqual(
+            Set(properties.keys.filter { $0.hasPrefix("$geoip_") }), ["$geoip_disable"], file: file, line: line
+        )
     }
 }
 

@@ -3,16 +3,24 @@
 # Uses Apple's published OpenAPI contract. Upload, beta review and public
 # availability are different states; none is inferred from xcodebuild success.
 require_relative 'create-ios-app-store-profile'
+require_relative 'apple-release-credentials'
 require 'time'
 require 'tmpdir'
 require 'digest'
 
 module AppleRelease
   class Client < IOSProfileBootstrap::Client
-    def initialize
-      @key_id = ENV.fetch('APP_STORE_CONNECT_KEY_ID', 'S747NJ9DZY')
-      @issuer = ENV.fetch('APP_STORE_CONNECT_ISSUER_ID')
-      @key = OpenSSL::PKey.read(File.read(ENV.fetch('APP_STORE_CONNECT_KEY_PATH', File.expand_path("~/.appstoreconnect/private_keys/AuthKey_#{@key_id}.p8"))))
+    def initialize(env: ENV, op_reader: OpReader.new)
+      case env.fetch('APP_STORE_CONNECT_CREDENTIAL_SOURCE', 'environment')
+      when '1password'
+        @key_id, @issuer, @key = VaultCredentials.load(env: env, reader: op_reader)
+      when 'environment'
+        @key_id = env.fetch('APP_STORE_CONNECT_KEY_ID', 'S747NJ9DZY')
+        @issuer = env.fetch('APP_STORE_CONNECT_ISSUER_ID')
+        @key = OpenSSL::PKey.read(File.read(env.fetch('APP_STORE_CONNECT_KEY_PATH', File.expand_path("~/.appstoreconnect/private_keys/AuthKey_#{@key_id}.p8"))))
+      else
+        raise CredentialError.new(:source)
+      end
     end
 
     def request(method:, path:, body: nil)

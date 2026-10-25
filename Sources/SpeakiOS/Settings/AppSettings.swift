@@ -199,7 +199,7 @@ public final class AppSettings: ObservableObject {
             if normalized != batchTranscriptionModel {
                 batchTranscriptionModel = normalized
             } else {
-                defaults.set(batchTranscriptionModel, forKey: DefaultsKey.batchTranscriptionModel.rawValue)
+                defaults.set(batchTranscriptionModel, forKey: DefaultsKey.batchTranscriptionModel.storageKey)
                 publishKeyboardProfileSelection()
             }
         }
@@ -289,7 +289,7 @@ public final class AppSettings: ObservableObject {
     }
 
     @Published public var transcriptionKeywords: String {
-        didSet { defaults.set(transcriptionKeywords, forKey: DefaultsKey.transcriptionKeywords.rawValue) }
+        didSet { defaults.set(transcriptionKeywords, forKey: DefaultsKey.transcriptionKeywords.storageKey) }
     }
 
     // MARK: - Canonical secure storage for API keys (SpeakCore)
@@ -452,7 +452,7 @@ public final class AppSettings: ObservableObject {
     /// macOS so the two platforms stay in step.
     @Published public var handsFreeDictationEnabled: Bool {
         didSet {
-            defaults.set(handsFreeDictationEnabled, forKey: DefaultsKey.handsFreeDictationEnabled.rawValue)
+            defaults.set(handsFreeDictationEnabled, forKey: DefaultsKey.handsFreeDictationEnabled.storageKey)
         }
     }
 
@@ -469,7 +469,7 @@ public final class AppSettings: ObservableObject {
 
     @Published public var preferredLocaleIdentifier: String {
         didSet {
-            defaults.set(preferredLocaleIdentifier, forKey: DefaultsKey.preferredLocale.rawValue)
+            defaults.set(preferredLocaleIdentifier, forKey: DefaultsKey.preferredLocale.storageKey)
             KeyboardDictationPreferencesStore.shared.mirrorAppPreference(
                 selectedIdentifier: preferredLocaleIdentifier
             )
@@ -517,14 +517,14 @@ public final class AppSettings: ObservableObject {
 
     @Published public var postProcessingEnabled: Bool {
         didSet {
-            defaults.set(postProcessingEnabled, forKey: DefaultsKey.postProcessingEnabled.rawValue)
+            defaults.set(postProcessingEnabled, forKey: DefaultsKey.postProcessingEnabled.storageKey)
             publishKeyboardProfileSelection()
         }
     }
 
     @Published public var postProcessingModel: String {
         didSet {
-            defaults.set(postProcessingModel, forKey: DefaultsKey.postProcessingModel.rawValue)
+            defaults.set(postProcessingModel, forKey: DefaultsKey.postProcessingModel.storageKey)
             publishKeyboardProfileSelection()
         }
     }
@@ -602,9 +602,9 @@ public final class AppSettings: ObservableObject {
             rawValue: defaults.string(forKey: DefaultsKey.visualDensity.rawValue) ?? ""
         ) ?? .normal
         let autoStart = defaults.bool(forKey: DefaultsKey.autoStartRecording.rawValue)
-        let handsFree = defaults.bool(forKey: DefaultsKey.handsFreeDictationEnabled.rawValue)
+        let handsFree = defaults.bool(forKey: DefaultsKey.handsFreeDictationEnabled.storageKey)
         let preferredLocale = TranscriptionLanguageCatalog.normalizedIdentifier(
-            defaults.string(forKey: DefaultsKey.preferredLocale.rawValue)
+            defaults.string(forKey: DefaultsKey.preferredLocale.storageKey)
         )
 
         // Hardware trigger destination (Action Button, Siri, Shortcuts).
@@ -628,15 +628,15 @@ public final class AppSettings: ObservableObject {
         }
 
         // Post-processing settings
-        let postEnabled = defaults.bool(forKey: DefaultsKey.postProcessingEnabled.rawValue)
-        let storedPostModel = defaults.string(forKey: DefaultsKey.postProcessingModel.rawValue)
+        let postEnabled = defaults.bool(forKey: DefaultsKey.postProcessingEnabled.storageKey)
+        let storedPostModel = defaults.string(forKey: DefaultsKey.postProcessingModel.storageKey)
         let normalizedPostModel = ModelCatalog.normalizedPostProcessingModel(storedPostModel)
         let postModel = Self.postProcessingModels.contains { $0.id == normalizedPostModel }
             ? normalizedPostModel
             : ModelCatalog.defaultPostProcessingModel
         let autoPost = defaults.bool(forKey: DefaultsKey.autoPostProcess.rawValue)
         let batchModel = ModelCatalog.normalizedBatchTranscriptionModel(
-            defaults.string(forKey: DefaultsKey.batchTranscriptionModel.rawValue)
+            defaults.string(forKey: DefaultsKey.batchTranscriptionModel.storageKey)
         )
         let mode = IOSTranscriptionMode(
             rawValue: defaults.string(forKey: DefaultsKey.transcriptionMode.rawValue) ?? ""
@@ -673,7 +673,7 @@ public final class AppSettings: ObservableObject {
         self.speechmaticsAPIKey = ""
         self.revAIAPIKey = ""
         self.mistralAPIKey = ""
-        self.transcriptionKeywords = defaults.string(forKey: DefaultsKey.transcriptionKeywords.rawValue) ?? ""
+        self.transcriptionKeywords = defaults.string(forKey: DefaultsKey.transcriptionKeywords.storageKey) ?? ""
         self.liveActivitiesEnabled = liveActivities
         self.transcriptClipboardLifetime = clipboardPolicy.lifetime
         self.transcriptAllowsUniversalClipboard = clipboardPolicy.allowsUniversalClipboard

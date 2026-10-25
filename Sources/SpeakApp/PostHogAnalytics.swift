@@ -59,6 +59,8 @@ actor PostHogProductAnalyticsSink: ProductAnalyticsSink {
   private let now: @Sendable () -> Date
   private let requestDeadline: Duration
   private let retryDelays: [Duration]
+  private let forceDisabled: @Sendable () -> Bool
+  private var inspectionRecords: [AnalyticsInspectionRecord] = []
   private var queue: [QueuedEvent] = []
   private var isOpen = false
   private var activeFlushID: UUID?
@@ -75,21 +77,27 @@ actor PostHogProductAnalyticsSink: ProductAnalyticsSink {
     configuration: (projectKey: String, endpoint: URL)? = nil,
     now: @escaping @Sendable () -> Date = { Date() },
     requestDeadline: Duration = .seconds(15),
-    retryDelays: [Duration] = [.seconds(1), .seconds(5), .seconds(30)]
+    retryDelays: [Duration] = [.seconds(1), .seconds(5), .seconds(30)],
+    forceDisabled: @escaping @Sendable () -> Bool = { false }
   ) {
     self.queueURL = queueURL
     self.session = session
     self.now = now
     self.requestDeadline = requestDeadline
     self.retryDelays = retryDelays
+    self.forceDisabled = forceDisabled
     self.configuration = configuration.map {
       Configuration(projectKey: $0.projectKey, endpoint: $0.endpoint)
     }
       ?? Configuration.resolve()
     queue = Self.pruned(Self.loadQueue(from: queueURL), now: now())
+    inspectionRecords = forceDisabled() ? [] : queue.suffix(100).compactMap {
+      Self.inspectionRecord($0, status: .queued)
+    }
   }
 
   func reopen() async throws {
+    guard !forceDisabled() else { try await purge(); return }
     cancelRetry()
     retryAttempt = 0
     pruneQueue()
@@ -99,16 +107,24 @@ actor PostHogProductAnalyticsSink: ProductAnalyticsSink {
   }
 
   func capture(_ payload: ProductAnalyticsPayload) async throws {
-    guard isOpen, configuration != nil else { return }
-    queue.append(QueuedEvent(createdAt: now(), payload: payload))
+    guard isOpen, !forceDisabled(), configuration != nil else { return }
+    let event = QueuedEvent(createdAt: now(), payload: payload)
+    queue.append(event)
     pruneQueue()
-    try persistQueue()
+    do {
+      try persistQueue()
+      updateInspection(event, status: .queued)
+    } catch {
+      updateInspection(event, status: .persistenceFailed)
+      throw error
+    }
     try await flush()
   }
 
   func purge() async throws {
     stopRequests()
     queue.removeAll(keepingCapacity: false)
+    inspectionRecords.removeAll(keepingCapacity: false)
     if FileManager.default.fileExists(atPath: queueURL.path) {
       try FileManager.default.removeItem(at: queueURL)
     }
@@ -131,7 +147,7 @@ actor PostHogProductAnalyticsSink: ProductAnalyticsSink {
   }
 
   private func scheduleRetry() {
-    guard isOpen, !queue.isEmpty, retryTask == nil, retryAttempt < retryDelays.count else { return }
+    guard isOpen, !forceDisabled(), !queue.isEmpty, retryTask == nil, retryAttempt < retryDelays.count else { return }
     let delay = retryDelays[retryAttempt]
     retryAttempt += 1
     let scheduledID = UUID()
@@ -145,8 +161,14 @@ actor PostHogProductAnalyticsSink: ProductAnalyticsSink {
     }
   }
 
+  private func inspectFailure(_ error: Error, event: QueuedEvent, flushID: UUID) {
+    guard activeFlushID == flushID, !forceDisabled() else { return }
+    updateQueuedInspection(event, status: Self.isRetryable(error) ? .retryPending : .rejected)
+    if Self.isRetryable(error) { scheduleRetry() }
+  }
+
   private func flush() async throws {
-    guard isOpen, let configuration, activeFlushID == nil, retryTask == nil else { return }
+    guard isOpen, !forceDisabled(), let configuration, activeFlushID == nil, retryTask == nil else { return }
     let flushID = UUID()
     activeFlushID = flushID
     defer {
@@ -155,7 +177,7 @@ actor PostHogProductAnalyticsSink: ProductAnalyticsSink {
         activeRequest = nil
       }
     }
-    while isOpen, activeFlushID == flushID {
+    while isOpen, !forceDisabled(), activeFlushID == flushID {
       pruneQueue()
       try persistQueue()
       guard let next = queue.first else {
@@ -163,25 +185,34 @@ actor PostHogProductAnalyticsSink: ProductAnalyticsSink {
         return
       }
       let request = try makeRequest(event: next, configuration: configuration)
+      updateInspection(next, status: .sending)
       let response: URLResponse
       do {
         response = try await deliver(request)
       } catch {
-        if activeFlushID == flushID, Self.isRetryable(error) { scheduleRetry() }
+        inspectFailure(error, event: next, flushID: flushID)
         throw error
       }
       // An opt-out can purge the queue and a later opt-in can start a new flush
       // while the cancelled request is finishing. Its response owns neither queue.
-      guard isOpen, activeFlushID == flushID else { return }
+      guard isOpen, !forceDisabled(), activeFlushID == flushID else { return }
       activeRequest = nil
       guard let http = response as? HTTPURLResponse, (200 ..< 300).contains(http.statusCode) else {
         if let http = response as? HTTPURLResponse,
            http.statusCode == 408 || http.statusCode == 429 || (500 ..< 600).contains(http.statusCode) {
+          updateQueuedInspection(next, status: .retryPending)
           scheduleRetry()
+        } else {
+          updateQueuedInspection(next, status: .rejected)
         }
         throw URLError(.badServerResponse)
       }
       // A concurrent capture may have evicted this entry at the queue cap.
+      // Pruning may evict a request while it is in flight; never recreate an
+      // evicted or purged inspector entry when its response eventually arrives.
+      if inspectionRecords.contains(where: { $0.id == next.id }) {
+        updateInspection(next, status: .httpAcknowledged)
+      }
       queue.removeAll { $0.id == next.id }
       try persistQueue()
     }
@@ -191,17 +222,8 @@ actor PostHogProductAnalyticsSink: ProductAnalyticsSink {
 
 extension PostHogProductAnalyticsSink {
   private func makeRequest(event: QueuedEvent, configuration: Configuration) throws -> URLRequest {
-    var properties = event.properties.mapValues(\.foundationValue)
-    properties["distinct_id"] = event.distinctID
-    properties["$lib"] = "just-speak-to-it"
-    properties["$lib_version"] = "1"
-    properties["release_train"] = ReleaseTrain.current.rawValue
-    properties["timestamp"] = ISO8601DateFormatter().string(from: event.createdAt)
-    let body: [String: Any] = [
-      "api_key": configuration.projectKey,
-      "event": event.event,
-      "properties": properties
-    ]
+    var body = Self.eventEnvelope(event)
+    body["api_key"] = configuration.projectKey
     var request = URLRequest(url: configuration.endpoint)
     request.httpMethod = "POST"
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -209,9 +231,67 @@ extension PostHogProductAnalyticsSink {
     return request
   }
 
+  /// The sole event-envelope builder. Authentication is added only by makeRequest.
+  private static func eventEnvelope(_ event: QueuedEvent) -> [String: Any] {
+    var properties = event.properties.mapValues(\.foundationValue)
+    // IP discard alone permits server enrichment. Apply this processing
+    // control at serialization so restored queues and every retry inherit it.
+    properties["$geoip_disable"] = true
+    properties["distinct_id"] = event.distinctID
+    properties["$lib"] = "just-speak-to-it"
+    properties["$lib_version"] = "1"
+    properties["release_train"] = ReleaseTrain.current.rawValue
+    properties["timestamp"] = ISO8601DateFormatter().string(from: event.createdAt)
+    return ["event": event.event, "properties": properties]
+  }
+
+  /// Read-only: never reopens the sink, persists a queue or creates traffic.
+  func inspectionSnapshot() -> AnalyticsInspectionSnapshot {
+    let currentQueue = Self.pruned(queue, now: now())
+    let expiredIDs = Set(queue.map(\.id)).subtracting(currentQueue.map(\.id))
+    let cutoff = now().addingTimeInterval(-7 * 24 * 60 * 60)
+    inspectionRecords.removeAll { expiredIDs.contains($0.id) || $0.createdAt < cutoff }
+    let disabled = forceDisabled()
+    return AnalyticsInspectionSnapshot(
+      endpoint: AnalyticsInspectionSnapshot.sanitizedEndpoint(configuration?.endpoint),
+      configured: configuration != nil,
+      isOpen: isOpen && !disabled,
+      isDisabled: disabled,
+      queueDepth: currentQueue.count,
+      records: disabled ? [] : inspectionRecords
+    )
+  }
+
+  private static func inspectionRecord(
+    _ event: QueuedEvent, status: AnalyticsInspectionRecord.Status
+  ) -> AnalyticsInspectionRecord? {
+    guard let data = try? JSONSerialization.data(
+      withJSONObject: eventEnvelope(event), options: [.prettyPrinted, .sortedKeys]
+    ) else { return nil }
+    return AnalyticsInspectionRecord(
+      id: event.id, createdAt: event.createdAt, event: event.event, status: status, envelope: data
+    )
+  }
+
+  private func updateQueuedInspection(_ event: QueuedEvent, status: AnalyticsInspectionRecord.Status) {
+    guard queue.contains(where: { $0.id == event.id }) else { return }
+    updateInspection(event, status: status)
+  }
+
+  private func updateInspection(_ event: QueuedEvent, status: AnalyticsInspectionRecord.Status) {
+    guard let record = Self.inspectionRecord(event, status: status) else { return }
+    if let index = inspectionRecords.firstIndex(where: { $0.id == event.id }) {
+      inspectionRecords[index] = record
+    } else {
+      inspectionRecords.append(record)
+    }
+    inspectionRecords = Array(inspectionRecords.suffix(100))
+  }
+
   private func deliver(_ request: URLRequest) async throws -> URLResponse {
-    let requestTask = Task { [session, request] in
+    let requestTask = Task { [session, request, forceDisabled] in
       try Task.checkCancellation()
+      guard !forceDisabled() else { throw CancellationError() }
       let (bytes, response) = try await session.bytes(for: request)
       let networkTask = bytes.task
       defer { networkTask.cancel() }
@@ -250,7 +330,11 @@ extension PostHogProductAnalyticsSink {
   }
 
   private func pruneQueue() {
+    let previousIDs = Set(queue.map(\.id))
     queue = Self.pruned(queue, now: now())
+    let evictedIDs = previousIDs.subtracting(queue.map(\.id))
+    let cutoff = now().addingTimeInterval(-7 * 24 * 60 * 60)
+    inspectionRecords.removeAll { evictedIDs.contains($0.id) || $0.createdAt < cutoff }
   }
 
   private func persistQueue() throws {
@@ -268,6 +352,13 @@ extension PostHogProductAnalyticsSink {
       to: queueURL,
       options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
     )
+    let pendingIDs = Set(queue.map(\.id))
+    inspectionRecords = inspectionRecords.map { record in
+      guard record.status == .persistenceFailed, pendingIDs.contains(record.id) else { return record }
+      return AnalyticsInspectionRecord(
+        id: record.id, createdAt: record.createdAt, event: record.event, status: .queued, envelope: record.envelope
+      )
+    }
   }
 
   private static func loadQueue(from url: URL) -> [QueuedEvent] {

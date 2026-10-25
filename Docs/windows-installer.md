@@ -69,9 +69,9 @@ Fast CLI checks do not substitute stdout for GUI module provenance. Fresh native
 build and MakeAppx/install/alias/removal receipts are still required: earlier
 GUI-only receipts do not qualify this CLI packaging change. The `6d920e46`
 developer layouts were rejected by MakeAppx with `0x80080204` because both alias
-extensions occupied the GUI Application. Static/mock topology tests do not
-qualify the corrected layout: actual x64/ARM64 SDK packing and installed
-alias/start/upgrade/removal receipts remain required.
+extensions occupied the GUI Application. Static/mock topology tests alone do not qualify the corrected layout.
+Actual x64/ARM64 SDK packing and installed alias/start/upgrade/removal passed
+at the [current checkpoint](#evidence-at-this-checkpoint).
 
 Package logos come from the canonical Mac 1024px export with transparent
 corners. The three manifest roots (`StoreLogo`, `Square44x44Logo` and
@@ -414,6 +414,19 @@ They do not include signing material or environment dumps.
 
 ## Evidence at this checkpoint
 
+The current merged source is `ec1f53159c61b023f9dba5152e359a44fb6a9fdb`
+([PR #1238](https://github.com/crmitchelmore/justspeaktoit/pull/1238)); its tree
+matches tested `a6b5b53912af4e6024d0d65542df8dd0786005fc`. On 25 October 2026,
+[x64 lifecycle](https://github.com/crmitchelmore/justspeaktoit/actions/runs/40190710023)
+and [native ARM64 lifecycle](https://github.com/crmitchelmore/justspeaktoit/actions/runs/40190709985)
+passed actual SDK packing, install, GUI/CLI launch and alias checks,
+failed-upgrade refusal, upgrade and removal. This qualifies the corrected
+two-Application layout described above. Standalone bundles also ran without
+installed Swift. Earlier pending receipt statements refer to those historical
+checkpoints. Public Azure Artifact Signing was skipped; these results do not
+establish public trust, physical-machine acceptance, updates or a Stable release.
+
+
 - Locally on macOS (Python 3.14.4), 28 packaging unit tests pass. They cover
   schema rules, publisher IDs, manifest content and escaping, deterministic
   logos, refusal of changed or foreign bundles, same-size tampering,
@@ -442,19 +455,19 @@ They do not include signing material or environment dumps.
   cleanup removes only owned state; a foreign registration is kept and fails
   the run; and each kind of incomplete cleanup fails the run. Root
   independently reproduced the same 22 passes at `add035fe`.
-- **Not yet executed:** the Windows PowerShell 5.1 run of the ownership test,
-  MakeAppx packing, signing, the admission control and every Windows install,
-  launch, failure, upgrade and uninstall step. They run only in the
-  `package-lifecycle` job, which has not run for this revision. No
-  installation receipt exists yet.
+- **Historical gap, now qualified:** the initial checkpoint had not executed
+  Windows PowerShell 5.1 ownership checks, MakeAppx, test signing or the
+  install/upgrade/removal lifecycle. Both architectures now have the passing
+  current-checkpoint receipts above; public signing remains unqualified.
 
 ## Remaining gates and integration needs
 
 - **ARM64.** `windows-arm64.yml` packs the ARM64 bundle as
   `ProcessorArchitecture="arm64"` in the same family and runs this lifecycle,
   unchanged, on `windows-11-arm`, where the pinned x64 MakeAppx and SignTool
-  are expected to run under emulation. It has no receipt yet, and no `.msixbundle` holds both
-  architectures (a family may move from `.msix` to a bundle, not back). See
+  run under emulation. The ARM64 app and its lifecycle passed at the current
+  checkpoint; no `.msixbundle` holds both architectures (a family may move
+  from `.msix` to a bundle, not back). See
   [Windows ARM64](windows-arm64.md).
 - **Updater (same issue, later slice).** Needs a stable, externally signed
   publisher first. MSIX updates can use an `.appinstaller` file over HTTPS

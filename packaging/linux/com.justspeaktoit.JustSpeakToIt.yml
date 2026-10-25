@@ -7,7 +7,8 @@
 #   flatpak run com.justspeaktoit.JustSpeakToIt
 #
 # The Swift toolchain comes from the Flathub swift6 SDK extension, which must
-# provide Swift 6.2 or newer (see Docs/linux-development.md).
+# provide Swift 6.2 or newer. SwiftPM sources are pinned and mirrored for an
+# offline build (see Docs/linux-packaging.md).
 app-id: com.justspeaktoit.JustSpeakToIt
 runtime: org.gnome.Platform
 runtime-version: "50"
@@ -25,6 +26,11 @@ finish-args:
   # Microphone capture through PipeWire's pulse server.
   - --socket=pulseaudio
   - --device=dri
+  # The current native loader accepts an explicit, app-owned runtime directory.
+  - --env=JSTI_WHISPER_RUNTIME_DIRECTORY=/app/lib/justspeaktoit
+  # Seed before static Swift captures argv from the initial environment stack.
+  # The native constructor keeps an explicit choice and need not call setenv.
+  - --env=GGML_NO_BACKTRACE=1
   # libsecret reaches the Secret portal from inside the sandbox; the
   # GlobalShortcuts, RemoteDesktop, Clipboard, Background (Launch at login) and
   # notification portals need no extra permissions.
@@ -35,19 +41,85 @@ build-options:
   append-path: /usr/lib/sdk/swift6/bin
   prepend-ld-library-path: /usr/lib/sdk/swift6/lib
 modules:
+  # Build-time only: ggml-vulkan needs the SPIR-V headers' CMake package, which
+  # the SDK lacks. Same Vulkan SDK release as the Windows runtime build.
+  - name: spirv-headers
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DSPIRV_HEADERS_ENABLE_TESTS=OFF
+      - -DSPIRV_HEADERS_ENABLE_INSTALL=ON
+    cleanup:
+      - "*"
+    sources:
+      - type: git
+        url: https://github.com/KhronosGroup/SPIRV-Headers.git
+        tag: vulkan-sdk-1.4.357.0
+        commit: 29981f65241605e08b0ede4cfeb999fe3b723c6a
+
+  # Local transcription runtime. The app dlopens libwhisper.so.1 from
+  # /app/lib/justspeaktoit (<executable dir>/../lib/justspeaktoit) and loads
+  # the ggml backends from the same directory. Same pin and options as the
+  # Windows runtime (scripts/windows-local-runtime/dependencies.json) and
+  # scripts/linux-build-whisper.sh.
+  - name: whisper-cpp
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DCMAKE_INSTALL_LIBDIR=lib/justspeaktoit
+      # libwhisper finds libggml*.so, and the backends libggml-base.so, beside
+      # themselves when loaded by path.
+      - -DCMAKE_INSTALL_RPATH=$ORIGIN
+      - -DGGML_BACKEND_DIR=/app/lib/justspeaktoit
+      - -DWHISPER_BUILD_IS_DEV=OFF
+      - -DBUILD_SHARED_LIBS=ON
+      - -DGGML_NATIVE=OFF
+      - -DGGML_BACKEND_DL=ON
+      - -DGGML_CPU_ALL_VARIANTS=ON
+      # The GNOME 50 SDK ships the Vulkan headers, loader and glslc.
+      - -DGGML_VULKAN=ON
+      - -DGGML_OPENMP=OFF
+      - -DGGML_CCACHE=OFF
+      - -DWHISPER_BUILD_EXAMPLES=OFF
+      - -DWHISPER_BUILD_TESTS=OFF
+      - -DWHISPER_BUILD_SERVER=OFF
+      - -DWHISPER_SDL2=OFF
+      - -DWHISPER_CURL=OFF
+    post-install:
+      # The production loader refuses symlinks, including CMake SONAME links.
+      # Keep the exact SONAME paths as regular files, as the native stager does.
+      - for name in libggml-base.so.0 libggml.so.0 libwhisper.so.1; do
+          cp -L /app/lib/justspeaktoit/$name /app/lib/justspeaktoit/$name.tmp &&
+          mv -f /app/lib/justspeaktoit/$name.tmp /app/lib/justspeaktoit/$name || exit 1;
+        done
+      - install -Dm644 "$FLATPAK_BUILDER_BUILDDIR/LICENSE"
+        /app/share/licenses/com.justspeaktoit.JustSpeakToIt/whisper.cpp/LICENSE
+    cleanup:
+      - /include
+      - /lib/justspeaktoit/cmake
+      - /lib/justspeaktoit/pkgconfig
+      # Development links; the app loads the SONAMEs.
+      - /lib/justspeaktoit/libggml.so
+      - /lib/justspeaktoit/libggml-base.so
+      - /lib/justspeaktoit/libparakeet.so
+      - /lib/justspeaktoit/libwhisper.so
+    sources:
+      - type: git
+        url: https://github.com/ggml-org/whisper.cpp.git
+        tag: v1.9.4
+        commit: 927cfce34f31707e17f2bff35c349632fb9e2c3a
+
   - name: justspeaktoit
     buildsystem: simple
     build-options:
       env:
         SPEAK_LINUX_TARGET: "1"
-      # SwiftPM fetches SwiftNIO and NIOSSL at the versions pinned in
-      # packaging/linux/Package.resolved. Flathub builds offline, so a Flathub
-      # submission must also vendor those pins as git sources.
-      build-args:
-        - --share=network
     build-commands:
+      - swift --version
       - python3 scripts/migration/verify-miniz.py
-      - cp packaging/linux/Package.resolved Package.resolved
+      - packaging/linux/swiftpm-offline-setup.sh
       - swift build --configuration release --product SpeakLinux --static-swift-stdlib --disable-sandbox
         --force-resolved-versions
       - swift build --configuration release --product speak --static-swift-stdlib --disable-sandbox
@@ -58,9 +130,14 @@ modules:
       - python3 scripts/stage-linux-desktop.py --binary .build/release/SpeakLinux
         --output .build/linux-desktop-layout --prefix /app --cli .build/release/speak
       - cp -r .build/linux-desktop-layout/. /app/
+      - install -Dm644 LICENSE /app/share/licenses/justspeaktoit/LICENSE
     sources:
       - type: dir
         path: ../..
         skip:
           - .build
           - .git
+          - .flatpak-builder
+          - swiftpm-deps
+          - Tooling/.build
+      - swiftpm-sources.json

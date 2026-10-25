@@ -23,6 +23,52 @@ are processed for App Store submission without beta-group assignment. Existing
 tester membership is preserved. Public
 Alpha links live in the README only; the website and Homebrew advertise Stable.
 
+### Local Apple release credentials from 1Password
+
+`scripts/release-apple.rb` and `scripts/reconcile-apple-releases.rb` can explicitly
+read their App Store Connect credentials from 1Password. Install the 1Password
+CLI, unlock the desktop app, and authorise CLI access yourself before running
+either script. Each read has a 30-second deadline with bounded cleanup; a locked
+or unavailable vault fails the command rather than waiting indefinitely. See the official
+[CLI setup](https://developer.1password.com/docs/cli/get-started/) and
+[`op read` reference](https://developer.1password.com/docs/cli/reference/commands/read/).
+
+Configure references to existing fields, rather than credential values. These
+example names are placeholders; use **Copy Secret Reference** in your vault:
+
+```bash
+export APP_STORE_CONNECT_CREDENTIAL_SOURCE=1password
+export APP_STORE_CONNECT_KEY_ID_REF='op://Release/Apple/key-id'
+export APP_STORE_CONNECT_ISSUER_ID_REF='op://Release/Apple/issuer-id'
+export APP_STORE_CONNECT_PRIVATE_KEY_REF='op://Release/Apple/private-key'
+```
+
+The key-ID field must contain its 10-character uppercase ASCII alphanumeric ID;
+the issuer field must contain its UUID. The private-key field must contain the
+complete unencrypted PEM for a private P-256 key. Password-protected PEM is
+rejected with an explicit empty passphrase; vault mode never asks for one
+interactively. These correspond to Apple's
+[team-key JWT header and claims](https://developer.apple.com/documentation/appstoreconnectapi/generating-tokens-for-api-requests).
+The scripts capture at most 64 KiB of `op read --no-newline` output in memory,
+discard diagnostics with a separate 64 KiB limit, and validate the key. They
+never print credential values, references or CLI error output or write a
+temporary key file. Overflow and deadline failures signal only the owned CLI
+process, with up to 250 ms each for TERM and KILL cleanup. If kernel I/O still
+prevents exit, ownership transfers to an eventual reaper so the caller can fail
+without another signal to that PID. Cancellation cannot preempt kernel work.
+Redacted error categories distinguish reference configuration,
+unavailable access, deadlines, output limits and invalid values/keys.
+Any selected-vault failure stops authentication; it never
+falls back to environment credential values or a local `.p8` file. Do not add
+shell tracing or print the captured values.
+
+When `APP_STORE_CONNECT_CREDENTIAL_SOURCE` is unset (or `environment`), the
+existing CI/local contract remains: `APP_STORE_CONNECT_KEY_ID`,
+`APP_STORE_CONNECT_ISSUER_ID` and `APP_STORE_CONNECT_KEY_PATH`, including the
+existing default key ID/path. Provisioning/bootstrap entrypoints are unchanged.
+This option does not change runner authentication, create vault items, submit a
+build, or establish live vault/API access; those require separate verification.
+
 ## Alpha
 
 Every successful main push CI allocates an immutable annotated

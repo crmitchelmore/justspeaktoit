@@ -5,6 +5,11 @@ import XCTest
 @testable import SpeakApp
 
 final class AssemblyAIBatchAdapterTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        StubURLProtocol.reset()
+    }
+
     override func tearDown() {
         StubURLProtocol.reset()
         super.tearDown()

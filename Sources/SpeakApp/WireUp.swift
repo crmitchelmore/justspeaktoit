@@ -82,6 +82,9 @@ final class AppEnvironment: ObservableObject {
   private var statusBarVisibilityObserver: AnyCancellable?
   /// Product analytics controller — nil when PostHog configuration is absent.
   private(set) var analytics: ProductAnalyticsController?
+  #if !APP_STORE
+  fileprivate(set) var analyticsPrivacyControls: AnalyticsPrivacyControls?
+  #endif
   var analyticsAvailable: Bool { analytics != nil }
   private var analyticsConsentObserver: AnyCancellable?
   private(set) var menuBarManager: MenuBarManager?
@@ -153,6 +156,9 @@ final class AppEnvironment: ObservableObject {
     // Sync the initial consent state and fire the daily-active-user event.
     Task {
       try? await controller.setConsent(initiallyEnabled ? .optedIn : .optedOut)
+      #if !APP_STORE
+      await analyticsPrivacyControls?.refresh()
+      #endif
       // Fire app_active_daily at most once per calendar day.
       let todayKey = "posthog.lastActiveDailyCaptureDate"
       let today = Calendar.current.startOfDay(for: Date())
@@ -167,10 +173,16 @@ final class AppEnvironment: ObservableObject {
     analyticsConsentObserver = settings.$analyticsEnabled
       .dropFirst()
       .receive(on: RunLoop.main)
-      .sink { [weak controller] enabled in
+      .sink { [weak controller, weak self] enabled in
         guard let controller else { return }
+        #if !APP_STORE
+        self?.analyticsPrivacyControls?.invalidate()
+        #endif
         Task {
           try? await controller.setConsent(enabled ? .optedIn : .optedOut)
+          #if !APP_STORE
+          await self?.analyticsPrivacyControls?.refresh()
+          #endif
           if enabled { try? await controller.capture(.analyticsOptIn(surface: .settings)) }
         }
       }
@@ -553,13 +565,20 @@ enum WireUp {
   /// uses `.live`; a test injects its own so bootstrap never syncs the
   /// developer's iCloud account, registers for or posts notifications, or
   /// sends analytics.
+  struct AnalyticsServices {
+    let controller: ProductAnalyticsController
+    #if !APP_STORE
+    let privacyControls: AnalyticsPrivacyControls
+    #endif
+  }
+
   struct Integrations {
     /// Starts CloudKit history and Compare Models sync, and remote-transcript
     /// delivery, which registers its notification actions and re-runs sync
     /// on wake and activation.
     var startCloudSync: @MainActor (MacHistorySyncAdapter, MacComparisonSyncAdapter, RemoteTranscriptDelivery) -> Void
     /// Builds product analytics over the bootstrap's storage, or nil when absent.
-    var makeAnalytics: @MainActor (AppSettings, FileManager) -> ProductAnalyticsController?
+    var makeAnalytics: @MainActor (AppSettings, FileManager) -> AnalyticsServices?
 
     static let live = Integrations(
       startCloudSync: { history, comparisons, remoteTranscripts in
@@ -823,8 +842,11 @@ enum WireUp {
     }
 
     // Analytics
-    if let analyticsController = options.integrations.makeAnalytics(settings, options.fileManager) {
-      environment.installAnalytics(analyticsController)
+    if let analyticsServices = options.integrations.makeAnalytics(settings, options.fileManager) {
+      #if !APP_STORE
+      environment.analyticsPrivacyControls = analyticsServices.privacyControls
+      #endif
+      environment.installAnalytics(analyticsServices.controller)
     }
 
     logger.info("AppEnvironment.bootstrap complete")
@@ -844,7 +866,7 @@ enum WireUp {
   private static func makeAnalyticsController(
     settings: AppSettings,
     fileManager: FileManager
-  ) -> ProductAnalyticsController? {
+  ) -> AnalyticsServices? {
     #if APP_STORE
     return nil
     #else
@@ -858,10 +880,17 @@ enum WireUp {
     let queueURL = stateURL.deletingLastPathComponent().appendingPathComponent("analytics_queue.json")
     let stateStore = FileProductAnalyticsStateStore(fileURL: stateURL)
     let context = buildAnalyticsContext()
-    return try? ProductAnalyticsController(
+    let policy = AnalyticsLocalPolicy()
+    let sink = PostHogProductAnalyticsSink(queueURL: queueURL, forceDisabled: { policy.isDisabled })
+    guard let controller = try? ProductAnalyticsController(
       context: context,
-      sink: PostHogProductAnalyticsSink(queueURL: queueURL),
-      stateStore: stateStore
+      sink: sink,
+      stateStore: stateStore,
+      forceDisabled: { policy.isDisabled }
+    ) else { return nil }
+    return AnalyticsServices(
+      controller: controller,
+      privacyControls: AnalyticsPrivacyControls(controller: controller, sink: sink, policy: policy)
     )
     #endif
   }

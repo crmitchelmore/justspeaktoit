@@ -227,6 +227,19 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
 
     // MARK: - Batch transcription
 
+    /// One comparison lane owns this session and can abort its requests without
+    /// invalidating a recording, chat request or another lane on the original client.
+    public func makeIsolatedFileTranscriptionClient() -> (client: OpenRouterAPIClient, session: URLSession) {
+        let owned = URLSession(
+            configuration: session.configuration, delegate: session.delegate, delegateQueue: session.delegateQueue
+        )
+        let client = OpenRouterAPIClient(
+            apiKeyProvider: apiKeyProvider, session: owned, apiKeyOverride: apiKeyOverride,
+            maximumInlineAudioBytes: maximumInlineAudioBytes, branding: branding
+        )
+        return (client, owned)
+    }
+
     public func transcribeFile(at url: URL, model: String, language: String?) async throws
         -> TranscriptionResult {
         let cleanedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)

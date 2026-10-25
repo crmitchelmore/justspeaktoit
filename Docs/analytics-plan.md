@@ -78,11 +78,21 @@ auditor reading our source and watching our network traffic confirms it.
 `platform`, `app_version`, `build`, `os_major_minor`, `distribution_channel`
 (direct | homebrew | mac_app_store | testflight | app_store | development),
 `locale_language_code`,
-`architecture`, `analytics_schema_version`. Nothing else. No device model, no
-device name, no timezone beyond what ingestion infers coarsely (IP capture
-disabled at the project level). The shared payload boundary validates version,
+`architecture`, `analytics_schema_version`. No device model, device name,
+timezone or location is added by the app. The shared payload boundary validates version,
 build and OS formats, restricts architecture to a closed set, and derives locale
 language from the canonical language catalogue; invalid values become `other`.
+
+The final transport envelope adds the reserved processing control
+`properties.$geoip_disable = true` as a JSON Boolean, including for restored
+queued events and retries. It is visible in the same credential-free inspector
+envelope. This is not a location dimension or a new event family. PostHog's
+[per-capture GeoIP control](https://posthog.com/docs/libraries/python#geoip-properties)
+is serialized to that property by the
+[official SDK](https://github.com/PostHog/posthog-python/blob/3f6c80eb4df1ddffd9e5b9d1d8aae8facf9f83b2/posthog/client.py#L2432).
+The [IP-discard setting permits enrichment before discarding the raw IP](https://posthog.com/docs/privacy/data-storage#discarding-ip-addresses-at-project-level);
+it does not establish absence of stored location fields. Authorized server
+verification, historical-data handling and retention remain rollout gates.
 
 ### Bucket definitions (shared, versioned with the schema)
 
@@ -150,37 +160,36 @@ fail on any non-enum string property, exactly as issue #591 specifies.
   volume but adds an ops burden (patching, backups, uptime) that a two-platform
   indie app should not carry, and the free tier (1M events/month) comfortably
   covers projected volume. Revisit if governance requires it.
-- Two projects: `dev` and `production`. Debug builds use `dev` or the no-op
-  client, never `production`.
-- The SDK ships **locked down** using the exact configuration baseline
-  enumerated in issue #591 (all autocapture, swizzling, screen views, lifecycle
-  events, surveys, replay, feature-flag preloading, person profiles, and error
-  autocapture off; `personProfiles = .never`). The unavoidable remote-config
-  request is a known cost — see the go/no-go checklist: if a network audit shows
-  traffic we cannot justify to a user reading our source, we switch vendors
-  (§6) rather than ship.
+- **Production only**, following the recorded #776 owner decision. Unconfigured
+  development builds stay no-op; do not create or fund a Development project.
+- Direct macOS uses `PostHogProductAnalyticsSink`, a minimal typed `/capture`
+  transport, instead of initializing the SDK. It adds no remote-config,
+  autocapture, replay, survey, person-profile or error-capture request path.
+  This source boundary is not a full-process release network audit; any
+  unapproved traffic still blocks rollout.
 
 ### Consent: opt-IN, three states, with a real preview
 
 - Persisted consent state: `unknown` | `optedIn` | `optedOut` (Element X
-  pattern). **`unknown` and `optedOut` both send nothing.** The SDK is not
-  initialised until the state is `optedIn`.
+  pattern). **`unknown` and `optedOut` both admit no event.** The transport is
+  not reopened for collection until opted in and allowed by local policy.
 - The opt-in prompt appears once, late in onboarding (after first value is
   demonstrated, never as a gate), and:
-  - shows a **live preview of the actual JSON** that would be sent for a sample
-    event — the same renderer as the inspector in §4, not marketing copy;
+  - explains the bounded typed catalogue; actual credential-free event
+    envelopes can be inspected separately through §4;
   - states what is collected, what is never collected, purpose, retention, and
     how to withdraw; links `Docs/PRIVACY.md`;
   - is visibly *our* UI — it must not imitate an Apple permission prompt.
-- Settings on both platforms carry a permanent **"Share anonymous analytics"**
-  toggle. Turning it off: stops capture synchronously, purges the on-disk queue,
-  deletes the install ID, closes the SDK, and sends nothing — covered by an
-  integration test, since (per #591's research) the SDK's `optOut()` alone does
-  not clearly guarantee queue deletion.
+- Direct-macOS Settings carries a permanent **"Share anonymous analytics"**
+  toggle. Withdrawal closes controller admission before asynchronous cleanup,
+  cancels controlled requests/retries, purges local queue/inspection history and
+  deletes identity. Already accepted remote bytes cannot be recalled. iOS and
+  Store collection remain outside this implementation.
 
 ### Identity: random install ID, nothing else
 
-- A `UUID()` generated on first opt-in, stored in Application Support (not the
+- A `UUID()` generated by the first approved pseudonymous event after opt-in,
+  stored in Application Support (not the
   Keychain — it must die with the app data, not survive reinstall).
 - **Not** synced across devices via iCloud in v1 (per #591's recommendation);
   macOS and iOS installs are independent pseudonyms.
@@ -197,11 +206,10 @@ fail on any non-enum string property, exactly as issue #591 specifies.
 - **Local kill switch:** a build-level flag and a hidden `defaults`/plist
   override that force the no-op client regardless of consent state.
 - **Remote kill switch without remote config:** v1 deliberately has no feature
-  flags (per #591), so the emergency stop is server-side — revoking/rotating
-  the project API key at PostHog stops ingestion for all shipped builds
-  immediately, and ingestion-side filtering can drop a bad event name. This
-  satisfies "analytics can be disabled without an app release" with zero
-  additional client surface.
+  flags (per #591). An owner-controlled ingestion-key revoke/rotation drill
+  must establish actual rejection and bounded queue behavior before rollout;
+  it is not assumed to stop all client traffic immediately. This implementation
+  changes neither server settings nor keys.
 
 ### Coexistence with Sentry
 
@@ -242,19 +250,35 @@ join.
 The app is open source and its users are exactly the demographic that reads
 source and runs proxies. Lean into that:
 
-1. **In-app Analytics Inspector** (both platforms, shipped in *release* builds,
-   reachable from Settings → Privacy → Analytics, no secret gesture):
-   - a live, scrollable feed of every event as the **exact JSON payload**
-     queued/sent — same bytes as the wire, pretty-printed;
-   - current consent state, install ID (with a "reset" button), queue depth,
-     and endpoint hostname;
-   - an "export last 100 events" action so users can diff against the docs;
-   - works in `unknown`/`optedOut` states too — it then shows "nothing is
-     collected" backed by an empty queue, which is itself the proof.
-2. **Public event catalogue**: §2's table lives in this repo and is linked from
-   the opt-in prompt, the inspector, and `PRIVACY.md`. A CI test asserts the
-   typed Swift catalogue and the documented table stay in sync (names,
-   properties, classes), so the docs cannot silently drift from the binary.
+1. **In-app Analytics Inspector** is available in configured direct-macOS builds
+   from Settings → About → Privacy. iOS, extensions and Mac App Store remain
+   excluded from this implementation.
+   - The JSON contains the same serialized event/properties fields as transport,
+     including transport-added fields, with `api_key` omitted. It is not raw
+     authenticated request bytes. Endpoint display/export shows only the origin; URL userinfo, paths, query
+     values and fragments are omitted because a proxy path may contain a token.
+   - At most 100 recent records are retained in memory, including surviving
+     queued entries from earlier launches. Sent history is not persisted.
+     Queue retention remains 1,000 events/seven days. Retries update one row;
+     HTTP acknowledged means an observed 2xx response, not backend processing or
+     exactly-once delivery.
+   - Read-only inspection creates no identity, event or network request. Native
+     Reset and Export controls report local success/failure; export cancellation
+     is neutral. Reset preserves consent, purges queued/inspected events and
+     deletes the local identity. A later legitimate event creates any new ID.
+   - "Disable collection on this Mac" preserves consent and immediately closes
+     controlled requests/retries, purges queue/history and deletes identity.
+     Clearing the override only permits existing opt-in to apply. A build/plist
+     or controlled-launch disable cannot be cleared in the inspector. Local
+     cleanup failure keeps admission closed until cleanup succeeds.
+   - Local cancellation/reset cannot recall bytes already accepted remotely or
+     remove user-owned exported files. Release network qualification remains
+     required before rollout; opening an empty inspector alone proves no such
+     audit.
+2. **Public event catalogue**: §2's table lives in this repo. Existing tests
+   verify the typed Swift catalogue; a test comparing its names, properties and
+   privacy classes with this Markdown table remains a follow-up under #776.
+   Catalogue changes must update the documentation alongside code and tests.
 3. **Auditable pipeline**: the typed event API + allowlist means a reviewer can
    read one file in `SpeakCore` and enumerate everything the app can possibly
    send. PRs adding events must update catalogue + docs + tests together.
@@ -262,6 +286,32 @@ source and runs proxies. Lean into that:
    release checklist so anyone can watch a store-signed build's traffic and
    confirm it matches the inspector. This is the exact audit that exposed
    Wispr Flow — we publish the instructions for running it against us.
+
+### Local operator disable
+
+Quit the relevant direct app, then set its device-local override and restart:
+
+```sh
+defaults write com.justspeaktoit.mac posthog.forceDisabled -bool true
+defaults write com.justspeaktoit.mac.alpha posthog.forceDisabled -bool true
+```
+
+Use the applicable train's command; these overrides are never synced/transferred.
+To clear only the local override, use `-bool false` for that same bundle ID and
+restart. A restart is required for deterministic cross-process observation;
+defaults notifications are not promised to update an already running process.
+The native inspector control applies the policy immediately in its own process.
+`PostHogForceDisabled=true` in the app plist or `POSTHOG_DISABLED=true` for a
+controlled launch also wins over consent. None of these controls changes server
+settings or rotates an ingestion key.
+
+Release qualification must use an authorized direct Release build with full
+process network capture: unknown/opt-out silence; opt-in phase-one envelopes;
+offline queue/reconnect; withdrawal during a held request; local override; and
+identity reset. Compare inspector/export fields to captured JSON after removing
+`api_key`, and retain only redacted aggregate receipts privately. Check Sentry
+identity separation independently. No production key, raw response, exported
+identity or user-level server record belongs in public test evidence.
 
 ---
 
@@ -271,7 +321,7 @@ source and runs proxies. Lean into that:
 
 | Phase | Scope | Gate to next phase |
 | --- | --- | --- |
-| **0. Design & governance** | Finalise this catalogue as typed code; consent copy; retention (proposal: 12 months, then aggregate-only); create dev/prod PostHog projects with replay/surveys/flags disabled server-side; land disclosure PRs | Catalogue + consent model reviewed and merged; go/no-go checklist items 1–4 pass |
+| **0. Design & governance** | Finalise the typed catalogue and consent copy; verify approved 12-month retention then aggregate/delete and Production-only privacy settings; development stays no-op; land disclosure PRs | Catalogue + consent model reviewed and merged; go/no-go checklist items 1–4 pass |
 | **1. macOS Developer ID + Homebrew (internal)** | Ship behind opt-in to direct-download builds first — no store review latency, fastest fix loop; events: `app_active_daily`, onboarding funnel, `first_transcription_succeeded` only | One week of payload inspection shows zero prohibited data; counts sane vs Sentry sessions |
 | **2. iOS TestFlight** | Same minimal event set; store-signed build tested with analytics disabled and enabled; App Store Connect privacy answers updated *before* external TestFlight | Archive privacy report matches declarations; keyboard extension confirmed traffic-free |
 | **3. Full event set, both stores** | Add transcription lifecycle, feature adoption, error events; MAS + App Store submissions with review notes | Dashboards answer the §1 questions; no schema divergence across the five channels |
@@ -295,13 +345,13 @@ source and runs proxies. Lean into that:
        catalogue↔docs drift.
 2. [ ] Network-spy tests prove nothing is sent in `unknown`/`optedOut`; queue
        purge on opt-out proven by integration test.
-3. [ ] Full `mitmproxy` capture of a release-configuration build reviewed: every
-       request justified, including the SDK's remote-config call. **If that
-       call cannot be disabled or justified, this checklist fails and we
-       execute the §6 fallback (TelemetryDeck) instead of shipping.**
-4. [ ] `PRIVACY.md`, `SECURITY.md`, both privacy manifests, and App Store
-       Connect answers updated and consistent with observed payloads.
-5. [ ] Analytics Inspector functional on both platforms in release builds.
+3. [ ] Full-process `mitmproxy` capture of a direct Release build reviewed:
+       every request justified, including any unexpected remote-config path.
+       Unapproved traffic blocks rollout; source tests alone do not pass this gate.
+4. [ ] Direct-macOS privacy/security disclosures match observed payloads and
+       policy publication is verified. iOS/Store manifests and App Store Connect
+       answers remain separately gated before any expansion.
+5. [ ] Direct-macOS Analytics Inspector validated in Release; other platforms remain deferred.
 6. [ ] Keyboard extension binary confirmed to contain no analytics symbols and
        produce no analytics traffic.
 7. [ ] Server-side kill switch drill performed (rotate key, confirm clients fail

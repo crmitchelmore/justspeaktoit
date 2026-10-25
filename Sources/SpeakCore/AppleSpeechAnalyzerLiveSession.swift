@@ -170,7 +170,7 @@ public final class AppleSpeechAnalyzerLiveSession: @unchecked Sendable {
 /// A cancellation handler cannot await. Retain its one teardown task so the
 /// initializer's catch and every later cancel join the same native operation.
 @available(macOS 26.0, iOS 26.0, *)
-private final class SpeechAnalyzerCancellation: @unchecked Sendable {
+final class SpeechAnalyzerCancellation: @unchecked Sendable {
     private let lock = NSLock()
     private let analyzer: SpeechAnalyzer
     private var task: Task<Void, Never>?

@@ -34,6 +34,7 @@ public enum ApplicationPreferenceKey: String, CaseIterable, Sendable {
     case preferredAudioInputUID
     case defaultTTSVoice
     case ttsLanguage
+    case mistralTTSModel
     case sonioxTTSRegion
     case ttsSpeed
     case ttsPitch

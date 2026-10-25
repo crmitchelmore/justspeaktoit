@@ -13,7 +13,7 @@ import os.log
 /// frames** (`input_audio.append`), not binary frames. The service streams
 /// append-only `transcription.text.delta` fragments and no per-utterance final;
 /// the single authoritative transcript arrives as `transcription.done` after
-/// `input_audio.flush` and `input_audio.end`. This client therefore folds the
+/// `input_audio.end` (preceded by `input_audio.flush` for Voxtral 2). This client folds the
 /// deltas itself and reports cumulative interim text, so consumers see the same
 /// shape they get from every other provider.
 ///
@@ -30,8 +30,8 @@ public final class MistralVoxtralLiveClient: FinalizingStreamingTranscriptionCli
     /// `transcription.done` restates the whole session, and it is the only
     /// final this service emits.
     public let finalShape: TranscriptFinalShape = .cumulativeTranscript
-    /// `input_audio.flush` commits audio Voxtral has received but not yet
-    /// transcribed, so a caller must always finish gracefully.
+    /// Graceful finish drains admitted audio and asks Voxtral for its final
+    /// transcript. Voxtral 3 uses end alone; Voxtral 2 also sends flush.
     public let finishFlushesBufferedAudio = true
     /// The whole finish deadline, from the constant the catalogue declares as
     /// this model's `postStopFinalizeBudget`, so platform watchdogs agree.
@@ -147,7 +147,7 @@ public final class MistralVoxtralLiveClient: FinalizingStreamingTranscriptionCli
 
     public func cancel() { stop() }
 
-    /// Drains every admitted frame, then sends the flush, then the end, and
+    /// Drains every admitted frame, sends the legacy flush when required, then the end, and
     /// waits for `transcription.done`, all inside the one `finishBudget`
     /// deadline. Returns the whole session transcript, so a done it consumes
     /// is not also delivered through `onTranscript`. A finish that does not
@@ -247,6 +247,7 @@ extension MistralVoxtralLiveClient {
         let previous = run
         let active = MistralVoxtralLiveRun()
         active.usesTransport = usesTransport
+        active.usesLegacyFlush = model != MistralVoxtral3.realtimeAPIModelID
         active.onTranscript = onTranscript
         active.onError = onError
         active.phase = .connecting
@@ -290,8 +291,8 @@ extension MistralVoxtralLiveClient {
         requestPump(active, &effects)
     }
 
-    /// Stop sequencing: stop accepting audio, drain what was admitted, flush,
-    /// then end, then wait for `transcription.done`. A session that is still
+    /// Stop sequencing: stop accepting audio, drain what was admitted, send
+    /// the legacy flush when required, then end and wait for `transcription.done`. A session that is still
     /// connecting, including one whose transport factory has not returned yet,
     /// keeps its capture and sends it once configured. One deadline bounds the
     /// whole finish; which step it catches decides the error.
@@ -304,7 +305,7 @@ extension MistralVoxtralLiveClient {
             return
         }
         active.phase = .finishing
-        active.outgoing.append(.flush)
+        if active.usesLegacyFlush { active.outgoing.append(.flush) }
         active.outgoing.append(.end)
         log("Finishing")
         requestPump(active, &effects)

@@ -103,6 +103,12 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
                 + "partial hypotheses and per-segment finals. Reuses your Rev.ai access token.",
             estimatedLatencyMs: 300, latencyTier: .fast),
         Option(
+            id: MistralVoxtral3.realtimeID,
+            displayName: "Mistral Voxtral Realtime 3 (Streaming, Preview)",
+            description: "Voxtral 3 public-preview live transcription with automatic language detection. "
+                + "Uses your Mistral API key and the app's 480 ms streaming delay.",
+            estimatedLatencyMs: 480, latencyTier: .fast),
+        Option(
             id: MistralVoxtralRealtime.liveCatalogID,
             displayName: "Mistral Voxtral Realtime (Streaming)",
             description: "Mistral's natively streaming Voxtral model across 13 languages, with "
@@ -188,6 +194,16 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             displayName: "Whisper Large v3 Turbo (Groq)",
             description: "Groq-hosted Whisper Large v3 Turbo. Fast, low-cost OpenAI-compatible batch transcription.",
             estimatedLatencyMs: 500, latencyTier: .fast),
+        Option(
+            id: MistralVoxtral3.miniBatchID,
+            displayName: "Voxtral Mini Transcribe 3 (Mistral, Preview)",
+            description: "Voxtral 3 public-preview file transcription with multilingual audio and vocabulary hints.",
+            latencyTier: .fast),
+        Option(
+            id: MistralVoxtral3.smallBatchID,
+            displayName: "Voxtral Small Transcribe 3 (Mistral, Preview)",
+            description: "Mistral's larger Voxtral 3 public-preview model for higher-quality file transcription.",
+            latencyTier: .medium),
         Option(
             id: "mistral/voxtral-mini-latest",
             displayName: "Voxtral Mini Transcribe 2 (Mistral)",

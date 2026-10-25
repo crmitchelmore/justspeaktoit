@@ -178,6 +178,10 @@ extension ModelCatalog {
         // per-utterance final: the authoritative transcript is the
         // `transcription.done` frame that follows the flush, so the budget
         // stays large enough to capture it before teardown.
+        MistralVoxtral3.realtimeID: LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish],
+            postStopFinalizeBudget: MistralVoxtralRealtime.finishBudget
+        ),
         MistralVoxtralRealtime.liveCatalogID: LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish],
             postStopFinalizeBudget: MistralVoxtralRealtime.finishBudget

@@ -107,7 +107,9 @@ public struct MistralBatchClient: TranscriptionProvider {
   }
 
   public static func supportsKeywords(model: String) -> Bool {
-    (model.split(separator: "/").last.map(String.init) ?? model) == "voxtral-mini-latest"
+    let name = model.split(separator: "/").last.map(String.init) ?? model
+    return name == "voxtral-mini-latest"
+      || MistralVoxtral3.batchIDs.contains("mistral/" + name)
   }
 
   private func modelID(from model: String) -> String {

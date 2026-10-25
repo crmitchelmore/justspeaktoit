@@ -1,9 +1,52 @@
 #include "LinuxActionShortcutsInternal.h"
 
 #include <adwaita.h>
+#include <glib/gstdio.h>
 #include <string.h>
 
 #define JSTI_MAXIMUM_CONFIGURATION_FIELDS 64
+
+typedef struct EscapePolicy {
+    GMutex mutex;
+    guint64 epoch;
+    gboolean enabled, recording, closed;
+} EscapePolicy;
+
+static EscapePolicy escape_policy = { .enabled = TRUE };
+
+static void escape_publish(EscapePolicy *policy, gint32 recording, gint32 enabled, gboolean close) {
+    g_mutex_lock(&policy->mutex);
+    if (recording >= 0) policy->recording = recording == JSTI_STATE_RECORDING || recording == JSTI_STATE_WORKING;
+    if (enabled >= 0) policy->enabled = enabled != 0;
+    if (close) policy->closed = TRUE;
+    gboolean active = policy->recording && policy->enabled && !policy->closed;
+    if ((gboolean)(policy->epoch & 1u) != active) ++policy->epoch;
+    g_mutex_unlock(&policy->mutex);
+}
+
+static guint64 escape_token(EscapePolicy *policy) {
+    g_mutex_lock(&policy->mutex);
+    guint64 token = policy->epoch & 1u ? policy->epoch : 0;
+    g_mutex_unlock(&policy->mutex);
+    return token;
+}
+
+static gboolean escape_enabled(void) {
+    g_mutex_lock(&escape_policy.mutex);
+    gboolean enabled = escape_policy.enabled;
+    g_mutex_unlock(&escape_policy.mutex);
+    return enabled;
+}
+
+int32_t jsti_window_set_escape_cancellation(int32_t enabled) {
+    if (enabled != 0 && enabled != 1) return -1;
+    escape_publish(&escape_policy, -1, enabled, FALSE);
+    return 0;
+}
+
+int32_t jsti_window_escape_is_current(uint64_t token) {
+    return (token & 1u) && token == escape_token(&escape_policy);
+}
 
 /*
  * The GTK 4 / libadwaita window. It owns no application state: every control
@@ -22,6 +65,7 @@ typedef struct Slot {
 typedef struct Models Models;
 static void models_free(gpointer pointer);
 static void on_model_filter(gboolean local, gboolean live);
+static guint model_mode(gboolean local, gboolean live) { return (local ? 2 : 0) + (live ? 1 : 0); }
 
 static GMutex cleanup_lock;
 static guint64 cleanup_ticket;
@@ -54,7 +98,7 @@ typedef struct UI {
     GtkStringList *model_names;
     GArray *model_slots;
     Models *model_catalog;
-    gint32 preferred_model_slots[3];
+    gint32 preferred_model_slots[4];
     AdwComboRow *model_row;
     GtkLabel *catalog_status;
     GtkButton *catalog_refresh;
@@ -124,8 +168,11 @@ typedef struct UI {
     AdwSwitchRow *backup_profiles;
     GtkButton *backup_export;
     GtkButton *backup_inspect;
+    GtkButton *backup_restore;
+    GtkWidget *restore_dialog;
     GCancellable *backup_chooser;
     gboolean closing;
+    gboolean cancel_key_held;
     GtkButton *import_button;
     GtkButton *play;
     GtkButton *stop_play;
@@ -209,6 +256,8 @@ static gboolean window_closed;
 static GQueue early_posts = G_QUEUE_INIT;
 static void open_posts(void);
 static void close_posts(void);
+static void retire_migration_restore(void);
+static void refresh_migration_restore(void);
 
 gboolean jsti_window_loop_running(void) { return g_atomic_int_get(&loop_running) != 0; }
 
@@ -310,7 +359,7 @@ static void refresh_actions(void) {
     gboolean voices = g_list_model_get_n_items(G_LIST_MODEL(read_aloud.voices)) > 0;
     gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.button), idle && presented && has_text && voices);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_read), idle && presented && has_text && voices);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), idle);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), !ui.closing);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_sources), idle && voices);
     jsti_voice_credentials_set_idle(idle);
     gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.voice_row), idle);
@@ -330,11 +379,14 @@ static void refresh_actions(void) {
         gtk_widget_set_sensitive(GTK_WIDGET(ui.recordings_default), idle && ui.location_chooser == NULL);
     }
     if (ui.backup_audio != NULL) {
-        gtk_widget_set_sensitive(GTK_WIDGET(ui.backup_audio), idle && ui.backup_chooser == NULL);
-        gtk_widget_set_sensitive(GTK_WIDGET(ui.backup_profiles), idle && ui.backup_chooser == NULL);
-        gtk_widget_set_sensitive(GTK_WIDGET(ui.backup_export), idle && ui.backup_chooser == NULL);
-        gtk_widget_set_sensitive(GTK_WIDGET(ui.backup_inspect), idle && ui.backup_chooser == NULL);
+        gboolean backup_idle = idle && ui.backup_chooser == NULL && ui.restore_dialog == NULL;
+        gtk_widget_set_sensitive(GTK_WIDGET(ui.backup_audio), backup_idle);
+        gtk_widget_set_sensitive(GTK_WIDGET(ui.backup_profiles), backup_idle);
+        gtk_widget_set_sensitive(GTK_WIDGET(ui.backup_export), backup_idle);
+        gtk_widget_set_sensitive(GTK_WIDGET(ui.backup_inspect), backup_idle);
+        gtk_widget_set_sensitive(GTK_WIDGET(ui.backup_restore), backup_idle);
     }
+    refresh_migration_restore();
     gtk_widget_set_sensitive(GTK_WIDGET(ui.model_row), idle);
     jsti_model_filters_set_idle(idle);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.microphone_row), idle);
@@ -396,7 +448,7 @@ static void on_model(GObject *object, GParamSpec *spec, gpointer data) {
     refresh_setup();
     gint32 slot = selected_model_slot();
     if (!ui.suppress && slot >= 0) {
-        guint mode = jsti_model_filters_local() ? 2 : (jsti_model_filters_live() ? 1 : 0);
+        guint mode = model_mode(jsti_model_filters_local(), jsti_model_filters_live());
         ui.preferred_model_slots[mode] = slot;
     }
     if (slot >= 0) emit(JSTI_EVENT_SELECT_MODEL, "", slot);
@@ -806,7 +858,7 @@ typedef struct BackupChoice {
     GCancellable *cancelled;
     gint32 include_audio;
     gint32 include_profiles;
-    gboolean inspect;
+    gint action; /* 0 export, 1 inspect, 2 restore */
 } BackupChoice;
 
 static gboolean backup_choice_active(const BackupChoice *choice, GObject *parent) {
@@ -815,14 +867,18 @@ static gboolean backup_choice_active(const BackupChoice *choice, GObject *parent
 }
 
 static void backup_emit_path(const BackupChoice *choice, const char *path) {
-    emit(choice->inspect ? JSTI_EVENT_MIGRATION_INSPECT : JSTI_EVENT_MIGRATION_EXPORT,
-         path, choice->inspect ? 0 : (choice->include_audio | choice->include_profiles));
+    const gint32 events[] = {JSTI_EVENT_MIGRATION_EXPORT, JSTI_EVENT_MIGRATION_INSPECT, JSTI_EVENT_MIGRATION_RESTORE};
+    if (choice->action < 0 || choice->action >= (gint)G_N_ELEMENTS(events)) {
+        jsti_window_update("Could not choose backup action: invalid request.", NULL, -1);
+        return;
+    }
+    emit(events[choice->action], path, choice->action != 0 ? 0 : (choice->include_audio | choice->include_profiles));
 }
 
 static void backup_chosen(GObject *source, GAsyncResult *result, gpointer data) {
     BackupChoice *choice = data;
     GError *error = NULL;
-    GFile *file = choice->inspect ? gtk_file_dialog_open_finish(GTK_FILE_DIALOG(source), result, &error)
+    GFile *file = choice->action != 0 ? gtk_file_dialog_open_finish(GTK_FILE_DIALOG(source), result, &error)
                                 : gtk_file_dialog_save_finish(GTK_FILE_DIALOG(source), result, &error);
     GObject *parent = g_weak_ref_get(&choice->parent);
     gboolean active = backup_choice_active(choice, parent);
@@ -855,19 +911,20 @@ static void backup_chosen(GObject *source, GAsyncResult *result, gpointer data) 
 
 static void on_backup(GtkButton *button, gpointer data) {
     (void)button;
-    if (ui.closing || ui.state != 0 || ui.backup_chooser != NULL) return;
+    if (ui.closing || ui.state != 0 || ui.backup_chooser != NULL || ui.restore_dialog != NULL) return;
     BackupChoice *choice = g_new0(BackupChoice, 1);
     g_weak_ref_init(&choice->parent, G_OBJECT(ui.window));
     choice->cancelled = g_cancellable_new();
     choice->include_audio = adw_switch_row_get_active(ui.backup_audio) ? 1 : 0;
     choice->include_profiles = adw_switch_row_get_active(ui.backup_profiles) ? 2 : 0;
-    choice->inspect = GPOINTER_TO_INT(data) != 0;
+    choice->action = GPOINTER_TO_INT(data);
     ui.backup_chooser = g_object_ref(choice->cancelled);
     refresh_actions();
     GtkFileDialog *dialog = gtk_file_dialog_new();
-    gtk_file_dialog_set_title(dialog, choice->inspect ? "Inspect backup (no data will be imported)"
-                                                    : "Save ZIP backup (existing files are never replaced)");
-    if (!choice->inspect) gtk_file_dialog_set_initial_name(dialog, "JustSpeakToIt-History.zip");
+    gtk_file_dialog_set_title(dialog, choice->action == 2 ? "Restore backup (preview before changes)"
+        : choice->action == 1 ? "Inspect backup (no data will be imported)"
+                             : "Save ZIP backup (existing files are never replaced)");
+    if (choice->action == 0) gtk_file_dialog_set_initial_name(dialog, "JustSpeakToIt-History.zip");
     GtkFileFilter *filter = gtk_file_filter_new();
     gtk_file_filter_set_name(filter, "ZIP backups");
     gtk_file_filter_add_pattern(filter, "*.zip");
@@ -875,7 +932,7 @@ static void on_backup(GtkButton *button, gpointer data) {
     g_list_store_append(filters, filter);
     gtk_file_dialog_set_filters(dialog, G_LIST_MODEL(filters));
     gtk_file_dialog_set_default_filter(dialog, filter);
-    if (choice->inspect) gtk_file_dialog_open(dialog, ui.window, choice->cancelled, backup_chosen, choice);
+    if (choice->action != 0) gtk_file_dialog_open(dialog, ui.window, choice->cancelled, backup_chosen, choice);
     else gtk_file_dialog_save(dialog, ui.window, choice->cancelled, backup_chosen, choice);
     g_object_unref(filters);
     g_object_unref(filter);
@@ -970,7 +1027,10 @@ static gboolean on_close_request(GtkWindow *window, gpointer data) {
     jsti_voice_sources_close();
     jsti_voice_credentials_close();
     jsti_action_shortcut_editor_close();
+    jsti_setup_close();
     ui.closing = TRUE;
+    escape_publish(&escape_policy, -1, -1, TRUE);
+    retire_migration_restore();
     if (ui.backup_chooser != NULL) g_cancellable_cancel(ui.backup_chooser);
     g_clear_object(&ui.backup_chooser);
     if (ui.location_chooser != NULL) g_cancellable_cancel(ui.location_chooser);
@@ -1095,6 +1155,39 @@ static gboolean sidebar_navigate(guint keyval, GdkModifierType modifiers, GtkWid
 
 static gboolean action_shortcut_run(gint run, const char *page, gint slot);
 
+static gboolean cancel_key(guint keyval, GdkModifierType modifiers, GtkWidget *focused, gboolean active) {
+    if (keyval != GDK_KEY_Escape || !active || ui.closing || ui.suppress ||
+        !gtk_widget_is_sensitive(GTK_WIDGET(ui.window))) return FALSE;
+    for (GtkWidget *focus = focused; focus != NULL; focus = gtk_widget_get_parent(focus)) {
+        if (GTK_IS_POPOVER(focus) || (GTK_IS_WINDOW(focus) && focus != GTK_WIDGET(ui.window))) return FALSE;
+#if ADW_CHECK_VERSION(1, 5, 0)
+        if (ADW_IS_DIALOG(focus)) return FALSE;
+#endif
+    }
+    GdkModifierType relevant = modifiers & (GDK_CONTROL_MASK | GDK_SHIFT_MASK | GDK_ALT_MASK |
+                                            GDK_SUPER_MASK | GDK_HYPER_MASK | GDK_META_MASK);
+    if (!escape_enabled()) {
+        if (relevant == 0) ui.cancel_key_held = TRUE;
+        return FALSE;
+    }
+    if (ui.cancel_key_held) return TRUE;
+    if (relevant != 0 || (ui.state != JSTI_STATE_RECORDING && ui.state != JSTI_STATE_WORKING)) return FALSE;
+    guint64 token = escape_token(&escape_policy);
+    if (token == 0) return FALSE;
+    ui.cancel_key_held = TRUE;
+    gchar value[32];
+    g_snprintf(value, sizeof(value), "%" G_GUINT64_FORMAT, token);
+    retire_cleanup_preview();
+    emit(JSTI_EVENT_CANCEL, value, 0);
+    return TRUE;
+}
+
+static gboolean cancel_key_pressed(GtkEventControllerKey *controller, guint keyval, guint keycode,
+                                   GdkModifierType modifiers, gpointer data) {
+    (void)controller; (void)keycode; (void)data;
+    return cancel_key(keyval, modifiers, gtk_window_get_focus(ui.window), gtk_window_is_active(ui.window));
+}
+
 static gboolean sidebar_key_pressed(GtkEventControllerKey *controller, guint keyval, guint keycode,
                                     GdkModifierType modifiers, gpointer data) {
     (void)data;
@@ -1107,13 +1200,17 @@ static gboolean sidebar_key_pressed(GtkEventControllerKey *controller, guint key
 
 static void action_key_released(GtkEventControllerKey *controller, guint keyval, guint keycode,
                                 GdkModifierType modifiers, gpointer data) {
-    (void)controller; (void)keyval; (void)modifiers; (void)data;
+    (void)controller; (void)modifiers; (void)data;
+    if (keyval == GDK_KEY_Escape) ui.cancel_key_held = FALSE;
     jsti_action_shortcuts_release(keycode);
 }
 
 static void action_window_active(GObject *object, GParamSpec *spec, gpointer data) {
     (void)spec; (void)data;
-    if (!gtk_window_is_active(GTK_WINDOW(object))) jsti_action_shortcuts_reset();
+    if (!gtk_window_is_active(GTK_WINDOW(object))) {
+        ui.cancel_key_held = FALSE;
+        jsti_action_shortcuts_reset();
+    }
 }
 
 static void sidebar_header(GtkListBoxRow *row, GtkListBoxRow *before, gpointer data) {
@@ -1471,7 +1568,8 @@ static GtkWidget *build_voice_output(void) {
     gtk_box_append(GTK_BOX(body), jsti_voice_credentials_group_new());
     GtkWidget *note = gtk_label_new(
         "Choose a recording in History, or open Text and export for typed/pasted text and an explicit clipboard "
-        "snapshot. External selected text is unavailable. Recording, another playback or Stop ends voice output.");
+        "snapshot. For external selected text, allow session access below and use a desktop shortcut after "
+        "refocusing the external field. Recording, another playback or Stop ends voice output.");
     gtk_label_set_wrap(GTK_LABEL(note), TRUE);
     gtk_label_set_xalign(GTK_LABEL(note), 0);
     gtk_widget_add_css_class(note, "dim-label");
@@ -1490,6 +1588,7 @@ static GtkWidget *build_voice_output(void) {
     gtk_box_append(GTK_BOX(actions), GTK_WIDGET(ui.voice_read));
     gtk_box_append(GTK_BOX(body), actions);
     gtk_box_append(GTK_BOX(column), card);
+    gtk_box_append(GTK_BOX(column), jsti_selection_access_group_new());
     return page;
 }
 
@@ -1635,6 +1734,15 @@ static GtkWidget *build_general(void) {
     g_signal_connect(ui.backup_inspect, "clicked", G_CALLBACK(on_backup), GINT_TO_POINTER(1));
     adw_action_row_add_suffix(ADW_ACTION_ROW(inspect_row), GTK_WIDGET(ui.backup_inspect));
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(backup), inspect_row);
+    GtkWidget *restore_row = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(restore_row), "Restore a ZIP backup");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(restore_row),
+        "Preview and confirm History text and app profiles. Settings, audio and credentials stay unchanged.");
+    ui.backup_restore = GTK_BUTTON(gtk_button_new_with_mnemonic("_Restore..."));
+    gtk_widget_set_valign(GTK_WIDGET(ui.backup_restore), GTK_ALIGN_CENTER);
+    g_signal_connect(ui.backup_restore, "clicked", G_CALLBACK(on_backup), GINT_TO_POINTER(2));
+    adw_action_row_add_suffix(ADW_ACTION_ROW(restore_row), GTK_WIDGET(ui.backup_restore));
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(backup), restore_row);
     gtk_box_append(GTK_BOX(column), backup);
     return page;
 }
@@ -1780,7 +1888,10 @@ static GtkWidget *build_keyboard(void) {
     adw_preferences_group_set_description(
         ADW_PREFERENCES_GROUP(shortcut),
         "Where the desktop offers no shortcut portal, bind the command justspeaktoit --toggle to a key in your "
-        "desktop's keyboard settings.");
+        "desktop's keyboard settings. With the app already running, --speak-clipboard reads clipboard text aloud "
+        "and --paste-last-history delivers the newest History text without raising this window. "
+        "The running app also accepts --stop-speech, --pause-resume-speech and --quick-voice-1 "
+        "(or --quick-voice-2 / --quick-voice-3).");
     ui.shortcut_row = ADW_ACTION_ROW(adw_action_row_new());
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.shortcut_row), "Keyboard shortcut");
     adw_action_row_set_subtitle(ui.shortcut_row, "Checking the desktop…");
@@ -1842,6 +1953,14 @@ static void on_permissions(GtkButton *button, gpointer data) {
     jsti_permissions_open(ui.window);
 }
 
+static void on_setup(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    if (!ui.closing) jsti_setup_open(ui.window);
+}
+
+static void request_setup(gpointer data) { (void)data; on_setup(NULL, NULL); }
+int32_t jsti_window_request_setup(void) { return jsti_window_post(request_setup, NULL, NULL); }
+
 static void request_permissions(gpointer data) {
     (void)data;
     if (!ui.closing) jsti_permissions_open(ui.window);
@@ -1901,6 +2020,14 @@ static gboolean action_shortcut_run(gint run, const char *page, gint slot) {
     case 10:
         emit(JSTI_EVENT_PERMISSIONS, "", 0);
         return TRUE;
+    case 11:
+        if (ui.state != JSTI_STATE_IDLE) return FALSE;
+        emit(JSTI_EVENT_PASTE_LAST_HISTORY, "", 0);
+        return TRUE;
+    case 12:
+        if (ui.state != JSTI_STATE_IDLE) return FALSE;
+        emit(JSTI_EVENT_SPEAK_SELECTED_TEXT, "", 0);
+        return TRUE;
     default: return FALSE;
     }
 }
@@ -1949,6 +2076,11 @@ static GtkWidget *build_about(void) {
     gtk_widget_set_size_request(permissions, -1, 44);
     gtk_widget_set_halign(permissions, GTK_ALIGN_START);
     g_signal_connect(permissions, "clicked", G_CALLBACK(on_permissions), NULL);
+    GtkWidget *setup = gtk_button_new_with_label("Run setup again");
+    gtk_widget_set_size_request(setup, -1, 44);
+    gtk_widget_set_halign(setup, GTK_ALIGN_START);
+    g_signal_connect(setup, "clicked", G_CALLBACK(on_setup), NULL);
+    gtk_box_append(GTK_BOX(body), setup);
     gtk_box_append(GTK_BOX(body), permissions);
     gtk_box_append(GTK_BOX(column), card);
     return page;
@@ -1962,6 +2094,11 @@ static void build_window(void) {
     gtk_window_set_default_size(ui.window, 1080, 760);
     gtk_widget_set_size_request(window, 360, 480);
     g_signal_connect(window, "close-request", G_CALLBACK(on_close_request), NULL);
+    GtkEventController *cancel_keys = gtk_event_controller_key_new();
+    gtk_event_controller_set_propagation_phase(cancel_keys, GTK_PHASE_CAPTURE);
+    g_signal_connect(cancel_keys, "key-pressed", G_CALLBACK(cancel_key_pressed), NULL);
+    g_signal_connect(cancel_keys, "key-released", G_CALLBACK(action_key_released), NULL);
+    gtk_widget_add_controller(window, cancel_keys);
     GtkEventController *navigation_keys = gtk_event_controller_key_new();
     gtk_event_controller_set_propagation_phase(navigation_keys, GTK_PHASE_BUBBLE);
     g_signal_connect(navigation_keys, "key-pressed", G_CALLBACK(sidebar_key_pressed), NULL);
@@ -2102,26 +2239,123 @@ static void on_activate(GApplication *application, gpointer data) {
     }
 }
 
+typedef struct WindowCommand {
+    gint run, slot;
+    gboolean background, unknown_argument;
+} WindowCommand;
+
+static gboolean parse_window_command(gint argc, const gchar *const *argv, WindowCommand *command) {
+    const struct { const gchar *argument; gint run, slot; } actions[] = {
+        { JSTI_TOGGLE_ARGUMENT, 1, 0 }, { JSTI_SPEAK_CLIPBOARD_ARGUMENT, 7, 0 },
+        { JSTI_PASTE_LAST_HISTORY_ARGUMENT, 11, 0 },
+        { JSTI_SPEAK_SELECTED_TEXT_ARGUMENT, 12, 0 },
+        { JSTI_STOP_SPEECH_ARGUMENT, 3, 0 }, { JSTI_PAUSE_SPEECH_ARGUMENT, 8, 0 },
+        { JSTI_QUICK_VOICE_1_ARGUMENT, 6, 1 }, { JSTI_QUICK_VOICE_2_ARGUMENT, 6, 2 },
+        { JSTI_QUICK_VOICE_3_ARGUMENT, 6, 3 }
+    };
+    *command = (WindowCommand){ 0 };
+    for (gint index = 1; index < argc; ++index) {
+        gboolean known = g_strcmp0(argv[index], JSTI_LOGIN_LAUNCH_ARGUMENT) == 0;
+        if (known) command->background = TRUE;
+        for (guint action = 0; action < G_N_ELEMENTS(actions); ++action) {
+            if (g_strcmp0(argv[index], actions[action].argument) != 0) continue;
+            known = TRUE;
+            if (command->run != 0 &&
+                (command->run != actions[action].run || command->slot != actions[action].slot)) return FALSE;
+            command->run = actions[action].run;
+            command->slot = actions[action].slot;
+        }
+        if (!known) command->unknown_argument = TRUE;
+    }
+    return TRUE;
+}
+
+static gboolean is_forwardable_command(gint run, gint slot) {
+    if (run == 6) return slot >= 1 && slot <= 3;
+    return slot == 0 && (run == 3 || run == 7 || run == 8 || run == 11 || run == 12);
+}
+
+static gboolean parse_action_command(int argc, const gchar *const *argv, WindowCommand *command) {
+    return argc >= 1 && argv != NULL && parse_window_command(argc, argv, command) &&
+        command->run != 0 && !command->unknown_argument;
+}
+
+int32_t jsti_window_validate_action_command(int argc, char **argv, char *error, size_t capacity) {
+    WindowCommand command;
+    if (!parse_action_command(argc, (const gchar *const *)argv, &command)) {
+        jsti_set_error(error, capacity, "Choose exactly one supported desktop action command.");
+        return -1;
+    }
+    return 0;
+}
+
+/* 0 means admitted, not completed; 2 requires the running app, 3 means unavailable now. */
+static gint forward_window_command(gint run, gint slot, gboolean remote) {
+    if (!remote || ui.window == NULL) return 2;
+    if (!is_forwardable_command(run, slot)) return 3;
+    return action_shortcut_run(run, "", slot) ? 0 : 3;
+}
+
+static int reject_local_action(GApplication *application, GApplicationCommandLine *line, gpointer data) {
+    (void)application; (void)data;
+    g_application_command_line_printerr(line, "Open JustSpeakToIt before using this action command.\n");
+    return 2;
+}
+
+int32_t jsti_window_forward_action(const char *app_id, int argc, char **argv, char *error, size_t capacity) {
+    WindowCommand command;
+    if (app_id == NULL || !g_application_id_is_valid(app_id) ||
+        !parse_action_command(argc, (const gchar *const *)argv, &command) ||
+        !is_forwardable_command(command.run, command.slot)) {
+        jsti_set_error(error, capacity, "Choose exactly one supported desktop action command.");
+        return -1;
+    }
+    GApplication *client = g_application_new(app_id, G_APPLICATION_HANDLES_COMMAND_LINE);
+    g_signal_connect(client, "command-line", G_CALLBACK(reject_local_action), NULL);
+    gint status = g_application_run(client, argc, argv);
+    g_object_unref(client);
+    if (status != 0) {
+        jsti_set_error(error, capacity, "The desktop action was refused (status %d).", status);
+        return -1;
+    }
+    return 0;
+}
+
 static int on_command_line(GApplication *application, GApplicationCommandLine *line, gpointer data) {
     (void)data;
     gint argc = 0;
     gchar **argv = g_application_command_line_get_arguments(line, &argc);
-    gboolean toggle = FALSE, background = FALSE;
-    for (gint index = 1; index < argc; index++) {
-        if (g_strcmp0(argv[index], "--toggle") == 0) toggle = TRUE;
-        if (g_strcmp0(argv[index], JSTI_LOGIN_LAUNCH_ARGUMENT) == 0) background = TRUE;
-    }
+    WindowCommand command;
+    gboolean parsed = parse_window_command(argc, (const gchar *const *)argv, &command);
     g_strfreev(argv);
+    if (!parsed) {
+        g_application_command_line_printerr(line, "Choose only one action command per invocation.\n");
+        return 2;
+    }
+    if (command.run != 0 && command.unknown_argument) {
+        g_application_command_line_printerr(line, "Unsupported option for this desktop action command.\n");
+        return 2;
+    }
     gboolean remote = g_application_command_line_get_is_remote(line);
+    if (command.run != 0 && command.run != 1) {
+        gint status = forward_window_command(command.run, command.slot, remote);
+        if (status == 2)
+            g_application_command_line_printerr(line, "Open JustSpeakToIt before using this action command.\n");
+        else if (status != 0 && command.run == 3)
+            g_application_command_line_printerr(line, "Playback Stop is unavailable while a dialog is open or the app is closing.\n");
+        else if (status != 0)
+            g_application_command_line_printerr(line, "Finish the current operation or close dialogs first.\n");
+        return status;
+    }
     if (!remote || ui.window == NULL) {
-        if (ui.window == NULL) ui.start_minimized = background && !toggle;
+        if (ui.window == NULL) ui.start_minimized = command.background && command.run == 0;
         g_application_activate(application);
     }
     /* A remote --toggle drives the running app without raising its window, so
      * focus stays on the field that should receive the text; a second login
      * launch leaves the running app as it is. */
-    if (toggle) emit(JSTI_EVENT_COMMAND_TOGGLE, selected_microphone(), selected_model_slot());
-    else if (remote && !background) gtk_window_present(ui.window);
+    if (command.run == 1) emit(JSTI_EVENT_COMMAND_TOGGLE, selected_microphone(), selected_model_slot());
+    else if (remote && !command.background) gtk_window_present(ui.window);
     return 0;
 }
 
@@ -2135,7 +2369,13 @@ int32_t jsti_window_run(
     }
     GApplicationFlags application_flags = G_APPLICATION_HANDLES_COMMAND_LINE;
     if (flags & JSTI_WINDOW_SMOKE_TEST) application_flags |= G_APPLICATION_NON_UNIQUE;
-    ui.application = adw_application_new(app_id, application_flags);
+    /* NON_UNIQUE still exports an object path. Keep the smoke window's path
+     * separate from the private command fixture's real application identity. */
+    gchar *fixture_id = (flags & JSTI_WINDOW_SMOKE_TEST) &&
+        g_strcmp0(g_getenv("JSTI_COMMAND_FORWARDING_CHECK"), "1") == 0
+        ? g_strconcat(app_id, ".CommandFixture", NULL) : NULL;
+    ui.application = adw_application_new(fixture_id != NULL ? fixture_id : app_id, application_flags);
+    g_free(fixture_id);
     if (ui.application == NULL) {
         jsti_set_error(error, capacity, "Could not create the application.");
         return -1;
@@ -2153,6 +2393,8 @@ int32_t jsti_window_run(
     g_signal_connect(ui.application, "command-line", G_CALLBACK(on_command_line), NULL);
     int status = g_application_run(G_APPLICATION(ui.application), argc, argv);
     jsti_hands_free_guard_stop();
+    jsti_setup_close();
+    retire_migration_restore();
     close_posts();
     ui.callback = NULL;
     read_aloud.picker_callback = NULL;
@@ -2218,7 +2460,7 @@ static void attach(Pending *pending) {
 
 /* Updates made before the window exists (initial microphones, text output)
  * wait here and are applied first, in order; after it closes they are dropped. */
-static int32_t post(apply_fn apply, gpointer data, GDestroyNotify destroy) {
+static int32_t post_with_recording(apply_fn apply, gpointer data, GDestroyNotify destroy, gint32 recording) {
     Pending *pending = g_new0(Pending, 1);
     pending->apply = apply;
     pending->destroy = destroy;
@@ -2229,6 +2471,7 @@ static int32_t post(apply_fn apply, gpointer data, GDestroyNotify destroy) {
         pending_free(pending);
         return 0;
     }
+    if (recording >= 0) escape_publish(&escape_policy, recording, -1, FALSE);
     if (!jsti_window_loop_running()) {
         g_queue_push_tail(&early_posts, pending);
         g_mutex_unlock(&post_lock);
@@ -2237,6 +2480,10 @@ static int32_t post(apply_fn apply, gpointer data, GDestroyNotify destroy) {
     attach(pending);
     g_mutex_unlock(&post_lock);
     return 0;
+}
+
+static int32_t post(apply_fn apply, gpointer data, GDestroyNotify destroy) {
+    return post_with_recording(apply, data, destroy, -1);
 }
 
 int32_t jsti_window_post(jsti_window_apply_fn apply, gpointer data, GDestroyNotify destroy) {
@@ -2256,6 +2503,7 @@ static void open_posts(void) {
 static void close_posts(void) {
     g_mutex_lock(&post_lock);
     window_closed = TRUE;
+    escape_publish(&escape_policy, -1, -1, TRUE);
     g_atomic_int_set(&loop_running, 0);
     Pending *pending;
     while ((pending = g_queue_pop_head(&early_posts)) != NULL) pending_free(pending);
@@ -2360,7 +2608,7 @@ int32_t jsti_window_update(const char *status, const char *transcript, int32_t s
     update->transcript = g_strdup(transcript);
     update->has_transcript = transcript != NULL;
     update->state = state;
-    return post(update_apply, update, update_free);
+    return post_with_recording(update_apply, update, update_free, state);
 }
 
 struct Models {
@@ -2439,7 +2687,7 @@ static void filter_models(gint32 keep) {
 }
 
 static void on_model_filter(gboolean local, gboolean live) {
-    guint mode = local ? 2 : (live ? 1 : 0);
+    guint mode = model_mode(local, live);
     filter_models(ui.preferred_model_slots[mode]);
     gint32 selected = selected_model_slot();
     if (selected >= 0) {
@@ -2463,7 +2711,7 @@ static void models_apply(gpointer pointer) {
         if (slot.global == keep) {
             gboolean local = g_str_has_prefix(slot.id, "local/");
             jsti_model_filters_select(local, slot.live);
-            ui.preferred_model_slots[local ? 2 : (slot.live ? 1 : 0)] = keep;
+            ui.preferred_model_slots[model_mode(local, slot.live)] = keep;
         }
     }
     filter_models(keep);
@@ -2483,6 +2731,40 @@ int32_t jsti_window_set_model_catalog(
     models->status = g_strdup(status);
     models->refreshing = refreshing != 0;
     return post(models_apply, models, models_free);
+}
+
+static void model_preferences_apply(gpointer pointer) {
+    memcpy(ui.preferred_model_slots, pointer, sizeof(ui.preferred_model_slots));
+}
+
+int32_t jsti_window_set_preferred_models(int32_t batch, int32_t live, int32_t local, int32_t local_live) {
+    if (batch < -1 || live < -1 || local < -1 || local_live < -1) return -1;
+    const gint32 values[] = { batch, live, local, local_live };
+    return post(model_preferences_apply, g_memdup2(values, sizeof(values)), g_free);
+}
+
+static void local_model_preferences_apply(gpointer pointer) {
+    const gint32 *values = pointer;
+    guint active = model_mode(jsti_model_filters_local(), jsti_model_filters_live());
+    for (guint i = 0; i < 2; ++i) {
+        if (values[i] < 0 || active == i + 2) continue;
+        gboolean found = FALSE;
+        for (guint j = 0; ui.model_catalog != NULL && j < ui.model_catalog->slots->len; ++j) {
+            Slot slot = g_array_index(ui.model_catalog->slots, Slot, j);
+            if (slot.global == values[i] && slot.live == (i != 0) && g_str_has_prefix(slot.id, "local/")) {
+                found = TRUE;
+                break;
+            }
+        }
+        if (found) ui.preferred_model_slots[i + 2] = values[i];
+        else gtk_label_set_text(ui.status, "Saved Local model choice is unavailable. Reopen the app before switching modes.");
+    }
+}
+
+int32_t jsti_window_set_local_model_preferences(int32_t batch, int32_t live) {
+    if (batch < -1 || live < -1) return -1;
+    const gint32 values[] = { batch, live };
+    return post(local_model_preferences_apply, g_memdup2(values, sizeof(values)), g_free);
 }
 
 typedef struct Microphones {
@@ -2724,6 +3006,117 @@ static void migration_report_apply(gpointer pointer) {
 int32_t jsti_window_show_migration_report(const char *text) {
     if (text == NULL || text[0] == '\0' || !g_utf8_validate(text, -1, NULL)) return -1;
     return post(migration_report_apply, g_strdup(text), g_free);
+}
+
+static void migration_restore_response(AdwMessageDialog *dialog, const char *response, gpointer data);
+
+static GtkWidget *migration_restore_dialog_new(
+    const char *token, const char *text, gboolean offers_replace, gboolean confirming
+) {
+    GtkWidget *dialog = adw_message_dialog_new(ui.window,
+        confirming ? "Replace app profiles?" : "Restore backup: review before anything is written",
+        confirming ? "Replace your app profiles with the profiles in this backup?\n\n"
+            "Profiles absent from the backup will be removed. History is still only merged. "
+            "Settings, audio and credentials stay unchanged. Changes are rolled back if anything fails."
+            : text);
+    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+    adw_message_dialog_set_body_use_markup(ADW_MESSAGE_DIALOG(dialog), FALSE);
+    adw_message_dialog_add_response(ADW_MESSAGE_DIALOG(dialog), "cancel", "Cancel");
+    if (!confirming) adw_message_dialog_add_response(ADW_MESSAGE_DIALOG(dialog), "merge", "Merge backup");
+    if (offers_replace) {
+        adw_message_dialog_add_response(ADW_MESSAGE_DIALOG(dialog), "replace",
+            confirming ? "Replace profiles" : "Replace profiles...");
+        adw_message_dialog_set_response_appearance(ADW_MESSAGE_DIALOG(dialog), "replace", ADW_RESPONSE_DESTRUCTIVE);
+    }
+    adw_message_dialog_set_default_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
+    adw_message_dialog_set_close_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
+    g_object_set_data_full(G_OBJECT(dialog), "jsti-restore-token", g_strdup(token), g_free);
+    g_object_set_data(G_OBJECT(dialog), "jsti-restore-replace", GINT_TO_POINTER(offers_replace));
+    g_object_set_data(G_OBJECT(dialog), "jsti-restore-confirming", GINT_TO_POINTER(confirming));
+    g_signal_connect(dialog, "response", G_CALLBACK(migration_restore_response), NULL);
+    return g_object_ref_sink(dialog);
+}
+
+static void retire_migration_restore(void) {
+    GtkWidget *dialog = ui.restore_dialog;
+    ui.restore_dialog = NULL;
+    if (dialog == NULL) return;
+    gtk_window_destroy(GTK_WINDOW(dialog));
+    g_object_unref(dialog);
+}
+
+static void refresh_migration_restore(void) {
+    if (ui.restore_dialog == NULL) return;
+    AdwMessageDialog *dialog = ADW_MESSAGE_DIALOG(ui.restore_dialog);
+    gboolean idle = ui.state == JSTI_STATE_IDLE && !ui.closing;
+    if (adw_message_dialog_has_response(dialog, "merge"))
+        adw_message_dialog_set_response_enabled(dialog, "merge", idle);
+    if (adw_message_dialog_has_response(dialog, "replace"))
+        adw_message_dialog_set_response_enabled(dialog, "replace", idle);
+}
+
+static void migration_restore_response(AdwMessageDialog *dialog, const char *response, gpointer data) {
+    (void)data;
+    if (ui.restore_dialog != GTK_WIDGET(dialog)) return;
+    gchar *token = g_strdup(g_object_get_data(G_OBJECT(dialog), "jsti-restore-token"));
+    gboolean offers_replace = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(dialog), "jsti-restore-replace"));
+    gboolean confirming = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(dialog), "jsti-restore-confirming"));
+    gboolean available = !ui.closing && ui.state == JSTI_STATE_IDLE;
+    gboolean replace = available && offers_replace && g_strcmp0(response, "replace") == 0;
+    if (replace && !confirming) {
+        retire_migration_restore();
+        ui.restore_dialog = migration_restore_dialog_new(token, "", TRUE, TRUE);
+        refresh_actions();
+        gtk_window_present(GTK_WINDOW(ui.restore_dialog));
+    } else {
+        gint choice = replace && confirming ? 2 : available && !confirming && g_strcmp0(response, "merge") == 0 ? 1 : 0;
+        retire_migration_restore();
+        refresh_actions();
+        emit(JSTI_EVENT_MIGRATION_RESTORE_RESPONSE, token, choice);
+    }
+    g_free(token);
+}
+
+typedef struct MigrationRestoreConfirmation {
+    gchar *token;
+    gchar *text;
+    gboolean offers_replace;
+} MigrationRestoreConfirmation;
+
+static void migration_restore_confirmation_free(gpointer pointer) {
+    MigrationRestoreConfirmation *confirmation = pointer;
+    g_free(confirmation->token);
+    g_free(confirmation->text);
+    g_free(confirmation);
+}
+
+static gboolean migration_restore_stage(const MigrationRestoreConfirmation *confirmation) {
+    if (ui.restore_dialog != NULL &&
+        g_strcmp0(g_object_get_data(G_OBJECT(ui.restore_dialog), "jsti-restore-token"), confirmation->token) == 0) {
+        return FALSE;
+    }
+    if (ui.window == NULL || ui.closing || ui.restore_dialog != NULL) {
+        emit(JSTI_EVENT_MIGRATION_RESTORE_RESPONSE, confirmation->token, 0);
+        return FALSE;
+    }
+    ui.restore_dialog = migration_restore_dialog_new(
+        confirmation->token, confirmation->text, confirmation->offers_replace, FALSE);
+    refresh_actions();
+    return TRUE;
+}
+
+static void migration_restore_confirmation_apply(gpointer pointer) {
+    if (migration_restore_stage(pointer)) gtk_window_present(GTK_WINDOW(ui.restore_dialog));
+}
+
+int32_t jsti_window_confirm_migration_restore(const char *token, const char *text, int32_t offers_replace) {
+    if (token == NULL || !g_uuid_string_is_valid(token) || text == NULL || text[0] == '\0' ||
+        !g_utf8_validate(text, -1, NULL) || (offers_replace != 0 && offers_replace != 1)) return -1;
+    MigrationRestoreConfirmation *confirmation = g_new0(MigrationRestoreConfirmation, 1);
+    confirmation->token = g_strdup(token);
+    confirmation->text = g_strdup(text);
+    confirmation->offers_replace = offers_replace != 0;
+    return post(migration_restore_confirmation_apply, confirmation, migration_restore_confirmation_free);
 }
 
 typedef struct Insights {
@@ -4306,6 +4699,179 @@ static void observe_event(gint32 event, const char *text, gint32 index, void *co
     observed.index = index;
 }
 
+static void observe_cancel(gint32 event, const char *text, gint32 index, void *context) {
+    (void)index;
+    gint32 *calls = context;
+    ++calls[0];
+    calls[1] = event;
+    gchar expected[32];
+    guint64 token = escape_token(&escape_policy);
+    g_snprintf(expected, sizeof(expected), "%" G_GUINT64_FORMAT, token);
+    calls[2] = token != 0 && g_strcmp0(text, expected) == 0;
+    calls[3] = text != NULL && *text == '\0';
+}
+
+static gboolean escape_policy_self_test(void) {
+    EscapePolicy policy = { .enabled = TRUE };
+    gboolean okay = escape_token(&policy) == 0;
+    escape_publish(&policy, JSTI_STATE_RECORDING, -1, FALSE);
+    guint64 first = escape_token(&policy);
+    escape_publish(&policy, JSTI_STATE_WORKING, -1, FALSE);
+    okay = first != 0 && escape_token(&policy) == first && okay;
+    escape_publish(&policy, -1, 0, FALSE);
+    okay = escape_token(&policy) == 0 && okay;
+    escape_publish(&policy, JSTI_STATE_RECORDING, -1, FALSE);
+    okay = escape_token(&policy) == 0 && okay;
+    escape_publish(&policy, -1, 1, FALSE);
+    guint64 second = escape_token(&policy);
+    okay = second != 0 && second != first && okay;
+    escape_publish(&policy, JSTI_STATE_IDLE, -1, FALSE);
+    escape_publish(&policy, JSTI_STATE_RECORDING, -1, FALSE);
+    okay = escape_token(&policy) != 0 && escape_token(&policy) != second && okay;
+    escape_publish(&policy, -1, -1, TRUE);
+    escape_publish(&policy, JSTI_STATE_RECORDING, 1, FALSE);
+    okay = escape_token(&policy) == 0 && okay;
+    g_mutex_clear(&policy.mutex);
+    return okay;
+}
+
+static gboolean cancel_key_self_test(void) {
+    jsti_window_event_fn callback = ui.callback;
+    void *context = ui.context;
+    gint32 state = ui.state, calls[4] = {0};
+    g_mutex_lock(&escape_policy.mutex);
+    gboolean saved_policy = escape_policy.enabled, saved_recording = escape_policy.recording;
+    g_mutex_unlock(&escape_policy.mutex);
+    gboolean held = ui.cancel_key_held, suppress = ui.suppress, closing = ui.closing;
+    gboolean sensitive = gtk_widget_get_sensitive(GTK_WIDGET(ui.window));
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.window), TRUE);
+    ui.callback = observe_cancel; ui.context = calls;
+    ui.cancel_key_held = FALSE; ui.suppress = FALSE; ui.closing = FALSE; ui.state = JSTI_STATE_IDLE;
+    escape_publish(&escape_policy, JSTI_STATE_IDLE, 1, FALSE);
+    gboolean okay = escape_policy_self_test() && !cancel_key(GDK_KEY_Escape, 0, NULL, TRUE);
+    ui.state = JSTI_STATE_RECORDING;
+    escape_publish(&escape_policy, ui.state, -1, FALSE);
+    const GdkModifierType modified[] = {
+        GDK_CONTROL_MASK, GDK_SHIFT_MASK, GDK_ALT_MASK, GDK_SUPER_MASK, GDK_HYPER_MASK, GDK_META_MASK
+    };
+    for (guint i = 0; i < G_N_ELEMENTS(modified); ++i)
+        okay = !cancel_key(GDK_KEY_Escape, modified[i], NULL, TRUE) && okay;
+    okay = !cancel_key(GDK_KEY_Escape, 0, NULL, FALSE) && !cancel_key(GDK_KEY_a, 0, NULL, TRUE) && okay;
+    GtkWidget *popover = gtk_popover_new();
+    g_object_ref_sink(popover);
+    okay = !cancel_key(GDK_KEY_Escape, 0, popover, TRUE) && okay;
+    g_object_unref(popover);
+    GtkWidget *dialog = adw_message_dialog_new(ui.window, "Cancel fixture", NULL);
+    g_object_ref_sink(dialog);
+    okay = !cancel_key(GDK_KEY_Escape, 0, dialog, TRUE) && calls[0] == 0 && okay;
+    gtk_window_destroy(GTK_WINDOW(dialog));
+    g_object_unref(dialog);
+#if ADW_CHECK_VERSION(1, 5, 0)
+    AdwDialog *embedded = adw_dialog_new();
+    g_object_ref_sink(embedded);
+    okay = !cancel_key(GDK_KEY_Escape, 0, GTK_WIDGET(embedded), TRUE) && calls[0] == 0 && okay;
+    g_object_unref(embedded);
+#endif
+    okay = cancel_key(GDK_KEY_Escape, GDK_LOCK_MASK, GTK_WIDGET(ui.transcript), TRUE) &&
+        calls[0] == 1 && calls[1] == JSTI_EVENT_CANCEL && calls[2] && okay;
+    ui.state = JSTI_STATE_IDLE;
+    escape_publish(&escape_policy, ui.state, -1, FALSE);
+    okay = cancel_key(GDK_KEY_Escape, 0, NULL, TRUE) && calls[0] == 1 && okay;
+    action_key_released(NULL, GDK_KEY_Escape, 9, 0, NULL);
+    okay = !cancel_key(GDK_KEY_Escape, 0, NULL, TRUE) && !ui.cancel_key_held && okay;
+    ui.state = JSTI_STATE_WORKING;
+    escape_publish(&escape_policy, ui.state, -1, FALSE);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.window), FALSE);
+    okay = !cancel_key(GDK_KEY_Escape, 0, NULL, TRUE) && okay;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.window), TRUE);
+    ui.closing = TRUE;
+    okay = !cancel_key(GDK_KEY_Escape, 0, NULL, TRUE) && okay;
+    ui.closing = FALSE;
+    okay = cancel_key(GDK_KEY_Escape, 0, NULL, TRUE) && calls[0] == 2 && okay;
+    guint64 old_token = escape_token(&escape_policy);
+    okay = jsti_window_set_escape_cancellation(-1) == -1 &&
+        jsti_window_set_escape_cancellation(2) == -1 && jsti_window_escape_is_current(old_token) && okay;
+    okay = jsti_window_set_escape_cancellation(0) == 0 &&
+        !cancel_key(GDK_KEY_Escape, 0, NULL, TRUE) && calls[0] == 2 &&
+        !jsti_window_escape_is_current(old_token) && okay;
+    on_cancel(NULL, NULL);
+    okay = calls[0] == 3 && calls[1] == JSTI_EVENT_CANCEL && calls[3] && okay;
+    okay = jsti_window_set_escape_cancellation(1) == 0 &&
+        !jsti_window_escape_is_current(old_token) &&
+        cancel_key(GDK_KEY_Escape, 0, NULL, TRUE) && calls[0] == 3 && okay;
+    action_key_released(NULL, GDK_KEY_Escape, 9, 0, NULL);
+    okay = cancel_key(GDK_KEY_Escape, 0, NULL, TRUE) && calls[0] == 4 && calls[2] && okay;
+    escape_publish(&escape_policy, saved_recording ? JSTI_STATE_RECORDING : JSTI_STATE_IDLE, saved_policy, FALSE);
+    ui.callback = callback; ui.context = context; ui.state = state;
+    ui.cancel_key_held = held; ui.suppress = suppress; ui.closing = closing;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.window), sensitive);
+    return okay;
+}
+
+/* Real model rows must remain distinct across all four source/mode pairs. */
+static gboolean model_modes_self_test(void) {
+    if (ui.model_catalog == NULL) return FALSE;
+    gint32 saved[4], preferred[] = { -1, -1, -1, -1 }, first[] = { -1, -1, -1, -1 };
+    guint counts[4] = {0};
+    memcpy(saved, ui.preferred_model_slots, sizeof(saved));
+    gint32 selection = selected_model_slot();
+    gboolean local = jsti_model_filters_local(), live = jsti_model_filters_live();
+    gboolean remote_live = jsti_model_filters_preferred_live(FALSE);
+    gboolean local_live = jsti_model_filters_preferred_live(TRUE), suppress = ui.suppress;
+    jsti_window_event_fn callback = ui.callback;
+    for (guint i = 0; i < ui.model_catalog->slots->len; ++i) {
+        Slot slot = g_array_index(ui.model_catalog->slots, Slot, i);
+        guint mode = model_mode(g_str_has_prefix(slot.id, "local/"), slot.live);
+        if (first[mode] < 0) first[mode] = slot.global;
+        preferred[mode] = slot.global;
+        ++counts[mode];
+    }
+    gboolean okay = counts[0] > 0 && counts[2] > 1 && counts[3] > 1 &&
+        jsti_window_set_preferred_models(-2, -1, -1, -1) == -1;
+    model_preferences_apply(preferred);
+    ui.callback = observe_event;
+    const guint modes[] = { 0, 2, 3, 1, 3, 2 };
+    for (guint i = 0; okay && i < G_N_ELEMENTS(modes); ++i) {
+        guint mode = modes[i];
+        if (counts[mode] == 0) continue;
+        jsti_model_filters_select(mode >= 2, (mode & 1) != 0);
+        observed.event = 0;
+        on_model_filter(mode >= 2, (mode & 1) != 0);
+        okay = selected_model_slot() == preferred[mode] && ui.model_slots->len == counts[mode] &&
+            observed.event == JSTI_EVENT_SELECT_MODEL && observed.index == preferred[mode] &&
+            gtk_widget_get_visible(GTK_WIDGET(ui.key_row)) == (mode < 2);
+    }
+    if (okay) {
+        jsti_model_filters_select(FALSE, FALSE);
+        on_model_filter(FALSE, FALSE);
+        gint32 selected = selected_model_slot(), event = observed.event = -500;
+        const gint32 imported[] = { first[2], first[3] };
+        local_model_preferences_apply((gpointer)imported);
+        okay = selected_model_slot() == selected && observed.event == event &&
+            ui.preferred_model_slots[0] == preferred[0] && ui.preferred_model_slots[2] == first[2] &&
+            ui.preferred_model_slots[3] == first[3];
+        jsti_model_filters_select(TRUE, TRUE);
+        on_model_filter(TRUE, TRUE);
+        okay = okay && observed.event == JSTI_EVENT_SELECT_MODEL && observed.index == first[3];
+        observed.event = -500;
+        const gint32 replacement[] = { preferred[2], preferred[3] };
+        local_model_preferences_apply((gpointer)replacement);
+        okay = okay && selected_model_slot() == first[3] && observed.event == -500 &&
+            ui.preferred_model_slots[3] == first[3] &&
+            ui.preferred_model_slots[2] == preferred[2] &&
+            jsti_window_set_local_model_preferences(-2, -1) == -1;
+    }
+    jsti_model_filters_select(FALSE, remote_live);
+    jsti_model_filters_select(TRUE, local_live);
+    jsti_model_filters_select(local, live);
+    model_preferences_apply(saved);
+    filter_models(selection);
+    ui.suppress = suppress;
+    ui.callback = callback;
+    g_clear_pointer(&observed.text, g_free);
+    return okay;
+}
+
 /* Read aloud follows the presented record: offered while its text is shown
  * and the window is idle, it reports that record, and the voice picker
  * reports the chosen position. */
@@ -4673,15 +5239,27 @@ static gboolean action_execution_self_test(void) {
         capture.slot == 0 && capture.calls == 8;
     okay = okay && action_shortcut_run(10, "", 0) && capture.event == JSTI_EVENT_PERMISSIONS &&
         capture.slot == 0 && capture.calls == 9;
+    gint paste_page = ui.page;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), FALSE);
+    gtk_widget_set_sensitive(history, FALSE);
+    okay = okay && action_shortcut_run(11, "", 0) && capture.event == JSTI_EVENT_PASTE_LAST_HISTORY &&
+        capture.slot == 0 && capture.calls == 10 && ui.page == paste_page;
+    gtk_widget_set_sensitive(history, history_sensitive);
+    okay = okay && action_shortcut_run(12, "", 0) && capture.event == JSTI_EVENT_SPEAK_SELECTED_TEXT &&
+        capture.slot == 0 && capture.calls == 11;
     ui.state = JSTI_STATE_WORKING;
     okay = okay && !action_shortcut_run(6, "", 1) && !action_shortcut_run(5, "", 0) &&
         !action_shortcut_run(7, "", 0) && !action_shortcut_run(8, "", 0) &&
-        !action_shortcut_run(9, "", 0) && capture.calls == 9;
+        !action_shortcut_run(9, "", 0) && !action_shortcut_run(11, "", 0) &&
+        !action_shortcut_run(12, "", 0) && capture.calls == 11;
+    ui.state = JSTI_STATE_RECORDING;
+    okay = okay && !action_shortcut_run(11, "", 0) && !action_shortcut_run(12, "", 0) && capture.calls == 11;
     gtk_widget_set_sensitive(GTK_WIDGET(ui.window), FALSE);
     ui.state = JSTI_STATE_IDLE;
     okay = okay && !action_shortcut_run(4, "", 0) && !action_shortcut_run(2, "about", 0) &&
         !action_shortcut_run(7, "", 0) && !action_shortcut_run(8, "", 0) &&
-        !action_shortcut_run(9, "", 0) && !action_shortcut_run(10, "", 0) && capture.calls == 9;
+        !action_shortcut_run(9, "", 0) && !action_shortcut_run(10, "", 0) &&
+        !action_shortcut_run(11, "", 0) && !action_shortcut_run(12, "", 0) && capture.calls == 11;
     gtk_widget_set_sensitive(GTK_WIDGET(ui.window), window_sensitive);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.record), record_sensitive);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), stop_sensitive);
@@ -4689,6 +5267,355 @@ static gboolean action_execution_self_test(void) {
     show_page(original_page);
     ui.callback = callback;
     ui.context = context;
+    return okay;
+}
+
+static guint command_wait_milliseconds(gint64 remaining) {
+    if (remaining <= 0) return 0;
+    return (guint)((MIN(remaining, 15 * G_TIME_SPAN_SECOND) + 999) / 1000);
+}
+
+static gboolean command_forwarding_self_test(void) {
+    WindowCommand command;
+    const gchar *background[] = { "justspeaktoit", JSTI_LOGIN_LAUNCH_ARGUMENT };
+    const gchar *toggle[] = { "justspeaktoit", JSTI_TOGGLE_ARGUMENT, JSTI_LOGIN_LAUNCH_ARGUMENT };
+    const gchar *clipboard[] = { "justspeaktoit", JSTI_SPEAK_CLIPBOARD_ARGUMENT };
+    const gchar *paste[] = { "justspeaktoit", JSTI_PASTE_LAST_HISTORY_ARGUMENT, JSTI_PASTE_LAST_HISTORY_ARGUMENT };
+    const gchar *mixed[] = { "justspeaktoit", JSTI_TOGGLE_ARGUMENT, JSTI_SPEAK_CLIPBOARD_ARGUMENT };
+    const gchar *mixed_output[] = { "justspeaktoit", JSTI_PASTE_LAST_HISTORY_ARGUMENT, JSTI_SPEAK_CLIPBOARD_ARGUMENT };
+    const gchar *unknown[] = { "justspeaktoit", JSTI_SPEAK_CLIPBOARD_ARGUMENT, "--gapplication-service" };
+    const struct { const gchar *argument; gint run, slot, event; } controls[] = {
+        { JSTI_SPEAK_SELECTED_TEXT_ARGUMENT, 12, 0, JSTI_EVENT_SPEAK_SELECTED_TEXT },
+        { JSTI_STOP_SPEECH_ARGUMENT, 3, 0, JSTI_EVENT_PLAYBACK_STOP },
+        { JSTI_PAUSE_SPEECH_ARGUMENT, 8, 0, JSTI_EVENT_SPEECH_PAUSE },
+        { JSTI_QUICK_VOICE_1_ARGUMENT, 6, 1, JSTI_EVENT_QUICK_VOICE },
+        { JSTI_QUICK_VOICE_2_ARGUMENT, 6, 2, JSTI_EVENT_QUICK_VOICE },
+        { JSTI_QUICK_VOICE_3_ARGUMENT, 6, 3, JSTI_EVENT_QUICK_VOICE }
+    };
+    gboolean okay = command_wait_milliseconds(-1) == 0 && command_wait_milliseconds(0) == 0 &&
+        command_wait_milliseconds(1) == 1 && command_wait_milliseconds(15001) == 16 &&
+        command_wait_milliseconds(15 * G_TIME_SPAN_SECOND) == 15000 &&
+        command_wait_milliseconds(G_MAXINT64) == 15000 &&
+        parse_window_command(2, background, &command) && command.run == 0 && command.background;
+    okay = okay && parse_window_command(3, toggle, &command) && command.run == 1 && command.background;
+    okay = okay && parse_window_command(2, clipboard, &command) && command.run == 7 && !command.background;
+    okay = okay && parse_window_command(3, paste, &command) && command.run == 11;
+    okay = okay && !parse_window_command(3, mixed, &command) && !parse_window_command(3, mixed_output, &command);
+    okay = okay && parse_window_command(3, unknown, &command) && command.unknown_argument;
+    const gchar *toggle_unknown[] = { "justspeaktoit", JSTI_TOGGLE_ARGUMENT, "--typo" };
+    okay = okay && parse_window_command(3, toggle_unknown, &command) && command.run == 1 &&
+        command.unknown_argument && !parse_action_command(3, toggle_unknown, &command) &&
+        parse_action_command(3, toggle, &command) && command.run == 1 && command.background &&
+        !parse_action_command(2, background, &command) && !parse_action_command(0, NULL, &command);
+    for (guint index = 0; index < G_N_ELEMENTS(controls); ++index) {
+        const gchar *arguments[] = { "justspeaktoit", controls[index].argument };
+        okay = okay && parse_window_command(2, arguments, &command) &&
+            command.run == controls[index].run && command.slot == controls[index].slot &&
+            is_forwardable_command(command.run, command.slot);
+    }
+    const gchar *mixed_slots[] = { "justspeaktoit", JSTI_QUICK_VOICE_1_ARGUMENT, JSTI_QUICK_VOICE_2_ARGUMENT };
+    okay = okay && !parse_window_command(3, mixed_slots, &command) && !is_forwardable_command(6, 0) &&
+        !is_forwardable_command(6, 4) && !is_forwardable_command(1, 0) && !is_forwardable_command(3, 1);
+    char *invalid[] = { "justspeaktoit", JSTI_SPEAK_CLIPBOARD_ARGUMENT, "--gapplication-service", NULL };
+    char error[256] = { 0 };
+    char *valid_toggle[] = { "justspeaktoit", JSTI_TOGGLE_ARGUMENT, JSTI_LOGIN_LAUNCH_ARGUMENT, NULL };
+    char *repeated_toggle[] = { "justspeaktoit", JSTI_TOGGLE_ARGUMENT, JSTI_TOGGLE_ARGUMENT, NULL };
+    char *invalid_toggle[] = { "justspeaktoit", JSTI_TOGGLE_ARGUMENT, "--gapplication-service", NULL };
+    okay = okay && jsti_window_validate_action_command(3, valid_toggle, error, sizeof(error)) == 0 &&
+        jsti_window_validate_action_command(3, repeated_toggle, error, sizeof(error)) == 0 &&
+        jsti_window_validate_action_command(3, invalid_toggle, error, sizeof(error)) == -1 && error[0] != '\0';
+    okay = okay && jsti_window_forward_action(
+        "com.justspeaktoit.JustSpeakToIt", 3, invalid, error, sizeof(error)) == -1 && error[0] != '\0';
+    jsti_window_event_fn callback = ui.callback;
+    void *context = ui.context;
+    gint state = ui.state, page = ui.page;
+    gboolean sensitive = gtk_widget_get_sensitive(GTK_WIDGET(ui.window)), closing = ui.closing;
+    gboolean stop_sensitive = gtk_widget_get_sensitive(GTK_WIDGET(ui.voice_stop));
+    GtkWindow *window = ui.window;
+    ActionShortcutCapture capture = { 0 };
+    ui.callback = action_shortcut_capture;
+    ui.context = &capture;
+    ui.state = JSTI_STATE_IDLE;
+    ui.closing = FALSE;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.window), TRUE);
+    okay = okay && forward_window_command(7, 0, TRUE) == 0 && capture.event == JSTI_EVENT_SPEAK_CLIPBOARD &&
+        capture.calls == 1 && ui.page == page;
+    okay = okay && forward_window_command(11, 0, TRUE) == 0 && capture.event == JSTI_EVENT_PASTE_LAST_HISTORY &&
+        capture.calls == 2 && ui.page == page;
+    okay = okay && forward_window_command(7, 0, FALSE) == 2 && forward_window_command(11, 0, FALSE) == 2;
+    ui.window = NULL;
+    okay = okay && forward_window_command(7, 0, TRUE) == 2 && forward_window_command(11, 0, TRUE) == 2;
+    ui.window = window;
+    ui.state = JSTI_STATE_WORKING;
+    okay = okay && forward_window_command(7, 0, TRUE) == 3 && forward_window_command(11, 0, TRUE) == 3;
+    ui.state = JSTI_STATE_RECORDING;
+    okay = okay && forward_window_command(7, 0, TRUE) == 3 && forward_window_command(11, 0, TRUE) == 3;
+    ui.state = JSTI_STATE_IDLE;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.window), FALSE);
+    okay = okay && forward_window_command(7, 0, TRUE) == 3 && forward_window_command(11, 0, TRUE) == 3;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.window), TRUE);
+    ui.closing = TRUE;
+    okay = okay && forward_window_command(7, 0, TRUE) == 3 && forward_window_command(11, 0, TRUE) == 3 &&
+        capture.calls == 2;
+    ui.closing = FALSE;
+    ui.state = JSTI_STATE_IDLE;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), TRUE);
+    for (guint index = 0; index < G_N_ELEMENTS(controls); ++index) {
+        capture = (ActionShortcutCapture){ 0 };
+        gint run = controls[index].run, slot = controls[index].slot;
+        okay = okay && forward_window_command(run, slot, TRUE) == 0 &&
+            capture.calls == 1 && capture.event == controls[index].event &&
+            capture.slot == slot && ui.page == page && forward_window_command(run, slot, FALSE) == 2;
+        gtk_widget_set_sensitive(GTK_WIDGET(ui.window), FALSE);
+        okay = okay && forward_window_command(run, slot, TRUE) == 3 && capture.calls == 1;
+        gtk_widget_set_sensitive(GTK_WIDGET(ui.window), TRUE);
+        ui.closing = TRUE;
+        okay = okay && forward_window_command(run, slot, TRUE) == 3 && capture.calls == 1;
+        ui.closing = FALSE;
+        if (run != 3) {
+            ui.state = JSTI_STATE_WORKING;
+            okay = okay && forward_window_command(run, slot, TRUE) == 3 && capture.calls == 1;
+            ui.state = JSTI_STATE_RECORDING;
+            okay = okay && forward_window_command(run, slot, TRUE) == 3 && capture.calls == 1;
+            ui.state = JSTI_STATE_IDLE;
+        }
+    }
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), FALSE);
+    okay = okay && forward_window_command(3, 0, TRUE) == 3;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), stop_sensitive);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.window), sensitive);
+    ui.closing = closing;
+    ui.state = state;
+    ui.callback = callback;
+    ui.context = context;
+    return okay;
+}
+
+typedef struct CommandProcessResult {
+    GMainLoop *loop;
+    GSubprocess *child;
+    gboolean completed, timed_out;
+    gchar *diagnostic;
+    GError *failure;
+} CommandProcessResult;
+
+static void command_process_finished(GObject *object, GAsyncResult *result, gpointer data) {
+    CommandProcessResult *check = data;
+    check->completed = g_subprocess_communicate_utf8_finish(
+        G_SUBPROCESS(object), result, NULL, &check->diagnostic, &check->failure);
+    g_main_loop_quit(check->loop);
+}
+
+static gboolean command_process_expired(gpointer data) {
+    CommandProcessResult *check = data;
+    check->timed_out = TRUE;
+    g_subprocess_force_exit(check->child);
+    return G_SOURCE_REMOVE;
+}
+
+static gboolean check_command_process(
+    const gchar *const *arguments, const gchar *directory, gboolean success,
+    const gchar *refusal, gint64 group_deadline, char *error, size_t capacity
+) {
+    if (g_get_monotonic_time() >= group_deadline) {
+        jsti_set_error(error, capacity, "The shared command-client fixture budget expired before %s.", arguments[1]);
+        return FALSE;
+    }
+    GSubprocessLauncher *launcher = g_subprocess_launcher_new(
+        G_SUBPROCESS_FLAGS_STDOUT_SILENCE | G_SUBPROCESS_FLAGS_STDERR_PIPE);
+    g_subprocess_launcher_setenv(launcher, "XDG_DATA_HOME", directory, TRUE);
+    CommandProcessResult check = { 0 };
+    check.child = g_subprocess_launcher_spawnv(launcher, arguments, &check.failure);
+    g_object_unref(launcher);
+    if (check.child == NULL) {
+        jsti_set_error(error, capacity, "Could not start the command client: %s", check.failure->message);
+        g_clear_error(&check.failure);
+        return FALSE;
+    }
+    GMainContext *context = g_main_context_get_thread_default();
+    check.loop = g_main_loop_new(context, FALSE);
+    GSource *deadline = g_timeout_source_new(command_wait_milliseconds(group_deadline - g_get_monotonic_time()));
+    g_source_set_callback(deadline, command_process_expired, &check, NULL);
+    g_source_attach(deadline, context);
+    g_subprocess_communicate_utf8_async(check.child, NULL, NULL, command_process_finished, &check);
+    g_main_loop_run(check.loop);
+    g_source_destroy(deadline);
+    g_source_unref(deadline);
+    if (!check.completed) {
+        g_subprocess_force_exit(check.child);
+        g_subprocess_wait(check.child, NULL, NULL);
+    }
+    const gboolean group_expired = g_get_monotonic_time() >= group_deadline;
+    gboolean okay = check.completed && !check.timed_out && !group_expired && g_subprocess_get_if_exited(check.child) &&
+        g_subprocess_get_successful(check.child) == success &&
+        (refusal == NULL || (check.diagnostic != NULL && strstr(check.diagnostic, refusal) != NULL));
+    if (!okay) jsti_set_error(error, capacity, "Command %s failed its process contract: %s%s",
+        arguments[1], group_expired ? "shared command-client budget expired; " : check.timed_out ? "timed out; " : "",
+        check.failure != NULL ? check.failure->message :
+            (check.diagnostic != NULL ? check.diagnostic : "unexpected process status"));
+    g_clear_error(&check.failure);
+    g_free(check.diagnostic);
+    g_main_loop_unref(check.loop);
+    g_object_unref(check.child);
+    return okay;
+}
+
+static gboolean command_process_self_test(char *error, size_t capacity) {
+    /* Opt in only from the harness's private session bus. No provider/Host event
+     * is delivered: a private context serves the real handler with a test callback. */
+    if (g_strcmp0(g_getenv("JSTI_COMMAND_FORWARDING_CHECK"), "1") != 0) return TRUE;
+    if (!(ui.flags & JSTI_WINDOW_SMOKE_TEST)) {
+        jsti_set_error(error, capacity, "Command process checks require the isolated smoke-test window.");
+        return FALSE;
+    }
+    GMainContext *context = g_main_context_new();
+    g_main_context_push_thread_default(context);
+    GApplication *primary = g_application_new(
+        "com.justspeaktoit.JustSpeakToIt", G_APPLICATION_HANDLES_COMMAND_LINE);
+    g_signal_connect(primary, "command-line", G_CALLBACK(on_command_line), NULL);
+    GError *failure = NULL;
+    gboolean okay = g_application_register(primary, NULL, &failure);
+    if (!okay || g_application_get_is_remote(primary)) {
+        jsti_set_error(error, capacity, "Command fixture could not own its private application name: %s",
+            failure != NULL ? failure->message : "another instance is running");
+        g_clear_error(&failure);
+        g_object_unref(primary);
+        g_main_context_pop_thread_default(context);
+        g_main_context_unref(context);
+        return FALSE;
+    }
+    gchar *executable = g_file_read_link("/proc/self/exe", &failure);
+    gchar *directory = executable != NULL ? g_dir_make_tmp("jsti-command-check-XXXXXX", &failure) : NULL;
+    if (directory == NULL) {
+        jsti_set_error(error, capacity, "Command fixture setup failed: %s", failure->message);
+        g_clear_error(&failure);
+        g_free(executable);
+        g_object_unref(primary);
+        g_main_context_pop_thread_default(context);
+        g_main_context_unref(context);
+        return FALSE;
+    }
+    jsti_window_event_fn callback = ui.callback;
+    void *callback_context = ui.context;
+    gint state = ui.state, page = ui.page;
+    gboolean closing = ui.closing, sensitive = gtk_widget_get_sensitive(GTK_WIDGET(ui.window));
+    gboolean visible = gtk_widget_get_visible(GTK_WIDGET(ui.window));
+    gboolean stop_enabled = gtk_widget_get_sensitive(GTK_WIDGET(ui.voice_stop));
+    ActionShortcutCapture capture = { 0 };
+    ui.callback = action_shortcut_capture;
+    ui.context = &capture;
+    gtk_widget_set_visible(GTK_WIDGET(ui.window), FALSE);
+    const struct {
+        const gchar *argument, *second;
+        gint state, event, slot;
+        gboolean sensitive, closing;
+        const gchar *refusal;
+    } cases[] = {
+        { JSTI_SPEAK_SELECTED_TEXT_ARGUMENT, NULL, JSTI_STATE_IDLE, JSTI_EVENT_SPEAK_SELECTED_TEXT, 0, TRUE, FALSE, NULL },
+        { JSTI_SPEAK_SELECTED_TEXT_ARGUMENT, JSTI_SPEAK_SELECTED_TEXT_ARGUMENT,
+            JSTI_STATE_IDLE, JSTI_EVENT_SPEAK_SELECTED_TEXT, 0, TRUE, FALSE, NULL },
+        { JSTI_SPEAK_SELECTED_TEXT_ARGUMENT, "--typo",
+            JSTI_STATE_IDLE, 0, 0, TRUE, FALSE, "Choose exactly one supported desktop action command" },
+        { JSTI_SPEAK_SELECTED_TEXT_ARGUMENT, JSTI_SPEAK_CLIPBOARD_ARGUMENT,
+            JSTI_STATE_IDLE, 0, 0, TRUE, FALSE, "Choose exactly one supported desktop action command" },
+        { JSTI_SPEAK_CLIPBOARD_ARGUMENT, NULL, JSTI_STATE_IDLE, JSTI_EVENT_SPEAK_CLIPBOARD, 0, TRUE, FALSE, NULL },
+        { JSTI_PASTE_LAST_HISTORY_ARGUMENT, NULL, JSTI_STATE_IDLE, JSTI_EVENT_PASTE_LAST_HISTORY, 0, TRUE, FALSE, NULL },
+        { JSTI_PASTE_LAST_HISTORY_ARGUMENT, JSTI_PASTE_LAST_HISTORY_ARGUMENT,
+            JSTI_STATE_IDLE, JSTI_EVENT_PASTE_LAST_HISTORY, 0, TRUE, FALSE, NULL },
+        { JSTI_SPEAK_CLIPBOARD_ARGUMENT, JSTI_LOGIN_LAUNCH_ARGUMENT,
+            JSTI_STATE_IDLE, JSTI_EVENT_SPEAK_CLIPBOARD, 0, TRUE, FALSE, NULL },
+        { JSTI_SPEAK_CLIPBOARD_ARGUMENT, NULL, JSTI_STATE_WORKING, 0, 0, TRUE, FALSE, "Finish the current operation" },
+        { JSTI_PASTE_LAST_HISTORY_ARGUMENT, NULL, JSTI_STATE_RECORDING, 0, 0, TRUE, FALSE, "Finish the current operation" },
+        { JSTI_SPEAK_CLIPBOARD_ARGUMENT, NULL, JSTI_STATE_IDLE, 0, 0, FALSE, FALSE, "Finish the current operation" },
+        { JSTI_PASTE_LAST_HISTORY_ARGUMENT, NULL, JSTI_STATE_IDLE, 0, 0, TRUE, TRUE, "Finish the current operation" },
+        { JSTI_SPEAK_CLIPBOARD_ARGUMENT, JSTI_PASTE_LAST_HISTORY_ARGUMENT,
+            JSTI_STATE_IDLE, 0, 0, TRUE, FALSE, "Choose exactly one supported desktop action command" },
+        { JSTI_TOGGLE_ARGUMENT, JSTI_SPEAK_CLIPBOARD_ARGUMENT,
+            JSTI_STATE_IDLE, 0, 0, TRUE, FALSE, "Choose exactly one supported desktop action command" },
+        { JSTI_SPEAK_CLIPBOARD_ARGUMENT, "--gapplication-service",
+            JSTI_STATE_IDLE, 0, 0, TRUE, FALSE, "Choose exactly one supported desktop action command" },
+        { JSTI_TOGGLE_ARGUMENT, "--typo",
+            JSTI_STATE_IDLE, 0, 0, TRUE, FALSE, "Choose exactly one supported desktop action command" },
+        { JSTI_TOGGLE_ARGUMENT, "--gapplication-service",
+            JSTI_STATE_IDLE, 0, 0, TRUE, FALSE, "Choose exactly one supported desktop action command" },
+        { JSTI_STOP_SPEECH_ARGUMENT, NULL, JSTI_STATE_IDLE, JSTI_EVENT_PLAYBACK_STOP, 0, TRUE, FALSE, NULL },
+        { JSTI_STOP_SPEECH_ARGUMENT, NULL, JSTI_STATE_WORKING, JSTI_EVENT_PLAYBACK_STOP, 0, TRUE, FALSE, NULL },
+        { JSTI_STOP_SPEECH_ARGUMENT, NULL, JSTI_STATE_RECORDING, JSTI_EVENT_PLAYBACK_STOP, 0, TRUE, FALSE, NULL },
+        { JSTI_STOP_SPEECH_ARGUMENT, NULL, JSTI_STATE_IDLE, 0, 0, FALSE, FALSE, "Playback Stop is unavailable" },
+        { JSTI_STOP_SPEECH_ARGUMENT, NULL, JSTI_STATE_IDLE, 0, 0, TRUE, TRUE, "Playback Stop is unavailable" },
+        { JSTI_PAUSE_SPEECH_ARGUMENT, NULL, JSTI_STATE_IDLE, JSTI_EVENT_SPEECH_PAUSE, 0, TRUE, FALSE, NULL },
+        { JSTI_QUICK_VOICE_1_ARGUMENT, NULL, JSTI_STATE_IDLE, JSTI_EVENT_QUICK_VOICE, 1, TRUE, FALSE, NULL },
+        { JSTI_QUICK_VOICE_2_ARGUMENT, NULL, JSTI_STATE_IDLE, JSTI_EVENT_QUICK_VOICE, 2, TRUE, FALSE, NULL },
+        { JSTI_QUICK_VOICE_3_ARGUMENT, NULL, JSTI_STATE_IDLE, JSTI_EVENT_QUICK_VOICE, 3, TRUE, FALSE, NULL },
+        { JSTI_QUICK_VOICE_1_ARGUMENT, JSTI_QUICK_VOICE_3_ARGUMENT,
+            JSTI_STATE_IDLE, 0, 0, TRUE, FALSE, "Choose exactly one supported desktop action command" },
+        { JSTI_QUICK_VOICE_1_ARGUMENT, NULL, JSTI_STATE_WORKING, 0, 0, TRUE, FALSE, "Finish the current operation" },
+        { JSTI_PAUSE_SPEECH_ARGUMENT, NULL, JSTI_STATE_RECORDING, 0, 0, TRUE, FALSE, "Finish the current operation" }
+    };
+    /* Leave most of the 600-second smoke envelope for non-command checks. */
+    const gint64 group_deadline = g_get_monotonic_time() + 180 * G_TIME_SPAN_SECOND;
+    for (guint index = 0; okay && index < G_N_ELEMENTS(cases); ++index) {
+        const gchar *arguments[] = { executable, cases[index].argument, cases[index].second, NULL };
+        capture = (ActionShortcutCapture){ 0 };
+        ui.state = cases[index].state;
+        ui.closing = cases[index].closing;
+        gtk_widget_set_sensitive(GTK_WIDGET(ui.window), cases[index].sensitive);
+        refresh_actions();
+        okay = check_command_process(
+            arguments, directory, cases[index].event != 0, cases[index].refusal, group_deadline, error, capacity);
+        if (okay && (capture.calls != (cases[index].event != 0 ? 1u : 0u) ||
+            capture.event != cases[index].event || capture.slot != cases[index].slot || ui.page != page ||
+            gtk_widget_get_visible(GTK_WIDGET(ui.window)))) {
+            jsti_set_error(error, capacity, "Command fixture %u changed page/visibility or emitted the wrong event.", index);
+            okay = FALSE;
+        }
+    }
+    g_clear_object(&primary);
+    const gchar *cold[] = {
+        JSTI_SPEAK_SELECTED_TEXT_ARGUMENT,
+        JSTI_SPEAK_CLIPBOARD_ARGUMENT, JSTI_PASTE_LAST_HISTORY_ARGUMENT, JSTI_STOP_SPEECH_ARGUMENT,
+        JSTI_PAUSE_SPEECH_ARGUMENT, JSTI_QUICK_VOICE_1_ARGUMENT, JSTI_QUICK_VOICE_2_ARGUMENT, JSTI_QUICK_VOICE_3_ARGUMENT
+    };
+    for (guint index = 0; okay && index < G_N_ELEMENTS(cold); ++index) {
+        const gchar *arguments[] = { executable, cold[index], NULL };
+        okay = check_command_process(arguments, directory, FALSE,
+            "Open JustSpeakToIt before using this action command", group_deadline, error, capacity);
+    }
+    const gchar *cold_invalid[] = { "--typo", "--gapplication-service" };
+    for (guint index = 0; okay && index < G_N_ELEMENTS(cold_invalid); ++index) {
+        const gchar *arguments[] = { executable, JSTI_TOGGLE_ARGUMENT, cold_invalid[index], NULL };
+        okay = check_command_process(arguments, directory, FALSE,
+            "Choose exactly one supported desktop action command", group_deadline, error, capacity);
+    }
+    ui.state = state;
+    ui.closing = closing;
+    refresh_actions();
+    ui.callback = callback;
+    ui.context = callback_context;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), stop_enabled);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.window), sensitive);
+    gtk_widget_set_visible(GTK_WIDGET(ui.window), visible);
+    GDir *contents = g_dir_open(directory, 0, &failure);
+    gboolean empty = contents != NULL && g_dir_read_name(contents) == NULL;
+    if (contents != NULL) g_dir_close(contents);
+    if (!empty) {
+        if (okay) jsti_set_error(
+            error, capacity, "Command clients created data in %s or the fixture could not inspect it.", directory);
+        g_printerr("Retaining command fixture directory for diagnosis: %s\n", directory);
+        okay = FALSE;
+    }
+    g_clear_error(&failure);
+    if (empty && g_rmdir(directory) != 0) {
+        if (okay) jsti_set_error(error, capacity, "Could not remove the empty command fixture directory.");
+        g_printerr("Could not remove command fixture directory: %s\n", directory);
+        okay = FALSE;
+    }
+    g_free(directory);
+    g_free(executable);
+    g_main_context_pop_thread_default(context);
+    g_main_context_unref(context);
+    if (okay) g_print("Desktop commands: %u real client processes passed forwarding, refusal and store-isolation checks.\n",
+        (guint)(G_N_ELEMENTS(cases) + G_N_ELEMENTS(cold) + G_N_ELEMENTS(cold_invalid)));
     return okay;
 }
 
@@ -4934,6 +5861,110 @@ static gboolean cleanup_preview_self_test(void) {
     return okay;
 }
 
+static gboolean migration_restore_self_test(void) {
+    if (ui.restore_dialog != NULL) return FALSE;
+    jsti_window_event_fn saved = ui.callback;
+    gint32 state = ui.state;
+    ui.callback = observe_event;
+    ui.state = JSTI_STATE_IDLE;
+    gchar token[] = "00000000-0000-0000-0000-000000000098";
+    gchar text[] = "Synthetic restore counts. Nothing has been written yet.";
+    MigrationRestoreConfirmation request = {.token = token, .text = text, .offers_replace = FALSE};
+    gboolean okay = jsti_window_confirm_migration_restore(NULL, text, 0) == -1 &&
+        jsti_window_confirm_migration_restore("bad-token", text, 0) == -1 &&
+        jsti_window_confirm_migration_restore(token, NULL, 0) == -1 &&
+        jsti_window_confirm_migration_restore(token, "", 0) == -1 &&
+        jsti_window_confirm_migration_restore(token, "\xff", 0) == -1 &&
+        jsti_window_confirm_migration_restore(token, text, 2) == -1;
+    observed.event = -500;
+    okay = okay && migration_restore_stage(&request) && ui.restore_dialog != NULL;
+    if (ui.restore_dialog != NULL) {
+        AdwMessageDialog *dialog = ADW_MESSAGE_DIALOG(ui.restore_dialog);
+        token[0] = 'x';
+        text[0] = 'x';
+        okay = okay &&
+            g_strcmp0(adw_message_dialog_get_default_response(dialog), "cancel") == 0 &&
+            g_strcmp0(adw_message_dialog_get_close_response(dialog), "cancel") == 0 &&
+            !adw_message_dialog_has_response(dialog, "replace") &&
+            g_str_has_prefix(adw_message_dialog_get_body(dialog), "Synthetic restore counts.") &&
+            !gtk_widget_get_sensitive(GTK_WIDGET(ui.backup_restore)) && observed.event == -500;
+        migration_restore_response(dialog, "merge", NULL);
+        okay = okay && ui.restore_dialog == NULL && observed.event == JSTI_EVENT_MIGRATION_RESTORE_RESPONSE &&
+            observed.index == 1 && g_strcmp0(observed.text, "00000000-0000-0000-0000-000000000098") == 0;
+    }
+    token[0] = '0';
+    observed.event = -500;
+    okay = migration_restore_stage(&request) && okay;
+    if (ui.restore_dialog != NULL) {
+        GtkWidget *current = ui.restore_dialog;
+        okay = !migration_restore_stage(&request) && ui.restore_dialog == current && observed.event == -500 && okay;
+        migration_restore_response(ADW_MESSAGE_DIALOG(ui.restore_dialog), "replace", NULL);
+        okay = okay && ui.restore_dialog == NULL && observed.index == 0 &&
+            observed.event == JSTI_EVENT_MIGRATION_RESTORE_RESPONSE;
+    }
+    request.offers_replace = TRUE;
+    observed.event = -500;
+    okay = migration_restore_stage(&request) && okay;
+    if (ui.restore_dialog != NULL) {
+        GtkWidget *old = g_object_ref(ui.restore_dialog);
+        migration_restore_response(ADW_MESSAGE_DIALOG(old), "replace", NULL);
+        okay = okay && ui.restore_dialog != NULL && ui.restore_dialog != old && observed.event == -500;
+        migration_restore_response(ADW_MESSAGE_DIALOG(old), "merge", NULL);
+        okay = okay && observed.event == -500;
+        g_object_unref(old);
+        if (ui.restore_dialog != NULL) {
+            AdwMessageDialog *dialog = ADW_MESSAGE_DIALOG(ui.restore_dialog);
+            okay = okay && !adw_message_dialog_has_response(dialog, "merge") &&
+                g_strcmp0(adw_message_dialog_get_default_response(dialog), "cancel") == 0 &&
+                g_strcmp0(adw_message_dialog_get_close_response(dialog), "cancel") == 0 &&
+                strstr(adw_message_dialog_get_body(dialog), "History is still only merged") != NULL;
+            migration_restore_response(dialog, "replace", NULL);
+            okay = okay && ui.restore_dialog == NULL && observed.index == 2 &&
+                observed.event == JSTI_EVENT_MIGRATION_RESTORE_RESPONSE;
+        }
+    }
+    for (gint scenario = 0; scenario < 3; ++scenario) {
+        observed.event = -500;
+        okay = migration_restore_stage(&request) && okay;
+        if (ui.restore_dialog == NULL) { okay = FALSE; continue; }
+        ui.state = scenario == 1 ? JSTI_STATE_WORKING : JSTI_STATE_IDLE;
+        refresh_actions();
+        if (scenario == 2) {
+            migration_restore_response(ADW_MESSAGE_DIALOG(ui.restore_dialog), "replace", NULL);
+            okay = okay && ui.restore_dialog != NULL && observed.event == -500;
+        }
+        if (ui.restore_dialog == NULL) { okay = FALSE; continue; }
+        if (scenario == 1)
+            okay = okay && !adw_message_dialog_get_response_enabled(ADW_MESSAGE_DIALOG(ui.restore_dialog), "merge");
+        migration_restore_response(ADW_MESSAGE_DIALOG(ui.restore_dialog), scenario == 1 ? "merge" : "cancel", NULL);
+        okay = okay && observed.event == JSTI_EVENT_MIGRATION_RESTORE_RESPONSE && observed.index == 0;
+    }
+    ui.state = JSTI_STATE_WORKING;
+    okay = migration_restore_stage(&request) && okay;
+    if (ui.restore_dialog != NULL) {
+        AdwMessageDialog *dialog = ADW_MESSAGE_DIALOG(ui.restore_dialog);
+        okay = okay && !adw_message_dialog_get_response_enabled(dialog, "merge");
+        ui.state = JSTI_STATE_IDLE;
+        refresh_actions();
+        okay = okay && adw_message_dialog_get_response_enabled(dialog, "merge");
+        migration_restore_response(dialog, "cancel", NULL);
+    }
+    ui.state = JSTI_STATE_IDLE;
+    okay = migration_restore_stage(&request) && okay;
+    observed.event = -500;
+    retire_migration_restore();
+    okay = okay && ui.restore_dialog == NULL && observed.event == -500;
+    ui.closing = TRUE;
+    okay = !migration_restore_stage(&request) && okay;
+    okay = okay && ui.restore_dialog == NULL && observed.index == 0;
+    ui.closing = FALSE;
+    ui.state = state;
+    ui.callback = saved;
+    g_clear_pointer(&observed.text, g_free);
+    refresh_actions();
+    return okay;
+}
+
 int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (jsti_hands_free_guard_self_test(error, capacity) != 0) return -1;
     if (ui.window == NULL) return fail(error, capacity, "the window was not created");
@@ -4965,11 +5996,14 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (jsti_action_shortcut_editor_self_test(ui.window, error, capacity) != 0) return -1;
     if (!action_execution_self_test())
         return fail(error, capacity, "action shortcut native page, event, slot or sensitivity routing failed");
+    if (!command_forwarding_self_test())
+        return fail(error, capacity, "desktop-bound command parsing, dispatch or lifetime admission failed");
+    if (!command_process_self_test(error, capacity)) return -1;
     if (!post_processing_self_test())
         return fail(error, capacity, "Local/Remote post-processing controls, key isolation or callback indexes failed");
     if (ui.recordings_folder == NULL || ui.audio_cleanup == NULL ||
         ui.backup_audio == NULL || ui.backup_profiles == NULL ||
-        ui.backup_export == NULL || ui.backup_inspect == NULL ||
+        ui.backup_export == NULL || ui.backup_inspect == NULL || ui.backup_restore == NULL ||
         !adw_switch_row_get_active(ui.backup_audio) ||
         adw_switch_row_get_active(ui.backup_profiles) ||
         jsti_window_confirm_audio_cleanup(NULL, 1) != -1 ||
@@ -4986,7 +6020,8 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
         !gtk_widget_get_sensitive(GTK_WIDGET(ui.backup_audio)) &&
         !gtk_widget_get_sensitive(GTK_WIDGET(ui.backup_profiles)) &&
         !gtk_widget_get_sensitive(GTK_WIDGET(ui.backup_export)) &&
-        !gtk_widget_get_sensitive(GTK_WIDGET(ui.backup_inspect));
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.backup_inspect)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.backup_restore));
     jsti_window_event_fn backup_callback = ui.callback;
     ui.callback = observe_event;
     for (gint32 flags = 0; flags < 4; ++flags) {
@@ -4996,11 +6031,15 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
         backup_ok = backup_ok && observed.event == JSTI_EVENT_MIGRATION_EXPORT && observed.index == flags &&
             g_strcmp0(observed.text, "synthetic-export.zip") == 0;
     }
-    choice.inspect = TRUE;
+    choice.action = 1;
     choice.include_audio = 1;
     backup_emit_path(&choice, "synthetic-review.zip");
     backup_ok = backup_ok && observed.event == JSTI_EVENT_MIGRATION_INSPECT && observed.index == 0 &&
         g_strcmp0(observed.text, "synthetic-review.zip") == 0;
+    choice.action = 2;
+    backup_emit_path(&choice, "synthetic-restore.zip");
+    backup_ok = backup_ok && observed.event == JSTI_EVENT_MIGRATION_RESTORE && observed.index == 0 &&
+        g_strcmp0(observed.text, "synthetic-restore.zip") == 0;
     ui.callback = backup_callback;
     g_clear_pointer(&observed.text, g_free);
     ui.closing = TRUE;
@@ -5025,6 +6064,8 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     gtk_window_destroy(GTK_WINDOW(report_dialog));
     g_object_unref(report_dialog);
     if (!report_ok) return fail(error, capacity, "Backup inspection report text ownership or close defaults changed");
+    if (!migration_restore_self_test())
+        return fail(error, capacity, "Backup restore preview, two-stage confirmation or lifecycle fence failed");
     gchar audio_token[] = "00000000-0000-0000-0000-000000000093";
     GtkWidget *audio_confirmation = audio_cleanup_dialog(audio_token, 2);
     g_object_ref_sink(audio_confirmation);
@@ -5086,6 +6127,8 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     }
     if (jsti_local_models_self_test(error, capacity) != 0) return -1;
     if (jsti_model_filters_self_test(error, capacity) != 0) return -1;
+    if (!model_modes_self_test())
+        return fail(error, capacity, "Model picker did not isolate and restore all four Source/Mode choices");
     if (jsti_cloud_sync_self_test(error, capacity) != 0) return -1;
     if (jsti_history_filters_self_test(error, capacity) != 0) return -1;
     if (jsti_vocabulary_self_test(error, capacity) != 0) return -1;
@@ -5093,6 +6136,8 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (jsti_troubleshooting_self_test(ui.window, error, capacity) != 0) return -1;
     if (jsti_api_keys_self_test(ui.window, error, capacity) != 0) return -1;
     if (jsti_permissions_self_test(ui.window, error, capacity) != 0) return -1;
+    if (jsti_setup_self_test(ui.window, error, capacity) != 0) return -1;
+    if (!cancel_key_self_test()) return fail(error, capacity, "Escape cancellation ownership or repeat guards failed");
     {
         GtkTextBuffer *prompt = gtk_text_view_get_buffer(ui.polish_prompt_row);
         GtkTextIter prompt_start, prompt_end;

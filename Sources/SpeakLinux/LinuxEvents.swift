@@ -17,6 +17,7 @@ final class LinuxEventContext: @unchecked Sendable {
     var windowCheck: (@Sendable () throws -> Void)?
     /// With --ui-screenshots: loads the sample History, then saves every page here.
     var screenshotDirectory: String?
+    var needsSetupAtLaunch = false
     private let historyEvents: DesktopEventDispatcher<DesktopHistoryEvent>
     private let searches: DesktopEventDispatcher<String>
     private let copies: DesktopTranscriptCopyDispatcher
@@ -25,8 +26,10 @@ final class LinuxEventContext: @unchecked Sendable {
     private var readyTask: Task<Void, Never>?
     private var shortcutTail: Task<Void, Never>?
     let shortcuts: LinuxShortcuts
+    let globalActionShortcuts = LinuxGlobalActionShortcuts()
     let automation: LinuxAutomationSwitch
     let apiKeys = DesktopAPIKeyRequests()
+    let historyPaste = DesktopHistoryPasteAdmission()
     private(set) var gestures: LinuxShortcutGestures!
     lazy var microphones = LinuxMicrophoneMonitor(controller: controller)
     /// Set before the window opens, when iCloud sync is configured.
@@ -72,6 +75,26 @@ final class LinuxEventContext: @unchecked Sendable {
     var currentSettingsTask: Task<Void, Never>? { settings.current }
     func finishSettings() async { await settings.drain() }
 
+    func pasteLastHistory(lifetime: DesktopShortcutListenerLifetime? = nil) {
+        guard let request = historyPaste.begin() else {
+            LinuxHostPlatform.update(
+                "History paste is already pending or the app is closing. No new target was captured."
+            )
+            return
+        }
+        let target = Self.captureTarget(includeObservation: false)
+        let controller = controller
+        let deliver = {
+            self.enqueueSettings {
+                defer { request.finish() }
+                await controller.pasteLastHistoryItem(target: target, request: request)
+            }
+        }
+        if let lifetime {
+            if !lifetime.admitCallback(deliver) { request.finish() }
+        } else { deliver() }
+    }
+
     /// Text output as of this event in settings order, however late the
     /// recording task runs.
     func recordingSettings(
@@ -96,28 +119,33 @@ final class LinuxEventContext: @unchecked Sendable {
 
     /// A shortcut, `--toggle` or the app action. The target is captured now,
     /// before anything else can take focus; toggles run one at a time.
-    func shortcutToggle(modelIndex: Int?, deviceID: String?) {
+    func shortcutToggle(
+        modelIndex: Int?, deviceID: String?, lifetime: DesktopShortcutListenerLifetime? = nil
+    ) {
         guard jsti_action_shortcuts_editor_is_open() == 0, jsti_api_keys_is_open() == 0 else {
             LinuxHostPlatform.update("Close the shortcut or API Keys editor before recording.")
             return
         }
         let target = LinuxEventContext.captureTarget()
-        let selection = recordingSettings(modelIndex: modelIndex, target: target)
-        let controller = controller
-        let ready = ready
-        lock.withLock {
-            let previous = shortcutTail
-            shortcutTail = Task {
-                await previous?.value
-                await ready?.value
-                let saved = await selection.value
-                guard jsti_api_keys_is_open() == 0 else { return }
-                await controller.admitCaptured(
-                    target: target, modelIndex: saved.modelIndex, deviceID: deviceID ?? saved.deviceID,
-                    textOutput: saved.textOutput, profile: saved.profile, trigger: .press
-                )
+        let deliver = {
+            let selection = self.recordingSettings(modelIndex: modelIndex, target: target)
+            let controller = self.controller
+            let ready = self.ready
+            self.lock.withLock {
+                let previous = self.shortcutTail
+                self.shortcutTail = Task {
+                    await previous?.value
+                    await ready?.value
+                    let saved = await selection.value
+                    guard jsti_api_keys_is_open() == 0 else { return }
+                    await controller.admitCaptured(
+                        target: target, modelIndex: saved.modelIndex, deviceID: deviceID ?? saved.deviceID,
+                        textOutput: saved.textOutput, profile: saved.profile, trigger: .press
+                    )
+                }
             }
         }
+        if let lifetime { lifetime.admitCallback(deliver) } else { deliver() }
     }
 
     func drainShortcuts() async {
@@ -127,20 +155,23 @@ final class LinuxEventContext: @unchecked Sendable {
 
     /// A global shortcut press or release from the X11 or portal thread. The
     /// target and text output are captured at the press.
-    func shortcutKey(pressed: Bool) {
-        if pressed {
-            guard jsti_action_shortcuts_editor_is_open() == 0, jsti_api_keys_is_open() == 0 else { return }
-            let target = Self.captureTarget()
+    func shortcutKey(pressed: Bool, lifetime: DesktopShortcutListenerLifetime) {
+        guard pressed else {
+            lifetime.admitCallback { gestures.keyUp() }
+            return
+        }
+        guard jsti_action_shortcuts_editor_is_open() == 0, jsti_api_keys_is_open() == 0 else { return }
+        let target = Self.captureTarget()
+        let shouldWarmMicrophone = !smokeTest && gestures.currentStyle != .pressToToggle
+        lifetime.admitCallback {
             let selection = recordingSettings(target: target)
-            if !smokeTest, gestures.currentStyle != .pressToToggle {
+            if shouldWarmMicrophone {
                 let controller = controller
                 Task { await controller.warmMicrophoneForShortcutPress() }
             }
             gestures.keyDown(
                 target: target, textOutput: Task { await selection.value.textOutput }, selection: selection
             )
-        } else {
-            gestures.keyUp()
         }
     }
 
@@ -153,12 +184,21 @@ final class LinuxEventContext: @unchecked Sendable {
 
     /// X11 reports the focused window; Wayland hides it, so the paste goes to
     /// whatever is focused at delivery, never to this app's own window.
-    static func captureTarget() -> LinuxInsertionTarget? {
+    /// History paste must not consume the one-shot correction-learning target.
+    static func captureTarget(includeObservation: Bool = true) -> LinuxInsertionTarget? {
         switch LinuxHostPlatform.session.displayServer {
-        case .x11: return LinuxX11.captureTarget()
+        case .x11:
+            if includeObservation { return LinuxX11.captureTarget() }
+            do {
+                return try LinuxX11.captureTargetChecked()
+            } catch {
+                LinuxHostPlatform.update("Could not capture the paste target: \(error.localizedDescription)")
+                return nil
+            }
         case .wayland:
             return LinuxInsertionTarget(
-                kind: .focusedApplication, observationalTarget: LinuxAtspiTarget.captureAdmitted()
+                kind: .focusedApplication,
+                observationalTarget: includeObservation ? LinuxAtspiTarget.captureAdmitted() : nil
             )
         case .unknown: return nil
         }
@@ -229,19 +269,26 @@ private func linuxActionEvent(_ event: Int, value: String, slot: Int, holder: Li
         linuxActionShortcutEdit(value, holder: holder)
     case Int(JSTI_EVENT_SPEAK_CLIPBOARD):
         holder.enqueueSettings { await holder.controller.readClipboardAloud() }
+    case Int(JSTI_EVENT_SPEAK_SELECTED_TEXT):
+        holder.speakSelectedText()
     case Int(JSTI_EVENT_API_KEYS):
-        if jsti_window_request_api_keys() != 0 {
-            LinuxHostPlatform.update("API Keys could not be opened. Try again when the app is idle.")
-        }
+        linuxRequestDialog(jsti_window_request_api_keys(),
+                           refusal: "API Keys could not be opened. Try again when the app is idle.")
     case Int(JSTI_EVENT_PERMISSIONS):
-        if jsti_window_request_permissions() != 0 {
-            LinuxHostPlatform.update("Permissions could not be opened. Try again after closing other dialogs.")
-        }
+        linuxRequestDialog(jsti_window_request_permissions(),
+                           refusal: "Permissions could not be opened. Try again after closing other dialogs.")
     case Int(JSTI_EVENT_SPEECH_PAUSE):
         holder.enqueueSettings { await holder.controller.pauseResumeSpeech() }
+    case Int(JSTI_EVENT_PASTE_LAST_HISTORY):
+        holder.pasteLastHistory()
     default: return false
     }
     return true
+}
+
+/// Reports a native dialog request the window refused.
+private func linuxRequestDialog(_ status: Int32, refusal: String) {
+    if status != 0 { LinuxHostPlatform.update(refusal) }
 }
 
 /// Recording, import, copy and lifecycle events. Returns false for others.
@@ -269,7 +316,7 @@ private func linuxSessionEvent(_ event: Int, value: String, slot: Int, holder: L
         }
     case Int(JSTI_EVENT_COPY): holder.copyDisplayed()
     case Int(JSTI_EVENT_READY): linuxReady(holder)
-    case Int(JSTI_EVENT_CANCEL): Task { await controller.cancelTranscription() }
+    case Int(JSTI_EVENT_CANCEL): linuxCancelOperation(value, holder: holder)
     case Int(JSTI_EVENT_USER_ABSENT): Task { await controller.handsFreeUserAbsent(value) }
     case Int(JSTI_EVENT_REFRESH_MODELS): Task { await controller.refreshModels(force: true) }
     default: return false
@@ -279,6 +326,7 @@ private func linuxSessionEvent(_ event: Int, value: String, slot: Int, holder: L
 
 /// History list, export and playback events. Returns false for others.
 private func linuxHistoryManagementEvent(_ event: Int, value: String, slot: Int, holder: LinuxEventContext) -> Bool {
+    if linuxMigrationEvent(event, value: value, slot: slot, holder: holder) { return true }
     switch event {
     case Int(JSTI_EVENT_HISTORY_FILTERS): holder.submitHistoryPlayback(.filter(value))
     case Int(JSTI_EVENT_HISTORY_DELETE):
@@ -291,14 +339,6 @@ private func linuxHistoryManagementEvent(_ event: Int, value: String, slot: Int,
         holder.enqueueSettings { await holder.controller.beginAudioCleanupConfirmation() }
     case Int(JSTI_EVENT_AUDIO_CLEANUP_RESPONSE):
         holder.enqueueSettings { await holder.controller.answerAudioCleanup(value, delete: slot == 1) }
-    case Int(JSTI_EVENT_MIGRATION_INSPECT):
-        holder.enqueueSettings {
-            await holder.controller.beginMigrationInspection(URL(fileURLWithPath: value))
-        }
-    case Int(JSTI_EVENT_MIGRATION_EXPORT):
-        holder.enqueueSettings {
-            await holder.controller.beginMigrationExport(URL(fileURLWithPath: value), nativeFlags: slot)
-        }
     default: return false
     }
     return true
@@ -426,6 +466,7 @@ private func linuxReady(_ holder: LinuxEventContext) { // swiftlint:disable:this
             await ready.value
             await controller.refreshLoginItem()
             await LinuxAutomationSwitch.restore(holder)
+            LinuxOnboarding.openIfNeeded(holder)
         }
         LinuxCloudSync.start(holder, after: ready)
         holder.shortcuts.start(holder)

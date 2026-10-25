@@ -1,5 +1,9 @@
 {
   "servers": {
+    "posthog": {
+      "type": "http",
+      "url": "https://mcp.posthog.com/mcp"
+    },
     "github-agentic-workflows": {
       "command": "gh",
       "args": [

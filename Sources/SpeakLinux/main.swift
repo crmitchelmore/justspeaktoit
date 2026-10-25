@@ -78,14 +78,26 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
         _ = jsti_window_set_appearance(Int32(await controller.appearance().rawValue))
         await controller.configureLocalModels()
         await controller.configureLocalCleanup(presenter: Unmanaged.passUnretained(holder).toOpaque())
+        try LinuxWindow.configureModelPreferences(await controller.preferredModelIDs())
         return await controller.selectedIndex()
     }
     LinuxCloudSync.configure(holder)
     let context = Unmanaged.passUnretained(holder).toOpaque()
     let windowFailure = runGTKEventLoop(selected: selected, context: context, holder: holder)
     LinuxWindow.endVoiceProviderCallbacks(providerCallbacks)
+    try shutDownWindow(controller: controller, holder: holder)
+    withExtendedLifetime(holder) {}
+    if let windowFailure { throw windowFailure }
+    if let smokeFailure = holder.smokeTestFailure { throw smokeFailure }
+}
+
+/// Fences callbacks, drains settings and closes the controller after the window closes.
+private func shutDownWindow(controller: LinuxAppController, holder: LinuxEventContext) throws {
     try blocking {
+        holder.globalActionShortcuts.stop()
         holder.shortcuts.stop()
+        holder.historyPaste.stop()
+        LinuxSelectedTextTarget.stopSessionAccess()
         if !holder.smokeTest { holder.microphones.stop() }
         await holder.finishSettings()
         await controller.stopProviderCredentialEdits()
@@ -101,9 +113,6 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
         }
         LinuxPortal.stopRemoteDesktop()
     }
-    withExtendedLifetime(holder) {}
-    if let windowFailure { throw windowFailure }
-    if let smokeFailure = holder.smokeTestFailure { throw smokeFailure }
 }
 
 /// Runs the GTK event loop until the window closes, returning any error
@@ -139,9 +148,34 @@ func configureApplicationIcon() throws {
     try LinuxNative.call { jsti_app_icon_configure(theme.deletingLastPathComponent().path, $0, $1) }
 }
 
+func prepareDesktopAction(_ arguments: [String], forward: Bool) throws {
+    var nativeArguments = arguments.map { strdup($0) }
+    defer { nativeArguments.forEach { free($0) } }
+    guard nativeArguments.allSatisfy({ $0 != nil }) else {
+        throw DesktopHostError(message: "Could not allocate desktop action command arguments.")
+    }
+    nativeArguments.append(nil)
+    try LinuxNative.call {
+        jsti_window_validate_action_command(Int32(arguments.count), &nativeArguments, $0, $1)
+    }
+    guard forward else { return }
+    try LinuxNative.call {
+        jsti_window_forward_action(
+            linuxApplicationID, Int32(arguments.count), &nativeArguments, $0, $1
+        )
+    }
+}
+
 let arguments = CommandLine.arguments
+let actionArguments = LinuxActionShortcutRun.forwardedCommandArguments
+let forwardsAction = arguments.contains(where: { actionArguments.contains($0) })
+if forwardsAction || arguments.contains(JSTI_TOGGLE_ARGUMENT) {
+    do { try prepareDesktopAction(arguments, forward: forwardsAction) } catch { fail(error) }
+    if forwardsAction { exit(0) }
+}
 DesktopHostModels.configure(
-    streamingQualified: LinuxLiveTransport.qualified, local: DesktopLocalTranscription.options(host: .linux)
+    streamingQualified: LinuxLiveTransport.qualified, local: DesktopLocalTranscription.options(host: .linux),
+    localLive: DesktopLocalStreaming.options(host: .linux)
 )
 if arguments.contains("--version") {
     print("JustSpeakToIt for Linux (developer preview)")
@@ -171,12 +205,16 @@ let integrationCheck = arguments.firstIndex(of: "--integration-test").flatMap {
     arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil
 }
 switch integrationCheck {
-case "keyring", "capture", "portal", "x11-hotkey":
+case "atspi-selection":
+    do { try LinuxSelectionIntegrationCheck.run() } catch { fail(error) }
+    exit(0)
+case "keyring", "capture", "portal", "x11-hotkey", "x11-hotkey-locks":
     do {
         switch integrationCheck {
         case "keyring": try LinuxIntegrationChecks.keyring()
         case "capture": try LinuxIntegrationChecks.capture()
         case "x11-hotkey": try LinuxIntegrationChecks.x11Hotkey()
+        case "x11-hotkey-locks": try LinuxIntegrationChecks.x11Hotkey(lockStates: true)
         default: try LinuxIntegrationChecks.portal()
         }
     } catch { fail(error) }
@@ -205,8 +243,12 @@ do {
     if screenshotDirectory != nil {
         try blocking { try await DesktopHostSampleHistory.seed(directory: directory) }
     }
+    let needsSetup = !smokeTest && LinuxOnboarding.needsAutomaticSetup(in: directory)
     let controller = try LinuxAppController(directory: directory, effects: LinuxNativeEffects())
     let holder = LinuxEventContext(controller: controller, smokeTest: smokeTest)
+    holder.needsSetupAtLaunch = needsSetup
+    try LinuxOnboarding.configure(holder)
+    defer { jsti_setup_clear() }
     holder.screenshotDirectory = screenshotDirectory
     if integrationCheck == "x11" { holder.windowCheck = { try LinuxIntegrationChecks.x11() } }
     defer { if smokeTest { try? FileManager.default.removeItem(at: directory) } }

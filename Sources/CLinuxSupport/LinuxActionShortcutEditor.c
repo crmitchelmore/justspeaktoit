@@ -342,7 +342,7 @@ void jsti_action_shortcut_editor_open(GtkWindow *owner) {
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), body);
     gtk_box_append(GTK_BOX(body), wrapped(
         "Choose an action and record its key. Changes stay in this draft until Save. "
-        "Global bindings stay saved but are not registered on Linux yet."));
+        "Supported global bindings register on X11. Wayland uses desktop keyboard settings."));
     editor->controls = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
     gtk_box_append(GTK_BOX(body), editor->controls);
     GtkStringList *titles = gtk_string_list_new(NULL);
@@ -365,7 +365,8 @@ void jsti_action_shortcut_editor_open(GtkWindow *owner) {
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(editor->enabled), "Enabled");
     editor->global = ADW_SWITCH_ROW(adw_switch_row_new());
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(editor->global), "Work in other apps");
-    adw_action_row_set_subtitle(ADW_ACTION_ROW(editor->global), "Saved only; global registration is not available yet.");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(editor->global),
+        "X11 registers supported actions after saving. Check Action shortcuts for availability.");
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(switches), GTK_WIDGET(editor->enabled));
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(switches), GTK_WIDGET(editor->global));
     gtk_box_append(GTK_BOX(editor->controls), switches);

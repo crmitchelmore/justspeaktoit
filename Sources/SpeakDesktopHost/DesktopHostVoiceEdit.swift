@@ -31,6 +31,7 @@ extension DesktopHostController {
             configuration: settings.configuration, processing: postProcessingOptions()
         )
         voiceEdit.active = run
+        Platform.voiceEditEscape(true)
         beginBusyOperation()
         voiceEdit.workers += 1
         run.workers += 1
@@ -127,6 +128,7 @@ extension DesktopHostController {
             await recordingFeedback?.cancelRecording(run.id)
             if voiceEdit.active === run {
                 voiceEdit.active = nil
+                Platform.voiceEditEscape(false)
                 if run.busyHeld {
                     run.busyHeld = false
                     finishBusyOperation()

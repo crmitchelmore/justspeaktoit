@@ -6,6 +6,14 @@ extension DesktopDictationProfileStore {
         digests: LocalModelDigestProvider,
         checkCancellation: () throws -> Void = { try Task.checkCancellation() }
     ) throws -> DataMigrationSnapshot {
+        try DesktopProfileDocumentAccess.withMutation {
+            try migrationSnapshotUnlocked(digests: digests, checkCancellation: checkCancellation)
+        }
+    }
+
+    private func migrationSnapshotUnlocked(
+        digests: LocalModelDigestProvider, checkCancellation: () throws -> Void
+    ) throws -> DataMigrationSnapshot {
         let source = try DesktopOwnedAppDataFileReader.readStrict(
             Self.filename, appDirectory: fileURL.deletingLastPathComponent(),
             maximumBytes: DataMigrationArchivePolicy.maximumJSONBytes, checkCancellation: checkCancellation

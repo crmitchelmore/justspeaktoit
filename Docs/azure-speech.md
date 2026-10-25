@@ -247,10 +247,15 @@ not a proxy running on a Mac.
 Only the literal IPv4 loopback origin with an explicit port is allowed; enter
 `127.0.0.1`, not `localhost`, a LAN address, a path or a query. The shared transcription
 clients require the `local-proxy/` credential prefix before sending anything to
-loopback and strips it from the local request header. An ordinary Azure key is
+loopback and strip it from the local request header. An ordinary Azure key is
 never sent to the proxy, and a proxy credential is never sent to Azure.
 Direct Azure HTTPS endpoint validation is unchanged. Direct TTS still rejects
 proxy credentials; the app's TTS settings do not route through this endpoint.
+
+The local credential health check accepts at most 4,096 response bytes and has
+a ten-second total deadline, including an incomplete response body. It cancels
+oversized or overdue exchanges and refuses redirects. A successful health check
+verifies the local proxy's compatibility, not Azure sign-in or model access.
 
 **Alpha builds predating loopback support reject these endpoints; use a compatible
 build. The dedicated incremental model also requires its new catalogue/API

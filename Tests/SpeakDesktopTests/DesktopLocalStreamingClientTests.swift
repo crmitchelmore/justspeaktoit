@@ -87,14 +87,26 @@ final class DesktopLocalStreamingClientTests: XCTestCase {
     }
 
     func testOptionsUseLiveIdentifiersOfExecutableBatchModels() {
-        let options = DesktopLocalStreaming.options(host: .windows)
-        XCTAssertEqual(
-            options.map(\.id),
-            DesktopLocalTranscription.models(host: .windows).map {
-                LocalModelIdentity.whisperLiveModelID(forBatchModelID: $0.catalogueID)
+        for host in [LocalModelHostSupport.windows, .linux] {
+            let options = DesktopLocalStreaming.options(host: host)
+            XCTAssertFalse(options.isEmpty)
+            XCTAssertEqual(
+                options.map(\.id),
+                DesktopLocalTranscription.models(host: host).map {
+                    LocalModelIdentity.whisperLiveModelID(forBatchModelID: $0.catalogueID)
+                }
+            )
+            XCTAssertTrue(options.allSatisfy { $0.id.hasPrefix(LocalModelIdentity.whisperLivePrefix) })
+            let slots = DesktopModelSlots(
+                live: [], local: DesktopLocalTranscription.options(host: host), localLive: options
+            )
+            XCTAssertEqual(
+                slots.entries.filter { $0.isLocal && $0.isLive }.map(\.option.id), options.map(\.id)
+            )
+            for option in options {
+                XCTAssertNotNil(DesktopLocalStreaming.model(forLiveID: option.id, host: host))
             }
-        )
-        XCTAssertTrue(options.allSatisfy { $0.id.hasPrefix(LocalModelIdentity.whisperLivePrefix) })
+        }
         XCTAssertTrue(DesktopLocalStreaming.options(host: .unsupported).isEmpty)
         XCTAssertEqual(
             DesktopLocalStreaming.model(forLiveID: " local/streaming/whisperkit/base ", host: .windows)?.catalogueID,

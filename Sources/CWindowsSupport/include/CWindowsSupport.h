@@ -135,6 +135,15 @@ int jsti_comparison_present_batch(const char *models, const char *rounds, const 
                                  const char *batch_round, int batch_remaining, int can_next);
 int jsti_window_run(const char *const *model_names, size_t model_count, int selected_index,
                     JSTIWindowCallback callback, void *context, char *error, size_t error_capacity);
+/* Pre-run only: opt in to passive Escape observation while recording/working.
+ * Pass 0 for synthetic/screenshot windows. No listener is installed while idle. */
+int jsti_window_configure_global_escape(int enabled);
+/* Thread-safe saved preference, independent of the pre-run synthetic-window opt-in. */
+int jsti_window_set_escape_cancellation(int enabled);
+/* Publish the independent Voice Edit reason before its usual window state update. */
+int jsti_window_set_voice_edit_escape(int active);
+/* Thread-safe final Host admission check for a queued local/global Escape token. */
+int jsti_window_global_escape_is_current(uint64_t token);
 /* Optional pre-run mode catalogue with the same count/order as window_run's
  * full model array. Each mode is 0 remote batch, 1 remote live, 2 local batch
  * or 3 local live: bit 0 is live, bit 1 is local. The window shows a Source
@@ -1343,6 +1352,9 @@ int jsti_recording_feedback_check_assets(const char *start_path, const char *sto
  * window_run. -1 chooses the first local live row. Returns -1 when the index is
  * not a configured mode-3 row or the window is running. */
 int jsti_window_set_preferred_local_live_model(int index);
+/* Thread-safe inactive Local preferences; -1 leaves a slot unchanged.
+ * Does not change the active model, populate a picker or emit a callback. */
+int jsti_window_set_local_model_preferences(int batch, int live);
 
 /* General > CLI and MCP setup dialog: the automation pipe name, the installed
  * speak.exe path (empty when it is not beside the app) and the copyable

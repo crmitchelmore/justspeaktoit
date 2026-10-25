@@ -347,6 +347,206 @@ app without raising its window (GApplication forwards the command line), so it
 can be bound to a key in any desktop. The `app.toggle-recording` action does
 the same over D-Bus.
 
+The X11 listener discovers CapsLock/ShiftLock, NumLock and ScrollLock slots from
+the actual modifier and key maps when registering, rather than assuming Mod2
+and Mod5 are locks. A slot that also contains AltGr, a group-switch key or another
+ordinary key is deliberately not ignored; explicitly required modifiers also
+remain required. Grab and release use the same owned set of unique lock-state
+variants, and event admission rejects extra non-lock modifiers. Custom maps with
+mixed lock/non-lock slots may need the desktop-owned `--toggle` binding instead.
+Runtime key/modifier remapping still needs a listener restart: automatic
+remapping/rebinding, multiple global actions and real keyboard/layout acceptance
+remain open gates. No-display native fixtures cover the classification and mask
+invariants, including the 256-variant bound; these changes are NOT_RUN locally.
+The disposable Xvfb integration harness also authors an
+`--integration-test x11-hotkey-locks` check: reject Ctrl+Alt+Shift+Space, then
+require exact press/release receipts with locks off, CapsLock, CapsLock+NumLock,
+NumLock, and locks off again. Each producer phase waits for its own
+acknowledgement; a false extra-modifier activation cannot compensate for a missed
+lock-state action. Readiness, phase waits and the child process are bounded; native
+stop is deferred on every exit. The rejection uses a 250 ms test-only quiet
+window, not a production readiness delay. The private server is discarded after
+the harness; no real desktop key map is modified. This check is NOT_RUN locally
+and does not qualify AltGr, arbitrary layouts, runtime remapping or Wayland.
+
+With the app **already running**, desktop keyboard settings can also bind
+`justspeaktoit --speak-clipboard`, `justspeaktoit --speak-selected-text` and
+`justspeaktoit --paste-last-history`.
+The same running-app forwarding path supports `--stop-speech`,
+`--pause-resume-speech`, and `--quick-voice-1`, `--quick-voice-2` or
+`--quick-voice-3`. Quick Voice selects the corresponding saved favorite; it does
+not start speech, record an instruction, or read selection/clipboard text.
+Pause/Resume acts on the active speech through the existing Host policy.
+Stop uses the existing Playback Stop action. Its native control remains enabled
+while idle, recording or working; Stop is idempotent if no audio is playing.
+It cancels speech/playback without cancelling dictation or clearing a busy
+operation's state/status. Modal-disabled or closing windows still refuse it.
+Inside Flatpak use `flatpak run com.justspeaktoit.JustSpeakToIt` followed by the
+same argument. These commands forward without presenting the window, preserving
+the external app's focus. Speak Clipboard uses the saved Voice Output settings;
+Paste Last History captures the invocation target and uses saved output policy,
+not the selected History row. Clipboard-only output requires no external field.
+X11 requires a captured external window for paste; Wayland retains the existing
+portal delivery-time-focus and recovery-copy behavior, not an anchored-field
+guarantee. Forwarding happens before model/controller construction or opening
+application stores. A cold invocation of any of these commands exits nonzero
+instead of opening a window and acting on the wrong focus.
+
+Choose one action per invocation; different action flags together or unsupported
+options are refused before dispatch, including two different Quick Voice slots.
+This preflight includes legacy `--toggle`: adding an unknown option (including
+`--gapplication-service`) or another action refuses before model/controller
+construction or store access. A valid `--toggle`, with optional `--background`
+or repeated identical toggle flags, keeps its existing cold-launch and
+running-app dictation behavior; it is not changed into a running-only command.
+Busy/recording states refuse clipboard/selected-text speech, History paste, Pause/Resume and
+Quick Voice; closing or modal-disabled windows refuse all commands. Stop follows
+its own control's availability as described above. Refusal returns a nonzero exit
+status. Status 0 means admitted
+to the running app, not that speech or paste completed; results and provider
+errors appear in the app.
+Bindings remain user-owned desktop configuration: the saved Global switch
+does not automatically register these actions. Parser and native dispatch
+fixtures are authored but NOT_RUN locally.
+
+Selected-text speech requires its own **Voice Output > Selection access >
+Allow...** session disclosure. After allowing, refocus an external ordinary
+editable AT-SPI field, select text and invoke `--speak-selected-text` without
+raising this app. The selected text may be sent to the saved remote Voice
+Output provider. Correction-learning consent does not authorize this read-only
+session; neither settings nor imports grant it. Stop access revokes pending
+reads before requesting speech Stop, and shutdown revokes access before draining
+settings. The app does not enable desktop accessibility.
+
+Capture on the command path uses only an already-admitted field receipt. A
+single pending lease across session restarts prevents queued target accumulation.
+The private worker has 2.5 seconds from invocation, requires exactly one
+nonempty selection of at most 8,192 Unicode scalars / 32,768 UTF-8 bytes, and
+rechecks target identity, privacy, range and contents before returning a
+snapshot to the owned Host speech task. Selection/caret changes invalidate the
+receipt; any new admission revalidates the same known control off the action
+path. Text mutation events are registered only during the explicit read.
+Read-only documents, password/ambiguous controls and unsupported apps refuse;
+there is no clipboard or PRIMARY-selection fallback. This is a per-field
+AT-SPI capability, not blanket X11/Wayland support. The in-app source dialog
+still excludes external selection because opening it changes focus.
+Pure contract and command fixtures are authored, NOT_RUN locally; real field,
+provider/audio and compositor acceptance remain unverified.
+
+Linux also offers **Local > Live** for the pinned executable Whisper catalogue.
+It uses the shared in-process streaming engine with the same downloaded model,
+runtime and install/removal ownership as Local Batch; imported models remain
+batch-only. The Mode picker stays available under either source while idle, and
+four saved model choices survive restart independently. Local Live never needs a
+provider key or a qualified WebSocket transport.
+
+The existing native local-transcription CLI check now sends its WAV fixture
+through `DesktopLiveSession` and the Linux recognizer as well: text must arrive
+before finish, and finish must preserve the expected phrase. Readiness polling
+has a 30-second bound and returns as soon as text arrives. The existing model
+step/job ceilings are unchanged. The GTK smoke checks cover actual row filtering,
+four remembered slots and Local/Remote mode memory. These additions are authored
+NOT_RUN locally and do not prove microphone performance or installed acceptance.
+
+Portable configuration JSON also recognises canonical Local Batch and Local Live
+model choices when this host offers them. It updates only inactive remembered
+slots, not the active model or service permissions, and never downloads a model.
+Unavailable/wrong-mode IDs and changes to the active mode remain preserved but
+unapplied, with a notice; choosing a model explicitly replaces that pending
+choice. The queued GTK update emits no selection callback. Source-only restart,
+round-trip, failure and native smoke assertions accompany this mapping; all are
+NOT_RUN here. History-backup restore still does not apply settings.
+
+General > Data backup > **Restore...** now uses the shared cancellable ZIP
+reader, privacy-safe preview, current single-use confirmation and transactional
+rollback. History text merges; app profiles can merge or, after a second
+confirmation, replace. Both GTK dialogs default to Cancel. The owned picker
+rejects late or cancelled results, the preview copies its token/report, busy
+state disables apply, and shutdown retires the dialog. Settings, saved audio,
+credentials, vocabulary, connections and models remain unapplied. Native
+smoke assertions and seven shared Host regressions are authored but NOT_RUN
+locally; this is source wiring, not an installed-desktop acceptance receipt.
+The shared restore engine also rechecks the preview's full History baseline
+inside the History store actor immediately before staging/writing, without an
+actor suspension. A same-store update arriving after the early check is kept,
+and profiles are rolled back before a stale-preview response is returned.
+Rollback failure remains an explicit failure. Five portable admission/rollback
+regressions are authored but **NOT_RUN** here; this does not claim protection
+against independent processes writing the same files.
+
+The modeless first-run setup guide shares SpeakCore's seven-step catalogue and
+completion key, and can be reopened from About > **Run setup again**. It resumes
+unfinished progress; existing installs with settings but no guide state do not
+auto-open it. Eligibility is read before controller creation, and smoke,
+screenshot and integration modes do not auto-open it. Next/Back, Skip and Finish
+acknowledge successful writes only; read/write failures remain explicit.
+Closing or Escape does not mark setup complete. Revision-fenced owned pages
+reject delayed responses after close/reopen.
+
+Guide actions reuse Permissions, API Keys and the existing settings pages.
+Microphone guidance is passive, text-insertion advice distinguishes X11 and
+Wayland, and practice uses the real global shortcut in another app rather than
+an unimplemented test-record button. Guide rendering does not read keys,
+activate capture, request desktop access or contact a provider; a selected
+model alone is not a readiness receipt. Ten new shared Host regressions and
+native GTK smoke assertions are authored but **NOT_RUN** here. This slice does
+not qualify real-desktop permission, microphone, provider or shortcut behavior.
+
+The guide's passive page projection is additionally checked against every shared
+step/action in four authored platform tests. Its typed action destinations route
+microphone selection to the actual General picker, while Local models open
+Transcription. Nine authored Host progress regressions
+cover the shared completion transition, sticky upgrades and cancellation/failure
+paths. Native revision checks execute inside the Host actor at read/write
+admission, including Finish/Skip, rather than relying solely on a pre-await
+check in the GTK adapter. These follow-up tests are also **NOT_RUN** here.
+
+Before the keyring and desktop integration checks, the harness runs
+`--integration-test atspi-selection` against an external synthetic AT-SPI
+service, each time on its own nested private bus. The fixture refuses a
+nonempty bus, and the client checks the launched server's process identity and
+service ownership before allowing any test access. It exercises the production
+worker, not a replacement text-reader implementation. Metadata readiness is
+acknowledged on that worker after admission/cleanup, not inferred from an early
+server reply.
+
+Both supported registry cleanup signatures and unsupported-schema refusal are
+covered. Cases check exact range and Unicode limits, protected/password/read-only
+refusals without text sampling, missing/multiple/empty/oversized/out-of-field
+selections, short replies, stale receipts after selection changes, selection and
+role changes during a read, real lease expiry, held-read revocation, burst and
+restart admission, and independent correction consent.
+The server models subscription filtering and prefix cleanup, records text reads,
+rejects mutations and counts remaining registrations after shutdown. Each
+schema process has a 60-second ceiling; normal readiness polling ends as soon as
+the condition is met. The expiry case intentionally measures the real 2.5-second
+lease. This authored fixture is NOT_RUN locally. It cannot qualify real
+compositor/AT-SPI app behavior, consent UI, provider requests or audible output.
+
+`scripts/linux-desktop-checks.sh` also opts into a cross-process fixture only
+inside its private session bus. It launches 39 real command-client processes
+against the production native command handler with a synthetic event callback:
+valid and repeated commands, `--background`, mixed action flags, unsupported
+options, Quick Voice slot identity/conflicts, Stop availability during idle,
+working and recording states, busy/recording/modal/closing refusal, and all eight running-only
+commands with no primary. Malformed toggle options are additionally refused both
+with and without a primary; no real toggle/provider action is delivered.
+The fixture applies production `refresh_actions` for each state, not a synthetic
+Stop-sensitivity override, including explicit Stop modal/closing refusals.
+All command clients share one 180-second monotonic budget. Each child is reaped
+and receives at most 15 seconds, shortened to the group's remaining time; there
+are no success-path waits. The whole smoke window, not just these clients, has
+the unchanged 600-second envelope, leaving 420 seconds for its other checks
+instead of multiplying 39 independent ceilings. Budget exhaustion fails loudly.
+The fixture requires exact callback identity/count/slot, unchanged page
+and hidden-window visibility, refusal diagnostics, and an empty isolated data
+directory after all clients. A separate smoke-window application path avoids
+colliding with the fixture's real GApplication identity; a private main context
+keeps unrelated GTK/Host callbacks out of the fixture. It never invokes providers,
+reads clipboard content, or pastes into a field. This fixture is also NOT_RUN
+locally: automatic cross-process qualification, compositor key bindings and
+external-field/provider acceptance remain unverified.
+
 Data lives in `$XDG_DATA_HOME/JustSpeakToIt` (`~/.local/share/JustSpeakToIt`;
 Flatpak: `~/.var/app/com.justspeaktoit.JustSpeakToIt/data/JustSpeakToIt`):
 `settings.json`, `History/`, profiles and the OpenRouter catalogue cache, all
@@ -417,6 +617,67 @@ offline, so a submission must also list them as git sources.
 
 ## Desktop support
 
+### X11 global action shortcuts (source only; NOT_RUN)
+
+On X11, enabled **Work in other apps** bindings now request a separate native
+action group after the existing dictation listener finishes registration.
+Eligible routes are Start/Stop Recording, Speak Clipboard Content, Paste Last
+History Item and Speak Selected Text. The action list and presets come from
+the shared catalogue; unsupported actions and Mac-specific combinations stay
+saved with an explicit refusal rather than being downgraded to window-local.
+Wayland keeps its existing single dictation portal and desktop keyboard
+settings commands; this change does not add a multi-action portal session.
+
+The main Keyboard page reports each X11 row's registration result, including
+another application's grab, keyboard-layout aliases, unsupported combinations
+and listener failure. Ctrl+Alt+Space remains reserved for dictation. New global
+edits require Ctrl or Alt, or F13-F24, so ordinary typing is not grabbed.
+Imported invalid combinations remain saved but unregistered. Exact modifier
+matching retains lock-only CapsLock/NumLock tolerance without ignoring AltGr;
+repeated admitted key presses and modifier changes while held do not dispatch
+another action. The original single-hotkey and portal callback contracts are
+unchanged.
+
+Rebinding fences the previous generation before submitting cleanup and a
+replacement on the owned native queue. Late rejected startup closes inline on
+that queue before the next registration begins. Native registration and joins
+stay off the settings/GTK queues. Closing fences callbacks immediately;
+native stop retains callback context until its worker has joined. Target and
+consented selection capture precede the final bounded callback admission.
+Already-admitted actions keep the existing settings order, output ownership
+and shutdown behavior; rebind does not cancel an already-admitted action.
+Selected-text speech still requires explicit Voice Output session access and
+an external editable AT-SPI field; registration grants no selection access.
+
+Portable projection/queue regressions and a display-free native event-handler
+fixture are authored; the latter joins the existing native self-test rather
+than adding another fixture child or runtime budget. **Compiler, test and
+native execution are NOT_RUN here.** Exact-head Apple/portable checks,
+X11/GTK coexistence, registration failures, physical repeat/lock/layout
+behavior and shutdown still need native qualification. Xlib server loss can
+remain fatal despite reporting poll-detected listener failures. Linux
+system-wide Escape and voice editing remain separate gaps.
+
+### Escape and dictation delivery
+
+With Keyboard's default-on **Cancel recording with Escape** enabled, plain
+Escape in the active main window is source-wired to the existing Cancel
+operation while recording/working. Idle Escape, modified combinations, dialogs
+and popovers keep their own behavior. The main window's capture-phase key
+controller owns only this active cancellation; release and deactivation retire
+its repeat latch. No global key monitor, X11 Escape grab or portal binding is
+installed. The shared Host retains legacy captured audio without transcription.
+Portable and GTK smoke assertions are authored but **NOT_RUN** here; physical
+keyboard acceptance and system-wide Escape cancellation remain outstanding.
+
+The canonical `cancelRecordingOnEscape` value now transfers, persists and drives
+the native main-window policy. Explicit Cancel stays unconditional. Local Escape
+carries an opaque work token, rechecked with the saved policy inside Host
+admission. Native state publication uses the post lock before GTK application;
+policy toggles retire old tokens, and close cannot be undone by late updates.
+New preference/restart/Host regressions and extended GTK policy/event fixtures
+are authored but **NOT_RUN**, with no new monitor or global Escape registration.
+
 | Desktop (2026) | Shortcut | Paste into the focused app | Fallback |
 |---|---|---|---|
 | GNOME 48+ Wayland | GlobalShortcuts portal (asks once) | RemoteDesktop portal, keyboard only, persist mode 2, restore token in the keyring; transcript offered through the Clipboard portal; Ctrl+V as keysyms | Copied + notification "press Ctrl+V" |
@@ -424,7 +685,7 @@ offline, so a submission must also list them as git sources.
 | Hyprland | Portal (xdg-desktop-portal-hyprland) | Portal path if its RemoteDesktop is available | Copy |
 | Sway, niri, other wlroots | No portal: bind `justspeaktoit --toggle` | No RemoteDesktop portal: copy | Copy |
 | COSMIC | Portal or `--toggle` binding | Portal path (restore tokens reported not to persist) | Copy |
-| X11 (any) | Ctrl+Alt+Space by XGrabKey | Clipboard + XTest Ctrl+V into the window focused at the shortcut, re-verified before the keystroke; Ctrl+Shift+V for terminals by WM_CLASS; previous clipboard text restored after 750 ms unless the user copied something else | Copy + notification |
+| X11 (any) | Ctrl+Alt+Space by XGrabKey; separate source-wired action group above, unqualified | Clipboard + XTest Ctrl+V into the window focused at the shortcut, re-verified before the keystroke; Ctrl+Shift+V for terminals by WM_CLASS; previous clipboard text restored after 750 ms unless the user copied something else | Copy + notification |
 
 Policy carried over from Windows: the target and text-output choice are fixed
 when dictation starts; Record in the app's own window never pastes (the app

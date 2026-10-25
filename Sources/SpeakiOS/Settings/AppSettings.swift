@@ -253,15 +253,15 @@ public final class AppSettings: ObservableObject {
     }
 
     @Published public var smallestAPIKey: String {
-        didSet { persistSecret(smallestAPIKey, identifier: "smallest.apiKey") }
+        didSet { persistSecret(smallestAPIKey, identifier: Self.smallestKeyID) }
     }
 
     @Published public var reson8APIKey: String {
-        didSet { persistSecret(reson8APIKey, identifier: "reson8.apiKey") }
+        didSet { persistSecret(reson8APIKey, identifier: Self.reson8KeyID) }
     }
 
     @Published public var stepfunAPIKey: String {
-        didSet { persistSecret(stepfunAPIKey, identifier: "stepfun.apiKey") }
+        didSet { persistSecret(stepfunAPIKey, identifier: Self.stepfunKeyID) }
     }
 
     @Published public var speechmaticsAPIKey: String {
@@ -298,23 +298,26 @@ public final class AppSettings: ObservableObject {
     // same service/account as the macOS app. Cross-device transfer is handled only
     // by the explicit passphrase-encrypted CloudKit sync feature below; the base
     // Keychain item is deliberately not kSecAttrSynchronizable.
-    static let deepgramKeyID = "deepgram.apiKey"
-    static let openRouterKeyID = "openrouter.apiKey"
-    static let openAIKeyID = "openai.apiKey"
-    static let elevenLabsKeyID = "elevenlabs.apiKey"
-    static let cartesiaKeyID = "cartesia.apiKey"
-    static let sonioxKeyID = "soniox.apiKey"
-    static let modulateKeyID = "modulate.apiKey"
-    static let assemblyAIKeyID = "assemblyai.apiKey"
-    static let gladiaKeyID = "gladia.apiKey"
-    static let googleKeyID = "google.apiKey"
-    static let xAIKeyID = "xai.apiKey"
+    static let deepgramKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "deepgram")
+    static let openRouterKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "openrouter")
+    static let openAIKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "openai")
+    static let elevenLabsKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "elevenlabs")
+    static let cartesiaKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "cartesia")
+    static let sonioxKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "soniox")
+    static let modulateKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "modulate")
+    static let assemblyAIKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "assemblyai")
+    static let gladiaKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "gladia")
+    static let googleKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "google")
+    static let xAIKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "xai")
     static let azureKeyID = AzureSpeechConfiguration.credentialIdentifier
     static let alibabaKeyID = AlibabaSpeechConfiguration.credentialIdentifier
-    static let metaKeyID = "meta.apiKey"
-    static let speechmaticsKeyID = "speechmatics.apiKey"
-    static let revAIKeyID = "revai.apiKey"
-    static let mistralKeyID = "mistral.apiKey"
+    static let metaKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "meta")
+    static let speechmaticsKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "speechmatics")
+    static let revAIKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "revai")
+    static let mistralKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "mistral")
+    static let stepfunKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "stepfun")
+    static let reson8KeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "reson8")
+    static let smallestKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "smallest")
 
     private static let credentialStorage = SecureStorage(
         configuration: SecureStorageConfiguration(
@@ -891,9 +894,9 @@ public final class AppSettings: ObservableObject {
 
     private func reloadStreamingProviderAPIKeys() async {
         await reloadSyncedAPIKey(\.xAIAPIKey, identifier: Self.xAIKeyID)
-        await reloadSyncedAPIKey(\.smallestAPIKey, identifier: "smallest.apiKey")
-        await reloadSyncedAPIKey(\.reson8APIKey, identifier: "reson8.apiKey")
-        await reloadSyncedAPIKey(\.stepfunAPIKey, identifier: "stepfun.apiKey")
+        await reloadSyncedAPIKey(\.smallestAPIKey, identifier: Self.smallestKeyID)
+        await reloadSyncedAPIKey(\.reson8APIKey, identifier: Self.reson8KeyID)
+        await reloadSyncedAPIKey(\.stepfunAPIKey, identifier: Self.stepfunKeyID)
         await reloadSyncedAPIKey(\.azureAPIKey, identifier: Self.azureKeyID)
         await reloadSyncedAPIKey(\.alibabaAPIKey, identifier: Self.alibabaKeyID)
         await reloadSyncedAPIKey(\.metaAPIKey, identifier: Self.metaKeyID)
@@ -983,7 +986,7 @@ public final class AppSettings: ObservableObject {
             Self.gladiaKeyID: gladiaAPIKey,
             Self.googleKeyID: googleAPIKey,
             Self.xAIKeyID: xAIAPIKey,
-            "reson8.apiKey": reson8APIKey,
+            Self.reson8KeyID: reson8APIKey,
             Self.metaKeyID: metaAPIKey,
             Self.speechmaticsKeyID: speechmaticsAPIKey,
             Self.revAIKeyID: revAIAPIKey,
@@ -1018,8 +1021,8 @@ public final class AppSettings: ObservableObject {
     private var apiKeysByIdentifier: [String: String] {
         var keys = liveAPIKeysByIdentifier
         keys[Self.openRouterKeyID] = openRouterAPIKey
-        keys["smallest.apiKey"] = smallestAPIKey
-        keys["stepfun.apiKey"] = stepfunAPIKey
+        keys[Self.smallestKeyID] = smallestAPIKey
+        keys[Self.stepfunKeyID] = stepfunAPIKey
         return keys
     }
 

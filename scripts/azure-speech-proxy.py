@@ -413,6 +413,47 @@ class ProxyServer(http.server.ThreadingHTTPServer):
         print("Local proxy request failed.", file=sys.stderr, flush=True)
 
 
+MAX_HEADER_SECONDS = 15
+
+
+class HeaderDeadlineReader:
+    """One absolute budget for the request line and all HTTP headers."""
+
+    def __init__(self, raw, connection):
+        self.raw = raw
+        self.connection = connection
+        self.deadline = time.monotonic() + MAX_HEADER_SECONDS
+
+    def readline(self, limit=-1):
+        line = bytearray()
+        while limit < 0 or len(line) < limit:
+            remaining = self.deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("HTTP header deadline reached.")
+            self.connection.settimeout(remaining)
+            # Peek a bounded chunk, then consume only through this line's LF.
+            # This avoids per-byte syscalls without reading ahead into upload
+            # or WebSocket bytes, whose owners read the original raw stream.
+            available = self.connection.recv(8192, socket.MSG_PEEK)
+            if not available:
+                break
+            newline = available.find(b"\n")
+            count = newline + 1 if newline >= 0 else len(available)
+            if limit >= 0:
+                count = min(count, limit - len(line))
+            remaining = self.deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("HTTP header deadline reached.")
+            self.connection.settimeout(remaining)
+            chunk = self.raw.read(count)
+            if not chunk:
+                break
+            line.extend(chunk)
+            if chunk.endswith(b"\n"):
+                break
+        return bytes(line)
+
+
 class ProxyHandler(http.server.BaseHTTPRequestHandler):
     # No read-ahead: after HTTP upgrade the relay reads directly from the socket.
     rbufsize = 0
@@ -420,6 +461,23 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
     def setup(self):
         self.request.settimeout(15)
         super().setup()
+
+    def handle_one_request(self):
+        original = self.rfile
+        self.rfile = HeaderDeadlineReader(original, self.connection)
+        try:
+            super().handle_one_request()
+        finally:
+            self.rfile = original
+
+    def parse_request(self):
+        reader = self.rfile
+        try:
+            return super().parse_request()
+        finally:
+            # Uploads and upgraded WebSockets keep their separate lifetime budgets.
+            self.rfile = reader.raw
+            self.connection.settimeout(15)
 
     def log_message(self, *args):
         pass

@@ -317,6 +317,51 @@ before the working one is released. Gesture styles report the native press and
 the release, observed by polling the key only while it is held, to the shared
 SpeakCore gesture machine and session policy that state the macOS rules; a
 gesture stops only the kind of session it started.
+With Keyboard's default-on **Cancel recording with Escape** enabled, plain
+Escape is source-wired to Cancel while this app's main window is active and
+recording/working. Idle Escape and other dialogs keep their native behavior;
+held repeats emit only one cancellation, even if the app becomes idle before
+release. Modified Escape remains available to Windows. The shared Host also
+stops legacy active capture without transcription and retains its audio.
+Three portable regressions and native smoke assertions are authored but
+**NOT_RUN** here.
+
+The source-only Windows extension adds passive system-wide Escape observation
+while recording/working with the saved preference enabled, or while Voice Edit
+owns its independent cancellation reason. It uses a UI-thread low-level keyboard hook, not an
+unmodified `RegisterHotKey` grab: every callback continues the native hook chain
+and the foreground app still receives its Escape. Only a first plain physical
+Escape in another process queues cancellation; modified/injected keys, held
+repeats and this app's own windows are excluded. No keystrokes or foreground
+text are retained or logged. Idle publication immediately fences callbacks,
+even before the UI removes the hook. No modifier/foreground query or event
+payload inspection takes place through this callback while fenced.
+
+The native work epoch advances across every idle/active transition, independently
+of coalesced window updates. Queued cancellation is checked against that epoch
+at native message delivery and again inside the shared Host actor before it
+touches the current run. A held Escape at registration cannot cancel a new run.
+Shutdown retires the epoch before teardown, retains a failed-to-remove handle
+in a fenced state rather than stacking another listener, and reports failures.
+Installation is attempted once per active epoch; failure leaves the app's Cancel
+button/window-local Escape available and is explicitly reported. The hook is
+opted out for smoke/screenshot windows. Its native fixture injects registration,
+key-state, delivery and teardown operations and never installs a real hook.
+Two additional portable regressions cover refused stale cancellation and
+cancellation after recording restarts. All compilation, fixtures and physical
+other-app keyboard acceptance for this change are **NOT_RUN** here. Secure
+desktop, session boundaries and real Windows hook delivery remain platform
+qualification requirements, not inferred support.
+
+The canonical `cancelRecordingOnEscape` Boolean now transfers, persists and
+appears in Keyboard. Its default is shared with Mac. Native publication fences
+local and global Escape tokens across off/on transitions, and final Host
+admission also checks the saved policy. Disabling it neither consumes local
+Escape nor disables the explicit Cancel control. Voice Edit still cancels with
+Escape independently, as on Mac. Preference, restart, Voice Edit and native
+policy fixtures are authored but **NOT_RUN**; no additional real hook or
+keyboard activity was used to qualify them.
+
 The portable `DesktopPressCaptureLease` and `DesktopPressCapturePCMRelay` are
 **ownership scaffolding, not an enabled microphone-on-key-press feature**.
 No native worker, host handoff, preference control or permission adapter is

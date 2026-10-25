@@ -22,17 +22,21 @@ public struct DesktopDictationProfileStore: Sendable {
     /// Profiles in stored order. A missing file means no profiles; an
     /// unreadable file throws so the host can say so instead of hiding it.
     public func load() throws -> [DictationProfile] {
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { return [] }
-        return try DictationProfile.decodeList(Data(contentsOf: fileURL))
+        try DesktopProfileDocumentAccess.withMutation {
+            guard FileManager.default.fileExists(atPath: fileURL.path) else { return [] }
+            return try DictationProfile.decodeList(Data(contentsOf: fileURL))
+        }
     }
 
     /// Replaces the whole list atomically. Callers persist only a validated
     /// list; a cancelled edit never reaches this call.
     public func save(_ profiles: [DictationProfile]) throws {
-        try FileManager.default.createDirectory(
-            at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true
-        )
-        try DictationProfile.encodeList(profiles).write(to: fileURL, options: .atomic)
+        try DesktopProfileDocumentAccess.withMutation {
+            try FileManager.default.createDirectory(
+                at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true
+            )
+            try DictationProfile.encodeList(profiles).write(to: fileURL, options: .atomic)
+        }
     }
 
     /// Moves a file `load` could not decode beside itself so a later save
@@ -40,12 +44,14 @@ public struct DesktopDictationProfileStore: Sendable {
     /// or `nil` when there was nothing to preserve.
     @discardableResult
     public func preserveUnreadableFile(now: Date = Date()) throws -> URL? {
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
-        let stamp = Int(now.timeIntervalSince1970)
-        let suffix = UUID().uuidString.prefix(8).lowercased()
-        let destination = fileURL.deletingLastPathComponent()
-            .appendingPathComponent("\(Self.filename).unreadable-\(stamp)-\(suffix)")
-        try FileManager.default.moveItem(at: fileURL, to: destination)
-        return destination
+        try DesktopProfileDocumentAccess.withMutation {
+            guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
+            let stamp = Int(now.timeIntervalSince1970)
+            let suffix = UUID().uuidString.prefix(8).lowercased()
+            let destination = fileURL.deletingLastPathComponent()
+                .appendingPathComponent("\(Self.filename).unreadable-\(stamp)-\(suffix)")
+            try FileManager.default.moveItem(at: fileURL, to: destination)
+            return destination
+        }
     }
 }

@@ -68,7 +68,7 @@ enum DeliverySettingsRemedy: Equatable {
   ) -> DeliverySettingsRemedy? {
     switch outputError {
     case .originalApplicationNotInFront:
-      return .useAppSwitchDelivery(.originalApp)
+      return configuration.appSwitchDelivery == .originalApp ? nil : .useAppSwitchDelivery(.originalApp)
     case .targetApplicationUnavailable:
       return configuration.appSwitchDelivery == .currentApp ? nil : .useAppSwitchDelivery(.currentApp)
     case .accessibilityPermissionMissing:

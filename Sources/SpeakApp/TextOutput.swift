@@ -253,10 +253,10 @@ enum TextOutputError: LocalizedError {
       return "The focused field changed since recording started. "
         + "The transcript was kept on the clipboard."
     case .originalApplicationNotInFront(let name):
-      return "You'd switched away from \(name ?? "the app where recording started"), so nothing was inserted. "
+      return "You'd switched away from \(name ?? "the app where recording started") before final delivery. "
         + "The transcript was kept on the clipboard."
     case .destinationApplicationChanged:
-      return "You switched apps again before the transcript could be inserted, so nothing was inserted. "
+      return "You switched apps again before final delivery. "
         + "The transcript was kept on the clipboard."
     }
   }
@@ -308,55 +308,22 @@ struct AccessibilityTextOutput: TextOutputting {
 
     switch appSettings.accessibilityInsertionMode {
     case .insertAtCursor:
-      return insertAtCursor(text, into: focusedElement)
+      return AccessibilityInsertionWriter.insertAtCursor(
+        text: text,
+        selectedRange: { AccessibilityStreamingTextField(element: focusedElement).readSelectedRange() },
+        destinationError: { target?.destinationChangedError() },
+        setSelectedText: {
+          AXUIElementSetAttributeValue(focusedElement, kAXSelectedTextAttribute as CFString, text as CFTypeRef)
+        },
+        setValue: { AXUIElementSetAttributeValue(focusedElement, kAXValueAttribute as CFString, text as CFTypeRef) }
+      )
 
     case .replaceAll:
-      let setResult = AXUIElementSetAttributeValue(
-        focusedElement, kAXValueAttribute as CFString, text as CFTypeRef)
-      guard setResult == .success else {
-        return TextOutputResult(
-          method: .none,
-          error: TextOutputError.unableToSetValue(setResult)
-        )
-      }
-      return TextOutputResult(
-        method: .accessibility,
-        error: nil,
-        insertedRange: VoiceEditTextRange(location: 0, length: text.utf16.count)
+      return AccessibilityInsertionWriter.replaceAll(
+        text: text, destinationError: { target?.destinationChangedError() },
+        setValue: { AXUIElementSetAttributeValue(focusedElement, kAXValueAttribute as CFString, text as CFTypeRef) }
       )
     }
-  }
-
-  /// Replaces the current selection (or inserts at the caret), falling back to
-  /// replacing the whole field when the app rejects selected-text insertion.
-  private func insertAtCursor(_ text: String, into focusedElement: AXUIElement) -> TextOutputResult {
-    // The selection about to be replaced tells us where the text will land.
-    let selectionBeforeInsert = AccessibilityStreamingTextField(element: focusedElement)
-      .readSelectedRange()
-    let setResult = AXUIElementSetAttributeValue(
-      focusedElement, kAXSelectedTextAttribute as CFString, text as CFTypeRef)
-    guard setResult == .success else {
-      let fallbackResult = AXUIElementSetAttributeValue(
-        focusedElement, kAXValueAttribute as CFString, text as CFTypeRef)
-      guard fallbackResult == .success else {
-        return TextOutputResult(
-          method: .none,
-          error: TextOutputError.unableToSetValue(fallbackResult)
-        )
-      }
-      return TextOutputResult(
-        method: .accessibility,
-        error: nil,
-        insertedRange: VoiceEditTextRange(location: 0, length: text.utf16.count)
-      )
-    }
-    return TextOutputResult(
-      method: .accessibility,
-      error: nil,
-      insertedRange: selectionBeforeInsert.map {
-        VoiceEditTextRange(location: $0.location, length: text.utf16.count)
-      }
-    )
   }
 
   /// A non-nil target is a captured-field contract: when its AX element is
@@ -643,15 +610,17 @@ struct SmartTextOutput: TextOutputting {
     guard let target else {
       return deliver(text: text, target: nil)
     }
-    let frontmostProcessIdentifier = NSWorkspace.shared.frontmostApplication?.processIdentifier
-    let decision = Self.appSwitchDecision(
-      policy: appSettings.appSwitchDelivery,
-      capturedApplicationIsFrontmost: target.capturedApplicationIsFrontmost(
-        frontmostProcessIdentifier: frontmostProcessIdentifier
-      ),
-      capturedApplicationIsRunning: target.isApplicationRunning,
-      frontmostProcessIdentifier: frontmostProcessIdentifier
-    )
+    if target.requiresFrontmostAtDelivery {
+      // The destination was already chosen by live finalization. Never follow
+      // another app switch back into a field holding this session's partials.
+      if let error = target.destinationChangedError() {
+        return Self.keepOnClipboard(text: text, error: error)
+      }
+      var result = deliver(text: text, target: target)
+      result.redirectedTarget = target
+      return result
+    }
+    let decision = Self.currentAppSwitchDecision(policy: appSettings.appSwitchDelivery, target: target)
     switch decision {
     case .deliverToOriginal(let focusMoved):
       var result = deliver(text: text, target: target)
@@ -661,11 +630,22 @@ struct SmartTextOutput: TextOutputting {
       return deliverToCurrentApp(text: text, originalTarget: target)
     case .keepOnClipboard:
       logger.info("Original app is not in front; keeping the transcript on the clipboard")
-      return keepOnClipboard(
-        text: text,
-        error: .originalApplicationNotInFront(target.applicationName)
-      )
+      return Self.keepOnClipboard(text: text, error: .originalApplicationNotInFront(target.applicationName))
     }
+  }
+
+  static func currentAppSwitchDecision(
+    policy: AppSettings.AppSwitchDelivery, target: TextOutputTarget
+  ) -> AppSwitchDecision {
+    let frontmostProcessIdentifier = NSWorkspace.shared.frontmostApplication?.processIdentifier
+    return appSwitchDecision(
+      policy: policy,
+      capturedApplicationIsFrontmost: target.capturedApplicationIsFrontmost(
+        frontmostProcessIdentifier: frontmostProcessIdentifier
+      ),
+      capturedApplicationIsRunning: target.isApplicationRunning,
+      frontmostProcessIdentifier: frontmostProcessIdentifier
+    )
   }
 
   private func deliverToCurrentApp(text: String, originalTarget: TextOutputTarget) -> TextOutputResult {
@@ -673,19 +653,19 @@ struct SmartTextOutput: TextOutputting {
     current.requiresFrontmostAtDelivery = true
     guard Self.isUsableRedirectDestination(processIdentifier: current.processIdentifier) else {
       logger.info("No other app is in front any more; keeping the transcript on the clipboard")
-      return keepOnClipboard(text: text, error: .destinationApplicationChanged)
+      return Self.keepOnClipboard(text: text, error: .destinationApplicationChanged)
     }
     let originalApp = originalTarget.applicationName ?? "unknown"
     let currentApp = current.applicationName ?? "unknown"
     logger.info(
-      "Focus moved from \(originalApp, privacy: .public) to \(currentApp, privacy: .public); delivering there"
+      "Focus moved from \(originalApp, privacy: .private) to \(currentApp, privacy: .private); delivering there"
     )
     var result = deliver(text: text, target: current)
     if case .destinationApplicationChanged? = result.error as? TextOutputError {
       logger.info("Focus moved again before insertion; keeping the transcript on the clipboard")
       // Accessibility-only delivery never touched the clipboard.
       if result.method != .clipboard {
-        result = keepOnClipboard(text: text, error: .destinationApplicationChanged)
+        result = Self.keepOnClipboard(text: text, error: .destinationApplicationChanged)
       }
       return result
     }
@@ -741,7 +721,7 @@ struct SmartTextOutput: TextOutputting {
     }
   }
 
-  private func keepOnClipboard(text: String, error: TextOutputError) -> TextOutputResult {
+  static func keepOnClipboard(text: String, error: TextOutputError) -> TextOutputResult {
     guard PasteTextOutput.hasDeliverableText(text) else {
       return TextOutputResult(method: .none, error: nil)
     }

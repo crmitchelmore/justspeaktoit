@@ -30,6 +30,7 @@ package enum DesktopHostPreferenceArchive {
         if let value = settings.archiveBatchModel { native.set(.batchTranscriptionModel, .string(value)) }
         if let value = settings.archiveLiveModel { native.set(.liveTranscriptionModel, .string(value)) }
         if let value = settings.archiveLocalModel { native.set(.localTranscriptionModel, .string(value)) }
+        if let value = settings.archiveLocalLiveModel { native.set(.localStreamingModelSource, .string(value)) }
         if let model = settings.archiveModel { addActiveModel(model, to: &native) }
         addAppearanceAndServices(settings, to: &native)
         if let polish = settings.postProcessing { addPostProcessing(polish, to: &native) }
@@ -57,8 +58,13 @@ package enum DesktopHostPreferenceArchive {
     }
 
     private static func addActiveModel(_ model: String, to native: inout DesktopHostNativePreferenceProjection) {
-        if case .downloadedLocal = ModelRouting.family(for: model) {
+        if case .downloadedLocal(engine: .streaming) = ModelRouting.family(for: model) {
             native.set(.transcriptionMode, .string("localModel"))
+            native.set(.localTranscriptionMode, .string("streaming"))
+            native.set(.localStreamingModelSource, .string(model))
+        } else if case .downloadedLocal = ModelRouting.family(for: model) {
+            native.set(.transcriptionMode, .string("localModel"))
+            native.set(.localTranscriptionMode, .string("batch"))
             native.set(.localTranscriptionModel, .string(model))
         } else if DesktopLiveTranscription.route(forID: model) != nil {
             native.set(.transcriptionMode, .string("liveNative"))

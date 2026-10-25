@@ -37,6 +37,9 @@ extension LinuxWindow {
     static func configureConfiguration(_ holder: LinuxEventContext) async throws {
         let snapshot = try await holder.controller.nativeConfigurationEditorSnapshot()
         let preferences = snapshot.preferences
+        guard jsti_window_set_escape_cancellation(preferences.cancelRecordingOnEscape ? 1 : 0) == 0 else {
+            throw DesktopConfigurationError.invalidField("Escape cancellation")
+        }
         holder.gestures.configureTiming(
             hold: preferences.number("holdThreshold"), doubleTap: preferences.number("doubleTapWindow")
         )

@@ -1170,7 +1170,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       defaults.string(forKey: DefaultsKey.appSwitchDelivery.rawValue)
         .flatMap(AppSwitchDelivery.init(rawValue:)) ?? AppSwitchDelivery.defaultValue
     cancelRecordingOnEscape =
-      defaults.object(forKey: DefaultsKey.cancelRecordingOnEscape.rawValue) as? Bool ?? true
+      defaults.object(forKey: DefaultsKey.cancelRecordingOnEscape.rawValue) as? Bool
+      ?? SpeechDefaults.cancelRecordingOnEscape
     showHUDDuringSessions = defaults.object(forKey: DefaultsKey.showHUD.rawValue) as? Bool ?? SpeechDefaults.showHUD
     showLiveTranscriptInHUD =
       defaults.object(forKey: DefaultsKey.showLiveTranscriptInHUD.rawValue) as? Bool ?? SpeechDefaults.liveTranscriptHUD

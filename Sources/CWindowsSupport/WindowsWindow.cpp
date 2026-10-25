@@ -26,6 +26,7 @@
 #include "WindowsOnboarding.hpp"
 #include "WindowsAppIcon.hpp"
 #include "WindowsMigrationRestore.hpp"
+#include "WindowsGlobalEscape.hpp"
 
 bool jsti_postprocessing_available();
 void jsti_show_postprocessing(HWND owner);
@@ -390,6 +391,8 @@ struct WindowState {
     std::vector<MicrophoneRow> pendingMicrophones;
     std::wstring microphoneError;
     bool modelsChanged = false;
+    bool localModelPreferencesChanged = false;
+    int pendingLocalModelPreferences[2] = {-1, -1};
     bool modelsRefreshing = false;
     std::wstring modelStatus;
     std::vector<ModelRow> pendingModels;
@@ -402,6 +405,8 @@ struct WindowState {
     int pendingPlaybackState = playbackIdle;
     std::wstring pendingPlaybackText;
     int recording = 0;
+    bool globalEscapeEnabled = false;
+    bool cancelKeyHeld = false;
     std::wstring status;
     std::wstring transcript;
     std::vector<MicrophoneRow> microphones;
@@ -1943,6 +1948,41 @@ bool sidebarKeyMessage(HWND window, const MSG &message) {
     return navigateSidebar(window, static_cast<int>(message.wParam - '0'), exactControl, GetFocus());
 }
 
+bool cancelKey(HWND window, const MSG &message, bool plain, bool active) {
+    if (message.wParam != VK_ESCAPE || !active || !IsWindowEnabled(window) ||
+        !(message.hwnd == window || IsChild(window, message.hwnd))) return false;
+    if (message.message == WM_KEYUP || message.message == WM_SYSKEYUP) {
+        const bool held = state.cancelKeyHeld;
+        state.cancelKeyHeld = false;
+        return held && jsti::globalEscape::enabled();
+    }
+    if (message.message != WM_KEYDOWN) return false;
+    if (!jsti::globalEscape::enabled()) {
+        if (plain) state.cancelKeyHeld = true;
+        return false;
+    }
+    if (state.cancelKeyHeld) return true;
+    if (!plain) return false;
+    if (message.lParam & (static_cast<LPARAM>(1) << 30)) return false;
+    int recording;
+    { std::lock_guard<std::mutex> lock(state.mutex); recording = state.recording; }
+    if (recording != 1 && recording != 2) return false;
+    const auto token = jsti::globalEscape::token();
+    if (!token) return false;
+    state.cancelKeyHeld = true;
+    retireCleanupPreview();
+    emit(window, JSTI_EVENT_CANCEL_TRANSCRIPTION, std::to_string(token).c_str());
+    return true;
+}
+
+bool cancelKeyMessage(HWND window, const MSG &message) {
+    if (message.wParam != VK_ESCAPE) return false;
+    const bool plain = !(GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000) &&
+        !(GetKeyState(VK_SHIFT) & 0x8000) && !(GetKeyState(VK_LWIN) & 0x8000) &&
+        !(GetKeyState(VK_RWIN) & 0x8000);
+    return cancelKey(window, message, plain, GetForegroundWindow() == window);
+}
+
 // The dashboard's Setup card and the header subtitle echo the settings.
 void refreshSetup(HWND window) {
     auto comboText = [&](int identifier) {
@@ -2248,7 +2288,8 @@ void applyUpdate(HWND window) {
     std::vector<MicrophoneRow> microphones;
     std::wstring microphoneError;
     bool statusChanged, transcriptChanged, historyChanged, variantChanged, variantSwitchable;
-    bool modelsChanged, modelsRefreshing;
+    bool modelsChanged, modelsRefreshing, localModelPreferencesChanged;
+    int localModelPreferences[2];
     std::vector<ModelRow> models;
     std::wstring modelStatus;
     std::vector<HistoryRow> history;
@@ -2273,6 +2314,11 @@ void applyUpdate(HWND window) {
         modelsRefreshing = state.modelsRefreshing;
         if (modelsChanged) { models = std::move(state.pendingModels); modelStatus = state.modelStatus; }
         state.modelsChanged = false;
+        localModelPreferencesChanged = state.localModelPreferencesChanged;
+        std::copy(std::begin(state.pendingLocalModelPreferences), std::end(state.pendingLocalModelPreferences),
+                  localModelPreferences);
+        std::fill(std::begin(state.pendingLocalModelPreferences), std::end(state.pendingLocalModelPreferences), -1);
+        state.localModelPreferencesChanged = false;
         statusChanged = state.statusChanged; transcriptChanged = state.transcriptChanged;
         state.statusChanged = false; state.transcriptChanged = false;
         historyChanged = state.historyChanged;
@@ -2309,8 +2355,23 @@ void applyUpdate(HWND window) {
         state.remoteModelStatus = modelStatus;
         EnableWindow(GetDlgItem(window, modelRefreshID), !modelsRefreshing);
     }
+    if (localModelPreferencesChanged) {
+        for (int i = 0; i < 2; ++i) {
+            const int index = localModelPreferences[i], mode = i + 2;
+            if (index < 0 || state.activeMode == mode) continue;
+            if (static_cast<size_t>(index) < state.modelModes.size() && state.modelModes[index] == mode)
+                state.preferredModels[mode] = index;
+            else {
+                status = L"Saved Local model choice is unavailable. Reopen the app before switching modes.";
+                statusChanged = true;
+            }
+        }
+    }
     updateSourceControls(window);
     if (statusChanged) SetDlgItemTextW(window, statusID, status.c_str());
+    std::string escapeFailure;
+    if (!jsti::globalEscape::reconcile(window, state.globalEscapeEnabled, showFailure, escapeFailure) &&
+        !escapeFailure.empty()) showFailure(window, escapeFailure);
     applyInsights(window);
 
     SetDlgItemTextW(window, recordID, recording == 1 ? L"&Stop recording" : (recording == 2 ? L"&Cancel" : L"&Record"));
@@ -2622,6 +2683,9 @@ void tourStep(HWND window) {
 
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     switch (message) {
+    case WM_ACTIVATE:
+        if (LOWORD(wparam) == WA_INACTIVE) state.cancelKeyHeld = false;
+        break;
     case WM_CREATE:
         if (!createControls(window)) return -1;
         startHandsFreeGuard(window);
@@ -2732,6 +2796,16 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         return 0;
     case updateMessage:
         applyUpdate(window); return 0;
+    case jsti::globalEscape::message:
+        if (jsti::globalEscape::take(window, wparam)) {
+            const int recording = jsti_window_recording_state();
+            if (recording == 1 || recording == 2) {
+                retireCleanupPreview();
+                const auto token = std::to_string(static_cast<uint64_t>(wparam));
+                emit(window, JSTI_EVENT_CANCEL_TRANSCRIPTION, token.c_str());
+            }
+        }
+        return 0;
     case audioCleanupMessage: {
         std::string token;
         size_t count;
@@ -3178,11 +3252,16 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         }
         break;
     case WM_CLOSE:
+        jsti::globalEscape::publish(0);
         retireCleanupPreview();
         emit(window, JSTI_EVENT_CLOSING);
         DestroyWindow(window); return 0;
     case WM_DESTROY:
         retireCleanupPreview();
+        {
+            std::string failure;
+            if (!jsti::globalEscape::stop(failure) && !failure.empty()) showFailure(window, failure);
+        }
         stopHandsFreeGuard(window);
         jsti::tray::remove();
         backdrop.release();
@@ -3558,6 +3637,8 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
             }
         }
         state.pendingModels.clear(); state.modelsChanged = false;
+        state.localModelPreferencesChanged = false;
+        std::fill(std::begin(state.pendingLocalModelPreferences), std::end(state.pendingLocalModelPreferences), -1);
         for (int mode = 0; mode < modeCount; ++mode) {
             const auto first = std::find(state.modelModes.begin(), state.modelModes.end(), mode);
             state.preferredModels[mode] = first == state.modelModes.end() ? -1 : static_cast<int>(first - state.modelModes.begin());
@@ -3576,6 +3657,8 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
         if (state.microphones.empty()) state.microphones.push_back({"", L"Default communications microphone"});
         state.running = true;
         state.recording = 0;
+        jsti::globalEscape::publish(0);
+        state.cancelKeyHeld = false;
         state.microphonesChanged = false;
         state.pendingMicrophones.clear(); state.microphoneError.clear();
         state.posted = false;
@@ -3669,6 +3752,7 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
         MSG message{};
         BOOL result;
         while ((result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
+            if (cancelKeyMessage(window, message)) continue;
             if (sidebarKeyMessage(window, message)) continue;
             if (jsti_action_shortcut_key_message(window, message)) continue;
             if (!jsti_history_filters_message(&message) && !jsti_guide_message(&message) &&
@@ -3679,6 +3763,13 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
         if (result < 0) {
             outcome = jsti::fail(jsti::systemError("Reading desktop messages"), error, capacity);
             DestroyWindow(window);
+        }
+    }
+    {
+        std::string failure;
+        if (!jsti::globalEscape::stop(failure) && !outcome) {
+            outcome = jsti::fail(
+                failure.empty() ? "The active-only Escape listener could not be removed." : failure, error, capacity);
         }
     }
     jsti::hud::destroy();
@@ -3697,6 +3788,35 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
         state.shellDelivery.retire();
     }
     return outcome;
+}
+
+int jsti_window_configure_global_escape(int enabled) {
+    if (enabled != 0 && enabled != 1) return -1;
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (state.running) return -1;
+    state.globalEscapeEnabled = enabled == 1;
+    return 0;
+}
+
+int jsti_window_global_escape_is_current(uint64_t token) {
+    return jsti::globalEscape::current(token) ? 1 : 0;
+}
+
+int jsti_window_set_voice_edit_escape(int active) {
+    if (active != 0 && active != 1) return -1;
+    jsti::globalEscape::editing(active == 1);
+    return 0;
+}
+
+int jsti_window_set_escape_cancellation(int enabled) {
+    if (enabled != 0 && enabled != 1) return -1;
+    std::lock_guard<std::mutex> lock(state.mutex);
+    jsti::globalEscape::configure(enabled == 1);
+    if (state.window && !state.posted) {
+        state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
+        if (!state.posted) return -1;
+    }
+    return 0;
 }
 
 int jsti_window_set_model_modes(const int *rowModes, size_t count, int preferredBatch, int preferredLive,
@@ -3728,6 +3848,32 @@ int jsti_window_set_preferred_local_live_model(int index) {
     const auto &modes = state.configuredModelModes;
     if (index < -1 || (index >= 0 && (static_cast<size_t>(index) >= modes.size() || modes[index] != 3))) return -1;
     state.configuredPreferredModels[3] = index;
+    return 0;
+}
+
+int jsti_window_set_local_model_preferences(int batch, int live) {
+    std::lock_guard<std::mutex> lock(state.mutex);
+    const int values[] = {batch, live};
+    for (int i = 0; i < 2; ++i) {
+        const int index = values[i], mode = i + 2;
+        if (index < -1) return -1;
+        if (index < 0) continue;
+        if (state.running) {
+            if (static_cast<size_t>(index) >= state.knownModelIdentities.size() ||
+                state.knownModelIdentities[index].second != mode) return -1;
+        } else if (static_cast<size_t>(index) >= state.configuredModelModes.size() ||
+                   state.configuredModelModes[index] != mode) return -1;
+    }
+    if (!state.running) {
+        for (int i = 0; i < 2; ++i) if (values[i] >= 0) state.configuredPreferredModels[i + 2] = values[i];
+        return 0;
+    }
+    for (int i = 0; i < 2; ++i) if (values[i] >= 0) state.pendingLocalModelPreferences[i] = values[i];
+    state.localModelPreferencesChanged = true;
+    if (state.window && !state.posted) {
+        state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
+        if (!state.posted) return -1;
+    }
     return 0;
 }
 
@@ -3874,7 +4020,10 @@ int jsti_window_update(const char *status, const char *transcript, int recording
     if (!state.window) return -1;
     if (status) { state.status = std::move(wideStatus); state.statusChanged = true; }
     if (transcript) { state.transcript = std::move(wideTranscript); state.transcriptChanged = true; }
-    if (recording >= 0) state.recording = recording;
+    if (recording >= 0) {
+        state.recording = recording;
+        jsti::globalEscape::publish(recording);
+    }
     if (!state.posted) {
         state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
         if (!state.posted) return -1;
@@ -4314,6 +4463,14 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     if (!window || GetWindowThreadProcessId(window, nullptr) != GetCurrentThreadId()) {
         return jsti::fail("Window checks must run on the UI thread after READY.", error, errorCapacity);
     }
+    std::string escapeFailure;
+    if (!jsti::globalEscape::selfTest(window, escapeFailure)) {
+        return jsti::fail(escapeFailure, error, errorCapacity);
+    }
+    if (jsti_window_configure_global_escape(0) != -1 || jsti_window_configure_global_escape(2) != -1 ||
+        jsti_window_global_escape_is_current(0) != 0) {
+        return jsti::fail("Global Escape configuration or invalid-token admission lost its guard.", error, errorCapacity);
+    }
     if (!GetDlgItem(window, troubleshootingID) || !onPage(troubleshootingID, aboutPage) ||
         onPage(troubleshootingID, dashboardPage) || !jsti_troubleshooting_self_test(window))
         return jsti::fail("Troubleshooting entry, independent report state or stale-result checks failed.",
@@ -4489,10 +4646,10 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     // The model, source and mode checks read the Transcription page's controls.
     const int originalPage = state.page;
     showPage(window, transcriptionPage);
-    struct Event { int event = 0; std::string id; int model = -1; } observed;
+    struct Event { int event = 0; std::string id; int model = -1; int calls = 0; } observed;
     state.callback = [](int event, const char *id, int model, void *context) {
         auto &observed = *static_cast<Event *>(context);
-        observed.event = event; observed.id = id ? id : ""; observed.model = model;
+        observed.event = event; observed.id = id ? id : ""; observed.model = model; ++observed.calls;
     };
     state.context = &observed;
     const unsigned originalAbsence = handsFreeAbsence.exchange(0);
@@ -5192,6 +5349,65 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         jsti_window_update(nullptr, nullptr, 0);
         applyUpdate(window);
         if (!cancellation) { failure = "Busy transcription could not be cancelled from the native control."; return false; }
+        {
+            MSG escape{};
+            escape.hwnd = GetDlgItem(window, transcriptID);
+            escape.message = WM_KEYDOWN; escape.wParam = VK_ESCAPE;
+            const int before = observed.calls;
+            const bool savedPolicy = jsti::globalEscape::enabled();
+            bool okay = jsti_window_set_escape_cancellation(1) == 0 && !cancelKey(window, escape, true, true);
+            jsti_window_update(nullptr, nullptr, 1);
+            applyUpdate(window);
+            okay = !cancelKey(window, escape, false, true) && !cancelKey(window, escape, true, false) && okay;
+            HWND child = escape.hwnd;
+            escape.hwnd = GetDesktopWindow();
+            okay = !cancelKey(window, escape, true, true) && okay;
+            escape.hwnd = child;
+            EnableWindow(window, FALSE);
+            okay = !cancelKey(window, escape, true, true) && okay;
+            EnableWindow(window, TRUE);
+            okay = cancelKey(window, escape, true, true) && observed.calls == before + 1 &&
+                observed.event == JSTI_EVENT_CANCEL_TRANSCRIPTION &&
+                observed.id == std::to_string(jsti::globalEscape::token()) && okay;
+            escape.lParam = static_cast<LPARAM>(1) << 30;
+            okay = cancelKey(window, escape, true, true) && observed.calls == before + 1 && okay;
+            jsti_window_update(nullptr, nullptr, 0);
+            applyUpdate(window);
+            okay = cancelKey(window, escape, true, true) && observed.calls == before + 1 && okay;
+            escape.message = WM_KEYUP;
+            okay = cancelKey(window, escape, true, true) && !state.cancelKeyHeld && okay;
+            escape.message = WM_KEYDOWN;
+            okay = !cancelKey(window, escape, true, true) && okay;
+            jsti_window_update(nullptr, nullptr, 2);
+            applyUpdate(window);
+            escape.lParam = 0;
+            okay = cancelKey(window, escape, true, true) && observed.calls == before + 2 && okay;
+            const auto oldToken = jsti::globalEscape::token();
+            okay = jsti_window_set_escape_cancellation(-1) == -1 &&
+                jsti_window_set_escape_cancellation(2) == -1 &&
+                jsti_window_set_voice_edit_escape(-1) == -1 &&
+                jsti_window_set_voice_edit_escape(2) == -1 &&
+                jsti_window_global_escape_is_current(oldToken) == 1 && okay;
+            okay = jsti_window_set_escape_cancellation(0) == 0 &&
+                !cancelKey(window, escape, true, true) && observed.calls == before + 2 &&
+                !jsti_window_global_escape_is_current(oldToken) && okay;
+            SendMessageW(window, WM_COMMAND, MAKEWPARAM(recordID, BN_CLICKED), 0);
+            okay = observed.calls == before + 3 && observed.event == JSTI_EVENT_CANCEL_TRANSCRIPTION &&
+                observed.id.empty() && okay;
+            okay = jsti_window_set_escape_cancellation(1) == 0 &&
+                !jsti_window_global_escape_is_current(oldToken) &&
+                cancelKey(window, escape, true, true) && observed.calls == before + 3 && okay;
+            SendMessageW(window, WM_ACTIVATE, WA_INACTIVE, 0);
+            okay = !state.cancelKeyHeld && okay;
+            okay = cancelKey(window, escape, true, true) && observed.calls == before + 4 &&
+                observed.id == std::to_string(jsti::globalEscape::token()) && okay;
+            escape.message = WM_KEYUP;
+            okay = cancelKey(window, escape, true, true) && !state.cancelKeyHeld && okay;
+            jsti_window_update(nullptr, nullptr, 0);
+            applyUpdate(window);
+            okay = jsti_window_set_escape_cancellation(savedPolicy ? 1 : 0) == 0 && okay;
+            if (!okay) { failure = "Escape cancellation lost ownership, idle or repeat guards."; return false; }
+        }
         state.modelModes.assign(state.modelNames.size(), 0);
         state.preferredModels[0] = 2;
         state.preferredModels[1] = -1;
@@ -5304,6 +5520,36 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         if (!remoteShown || !localChosen || !sourceLocked || !changeSource(0, 0) || !changeMode(1, 1) ||
             !changeSource(1, 2) || !changeSource(0, 0)) {
             failure = "The Source picker lost a source preference, its controls or the global model identity."; return false;
+        }
+        state.modelNames = {L"Remote Batch", L"Remote Live", L"Local Batch", L"Local Live",
+                            L"Imported Local Batch", L"Imported Local Live"};
+        state.modelModes = {0, 1, 2, 3, 2, 3};
+        state.modelOrder = {0, 1, 2, 3, 4, 5};
+        {
+            std::lock_guard<std::mutex> lock(state.mutex);
+            state.knownModelIdentities = {{"remote-batch", 0}, {"remote-live", 1}, {"local-batch", 2},
+                                         {"local-live", 3}, {"other-batch", 2}, {"other-live", 3}};
+        }
+        state.preferredModels[3] = 3;
+        if (!populateModels(window)) { failure = "Local transfer fixture could not display models."; return false; }
+        const int beforeImport = observed.event = -500;
+        if (jsti_window_set_local_model_preferences(4, -1) != 0 ||
+            jsti_window_set_local_model_preferences(-1, 5) != 0) {
+            failure = "Inactive Local choices could not be published."; return false;
+        }
+        applyUpdate(window);
+        if (selection(window) != 0 || observed.event != beforeImport || state.preferredModels[0] != 0 ||
+            state.preferredModels[1] != 1 || state.preferredModels[2] != 4 || state.preferredModels[3] != 5 ||
+            !changeSource(1, 4) || !changeMode(1, 5) || jsti_window_set_local_model_preferences(2, 3) != 0) {
+            failure = "Local transfer activated a model or lost an inactive preference."; return false;
+        }
+        observed.event = -500;
+        applyUpdate(window);
+        if (selection(window) != 5 || observed.event != -500 || state.preferredModels[3] != 5 ||
+            state.preferredModels[2] != 2 ||
+            jsti_window_set_local_model_preferences(-2, -1) != -1 ||
+            jsti_window_set_local_model_preferences(1, 2) != -1 || !changeSource(0, 1)) {
+            failure = "Local transfer replaced the active model or accepted a wrong-mode index."; return false;
         }
         // The Text output modal must block both background recording paths.
         auto setRecording = [](HWND owner, int recording) {

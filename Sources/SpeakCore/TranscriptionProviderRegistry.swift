@@ -37,7 +37,7 @@ public struct TranscriptionProviderMetadata: Sendable, Identifiable {
     ) {
         self.init(
             id: id, displayName: displayName, systemImage: systemImage, tintColor: tintColor,
-            website: website, apiKeyIdentifier: "\(id).apiKey"
+            website: website, apiKeyIdentifier: ProviderCredentialCatalogue.apiKeyIdentifier(for: id)
         )
     }
 

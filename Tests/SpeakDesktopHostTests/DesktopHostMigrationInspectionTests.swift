@@ -6,12 +6,14 @@ import XCTest
 
 final class DesktopHostMigrationInspectionTests: XCTestCase {
     func testRealBackup_InspectsHistoryAndAudioWithoutChangingApplicationOrSource() async throws {
+        FakeLog.shared.reset()
         let fixture = try BackupHostFixture()
         defer { fixture.remove() }
         let record = try await fixture.seed()
         await fixture.controller.beginMigrationExport(fixture.destination, includeAudio: true, using: fixture.adapter())
         await fixture.finish()
         let source = try Data(contentsOf: fixture.destination)
+        let presented = expectation(description: "This backup's read-only inspection was presented")
         let inspector = DesktopHostMigrationInspector(reader: .init {
             try DesktopMigrationArchive.read(
                 $0, digests: BackupHostFixture.digests, stagingRoot: fixture.root, storage: BackupHostFixture.storage
@@ -29,10 +31,12 @@ final class DesktopHostMigrationInspectionTests: XCTestCase {
             XCTAssertTrue(report.recordingHistoryOnly)
             XCTAssertTrue(report.text.contains("Separate speech-usage ledgers are excluded"))
             XCTAssertFalse(report.text.contains(record.id.uuidString))
+            presented.fulfill()
         })
         await fixture.controller.beginMigrationInspection(fixture.destination, using: inspector)
         let task = await fixture.controller.migrationInspectionTask
         await task?.value
+        await fulfillment(of: [presented], timeout: 10)
         let restored = try await fixture.controller.store.record(id: record.id)
         XCTAssertEqual(restored.processedText, record.processedText)
         XCTAssertEqual(try Data(contentsOf: fixture.destination), source)
@@ -41,7 +45,10 @@ final class DesktopHostMigrationInspectionTests: XCTestCase {
         let operations = await fixture.controller.activeOperations
         XCTAssertEqual(operations, 0)
         let statuses = FakeLog.shared.allStatuses
-        XCTAssertTrue(statuses.last?.contains("Backup inspected") == true, statuses.joined(separator: "\n"))
+        XCTAssertTrue(statuses.contains { $0.hasPrefix("Backup inspected.") }, "\(statuses)")
+        XCTAssertFalse(statuses.contains { $0.hasPrefix("Could not inspect backup") }, "\(statuses)")
+        XCTAssertFalse(statuses.contains { $0.hasPrefix("Could not show backup inspection") }, "\(statuses)")
+        XCTAssertFalse(statuses.contains { $0.hasPrefix("Backup inspection cancelled") }, "\(statuses)")
         await fixture.controller.close()
     }
 

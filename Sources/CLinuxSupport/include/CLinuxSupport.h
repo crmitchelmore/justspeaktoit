@@ -71,12 +71,16 @@ enum {
     JSTI_EVENT_AUDIO_CLEANUP_RESPONSE = 95, /* text: confirmation UUID; index: 1 confirms, 0 cancels */
     JSTI_EVENT_MIGRATION_EXPORT = 96, /* text: ZIP destination; index bits: 1 saved audio, 2 app profiles */
     JSTI_EVENT_MIGRATION_INSPECT = 97, /* text: selected ZIP source; no application changes */
+    JSTI_EVENT_MIGRATION_RESTORE = 98, /* text: selected ZIP source; prepares a preview only */
+    JSTI_EVENT_MIGRATION_RESTORE_RESPONSE = 99, /* text: preview token; 0 cancel, 1 merge, 2 replace profiles */
     JSTI_EVENT_QUICK_VOICE = 110, /* index: canonical favorite slot 1...3 */
+    JSTI_EVENT_PASTE_LAST_HISTORY = 111, /* capture the invocation target before queueing */
     JSTI_EVENT_SPEAK_CLIPBOARD = 113, /* captures through the owned Host speech task, not History */
     JSTI_EVENT_ACTION_SHORTCUT_EDIT = 115, /* revision/request header, then percent-escaped draft rows */
     JSTI_EVENT_SPEECH_PAUSE = 116, /* exact active speech only; never starts History audio */
     JSTI_EVENT_API_KEYS = 117,
     JSTI_EVENT_PERMISSIONS = 118,
+    JSTI_EVENT_SPEAK_SELECTED_TEXT = 130, /* captures a selection-only invocation receipt before queueing */
     /* Profiles: percent-escaped TAB fields, starting with revision/action/UUID;
      * "refresh" opens a new immutable catalogue/editor revision. */
     JSTI_EVENT_PROFILES = 140
@@ -103,6 +107,23 @@ enum {
 /* The argument the login item starts the app with (the shared
  * DesktopLoginItem.launchArgument): the window starts minimised. */
 #define JSTI_LOGIN_LAUNCH_ARGUMENT "--background"
+#define JSTI_TOGGLE_ARGUMENT "--toggle"
+#define JSTI_SPEAK_CLIPBOARD_ARGUMENT "--speak-clipboard"
+#define JSTI_SPEAK_SELECTED_TEXT_ARGUMENT "--speak-selected-text"
+#define JSTI_PASTE_LAST_HISTORY_ARGUMENT "--paste-last-history"
+#define JSTI_STOP_SPEECH_ARGUMENT "--stop-speech"
+#define JSTI_PAUSE_SPEECH_ARGUMENT "--pause-resume-speech"
+#define JSTI_QUICK_VOICE_1_ARGUMENT "--quick-voice-1"
+#define JSTI_QUICK_VOICE_2_ARGUMENT "--quick-voice-2"
+#define JSTI_QUICK_VOICE_3_ARGUMENT "--quick-voice-3"
+
+/* Pure preflight for exactly one supported action (including legacy --toggle).
+ * Rejects unknown options without registering, activating or opening stores. */
+int32_t jsti_window_validate_action_command(int argc, char **argv, char *error, size_t error_capacity);
+
+/* Forward an action command before constructing a controller or opening stores.
+ * Refuses a missing primary instance without activating any window. */
+int32_t jsti_window_forward_action(const char *app_id, int argc, char **argv, char *error, size_t error_capacity);
 
 /* Recording state for jsti_window_update: -1 keeps the current state. */
 enum { JSTI_STATE_IDLE = 0, JSTI_STATE_RECORDING = 1, JSTI_STATE_WORKING = 2 };
@@ -112,7 +133,9 @@ typedef void (*jsti_window_event_fn)(int32_t event, const char *text, int32_t in
  * rows remain visible but disabled; this does not change dictation registration.
  * run: 0 unavailable, 1 record, 2 page, 3 stop, 4 troubleshooting,
  * 5 comparison, 6 quick voice, 7 clipboard speech, 8 speech pause,
- * 9 API Keys, 10 Permissions. Strings are copied before return. */
+ * 9 API Keys, 10 Permissions, 11 paste last History, 12 selected-text speech.
+ * Selected-text speech needs external focus; its saved window binding stays disabled.
+ * Strings are copied before return. */
 typedef struct JSTILinuxActionShortcut {
     const char *title, *chord, *note, *page, *identifier;
     uint32_t keysym, modifiers;
@@ -235,6 +258,10 @@ int32_t jsti_window_run(
 /* Safe from any thread; applied on the GTK main thread. No-ops before the
  * window exists or after it closes. `status` or `transcript` may be NULL. */
 int32_t jsti_window_update(const char *status, const char *transcript, int32_t state);
+/* Thread-safe saved policy and final Host admission check for window-local Escape.
+ * Policy/state transitions retire old tokens before queued GTK presentation. */
+int32_t jsti_window_set_escape_cancellation(int32_t enabled);
+int32_t jsti_window_escape_is_current(uint64_t token);
 /* Preview-only; one pending value. Native navigation retires the ticket.
  * Offer returns 1 for a stale ticket, -1 for an enqueue/validation failure. */
 uint64_t jsti_window_begin_cleanup_preview(void);
@@ -246,6 +273,11 @@ void jsti_window_end_cleanup_preview(uint64_t ticket);
 int32_t jsti_vocabulary_set(int32_t kind, const char *payload, int32_t refresh);
 int32_t jsti_window_set_model_catalog(
     const JSTIModelRow *rows, size_t count, int32_t selected, const char *status, int32_t refreshing);
+/* Remembered global slots for Remote Batch/Live and Local Batch/Live.
+ * Queued before window construction; -1 means no saved model for that mode. */
+int32_t jsti_window_set_preferred_models(int32_t batch, int32_t live, int32_t local, int32_t local_live);
+/* Queued inactive Local choices only; -1 leaves a slot unchanged. No selection event. */
+int32_t jsti_window_set_local_model_preferences(int32_t batch, int32_t live);
 int32_t jsti_window_set_microphones(
     const char *const *ids, const char *const *names, size_t count, const char *selected);
 int32_t jsti_window_set_history(const JSTIHistoryRow *rows, size_t count, const char *selected_id);
@@ -253,6 +285,24 @@ int32_t jsti_window_set_history(const JSTIHistoryRow *rows, size_t count, const 
 int32_t jsti_window_set_history_management(const char *identifiers);
 int32_t jsti_window_confirm_audio_cleanup(const char *token, size_t count);
 int32_t jsti_window_show_migration_report(const char *text);
+/* Owned, modal preview; Replace profiles requires a second affirmative response.
+ * Both stages default to Cancel. Called from the Host's ordered publication path. */
+int32_t jsti_window_confirm_migration_restore(const char *token, const char *text, int32_t offers_replace);
+/* Modeless setup guide. Commands: 0 opened, 1 next, 2 back, 3 skip,
+ * 4 finish, 5 step action, 6 check again. A revision admits one response. */
+typedef void (*jsti_setup_fn)(uint64_t revision, int32_t command, int32_t step, const char *action, void *context);
+typedef struct { const char *title; const char *action; } JSTILinuxSetupAction;
+typedef struct {
+    int32_t step, has_previous, is_last;
+    const char *title, *progress, *detail, *status;
+} JSTILinuxSetupPage;
+int32_t jsti_setup_configure(jsti_setup_fn callback, void *context);
+void jsti_setup_clear(void);
+uint64_t jsti_setup_revision(void);
+int32_t jsti_setup_set_page(
+    const JSTILinuxSetupPage *page, const JSTILinuxSetupAction *actions, size_t count, uint64_t revision);
+int32_t jsti_setup_finish(uint64_t revision);
+int32_t jsti_window_request_setup(void);
 /* The dashboard totals (`all` saved records) and the History header totals
  * (`visible`, the records the search shows). */
 int32_t jsti_window_set_insights(const JSTIInsights *all, const JSTIInsights *visible);
@@ -705,11 +755,31 @@ int32_t jsti_x11_active_window(
 int32_t jsti_x11_paste(uint64_t window, int32_t shift, char *error, size_t error_capacity);
 
 typedef void (*jsti_hotkey_fn)(int32_t pressed, void *context);
-/* Grabs `keysym` with `modifiers` (X11 masks) on the root window from a
- * dedicated thread and reports presses and releases. */
+/* Grabs `keysym` with `modifiers` (the low eight X11 modifier bits) on the root
+ * window from a dedicated thread and reports presses and releases. Requires a
+ * non-null callback. Lock-only slots are discovered at registration, never
+ * guessed from Mod2/Mod5; mixed or explicitly required slots are not ignored.
+ * Runtime keyboard remapping still requires restarting the listener. */
 int32_t jsti_x11_hotkey_start(
     uint32_t keysym, uint32_t modifiers, jsti_hotkey_fn callback, void *context, char *error, size_t error_capacity);
 void jsti_x11_hotkey_stop(void);
+
+/* Separate action group: never replaces the dictation listener. Each row needs
+ * Ctrl/Alt or F13-F24. Result lookup is valid until stop; failures are per row.
+ * callback receives a canonical action index on first press, -1 on listener loss.
+ * Stop joins callbacks and must not run on that callback thread. */
+typedef struct JSTIX11ActionShortcuts JSTIX11ActionShortcuts;
+typedef struct JSTIX11ActionShortcut {
+    uint32_t keysym, modifiers;
+    int32_t identifier;
+} JSTIX11ActionShortcut;
+typedef void (*jsti_action_shortcut_fn)(int32_t identifier, void *context);
+JSTIX11ActionShortcuts *jsti_x11_action_shortcuts_start(
+    const JSTIX11ActionShortcut *rows, size_t count, jsti_action_shortcut_fn callback, void *context,
+    char *error, size_t error_capacity);
+int32_t jsti_x11_action_shortcuts_result(
+    JSTIX11ActionShortcuts *listener, size_t row, char *error, size_t error_capacity);
+void jsti_x11_action_shortcuts_stop(JSTIX11ActionShortcuts *listener);
 
 /* ------------------------------------------------------------------ portals */
 

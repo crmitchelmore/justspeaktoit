@@ -42,7 +42,8 @@ GtkWidget *jsti_action_shortcuts_group_new(GtkWindow *owner) {
     adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(group), "Action shortcuts");
     adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(group),
         "Saved bindings run while this window is active, outside typing controls. Sidebar shortcuts run first. "
-        "Edit keys, switches and presets below. Global action registration is not available yet.");
+        "Edit keys, switches and presets below. Supported global actions register on X11; "
+        "Wayland uses desktop keyboard settings.");
     preferences = GTK_LIST_BOX(gtk_list_box_new());
     g_object_add_weak_pointer(G_OBJECT(preferences), (gpointer *)&preferences);
     gtk_list_box_set_selection_mode(preferences, GTK_SELECTION_NONE);
@@ -74,7 +75,7 @@ GPtrArray *jsti_action_shortcuts_copy_rows(const JSTILinuxActionShortcut *rows, 
             row->identifier == NULL || !g_utf8_validate(row->identifier, -1, NULL) ||
             !g_utf8_validate(row->title, -1, NULL) || !g_utf8_validate(row->chord, -1, NULL) ||
             !g_utf8_validate(row->note, -1, NULL) || !g_utf8_validate(row->page, -1, NULL) ||
-            row->run < 0 || row->run > 10 || (row->modifiers & ~13u) != 0 ||
+            row->run < 0 || row->run > 12 || (row->modifiers & ~13u) != 0 ||
             row->identifier[0] == '\0' || strlen(row->identifier) > 128 ||
             (row->binding_enabled != 0 && row->binding_enabled != 1) ||
             (row->binding_global != 0 && row->binding_global != 1) ||
@@ -183,10 +184,11 @@ gboolean jsti_action_shortcuts_key(struct _GtkEventControllerKey *controller,
 }
 
 static guint captured;
+static gint captured_run;
 static gboolean accept_run;
 static gboolean capture_run(gint run, const char *page, gint slot) {
     (void)page; (void)slot;
-    if (run != 1) return FALSE;
+    captured_run = run;
     ++captured;
     return accept_run;
 }
@@ -232,7 +234,7 @@ int32_t jsti_action_shortcuts_self_test(char *error, size_t capacity) {
     accept_run = TRUE;
     jsti_action_shortcuts_reset();
     gboolean okay = jsti_action_shortcuts_key(NULL, GDK_KEY_D, 42, GDK_CONTROL_MASK | GDK_LOCK_MASK, NULL, capture_run);
-    okay = okay && captured == 1 &&
+    okay = okay && captured == 1 && captured_run == 1 &&
         jsti_action_shortcuts_key(NULL, GDK_KEY_d, 42, GDK_CONTROL_MASK, NULL, capture_run) && captured == 1;
     jsti_action_shortcuts_release(42);
     okay = okay && jsti_action_shortcuts_key(NULL, GDK_KEY_d, 42, GDK_CONTROL_MASK, NULL, capture_run) && captured == 2;
@@ -260,6 +262,40 @@ int32_t jsti_action_shortcuts_self_test(char *error, size_t capacity) {
     JSTILinuxActionShortcut invalid = { .title = "bad" };
     okay = okay && jsti_window_set_action_shortcuts(NULL, 1) == -1 &&
         jsti_window_set_action_shortcuts(&invalid, 1) == -1 && captured == 4;
+    JSTILinuxActionShortcut paste = {
+        .title = "Paste Last History Item", .chord = "Ctrl+Alt+V", .note = "This window",
+        .page = "", .identifier = "pasteLastHistoryItem", .keysym = GDK_KEY_v,
+        .modifiers = GDK_CONTROL_MASK | GDK_ALT_MASK, .run = 11, .enabled = 1,
+        .binding_enabled = 1, .can_be_global = 1, .has_key = 1
+    };
+    GPtrArray *paste_rows = jsti_action_shortcuts_copy_rows(&paste, 1);
+    okay = okay && paste_rows != NULL &&
+        ((ActionRow *)g_ptr_array_index(paste_rows, 0))->run == 11;
+    if (paste_rows != NULL) {
+        apply_rows(paste_rows);
+        jsti_action_shortcuts_reset();
+        okay = okay && jsti_action_shortcuts_key(NULL, GDK_KEY_v, 43,
+            GDK_CONTROL_MASK | GDK_ALT_MASK, NULL, capture_run) && captured == 5 && captured_run == 11;
+        jsti_action_shortcuts_release(43);
+    }
+    g_clear_pointer(&paste_rows, g_ptr_array_unref);
+    JSTILinuxActionShortcut selected = paste;
+    selected.title = "Speak Selected Text"; selected.identifier = "speakSelectedText";
+    selected.run = 12; selected.enabled = 0;
+    GPtrArray *selected_rows = jsti_action_shortcuts_copy_rows(&selected, 1);
+    okay = okay && selected_rows != NULL &&
+        ((ActionRow *)g_ptr_array_index(selected_rows, 0))->run == 12;
+    if (selected_rows != NULL) {
+        apply_rows(selected_rows);
+        jsti_action_shortcuts_reset();
+        okay = okay && !jsti_action_shortcuts_key(NULL, GDK_KEY_v, 43,
+            GDK_CONTROL_MASK | GDK_ALT_MASK, NULL, capture_run) && captured == 5;
+    }
+    g_clear_pointer(&selected_rows, g_ptr_array_unref);
+    paste.run = 13;
+    paste_rows = jsti_action_shortcuts_copy_rows(&paste, 1);
+    okay = okay && paste_rows == NULL;
+    g_clear_pointer(&paste_rows, g_ptr_array_unref);
     apply_rows(saved);
     g_ptr_array_unref(saved);
     g_ptr_array_unref(fixture);

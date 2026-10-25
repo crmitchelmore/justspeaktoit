@@ -123,10 +123,15 @@ extension DesktopHostController {
         let model = DesktopHostModels.all[index]
         var chosen = settings
         chosen.model = model.id
-        Self.rememberModelSlot(in: &chosen)
+        do {
+            try Self.rememberModelSlot(in: &chosen)
+        } catch {
+            update("Could not apply model choice: \(error.localizedDescription)")
+            return false
+        }
         if chosen.model != settings.model || chosen.batchModel != settings.batchModel
             || chosen.liveModel != settings.liveModel || chosen.localModel != settings.localModel
-            || chosen.localLiveModel != settings.localLiveModel {
+            || chosen.localLiveModel != settings.localLiveModel || chosen.configuration != settings.configuration {
             do {
                 try effects.writeSettings(
                     JSONEncoder().encode(chosen), to: directory.appendingPathComponent("settings.json")

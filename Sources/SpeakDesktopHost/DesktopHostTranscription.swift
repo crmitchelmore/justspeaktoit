@@ -144,14 +144,19 @@ extension DesktopHostController {
         }
     }
 
-    // existing owned cancellation dispatch across capture modes; no behavior change.
+    // Retain captured audio instead of sending cancelled recordings for transcription.
+    // Revalidate queued native requests on actor admission, before touching the current run.
     // swiftlint:disable:next cyclomatic_complexity function_body_length
-    package func cancelTranscription() {
-        guard !closed else { return }
+    package func cancelTranscription(
+        fromEscape: Bool = false, ifCurrent: @Sendable () -> Bool = { true }
+    ) async {
+        guard !closed, ifCurrent() else { return }
         if voiceEdit.active != nil {
             cancelVoiceEdit()
             return
         }
+        guard !fromEscape ||
+            (settings.configuration?.cancelRecordingOnEscape ?? SpeechDefaults.cancelRecordingOnEscape) else { return }
         if ownedDictation == nil, let admission = ownedDictationAdmission {
             cancellationRequested = true
             admission.operation.cancel()
@@ -169,6 +174,13 @@ extension DesktopHostController {
         }
         if ownedCaptureStartup != nil {
             requestOwnedStartupAbort()
+            return
+        }
+        if let active = recording, !busy, !active.handsFree {
+            cancellationRequested = true
+            beginBusyOperation()
+            defer { finishBusyOperation() }
+            await captureFailed("Recording cancelled. Audio retained.", recordingID: active.record.id)
             return
         }
         if let inspection = migrationInspectionWorker {

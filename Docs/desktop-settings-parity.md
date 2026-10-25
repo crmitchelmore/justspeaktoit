@@ -6,6 +6,62 @@ macOS `AppSettings.DefaultsKey` aliases the shared 92-key
 plus preferences and collections
 outside that enum. Track remaining product acceptance in #1157.
 
+## Automation spoken-language snapshots (source only; NOT_RUN)
+
+The automation-language table entry previously described a missing path that
+is already source-wired for both desktop hosts. Canonical `preferredLocale`
+becomes `DesktopConfiguration.language`; `resolveSelectedProfile` supplies it
+as the shared resolver's default language. File commands capture the resolved
+value in `DesktopHostTranscriptionRequest.language`, and vocabulary preparation
+keeps that value. Dictation start captures the same profile/session language;
+stop uses its admitted recording rather than resolving the current preference.
+
+An explicit profile language overrides the global preference, absent profile
+language inherits it, and explicit **Automatic** requests detection without
+substituting the system locale or falling back to the global language.
+Read-only file commands may overlap a later preference import: the admitted
+request keeps its captured language, while the next command resolves the new
+value. Active dictation continues to refuse ordinary configuration imports.
+
+Five new Host regressions exercise restart without a selected profile,
+explicit-to-Automatic changes, inherited/explicit/Automatic profile language,
+held file-command preference changes and dictation's captured language/active
+import refusal. They inspect actual injected transcription requests and
+History/no-History behavior. Existing cancellation coverage keeps its
+cancellation-aware fixture; explicit release only adds deterministic progress
+for the held-command case. No production forwarding logic was duplicated.
+These regressions are authored **NOT_RUN**; this source trace does not claim
+provider, compiler or native/runtime language acceptance.
+
+## X11 global action registration (source only; NOT_RUN)
+
+Linux now has a separate native action group for enabled canonical global
+bindings whose routes actually exist: recording toggle, clipboard speech,
+Paste Last History and consented selected-text speech. Dictation registers
+first; its single-hotkey/portal API and press/release contract stay unchanged.
+The group uses the shared catalogue, bindings and presets, not another
+platform-owned action list. Wayland still uses desktop keyboard commands and
+the existing single dictation portal; it gains no automatic action group.
+
+Keyboard rows show per-action registration or refusal, including native grabs
+owned elsewhere and physical aliases. Ctrl+Alt+Space is reserved; new X11
+global edits require Ctrl/Alt or F13-F24. Invalid imported values remain saved
+but unregistered, never silently converted to window-local. Reconfiguration
+serializes cleanup and replacement off the settings/GTK queues, fences stale
+callbacks and retains native callback ownership until join. Native target
+capture happens before final bounded callback admission; admitted work keeps
+its existing settings ordering and shutdown behavior. Selected-text access
+still needs explicit session consent and an external editable AT-SPI field.
+
+Projection and registration-queue regressions plus display-free native event
+fixtures are authored, not executed. Exact-head compiler/test gates and native
+X11/GTK, keyboard lock/repeat/layout, failure and shutdown qualification remain
+outstanding. Physical keys held across re-registration and Xlib server-loss
+behavior also need native acceptance; no stronger guarantee is inferred from
+the synthetic fixture. See [Linux desktop support](linux-development.md#desktop-support).
+This is not full feature parity: Linux voice editing, Wayland automatic global
+actions and system-wide Escape remain open.
+
 ## Core Journey qualification cache (source only)
 
 Automatic #1229 head `a729af1e` restored its exact Swift cache successfully,
@@ -78,7 +134,7 @@ Post-processing drains, keyless ordering, ordered live completion, later Apply,
 bounded overflow and permanent shutdown refusal. These native wiring and test changes remain
 NOT_RUN locally; this is not yet automatic qualification of the drain contract.
 
-## Linux Permissions destination (source only; NOT_RUN)
+## Linux Permissions destination (native CI qualified; physical acceptance open)
 
 About's **Permissions** button, Open Permissions action (run 10/event 118)
 and Troubleshooting's permission finding open a distinct modeless libadwaita
@@ -101,7 +157,9 @@ existing explicit paste workflow requests RemoteDesktop access when needed.
 
 Revision fencing ignores late reports after Check again or close/reopen.
 Four pure Linux presentation tests and native lifecycle/invalid-row/dispatch
-fixtures are authored but NOT_RUN locally. This is a usable permission recovery
+fixtures were NOT_RUN locally. Automatic `1667ee83` qualification passed native
+Windows (job `118642699896`) and Linux desktop (job `118642912114`), plus Debug,
+Core Journey, Fixture UI and API compatibility. This is a usable permission recovery
 destination, not evidence that capture, insertion or desktop permissions have
 been exercised on a physical system.
 
@@ -141,8 +199,8 @@ These checks are **NOT_RUN** locally. Windows maps the Quick Voice 1-3 action
 shortcuts to this action (`JSTI_ACTION_RUN_QUICK_VOICE_1`-`3` emit
 `JSTI_EVENT_QUICK_VOICE` with the slot, queued on the settings queue; ignored
 while Voice Output settings are locked). Linux now has source-wired window-local
-Quick Voice 1-3 actions through the same Host, gated while recording or working;
-global action registration and physical keyboard qualification remain open.
+Quick Voice 1-3 actions through the same Host, gated while recording or working.
+These actions remain window-local; physical keyboard qualification is open.
 
 ## Paste last History action foundation (source only)
 
@@ -163,7 +221,238 @@ These checks are **NOT_RUN** locally. Windows maps the Paste Last History Item
 action shortcut to it (`JSTI_ACTION_RUN_PASTE_LAST_HISTORY` emits
 `JSTI_EVENT_PASTE_LAST_HISTORY`); the callback captures the focused field on the
 UI thread before queueing the Host action, as the Record event does. Linux does
-not yet map the Paste Last History Item action.
+the same through window-local run 11/event 111. It captures the invocation target
+before joining the settings queue, without acquiring the one-shot AT-SPI
+observational target or starting correction learning. Native admission refuses
+recording, work and an insensitive parent, but is independent of the History
+page, selected row and speech controls. The saved output policy remains
+authoritative: clipboard-only works without a field; paste requires a captured
+target. X11 never substitutes a stale external window when this app has focus.
+Wayland retains its documented delivery-time-focus portal and recovery-copy
+policy; it does not acquire an anchored external-field guarantee.
+
+Both hosts now bound History-paste admission **before target capture**: only one
+request can wait in the settings queue. Further invocations report that paste is
+pending rather than capturing and retaining more external targets. The Host checks
+the request's one-second monotonic capture budget immediately before starting
+output; an expired or shutdown-invalidated request reports refusal, never retries,
+and releases its admission slot only when its queued consumer returns. Shutdown
+invalidates this gate before draining settings. The existing separate output slot
+still refuses overlapping output. This bounds delayed requests; it does not expand
+X11/Wayland target guarantees or change ordinary Copy or recording output. Portable
+burst/expiry/concurrent-admission tests and Host queued-expiry/cancellation tests
+are authored but NOT_RUN locally, pending automatic native/portable qualification.
+
+Linux now has **26 of 27 source-wired action destinations**; voice editing and
+Wayland automatic global action registration remain open. X11 has the
+source-only action group described above. Selected-text speech needs
+separate session access and an external focused control, not this app's window.
+Its saved window-local binding remains disabled with desktop-command guidance;
+an eligible global binding can register on X11 without granting selection access.
+Mapping, native row
+validation and busy/recording/parent/page-independent dispatch fixtures are
+authored but NOT_RUN locally. They need automatic qualification. Clipboard
+delivery alone is not evidence of external-field paste or global-shortcut parity.
+
+Linux also exposes `--speak-clipboard`, `--speak-selected-text`, `--paste-last-history`, `--stop-speech`,
+`--pause-resume-speech` and `--quick-voice-1` / `--quick-voice-2` /
+`--quick-voice-3` through the existing GApplication command-forwarding path.
+Quick Voice selects a saved favorite without reading text or starting speech.
+Stop reuses Playback Stop, whose native control now stays enabled across idle,
+recording and working states. Stop is idempotent when silent and does not cancel
+dictation or clear another operation's busy status; modal/closing gates still
+apply. Other commands retain their idle gates. The app must already be running:
+cold invocations are refused, and forwarding never raises the app window.
+Users can bind them in desktop keyboard settings; global action rows explain
+this fallback without presenting the saved binding as registered. Different
+action flags or unsupported options together are refused before dispatch. Busy,
+recording, closing and modal-disabled states refuse commands according to those
+existing action gates; distinct Quick Voice slots conflict before dispatch.
+Command parser/dispatch fixtures are authored but NOT_RUN locally.
+Legacy `--toggle` also receives pure preflight before model/controller/store
+initialization: malformed options or conflicting actions are refused, while a
+valid toggle retains its cold-launch/remote behavior. The native command handler
+independently rejects unknown options for every action, including toggle.
+The automatic desktop-check harness additionally enables 39 real child
+command processes on its private bus with synthetic native event capture, bounded
+waits, refusal diagnostics, hidden-window/page invariants and an empty isolated
+data-directory requirement, including malformed toggle options with and without
+a primary. Clients share a 180-second monotonic group budget; each child gets
+at most 15 seconds or the shorter remaining group time and completes without a
+fixed wait. The 600-second timeout covers the whole smoke window, so command
+ceilings no longer consume almost all of it. Stop cases use production action refresh, not a fabricated enabled
+control during work, and cover all three states plus modal/closing refusal.
+A separate scripted Host regression checks speech cancellation while retaining
+busy state and status; it is also authored, NOT_RUN locally. This does not
+deliver a native/provider/field action.
+The cross-process fixture is also NOT_RUN locally; automatic qualification,
+compositor/provider and external-field acceptance remain open.
+
+### Linux selected-text speech (source only; NOT_RUN)
+
+Voice Output now contains a dedicated native **Selection access** disclosure.
+It is off every launch and never restored by settings or imports. Only its
+affirmative session dialog allows a separate read-only AT-SPI session; correction
+learning consent and insertion targets cannot authorize selection reads. Stop
+access revokes pending reads synchronously and requests speech Stop. Shutdown
+revokes access before draining settings. No desktop accessibility setting is
+changed.
+
+After allowing access, refocus an ordinary external editable AT-SPI control,
+select text, then invoke `justspeaktoit --speak-selected-text` through desktop
+keyboard settings. Forwarding does not raise the app. The source editor still
+excludes external selection because opening it changes focus. Read-only
+documents, password/ambiguous fields and apps without the required AT-SPI
+interfaces are not supported. Availability is per control, not an X11/Wayland
+blanket claim; there is no clipboard or PRIMARY-selection substitute.
+
+Invocation captures cached field metadata only. One process-wide pending lease
+is held across consent restarts and native request completion; repeated commands
+cannot accumulate targets behind settings. The private worker has a 2.5-second
+budget from invocation, reads exactly one nonempty selection of at most 8,192
+Unicode scalars / 32,768 UTF-8 bytes, and rechecks identity, privacy, range and
+text before returning a snapshot. Selection/caret changes invalidate the old
+receipt and only re-admit the same known control off the action path. Text
+mutation listening exists only during an explicit read. The shared owned Host
+speech task performs capture before provider work, so Stop/replacement/recording
+and shutdown retain their cancellation policy.
+
+Pure native contracts cover range limits, authority separation, consent-ledger
+independence, selection invalidation and a 1,000-attempt admission burst with a
+retained native request. Native command fixtures include selected-text dispatch,
+repeat/mixed/unknown flags and cold refusal. These and the Swift wrapper remain
+NOT_RUN locally. Automatic native qualification and real AT-SPI field,
+provider/audio and compositor acceptance remain open; this is not full parity.
+
+The integration harness now also authors an actual D-Bus selection protocol
+fixture, separately nested inside a fresh private session bus for each registry
+cleanup shape (event-only, event/application, and unsupported). The fake external
+process refuses a nonempty bus; the native client verifies that all three service
+names belong to that launched process before granting fixture-only consent.
+The real private worker performs metadata admission and bounded reads. A gated,
+low-priority worker idle fence acknowledges completed metadata work rather than
+guessing readiness from a sleep or an early remote method response.
+
+Cases cover exact selected-range reads, the supplementary-Unicode and combining
+boundaries, missing/empty/multiple/oversized/out-of-field selections, short text
+replies, password/protected/read-only refusal without text I/O, stale receipts
+after selection changes, mid-read selection/privacy changes, actual monotonic
+expiry, 1,000-attempt burst admission, controlled in-flight revocation, restart
+admission and independent correction/selection consent. The backend enforces registry subscription
+filtering and legacy prefix cleanup and counts writes and out-of-range reads.
+Revocation must leave no private registry registrations. An unsupported registry
+must be rejected before any registration or text access. Each schema invocation
+has a 60-second harness ceiling; ordinary success paths have no readiness sleeps
+other than bounded test polling, and the expiry case deliberately waits for the
+real 2.5-second lease to expire. No provider, clipboard, actual field or device is
+used. This fixture is also NOT_RUN locally; automatic native evidence remains
+required and cannot replace physical-desktop/provider acceptance.
+
+## Local model configuration transfer (Windows/Linux source only; NOT_RUN)
+
+Portable JSON imports now map the Mac's `localTranscriptionModel` and
+`localStreamingModelSource` to the offered host's independent Local Batch and
+Local Live choices. Only exact, available, same-mode catalogue identifiers are
+admitted. This does not activate a model, download files, load a runtime, read
+credentials or grant service permissions. Remote choices remain unchanged.
+The active mode's existing model cannot be replaced by an import: a different
+choice for that mode stays preserved but unapplied, with an explicit notice.
+Choose the desired model in Models to make that change.
+
+Mapped values live only in the native settings slots; JSON export projects their
+canonical Mac keys, and unrelated preference edits do not leave stale mirrors.
+Unsupported or wrong-mode choices remain opaque and survive round-trip export.
+An explicit model selection replaces that mode's pending imported choice, even
+when the user reselects the current model. Missing keys do not clear a saved slot.
+The Mac's `localTranscriptionMode` intent is retained, not used to switch the
+active route automatically. An explicit Local model selection replaces pending
+submode intent too; JSON export then derives `batch` or `streaming` from that
+active model, so an old imported mode cannot contradict the user's choice.
+
+Both native presenters update inactive Local choices quietly, preserving active
+selection, remote preferences and callback identity. GTK uses its existing owned
+post queue; Windows merges pending per-slot updates on its locked UI queue and
+clears them across consumption/restart. A native publication failure explicitly
+reports that configuration was saved and requires reopening before switching;
+it does not bypass import's approval invalidation or hands-free cleanup.
+
+The separate preference archive projection now tracks explicit `localLiveModel`
+presence and exports it as `localStreamingModelSource`. An explicitly active
+Local Live model adds `localTranscriptionMode=streaming`, never puts its live ID
+in the batch key, and does not invent a selection for an absent slot. This is a
+projection repair, not a claim that the History-backup restore applies settings.
+
+Authored checks cover four-slot restart/export, unsupported and wrong-mode
+round trips, active-mode protection and explicit reselection, invalid-type and
+failed-write atomicity, native-publication failure recovery, absent keys and
+archive presence. Native GTK and Windows smoke assertions cover quiet inactive
+updates and protection of the active mode; Windows also checks merged pending
+updates and wrong-mode rejection. All new execution evidence is **NOT_RUN here**;
+portable, Apple and native qualification remains required.
+
+## Linux Local Live transcription (source only; NOT_RUN)
+
+Linux now projects the same executable pinned Whisper models into **Local >
+Batch** and **Local > Live**, using canonical live identifiers and the existing
+`DesktopLocalStreamingClient` with `LinuxWhisperRuntime`. Both modes share one
+verified model download, install status, GPU preference and removal/use lease.
+There is no network transport, helper process, audio-path IPC or second model
+download. Imported GGML models remain batch-only.
+
+The GTK Mode control is usable for either source when idle and disabled during
+recording/work. Local and Remote retain independent Batch/Live choices, and all
+four model slots are restored from saved host settings before interaction.
+Catalogue refresh keeps those stable slot identities. Local Live hides provider
+key controls and does not depend on remote streaming transport qualification.
+
+Authored checks cover canonical Linux/Windows live catalogue projection,
+four-slot settings restart, independent GTK source/mode memory, busy-state
+sensitivity and actual catalogue row filtering/callback indices. The existing
+native model CLI additionally feeds the real Linux runtime through the shared
+live session: it must produce text before finish and preserve the expected
+phrase after finish. This uses the existing synthetic WAV/model fixture and
+timeout envelope; no CI job timeout is raised. All additions are NOT_RUN locally.
+Automatic native evidence, microphone/device latency and installed acceptance
+are still required; this does not close full local-model or desktop parity.
+
+## Linux shortcut listener lifetime (source only; NOT_RUN)
+
+X11 registration now reads the actual modifier/key maps rather than ignoring
+guessed Mod2/Mod5 lock bits. Only lock-only slots are ignored, across every
+symbol level; AltGr/group-switch/mixed slots and explicitly required modifiers
+remain significant. The listener owns the exact unique grab/ungrab variants and
+checks event modifiers before admitting a press. No-display native fixtures
+cover relocated ScrollLock, AltGr, mixed/unknown keys, explicit lock modifiers
+and zero/all-eight-bit subset bounds. These are authored but NOT_RUN locally.
+Runtime remapping/rebinding, safe multi-action registration and physical
+keyboard/layout qualification remain open, not inferred from this repair.
+An additional authored private-Xvfb integration sequence rejects an extra Shift,
+then requires one press/release in each off/Caps/Caps+Num/Num/off lock state with
+per-phase producer acknowledgements and exact event prefixes. Cleanup is
+deferred and all waits are bounded. This is NOT_RUN locally; it covers only the
+disposable server's default map, not AltGr or runtime layout changes.
+
+The existing dictation listener now owns its startup and actual native cleanup,
+not just flags set after registration returns. Stop permanently fences new
+callback admission and result publication. An already-started X11 or portal
+registration may still finish, but its late success is immediately closed and
+cannot republish controls. Shutdown does not wait for a blocked startup dialog.
+Callback preflight is not final admission: native target capture and the gesture
+style's synchronous queue read stay outside the lifetime lock, then a bounded
+settings/gesture enqueue is atomically admitted against stop. If stop wins during
+preparation, no gesture or microphone-warmup task is submitted. Held-preparation
+and racing-final-admission regressions are authored but NOT_RUN locally.
+The native callback context stays alive through the actual stop call and holds
+the window/controller only weakly. A settings read already in flight rechecks
+the publication fence afterward.
+
+Six authored portable regressions cover stop-before-start, single admission,
+blocked startup and late cleanup, explicit failure hints, reentrant cleanup
+outside the state lock, and racing stop/completion. These are NOT_RUN locally;
+automatic portable/native qualification remains required. Existing X11/portal
+binding protocols, dictation gestures and fallback commands are unchanged.
+This closes a listener-lifetime prerequisite; multi-action global registration
+and physical shortcut acceptance remain open.
 
 ## Troubleshooting (source only)
 
@@ -1045,7 +1334,7 @@ and `LinuxPreferenceArchive.swift`; Mac wire names are established by
 | Native authority | Canonical projection or explicit boundary |
 | --- | --- |
 | Explicit active `model` | The existing desktop batch/live registries and shared local-family resolver select `transcriptionMode` and the active model key. Unknown/Apple-only routes are reported, never guessed as batch. Multi-purpose models remain batch when admitted by the batch registry. |
-| `batchModel`, `liveModel`, `localModel` | Stored model slots map to their canonical model keys. An explicit active model wins over its corresponding remembered slot. Local engine/source submode is not invented. |
+| `batchModel`, `liveModel`, `localModel`, `localLiveModel` | Explicit stored slots map to canonical keys; Local Live uses `localStreamingModelSource`, not the batch key. An explicit active model wins over its remembered slot and supplies the Local batch/streaming submode; an inactive slot does not invent one. |
 | `postProcessing.mode`, `.modelIdentifier`, `.temperature` | `postProcessingEnabled`, `postProcessingModel`, `postProcessingTemperature`; explicit native options override stale configuration mirrors. |
 | `postProcessing.includeLexiconDirectives`, `.includeContextTags`, `.streamingEnabled` | `postProcessingIncludeLexiconDirectives`, `postProcessingIncludeContextTags`, `postProcessingStreamingEnabled`; the native options are their sole desktop authority. `lastRemoteModelIdentifier` is dormant picker recall and is not projected. |
 | `postProcessing.outputLanguage` | Stored text, including explicit empty text, maps to `postProcessingOutputLanguage`; native nil suppresses a stale mirror without inventing a replacement string. |
@@ -2128,15 +2417,15 @@ profiles/history/connections/credentials and optional audio
 (`Sources/SpeakApp/DataMigration/MigrationArchive.swift:7-59`,
 `MigrationCatalog.swift:13-77`, `MigrationPreferenceSchema.swift:6-70`).
 General's **Save ZIP backup** already writes a Mac-compatible archive
-(`DesktopMigrationBackup`). **Restore backup** on Windows now reads one, maps
+(`DesktopMigrationBackup`). **Restore backup** on Windows and Linux now reads one, maps
 its categories, previews merge and replace, asks for confirmation and rolls
 back on failure for History text and app profiles only; see below. Restoring
 settings, audio, credentials, vocabulary, connections and models remains a
 gap. No ZIP is misidentified or silently imported as portable preferences.
 
-### Restore backup (Windows source only)
+### Restore backup (Windows/Linux source only)
 
-General > **Restore backup...** opens a Mac-compatible ZIP through a native
+Windows General and Linux General > Data backup > **Restore...** open a Mac-compatible ZIP through a native
 picker. The settings queue only admits the request. Reading, validation and
 planning run on an owned, cancellable worker that writes nothing and removes
 its private staging directory (`DesktopMigrationRestore.prepare`,
@@ -2149,9 +2438,15 @@ The preview lists each applied category's counts (new, updated, removed,
 before and after), conflicts, skipped items and every category that is kept in
 the backup but not applied. It never shows transcript text, profile contents,
 identifiers or credential values. Nothing is written until the user picks an
-action in the native dialog (`WindowsMigrationRestore.cpp`). Cancel is the
+action in the native dialog (`WindowsMigrationRestore.cpp`, Linux's `LinuxWindow.c`). Cancel is the
 default button. Replace needs a second confirmation that defaults to No. Each
 preview has a single-use token, so a stale or repeated answer is refused.
+Linux reuses the owned ZIP picker and its cancellation/parent-identity fence.
+Its modal GTK preview copies the report and token; Replace opens a separate
+destructive confirmation that also defaults to Cancel. A previous dialog's
+late response cannot answer the current dialog. Merge and Replace are disabled
+while the app is working, and an unoffered or stale response cannot apply.
+Closing retires the native dialog before callbacks and the queue are released.
 
 - **History text** always merges. It follows the canonical planner, so
   equivalence ignores the root ID and `desktopHistory.id`. A differing backup
@@ -2173,21 +2468,53 @@ preview has a single-use token, so a stale or repeated answer is refused.
 
 Apply re-reads the current History and profiles and refuses if either changed
 since the preview. It then writes profiles followed by each History item.
+History is compared again with the full preview baseline inside its store actor
+at final write admission; there is no actor suspension between this check and
+the writes. This closes the gap where a same-store sync/update could previously
+land after the early check and be overwritten by a stale plan. Enumeration
+order alone does not invalidate this final check. A late change leaves History
+untouched and rolls back any profile write before reporting a stale preview.
+If that rollback fails, the outcome remains an explicit failed restore, not a
+safe-to-retry stale response. Profile loads, saves, edits, backups and restore
+now share one synchronous host mutation boundary. Restore holds it inside the
+History actor's non-suspending apply interval, rechecks the raw profile baseline
+immediately before writing, checks profile identity at History write boundaries
+and rechecks profile bytes before commit. Rollback replaces only its own profile
+file identity and bytes; an observed newer save is preserved and reported as an
+incomplete rollback. This coordinates participating stores in one host, not
+independent processes or arbitrary external file writers.
 Before writing, it snapshots the original bytes of every file it touches
 (`DesktopRecordingStore.applyMigrationRestore`). On cancellation or failure,
 it restores those bytes, removes the files it added and reports whether the
 rollback succeeded. Portable tests are in
 `Tests/SpeakDesktopTests/DesktopMigrationRestoreTests.swift`.
+Five additional regressions in `DesktopMigrationRestoreAdmissionTests.swift`
+cover changed and newly added History at actor admission, enumeration-order
+independence, full-apply rollback of existing/previously absent profiles after
+a late History change, and failed profile rollback classification. Four more
+regressions in `DesktopRestoreProfileAdmissionTests.swift` cover newer profile
+and History saves immediately before restore writes and newer profile saves
+afterward, with and without another History failure. The first three reproduced
+the data loss before the fix. All 25 focused store/edit/restore tests pass on
+Apple Swift; final native qualification remains pending.
+
+Source-only checks:
+- GTK smoke assertions cover the Restore chooser's event/flags, copied
+  preview data, Cancel defaults, two-stage Replace, stale-dialog refusal,
+  busy-state rejection and close cleanup. Seven Host tests cover real ZIP
+  History-text restore without audio or source mutation, current
+  single-use confirmation, cancel, unoffered Replace, explicit profile
+  replacement, held-reader shutdown and native preview failure. They are
+  authored but NOT_RUN locally; native/portable automatic qualification is
+  still required.
 
 Not yet done:
-- Linux has the shared code but no GTK entry point; `LinuxHostPlatform` keeps
-  the default nil restorer.
 - Restored History is not pushed to iCloud sync immediately.
-- There is no native self-test or screenshot receipt for the dialog yet.
+- There is no installed Linux restore or screenshot receipt for the dialog yet.
 
-## Local live transcription (Windows source only)
+## Local live transcription (Windows/Linux source only)
 
-Local now offers Batch and Live on Windows. Live lists one entry per pinned
+Local now offers Batch and Live on Windows and Linux. Live lists one entry per pinned
 whisper.cpp catalogue model the host executes (`DesktopLocalStreaming.options`),
 named `<model> (on-device, live)` and identified by the Mac's
 `local/streaming/whisperkit/...` value, so History, profiles and selections
@@ -2211,19 +2538,20 @@ Model comparison excludes live entries because their batch model is already a
 candidate. File import and automation transcription of a local live
 selection use its batch model.
 
-Remaining gaps: no compiled or device receipt; Linux stays Local batch only;
+Remaining gaps: no compiled or device receipt for the new Linux picker/runtime path;
 imported Hugging Face models are batch only; Auto-Clean live polish is not
 offered for local live; profiles cannot override to a local live model;
-configuration transfer does not map `localStreamingModelSource`; a model whose
+portable JSON maps offered inactive Local choices but does not activate a route;
+full settings-archive restore remains incomplete. A model whose
 file fails its digest during streaming is reported, not removed automatically
 as in batch; sherpa-onnx and Parakeet streaming sources are Mac only.
 
-## First-run setup and permissions (Windows source wired; Linux model only)
+## First-run setup and permissions (Windows/Linux source wired)
 
 The Mac's `OnboardingView`, `PermissionsManager`, `PermissionRecoveryHelp` and
-`DashboardPermissionsSection` journeys have a shared desktop model and a Windows
-native surface. Earlier baseline notes that called onboarding and permission
-remediation missing on Windows are superseded by this source.
+`DashboardPermissionsSection` journeys have a shared desktop model and native
+Windows/Linux surfaces. Earlier baseline notes that called these surfaces
+missing are superseded by the source below; runtime qualification is separate.
 
 - **Shared model** (`SpeakCore/DesktopOnboarding.swift`,
   `SpeakDesktopHost/DesktopHostOnboarding.swift`): ordered steps (welcome,
@@ -2264,9 +2592,51 @@ remediation missing on Windows are superseded by this source.
 - **Limits**: the automation row reflects the saved setting, not whether the
   pipe is currently listening; there is no notification-area "Run setup"
   entry; all native and Swift code is uncompiled and unqualified on Windows.
-- **Linux**: shares the step and permission model; no native GTK guide or
-  Permissions page yet. Portal/PipeWire microphone access and Wayland
-  insertion limits need their own adapter before Linux can present the model.
+- **Linux setup guide** (`SpeakLinux/LinuxOnboarding.swift`,
+  `CLinuxSupport/LinuxSetup.c`): a modeless GTK window projects the same canonical
+  steps/actions after normal startup and from About, **Run setup again**. The
+  startup decision is read before controller creation: existing settings with
+  no guide state suppress automatic setup without silently writing an adoption
+  file; incomplete saved progress resumes, while a completed guide reopens at
+  Welcome manually. A manual rerun on an upgraded install keeps completion
+  sticky. Smoke, screenshot and integration paths never auto-open it.
+  Navigation, Skip and Finish acknowledge only successful checked persistence.
+  Read/write failures are reported and leave the guide open; closing or Escape
+  does not complete it. Owned page/action strings, revision-fenced publications
+  and one pending request protect close/reopen and delayed responses.
+- **Linux destinations and limits**: guide actions open the existing passive
+  Permissions/API Keys windows or General (microphone and text output),
+  Transcription (Local models), Keyboard and Post-processing pages. The existing
+  native Permissions window already reports PipeWire/microphone warnings and X11/Wayland insertion
+  guidance; it was not missing. Rendering the guide does not read credentials,
+  open the microphone, request portal permission or contact a provider. Route
+  readiness is not inferred from a selected model: users check API Keys/Local
+  models explicitly. The Windows administrator-app wording is replaced with
+  Linux insertion/paste guidance. Practice uses the real shortcut in another
+  app; an unimplemented test-dictation button is not shown. Desktop permission
+  changes and real-device acceptance remain unqualified.
+- **Linux guide evidence**: ten new Host regressions cover checked persistence,
+  settings isolation, closed/write/read failures and prelaunch eligibility.
+  GTK smoke assertions cover owned strings, actions, pending admission,
+  navigation controls, stale page/Finish responses, modeless ownership, the
+  canonical app icon, close, reopen and Escape. These additions are authored
+  only, **NOT_RUN** here; they do not transfer qualification from earlier Linux heads.
+
+The follow-up isolates the passive page projection in
+`SpeakLinuxPlatform/LinuxOnboardingPage.swift`: catalogue-wide tests check every
+canonical step's index, metadata, navigation and supported actions, plus Linux
+insertion/privacy guidance. The typed destination projection is consumed by the
+native adapter and checked for every canonical action; microphone selection
+routes to General, where the actual picker lives, not Transcription.
+Checked Host progress now owns the completion
+transition, shared with the existing Windows entry point. Nine additional Host
+regressions exercise all steps, sticky completion, manual upgrades, actual task
+cancellation, revocation after reading state, closed/read/write failures and
+unchanged settings. Linux's native revision is checked inside the Host actor
+before reading progress and again before writing; Finish/Skip are also checked
+inside the actor. A guide closed while its actor call is queued cannot later
+persist stale progress. The four projection tests and nine Host regressions are
+authored **NOT_RUN**, not an executable qualification receipt.
 
 ## Evidence legend
 
@@ -2294,12 +2664,12 @@ replacement/nearest implemented surface; they do not assert hidden support.
 |---|---|---|
 | appearance | Equivalent / Equivalent | General; system/light/dark native schemes |
 | visualDensity | Wired; native acceptance pending / Wired; native acceptance pending | General Normal/Compact choice; strict shared configuration, JSON transfer and native page/card/sidebar spacing |
-| transcriptionMode | Equivalent / Equivalent | Models; Remote Batch/Live; Local Batch, plus Local Live on Windows (source only, see local live transcription) |
+| transcriptionMode | Equivalent / Equivalent | Models; Remote Batch/Live; Local Batch, plus Local Live on Windows and Linux (source only, see local live transcription) |
 | liveTranscriptionModel | Partial / Partial | Models; implemented transport routes only; Apple Speech and unavailable providers are not substitutes |
 | batchTranscriptionModel | Equivalent / Equivalent | Models; independent remembered batch model |
 | localTranscriptionModel | Partial / Partial | Models; pinned whisper.cpp catalogue plus explicit Hugging Face GGML imports (`desktop-huggingface-import.md`); not the Mac WhisperKit/Core ML or sherpa-onnx runtimes |
-| localTranscriptionMode | Source wired, unqualified / Partial | Windows Local Batch and Live: Live streams a pinned downloaded whisper.cpp model in process with VAD-bounded windows and shares the remembered `localLiveModel` slot; Linux remains Local batch only |
-| localStreamingModelSource | Partial / Missing | Windows Local Live selections use the Mac's WhisperKit live identity (`local/streaming/whisperkit/...`) for pinned Whisper models, saved in the host `localLiveModel` slot; configuration transfer does not map the Mac key yet. Sherpa-onnx and Parakeet sources are not offered because no desktop host runs them |
+| localTranscriptionMode | Source wired, unqualified / Source wired, unqualified | Windows and Linux Local Batch and Live: Live streams a pinned downloaded whisper.cpp model in process with VAD-bounded windows and shares the remembered `localLiveModel` slot; native/runtime acceptance remains open |
+| localStreamingModelSource | Partial / Partial | Both hosts use the canonical Whisper live identity in `localLiveModel`; source-only JSON transfer maps offered inactive choices and preserves unavailable/active-mode changes without activation. Archive projection uses the correct live key; full settings restore and native acceptance remain open. No desktop sherpa-onnx or Parakeet runtime |
 | postProcessingEnabled | Equivalent / Equivalent | `DesktopHostPostProcessing.swift`; desktop default remains disabled. Source proposal adds explicit local rules opt-in without credential access; remote remains opt-in |
 | postProcessingModel | Partial / Partial | Shared remote catalogue, built-in Local Cleanup and downloaded GGUF LLMs through the native llama.cpp runtime (`desktop-local-llm-cleanup.md`, source only); Apple Foundation Models and MLX remain unavailable |
 | postProcessingTemperature | Wired / Wired | Config; range 0...1, OpenRouter request |
@@ -2316,11 +2686,11 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | runAtLogin | Equivalent / Equivalent | General; native startup task/login entry, OS status displayed |
 | recordingsDirectory | Partial: fenced / Partial: source only | Mac path retained, never executed. Device-local chosen folder via verified recording locations: Linux Housekeeping chooser; Windows reports unavailable while `WindowsRecordingRegistry` identity/restart integration is fenced. Existing audio never moves. See recordings folder above |
 | hotKeyActivation | Equivalent / Equivalent | Shortcuts; press/hold/double-tap/combined styles; Linux portal availability caveat |
-| cancelRecordingOnEscape | Mac only / Mac only | Boolean preserved through the shared migration catalogue; the Mac configures Escape cancellation, while native desktop hosts do not apply it |
+| cancelRecordingOnEscape | Applied (source only) / Applied (source only) | Shared default-on Boolean in Keyboard; Windows local/global and Linux main-window Escape honor it, with final Host admission and native epoch guards; explicit Cancel and Windows Voice Edit cancellation remain independent. Compiler/native qualification is NOT_RUN |
 | holdThreshold | Wired / Wired | Config + shared gesture machine; 0.2...1.5 s |
 | doubleTapWindow | Wired / Wired | Config + shared gesture machine; 0.2...1 s |
 | trackedKeyIdentifiers | Equivalent source only; NOT_RUN | Keys; identifiers only, in `trackedKeyIdentifiers.json`. Saving a key from the shared editors registers its identifier and removing it unregisters it. Both desktop API Keys windows reconcile the list against the store; cancellation skips reconciliation. |
-| preferredLocale | Wired / Wired | Config + `DesktopProfileSession.swift`; provider language capability gates; automation language remains a separate gap |
+| preferredLocale | Source wired; qualification pending / Same | Config + shared profile resolver/provider language gates; automation file and dictation requests capture the resolved language, including profile inheritance/override and Automatic. Explicit Host regressions above are authored NOT_RUN; native/provider language acceptance remains unqualified. |
 | postRecordingTailDuration | Wired / Wired | Config + `DesktopHostRecordingTail.swift`; owned 0...2 s capture buffer, immediate cancel/failure/shutdown cleanup, no stale finalisation |
 | deepgramStopGracePeriod | Equivalent migration / Equivalent migration | Valid legacy value initializes absent liveStopGracePeriod; canonical value, including zero, wins; legacy retained for downgrade |
 | liveStopGracePeriod | Partial / Partial | Config; AssemblyAI/Cartesia only; range 0...2 s |
@@ -2379,7 +2749,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | modulatePIIPhiTagging | Live/batch source wired; unqualified / Same | Native default/on/off choice, strict transfer/restart and captured live/batch provider flags; absent stays off. Native/provider acceptance pending. |
 | accessibilityInsertionMode | Equivalent / Missing | Output; Windows cursor/replace-field; Linux paste cannot claim AX replace-all equivalence |
 | selectedHotKey | Equivalent / Partial | Shortcuts; Windows Ctrl/Alt native key; Linux desktop/portal-owned binding, never Mac Fn key translation |
-| customShortcutBindings | Complete source mapping; unqualified / Partial window-local source | Windows Keyboard **Action shortcuts** dialog: all 27 actions source-wired; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Voice editing additionally requires an editable UIA selection and a rewrite API key. Linux projects 24 actions into window-local bindings and edits all saved bindings with presets/reset; three execution actions and global registration remain unimplemented. Native/physical acceptance pending. |
+| customShortcutBindings | Complete source mapping; unqualified / Partial native source | Windows Keyboard **Action shortcuts** dialog: all 27 actions source-wired; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Voice editing additionally requires an editable UIA selection and a rewrite API key. Linux projects 26 action destinations and edits saved bindings with presets/reset; eligible X11 global actions use a separate native group with per-row refusals. Selected-text speech needs session access and an external editable AT-SPI field. Linux voice editing and Wayland automatic action registration remain open. Native/physical acceptance pending. |
 | paidAccessRoutingEnabled | Apple-specific / Apple-specific | BYOK desktop providers; no paid-access entitlement/routing journey. Retained opaque through import/export |
 | simpleModelChoices | Missing / Missing | Native catalogue picker without simplified paid-model chooser |
 | rememberedLocalTranscriptionSource | Partial / Partial | Models remembers Local selection; no Apple on-device source |
@@ -2395,12 +2765,102 @@ an actually present legacy desktop scalar is a distinct opt-in captured source,
 not silently mapped to a profile. `customShortcutBindings`/individual action
 shortcuts, Shortcut presets/reset and conflict reporting are source wired on
 Windows (partial; see [Individual action shortcuts](#individual-action-shortcuts))
-and partially window-local on Linux, with a source-wired editor and presets;
-Linux global registration remains a gap. Escape recording cancellation remains a gap.
+and partially window-local on Linux, with a source-wired editor and presets.
+Eligible X11 global actions now have the unqualified native group above;
+Wayland automatic action registration remains a gap. Main-window Escape cancellation is
+source-wired on both hosts as described below. The subsequent source-only
+Windows change adds active-only passive system-wide Escape observation; Linux
+system-wide Escape and exact-head Windows native acceptance remain gaps.
 Profiles have a Windows native editor with
 shared ordering/session snapshots; this separate source-only candidate adds
 the GTK editor and actual recording selection described above. Apple bundle-ID matchers are preserved but
 not silently converted to executable paths.
+
+### Main-window Escape cancellation (source only)
+
+With `cancelRecordingOnEscape` enabled, plain Escape in the active native main
+window emits the existing Cancel operation while recording or working. Idle Escape keeps the existing action
+shortcut/search behavior. Modified Escape is left to the platform, as are
+disabled owners, other windows, dialogs and GTK popovers. One held cancellation
+key cannot repeatedly cancel or fall through to Stop speech after the app
+becomes idle; release or deactivation retires that latch. This window-local
+change adds no global monitor or idle key grab; the subsequent Windows-only
+extension is described separately below.
+
+The shared cancellation entry point now also stops a legacy non-owned recording
+before transcription, retains its audio/partial result through the existing
+capture-failure cleanup path, and holds busy admission across that cleanup.
+Owned recording/startup, hands-free and already-running operation cancellation
+keep their existing routes. Three portable regressions cover active capture,
+independent restart and idle cancellation; both native smoke fixtures exercise
+the Escape ownership/state/repeat rules. All are authored but **NOT_RUN** here.
+Compilation, exact-head native/portable qualification and physical keyboard
+acceptance remain required; this does not complete system-wide Escape parity.
+
+### Windows active-only system-wide Escape (source only)
+
+Windows additionally opts real application windows into passive low-level
+keyboard observation only while recording/working with Escape cancellation enabled,
+or while Voice Edit owns its independent cancellation reason. The hook always continues
+the chain: Escape still reaches the foreground app rather than being grabbed.
+A first unmodified, non-injected Escape in another process queues the existing
+Cancel event; the app's own windows keep the local route. Held repeats and an
+Escape already down when registration begins cannot start another cancellation.
+Neither key text nor foreground content is captured, persisted or logged.
+
+Every native state publication updates an atomic idle/active epoch, even if
+presentation updates coalesce. Idle/close publication immediately fences the
+callback before UI-thread removal. A queued message must match the current
+epoch and pending delivery; its opaque token is rechecked on final Host actor
+admission so a delayed task cannot cancel a later idle-to-active run. This does
+not introduce provider, capture, clipboard or insertion work on the hook path.
+Install, queue and removal failures are explicit; failed installation is not
+retried on each transcript repaint, and an unremoved listener stays fenced
+rather than being forgotten or duplicated. The native window also returns a
+failure if teardown still cannot retire it.
+
+Smoke/screenshot windows opt out before launch. The existing native smoke suite
+includes a separate injected-operations listener fixture covering idle/synthetic
+scope, exact modifier matching, injected events, Caps/Num/Scroll Lock, held-key
+suppression, delivery ownership, pending duplicates, coalesced generation
+changes, stale messages, registration/queue/removal failure and shutdown.
+No fixture installs a real hook or injects a key. Two additional portable Host
+regressions cover guarded cancellation and preserving a restarted capture.
+Compiler, portable/native fixtures and physical external-app acceptance are
+all **NOT_RUN** here. Linux system-wide Escape remains unimplemented; Windows
+secure desktop/session-boundary behavior still requires platform evidence.
+
+### Canonical Escape cancellation preference (source only)
+
+Keyboard now exposes the Mac's default-on `cancelRecordingOnEscape` Boolean
+through the shared field catalogue. Missing values use `SpeechDefaults` on
+Mac and portable hosts; explicit false survives editor, configuration transfer
+and restart. Both native configuration publishers apply the saved policy before
+presentation. Turning it off leaves ordinary Escape handling alone; the explicit
+Cancel control still stops work and retains recorded audio.
+
+Local Escape events now carry the native work token, just like Windows global
+Escape. Policy and recording-state publication fence old tokens before queued
+window updates apply. Off/on and idle/active transitions cannot reuse a previous
+active token. Linux admits state publication under its existing post lock and
+fences close permanently, so a late update cannot reactivate cancellation after
+the window closes. The Host rechecks the native token and its own saved policy
+inside actual cancellation admission, without an intervening await.
+
+As on Mac, Windows Voice Edit owns a separate Escape reason: disabling recording
+cancellation does not disable cancelling an edit. Admission/retirement publish
+that reason from the actual Host run, not from a shortcut's queued request.
+Synthetic Windows windows still cannot install the real global listener.
+
+Authored regressions cover Boolean/default metadata, Codable/editor transfer,
+disabled/default/enabled capture cancellation, persistence after restart, stale
+requests and Voice Edit independence. Existing native fixtures additionally
+exercise policy toggles, invalid setters, token payloads, explicit Cancel,
+held-key suppression, close fencing and the separate Windows edit reason.
+These additions are **NOT_RUN**: no compiler, linter, parser, test or native
+execution was performed here. Linux system-wide Escape remains a gap.
+
+### Remaining destination and selection-learning gaps
 
 The Mac's 12 `SettingsTab` destinations are General, Transcription,
 Post-processing, Profiles, Voice Output, Pronunciation, API Keys, Keyboard,
@@ -2677,22 +3137,24 @@ not run local actions. An imported duplicate retains its value and shows a
 conflict note; the first listed action owns that combination. Sidebar
 Ctrl+digit chords retain precedence and corresponding action notes disclose it.
 
-Three Linux actions remain unavailable: Speak Selected Text,
-Paste Last History Item and Edit Selection by Voice. The Permissions action
+Linux voice editing remains unavailable. Paste Last History now uses its
+existing bounded admission/target path, and selected-text speech uses the
+consented external AT-SPI path described above. The Permissions action
 opens its own Linux-specific recovery guidance, not an unrelated page.
-Enabled global bindings remain saved and visibly unregistered;
-they are not silently downgraded to local shortcuts. The existing single X11 /
-Wayland-portal dictation shortcut is unchanged. Multi-action global registration
-remains build-out work. Because this is only
+Enabled eligible global bindings now register on X11 with explicit per-row
+status; unsupported bindings stay saved and visibly unregistered, never
+silently downgraded to local shortcuts. The existing single X11 /
+Wayland-portal dictation shortcut is unchanged. Wayland multi-action automatic
+registration remains build-out work. Because this is only
 partial application of `customShortcutBindings`, migration continues to
 preserve the whole value rather than claiming full Linux coverage.
 
 The Linux Keyboard **Edit action shortcuts...** dialog edits a draft with
 native key capture, Clear, Enabled and Work in other apps switches. It uses the
 same canonical presets and reset defaults as macOS/Windows. Global switches
-explicitly say the binding is saved but not registered. The shared editor
+explain X11 availability and the Wayland desktop-settings fallback. The shared editor
 validation refuses newly introduced duplicates, unmodified typing keys and
-local collisions with Linux's separate Ctrl+Alt+Space dictation shortcut;
+local/global collisions with Linux's separate Ctrl+Alt+Space dictation shortcut;
 sidebar collisions and shared reserved-key policy produce visible warnings.
 Restoring canonical defaults explicitly permits the default Space/Escape media
 keys without permitting arbitrary unmodified typing keys.

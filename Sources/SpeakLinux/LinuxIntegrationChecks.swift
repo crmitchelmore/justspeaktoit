@@ -192,35 +192,6 @@ enum LinuxIntegrationChecks {
             + "same-text copies and another client's selection.")
     }
 
-    /// The X11 Ctrl+Alt+Space grab: the script presses the key with XTest once
-    /// the grab is in place (signalled by creating JSTI_TEST_READY_FILE).
-    static func x11Hotkey() throws {
-        let readyFile = try environment("JSTI_TEST_READY_FILE")
-        final class Presses: @unchecked Sendable {
-            let lock = NSLock()
-            var events: [Int32] = []
-        }
-        let presses = Presses()
-        try withExtendedLifetime(presses) {
-            try LinuxNative.call {
-                jsti_x11_hotkey_start(
-                    LinuxShortcuts.x11Keysym, LinuxShortcuts.x11Modifiers, { pressed, context in
-                        let presses = Unmanaged<Presses>.fromOpaque(context!).takeUnretainedValue()
-                        presses.lock.withLock { presses.events.append(pressed) }
-                    }, Unmanaged.passUnretained(presses).toOpaque(), $0, $1
-                )
-            }
-            FileManager.default.createFile(atPath: readyFile, contents: Data())
-            for _ in 0..<1_000 where presses.lock.withLock({ presses.events.count }) < 2 {
-                Thread.sleep(forTimeInterval: 0.01)
-            }
-            jsti_x11_hotkey_stop()
-        }
-        let events = presses.lock.withLock { presses.events }
-        try require(events == [1, 0], "the grab reported \(events)")
-        print("X11 shortcut: Ctrl+Alt+Space grab reported one press and one release.")
-    }
-
     /// GlobalShortcuts and RemoteDesktop/Clipboard against the fake portal.
     static func portal() throws {
         try require(LinuxPortal.version(of: LinuxPortal.globalShortcuts) != nil, "GlobalShortcuts is not offered")
@@ -289,5 +260,65 @@ enum LinuxIntegrationChecks {
         }
         try require(answers == [.enabled, .disabled, .disabledBySystem], "the portal answered \(answers)")
         print("Background: Launch at login was granted, removed, then refused as the desktop's own choice.")
+    }
+}
+
+extension LinuxIntegrationChecks {
+    /// The X11 Ctrl+Alt+Space grab: the script presses the key with XTest once
+    /// the grab is in place (signalled by creating JSTI_TEST_READY_FILE).
+    static func x11Hotkey(lockStates: Bool = false) throws {
+        let readyFile = try environment("JSTI_TEST_READY_FILE")
+        final class Presses: @unchecked Sendable {
+            let lock = NSLock()
+            var events: [Int32] = []
+        }
+        let presses = Presses()
+        try withExtendedLifetime(presses) {
+            try LinuxNative.call {
+                jsti_x11_hotkey_start(
+                    LinuxShortcuts.x11Keysym, LinuxShortcuts.x11Modifiers, { pressed, context in
+                        let presses = Unmanaged<Presses>.fromOpaque(context!).takeUnretainedValue()
+                        presses.lock.withLock { presses.events.append(pressed) }
+                    }, Unmanaged.passUnretained(presses).toOpaque(), $0, $1
+                )
+            }
+            defer { jsti_x11_hotkey_stop() }
+            try Data().write(to: URL(fileURLWithPath: readyFile), options: .atomic)
+            if lockStates {
+                for phase in 0...5 {
+                    try x11HotkeyPhase(phase, prefix: readyFile) { presses.lock.withLock { presses.events } }
+                }
+            } else {
+                for _ in 0..<1_000 where presses.lock.withLock({ presses.events.count }) < 2 {
+                    Thread.sleep(forTimeInterval: 0.01)
+                }
+            }
+        }
+        let events = presses.lock.withLock { presses.events }
+        let expected: [Int32] = Array([[Int32]](repeating: [1, 0], count: lockStates ? 5 : 1).joined())
+        try require(events == expected, "the grab reported \(events), expected \(expected)")
+        print(lockStates
+            ? "X11 shortcut: extra Shift refused; five exact presses/releases survived CapsLock/NumLock states."
+            : "X11 shortcut: Ctrl+Alt+Space grab reported one press and one release.")
+    }
+
+    private static func x11HotkeyPhase(_ phase: Int, prefix: String, events: () -> [Int32]) throws {
+        let produced = "\(prefix).phase-\(phase)"
+        for _ in 0..<1_000 where !FileManager.default.fileExists(atPath: produced) {
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+        try require(FileManager.default.fileExists(atPath: produced), "X11 key producer never finished phase \(phase)")
+        let expected: [Int32] = Array([[Int32]](repeating: [1, 0], count: phase).joined())
+        if phase == 0 {
+            // Test-only quiet window: a rejected extra modifier must emit nothing.
+            for _ in 0..<25 {
+                try require(events().isEmpty, "extra Shift triggered the shortcut: \(events())")
+                Thread.sleep(forTimeInterval: 0.01)
+            }
+        } else {
+            for _ in 0..<1_000 where events().count < expected.count { Thread.sleep(forTimeInterval: 0.01) }
+        }
+        try require(events() == expected, "X11 phase \(phase) reported \(events()), expected \(expected)")
+        try Data().write(to: URL(fileURLWithPath: "\(prefix).ack-\(phase)"), options: .atomic)
     }
 }

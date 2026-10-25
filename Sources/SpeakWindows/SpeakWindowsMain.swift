@@ -16,6 +16,7 @@ final class WindowsEventContext {
     private let historyEvents: DesktopEventDispatcher<DesktopHistoryEvent>
     private let copies: DesktopTranscriptCopyDispatcher
     private let settings = DesktopSettingsQueue()
+    let historyPaste = DesktopHistoryPasteAdmission()
     let postProcessingPicker = DesktopPostProcessingPicker()
     lazy var hotKeys = WindowsHotKeyGestures { [controller] request in await controller.hotKey(request) }
     lazy var automation = WindowsAutomationSwitch(controller: controller)
@@ -70,6 +71,19 @@ final class WindowsEventContext {
     var currentSettingsTask: Task<Void, Never>? { settings.current }
 
     func finishSettings() async { await settings.drain() }
+
+    func pasteLastHistory() {
+        guard let request = historyPaste.begin() else {
+            WindowsNative.update("History paste is already pending or the app is closing. No new target was captured.")
+            return
+        }
+        let target = try? WindowsInsertionTarget.capture()
+        let controller = controller
+        enqueueSettings {
+            defer { request.finish() }
+            await controller.pasteLastHistoryItem(target: target, request: request)
+        }
+    }
 
     /// Called by the UI thread at the Record event. Reads text output in
     /// settings order: an Apply before Record is used, and one after it cannot
@@ -230,17 +244,14 @@ private func otherWindowEvent(_ event: Int32, value: String, holder: WindowsEven
     case 10: Task { await controller.retryHistory(value) }
     case 11: exportHistoryWindowEvent(value, holder: holder)
     case 12: Task { await controller.openHistoryAudio(value) }
-    case 14: Task { await controller.cancelTranscription() }
+    case 14: windowsCancelOperation(value, holder: holder)
     case 120: Task { await controller.handsFreeUserAbsent(value) }
     case 20: Task { await controller.refreshModels(force: true) }
     case 110:
         guard let slot = Int(value) else { return }
         holder.enqueueSettings { await controller.selectQuickVoice(slot) }
     case 111:
-        // As at the Record event: capture the focused field before anything else can change it.
-        // Clipboard-only output accepts no target; the Host reports a missing required one.
-        let target = try? WindowsInsertionTarget.capture()
-        holder.enqueueSettings { await controller.pasteLastHistoryItem(target: target) }
+        holder.pasteLastHistory()
     case 112:
         do {
             let target = try WindowsInsertionTarget.captureSelection()
@@ -333,6 +344,9 @@ enum SpeakWindowsMain {
 
     /// Restores native dialog state and services before the window opens.
     private static func configureWindow(controller: WindowsAppController, holder: WindowsEventContext) async throws {
+        guard jsti_window_configure_global_escape(holder.smokeTest ? 0 : 1) == 0 else {
+            throw WindowsNativeError(message: "Could not configure active-only Escape cancellation.")
+        }
         let microphone = await controller.selectedMicrophone()
         let smokeTest = holder.smokeTest
         let warning = try await Task.detached {
@@ -391,6 +405,7 @@ enum SpeakWindowsMain {
         await Task.detached { monitor?.stop() }.value
         holder.microphoneMonitor = nil
         WindowsNative.endVoiceProviderCallbacks(providerCallbacks)
+        holder.historyPaste.stop()
         await holder.finishSettings()
         await controller.stopProviderCredentialEdits()
         // A drained Apply may have refreshed the dialog; never leave it holding

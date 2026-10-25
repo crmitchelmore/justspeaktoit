@@ -6,6 +6,8 @@
 
 /* Writes a formatted, always-terminated message into a caller buffer. */
 void jsti_set_error(char *error, size_t capacity, const char *format, ...) G_GNUC_PRINTF(3, 4);
+int32_t jsti_x11_modifier_self_test(char *error, size_t capacity);
+int32_t jsti_x11_action_shortcuts_self_test(char *error, size_t capacity);
 
 /* Runs `work(data)` on the default (GTK) main context and waits for it, at
  * most `timeout_ms`. Runs inline on the owning thread. Returns FALSE on
@@ -19,6 +21,10 @@ void jsti_main_call_complete(JSTIMainCall *call);
 
 /* TRUE while the GTK window's main loop is running. */
 gboolean jsti_window_loop_running(void);
+struct _GtkWindow;
+void jsti_setup_open(struct _GtkWindow *owner);
+void jsti_setup_close(void);
+int32_t jsti_setup_self_test(struct _GtkWindow *owner, char *error, size_t capacity);
 
 /* For window sections kept in their own files: the window's ordered,
  * thread-safe setter queue (apply runs on the GTK main thread while the window
@@ -38,6 +44,7 @@ struct _GtkWidget *jsti_api_keys_group_new(struct _GtkWindow *owner);
 int32_t jsti_api_keys_self_test(struct _GtkWindow *owner, char *error, size_t capacity);
 typedef gboolean (*jsti_action_run_fn)(gint run, const char *page, gint slot);
 struct _GtkWidget *jsti_action_shortcuts_group_new(struct _GtkWindow *owner);
+struct _GtkWidget *jsti_selection_access_group_new(void);
 gboolean jsti_action_shortcuts_key(struct _GtkEventControllerKey *controller,
     guint keyval, guint keycode, guint modifiers, struct _GtkWidget *focused, jsti_action_run_fn run);
 void jsti_action_shortcuts_release(guint keycode);
@@ -57,6 +64,7 @@ void jsti_model_filters_select(gboolean local, gboolean live);
 void jsti_model_filters_set_idle(gboolean idle);
 gboolean jsti_model_filters_local(void);
 gboolean jsti_model_filters_live(void);
+gboolean jsti_model_filters_preferred_live(gboolean local);
 int32_t jsti_model_filters_self_test(char *error, size_t capacity);
 
 /* The iCloud sync group (LinuxCloudSync.c): built once for the window's

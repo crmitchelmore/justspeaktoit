@@ -82,7 +82,10 @@ public enum ModelCredentialResolver {
         // OpenAI-prefixed audio models in the batch catalogue are OpenRouter
         // models, so an identifier prefix alone is not sufficient here.
         if OpenAITranscriptionModels.directBatchModelIDs.contains(modelIdentifier) {
-            return .apiKey(identifier: "openai.apiKey", providerName: "OpenAI")
+            return .apiKey(
+                identifier: ProviderCredentialCatalogue.apiKeyIdentifier(for: "openai"),
+                providerName: "OpenAI"
+            )
         }
 
         // Gemini 3.5 Transcribe uses Google's own Interactions API. The other
@@ -90,7 +93,7 @@ public enum ModelCredentialResolver {
         // so the prefix alone is not sufficient here either.
         if GeminiTranscribeModels.directBatchModelIDs.contains(modelIdentifier) {
             return .apiKey(
-                identifier: "google.apiKey",
+                identifier: ProviderCredentialCatalogue.apiKeyIdentifier(for: "google"),
                 providerName: GeminiTranscribeModels.providerDisplayName
             )
         }
@@ -101,7 +104,7 @@ public enum ModelCredentialResolver {
         let provider = providerPrefix(in: modelIdentifier)
         if directBatchProviderIdentifiers.contains(provider) {
             return .apiKey(
-                identifier: "\(provider).apiKey",
+                identifier: ProviderCredentialCatalogue.apiKeyIdentifier(for: provider),
                 providerName: providerDisplayName(provider)
             )
         }
@@ -121,16 +124,22 @@ public enum ModelCredentialResolver {
             return .notRequired
         }
         if lowered.hasPrefix("aura") || lowered.hasPrefix("deepgram/") {
-            return .apiKey(identifier: "deepgram.apiKey", providerName: "Deepgram")
+            return .apiKey(
+                identifier: ProviderCredentialCatalogue.apiKeyIdentifier(for: "deepgram"),
+                providerName: "Deepgram"
+            )
         }
         if lowered.hasPrefix("elevenlabs/") {
             return .apiKey(identifier: ElevenLabsTTSCatalog.credentialIdentifier, providerName: "ElevenLabs")
         }
         if lowered.hasPrefix("openai/") {
-            return .apiKey(identifier: "openai.tts.apiKey", providerName: "OpenAI")
+            return .apiKey(
+                identifier: ProviderCredentialCatalogue.apiKeyIdentifier(for: "openai.tts"),
+                providerName: "OpenAI"
+            )
         }
         if lowered.hasPrefix("azure/") {
-            return .apiKey(identifier: "azure.speech.apiKey", providerName: "Azure")
+            return .apiKey(identifier: AzureSpeechConfiguration.credentialIdentifier, providerName: "Azure")
         }
         return requirementForProviderPrefix(lowered, fallbackProvider: nil)
     }
@@ -151,7 +160,7 @@ public enum ModelCredentialResolver {
             return .notRequired
         }
         return .apiKey(
-            identifier: "\(provider).apiKey",
+            identifier: ProviderCredentialCatalogue.apiKeyIdentifier(for: provider),
             providerName: providerDisplayName(provider)
         )
     }
@@ -199,7 +208,7 @@ public enum ModelCredentialResolver {
     /// local, are served by OpenRouter's inline-audio chat route on every platform; the
     /// shared route derives its model set from this rule rather than from a second list.
     static let openRouterRequirement = ModelCredentialRequirement.apiKey(
-        identifier: "openrouter.apiKey",
+        identifier: ProviderCredentialCatalogue.apiKeyIdentifier(for: "openrouter"),
         providerName: "OpenRouter"
     )
 
@@ -228,13 +237,15 @@ public enum ModelCredentialResolver {
     /// transfer parity test fails until its transfer capability is defined.
     public static var allKnownAPIKeyIdentifiers: Set<String> {
         var identifiers = Set(LiveTranscriptionProviderID.allCases.compactMap(\.apiKeyIdentifier))
-        identifiers.formUnion(directBatchProviderIdentifiers.map { "\($0).apiKey" })
+        identifiers.formUnion(directBatchProviderIdentifiers.map {
+            ProviderCredentialCatalogue.apiKeyIdentifier(for: $0)
+        })
         // Direct OpenAI batch models, OpenRouter routing, and the voice-output
         // credentials that use dedicated identifiers.
-        identifiers.insert("openai.apiKey")
-        identifiers.insert("openrouter.apiKey")
-        identifiers.insert("openai.tts.apiKey")
-        identifiers.insert("azure.speech.apiKey")
+        identifiers.insert(ProviderCredentialCatalogue.apiKeyIdentifier(for: "openai"))
+        identifiers.insert(ProviderCredentialCatalogue.apiKeyIdentifier(for: "openrouter"))
+        identifiers.insert(ProviderCredentialCatalogue.apiKeyIdentifier(for: "openai.tts"))
+        identifiers.insert(AzureSpeechConfiguration.credentialIdentifier)
         return identifiers
     }
 }

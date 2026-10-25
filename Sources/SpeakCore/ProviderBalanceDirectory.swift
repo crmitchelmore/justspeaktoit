@@ -72,28 +72,28 @@ public enum ProviderBalanceDirectory {
         ProviderBalanceAccount(
             id: "deepgram",
             displayName: "Deepgram",
-            credentialIdentifiers: ["deepgram.apiKey"],
+            credentialIdentifiers: [ProviderCredentialCatalogue.apiKeyIdentifier(for: "deepgram")],
             support: .balance,
             billingURL: "https://console.deepgram.com/project"
         ),
         ProviderBalanceAccount(
             id: "revai",
             displayName: "Rev.ai",
-            credentialIdentifiers: ["revai.apiKey"],
+            credentialIdentifiers: [ProviderCredentialCatalogue.apiKeyIdentifier(for: "revai")],
             support: .balance,
             billingURL: "https://www.rev.ai/account"
         ),
         ProviderBalanceAccount(
             id: "elevenlabs",
             displayName: "ElevenLabs",
-            credentialIdentifiers: ["elevenlabs.apiKey"],
+            credentialIdentifiers: [ProviderCredentialCatalogue.apiKeyIdentifier(for: "elevenlabs")],
             support: .balance,
             billingURL: "https://elevenlabs.io/app/subscription"
         ),
         ProviderBalanceAccount(
             id: "openrouter",
             displayName: "OpenRouter",
-            credentialIdentifiers: ["openrouter.apiKey"],
+            credentialIdentifiers: [ProviderCredentialCatalogue.apiKeyIdentifier(for: "openrouter")],
             support: .balance,
             billingURL: "https://openrouter.ai/credits"
         ),
@@ -102,8 +102,11 @@ public enum ProviderBalanceDirectory {
             displayName: "OpenAI",
             // One OpenAI account, two cards: transcription and voice output
             // write separate Keychain items but bill to the same organisation.
-            credentialIdentifiers: ["openai.apiKey", "openai.tts.apiKey"],
-            primaryCredentialIdentifier: "openai.apiKey",
+            credentialIdentifiers: [
+                ProviderCredentialCatalogue.apiKeyIdentifier(for: "openai"),
+                ProviderCredentialCatalogue.apiKeyIdentifier(for: "openai.tts")
+            ],
+            primaryCredentialIdentifier: ProviderCredentialCatalogue.apiKeyIdentifier(for: "openai"),
             support: .billingLinkOnly(
                 reason: "OpenAI's admin API reports costs already incurred, not a wallet balance, "
                     + "and it needs an admin key this app does not hold."
@@ -123,7 +126,7 @@ public enum ProviderBalanceDirectory {
         ProviderBalanceAccount(
             id: "azure",
             displayName: "Azure",
-            credentialIdentifiers: ["azure.speech.apiKey"],
+            credentialIdentifiers: [AzureSpeechConfiguration.credentialIdentifier],
             support: .billingLinkOnly(
                 reason: "Azure balances need a separate billing sign-in and an offer eligibility check, "
                     + "which a Speech resource key cannot perform."
@@ -133,7 +136,7 @@ public enum ProviderBalanceDirectory {
         ProviderBalanceAccount(
             id: "cartesia",
             displayName: "Cartesia",
-            credentialIdentifiers: ["cartesia.apiKey"],
+            credentialIdentifiers: [ProviderCredentialCatalogue.apiKeyIdentifier(for: "cartesia")],
             support: .billingLinkOnly(
                 reason: "Cartesia's credits endpoint reports admin usage rather than a spendable wallet, "
                     + "so it is not shown here as a balance."
@@ -143,7 +146,7 @@ public enum ProviderBalanceDirectory {
         ProviderBalanceAccount(
             id: "soniox",
             displayName: "Soniox",
-            credentialIdentifiers: ["soniox.apiKey"],
+            credentialIdentifiers: [ProviderCredentialCatalogue.apiKeyIdentifier(for: "soniox")],
             support: .billingLinkOnly(
                 reason: "Soniox reports consumed usage rather than a wallet balance."
             ),
@@ -152,7 +155,7 @@ public enum ProviderBalanceDirectory {
         ProviderBalanceAccount(
             id: "xai",
             displayName: "xAI",
-            credentialIdentifiers: ["xai.apiKey"],
+            credentialIdentifiers: [ProviderCredentialCatalogue.apiKeyIdentifier(for: "xai")],
             support: .billingLinkOnly(
                 reason: "xAI's management billing API needs a separate management key, "
                     + "which an inference key does not provide."
@@ -162,56 +165,56 @@ public enum ProviderBalanceDirectory {
         ProviderBalanceAccount(
             id: "assemblyai",
             displayName: "AssemblyAI",
-            credentialIdentifiers: ["assemblyai.apiKey"],
+            credentialIdentifiers: [ProviderCredentialCatalogue.apiKeyIdentifier(for: "assemblyai")],
             support: .billingLinkOnly(reason: Self.noDocumentedContract),
             billingURL: "https://www.assemblyai.com/app/account"
         ),
         ProviderBalanceAccount(
             id: "gladia",
             displayName: "Gladia",
-            credentialIdentifiers: ["gladia.apiKey"],
+            credentialIdentifiers: [ProviderCredentialCatalogue.apiKeyIdentifier(for: "gladia")],
             support: .billingLinkOnly(reason: Self.noDocumentedContract),
             billingURL: "https://app.gladia.io"
         ),
         ProviderBalanceAccount(
             id: "groq",
             displayName: "Groq",
-            credentialIdentifiers: ["groq.apiKey"],
+            credentialIdentifiers: [ProviderCredentialCatalogue.apiKeyIdentifier(for: "groq")],
             support: .billingLinkOnly(reason: Self.noDocumentedContract),
             billingURL: "https://console.groq.com/settings/billing"
         ),
         ProviderBalanceAccount(
             id: "google",
             displayName: GeminiTranscribeModels.providerDisplayName,
-            credentialIdentifiers: ["google.apiKey"],
+            credentialIdentifiers: [ProviderCredentialCatalogue.apiKeyIdentifier(for: "google")],
             support: .billingLinkOnly(reason: Self.noDocumentedContract),
             billingURL: "https://aistudio.google.com/app/plan_information"
         ),
         ProviderBalanceAccount(
             id: "mistral",
             displayName: "Mistral",
-            credentialIdentifiers: ["mistral.apiKey"],
+            credentialIdentifiers: [ProviderCredentialCatalogue.apiKeyIdentifier(for: "mistral")],
             support: .billingLinkOnly(reason: Self.noDocumentedContract),
             billingURL: "https://console.mistral.ai/billing"
         ),
         ProviderBalanceAccount(
             id: "speechmatics",
             displayName: "Speechmatics",
-            credentialIdentifiers: ["speechmatics.apiKey"],
+            credentialIdentifiers: [ProviderCredentialCatalogue.apiKeyIdentifier(for: "speechmatics")],
             support: .billingLinkOnly(reason: Self.noDocumentedContract),
             billingURL: "https://portal.speechmatics.com"
         ),
         ProviderBalanceAccount(
             id: "meta",
             displayName: "Meta",
-            credentialIdentifiers: ["meta.apiKey"],
+            credentialIdentifiers: [ProviderCredentialCatalogue.apiKeyIdentifier(for: "meta")],
             support: .billingLinkOnly(reason: Self.noDocumentedContract),
             billingURL: "https://llama.developer.meta.com"
         ),
         ProviderBalanceAccount(
             id: "modulate",
             displayName: "Modulate",
-            credentialIdentifiers: ["modulate.apiKey"],
+            credentialIdentifiers: [ProviderCredentialCatalogue.apiKeyIdentifier(for: "modulate")],
             support: .billingLinkOnly(reason: Self.noDocumentedContract),
             billingURL: "https://modulate.ai"
         )

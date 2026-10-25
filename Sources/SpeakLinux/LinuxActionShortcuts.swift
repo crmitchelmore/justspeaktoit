@@ -5,7 +5,7 @@ import CLinuxSupport
 
 enum LinuxActionShortcutRun: Equatable {
     case record, page(String), stop, troubleshooting, comparison, quickVoice(Int), clipboard, pauseSpeech
-    case apiKeys, permissions, unavailable
+    case apiKeys, permissions, pasteLastHistory, selectedText, unavailable
 
     // swiftlint:disable:next cyclomatic_complexity
     init(_ action: DesktopShortcutAction) {
@@ -32,9 +32,9 @@ enum LinuxActionShortcutRun: Equatable {
         case .pauseResumeTTS: self = .pauseSpeech
         case .openAPIKeysSettings: self = .apiKeys
         case .openPermissionsSettings: self = .permissions
-        case .speakSelectedText,
-             .pasteLastHistoryItem, .editSelectionByVoice:
-            self = .unavailable
+        case .pasteLastHistoryItem: self = .pasteLastHistory
+        case .speakSelectedText: self = .selectedText
+        case .editSelectionByVoice: self = .unavailable
         }
     }
 
@@ -51,18 +51,49 @@ enum LinuxActionShortcutRun: Equatable {
         case .pauseSpeech: 8
         case .apiKeys: 9
         case .permissions: 10
+        case .pasteLastHistory: 11
+        case .selectedText: 12
         }
     }
     var page: String { if case .page(let name) = self { name } else { "" } }
     var slot: Int32 { if case .quickVoice(let slot) = self { Int32(slot) } else { 0 } }
+    var desktopCommandArgument: String? {
+        switch self {
+        case .record: JSTI_TOGGLE_ARGUMENT
+        case .clipboard: JSTI_SPEAK_CLIPBOARD_ARGUMENT
+        case .pasteLastHistory: JSTI_PASTE_LAST_HISTORY_ARGUMENT
+        case .selectedText: JSTI_SPEAK_SELECTED_TEXT_ARGUMENT
+        case .stop: JSTI_STOP_SPEECH_ARGUMENT
+        case .pauseSpeech: JSTI_PAUSE_SPEECH_ARGUMENT
+        case .quickVoice(1): JSTI_QUICK_VOICE_1_ARGUMENT
+        case .quickVoice(2): JSTI_QUICK_VOICE_2_ARGUMENT
+        case .quickVoice(3): JSTI_QUICK_VOICE_3_ARGUMENT
+        default: nil
+        }
+    }
+
+    static var forwardedCommandArguments: Set<String> {
+        Set(DesktopShortcutAction.allCases.compactMap { Self($0).desktopCommandArgument })
+            .subtracting([JSTI_TOGGLE_ARGUMENT])
+    }
+
+    var supportsAutomaticGlobalRegistration: Bool {
+        switch self {
+        case .record, .clipboard, .pasteLastHistory, .selectedText: true
+        default: false
+        }
+    }
 }
 
 extension LinuxWindow {
     static func configureActionShortcuts(_ holder: LinuxEventContext) async throws {
         let bindings = await holder.controller.shortcutBindings
+        holder.globalActionShortcuts.configure(bindings, holder: holder)
         let revision = LinuxActionShortcutEditorState.shared.configure(bindings)
         let strings = Strings()
-        let rows = actionShortcutRows(bindings, strings: strings)
+        let rows = actionShortcutRows(
+            bindings, strings: strings, globalNotes: holder.globalActionShortcuts.notes(for: bindings)
+        )
         let presets = DesktopShortcutPreset.allCases
         guard let reset = presets.firstIndex(of: .standard) else {
             throw DesktopHostError(message: "The canonical shortcut defaults are unavailable.")
@@ -87,13 +118,14 @@ extension LinuxWindow {
     }
 
     private static func actionShortcutRows(
-        _ bindings: DesktopShortcutBindings, strings: Strings
+        _ bindings: DesktopShortcutBindings, strings: Strings,
+        globalNotes: [DesktopShortcutAction: String] = [:]
     ) -> [JSTILinuxActionShortcut] {
         DesktopShortcutAction.allCases.map { action in
             let binding = bindings[action]
             let chord = binding.linuxChord
             let run = LinuxActionShortcutRun(action)
-            let note = actionShortcutNote(action, bindings: bindings)
+            let note = actionShortcutNote(action, bindings: bindings, globalNote: globalNotes[action])
             let unset = binding.keyCode == 0 && binding.modifiers.isEmpty && !binding.isEnabled
             return JSTILinuxActionShortcut(
                 title: strings.add(action.displayName),
@@ -101,7 +133,8 @@ extension LinuxWindow {
                 note: strings.add(note), page: strings.add(run.page), identifier: strings.add(action.rawValue),
                 keysym: unset ? 0 : chord?.keysym ?? 0,
                 modifiers: chord?.modifiers ?? 0, run: run.code, slot: run.slot,
-                enabled: binding.isEnabled && !binding.isGlobal && chord != nil && run != .unavailable ? 1 : 0,
+                enabled: binding.isEnabled && !binding.isGlobal && chord != nil
+                    && run != .unavailable && run != .selectedText ? 1 : 0,
                 binding_enabled: binding.isEnabled ? 1 : 0, binding_global: binding.isGlobal ? 1 : 0,
                 can_be_global: action.supportsGlobalShortcut ? 1 : 0, has_key: unset ? 0 : 1
             )
@@ -109,13 +142,16 @@ extension LinuxWindow {
     }
 
     private static func actionShortcutNote(
-        _ action: DesktopShortcutAction, bindings: DesktopShortcutBindings
+        _ action: DesktopShortcutAction, bindings: DesktopShortcutBindings, globalNote: String?
     ) -> String {
         let binding = bindings[action]
         let run = LinuxActionShortcutRun(action)
         if !binding.isEnabled { return "Off" }
         if run == .unavailable { return "Not implemented on Linux yet. The binding stays saved." }
-        if binding.isGlobal { return "Global action registration is not available yet. The binding stays saved." }
+        if run == .selectedText {
+            return selectedTextShortcutNote(binding: binding, globalNote: globalNote)
+        }
+        if binding.isGlobal { return globalShortcutNote(run: run, note: globalNote) }
         guard let chord = binding.linuxChord else {
             return "This Mac-specific combination stays saved, not registered."
         }
@@ -130,7 +166,33 @@ extension LinuxWindow {
         }) {
             return "This window. Conflicts with \(conflict.displayName); the first listed action runs."
         }
+        if let argument = run.desktopCommandArgument, run != .record {
+            return "This window. You can also bind `\(LinuxShortcuts.toggleCommand) \(argument)` "
+                + "in desktop keyboard settings while the app is running."
+        }
         return "This window"
+    }
+
+    private static func globalShortcutNote(run: LinuxActionShortcutRun, note: String?) -> String {
+        if LinuxHostPlatform.session.displayServer == .x11 {
+            return note ?? "X11 global shortcut starts when the app is ready; subject to availability."
+        }
+        if let argument = run.desktopCommandArgument {
+            return "Bind `\(LinuxShortcuts.toggleCommand) \(argument)` in your desktop's keyboard settings. "
+                + "Keep the app running; this saved global binding is not registered automatically."
+        }
+        return "Global action registration is not available yet. The binding stays saved."
+    }
+
+    private static func selectedTextShortcutNote(binding: DesktopShortcutBinding, globalNote: String?) -> String {
+        if binding.isGlobal, LinuxHostPlatform.session.displayServer == .x11 {
+            return (globalNote ?? "X11 global shortcut starts when the app is ready.")
+                + " External editable AT-SPI fields only; allow session access in Voice Output."
+        }
+        return "External editable AT-SPI fields only. Allow session access in Voice Output, then bind "
+            + "`\(LinuxShortcuts.toggleCommand) \(JSTI_SPEAK_SELECTED_TEXT_ARGUMENT)` "
+            + "in desktop keyboard settings. This app's fields are excluded; the saved binding "
+            + "is not registered automatically."
     }
 }
 
@@ -147,17 +209,37 @@ extension LinuxActionShortcutRun {
             (.openCompareModelsSettings, .comparison), (.openAboutSettings, .page("about")),
             (.quickVoice1, .quickVoice(1)), (.quickVoice2, .quickVoice(2)), (.quickVoice3, .quickVoice(3)),
             (.speakClipboard, .clipboard), (.pauseResumeTTS, .pauseSpeech), (.openAPIKeysSettings, .apiKeys),
-            (.openPermissionsSettings, .permissions)
+            (.openPermissionsSettings, .permissions), (.pasteLastHistoryItem, .pasteLastHistory),
+            (.speakSelectedText, .selectedText)
         ]
         let unavailable: [DesktopShortcutAction] = [
-            .speakSelectedText, .pasteLastHistoryItem, .editSelectionByVoice
+            .editSelectionByVoice
         ]
         guard expected.allSatisfy({ Self($0.0) == $0.1 }),
               unavailable.allSatisfy({ Self($0) == .unavailable }),
+              Self(.pasteLastHistoryItem).code == 11,
+              Self(.pasteLastHistoryItem).page.isEmpty, Self(.pasteLastHistoryItem).slot == 0,
+              Self(.speakSelectedText).code == 12, Self(.speakSelectedText).slot == 0,
+              desktopCommandProjectionIsValid(),
               Set(expected.map(\.0) + unavailable) == Set(DesktopShortcutAction.allCases) else {
             throw DesktopHostError(
                 message: "Linux action shortcut execution coverage differs from its declared projection."
             )
         }
+    }
+
+    private static func desktopCommandProjectionIsValid() -> Bool {
+        let expected: [(DesktopShortcutAction, String)] = [
+            (.startStopRecording, JSTI_TOGGLE_ARGUMENT),
+            (.speakClipboard, JSTI_SPEAK_CLIPBOARD_ARGUMENT),
+            (.pasteLastHistoryItem, JSTI_PASTE_LAST_HISTORY_ARGUMENT),
+            (.speakSelectedText, JSTI_SPEAK_SELECTED_TEXT_ARGUMENT),
+            (.stopTTS, JSTI_STOP_SPEECH_ARGUMENT), (.pauseResumeTTS, JSTI_PAUSE_SPEECH_ARGUMENT),
+            (.quickVoice1, JSTI_QUICK_VOICE_1_ARGUMENT), (.quickVoice2, JSTI_QUICK_VOICE_2_ARGUMENT),
+            (.quickVoice3, JSTI_QUICK_VOICE_3_ARGUMENT)
+        ]
+        return expected.allSatisfy { Self($0.0).desktopCommandArgument == $0.1 }
+            && Set(expected.map(\.1)) == forwardedCommandArguments.union([JSTI_TOGGLE_ARGUMENT])
+            && Self.quickVoice(0).desktopCommandArgument == nil && Self.quickVoice(4).desktopCommandArgument == nil
     }
 }

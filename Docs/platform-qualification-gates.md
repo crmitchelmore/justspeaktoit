@@ -14,8 +14,12 @@ and strict branch freshness when deciding whether to require these contexts.
 | Linux Flatpak gate (optional policy) | Fresh installed bundle checks, or explicitly selected authenticated trusted retest |
 
 Every in-scope pull request starts each workflow regardless of changed paths;
-existing target-branch scopes remain. The classifier uses
-[one canonical filter file](../.github/desktop-platform-paths.yml). Main push
+existing target-branch scopes remain. PR classification reads
+[the canonical filter file](../.github/desktop-platform-paths.yml) only from the
+event's immutable repository-owned base commit, so head policy edits cannot
+exclude their own source changes. A base predating that file explicitly
+commissions all platforms. Existing unreadable, malformed or incomplete policy
+fails closed; policy edits match every lane's trusted self-path pattern. Main push
 filters are matching projections checked by the lightweight contract suite.
 Documentation, Apple-only and no-change pull requests may intentionally skip
 unrelated native work. Manual dispatch and matching main pushes select work.

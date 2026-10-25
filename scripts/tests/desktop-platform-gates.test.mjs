@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, chmodSync, mkdirSync, symlinkSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, matchesGlob } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -7,12 +7,16 @@ import { test } from 'node:test';
 import { lanes, acceptsDesktopGate } from '../verify-desktop-ci-gates.mjs';
 
 const read = path => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8');
-const filters = {};
-let current;
-for (const line of read('.github/desktop-platform-paths.yml').split('\n')) {
-  if (/^[a-z][a-z0-9-]+:$/.test(line)) filters[current = line.slice(0, -1)] = [];
-  else if (line.startsWith('  - ')) filters[current].push(JSON.parse(line.slice(4)));
+function parseFilters(text) {
+  const filters = {};
+  let current;
+  for (const line of text.split('\n')) {
+    if (/^[a-z][a-z0-9-]+:$/.test(line)) filters[current = line.slice(0, -1)] = [];
+    else if (line.startsWith('  - ')) filters[current].push(JSON.parse(line.slice(4)));
+  }
+  return filters;
 }
+const filters = parseFilters(read('.github/desktop-platform-paths.yml'));
 const workflows = Object.fromEntries(Object.entries(lanes).map(([id, spec]) => [id, read(`.github/workflows/${spec.file}`)]));
 const jobs = text => Object.fromEntries([...text.slice(text.indexOf('\njobs:\n')).matchAll(
   /^  ([a-z][a-z0-9-]+):\n([\s\S]*?)(?=^  [a-z][a-z0-9-]+:\n|$(?![\s\S]))/gm,
@@ -68,6 +72,9 @@ for (const [lane, spec] of Object.entries(lanes)) {
     assert.ok(filters[lane].includes('.github/desktop-platform-paths.yml'));
     assert.match(bodies['desktop-paths'], /dorny\/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d/);
     assert.match(bodies['desktop-paths'], /persist-credentials: false/);
+    assert.match(bodies['desktop-paths'], /ref: \$\{\{ github.event_name == 'pull_request' && github.event.pull_request.base.sha \|\| github.sha \}\}/);
+    assert.match(bodies['desktop-paths'], /if: github.event_name == 'pull_request' && steps.policy.outputs.present == 'true'/);
+    assert.doesNotMatch(bodies['desktop-paths'], /head.sha|head.ref|scripts\//);
   });
 
   test(`${lane}: relevant, docs, Apple-only and no-change classification`, () => {
@@ -113,14 +120,38 @@ for (const [lane, spec] of Object.entries(lanes)) {
     assert.equal(assess(fixture('false'), 'workflow_dispatch'), false);
   });
 
+  test(`${lane}: only a genuinely absent trusted policy commissions; read errors reject`, () => {
+    const script = bodies['desktop-paths'].match(/        id: policy\n        run: \|\n([\s\S]*?)      - name: Classify/)[1].replace(/^          /gm, '');
+    for (const kind of ['absent', 'present', 'empty', 'unreadable', 'directory', 'dangling-link']) {
+      const dir = mkdtempSync(join(tmpdir(), 'platform-policy-'));
+      try {
+        mkdirSync(join(dir, '.github'));
+        const path = join(dir, '.github/desktop-platform-paths.yml');
+        const output = join(dir, 'outputs');
+        if (kind === 'present') writeFileSync(path, read('.github/desktop-platform-paths.yml'));
+        if (kind === 'empty' || kind === 'unreadable') writeFileSync(path, '');
+        if (kind === 'unreadable') chmodSync(path, 0);
+        if (kind === 'directory') mkdirSync(path);
+        if (kind === 'dangling-link') symlinkSync('missing', path);
+        const result = spawnSync('/bin/bash', ['-ec', script], { cwd: dir, encoding: 'utf8', env: {
+          ...process.env, GITHUB_OUTPUT: output,
+        } });
+        if (kind === 'absent' || kind === 'present' || kind === 'empty') {
+          assert.equal(result.status, 0, result.stderr);
+          assert.equal(readFileSync(output, 'utf8'), `present=${kind !== 'absent'}\n`);
+        } else assert.notEqual(result.status, 0, `${kind} must never become commissioning`);
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    }
+  });
+
   test(`${lane}: actual selector shell validates outputs and manual input boundaries`, () => {
-    const script = bodies['desktop-paths'].match(/        run: \|\n([\s\S]*)/)[1].replace(/^          /gm, '');
-    function select(event, selected, run = '', sha = '') {
+    const script = bodies['desktop-paths'].slice(bodies['desktop-paths'].indexOf('      - name: Select')).match(/        run: \|\n([\s\S]*)/)[1].replace(/^          /gm, '');
+    function select(event, selected, run = '', sha = '', present = 'true', cwd) {
       const dir = mkdtempSync(join(tmpdir(), 'platform-selector-'));
       const output = join(dir, 'outputs');
       try {
-        const result = spawnSync('/bin/bash', ['-c', script], { encoding: 'utf8', env: {
-          ...process.env, EVENT_NAME: event, SELECTED: selected, SOURCE_RUN: run, SOURCE_SHA: sha, GITHUB_OUTPUT: output,
+        const result = spawnSync('/bin/bash', ['-c', script], { cwd, encoding: 'utf8', env: {
+          ...process.env, EVENT_NAME: event, TRUSTED_POLICY: present, SELECTED: selected, SOURCE_RUN: run, SOURCE_SHA: sha, GITHUB_OUTPUT: output,
         } });
         return { status: result.status, outputs: result.status === 0 ? readFileSync(output, 'utf8') : '' };
       } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -131,6 +162,43 @@ for (const [lane, spec] of Object.entries(lanes)) {
       assert.match(result.outputs, new RegExp(`selected=${selected}\\n`));
     }
     for (const selected of ['', 'invalid']) assert.notEqual(select('pull_request', selected).status, 0);
+    for (const present of ['', 'invalid']) assert.notEqual(select('pull_request', 'false', '', '', present).status, 0);
+    for (const selected of ['', 'false', 'invalid']) {
+      assert.match(select('pull_request', selected, '', '', 'false').outputs, /selected=true\n/,
+        'genuinely absent trusted-base policy commissions every platform');
+    }
+    // These are separate on-disk base/head trees. The exact checkout ref assertion
+    // binds the workflow to the base fixture; a head-controlled policy would exclude.
+    const policyScript = bodies['desktop-paths'].match(/        id: policy\n        run: \|\n([\s\S]*?)      - name: Classify/)[1].replace(/^          /gm, '');
+    for (const hostileHead of [null, '', `${lane}:\n`, `${lane}:\n  - "Docs/**"\n`]) {
+      for (const commissioning of [false, true]) {
+        const dir = mkdtempSync(join(tmpdir(), 'platform-base-head-'));
+        try {
+          const base = join(dir, 'base'); const head = join(dir, 'head');
+          for (const tree of [base, head]) mkdirSync(join(tree, '.github'), { recursive: true });
+          mkdirSync(join(head, 'Sources/SpeakCore'), { recursive: true });
+          writeFileSync(join(head, 'Sources/SpeakCore/Changed.swift'), '// changed source\n');
+          const policyPath = '.github/desktop-platform-paths.yml';
+          if (!commissioning) writeFileSync(join(base, policyPath), read(policyPath));
+          if (hostileHead !== null) writeFileSync(join(head, policyPath), hostileHead);
+          const paths = ['Sources/SpeakCore/Changed.swift', policyPath];
+          const headFilters = parseFilters(hostileHead === null ? '' : readFileSync(join(head, policyPath), 'utf8'));
+          assert.equal(paths.some(path => (headFilters[lane] || []).some(glob => matchesGlob(path, glob))), false,
+            'head policy really would omit source and policy self-change');
+          const output = join(dir, 'policy-output');
+          const result = spawnSync('/bin/bash', ['-ec', policyScript], { cwd: base, encoding: 'utf8', env: {
+            ...process.env, GITHUB_OUTPUT: output,
+          } });
+          assert.equal(result.status, 0, result.stderr);
+          const present = readFileSync(output, 'utf8').trim().split('=')[1];
+          assert.equal(present, String(!commissioning));
+          const baseFilters = commissioning ? {} : parseFilters(readFileSync(join(base, policyPath), 'utf8'));
+          const selected = paths.some(path => (baseFilters[lane] || []).some(glob => matchesGlob(path, glob)));
+          assert.match(select('pull_request', commissioning ? '' : String(selected), '', '', present, base).outputs,
+            /selected=true\n/, 'base policy selects changed source; absence explicitly commissions all');
+        } finally { rmSync(dir, { recursive: true, force: true }); }
+      }
+    }
     for (const event of ['', 'merge_group', 'invalid']) assert.notEqual(select(event, 'false').status, 0);
     for (const event of ['push', 'workflow_dispatch']) assert.match(select(event, '').outputs, /selected=true\n/);
     if (lane === 'linux-flatpak') {

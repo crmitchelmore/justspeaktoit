@@ -225,6 +225,8 @@ jobs:
           } > flatpak-evidence/argv-probe.log 2>&1
 
       - name: Qualify the unchanged bundle in a real session
+        env:
+          JSTI_FLATPAK_TEST_GGML_PRESEED: "1"
         run: >-
           bash -o pipefail -c 'scripts/linux-flatpak-checks.sh
           flatpak-evidence/JustSpeakToIt-x86_64.flatpak "$RUNNER_TEMP/jfk.wav"

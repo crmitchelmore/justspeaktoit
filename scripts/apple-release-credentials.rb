@@ -1,52 +1,134 @@
 # frozen_string_literal: true
 
-require 'open3'
 require 'openssl'
-require 'timeout'
 
 module AppleRelease
-  class CredentialError < StandardError; end
+  class CredentialError < StandardError
+    MESSAGES = {
+      references: 'Configure all three 1Password release credential references',
+      unavailable: 'Unable to read 1Password release credentials; check unlocked access',
+      timeout: '1Password release credential read timed out; check unlocked access',
+      output_limit: '1Password release credential output exceeded its limit',
+      invalid_value: '1Password release credentials contain an empty or invalid value',
+      invalid_key: '1Password release credentials require a private P-256 key',
+      source: 'Unsupported Apple release credential source'
+    }.freeze
+    attr_reader :reason
+    def initialize(reason = :unavailable)
+      @reason = reason
+      super(MESSAGES.fetch(reason))
+    end
+  end
 
-  # Capture both streams in memory. Never invoke a shell, print CLI diagnostics,
+  # Keep bounded output in memory and discard diagnostics. Never invoke a shell,
   # or let an unattended desktop-unlock prompt hold the release indefinitely.
   class OpReader
-    def initialize(spawn: Open3.method(:popen3), timeout: 30)
+    MAX_OUTPUT_BYTES = 64 * 1024
+    MAX_ERROR_BYTES = 64 * 1024
+    Child = Struct.new(:pid, :status, :reaped)
+
+    def initialize(spawn: Process.method(:spawn), timeout: 30)
       @spawn, @timeout = spawn, timeout
     end
 
     def read(reference)
-      @spawn.call('op', 'read', '--no-newline', reference) do |input, output, errors, process|
-        input.close
-        readers = [output, errors].map do |stream|
-          Thread.new { stream.read rescue '' }
-        end
-        begin
-          Timeout.timeout(@timeout) do
-            status = process.value
-            value = readers[0].value
-            readers[1].value # Drain stderr, but never expose its contents.
-            raise CredentialError unless status.success? && !value.strip.empty?
-            value
-          end
-        ensure
-          stop_owned_process(process)
-          [output, errors].each { |stream| stream.close unless stream.closed? }
-          readers.each { |reader| reader.kill if reader.alive?; reader.join }
-        end
-      end
+      read_owned(reference)
+    rescue CredentialError => error
+      raise CredentialError.new(error.reason), cause: nil
     rescue StandardError
-      raise CredentialError, 'Unable to read 1Password release credentials', cause: nil
+      raise CredentialError.new, cause: nil
     end
 
     private
 
-    def stop_owned_process(process)
-      return if process.join(0)
-      Process.kill('TERM', process.pid)
-      Process.kill('KILL', process.pid) unless process.join(0.25)
-      process.value # Reap only the child this read created.
-    rescue Errno::ESRCH
-      process.value
+    def read_owned(reference)
+      pipes = []
+      child = nil
+      output, output_writer = IO.pipe
+      pipes.concat([output, output_writer])
+      errors, error_writer = IO.pipe
+      pipes.concat([errors, error_writer])
+      deadline = monotonic + @timeout
+      pid = @spawn.call('op', 'read', '--no-newline', reference,
+        in: File::NULL, out: output_writer, err: error_writer)
+      child = Child.new(pid, nil, false)
+      [output_writer, error_writer].each(&:close)
+      value = drain(child, output, errors, deadline)
+      raise CredentialError unless child.status.success?
+      raise CredentialError.new(:invalid_value) if value.strip.empty?
+      value
+    ensure
+      begin
+        stop_owned_process(child) if child
+      ensure
+        pipes&.each { |pipe| pipe.close unless pipe.closed? }
+      end
+    end
+
+    def monotonic
+      Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    end
+
+    def drain(child, output, errors, deadline)
+      streams = [output, errors]
+      value = ''.b
+      error_bytes = 0
+      until child.reaped && streams.empty?
+        poll(child)
+        remaining = deadline - monotonic
+        raise CredentialError.new(:timeout) if remaining <= 0
+        ready = IO.select(streams, nil, nil, [remaining, 0.05].min)
+        next unless ready
+        ready.first.each do |stream|
+          chunk = stream.read_nonblock(4096, exception: false)
+          if chunk.nil?
+            streams.delete(stream)
+          elsif chunk != :wait_readable
+            if stream == output
+              raise CredentialError.new(:output_limit) if value.bytesize + chunk.bytesize > MAX_OUTPUT_BYTES
+              value << chunk
+            else
+              error_bytes += chunk.bytesize # Count and discard diagnostics, never retain them.
+              raise CredentialError.new(:output_limit) if error_bytes > MAX_ERROR_BYTES
+            end
+          end
+        end
+      end
+      value
+    end
+
+    # This control thread is the sole reaper. An exited, unreaped child keeps
+    # its PID reserved; once reaped, no cleanup path may signal that PID.
+    def poll(child)
+      return child.status if child.reaped
+      result = Process.waitpid2(child.pid, Process::WNOHANG)
+      if result
+        child.status = result.last
+        child.reaped = true
+      end
+      child.status
+    rescue Errno::ECHILD
+      child.reaped = true
+      raise CredentialError
+    end
+
+    def stop_owned_process(child)
+      return if child.reaped
+      begin
+        Process.kill('TERM', child.pid)
+      rescue Errno::ESRCH
+        # It exited without being reaped; poll below still owns that wait.
+      end
+      deadline = monotonic + 0.25
+      sleep 0.01 until poll(child) || monotonic >= deadline
+      return if child.reaped
+      begin
+        Process.kill('KILL', child.pid)
+      rescue Errno::ESRCH
+        # Reap an already-exited owned child below.
+      end
+      _, child.status = Process.waitpid2(child.pid)
+      child.reaped = true
     end
   end
 
@@ -60,17 +142,23 @@ module AppleRelease
     def self.load(env:, reader:)
       refs = REFERENCES.map { |name| env[name] }
       unless refs.all? { |ref| valid_reference?(ref) }
-        raise CredentialError, 'Configure all three 1Password release credential references'
+        raise CredentialError.new(:references)
       end
       key_id, issuer, pem = refs.map { |ref| reader.read(ref) }
-      key = OpenSSL::PKey.read(pem)
-      unless key.is_a?(OpenSSL::PKey::EC) && key.private? && key.group.curve_name == 'prime256v1'
-        raise CredentialError, 'Invalid 1Password release credentials'
+      raise CredentialError.new(:invalid_value) if [key_id, issuer, pem].any? { |value| !value.is_a?(String) || value.strip.empty? }
+      begin
+        key = OpenSSL::PKey.read(pem)
+      rescue OpenSSL::PKey::PKeyError, ArgumentError
+        raise CredentialError.new(:invalid_key), cause: nil
       end
-      raise CredentialError, 'Invalid 1Password release credentials' if key_id.strip.empty? || issuer.strip.empty?
+      unless key.is_a?(OpenSSL::PKey::EC) && key.private? && key.group.curve_name == 'prime256v1'
+        raise CredentialError.new(:invalid_key)
+      end
       [key_id.strip, issuer.strip, key]
+    rescue CredentialError => error
+      raise CredentialError.new(error.reason), cause: nil
     rescue StandardError
-      raise CredentialError, 'Unable to load 1Password release credentials; check references and unlock access', cause: nil
+      raise CredentialError.new, cause: nil
     end
 
     def self.valid_reference?(reference)

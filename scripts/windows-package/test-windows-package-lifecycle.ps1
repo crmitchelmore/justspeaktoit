@@ -483,6 +483,10 @@ function Assert-Removed([string] $Label, $Package) {
     # The package object reads its location from the live registration, which
     # is gone after removal; keep the path it had while installed.
     $installLocation = [string] $Package.InstallLocation
+    # Exit/identity evidence was collected before this point. Release only
+    # completed owned process handles before asking Windows to remove the app.
+    $released = Close-JstiExitedProcesses $script:ledger $ownershipOperations
+    Assert-Check "$Label releases exited owned process handles" ($released.failures.Count -eq 0) $released
     $deployment = Invoke-Deployment "Uninstall $Label" { Remove-AppxPackage -Package $Package.PackageFullName }
     Assert-Check "$Label uninstalls through the normal package removal" $deployment.succeeded $deployment
     Assert-Check "$Label leaves no registered version" ((Get-Registrations).Count -eq 0) @((Get-Registrations) | ForEach-Object { $_.PackageFullName })

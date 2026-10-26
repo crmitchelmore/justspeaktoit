@@ -52,6 +52,32 @@ function Add-JstiOwnedProcess($Ledger, $Process) {
     [void] $Ledger.Processes.Add($Process)
 }
 
+# A completed owned process no longer needs its handle for identity/exit proof.
+# Keep running or unobservable processes in the ledger for normal cleanup; never
+# discover or dispose a foreign process. Failed disposal remains owned for retry.
+function Close-JstiExitedProcesses {
+    param(
+        [Parameter(Mandatory = $true)] $Ledger,
+        [Parameter(Mandatory = $true)] [hashtable] $Operations
+    )
+    Assert-JstiAdmitted $Ledger
+    $record = [ordered]@{ releasedProcessHandles = @(); failures = @() }
+    for ($index = $Ledger.Processes.Count - 1; $index -ge 0; $index--) {
+        $process = $Ledger.Processes[$index]
+        $processId = 'unknown'
+        try {
+            $processId = $process.Id
+            if (& $Operations.IsRunning $process) { continue }
+            $null = & $Operations.DisposeProcess $process
+            $Ledger.Processes.RemoveAt($index)
+            $record.releasedProcessHandles += $processId
+        } catch {
+            $record.failures += "releasing exited process ${processId}: $($_.Exception.Message)"
+        }
+    }
+    return $record
+}
+
 function Add-JstiOwnedCertificate($Ledger, [string] $Thumbprint) {
     Assert-JstiAdmitted $Ledger
     [void] $Ledger.Certificates.Add($Thumbprint)
@@ -65,7 +91,7 @@ function Set-JstiOwnedDataDirectory($Ledger, [string] $Path) {
 }
 
 function Invoke-JstiLifecycleCleanup {
-    # $Operations holds scriptblocks: IsRunning(process), StopProcess(process),
+    # $Operations holds scriptblocks: IsRunning(process), StopProcess(process), DisposeProcess(process),
     # GetRegistrations(), RemovePackage(fullName), RemoveCertificate(thumbprint),
     # FindCertificate(thumbprint), TestPath(path), RemoveDirectory(path).
     # Returns a record whose failures list every piece of owned state that could
@@ -76,7 +102,7 @@ function Invoke-JstiLifecycleCleanup {
     )
     $record = [ordered]@{
         admitted = [bool] $Ledger.Admitted; skipped = $false; failures = @()
-        stoppedProcesses = @(); removedPackages = @(); foreignRegistrations = @()
+        stoppedProcesses = @(); releasedProcessHandles = @(); removedPackages = @(); foreignRegistrations = @()
         removedCertificates = @(); dataDirectoryRemoved = $false
     }
     if (-not $Ledger.Admitted) {
@@ -94,6 +120,9 @@ function Invoke-JstiLifecycleCleanup {
             if (& $Operations.IsRunning $process) { [void] $failures.Add("process $($process.Id) is still running") }
         } catch { [void] $failures.Add("stopping process $($process.Id): $($_.Exception.Message)") }
     }
+    $released = Close-JstiExitedProcesses $Ledger $Operations
+    $record.releasedProcessHandles = $released.releasedProcessHandles
+    foreach ($failure in $released.failures) { [void] $failures.Add($failure) }
     try {
         foreach ($fullName in @(& $Operations.GetRegistrations)) {
             if ($Ledger.Packages -notcontains $fullName) {
@@ -137,6 +166,7 @@ function Get-JstiWindowsOwnershipOperations([string] $PackageName) {
     # The real operations for a Windows run; each acts on one owned item.
     return @{
         IsRunning = { param($Process) -not $Process.HasExited }
+        DisposeProcess = { param($Process) $Process.Dispose() }
         StopProcess = {
             param($Process)
             if (-not $Process.HasExited) {

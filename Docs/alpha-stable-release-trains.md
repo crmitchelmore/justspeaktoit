@@ -27,9 +27,13 @@ Alpha links live in the README only; the website and Homebrew advertise Stable.
 
 `scripts/release-apple.rb` and `scripts/reconcile-apple-releases.rb` can explicitly
 read their App Store Connect credentials from 1Password. Install the 1Password
-CLI, unlock the desktop app, and authorise CLI access yourself before running
-either script. Each read has a 30-second deadline with bounded cleanup; a locked
-or unavailable vault fails the command rather than waiting indefinitely. See the official
+CLI and authenticate with a service account or desktop-app integration. Supply
+the service account's `OP_SERVICE_ACCOUNT_TOKEN` from the host's credential store;
+service-account authentication does not require desktop unlock or `op signin`.
+For desktop-app integration, unlock the app and authorise CLI access yourself
+before running either script. Each read has a 30-second deadline with bounded
+cleanup; unavailable vault access fails the command rather than waiting
+indefinitely. See the official [service-account setup](https://developer.1password.com/docs/service-accounts/use-with-1password-cli/),
 [CLI setup](https://developer.1password.com/docs/cli/get-started/) and
 [`op read` reference](https://developer.1password.com/docs/cli/reference/commands/read/).
 

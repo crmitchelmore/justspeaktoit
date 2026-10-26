@@ -167,7 +167,7 @@ final class AssemblyAIControllerClock: @unchecked Sendable {
         lock.withLock { self.observer = observer }
     }
     func schedule(_ seconds: TimeInterval, action: @escaping @Sendable () -> Void) {
-        let observer = lock.withLock { actions.append((seconds, action)); return observer }
+        let observer = lock.withLock { actions.append((seconds, action)); return self.observer }
         observer?(seconds)
     }
     func fire(_ seconds: TimeInterval) -> Int {

@@ -79,7 +79,7 @@ final class TranscriptionActivitySurfaceOwnerTests: XCTestCase {
         let clock = SurfaceOwnerSleep(entered: { sleeping.fulfill() })
         let manager = TranscriptionActivityManager(
             activitiesEnabled: { true }, activities: { [activity] }, request: { _ in activity },
-            sleep: { try await clock.wait() }
+            sleep: { _ in try await clock.wait() }
         )
         defer { manager.endActivity(); clock.release() }
         let owner = UUID()

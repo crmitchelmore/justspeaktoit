@@ -20,9 +20,10 @@ public extension Data {
         fileData: Data,
         boundary: String
     ) {
+        let escapedFilename = OpenAICompatibleBatchTranscriptionClient.escapedFilename(filename)
         appendString("--\(boundary)\r\n")
         appendString(
-            "Content-Disposition: form-data; name=\"\(name)\"; filename=\"\(filename)\"\r\n")
+            "Content-Disposition: form-data; name=\"\(name)\"; filename=\"\(escapedFilename)\"\r\n")
         appendString("Content-Type: \(mimeType)\r\n\r\n")
         append(fileData)
         appendString("\r\n")

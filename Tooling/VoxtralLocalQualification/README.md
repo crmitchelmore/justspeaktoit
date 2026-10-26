@@ -16,7 +16,7 @@ The current SDK head `8b410674` requires MLX versions declaring Swift 6.3. This 
 | Model | `mlx-community/Voxtral-Mini-4B-Realtime-2602-4bit` |
 | Model revision | `fdebf7b2af834a1db4b8a3c99ab7480b333adf9e` |
 
-The committed `Package.resolved` records the complete dependency graph. Source/package compatibility does not establish measured inference, memory use or iOS support.
+The committed `Package.resolved` records the complete dependency graph. Source/package compatibility does not establish measured inference, memory use or iOS support. The compilation described above tested source `9a7c200a43df399d5b9c0adb137f2cb5571304fe`; the later provenance-label and JSON-scalar correction has parse-only validation.
 
 ## Reproduce on a qualified Apple host
 
@@ -60,6 +60,6 @@ Set `TMPDIR`, `XDG_CACHE_HOME`, `CLANG_MODULE_CACHE_PATH` and `SWIFT_MODULECACHE
 
 ## Interpreting a future result
 
-The probe feeds 100 ms chunks without wall-clock pacing, calls `finish`, checks post-finish behavior, releases the session and repeats against the loaded model. Its JSON records per-step deltas, pre-finish/final text, load/first-partial/finish/total timing, process RSS peak and MLX allocator counters. Report the exact build configuration: unoptimized Debug timing is not a production performance benchmark. Verify the complete known phrase and first/last words from actual output rather than assuming a successful exit means correct transcription.
+The probe feeds 100 ms chunks without wall-clock pacing, calls `finish`, checks post-finish behavior, releases the session and repeats against the loaded model. Its JSON records per-step deltas, pre-finish/final text, load/first-partial/finish/total timing, process RSS peak and MLX allocator counters. Revision fields are explicitly expected pins: the probe accepts a supplied directory and does not verify its hashes or the executing dependency graph. Retain an external receipt verifying all six model hashes and the resolved build dependencies before attributing results to these revisions. Report the exact build configuration: unoptimized Debug timing is not a production performance benchmark. Verify the complete known phrase and first/last words from actual output rather than assuming a successful exit means correct transcription.
 
 A positive step/finish result still needs offline quality and resource comparison with an existing local option, cancellation/unload/recovery, and a measured go/no-go before an app adapter or shipping dependency. A synthetic file probe does not qualify microphone capture, long-running memory, interruption handling, thermal behavior, background execution or iPhone support.

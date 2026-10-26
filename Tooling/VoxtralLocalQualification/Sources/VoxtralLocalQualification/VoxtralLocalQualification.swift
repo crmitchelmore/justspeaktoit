@@ -19,7 +19,7 @@ struct VoxtralLocalQualification {
         let started = ProcessInfo.processInfo.systemUptime
         let model = try VoxtralRealtimeModel.fromDirectory(modelDirectory)
         let loadSeconds = elapsed(since: started)
-        print("Loaded pinned local model in \(loadSeconds) seconds; no download API used.")
+        print("Loaded supplied local model in \(loadSeconds) seconds; no download API used.")
         fflush(stdout)
         var runs: [[String: Any]] = []
         for iteration in 0..<2 {
@@ -56,7 +56,7 @@ struct VoxtralLocalQualification {
             Memory.clearCache()
             runs.append([
                 "iteration": iteration,
-                "first_partial_seconds": firstPartialSeconds as Any? ?? NSNull(),
+                "first_partial_seconds": firstPartialSeconds.map { $0 as Any } ?? NSNull(),
                 "text_before_finish": textBeforeFinish,
                 "finish_delta": finishDelta.text,
                 "final_text": final,
@@ -74,8 +74,10 @@ struct VoxtralLocalQualification {
             print("Iteration \(iteration): \(final); finish=\(finishSeconds)s; total=\(totalSeconds)s")
             fflush(stdout)
             let report: [String: Any] = [
-                "runtime_revision": "8d86630ade569728aaea3dc1a29fc44e2efa719b",
-                "model_revision": "fdebf7b2af834a1db4b8a3c99ab7480b333adf9e",
+                "expected_runtime_revision": "8d86630ade569728aaea3dc1a29fc44e2efa719b",
+                "expected_model_revision": "fdebf7b2af834a1db4b8a3c99ab7480b333adf9e",
+                "model_hashes_verified_by_probe": false,
+                "provenance_requirement": "External model hash and resolved-dependency verification receipts required",
                 "mode": "offline-directory; incremental 100ms chunks without wall-clock pacing",
                 "fixture_expected_text": "The quick brown fox jumps over the lazy dog.",
                 "sample_rate": 16_000,

@@ -78,7 +78,7 @@ final class CoreJourneyLaunchProfileTests: XCTestCase {
         )
     }
 
-    func testAlibabaFixtureReadsVolatileConfigurationWithoutPersistingItOrUsingBalanceHTTP() throws {
+    func testAlibabaFixtureReadsValidAndRejectsInvalidVolatileConfigurationWithoutPersistenceOrBalanceHTTP() throws {
         let profile = makeProfile()
         let domain = UserDefaults.argumentDomain
         let original = profile.defaults.volatileDomain(forName: domain)
@@ -97,10 +97,18 @@ final class CoreJourneyLaunchProfileTests: XCTestCase {
         XCTAssertNil(profile.defaults.persistentDomain(forName: profile.suiteName)?["alibaba.newKey.workspace"])
         let account = try XCTUnwrap(ProviderBalanceDirectory.account(id: "alibaba"))
         guard case .billingLinkOnly = account.support else { return XCTFail("Fixture must not use balance HTTP") }
-        profile.defaults.removeVolatileDomain(forName: domain)
+        // This object remains in the same process. Removing a volatile domain
+        // does not model a later launch or prove what other search domains hold.
+        // Replace the input explicitly so refusal tests the configuration boundary.
+        profile.defaults.setVolatileDomain([
+            "alibaba.newKey.region": "invalid-fixture-region",
+            "alibaba.newKey.workspace": ""
+        ], forName: domain)
+        XCTAssertEqual(profile.defaults.string(forKey: "alibaba.newKey.region"), "invalid-fixture-region")
+        XCTAssertEqual(profile.defaults.string(forKey: "alibaba.newKey.workspace"), "")
         XCTAssertThrowsError(try AlibabaSpeechConfiguration.credentialsForSaving(
             "synthetic-unused-key", defaults: profile.defaults
-        ), "A later launch must not inherit the earlier volatile configuration")
+        ), "Explicit invalid volatile configuration must be refused")
     }
 
     func testHotKeyProbe_usesSupportedCarbonChordWithoutGrantingCapturePermissions() {

@@ -51,8 +51,16 @@ final class SettingsCredentialUITests: XCTestCase {
         let remove = app.buttons["Remove Key"]
         try wait(app, stage: "Saved credential exposes Remove Key") { remove.exists }
         remove.click()
-        let confirmation = app.dialogs.buttons["Remove Key"].firstMatch
-        try wait(app, stage: "Remove confirmation appears", timeout: 10) { confirmation.exists }
+        let confirmationSheets = app.sheets.matching(NSPredicate(format: "label == %@", "alert"))
+        let confirmationSheet = confirmationSheets.firstMatch
+        let title = "Remove the Alibaba Model Studio (Transcription) key?"
+        let confirmationTitle = confirmationSheet.staticTexts.matching(
+            NSPredicate(format: "label == %@ OR value == %@", title, title)
+        ).firstMatch
+        let confirmation = confirmationSheet.buttons["Remove Key"]
+        try wait(app, stage: "Exact Alibaba removal sheet appears", timeout: 10) {
+            confirmationSheets.count == 1 && confirmationTitle.exists && confirmation.exists
+        }
         confirmation.click()
         try wait(app, stage: "Removed credential returns to the unsaved row") {
             app.buttons["Save Key"].exists && !app.buttons["Remove Key"].exists

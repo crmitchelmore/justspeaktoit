@@ -9,7 +9,7 @@ final class SpeechCancellationDiagnostics: NSObject, URLSessionTaskDelegate, @un
     enum Phase: String {
         case protocolOutcomeDelivered = "protocol_outcome_delivered"
         case protocolStopLoading = "protocol_stop_loading"
-        case testObservedProtocolStart = "test_observed_protocol_start"
+        case protocolStartWaitReturned = "protocol_start_wait_returned"
         case callerCancelRequested = "caller_cancel_requested"
         case clientStopRequested = "client_stop_requested"
         case callerReturned = "caller_returned"

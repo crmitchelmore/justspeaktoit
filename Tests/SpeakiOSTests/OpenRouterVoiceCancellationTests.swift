@@ -56,7 +56,7 @@ final class OpenRouterVoiceCancellationTests: XCTestCase {
         let task = startSpeech(on: client, completed: completed, diagnostics: diagnostics)
         defer { task.cancel() }
         await fulfillment(of: [started], timeout: 2)
-        diagnostics.record(.testObservedProtocolStart)
+        diagnostics.record(.protocolStartWaitReturned)
         if cancelCaller {
             diagnostics.record(.callerCancelRequested)
             task.cancel()

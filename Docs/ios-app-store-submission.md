@@ -194,8 +194,9 @@ work in this document does not establish that it was resolved.
 
 For local release/reconciliation authentication, see the
 [1Password credential setup](alpha-stable-release-trains.md#local-apple-release-credentials-from-1password).
-Unlock and authorise vault access before fresh readback; configured references
-alone do not prove credential or API access.
+Authenticate CLI access with the configured service account or desktop-app
+integration before fresh readback; configured references alone do not prove
+credential or API access.
 
 ## Regression cover
 

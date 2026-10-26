@@ -125,40 +125,87 @@ final class FocusRecordingServiceTests: XCTestCase {
         } catch { XCTAssertEqual(error as? CaptureParameterFailure, .unknownModel) }
         XCTAssertFalse(service.isActive)
         XCTAssertTrue(harness.activityStarts.isEmpty)
+        let offeredModel = try XCTUnwrap(ModelCatalog.onDeviceLiveTranscription.first?.id)
+        XCTAssertTrue(CaptureModelSupport.liveModelIDs.contains(offeredModel))
         try await service.startRecording(
-            requiresLiveActivity: false, parameters: CaptureRunParameters(modelID: AppleLocalModels.legacySpeechModelID)
+            requiresLiveActivity: false, parameters: CaptureRunParameters(modelID: offeredModel)
         )
+        XCTAssertEqual(service.effectiveConfiguration?.modelID, offeredModel)
         XCTAssertEqual(service.effectiveConfiguration?.modelOrigin, .explicit)
         XCTAssertEqual(service.effectiveDestination?.origin, .focus)
         _ = await service.stopRecording()
         XCTAssertTrue(harness.pasteboard.writes.isEmpty)
     }
 
-    func testNamedFocusModelMissingCredentialsAndOfflineLocalUnavailableRefuseWithoutFallback() async throws {
-        for offlineLocal in [false, true] {
+    func testNamedFocusModelMissingCredentialsRefusesWithoutFallback() async throws {
+        let harness = try DependencyHarness()
+        defer { harness.cleanUp() }
+        harness.focus = FocusCaptureOverride(modelID: "deepgram/nova-3-streaming")
+        let service = harness.makeService(networkSnapshot: { .available })
+        var allocations = 0
+        service.makeSession = { allocations += 1; return DependencySession() }
+        do {
+            try await service.startRecording(requiresLiveActivity: false)
+            XCTFail("A named Focus model must not silently fall back")
+        } catch {
+            XCTAssertEqual(error as? CaptureParameterFailure, .modelUnavailable)
+        }
+        XCTAssertEqual(allocations, 0)
+        XCTAssertFalse(service.isActive)
+    }
+
+    func testUnavailableGlobalLegacyRecognitionRefusesUnderFocusDestinationBeforeAllocation() async throws {
+        let harness = try DependencyHarness()
+        defer { harness.cleanUp() }
+        // The legacy recognizer remains an existing global route. On newer OS
+        // versions it is no longer offered as a named model by the catalogue.
+        harness.settings.selectedModel = AppleLocalModels.legacySpeechModelID
+        harness.focus = FocusCaptureOverride(destinationID: "historyOnly")
+        var capabilityReads = 0
+        let service = harness.makeService(networkSnapshot: { .unavailable }, capability: { _ in
+            capabilityReads += 1
+            return .unavailable
+        })
+        var allocations = 0
+        service.makeSession = { allocations += 1; return DependencySession() }
+        do {
+            try await service.startRecording(requiresLiveActivity: false)
+            XCTFail("Unavailable local recognition must not silently fall back")
+        } catch {
+            guard case .offlineLocalRecognitionUnavailable = error as? iOSTranscriptionError else {
+                return XCTFail("Expected strict local recognition refusal")
+            }
+        }
+        XCTAssertEqual(capabilityReads, 1, "The actual legacy capability boundary must be reached")
+        XCTAssertEqual(harness.focusReads, 1)
+        XCTAssertEqual(allocations, 0)
+        XCTAssertFalse(service.isActive)
+        XCTAssertTrue(harness.activityStarts.isEmpty)
+        XCTAssertTrue(harness.pasteboard.writes.isEmpty)
+    }
+
+    func testNamedObsoleteFocusModelsRefuseBeforeCredentialsOrAllocation() async throws {
+        let legacy = AppleLocalModels.legacySpeechModelID
+        let obsoleteModels = ["deleted-model"]
+            + (CaptureParameterResolution.model(from: legacy) == nil ? [legacy] : [])
+        for model in obsoleteModels {
             let harness = try DependencyHarness()
             defer { harness.cleanUp() }
-            harness.focus = FocusCaptureOverride(modelID: offlineLocal
-                ? AppleLocalModels.legacySpeechModelID : "deepgram/nova-3-streaming")
-            let service = harness.makeService(
-                networkSnapshot: { offlineLocal ? .unavailable : .available }, capability: { _ in .unavailable }
-            )
+            harness.focus = FocusCaptureOverride(modelID: model)
+            var credentialReads = 0
+            let service = harness.makeService(ensureKeysLoaded: { credentialReads += 1 })
             var allocations = 0
             service.makeSession = { allocations += 1; return DependencySession() }
             do {
                 try await service.startRecording(requiresLiveActivity: false)
-                XCTFail("A named Focus model must not silently fall back")
+                XCTFail("An obsolete named Focus model must not fall back")
             } catch {
-                if offlineLocal {
-                    guard case .offlineLocalRecognitionUnavailable = error as? iOSTranscriptionError else {
-                        return XCTFail("Expected strict local recognition refusal")
-                    }
-                } else {
-                    XCTAssertEqual(error as? CaptureParameterFailure, .modelUnavailable)
-                }
+                XCTAssertEqual(error as? CaptureParameterFailure, .unknownModel)
             }
+            XCTAssertEqual(credentialReads, 0)
             XCTAssertEqual(allocations, 0)
             XCTAssertFalse(service.isActive)
+            XCTAssertTrue(harness.activityStarts.isEmpty)
         }
     }
 

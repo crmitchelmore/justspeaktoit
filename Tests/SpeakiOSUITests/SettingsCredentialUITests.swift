@@ -89,8 +89,10 @@ final class SettingsCredentialUITests: XCTestCase {
         try reveal(field, in: app)
         field.tap()
         field.typeText(value)
-        let save = app.navigationBars.buttons["Save"]
-        try wait { save.isEnabled }
+        XCTAssertEqual(app.searchFields.firstMatch.value as? String, "Alibaba")
+        let save = app.buttons["apiKeysSaveButton"]
+        XCTAssertTrue(save.waitForExistence(timeout: 15))
+        try wait { save.isHittable && save.isEnabled }
         save.tap()
         let alert = app.alerts["Validation"]
         XCTAssertTrue(alert.waitForExistence(timeout: 15))

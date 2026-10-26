@@ -208,6 +208,9 @@ switch integrationCheck {
 case "atspi-selection":
     do { try LinuxSelectionIntegrationCheck.run() } catch { fail(error) }
     exit(0)
+case "x11-profiles":
+    do { try LinuxProfileIntegrationCheck.run() } catch { fail(error) }
+    exit(0)
 case "keyring", "capture", "portal", "x11-hotkey", "x11-hotkey-locks":
     do {
         switch integrationCheck {

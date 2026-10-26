@@ -149,16 +149,18 @@ final class GladiaLiveTranscriber: @unchecked Sendable {
   private let baseURL: URL
   private let logger = SpeakLogger.logger(category: "GladiaLiveTranscriber")
   private let stateLock = NSLock()
-  private let pendingSendGroup = DispatchGroup()
 
-  private var webSocketTask: URLSessionWebSocketTask?
+  private let makeSocket: @Sendable (URLRequest) -> any GladiaMacWebSocket
+  private let schedule: @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void
+  private let beforeStopHandoff: @Sendable () -> Void
+  private let didRegisterFinishWaiter: @Sendable () -> Void
+  private var finalization = GladiaMacFinalization()
+  private var webSocketTask: (any GladiaMacWebSocket)?
   private var initTask: Task<Void, Never>?
   private var pendingAudio = Data()
-  private var onTranscript: ((GladiaTranscriptEvent) -> Void)?
-  private var onError: ((Error) -> Void)?
   private var isStopping = false
 
-  init(
+  convenience init(
     apiKey: String,
     model: String = "gladia/solaria-1-streaming",
     language: String? = nil,
@@ -166,6 +168,27 @@ final class GladiaLiveTranscriber: @unchecked Sendable {
     session: URLSession = .shared,
     baseURL: URL = GladiaLiveTranscriber.defaultBaseURL
   ) {
+    self.init(
+      apiKey: apiKey, model: model, language: language, sampleRate: sampleRate,
+      session: session, baseURL: baseURL, makeSocket: { session.webSocketTask(with: $0) }
+    )
+  }
+
+  init(
+    apiKey: String, model: String = "gladia/solaria-1-streaming", language: String? = nil,
+    sampleRate: Int = 16_000, session: URLSession = .shared,
+    baseURL: URL = GladiaLiveTranscriber.defaultBaseURL,
+    makeSocket: @escaping @Sendable (URLRequest) -> any GladiaMacWebSocket,
+    beforeStopHandoff: @escaping @Sendable () -> Void = {},
+    didRegisterFinishWaiter: @escaping @Sendable () -> Void = {},
+    schedule: @escaping @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void = { delay, action in
+      DispatchQueue.global().asyncAfter(deadline: .now() + delay, execute: action)
+    }
+  ) {
+    self.makeSocket = makeSocket
+    self.beforeStopHandoff = beforeStopHandoff
+    self.didRegisterFinishWaiter = didRegisterFinishWaiter
+    self.schedule = schedule
     self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
     self.model = model
     self.language = language
@@ -178,11 +201,12 @@ final class GladiaLiveTranscriber: @unchecked Sendable {
     onTranscript: @escaping (GladiaTranscriptEvent) -> Void,
     onError: @escaping (Error) -> Void
   ) {
+    stop()
+    let active = GladiaMacFinalization(onTranscript: onTranscript, onError: onError)
     let oldInitTask = withStateLock { () -> Task<Void, Never>? in
+      finalization = active
       isStopping = false
       pendingAudio.removeAll(keepingCapacity: true)
-      self.onTranscript = onTranscript
-      self.onError = onError
       let old = initTask
       initTask = nil
       return old
@@ -191,38 +215,60 @@ final class GladiaLiveTranscriber: @unchecked Sendable {
 
     let task = Task { [weak self] in
       guard let self else { return }
-      await self.initiateAndConnect()
+      await self.initiateAndConnect(active)
     }
     withStateLock {
-      self.initTask = task
+      if finalization === active, !isStopping { self.initTask = task } else { task.cancel() }
     }
+  }
+
+  var snapshot: GladiaMacFinalization.Snapshot { withStateLock { finalization }.snapshot }
+
+  func takeFailureForReporting() -> Error? { withStateLock { finalization }.takeFailureForReporting() }
+
+  func finishAndWait(timeout: TimeInterval) async -> GladiaMacFinalization.Snapshot {
+    let active = withStateLock { finalization }
+    return await withTaskCancellationHandler {
+      let result = await active.wait(
+        timeout: timeout, schedule: schedule, registered: didRegisterFinishWaiter
+      ) { [weak self] in
+        guard let self else { return }
+        self.sendStopRecording(active)
+      }
+      self.stop(active)
+      return result
+    } onCancel: { [weak self] in self?.stop(active) }
   }
 
   func sendAudio(_ audioData: Data) {
-    guard let task = currentWebSocketTask(), task.state == .running else {
-      bufferPendingAudio(audioData)
+    let (active, task, stopping) = withStateLock { (finalization, webSocketTask, isStopping) }
+    guard active.acceptsAudio, !stopping else { return }
+    guard let task, task.state == .running else {
+      bufferPendingAudio(audioData, active: active)
       return
     }
-    flushPendingAudio(to: task)
-    send(audioData, to: task)
+    flushPendingAudio(to: task, active: active)
+    send(audioData, to: task, active: active)
   }
 
-  func sendStopRecording() {
-    guard let task = currentWebSocketTask(), task.state == .running else { return }
-    let message = Self.stopRecordingMessage()
-    let sendGroup = pendingSendGroup
+  func sendStopRecording() { sendStopRecording(withStateLock { finalization }) }
+
+  private func sendStopRecording(_ active: GladiaMacFinalization) {
+    let task = withStateLock { finalization === active && !isStopping ? webSocketTask : nil }
+    guard let task, task.state == .running, active.claimStop() else { return }
+    let sendGroup = active.pendingSendGroup
     sendGroup.enter()
-    task.send(.string(message)) { [weak self] error in
+    beforeStopHandoff()
+    guard isCurrent(active), active.handOffStop() else { sendGroup.leave(); return }
+    task.send(.string(Self.stopRecordingMessage())) { [weak self] error in
       defer { sendGroup.leave() }
-      guard let self else { return }
-      if let error, !self.isStoppingState(), !WebSocketErrorFilter.shouldIgnore(error) {
-        self.currentOnError()?(error)
-      }
+      guard let self, self.isCurrent(active) else { return }
+      if let error { self.fail(self.mapConnectionError(error), active) }
     }
   }
 
-  func waitForPendingSends(timeout: TimeInterval = 1.5) async {
-    let sendGroup = pendingSendGroup
+  func waitForPendingSends(timeout: TimeInterval = 1.5, active: GladiaMacFinalization? = nil) async {
+    let sendGroup = (active ?? withStateLock { finalization }).pendingSendGroup
     await withCheckedContinuation { continuation in
       let lock = NSLock()
       var didResume = false
@@ -242,21 +288,30 @@ final class GladiaLiveTranscriber: @unchecked Sendable {
     }
   }
 
-  func stop() {
-    let task = withStateLock { () -> URLSessionWebSocketTask? in
-      guard !isStopping else { return nil }
+  func stop() { stop(withStateLock { finalization }) }
+
+  private func stop(_ active: GladiaMacFinalization) {
+    let task = withStateLock { () -> (any GladiaMacWebSocket)? in
+      guard finalization === active, !isStopping else { return nil }
       isStopping = true
       initTask?.cancel()
       initTask = nil
-      return webSocketTask
+      let task = webSocketTask
+      webSocketTask = nil
+      return task
     }
-    guard let task else { return }
-    if task.state == .running {
-      task.cancel(with: .normalClosure, reason: nil)
-    }
-    withStateLock {
-      if webSocketTask === task { webSocketTask = nil }
-    }
+    active.complete(error: CancellationError())
+    task?.cancel(with: .normalClosure, reason: nil)
+  }
+
+  private func isCurrent(_ active: GladiaMacFinalization) -> Bool {
+    withStateLock { finalization === active && !isStopping }
+  }
+
+  private func fail(_ error: Error, _ active: GladiaMacFinalization) {
+    guard isCurrent(active) else { return }
+    active.complete(error: error, beforeResume: { active.onError(error) })
+    stop(active)
   }
 
   nonisolated static func stopRecordingMessage() -> String {
@@ -304,16 +359,16 @@ final class GladiaLiveTranscriber: @unchecked Sendable {
     )
   }
 
-  private func initiateAndConnect() async {
+  private func initiateAndConnect(_ active: GladiaMacFinalization) async {
     do {
       let response = try await initiateLiveSession()
       guard let url = URL(string: response.url) else {
         throw GladiaLiveError.invalidInitResponse
       }
-      connectWebSocket(url: url)
+      guard isCurrent(active) else { return }
+      connectWebSocket(url: url, active: active)
     } catch {
-      guard !isStoppingState() else { return }
-      currentOnError()?(mapConnectionError(error))
+      fail(mapConnectionError(error), active)
     }
   }
 
@@ -336,79 +391,80 @@ final class GladiaLiveTranscriber: @unchecked Sendable {
     return try JSONDecoder().decode(GladiaLiveInitResponse.self, from: data)
   }
 
-  private func connectWebSocket(url: URL) {
+  private func connectWebSocket(url: URL, active: GladiaMacFinalization) {
     var request = URLRequest(url: url)
     request.timeoutInterval = 30
-    let task = session.webSocketTask(with: request)
+    let task = makeSocket(request)
     let shouldReceive = withStateLock { () -> Bool in
-      guard !isStopping else { return false }
+      guard finalization === active, !isStopping else { return false }
       webSocketTask = task
-      task.resume()
       return true
     }
     guard shouldReceive else {
       task.cancel(with: .goingAway, reason: nil)
       return
     }
+    task.resume()
     logger.info("Gladia WebSocket connecting")
-    flushPendingAudio(to: task)
-    receiveMessages()
+    flushPendingAudio(to: task, active: active)
+    receiveMessages(task: task, active: active)
+    if active.isFinishing {
+      Task { [weak self] in
+        guard let self else { return }
+        await self.waitForPendingSends(active: active)
+        self.sendStopRecording(active)
+      }
+    }
   }
 
-  private func send(_ audioData: Data, to task: URLSessionWebSocketTask) {
-    let sendGroup = pendingSendGroup
+  private func send(_ audioData: Data, to task: any GladiaMacWebSocket, active: GladiaMacFinalization) {
+    guard isCurrent(active) else { return }
+    let sendGroup = active.pendingSendGroup
     sendGroup.enter()
     task.send(.data(audioData)) { [weak self] error in
       defer { sendGroup.leave() }
       guard let self else { return }
       if let error {
-        if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
-        self.currentOnError()?(self.mapConnectionError(error))
+        guard self.isCurrent(active) else { return }
+        self.fail(self.mapConnectionError(error), active)
       }
     }
   }
 
-  private func receiveMessages() {
-    guard let task = currentWebSocketTask() else { return }
-    task.receive { [weak self] result in
-      guard let self else { return }
+  private func receiveMessages(task: any GladiaMacWebSocket, active: GladiaMacFinalization) {
+    guard isCurrent(active) else { return }
+    task.receive { [weak self, weak task] result in
+      guard let self, let task, self.isCurrent(active) else { return }
       switch result {
       case .success(let message):
-        self.handleMessage(message)
-        self.receiveMessages()
-      case .failure(let error):
-        if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
-        self.currentOnError()?(self.mapConnectionError(error))
+        switch message {
+        case .string(let text): self.parseResponse(text, active: active)
+        case .data(let data):
+          if let text = String(data: data, encoding: .utf8) { self.parseResponse(text, active: active) }
+        @unknown default: break
+        }
+        self.receiveMessages(task: task, active: active)
+      case .failure(let error): self.fail(self.mapConnectionError(error), active)
       }
     }
   }
 
-  private func handleMessage(_ message: URLSessionWebSocketTask.Message) {
-    switch message {
-    case .string(let text):
-      parseResponse(text)
-    case .data(let data):
-      if let text = String(data: data, encoding: .utf8) {
-        parseResponse(text)
-      }
-    @unknown default:
-      break
-    }
-  }
-
-  private func parseResponse(_ json: String) {
+  private func parseResponse(_ json: String, active: GladiaMacFinalization) {
     if let event = Self.transcriptEvent(from: json) {
-      currentOnTranscript()?(event)
+      if active.record(event) { active.onTranscript(event) }
       return
     }
-
-    guard let data = json.data(using: .utf8),
-      let envelope = try? JSONDecoder().decode(GladiaLiveMessage.self, from: data),
-      let error = envelope.error else {
+    guard let data = json.data(using: .utf8) else { return }
+    if let lifecycle = try? JSONDecoder().decode(GladiaLifecycleMessage.self, from: data),
+      lifecycle.type == "end_session" {
+      active.ended()
+      stop(active)
       return
     }
+    guard let envelope = try? JSONDecoder().decode(GladiaLiveMessage.self, from: data),
+      let error = envelope.error else { return }
     let detail = error.message ?? error.exception ?? "Unknown server error"
-    currentOnError()?(GladiaLiveError.serverError(detail))
+    fail(GladiaLiveError.serverError(detail), active)
   }
 
   private func mapConnectionError(_ error: Error) -> Error {
@@ -432,24 +488,13 @@ final class GladiaLiveTranscriber: @unchecked Sendable {
     return block()
   }
 
-  private func currentWebSocketTask() -> URLSessionWebSocketTask? {
-    withStateLock { webSocketTask }
-  }
-
   private func isStoppingState() -> Bool {
     withStateLock { isStopping }
   }
 
-  private func currentOnTranscript() -> ((GladiaTranscriptEvent) -> Void)? {
-    withStateLock { onTranscript }
-  }
-
-  private func currentOnError() -> ((Error) -> Void)? {
-    withStateLock { onError }
-  }
-
-  private func bufferPendingAudio(_ audioData: Data) {
+  private func bufferPendingAudio(_ audioData: Data, active: GladiaMacFinalization) {
     withStateLock {
+      guard finalization === active, !isStopping, active.acceptsAudio else { return }
       pendingAudio.append(audioData)
       let maxBufferedBytes = Self.preferredChunkBytes * 50
       if pendingAudio.count > maxBufferedBytes {
@@ -458,14 +503,15 @@ final class GladiaLiveTranscriber: @unchecked Sendable {
     }
   }
 
-  private func flushPendingAudio(to task: URLSessionWebSocketTask) {
+  private func flushPendingAudio(to task: any GladiaMacWebSocket, active: GladiaMacFinalization) {
     let buffered = withStateLock { () -> Data in
+      guard finalization === active, !isStopping else { return Data() }
       let snapshot = pendingAudio
       pendingAudio.removeAll(keepingCapacity: true)
       return snapshot
     }
     guard !buffered.isEmpty else { return }
-    send(buffered, to: task)
+    send(buffered, to: task, active: active)
   }
 }
 
@@ -602,3 +648,5 @@ private struct GladiaServerError: Decodable {
     message = try? container.decode(String.self, forKey: .message)
   }
 }
+
+private struct GladiaLifecycleMessage: Decodable { let type: String? }

@@ -22,12 +22,11 @@ final class GladiaLiveController: NSObject, LiveTranscriptionController {
   private let logger = SpeakLogger.logger(category: "GladiaLiveController")
   private let audioProcessor = GladiaAudioProcessor()
   private var hasFinished: Bool = false
-  private var stopContinuation: CheckedContinuation<Void, Never>?
-  private var stopGeneration = LiveTranscriptionStopGeneration()
 
   private let targetSampleRate: Double = 16_000
   private var targetFormat: AVAudioFormat?
   private var streamingStartTime: Date?
+  private var streamingEndTime: Date?
   private var finalSegments: [TranscriptionSegment] = []
   private var currentInterim: String = ""
   private var fullTranscript: String = ""
@@ -89,22 +88,23 @@ final class GladiaLiveController: NSObject, LiveTranscriptionController {
       transcriber = newTranscriber
 
       newTranscriber.start(
-        onTranscript: { [weak self, weak newTranscriber] event in
+        onTranscript: { [weak self, weak newTranscriber] _ in
           Task { @MainActor [weak self, weak newTranscriber] in
             guard let self else { return }
             // Cached controllers are reused between recordings, so a message
             // queued by the previous stream can land here after the next
             // recording started. Only the current stream owns this state.
             guard LiveTranscriptionRun.isCurrent(newTranscriber, activeStream: self.transcriber) else { return }
-            self.handleTranscript(event)
+            guard let newTranscriber else { return }
+            self.applySnapshot(newTranscriber.snapshot)
           }
         },
-        onError: { [weak self, weak newTranscriber] error in
+        onError: { [weak self, weak newTranscriber] _ in
           Task { @MainActor [weak self, weak newTranscriber] in
             guard let self else { return }
             guard LiveTranscriptionRun.isCurrent(newTranscriber, activeStream: self.transcriber) else { return }
-            if !self.isRunning { return }
-            self.delegate?.liveTranscriber(self, didFail: error)
+            guard self.isRunning, let failure = newTranscriber?.takeFailureForReporting() else { return }
+            self.delegate?.liveTranscriber(self, didFail: failure)
           }
         }
       )
@@ -132,87 +132,67 @@ final class GladiaLiveController: NSObject, LiveTranscriptionController {
   }
 
   func stop() async {
-    guard isRunning else { return }
-    guard !hasFinished else { return }
+    guard isRunning, !hasFinished else { return }
     hasFinished = true
-
+    streamingEndTime = Date()
     audioEngine.stop()
     audioEngine.inputNode.removeTap(onBus: 0)
     isRunning = false
 
-    if let transcriber {
+    let active = transcriber
+    let stoppingInputSession = activeInputSession
+    activeInputSession = nil
+    let budget = appSettings.liveModelCapabilities.postStopFinalizeBudget
+    let grace = appSettings.liveStopGracePeriod
+    if let active {
       audioProcessor.drainConverterTail()
-      audioProcessor.flushPendingAudio(to: transcriber)
-      await transcriber.waitForPendingSends()
-      audioProcessor.setRunning(false)
-      await applyLiveStopGrace(appSettings.liveStopGracePeriod)
-      transcriber.sendStopRecording()
-      await transcriber.waitForPendingSends()
-
-      let budget = appSettings.liveModelCapabilities.postStopFinalizeBudget
-      if budget > 0 {
-        let generation = stopGeneration.begin()
-        await withCheckedContinuation { continuation in
-          stopContinuation = continuation
-          Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(budget))
-            guard let self,
-              self.stopGeneration.isCurrent(generation),
-              let cont = self.stopContinuation
-            else { return }
-            self.stopContinuation = nil
-            cont.resume()
-          }
-        }
-      }
-
-      transcriber.stop()
-    } else {
-      audioProcessor.setRunning(false)
+      audioProcessor.flushPendingAudio(to: active)
     }
-
-    let result = buildFinalResult()
-    delegate?.liveTranscriber(self, didFinishWith: result)
-
-    await endActiveInputSession()
-    transcriber = nil
+    audioProcessor.setRunning(false)
+    if let active {
+      await active.waitForPendingSends()
+      await applyLiveStopGrace(grace)
+      // The terminal waiter is installed before stop_recording can be sent.
+      // A final utterance/acknowledgement is never session completion.
+      let snapshot = await active.finishAndWait(timeout: budget)
+      if let stoppingInputSession {
+        await audioDeviceManager.endUsingPreferredInput(session: stoppingInputSession)
+      }
+      guard transcriber === active else { return }
+      applySnapshot(snapshot)
+      if let failure = active.takeFailureForReporting() {
+        delegate?.liveTranscriber(self, didFail: failure)
+      }
+    } else if let stoppingInputSession {
+      await audioDeviceManager.endUsingPreferredInput(session: stoppingInputSession)
+    }
+    guard transcriber === active else { return }
+    delegate?.liveTranscriber(self, didFinishWith: buildFinalResult())
+    if transcriber === active { transcriber = nil }
   }
 
-  private func handleTranscript(_ event: GladiaTranscriptEvent) {
-    if event.isFinal {
-      let segment = TranscriptionSegment(
-        startTime: 0,
-        endTime: 0,
-        text: event.text,
-        isFinal: true,
-        confidence: event.confidence
-      )
-      finalSegments.append(segment)
+  /// Every accepted final and its confidence is applied once even when an
+  /// end_session resumes stop before queued MainActor transcript delivery.
+  private func applySnapshot(_ snapshot: GladiaMacFinalization.Snapshot) {
+    for event in snapshot.finals.dropFirst(finalSegments.count) {
+      finalSegments.append(TranscriptionSegment(
+        startTime: 0, endTime: 0, text: event.text, isFinal: true, confidence: event.confidence
+      ))
       fullTranscript = finalSegments.map(\.text).joined(separator: " ")
       currentInterim = ""
       delegate?.liveTranscriber(self, didUpdateWith: LiveTranscriptionUpdate(
-        text: fullTranscript,
-        isFinal: true,
-        confidence: event.confidence
+        text: fullTranscript, isFinal: true, confidence: event.confidence
       ))
       delegate?.liveTranscriber(self, didUpdatePartial: fullTranscript)
       delegate?.liveTranscriber(self, didDetectUtteranceBoundary: event.text)
-
-      if hasFinished, let continuation = stopContinuation {
-        stopContinuation = nil
-        continuation.resume()
-      }
-    } else {
-      currentInterim = event.text
-      let displayText = fullTranscript.isEmpty
-        ? currentInterim
-        : fullTranscript + " " + currentInterim
+    }
+    currentInterim = snapshot.interim?.text ?? ""
+    if let interim = snapshot.interim {
+      let display = fullTranscript.isEmpty ? interim.text : fullTranscript + " " + interim.text
       delegate?.liveTranscriber(self, didUpdateWith: LiveTranscriptionUpdate(
-        text: displayText,
-        isFinal: false,
-        confidence: event.confidence
+        text: display, isFinal: false, confidence: interim.confidence
       ))
-      delegate?.liveTranscriber(self, didUpdatePartial: displayText)
+      delegate?.liveTranscriber(self, didUpdatePartial: display)
     }
   }
 
@@ -411,7 +391,7 @@ private extension GladiaLiveController {
     currentInterim = ""
     fullTranscript = ""
     streamingStartTime = nil
-    stopContinuation = nil
+    streamingEndTime = nil
     hasFinished = false
     isRunning = false
   }
@@ -428,7 +408,7 @@ private extension GladiaLiveController {
     currentInterim = ""
     fullTranscript = ""
     streamingStartTime = nil
-    stopContinuation = nil
+    streamingEndTime = nil
     await endActiveInputSession()
   }
 
@@ -442,7 +422,7 @@ private extension GladiaLiveController {
 
     let streamingDuration: TimeInterval
     if let startTime = streamingStartTime {
-      streamingDuration = Date().timeIntervalSince(startTime)
+      streamingDuration = (streamingEndTime ?? Date()).timeIntervalSince(startTime)
     } else {
       streamingDuration = 0
     }

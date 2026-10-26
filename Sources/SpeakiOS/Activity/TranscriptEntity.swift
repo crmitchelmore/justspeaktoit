@@ -83,13 +83,29 @@ struct TranscriptEntityHistory: Sendable {
 
     @MainActor
     static func localSnapshotAndWait() async throws -> [iOSHistoryItem] {
-        guard UIApplication.shared.isProtectedDataAvailable else {
-            throw TranscriptEntityError.historyUnavailable
-        }
         let history = iOSHistoryManager.shared
-        await history.loadIfNeededAndWait()
-        guard history.isStorageReady else { throw TranscriptEntityError.historyUnavailable }
-        return history.items
+        return try await Self.protectedSnapshotAndWait(
+            available: { UIApplication.shared.isProtectedDataAvailable },
+            load: { await history.loadIfNeededAndWait() },
+            snapshot: {
+                guard history.isStorageReady else { throw TranscriptEntityError.historyUnavailable }
+                return history.items
+            }
+        )
+    }
+
+    @MainActor
+    static func protectedSnapshotAndWait(
+        available: @MainActor () -> Bool,
+        load: @MainActor () async -> Void,
+        snapshot: Snapshot
+    ) async throws -> [iOSHistoryItem] {
+        guard available() else { throw TranscriptEntityError.historyUnavailable }
+        await load()
+        // Lock state can change while persistence is suspended. Do not expose
+        // private rows after that boundary merely because loading succeeded.
+        guard available() else { throw TranscriptEntityError.historyUnavailable }
+        return try snapshot()
     }
 
     @MainActor

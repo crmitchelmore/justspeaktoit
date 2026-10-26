@@ -73,16 +73,16 @@ final class HistoryRecoveryReviewTests: XCTestCase {
         let committed = item("committed", id: old.id, date: 10.8)
         try write([old])
         let primary = try XCTUnwrap(file)
-        var blockPrimary = true
+        let blockPrimary = HistoryTestLocked(true)
         var storageIO = IOSHistoryPersistence.StorageIO()
         storageIO.write = { data, url in
-            if url == primary && blockPrimary { throw CocoaError(.fileWriteOutOfSpace) }
+            if url == primary && blockPrimary.value { throw CocoaError(.fileWriteOutOfSpace) }
             try data.write(to: url, options: .atomic)
         }
         storageIO.remove = { _ in throw CocoaError(.fileWriteNoPermission) }
         let history = manager(storageIO)
         XCTAssertTrue(history.upsertReportingDurability(pending))
-        blockPrimary = false
+        blockPrimary.value = false
         XCTAssertTrue(history.upsertReportingDurability(committed))
         XCTAssertFalse(history.isStorageReady)
         XCTAssertEqual(manager().items.first?.transcription, "committed")
@@ -112,16 +112,16 @@ final class HistoryRecoveryReviewTests: XCTestCase {
         let old = item("old")
         try write([old])
         let primary = try XCTUnwrap(file)
-        var blockPrimary = true
+        let blockPrimary = HistoryTestLocked(true)
         var storageIO = IOSHistoryPersistence.StorageIO()
         storageIO.write = { data, url in
-            if url == primary && blockPrimary { throw CocoaError(.fileWriteOutOfSpace) }
+            if url == primary && blockPrimary.value { throw CocoaError(.fileWriteOutOfSpace) }
             try data.write(to: url, options: .atomic)
         }
         storageIO.remove = { _ in throw CocoaError(.fileWriteNoPermission) }
         let history = manager(storageIO)
         await history.didDeleteRemoteEntry(id: old.id)
-        blockPrimary = false
+        blockPrimary.value = false
         history.retryPersistence()
         let recreated = item("recreated", id: old.id, date: 20)
         XCTAssertTrue(history.upsertReportingDurability(recreated))
@@ -144,20 +144,20 @@ final class HistoryRecoveryReviewTests: XCTestCase {
 
     func testRepeatedUpsertsDuringOutageWaitForExplicitRetryBeforeReloading() throws {
         let primary = try XCTUnwrap(file)
-        var reads = 0
+        let reads = HistoryTestLocked(0)
         var storageIO = IOSHistoryPersistence.StorageIO()
         storageIO.read = { url in
             if url == primary {
-                reads += 1
+                reads.update { $0 += 1 }
                 throw CocoaError(.fileReadNoPermission)
             }
             return try Data(contentsOf: url)
         }
         let history = manager(storageIO)
         for index in 0..<3 { XCTAssertTrue(history.upsertReportingDurability(item("pending \(index)"))) }
-        XCTAssertEqual(reads, 1)
+        XCTAssertEqual(reads.value, 1)
         history.retryPersistence()
-        XCTAssertEqual(reads, 2)
+        XCTAssertEqual(reads.value, 2)
         XCTAssertEqual(history.items.count, 3)
     }
 

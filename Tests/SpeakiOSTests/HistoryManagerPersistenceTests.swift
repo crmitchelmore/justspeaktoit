@@ -58,12 +58,12 @@ final class HistoryManagerPersistenceTests: XCTestCase {
         let first = makeItem("First")
         let second = makeItem("Second")
         try writeHistory([first, second])
-        var blocked = true
+        let blocked = HistoryTestLocked(true)
         var retired: [Set<UUID>] = []
         let manager = iOSHistoryManager(
             fileURL: fileURL, syncEnabled: false,
             storageIO: .init(write: { data, url in
-                if blocked { throw CocoaError(.fileWriteNoPermission) }
+                if blocked.value { throw CocoaError(.fileWriteNoPermission) }
                 try data.write(to: url, options: .atomic)
             }),
             removeNotificationClaims: { retired.append($0) }
@@ -72,7 +72,7 @@ final class HistoryManagerPersistenceTests: XCTestCase {
         manager.clearAll()
         XCTAssertTrue(retired.isEmpty)
         XCTAssertEqual(Set(manager.items.map(\.id)), [first.id, second.id])
-        blocked = false
+        blocked.value = false
         manager.retryPersistence()
         XCTAssertTrue(manager.isStorageReady)
         manager.remove(first)

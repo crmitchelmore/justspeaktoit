@@ -54,6 +54,7 @@ final class HistorySyncReconciliationTests: XCTestCase {
         let item = makeItem(text: "delete")
         try writeHistory([item])
         let manager = makeManager()
+        _ = manager.pendingEntries()
         await manager.didAcknowledgeSyncedEntries(ids: [item.id])
         XCTAssertEqual(manager.syncedCount, 1)
 
@@ -72,6 +73,7 @@ final class HistorySyncReconciliationTests: XCTestCase {
 
         await manager.didReceiveRemoteEntry(item.toSyncable())
 
+        try await manager.persistRemoteChanges()
         XCTAssertEqual(manager.items.count, 1)
         XCTAssertEqual(manager.syncedCount, 1)
         XCTAssertEqual(manager.unsyncedCount, 0)
@@ -94,6 +96,7 @@ final class HistorySyncReconciliationTests: XCTestCase {
 
         await manager.didReceiveRemoteEntry(remote)
 
+        try await manager.persistRemoteChanges()
         XCTAssertEqual(manager.items.first?.transcription, "new")
         XCTAssertEqual(manager.items.first?.updatedAt, remote.updatedAt)
         XCTAssertEqual(manager.syncedCount, 1)

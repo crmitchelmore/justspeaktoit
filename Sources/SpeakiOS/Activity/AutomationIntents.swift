@@ -217,7 +217,7 @@ struct TranscribeAudioFileIntent: AppIntent {
             language: overrides.languageIdentifier ?? settings.preferredModelLanguage,
             keywords: MetaMuseVoiceTranscribe.keywords(from: settings.transcriptionKeywords)
         )
-        iOSHistoryManager.shared.recordTranscription(
+        _ = await iOSHistoryManager.shared.recordTranscriptionAndWait(
             text: result.text,
             model: modelID,
             duration: result.duration
@@ -298,7 +298,7 @@ struct GetLastTranscriptionIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
         let history = iOSHistoryManager.shared
-        history.ensureLoaded()
+        await history.loadIfNeededAndWait()
         let text = history.items.lazy
             .compactMap { item in
                 AutomationIntentSupport.bestTranscript(

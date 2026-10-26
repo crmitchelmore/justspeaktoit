@@ -187,7 +187,7 @@ public struct RecordingsView: View {
                 // for it, possibly with a different model. Only the automatic
                 // recovery path is keyed on the recording, so that retrying an
                 // interrupted one cannot duplicate its row.
-                iOSHistoryManager.shared.add(iOSHistoryItem(
+                let durable = await iOSHistoryManager.shared.upsertAndWait(iOSHistoryItem(
                     createdAt: rec.startedAt,
                     transcription: trimmed,
                     model: CaptureRecoveryCoordinator.recoveryModel(),
@@ -195,6 +195,10 @@ public struct RecordingsView: View {
                     wordCount: trimmed.split(whereSeparator: \.isWhitespace).count,
                     originPlatform: CaptureRecoveryCoordinator.recoveredOrigin
                 ))
+                guard durable else {
+                    transcribeMessage = "History could not be saved. The audio is still here."
+                    return
+                }
                 // This recording may be the one an interrupted capture left
                 // behind. Its transcript has just been delivered, so the
                 // matching claim must close: otherwise the next recovery pass

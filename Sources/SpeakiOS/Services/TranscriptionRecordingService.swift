@@ -1008,7 +1008,8 @@ public final class TranscriptionRecordingService: ObservableObject {
     }
 
     @discardableResult
-    // swiftlint:disable:next function_body_length
+    // The additional ownership guard follows the newly awaited durable History write.
+    // swiftlint:disable:next function_body_length cyclomatic_complexity
     func stopRecording(
         selection: CaptureDestinationSelection?,
         legacyCaller: Bool = false,
@@ -1135,7 +1136,7 @@ public final class TranscriptionRecordingService: ObservableObject {
 
         // Specialized callers may opt out when their result is intentionally transient.
         let historyItem = saveToHistory
-            ? historyManager.recordTranscription(
+            ? await historyManager.recordTranscriptionAndWait(
                 text: text,
                 model: currentModel,
                 duration: result.duration,
@@ -1144,6 +1145,13 @@ public final class TranscriptionRecordingService: ObservableObject {
                 }
             )
             : nil
+        // Cancellation can retire this completion while its admitted History write
+        // finishes. Keep that durable receipt, but never deliver a retired run or
+        // clear a replacement run's state. cancelRecording already owns teardown.
+        guard latestCompletionID == completionID else {
+            assertion.end()
+            return result.replacingText("")
+        }
 
         // Offer the transcript to the keyboard *before* anything else acts on
         // the destination: straight into the field when the keyboard is on
@@ -1610,7 +1618,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         let polish = self.polish
         let operation = AutomaticPolishOperation(
             isCurrent: { [weak self] in self?.latestCompletionID == completionID },
-            success: { [weak self] polished, current in
+            successAndWait: { [weak self] polished, current in
                 if current {
                     self?.sharedState.lastCompletedTranscript = polished
                     // Only the current run's polish may be waited on; an
@@ -1619,14 +1627,14 @@ public final class TranscriptionRecordingService: ObservableObject {
                 }
                 if let historyItemID {
                     // A loss notice recorded at stop survives the polish (issue #950).
-                    historyManager.setPostProcessed(
+                    await historyManager.setPostProcessedAndWait(
                         polished, for: historyItemID, preservingError: recordingWarning
                     )
                 }
             },
-            failure: { error in
+            failureAndWait: { error in
                 if let historyItemID {
-                    historyManager.setError(
+                    await historyManager.setErrorAndWait(
                         [recordingWarning, error.localizedDescription].compactMap { $0 }.joined(separator: " "),
                         for: historyItemID
                     )

@@ -415,6 +415,13 @@ been eliminated.
 
 ## Safe extension points
 
+- `BatchTranscriptionRouting` in `SpeakCore` owns batch model/transport metadata with explicit Mac/iOS compatibility
+  projections. iOS keeps its supported direct routes and legacy unknown-ID OpenRouter fallback; a shared client on Mac
+  does not enable that endpoint on iPhone. The Mac registry still consults each registered instance's `supportedModels()`
+  and preserves non-batch credential ownership. Metadata names the selected transport's canonical credential owner,
+  not the provenance of a caller-supplied key. Wire model names are populated only for verified single-name projections;
+  provider-managed options remain in clients. Live routing, availability, payloads and endpoint authentication stay
+  with their existing owners; adding a provider can still require platform registration and native acceptance.
 - Add shared catalogue metadata and route/client support in `SpeakCore`, then register concrete batch or platform
   adapters where the capability requires them. Preserve model-ID migration and catalogue parity tests; stored option
   identifiers and public protocol surfaces are compatibility contracts.

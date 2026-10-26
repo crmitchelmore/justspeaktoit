@@ -8,6 +8,11 @@ actor TranscriptionProviderRegistry {
 
     private var providers: [String: any TranscriptionProvider] = [:]
 
+    /// Characterizes registered-instance ownership without constructing transports.
+    init(providers: [String: any TranscriptionProvider]) {
+        self.providers = providers
+    }
+
     /// Comparisons inject a session owned by one lane; normal recording keeps the shared registry.
     init(session: URLSession = .shared, independentCleanup: Bool = false) {
         // Register all providers here - adding a new provider automatically makes it available
@@ -49,15 +54,24 @@ actor TranscriptionProviderRegistry {
     }
 
     func provider(forModel model: String) -> (any TranscriptionProvider)? {
-        // Extract provider ID from model string (e.g., "openai/whisper-1" -> "openai")
         let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
-        let components = trimmedModel.split(separator: "/")
-        guard let providerID = components.first else { return nil }
-        guard let provider = providers[String(providerID)] else { return nil }
+        let providerID: String
+        if let route = BatchTranscriptionRouting.route(for: trimmedModel, platform: .macOS),
+           route.transport == .directProvider {
+            providerID = route.providerID
+        } else {
+            // Registry lookup also owns live credentials and compatibility IDs.
+            // A nil/non-direct batch route must not disable that existing role.
+            guard let prefix = trimmedModel.split(separator: "/").first else { return nil }
+            providerID = String(prefix)
+        }
+        guard let provider = providers[providerID] else { return nil }
         // Alibaba owns the prefix, including invalid/retired selections. Its
         // client rejects those explicitly rather than uploading to OpenRouter.
         if providerID == "alibaba" { return provider }
 
+        // The registered instance remains authoritative even for a known batch
+        // catalogue ID (including injected/replaced provider implementations).
         let supportedIDs = provider.supportedModels().map(\.id)
         // Live-only providers (e.g. Soniox) intentionally expose an empty batch
         // catalogue; treat that as "any model under this prefix is owned by us".

@@ -160,9 +160,11 @@ struct HardwareTriggerSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Text(
-                    "Recording uses the live model from the Transcription section above. "
-                        + "If the chosen model needs an API key that isn't set, JustSpeakToIt "
-                        + "falls back to Apple Speech (on-device) so the trigger still works."
+                    "Live recording uses the selected model or an explicit model override for this run. "
+                        + "Ordinary remote selections may fall back to Apple Speech (on-device) when an API key "
+                        + "is missing or the network is known to be offline. Local recognition must be available; "
+                        + "otherwise recording may not start. A model explicitly requested for a run is never "
+                        + "silently replaced."
                 )
                     .font(.caption)
                     .foregroundStyle(.secondary)

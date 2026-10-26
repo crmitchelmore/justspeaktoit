@@ -470,8 +470,8 @@ public struct SettingsView: View {
 
                 CloudKitKeySyncSettingsSection()
 
-                // Sync status. With iCloud History Sync off the preferred path
-                // is Bonjour or local only, whatever iCloud itself offers.
+                // History remains local when its CloudKit lane is off/unavailable.
+                // Protocol support below does not imply a shipping iPhone sender.
                 let syncStatus = historySync.isSyncEnabled
                     ? SyncStatus.current(iCloudCloudKitAvailable: historySync.state.isCloudAvailable)
                     : SyncStatus()
@@ -503,9 +503,9 @@ public struct SettingsView: View {
                 }
 
                 if !usesInlineDensityLayout {
-                    Text("Just Speak to It syncs History through iCloud when available. Settings are not "
-                        + "synced; use QR transfer to copy them to another device. If iCloud is unavailable, "
-                        + "Bonjour Transport can send sessions to a paired Mac on your local network.")
+                    Text("Just Speak to It syncs History through iCloud when enabled and available. Settings are not "
+                        + "synced; use QR transfer to copy them to another device. Without iCloud History Sync, "
+                        + "History stays on this iPhone. The iPhone app has no Bonjour transcript sender.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -723,9 +723,17 @@ public struct SettingsView: View {
         .accessibilityElement(children: .combine)
     }
 
+    /// Display only: protocol support is not an iPhone History delivery lane.
+    private func historySyncBackend(_ status: SyncStatus) -> SyncBackend {
+        historySync.isSyncEnabled && status.iCloudCloudKitAvailable ? .iCloud : .localOnly
+    }
+
     private func compactSyncStatus(_ status: SyncStatus) -> some View {
         HStack(spacing: settings.visualDensity.inlineSpacing) {
-            Label(status.preferredBackend.displayName, systemImage: "arrow.triangle.branch")
+            Label(
+                historySyncBackend(status).displayName,
+                systemImage: "arrow.triangle.branch"
+            )
                 .lineLimit(1)
             Spacer()
             // No iCloud Keychain or iCloud Settings icons: API keys never use
@@ -734,7 +742,7 @@ public struct SettingsView: View {
             syncAvailabilityIcon(
                 "network",
                 available: status.transportAvailable,
-                label: "Bonjour Transport"
+                label: "Bonjour protocol support"
             )
         }
         .font(.caption)
@@ -747,25 +755,25 @@ public struct SettingsView: View {
     ) -> some View {
         Image(systemName: available ? systemImage : "xmark.circle")
             .foregroundStyle(available ? .green : .secondary)
-            .accessibilityLabel("\(label): \(available ? "available" : "unavailable")")
+            .accessibilityLabel("\(label): \(available ? "included" : "not included")")
     }
 
     private func syncStatusRows(_ status: SyncStatus) -> some View {
         Group {
             HStack {
-                Label("Preferred Sync", systemImage: "arrow.triangle.branch")
+                Label("History Sync", systemImage: "arrow.triangle.branch")
                 Spacer()
-                Text(status.preferredBackend.displayName)
-                    .foregroundStyle(status.preferredBackend != .localOnly ? .green : .secondary)
+                Text(historySyncBackend(status).displayName)
+                    .foregroundStyle(historySyncBackend(status) != .localOnly ? .green : .secondary)
             }
             .accessibilityElement(children: .combine)
 
             // iCloud History and Encrypted API-Key Sync rows sit above; there is
             // no iCloud Keychain or iCloud Settings path to report.
             syncStatusRow(
-                name: "Bonjour Transport",
+                name: "Bonjour Protocol",
                 systemImage: "network",
-                value: status.transportAvailable ? "Ready" : "Unavailable",
+                value: status.transportAvailable ? "Included" : "Not included",
                 isAvailable: status.transportAvailable
             )
         }

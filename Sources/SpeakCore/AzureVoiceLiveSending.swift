@@ -119,6 +119,22 @@ extension AzureVoiceLiveClient {
     private func finishTimeoutError(_ active: AzureVoiceLiveRun) -> Error {
         if !active.ready { return AzureVoiceLiveError.sessionNotReady }
         if !active.isDrained { return stalledError }
+        if model == AzureVoiceLiveProtocol.maiModel {
+            return AzureLegacyMAIFinalisationTimeout(budget: finishBudget)
+        }
         return AzureSpeechError.timedOut
+    }
+}
+
+/// The legacy alias can fail after commit even when this client's transport drained correctly.
+/// Identify that route and offer an explicit next step without attributing an unknown service cause.
+struct AzureLegacyMAIFinalisationTimeout: LocalizedError, Sendable {
+    let budget: TimeInterval
+
+    var errorDescription: String? {
+        let seconds = String(format: "%.0f", budget)
+        return "Azure MAI Transcribe (Turn-based) did not return a final transcript within \(seconds) seconds. "
+            + "Check this model's availability on your Azure resource, or explicitly choose another configured "
+            + "transcription model. Any text already received remains available for recovery."
     }
 }

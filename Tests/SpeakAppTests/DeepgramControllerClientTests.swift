@@ -137,6 +137,91 @@ final class DeepgramControllerClientTests: XCTestCase {
         XCTAssertEqual(fixture.adapter.snapshot.text, "")
     }
 
+    func testCancellationIsRecordedBeforeEitherConcurrentFinishCallerReturns() async throws {
+        let fixture = DeepgramMacFixture(model: "nova-3")
+        fixture.start()
+        fixture.socket.emit(fixture.event("Confirmed.", final: true))
+        fixture.socket.emit(fixture.event("saved draft", final: false))
+        let closeSent = expectation(description: "Shared CloseStream held")
+        fixture.socket.onClose = { closeSent.fulfill() }
+        let first = DeepgramMacOutcome(), second = DeepgramMacOutcome()
+        let settled = expectation(description: "Both finish callers observed cancellation")
+        settled.expectedFulfillmentCount = 2
+        let taskOne = Task { first.store(await fixture.adapter.finishAndWait()); settled.fulfill() }
+        defer { taskOne.cancel(); fixture.adapter.stop() }
+        await fulfillment(of: [closeSent], timeout: 2)
+        let taskTwo = Task { second.store(await fixture.adapter.finishAndWait()); settled.fulfill() }
+        defer { taskTwo.cancel() }
+        let joined = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            fixture.adapter.pendingFinishes == 2
+        }, object: nil)
+        await fulfillment(of: [joined], timeout: 2)
+        taskOne.cancel()
+        await fulfillment(of: [settled], timeout: 2)
+        let resultOne = try XCTUnwrap(first.value), resultTwo = try XCTUnwrap(second.value)
+        XCTAssertTrue(resultOne.error is CancellationError)
+        XCTAssertTrue(resultTwo.error is CancellationError)
+        XCTAssertEqual(resultOne.text, "Confirmed. saved draft")
+        XCTAssertEqual(resultTwo.text, resultOne.text)
+        XCTAssertEqual(resultOne.confirmedText, "Confirmed.")
+        XCTAssertEqual(resultTwo.confirmedText, resultOne.confirmedText)
+        XCTAssertEqual(fixture.socket.cancels, 1)
+        XCTAssertEqual(fixture.socket.text, [#"{"type":"CloseStream"}"#])
+    }
+
+    func testHealthyCachedOutcomeSurvivesLateCancelledFinishCaller() async throws {
+        let fixture = DeepgramMacFixture(model: "nova-3")
+        fixture.start()
+        fixture.socket.emit(fixture.event("Complete.", final: true))
+        let closeSent = expectation(description: "Initial CloseStream sent")
+        fixture.socket.onClose = { closeSent.fulfill() }
+        let first = DeepgramMacOutcome()
+        let settled = expectation(description: "Healthy owned finish settled")
+        let pending = Task { first.store(await fixture.adapter.finishAndWait()); settled.fulfill() }
+        defer { pending.cancel(); fixture.adapter.stop() }
+        await fulfillment(of: [closeSent], timeout: 2)
+        fixture.socket.completeSend()
+        fixture.socket.emit(#"{"type":"Metadata"}"#)
+        await fulfillment(of: [settled], timeout: 2)
+        XCTAssertNil(try XCTUnwrap(first.value).error)
+        let lateResult = DeepgramMacOutcome()
+        let lateSettled = expectation(description: "Late cancelled caller returned cached outcome")
+        let late = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            lateResult.store(await fixture.adapter.finishAndWait())
+            lateSettled.fulfill()
+        }
+        defer { late.cancel() }
+        await fulfillment(of: [lateSettled], timeout: 2)
+        let result = try XCTUnwrap(lateResult.value)
+        XCTAssertNil(result.error)
+        XCTAssertNil(fixture.adapter.snapshot.error)
+        XCTAssertEqual(result.text, "Complete.")
+        XCTAssertEqual(result.confirmedText, "Complete.")
+        XCTAssertEqual(fixture.socket.cancels, 1)
+        XCTAssertEqual(fixture.socket.text, [#"{"type":"CloseStream"}"#])
+    }
+
+    func testStopBeforeUnderlyingStartReturnsClosesTheNewOwnedCoreConnection() async {
+        let entered = expectation(description: "Injected start held before Core.start")
+        let returned = expectation(description: "Owned start returned")
+        let hold = DeepgramStartHold()
+        let fixture = DeepgramMacFixture(model: "nova-3", beforeStart: {
+            entered.fulfill()
+            XCTAssertTrue(hold.wait(), "Owned start hold is bounded")
+        })
+        DispatchQueue.global().async { fixture.start(); returned.fulfill() }
+        defer { hold.release(); fixture.adapter.stop() }
+        await fulfillment(of: [entered], timeout: 2)
+        fixture.adapter.stop()
+        hold.release()
+        await fulfillment(of: [returned], timeout: 2)
+        XCTAssertEqual(fixture.socket.cancels, 1, "Post-start guard must close the restarted Core run")
+        XCTAssertTrue(fixture.adapter.snapshot.error is CancellationError)
+        fixture.adapter.sendAudio(Data([1, 0]))
+        XCTAssertTrue(fixture.socket.binary.isEmpty)
+    }
+
     private func assertTrailingFinals(model: String) async throws {
         let fixture = DeepgramMacFixture(model: model)
         fixture.start()
@@ -185,12 +270,15 @@ private final class DeepgramMacFixture: @unchecked Sendable {
     var onError: ((Error) -> Void)?
     var delivered: [String] { lock.withLock { transcripts } }
 
-    init(model: String) {
+    init(model: String, beforeStart: (() -> Void)? = nil) {
         self.model = model
         let socket = socket
-        adapter = DeepgramControllerClient(client: DeepgramLiveClient(
+        let core = DeepgramLiveClient(
             apiKey: "synthetic", model: model, makeConnection: { _ in socket }, schedule: { _, _ in }
-        ))
+        )
+        if let beforeStart {
+            adapter = DeepgramControllerClient(client: DeepgramHeldStartClient(core: core, hold: beforeStart))
+        } else { adapter = DeepgramControllerClient(client: core) }
     }
 
     func start() {
@@ -251,4 +339,33 @@ private final class DeepgramMacSocket: StreamingWebSocketConnection, @unchecked 
         callback?(result)
     }
     func cancel() { lock.withLock { cancellations += 1 } }
+}
+
+private final class DeepgramHeldStartClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
+    let core: DeepgramLiveClient
+    let hold: () -> Void
+    var finalShape: TranscriptFinalShape { core.finalShape }
+    var isConnected: Bool { core.isConnected }
+    var finishFlushesBufferedAudio: Bool { core.finishFlushesBufferedAudio }
+    init(core: DeepgramLiveClient, hold: @escaping () -> Void) { self.core = core; self.hold = hold }
+    func start(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {
+        hold()
+        core.start(onTranscript: onTranscript, onError: onError)
+    }
+    func sendAudio(_ data: Data) { core.sendAudio(data) }
+    func stop() { core.stop() }
+    func finishAndWait() async -> String? { await core.finishAndWait() }
+}
+
+private final class DeepgramStartHold: @unchecked Sendable {
+    private let condition = NSCondition()
+    private var released = false
+    func wait() -> Bool {
+        condition.lock()
+        defer { condition.unlock() }
+        let deadline = Date().addingTimeInterval(2)
+        while !released { if !condition.wait(until: deadline) { return released } }
+        return true
+    }
+    func release() { condition.lock(); released = true; condition.broadcast(); condition.unlock() }
 }

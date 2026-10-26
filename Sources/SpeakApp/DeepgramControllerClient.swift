@@ -4,7 +4,7 @@ import SpeakCore
 /// One recording's Mac adapter. Core owns PCM ordering, CloseStream and the
 /// bounded trailing-response drain; capture and result metadata stay in Mac.
 final class DeepgramControllerClient: @unchecked Sendable {
-    struct Snapshot {
+    struct Snapshot: Sendable {
         let text: String
         let confirmedText: String
         let error: Error?
@@ -19,10 +19,13 @@ final class DeepgramControllerClient: @unchecked Sendable {
     private var started = false
     private var closed = false
     private var finished: Snapshot?
+    private var finishing: Task<Snapshot, Never>?
+    private var finishCallers = 0
 
     init(client: any FinalizingStreamingTranscriptionClient) { self.client = client }
 
     var snapshot: Snapshot { lock.withLock { value } }
+    var pendingFinishes: Int { lock.withLock { finishCallers } }
 
     private var value: Snapshot {
         finished ?? Snapshot(
@@ -59,6 +62,9 @@ final class DeepgramControllerClient: @unchecked Sendable {
             }
             if deliver { onError(error) }
         })
+        // stop() can win after admission but before the underlying start.
+        // Deepgram.start creates a fresh Core run, so retire that connection.
+        if lock.withLock({ closed }) { client.stop() }
     }
 
     func sendAudio(_ audio: Data) {
@@ -67,11 +73,29 @@ final class DeepgramControllerClient: @unchecked Sendable {
     }
 
     func finishAndWait() async -> Snapshot {
-        let whole = await client.finishAndWait()
-        let cancelled = Task.isCancelled
-        return lock.withLock {
+        if let finished = lock.withLock({ finished }) { return finished }
+        lock.withLock { finishCallers += 1 }
+        defer { lock.withLock { finishCallers -= 1 } }
+        return await withTaskCancellationHandler {
+            let owned = lock.withLock { () -> Task<Snapshot, Never> in
+                if let finishing { return finishing }
+                // Record a caller's cancellation before stopping Core. A
+                // directly cancelled Core waiter could wake another caller
+                // before the adapter recorded their shared error outcome.
+                let task = Task.detached(priority: Task.currentPriority) { [self] in
+                    let whole = await client.finishAndWait()
+                    return finish(whole: whole)
+                }
+                finishing = task
+                return task
+            }
+            return await owned.value
+        } onCancel: { [weak self] in self?.stop() }
+    }
+
+    private func finish(whole: String?) -> Snapshot {
+        lock.withLock {
             if let finished { return finished }
-            if cancelled, failure == nil { failure = CancellationError() }
             if let whole = whole?.trimmingCharacters(in: .whitespacesAndNewlines), !whole.isEmpty {
                 let previousConfirmed = committed.text
                 committed.replace(with: whole)

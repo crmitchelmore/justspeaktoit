@@ -40,44 +40,9 @@ on:
       - Docs/windows-development.md
       - .github/workflows/windows.yml
       - .github/workflows/windows-local-runtime.yml
+      - Package.resolved
+      - .github/desktop-platform-paths.yml
   pull_request:
-    paths:
-      - .gitattributes
-      - Package.swift
-      - Resources/Desktop/**
-      - Resources/AppIcon.iconset/**
-      - scripts/generate-desktop-icons.py
-      - scripts/tests/test_desktop_icons.py
-      - Sources/SpeakCore/**
-      - Sources/SpeakDesktop/**
-      - Sources/CLlamaCpp/**
-      - Sources/CMigrationArchive/**
-      - Sources/CRecordingFileSupport/**
-      - Sources/SpeakDesktopHost/**
-      - Sources/SpeakDesktopSync/**
-      - Sources/SpeakSync/**
-      - Sources/SpeakWindows/**
-      - Sources/SpeakWindowsPlatform/**
-      - Sources/CWindowsSupport/**
-      - Sources/CWindowsAutomation/**
-      - Sources/SpeakAutomationKit/**
-      - Sources/SpeakCLI/**
-      - Tests/SpeakPortableTests/**
-      - Tests/SpeakDesktopTests/**
-      - Tests/SpeakDesktopHostTests/**
-      - Tests/SpeakDesktopSyncTests/**
-      - Tests/SpeakSyncTests/**
-      - Tests/SpeakWindowsPlatformTests/**
-      - Tests/SpeakAutomationKitTests/**
-      - Tests/SpeakTestSupport/**
-      - scripts/verify-portable-core-boundary.py
-      - scripts/windows-cloudkit/**
-      - scripts/websocket-loopback-probe.py
-      - scripts/windows-local-runtime/**
-      - scripts/windows-bundle/runtime-policy.json
-      - Docs/windows-development.md
-      - .github/workflows/windows.yml
-      - .github/workflows/windows-local-runtime.yml
   workflow_dispatch:
     inputs:
       owned_capture_diagnostics:
@@ -98,7 +63,63 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  desktop-paths:
+    name: Detect desktop-relevant changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      selected: ${{ steps.select.outputs.selected }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # PR exclusions use only the event's immutable repository-owned base policy.
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.sha }}
+          persist-credentials: false
+      - name: Read trusted policy presence
+        id: policy
+        run: |
+          python3 - <<'PYTHON'
+          import os, stat
+          path = '.github/desktop-platform-paths.yml'
+          try:
+              metadata = os.lstat(path)
+          except FileNotFoundError:
+              present = 'false'  # Explicit commissioning: select every platform.
+          else:
+              if not stat.S_ISREG(metadata.st_mode):
+                  raise SystemExit('Trusted platform policy must be a regular readable file')
+              with open(path, 'rb') as policy:
+                  policy.read()  # Read errors must fail, never commission.
+              present = 'true'
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'present={present}\n')
+          PYTHON
+      - name: Classify changed files
+        if: github.event_name == 'pull_request' && steps.policy.outputs.present == 'true'
+        id: filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # existing CI v4.0.3 pin
+        with:
+          filters: .github/desktop-platform-paths.yml
+      - name: Select an explicit boolean
+        id: select
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          TRUSTED_POLICY: ${{ steps.policy.outputs.present }}
+          SELECTED: ${{ steps.filter.outputs.windows-native }}
+        run: |
+          set -eu
+          case "$EVENT_NAME" in pull_request|push|workflow_dispatch) ;; *) exit 1 ;; esac
+          case "$TRUSTED_POLICY" in true|false) ;; *) exit 1 ;; esac
+          if [ "$EVENT_NAME" != "pull_request" ] || [ "$TRUSTED_POLICY" = false ]; then SELECTED=true; fi
+          case "$SELECTED" in true|false) ;; *) exit 1 ;; esac
+          echo "selected=$SELECTED" >> "$GITHUB_OUTPUT"
+
   local-runtime:
+    needs: desktop-paths
+    if: needs.desktop-paths.outputs.selected == 'true'
     uses: ./.github/workflows/windows-local-runtime.yml
 
   windows:
@@ -1707,6 +1728,8 @@ jobs:
           retention-days: 14
 
   portable-macos:
+    needs: desktop-paths
+    if: needs.desktop-paths.outputs.selected == 'true'
     name: Portable Swift on macOS
     runs-on: macos-15
     timeout-minutes: 10
@@ -1749,6 +1772,8 @@ jobs:
         run: git restore --source=HEAD -- Package.resolved
 
   portable-linux:
+    needs: desktop-paths
+    if: needs.desktop-paths.outputs.selected == 'true'
     name: Portable Swift on Linux (Swift 6.2.3)
     runs-on: ubuntu-22.04
     container:
@@ -1782,3 +1807,31 @@ jobs:
         run: |
           swift --version
           swift test --configuration release --jobs 4
+
+  required-desktop:
+    name: Windows x64 gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+    permissions: {}
+    needs: [desktop-paths, local-runtime, windows, portable-macos, portable-linux]
+    steps:
+      - name: Reject unsuccessful or missing selected work
+        if: >-
+          always() && (
+            needs.desktop-paths.result != 'success' ||
+            (github.event_name != 'pull_request' && needs.desktop-paths.outputs.selected != 'true') ||
+            (needs.desktop-paths.outputs.selected != 'true' && needs.desktop-paths.outputs.selected != 'false') ||
+            (needs.local-runtime.result != 'success' && !(needs.desktop-paths.outputs.selected == 'false' && needs.local-runtime.result == 'skipped')) ||
+            (needs.windows.result != 'success' && !(needs.desktop-paths.outputs.selected == 'false' && needs.windows.result == 'skipped')) ||
+            (needs.portable-macos.result != 'success' && !(needs.desktop-paths.outputs.selected == 'false' && needs.portable-macos.result == 'skipped')) ||
+            (needs.portable-linux.result != 'success' && !(needs.desktop-paths.outputs.selected == 'false' && needs.portable-linux.result == 'skipped'))
+          )
+        env:
+          GATE_NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "::error::A desktop gate failed, was cancelled, or skipped unexpectedly."
+          printf '%s\n' "$GATE_NEEDS"
+          exit 1
+      - name: Confirm successful selected work
+        run: echo "Selected platform jobs passed; explicit unrelated-path exclusions may skip."

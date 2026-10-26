@@ -1,0 +1,42 @@
+name: Platform gate contract
+
+on:
+  pull_request:
+    paths: &paths
+      - .github/desktop-platform-paths.yml
+      - .github/workflows/windows.yml
+      - .github/workflows/windows-arm64.yml
+      - .github/workflows/windows-cross-proof.yml
+      - .github/workflows/linux.yml
+      - .github/workflows/linux-flatpak.yml
+      - .github/workflows/ci.yml
+      - .github/workflows/platform-gate-contract.yml
+      - scripts/verify-desktop-ci-gates.mjs
+      - scripts/tests/desktop-platform-gates.test.mjs
+      - scripts/tests/verify-ci-gates.test.mjs
+  push:
+    branches: [main]
+    paths: *paths
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  contract:
+    name: Platform gate contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24'
+      - name: Test actual gate predicates, path projections and selector scripts
+        run: node --test scripts/tests/desktop-platform-gates.test.mjs scripts/tests/verify-ci-gates.test.mjs

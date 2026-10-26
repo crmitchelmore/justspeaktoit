@@ -31,7 +31,8 @@ test('product checks cover stacked pull requests without broadening push or cred
       `${name}: non-main target branches must receive product checks`);
     assert.doesNotMatch(source, /^  pull_request_target:/m, `${name}: no privileged PR event`);
     if (name !== 'ci') {
-      assert.match(pullRequest[1], /^    paths:$/m, `${name}: retain product path gates`);
+      assert.doesNotMatch(pullRequest[1], /^    paths:$/m, `${name}: terminal PR gate must always emit`);
+      assert.match(source, /filters: \.github\/desktop-platform-paths\.yml/);
     }
   }
 });
@@ -39,14 +40,14 @@ test('product checks cover stacked pull requests without broadening push or cred
 test('desktop native dependency changes select every native and cross-build workflow', () => {
   for (const name of ['windows', 'linux', 'windows-arm64', 'windows-cross-proof']) {
     const source = readFileSync(new URL(`../../.github/workflows/${name}.yml`, import.meta.url), 'utf8');
-    for (const event of ['push', 'pull_request']) {
-      const trigger = source.match(new RegExp(`^  ${event}:\\n((?: {4}[^\\n]*\\n|\\n)*)`, 'm'));
-      assert.ok(trigger, `${name}: ${event} must exist`);
-      for (const target of ['CLlamaCpp', 'CMigrationArchive', 'CRecordingFileSupport']) {
-        assert.ok(trigger[1].includes(`      - Sources/${target}/**\n`),
-          `${name}: ${event} must include native dependency ${target}`);
-      }
+    const push = source.match(/^  push:\n((?: {4}[^\n]*\n|\n)*)/m);
+    assert.ok(push, `${name}: main push must exist`);
+    const canonical = readFileSync(new URL('../../.github/desktop-platform-paths.yml', import.meta.url), 'utf8');
+    for (const target of ['CLlamaCpp', 'CMigrationArchive', 'CRecordingFileSupport']) {
+      assert.ok(push[1].includes(`      - Sources/${target}/**\n`), `${name}: push includes ${target}`);
+      assert.ok(canonical.includes(`  - "Sources/${target}/**"\n`), `${name}: PR classifier includes ${target}`);
     }
+    assert.match(source, /filters: \.github\/desktop-platform-paths\.yml/);
   }
 });
 

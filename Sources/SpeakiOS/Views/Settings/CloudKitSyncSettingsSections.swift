@@ -97,12 +97,8 @@ struct CloudKitSyncSettingsSection: View {
             .disabled(isSyncing || syncEngine.state.isSyncing)
         } else {
             VStack(alignment: .leading, spacing: 4) {
-                Text(
-                    availability.transportAvailable
-                        ? "Sign in to iCloud to sync history automatically. Until then, Bonjour Transport "
-                            + "can send new sessions to a paired Mac on your local network."
-                        : "Sign in to iCloud in Settings to sync transcription history across your devices."
-                )
+                Text("Sign in to iCloud in Settings to sync History across your devices. "
+                    + "Until iCloud History Sync is available, History stays on this iPhone.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

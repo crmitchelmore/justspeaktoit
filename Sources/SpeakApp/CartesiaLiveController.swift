@@ -30,6 +30,8 @@ final class CartesiaLiveController: NSObject, LiveTranscriptionController {
   private var finalSegments: [TranscriptionSegment] = []
   private var currentInterim: String = ""
   private var fullTranscript: String = ""
+  private var finalizedTranscript: StreamingTranscriptSnapshot?
+  private var streamingEndTime: Date?
 
   init(
     appSettings: AppSettings,
@@ -89,7 +91,9 @@ final class CartesiaLiveController: NSObject, LiveTranscriptionController {
       let newTranscriber = CartesiaTranscriptionProvider().createLiveTranscriber(
         apiKey: apiKey,
         model: modelID,
-        sampleRate: 16_000
+        sampleRate: 16_000,
+        postStopFinalizeBudget: appSettings.liveModelCapabilities.postStopFinalizeBudget,
+        stopGracePeriod: appSettings.liveStopGracePeriod
       )
       transcriber = newTranscriber
 
@@ -100,14 +104,15 @@ final class CartesiaLiveController: NSObject, LiveTranscriptionController {
             // Drop callbacks queued by a previous recording's stream: this
             // controller instance is reused between recordings (issue #643).
             guard LiveTranscriptionRun.isCurrent(newTranscriber, activeStream: self.transcriber) else { return }
+            guard !self.hasFinished else { return }
             self.handleTranscript(text: text, isFinal: isFinal)
           }
         },
-        onError: { [weak self, weak newTranscriber] error in
+        onError: { [weak self, weak newTranscriber] _ in
           Task { @MainActor [weak self, weak newTranscriber] in
             guard let self else { return }
             guard LiveTranscriptionRun.isCurrent(newTranscriber, activeStream: self.transcriber) else { return }
-            self.delegate?.liveTranscriber(self, didFail: error)
+            self.reportActiveFailure(from: newTranscriber)
           }
         }
       )
@@ -150,31 +155,40 @@ final class CartesiaLiveController: NSObject, LiveTranscriptionController {
     }
   }
 
-  func stop() async {
-    guard isRunning else { return }
-    guard !hasFinished else { return }
-    hasFinished = true
+  var stopCompletionTimeout: TimeInterval { max(10, (transcriber?.finalisationBudget ?? 0) + 2) }
 
+  func stop() async {
+    guard isRunning, !hasFinished else { return }
+    hasFinished = true
+    streamingEndTime = Date()
     audioEngine.stop()
     audioEngine.inputNode.removeTap(onBus: 0)
     isRunning = false
 
-    if let transcriber {
+    let active = transcriber
+    let stoppingInputSession = activeInputSession
+    activeInputSession = nil
+    if let active {
       audioProcessor.drainConverterTail()
-      audioProcessor.flushPendingAudio(to: transcriber)
-      await transcriber.waitForPendingSends()
-      audioProcessor.setRunning(false)
-      await applyLiveStopGrace(appSettings.liveStopGracePeriod)
-      transcriber.stop()
-    } else {
-      audioProcessor.setRunning(false)
+      audioProcessor.flushPendingAudio(to: active)
     }
-
-    let result = buildFinalResult()
-    delegate?.liveTranscriber(self, didFinishWith: result)
-
-    await endActiveInputSession()
-    transcriber = nil
+    audioProcessor.setRunning(false)
+    let snapshot = await active?.finishAndWait()
+    if let stoppingInputSession {
+      await audioDeviceManager.endUsingPreferredInput(session: stoppingInputSession)
+    }
+    guard transcriber === active else { return }
+    if let snapshot {
+      // The rich snapshot is already the whole session, including the open
+      // draft and turns received after close. Never append it to live turns.
+      finalizedTranscript = snapshot.transcript
+      delegate?.liveTranscriber(self, didUpdatePartial: snapshot.transcript.displayText ?? "")
+      if let failure = active?.takeFailureForReporting() {
+        delegate?.liveTranscriber(self, didFail: failure)
+      }
+    }
+    delegate?.liveTranscriber(self, didFinishWith: buildFinalResult())
+    if transcriber === active { transcriber = nil }
   }
 
   private final class CartesiaAudioProcessor: @unchecked Sendable {
@@ -324,6 +338,11 @@ final class CartesiaLiveController: NSObject, LiveTranscriptionController {
 // swiftlint:enable type_body_length
 
 private extension CartesiaLiveController {
+  func reportActiveFailure(from transcriber: CartesiaLiveTranscriber?) {
+    guard isRunning, !hasFinished, let failure = transcriber?.takeFailureForReporting() else { return }
+    delegate?.liveTranscriber(self, didFail: failure)
+  }
+
   func ensurePermissions() async -> Bool {
     let microphone = await permissionsManager.ensureGranted(.microphone)
     return microphone.isGranted
@@ -347,6 +366,8 @@ private extension CartesiaLiveController {
     currentInterim = ""
     fullTranscript = ""
     streamingStartTime = nil
+    streamingEndTime = nil
+    finalizedTranscript = nil
     hasFinished = false
     isRunning = false
   }
@@ -360,6 +381,8 @@ private extension CartesiaLiveController {
     transcriber = nil
     targetFormat = nil
     streamingStartTime = nil
+    streamingEndTime = nil
+    finalizedTranscript = nil
     currentInterim = ""
     finalSegments = []
     fullTranscript = ""
@@ -373,10 +396,10 @@ private extension CartesiaLiveController {
       if !text.isEmpty { text += " " }
       text += trimmedInterim
     }
-    let streamingDuration = streamingStartTime.map { Date().timeIntervalSince($0) } ?? 0
+    let streamingDuration = streamingStartTime.map { (streamingEndTime ?? Date()).timeIntervalSince($0) } ?? 0
     return TranscriptionResult(
-      text: text,
-      segments: finalSegments,
+      text: finalizedTranscript?.displayText ?? text,
+      segments: finalizedTranscript?.segments ?? finalSegments,
       confidence: nil,
       duration: streamingDuration,
       modelIdentifier: currentModel ?? "cartesia/ink-2-streaming",
@@ -391,4 +414,5 @@ private extension CartesiaLiveController {
     activeInputSession = nil
     await audioDeviceManager.endUsingPreferredInput(session: session)
   }
-}
+// Capture/conversion stays in this existing controller during the bounded shutdown fix.
+} // swiftlint:disable:this file_length

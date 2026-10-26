@@ -7,8 +7,8 @@ import FoundationNetworking
 
 /// Shared Cartesia Ink-2 streaming client. The iOS live path reaches it through
 /// `LiveTranscriptionClientFactory` and Windows through `DesktopLiveTranscription`;
-/// the macOS app still records through its own `CartesiaLiveController` and
-/// `CartesiaLiveTranscriber` and does not use this client yet.
+/// macOS owns capture in `CartesiaLiveController` and consumes this same
+/// transport and rich snapshot through its `CartesiaLiveTranscriber` adapter.
 ///
 /// One `/stt/turns/websocket` socket per run (see `CartesiaLiveProtocol`). PCM16
 /// mono is repacked into 100 ms frames and sent as one binary frame at a time

@@ -25,47 +25,50 @@ final class SettingsCredentialUITests: XCTestCase {
 
         // These two @AppStorage controls read .standard. Process arguments
         // shadow it without writing the real app's region/workspace settings.
-        launch(app, region: "invalid-fixture-region")
+        try launch(app, region: "invalid-fixture-region")
         try openAlibaba(app)
         let field = app.secureTextFields["Alibaba Model Studio API Key"]
         XCTAssertFalse(app.buttons["Remove Key"].exists, "The UUID vault must start empty")
         field.click()
         field.typeText("synthetic-alibaba-first")
         app.buttons["Save Key"].click()
-        try wait {
-            app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Set the Alibaba region"))
-                .firstMatch.exists
+        try wait(app, stage: "Rejected configuration error is visible") {
+            self.validationTextExists(app, containing: "Set the Alibaba region")
         }
         XCTAssertFalse(app.buttons["Remove Key"].exists, "Rejected configuration must not save a credential")
 
         app.terminate()
-        launch(app, region: "ap-southeast-1")
+        try launch(app, region: "ap-southeast-1")
         try openAlibaba(app)
         XCTAssertFalse(app.buttons["Remove Key"].exists)
         try save(app, value: "synthetic-alibaba-first", replacing: false)
         try save(app, value: "synthetic-alibaba-replacement", replacing: true)
 
         app.terminate()
-        launch(app, region: "ap-southeast-1")
+        try launch(app, region: "ap-southeast-1")
         try openAlibaba(app)
-        XCTAssertTrue(app.buttons["Replace Key"].waitForExistence(timeout: 15), "Startup must load the saved row")
+        try wait(app, stage: "Startup loads the saved row") { app.buttons["Replace Key"].exists }
         let remove = app.buttons["Remove Key"]
-        XCTAssertTrue(remove.waitForExistence(timeout: 15))
+        try wait(app, stage: "Saved credential exposes Remove Key") { remove.exists }
         remove.click()
         let confirmation = app.dialogs.buttons["Remove Key"].firstMatch
-        XCTAssertTrue(confirmation.waitForExistence(timeout: 10))
+        try wait(app, stage: "Remove confirmation appears", timeout: 10) { confirmation.exists }
         confirmation.click()
-        try wait { app.buttons["Save Key"].exists && !app.buttons["Remove Key"].exists }
+        try wait(app, stage: "Removed credential returns to the unsaved row") {
+            app.buttons["Save Key"].exists && !app.buttons["Remove Key"].exists
+        }
 
         app.terminate()
-        launch(app, region: "ap-southeast-1")
+        try launch(app, region: "ap-southeast-1")
         try openAlibaba(app)
-        XCTAssertTrue(app.buttons["Save Key"].waitForExistence(timeout: 15))
+        try wait(app, stage: "Startup exposes the unsaved row") { app.buttons["Save Key"].exists }
         XCTAssertFalse(app.buttons["Remove Key"].exists, "The deletion must survive startup")
     }
 
     @MainActor
-    private func launch(_ app: XCUIApplication, region: String) {
+    private func launch(
+        _ app: XCUIApplication, region: String, file: StaticString = #filePath, line: UInt = #line
+    ) throws {
         // Replace the whole argument list each time; invalid configuration
         // from the earlier process must not leak into the recovery launch.
         app.launchArguments = [
@@ -73,21 +76,27 @@ final class SettingsCredentialUITests: XCTestCase {
             "-alibaba.newKey.region", region, "-alibaba.newKey.workspace", "synthetic-settings"
         ]
         app.launch()
-        XCTAssertTrue(app.buttons["toolbarRecordToggleButton"].waitForExistence(timeout: 15))
+        try wait(app, stage: "Production bootstrap exposes recording control", file: file, line: line) {
+            app.buttons["toolbarRecordToggleButton"].exists
+        }
     }
 
     @MainActor
     private func openAlibaba(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) throws {
         let navigation = app.descendants(matching: .any)["sidebarSettings-apiKeys"].firstMatch
-        XCTAssertTrue(navigation.waitForExistence(timeout: 15))
+        try wait(app, stage: "Settings navigation is available", file: file, line: line) { navigation.exists }
         navigation.click()
         let search = app.textFields["Search API keys"]
-        XCTAssertTrue(search.waitForExistence(timeout: 15))
+        try wait(app, stage: "API key search is available", file: file, line: line) { search.exists }
         search.click()
         search.typeText("Alibaba")
         try revealAlibabaControls(app, file: file, line: line)
-        try wait { app.staticTexts["Alibaba Model Studio (Transcription)"].exists }
-        XCTAssertTrue(app.secureTextFields["Alibaba Model Studio API Key"].waitForExistence(timeout: 15))
+        try wait(app, stage: "Exact Alibaba provider row exists", file: file, line: line) {
+            app.staticTexts["Alibaba Model Studio (Transcription)"].exists
+        }
+        try wait(app, stage: "Exact Alibaba secure field exists", file: file, line: line) {
+            app.secureTextFields["Alibaba Model Studio API Key"].exists
+        }
     }
 
     @MainActor
@@ -99,7 +108,7 @@ final class SettingsCredentialUITests: XCTestCase {
         let panes = app.scrollViews.containing(.textField, identifier: "Search API keys")
             .allElementsBoundByAccessibilityElement
         guard panes.count == 1 else {
-            try failReveal(app, stage: "Expected one Settings pane containing Search; found \(panes.count)",
+            try failSettings(app, stage: "Expected one Settings pane containing Search; found \(panes.count)",
                            file: file, line: line)
         }
         let pane = panes[0]
@@ -113,7 +122,7 @@ final class SettingsCredentialUITests: XCTestCase {
             pane.scroll(byDeltaX: 0, deltaY: -300)
         }
         guard alibabaControlsAreHittable(app) else {
-            try failReveal(app, stage: "Alibaba row, secure field and credential actions were not revealed",
+            try failSettings(app, stage: "Alibaba row, secure field and credential actions were not revealed",
                            file: file, line: line)
         }
     }
@@ -129,12 +138,12 @@ final class SettingsCredentialUITests: XCTestCase {
     }
 
     @MainActor
-    private func failReveal(
+    private func failSettings(
         _ app: XCUIApplication, stage: String, file: StaticString, line: UInt
     ) throws -> Never {
         if app.state != .notRunning {
             let screenshot = XCTAttachment(screenshot: app.screenshot())
-            screenshot.name = "Alibaba Settings reveal: " + stage
+            screenshot.name = "Alibaba Settings: " + stage
             screenshot.lifetime = .keepAlways
             add(screenshot)
             let hierarchy = XCTAttachment(string: app.debugDescription)
@@ -147,28 +156,41 @@ final class SettingsCredentialUITests: XCTestCase {
     }
 
     @MainActor
-    private func save(_ app: XCUIApplication, value: String, replacing: Bool) throws {
+    private func save(
+        _ app: XCUIApplication, value: String, replacing: Bool, file: StaticString = #filePath, line: UInt = #line
+    ) throws {
         let field = app.secureTextFields["Alibaba Model Studio API Key"]
         field.click()
         field.typeText(value)
         let save = app.buttons[replacing ? "Replace Key" : "Save Key"]
-        try wait { save.isEnabled }
+        try wait(app, stage: "Credential save action is enabled", file: file, line: line) { save.isEnabled }
         save.click()
-        try wait { app.buttons["Replace Key"].exists && !app.buttons["Replace Key"].isEnabled }
+        try wait(app, stage: "Saved credential exposes disabled Replace Key", file: file, line: line) {
+            app.buttons["Replace Key"].exists && !app.buttons["Replace Key"].isEnabled
+        }
         XCTAssertTrue(app.buttons["Remove Key"].exists)
-        XCTAssertTrue(app.staticTexts.matching(
-            NSPredicate(format: "label CONTAINS %@", "Alibaba key, region and workspace saved")
-        ).firstMatch.exists)
+        XCTAssertTrue(validationTextExists(app, containing: "Alibaba key, region and workspace saved"),
+                      file: file, line: line)
     }
 
     @MainActor
-    private func wait(_ predicate: @escaping () -> Bool) throws {
+    private func validationTextExists(_ app: XCUIApplication, containing text: String) -> Bool {
+        // Accept the rendered validation copy in either AX label or value.
+        app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", text, text))
+            .firstMatch.exists
+    }
+
+    @MainActor
+    private func wait(
+        _ app: XCUIApplication, stage: String, timeout: TimeInterval = 15,
+        file: StaticString = #filePath, line: UInt = #line, _ predicate: @escaping () -> Bool
+    ) throws {
         let result = XCTWaiter.wait(
-            for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in predicate() }, object: nil)], timeout: 15
+            for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in predicate() }, object: nil)],
+            timeout: timeout
         )
         guard result == .completed else {
-            XCTFail("The actual Settings control did not reach its expected state")
-            throw SettingsTimeout()
+            try failSettings(app, stage: stage, file: file, line: line)
         }
     }
 

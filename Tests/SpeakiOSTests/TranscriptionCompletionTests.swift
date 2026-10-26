@@ -69,21 +69,36 @@ final class TranscriptionCompletionTests: XCTestCase {
         let expectedClipboard = destination == .historyOnly || !acceptsClipboardWrite ? nil : "Raw transcript"
         XCTAssertEqual(textAtCompletion, expectedClipboard)
         XCTAssertEqual(history.items.count, saveToHistory ? 1 : 0)
+        if saveToHistory {
+            XCTAssertEqual(history.items.first?.transcription, "Raw transcript")
+            XCTAssertNil(history.items.first?.errorMessage)
+        }
         for _ in 0..<1_000 where !history.reprocessingIDs.isEmpty { await Task.yield() }
         XCTAssertEqual(
             completions.outcomes, [.ready], "Polish must not schedule another completion UI update"
         )
         XCTAssertEqual(pasteboard.writes, destination == .historyOnly ? [] : ["Raw transcript"])
         XCTAssertEqual(pasteboard.string, expectedClipboard, "Polish must never rewrite the clipboard")
-        XCTAssertEqual(
-            completions.previews,
-            [saveToHistory ? "Raw transcript" : ""],
-            "Only a published transcript may carry a preview, which is what enables the result row's actions"
-        )
-        try assertCompletionIsAddressable(
-            try XCTUnwrap(completions.ids.first), sharedState: sharedState, published: saveToHistory
+        try assertSharedPublication(
+            completions, sharedState: sharedState, published: saveToHistory && destination != .historyOnly
         )
         service.cancelRecording()
+    }
+
+    private func assertSharedPublication(
+        _ completions: CompletionRecorder, sharedState: SharedTranscriptionState, published: Bool
+    ) throws {
+        XCTAssertEqual(
+            completions.previews, [published ? "Raw transcript" : ""],
+            "History-only storage must not publish an external preview or Copy action"
+        )
+        try assertCompletionIsAddressable(
+            try XCTUnwrap(completions.ids.first), sharedState: sharedState, published: published
+        )
+        if !published {
+            XCTAssertNil(sharedState.completedTranscriptID)
+            XCTAssertNil(sharedState.lastCompletedTranscript)
+        }
     }
 
     private static func historyManager(in directory: URL, defaults: UserDefaults) -> iOSHistoryManager {
@@ -106,7 +121,7 @@ final class TranscriptionCompletionTests: XCTestCase {
         guard published else {
             XCTAssertTrue(
                 completionID.isEmpty,
-                "A keyboard handoff publishes nothing retrievable, so its row must not claim a completion"
+                "A private History or keyboard result publishes no retrievable text or Copy completion"
             )
             XCTAssertNil(sharedState.completedTranscript(matching: ""))
             return

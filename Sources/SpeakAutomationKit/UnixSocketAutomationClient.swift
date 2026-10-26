@@ -27,15 +27,27 @@ public struct UnixSocketAutomationClient: CancellableAutomationRequesting {
 
     public let socketPath: String
     private let onConnectWait: (@Sendable () -> Void)?
+    private let connectAttempt: (@Sendable (Int32) -> Int32)?
 
     public init(socketPath: String = AutomationEndpoint.socketPath()) {
         self.socketPath = socketPath
         self.onConnectWait = nil
+        self.connectAttempt = nil
     }
 
     init(socketPath: String, onConnectWait: @escaping @Sendable () -> Void) {
         self.socketPath = socketPath
         self.onConnectWait = onConnectWait
+        self.connectAttempt = nil
+    }
+
+    /// Injects a connect errno against the real owned socket for deterministic retry-boundary tests.
+    /// Zero means connected; production initializers always use Darwin.connect directly.
+    init(socketPath: String, onConnectWait: @escaping @Sendable () -> Void,
+         connectAttempt: @escaping @Sendable (Int32) -> Int32) {
+        self.socketPath = socketPath
+        self.onConnectWait = onConnectWait
+        self.connectAttempt = connectAttempt
     }
 
     public func send(_ request: AutomationRequest) throws -> AutomationResponse {
@@ -151,13 +163,8 @@ public struct UnixSocketAutomationClient: CancellableAutomationRequesting {
             guard !cancellation.isCancelled else {
                 throw AutomationError(code: .appUnavailable, message: "Automation request cancelled.")
             }
-            let result = withUnsafePointer(to: &address) { pointer in
-                pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
-                    Darwin.connect(descriptor, sockaddrPointer, size)
-                }
-            }
-            if result == 0 || errno == EISCONN { break }
-            let failure = errno
+            let failure = self.connectionFailure(descriptor, address: &address, size: size)
+            if failure == 0 || failure == EISCONN { break }
             guard [EINPROGRESS, EALREADY, EINTR, EAGAIN].contains(failure) else {
                 throw self.connectError(failure)
             }
@@ -183,6 +190,16 @@ public struct UnixSocketAutomationClient: CancellableAutomationRequesting {
                 throw self.connectError(socketError)
             }
         }
+    }
+
+    private func connectionFailure(_ descriptor: Int32, address: inout sockaddr_un, size: socklen_t) -> Int32 {
+        if let connectAttempt = self.connectAttempt { return connectAttempt(descriptor) }
+        let result = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                Darwin.connect(descriptor, sockaddrPointer, size)
+            }
+        }
+        return result == 0 ? 0 : errno
     }
 
     /// Only "nothing is listening" is reported as the app being unavailable;

@@ -432,7 +432,7 @@ final class MainManager: ObservableObject {
     session.errors.append(
       HistoryError(phase: .recording, message: "User cancelled", debugDescription: nil)
     )
-    cleanupAfterFailure(message: "Recording cancelled", preserveFile: false)
+    cleanupAfterFailure(message: "Recording cancelled", preserveFile: false, transcriptPolicy: .discard)
   }
 
   func cancelRecordingWithEscape() {
@@ -441,7 +441,7 @@ final class MainManager: ObservableObject {
     activeSession?.errors.append(
       HistoryError(phase: .recording, message: "Cancelled by user (Escape)", debugDescription: nil)
     )
-    cleanupAfterFailure(message: "Recording cancelled", preserveFile: false)
+    cleanupAfterFailure(message: "Recording cancelled", preserveFile: false, transcriptPolicy: .discard)
   }
 
   /// Hands-free replaces press-to-talk with press-to-arm.
@@ -761,13 +761,15 @@ final class MainManager: ObservableObject {
       // listening yet. The pre-warm path (issue #663) runs inside the same
       // step — a claimed staged recorder still has to prove it is capturing.
       let startStream: RecordingStartSequencer.Step? = isStreamingTranscriptionMode
-        ? { [transcriptionManager, preRollBuffers, trigger, primedInput] in
+        ? { [weak self, transcriptionManager, preRollBuffers, trigger, primedInput] in
           let primedCapture = await primedInput?.value
           try await transcriptionManager.startLiveTranscription(
             preRollBuffers: preRollBuffers,
             analyzerFallbackAllowed: trigger != .handsFree,
             primedInput: primedCapture
           )
+          guard self?.activeSession === session else { return }
+          session.liveTranscriptSessionID = transcriptionManager.liveTranscript.sessionID
         }
         : nil
       // The live engine's input node is built before the recorder opens the
@@ -846,6 +848,7 @@ final class MainManager: ObservableObject {
       return .rejected(.captureFailed)
     } catch {
       await liveInputPreparation.finish(startFailed: true)
+      guard sessionProcessingShouldContinue(session) else { return .rejected(.captureFailed) }
       session.errors.append(
         HistoryError(
           phase: .recording,
@@ -1389,6 +1392,7 @@ final class MainManager: ObservableObject {
       liveTextInserter.reset()
       activeSession = nil
     } catch {
+      guard sessionProcessingShouldContinue(session) else { return }
       session.errors.append(
         HistoryError(
           phase: .transcription,

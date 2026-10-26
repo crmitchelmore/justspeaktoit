@@ -12,7 +12,7 @@ struct GetLastTranscriptEntityIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<TranscriptEntity> {
-        .result(value: try TranscriptEntityHistory().latest())
+        .result(value: try await TranscriptEntityHistory().latestAndWait())
     }
 }
 #endif

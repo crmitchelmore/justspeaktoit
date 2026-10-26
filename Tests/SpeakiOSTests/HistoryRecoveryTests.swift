@@ -66,11 +66,11 @@ final class HistoryRecoveryTests: XCTestCase {
         let added = item("new")
         try write([old])
         let original = try Data(contentsOf: file)
-        var blocked = true
+        let blocked = HistoryTestLocked(true)
         let primary = try XCTUnwrap(file)
         var storageIO = IOSHistoryPersistence.StorageIO()
         storageIO.read = { url in
-            if url == primary && blocked { throw CocoaError(.fileReadNoPermission) }
+            if url == primary && blocked.value { throw CocoaError(.fileReadNoPermission) }
             return try Data(contentsOf: url)
         }
         let history = manager(storageIO)
@@ -79,7 +79,7 @@ final class HistoryRecoveryTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: file), original)
         let relaunched = manager(storageIO)
         XCTAssertEqual(relaunched.items.map(\.id), [added.id])
-        blocked = false
+        blocked.value = false
         relaunched.retryPersistence()
         relaunched.retryPersistence()
         XCTAssertTrue(relaunched.isStorageReady)
@@ -104,10 +104,10 @@ final class HistoryRecoveryTests: XCTestCase {
 
     func testBothWritesFailThenRetryPreservesMemoryAndReportsDurabilityTruthfully() throws {
         try write([item("old")])
-        var blocked = true
+        let blocked = HistoryTestLocked(true)
         var storageIO = IOSHistoryPersistence.StorageIO()
         storageIO.write = { data, url in
-            if blocked { throw CocoaError(.fileWriteOutOfSpace) }
+            if blocked.value { throw CocoaError(.fileWriteOutOfSpace) }
             try data.write(to: url, options: .atomic)
         }
         let history = manager(storageIO)
@@ -116,7 +116,7 @@ final class HistoryRecoveryTests: XCTestCase {
         XCTAssertFalse(history.isStorageReady)
         XCTAssertEqual(history.items.count, 2)
         XCTAssertEqual(manager().items.count, 1)
-        blocked = false
+        blocked.value = false
         history.retryPersistence()
         XCTAssertTrue(history.isStorageReady)
         XCTAssertTrue(history.upsertReportingDurability(added))
@@ -164,16 +164,16 @@ final class HistoryRecoveryTests: XCTestCase {
         let recovery = file.appendingPathExtension("recovery")
         try write([pending], to: recovery)
         let original = try Data(contentsOf: recovery)
-        var blocked = true
+        let blocked = HistoryTestLocked(true)
         var storageIO = IOSHistoryPersistence.StorageIO()
         storageIO.read = { url in
-            if url == recovery && blocked { throw CocoaError(.fileReadNoPermission) }
+            if url == recovery && blocked.value { throw CocoaError(.fileReadNoPermission) }
             return try Data(contentsOf: url)
         }
         let history = manager(storageIO)
         XCTAssertFalse(history.upsertReportingDurability(added))
         XCTAssertEqual(try Data(contentsOf: recovery), original)
-        blocked = false
+        blocked.value = false
         history.retryPersistence()
         XCTAssertTrue(history.isStorageReady)
         XCTAssertEqual(Set(manager().items.map(\.id)), [old.id, pending.id, added.id])
@@ -185,6 +185,7 @@ final class HistoryRecoveryTests: XCTestCase {
         var storageIO = IOSHistoryPersistence.StorageIO()
         storageIO.write = { _, _ in throw CocoaError(.fileWriteOutOfSpace) }
         let history = manager(storageIO)
+        _ = history.pendingEntries()
         await history.didAcknowledgeSyncedEntries(ids: [old.id])
         history.remove(old)
         history.clearAll()
@@ -196,24 +197,25 @@ final class HistoryRecoveryTests: XCTestCase {
     func testInitialFailureWithholdsSyncUntilProtectedDataRetrySucceeds() async throws {
         let existing = item("old")
         try write([existing])
-        var blocked = true
+        let blocked = HistoryTestLocked(true)
         var starts = 0
+        let syncStarted = expectation(description: "Protected-data retry started sync")
         let primary = try XCTUnwrap(file)
         var storageIO = IOSHistoryPersistence.StorageIO()
         storageIO.read = { url in
-            if url == primary && blocked { throw CocoaError(.fileReadNoPermission) }
+            if url == primary && blocked.value { throw CocoaError(.fileReadNoPermission) }
             return try Data(contentsOf: url)
         }
         let history = iOSHistoryManager(
             fileURL: file, syncEnabled: true, userDefaults: defaults, storageIO: storageIO,
-            startSync: { _ in starts += 1 }
+            startSync: { _ in starts += 1; syncStarted.fulfill() }
         )
         for _ in 0..<5 { await Task.yield() }
         XCTAssertEqual(starts, 0)
         history.add(item("pending"))
-        blocked = false
+        blocked.value = false
         NotificationCenter.default.post(name: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil)
-        for _ in 0..<5 { await Task.yield() }
+        await fulfillment(of: [syncStarted], timeout: 2)
         XCTAssertEqual(starts, 1)
         XCTAssertTrue(history.isStorageReady)
         XCTAssertEqual(history.pendingEntries().count, 2)

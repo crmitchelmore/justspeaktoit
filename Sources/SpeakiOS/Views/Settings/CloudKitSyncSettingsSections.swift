@@ -11,7 +11,7 @@ struct CloudKitSyncSettingsSection: View {
     /// an availability result that lands after the toggle flips would
     /// otherwise not refresh this section.
     @ObservedObject private var syncState = HistorySyncEngine.shared.state
-    @StateObject private var historyManager = iOSHistoryManager.shared
+    @ObservedObject private var historyManager = iOSHistoryManager.shared
     @State private var isSyncing = false
 
     var body: some View {
@@ -25,6 +25,7 @@ struct CloudKitSyncSettingsSection: View {
             Label("iCloud History Sync", systemImage: "icloud")
         }
         .accessibilityIdentifier("iCloudHistorySyncToggle")
+        .task { await historyManager.loadIfNeededAndWait() }
 
         if !syncEngine.isSyncEnabled {
             Text(PrivacyStorageDisclosure.historySyncOff)

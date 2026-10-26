@@ -62,6 +62,49 @@ final class WatchCaptureImportPipelineTests: XCTestCase {
 
 @MainActor
 extension WatchCaptureImportPipelineTests {
+    func testAwaitedHistoryWriteKeepsWatchAudioAndAcknowledgementUntilDurableReceipt() async throws {
+        let fixture = try RetryFixture()
+        defer { fixture.cleanUp() }
+        let pipeline = fixture.pipeline()
+        pipeline.transcribeAudio = { _ in RetryFixture.result }
+        let file = fixture.directory.appendingPathComponent("history.json")
+        let storage = HistoryAsyncStorage(primary: file)
+        let entered = expectation(description: "Watch History write held")
+        storage.holdWrite(entered)
+        defer { storage.release() }
+        let history = iOSHistoryManager(
+            fileURL: file, syncEnabled: false, userDefaults: UserDefaults(suiteName: fixture.suite)!,
+            storageIO: storage.storageIO, loadImmediately: false
+        )
+        pipeline.persistHistory = { await history.upsertAndWait($0) }
+        let acks = AckRecorder()
+        pipeline.sendAck = { acks.append($0) }
+        var notices: [TranscriptReadyNotificationInput] = []
+        pipeline.notifyTranscriptReady = { notices.append($0) }
+        let done = expectation(description: "Watch import settled")
+        let task = Task { await pipeline.processPendingImports(); done.fulfill() }
+        guard await XCTWaiter.fulfillment(of: [entered], timeout: 2) == .completed else {
+            task.cancel()
+            XCTFail("Watch import did not enter the History write")
+            return
+        }
+        try fixture.assertRetained(pipeline)
+        XCTAssertTrue(acks.values.isEmpty)
+        XCTAssertTrue(notices.isEmpty)
+        storage.release()
+        guard await XCTWaiter.fulfillment(of: [done], timeout: 2) == .completed else {
+            task.cancel()
+            XCTFail("Watch import did not settle after History release")
+            return
+        }
+        XCTAssertEqual(history.items.map(\.id), [fixture.envelope.id])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.audioURL.path))
+        XCTAssertTrue(pipeline.journal.pendingJobs().isEmpty)
+        XCTAssertEqual(pipeline.journal.completedAcknowledgement(captureID: fixture.envelope.id)?.outcome, .transcribed)
+        XCTAssertFalse(storage.observedMainThread)
+        XCTAssertFalse(storage.timedOut)
+    }
+
     func testTransientNetworkFailures_keepAudioAndBudgetThenRecoverOnceAfterRelaunch() async throws {
         for code in [URLError.notConnectedToInternet, .networkConnectionLost, .timedOut] {
             let fixture = try RetryFixture()

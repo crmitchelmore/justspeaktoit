@@ -95,10 +95,16 @@ enum WindowsHotKeySelfTest {
         // Double Tap: a release never ends it; a single tap does. Double taps
         // closer than the command interval are duplicates.
         try await Task.sleep(for: .milliseconds(300))
-        await send(.gesture(.doubleTap), .doubleTapToggle)
+        let doubleTapAt = ProcessInfo.processInfo.systemUptime
+        await send(.gesture(.doubleTap), .doubleTapToggle, at: doubleTapAt)
         try await expect(controller, .doubleTap, "a double tap did not start a session")
         await send(.gesture(.holdEnd), .doubleTapToggle)
-        await send(.gesture(.doubleTap), .doubleTapToggle)
+        // Recognition time belongs to the input, even if startup awaited above
+        // takes longer than the duplicate window on a busy hosted machine.
+        await send(
+            .gesture(.doubleTap), .doubleTapToggle,
+            at: doubleTapAt + HotKeyGestureTiming.doubleTapCommandInterval / 2
+        )
         try await expect(controller, .doubleTap, "a release or duplicate double tap ended the session")
         try await Task.sleep(for: .milliseconds(300))
         await send(.gesture(.singleTap), .doubleTapToggle)

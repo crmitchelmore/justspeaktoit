@@ -218,8 +218,14 @@ final class MCPAwaitLifecycleTests: XCTestCase {
     #if canImport(Darwin)
     func testRealBlockedPipeWrite_EOFInterruptsAndOriginalFlagsRestore() async throws {
         let pipe = Pipe()
-        let original = fcntl(pipe.fileHandleForWriting.fileDescriptor, F_GETFL)
+        // The first write sets Darwin's kernel-maintained FWASWRITTEN bit, independently of
+        // F_SETFL. Prime/drain before comparing the complete status flags around our write.
+        try pipe.fileHandleForWriting.write(contentsOf: Data([0x61]))
+        XCTAssertEqual(try pipe.fileHandleForReading.read(upToCount: 1), Data([0x61]))
         let writer = MCPBoundedOutput(output: pipe.fileHandleForWriting)
+        let original = fcntl(pipe.fileHandleForWriting.fileDescriptor, F_GETFL)
+        XCTAssertGreaterThanOrEqual(original, 0)
+        XCTAssertEqual(original & O_NONBLOCK, 0)
         let state = MCPClosedFlag()
         let entered = expectation(description: "writer observed real full-pipe backpressure")
         let ended = expectation(description: "writer ended after EOF")
@@ -232,7 +238,9 @@ final class MCPAwaitLifecycleTests: XCTestCase {
         await fulfillment(of: [entered], timeout: 2)
         state.close()
         await fulfillment(of: [ended], timeout: 2)
-        XCTAssertEqual(fcntl(pipe.fileHandleForWriting.fileDescriptor, F_GETFL), original)
+        let restored = fcntl(pipe.fileHandleForWriting.fileDescriptor, F_GETFL)
+        XCTAssertEqual(restored, original)
+        XCTAssertEqual(restored & O_NONBLOCK, 0)
     }
     #endif
 }

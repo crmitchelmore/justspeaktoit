@@ -28,6 +28,10 @@
 #include "WindowsMigrationRestore.hpp"
 #include "WindowsGlobalEscape.hpp"
 
+static_assert(!(JSTI_EVENT_USER_ABSENT >= 100 && JSTI_EVENT_USER_ABSENT <= 109) &&
+    !(JSTI_EVENT_USER_ABSENT >= 120 && JSTI_EVENT_USER_ABSENT <= 129),
+    "Session absence must not be routed as a comparison action.");
+
 bool jsti_postprocessing_available();
 void jsti_show_postprocessing(HWND owner);
 bool jsti_settings_self_test(HWND owner, std::string &error);
@@ -4654,17 +4658,20 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     state.context = &observed;
     const unsigned originalAbsence = handsFreeAbsence.exchange(0);
     SendMessageW(window, WM_WTSSESSION_CHANGE, WTS_SESSION_LOCK, 0);
+    const bool lockEvent = observed.calls == 1 && observed.event == JSTI_EVENT_USER_ABSENT && !observed.id.empty();
     SendMessageW(window, WM_POWERBROADCAST, PBT_APMSUSPEND, 0);
+    const bool suspendEvent = observed.calls == 2 && observed.event == JSTI_EVENT_USER_ABSENT && !observed.id.empty();
     SendMessageW(window, WM_WTSSESSION_CHANGE, WTS_SESSION_UNLOCK, 0);
     const bool stayedSuspended = handsFreeAbsence == 2u && !jsti_window_hands_free_guard_ready();
     SendMessageW(window, WM_POWERBROADCAST, PBT_APMRESUMEAUTOMATIC, 0);
     const bool guardCleared = handsFreeAbsence == 0;
     handsFreeAbsence = originalAbsence;
+    const bool absenceEvents = lockEvent && suspendEvent && observed.calls == 2;
     observed = {};
-    if (!stayedSuspended || !guardCleared) {
+    if (!absenceEvents || !stayedSuspended || !guardCleared) {
         state.callback = originalCallback;
         state.context = originalContext;
-        return jsti::fail("Session unlock incorrectly cleared the hands-free suspend guard.", error, errorCapacity);
+        return jsti::fail("Session absence callback or hands-free suspend guard failed.", error, errorCapacity);
     }
     std::string failure;
     auto checkBounds = [&]() -> bool {

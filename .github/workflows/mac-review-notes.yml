@@ -28,7 +28,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: mac-review-notes
+  group: mac-review-notes-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.number) || 'dispatch' }}
   cancel-in-progress: false
 jobs:
   validate:

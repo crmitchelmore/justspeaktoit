@@ -9,9 +9,29 @@ enum OpenRouterAudioDownload {
         limit: Int,
         speech: Bool
     ) async throws -> URL {
+        try await perform(
+            request: request, session: session, destination: destination, limit: limit, speech: speech, onBytes: nil
+        )
+    }
+
+    // The observer receives ordered, awaited chunks only after response validation. Its
+    // 1 KiB boundary is independent of the existing 32 KiB file buffer. There is no
+    // unbounded stream or task per chunk; the owned consumer supplies backpressure.
+    // Preserve the existing five-argument entry; observation is the sole additive option.
+    // swiftlint:disable:next function_parameter_count
+    static func perform(
+        request: URLRequest,
+        session: URLSession,
+        destination: URL,
+        limit: Int,
+        speech: Bool,
+        onBytes: (@Sendable (Data) async throws -> Void)?
+    ) async throws -> URL {
         try await withThrowingTaskGroup(of: URL.self) { group in
             group.addTask {
-                try await stream(request, session: session, destination: destination, limit: limit, speech: speech)
+                try await stream(
+                    request, session: session, destination: destination, limit: limit, speech: speech, onBytes: onBytes
+                )
                 return destination
             }
             group.addTask {
@@ -24,12 +44,14 @@ enum OpenRouterAudioDownload {
         }
     }
 
+    // swiftlint:disable:next function_parameter_count
     private static func stream(
         _ request: URLRequest,
         session: URLSession,
         destination: URL,
         limit: Int,
-        speech: Bool
+        speech: Bool,
+        onBytes: (@Sendable (Data) async throws -> Void)?
     ) async throws {
         let policy = OpenRouterAudioRedirectPolicy()
         defer { policy.cancel() }
@@ -54,12 +76,21 @@ enum OpenRouterAudioDownload {
         defer { try? handle.close() }
         try await withTaskCancellationHandler {
             var buffer = Data()
+            var observed = Data()
             var count = 0
             for try await byte in bytes {
                 try Task.checkCancellation()
                 guard count < limit else { throw OpenRouterAudioError.responseTooLarge }
                 buffer.append(byte)
                 count += 1
+                if onBytes != nil {
+                    observed.append(byte)
+                    if observed.count == 1024 {
+                        try await onBytes?(observed)
+                        try Task.checkCancellation()
+                        observed.removeAll(keepingCapacity: true)
+                    }
+                }
                 if buffer.count == 32 * 1024 {
                     try handle.write(contentsOf: buffer)
                     buffer.removeAll(keepingCapacity: true)
@@ -67,6 +98,8 @@ enum OpenRouterAudioDownload {
             }
             try Task.checkCancellation()
             guard count > 0 else { throw OpenRouterAudioError.invalidResponse }
+            if !observed.isEmpty { try await onBytes?(observed) }
+            try Task.checkCancellation()
             if !buffer.isEmpty { try handle.write(contentsOf: buffer) }
         } onCancel: {
             bytes.task.cancel()

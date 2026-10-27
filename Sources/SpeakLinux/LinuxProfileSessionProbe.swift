@@ -86,7 +86,7 @@ enum LinuxProfileSessionProbe {
         settings.configuration = try DesktopConfiguration(values: [
             "handsFreeDictationEnabled": AnyCodable(.bool(true)),
             "silenceDetectionEnabled": AnyCodable(.bool(false)),
-            "silenceThreshold": AnyCodable(.double(0.005)),
+            "silenceThreshold": AnyCodable(.double(0.01)),
             "silenceDuration": AnyCodable(.double(1.5)),
             "postRecordingTailDuration": AnyCodable(.double(0.1)),
             "recordingSoundsEnabled": AnyCodable(.bool(false)),

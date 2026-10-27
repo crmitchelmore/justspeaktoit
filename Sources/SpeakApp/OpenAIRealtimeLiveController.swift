@@ -8,7 +8,7 @@ import os.log
 // MARK: - OpenAI Realtime Live Controller
 
 /// Wraps `OpenAIRealtimeLiveTranscriber` to conform to
-/// `LiveTranscriptionController`. Mirrors `AssemblyAILiveController`:
+/// `LiveTranscriptionController`. Uses the shared macOS capture pattern:
 /// captures audio, resamples to PCM16 / 24 kHz, forwards to the WebSocket,
 /// and on stop sends `input_audio_buffer.commit` and waits up to the
 /// per-model `postStopFinalizeBudget` for the final completed event.
@@ -373,9 +373,8 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
 // MARK: - Audio Processor
 
 /// PCM16 audio resampler that batches frames into ≥50 ms chunks and forwards
-/// them to the OpenAI Realtime WebSocket. Logically identical to
-/// `AssemblyAILiveController.AssemblyAIAudioProcessor` except for the target
-/// sample rate (24 kHz here, 16 kHz there) and the destination type.
+/// them to the OpenAI Realtime WebSocket. Uses the same retained-converter
+/// pattern as `SharedClientAudioProcessor`; OpenAI's 24 kHz framing stays here.
 private final class OpenAIRealtimeAudioProcessor: @unchecked Sendable {
   private let queue = DispatchQueue(label: "com.speak.app.openairealtime.audioProcessing")
   private let minimumChunkBytes: Int

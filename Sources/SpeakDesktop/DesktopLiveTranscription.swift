@@ -149,6 +149,7 @@ public enum DesktopLiveTranscription {
             // Gladia detects the language when there is none.
             return GladiaLiveClient(
                 apiKey: apiKey, model: route.apiModelName, language: hint, sampleRate: route.sampleRate,
+                options: options,
                 initiateSession: initiateGladiaSession ?? GladiaLiveClient.sessionInitiator(session: .shared),
                 makeConnection: makeConnection
             )

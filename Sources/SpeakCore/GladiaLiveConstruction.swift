@@ -18,6 +18,21 @@ extension GladiaLiveClient {
         )
     }
 
+    /// Configured framing with host-owned HTTP/socket transports and the same
+    /// checked production scheduler as the URLSession options constructor.
+    public convenience init(
+        apiKey: String, model: String = GladiaLive.defaultModel, language: String? = nil,
+        sampleRate: Int = 16_000, baseURL: URL = GladiaLive.baseURL, options: LiveClientOptions,
+        initiateSession: @escaping SessionInitiator, makeConnection: @escaping ConnectionFactory
+    ) {
+        self.init(
+            apiKey: apiKey, model: model, language: language, sampleRate: sampleRate,
+            baseURL: baseURL, initiateSession: initiateSession, makeConnection: makeConnection,
+            schedule: Self.defaultScheduler, mode: .configured(GladiaConfiguredTiming(options: options)),
+            usesCheckedDefaultScheduler: true
+        )
+    }
+
     /// Explicit options with held transports; scheduler is required so this
     /// overload cannot change any existing constructor's default scheduling.
     public convenience init(

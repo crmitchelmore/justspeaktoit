@@ -3,6 +3,10 @@
 #include <unistd.h>
 #include <string.h>
 
+_Static_assert(!(JSTI_EVENT_USER_ABSENT >= 100 && JSTI_EVENT_USER_ABSENT <= 109) &&
+    !(JSTI_EVENT_USER_ABSENT >= 120 && JSTI_EVENT_USER_ABSENT <= 129),
+    "Session absence must not be routed as a comparison action.");
+
 static GDBusConnection *system_bus, *session_bus;
 static guint system_signals[5], screen_signals[3];
 static gchar *session_path;

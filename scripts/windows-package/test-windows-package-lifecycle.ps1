@@ -500,7 +500,7 @@ function Assert-Removed([string] $Label, $Package) {
     if (-not $filesRemoved) {
         # Read-only, capped diagnostics after the unchanged strict deadline.
         # Never delete retained files or turn delayed cleanup into a pass.
-        $removalDetails = Get-PreviousPackageDiagnostics $name $Package.PackageFullName $installLocation -RemovalOnly
+        $removalDetails = Get-PreviousPackageDiagnostics $name $Package.PackageFullName $installLocation
     }
     Add-Check "$Label removes its installed files" $filesRemoved $removalDetails
 }

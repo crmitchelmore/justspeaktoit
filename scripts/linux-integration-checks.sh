@@ -52,7 +52,7 @@ step "capture (PipeWire through libpulse)"
 pipewire >"$work/pipewire.log" 2>&1 & pids+=($!)
 sleep 0.5
 wireplumber >"$work/wireplumber.log" 2>&1 & pids+=($!)
-pipewire-pulse >"$work/pipewire-pulse.log" 2>&1 & pids+=($!)
+pipewire-pulse >"$work/pipewire-pulse.log" 2>&1 & pulse=$!; pids+=("$pulse")
 for _ in $(seq 1 100); do pactl info >/dev/null 2>&1 && break; sleep 0.1; done
 pactl load-module module-null-sink sink_name=jsti_test >/dev/null
 step "recording feedback (all profiles, dedicated warmed libpulse channel)"
@@ -63,7 +63,9 @@ with open(sys.argv[1], "wb") as tone:
     tone.write(b"".join(struct.pack("<h", int(12000 * math.sin(2 * math.pi * 440 * n / 16000)))
                         for n in range(16000 * 20)))
 PY
-pacat --playback --device=jsti_test --format=s16le --rate=16000 --channels=1 "$work/tone.raw" & pids+=($!)
+pacat --playback --device=jsti_test --format=s16le --rate=16000 --channels=1 "$work/tone.raw" & tone=$!
+tone_index=${#pids[@]}
+pids+=("$tone")
 sleep 0.5
 if ! JSTI_TEST_SOURCE=jsti_test.monitor "$binary" --integration-test capture; then
     pactl info || true
@@ -160,6 +162,16 @@ echo "The Zenity field received the dictated text."
 step "X11 profile identity and ordering (two owned executable windows)"
 JSTI_PROFILE_OWNED_DISPLAY="$DISPLAY" JSTI_PROFILE_OWNED_DISPLAY_PID="$xvfb" \
     "$python" "$repo/scripts/linux-profile-identity-checks.py" "$binary"
+
+step "recorded native profile host (owned private bus, existing PipeWire monitor, local tiny)"
+"$python" -B -m unittest discover -s "$repo/scripts/tests" -p test_linux_profile_session_checks.py
+# Join the original finite tone before replaying speech into that same owned
+# monitor. Keep the original service/device/default settings unchanged.
+wait "$tone"
+unset 'pids[tone_index]'
+JSTI_PROFILE_OWNED_DISPLAY="$DISPLAY" JSTI_PROFILE_OWNED_DISPLAY_PID="$xvfb" \
+    JSTI_PROFILE_OWNED_PULSE_PID="$pulse" \
+    "$python" -B "$repo/scripts/linux-profile-session-checks.py" "$binary"
 
 step "login launch (--background starts minimised)"
 "$binary" --background >"$work/background.out" 2>&1 & background=$!

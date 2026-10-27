@@ -18,7 +18,8 @@ class RemovalDiagnosticTests(unittest.TestCase):
         removal = source.split('function Assert-Removed(', 1)[1].split('# --- user data', 1)[0]
         self.assertIn('$filesRemoved = $installLocation -and (Wait-PathState $installLocation $false 120)', removal)
         self.assertIn('if (-not $filesRemoved) {', removal)
-        self.assertIn('$installLocation -RemovalOnly', removal)
+        self.assertIn('Get-PreviousPackageDiagnostics $name $Package.PackageFullName $installLocation', removal)
+        self.assertNotIn('-RemovalOnly', removal)
         self.assertIn('Add-Check "$Label removes its installed files" $filesRemoved $removalDetails', removal)
         self.assertNotIn('Remove-Item', removal)
 

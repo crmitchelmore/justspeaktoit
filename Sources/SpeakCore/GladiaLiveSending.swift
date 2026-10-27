@@ -16,6 +16,10 @@ extension GladiaLiveClient {
                 fail(GladiaStreamingError.invalidPCM, active, &effects)
                 return
             }
+            if mode.isConfigured {
+                admitFramed(audioData, active, &effects)
+                return
+            }
             guard active.admittedAudioChunks < Self.maximumQueuedChunks,
                   active.admittedAudioBytes + audioData.count <= active.maximumAudioBytes else {
                 // Before the socket opens the budget is spent waiting for
@@ -129,6 +133,13 @@ extension GladiaLiveClient {
             fail(GladiaStreamingError.connectionLost, active, &effects)
             return nil
         }
+        if mode.isConfigured {
+            if active.stopHandedOff {
+                configuredStopCompleted(active, &effects)
+            } else {
+                advanceConfiguredDrain(active, &effects)
+            }
+        }
         return nextSend(active)
     }
 
@@ -142,6 +153,10 @@ extension GladiaLiveClient {
         active.finishing = true
         guard active.admittedAnyAudio else {
             close(active, &effects)
+            return
+        }
+        if mode.isConfigured {
+            beginConfiguredFinish(active, &effects)
             return
         }
         active.outgoing.append(.stopRecording)

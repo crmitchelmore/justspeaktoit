@@ -7,6 +7,10 @@ import Foundation
 /// HTTP, socket or timer callback.
 final class GladiaLiveRun: @unchecked Sendable {
     enum Stage { case idle, initiating, connecting, open, closed }
+    enum FinishPhase: Sendable { case none, draining, grace, control, finalEvents }
+    var finishPhase = FinishPhase.none
+    var finishPhaseGeneration: UInt64 = 0
+    var framer: GladiaPCMFramer?
 
     /// Admitted PCM stays raw in capture order; `stop_recording` follows the
     /// last admitted chunk, so it can only leave after every chunk completed.
@@ -56,6 +60,14 @@ final class GladiaLiveRun: @unchecked Sendable {
     var earlyReceive: Result<StreamingWebSocketMessage, Error>?
 
     var accumulator = TranscriptAccumulator(shape: .standaloneSegments)
+    var segments: [TranscriptionSegment] = []
+    var finalConfidenceTotal: Double = 0
+    var finalConfidenceCount = 0
+    var pendingInterim: String?
+    var latestUpdateConfidence: Double?
+    /// Explicit abort only, including cancel after failure closed transport.
+    /// Normal finish and failure retain an already admitted final boundary.
+    var discardAdmittedBoundaries = false
     /// Utterances already final; a late partial for one is not a new draft.
     var finalUtteranceIDs: Set<String> = []
     var waiters: [CheckedContinuation<String?, Never>] = []
@@ -78,7 +90,10 @@ final class GladiaLiveRun: @unchecked Sendable {
     /// Five seconds of PCM16 mono, the bound this route has always held
     /// before its socket was ready, now applied to everything admitted.
     init(sampleRate: Int) {
-        maximumAudioBytes = Int(Double(max(sampleRate, 1) * 2) * StreamingAudioPreroll.defaultBudgetSeconds)
+        // Initializer inputs are untrusted, including Int.min/max. No rate
+        // multiplication or framer construction occurs before validation.
+        maximumAudioBytes = GladiaLiveProtocol.supportedSampleRates.contains(sampleRate)
+            ? Int(Double(sampleRate * 2) * StreamingAudioPreroll.defaultBudgetSeconds) : 0
     }
 
     /// Confirmed finals only. A failed or cancelled run never folds its

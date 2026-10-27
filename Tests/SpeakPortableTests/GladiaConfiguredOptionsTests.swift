@@ -18,9 +18,30 @@ final class GladiaConfiguredOptionsTests: XCTestCase {
         }
     }
 
-    func testIndividuallyRepresentableDelaysWithUnrepresentableFiniteTotalRefuseBeforeHTTP() async {
-        XCTAssertNotNil(GladiaConfiguredTiming.deadline(after: 5_000_000_000))
-        await assertRefused(grace: 5_000_000_000, window: 5_000_000_000)
+    func testNumericallyRepresentableDelaysWithUnrepresentableFiniteTotalRefuseBeforeHTTP() async {
+        let delay: TimeInterval = 5_000_000_000
+        let nanoseconds = (delay * 1_000_000_000).rounded(.up)
+        XCTAssertNotNil(Int64(exactly: nanoseconds))
+        XCTAssertNotNil(Int(exactly: nanoseconds))
+        let total = GladiaConfiguredTiming.drain + delay + GladiaConfiguredTiming.control + delay
+        XCTAssertTrue(total.isFinite)
+        XCTAssertNil(Int64(exactly: (total * 1_000_000_000).rounded(.up)))
+        // Numeric conversion and the clock's absolute headroom are distinct:
+        // Linux Dispatch can reject even an individual delay this large.
+        await assertRefused(grace: delay, window: delay)
+
+        // Exercise the combined guard even when the absolute clock refuses
+        // the first numeric fixture. Both phases must be schedulable alone.
+        guard let individual = [delay, 3_000_000_000].first(where: {
+            GladiaConfiguredTiming.deadline(after: $0) != nil
+        }) else {
+            XCTFail("No large individually schedulable delay for the combined-deadline fixture")
+            return
+        }
+        let combined = GladiaConfiguredTiming.drain + individual + GladiaConfiguredTiming.control + individual
+        XCTAssertNotNil(GladiaConfiguredTiming.deadline(after: individual))
+        XCTAssertNil(GladiaConfiguredTiming.deadline(after: combined))
+        await assertRefused(grace: individual, window: individual)
     }
 
     func testNanosecondsProductAndNonfiniteSumCannotScheduleOrInitiate() async {

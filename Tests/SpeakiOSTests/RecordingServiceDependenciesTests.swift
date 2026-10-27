@@ -328,7 +328,8 @@ final class DependencyHarness {
         networkSnapshot: @escaping CaptureNetworkPathMonitor.SnapshotProvider = { .unknown },
         capability: @escaping @MainActor (String) -> AppleLocalRecognitionCapability = { _ in .available },
         activity: RecordingServiceActivity? = nil,
-        completion: TranscriptionRecordingService.ActivityCompletion? = nil
+        completion: TranscriptionRecordingService.ActivityCompletion? = nil,
+        foregroundOwnership: ForegroundRecordingOwnership? = nil
     ) -> TranscriptionRecordingService {
         let dependencies = self.makeDependencies(activity: activity)
         let service = TranscriptionRecordingService(
@@ -341,7 +342,7 @@ final class DependencyHarness {
                 return "Polished transcript"
             },
             completeActivity: completion,
-            foregroundOwnership: ForegroundRecordingOwnership(),
+            foregroundOwnership: foregroundOwnership ?? ForegroundRecordingOwnership(),
             ensureKeysLoaded: ensureKeysLoaded,
             networkSnapshot: networkSnapshot,
             localRecognitionCapability: capability,
@@ -350,7 +351,6 @@ final class DependencyHarness {
         self.service = service
         return service
     }
-
     func cleanUp() {
         self.service?.cancelRecording()
         self.defaults.removePersistentDomain(forName: self.suite)

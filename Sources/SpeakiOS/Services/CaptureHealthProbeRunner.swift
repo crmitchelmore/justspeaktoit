@@ -9,21 +9,42 @@ import SpeakCore
 /// can report a real earlier run rather than only what is true this second
 /// (issue #997).
 ///
-/// Two fields, both closed-set: an outcome label and a date. No transcript, no
+/// An outcome label, a date and an optional closed-mapped failure code. No transcript, no
 /// error text, no provider, no route. Written to the App Group container so a
 /// headless capture's outcome is visible to the app that shows the screen.
 public enum CaptureOutcomeJournal {
     private static let outcomeKey = "captureHealth.lastOutcome.v1"
     private static let dateKey = "captureHealth.lastOutcomeAt.v1"
+    private static let failureCodeKey = "captureHealth.lastFailureCode.v1"
 
     static var defaults: UserDefaults? {
         AppGroupAvailability.verifiedDefaults() ?? UserDefaults.standard
     }
 
     public static func record(_ outcome: CaptureHealthLastOutcome, at date: Date = Date()) {
+        self.record(outcome, failure: nil, at: date)
+    }
+
+    static func record(
+        _ outcome: CaptureHealthLastOutcome,
+        failure: Error?,
+        at date: Date = Date(),
+        defaults: UserDefaults? = CaptureOutcomeJournal.defaults
+    ) {
         guard let defaults else { return }
         defaults.set(outcome.rawValue, forKey: outcomeKey)
         defaults.set(date.timeIntervalSince1970, forKey: dateKey)
+        // Successful/cancelled outcomes cannot inherit a prior run's failure.
+        // Only the existing closed mapping is persisted, never error text or metadata.
+        if outcome != .delivered, outcome != .cancelled, let failure {
+            defaults.set(CaptureStartFailurePresentation.make(for: failure).code, forKey: failureCodeKey)
+        } else {
+            defaults.removeObject(forKey: failureCodeKey)
+        }
+    }
+
+    static func lastFailureCode(defaults: UserDefaults? = CaptureOutcomeJournal.defaults) -> String? {
+        defaults?.string(forKey: failureCodeKey)
     }
 
     public static func last() -> (outcome: CaptureHealthLastOutcome, at: Date)? {

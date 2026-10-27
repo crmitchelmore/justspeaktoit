@@ -3,6 +3,9 @@ import ActivityKit
 import Foundation
 import os.log
 
+// Keep compatible public entry points beside the run ownership guards they share.
+// swiftlint:disable file_length
+
 /// Manages Live Activity lifecycle for transcription sessions.
 ///
 /// Every piece of asynchronous work — the observer, throttled updates, the
@@ -248,9 +251,21 @@ public final class TranscriptionActivityManager: ObservableObject {
         retire(activity, finalState: nil)
     }
 
+    /// Retires the owned activity immediately, retaining a classified terminal error payload.
+    public func endActivity(errorMessage: String, failureCode: String) {
+        var state = latestState ?? activity?.transcriptionState
+        state?.status = .error
+        state?.errorMessage = errorMessage
+        state?.failureCode = failureCode
+        beginRun()
+        guard let activity else { return }
+        retire(activity, finalState: state, immediately: true)
+    }
+
     private func retire(
         _ activity: any TranscriptionActivityHandle,
-        finalState: TranscriptionActivityAttributes.ContentState?
+        finalState: TranscriptionActivityAttributes.ContentState?,
+        immediately: Bool = false
     ) {
         // Detach synchronously and exclude it from adoption while end is suspended.
         // The end task owns this retired activity only, and never clears a newer run.
@@ -258,13 +273,22 @@ public final class TranscriptionActivityManager: ObservableObject {
         clearActivity()
         let timestamp = nextPayloadTimestamp()
         Task { [weak self] in
-            await activity.endTranscription(finalState, timestamp: timestamp)
+            if immediately, let finalState {
+                await activity.endTranscriptionImmediately(finalState, timestamp: timestamp)
+            } else {
+                await activity.endTranscription(finalState, timestamp: timestamp)
+            }
             self?.retiringIDs.remove(activity.id)
         }
     }
 
     /// Reports an error to the Live Activity.
     public func reportError(_ message: String) {
+        reportError(message, failureCode: nil)
+    }
+
+    /// Carries an explicitly classified local diagnostic code with the existing error outcome.
+    public func reportError(_ message: String, failureCode: String?) {
         guard let activity else { return }
         completedSurfaceOwner = nil
         updateThrottleTask?.cancel()
@@ -272,6 +296,7 @@ public final class TranscriptionActivityManager: ObservableObject {
         var state = latestState ?? activity.transcriptionState
         state.status = .error
         state.errorMessage = message
+        state.failureCode = failureCode
         enqueueUpdate(state, activity: activity, runID: runID)
     }
 }

@@ -12,7 +12,14 @@ protocol TranscriptionActivityHandle: AnyObject {
     var transcriptionState: TranscriptionActivityAttributes.ContentState { get }
     func updateTranscription(_ state: TranscriptionActivityAttributes.ContentState, timestamp: Date) async
     func endTranscription(_ state: TranscriptionActivityAttributes.ContentState?, timestamp: Date) async
+    func endTranscriptionImmediately(_ state: TranscriptionActivityAttributes.ContentState, timestamp: Date) async
     func observeState(_ handler: @escaping @MainActor (ActivityState) -> Void) -> Task<Void, Never>
+}
+
+extension TranscriptionActivityHandle {
+    func endTranscriptionImmediately(_ state: TranscriptionActivityAttributes.ContentState, timestamp: Date) async {
+        await endTranscription(state, timestamp: timestamp)
+    }
 }
 
 extension Activity: TranscriptionActivityHandle where Attributes == TranscriptionActivityAttributes {
@@ -21,6 +28,15 @@ extension Activity: TranscriptionActivityHandle where Attributes == Transcriptio
     var supportsUpdateTimestamps: Bool {
         if #available(iOS 17.2, *) { return true }
         return false
+    }
+
+    func endTranscriptionImmediately(_ state: TranscriptionActivityAttributes.ContentState, timestamp: Date) async {
+        let content = ActivityContent(state: state, staleDate: nil)
+        if #available(iOS 17.2, *) {
+            await end(content, dismissalPolicy: .immediate, timestamp: timestamp)
+        } else {
+            await end(content, dismissalPolicy: .immediate)
+        }
     }
 
     func updateTranscription(_ state: TranscriptionActivityAttributes.ContentState, timestamp: Date) async {

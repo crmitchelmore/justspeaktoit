@@ -21,6 +21,8 @@ extension TranscriptionActivityAttributes {
         public var provider: String
         /// Optional error message
         public var errorMessage: String?
+        /// Optional local diagnostic identifier; never an underlying error description.
+        public var failureCode: String?
         /// Only describes confirmed completion effects; older payloads remain neutral.
         public var completionOutcome: TranscriptionCompletionOutcome
         /// First line of the completed transcript, empty unless it was published
@@ -54,13 +56,14 @@ extension TranscriptionActivityAttributes {
             self.duration = duration
             self.provider = provider
             self.errorMessage = errorMessage
+            self.failureCode = nil
             self.completionOutcome = completionOutcome
             self.resultPreview = resultPreview
             self.resultCompletionID = resultCompletionID
         }
 
         private enum CodingKeys: String, CodingKey { // swiftlint:disable:this nesting
-            case status, lastSnippet, wordCount, duration, provider, errorMessage
+            case status, lastSnippet, wordCount, duration, provider, errorMessage, failureCode
             case completionOutcome, resultPreview, resultCompletionID
         }
 
@@ -72,6 +75,7 @@ extension TranscriptionActivityAttributes {
             self.duration = try container.decode(Int.self, forKey: .duration)
             self.provider = try container.decode(String.self, forKey: .provider)
             self.errorMessage = try container.decodeIfPresent(String.self, forKey: .errorMessage)
+            self.failureCode = try container.decodeIfPresent(String.self, forKey: .failureCode)
             self.completionOutcome = try container.decodeIfPresent(
                 TranscriptionCompletionOutcome.self, forKey: .completionOutcome
             ) ?? .ready

@@ -5,6 +5,11 @@ Callers own the existing job deadline and signing/validation gates. The app
 retains its 120 attempts/60 minutes; CLI retains 45 minutes. DMG callers adopt
 the app's explicitly tighter 120-attempt/60-minute cap (previously only the
 240-minute outer job bounded their wait).
+
+Upload now has a NEW tighter cap equal to the caller's polling window (60
+minutes for app/DMG, 45 for CLI). A timed-out upload has unknown acceptance:
+fail without a second submission or any status query lacking a confirmed ID.
+The separate post-upload polling window still starts only after upload.
 """
 
 import argparse
@@ -61,7 +66,15 @@ def notarize(path, timeout_seconds, max_attempts, poll_seconds):
     credentials, secrets = _credentials()
     # No --wait: successful upload yields the durable ID before polling can
     # encounter a network failure. Never call submit again in this operation.
-    submitted = _request(["submit", path, "--no-wait", "--output-format", "json"], credentials)
+    try:
+        submitted = _request(
+            ["submit", path, "--no-wait", "--output-format", "json"], credentials, timeout_seconds,
+        )
+    except subprocess.TimeoutExpired:
+        # TimeoutExpired can retain the command and captured authentication
+        # diagnostics. Never render it or repeat an upload of unknown state.
+        print("Upload exceeded its finite time limit; acceptance unknown, refusing to resubmit", file=sys.stderr)
+        return 1
     if submitted.returncode:
         _diagnostic(submitted.stdout + submitted.stderr, secrets)
         return 1

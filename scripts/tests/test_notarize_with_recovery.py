@@ -65,6 +65,7 @@ class NotarizationRecoveryTests(unittest.TestCase):
         self.assertEqual([call[0][2] for call in calls], ["submit", "info"])
         self.assertIn("--no-wait", calls[0][0])
         self.assertNotIn("--wait", calls[0][0])
+        self.assertEqual(calls[0][1]["timeout"], 3600)
         self.assertEqual(calls[1][0][3], SUBMISSION)
         self.assertEqual(sleeps, [])
 
@@ -83,7 +84,7 @@ class NotarizationRecoveryTests(unittest.TestCase):
         self.assertEqual(sleeps, [30])
 
     def test_query_and_retry_delay_cannot_extend_the_single_wall_deadline(self):
-        code, calls, sleeps, _ = self.run_helper([uploaded(), offline()], seconds=10, durations=[50, 3])
+        code, calls, sleeps, _ = self.run_helper([uploaded(), offline()], seconds=10, durations=[2, 3])
         self.assertEqual(code, 1)
         self.assertEqual(len(calls), 2)
         self.assertEqual(calls[1][1]["timeout"], 10)
@@ -108,8 +109,24 @@ class NotarizationRecoveryTests(unittest.TestCase):
         code, calls, sleeps, _ = self.run_helper([uploaded(), response("In Progress")], seconds=2700,
                                                 attempts=90, durations=[0, 2695])
         self.assertEqual(code, 1)
+        self.assertEqual(calls[0][1]["timeout"], 2700)
         self.assertEqual(calls[1][1]["timeout"], 2700)
         self.assertEqual(sleeps, [5])
+
+    def test_upload_timeout_is_bounded_single_submit_without_polling_or_secret_diagnostics(self):
+        for seconds in (3600, 2700):
+            with self.subTest(seconds=seconds):
+                private = " ".join(CREDENTIALS.values())
+                timeout = subprocess.TimeoutExpired(["xcrun", private], seconds, output=private, stderr=private)
+                code, calls, sleeps, output = self.run_helper([timeout], seconds=seconds)
+                self.assertEqual(code, 1)
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(calls[0][0][2], "submit")
+                self.assertEqual(calls[0][1]["timeout"], seconds)
+                self.assertEqual(sleeps, [])
+                self.assertIn("acceptance unknown, refusing to resubmit", output)
+                for value in CREDENTIALS.values():
+                    self.assertNotIn(value, output)
 
     def test_invalid_and_rejected_are_terminal_and_preserve_diagnostics_for_same_id(self):
         for state in ("Invalid", "Rejected"):
@@ -165,6 +182,9 @@ class NotarizationRecoveryTests(unittest.TestCase):
         self.assertIn("new, tighter per-submission cap", package)
         self.assertIn("--timeout-seconds 2700 --max-attempts 90", cli)
         self.assertIn("timeout-minutes: 240", workflow)
+        helper = (ROOT / "scripts/notarize-with-recovery.py").read_text()
+        self.assertIn("NEW tighter cap equal to the caller's polling window", helper)
+        self.assertIn("separate post-upload polling window", helper)
         self.assertNotIn("notarytool submit", package + cli)
         for artifact in ("APP_PATH", "DMG_PATH"):
             invocation = (f'python3 scripts/notarize-with-recovery.py "${artifact}"'

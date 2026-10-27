@@ -153,12 +153,10 @@ final class TranscriptReadyNotificationTests: XCTestCase {
         ))
         XCTAssertTrue(router.handle(queued))
         let capture = try XCTUnwrap(router.pendingCaptureAction)
-        router.pendingConversationId = "old"
         let identifier = UUID()
         router.openHistory(identifier: identifier)
         XCTAssertEqual(superseded, [capture])
         XCTAssertNil(router.pendingCaptureAction)
-        XCTAssertNil(router.pendingConversationId)
         XCTAssertEqual(router.pendingHistoryID, identifier)
         let newer = try XCTUnwrap(URL(string: "\(ReleaseTrain.current.urlScheme)://start?destination=history"))
         XCTAssertTrue(router.handle(newer))

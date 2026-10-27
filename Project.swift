@@ -123,10 +123,6 @@ var iosTestResourceElements: [ResourceFileElement] = [
     "JustSpeakToItWidgetExtension/JustSpeakToItWidgetExtension.entitlements"
 ]
 
-let isOpenClawTabEnabled = ProcessInfo.processInfo.environment["SHOW_OPENCLAW_TAB"] != nil
-if isOpenClawTabEnabled {
-    iosActiveCompilationConditions.append("SHOW_OPENCLAW_TAB")
-}
 if isIOSKeyboardEnabled {
     iosActiveCompilationConditions.append("IOS_KEYBOARD_FEATURE")
     iosTestSettings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = "$(inherited) IOS_KEYBOARD_FEATURE"
@@ -419,12 +415,6 @@ var iosAppInfoPlist: [String: Plist.Value] = [
         ]
     ]
 ]
-// Only internal builds exposing the gateway can request local-network access.
-// The iPhone app has no Bonjour transcript sender or browser.
-if isOpenClawTabEnabled {
-    iosAppInfoPlist["NSLocalNetworkUsageDescription"] =
-        "Just Speak to It uses your local network when you connect to an OpenClaw gateway on that network."
-}
 let iosAppTarget: Target = .target(
     name: "SpeakiOS",
     destinations: .iOS,

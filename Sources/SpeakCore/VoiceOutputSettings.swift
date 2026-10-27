@@ -3,7 +3,7 @@ import Foundation
 import NaturalLanguage
 #endif
 
-/// Providers currently supported by the iOS OpenClaw voice-output route.
+/// Providers supported by the shared voice-output settings and iOS playback route.
 public enum VoiceOutputProvider: String, CaseIterable, Codable, Hashable, Identifiable, Sendable {
     case deepgram
     case soniox

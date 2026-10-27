@@ -3,7 +3,7 @@ import Combine
 import Foundation
 import SpeakCore
 
-/// Provider-neutral voice-output boundary used by OpenClaw.
+/// Provider-neutral voice-output boundary for iOS speech playback.
 @MainActor
 public final class VoiceOutputRouter: ObservableObject {
     @Published private(set) public var isSpeaking = false

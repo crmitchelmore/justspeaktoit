@@ -111,7 +111,7 @@ public enum GladiaStreamingError: LocalizedError, Equatable {
 /// acknowledgments and anything added upstream decode to `nil`: an
 /// unrecognised frame must never end a recording.
 enum GladiaLiveEvent: Equatable {
-    case transcript(utteranceID: String?, text: String, isFinal: Bool)
+    case transcript(utteranceID: String?, text: String, isFinal: Bool, confidence: Double? = nil)
     case sessionStarted
     case sessionEnded
     case failure(String)
@@ -292,7 +292,23 @@ enum GladiaLiveProtocol {
               let utterance = data["utterance"] as? [String: Any],
               let text = utterance["text"] as? String else { return nil }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return .transcript(utteranceID: data["id"] as? String, text: trimmed, isFinal: isFinal)
+        return .transcript(
+            utteranceID: data["id"] as? String, text: trimmed, isFinal: isFinal,
+            confidence: confidence(in: utterance)
+        )
+    }
+
+    /// Gladia's Utterance schema defines confidence between zero and one.
+    /// JSON booleans bridge to NSNumber too; accept only a finite numeric
+    /// probability. Invalid optional metadata must not drop the words.
+    private static func confidence(in utterance: [String: Any]) -> Double? {
+        guard let value = utterance["confidence"],
+              let bytes = try? JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed]) else {
+            return nil
+        }
+        guard let confidence = try? JSONDecoder().decode(Double.self, from: bytes),
+              confidence.isFinite, (0...1).contains(confidence) else { return nil }
+        return confidence
     }
 }
 

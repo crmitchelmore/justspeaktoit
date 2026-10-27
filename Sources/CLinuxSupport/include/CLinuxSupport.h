@@ -101,7 +101,7 @@ enum {
     /* Housekeeping › New recordings folder. text: chosen absolute local folder,
      * or "" to save new recordings in History again. Nothing is moved. */
     JSTI_EVENT_RECORDINGS_LOCATION = 98,
-    JSTI_EVENT_USER_ABSENT = 120
+    JSTI_EVENT_USER_ABSENT = 131 /* Outside comparison events 100-109 and 120-129. */
 };
 
 /* The argument the login item starts the app with (the shared

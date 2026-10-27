@@ -16,6 +16,24 @@ struct RecordingServiceActivity {
     var hasActiveResult: (String) -> Bool = { _ in false }
     var completeOwned: TranscriptionRecordingService.OwnedActivityCompletion?
     var hasActiveResultSurface: (UUID) -> Bool = { _ in false }
+    var reportCodedError: ((String, String) -> Void)?
+    var endFailedActivity: ((String, String) -> Void)?
+
+    func retireFailedActivity(_ failure: CaptureStartFailurePresentation) {
+        if let endFailedActivity {
+            endFailedActivity(failure.message, failure.code)
+        } else {
+            self.endActivity()
+        }
+    }
+
+    func reportClassifiedError(_ error: Error) {
+        if let reportCodedError {
+            reportCodedError(error.localizedDescription, CaptureStartFailurePresentation.make(for: error).code)
+        } else {
+            self.reportError(error.localizedDescription)
+        }
+    }
 
     func startActivity(provider: String, initialStatus: Status) -> Bool {
         self.start(provider, initialStatus)
@@ -52,7 +70,9 @@ struct RecordingServiceActivity {
                     surfaceOwnerID: owner
                 )
             },
-            hasActiveResultSurface: { manager.hasActiveResult(surfaceOwnerID: $0) }
+            hasActiveResultSurface: { manager.hasActiveResult(surfaceOwnerID: $0) },
+            reportCodedError: { manager.reportError($0, failureCode: $1) },
+            endFailedActivity: { manager.endActivity(errorMessage: $0, failureCode: $1) }
         )
     }
 }

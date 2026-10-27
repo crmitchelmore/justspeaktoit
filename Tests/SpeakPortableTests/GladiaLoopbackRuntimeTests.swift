@@ -47,6 +47,68 @@ final class GladiaLoopbackRuntimeTests: XCTestCase {
         XCTAssertEqual(recorder.sentTexts, [#"{"type":"stop_recording"}"#])
     }
 
+    func testConfiguredFragmentsUseRealCheckedSchedulerAndPreserveExactPCMAndWholeResult() async throws {
+        let loopback = try GladiaURLSessionLoopback(scenario: "gladia", configured: true)
+        defer { loopback.invalidate() }
+        let firstFinal = expectation(description: "Configured final arrives before finish")
+        loopback.events.onFinal = { if $0 == GladiaURLSessionLoopback.firstFinal { firstFinal.fulfill() } }
+        XCTAssertEqual(loopback.client.finalisationBudget, 4.5)
+        loopback.start()
+        let pcm = (0..<GladiaURLSessionLoopback.frameCount)
+            .reduce(into: Data()) { $0.append(GladiaURLSessionLoopback.pcm($1)) }
+        let fragments = [2, 14, 254, 1_024, 3_200]
+        var offset = 0
+        var index = 0
+        while offset < pcm.count {
+            let end = min(offset + fragments[index % fragments.count], pcm.count)
+            loopback.client.sendAudio(pcm.subdata(in: offset..<end))
+            offset = end
+            index += 1
+        }
+        await fulfillment(of: [firstFinal], timeout: 10)
+        XCTAssertEqual(loopback.events.finals, [GladiaURLSessionLoopback.firstFinal])
+        let began = ContinuousClock.now
+        let finish = ownedConfiguredFinish(loopback)
+        let transcript = try await configuredResult(finish, budget: 4.5)
+        XCTAssertLessThan(began.duration(to: .now), .seconds(4.5))
+        XCTAssertEqual(transcript.map { Data($0.utf8) },
+                       Data("\(GladiaURLSessionLoopback.firstFinal) \(GladiaURLSessionLoopback.tailFinal)".utf8))
+        XCTAssertTrue(loopback.events.errors.isEmpty)
+        XCTAssertEqual(loopback.recorder.sessionRequests, 1)
+        XCTAssertEqual(loopback.recorder.socketCount, 1)
+        XCTAssertEqual(loopback.recorder.sentAudio,
+                       (0..<GladiaURLSessionLoopback.frameCount).map(GladiaURLSessionLoopback.pcm))
+        XCTAssertEqual(loopback.recorder.sentTexts, [#"{"type":"stop_recording"}"#])
+    }
+
+    func testConfiguredRealCheckedFinalWindowExpiresWithMissingCompletionAndRetainedText() async throws {
+        let loopback = try GladiaURLSessionLoopback(scenario: "gladia-hold", configured: true)
+        defer { loopback.invalidate() }
+        let heldFinal = expectation(description: "Configured held final arrives")
+        loopback.events.onFinal = { if $0 == GladiaURLSessionLoopback.heldFinal { heldFinal.fulfill() } }
+        let stopSent = expectation(description: "Configured stop reaches real socket")
+        loopback.recorder.onStop = { stopSent.fulfill() }
+        loopback.start()
+        for index in 0..<3 { loopback.client.sendAudio(GladiaURLSessionLoopback.pcm(index)) }
+        await fulfillment(of: [heldFinal], timeout: 10)
+        let budget = try XCTUnwrap(loopback.client.finalisationBudget)
+        XCTAssertEqual(budget, 4.5)
+        let began = ContinuousClock.now
+        let finish = ownedConfiguredFinish(loopback)
+        await fulfillment(of: [stopSent], timeout: 10)
+        let transcript = try await configuredResult(finish, budget: budget)
+        XCTAssertLessThan(began.duration(to: .now), .seconds(budget + 1))
+        XCTAssertGreaterThanOrEqual(began.duration(to: .now), .seconds(GladiaLive.finalEventWindow),
+                                    "Missing completion must wait for the real final-event deadline")
+        XCTAssertEqual(transcript.map { Data($0.utf8) }, Data(GladiaURLSessionLoopback.heldFinal.utf8))
+        XCTAssertEqual(loopback.events.errors.count, 1)
+        XCTAssertEqual(loopback.events.errors.first as? GladiaStreamingError, .missingCompletion)
+        XCTAssertEqual(loopback.recorder.sessionRequests, 1)
+        XCTAssertEqual(loopback.recorder.socketCount, 1)
+        XCTAssertEqual(loopback.recorder.sentAudio, (0..<3).map(GladiaURLSessionLoopback.pcm))
+        XCTAssertEqual(loopback.recorder.sentTexts, [#"{"type":"stop_recording"}"#])
+    }
+
     func testTerminalFailureIsReportedOnceWithConfirmedTextKept() async throws {
         let loopback = try GladiaURLSessionLoopback(scenario: "gladia-failure")
         defer { loopback.invalidate() }
@@ -110,6 +172,41 @@ final class GladiaLoopbackRuntimeTests: XCTestCase {
     }
 }
 
+private extension GladiaLoopbackRuntimeTests {
+    struct ConfiguredFinish {
+        let task: Task<String?, Never>
+        let done: XCTestExpectation
+    }
+
+    func ownedConfiguredFinish(_ loopback: GladiaURLSessionLoopback) -> ConfiguredFinish {
+        let done = XCTestExpectation(description: "Configured loopback finish returned")
+        let exited = XCTestExpectation(description: "Owned configured loopback finish exited")
+        let client = loopback.client
+        let task = Task {
+            defer { exited.fulfill() }
+            let text = await client.finishAndWait()
+            done.fulfill()
+            return text
+        }
+        addTeardownBlock {
+            task.cancel(); client.cancel()
+            let outcome = await XCTWaiter.fulfillment(of: [exited], timeout: 2)
+            XCTAssertEqual(outcome, .completed)
+        }
+        return ConfiguredFinish(task: task, done: done)
+    }
+
+    func configuredResult(_ finish: ConfiguredFinish, budget: TimeInterval) async throws -> String? {
+        guard await XCTWaiter.fulfillment(of: [finish.done], timeout: budget + 1) == .completed else {
+            finish.task.cancel()
+            XCTFail("Configured real transport exceeded its declared stop budget")
+            throw ConfiguredTimeout()
+        }
+        return await finish.task.value
+    }
+    struct ConfiguredTimeout: Error {}
+}
+
 /// One shared client wired to the loopback peer for a scenario route, with a
 /// private ephemeral session for both the session request and the socket.
 private final class GladiaURLSessionLoopback: @unchecked Sendable {
@@ -127,7 +224,7 @@ private final class GladiaURLSessionLoopback: @unchecked Sendable {
     let client: GladiaLiveClient
     private let session: URLSession
 
-    init(scenario: String) throws {
+    init(scenario: String, configured: Bool = false) throws {
         #if canImport(FoundationNetworking)
         throw XCTSkip("FoundationNetworking is not a qualified WebSocket transport; Windows uses WinHTTP.")
         #else
@@ -144,18 +241,29 @@ private final class GladiaURLSessionLoopback: @unchecked Sendable {
         let production = GladiaLiveClient.sessionInitiator(session: session)
         self.session = session
         self.recorder = recorder
-        client = GladiaLiveClient(
-            apiKey: "synthetic-loopback-key", baseURL: baseURL,
-            initiateSession: { request, completion in
-                recorder.noteSessionRequest()
-                return production(GladiaURLSessionLoopback.marked(request), completion)
-            },
-            makeConnection: { request in
-                var marked = GladiaURLSessionLoopback.marked(request)
-                marked.setValue("jsti-probe", forHTTPHeaderField: "Sec-WebSocket-Protocol")
-                return recorder.record(URLSessionStreamingConnection(session: session, request: marked))
-            }
-        )
+        let initiate: GladiaLiveClient.SessionInitiator = { request, completion in
+            recorder.noteSessionRequest()
+            return production(GladiaURLSessionLoopback.marked(request), completion)
+        }
+        let connect: GladiaLiveClient.ConnectionFactory = { request in
+            var marked = GladiaURLSessionLoopback.marked(request)
+            marked.setValue("jsti-probe", forHTTPHeaderField: "Sec-WebSocket-Protocol")
+            return recorder.record(URLSessionStreamingConnection(session: session, request: marked))
+        }
+        if configured {
+            client = GladiaLiveClient(
+                apiKey: "synthetic-loopback-key", model: GladiaLive.defaultModel, language: nil,
+                sampleRate: 16_000, baseURL: baseURL, initiateSession: initiate, makeConnection: connect,
+                schedule: GladiaLiveClient.defaultScheduler,
+                mode: .configured(GladiaConfiguredTiming(options: LiveClientOptions())),
+                usesCheckedDefaultScheduler: true
+            )
+        } else {
+            client = GladiaLiveClient(
+                apiKey: "synthetic-loopback-key", baseURL: baseURL,
+                initiateSession: initiate, makeConnection: connect
+            )
+        }
         #endif
     }
 

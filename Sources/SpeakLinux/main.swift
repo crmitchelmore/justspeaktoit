@@ -222,7 +222,7 @@ case "keyring", "capture", "portal", "x11-hotkey", "x11-hotkey-locks":
         }
     } catch { fail(error) }
     exit(0)
-case nil, "x11": break
+case nil, "x11", "x11-profile-session": break
 default: fail(DesktopHostError(message: "Unknown integration check \(integrationCheck ?? "")."))
 }
 
@@ -231,11 +231,18 @@ let screenshotDirectory = arguments.firstIndex(of: "--ui-screenshots").flatMap {
     arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil
 }
 // The X11 check and the screenshot tour run inside a throwaway window like the smoke test.
-let smokeTest = arguments.contains("--ui-smoke-test") || integrationCheck == "x11" || screenshotDirectory != nil
+let profileSessionProbe = integrationCheck == "x11-profile-session"
+let smokeTest = arguments.contains("--ui-smoke-test") || integrationCheck == "x11"
+    || profileSessionProbe || screenshotDirectory != nil
 let session = LinuxDesktopSession()
-let directory = smokeTest
-    ? FileManager.default.temporaryDirectory.appendingPathComponent("jsti-smoke-\(UUID().uuidString)")
-    : LinuxFiles.dataDirectory()
+let directory: URL
+if profileSessionProbe {
+    do { directory = try LinuxProfileSessionProbe.directory() } catch { fail(error) }
+} else {
+    directory = smokeTest
+        ? FileManager.default.temporaryDirectory.appendingPathComponent("jsti-smoke-\(UUID().uuidString)")
+        : LinuxFiles.dataDirectory()
+}
 // The remote-input portal is probed once; smoke tests never touch the desktop.
 let remoteDesktop = !smokeTest && session.displayServer == .wayland
     && LinuxPortal.version(of: LinuxPortal.remoteDesktop) != nil
@@ -243,17 +250,26 @@ LinuxHostPlatform.configure(session: session, remoteDesktopAvailable: remoteDesk
 
 do {
     try LinuxFiles.preparePrivateDirectory(directory)
+    if profileSessionProbe { try LinuxProfileSessionProbe.prepare(directory: directory) }
     if screenshotDirectory != nil {
         try blocking { try await DesktopHostSampleHistory.seed(directory: directory) }
     }
     let needsSetup = !smokeTest && LinuxOnboarding.needsAutomaticSetup(in: directory)
-    let controller = try LinuxAppController(directory: directory, effects: LinuxNativeEffects())
+    let probeEffects = profileSessionProbe ? LinuxProfileProbeEffects() : nil
+    let effects: any DesktopHostEffects<LinuxHostPlatform>
+    if let probeEffects { effects = probeEffects } else { effects = LinuxNativeEffects() }
+    let controller = try LinuxAppController(directory: directory, effects: effects)
     let holder = LinuxEventContext(controller: controller, smokeTest: smokeTest)
     holder.needsSetupAtLaunch = needsSetup
     try LinuxOnboarding.configure(holder)
     defer { jsti_setup_clear() }
     holder.screenshotDirectory = screenshotDirectory
     if integrationCheck == "x11" { holder.windowCheck = { try LinuxIntegrationChecks.x11() } }
+    if let probeEffects {
+        holder.windowCheck = {
+            try blocking { try await LinuxProfileSessionProbe.run(controller: controller, effects: probeEffects) }
+        }
+    }
     defer { if smokeTest { try? FileManager.default.removeItem(at: directory) } }
     try runWindow(controller: controller, holder: holder)
     if let screenshotDirectory {

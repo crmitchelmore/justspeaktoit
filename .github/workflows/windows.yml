@@ -1766,6 +1766,7 @@ jobs:
           JSTI_WEBSOCKET_PROBE_PORT=$(python3 -c \
             'import json,sys; p=json.load(open(sys.argv[1])); assert p["host"]=="127.0.0.1"; print(p["port"])' "$ready")
           xcrun swift test --configuration release --skip-build --filter AdditionalProviderLoopbackTests
+          xcrun swift test --configuration release --skip-build --filter GladiaLoopbackRuntimeTests
       - name: Qualify Modulate opening PCM across an explicitly held HTTP101
         run: |
           python3 -B scripts/qualify-modulate-opening-audio.py \

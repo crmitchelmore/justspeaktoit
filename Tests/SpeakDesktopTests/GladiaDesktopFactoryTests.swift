@@ -35,7 +35,7 @@ final class GladiaDesktopFactoryTests: XCTestCase {
             XCTAssertEqual(client.sampleRate, 16_000)
             XCTAssertEqual(client.language, "fr_FR", "The selection reaches the shared client, as on iOS")
             XCTAssertEqual(client.endpoint.absoluteString, "https://api.gladia.io/v2/live")
-            XCTAssertEqual(client.finalisationBudget, GladiaLive.finishBudget)
+            XCTAssertEqual(client.finalisationBudget, 4.5)
             XCTAssertEqual(client.currentStage, .idle)
         }
         XCTAssertNil(DesktopLiveTranscription.route(forID: "gladia/solaria-1"), "The batch model is not live")

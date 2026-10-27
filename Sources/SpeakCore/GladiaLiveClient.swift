@@ -10,17 +10,17 @@ import os.log
 
 /// Portable Gladia Solaria live client.
 ///
-/// iOS builds it through `LiveTranscriptionClientFactory` and Windows through
-/// the desktop live projection. It compiles for every platform, but the macOS
-/// app's production Gladia route still runs its own controller and
-/// transcriber in `SpeakApp`; Mac capture has not been moved onto this client.
+/// macOS and iOS build it through `LiveTranscriptionClientFactory`; Windows
+/// and Linux use the desktop live projection. The macOS app captures through
+/// `SharedClientLiveController`, while framing and finalisation remain here.
 ///
 /// Gladia is two-stage: `POST /v2/live` with `x-gladia-key` creates a session
 /// and returns a single-use WebSocket URL carrying its own temporary token.
 /// PCM16 mono chunks are admitted synchronously into one bounded queue from
 /// `start()` onward and sent one at a time, as binary frames, once the socket
 /// handshake completes. A finish drains that queue, sends `stop_recording`
-/// behind the last chunk and waits for `end_session` inside one whole deadline.
+/// behind the last chunk and waits for `end_session`. Original constructors
+/// use one whole deadline; required-options constructors use bounded stages.
 /// Both transports are injected (`URLSession` through the original
 /// initializer, as on iOS; the desktop projection's HTTPS request plus the
 /// host's native socket on Windows) while framing, admission, ordering and run
@@ -31,14 +31,17 @@ import os.log
 /// and finish waiters run after it is released, in the order the state changed;
 /// each transport effect re-checks its run first. A failure is reported after
 /// transcripts already being delivered, and before any finish returns.
-public final class GladiaLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
+public final class GladiaLiveClient: FinalizingStreamingTranscriptionClient,
+    StreamingTranscriptSnapshotProviding, UtteranceBoundaryStreamingClient, @unchecked Sendable {
     /// Each final `transcript` carries one utterance, identified by `data.id`.
     public let finalShape: TranscriptFinalShape = .standaloneSegments
     /// `stop_recording` makes Gladia process audio it has not transcribed yet,
     /// so a caller must always finish gracefully.
     public let finishFlushesBufferedAudio = true
     /// The whole bound `finishAndWait()` applies, for host stop watchdogs.
-    public var finalisationBudget: TimeInterval? { GladiaLive.finishBudget }
+    public var finalisationBudget: TimeInterval? {
+        mode.isConfigured ? mode.timing?.total : GladiaLive.finishBudget
+    }
 
     public typealias SessionInitiator = @Sendable (
         URLRequest, @escaping @Sendable (Result<(statusCode: Int, body: Data), Error>) -> Void
@@ -59,9 +62,23 @@ public final class GladiaLiveClient: FinalizingStreamingTranscriptionClient, @un
     let initiateSession: SessionInitiator
     let makeConnection: ConnectionFactory
     let schedule: Scheduler
+    let mode: GladiaLiveMode
+    let usesCheckedDefaultScheduler: Bool
     private let lock = NSLock()
     /// The current run. Read and replaced only under `lock`.
     var run: GladiaLiveRun
+    /// Event projections scoped to their synchronous callback thread. A held
+    /// callback can inspect its own event even after another thread restarts
+    /// the client; capture, cancellation and replacement never wait for it.
+    var callbackSnapshots: [ObjectIdentifier: [GladiaCallbackSnapshot]] = [:]
+    var boundaryCallback: ((String) -> Void)?
+
+    /// Each accepted final utterance, after its transcript callback. A graceful
+    /// finish preserves these deliveries; immediate abort/replacement does not.
+    public var onUtteranceBoundary: ((String) -> Void)? {
+        get { perform { _ in boundaryCallback } }
+        set { perform { _ in boundaryCallback = newValue } }
+    }
 
     public init(
         apiKey: String,
@@ -78,6 +95,8 @@ public final class GladiaLiveClient: FinalizingStreamingTranscriptionClient, @un
         self.initiateSession = Self.sessionInitiator(session: session)
         self.makeConnection = { URLSessionStreamingConnection(session: session, request: $0) }
         self.schedule = Self.defaultScheduler
+        self.mode = .legacy
+        self.usesCheckedDefaultScheduler = false
         self.run = GladiaLiveRun(sampleRate: sampleRate)
     }
 
@@ -104,6 +123,26 @@ public final class GladiaLiveClient: FinalizingStreamingTranscriptionClient, @un
         self.initiateSession = initiateSession
         self.makeConnection = makeConnection
         self.schedule = schedule
+        self.mode = .legacy
+        self.usesCheckedDefaultScheduler = false
+        self.run = GladiaLiveRun(sampleRate: sampleRate)
+    }
+
+    init(
+        apiKey: String, model: String, language: String?, sampleRate: Int, baseURL: URL,
+        initiateSession: @escaping SessionInitiator, makeConnection: @escaping ConnectionFactory,
+        schedule: @escaping Scheduler, mode: GladiaLiveMode, usesCheckedDefaultScheduler: Bool
+    ) {
+        self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.model = GladiaLiveProtocol.apiModelName(from: model)
+        self.language = language
+        self.sampleRate = sampleRate
+        self.endpoint = baseURL.appendingPathComponent(GladiaLiveProtocol.initPath)
+        self.initiateSession = initiateSession
+        self.makeConnection = makeConnection
+        self.schedule = schedule
+        self.mode = mode
+        self.usesCheckedDefaultScheduler = usesCheckedDefaultScheduler
         self.run = GladiaLiveRun(sampleRate: sampleRate)
     }
 
@@ -132,6 +171,7 @@ public final class GladiaLiveClient: FinalizingStreamingTranscriptionClient, @un
     /// with that run's confirmed text; nothing of it can reach the new run.
     public func start(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {
         perform { effects in
+            run.discardAdmittedBoundaries = true
             close(run, &effects)
             let active = GladiaLiveRun(sampleRate: sampleRate)
             run = active
@@ -143,14 +183,19 @@ public final class GladiaLiveClient: FinalizingStreamingTranscriptionClient, @un
 
     /// Immediate abort: abandons the session request or socket and wakes
     /// every finish waiter with the confirmed text. No error is reported.
-    public func stop() { perform { close(run, &$0) } }
+    public func stop() { cancel() }
 
     /// Immediate abort, identical to `stop()`.
-    public func cancel() { perform { close(run, &$0) } }
+    public func cancel() {
+        perform { effects in
+            run.discardAdmittedBoundaries = true
+            close(run, &effects)
+        }
+    }
 
     /// Drains admitted PCM, sends `stop_recording` behind it and waits for
-    /// `end_session`, inside `GladiaLive.finishBudget` from the moment the
-    /// first finish begins. Concurrent and repeated finishes share one
+    /// `end_session`. Legacy mode uses `GladiaLive.finishBudget` from the first
+    /// finish; configured mode uses its declared staged budget. Repeated finishes share one
     /// outcome. Returns the confirmed transcript of the whole session, or
     /// `nil` when nothing was transcribed. A failure is published through
     /// `onError` before any finish returns, including one that joins while
@@ -174,6 +219,7 @@ public final class GladiaLiveClient: FinalizingStreamingTranscriptionClient, @un
                     }
                     active.waiters.append(continuation)
                     if Task.isCancelled {
+                        active.discardAdmittedBoundaries = true
                         close(active, &effects)
                     } else {
                         beginFinish(active, &effects)
@@ -182,7 +228,11 @@ public final class GladiaLiveClient: FinalizingStreamingTranscriptionClient, @un
             }
         } onCancel: { [weak self, weak active] in
             guard let self, let active else { return }
-            self.perform { effects in if self.isCurrent(active) { self.close(active, &effects) } }
+            self.perform { effects in
+                guard self.run === active else { return }
+                active.discardAdmittedBoundaries = true
+                self.close(active, &effects)
+            }
         }
     }
 
@@ -269,6 +319,9 @@ extension GladiaLiveClient {
         active.sessionRequest = nil
         active.connection = nil
         active.outgoing.removeAll()
+        active.framer = nil
+        active.finishPhase = .none
+        active.finishPhaseGeneration &+= 1
         active.admittedAudioBytes = 0
         active.admittedAudioChunks = 0
         active.inFlightAudioBytes = 0
@@ -295,14 +348,21 @@ extension GladiaLiveClient {
     /// closed or was replaced does nothing.
     func arm(
         _ seconds: TimeInterval, _ active: GladiaLiveRun, _ effects: inout GladiaLiveEffects,
+        ownsPhase: (@Sendable (GladiaLiveRun) -> Bool)? = nil,
         action: @escaping @Sendable (GladiaLiveClient, GladiaLiveRun, inout GladiaLiveEffects) -> Void
     ) {
         let deadline: @Sendable () -> Void = { [weak self, weak active] in
             guard let self, let active else { return }
-            self.perform { effects in if self.isCurrent(active) { action(self, active, &effects) } }
+            self.perform { effects in
+                if self.isCurrent(active), ownsPhase?(active) ?? true { action(self, active, &effects) }
+            }
         }
-        let schedule = schedule
-        effects.append { schedule(seconds, deadline) }
+        if mode.isConfigured {
+            armChecked(seconds, active, effects: &effects, ownsPhase: ownsPhase, action: deadline)
+        } else {
+            let schedule = schedule
+            effects.append { schedule(seconds, deadline) }
+        }
     }
 
     func log(_ event: String) {

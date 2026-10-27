@@ -248,30 +248,45 @@ xcrun altool --upload-app \
 
 ### App Review Information (required)
 
-Keep the following text in **App Review Information** for every macOS version. The
+Keep the canonical listener explanation in **App Review Information** for every macOS version. The
 `com.apple.security.network.server` entitlement is intentional: the optional,
-user-enabled **Send to Mac** feature starts an inbound Bonjour listener. Removing
+user-enabled **Send to Mac** feature starts an inbound Bonjour listener. Apple's
+[network server entitlement](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.security.network.server)
+permits incoming connections. Removing
 the entitlement while leaving that feature enabled breaks the feature in the App
 Sandbox.
 
-```
-Just Speak to It uses the com.apple.security.network.server entitlement only for
-the optional, user-enabled "Send to Mac" feature.
+The canonical text lives in [`scripts/mac-review-notes.rb`](../scripts/mac-review-notes.rb),
+using the release train's Bonjour service from `ReleaseTrains.json`. It describes
+the actual Mac receiver: Settings > General > Send to Mac > **Enable Send to Mac**,
+the listener, and the displayed pairing code. No shipping iOS sender screen exists;
+do not provide fictional iOS pairing navigation or claim verified end-to-end delivery.
 
-To verify:
-1. Open the macOS app and go to Settings > General > Send to Mac.
-2. Enable "Send to Mac". The app starts an Apple Network.framework NWListener,
-   advertises the Bonjour service _speaktransport._tcp, and displays a pairing code.
-3. In the iOS companion app, go to Settings > Send to Mac > Configure Mac
-   Connection, select the Mac, and enter the pairing code.
-4. The iOS app then opens the inbound TCP connection and can send transcript chunks
-   to the Mac.
+Before new Mac beta or approved Stable review submissions, release tooling appends
+the explanation without replacing existing notes, then checks exact readback.
+Existing approved/in-review builds and iOS review paths are left alone. Missing
+review-detail resources or insufficient note capacity require owner attention;
+the helper never invents contacts, demo credentials or replacement notes.
+Apple documents the separate [App Store review detail](https://developer.apple.com/documentation/appstoreconnectapi/app-store-review-details)
+and [beta review detail](https://developer.apple.com/documentation/appstoreconnectapi/beta-app-review-detail)
+resources; only their `notes` attribute is changed.
 
-The listener is off by default and starts only after the user enables this setting.
-It is not a general-purpose web or FTP server. The app also declares
-com.apple.security.network.client separately for outbound transcription and
-post-processing provider connections.
-```
+The **Audit or repair Mac review notes** workflow defaults to read-only audit. Its
+secrets-free PR validation can register the workflow; the maintainer may audit an immutable,
+reviewed branch or protected main. Audit returns version/state/resource identity,
+note hash/length and whether the explanation exists, never actual notes or contacts.
+Repair is restricted to protected main and requires the exact selected version ID
+and existing note hash. Only `REJECTED`, `PREPARE_FOR_SUBMISSION` and
+`DEVELOPER_REJECTED` Mac versions are editable. Two reads detect observed conflicts;
+GET/PATCH is not atomic. Exact readback is required. This tool does not attach builds,
+create versions, submit reviews, reply to reviewers or publish Stable.
+Local use may explicitly select the existing `1password` credential mode and its
+validated vault references. CI uses explicit `environment` mode with an owned key
+path. Missing or unknown sources fail before credential access; neither mode falls
+back to a personal key file or a different credential store.
+
+Saving the explanation is not evidence that Apple accepted the entitlement or that
+the unavailable iOS sender flow works. Reviewer acceptance remains a separate gate.
 
 If automated review flags the entitlement, reply in the Resolution Center with
 the same explanation and verification steps. Do not remove the entitlement unless

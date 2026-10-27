@@ -25,24 +25,34 @@ static void enable(Credentials *form) {
     gtk_widget_set_sensitive(form->remove, editable && form->saved);
     gtk_widget_set_sensitive(form->recheck, form->idle && form->callback != NULL && form->pending_token == NULL);
 }
-static void request_view(Credentials *form) {
-    gtk_editable_set_text(GTK_EDITABLE(form->key), "");
+static void retire_view(Credentials *form) {
+    gchar *token = g_steal_pointer(&form->view_token);
+    gboolean loading = form->loading;
+    form->loading = FALSE;
     form->ready = FALSE;
-    form->loading = TRUE;
-    g_free(form->view_token); form->view_token = g_uuid_string_random();
+    if (loading && token != NULL && form->callback != NULL)
+        form->callback("cancel", "voice-output", "", token, "", "", form->context);
+    g_free(token);
+}
+static void request_view(Credentials *form) {
+    retire_view(form);
+    gtk_editable_set_text(GTK_EDITABLE(form->key), "");
     enable(form);
-    if (form->callback != NULL)
-        form->callback("open", "voice-output", "", form->view_token, "", "", form->context);
+    if (!gtk_widget_get_mapped(GTK_WIDGET(form->group)) || !form->idle ||
+        form->callback == NULL || form->pending_token != NULL) return;
+    form->loading = TRUE;
+    form->view_token = g_uuid_string_random();
+    enable(form);
+    form->callback("open", "voice-output", "", form->view_token, "", "", form->context);
 }
 static void cancel(Credentials *form) {
     if (form->callback != NULL && form->pending_token != NULL)
         form->callback("cancel", "voice-output", "", form->pending_token, "", "", form->context);
-    if (form->callback != NULL && form->loading && form->view_token != NULL)
-        form->callback("cancel", "voice-output", "", form->view_token, "", "", form->context);
+    retire_view(form);
 }
 static void unmap(GtkWidget *widget, gpointer data) {
     (void)widget; Credentials *form = data;
-    gtk_editable_set_text(GTK_EDITABLE(form->key), ""); cancel(form);
+    gtk_editable_set_text(GTK_EDITABLE(form->key), ""); cancel(form); enable(form);
 }
 static void map(GtkWidget *widget, gpointer data) {
     (void)widget; Credentials *form = data;
@@ -150,8 +160,7 @@ void jsti_voice_credentials_set_idle(gboolean idle) {
     if (active != NULL) {
         gboolean was_idle = active->idle;
         active->idle = idle;
-        if (!idle) gtk_editable_set_text(GTK_EDITABLE(active->key), "");
-        if (!was_idle && idle && active->pending_token == NULL) request_view(active);
+        if (!idle || !was_idle) request_view(active);
         enable(active);
     }
 }
@@ -259,21 +268,110 @@ static void fixture_callback(const char *operation, const char *purpose, const c
         } else observed->valid = FALSE;
     }
 }
-int32_t jsti_voice_credentials_self_test(char *error, size_t capacity) {
+static GtkWidget *fixture_window(GtkWidget *group) {
+    GtkWidget *window = gtk_window_new();
+    g_object_ref_sink(window);
+    gtk_window_set_child(GTK_WINDOW(window), group);
+    return window;
+}
+static gboolean visibility_self_test(void) {
     Credentials *original = active;
     GtkWidget *group = jsti_voice_credentials_group_new();
     g_object_ref_sink(group);
+    GtkWidget *window = fixture_window(group);
+    Credentials *form = active;
+    Observed observed = {.valid = TRUE};
+    Handler handler = {.callback = fixture_callback, .context = &observed};
+    apply_handler(&handler);
+    jsti_voice_credentials_selection_changed();
+    jsti_voice_credentials_set_idle(FALSE);
+    jsti_voice_credentials_set_idle(TRUE);
+    recheck(NULL, form);
+    gboolean passed = !gtk_widget_get_mapped(group) && observed.opens == 0 && form->view_token == NULL;
+
+    jsti_voice_credentials_set_idle(FALSE);
+    gtk_window_present(GTK_WINDOW(window));
+    passed = gtk_widget_get_mapped(group) && observed.opens == 0 && form->view_token == NULL && passed;
+    gtk_widget_set_visible(window, FALSE);
+    jsti_voice_credentials_set_idle(TRUE);
+    gtk_window_present(GTK_WINDOW(window));
+    passed = gtk_widget_get_mapped(group) && observed.opens == 1 && form->loading && passed;
+    gchar *epoch = g_uuid_string_random();
+    Delivery view = {.token = form->view_token, .epoch = epoch, .identifier = "openai.tts.apiKey",
+        .label = "Synthetic Voice key", .privacy = "Synthetic fixture: no credential storage or provider.",
+        .status = "Synthetic saved state", .saved = 1, .can_save = TRUE};
+    apply_delivery(&view);
+    jsti_voice_credentials_set_idle(TRUE);
+    passed = observed.opens == 1 && passed;
+    recheck(NULL, form);
+    passed = observed.opens == 2 && passed;
+    view.token = form->view_token; apply_delivery(&view);
+    jsti_voice_credentials_set_idle(FALSE);
+    passed = observed.opens == 2 && form->view_token == NULL && !form->ready && passed;
+    jsti_voice_credentials_set_idle(TRUE);
+    passed = observed.opens == 3 && passed;
+    view.token = form->view_token; apply_delivery(&view);
+    jsti_voice_credentials_selection_pending();
+    jsti_voice_credentials_selection_changed();
+    passed = observed.opens == 4 && passed;
+    view.token = form->view_token; apply_delivery(&view);
+
+    gtk_editable_set_text(GTK_EDITABLE(form->key), "synthetic-only");
+    passed = emit(form, FALSE) && observed.saves == 1 && passed;
+    gchar *pending = g_strdup(form->pending_token), *pending_epoch = g_strdup(form->pending_epoch);
+    request_view(form);
+    passed = observed.opens == 4 && same_uuid(form->pending_token, pending) && passed;
+    gtk_widget_set_visible(window, FALSE);
+    passed = !gtk_widget_get_mapped(group) && observed.opens == 4 && form->view_token == NULL &&
+        same_uuid(form->pending_token, pending) && same_uuid(form->pending_epoch, pending_epoch) &&
+        gtk_editable_get_text(GTK_EDITABLE(form->key))[0] == '\0' && passed;
+    Delivery completion = {.token = pending, .epoch = pending_epoch, .status = "Synthetic save completed",
+        .finish = TRUE};
+    apply_delivery(&completion);
+    passed = observed.opens == 4 && form->pending_token == NULL && form->pending_epoch == NULL &&
+        g_strcmp0(form->outcome, completion.status) == 0 && passed;
+
+    gtk_window_present(GTK_WINDOW(window));
+    passed = gtk_widget_get_mapped(group) && observed.opens == 5 && passed;
+    gchar *retired = g_strdup(form->view_token);
+    gint cancels = observed.cancels;
+    gtk_widget_set_visible(window, FALSE);
+    passed = observed.cancels == cancels + 1 && form->view_token == NULL && !form->loading && passed;
+    view.token = retired; apply_delivery(&view);
+    passed = !form->ready && form->view_token == NULL && observed.opens == 5 && passed;
+    gtk_window_present(GTK_WINDOW(window));
+    passed = observed.opens == 6 && passed;
+    clear(NULL);
+    request_view(form);
+    passed = form->view_token == NULL && !form->loading && observed.opens == 6 && passed;
+    apply_handler(&handler);
+    passed = observed.opens == 7 && observed.valid && passed;
+
+    clear(NULL);
+    gtk_window_destroy(GTK_WINDOW(window));
+    g_object_unref(window); g_object_unref(group);
+    active = original;
+    g_free(epoch); g_free(pending); g_free(pending_epoch); g_free(retired);
+    return passed;
+}
+int32_t jsti_voice_credentials_self_test(char *error, size_t capacity) {
+    gboolean visibility_passed = visibility_self_test();
+    Credentials *original = active;
+    GtkWidget *group = jsti_voice_credentials_group_new();
+    g_object_ref_sink(group);
+    GtkWidget *window = fixture_window(group);
     Credentials *form = active;
     Observed observed = {.valid = TRUE};
     form->callback = fixture_callback; form->context = &observed;
-    request_view(form);
+    gtk_window_present(GTK_WINDOW(window));
     gchar *epoch = g_uuid_string_random(), *obsolete = g_uuid_string_random();
     Delivery view = {.token = obsolete, .epoch = epoch, .identifier = "openai.tts.apiKey",
         .label = "OpenAI Voice Output key (separate from transcription)",
         .privacy = "Synthetic fixture only: no vault access, provider calls or actual credentials.",
         .status = "A synthetic saved key is present. It is not prefilled.", .saved = 1, .can_save = TRUE};
     apply_delivery(&view);
-    gboolean passed = !gtk_widget_get_sensitive(GTK_WIDGET(form->key));
+    gboolean passed = visibility_passed && gtk_widget_get_mapped(group) && observed.opens == 1 &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(form->key));
     gchar *canonical_view = g_ascii_strup(form->view_token, -1);
     view.token = canonical_view; apply_delivery(&view);
     passed = passed && gtk_widget_get_sensitive(GTK_WIDGET(form->key)) &&
@@ -306,9 +404,10 @@ int32_t jsti_voice_credentials_self_test(char *error, size_t capacity) {
     passed = passed && observed.removes == 1 && form->pending_token != NULL;
     clear(NULL);
     passed = passed && observed.cancels == 1 && !gtk_widget_get_sensitive(GTK_WIDGET(form->key)) && observed.valid;
-    g_object_unref(group); active = original;
+    gtk_window_destroy(GTK_WINDOW(window));
+    g_object_unref(window); g_object_unref(group); active = original;
     g_free(epoch); g_free(obsolete); g_free(first_token); g_free(previous_view); g_free(canonical_view);
     if (!passed) jsti_set_error(error, capacity,
-        "Voice key masking, explicit removal, snapshot fencing, cancellation or late-completion protection failed.");
+        "Voice key visibility, masking, explicit removal, snapshot fencing, cancellation or late completion failed.");
     return passed ? 0 : -1;
 }

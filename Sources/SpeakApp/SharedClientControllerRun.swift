@@ -14,10 +14,16 @@ final class SharedClientControllerRun: @unchecked Sendable {
         let error: Error?
     }
 
+    struct BoundaryPair: Sendable {
+        let display: Snapshot
+        let utterance: String
+    }
+
     let modelIdentifier: String
     /// The client reports utterance boundaries itself, so none is inferred
     /// from a final.
     let hasExplicitBoundaries: Bool
+    let pairsStandaloneBoundaries: Bool
     private let lock = NSLock()
     private var accumulator: TranscriptAccumulator
     private var text = ""
@@ -28,17 +34,23 @@ final class SharedClientControllerRun: @unchecked Sendable {
     private var revision: UInt64 = 0
     private var transcriptRevision: UInt64 = 0
     private var closed = false
+    private var lastTranscriptSnapshot: Snapshot?
+    private var lastPairedTranscriptRevision: UInt64 = 0
+    private var pendingBoundaryPairs: [BoundaryPair] = []
+    private var discardBoundaries = false
 
     init(shape: TranscriptFinalShape, modelIdentifier: String, hasExplicitBoundaries: Bool = false) {
         accumulator = TranscriptAccumulator(shape: shape)
         self.modelIdentifier = modelIdentifier
         self.hasExplicitBoundaries = hasExplicitBoundaries
+        self.pairsStandaloneBoundaries = hasExplicitBoundaries && shape == .standaloneSegments
     }
 
     var snapshot: Snapshot { lock.withLock { current } }
 
     /// Whether this recording still accepts provider events.
     var isOpen: Bool { lock.withLock { !closed } }
+    var mayDeliverBoundaries: Bool { lock.withLock { !discardBoundaries } }
 
     /// Folds one provider update. A client's authoritative `projection`
     /// replaces the folded text instead of being appended to it.
@@ -63,7 +75,30 @@ final class SharedClientControllerRun: @unchecked Sendable {
             confidence = projection?.latestUpdateConfidence
             revision += 1
             transcriptRevision = revision
+            let snapshot = current
+            lastTranscriptSnapshot = snapshot
+            return snapshot
+        }
+    }
+
+    /// The explicit standalone callback follows its ordinary transcript
+    /// callback synchronously, before the client starts the next receive.
+    /// Pair that exact event, not a later mutable snapshot or cumulative text.
+    func recordStandaloneBoundary(_ utterance: String) -> Snapshot? {
+        guard !utterance.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return lock.withLock {
+            guard pairsStandaloneBoundaries, !discardBoundaries, let display = lastTranscriptSnapshot,
+                  display.isFinal, display.transcriptRevision > lastPairedTranscriptRevision else { return nil }
+            lastPairedTranscriptRevision = display.transcriptRevision
+            pendingBoundaryPairs.append(BoundaryPair(display: display, utterance: utterance))
             return current
+        }
+    }
+
+    func takeBoundaryPairs() -> [BoundaryPair] {
+        lock.withLock {
+            defer { pendingBoundaryPairs.removeAll() }
+            return discardBoundaries ? [] : pendingBoundaryPairs
         }
     }
 
@@ -82,7 +117,11 @@ final class SharedClientControllerRun: @unchecked Sendable {
         lock.withLock {
             let previousText = text
             let previousFinal = isFinal
-            if cancelled, error == nil { error = CancellationError() }
+            if cancelled {
+                discardBoundaries = true
+                pendingBoundaryPairs.removeAll()
+                if error == nil { error = CancellationError() }
+            }
             if let whole, !whole.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 accumulator.replace(with: whole)
                 // A failed/cancelled return can contain only confirmed text.
@@ -115,6 +154,8 @@ final class SharedClientControllerRun: @unchecked Sendable {
     @discardableResult
     func cancel() -> Bool {
         lock.withLock {
+            discardBoundaries = true
+            pendingBoundaryPairs.removeAll()
             guard !closed else { return false }
             if error == nil { error = CancellationError() }
             closed = true

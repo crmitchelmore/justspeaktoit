@@ -11,6 +11,66 @@ import SpeakWindowsPlatform
 /// session request, then the production WinHTTP socket. No provider account,
 /// credential or external network is involved; the key is a synthetic marker.
 final class GladiaWinHTTPRuntimeTests: XCTestCase {
+    func testConfiguredFragmentsUseRealCheckedSchedulerAndPreserveExactPCMAndWholeResult() async throws {
+        let loopback = try GladiaLoopback(configuredScenario: "gladia")
+        defer { loopback.invalidateConfiguredResources() }
+        let firstFinal = expectation(description: "Configured final arrives before finish")
+        loopback.events.onFinal = { if $0 == GladiaLoopback.firstFinal { firstFinal.fulfill() } }
+        XCTAssertEqual(loopback.client.finalisationBudget, 4.5)
+        loopback.start()
+        let pcm = (0..<GladiaLoopback.frameCount).reduce(into: Data()) { $0.append(GladiaLoopback.pcm($1)) }
+        let fragments = [2, 14, 254, 1_024, 3_200]
+        var offset = 0
+        var index = 0
+        while offset < pcm.count {
+            let end = min(offset + fragments[index % fragments.count], pcm.count)
+            loopback.client.sendAudio(pcm.subdata(in: offset..<end))
+            offset = end
+            index += 1
+        }
+        await fulfillment(of: [firstFinal], timeout: 10)
+        XCTAssertEqual(loopback.events.finals, [GladiaLoopback.firstFinal])
+        let began = ContinuousClock.now
+        let finish = ownedConfiguredFinish(loopback)
+        let transcript = try await configuredResult(finish, budget: 4.5)
+        XCTAssertLessThan(began.duration(to: .now), .seconds(4.5))
+        XCTAssertEqual(transcript.map { Data($0.utf8) },
+                       Data("\(GladiaLoopback.firstFinal) \(GladiaLoopback.tailFinal)".utf8))
+        XCTAssertTrue(loopback.events.errors.isEmpty)
+        XCTAssertEqual(loopback.recorder.sessionRequests, 1)
+        XCTAssertEqual(loopback.recorder.socketCount, 1)
+        XCTAssertEqual(loopback.recorder.sentAudio, (0..<GladiaLoopback.frameCount).map(GladiaLoopback.pcm))
+        XCTAssertEqual(loopback.recorder.sentTexts, [#"{"type":"stop_recording"}"#])
+    }
+
+    func testConfiguredRealCheckedFinalWindowExpiresWithMissingCompletionAndRetainedText() async throws {
+        let loopback = try GladiaLoopback(configuredScenario: "gladia-hold")
+        defer { loopback.invalidateConfiguredResources() }
+        let heldFinal = expectation(description: "Configured held final arrives")
+        loopback.events.onFinal = { if $0 == GladiaLoopback.heldFinal { heldFinal.fulfill() } }
+        let stopSent = expectation(description: "Configured stop reaches WinHTTP")
+        loopback.recorder.onStop = { stopSent.fulfill() }
+        loopback.start()
+        for index in 0..<3 { loopback.client.sendAudio(GladiaLoopback.pcm(index)) }
+        await fulfillment(of: [heldFinal], timeout: 10)
+        let budget = try XCTUnwrap(loopback.client.finalisationBudget)
+        XCTAssertEqual(budget, 4.5)
+        let began = ContinuousClock.now
+        let finish = ownedConfiguredFinish(loopback)
+        await fulfillment(of: [stopSent], timeout: 10)
+        let transcript = try await configuredResult(finish, budget: budget)
+        XCTAssertLessThan(began.duration(to: .now), .seconds(budget + 1))
+        XCTAssertGreaterThanOrEqual(began.duration(to: .now), .seconds(GladiaLive.finalEventWindow),
+                                    "Missing completion must wait for the real final-event deadline")
+        XCTAssertEqual(transcript.map { Data($0.utf8) }, Data(GladiaLoopback.heldFinal.utf8))
+        XCTAssertEqual(loopback.events.errors.count, 1)
+        XCTAssertEqual(loopback.events.errors.first as? GladiaStreamingError, .missingCompletion)
+        XCTAssertEqual(loopback.recorder.sessionRequests, 1)
+        XCTAssertEqual(loopback.recorder.socketCount, 1)
+        XCTAssertEqual(loopback.recorder.sentAudio, (0..<3).map(GladiaLoopback.pcm))
+        XCTAssertEqual(loopback.recorder.sentTexts, [#"{"type":"stop_recording"}"#])
+    }
+
     func testTwoStageSessionStreamsExactPCMAndCompletesOnEndSession() async throws {
         let loopback = try GladiaLoopback(scenario: "gladia")
         let firstFinal = expectation(description: "The first final arrives while streaming")
@@ -96,6 +156,43 @@ final class GladiaWinHTTPRuntimeTests: XCTestCase {
     }
 }
 
+private extension GladiaWinHTTPRuntimeTests {
+    struct ConfiguredFinish {
+        let task: Task<String?, Never>
+        let bodyDone: XCTestExpectation
+    }
+
+    func ownedConfiguredFinish(_ loopback: GladiaLoopback) -> ConfiguredFinish {
+        let bodyDone = XCTestExpectation(description: "Configured WinHTTP finish returned")
+        let exited = XCTestExpectation(description: "Owned configured WinHTTP finish exited")
+        let client = loopback.client
+        let task = Task {
+            defer { exited.fulfill() }
+            let text = await client.finishAndWait()
+            bodyDone.fulfill()
+            return text
+        }
+        addTeardownBlock {
+            task.cancel()
+            loopback.invalidateConfiguredResources()
+            let outcome = await XCTWaiter.fulfillment(of: [exited], timeout: 2)
+            XCTAssertEqual(outcome, .completed)
+        }
+        return ConfiguredFinish(task: task, bodyDone: bodyDone)
+    }
+
+    func configuredResult(_ finish: ConfiguredFinish, budget: TimeInterval) async throws -> String? {
+        guard await XCTWaiter.fulfillment(of: [finish.bodyDone], timeout: budget + 1) == .completed else {
+            finish.task.cancel()
+            XCTFail("Configured WinHTTP transport exceeded its declared stop budget")
+            throw ConfiguredTimeout()
+        }
+        return await finish.task.value
+    }
+
+    struct ConfiguredTimeout: Error {}
+}
+
 /// One shared client wired to the loopback peer for a scenario route.
 private final class GladiaLoopback: @unchecked Sendable {
     static let frameCount = 10
@@ -110,6 +207,7 @@ private final class GladiaLoopback: @unchecked Sendable {
     let recorder: GladiaLoopbackRecorder
     let events = GladiaLoopbackEvents()
     let client: GladiaLiveClient
+    private let ownedSession: URLSession?
 
     init(scenario: String) throws {
         guard let value = ProcessInfo.processInfo.environment["JSTI_WEBSOCKET_PROBE_PORT"] else {
@@ -120,6 +218,7 @@ private final class GladiaLoopback: @unchecked Sendable {
         let recorder = GladiaLoopbackRecorder()
         let production = GladiaLiveClient.sessionInitiator(session: .shared)
         self.recorder = recorder
+        ownedSession = nil
         client = GladiaLiveClient(
             apiKey: "synthetic-loopback-key", baseURL: baseURL,
             initiateSession: { request, completion in
@@ -134,7 +233,45 @@ private final class GladiaLoopback: @unchecked Sendable {
         )
     }
 
+    /// Only the configured probes own a private HTTP session. Their socket is
+    /// the production WinHTTP transport, with the existing local-only marker.
+    init(configuredScenario scenario: String) throws {
+        guard let value = ProcessInfo.processInfo.environment["JSTI_WEBSOCKET_PROBE_PORT"] else {
+            throw XCTSkip("Requires the bounded local WebSocket probe server.")
+        }
+        let port = try XCTUnwrap(UInt16(value))
+        let baseURL = try XCTUnwrap(URL(string: "http://127.0.0.1:\(port)/\(scenario)"))
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 10
+        configuration.timeoutIntervalForResource = 30
+        let session = URLSession(configuration: configuration)
+        let recorder = GladiaLoopbackRecorder()
+        let production = GladiaLiveClient.sessionInitiator(session: session)
+        ownedSession = session
+        self.recorder = recorder
+        client = GladiaLiveClient(
+            apiKey: "synthetic-loopback-key", baseURL: baseURL, options: LiveClientOptions(),
+            initiateSession: { request, completion in
+                recorder.noteSessionRequest()
+                return production(GladiaLoopback.marked(request), completion)
+            },
+            makeConnection: { request in
+                var marked = GladiaLoopback.marked(request)
+                marked.setValue("jsti-probe", forHTTPHeaderField: "Sec-WebSocket-Protocol")
+                return recorder.record(WinHTTPStreamingConnection(request: marked))
+            }
+        )
+    }
+
     deinit { client.cancel() }
+
+    func invalidateConfiguredResources() {
+        events.onFinal = nil
+        events.onError = nil
+        recorder.onStop = nil
+        client.cancel()
+        ownedSession?.invalidateAndCancel()
+    }
 
     func start() {
         let events = events

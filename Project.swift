@@ -385,7 +385,7 @@ var iosAppInfoPlist: [String: Plist.Value] = [
             + "its servers when on-device recognition is unavailable."
     ),
     "NSLocalNetworkUsageDescription":
-        "Just Speak to It uses your local network to connect iPhone and Mac for Send to Mac transcription transfer.",
+        "Just Speak to It uses your local network when you connect to an OpenClaw gateway on that network.",
     "NSBonjourServices": [.string(trainValue("transportServiceType"))],
     // The camera is used by QRScannerCoordinator, reached from
     // Settings -> Transfer from Mac, to read the configuration QR code the

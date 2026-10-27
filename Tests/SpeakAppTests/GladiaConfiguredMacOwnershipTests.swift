@@ -129,7 +129,12 @@ final class GladiaConfiguredMacOwnershipTests: XCTestCase {
         XCTAssertEqual(result, "Kept.")
         await stopping.task.value
         XCTAssertTrue(socket.controls.isEmpty, "Retired claimed control cannot reach the transport")
-        XCTAssertEqual(fixture.delegate.events, [.partial("Kept."), .boundary("Kept."), .error])
+        XCTAssertEqual(fixture.delegate.events, [
+            .partial("Kept."), .boundary("Kept."), .partial("Kept."), .error
+        ])
+        // Failure republishes the same display to clear successful-final metadata.
+        XCTAssertEqual(fixture.delegate.updates.map(\.text), ["Kept.", "Kept."])
+        XCTAssertEqual(fixture.delegate.updates.map(\.isFinal), [true, false])
         XCTAssertEqual(fixture.delegate.errors.first as? GladiaStreamingError, .unexpectedSessionEnd)
         XCTAssertEqual(fixture.delegate.errors.count, 1)
         XCTAssertTrue(fixture.delegate.results.isEmpty)

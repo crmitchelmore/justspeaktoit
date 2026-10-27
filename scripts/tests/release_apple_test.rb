@@ -19,8 +19,8 @@ class ReleaseAppleTest < Minitest::Test
       @calls << {method: :get, path: path}
       return {'data'=>{'id'=>'store-review','attributes'=>store_contact}} if path == '/v1/appStoreVersions/stable-version/appStoreReviewDetail'
       raise 'Unexpected Store review source' if path.end_with?('/appStoreReviewDetail')
-      return {'data'=>{'id'=>'review','attributes'=>path.include?('6810300888') ? review_contact : stable_contact}} if path.end_with?('/betaAppReviewDetail')
-      return {'data'=>{'attributes'=>{'bundleId'=>bundle_id}}} if path.start_with?('/v1/apps/')
+      return {'data'=>{'type'=>'betaAppReviewDetails','id'=>'review','attributes'=>%w[6810300888 6810302118].any? { |id| path.include?(id) } ? review_contact : stable_contact}} if path.split('?').first.end_with?('/betaAppReviewDetail')
+      return {'data'=>{'type'=>'apps','id'=>path.split('/')[3].split('?').first,'attributes'=>{'bundleId'=>bundle_id}}} if path.start_with?('/v1/apps/')
       # Group access, notification configuration and Apple state are independent.
       state=detail_states.empty? ? beta_state : detail_states.shift
       {'data'=>{'id'=>detail_id,'attributes'=>{'externalBuildState'=>state,'autoNotifyEnabled'=>auto_notify}}}

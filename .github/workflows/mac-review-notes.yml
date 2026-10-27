@@ -1,0 +1,107 @@
+name: Audit or repair Mac review notes
+on:
+  pull_request:
+    paths:
+      - .github/workflows/mac-review-notes.yml
+      - scripts/mac-review-notes.rb
+      - scripts/audit-mac-review-notes.rb
+      - scripts/release-apple.rb
+      - scripts/tests/mac_review_notes_test.rb
+      - scripts/tests/release_apple_test.rb
+      - Config/ReleasePipeline.json
+      - Sources/SpeakCore/Resources/ReleaseTrains.json
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Audit is read-only; repair changes only the selected version's review notes
+        type: choice
+        options: [audit, repair]
+        default: audit
+      version_id:
+        description: Exact stable macOS App Store version resource ID (required for repair)
+        type: string
+        required: false
+      expected_notes_sha256:
+        description: Existing notes SHA256 from audit (required for repair)
+        type: string
+        required: false
+permissions:
+  contents: read
+concurrency:
+  group: mac-review-notes
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test notes-only API behavior without secrets
+        run: |
+          ruby scripts/tests/mac_review_notes_test.rb
+          ruby scripts/tests/release_apple_test.rb
+  notes:
+    if: github.event_name == 'workflow_dispatch'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Restrict repair to protected main
+        env:
+          MODE: ${{ inputs.mode }}
+        shell: bash
+        run: |
+          case "$MODE" in
+            audit) ;;
+            repair) test "$GITHUB_REF" = refs/heads/main ;;
+            *) exit 1 ;;
+          esac
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate notes-only selection before credentials
+        env:
+          MODE: ${{ inputs.mode }}
+          VERSION_ID: ${{ inputs.version_id }}
+          EXPECTED_HASH: ${{ inputs.expected_notes_sha256 }}
+        shell: bash
+        run: |
+          args=(--mode "$MODE")
+          if [ -n "$VERSION_ID" ]; then args+=(--version-id "$VERSION_ID"); fi
+          if [ -n "$EXPECTED_HASH" ]; then args+=(--expected-notes-sha256 "$EXPECTED_HASH"); fi
+          ruby -r./scripts/audit-mac-review-notes -e 'exit AppleRelease::MacReviewNotesCLI.validate(ARGV)' -- "${args[@]}"
+      - name: Read or repair only Mac review notes
+        env:
+          MODE: ${{ inputs.mode }}
+          VERSION_ID: ${{ inputs.version_id }}
+          EXPECTED_HASH: ${{ inputs.expected_notes_sha256 }}
+          KEY_DATA: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_CREDENTIAL_SOURCE: environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          key_directory=$(mktemp -d "$RUNNER_TEMP/mac-review-notes.XXXXXX")
+          key_path="$key_directory/key.p8"
+          cleanup() { rm -f -- "$key_path"; rmdir -- "$key_directory"; }
+          trap cleanup EXIT
+          trap 'exit 1' HUP INT TERM
+          printf '%s' "$KEY_DATA" | base64 --decode > "$key_path"
+          chmod 600 "$key_path"
+          unset KEY_DATA
+          export APP_STORE_CONNECT_KEY_PATH="$key_path"
+          args=(--mode "$MODE")
+          if [ -n "$VERSION_ID" ]; then args+=(--version-id "$VERSION_ID"); fi
+          if [ -n "$EXPECTED_HASH" ]; then args+=(--expected-notes-sha256 "$EXPECTED_HASH"); fi
+          timeout --signal=TERM --kill-after=5s 240s ruby scripts/audit-mac-review-notes.rb "${args[@]}" |
+            tee "$RUNNER_TEMP/mac-review-notes-result.json"
+      - name: Retain only allowlisted audit fields
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mac-review-notes-result
+          path: ${{ runner.temp }}/mac-review-notes-result.json
+          retention-days: 7
+          if-no-files-found: error

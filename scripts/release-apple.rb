@@ -4,6 +4,7 @@
 # availability are different states; none is inferred from xcodebuild success.
 require_relative 'create-ios-app-store-profile'
 require_relative 'apple-release-credentials'
+require_relative 'mac-review-notes'
 require 'time'
 require 'tmpdir'
 require 'digest'
@@ -233,6 +234,7 @@ module AppleRelease
           # the reconciler retries; it must not be reported as public delivery.
           ensure_beta_description
           ensure_beta_review_information
+          MacReviewNotes.new(client: @client, train: @train).ensure_beta if @surface == 'mac-store'
           ensure_automatic_beta_notification(id)
           begin
             @client.post('/v1/betaAppReviewSubmissions', data: {type: 'betaAppReviewSubmissions', relationships: {build: AppleRelease.relationship('builds', id)}})
@@ -315,6 +317,7 @@ module AppleRelease
         puts "#{@surface}: existing submission #{version.dig('attributes','appStoreState')}"
         return
       end
+      MacReviewNotes.new(client: @client, train: @train).ensure_stable(id) if @surface == 'mac-store'
       @client.patch("/v1/appStoreVersions/#{id}", data:{type:'appStoreVersions',id:id,attributes:{releaseType:'AFTER_APPROVAL'},relationships:{build:AppleRelease.relationship('builds',found['id'])}})
       locales=@client.list("/v1/appStoreVersions/#{id}/appStoreVersionLocalizations")
       raise 'App Store localisation missing' if locales.empty?

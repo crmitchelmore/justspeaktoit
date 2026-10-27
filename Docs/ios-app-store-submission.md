@@ -14,7 +14,7 @@ needs it and where the data goes.
 | `NSMicrophoneUsageDescription` | Recording for transcription; discloses that audio reaches the chosen provider |
 | `NSSpeechRecognitionUsageDescription` | Apple speech recognition, including its server-side path |
 | `NSCameraUsageDescription` | `QRScannerCoordinator`, reading the configuration QR code the Mac app shows |
-| `NSLocalNetworkUsageDescription` | Send to Mac, paired with `NSBonjourServices` |
+| `NSLocalNetworkUsageDescription` | Local transport declaration; no shipping Send to Mac sender screen |
 
 Two failure modes to avoid. A string that denies using the capability at all
 ("a linked library requires this declaration") is a rejection. So is one that
@@ -155,8 +155,8 @@ the current provider list. Replace them with something like this:
 > - Microphone and Speech Recognition: recording and transcribing dictation.
 > - Camera: Settings > Transfer from Mac scans a QR code shown by the Mac app to
 >   copy settings across. The camera is used for nothing else.
-> - Local Network: Send to Mac transfers a finished transcript to a paired Mac
->   over Bonjour. Optional, and off until configured.
+> - Local Network: there is no shipping Send to Mac sender or pairing screen on
+>   iOS. Do not claim an available iPhone-to-Mac transfer workflow.
 > - Background audio: recording continues when the screen locks, which is the
 >   point of a dictation app.
 >

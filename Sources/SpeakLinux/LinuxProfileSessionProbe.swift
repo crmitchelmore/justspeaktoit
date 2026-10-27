@@ -35,7 +35,7 @@ enum LinuxProfileSessionProbe {
         let fixture = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: file))
         try require(fixture.version == 1 && fixture.ownerPID == getppid()
             && fixture.display == ProcessInfo.processInfo.environment["DISPLAY"]
-            && fixture.targets.count == 2, "fixture identity does not match its owning parent/display")
+            && fixture.targets.count == 3, "fixture identity does not match its owning parent/display")
         for (name, path) in [("data", fixture.dataDirectory), ("signals", fixture.signalDirectory)] {
             let url = URL(fileURLWithPath: path).standardizedFileURL
             let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
@@ -45,8 +45,8 @@ enum LinuxProfileSessionProbe {
                 && ((attributes[.posixPermissions] as? NSNumber)?.intValue ?? 0) & 0o077 == 0,
                 "fixture folders must be private owned siblings, not symlinks or ambient data")
         }
-        try require(fixture.targets[0].processID != fixture.targets[1].processID
-            && fixture.targets[0].executable != fixture.targets[1].executable
+        try require(Set(fixture.targets.map(\.processID)).count == 3
+            && Set(fixture.targets.map(\.executable)).count == 3
             && fixture.deviceID.hasSuffix(".monitor"), "fixture needs distinct owned apps and its recorded monitor")
         return fixture
     }
@@ -75,7 +75,8 @@ enum LinuxProfileSessionProbe {
                 name: "Owned incompatible rate", matchers: [
                     .init(kind: .linuxExecutablePath, value: fixture.targets[1].executable)
                 ], transcriptionModelID: route.id, polishEnabled: false, transcriptionRouting: .remoteStreaming
-            )
+            ),
+            try unavailableProfile(fixture: fixture)
         ]
         try DesktopDictationProfileStore(directory: directory).save(profiles)
         var settings = LinuxAppController.Settings()
@@ -128,11 +129,16 @@ enum LinuxProfileSessionProbe {
         try signal("ready", in: signals)
         try await manualAndAutomatic(controller, effects: effects, fixture: fixture, index: index, signals: signals)
         try await rateRefusal(controller, effects: effects, fixture: fixture, index: index, signals: signals)
+        try await unavailableRefusal(controller, effects: effects, fixture: fixture, index: index, signals: signals)
         try await ownerLoss(controller, fixture: fixture, index: index, signals: signals)
         let after = effects.snapshot()
         try require(after.transcriptions.count - before.transcriptions.count == 2
             && after.credentialReads == before.credentialReads && after.remoteLiveAttempts == 0,
             "unexpected provider boundary or transcription count")
+        // Manual capture, initial detector, unavailable-case detector, final
+        // owner-loss detector. Refused attempts must add no capture of their own.
+        try require(after.captureRates == [16_000, 16_000, 16_000, 16_000] && after.copiedOutputs == 2,
+                    "unexpected native capture or acknowledged-output inventory")
         let settings = await controller.settings
         try require(settings.model == baseline.model && settings.configuration == baseline.configuration
             && settings.postProcessing == baseline.postProcessing, "profile mutated global transcription policy")
@@ -141,7 +147,8 @@ enum LinuxProfileSessionProbe {
             throw DesktopHostError(message: "The recorded probe evidence was not UTF-8.")
         }
         print("Recorded Linux profiles: manual/local result, automatic/local result and copied rearm, "
-            + "24k/16k refusal before attempt, native guard owner-loss and unchanged defaults passed.")
+            + "24k/16k and missing-model refusals before attempt, "
+            + "native guard owner-loss and unchanged defaults passed.")
         print("Recorded Linux profile effects: " + text)
         try signal("complete", in: signals)
     }

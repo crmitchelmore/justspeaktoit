@@ -260,12 +260,22 @@ if(command === 'allocate' || command === 'prepare') {
         if(allocatedRelease) {
             const allocatedManifest=manifestFor(allocatedRelease.tag_name);
             let complete=true;
+            let invalidAppleUpload=false;
             for(const surface of surfaces) {
                 const asset=allocatedRelease.assets.find(a=>a.name===`${surface}-receipt.json`);
-                if(!asset) {complete=false;break;}
+                if(!asset) {complete=false;continue;}
                 const receipt=JSON.parse(gh('api',`repos/${repo}/releases/assets/${asset.id}`,'-H','Accept: application/octet-stream'));
                 const item=allocatedManifest.surfaces[surface];
-                if(receipt.status !== 'verified' || receipt.source !== allocatedManifest.source || receipt.build !== item.build || receipt.notesHash !== item.notesHash) {complete=false;break;}
+                const matches=receipt.source === allocatedManifest.source && receipt.build === item.build && receipt.notesHash === item.notesHash;
+                if(matches && surface !== 'mac-direct' && receipt.status === 'invalid') invalidAppleUpload=true;
+                if(receipt.status !== 'verified' || !matches) complete=false;
+            }
+            // A frozen rejected binary cannot be repaired by uploading it again.
+            // Keep its evidence; explicit --rebuild allocates a fresh attempt.
+            // Newer successful sources remain eligible and do not lose a slot.
+            if(invalidAppleUpload) {
+                console.log(`${allocatedRelease.tag_name}: invalid Apple upload requires an explicit new build attempt.`);
+                continue;
             }
             if(complete && !allocatedRelease.draft && pointer && !canAdvance(pointer,allocatedManifest)) continue;
         }

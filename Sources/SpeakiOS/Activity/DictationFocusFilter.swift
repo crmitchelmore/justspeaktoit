@@ -6,7 +6,7 @@ import SpeakCore
 public struct DictationFocusFilter: SetFocusFilterIntent {
     public static var title: LocalizedStringResource { "Capture Overrides" }
     public static var description: IntentDescription {
-        IntentDescription("Choose destination, model or language for Action Button, Siri and Shortcuts captures.")
+        IntentDescription("Choose destination, model or language for Action Button and Shortcuts captures.")
     }
 
     @Parameter(title: "Destination")

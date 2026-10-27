@@ -23,6 +23,12 @@ are processed for App Store submission without beta-group assignment. Existing
 tester membership is preserved. Public
 Alpha links live in the README only; the website and Homebrew advertise Stable.
 
+Before a new Alpha beta-review submission, the worker enables Apple's per-build
+[automatic tester notification](https://developer.apple.com/documentation/appstoreconnectapi/buildbetadetailupdaterequest/data-data.dictionary/attributes-data.dictionary)
+and verifies readback. It does not change already-approved historical builds or
+send manual notifications. Group assignment and notification configuration alone
+do not establish availability; the receipt retains Apple's observed beta state.
+
 ### Local Apple release credentials from 1Password
 
 `scripts/release-apple.rb` and `scripts/reconcile-apple-releases.rb` can explicitly

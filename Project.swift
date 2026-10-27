@@ -123,7 +123,8 @@ var iosTestResourceElements: [ResourceFileElement] = [
     "JustSpeakToItWidgetExtension/JustSpeakToItWidgetExtension.entitlements"
 ]
 
-if ProcessInfo.processInfo.environment["SHOW_OPENCLAW_TAB"] != nil {
+let isOpenClawTabEnabled = ProcessInfo.processInfo.environment["SHOW_OPENCLAW_TAB"] != nil
+if isOpenClawTabEnabled {
     iosActiveCompilationConditions.append("SHOW_OPENCLAW_TAB")
 }
 if isIOSKeyboardEnabled {
@@ -384,9 +385,6 @@ var iosAppInfoPlist: [String: Plist.Value] = [
         "Apple's speech recognition turns your recorded voice into text. Apple processes some audio on "
             + "its servers when on-device recognition is unavailable."
     ),
-    "NSLocalNetworkUsageDescription":
-        "Just Speak to It uses your local network when you connect to an OpenClaw gateway on that network.",
-    "NSBonjourServices": [.string(trainValue("transportServiceType"))],
     // The camera is used by QRScannerCoordinator, reached from
     // Settings -> Transfer from Mac, to read the configuration QR code the
     // Mac app displays.
@@ -421,6 +419,12 @@ var iosAppInfoPlist: [String: Plist.Value] = [
         ]
     ]
 ]
+// Only internal builds exposing the gateway can request local-network access.
+// The iPhone app has no Bonjour transcript sender or browser.
+if isOpenClawTabEnabled {
+    iosAppInfoPlist["NSLocalNetworkUsageDescription"] =
+        "Just Speak to It uses your local network when you connect to an OpenClaw gateway on that network."
+}
 let iosAppTarget: Target = .target(
     name: "SpeakiOS",
     destinations: .iOS,

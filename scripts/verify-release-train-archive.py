@@ -24,6 +24,8 @@ if surface == 'mac-direct' and info.get('SUFeedURL') != config['feedURL']:
     raise SystemExit('Wrong Sparkle release train')
 if surface == 'mac-store' and any(key.startswith('SU') for key in info):
     raise SystemExit('App Store archive contains Sparkle configuration')
+if surface == 'ios' and any(key in info for key in ['NSLocalNetworkUsageDescription', 'NSBonjourServices']):
+    raise SystemExit('Public iOS archive declares an unavailable local-network feature')
 def signed_entitlements(bundle):
     result = subprocess.run(['codesign', '-d', '--entitlements', ':-', str(bundle)],
                             check=True, capture_output=True)

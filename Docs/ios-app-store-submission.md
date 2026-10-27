@@ -14,7 +14,11 @@ needs it and where the data goes.
 | `NSMicrophoneUsageDescription` | Recording for transcription; discloses that audio reaches the chosen provider |
 | `NSSpeechRecognitionUsageDescription` | Apple speech recognition, including its server-side path |
 | `NSCameraUsageDescription` | `QRScannerCoordinator`, reading the configuration QR code the Mac app shows |
-| `NSLocalNetworkUsageDescription` | Local transport declaration; no shipping Send to Mac sender screen |
+| `NSLocalNetworkUsageDescription` | Only internal `SHOW_OPENCLAW_TAB` builds connecting to a local OpenClaw gateway; omitted from public builds |
+
+The iPhone app has no Bonjour transcript sender or browser, so its generated
+Info.plist does not declare `NSBonjourServices`. Public archive verification
+rejects both unused local-network declarations; the Mac receiver is separate.
 
 Two failure modes to avoid. A string that denies using the capability at all
 ("a linked library requires this declaration") is a rejection. So is one that

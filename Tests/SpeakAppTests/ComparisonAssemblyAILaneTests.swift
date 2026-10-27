@@ -76,7 +76,7 @@ final class ComparisonAssemblyAILaneTests: XCTestCase {
 
     private func stop(_ fixture: Fixture) -> (task: Task<Void, Never>, done: XCTestExpectation) {
         let done = expectation(description: "comparison finish returned")
-        let cleanedUp = expectation(description: "owned comparison finish exited")
+        let cleanedUp = XCTestExpectation(description: "owned comparison finish exited")
         let task = Task { @MainActor in
             defer { cleanedUp.fulfill() }
             await fixture.lane.finish(stoppedAt: Date())

@@ -177,6 +177,7 @@ typedef struct { JSTIVoiceCredentialCallback callback; void *context; } Handler;
 static void apply_handler(gpointer data) {
     Handler *handler = data;
     if (active != NULL) {
+        retire_view(active);
         active->callback = handler->callback; active->context = handler->context;
         request_view(active);
     }
@@ -347,11 +348,28 @@ static gboolean visibility_self_test(void) {
     apply_handler(&handler);
     passed = observed.opens == 7 && observed.valid && passed;
 
+    // Replacing an owner must retire its loading request through that owner,
+    // then fence its late delivery from the replacement view.
+    gchar *old_loading = g_strdup(form->view_token);
+    gint old_cancels = observed.cancels;
+    Observed replacement = {.valid = TRUE};
+    Handler replacement_handler = {.callback = fixture_callback, .context = &replacement};
+    apply_handler(&replacement_handler);
+    passed = observed.cancels == old_cancels + 1 && observed.opens == 7 &&
+        replacement.opens == 1 && replacement.cancels == 0 &&
+        !same_uuid(form->view_token, old_loading) && form->loading && passed;
+    view.token = old_loading; apply_delivery(&view);
+    passed = !form->ready && form->loading && passed;
+    view.token = form->view_token; apply_delivery(&view);
+    passed = form->ready && !form->loading && replacement.valid && passed;
+    apply_handler(&handler);
+    passed = observed.opens == 8 && replacement.cancels == 0 && observed.valid && passed;
+
     clear(NULL);
     gtk_window_destroy(GTK_WINDOW(window));
     g_object_unref(window); g_object_unref(group);
     active = original;
-    g_free(epoch); g_free(pending); g_free(pending_epoch); g_free(retired);
+    g_free(epoch); g_free(pending); g_free(pending_epoch); g_free(retired); g_free(old_loading);
     return passed;
 }
 int32_t jsti_voice_credentials_self_test(char *error, size_t capacity) {

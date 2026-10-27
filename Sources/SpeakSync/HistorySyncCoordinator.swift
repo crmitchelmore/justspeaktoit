@@ -115,11 +115,11 @@ public final class HistorySyncCoordinator {
         // Set before the first suspension so a re-entrant trigger queues a
         // follow-up instead of starting a concurrent pass.
         await set(\.isSyncing, true, .isSyncing, isolation: isolation)
-        await set(\.error, nil, .error, isolation: isolation)
 
         var passes = 0
         repeat {
             followUpRequested = false
+            await set(\.error, nil, .error, isolation: isolation)
             await runReconciliationPass(store: store, isolation: isolation)
             passes += 1
         } while followUpRequested && isSyncEnabled && passes < Self.maxCoalescedPasses

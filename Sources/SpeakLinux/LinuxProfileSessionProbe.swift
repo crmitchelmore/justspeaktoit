@@ -150,6 +150,7 @@ enum LinuxProfileSessionProbe {
         _ controller: LinuxAppController, effects: LinuxProfileProbeEffects, fixture: Fixture, index: Int, signals: URL
     ) async throws {
         try await waitFor("manual", in: signals)
+        print("Recorded Linux profile stage: manual begin.")
         let target = try capture(fixture.targets[0])
         let profile = await controller.captureProfile(modelIndex: index, executablePath: target.executablePath)
         try require(profile.canRecord && profile.profileName == profileName && profile.modelIdentifier == modelID
@@ -166,9 +167,11 @@ enum LinuxProfileSessionProbe {
         )
         try await verifyRecords(controller: controller, count: 1)
         try await wait("manual clipboard acknowledgment") { effects.snapshot().copiedOutputs == 1 }
+        print("Recorded Linux profile stage: manual acknowledged.")
         try signal("manual-complete", in: signals)
 
         try await waitFor("automatic", in: signals)
+        print("Recorded Linux profile stage: automatic begin.")
         let automaticTarget = try capture(fixture.targets[0])
         await arm(controller, index: index, fixture: fixture, target: automaticTarget)
         try await wait("armed native detector") { await controller.handsFreeState() == .armed }
@@ -180,6 +183,7 @@ enum LinuxProfileSessionProbe {
                 && state == .armed
         }
         try await verifyRecords(controller: controller, count: 2)
+        print("Recorded Linux profile stage: automatic acknowledged.")
         try signal("automatic-complete", in: signals)
     }
 
@@ -187,6 +191,7 @@ enum LinuxProfileSessionProbe {
         _ controller: LinuxAppController, effects: LinuxProfileProbeEffects, fixture: Fixture, index: Int, signals: URL
     ) async throws {
         try await waitFor("rate", in: signals)
+        print("Recorded Linux profile stage: rate refusal begin.")
         let different = try capture(fixture.targets[1])
         let incompatible = await controller.captureProfile(modelIndex: index, executablePath: different.executablePath)
         try require(incompatible.canRecord && DesktopLiveTranscription.route(
@@ -196,7 +201,11 @@ enum LinuxProfileSessionProbe {
         try signal("rate-capture-ready", in: signals)
         try await wait("incompatible rate disarm") { await controller.handsFreeState() == .off }
         let rejected = effects.snapshot()
-        try require(jsti_window_hands_free_guard_ready() != 0
+        let state = String(describing: await controller.handsFreeState())
+        let guardReady = jsti_window_hands_free_guard_ready() != 0
+        try rateDiagnostic(prior: prior, rejected: rejected, expected: fixture.targets[1], profile: incompatible,
+                           nativeState: (guardReady, state))
+        try require(guardReady
             && rejected.contexts.last == fixture.targets[1].executable
             && rejected.captureRates == prior.captureRates
             && rejected.credentialReads == prior.credentialReads
@@ -204,6 +213,7 @@ enum LinuxProfileSessionProbe {
             && rejected.transcriptions == prior.transcriptions && rejected.copiedOutputs == prior.copiedOutputs,
             "rate refusal reached credentials, capture, provider or output")
         try await verifyRecords(controller: controller, count: 2)
+        print("Recorded Linux profile stage: rate refusal acknowledged.")
         try signal("rate-complete", in: signals)
     }
 
@@ -211,6 +221,7 @@ enum LinuxProfileSessionProbe {
         _ controller: LinuxAppController, fixture: Fixture, index: Int, signals: URL
     ) async throws {
         try await waitFor("owner-loss", in: signals)
+        print("Recorded Linux profile stage: owner loss begin.")
         await arm(controller, index: index, fixture: fixture, target: try capture(fixture.targets[0]))
         try await wait("rearmed before owned service loss") { await controller.handsFreeState() == .armed }
         try signal("owner-loss-ready", in: signals)
@@ -219,5 +230,47 @@ enum LinuxProfileSessionProbe {
             return jsti_window_hands_free_guard_ready() == 0 && state == .off
         }
         try await verifyRecords(controller: controller, count: 2)
+        print("Recorded Linux profile stage: owner loss acknowledged.")
+    }
+}
+
+private extension LinuxProfileSessionProbe {
+    static func rateDiagnostic(
+        prior: LinuxProfileProbeEffects.Evidence, rejected: LinuxProfileProbeEffects.Evidence,
+        expected: Target, profile: DesktopProfileSession, nativeState: (ready: Bool, state: String)
+    ) throws {
+        let predicates = [
+            "guardReady": nativeState.ready, "lastContextIsOwnedB": rejected.contexts.last == expected.executable,
+            "captureRatesUnchanged": rejected.captureRates == prior.captureRates,
+            "credentialReadsUnchanged": rejected.credentialReads == prior.credentialReads,
+            "remoteLiveAttemptsUnchanged": rejected.remoteLiveAttempts == prior.remoteLiveAttempts,
+            "transcriptionsUnchanged": rejected.transcriptions == prior.transcriptions,
+            "copiedOutputsUnchanged": rejected.copiedOutputs == prior.copiedOutputs
+        ]
+        let observation: [String: Any] = [
+            "version": 1, "stage": "rate-refusal", "predicates": predicates, "actualState": nativeState.state,
+            "capturedProfileIsOwnedB": profile.profileName == "Owned incompatible rate",
+            "capturedProfileCanRecord": profile.canRecord,
+            "capturedProfileRate": DesktopLiveTranscription.route(forID: profile.modelIdentifier)?.sampleRate ?? 0,
+            "expectedDetectorRate": 16_000, "desiredRate": 24_000,
+            "lastObservedCaptureRateBefore": prior.captureRates.last ?? 0,
+            "contextCountBefore": prior.contexts.count, "contextCountAfter": rejected.contexts.count,
+            "lastContextWasOwnedBBefore": prior.contexts.last == expected.executable,
+            "captureRateCountBefore": prior.captureRates.count, "captureRateCountAfter": rejected.captureRates.count,
+            "captureRatesBefore": Array(prior.captureRates.prefix(8)),
+            "captureRatesAfter": Array(rejected.captureRates.prefix(8)),
+            "credentialReadsBefore": prior.credentialReads, "credentialReadsAfter": rejected.credentialReads,
+            "remoteLiveAttemptsBefore": prior.remoteLiveAttempts,
+            "remoteLiveAttemptsAfter": rejected.remoteLiveAttempts,
+            "transcriptionCountBefore": prior.transcriptions.count,
+            "transcriptionCountAfter": rejected.transcriptions.count,
+            "copiedOutputsBefore": prior.copiedOutputs, "copiedOutputsAfter": rejected.copiedOutputs,
+            "nativeContextErrorsObservable": false
+        ]
+        let data = try JSONSerialization.data(withJSONObject: observation, options: .sortedKeys)
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw DesktopHostError(message: "The recorded rate observation was not UTF-8.")
+        }
+        print("Recorded Linux profile rate observation: " + text)
     }
 }

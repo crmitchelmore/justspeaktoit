@@ -109,67 +109,8 @@ final class OpenRouterIOSAudioPlayback: NSObject, AVAudioPlayerDelegate {
     }
 
     nonisolated static func interruptsPlayback(_ notice: Notification) -> Bool {
-        switch notice.name {
-        case AVAudioSession.interruptionNotification:
-            (notice.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt)
-                == AVAudioSession.InterruptionType.began.rawValue
-        case AVAudioSession.routeChangeNotification:
-            (notice.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt)
-                == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue
-        default:
-            true
-        }
+        OpenRouterIOSAudioSessionLease.interruptsPlayback(notice)
     }
 }
 
-/// AVAudioSession does not expose its prior active state, so a borrower never deactivates it.
-@MainActor
-private struct OpenRouterIOSAudioSessionLease {
-    struct Configuration: Equatable {
-        let category: AVAudioSession.Category
-        let mode: AVAudioSession.Mode
-        let options: AVAudioSession.CategoryOptions
-
-        init(session: AVAudioSession) {
-            category = session.category
-            mode = session.mode
-            options = session.categoryOptions
-        }
-
-        init(
-            category: AVAudioSession.Category,
-            mode: AVAudioSession.Mode,
-            options: AVAudioSession.CategoryOptions
-        ) {
-            self.category = category
-            self.mode = mode
-            self.options = options
-        }
-    }
-
-    let previous: Configuration
-    let installed: Configuration
-
-    static func acquire() throws -> Self? {
-        let session = AVAudioSession.sharedInstance()
-        let previous = Configuration(session: session)
-        switch previous.category {
-        case .playAndRecord, .multiRoute:
-            // Preserve microphone/session configuration owned by the recording workflow.
-            return nil
-        case .record:
-            throw OpenRouterIOSVoiceOutputError.recordingInProgress
-        default:
-            let installed = Configuration(category: .playback, mode: .spokenAudio, options: [.mixWithOthers])
-            try session.setCategory(installed.category, mode: installed.mode, options: installed.options)
-            return Self(previous: previous, installed: installed)
-        }
-    }
-
-    func restoreIfUnchanged() {
-        let session = AVAudioSession.sharedInstance()
-        guard Configuration(session: session) == installed else { return }
-        try? session.setCategory(previous.category, mode: previous.mode, options: previous.options)
-    }
-}
 #endif

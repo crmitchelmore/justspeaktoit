@@ -16,6 +16,17 @@ public final class VoiceOutputRouter: ObservableObject {
         self.deepgram = DeepgramTTSClient(session: session)
         self.soniox = SonioxIOSVoiceOutputClient(session: session)
         self.openRouter = OpenRouterIOSVoiceOutputClient(session: session)
+        bindSpeaking()
+    }
+
+    init(session: URLSession, progressiveSpeech: OpenRouterProgressiveSpeechOption) {
+        self.deepgram = DeepgramTTSClient(session: session)
+        self.soniox = SonioxIOSVoiceOutputClient(session: session)
+        self.openRouter = OpenRouterIOSVoiceOutputClient(session: session, progressiveSpeech: progressiveSpeech)
+        bindSpeaking()
+    }
+
+    private func bindSpeaking() {
         deepgram.$isSpeaking
             .combineLatest(soniox.$isSpeaking, openRouter.$isSpeaking)
             .map { $0 || $1 || $2 }
@@ -50,6 +61,7 @@ public final class VoiceOutputRouter: ObservableObject {
         sonioxAPIKey: String,
         openRouterAPIKey: String
     ) async throws {
+        try Task.checkCancellation()
         stop()
         switch provider {
         case .deepgram:

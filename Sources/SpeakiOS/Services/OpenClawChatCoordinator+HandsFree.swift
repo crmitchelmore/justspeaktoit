@@ -8,63 +8,27 @@ extension OpenClawChatCoordinator {
     // MARK: - Private
 
     func setupClientCallbacks() {
-        client.onConnectionStateChanged = { [weak self] state in
-            Task { @MainActor in
-                self?.connectionState = state
-            }
-        }
+        let epoch = connectionEpoch
+        dependencies.installCallbacks(.init(
+            connection: { [weak self] state in self?.receiveConnectionState(state, epoch: epoch) },
+            delta: { [weak self] runID, text in self?.receiveDelta(runID: runID, text: text) },
+            final: { [weak self] runID, text in self?.receiveFinal(runID: runID, text: text) },
+            error: { [weak self] runID, message in self?.receiveError(runID: runID, message: message) }
+        ))
+    }
 
-        client.onChatDelta = { [weak self] runId, delta in
-            Task { @MainActor in
-                guard let self, self.currentRunId == runId else { return }
-                let previous = self.accumulatedResponse
-
-                if self.isNewAssistantSegment(delta, comparedTo: previous) {
-                    self.persistAssistantMessageIfNeeded(previous)
-                }
-
-                self.accumulatedResponse = delta
-                self.streamingResponse = delta
-            }
-        }
-
-        client.onChatFinal = { [weak self] runId, finalMessage in
-            Task { @MainActor in
-                guard let self, self.currentRunId == runId else { return }
-
-                let responseText = finalMessage.isEmpty ? self.accumulatedResponse : finalMessage
-                self.currentRunId = nil
-                self.isProcessing = false
-                self.streamingResponse = ""
-                self.accumulatedResponse = ""
-                self.persistAssistantMessageIfNeeded(responseText)
-                let responseBatch = self.pendingAssistantResponses
-                self.pendingAssistantResponses = []
-
-                // Update Live Activity status
-                self.updateLiveActivityState()
-
-                // Summarise and speak if enabled
-                if self.settings.ttsEnabled && self.hasSelectedVoiceOutputKey {
-                    await self.speakAssistantResponses(responseBatch)
-                }
-                self.isBufferingForTTS = false
-
-                await self.maybeResumeConversationListening()
-            }
-        }
-
-        client.onChatError = { [weak self] runId, errorMessage in
-            Task { @MainActor in
-                guard self?.currentRunId == runId else { return }
-                self?.currentRunId = nil
-                self?.error = OpenClawError.serverError(errorMessage)
-                self?.isProcessing = false
-                self?.streamingResponse = ""
-                self?.accumulatedResponse = ""
-                self?.pendingAssistantResponses = []
-                self?.isBufferingForTTS = false
-            }
+    func receiveConnectionState(_ state: OpenClawClient.ConnectionState, epoch: UUID) {
+        guard epoch == connectionEpoch else { return }
+        connectionState = state
+        switch state {
+        case .disconnected:
+            invalidateChatOperation()
+        case .error(let message):
+            let hadOperation = ownedSend != nil || isRecording
+            invalidateChatOperation()
+            if hadOperation { error = OpenClawError.serverError(message) }
+        case .connecting, .connected:
+            break
         }
     }
 
@@ -76,22 +40,13 @@ extension OpenClawChatCoordinator {
         }
     }
 
-    func ensureConversationReady() async throws -> OpenClawClient.Conversation {
-        let conversation: OpenClawClient.Conversation
-        if let currentConversation {
-            conversation = currentConversation
-        } else {
-            let newConversation = store.createConversation()
-            currentConversation = newConversation
-            conversation = newConversation
-        }
-
-        try await waitForConnection()
-        return conversation
-    }
-
     func waitForConnection() async throws {
-        guard settings.isConfigured else { throw OpenClawError.notConnected }
+        try Task.checkCancellation()
+        if let wait = dependencies.waitForConnection {
+            try await wait()
+            return
+        }
+        guard dependencies.isConfigured() else { throw OpenClawError.notConnected }
         if case .connected = connectionState { return }
 
         var didInitiateConnect = false
@@ -104,6 +59,7 @@ extension OpenClawChatCoordinator {
 
         let deadline = Date().addingTimeInterval(5)
         while Date() < deadline {
+            try Task.checkCancellation()
             switch connectionState {
             case .connected:
                 return
@@ -117,14 +73,15 @@ extension OpenClawChatCoordinator {
             case .connecting:
                 break
             }
-            try? await Task.sleep(for: .milliseconds(50))
+            try await Task.sleep(for: .milliseconds(50))
         }
 
         throw OpenClawError.notConnected
     }
 
     func maybeResumeConversationListening() async {
-        guard settings.conversationModeEnabled, settings.autoResumeListening else { return }
+        let policy = dependencies.conversationPolicy()
+        guard policy.conversationModeEnabled, policy.autoResumeListening else { return }
         guard !isRecording, !isProcessing, !isSpeaking else { return }
         do {
             try await startVoiceInput()
@@ -134,7 +91,7 @@ extension OpenClawChatCoordinator {
         }
     }
 
-    private func isNewAssistantSegment(_ incoming: String, comparedTo previous: String) -> Bool {
+    func isNewAssistantSegment(_ incoming: String, comparedTo previous: String) -> Bool {
         guard !previous.isEmpty, !incoming.isEmpty else { return false }
 
         if incoming.hasPrefix(previous) {
@@ -147,30 +104,16 @@ extension OpenClawChatCoordinator {
         return true
     }
 
-    private func persistAssistantMessageIfNeeded(_ text: String) {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, let conv = currentConversation else { return }
-
-        if let existingConversation = store.conversations.first(where: { $0.id == conv.id }),
-           existingConversation.messages.last?.role == "assistant",
-           existingConversation.messages.last?.content == trimmed {
-            return
-        }
-
-        let assistantMessage = OpenClawClient.ChatMessage(role: "assistant", content: trimmed)
-        store.addMessage(assistantMessage, to: conv.id)
-        currentConversation = store.conversations.first { $0.id == conv.id }
-        pendingAssistantResponses.append(trimmed)
-    }
-
     func shouldTriggerKeywordAcknowledge(for transcript: String) -> Bool {
-        guard settings.conversationModeEnabled,
-              settings.keywordAcknowledgeEnabled,
+        let policy = dependencies.conversationPolicy()
+        guard policy.conversationModeEnabled,
+              policy.keywordAcknowledgeEnabled,
               !awaitingKeywordAcknowledge else {
             return false
         }
 
-        let keyword = settings.keywordAcknowledgePhrase.trimmingCharacters(in: .whitespacesAndNewlines)
+        let keyword = dependencies.conversationPolicy().keywordAcknowledgePhrase
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !keyword.isEmpty else { return false }
 
         let trailingCharacters = CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters)
@@ -195,7 +138,8 @@ extension OpenClawChatCoordinator {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return trimmed }
 
-        let keyword = settings.keywordAcknowledgePhrase.trimmingCharacters(in: .whitespacesAndNewlines)
+        let keyword = dependencies.conversationPolicy().keywordAcknowledgePhrase
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !keyword.isEmpty else { return trimmed }
 
         let regex: NSRegularExpression
@@ -263,7 +207,8 @@ extension OpenClawChatCoordinator {
         commandCenter.pauseCommand.isEnabled = false
     }
 
-    private func speakAssistantResponses(_ responses: [String]) async {
+    func speakAssistantResponses(_ responses: [String], owner token: UUID) async {
+        guard ownsSend(token), !Task.isCancelled else { return }
         let nonEmpty = responses.map {
             $0.trimmingCharacters(in: .whitespacesAndNewlines)
         }.filter { !$0.isEmpty }
@@ -273,21 +218,23 @@ extension OpenClawChatCoordinator {
            settings.summariseResponses,
            !settings.lowLatencySpeech,
            appSettings.hasOpenRouterKey {
-            await summariseAndSpeak(nonEmpty.joined(separator: "\n\n"), allowSummary: true)
+            await summariseAndSpeak(nonEmpty.joined(separator: "\n\n"), allowSummary: true, owner: token)
             return
         }
 
         if nonEmpty.count == 1 {
-            await summariseAndSpeak(nonEmpty[0])
+            await summariseAndSpeak(nonEmpty[0], owner: token)
             return
         }
 
         for response in nonEmpty {
-            await summariseAndSpeak(response, allowSummary: false)
+            guard ownsSend(token), !Task.isCancelled else { return }
+            await summariseAndSpeak(response, allowSummary: false, owner: token)
         }
     }
 
-    func summariseAndSpeak(_ text: String, allowSummary: Bool = true) async {
+    func summariseAndSpeak(_ text: String, allowSummary: Bool = true, owner token: UUID) async {
+        guard ownsSend(token), !Task.isCancelled else { return }
         do {
             var spokenText = text
 
@@ -302,13 +249,17 @@ extension OpenClawChatCoordinator {
                         apiKey: appSettings.openRouterAPIKey
                     )
                     logger.info("Summarised response (\(text.count)→\(spokenText.count) chars)")
+                } catch is CancellationError {
+                    return
                 } catch {
+                    guard ownsSend(token), !Task.isCancelled else { return }
                     // Summarisation failed — fall back to speaking the original text
                     logger.warning("Summarisation failed, speaking raw: \(error.localizedDescription)")
                     spokenText = text
                 }
             }
 
+            guard ownsSend(token), !Task.isCancelled else { return }
             try await ttsClient.speak(
                 text: spokenText,
                 provider: settings.ttsProvider,
@@ -323,6 +274,7 @@ extension OpenClawChatCoordinator {
                 openRouterAPIKey: appSettings.openRouterAPIKey
             )
         } catch {
+            guard ownsSend(token), !Task.isCancelled else { return }
             logger.error("TTS failed: \(error.localizedDescription)")
             if settings.ttsProvider == .openrouter, !(error is CancellationError) {
                 self.error = error

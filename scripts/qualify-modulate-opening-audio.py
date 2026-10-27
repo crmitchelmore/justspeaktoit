@@ -29,6 +29,10 @@ REQUIRED_CASES = (
 _SPEC = importlib.util.spec_from_file_location("core_journey_gate", Path(__file__).with_name("run-core-journey-e2e.py"))
 COVERAGE = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(COVERAGE)
+_SOURCE_SPEC = importlib.util.spec_from_file_location(
+    "qualification_source_state", Path(__file__).with_name("qualification_source_state.py"))
+SOURCE_STATE = importlib.util.module_from_spec(_SOURCE_SPEC)
+_SOURCE_SPEC.loader.exec_module(SOURCE_STATE)
 
 
 def qualification(output):
@@ -129,6 +133,8 @@ def main():
     if not command or not 1 <= args.test_timeout <= 300 or os.name != "posix":
         parser.error("requires a POSIX test command and timeout between 1 and 300 seconds")
     args.output_dir.mkdir(parents=True, exist_ok=False)
+    source_before = {"phase": "before-harness-admission-and-command", "collectionComplete": False,
+                     "collectionErrors": ["not-collected"]}
     lock_snapshot = None
 
     def interrupted(number, _frame):
@@ -144,6 +150,7 @@ def main():
     errors = []
     with (args.output_dir / "peer.log").open("w") as log:
         try:
+            source_before = SOURCE_STATE.capture(Path.cwd(), "before-harness-admission-and-command", args.output_dir)
             lock_snapshot = admit_portable_lock(Path.cwd())
             peer = subprocess.Popen([
                 sys.executable, "-B", str(Path(__file__).with_name("modulate-opening-audio-probe.py")),
@@ -193,12 +200,18 @@ def main():
                 reader.join(timeout=3)
                 if reader.is_alive():
                     errors.append("Owned peer output reader did not terminate")
+    source_before_restore = SOURCE_STATE.capture(
+        Path.cwd(), "after-owned-process-cleanup-before-lock-restore", args.output_dir,
+        command_outcome=status)
     restored_lockfile = False
     if child is not None:
         try:
             restored_lockfile = restore_deleted_portable_lock(lock_snapshot)
         except (OSError, subprocess.CalledProcessError) as error:
             errors.append(f"Owned portable lockfile restoration failed: {type(error).__name__}")
+    source_after = SOURCE_STATE.capture(
+        Path.cwd(), "after-lock-restore-before-qualification-receipt", args.output_dir,
+        command_outcome=status)
     test_log_path = args.output_dir / "tests.log"
     output = test_log_path.read_text(errors="replace") if test_log_path.exists() else ""
     print(output, end="", flush=True)
@@ -213,7 +226,9 @@ def main():
         errors.append("Could not record qualification source revision")
         if exit_code == 0:
             exit_code = 1
-    receipt = {"restoredPortableLockfile": restored_lockfile, "ownedCommandPID": child.pid if child else None,
+    receipt = {"sourceStateEvidence": {"before": source_before, "beforeLockRestore": source_before_restore,
+                                       "after": source_after},
+               "restoredPortableLockfile": restored_lockfile, "ownedCommandPID": child.pid if child else None,
                "ownedPeerPID": peer.pid if peer else None, "sourceRevision": revision, "sourceDirty": dirty, "suite": SUITE, "requiredCases": REQUIRED_CASES, "caseResults": results,
                "counts": counts, "errors": errors, "commandExitCode": status, "qualificationExitCode": exit_code}
     (args.output_dir / "qualification.json").write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")

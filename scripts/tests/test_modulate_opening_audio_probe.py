@@ -351,6 +351,60 @@ class OwnedRunnerTests(unittest.TestCase):
                 self.assertFalse(RUNNER.restore_deleted_portable_lock(snapshot))
                 self.assertEqual(target.read_bytes(), original)
 
+    def test_runner_records_before_command_pre_restore_and_after_without_changing_test_exit_semantics(self):
+        runner = Path(__file__).resolve().parents[1] / "qualify-modulate-opening-audio.py"
+        with tempfile.TemporaryDirectory(prefix="modulate-source-state-") as directory:
+            for scenario, expected in (("deleted-lock", 0), ("initially-missing-lock", 0),
+                                       ("source-change", 0), ("failed-source-change", 7)):
+                with self.subTest(scenario=scenario):
+                    root = Path(directory) / scenario
+                    root.mkdir()
+                    (root / "Sources").mkdir()
+                    (root / "Sources/fixture.swift").write_text("let value = 1\n")
+                    lock = root / "Package.resolved"
+                    lock.write_text('{"pins": []}\n')
+                    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+                    subprocess.run(["git", "add", "Sources", "Package.resolved"], cwd=root, check=True)
+                    subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
+                                    "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                                    "commit", "-qm", "fixture"], cwd=root, check=True)
+                    if scenario == "initially-missing-lock":
+                        lock.unlink()
+                    mutation = ("Path('Package.resolved').unlink(); " if scenario == "deleted-lock" else
+                                "Path('Sources/fixture.swift').write_text('let value = 2\\n'); "
+                                if "source-change" in scenario else "")
+                    code = f"from pathlib import Path; import sys; {mutation}print({VALID_OUTPUT!r}); sys.exit({expected})"
+                    output = Path(directory) / (scenario + "-receipt")
+                    result = subprocess.run([sys.executable, "-B", str(runner), "--output-dir", str(output),
+                                             "--", sys.executable, "-B", "-c", code], cwd=root,
+                                            env={**os.environ, "SPEAK_PORTABLE_CORE": "1"},
+                                            capture_output=True, text=True, timeout=20)
+                    self.assertEqual(result.returncode, expected, result.stderr)
+                    receipt = json.loads((output / "qualification.json").read_text())
+                    evidence = receipt["sourceStateEvidence"]
+                    before, pre_restore, after = (evidence[name] for name in ("before", "beforeLockRestore", "after"))
+                    self.assertEqual(before["head"], receipt["sourceRevision"])
+                    self.assertEqual(before["head"], after["head"])
+                    self.assertTrue(all(item["collectionComplete"] for item in (before, pre_restore, after)))
+                    self.assertLess(before["finishedMonotonicNS"], pre_restore["startedMonotonicNS"])
+                    self.assertLess(pre_restore["finishedMonotonicNS"], after["startedMonotonicNS"])
+                    self.assertEqual(receipt["sourceDirty"], after["gitDirty"])
+                    self.assertEqual(receipt["qualificationExitCode"], expected)
+                    if scenario == "deleted-lock":
+                        self.assertTrue(before["packageResolved"]["matchesHEADRawBytes"])
+                        self.assertEqual(pre_restore["packageResolved"]["kind"], "missing")
+                        self.assertTrue(after["packageResolved"]["matchesHEADRawBytes"])
+                        self.assertTrue(receipt["restoredPortableLockfile"])
+                    elif scenario == "initially-missing-lock":
+                        self.assertEqual(before["packageResolved"]["kind"], "missing")
+                        self.assertEqual(after["packageResolved"]["kind"], "missing")
+                        self.assertFalse(receipt["restoredPortableLockfile"])
+                    else:
+                        self.assertFalse(before["gitDirty"])
+                        self.assertTrue(after["gitDirty"])
+                        self.assertEqual(after["records"][0]["path"], "Sources/fixture.swift")
+                        self.assertEqual(after["commandOutcome"], expected)
+
 
 if __name__ == "__main__":
     unittest.main()

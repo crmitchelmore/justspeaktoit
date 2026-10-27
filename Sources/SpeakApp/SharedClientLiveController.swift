@@ -1,13 +1,8 @@
 import AVFoundation
 import Foundation
 import SpeakCore
-
-/// macOS capture/controller path for providers implemented by a shared
-/// `StreamingTranscriptionClient`.
-///
-/// Platform-specific code owns microphone capture and PCM conversion; the
-/// provider transport and event parsing stay in SpeakCore and are shared with
-/// iOS.
+/// macOS capture/PCM conversion for shared StreamingTranscriptionClient providers.
+/// Provider transport and parsing stay in SpeakCore, shared with iOS.
 @MainActor
 final class SharedClientLiveController: NSObject, LiveTranscriptionController {
   weak var delegate: LiveTranscriptionSessionDelegate?
@@ -39,6 +34,8 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
   private let audioProcessor = SharedClientAudioProcessor()
   // Injectable system boundaries for controller lifecycle tests.
   var clientFactory: (() -> StreamingTranscriptionClient)?
+  var configuredClientFactory: (@MainActor (LiveTranscriptionRoute, String?, LiveClientOptions) async throws
+    -> StreamingTranscriptionClient)?
   var startCaptureAudio: (() async throws -> Void)?
   var enqueueClientUpdate: @Sendable (@escaping @MainActor @Sendable () -> Void) -> Void = { update in
     Task { @MainActor in update() }
@@ -72,7 +69,11 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
       throw LiveTranscriptionClientError.unknownModel(currentModel ?? "")
     }
 
-    let client = try await makeClient(route: route, keyIdentifier: keyIdentifier)
+    let options = appSettings.liveClientOptions
+    let language = currentLanguage
+    let client = try await makeClient(
+      route: route, keyIdentifier: keyIdentifier, language: language, options: options
+    )
     if startCaptureAudio == nil {
       activeInputSession = await audioDeviceManager.beginUsingPreferredInput()
     }
@@ -166,21 +167,6 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     }
     releaseRunOwnership()
     await endActiveInputSession()
-  }
-
-  private func makeClient(route: LiveTranscriptionRoute, keyIdentifier: String) async throws
-    -> StreamingTranscriptionClient {
-    if let clientFactory { return clientFactory() }
-    let permission = await permissionsManager.ensureGranted(.microphone)
-    try Task.checkCancellation()
-    guard permission.isGranted else { throw TranscriptionManagerError.microphonePermissionMissing }
-    let apiKey = try await loadAPIKey(identifier: keyIdentifier)
-    try Task.checkCancellation()
-    guard let created = LiveTranscriptionClientFactory.makeClient(
-      for: route, apiKey: apiKey, language: currentLanguage, options: appSettings.liveClientOptions,
-      azureEndpoint: UserDefaults.standard.string(forKey: AzureSpeechConfiguration.endpointDefaultsKey) ?? ""
-    ) else { throw LiveTranscriptionClientError.providerNotAvailable(route.provider) }
-    return created
   }
 
   private func loadAPIKey(identifier: String) async throws -> String {
@@ -283,6 +269,22 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
 }
 
 private extension SharedClientLiveController {
+  private func makeClient(
+    route: LiveTranscriptionRoute, keyIdentifier: String, language: String?, options: LiveClientOptions
+  ) async throws -> StreamingTranscriptionClient {
+    if let clientFactory { return clientFactory() }
+    if let configuredClientFactory { return try await configuredClientFactory(route, language, options) }
+    let permission = await permissionsManager.ensureGranted(.microphone)
+    try Task.checkCancellation()
+    guard permission.isGranted else { throw TranscriptionManagerError.microphonePermissionMissing }
+    let apiKey = try await loadAPIKey(identifier: keyIdentifier)
+    try Task.checkCancellation()
+    guard let created = LiveTranscriptionClientFactory.makeClient(
+      for: route, apiKey: apiKey, language: language, options: options,
+      azureEndpoint: UserDefaults.standard.string(forKey: AzureSpeechConfiguration.endpointDefaultsKey) ?? ""
+    ) else { throw LiveTranscriptionClientError.providerNotAvailable(route.provider) }
+    return created
+  }
   @MainActor
   final class DeliveryOwner {
     weak var delegate: LiveTranscriptionSessionDelegate?
@@ -348,7 +350,6 @@ private extension SharedClientLiveController {
     guard let original = owner.delegate else { return !owner.hadDelegate && delegate == nil }
     return delegate === original
   }
-
 }
 
 // MARK: - Client callbacks

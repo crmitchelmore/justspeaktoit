@@ -110,7 +110,7 @@ public enum LiveTranscriptionClientFactory {
                 apiKey: apiKey,
                 model: route.apiModelName,
                 language: language,
-                sampleRate: route.sampleRate
+                sampleRate: route.sampleRate, options: options
             )
         case .google:
             return GeminiLiveClient(

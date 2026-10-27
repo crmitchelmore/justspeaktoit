@@ -173,7 +173,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         observeCaptureConfiguration()
     }
 
-    private func makeClient() -> StreamingTranscriptionClient? {
+    func makeClient() -> StreamingTranscriptionClient? {
         if let clientFactory { return clientFactory() }
         return LiveTranscriptionClientFactory.makeClient(
             for: route, apiKey: apiKey, language: language, keywords: keywords,

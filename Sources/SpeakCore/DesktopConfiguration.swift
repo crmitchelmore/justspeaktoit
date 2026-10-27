@@ -98,7 +98,7 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable { // swiftlint:
               title: "AssemblyAI keyterms (includes pronunciation hints when selected)",
               group: "Transcription", kind: .text, defaultValue: AnyCodable(.string(""))),
         .init(key: ApplicationPreferenceKey.liveStopGracePeriod.rawValue,
-              title: "Live stop grace (seconds; AssemblyAI and Cartesia)",
+              title: "Live stop grace (seconds; supported providers)",
               group: "Transcription", kind: .number(0...2),
               defaultValue: AnyCodable(.double(SpeechDefaults.liveStopGracePeriod))),
         .init(key: ApplicationPreferenceKey.handsFreeDictationEnabled.rawValue,

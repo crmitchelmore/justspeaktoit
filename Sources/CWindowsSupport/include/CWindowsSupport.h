@@ -75,7 +75,7 @@ enum JSTIWindowEvent {
     JSTI_EVENT_SPEAK_CLIPBOARD = 113,
     JSTI_EVENT_VOICE_EDIT = 114,
     JSTI_EVENT_SPEECH_PAUSE = 116, /* exact active speech only; never starts History audio */
-    JSTI_EVENT_USER_ABSENT = 120
+    JSTI_EVENT_USER_ABSENT = 131 /* Outside comparison events 100-109 and 120-129. */
 };
 
 /* Runs on the UI thread. text is borrowed until callback returns. model_index

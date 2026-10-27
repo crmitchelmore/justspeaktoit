@@ -245,7 +245,7 @@ private func otherWindowEvent(_ event: Int32, value: String, holder: WindowsEven
     case 11: exportHistoryWindowEvent(value, holder: holder)
     case 12: Task { await controller.openHistoryAudio(value) }
     case 14: windowsCancelOperation(value, holder: holder)
-    case 120: Task { await controller.handsFreeUserAbsent(value) }
+    case Int32(JSTI_EVENT_USER_ABSENT.rawValue): Task { await controller.handsFreeUserAbsent(value) }
     case 20: Task { await controller.refreshModels(force: true) }
     case 110:
         guard let slot = Int(value) else { return }

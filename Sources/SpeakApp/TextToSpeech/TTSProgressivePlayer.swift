@@ -55,10 +55,7 @@ final class TTSProgressivePlayer {
     ) throws -> TTSProgressivePlaybackState.SessionID {
         stop()
         guard let format = AVAudioFormat(
-            commonFormat: .pcmFormatInt16,
-            sampleRate: Double(sampleRate),
-            channels: 1,
-            interleaved: true
+            standardFormatWithSampleRate: Double(sampleRate), channels: 1
         ) else {
             throw TTSError.audioPlaybackFailure
         }
@@ -108,13 +105,15 @@ final class TTSProgressivePlayer {
         try state.requireCurrent(owner)
         guard let format, let player,
             let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount),
-            let channel = buffer.int16ChannelData?[0]
+            let channel = buffer.floatChannelData?[0],
+            let samples = TTSProgressivePCMConversion.samples(from: payload),
+            samples.count == Int(frameCount)
         else {
             throw TTSError.audioPlaybackFailure
         }
-        payload.withUnsafeBytes { source in
+        samples.withUnsafeBufferPointer { source in
             guard let baseAddress = source.baseAddress else { return }
-            memcpy(channel, baseAddress, payload.count)
+            channel.update(from: baseAddress, count: samples.count)
         }
         buffer.frameLength = frameCount
         do { try state.reserve(frames: Int(frameCount), owner: owner) } catch {

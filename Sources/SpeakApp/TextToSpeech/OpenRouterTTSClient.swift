@@ -16,6 +16,11 @@ actor OpenRouterTTSClient: TextToSpeechClient {
         self.validationClient = OpenRouterAPIClient(secureStorage: secureStorage, session: session)
     }
 
+    init(api: OpenRouterAudioClient, validationClient: OpenRouterAPIClient) {
+        self.api = api
+        self.validationClient = validationClient
+    }
+
     func synthesize(text: String, voice: String, settings _: TTSSettings) async throws -> TTSResult {
         guard let selection = OpenRouterSpeechSelection(id: voice) else {
             throw TTSError.invalidVoice("Select an OpenRouter speech model and voice again.")
@@ -29,6 +34,34 @@ actor OpenRouterTTSClient: TextToSpeechClient {
             if error is CancellationError { throw error }
             throw Self.ttsError(for: error)
         }
+        return try await complete(result, text: text, selection: selection)
+    }
+
+    func synthesizeProgressively(
+        text: String, voice: String,
+        onPCM: @escaping @Sendable (Data) async throws -> Void
+    ) async throws -> OpenRouterTTSProgressiveResult {
+        guard let selection = OpenRouterSpeechSelection(id: voice) else {
+            throw TTSError.invalidVoice("Select an OpenRouter speech model and voice again.")
+        }
+        let response: OpenRouterProgressiveSpeechResult
+        do {
+            response = try await api.synthesizeProgressively(
+                text: text, model: selection.modelID, voice: selection.voice, onPCM: onPCM
+            )
+        } catch {
+            if error is CancellationError { throw error }
+            throw Self.ttsError(for: error)
+        }
+        let result = try await complete(response.speech, text: text, selection: selection)
+        return OpenRouterTTSProgressiveResult(
+            result: result, pcmProduced: response.pcmProduced, completedFileRequired: response.completedFileRequired
+        )
+    }
+
+    private func complete(
+        _ result: OpenRouterSpeechResult, text: String, selection: OpenRouterSpeechSelection
+    ) async throws -> TTSResult {
         do {
             try Task.checkCancellation()
             let duration = try await AVURLAsset(url: result.audioURL).load(.duration)
@@ -68,6 +101,12 @@ actor OpenRouterTTSClient: TextToSpeechClient {
     func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
         await validationClient.validateAPIKey(key)
     }
+}
+
+struct OpenRouterTTSProgressiveResult {
+    let result: TTSResult
+    let pcmProduced: Bool
+    let completedFileRequired: Bool
 }
 
 extension VoiceCatalog {

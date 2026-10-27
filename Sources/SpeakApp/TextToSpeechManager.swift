@@ -32,12 +32,26 @@ final class TextToSpeechManager: ObservableObject {
   let clients: [TTSProvider: TextToSpeechClient]
   private var audioPlayer: AVAudioPlayer?
   private let progressivePlayer = TTSProgressivePlayer()
-  private var synthesisTask: Task<TTSResult, Error>?
+  private var synthesisTask: Task<TTSSynthesisOutput, Error>?
   private var playbackTask: Task<Void, Never>?
   private var synthesisID = UUID()
   private let openRouterOutput = OpenRouterSpeechOutput()
+  private let progressiveSpeech: OpenRouterProgressiveSpeechOption
+  private let openRouterOperation: OpenRouterOperation
 
-  init(
+  typealias OpenRouterOperation = @MainActor (
+    String, String, TTSSettings, OpenRouterTTSClient, TTSProgressivePlayer
+  ) async throws -> TTSSynthesisOutput
+
+  private enum SynthesisPurpose { case normal, preview }
+
+  private struct SynthesisContext {
+    let requestID: UUID
+    let purpose: SynthesisPurpose
+    let autoPlay: Bool
+  }
+
+  convenience init(
     appSettings: AppSettings,
     secureStorage: SecureAppStorage,
     clients: [TTSProvider: TextToSpeechClient],
@@ -45,12 +59,35 @@ final class TextToSpeechManager: ObservableObject {
     recordingSaver: (@MainActor (TTSResult) async throws -> Void)? = nil,
     defaults: UserDefaults = .standard
   ) {
+    self.init(
+      appSettings: appSettings, secureStorage: secureStorage, clients: clients,
+      pronunciationManager: pronunciationManager, recordingSaver: recordingSaver,
+      defaults: defaults, progressiveSpeech: .disabled
+    )
+  }
+
+  init(
+    appSettings: AppSettings,
+    secureStorage: SecureAppStorage,
+    clients: [TTSProvider: TextToSpeechClient],
+    pronunciationManager: PronunciationManager? = nil,
+    recordingSaver: (@MainActor (TTSResult) async throws -> Void)? = nil,
+    defaults: UserDefaults = .standard,
+    progressiveSpeech: OpenRouterProgressiveSpeechOption,
+    openRouterOperation: @escaping OpenRouterOperation = { text, voice, settings, client, player in
+      try await OpenRouterTTSPlaybackOperation.synthesize(
+        text: text, voice: voice, settings: settings, client: client, player: player
+      )
+    }
+  ) {
     self.appSettings = appSettings
     self.secureStorage = secureStorage
     self.clients = clients
     self.pronunciationManager = pronunciationManager
     self.recordingSaver = recordingSaver
     self.defaults = defaults
+    self.progressiveSpeech = progressiveSpeech
+    self.openRouterOperation = openRouterOperation
     loadUsageHistory()
   }
 
@@ -59,6 +96,13 @@ final class TextToSpeechManager: ObservableObject {
     voice: String? = nil,
     useSSML: Bool? = nil
   ) async throws -> TTSResult {
+    try await synthesize(text: text, voice: voice, useSSML: useSSML, purpose: .normal)
+  }
+
+  private func synthesize(
+    text: String, voice: String?, useSSML: Bool?, purpose: SynthesisPurpose
+  ) async throws -> TTSResult {
+    try Task.checkCancellation()
     guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
       throw TTSError.synthesisFailure("Text cannot be empty")
     }
@@ -77,7 +121,9 @@ final class TextToSpeechManager: ObservableObject {
       }
     }
     do {
-      return try await performSynthesis(text: text, voice: voice, useSSML: useSSML, requestID: requestID)
+      return try await performSynthesis(
+        text: text, voice: voice, useSSML: useSSML, requestID: requestID, purpose: purpose
+      )
     } catch is CancellationError {
       throw CancellationError()
     } catch {
@@ -85,66 +131,6 @@ final class TextToSpeechManager: ObservableObject {
       if synthesisID == requestID { lastError = ttsError }
       throw ttsError
     }
-  }
-
-  private func performSynthesis(
-    text: String, voice: String?, useSSML: Bool?, requestID: UUID
-  ) async throws -> TTSResult {
-    let effectiveVoice = migrateAndValidateVoiceID(voice ?? appSettings.defaultTTSVoice)
-    let provider = TTSProvider.from(voiceID: effectiveVoice)
-    guard let client = clients[provider] else { throw TTSError.providerNotAvailable(provider) }
-    let settings = synthesisSettings(useSSML: useSSML)
-    let processedText = applyPronunciationProcessing(text: text, provider: provider, useSSML: settings.useSSML)
-    synthesisProgress = 0.5
-    // A provider that can stream speaks while the rest is still generating.
-    // Everything after this point is identical either way, because the
-    // progressive task answers with the same complete result.
-    let progressive = appSettings.ttsAutoPlay ? client as? any ProgressiveTextToSpeechClient : nil
-    let player = progressivePlayer
-    let task = progressive.map { streaming in
-      Task { @MainActor in
-        stopPlayback()
-        isPlaying = true
-        return try await player.speak(
-          text: processedText, voice: effectiveVoice, settings: settings, using: streaming
-        )
-      }
-    } ?? Task { try await client.synthesize(text: processedText, voice: effectiveVoice, settings: settings) }
-    synthesisTask = task
-    let result: TTSResult
-    do {
-      result = try await withTaskCancellationHandler {
-        try await task.value
-      } onCancel: {
-        task.cancel()
-      }
-    } catch {
-      // Only the request that still owns the player may tear it down. A
-      // replacement utterance has already prepared playback on the same
-      // player by the time a superseded request's cleanup runs, and stopping
-      // it here would silence the newer one.
-      if progressive != nil, synthesisID == requestID { stopPlayback() }
-      if task.isCancelled || Task.isCancelled { throw CancellationError() }
-      throw error
-    }
-    if progressive != nil, synthesisID == requestID { isPlaying = false }
-    guard synthesisID == requestID, !Task.isCancelled, !task.isCancelled else {
-      // The result was never published — not played, not saved, not in
-      // history — so its file belongs to nobody whatever the provider is.
-      try? FileManager.default.removeItem(at: result.audioURL)
-      throw CancellationError()
-    }
-    if progressive == nil { stopPlayback() }
-    openRouterOutput.replace(with: result)
-    lastResult = result
-    usageHistory.append(result)
-    saveUsageHistory()
-    if appSettings.ttsSaveToDirectory { try? await saveToRecordingsDirectory(result: result) }
-    try ensureSynthesisActive(task: task, requestID: requestID)
-    synthesisProgress = 1
-    if appSettings.ttsAutoPlay, progressive == nil { try await play(url: result.audioURL) }
-    try ensureSynthesisActive(task: task, requestID: requestID)
-    return result
   }
 
   private func synthesisSettings(useSSML: Bool?) -> TTSSettings {
@@ -158,13 +144,17 @@ final class TextToSpeechManager: ObservableObject {
   }
 
   func play(url: URL) async throws {
+    try await play(url: url, openRouterSpeed: appSettings.ttsSpeed)
+  }
+
+  private func play(url: URL, openRouterSpeed: Double) async throws {
     stopPlayback()
 
     do {
       let player = try AVAudioPlayer(contentsOf: url)
       if lastResult?.provider == .openrouter, lastResult?.audioURL == url {
         player.enableRate = true
-        player.rate = Self.openRouterPlaybackRate(speed: appSettings.ttsSpeed)
+        player.rate = Self.openRouterPlaybackRate(speed: openRouterSpeed)
       }
       audioPlayer = player
       player.prepareToPlay()
@@ -218,7 +208,7 @@ final class TextToSpeechManager: ObservableObject {
 
   func previewVoice(_ voice: String, sampleText: String = "Hello, this is a voice preview.") async {
     do {
-      _ = try await synthesize(text: sampleText, voice: voice, useSSML: false)
+      _ = try await synthesize(text: sampleText, voice: voice, useSSML: false, purpose: .preview)
     } catch {
       lastError = error as? TTSError
     }
@@ -279,9 +269,106 @@ final class TextToSpeechManager: ObservableObject {
 }
 
 extension TextToSpeechManager {
+  private func performSynthesis(
+    text: String, voice: String?, useSSML: Bool?, requestID: UUID, purpose: SynthesisPurpose
+  ) async throws -> TTSResult {
+    let effectiveVoice = migrateAndValidateVoiceID(voice ?? appSettings.defaultTTSVoice)
+    let provider = TTSProvider.from(voiceID: effectiveVoice)
+    guard let client = clients[provider] else { throw TTSError.providerNotAvailable(provider) }
+    let settings = synthesisSettings(useSSML: useSSML)
+    let processedText = applyPronunciationProcessing(text: text, provider: provider, useSSML: settings.useSSML)
+    synthesisProgress = 0.5
+    let autoPlay = appSettings.ttsAutoPlay
+    let saveToDirectory = appSettings.ttsSaveToDirectory
+    let (task, usesProgressive) = makeSynthesisTask(
+      text: processedText, voice: effectiveVoice, settings: settings, client: client,
+      context: SynthesisContext(requestID: requestID, purpose: purpose, autoPlay: autoPlay)
+    )
+    synthesisTask = task
+    let output: TTSSynthesisOutput
+    do {
+      output = try await withTaskCancellationHandler {
+        try await task.value
+      } onCancel: {
+        task.cancel()
+      }
+    } catch {
+      // Only the request that still owns the player may tear it down. A
+      // replacement utterance has already prepared playback on the same
+      // player by the time a superseded request's cleanup runs, and stopping
+      // it here would silence the newer one.
+      if usesProgressive, synthesisID == requestID { stopPlayback() }
+      if task.isCancelled || Task.isCancelled { throw CancellationError() }
+      throw error
+    }
+    let result = output.result
+    if usesProgressive, synthesisID == requestID { isPlaying = false }
+    guard synthesisID == requestID, !Task.isCancelled, !task.isCancelled else {
+      // The result was never published — not played, not saved, not in
+      // history — so its file belongs to nobody whatever the provider is.
+      try? FileManager.default.removeItem(at: result.audioURL)
+      throw CancellationError()
+    }
+    if !usesProgressive { stopPlayback() }
+    openRouterOutput.replace(with: result)
+    lastResult = result
+    usageHistory.append(result)
+    saveUsageHistory()
+    if saveToDirectory { try? await saveToRecordingsDirectory(result: result) }
+    try ensureSynthesisActive(task: task, requestID: requestID)
+    synthesisProgress = 1
+    if autoPlay, !output.playbackCompleted {
+      try await play(url: result.audioURL, openRouterSpeed: settings.speed)
+    }
+    try ensureSynthesisActive(task: task, requestID: requestID)
+    return result
+  }
+
+  private func makeSynthesisTask(
+    text: String, voice: String, settings: TTSSettings, client: TextToSpeechClient, context: SynthesisContext
+  ) -> (Task<TTSSynthesisOutput, Error>, Bool) {
+    let selection = OpenRouterSpeechSelection(id: voice)
+    let openRouter = client as? OpenRouterTTSClient
+    let useOpenRouter = context.purpose == .normal && context.autoPlay && settings.speed.isFinite && settings.speed == 1
+      && selection.map(progressiveSpeech.allows) == true && openRouter != nil
+    let progressive = context.autoPlay ? client as? any ProgressiveTextToSpeechClient : nil
+    let player = progressivePlayer
+    let task: Task<TTSSynthesisOutput, Error>
+    if useOpenRouter, let openRouter {
+      task = Task { @MainActor in
+        try ensureQueuedSynthesisActive(requestID: context.requestID)
+        stopPlayback()
+        isPlaying = true
+        return try await openRouterOperation(text, voice, settings, openRouter, player)
+      }
+    } else if let progressive {
+      task = Task { @MainActor in
+        try ensureQueuedSynthesisActive(requestID: context.requestID)
+        stopPlayback()
+        isPlaying = true
+        let result = try await player.speak(
+          text: text, voice: voice, settings: settings, using: progressive
+        )
+        return TTSSynthesisOutput(result: result, playbackCompleted: true)
+      }
+    } else {
+      task = Task { @MainActor in
+        try ensureQueuedSynthesisActive(requestID: context.requestID)
+        let result = try await client.synthesize(text: text, voice: voice, settings: settings)
+        return TTSSynthesisOutput(result: result, playbackCompleted: false)
+      }
+    }
+    return (task, useOpenRouter || progressive != nil)
+  }
+
   // MARK: - Private Helpers
 
-  private func ensureSynthesisActive(task: Task<TTSResult, Error>, requestID: UUID) throws {
+  private func ensureQueuedSynthesisActive(requestID: UUID) throws {
+    try Task.checkCancellation()
+    guard synthesisID == requestID else { throw CancellationError() }
+  }
+
+  private func ensureSynthesisActive(task: Task<TTSSynthesisOutput, Error>, requestID: UUID) throws {
     guard synthesisID == requestID, !task.isCancelled, !Task.isCancelled else { throw CancellationError() }
   }
 

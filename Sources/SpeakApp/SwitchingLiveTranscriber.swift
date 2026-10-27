@@ -221,7 +221,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       ("elevenlabs/", controllers.elevenlabs),
       ("soniox/", controllers.soniox),
       ("cartesia/", controllers.cartesia),
-      ("gladia/", controllers.gladia),
+      ("gladia/", controllers.sharedClient),
       // Gemini 3.5 Transcribe Live runs on the shared SpeakCore client, so it
       // needs no bespoke controller or audio processor.
       (GeminiTranscribeModels.liveCatalogID, controllers.sharedClient),
@@ -397,7 +397,6 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     let elevenlabs: ElevenLabsLiveController
     let soniox: SonioxLiveController
     let cartesia: CartesiaLiveController
-    let gladia: GladiaLiveController
     let openAIRealtime: OpenAIRealtimeLiveController
     let sharedClient: SharedClientLiveController
     let fluidAudio: FluidAudioParakeetLiveController
@@ -454,12 +453,6 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
         audioDeviceManager: audioDeviceManager,
         secureStorage: secureStorage
       )
-      gladia = GladiaLiveController(
-        appSettings: appSettings,
-        permissionsManager: permissionsManager,
-        audioDeviceManager: audioDeviceManager,
-        secureStorage: secureStorage
-      )
       openAIRealtime = OpenAIRealtimeLiveController(
         appSettings: appSettings,
         permissionsManager: permissionsManager,
@@ -503,7 +496,6 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
         elevenlabs,
         soniox,
         cartesia,
-        gladia,
         openAIRealtime,
         sharedClient,
         whisperKit,

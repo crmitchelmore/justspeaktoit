@@ -10,10 +10,9 @@ import os.log
 
 /// Portable Gladia Solaria live client.
 ///
-/// iOS builds it through `LiveTranscriptionClientFactory` and Windows through
-/// the desktop live projection. It compiles for every platform, but the macOS
-/// app's production Gladia route still runs its own controller and
-/// transcriber in `SpeakApp`; Mac capture has not been moved onto this client.
+/// macOS and iOS build it through `LiveTranscriptionClientFactory`; Windows
+/// and Linux use the desktop live projection. The macOS app captures through
+/// `SharedClientLiveController`, while framing and finalisation remain here.
 ///
 /// Gladia is two-stage: `POST /v2/live` with `x-gladia-key` creates a session
 /// and returns a single-use WebSocket URL carrying its own temporary token.

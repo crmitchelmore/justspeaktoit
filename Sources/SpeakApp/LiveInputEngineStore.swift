@@ -308,7 +308,6 @@ extension NativeOSXLiveTranscriber: LiveInputEngineConsumer {}
 extension AppleSpeechAnalyzerLiveController: LiveInputEngineConsumer {}
 extension DeepgramLiveController: LiveInputEngineConsumer {}
 extension ModulateLiveController: LiveInputEngineConsumer {}
-extension AssemblyAILiveController: LiveInputEngineConsumer {}
 extension ElevenLabsLiveController: LiveInputEngineConsumer {}
 extension SonioxLiveController: LiveInputEngineConsumer {}
 extension CartesiaLiveController: LiveInputEngineConsumer {}

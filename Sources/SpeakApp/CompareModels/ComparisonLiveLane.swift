@@ -17,6 +17,9 @@ final class ComparisonLiveLane {
     private(set) var appleSession: AppleLiveSessionBox?
     private(set) var appleConverter: AppleSpeechAudioConverterBox?
 
+    /// Synthetic transports exercise this lane without opening a provider socket.
+    var clientFactory: (() -> StreamingTranscriptionClient)?
+
     private var accumulated = TranscriptAccumulator(shape: .cumulativeTranscript)
     private var firstPartialAt: Date?
     private var abandoned = false
@@ -46,7 +49,7 @@ final class ComparisonLiveLane {
         onTranscript: @escaping @Sendable (String, Bool) -> Void
     ) throws {
         guard !abandoned, !Task.isCancelled else { throw CancellationError() }
-        guard let client = LiveTranscriptionClientFactory.makeClient(
+        guard let client = clientFactory?() ?? LiveTranscriptionClientFactory.makeClient(
             for: route,
             apiKey: apiKey,
             language: language,

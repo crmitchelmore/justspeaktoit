@@ -1,5 +1,6 @@
 #if os(iOS)
 import Foundation
+import Combine
 import XCTest
 @testable import SpeakiOSLib
 
@@ -102,6 +103,67 @@ final class HistoryAsyncStorage: @unchecked Sendable {
         while !released {
             if !condition.wait(until: deadline) { holdTimedOut = true; break }
         }
+    }
+}
+
+/// Owns only a synthetic fixture's directory and defaults. An unsettled worker
+/// retains its files for diagnosis instead of racing deletion against admitted IO.
+@MainActor
+final class HistoryFixtureCleanup {
+    private let directory: URL
+    private let defaults: UserDefaults
+    private let suite: String
+    private let history: iOSHistoryManager
+
+    init(directory: URL, defaults: UserDefaults, suite: String, history: iOSHistoryManager) {
+        self.directory = directory
+        self.defaults = defaults
+        self.suite = suite
+        self.history = history
+    }
+
+    func register(
+        on test: XCTestCase, terminal: AnyPublisher<Bool, Never>,
+        cancelOwned: @escaping @MainActor () -> Void
+    ) {
+        test.addTeardownBlock { @MainActor [self] in
+            await finish(terminal: terminal, cancelOwned: cancelOwned)
+        }
+    }
+
+    private func finish(terminal: AnyPublisher<Bool, Never>, cancelOwned: @MainActor () -> Void) async {
+        cancelOwned()
+        let settled = XCTestExpectation(description: "Owned fixture terminal cleanup")
+        let observation = terminal.first(where: { $0 }).sink { _ in settled.fulfill() }
+        defer { observation.cancel() }
+        guard await XCTWaiter.fulfillment(of: [settled], timeout: 2) == .completed else {
+            retainUnsettled("terminal receipt did not settle")
+            return
+        }
+        // A ticket behind admitted writes establishes worker quiescence even
+        // when cleanup began before a processor or capture was ever admitted.
+        let drained = XCTestExpectation(description: "Owned History worker quiesced")
+        let barrier = Task { @MainActor [history] in
+            await history.loadIfNeededAndWait()
+            drained.fulfill()
+        }
+        guard await XCTWaiter.fulfillment(of: [drained], timeout: 2) == .completed else {
+            barrier.cancel()
+            retainUnsettled("History worker did not quiesce")
+            return
+        }
+        defaults.removePersistentDomain(forName: suite)
+        do { try FileManager.default.removeItem(at: directory) } catch {
+            XCTFail("Owned fixture cleanup could not remove \(directory.path): \(error)")
+        }
+    }
+
+    private func retainUnsettled(_ reason: String) {
+        let evidence = ["reason": reason, "retainedDirectory": directory.path]
+        if let data = try? JSONSerialization.data(withJSONObject: evidence, options: [.sortedKeys]) {
+            try? data.write(to: directory.appendingPathComponent("unsettled-fixture.json"), options: .atomic)
+        }
+        XCTFail("\(reason); retained owned fixture at \(directory.path)")
     }
 }
 #endif

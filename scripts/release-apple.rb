@@ -180,6 +180,28 @@ module AppleRelease
       raise 'Beta feedback email write was not observed' if observed.any? { |l| l.dig('attributes', 'feedbackEmail').to_s.strip.empty? }
     end
 
+    # Configure only a new Alpha review submission. Reconciliation must not
+    # retroactively activate historical approved builds or send manual notices.
+    def ensure_automatic_beta_notification(build_id)
+      raise 'Only Alpha may configure automatic beta notification' unless @train == 'alpha'
+      detail = @client.get("/v1/builds/#{build_id}/buildBetaDetail").fetch('data')
+      unless detail.is_a?(Hash) && detail.dig('attributes', 'externalBuildState') == 'READY_FOR_BETA_SUBMISSION'
+        raise 'Beta review readiness changed before notification configuration; reconcile again'
+      end
+      detail_id = detail.fetch('id')
+      raise 'Build beta detail identity is missing' unless detail_id.is_a?(String) && !detail_id.strip.empty?
+      unless detail.dig('attributes', 'autoNotifyEnabled') == true
+        @client.patch("/v1/buildBetaDetails/#{detail_id}", data: {
+          type: 'buildBetaDetails', id: detail_id, attributes: {autoNotifyEnabled: true}})
+      end
+      observed = @client.get("/v1/builds/#{build_id}/buildBetaDetail").fetch('data')
+      unless observed.is_a?(Hash) && observed['id'] == detail_id &&
+          observed.dig('attributes', 'autoNotifyEnabled') == true &&
+          observed.dig('attributes', 'externalBuildState') == 'READY_FOR_BETA_SUBMISSION'
+        raise 'Automatic beta notification setting was not observed'
+      end
+    end
+
     def assign(found)
       raise 'Only Alpha may be distributed through TestFlight' unless @train == 'alpha'
       id = found.fetch('id')
@@ -211,6 +233,7 @@ module AppleRelease
           # the reconciler retries; it must not be reported as public delivery.
           ensure_beta_description
           ensure_beta_review_information
+          ensure_automatic_beta_notification(id)
           begin
             @client.post('/v1/betaAppReviewSubmissions', data: {type: 'betaAppReviewSubmissions', relationships: {build: AppleRelease.relationship('builds', id)}})
           rescue IOSProfileBootstrap::ApiError => error

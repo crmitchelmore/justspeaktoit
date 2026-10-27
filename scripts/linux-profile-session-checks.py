@@ -115,7 +115,7 @@ def run(binary):
             if refused.returncode == 0 or 'NoSessionForPID' not in refused.stderr:
                 raise RuntimeError('The private guard did not explicitly refuse an unrelated process')
             targets = []
-            for index in range(2):
+            for index in range(3):
                 executable = root / f'Profile-{index}'
                 shutil.copy2(tools['zenity'], executable)
                 title = f'JSTI recorded profile {root.name} {index}'
@@ -177,13 +177,23 @@ def run(binary):
             player = play()
             wait('rate-complete')
             identity.stop_owned(player)
+            phase('unavailable-manual', 2)
+            wait('unavailable-manual-complete')
+            phase('unavailable-arm', 0)
+            wait('unavailable-armed')
+            phase('unavailable-automatic', 2)
+            wait('unavailable-capture-ready')
+            player = play()
+            wait('unavailable-automatic-complete')
+            identity.stop_owned(player)
             phase('owner-loss', 0)
             wait('owner-loss-ready')
             identity.stop_owned(guard)
             wait('complete')
             if app.wait(timeout=min(15, max(0.1, deadline - time.monotonic()))) != 0:
                 raise RuntimeError('The actual recorded Linux host pipeline failed')
-            print('Owned recorded profile host: manual, automatic, rate refusal and guard-owner-loss stages passed.')
+            print('Owned recorded profile host: manual, automatic, rate refusal, unavailable-model refusals '
+                  'and guard-owner-loss stages passed.')
         finally:
             failures = []
             for process in reversed(processes):

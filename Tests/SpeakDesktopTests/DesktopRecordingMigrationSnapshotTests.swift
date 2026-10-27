@@ -73,20 +73,29 @@ final class DesktopRecordingMigrationSnapshotTests: XCTestCase {
     }
 
     func testFractionalCreationDate_ProducesCanonicalArchiveRecordDatesWithoutLosingNativeTimestamp() async throws {
-        let store = try store()
-        let directory = await store.directory
-        let createdAt = Date(timeIntervalSince1970: 100.625)
-        let original = try await save(store, createdAt: createdAt)
-        let source = try await store.migrationSnapshot(categories: [.history, .recordings], digests: digests)
-        let archive = try MigrationTestArchive.export(source, digests: digests, stagingRoot: directory)
-        let result = try MigrationTestArchive.read(archive, digests: digests, stagingRoot: directory)
-        XCTAssertEqual(result.records, source.records)
-        let history = try XCTUnwrap(result.records[.history]?.first)
-        XCTAssertEqual(history.date, Date(timeIntervalSince1970: 100))
-        let restored = try DesktopMigrationHistory.record(history, category: .history)
-        XCTAssertEqual(restored.createdAt, createdAt)
-        XCTAssertEqual(restored.id, original.id)
-        XCTAssertEqual(try DesktopMigrationHistory.value(restored), history.value)
+        for fraction in [0.625, 0.9995, 0.9999] {
+            let store = try store()
+            let directory = await store.directory
+            let createdAt = Date(timeIntervalSince1970: 100 + fraction)
+            let original = try await save(store, createdAt: createdAt)
+            let source = try await store.migrationSnapshot(categories: [.history, .recordings], digests: digests)
+            let archive = try MigrationTestArchive.export(source, digests: digests, stagingRoot: directory)
+            let result = try MigrationTestArchive.read(archive, digests: digests, stagingRoot: directory)
+            XCTAssertEqual(result.records, source.records)
+            let history = try XCTUnwrap(result.records[.history]?.first)
+            let audio = try XCTUnwrap(result.records[.recordings]?.first)
+            XCTAssertEqual(history.date, Date(timeIntervalSince1970: 100))
+            XCTAssertEqual(audio.date, history.date)
+            let item = try DataMigrationHistorySchema.validate(history, category: .history)
+            XCTAssertEqual(item.createdAt, history.date)
+            XCTAssertEqual(item.recordingDuration, 2)
+            XCTAssertNoThrow(try DataMigrationHistorySchema.validate(audio, category: .recordings))
+            let restored = try DesktopMigrationHistory.record(history, category: .history)
+            XCTAssertEqual(restored.createdAt, createdAt)
+            XCTAssertEqual(restored.id, original.id)
+            XCTAssertEqual(restored.recordingDuration, original.recordingDuration)
+            XCTAssertEqual(try DesktopMigrationHistory.value(restored), history.value)
+        }
     }
 
     func testFractionalScopeBoundaries_AreRejectedInsteadOfSilentlyChangingExclusiveEnd() async throws {

@@ -61,6 +61,9 @@ final class GladiaLiveRun: @unchecked Sendable {
     var finalConfidenceCount = 0
     var pendingInterim: String?
     var latestUpdateConfidence: Double?
+    /// Explicit abort only, including cancel after failure closed transport.
+    /// Normal finish and failure retain an already admitted final boundary.
+    var discardAdmittedBoundaries = false
     /// Utterances already final; a late partial for one is not a new draft.
     var finalUtteranceIDs: Set<String> = []
     var waiters: [CheckedContinuation<String?, Never>] = []

@@ -32,7 +32,7 @@ import os.log
 /// each transport effect re-checks its run first. A failure is reported after
 /// transcripts already being delivered, and before any finish returns.
 public final class GladiaLiveClient: FinalizingStreamingTranscriptionClient,
-    StreamingTranscriptSnapshotProviding, @unchecked Sendable {
+    StreamingTranscriptSnapshotProviding, UtteranceBoundaryStreamingClient, @unchecked Sendable {
     /// Each final `transcript` carries one utterance, identified by `data.id`.
     public let finalShape: TranscriptFinalShape = .standaloneSegments
     /// `stop_recording` makes Gladia process audio it has not transcribed yet,
@@ -67,6 +67,14 @@ public final class GladiaLiveClient: FinalizingStreamingTranscriptionClient,
     /// callback can inspect its own event even after another thread restarts
     /// the client; capture, cancellation and replacement never wait for it.
     var callbackSnapshots: [ObjectIdentifier: [GladiaCallbackSnapshot]] = [:]
+    var boundaryCallback: ((String) -> Void)?
+
+    /// Each accepted final utterance, after its transcript callback. A graceful
+    /// finish preserves these deliveries; immediate abort/replacement does not.
+    public var onUtteranceBoundary: ((String) -> Void)? {
+        get { perform { _ in boundaryCallback } }
+        set { perform { _ in boundaryCallback = newValue } }
+    }
 
     public init(
         apiKey: String,
@@ -137,6 +145,7 @@ public final class GladiaLiveClient: FinalizingStreamingTranscriptionClient,
     /// with that run's confirmed text; nothing of it can reach the new run.
     public func start(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {
         perform { effects in
+            run.discardAdmittedBoundaries = true
             close(run, &effects)
             let active = GladiaLiveRun(sampleRate: sampleRate)
             run = active
@@ -148,10 +157,15 @@ public final class GladiaLiveClient: FinalizingStreamingTranscriptionClient,
 
     /// Immediate abort: abandons the session request or socket and wakes
     /// every finish waiter with the confirmed text. No error is reported.
-    public func stop() { perform { close(run, &$0) } }
+    public func stop() { cancel() }
 
     /// Immediate abort, identical to `stop()`.
-    public func cancel() { perform { close(run, &$0) } }
+    public func cancel() {
+        perform { effects in
+            run.discardAdmittedBoundaries = true
+            close(run, &effects)
+        }
+    }
 
     /// Drains admitted PCM, sends `stop_recording` behind it and waits for
     /// `end_session`, inside `GladiaLive.finishBudget` from the moment the
@@ -179,6 +193,7 @@ public final class GladiaLiveClient: FinalizingStreamingTranscriptionClient,
                     }
                     active.waiters.append(continuation)
                     if Task.isCancelled {
+                        active.discardAdmittedBoundaries = true
                         close(active, &effects)
                     } else {
                         beginFinish(active, &effects)
@@ -187,7 +202,11 @@ public final class GladiaLiveClient: FinalizingStreamingTranscriptionClient,
             }
         } onCancel: { [weak self, weak active] in
             guard let self, let active else { return }
-            self.perform { effects in if self.isCurrent(active) { self.close(active, &effects) } }
+            self.perform { effects in
+                guard self.run === active else { return }
+                active.discardAdmittedBoundaries = true
+                self.close(active, &effects)
+            }
         }
     }
 

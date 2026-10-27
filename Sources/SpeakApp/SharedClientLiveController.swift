@@ -25,6 +25,7 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
   private var startedAt: Date?
   private var run: SharedClientControllerRun?
+  private var boundaryDeliveryOwner: DeliveryOwner?
   private var displayedRevision: UInt64 = 0
   private var displayedTranscriptRevision: UInt64 = 0
   var stopCompletionTimeout: TimeInterval {
@@ -81,6 +82,8 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
       hasExplicitBoundaries: client is UtteranceBoundaryStreamingClient
     )
     run = active
+    boundaryDeliveryOwner = active.pairsStandaloneBoundaries
+      ? DeliveryOwner(delegate: delegate) : nil
     displayedRevision = 0
     displayedTranscriptRevision = 0
     isStopping = false
@@ -110,6 +113,7 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
 
   func stop() async {
     guard isRunning, !isStopping, let active = run, let activeClient = client else { return }
+    let owner = boundaryDeliveryOwner
     isStopping = true
     defer { isStopping = false }
     audioEngine.stop()
@@ -143,16 +147,16 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     var snapshot = active.finish(whole: whole, cancelled: Task.isCancelled, projection: finalSnapshot)
     // Read the synchronous state before retiring identity. Queued provider
     // errors must reach the owner before a stop can be mistaken for success.
-    apply(snapshot, from: active, terminal: true)
+    apply(snapshot, from: active, terminal: true, owner: owner)
     // A delegate can cancel synchronously while receiving the terminal text.
     // Publish that cancellation before success or retirement of this run.
     if Task.isCancelled, snapshot.error == nil {
       snapshot = active.finish(whole: nil, cancelled: true)
       activeClient.cancel()
-      apply(snapshot, from: active, terminal: true)
+      apply(snapshot, from: active, terminal: true, owner: owner)
     }
     isRunning = false
-    if snapshot.error == nil {
+    if snapshot.error == nil, matchesDeliveryOwner(owner) {
       delegate?.liveTranscriber(self, didFinishWith: TranscriptionResult(
         text: snapshot.text, segments: finalSnapshot?.segments ?? [], confidence: finalSnapshot?.confidence,
         duration: finalSnapshot?.duration ?? captureDuration,
@@ -160,8 +164,7 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
         rawPayload: finalSnapshot?.rawPayload, debugInfo: nil
       ))
     }
-    client = nil
-    run = nil
+    releaseRunOwnership()
     await endActiveInputSession()
   }
 
@@ -199,21 +202,30 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
   private func apply(
     _ snapshot: SharedClientControllerRun.Snapshot,
     from active: SharedClientControllerRun,
-    terminal: Bool = false
+    terminal: Bool = false,
+    owner: DeliveryOwner? = nil
   ) {
-    guard run === active, terminal || !isStopping, snapshot.revision > displayedRevision else { return }
-    displayedRevision = snapshot.revision
-    if snapshot.transcriptRevision > displayedTranscriptRevision {
-      displayedTranscriptRevision = snapshot.transcriptRevision
-      delegate?.liveTranscriber(self, didUpdateWith: LiveTranscriptionUpdate(
-        text: snapshot.text, isFinal: snapshot.isFinal && snapshot.error == nil, confidence: snapshot.confidence
-      ))
-      delegate?.liveTranscriber(self, didUpdatePartial: snapshot.text)
-      if run === active, !active.hasExplicitBoundaries, snapshot.isFinal, snapshot.error == nil,
-         !terminal || !Task.isCancelled {
-        delegate?.liveTranscriber(self, didDetectUtteranceBoundary: snapshot.text)
+    guard run === active, terminal || !isStopping else { return }
+    let ownsDelivery: (() -> Bool)?
+    if active.pairsStandaloneBoundaries {
+      guard matchesDeliveryOwner(owner) else { return }
+      // An already-cancelled terminal snapshot still reports its original
+      // cancellation, but a delegate that cancels/replaces during this apply
+      // cannot receive any remaining text or failure from the old delivery.
+      let allowedAtEntry = active.mayDeliverBoundaries
+      let cancelledAtEntry = Task.isCancelled
+      ownsDelivery = { [weak self] in
+        self?.run === active && active.mayDeliverBoundaries == allowedAtEntry
+          && Task.isCancelled == cancelledAtEntry
+          && self?.matchesDeliveryOwner(owner) == true
       }
+    } else {
+      ownsDelivery = nil
     }
+    drainStandaloneBoundaries(from: active, terminal: terminal, owner: owner)
+    guard run === active, ownsDelivery?() ?? true, snapshot.revision > displayedRevision else { return }
+    publishTranscript(snapshot, from: active, terminal: terminal, ownsDelivery: ownsDelivery)
+    guard ownsDelivery?() ?? true else { return }
     if let failure = active.takeFailure() {
       delegate?.liveTranscriber(self, didFail: failure)
     }
@@ -256,8 +268,7 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     audioProcessor.setRunning(false)
     run?.cancel()
     client?.cancel()
-    client = nil
-    run = nil
+    releaseRunOwnership()
     isRunning = false
     isStopping = false
     startedAt = nil
@@ -271,6 +282,75 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
   }
 }
 
+private extension SharedClientLiveController {
+  @MainActor
+  final class DeliveryOwner {
+    weak var delegate: LiveTranscriptionSessionDelegate?
+    let hadDelegate: Bool
+
+    init(delegate: LiveTranscriptionSessionDelegate?) {
+      self.delegate = delegate
+      hadDelegate = delegate != nil
+    }
+  }
+
+  func releaseRunOwnership() {
+    client = nil
+    run = nil
+    boundaryDeliveryOwner = nil
+  }
+
+  func publishTranscript(
+    _ snapshot: SharedClientControllerRun.Snapshot,
+    from active: SharedClientControllerRun,
+    terminal: Bool,
+    ownsDelivery: (() -> Bool)? = nil
+  ) {
+    displayedRevision = snapshot.revision
+    if snapshot.transcriptRevision > displayedTranscriptRevision {
+      displayedTranscriptRevision = snapshot.transcriptRevision
+      delegate?.liveTranscriber(self, didUpdateWith: LiveTranscriptionUpdate(
+        text: snapshot.text, isFinal: snapshot.isFinal && snapshot.error == nil, confidence: snapshot.confidence
+      ))
+      if let ownsDelivery, !ownsDelivery() { return }
+      delegate?.liveTranscriber(self, didUpdatePartial: snapshot.text)
+      if let ownsDelivery, !ownsDelivery() { return }
+      if run === active, !active.hasExplicitBoundaries, snapshot.isFinal, snapshot.error == nil,
+         !terminal || !Task.isCancelled {
+        delegate?.liveTranscriber(self, didDetectUtteranceBoundary: snapshot.text)
+      }
+    }
+  }
+
+  /// Each pair was captured before the next standalone receive. Drain before
+  /// newer UI snapshots, and at terminal finish before retiring ownership.
+  /// Cumulative explicit clients keep their existing boundary ordering.
+  func drainStandaloneBoundaries(from active: SharedClientControllerRun, terminal: Bool, owner: DeliveryOwner?) {
+    guard active.pairsStandaloneBoundaries else { return }
+    for pair in active.takeBoundaryPairs() {
+      guard ownsBoundaryDelivery(active, terminal: terminal, owner: owner) else { return }
+      if pair.display.revision > displayedRevision {
+        publishTranscript(pair.display, from: active, terminal: terminal, ownsDelivery: { [weak self] in
+          self?.ownsBoundaryDelivery(active, terminal: terminal, owner: owner) == true
+        })
+      }
+      guard ownsBoundaryDelivery(active, terminal: terminal, owner: owner) else { return }
+      delegate?.liveTranscriber(self, didDetectUtteranceBoundary: pair.utterance)
+    }
+  }
+
+  func ownsBoundaryDelivery(_ active: SharedClientControllerRun, terminal: Bool, owner: DeliveryOwner?) -> Bool {
+    run === active && active.mayDeliverBoundaries && (!terminal || !Task.isCancelled) && matchesDeliveryOwner(owner)
+  }
+
+  func matchesDeliveryOwner(_ owner: DeliveryOwner?) -> Bool {
+    guard let owner else { return true }
+    guard let original = owner.delegate else { return !owner.hadDelegate && delegate == nil }
+    return delegate === original
+  }
+
+}
+
 // MARK: - Client callbacks
 
 extension SharedClientLiveController {
@@ -278,7 +358,8 @@ extension SharedClientLiveController {
   /// then opens the stream.
   private func startClient(_ client: StreamingTranscriptionClient, for active: SharedClientControllerRun) {
     let enqueue = enqueueClientUpdate
-    observeBoundaries(of: client, for: active)
+    let owner = boundaryDeliveryOwner
+    observeBoundaries(of: client, for: active, owner: owner)
     client.start(
       onTranscript: { [weak self, weak client] text, isFinal in
         // A client with an authoritative result replaces the text rather
@@ -286,21 +367,28 @@ extension SharedClientLiveController {
         let projection = (client as? StreamingTranscriptSnapshotProviding)?
           .transcriptSnapshot(captureDuration: 0)
         guard let snapshot = active.receive(text, isFinal: isFinal, projection: projection) else { return }
-        enqueue { [weak self] in self?.apply(snapshot, from: active) }
+        enqueue { [weak self] in self?.apply(snapshot, from: active, owner: owner) }
       },
       onError: { [weak self] error in
         guard let snapshot = active.fail(error) else { return }
-        enqueue { [weak self] in self?.apply(snapshot, from: active) }
+        enqueue { [weak self] in self?.apply(snapshot, from: active, owner: owner) }
       }
     )
   }
 
   /// A client that reports its own utterance boundaries is listened to
   /// directly; finals of such a client never imply one.
-  private func observeBoundaries(of client: StreamingTranscriptionClient, for active: SharedClientControllerRun) {
+  private func observeBoundaries(
+    of client: StreamingTranscriptionClient, for active: SharedClientControllerRun, owner: DeliveryOwner?
+  ) {
     guard let boundaryClient = client as? UtteranceBoundaryStreamingClient else { return }
     let enqueue = enqueueClientUpdate
     boundaryClient.onUtteranceBoundary = { [weak self] text in
+      if active.pairsStandaloneBoundaries {
+        guard let snapshot = active.recordStandaloneBoundary(text) else { return }
+        enqueue { [weak self] in self?.apply(snapshot, from: active, owner: owner) }
+        return
+      }
       guard active.isOpen else { return }
       enqueue { [weak self] in
         guard let self, self.run === active, active.isOpen else { return }

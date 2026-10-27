@@ -227,10 +227,15 @@ extension GladiaLiveClient {
         }
         active.latestUpdateConfidence = confidence
         let callback = active.onTranscript
+        let boundary = isFinal ? boundaryCallback : nil
         let snapshot = active.snapshot
         active.transcriptCallbacksInFlight += 1
         effects.append { [self] in
-            withTranscriptSnapshot(snapshot, for: active) { callback?(text, isFinal) }
+            withTranscriptSnapshot(snapshot, for: active) {
+                callback?(text, isFinal)
+                let retained = perform { _ in run === active && !active.discardAdmittedBoundaries }
+                if retained { boundary?(text) }
+            }
         }
     }
 }

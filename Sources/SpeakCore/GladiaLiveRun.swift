@@ -56,6 +56,11 @@ final class GladiaLiveRun: @unchecked Sendable {
     var earlyReceive: Result<StreamingWebSocketMessage, Error>?
 
     var accumulator = TranscriptAccumulator(shape: .standaloneSegments)
+    var segments: [TranscriptionSegment] = []
+    var finalConfidenceTotal: Double = 0
+    var finalConfidenceCount = 0
+    var pendingInterim: String?
+    var latestUpdateConfidence: Double?
     /// Utterances already final; a late partial for one is not a new draft.
     var finalUtteranceIDs: Set<String> = []
     var waiters: [CheckedContinuation<String?, Never>] = []

@@ -31,7 +31,8 @@ import os.log
 /// and finish waiters run after it is released, in the order the state changed;
 /// each transport effect re-checks its run first. A failure is reported after
 /// transcripts already being delivered, and before any finish returns.
-public final class GladiaLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
+public final class GladiaLiveClient: FinalizingStreamingTranscriptionClient,
+    StreamingTranscriptSnapshotProviding, @unchecked Sendable {
     /// Each final `transcript` carries one utterance, identified by `data.id`.
     public let finalShape: TranscriptFinalShape = .standaloneSegments
     /// `stop_recording` makes Gladia process audio it has not transcribed yet,
@@ -62,6 +63,10 @@ public final class GladiaLiveClient: FinalizingStreamingTranscriptionClient, @un
     private let lock = NSLock()
     /// The current run. Read and replaced only under `lock`.
     var run: GladiaLiveRun
+    /// Event projections scoped to their synchronous callback thread. A held
+    /// callback can inspect its own event even after another thread restarts
+    /// the client; capture, cancellation and replacement never wait for it.
+    var callbackSnapshots: [ObjectIdentifier: [GladiaCallbackSnapshot]] = [:]
 
     public init(
         apiKey: String,

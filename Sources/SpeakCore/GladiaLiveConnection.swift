@@ -183,8 +183,8 @@ extension GladiaLiveClient {
         switch event {
         case .sessionStarted:
             active.sessionStarted = true
-        case .transcript(let utteranceID, let text, let isFinal):
-            deliver(text, utteranceID: utteranceID, isFinal: isFinal, active, &effects)
+        case .transcript(let utteranceID, let text, let isFinal, let confidence):
+            deliver(text, utteranceID: utteranceID, isFinal: isFinal, confidence: confidence, active, &effects)
         case .sessionEnded:
             // The authoritative terminal event, valid only once `stop_recording`
             // was handed to the socket; earlier, Gladia ended the session with
@@ -205,8 +205,8 @@ extension GladiaLiveClient {
     /// finish then returns the same confirmed whole, so nothing is doubled.
     /// The run counts each callback until it returns, so a failure decided
     /// meanwhile on another thread is reported after it, never before.
-    private func deliver(
-        _ text: String, utteranceID: String?, isFinal: Bool, _ active: GladiaLiveRun,
+    private func deliver( // swiftlint:disable:this function_parameter_count
+        _ text: String, utteranceID: String?, isFinal: Bool, confidence: Double?, _ active: GladiaLiveRun,
         _ effects: inout GladiaLiveEffects
     ) {
         guard !text.isEmpty else { return }
@@ -214,14 +214,23 @@ extension GladiaLiveClient {
             if let utteranceID { active.finalUtteranceIDs.insert(utteranceID) }
             let before = active.accumulator.text
             guard active.accumulator.append(final: text, eventID: utteranceID) != before else { return }
+            active.segments.append(TranscriptionSegment(startTime: 0, endTime: 0, text: text, confidence: confidence))
+            if let confidence {
+                active.finalConfidenceTotal += confidence
+                active.finalConfidenceCount += 1
+            }
+            active.pendingInterim = nil
         } else if let utteranceID, active.finalUtteranceIDs.contains(utteranceID) {
             return
+        } else {
+            active.pendingInterim = text
         }
+        active.latestUpdateConfidence = confidence
         let callback = active.onTranscript
+        let snapshot = active.snapshot
         active.transcriptCallbacksInFlight += 1
         effects.append { [self] in
-            callback?(text, isFinal)
-            transcriptCallbackReturned(active)
+            withTranscriptSnapshot(snapshot, for: active) { callback?(text, isFinal) }
         }
     }
 }

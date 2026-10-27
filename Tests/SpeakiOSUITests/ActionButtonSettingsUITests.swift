@@ -14,6 +14,9 @@ final class ActionButtonSettingsUITests: XCTestCase {
         app = XCUIApplication()
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_GB"]
         app.launch()
+        #if targetEnvironment(simulator)
+        try app.skipFirstRunForUITest(ready: app.buttons["Settings"])
+        #endif
         // `launch()` returns when the process is up, not when the first screen
         // has rendered; tapping a tab that is not there yet fails the test
         // without a useful message.

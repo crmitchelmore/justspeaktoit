@@ -28,6 +28,7 @@ def passing_log():
         + completion("OpenRouterAudioSettingsTests", "testDefaultVoice")
         + completion("OpenRouterVoiceCancellationTests", "testStop")
         + completion("ActionButtonSettingsUITests", target="SpeakiOSUITests")
+        + completion("SettingsCredentialUITests", target="SpeakiOSUITests")
     )
 
 
@@ -47,13 +48,13 @@ class IOSCoverageTests(unittest.TestCase):
     def test_success_reports_both_targets_and_critical_suite_counts(self):
         result = gate.summarize(passing_log(), "success")
         self.assertEqual(result["errors"], [])
-        self.assertEqual(result["unique_cases"], 4)
-        self.assertEqual(result["counts"], {"passed": 4, "failed": 0, "skipped": 0})
+        self.assertEqual(result["unique_cases"], 5)
+        self.assertEqual(result["counts"], {"passed": 5, "failed": 0, "skipped": 0})
         unit = result["targets"]["SpeakiOSTests"]
         self.assertEqual(unit["unique_cases"], 3)
         self.assertEqual(unit["suites"]["OpenRouterAudioSettingsTests"]["passed"], 2)
         self.assertEqual(unit["suites"]["OpenRouterVoiceCancellationTests"]["passed"], 1)
-        self.assertEqual(result["targets"]["SpeakiOSUITests"]["counts"]["passed"], 1)
+        self.assertEqual(result["targets"]["SpeakiOSUITests"]["counts"]["passed"], 2)
 
     def test_zero_cases_and_suite_headings_do_not_prove_execution(self):
         for output in ("", "Executed 0 tests, with 0 failures\n", "** TEST SUCCEEDED **\n",
@@ -65,7 +66,7 @@ class IOSCoverageTests(unittest.TestCase):
 
     def test_missing_target_or_critical_suite_fails_even_with_other_passes(self):
         for name in ("SpeakiOSTests", "SpeakiOSUITests", "OpenRouterAudioSettingsTests",
-                     "OpenRouterVoiceCancellationTests"):
+                     "OpenRouterVoiceCancellationTests", "SettingsCredentialUITests"):
             with self.subTest(name=name):
                 result = gate.summarize(passing_log().replace(name, name + "Extra"), "success")
                 self.assertTrue(any(name in error for error in result["errors"]))
@@ -87,6 +88,12 @@ class IOSCoverageTests(unittest.TestCase):
                     errors = gate.summarize(output, "success")["errors"]
                     self.assertTrue(any(suite in error and "skipped" in error for error in errors))
 
+    def test_settings_ui_skip_cannot_pass_as_native_acceptance(self):
+        output = passing_log().replace(
+            "SettingsCredentialUITests testResult]' passed", "SettingsCredentialUITests testResult]' skipped")
+        self.assertTrue(any("SettingsCredentialUITests" in error
+                            for error in gate.summarize(output, "success")["errors"]))
+
     def test_failure_in_any_selected_target_fails_even_when_command_reports_success(self):
         for target in gate.REQUIRED_TARGETS:
             with self.subTest(target=target):
@@ -99,7 +106,7 @@ class IOSCoverageTests(unittest.TestCase):
                 output = completion("OpenRouterAudioSettingsTests", "testSelection", status) + passing_log()
                 result = gate.summarize(output, "success")
                 self.assertTrue(result["errors"])
-                self.assertEqual(result["unique_cases"], 4)
+                self.assertEqual(result["unique_cases"], 5)
                 self.assertEqual(result["counts"][status], 1)
 
     def test_duplicate_console_results_do_not_inflate_test_counts(self):
@@ -142,7 +149,7 @@ class IOSCoverageTests(unittest.TestCase):
                         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                             self.assertEqual(gate.main(), expected)
                     saved = json.loads(summary.read_text())
-                    self.assertEqual(saved["unique_cases"], 4 if expected == 0 else 0)
+                    self.assertEqual(saved["unique_cases"], 5 if expected == 0 else 0)
                     self.assertEqual(bool(saved["errors"]), expected != 0)
                     if extra:
                         self.assertTrue(any("exceeds" in error for error in saved["errors"]))

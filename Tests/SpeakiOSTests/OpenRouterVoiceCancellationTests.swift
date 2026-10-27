@@ -35,10 +35,53 @@ final class OpenRouterVoiceCancellationTests: XCTestCase {
         let stopped = expectation(description: "Speech request cancelled")
         let completed = expectation(description: "Synthesis caller cancelled promptly")
         let cancellation = TransportCancellationObservation()
+        let diagnostics = SpeechCancellationDiagnostics()
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StubURLProtocol.self]
-        let session = URLSession(configuration: configuration)
+        let session = URLSession(configuration: configuration, delegate: diagnostics, delegateQueue: nil)
         defer { session.invalidateAndCancel() }
+        installSpeechResponse(afterResponse: afterResponse)
+        StubURLProtocol.onStartLoading = {
+            diagnostics.record(.protocolOutcomeDelivered)
+            started.fulfill()
+        }
+        StubURLProtocol.onStopLoading = {
+            diagnostics.record(.protocolStopLoading)
+            cancellation.record()
+            stopped.fulfill()
+        }
+        defer { StubURLProtocol.reset() }
+        let client = OpenRouterIOSVoiceOutputClient(session: session)
+        let task = startSpeech(on: client, completed: completed, diagnostics: diagnostics)
+        defer { task.cancel() }
+        let startedResult = await XCTWaiter.fulfillment(of: [started], timeout: 2)
+        XCTAssertEqual(startedResult, .completed, "Speech request must start within the original two-second budget")
+        diagnostics.record(.protocolStartWaitReturned)
+        var cancelledWhileMainActorBusy = true
+        if cancelCaller {
+            diagnostics.record(.callerCancelRequested)
+            task.cancel()
+            if keepMainActorBusy {
+                cancelledWhileMainActorBusy = assertTransportCancelledWithoutYieldingMainActor(cancellation)
+            }
+        } else {
+            diagnostics.record(.clientStopRequested)
+            client.stop()
+        }
+        let cancelledResult = await XCTWaiter.fulfillment(of: [stopped, completed], timeout: 2)
+        XCTAssertEqual(
+            cancelledResult, .completed, "Transport cancellation and caller completion must finish within two seconds"
+        )
+        let isSpeaking = client.isSpeaking
+        XCTAssertFalse(isSpeaking)
+        await attachDiagnosticsIfFailed(
+            session, diagnostics: diagnostics,
+            failed: startedResult != .completed || cancelledResult != .completed
+                || isSpeaking || !cancelledWhileMainActorBusy
+        )
+    }
+
+    private func installSpeechResponse(afterResponse: Bool) {
         StubURLProtocol.handler = {  request in
             XCTAssertEqual(request.url?.host, "openrouter.ai")
             XCTAssertEqual(request.url?.path, "/api/v1/audio/speech")
@@ -54,33 +97,32 @@ final class OpenRouterVoiceCancellationTests: XCTestCase {
             }
             return .hang
         }
-        StubURLProtocol.onStartLoading = { started.fulfill() }
-        StubURLProtocol.onStopLoading = {
-            cancellation.record()
-            stopped.fulfill()
+    }
+
+    private func attachDiagnosticsIfFailed(
+        _ session: URLSession, diagnostics: SpeechCancellationDiagnostics, failed: Bool
+    ) async {
+        guard failed else { return }
+        // Observe only after the original assertions; never delay or synchronize cancellation.
+        // Task-specific delegates can intercept callbacks, so absence of a delegate event is unknown.
+        let sampled = expectation(description: "Post-failure owned-session task snapshot")
+        session.getAllTasks { tasks in
+            diagnostics.recordTasks(tasks)
+            sampled.fulfill()
         }
-        defer { StubURLProtocol.reset() }
-        let client = OpenRouterIOSVoiceOutputClient(session: session)
-        let task = startSpeech(on: client, completed: completed)
-        defer { task.cancel() }
-        await fulfillment(of: [started], timeout: 2)
-        if cancelCaller {
-            task.cancel()
-            if keepMainActorBusy {
-                assertTransportCancelledWithoutYieldingMainActor(cancellation)
-            }
-        } else {
-            client.stop()
-        }
-        await fulfillment(of: [stopped, completed], timeout: 2)
-        XCTAssertFalse(client.isSpeaking)
+        _ = await XCTWaiter.fulfillment(of: [sampled], timeout: 1)
+        let attachment = XCTAttachment(string: diagnostics.snapshot())
+        attachment.name = "Content-free speech cancellation phases"
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     private func startSpeech(
-        on client: OpenRouterIOSVoiceOutputClient, completed: XCTestExpectation
+        on client: OpenRouterIOSVoiceOutputClient, completed: XCTestExpectation,
+        diagnostics: SpeechCancellationDiagnostics
     ) -> Task<Void, Never> {
         Task {
-            defer { completed.fulfill() }
+            defer { diagnostics.record(.callerReturned); completed.fulfill() }
             do {
                 try await client.speak(
                     text: "Hello",
@@ -90,18 +132,23 @@ final class OpenRouterVoiceCancellationTests: XCTestCase {
                 )
                 XCTFail("Stopping synthesis must cancel the operation")
             } catch {
+                diagnostics.record(error is CancellationError ? .callerCancellationError : .callerOtherError)
                 XCTAssertTrue(error is CancellationError, "Expected cancellation, got \(error)")
             }
         }
     }
 
-    private func assertTransportCancelledWithoutYieldingMainActor(_ observation: TransportCancellationObservation) {
+    private func assertTransportCancelledWithoutYieldingMainActor(
+        _ observation: TransportCancellationObservation
+    ) -> Bool {
         // Deliberately deny actor hops: cancelling network I/O must not queue behind UI work.
         let deadline = ProcessInfo.processInfo.systemUptime + 2
         while !observation.isCancelled, ProcessInfo.processInfo.systemUptime < deadline {
             Thread.sleep(forTimeInterval: 0.001)
         }
-        XCTAssertTrue(observation.isCancelled, "Transport cancellation must not wait for a MainActor cleanup task")
+        let isCancelled = observation.isCancelled
+        XCTAssertTrue(isCancelled, "Transport cancellation must not wait for a MainActor cleanup task")
+        return isCancelled
     }
 }
 

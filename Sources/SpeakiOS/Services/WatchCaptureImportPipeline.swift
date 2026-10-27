@@ -47,6 +47,11 @@ public final class WatchCaptureImportPipeline: ObservableObject {
         }
     }
     var now: () -> Date = Date.init
+    var applicationIsForeground: () -> Bool = { UIApplication.shared.applicationState != .background }
+    var matchingResultActivity: (String) -> Bool = {
+        TranscriptionActivityManager.shared.hasActiveResult(completionID: $0)
+    }
+    var notifyTranscriptReady: (TranscriptReadyNotificationInput) -> Void = { _ in }
     var transcribeAudio: (@MainActor (URL) async throws -> TranscriptionResult)?
     var persistHistory: @MainActor (iOSHistoryItem) -> Bool = {
         iOSHistoryManager.shared.upsertReportingDurability($0)
@@ -73,6 +78,7 @@ public final class WatchCaptureImportPipeline: ObservableObject {
 
     public convenience init() {
         self.init(inboxDirectory: Self.inboxDirectory)
+        self.notifyTranscriptReady = { TranscriptReadyNotificationCoordinator.shared.submit($0) }
     }
 
     /// Test seam: an isolated inbox directory.
@@ -274,7 +280,8 @@ public final class WatchCaptureImportPipeline: ObservableObject {
             wordCount: item.wordCount
         )
 
-        commitSuccessfulImport(of: job, audioURL: audioURL)
+        let importCommitted = commitSuccessfulImport(of: job, audioURL: audioURL)
+        if importCommitted { self.notifySavedResult(item) }
 
         await offerToKeyboard(text)
 
@@ -318,7 +325,7 @@ public final class WatchCaptureImportPipeline: ObservableObject {
 
     /// Records the durable success: acknowledgement retained until confirmed,
     /// job removed, parked audio released.
-    private func commitSuccessfulImport(of job: WatchCaptureImportJob, audioURL: URL) {
+    private func commitSuccessfulImport(of job: WatchCaptureImportJob, audioURL: URL) -> Bool {
         inboxLock.lock()
         let completed = journal.completeJobReportingDurability(
             captureID: job.captureID,
@@ -328,6 +335,7 @@ public final class WatchCaptureImportPipeline: ObservableObject {
         inboxLock.unlock()
         // Transport callbacks may synchronously re-enter the delivery path.
         if completed { replayPendingAcks() }
+        return completed
     }
 
     // MARK: - Acknowledgements

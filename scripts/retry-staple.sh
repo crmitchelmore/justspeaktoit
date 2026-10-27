@@ -21,16 +21,15 @@ if ! [[ "$RETRY_DELAY" =~ ^[0-9]+$ ]] || (( RETRY_DELAY > 300 )); then
 fi
 
 for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
-    if xcrun stapler staple "$ARTIFACT_PATH"; then
-        xcrun stapler validate "$ARTIFACT_PATH"
+    if xcrun stapler staple "$ARTIFACT_PATH" && xcrun stapler validate "$ARTIFACT_PATH"; then
         exit 0
     fi
 
     if [ "$attempt" -eq "$MAX_ATTEMPTS" ]; then
-        echo "Stapling failed after $MAX_ATTEMPTS attempts" >&2
+        echo "Stapling or validation failed after $MAX_ATTEMPTS attempts" >&2
         exit 1
     fi
 
-    echo "Notarization ticket is not available yet; retrying in ${RETRY_DELAY}s (${attempt}/${MAX_ATTEMPTS})..."
+    echo "Stapling or ticket validation failed; retrying in ${RETRY_DELAY}s (${attempt}/${MAX_ATTEMPTS})..."
     sleep "$RETRY_DELAY"
 done

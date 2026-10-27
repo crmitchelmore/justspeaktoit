@@ -16,10 +16,50 @@ directly between them:
 | Verb | Shortcuts action | CLI | MCP tool |
 | --- | --- | --- | --- |
 | listen | Start Dictation | `speak listen` | `start_dictation` |
+| await (local Mac) | — | `speak await --capture-id <uuid>` | `await_transcript` |
+| status | — | `speak status` | `status` |
 | stop | Stop Dictation | `speak stop` | `stop_dictation` |
 | transcribe | Transcribe Audio File | `speak transcribe <file>` | `transcribe_file` |
 | history | Get Last Transcription | `speak history` | `get_history` |
 | polish | Polish Text | — | — |
+
+## Named local capture await (qualification pending)
+
+The new `await_transcript` path waits for one **already active local Mac capture**.
+Use the `captureID` returned by `speak listen --json` or active `speak status --json`,
+then register before stopping that capture through the UI/hotkey or a separate command:
+
+```sh
+speak await --capture-id <capture-uuid> --timeout 60 --json
+```
+
+MCP arguments are `capture_id`, optional `since_id`, and `timeout_seconds`.
+Default timeout is 60 seconds; the finite allowed range is greater than zero through
+600. `since_id` must name an existing History row and is a baseline, never replay.
+Missing, unrelated, deleted-baseline and already-completed captures fail. Await
+never starts recording or accepts a later capture, phone/Watch sync, import or edit.
+Only the exact nonempty successful local result qualifies; JSON/structured output
+includes `captureID` and a frozen `entry` (History identity plus text/metadata).
+
+At most 16 underlying waits run; same-capture fan-out is intentional. Same request
+ID and normalized arguments join/replay the original deadline and terminal result.
+Changed arguments fail. Timeout, final connection EOF, Automation off and shutdown
+remove subscriptions; one disconnected retry does not cancel another subscriber.
+Off/on or restart resets the epoch. No cross-restart resumption is promised.
+CLI Ctrl-C terminates its process and closes its owned connection. The one-shot CLI
+does not consume stdin, so `/dev/null` is supported; EOF here means process/socket
+closure. MCP handles
+`notifications/cancelled` by JSON-RPC `requestId` and EOF; only awaits run concurrently,
+while existing mutators remain ordered. Output frames are serialized; Mac stdout
+writes are close-aware and bounded to two seconds, with partial/broken output ending
+dispatch rather than emitting another corrupt frame. No writes occur after close returns.
+
+Existing Automation opt-in, socket ownership/permissions and provider ownership stay
+unchanged. This is a captured-result receipt under existing History WAL/recovery
+semantics, not proof of forced disk flush, cloud arrival or delivered text insertion.
+Older apps report unsupported; update both app and bundled CLI. Installed standalone
+CLI + actual MCP/local-speech proof, native/API suites and physical relay acceptance
+are not established by this source implementation. Phone/Watch remain outside scope.
 
 ## Shortcuts / App Intents
 
@@ -145,6 +185,32 @@ and a recording that never goes quiet still stops after 15 minutes.
 Works even when the recording happened via the Action Button, Live Activity,
 or the app itself — it reads the same history the app shows.
 
+### Structured transcript properties (iOS)
+
+The new **Get Last Transcript** action returns one authenticated local History
+record with its stable UUID, Raw Text, optional Polished Text, Created At and
+optional Duration in Seconds. It selects the same newest useful row as **Get
+Last Transcription**. Existing String actions keep their names and result types.
+No recording, polishing, clipboard write or remote lookup is requested.
+
+Only the authenticated action populates transcript properties. Passive entity
+identifier resolution returns metadata with both text fields unavailable, and
+there are no suggestions, search indexing or donations. Deleted identifiers are
+omitted rather than replaced with the latest transcript. Rehydrating an entity
+saved by a Shortcut therefore does not repopulate its text automatically. A
+Shortcut can retain text deliberately returned to it; later app locking or
+History deletion cannot retract that copy.
+
+Unavailable protected storage produces a safe error. A 64 KiB local UTF-8
+payload budget includes a 1 KiB metadata reserve; oversized results are refused
+without truncation, with guidance to use the existing text action. The framework
+handles authentication, which can include an already-unlocked companion device.
+
+Physical locked-device authentication, discovery, cancelled authentication and
+existing saved String Shortcuts remain #1016 acceptance gates; metadata and unit
+tests alone do not establish those behaviors. No Siri snippet or cross-device
+entity lookup is implemented.
+
 ### The gallery in the app (iOS)
 
 **Settings → Action Button & Shortcuts → Shortcuts Gallery** lists the same
@@ -255,6 +321,7 @@ bundle; the universal (Intel-compatible) legacy download still does, at
 
 ```text
 speak transcribe <file> [--json] [--timeout <seconds>]
+speak await --capture-id <uuid> [--since-id <uuid>] [--timeout <seconds>] [--json]
 speak listen [--json]
 speak stop [--json]
 speak history [--last <n>] [--json]
@@ -374,13 +441,15 @@ of the client's PATH (replace `<you>` with your user name, or use
 | `get_history` | `limit` (1–200, default 10) | Recent transcriptions, newest first |
 | `start_dictation` | — | Confirmation once the session is live |
 | `stop_dictation` | — | Transcript of the finished session |
+| `status` | — | App state and active local capture identity, when present |
+| `await_transcript` | `capture_id` (required), `since_id`, `timeout_seconds` (>0–600; default 60) | Exact successful local capture and frozen History entry |
 
 Every tool also returns `structuredContent` with the same fields as the CLI's
 `--json` `data` object.
 
 ### Behaviour worth knowing
 
-- **Process-scoped idempotent calls.** The JSON-RPC call id becomes an automation
+- **Legacy process-scoped idempotent calls.** Existing tools retain an automation
   request id shaped like `mcp-<process-scope>-<call-id>`, where the process scope
   is an eight-character UUID prefix. The final identifier is truncated to
   `AutomationLimits.maxIdentifierLength`. Reusing a call id within the same MCP
@@ -388,6 +457,19 @@ Every tool also returns `structuredContent` with the same fields as the CLI's
   timed-out `start_dictation` does not open a second session. A new server process
   receives a new scope: this does not promise exactly-once execution across
   processes or unlimited cache retention.
+- **Await identity.** `await_transcript` instead hashes the complete typed JSON-RPC
+  ID with SHA-256 under a full per-process UUID scope. Numeric `1` and string `"1"`,
+  and long IDs with a shared prefix, remain distinct. Retries with identical
+  normalized capture/cursor/timeout arguments share the original bounded wait.
+  Await numeric IDs support signed/unsigned 64-bit integer literals only: an
+  optional minus and decimal digits. Decimal points (including `1.0`), exponents,
+  fractional values and oversized integers fail closed before any wait or
+  cancellation lookup; inspected duplicate keys also fail closed. Use string IDs
+  for other identifiers. String ownership compares the decoded UTF-8 bytes without
+  Unicode normalization; escaped and literal representations of the same code units
+  match. This follows the
+  [JSON-RPC recommendation against fractional IDs](https://www.jsonrpc.org/specification#request_object),
+  whose binary conversion can otherwise merge distinct decimal identifiers.
 - **Tool failures are results, not protocol errors.** "App not running" comes back
   as `isError: true` content the agent can act on, leaving the session usable.
 - **Bounded inputs.** Paths, identifiers, history limits and message sizes are
@@ -413,7 +495,7 @@ each result PASS, FAIL, or NOT RUN.
 | Date; macOS/architecture | NOT RUN — `<date>; <macOS>; <architecture>` |
 | App version/build; standalone `speak` path and version; `claude --version` | NOT RUN — `<versions and resolved absolute path>` |
 | Original Automation state; local registration name/scope; restoration | NOT RUN — `<state; name; local scope; restored yes/no>` |
-| Real client connection and discovered tools | NOT RUN — expect exactly `transcribe_file`, `get_history`, `start_dictation`, `stop_dictation` |
+| Real client connection and discovered tools | NOT RUN — expect `transcribe_file`, `get_history`, `start_dictation`, `stop_dictation`, `status`, `await_transcript` |
 | Invoked argument and response shape/count | NOT RUN — `get_history({"limit":1})`; record `content`, `structuredContent`, and item count without text |
 | Failure classification | NOT RUN — `<none, PATH, opt-in/socket, account/client permission, or protocol mismatch; redacted code>` |
 | Disabled-access check and final state | NOT RUN — `<fresh call blocked; socket absent where applicable; original state restored>` |
@@ -423,7 +505,7 @@ client/account, running app, installed standalone CLI, and explicitly
 non-sensitive History entry. Use a local registration and preserve any existing
 target-server configuration. Do not install software, change account/provider
 state, or enable Automation without authorisation. Configuration output alone is
-not a pass: the real client must discover exactly the four tools and complete
+not a pass: the real client must discover the six tools listed above and complete
 `get_history({"limit":1})`. Disabling Automation prevents new access but does not
 erase content already returned to a client.
 
@@ -456,3 +538,41 @@ the default; raise it with `--timeout 900`.
 
 **`schema_mismatch`.** The CLI and the app were built from different releases.
 Update whichever is older.
+
+### Private saved-result alerts
+
+iOS Settings → Saved Results offers **Transcript Ready Alerts**, off by default on each device.
+Enabling it intentionally requests alert permission only; denial keeps it off. Allow notifications
+in iOS Settings before trying again. Launch, capture and Watch import never prompt for permission.
+The option is not synced or exported with configuration.
+
+Eligible background phone completions and Watch imports can schedule a generic **Transcript ready**
+alert after History is durably saved. Watch imports also require their durable success acknowledgment.
+Alerts contain no transcript, model, filename or source: only a schema version and the exact History UUID.
+Open History opens that saved record after foreground activation/unlock; a deleted record shows an
+unavailable message. There is no notification Copy action or latest-record fallback.
+
+Foreground, empty, cancelled, failed, unsaved and confirmed keyboard-inserted results are suppressed,
+as are results already owned by a matching active Live Activity. A late keyboard pickup offer is not
+confirmed insertion. Optional polishing updates the saved row without a second alert.
+
+A protected device-local ledger records each eligible attempt before enqueue, surviving restart and
+enqueue failure. This is best-effort at-most-once scheduling: a crash between the claim and enqueue can
+lose an alert. Turning the option off invalidates scheduling and removes this feature's pending alerts,
+without clearing unrelated or delivered notifications. Explicit durable local History deletion retires
+that row's claim and removes only its pending/delivered notice; overlapping candidates are invalidated.
+Launch reconciles persisted opt-out without prompting. A late accepted request crossing opt-out is also
+removed by its exact identifier. This is best-effort cleanup: the OS cannot prove recall of an already
+shown banner. Opt-out preserves alerts delivered before it as well as unrelated notifications.
+Remote-sync tombstones do not retire notification state in this local-deletion increment; stale taps
+still resolve the exact ID to the neutral unavailable state. Optional scheduling admits at most
+64 coalesced queued/processing results, including held old generations; excess notices are dropped.
+If 64 OS operations never return, admission remains closed until they return or the app restarts.
+Notification failures do not change capture receipts, History or Watch retry/ack state.
+
+Apple documents intentional [notification permission requests](https://developer.apple.com/documentation/usernotifications/asking-permission-to-use-notifications)
+and [foreground actions requiring unlock as needed](https://developer.apple.com/documentation/usernotifications/unnotificationactionoptions/foreground).
+Enqueue success is not physical delivery proof. Locked-device visibility, background delivery,
+permission denial, notification taps, concurrent captures and Watch retries still need device acceptance.
+No iOS 27 automation trigger, available Shortcuts variables, sub-second latency, unattended fan-out or
+new background execution is established by this feature.

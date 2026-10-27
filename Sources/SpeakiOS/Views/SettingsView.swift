@@ -31,6 +31,8 @@ public struct SettingsView: View {
     @Environment(\.iOSKeyboardEnabled) private var iOSKeyboardEnabled
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var showingAPIKeys = false
+    @State private var changingTranscriptReadyNotifications = false
+    @State private var transcriptReadyPermissionDenied = false
     @State private var missingTranscriptionAPIKeyAlert: IOSMissingTranscriptionAPIKeyAlert?
 
     public init() {}
@@ -313,6 +315,38 @@ public struct SettingsView: View {
                     }
                 }
             }
+
+            Section("Saved Results") {
+                Toggle(isOn: Binding(
+                    get: { self.settings.transcriptReadyNotificationsEnabled },
+                    set: { enabled in
+                        self.changingTranscriptReadyNotifications = true
+                        Task { @MainActor in
+                            let allowed = await TranscriptReadyNotificationCoordinator.shared
+                                .setEnabledFromUser(enabled)
+                            self.transcriptReadyPermissionDenied = enabled && !allowed
+                            self.changingTranscriptReadyNotifications = false
+                        }
+                    }
+                )) {
+                    Label("Transcript Ready Alerts", systemImage: "bell")
+                }
+                .disabled(self.changingTranscriptReadyNotifications)
+                .accessibilityIdentifier("transcriptReadyNotificationsToggle")
+                Text(
+                    "Private alerts contain no transcript. They appear for saved background results "
+                        + "without another active result surface."
+                )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if self.transcriptReadyPermissionDenied {
+                    Text("Alerts are off. Allow notifications for Just Speak in iOS Settings, then enable this option.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            FocusCaptureSettingsSection()
 
             Section("Hardware Trigger") {
                 NavigationLink {

@@ -51,25 +51,11 @@ final class CoreJourneyBatchUITests: XCTestCase {
 
     @MainActor
     private func driveRecording(fixture: XCUIApplication, target: XCUIElement, diagnosticsURL: URL) throws {
-        // A supported global chord enters through Carbon, never MainManager callbacks.
-        fixture.typeKey("k", modifierFlags: [.control, .option, .shift])
-        fixture.typeKey("k", modifierFlags: [.control, .option, .shift])
-        waitForSnapshot(at: diagnosticsURL, message: "Double-tap must start production recording") {
-            $0.states.last == "recording"
-        }
-        XCTAssertEqual(target.value as? String, initialField)
-        XCTAssertEqual(NSPasteboard.general.string(forType: .string), initialClipboard)
-        // Wait out the configured fifteen-second double-tap window so the stop is
-        // a distinct single tap. This is a gesture timing assertion, not a retry.
-        waitForSnapshot(at: diagnosticsURL, message: "Recording must survive until the stop gesture") {
-            guard let lastEvent = $0.events.last else { return false }
-            return $0.states.last == "recording"
-                && ProcessInfo.processInfo.systemUptime - lastEvent.uptime > 15.2
-        }
-        XCTAssertEqual(NSWorkspace.shared.frontmostApplication?.bundleIdentifier, fixtureBundleID)
-        fixture.typeKey("k", modifierFlags: [.control, .option, .shift])
-        waitForSnapshot(at: diagnosticsURL, message: "Stop must run transcription, delivery, and History") {
-            $0.states.last == "completed"
+        try CoreJourneyGestureDriver.recordAndStop(
+            fixture: fixture, diagnosticsURL: diagnosticsURL, terminalState: "completed"
+        ) {
+            XCTAssertEqual(target.value as? String, initialField)
+            XCTAssertEqual(NSPasteboard.general.string(forType: .string), initialClipboard)
         }
     }
 
@@ -203,20 +189,7 @@ final class CoreJourneyBatchUITests: XCTestCase {
     }
 }
 
-private struct BatchSnapshot: Decodable {
-    struct Event: Decodable {
-        let stage: String
-        let source: String
-        let frontmostBundleID: String?
-        let uptime: TimeInterval
-    }
-    let processID: Int32
-    let registered: Bool
-    let accessibilityTrusted: Bool
-    let eventPostingAllowed: Bool
-    let states: [String]
-    let events: [Event]
-}
+private typealias BatchSnapshot = CoreJourneyProbeSnapshot
 
 private struct BatchHTTPResult: Decodable {
     let acceptedRequests: Int

@@ -72,10 +72,25 @@ final class ProviderCatalogInvariantTests: XCTestCase {
         let registry = TranscriptionProviderRegistry.shared
 
         for model in ModelCatalog.batchTranscription {
+            let route = BatchTranscriptionRouting.route(for: model.id, platform: .macOS)
+            XCTAssertEqual(route?.modelID, model.id)
             // Apple entries transcribe on-device via ModelRouting.appleSpeech.
-            if ModelRouting.family(for: model.id) == .appleSpeech { continue }
+            if ModelRouting.family(for: model.id) == .appleSpeech {
+                XCTAssertEqual(route?.transport, .appleLocal)
+                XCTAssertNil(route?.apiKeyIdentifier)
+                continue
+            }
 
-            if await registry.provider(forModel: model.id) != nil { continue }
+            if let provider = await registry.provider(forModel: model.id) {
+                XCTAssertEqual(route?.transport, .directProvider, model.id)
+                XCTAssertEqual(route?.providerID, provider.metadata.id, model.id)
+                XCTAssertEqual(route?.apiKeyIdentifier, provider.metadata.apiKeyIdentifier, model.id)
+                continue
+            }
+
+            XCTAssertEqual(route?.transport, .openRouter, model.id)
+            XCTAssertEqual(route?.providerID, "openrouter", model.id)
+            XCTAssertEqual(route?.apiKeyIdentifier, "openrouter.apiKey", model.id)
 
             XCTAssertTrue(
                 Self.openRouterRoutedBatchModels.contains(model.id),

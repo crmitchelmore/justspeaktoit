@@ -600,7 +600,8 @@ let package = portableCoreBuild ? portablePackage : Package(
         ),
         .testTarget(
             name: "SpeakCoreTests",
-            dependencies: ["SpeakCore", "SpeakTestSupport"]
+            dependencies: ["SpeakCore", "SpeakTestSupport"],
+            resources: [.copy("Fixtures")]
         ),
         .testTarget(
             name: "SpeakWatchCoreTests",

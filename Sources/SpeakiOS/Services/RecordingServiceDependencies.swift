@@ -13,6 +13,9 @@ struct RecordingServiceActivity {
     var endActivity: () -> Void
     var reportError: (String) -> Void
     var complete: TranscriptionRecordingService.ActivityCompletion
+    var hasActiveResult: (String) -> Bool = { _ in false }
+    var completeOwned: TranscriptionRecordingService.OwnedActivityCompletion?
+    var hasActiveResultSurface: (UUID) -> Bool = { _ in false }
 
     func startActivity(provider: String, initialStatus: Status) -> Bool {
         self.start(provider, initialStatus)
@@ -39,7 +42,17 @@ struct RecordingServiceActivity {
                     completionMessage: message,
                     resultCompletionID: identifier
                 )
-            }
+            },
+            hasActiveResult: { manager.hasActiveResult(completionID: $0) },
+            completeOwned: { count, duration, primedMessage, outcome, preview, message, identifier, owner in
+                manager.completeActivity(
+                    finalWordCount: count, duration: duration, keepPrimed: true,
+                    primedMessage: primedMessage, completionOutcome: outcome,
+                    resultPreview: preview, completionMessage: message, resultCompletionID: identifier,
+                    surfaceOwnerID: owner
+                )
+            },
+            hasActiveResultSurface: { manager.hasActiveResult(surfaceOwnerID: $0) }
         )
     }
 }
@@ -55,6 +68,8 @@ struct RecordingServiceDependencies {
     let recordDictation: (CaptureTrigger, String) -> Void
     let markDelivered: (UUID) -> Void
     let applicationState: () -> UIApplication.State
+    var notifyTranscriptReady: (TranscriptReadyNotificationInput) -> Void = { _ in }
+    var focusOverride: @MainActor (CaptureRunParameters) async throws -> FocusCaptureOverride = { _ in .none }
 
     static func live(settings: AppSettings = .shared) -> Self {
         Self(
@@ -63,7 +78,9 @@ struct RecordingServiceDependencies {
             keyboardDelivery: .shared,
             recordDictation: { CaptureOnboardingStore.shared.recordDictation(trigger: $0, transcript: $1) },
             markDelivered: { CaptureSafetyClaimStore.shared.markDelivered(recording: $0) },
-            applicationState: { UIApplication.shared.applicationState }
+            applicationState: { UIApplication.shared.applicationState },
+            notifyTranscriptReady: { TranscriptReadyNotificationCoordinator.shared.submit($0) },
+            focusOverride: FocusCaptureReconciliation.live(explicit:)
         )
     }
 }

@@ -55,3 +55,6 @@ API breakage: enumelement GroqTTSAPIError.excessiveFanOut has been added as a ne
 # are rebuilt together and selection/migration behavior is covered by tests.
 API breakage: enumelement ApplicationPreferenceKey.mistralTTSModel has been added as a new enum case
 API breakage: enumelement MistralTTSModel.voxtralMiniTTS3 has been added as a new enum case
+# Named local-Mac capture waits add one command; existing cases, raw values and
+# initializers remain. Repository dispatchers and clients handle the new case.
+API breakage: enumelement AutomationCommand.awaitTranscript has been added as a new enum case

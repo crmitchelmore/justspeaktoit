@@ -59,6 +59,21 @@ Xvfb. No SDK substitution or extra filesystem permissions are used for these
 checks. The bundle, SHA-256, checked-out revision, resolved manifest and installed-test log are retained
 as `justspeaktoit-flatpak-x86_64`.
 
+Trusted retests download that fixed-name artifact from an authenticated, successful
+same-repository source run. New builds also retain a versioned `build-provenance.json`
+with run/attempt, repository and workflow identity, trigger source SHA, actual checkout
+and ordered commit parents, same-repository PR identities, and the bundle SHA-256.
+The consumer compares it with the live run identity/attempt, the actual fetched git
+commit and bundle bytes before checking unchanged package inputs. Current PR head/base
+metadata and an association disappearing after merge cannot rewrite the build-time
+record. The record has authority only inside that authenticated artifact; copying or
+inventing one alone does not establish qualification. Missing legacy records require
+a fresh build. Override and sandbox checks are unchanged. This provenance path has
+Python regression coverage and passed its [fresh hosted build/install](https://github.com/crmitchelmore/justspeaktoit/actions/runs/40227762194/job/121272697098)
+and [trusted installed retest](https://github.com/crmitchelmore/justspeaktoit/actions/runs/40229920326/job/121279237420)
+at code revision [`da07071f`](https://github.com/crmitchelmore/justspeaktoit/commit/da07071f5ffd96caa4a7ea3a0b0919a128851479).
+Normal PR/merge, public-distribution and physical acceptance gates remain open.
+
 Qualification requires a successful [Linux Flatpak workflow receipt](https://github.com/crmitchelmore/justspeaktoit/actions/workflows/linux-flatpak.yml)
 for the chosen revision, with its installed-test log and bundle hash. Historical
 packaging-branch success is not evidence for current main. The

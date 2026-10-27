@@ -51,7 +51,9 @@ final class MCPServerBehaviourTests: XCTestCase {
         let result = try XCTUnwrap(response["result"] as? [String: Any])
         let tools = try XCTUnwrap(result["tools"] as? [[String: Any]])
         let names = Set(tools.compactMap { $0["name"] as? String })
-        XCTAssertEqual(names, ["transcribe_file", "get_history", "start_dictation", "stop_dictation"])
+        XCTAssertEqual(names, [
+            "transcribe_file", "get_history", "start_dictation", "stop_dictation", "status", "await_transcript"
+        ])
 
         let transcribe = try XCTUnwrap(tools.first { $0["name"] as? String == "transcribe_file" })
         let schema = try XCTUnwrap(transcribe["inputSchema"] as? [String: Any])
@@ -180,22 +182,13 @@ final class MCPServerBehaviourTests: XCTestCase {
         XCTAssertEqual(error["code"] as? Int, -32602)
     }
 
-    func testUnadvertisedButValidCommand_returnsInvalidParams() throws {
-        let client = StubAutomationClient(result: AutomationResult())
-        let response = try XCTUnwrap(self.respond(
-            self.handler(client),
-            [
-                "jsonrpc": "2.0", "id": 12, "method": "tools/call",
-                "params": ["name": AutomationCommand.status.rawValue]
-            ]
-        ))
-        let error = try XCTUnwrap(response["error"] as? [String: Any])
-        XCTAssertEqual(
-            error["code"] as? Int,
-            -32602,
-            "`status` is a real socket command but is not advertised, so accepting it would make tools/list a lie"
-        )
-        XCTAssertTrue(client.sentRequests.isEmpty)
+    func testAdvertisedStatus_UsesSameSocketCommand() throws {
+        let client = StubAutomationClient(result: AutomationResult(sessionActive: false))
+        let response = try XCTUnwrap(self.respond(self.handler(client), [
+            "jsonrpc": "2.0", "id": 12, "method": "tools/call", "params": ["name": "status"]
+        ]))
+        XCTAssertNotNil(response["result"])
+        XCTAssertEqual(client.sentRequests.map(\.command), [.status])
     }
 
     func testBlankLine_isIgnored() {

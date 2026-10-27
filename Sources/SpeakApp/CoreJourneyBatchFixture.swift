@@ -1,5 +1,6 @@
 #if DEBUG
 import Foundation
+import CoreFoundation
 import SpeakCore
 
 /// A fixed synthetic PCM recording, not microphone input or speech recognition.
@@ -7,6 +8,7 @@ import SpeakCore
 enum CoreJourneyBatchFixture {
     static let model = "core-journey/batch-fixture"
     static let transcript = "A complete batch journey, through the clipboard."
+    static let audioPrompt = "Transcribe this audio file. Return only the transcript text, with no commentary."
     static let duration: TimeInterval = 0.25
     static let audioData: Data = {
         let sampleCount = 4_000
@@ -107,20 +109,31 @@ final class CoreJourneyBatchURLProtocol: URLProtocol, @unchecked Sendable {
     static func accepts(_ request: URLRequest) -> Bool {
         guard request.url?.absoluteString == "https://openrouter.ai/api/v1/chat/completions",
               request.httpMethod == "POST",
+              request.value(forHTTPHeaderField: "Content-Type") == "application/json",
               request.value(forHTTPHeaderField: "Authorization") == "Bearer core-journey-fixture-not-a-real-key",
               let body = body(of: request),
               let payload = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+              Set(payload.keys) == Set(["model", "temperature", "messages", "stream"]),
               payload["model"] as? String == CoreJourneyBatchFixture.model,
-              payload["stream"] as? Bool == false,
+              let stream = payload["stream"] as? NSNumber,
+              CFGetTypeID(stream) == CFBooleanGetTypeID(), !stream.boolValue,
+              let temperature = payload["temperature"] as? NSNumber,
+              CFGetTypeID(temperature) != CFBooleanGetTypeID(), temperature.doubleValue == 0,
               let messages = payload["messages"] as? [[String: Any]], messages.count == 1,
-              let content = messages.first?["content"] as? [[String: Any]] else { return false }
-        let audio = content.filter { $0["type"] as? String == "input_audio" }
-        guard audio.count == 1, let input = audio.first?["input_audio"] as? [String: String],
+              let message = messages.first, Set(message.keys) == Set(["role", "content"]),
+              message["role"] as? String == "user",
+              let content = message["content"] as? [[String: Any]], content.count == 2,
+              Set(content[0].keys) == Set(["type", "text"]), content[0]["type"] as? String == "text",
+              content[0]["text"] as? String == CoreJourneyBatchFixture.audioPrompt,
+              Set(content[1].keys) == Set(["type", "input_audio"]),
+              content[1]["type"] as? String == "input_audio" else { return false }
+        guard let input = content[1]["input_audio"] as? [String: String],
+              Set(input.keys) == Set(["format", "data"]),
               input["format"] == "wav", let encoded = input["data"] else { return false }
         return Data(base64Encoded: encoded) == CoreJourneyBatchFixture.audioData
     }
 
-    private static func body(of request: URLRequest) -> Data? {
+    static func body(of request: URLRequest) -> Data? {
         if let body = request.httpBody { return body }
         guard let stream = request.httpBodyStream else { return nil }
         stream.open()

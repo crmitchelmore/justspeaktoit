@@ -13,7 +13,7 @@ private let logger = SpeakLogger.logger(category: "iOSHistoryManager")
 /// Manages transcription history persistence for iOS with CloudKit sync.
 @MainActor
 // swiftlint:disable:next type_body_length
-public final class iOSHistoryManager: ObservableObject {
+public final class iOSHistoryManager: ObservableObject { // swiftlint:disable:this type_name
     public static let shared = iOSHistoryManager()
 
     @Published public private(set) var items: [iOSHistoryItem] = []
@@ -28,6 +28,7 @@ public final class iOSHistoryManager: ObservableObject {
     private var syncStarted = false
     private let startSync: ((iOSHistoryManager) async -> Void)?
     private let userDefaults: UserDefaults
+    private let removeNotificationClaims: (Set<UUID>) -> Void
 
     /// Whether CloudKit sync is wired up. Disabled in unit tests so persistence
     /// can be exercised in isolation.
@@ -87,7 +88,8 @@ public final class iOSHistoryManager: ObservableObject {
         self.init(
             fileURL: documentsURL.appendingPathComponent("transcription-history.json"),
             syncEnabled: true,
-            userDefaults: .standard
+            userDefaults: .standard,
+            removeNotificationClaims: { TranscriptReadyNotificationCoordinator.shared.retireNotifications(for: $0) }
         )
     }
 
@@ -97,12 +99,14 @@ public final class iOSHistoryManager: ObservableObject {
     init(
         fileURL: URL, syncEnabled: Bool, userDefaults: UserDefaults = .standard,
         storageIO: IOSHistoryPersistence.StorageIO = .init(),
-        startSync: ((iOSHistoryManager) async -> Void)? = nil
+        startSync: ((iOSHistoryManager) async -> Void)? = nil,
+        removeNotificationClaims: @escaping (Set<UUID>) -> Void = { _ in }
     ) {
         self.persistence = IOSHistoryPersistence(fileURL: fileURL, storageIO: storageIO)
         self.startSync = startSync
         self.syncEnabled = syncEnabled
         self.userDefaults = userDefaults
+        self.removeNotificationClaims = removeNotificationClaims
 
         loadSyncedIDs()
 
@@ -274,6 +278,7 @@ public final class iOSHistoryManager: ObservableObject {
             items = previous
             return
         }
+        self.removeNotificationClaims([item.id])
         syncedIDs.remove(item.id)
         saveSyncedIDs()
         // A Handoff pointer must never outlive the entry it points at
@@ -298,6 +303,7 @@ public final class iOSHistoryManager: ObservableObject {
             items = previous
             return
         }
+        self.removeNotificationClaims(Set(allIDs))
         syncedIDs.removeAll()
         saveSyncedIDs()
 

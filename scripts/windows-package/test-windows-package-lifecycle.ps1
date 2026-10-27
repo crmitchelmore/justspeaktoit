@@ -154,15 +154,19 @@ function Wait-PathState([string] $Path, [bool] $Present, [int] $Seconds) {
 # removes packages/files, changes the assertion, or proves absence of every
 # possible OS reference. Unreadable, truncated and timed-out observations stay
 # explicit; file contents and process command lines are not collected.
-function Get-PreviousPackageDiagnostics([string] $PackageName, [string] $PackageFullName, [string] $Location) {
+function Get-PreviousPackageDiagnostics(
+    [string] $PackageName, [string] $PackageFullName, [string] $Location, [switch] $RemovalOnly
+) {
     $result = [ordered]@{ packageFullName = $PackageFullName; location = $Location
         timeoutSeconds = 30; state = 'not-started'; observations = @(); error = $null }
     $job = $null
     try {
-        $job = Start-Job -ArgumentList $PackageName, $PackageFullName, $Location -ScriptBlock {
-            param($PackageName, $PackageFullName, $Location)
+        $job = Start-Job -ArgumentList $PackageName, $PackageFullName, $Location, ([bool] $RemovalOnly) -ScriptBlock {
+            param($PackageName, $PackageFullName, $Location, $RemovalOnly)
             $ErrorActionPreference = 'Stop'
-            foreach ($kind in @('registrations', 'provisioning', 'directory', 'processReferences')) {
+            $kinds = @('registrations', 'provisioning', 'directory', 'processReferences')
+            if ($RemovalOnly) { $kinds = @('registrations', 'directory') }
+            foreach ($kind in $kinds) {
                 $section = [ordered]@{ kind = $kind; rows = @(); truncated = $false; error = $null }
                 try {
                     switch ($kind) {
@@ -199,6 +203,9 @@ function Get-PreviousPackageDiagnostics([string] $PackageName, [string] $Package
                                         length = $(if ($_.PSIsContainer) { $null } else { $_.Length })
                                         attributes = [string] $_.Attributes }
                                 })
+                                $section.observedEntryCount = $section.rows.Count
+                                $section.observedDirectoryCount = @($section.rows | Where-Object { $_.directory }).Count
+                                $section.observedFileCount = $section.rows.Count - $section.observedDirectoryCount
                             }
                         }
                         'processReferences' {
@@ -476,6 +483,10 @@ function Assert-Removed([string] $Label, $Package) {
     # The package object reads its location from the live registration, which
     # is gone after removal; keep the path it had while installed.
     $installLocation = [string] $Package.InstallLocation
+    # Exit/identity evidence was collected before this point. Release only
+    # completed owned process handles before asking Windows to remove the app.
+    $released = Close-JstiExitedProcesses $script:ledger $ownershipOperations
+    Assert-Check "$Label releases exited owned process handles" ($released.failures.Count -eq 0) $released
     $deployment = Invoke-Deployment "Uninstall $Label" { Remove-AppxPackage -Package $Package.PackageFullName }
     Assert-Check "$Label uninstalls through the normal package removal" $deployment.succeeded $deployment
     Assert-Check "$Label leaves no registered version" ((Get-Registrations).Count -eq 0) @((Get-Registrations) | ForEach-Object { $_.PackageFullName })
@@ -484,8 +495,14 @@ function Assert-Removed([string] $Label, $Package) {
     Assert-Check "$Label removes its execution alias" (Wait-PathState $aliasPath $false 60) $aliasPath
     Assert-Check "$Label removes its CLI execution alias" (Wait-PathState $cliAliasPath $false 60) $cliAliasPath
     Assert-Check "$Label removes package-private app data" (Wait-PathState $packageDataDirectory $false 120) $packageDataDirectory
-    Add-Check "$Label removes its installed files" (
-        $installLocation -and (Wait-PathState $installLocation $false 120)) $installLocation
+    $filesRemoved = $installLocation -and (Wait-PathState $installLocation $false 120)
+    $removalDetails = $installLocation
+    if (-not $filesRemoved) {
+        # Read-only, capped diagnostics after the unchanged strict deadline.
+        # Never delete retained files or turn delayed cleanup into a pass.
+        $removalDetails = Get-PreviousPackageDiagnostics $name $Package.PackageFullName $installLocation -RemovalOnly
+    }
+    Add-Check "$Label removes its installed files" $filesRemoved $removalDetails
 }
 
 # --- user data ---------------------------------------------------------------------------------------

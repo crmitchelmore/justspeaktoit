@@ -18,6 +18,7 @@ function New-FakeMachine([string[]] $Registrations = @(), [string[]] $Certificat
         Calls = New-Object System.Collections.ArrayList
         FailRemovePackage = $false; IgnoreRemovePackage = $false; StickyProcess = $false
         StickyCertificate = $false; FailRemoveDirectory = $false
+        FailDisposeProcess = $false; FailProcessState = $false
     }
     foreach ($item in $Registrations) { [void] $machine.Registrations.Add($item) }
     foreach ($item in $Certificates) { [void] $machine.Certificates.Add($item) }
@@ -26,13 +27,23 @@ function New-FakeMachine([string[]] $Registrations = @(), [string[]] $Certificat
 }
 
 function New-FakeProcess([int] $Id, [bool] $Running = $true) {
-    return [pscustomobject]@{ Id = $Id; Running = $Running }
+    return [pscustomobject]@{ Id = $Id; Running = $Running; Disposed = $false }
 }
 
 function Get-FakeOperations($Machine) {
     # Every mutation is logged, so a test can prove exactly what was touched.
     return @{
-        IsRunning = { param($Process) [bool] $Process.Running }
+        IsRunning = {
+            param($Process)
+            if ($Machine.FailProcessState) { throw 'synthetic process-state failure' }
+            [bool] $Process.Running
+        }.GetNewClosure()
+        DisposeProcess = {
+            param($Process)
+            [void] $Machine.Calls.Add("dispose $($Process.Id)")
+            if ($Machine.FailDisposeProcess) { throw 'synthetic disposal failure' }
+            $Process.Disposed = $true
+        }.GetNewClosure()
         StopProcess = {
             param($Process)
             [void] $Machine.Calls.Add("stop $($Process.Id)")
@@ -99,7 +110,8 @@ Assert-That (-not $admission.admitted) 'An existing installation blocks admissio
 Assert-That ((@($admission.blocking) -join ',') -eq 'dataDirectory,registrations,packageData,alias,processes,publisherCertificates') 'Every kind of existing state is reported as blocking'
 $attempts = @(
     { Add-JstiOwnedPackage $ledger $base }, { Add-JstiOwnedProcess $ledger $userApp },
-    { Add-JstiOwnedCertificate $ledger 'NEW' }, { Set-JstiOwnedDataDirectory $ledger $data })
+    { Add-JstiOwnedCertificate $ledger 'NEW' }, { Set-JstiOwnedDataDirectory $ledger $data },
+    { Close-JstiExitedProcesses $ledger (Get-FakeOperations $machine) })
 foreach ($attempt in $attempts) {
     $refused = $false
     try { & $attempt } catch { $refused = $true }
@@ -130,10 +142,57 @@ Set-JstiOwnedDataDirectory $ledger $data
 $cleanup = Invoke-JstiLifecycleCleanup $ledger (Get-FakeOperations $machine)
 Assert-That ($ledger.Packages.Count -eq 2) 'A full name is owned once however often it is deployed'
 Assert-That ($cleanup.failures.Count -eq 0) 'Complete removal of owned state passes'
-Assert-That ((@($machine.Calls) -join ';') -eq "stop 1;remove $upgrade;certificate OWNED;delete $data") 'Cleanup touches exactly the owned running process, registration, certificate and data'
+Assert-That ((@($machine.Calls) -join ';') -eq "stop 1;dispose 2;dispose 1;remove $upgrade;certificate OWNED;delete $data") 'Cleanup stops and releases owned processes before removing their package, certificate and data'
 Assert-That (-not $running.Running -and $foreignProcess.Running) 'Only processes this run started are stopped'
 Assert-That ($machine.Registrations.Count -eq 0 -and $machine.Certificates -contains 'USERCERT' -and
     $machine.Directories.Count -eq 0) 'Owned registrations, certificates and data are removed; others are kept'
+
+# --- completed process handles are released before uninstall, once, without killing live/foreign state ---
+$machine = New-FakeMachine
+$ledger = New-AdmittedLedger
+$live = New-FakeProcess 11
+$finished = New-FakeProcess 12 $false
+$foreign = New-FakeProcess 13 $false
+Add-JstiOwnedProcess $ledger $live
+Add-JstiOwnedProcess $ledger $finished
+$released = Close-JstiExitedProcesses $ledger (Get-FakeOperations $machine)
+Assert-That ($released.failures.Count -eq 0 -and (@($released.releasedProcessHandles) -join ',') -eq '12') `
+    'Only the exited owned process handle is released'
+Assert-That ($finished.Disposed -and -not $live.Disposed -and -not $foreign.Disposed -and $live.Running) `
+    'Releasing completed handles never kills or disposes live or foreign processes'
+Assert-That ($ledger.Processes.Count -eq 1 -and $ledger.Processes[0] -eq $live) `
+    'Only successfully released processes leave the ownership ledger'
+$null = Close-JstiExitedProcesses $ledger (Get-FakeOperations $machine)
+Assert-That ((@($machine.Calls) -join ';') -eq 'dispose 12') 'Repeated release never disposes the same process twice'
+
+foreach ($fault in @('FailDisposeProcess', 'FailProcessState')) {
+    $machine = New-FakeMachine
+    $machine.$fault = $true
+    $ledger = New-AdmittedLedger
+    $finished = New-FakeProcess 14 $false
+    Add-JstiOwnedProcess $ledger $finished
+    $released = Close-JstiExitedProcesses $ledger (Get-FakeOperations $machine)
+    Assert-That ($released.failures.Count -eq 1 -and $released.failures[0] -like 'releasing exited process 14:*') `
+        "$fault is reported as a resource-release failure"
+    Assert-That (-not $finished.Disposed -and $ledger.Processes.Count -eq 1) `
+        "$fault preserves ownership without claiming the handle was released"
+    $machine.$fault = $false
+    $released = Close-JstiExitedProcesses $ledger (Get-FakeOperations $machine)
+    Assert-That ($released.failures.Count -eq 0 -and $finished.Disposed -and $ledger.Processes.Count -eq 0) `
+        "$fault can retry a still-owned completed process safely"
+}
+
+# Final cleanup records disposal errors instead of silently passing or forgetting ownership.
+$machine = New-FakeMachine
+$machine.FailDisposeProcess = $true
+$ledger = New-AdmittedLedger
+$finished = New-FakeProcess 15 $false
+Add-JstiOwnedProcess $ledger $finished
+$cleanup = Invoke-JstiLifecycleCleanup $ledger (Get-FakeOperations $machine)
+Assert-That ($cleanup.failures.Count -eq 1 -and $cleanup.failures[0] -like '*synthetic disposal failure*') `
+    'Final cleanup propagates disposal failures'
+Assert-That ($ledger.Processes.Count -eq 1 -and -not $finished.Disposed) `
+    'A failed final disposal retains the exact owned process for diagnosis or retry'
 
 # --- a registration the run does not own is never removed and fails the run -----------------
 $machine = New-FakeMachine -Registrations @($existing, $upgrade)

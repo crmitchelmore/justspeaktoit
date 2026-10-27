@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { assessCIGates as assessOracle } from '../verify-ci-gates.mjs';
@@ -195,45 +193,36 @@ test('every Apple build cache isolates architecture, host and workspace, includi
 });
 
 const simulatorPreparation = jobBodies['build-ios'].match(
-  /- name: Select iOS Simulator\n        run: \|\n([\s\S]*?)(?=\n      - name:)/,
-)?.[1].replace(/^          /gm, '');
-assert.ok(simulatorPreparation, 'simulator selection must reject unavailable devices');
+  /- name: Create owned iOS Simulator matching the selected configuration\n        run: \|\n([\s\S]*?)(?=\n      - name:)/,
+)?.[1];
+assert.ok(simulatorPreparation, 'owned simulator creation must precede preparation');
 const iosPreparation = readFileSync(new URL('../prepare-ios-ci.py', import.meta.url), 'utf8');
+const ownedSimulator = fileURLToPath(new URL('../owned-ios-ci-simulator.py', import.meta.url));
 
 function prepareSimulator(devices) {
-  const directory = mkdtempSync(join(tmpdir(), 'ios-ci-readiness-'));
-  const environmentFile = join(directory, 'environment');
-  try {
-    const result = spawnSync('/bin/bash', ['-c', `
-      xcrun() {
-        if [[ "$*" == "simctl list devices available -j" ]]; then
-          printf '%s\\n' "$SIM_DEVICES_JSON"
-        else
-          echo "Unexpected simulator command" >&2
-          return 64
-        fi
-      }
-      ${simulatorPreparation}
-    `], {
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        GITHUB_ENV: environmentFile,
-        SIM_DEVICES_JSON: JSON.stringify({ devices }),
-      },
-    });
-    assert.ifError(result.error);
-    return { ...result, environment: existsSync(environmentFile) ? readFileSync(environmentFile, 'utf8') : null };
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
+  // Execute the canonical selector without invoking simctl or creating devices.
+  const result = spawnSync('python3', ['-B', '-c', `
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("owned_simulator", sys.argv[1])
+owned = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(owned)
+print(json.dumps(owned.selected_configuration(json.loads(sys.argv[2]))))
+`, ownedSimulator, JSON.stringify(devices)], { encoding: 'utf8' });
+  assert.ifError(result.error);
+  return result;
 }
 
 test('iOS workloads are partitioned without extending budgets or dropping tests', () => {
   const body = jobBodies['build-ios'];
   assert.match(body, /^\s+timeout-minutes: 30$/m);
-  assert.ok(body.indexOf('Select iOS Simulator') < body.indexOf('- name: Prepare iOS Simulator'));
+  assert.ok(body.indexOf('Create owned iOS Simulator') < body.indexOf('- name: Prepare iOS Simulator'));
   assert.match(body, /python3 scripts\/prepare-ios-ci\.py "\$SIMULATOR_ID"/);
+  assert.match(simulatorPreparation, /python3 scripts\/owned-ios-ci-simulator\.py create/);
+  assert.match(simulatorPreparation, /--receipt "\$RUNNER_TEMP\/owned-ios-simulator\.json" --github-env "\$GITHUB_ENV"/);
+  assert.match(simulatorPreparation, /--owner "\$GITHUB_RUN_ID:\$GITHUB_RUN_ATTEMPT:\$GITHUB_JOB"/);
+  assert.match(body, /name: Remove only the simulator created by this job\n\s+if: always\(\)/);
+  assert.match(body, /owned-ios-ci-simulator\.py cleanup/);
+  assert.match(body, /\$\{\{ runner.temp \}\}\/owned-ios-simulator\.json/);
   assert.doesNotMatch(iosPreparation, /"swift"/);
   assert.doesNotMatch(iosPreparation, /"tuist"/);
   assert.match(iosPreparation, /boot.wait\(timeout=600\)/);
@@ -274,29 +263,29 @@ test('iOS workloads are partitioned without extending budgets or dropping tests'
 
 test('iOS selection prefers an available Pro before starting preparation', () => {
   const result = prepareSimulator({ runtime: [
-    { name: 'iPhone 17 Pro', udid: 'unavailable', isAvailable: false },
-    { name: 'iPhone 16', udid: 'fallback', isAvailable: true },
-    { name: 'iPhone 17 Pro', udid: 'preferred', isAvailable: true },
+    { name: 'iPhone 17 Pro', udid: 'unavailable', deviceTypeIdentifier: 'unavailable-type', isAvailable: false },
+    { name: 'iPhone 16', udid: 'fallback', deviceTypeIdentifier: 'fallback-type', isAvailable: true },
+    { name: 'iPhone 17 Pro', udid: 'preferred', deviceTypeIdentifier: 'preferred-type', isAvailable: true },
   ] });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.environment, 'SIMULATOR_ID=preferred\n');
+  assert.deepEqual(JSON.parse(result.stdout), ['runtime', 'preferred-type']);
 });
 
 test('iOS preparation falls back to an available iPhone, not a watch', () => {
   const result = prepareSimulator({ runtime: [
     { name: 'Apple Watch', udid: 'watch', isAvailable: true },
-    { name: 'iPhone 16', udid: 'fallback', isAvailable: true },
+    { name: 'iPhone 16', udid: 'fallback', deviceTypeIdentifier: 'fallback-type', isAvailable: true },
   ] });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.environment, 'SIMULATOR_ID=fallback\n');
+  assert.deepEqual(JSON.parse(result.stdout), ['runtime', 'fallback-type']);
 });
 
 test('missing simulator explicitly fails instead of publishing a usable destination', () => {
   const missing = prepareSimulator({ runtime: [] });
   assert.equal(missing.status, 1);
-  assert.match(missing.stdout, /::error::No available iPhone simulator/);
+  assert.match(missing.stderr, /No available iPhone simulator configuration/);
   assert.doesNotMatch(missing.stdout, /READINESS/);
-  assert.equal(missing.environment, null);
+  assert.equal(missing.stdout, '');
 });
 
 const predicate = aggregate.match(/name: Reject unsuccessful CI gates\n        if: >-\n([\s\S]*?)\n        env:/)?.[1];

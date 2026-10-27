@@ -96,7 +96,9 @@ PY
 
 step "X11 paste (Xvfb, Openbox, Zenity)"
 display=":$((80 + RANDOM % 9))"
-Xvfb "$display" -screen 0 1280x1024x24 -nolisten tcp >/dev/null 2>&1 & pids+=($!)
+Xvfb "$display" -screen 0 1280x1024x24 -nolisten tcp >/dev/null 2>&1 &
+xvfb=$!
+pids+=("$xvfb")
 for _ in $(seq 1 50); do [ -e "/tmp/.X11-unix/X${display#:}" ] && break; sleep 0.1; done
 export DISPLAY="$display" GDK_BACKEND=x11 GSK_RENDERER=cairo GTK_A11Y=none NO_AT_BRIDGE=1 LANG=C.UTF-8 LC_ALL=C.UTF-8
 openbox >/dev/null 2>&1 & pids+=($!)
@@ -154,6 +156,10 @@ wait "$zenity" || true
 pasted="$(cat "$work/zenity.out")"
 [ "$pasted" = "X11 dictation ✓" ] || { echo "The target received: '$pasted'" >&2; exit 1; }
 echo "The Zenity field received the dictated text."
+
+step "X11 profile identity and ordering (two owned executable windows)"
+JSTI_PROFILE_OWNED_DISPLAY="$DISPLAY" JSTI_PROFILE_OWNED_DISPLAY_PID="$xvfb" \
+    "$python" "$repo/scripts/linux-profile-identity-checks.py" "$binary"
 
 step "login launch (--background starts minimised)"
 "$binary" --background >"$work/background.out" 2>&1 & background=$!

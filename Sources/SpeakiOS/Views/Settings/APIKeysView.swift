@@ -195,16 +195,9 @@ struct APIKeysView: View {
                         : "line.3.horizontal.decrease.circle.fill")
                 }
             }
-            ToolbarItem(placement: .topBarTrailing) {
-                if isValidating {
-                    ProgressView()
-                } else {
-                    Button("Save") {
-                        saveKeys()
-                    }
-                    .disabled(!self.drafts.hasUnsavedKey)
-                }
-            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            saveAction
         }
         .alert("Validation", isPresented: $showingValidation) {
             Button("OK") {}
@@ -219,6 +212,31 @@ struct APIKeysView: View {
             balances.refreshAll(storedCredentialIdentifiers: storedCredentialIdentifiers)
         }
         .onDisappear { balances.cancelAll() }
+    }
+
+    /// Native search replaces navigation-bar actions while a query is active.
+    /// Keep the same save operation reachable above the keyboard when editing
+    /// a filtered provider, without clearing the query or the entered drafts.
+    private var saveAction: some View {
+        HStack {
+            if isValidating {
+                ProgressView("Saving keys")
+                    .frame(maxWidth: .infinity, minHeight: 44)
+            } else {
+                Button {
+                    saveKeys()
+                } label: {
+                    Text("Save")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!self.drafts.hasUnsavedKey)
+                .accessibilityIdentifier("apiKeysSaveButton")
+            }
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(.bar)
     }
 
     private func apiKeySection(for entry: APIKeyListEntry) -> some View {

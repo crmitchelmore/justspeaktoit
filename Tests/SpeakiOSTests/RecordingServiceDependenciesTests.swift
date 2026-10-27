@@ -112,6 +112,66 @@ final class RecordingServiceDependenciesTests: XCTestCase {
         XCTAssertTrue(harness.pasteboard.writes.isEmpty)
     }
 
+    func testSalvagedFailureAndUnsavedCompletion_AreNeverNotificationEligible() async throws {
+        let harness = try DependencyHarness()
+        defer { harness.cleanUp() }
+        harness.applicationState = .background
+        let session = DependencySession()
+        session.stopError = URLError(.timedOut)
+        harness.expectsActivityError = true
+        let service = harness.makeService()
+        service.makeSession = { session }
+        try await service.startRecording(requiresLiveActivity: false)
+        session.onPartialResult?("Salvaged partial", false)
+        XCTAssertEqual(service.partialText, "Salvaged partial")
+        _ = await service.stopRecording(destination: .historyOnly)
+        let failed = try XCTUnwrap(harness.notifications.first)
+        XCTAssertEqual(harness.activityErrors.count, 1)
+        XCTAssertNotNil(failed.historyID, "A salvaged partial is saved but must not alert")
+        XCTAssertTrue(failed.failed)
+        XCTAssertFalse(failed.isEligible)
+        session.stopError = nil
+        try await service.startRecording(requiresLiveActivity: false)
+        _ = await service.stopRecording(destination: .historyOnly, saveToHistory: false)
+        let unsaved = try XCTUnwrap(harness.notifications.last)
+        XCTAssertNil(unsaved.historyID)
+        XCTAssertFalse(unsaved.isEligible)
+    }
+
+    func testNonliveDependencyDefaults_KeepNotificationEffectsDisabled() throws {
+        let harness = try DependencyHarness()
+        defer { harness.cleanUp() }
+        let dependencies = RecordingServiceDependencies(
+            settings: harness.settings,
+            activity: RecordingServiceActivity(
+                start: { _, _ in false }, update: { _, _, _, _ in }, endActivity: {},
+                reportError: { _ in }, complete: { _, _, _, _, _, _, _ in }
+            ),
+            keyboardDelivery: harness.keyboard, recordDictation: { _, _ in }, markDelivered: { _ in },
+            applicationState: { .background }
+        )
+        dependencies.notifyTranscriptReady(.init(historyID: UUID()))
+        XCTAssertTrue(harness.notifications.isEmpty)
+        XCTAssertFalse(harness.settings.transcriptReadyNotificationsEnabled)
+    }
+
+    func testBackgroundCompletion_NotifiesWithDurableHistoryIDBeforeOptionalPolish() async throws {
+        let harness = try DependencyHarness()
+        defer { harness.cleanUp() }
+        harness.applicationState = .background
+        harness.defaults.set("Saved background result", forKey: "simulatorValidationTranscript")
+        let service = harness.makeService()
+        try await service.startRecording(requiresLiveActivity: false)
+        _ = await service.stopRecording(destination: .historyOnly)
+        let input = try XCTUnwrap(harness.notifications.first)
+        XCTAssertEqual(input.historyID, harness.history.items.first?.id)
+        XCTAssertTrue(input.isEligible)
+        XCTAssertEqual(harness.notifications.count, 1)
+        XCTAssertFalse(input.keyboardInserted, "Late pickup offers do not prove insertion")
+        XCTAssertNotNil(harness.history.items.first)
+        XCTAssertTrue(harness.pasteboard.writes.isEmpty)
+    }
+
     func testCancellationDuringInjectedKeyLoad_PreventsSessionAllocation() async throws {
         let harness = try DependencyHarness()
         defer { harness.cleanUp() }
@@ -151,10 +211,11 @@ final class RecordingServiceDependenciesTests: XCTestCase {
         XCTAssertTrue(harness.dictations.isEmpty)
         XCTAssertTrue(harness.deliveredRecordings.isEmpty)
     }
+
 }
 
 @MainActor
-private final class DependencyKeyLoadGate {
+final class DependencyKeyLoadGate {
     let entered: XCTestExpectation
     private var continuation: CheckedContinuation<Void, Never>?
     private var isReleased = false
@@ -184,7 +245,7 @@ private final class DependencyKeyLoadGate {
 }
 
 @MainActor
-private final class DependencyHarness {
+final class DependencyHarness {
     let suite = "RecordingServiceDependencies.\(UUID())"
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     let defaults: UserDefaults
@@ -193,13 +254,21 @@ private final class DependencyHarness {
     let keyboard: KeyboardDeliveryStore
     let pasteboard = DependencyPasteboard()
     var applicationState = UIApplication.State.active
+    var notifications: [TranscriptReadyNotificationInput] = []
+    var expectsActivityError = false
+    var activityErrors: [String] = []
     var activityStartsSuccessfully = true
     var activityStarts: [TranscriptionActivityAttributes.TranscriptionStatus] = []
     var activityUpdates: [TranscriptionActivityAttributes.TranscriptionStatus] = []
+    var activitySnippets: [String] = []
+    var resultPreviews: [String] = []
     var completions: [TranscriptionCompletionOutcome] = []
     var dictations: [(CaptureTrigger, String)] = []
     var deliveredRecordings: [UUID] = []
     var polishRequests: [(String, String)] = []
+    var focus: FocusCaptureOverride = .none
+    var focusReads = 0
+    var focusGate: DependencyKeyLoadGate?
     private var service: TranscriptionRecordingService?
 
     init() throws {
@@ -214,24 +283,54 @@ private final class DependencyHarness {
         )
     }
 
-    func makeService(ensureKeysLoaded: (@MainActor () async -> Void)? = nil) -> TranscriptionRecordingService {
-        let dependencies = RecordingServiceDependencies(
+    private func makeDependencies(activity: RecordingServiceActivity?) -> RecordingServiceDependencies {
+        RecordingServiceDependencies(
             settings: self.settings,
-            activity: RecordingServiceActivity(
+            activity: activity ?? RecordingServiceActivity(
                 start: { [unowned self] _, status in
                     self.activityStarts.append(status)
                     return self.activityStartsSuccessfully
                 },
-                update: { [unowned self] status, _, _, _ in self.activityUpdates.append(status) },
+                update: { [unowned self] status, snippet, _, _ in
+                    self.activityUpdates.append(status)
+                    self.activitySnippets.append(snippet)
+                },
                 endActivity: {},
-                reportError: { message in XCTFail("Unexpected activity error: \(message)") },
-                complete: { [unowned self] _, _, _, outcome, _, _, _ in self.completions.append(outcome) }
+                reportError: { [unowned self] message in
+                    self.activityErrors.append(message)
+                    if !self.expectsActivityError { XCTFail("Unexpected activity error: \(message)") }
+                },
+                complete: { [unowned self] _, _, _, outcome, preview, _, _ in
+                    self.completions.append(outcome)
+                    self.resultPreviews.append(preview)
+                }
             ),
             keyboardDelivery: self.keyboard,
             recordDictation: { [unowned self] in self.dictations.append(($0, $1)) },
             markDelivered: { [unowned self] in self.deliveredRecordings.append($0) },
-            applicationState: { [unowned self] in self.applicationState }
+            applicationState: { [unowned self] in self.applicationState },
+            notifyTranscriptReady: { [unowned self] input in
+                if let identifier = input.historyID {
+                    XCTAssertTrue(self.history.items.contains { $0.id == identifier })
+                }
+                self.notifications.append(input)
+            },
+            focusOverride: { [unowned self] _ in
+                self.focusReads += 1
+                if let gate = self.focusGate { await gate.wait() }
+                return self.focus
+            }
         )
+    }
+
+    func makeService(
+        ensureKeysLoaded: (@MainActor () async -> Void)? = nil,
+        networkSnapshot: @escaping CaptureNetworkPathMonitor.SnapshotProvider = { .unknown },
+        capability: @escaping @MainActor (String) -> AppleLocalRecognitionCapability = { _ in .available },
+        activity: RecordingServiceActivity? = nil,
+        completion: TranscriptionRecordingService.ActivityCompletion? = nil
+    ) -> TranscriptionRecordingService {
+        let dependencies = self.makeDependencies(activity: activity)
         let service = TranscriptionRecordingService(
             sharedState: SharedTranscriptionState(defaults: self.defaults),
             historyManager: self.history,
@@ -241,8 +340,11 @@ private final class DependencyHarness {
                 self.polishRequests.append((text, model))
                 return "Polished transcript"
             },
+            completeActivity: completion,
             foregroundOwnership: ForegroundRecordingOwnership(),
             ensureKeysLoaded: ensureKeysLoaded,
+            networkSnapshot: networkSnapshot,
+            localRecognitionCapability: capability,
             dependencies: dependencies
         )
         self.service = service
@@ -257,11 +359,12 @@ private final class DependencyHarness {
 }
 
 @MainActor
-private final class DependencySession: IOSRecordingSession {
+final class DependencySession: IOSRecordingSession {
     let isBatch = false
     let stopCompletionTimeout: TimeInterval = 1
     let resolution = IOSTranscriptionSession.Resolution(modelID: "test", backend: .apple, route: nil)
-    let partialText = "Safety transcript"
+    var partialText = "Safety transcript"
+    var stopError: Error?
     let confidence: Double? = nil
     var onPartialResult: ((String, Bool) -> Void)?
     var onError: ((Error) -> Void)?
@@ -276,8 +379,11 @@ private final class DependencySession: IOSRecordingSession {
     func discardTemporaryRecording() -> Bool { false }
     func start() async throws {}
     func start(preRollBuffers: [AVAudioPCMBuffer], analyzerFallbackAllowed: Bool) async throws {}
+    var finish: (() async throws -> TranscriptionResult)?
     func stop() async throws -> TranscriptionResult {
-        TranscriptionResult(
+        if let stopError { throw stopError }
+        if let finish { return try await finish() }
+        return TranscriptionResult(
             text: self.partialText, segments: [], confidence: nil, duration: 1,
             modelIdentifier: "test", cost: nil, rawPayload: nil, debugInfo: nil
         )
@@ -287,7 +393,7 @@ private final class DependencySession: IOSRecordingSession {
 }
 
 @MainActor
-private final class DependencyPasteboard: PolishPasteboard {
+final class DependencyPasteboard: PolishPasteboard {
     var writes: [String] = []
     func write(_ text: String) { self.writes.append(text) }
 }

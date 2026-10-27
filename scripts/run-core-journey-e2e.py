@@ -26,6 +26,7 @@ REQUIRED_SUITES = (
     "AutomationDeadlineTests",
     "CaptureSessionOwnershipTests",
     "CoreJourneyRecordingSourceTests",
+    "CoreJourneyPolishFixtureTests",
     "LiveTranscriptSessionIsolationTests",
     "HistoryPersistenceFailureTests",
 )

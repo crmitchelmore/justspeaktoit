@@ -88,6 +88,14 @@ extension WatchCaptureImportPipelineTests {
                 XCTAssertEqual(calls, before + 1)
                 fixture.now = deadline
             }
+            var notices: [TranscriptReadyNotificationInput] = []
+            pipeline.applicationIsForeground = { false }
+            pipeline.matchingResultActivity = { _ in false }
+            pipeline.notifyTranscriptReady = { input in
+                XCTAssertEqual(pipeline.journal.completedAcknowledgement(captureID: fixture.envelope.id)?.outcome,
+                               .transcribed)
+                notices.append(input)
+            }
             var history: [iOSHistoryItem] = []
             pipeline.persistHistory = { history.append($0); return true }
             pipeline.transcribeAudio = { _ in calls += 1; return RetryFixture.result }
@@ -102,6 +110,9 @@ extension WatchCaptureImportPipelineTests {
             await pipeline.processPendingImports()
             XCTAssertEqual(calls, 7)
             XCTAssertEqual(history.count, 1)
+            XCTAssertEqual(notices.count, 1)
+            XCTAssertEqual(notices.first?.historyID, fixture.envelope.id)
+            XCTAssertEqual(notices.first?.isEligible, true)
         }
     }
 
@@ -190,6 +201,8 @@ extension WatchCaptureImportPipelineTests {
         let fixture = try RetryFixture()
         defer { fixture.cleanUp() }
         let pipeline = fixture.pipeline()
+        var notices: [TranscriptReadyNotificationInput] = []
+        pipeline.notifyTranscriptReady = { notices.append($0) }
         pipeline.transcribeAudio = { _ in RetryFixture.result }
         let journalURL = fixture.directory.appendingPathComponent("import-journal.json")
         let backupURL = fixture.directory.appendingPathComponent("journal-backup.json")
@@ -207,12 +220,15 @@ extension WatchCaptureImportPipelineTests {
         let relaunched = WatchCaptureImportJournal(directoryURL: fixture.directory)
         XCTAssertEqual(relaunched.pendingJobs().map(\.captureID), [fixture.envelope.id])
         XCTAssertTrue(relaunched.pendingAcks().isEmpty)
+        XCTAssertTrue(notices.isEmpty, "No notice before both durable commits succeed")
     }
 
     func testRecoveryHistoryWriteFailure_keepsAudioAndDoesNotAcknowledge() async throws {
         let fixture = try RetryFixture()
         defer { fixture.cleanUp() }
         let pipeline = fixture.pipeline()
+        var notices: [TranscriptReadyNotificationInput] = []
+        pipeline.notifyTranscriptReady = { notices.append($0) }
         pipeline.transcribeAudio = { _ in throw URLError(.timedOut) }
         await pipeline.processPendingImports()
         fixture.now = try XCTUnwrap(pipeline.journal.pendingJobs().first?.nextRetryAt)
@@ -223,6 +239,7 @@ extension WatchCaptureImportPipelineTests {
         XCTAssertEqual(pipeline.journal.pendingJobs().first?.attempts, 1)
         XCTAssertTrue(pipeline.journal.pendingAcks().isEmpty)
         XCTAssertEqual(WatchCaptureImportJournal(directoryURL: fixture.directory).pendingJobs().count, 1)
+        XCTAssertTrue(notices.isEmpty, "No notice before both durable commits succeed")
     }
 }
 

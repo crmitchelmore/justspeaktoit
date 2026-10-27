@@ -40,6 +40,12 @@ public final class TranscriptionActivityManager: ObservableObject {
     private var inFlightUpdates: [String: Int] = [:]
     private var lastPayloadTimestamp: Date = .distantPast
     private var retiringIDs: Set<String> = []
+    private struct CompletedSurfaceOwner {
+        let identifier: UUID
+        let runID: UUID
+        let activityID: String
+    }
+    private var completedSurfaceOwner: CompletedSurfaceOwner?
     private var lastUpdateTime: Date = .distantPast
     private let minimumUpdateInterval: TimeInterval = 1
     private let activitiesEnabled: () -> Bool
@@ -122,6 +128,7 @@ public final class TranscriptionActivityManager: ObservableObject {
     /// Opens a new run: everything the previous run scheduled is superseded now,
     /// before anything is published for this one.
     private func beginRun() {
+        completedSurfaceOwner = nil
         runID = UUID()
         completionTask?.cancel()
         completionTask = nil
@@ -149,6 +156,7 @@ public final class TranscriptionActivityManager: ObservableObject {
     }
 
     private func clearActivity() {
+        completedSurfaceOwner = nil
         observerTask?.cancel()
         observerTask = nil
         activity = nil
@@ -204,6 +212,7 @@ public final class TranscriptionActivityManager: ObservableObject {
         duration: Int
     ) {
         guard let activity, activity.activityState == .active else { return }
+        completedSurfaceOwner = nil
         updateThrottleTask?.cancel()
         let state = TranscriptionActivityAttributes.ContentState(
             status: status, lastSnippet: String(lastSnippet.suffix(100)), wordCount: wordCount,
@@ -224,6 +233,57 @@ public final class TranscriptionActivityManager: ObservableObject {
         }
     }
 
+    /// A matching active result already owns this completion. An unrelated or
+    /// idle activity is not a reason to suppress a private completion alert.
+    public func hasActiveResult(completionID: String) -> Bool {
+        guard !completionID.isEmpty, let activity, activity.activityState == .active,
+              let state = latestState, state.status == .completed else { return false }
+        return state.resultCompletionID == completionID
+    }
+
+    /// Ends the current activity immediately.
+    public func endActivity() {
+        beginRun()
+        guard let activity else { return }
+        retire(activity, finalState: nil)
+    }
+
+    private func retire(
+        _ activity: any TranscriptionActivityHandle,
+        finalState: TranscriptionActivityAttributes.ContentState?
+    ) {
+        // Detach synchronously and exclude it from adoption while end is suspended.
+        // The end task owns this retired activity only, and never clears a newer run.
+        retiringIDs.insert(activity.id)
+        clearActivity()
+        let timestamp = nextPayloadTimestamp()
+        Task { [weak self] in
+            await activity.endTranscription(finalState, timestamp: timestamp)
+            self?.retiringIDs.remove(activity.id)
+        }
+    }
+
+    /// Reports an error to the Live Activity.
+    public func reportError(_ message: String) {
+        guard let activity else { return }
+        completedSurfaceOwner = nil
+        updateThrottleTask?.cancel()
+        completionTask?.cancel()
+        var state = latestState ?? activity.transcriptionState
+        state.status = .error
+        state.errorMessage = message
+        enqueueUpdate(state, activity: activity, runID: runID)
+    }
+}
+extension TranscriptionActivityManager {
+    /// Matches this process's completed surface without publishing a retrievable transcript token.
+    public func hasActiveResult(surfaceOwnerID: UUID) -> Bool {
+        guard let owner = completedSurfaceOwner, owner.identifier == surfaceOwnerID,
+              owner.runID == runID, let activity, owner.activityID == activity.id,
+              activity.activityState == .active, latestState?.status == .completed else { return false }
+        return true
+    }
+
     /// Explicit outcome variant; the original entry point remains neutral and source-compatible.
     ///
     /// The completed row stays on screen for `resultRowDuration`. A primed
@@ -240,6 +300,48 @@ public final class TranscriptionActivityManager: ObservableObject {
         resultPreview: String = "",
         completionMessage: String? = nil,
         resultCompletionID: String = ""
+    ) {
+        completeActivity(
+            finalWordCount: finalWordCount, duration: duration, keepPrimed: keepPrimed,
+            primedMessage: primedMessage, primedStatus: primedStatus, completionOutcome: completionOutcome,
+            resultPreview: resultPreview, completionMessage: completionMessage, resultCompletionID: resultCompletionID,
+            owner: nil
+        )
+    }
+
+    /// Associates only the retained active result surface with an in-process owner.
+    /// This identity is never encoded in Activity content or used to retrieve a transcript.
+    public func completeActivity(
+        finalWordCount: Int,
+        duration: Int,
+        keepPrimed: Bool = false,
+        primedMessage: String = "Ready for the Action Button",
+        primedStatus: TranscriptionActivityAttributes.TranscriptionStatus = .idle,
+        completionOutcome: TranscriptionCompletionOutcome,
+        resultPreview: String = "",
+        completionMessage: String? = nil,
+        resultCompletionID: String = "",
+        surfaceOwnerID: UUID
+    ) {
+        completeActivity(
+            finalWordCount: finalWordCount, duration: duration, keepPrimed: keepPrimed,
+            primedMessage: primedMessage, primedStatus: primedStatus, completionOutcome: completionOutcome,
+            resultPreview: resultPreview, completionMessage: completionMessage, resultCompletionID: resultCompletionID,
+            owner: surfaceOwnerID
+        )
+    }
+
+    private func completeActivity(
+        finalWordCount: Int,
+        duration: Int,
+        keepPrimed: Bool = false,
+        primedMessage: String = "Ready for the Action Button",
+        primedStatus: TranscriptionActivityAttributes.TranscriptionStatus = .idle,
+        completionOutcome: TranscriptionCompletionOutcome,
+        resultPreview: String = "",
+        completionMessage: String? = nil,
+        resultCompletionID: String = "",
+        owner: UUID?
     ) {
         guard let activity else { return }
         let provider = (latestState ?? activity.transcriptionState).provider
@@ -270,47 +372,21 @@ public final class TranscriptionActivityManager: ObservableObject {
         adopt(activity)
         let completionRun = runID
         enqueueUpdate(finalState, activity: activity, runID: completionRun)
+        if let owner {
+            completedSurfaceOwner = CompletedSurfaceOwner(
+                identifier: owner, runID: completionRun, activityID: activity.id
+            )
+        }
         completionTask = Task { [weak self, sleep] in
             do { try await sleep(Self.resultRowDuration) } catch { return }
             guard !Task.isCancelled, let self, self.isCurrent(activity, runID: completionRun) else { return }
             let idleState = TranscriptionActivityAttributes.ContentState(
                 status: primedStatus, lastSnippet: primedMessage, provider: finalState.provider
             )
+            self.completedSurfaceOwner = nil
             self.enqueueUpdate(idleState, activity: activity, runID: completionRun)
         }
     }
 
-    /// Ends the current activity immediately.
-    public func endActivity() {
-        beginRun()
-        guard let activity else { return }
-        retire(activity, finalState: nil)
-    }
-
-    private func retire(
-        _ activity: any TranscriptionActivityHandle,
-        finalState: TranscriptionActivityAttributes.ContentState?
-    ) {
-        // Detach synchronously and exclude it from adoption while end is suspended.
-        // The end task owns this retired activity only, and never clears a newer run.
-        retiringIDs.insert(activity.id)
-        clearActivity()
-        let timestamp = nextPayloadTimestamp()
-        Task { [weak self] in
-            await activity.endTranscription(finalState, timestamp: timestamp)
-            self?.retiringIDs.remove(activity.id)
-        }
-    }
-
-    /// Reports an error to the Live Activity.
-    public func reportError(_ message: String) {
-        guard let activity else { return }
-        updateThrottleTask?.cancel()
-        completionTask?.cancel()
-        var state = latestState ?? activity.transcriptionState
-        state.status = .error
-        state.errorMessage = message
-        enqueueUpdate(state, activity: activity, runID: runID)
-    }
 }
 #endif

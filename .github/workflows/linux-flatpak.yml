@@ -118,6 +118,8 @@ jobs:
           cp "$RUNNER_TEMP/JustSpeakToIt-x86_64.flatpak" flatpak-evidence/
           cp "$RUNNER_TEMP/flatpak-manifest.json" flatpak-evidence/
           sha256sum flatpak-evidence/JustSpeakToIt-x86_64.flatpak > flatpak-evidence/flatpak-bundle.sha256
+          python3 scripts/linux-flatpak-qualification.py record-build \
+            flatpak-evidence/JustSpeakToIt-x86_64.flatpak flatpak-evidence/build-provenance.json
           bash -o pipefail -c 'scripts/linux-flatpak-checks.sh "$RUNNER_TEMP/JustSpeakToIt-x86_64.flatpak" "$RUNNER_TEMP/jfk.wav" 2>&1 | tee flatpak-evidence/flatpak-installed-checks.log'
           flatpak info --user com.justspeaktoit.JustSpeakToIt >> flatpak-evidence/flatpak-installed-checks.log
           flatpak info --user --show-permissions com.justspeaktoit.JustSpeakToIt >> flatpak-evidence/flatpak-installed-checks.log
@@ -180,16 +182,17 @@ jobs:
           [ -s /etc/machine-id ] || dbus-uuidgen > /etc/machine-id
           python3 - <<'PY'
           import hashlib, json, os, pathlib, re, runpy, shutil, subprocess, urllib.request
-          records = list(pathlib.Path('downloaded-flatpak').rglob('source-revision.txt'))
-          assert len(records) == 1 and records[0].is_file() and not records[0].is_symlink(), 'Fresh build required: missing checked-out revision evidence'
-          built_sha = records[0].read_text().strip()
+          helper = runpy.run_path('scripts/linux-flatpak-qualification.py')
+          bundle, revision, provenance = helper['artifact_files'](pathlib.Path('downloaded-flatpak'))
+          record = helper['load_record'](provenance)
+          built_sha = revision.read_text().strip()
           assert re.fullmatch(r'[0-9a-f]{40}', built_sha), 'Invalid checked-out revision'
           git = ['git', '-c', 'safe.directory=' + os.getcwd()]
           subprocess.run([*git, 'fetch', '--no-tags', 'origin', built_sha], check=True)
           evidence = pathlib.Path('flatpak-evidence/source-run.json')
           metadata = json.loads(evidence.read_text())
-          parents = subprocess.check_output([*git, 'show', '-s', '--format=%P', built_sha], text=True).split()
-          runpy.run_path('packaging/linux/verify_build_revision.py')['verify_revision'](built_sha, parents, metadata)
+          parents = helper['checkout_parents'](git, built_sha)
+          helper['VERIFY']['verify_revision'](built_sha, parents, metadata, record, helper['file_digest'](bundle))
           inputs = ['Package.swift', 'LICENSE', '.gitattributes', 'packaging/linux', 'Sources', 'Resources',
                     'scripts/stage-linux-desktop.py', 'scripts/local-llm-runtime',
                     'scripts/generate-desktop-icons.py', 'scripts/migration/verify-miniz.py',
@@ -198,10 +201,9 @@ jobs:
           subprocess.run([*git, 'diff', '--exit-code', built_sha, 'HEAD', '--', *inputs], check=True)
           metadata['builtRevision'] = built_sha
           evidence.write_text(json.dumps(metadata, indent=2) + '\n')
-          shutil.copyfile(records[0], 'flatpak-evidence/source-revision.txt')
-          bundles = list(pathlib.Path('downloaded-flatpak').rglob('JustSpeakToIt-x86_64.flatpak'))
-          assert len(bundles) == 1 and bundles[0].is_file() and not bundles[0].is_symlink()
-          shutil.copyfile(bundles[0], 'flatpak-evidence/JustSpeakToIt-x86_64.flatpak')
+          shutil.copyfile(revision, 'flatpak-evidence/source-revision.txt')
+          shutil.copyfile(provenance, 'flatpak-evidence/build-provenance.json')
+          shutil.copyfile(bundle, 'flatpak-evidence/JustSpeakToIt-x86_64.flatpak')
           pin = json.loads(pathlib.Path('scripts/windows-local-runtime/dependencies.json').read_text())['whisperCpp']
           fixture = pin['fixture']
           url = 'https://raw.githubusercontent.com/ggml-org/whisper.cpp/' + pin['commit'] + '/' + fixture['path']

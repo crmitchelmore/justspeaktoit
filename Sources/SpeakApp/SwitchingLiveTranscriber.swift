@@ -215,7 +215,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
 
   private var controllerRoutes: [(prefix: String, controller: any LiveTranscriptionController)] {
     [
-      ("assemblyai/", controllers.assemblyAI),
+      ("assemblyai/", controllers.sharedClient),
       ("deepgram/", controllers.deepgram),
       ("modulate/", controllers.modulate),
       ("elevenlabs/", controllers.elevenlabs),
@@ -394,7 +394,6 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     let speechAnalyzer: AppleSpeechAnalyzerLiveController
     let deepgram: DeepgramLiveController
     let modulate: ModulateLiveController
-    let assemblyAI: AssemblyAILiveController
     let elevenlabs: ElevenLabsLiveController
     let soniox: SonioxLiveController
     let cartesia: CartesiaLiveController
@@ -432,12 +431,6 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
         secureStorage: secureStorage
       )
       modulate = ModulateLiveController(
-        appSettings: appSettings,
-        permissionsManager: permissionsManager,
-        audioDeviceManager: audioDeviceManager,
-        secureStorage: secureStorage
-      )
-      assemblyAI = AssemblyAILiveController(
         appSettings: appSettings,
         permissionsManager: permissionsManager,
         audioDeviceManager: audioDeviceManager,
@@ -507,7 +500,6 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
         speechAnalyzer,
         deepgram,
         modulate,
-        assemblyAI,
         elevenlabs,
         soniox,
         cartesia,

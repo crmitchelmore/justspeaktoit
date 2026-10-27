@@ -69,8 +69,57 @@ enum TranscriptEntityError: LocalizedError, Equatable {
 struct TranscriptEntityHistory: Sendable {
     typealias Snapshot = @MainActor @Sendable () throws -> [iOSHistoryItem]
     private let snapshot: Snapshot
+    private let asyncSnapshot: @MainActor @Sendable () async throws -> [iOSHistoryItem]
 
-    init(snapshot: @escaping Snapshot = Self.localSnapshot) { self.snapshot = snapshot }
+    init() {
+        snapshot = Self.localSnapshot
+        asyncSnapshot = Self.localSnapshotAndWait
+    }
+
+    init(snapshot: @escaping Snapshot) {
+        self.snapshot = snapshot
+        asyncSnapshot = { try snapshot() }
+    }
+
+    @MainActor
+    static func localSnapshotAndWait() async throws -> [iOSHistoryItem] {
+        let history = iOSHistoryManager.shared
+        return try await Self.protectedSnapshotAndWait(
+            available: { UIApplication.shared.isProtectedDataAvailable },
+            load: { await history.loadIfNeededAndWait() },
+            snapshot: {
+                guard history.isStorageReady else { throw TranscriptEntityError.historyUnavailable }
+                return history.items
+            }
+        )
+    }
+
+    @MainActor
+    static func protectedSnapshotAndWait(
+        available: @MainActor () -> Bool,
+        load: @MainActor () async -> Void,
+        snapshot: Snapshot
+    ) async throws -> [iOSHistoryItem] {
+        guard available() else { throw TranscriptEntityError.historyUnavailable }
+        await load()
+        // Lock state can change while persistence is suspended. Do not expose
+        // private rows after that boundary merely because loading succeeded.
+        guard available() else { throw TranscriptEntityError.historyUnavailable }
+        return try snapshot()
+    }
+
+    @MainActor
+    func latestAndWait() async throws -> TranscriptEntity {
+        let items = try await asyncSnapshot()
+        return try Self(snapshot: { items }).latest()
+    }
+
+    @MainActor
+    func metadataAndWait(for identifiers: [UUID]) async throws -> [TranscriptEntity] {
+        guard !identifiers.isEmpty else { return [] }
+        let items = try await asyncSnapshot()
+        return try Self(snapshot: { items }).metadata(for: identifiers)
+    }
 
     @MainActor
     static func localSnapshot() throws -> [iOSHistoryItem] {
@@ -122,7 +171,7 @@ struct TranscriptEntityQuery: EntityQuery {
 
     @MainActor
     func entities(for identifiers: [UUID]) async throws -> [TranscriptEntity] {
-        try self.history.metadata(for: identifiers)
+        try await self.history.metadataAndWait(for: identifiers)
     }
 
     func suggestedEntities() async throws -> [TranscriptEntity] { [] }

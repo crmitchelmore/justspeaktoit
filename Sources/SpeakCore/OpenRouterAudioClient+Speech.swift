@@ -11,6 +11,19 @@ extension OpenRouterAudioClient {
         voice: String?,
         speed: Double? = nil
     ) async throws -> OpenRouterSpeechResult {
+        let request = try await speechRequest(text: text, model: model, voice: voice, speed: speed)
+        let file = try await downloadSpeech(request)
+        do {
+            try Task.checkCancellation()
+            return OpenRouterSpeechResult(audioURL: file)
+        } catch {
+            try? FileManager.default.removeItem(at: file)
+            throw error
+        }
+    }
+
+    /// Both file and progressive paths use precisely the same MP3 request.
+    func speechRequest(text: String, model: String, voice: String?, speed: Double?) async throws -> URLRequest {
         try Task.checkCancellation()
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               text.utf8.count <= 64 * 1024,
@@ -21,14 +34,7 @@ extension OpenRouterAudioClient {
         request.httpBody = try JSONEncoder().encode(
             OpenRouterSpeechRequest(model: model, input: text, voice: voice, speed: speed)
         )
-        let file = try await downloadSpeech(request)
-        do {
-            try Task.checkCancellation()
-            return OpenRouterSpeechResult(audioURL: file)
-        } catch {
-            try? FileManager.default.removeItem(at: file)
-            throw error
-        }
+        return request
     }
 
     private func downloadSpeech(_ request: URLRequest) async throws -> URL {

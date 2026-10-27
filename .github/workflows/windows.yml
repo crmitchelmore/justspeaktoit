@@ -1730,10 +1730,24 @@ jobs:
         run: |
           python3 -B -m unittest discover -s scripts/tests -p test_additional_provider_loopback.py
           python3 -B -m unittest discover -s scripts/tests -p test_modulate_opening_audio_probe.py
+          python3 -B -m unittest discover -s scripts/tests -p test_qualification_source_state.py
+      - name: Record source state before portable compilation and tests
+        continue-on-error: true # Advisory evidence only; existing native gates are unchanged.
+        run: |
+          python3 -B scripts/qualification_source_state.py --phase before-portable-build-tests \
+            --output "$RUNNER_TEMP/portable-macos-source-state/before.json"
       - name: Test portable graph with Xcode Apple Swift
+        id: portable_graph_tests
         run: |
           xcrun swift --version
           xcrun swift test --configuration release --jobs 4
+      - name: Record source state after portable compilation and tests
+        if: always()
+        continue-on-error: true # Missing/partial evidence is never clean-source proof.
+        run: |
+          python3 -B scripts/qualification_source_state.py --phase after-portable-build-tests \
+            --command-outcome "${{ steps.portable_graph_tests.outcome }}" \
+            --output "$RUNNER_TEMP/portable-macos-source-state/after.json"
       - name: Probe additional shared providers over native Apple WebSockets
         shell: bash
         run: |
@@ -1769,6 +1783,14 @@ jobs:
         # The dependency-free graph removes pins it does not need. It must not
         # change the Apple graph's checked-in dependencies.
         run: git restore --source=HEAD -- Package.resolved
+      - name: Preserve advisory portable Mac source observations
+        if: always()
+        continue-on-error: true # Upload/collection failure is visible, never clean-source proof.
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: portable-macos-source-state
+          path: ${{ runner.temp }}/portable-macos-source-state
+          if-no-files-found: warn
 
   portable-linux:
     name: Portable Swift on Linux (Swift 6.2.3)

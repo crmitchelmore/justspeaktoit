@@ -74,6 +74,26 @@ creation preserves a competing creator's path; this is not synchronization of
 arbitrary concurrent writers. CI runs it after the existing portable Apple build and
 retains the receipt artifact.
 
+## Source-state evidence
+
+The receipt adds timed source observations before harness admission, after owned
+process cleanup before lock restoration, and after restoration. Each records HEAD,
+Git-visible path/status (including rename origins and untracked paths), selected
+tracked-input blobs/worktree hashes and explicit `Package.resolved` state. File
+contents, untracked-file hashes and environment values are not included. Output
+directory membership is reported separately; it never proves a change harmless.
+Hash/status limits and collection failures are explicit evidence gaps.
+
+The Mac portable workflow also captures immediately before and after its existing
+full build/test command, including that step's outcome, in the separate advisory
+`portable-macos-source-state` artifact. The original Modulate artifact layout stays unchanged.
+These new observations are advisory: they neither relax existing test failures nor
+add a required gate. Missing/partial captures are not clean-source acceptance.
+They require exclusive checkout ownership and do not attest the compiler's actual
+reads, caches or external dependencies. Harness-only `--skip-build` observations
+cannot establish the earlier compiled tree. Earlier receipts containing only a
+post-test dirty Boolean cannot recover exact dirty paths retroactively.
+
 A passing synthetic result establishes only these bounded scenarios on the
 current shared client. It does not establish physical iPhone/TestFlight opening
 speech, arbitrary handshake duration/overflow, real-provider connectivity, or

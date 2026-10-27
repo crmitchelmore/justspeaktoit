@@ -53,8 +53,8 @@ public final class WatchCaptureImportPipeline: ObservableObject {
     }
     var notifyTranscriptReady: (TranscriptReadyNotificationInput) -> Void = { _ in }
     var transcribeAudio: (@MainActor (URL) async throws -> TranscriptionResult)?
-    var persistHistory: @MainActor (iOSHistoryItem) -> Bool = {
-        iOSHistoryManager.shared.upsertReportingDurability($0)
+    var persistHistory: @MainActor (iOSHistoryItem) async -> Bool = {
+        await iOSHistoryManager.shared.upsertAndWait($0)
     }
     var beginBackgroundTask: (@escaping @MainActor @Sendable () -> Void) -> UIBackgroundTaskIdentifier = {
         UIApplication.shared.beginBackgroundTask(withName: "WatchCaptureImport", expirationHandler: $0)
@@ -267,7 +267,7 @@ public final class WatchCaptureImportPipeline: ObservableObject {
         // Acknowledge and delete only after the history write is durable:
         // a full or unwritable store keeps the audio parked and the job
         // retryable instead of acknowledging data loss (issue #674).
-        guard persistHistory(item) else {
+        guard await persistHistory(item) else {
             journal.recordAttemptFailure(
                 captureID: job.captureID,
                 message: "History could not be written to disk."

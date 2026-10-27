@@ -19,7 +19,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
   private let permissionsManager: PermissionsManager
   private let audioDeviceManager: AudioInputDeviceManager
   private let secureStorage: SecureAppStorage
-  private var transcriber: DeepgramLiveClient?
+  private var transcriber: DeepgramControllerClient?
   private var currentLanguage: String?
   private var currentModel: String?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
@@ -35,6 +35,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
 
   /// Track streaming session start time for cost estimation
   private var streamingStartTime: Date?
+  private var streamingEndTime: Date?
 
   /// Accumulated final transcript segments
   private var finalSegments: [TranscriptionSegment] = []
@@ -42,6 +43,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
   private var currentInterim: String = ""
   /// Full transcript so far (all finalized segments joined)
   private var fullTranscript: String = ""
+  private var finalizedText: String?
 
   init(
     appSettings: AppSettings,
@@ -160,7 +162,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
 
     /// Flushes the retained resampler's trailing frames down the live send path
     /// before the converter is released (issue #849).
-    func drainConverterTail(to transcriber: DeepgramLiveClient) {
+    func drainConverterTail(to transcriber: DeepgramControllerClient) {
       queue.sync {
         guard let tail = converterCache.drainPCM16() else { return }
         transcriber.sendAudio(tail)
@@ -171,7 +173,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
       _ buffer: AVAudioPCMBuffer,
       inputFormat: AVAudioFormat,
       outputFormat: AVAudioFormat,
-      transcriber: DeepgramLiveClient,
+      transcriber: DeepgramControllerClient,
       logger: Logger
     ) {
       guard let copied = copyPCMBuffer(buffer) else { return }
@@ -211,7 +213,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
       _ buffer: AVAudioPCMBuffer,
       from inputFormat: AVAudioFormat,
       to outputFormat: AVAudioFormat,
-      transcriber: DeepgramLiveClient,
+      transcriber: DeepgramControllerClient,
       logger: Logger
     ) {
       // Get or create cached converter (avoids ~30 allocations/sec)
@@ -275,6 +277,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
       return
     }
     hasFinished = true
+    streamingEndTime = Date()
 
     audioEngine.stop()
     audioEngine.inputNode.removeTap(onBus: 0)
@@ -285,20 +288,37 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
     }
     audioProcessor.setRunning(false)
 
+    let active = transcriber
+    let stoppingInputSession = activeInputSession
+    activeInputSession = nil
     await applyLiveStopGrace(appSettings.liveStopGracePeriod)
-
-    transcriber?.stop()
+    let snapshot = await active?.finishAndWait()
+    if let stoppingInputSession {
+      await audioDeviceManager.endUsingPreferredInput(session: stoppingInputSession)
+    }
+    guard transcriber === active else { return }
+    if let snapshot {
+      // Core returns the entire session, including finals received after
+      // CloseStream. Replace once; appending duplicates earlier live turns.
+      fullTranscript = snapshot.confirmedText
+      finalizedText = snapshot.text
+      currentInterim = ""
+      finalSegments = snapshot.confirmedText.isEmpty ? [] : [
+        TranscriptionSegment(startTime: 0, endTime: 0, text: snapshot.confirmedText)
+      ]
+      delegate?.liveTranscriber(self, didUpdatePartial: snapshot.text)
+      if let failure = active?.takeFailureForReporting() {
+        delegate?.liveTranscriber(self, didFail: failure)
+      }
+    }
 
     // Build final result including any unfinalised interim text
     let result = buildFinalResult()
     logger.info("Built result (\(result.text.count) chars)")
 
-    await MainActor.run {
-      delegate?.liveTranscriber(self, didFinishWith: result)
-    }
+    delegate?.liveTranscriber(self, didFinishWith: result)
 
-    await endActiveInputSession()
-    transcriber = nil
+    if transcriber === active { transcriber = nil }
   }
 }
 
@@ -338,7 +358,9 @@ private extension DeepgramLiveController {
     finalSegments = []
     currentInterim = ""
     fullTranscript = ""
+    finalizedText = nil
     streamingStartTime = nil
+    streamingEndTime = nil
     hasFinished = false
     isRunning = false
   }
@@ -358,15 +380,16 @@ private extension DeepgramLiveController {
     return outputFormat
   }
 
-  func makeDeepgramTranscriber(apiKey: String) throws -> DeepgramLiveClient {
+  func makeDeepgramTranscriber(apiKey: String) throws -> DeepgramControllerClient {
     let provider = DeepgramTranscriptionProvider()
     logger.info("Creating transcriber with model: \(self.currentModel ?? "nova-3")")
-    let transcriber = provider.createLiveTranscriber(
+    let client = provider.createLiveTranscriber(
       apiKey: apiKey,
       model: currentModel ?? "nova-3",
       language: currentLanguage,
       sampleRate: 16000
     )
+    let transcriber = DeepgramControllerClient(client: client)
     self.transcriber = transcriber
     transcriber.start(
       onTranscript: { [weak self, weak transcriber] text, isFinal in
@@ -375,16 +398,18 @@ private extension DeepgramLiveController {
           // Drop callbacks queued by a previous recording's stream: this
           // controller instance is reused between recordings (issue #643).
           guard LiveTranscriptionRun.isCurrent(transcriber, activeStream: self.transcriber) else { return }
+          guard !self.hasFinished else { return }
           self.handleTranscript(text: text, isFinal: isFinal)
         }
       },
-      onError: { [weak self, weak transcriber] error in
+      onError: { [weak self, weak transcriber] _ in
         Task { @MainActor [weak self, weak transcriber] in
           guard let self else { return }
           guard LiveTranscriptionRun.isCurrent(transcriber, activeStream: self.transcriber) else { return }
-          if !self.isRunning { return }
-          self.logger.error("Transcriber error: \(error.localizedDescription, privacy: .public)")
-          self.delegate?.liveTranscriber(self, didFail: error)
+          guard self.isRunning, !self.hasFinished,
+            let failure = transcriber?.takeFailureForReporting() else { return }
+          self.logger.error("Transcriber error: \(failure.localizedDescription, privacy: .public)")
+          self.delegate?.liveTranscriber(self, didFail: failure)
         }
       }
     )
@@ -395,7 +420,7 @@ private extension DeepgramLiveController {
     on inputNode: AVAudioInputNode,
     inputFormat: AVAudioFormat,
     outputFormat: AVAudioFormat,
-    transcriber: DeepgramLiveClient
+    transcriber: DeepgramControllerClient
   ) throws {
     audioProcessor.setRunning(true)
     let processor = audioProcessor
@@ -420,9 +445,11 @@ private extension DeepgramLiveController {
     transcriber = nil
     deepgramFormat = nil
     streamingStartTime = nil
+    streamingEndTime = nil
     finalSegments = []
     currentInterim = ""
     fullTranscript = ""
+    finalizedText = nil
     await endActiveInputSession()
   }
 
@@ -439,14 +466,14 @@ private extension DeepgramLiveController {
 
     let streamingDuration: TimeInterval
     if let startTime = streamingStartTime {
-      streamingDuration = Date().timeIntervalSince(startTime)
+      streamingDuration = (streamingEndTime ?? Date()).timeIntervalSince(startTime)
     } else {
       streamingDuration = finalSegments.last?.endTime ?? 0
     }
 
     let cost = estimateDeepgramCost(durationSeconds: streamingDuration, model: currentModel)
     return TranscriptionResult(
-      text: text,
+      text: finalizedText ?? text,
       segments: finalSegments,
       confidence: nil,
       duration: streamingDuration,

@@ -32,7 +32,7 @@ struct IdentifiedHistoryView: View {
             }
         }
         .navigationTitle("History")
-        .task { self.history.ensureLoaded() }
+        .task { await self.history.loadIfNeededAndWait() }
     }
 }
 #endif

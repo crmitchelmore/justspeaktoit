@@ -47,7 +47,7 @@ public struct HistoryView: View {
             if let error = historyManager.persistenceError {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(error).font(.callout)
-                    Button("Retry saving history") { historyManager.retryPersistence() }
+                    Button("Retry saving history") { Task { await historyManager.retryPersistenceAndWait() } }
                 }
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -101,6 +101,7 @@ public struct HistoryView: View {
         .refreshable {
             await historyManager.triggerSync()
         }
+        .task { await historyManager.loadIfNeededAndWait() }
         .task(id: refreshKey) {
             refreshDerivedState()
         }
@@ -110,7 +111,7 @@ public struct HistoryView: View {
             titleVisibility: .visible
         ) {
             Button("Clear All", role: .destructive) {
-                historyManager.clearAll()
+                Task { await historyManager.clearAllAndWait() }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -198,11 +199,11 @@ public struct HistoryView: View {
                             )
                         },
                         onReprocess: { Task { await historyManager.reprocess(item) } },
-                        onDelete: { historyManager.remove(item) }
+                        onDelete: { Task { await historyManager.removeAndWait(item) } }
                     )
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         Button(role: .destructive) {
-                            historyManager.remove(item)
+                            Task { await historyManager.removeAndWait(item) }
                         } label: {
                             Label("Delete", systemImage: "trash")
                         }

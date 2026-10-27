@@ -66,7 +66,7 @@ final class CartesiaTranscriptionProviderTests: XCTestCase {
     {"type":"turn.update","results":[{"transcript":"book a table"}]}
     """
 
-    let event = CartesiaLiveTranscriber.transcriptEvent(from: json)
+    let event = CartesiaLiveClient.transcriptEvent(from: json)
 
     XCTAssertEqual(event?.text, "book a table")
     XCTAssertEqual(event?.isFinal, false)
@@ -77,7 +77,7 @@ final class CartesiaTranscriptionProviderTests: XCTestCase {
     {"type":"turn.end","results":[{"transcript":"book a table for two"}]}
     """
 
-    let event = CartesiaLiveTranscriber.transcriptEvent(from: json)
+    let event = CartesiaLiveClient.transcriptEvent(from: json)
 
     XCTAssertEqual(event?.text, "book a table for two")
     XCTAssertEqual(event?.isFinal, true)
@@ -86,7 +86,7 @@ final class CartesiaTranscriptionProviderTests: XCTestCase {
   func testTranscriptEvent_ignoresEmptyTranscript() {
     let json = #"{"type":"turn.update","results":[{"transcript":""}]}"#
 
-    XCTAssertNil(CartesiaLiveTranscriber.transcriptEvent(from: json))
+    XCTAssertNil(CartesiaLiveClient.transcriptEvent(from: json))
   }
 
   func testValidateAPIKey_redactsAuthorizationHeaderInDebugSnapshot() async throws {

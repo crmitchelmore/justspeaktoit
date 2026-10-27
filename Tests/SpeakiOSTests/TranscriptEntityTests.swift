@@ -164,6 +164,76 @@ final class TranscriptEntityTests: XCTestCase {
         XCTAssertNil(result.first?.polishedText)
     }
 
+    func testProtectedSnapshotRefusesBeforeLoadingWhenUnavailable() async {
+        var loads = 0
+        var reads = 0
+        do {
+            _ = try await TranscriptEntityHistory.protectedSnapshotAndWait(
+                available: { false }, load: { loads += 1 }, snapshot: { reads += 1; return [] }
+            )
+            XCTFail("Protected History must be unavailable")
+        } catch { XCTAssertEqual(error as? TranscriptEntityError, .historyUnavailable) }
+        XCTAssertEqual(loads, 0)
+        XCTAssertEqual(reads, 0)
+    }
+
+    func testProtectedDataLossDuringHeldLoadRefusesBeforeReadingPrivateSnapshot() async {
+        var available = true
+        var reads = 0
+        var continuation: CheckedContinuation<Void, Never>?
+        var released = false
+        defer { released = true; continuation?.resume() }
+        let entered = expectation(description: "History load suspended")
+        let finished = expectation(description: "Protected read settled")
+        let task = Task {
+            defer { finished.fulfill() }
+            do {
+                _ = try await TranscriptEntityHistory.protectedSnapshotAndWait(
+                    available: { available },
+                    load: {
+                        await withCheckedContinuation { owned in
+                            guard !released && !Task.isCancelled else { owned.resume(); return }
+                            continuation = owned
+                            entered.fulfill()
+                        }
+                    },
+                    snapshot: { reads += 1; return [self.item(raw: "Private stored words")] }
+                )
+                XCTFail("A successful load cannot bypass a lock-state change")
+            } catch { XCTAssertEqual(error as? TranscriptEntityError, .historyUnavailable) }
+        }
+        guard await XCTWaiter.fulfillment(of: [entered], timeout: 2) == .completed else {
+            task.cancel()
+            XCTFail("Load did not enter its owned suspension")
+            return
+        }
+        available = false
+        released = true
+        let owned = continuation
+        continuation = nil
+        owned?.resume()
+        guard await XCTWaiter.fulfillment(of: [finished], timeout: 2) == .completed else {
+            task.cancel()
+            XCTFail("Protected read did not settle after load release")
+            return
+        }
+        XCTAssertEqual(reads, 0)
+    }
+
+    func testProtectedSnapshotStillReadsOnceWhenAvailableAcrossLoad() async throws {
+        let row = self.item(raw: "Raw", polished: "Polished")
+        var loads = 0
+        var reads = 0
+        let rows = try await TranscriptEntityHistory.protectedSnapshotAndWait(
+            available: { true }, load: { loads += 1 }, snapshot: { reads += 1; return [row] }
+        )
+        XCTAssertEqual(rows.map(\.id), [row.id])
+        XCTAssertEqual(rows.first?.transcription, row.transcription)
+        XCTAssertEqual(rows.first?.postProcessedTranscription, row.postProcessedTranscription)
+        XCTAssertEqual(loads, 1)
+        XCTAssertEqual(reads, 1)
+    }
+
     private func item(
         raw: String, polished: String? = nil, duration: TimeInterval = 2.5,
         createdAt: Date = Date(timeIntervalSince1970: 1_700_000_000)

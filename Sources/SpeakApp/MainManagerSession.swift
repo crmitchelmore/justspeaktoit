@@ -83,6 +83,28 @@ final class ActiveSession {
   let hotKeyDescription: String
   var recordingSummary: RecordingSummary?
   var transcriptionResult: TranscriptionResult?
+  /// Bound only after this dictation's live startup succeeds while still current.
+  var liveTranscriptSessionID: LiveTranscriptSessionID?
+  private var failedLiveTranscript: String?
+
+  enum FailureTranscriptPolicy: Equatable {
+    case retainOwned
+    case discard
+  }
+
+  /// Freeze raw text before cancellation resets the shared display. A failed
+  /// partial is not a completed provider result and supplies no invented metadata.
+  func retainFailedLiveTranscript(
+    _ snapshot: LiveTranscriptSnapshot,
+    policy: FailureTranscriptPolicy,
+    mayTearDownCapture: Bool
+  ) {
+    guard policy == .retainOwned else { failedLiveTranscript = nil; return }
+    guard mayTearDownCapture, transcriptionResult == nil,
+      let liveTranscriptSessionID, snapshot.sessionID == liveTranscriptSessionID,
+      !snapshot.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+    failedLiveTranscript = snapshot.text
+  }
   var postProcessingOutcome: PostProcessingOutcome?
   var events: [HistoryEvent] = []
   var errors: [HistoryError] = []
@@ -203,7 +225,7 @@ final class ActiveSession {
       updatedAt: updatedAt,
       modelsUsed: models,
       modelUsages: modelUsages,
-      rawTranscription: transcriptionResult?.text,
+      rawTranscription: transcriptionResult?.text ?? failedLiveTranscript,
       postProcessedTranscription: postProcessingOutcome?.processed,
       recordingDuration: recordingSummary?.duration ?? 0,
       cost: cost,

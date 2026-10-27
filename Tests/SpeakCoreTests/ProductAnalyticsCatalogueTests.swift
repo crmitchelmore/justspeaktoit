@@ -212,3 +212,96 @@ final class ProductAnalyticsCatalogueTests: XCTestCase {
 
     private static let catalogue = makeCatalogue()
 }
+
+extension ProductAnalyticsCatalogueTests {
+    func testDocumentedCatalogue_MatchesActualEventPropertiesAndPrivacyClasses() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let document = try String(contentsOf: root.appendingPathComponent("Docs/analytics-plan.md"), encoding: .utf8)
+        let heading = try XCTUnwrap(document.range(of: "### Catalogue\n"))
+        let remainder = String(document[heading.upperBound...])
+        let table = remainder.components(separatedBy: "\n## ")[0]
+        let rows = try documentedCatalogue(table)
+        XCTAssertEqual(Set(rows.keys), Set(Self.catalogue.map(\.name)))
+        for entry in Self.catalogue {
+            let row = try XCTUnwrap(rows[entry.event.name], entry.name)
+            XCTAssertEqual(row.keys, Set(entry.event.properties.keys), entry.name)
+            XCTAssertEqual(row.privacy, entry.event.privacyClass, entry.name)
+        }
+    }
+
+    private struct DocumentedEntry {
+        let keys: Set<String>
+        let privacy: AnalyticsPrivacyClass
+    }
+
+    private enum DocumentationError: Error {
+        case malformedRow, unknownReference, unbalancedExplanation
+    }
+
+    func testDocumentedCatalogue_ExcludesInlineValuesAndResolvesReferencedKeys() throws {
+        let rows = try documentedCatalogue("""
+        | 11 | `polish_completed` | `preset` (built-in enum; custom reports `custom`), `engine_type` | P | Adoption |
+        | 12 | `polish_failed` | as #11 + `error_category` (bounded enum) | A | Reliability |
+        """)
+        XCTAssertEqual(rows["polish_completed"]?.keys, ["preset", "engine_type"])
+        XCTAssertEqual(rows["polish_failed"]?.keys, ["preset", "engine_type", "error_category"])
+        XCTAssertEqual(rows["polish_failed"]?.privacy, .anonymousCounter)
+    }
+
+    func testDocumentedCatalogue_RejectsMalformedNewRowsAndUnknownReferences() {
+        XCTAssertThrowsError(try documentedCatalogue("| 26 | `new_event` | `key` | X | Reason |"))
+        XCTAssertThrowsError(try documentedCatalogue("| 26 | `new_event` | as #99 + `key` | P | Reason |"))
+    }
+
+    private func excludingExplanations(_ properties: String) throws -> String {
+        var depth = 0
+        var result = ""
+        for character in properties {
+            if character == "(" {
+                depth += 1
+            } else if character == ")" {
+                guard depth > 0 else { throw DocumentationError.unbalancedExplanation }
+                depth -= 1
+            } else if depth == 0 { result.append(character) }
+        }
+        guard depth == 0 else { throw DocumentationError.unbalancedExplanation }
+        return result
+    }
+
+    private func documentedCatalogue(_ document: String) throws -> [String: DocumentedEntry] {
+        let rowPattern = try NSRegularExpression(pattern: #"^\| (\d+) \| `([^`]+)` \| (.+) \| ([AP]) \| .+\|$"#)
+        let candidatePattern = try NSRegularExpression(pattern: #"^\|\s*\d+\s*\|"#)
+        let keyPattern = try NSRegularExpression(pattern: #"`([a-z][a-z0-9_]*)`"#)
+        let referencePattern = try NSRegularExpression(pattern: #"^(?:same as|as) #(\d+)"#)
+        var numberedKeys: [String: Set<String>] = [:]
+        var result: [String: DocumentedEntry] = [:]
+        for line in document.components(separatedBy: .newlines) {
+            let text = line as NSString
+            let range = NSRange(location: 0, length: text.length)
+            guard candidatePattern.firstMatch(in: line, range: range) != nil else { continue }
+            guard let row = rowPattern.firstMatch(in: line, range: range) else {
+                throw DocumentationError.malformedRow
+            }
+            let number = text.substring(with: row.range(at: 1))
+            let name = text.substring(with: row.range(at: 2))
+            let properties = try excludingExplanations(text.substring(with: row.range(at: 3)))
+            let propertyText = properties as NSString
+            let propertyRange = NSRange(location: 0, length: propertyText.length)
+            var keys = Set(keyPattern.matches(in: properties, range: propertyRange).map {
+                propertyText.substring(with: $0.range(at: 1))
+            })
+            if let reference = referencePattern.firstMatch(in: properties, range: propertyRange) {
+                let referenced = propertyText.substring(with: reference.range(at: 1))
+                guard let inherited = numberedKeys[referenced] else { throw DocumentationError.unknownReference }
+                keys.formUnion(inherited)
+            }
+            XCTAssertNil(numberedKeys.updateValue(keys, forKey: number), "Duplicate catalogue row #\(number)")
+            let privacy: AnalyticsPrivacyClass = text.substring(with: row.range(at: 4)) == "A"
+                ? .anonymousCounter : .pseudonymous
+            XCTAssertNil(result.updateValue(DocumentedEntry(keys: keys, privacy: privacy), forKey: name), name)
+        }
+        return result
+    }
+
+}

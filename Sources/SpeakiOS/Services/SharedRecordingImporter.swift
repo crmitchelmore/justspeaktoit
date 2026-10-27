@@ -150,13 +150,13 @@ public final class SharedRecordingImporter: ObservableObject {
         // The History entry carries the inbox item's own id, and the write is
         // only acknowledged when it reached disk.
         //
-        // `recordTranscription` mints a fresh id and returns the item whether
-        // or not the save succeeded, so acknowledging on a non-nil result
+        // The original recording adapter minted a fresh id even on a retry,
+        // so acknowledging without an owned durable upsert
         // deleted the only staged copy of the user's audio on a persistence
         // failure — and a crash between a successful write and the delete made
         // the replay add a second entry with a different id. Upserting by a
         // stable id is idempotent: a replay updates the same row.
-        guard iOSHistoryManager.shared.upsertReportingDurability(
+        guard await iOSHistoryManager.shared.upsertAndWait(
             iOSHistoryItem(
                 id: item.id,
                 transcription: result.text,

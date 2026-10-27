@@ -48,21 +48,34 @@ final class PolishClipboard {
 @MainActor
 final class AutomaticPolishOperation {
     private let isCurrent: () -> Bool
-    private let success: (String, Bool) -> Void
-    private let failure: (Error) -> Void
+    private let success: @MainActor (String, Bool) async -> Void
+    private let failure: @MainActor (Error) async -> Void
     private let completion: () -> Void
     private var task: Task<Void, Never>?
     private var finished = false
+    private var committing = false
 
-    init(
+    convenience init(
         isCurrent: @escaping () -> Bool,
         success: @escaping (String, Bool) -> Void,
         failure: @escaping (Error) -> Void,
         completion: @escaping () -> Void
     ) {
+        self.init(
+            isCurrent: isCurrent, successAndWait: { success($0, $1) },
+            failureAndWait: { failure($0) }, completion: completion
+        )
+    }
+
+    init(
+        isCurrent: @escaping () -> Bool,
+        successAndWait: @escaping @MainActor (String, Bool) async -> Void,
+        failureAndWait: @escaping @MainActor (Error) async -> Void,
+        completion: @escaping () -> Void
+    ) {
         self.isCurrent = isCurrent
-        self.success = success
-        self.failure = failure
+        self.success = successAndWait
+        self.failure = failureAndWait
         self.completion = completion
     }
 
@@ -87,17 +100,19 @@ final class AutomaticPolishOperation {
                 guard !self.finished else { return }
                 guard !polished.isEmpty else { throw PostProcessingError.emptyResult }
                 let current = self.isCurrent()
-                self.success(polished, current)
+                self.committing = true
+                await self.success(polished, current)
             } catch {
                 guard !self.finished else { return }
-                self.failure(error)
+                self.committing = true
+                await self.failure(error)
             }
         }
     }
 
     func cancel() {
         task?.cancel()
-        finish()
+        if !committing { finish() }
     }
 
     private func finish() {

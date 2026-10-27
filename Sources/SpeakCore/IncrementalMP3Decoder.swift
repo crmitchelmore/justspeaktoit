@@ -11,14 +11,23 @@ actor IncrementalMP3Decoder {
         case invalidAudio
     }
 
-    static let sampleRate = 24_000
+    static let sampleRate = OpenRouterProgressiveSpeechResult.sampleRate
     static let maximumPCMFrames = 2_400
     static let maximumCompressedBytes = 256 * 1024
     private var validator = MP3FrameBoundaryValidator()
+    private let nativeFactory: @Sendable () throws -> IncrementalMP3NativeState
     private var native: IncrementalMP3NativeState?
     private var inputFinished = false
     private var disabled = false
     private var closed = false
+
+    init(
+        nativeFactory: @escaping @Sendable () throws -> IncrementalMP3NativeState = {
+            try IncrementalMP3NativeState()
+        }
+    ) {
+        self.nativeFactory = nativeFactory
+    }
 
     func append(_ data: Data) throws {
         try Task.checkCancellation()
@@ -26,7 +35,7 @@ actor IncrementalMP3Decoder {
         guard !data.isEmpty else { return }
         try validator.append(data)
         guard !disabled else { return }
-        if native == nil { native = try IncrementalMP3NativeState() }
+        if native == nil { native = try nativeFactory() }
         try native?.append(data)
     }
 

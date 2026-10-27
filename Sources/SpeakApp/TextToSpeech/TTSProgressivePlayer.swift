@@ -22,8 +22,8 @@ final class TTSProgressivePlayer {
     private var player: AVAudioPlayerNode?
     private var format: AVAudioFormat?
     private var pending = Data()
-    private var scheduledBuffers = 0
-    private var scheduledFrames = 0
+    private var state = TTSProgressivePlaybackState()
+    private var isPaused = false
     private var drainContinuation: CheckedContinuation<Void, Never>?
 
     /// Seconds of audio that may sit scheduled ahead of what has been heard.
@@ -31,16 +31,28 @@ final class TTSProgressivePlayer {
     /// A streaming provider can generate far faster than real time, so without a
     /// ceiling a long utterance accumulates the whole document in scheduled
     /// buffers. Ten seconds is more than enough to ride out a network stall.
-    static let scheduledAheadLimit: TimeInterval = 10
+    static let scheduledAheadLimit = TTSProgressivePlaybackState.scheduledAheadLimit
     /// Longest one chunk waits for that headroom before being scheduled anyway.
     /// Playback that is paused indefinitely must not stall the socket forever.
     static let headroomWaitLimit: TimeInterval = 5
     private static let headroomPollInterval: TimeInterval = 0.05
 
     /// Whether an utterance is currently scheduled or playing.
-    private(set) var isActive = false
+    var isActive: Bool { state.isActive }
 
     func prepare(sampleRate: Int) throws {
+        _ = try prepare(sampleRate: sampleRate, mode: .legacy)
+    }
+
+    /// Opt-in preparation; no app routing uses this entry until its own gate is enabled.
+    func prepareOwned(sampleRate: Int) throws -> TTSProgressivePlaybackState.SessionID {
+        try Task.checkCancellation()
+        return try prepare(sampleRate: sampleRate, mode: .bounded)
+    }
+
+    private func prepare(
+        sampleRate: Int, mode: TTSProgressivePlaybackState.Mode
+    ) throws -> TTSProgressivePlaybackState.SessionID {
         stop()
         guard let format = AVAudioFormat(
             commonFormat: .pcmFormatInt16,
@@ -52,12 +64,15 @@ final class TTSProgressivePlayer {
         }
         let engine = makeEngine()
         let player = AVAudioPlayerNode()
+        let owner: TTSProgressivePlaybackState.SessionID
         do {
             engine.attach(player)
             engine.connect(player, to: engine.mainMixerNode, format: format)
             try engine.start()
             player.play()
+            owner = try state.begin(sampleRate: sampleRate, mode: mode)
         } catch {
+            state.stop()
             player.stop()
             engine.stop()
             throw TTSError.audioPlaybackFailure
@@ -65,7 +80,7 @@ final class TTSProgressivePlayer {
         self.engine = engine
         self.player = player
         self.format = format
-        self.isActive = true
+        return owner
     }
 
     /// Schedules every whole sample in `data`, holding a trailing partial sample
@@ -73,7 +88,8 @@ final class TTSProgressivePlayer {
     /// yet, which is not a failure.
     @discardableResult
     func enqueue(_ data: Data) throws -> Bool {
-        guard let format, let player, isActive else { return false }
+        guard isActive, let owner = state.session else { return false }
+        guard state.mode == .legacy else { throw TTSError.audioPlaybackFailure }
         pending.append(data)
         let sampleSize = MemoryLayout<Int16>.size
         let wholeByteCount = pending.count - pending.count % sampleSize
@@ -82,70 +98,79 @@ final class TTSProgressivePlayer {
         pending.removeFirst(wholeByteCount)
 
         let frameCount = AVAudioFrameCount(wholeByteCount / sampleSize)
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount),
+        try schedule(Data(payload), frames: frameCount, owner: owner)
+        return true
+    }
+
+    private func schedule(
+        _ payload: Data, frames frameCount: AVAudioFrameCount, owner: TTSProgressivePlaybackState.SessionID
+    ) throws {
+        try state.requireCurrent(owner)
+        guard let format, let player,
+            let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount),
             let channel = buffer.int16ChannelData?[0]
         else {
             throw TTSError.audioPlaybackFailure
         }
         payload.withUnsafeBytes { source in
             guard let baseAddress = source.baseAddress else { return }
-            memcpy(channel, baseAddress, wholeByteCount)
+            memcpy(channel, baseAddress, payload.count)
         }
         buffer.frameLength = frameCount
-        scheduledBuffers += 1
-        scheduledFrames += Int(frameCount)
-        player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
-            Task { @MainActor in self?.didFinishBuffer(frames: Int(frameCount)) }
+        do { try state.reserve(frames: Int(frameCount), owner: owner) } catch {
+            if error is CancellationError { throw error }
+            throw TTSError.audioPlaybackFailure
         }
-        if !player.isPlaying { player.play() }
-        return true
+        player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
+            Task { @MainActor in self?.didFinishBuffer(frames: Int(frameCount), owner: owner) }
+        }
+        if !player.isPlaying, state.mode == .legacy || !isPaused { player.play() }
     }
 
     /// Waits until every scheduled buffer has been heard, so a caller can report
     /// playback finished rather than guessing from the synthesis time.
     func waitUntilDrained() async {
-        guard isActive, scheduledBuffers > 0 else { return }
+        guard isActive, state.scheduledBuffers > 0 else { return }
         await withCheckedContinuation { continuation in
             self.drainContinuation = continuation
         }
     }
 
     func pause() {
+        isPaused = true
         player?.pause()
     }
 
     func resume() {
         guard isActive else { return }
+        isPaused = false
         if engine?.isRunning == false { try? engine?.start() }
         if player?.isPlaying == false { player?.play() }
     }
 
     func stop() {
+        // Invalidate identity before native stop can trigger delayed completions.
+        state.stop()
         player?.stop()
         engine?.stop()
         player = nil
         engine = nil
         format = nil
         pending.removeAll(keepingCapacity: false)
-        scheduledBuffers = 0
-        scheduledFrames = 0
-        isActive = false
+        isPaused = false
         drainContinuation?.resume()
         drainContinuation = nil
     }
 
-    private func didFinishBuffer(frames: Int) {
-        scheduledBuffers = max(0, scheduledBuffers - 1)
-        scheduledFrames = max(0, scheduledFrames - frames)
-        guard scheduledBuffers == 0 else { return }
+    private func didFinishBuffer(frames: Int, owner: TTSProgressivePlaybackState.SessionID) {
+        guard state.complete(frames: frames, owner: owner) else { return }
         drainContinuation?.resume()
         drainContinuation = nil
     }
 
     /// Seconds of scheduled audio that have not been heard yet.
     var scheduledAheadSeconds: TimeInterval {
-        guard let format, format.sampleRate > 0 else { return 0 }
-        return Double(scheduledFrames) / format.sampleRate
+        state.scheduledSeconds
     }
 
     /// Waits, up to `headroomWaitLimit`, until the scheduled audio falls back
@@ -161,6 +186,62 @@ final class TTSProgressivePlayer {
                 nanoseconds: UInt64(Self.headroomPollInterval * 1_000_000_000)
             )
         }
+    }
+
+    /// Strict entry: reserve room for this aligned <=100 ms chunk before enqueue.
+    /// A paused/stalled player fails rather than exceeding the ten-second queue.
+    func enqueue(_ data: Data, session owner: TTSProgressivePlaybackState.SessionID) async throws {
+        do {
+            try Task.checkCancellation()
+            try state.requireCurrent(owner)
+            guard !data.isEmpty, data.count % 2 == 0,
+                  data.count / 2 <= state.maximumChunkFrames else { throw TTSError.audioPlaybackFailure }
+            let frames = data.count / 2
+            let clock = ContinuousClock()
+            let deadline = clock.now.advanced(by: .seconds(Self.headroomWaitLimit))
+            while try !state.hasHeadroom(for: frames, owner: owner) {
+                try Task.checkCancellation()
+                guard clock.now < deadline else { throw TTSError.audioPlaybackFailure }
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            try Task.checkCancellation()
+            try state.requireCurrent(owner)
+            guard clock.now < deadline else { throw TTSError.audioPlaybackFailure }
+            try schedule(data, frames: AVAudioFrameCount(frames), owner: owner)
+        } catch {
+            stop(session: owner)
+            throw error
+        }
+    }
+
+    /// Only strict sessions use this bounded, cancellation-aware drain. The
+    /// existing no-argument continuation entry retains its legacy behavior.
+    func waitUntilDrained(session owner: TTSProgressivePlaybackState.SessionID) async throws {
+        do {
+            try Task.checkCancellation()
+            try state.requireCurrent(owner)
+            guard state.mode == .bounded else { throw TTSError.audioPlaybackFailure }
+            let clock = ContinuousClock()
+            let deadline = clock.now.advanced(by: .seconds(state.scheduledSeconds + Self.headroomWaitLimit))
+            while state.scheduledBuffers > 0 {
+                try Task.checkCancellation()
+                try state.requireCurrent(owner)
+                guard clock.now < deadline else { throw TTSError.audioPlaybackFailure }
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            try state.requireCurrent(owner)
+            try Task.checkCancellation()
+            guard clock.now < deadline else { throw TTSError.audioPlaybackFailure }
+        } catch {
+            stop(session: owner)
+            throw error
+        }
+    }
+
+    /// Cleanup from a cancelled/replaced request must not stop another engine.
+    func stop(session owner: TTSProgressivePlaybackState.SessionID) {
+        guard state.session == owner else { return }
+        stop()
     }
 }
 
@@ -182,27 +263,39 @@ extension TTSProgressivePlayer {
     ) async throws -> TTSResult {
         // A cancelled utterance must not open the audio device or provider stream.
         try Task.checkCancellation()
-        try prepare(sampleRate: client.progressiveSampleRate)
+        let owner = try prepare(sampleRate: client.progressiveSampleRate, mode: .legacy)
         do {
             let result = try await client.synthesizeProgressively(
                 text: text, voice: voice, settings: settings
             ) { [weak self] chunk in
-                guard let self else { return }
-                try await self.schedule(chunk)
+                guard let self else { throw CancellationError() }
+                try await self.schedule(chunk, owner: owner)
             }
-            await waitUntilDrained()
-            stop()
-            return result
+            do {
+                try Task.checkCancellation()
+                try state.requireCurrent(owner)
+                await waitUntilDrained()
+                try Task.checkCancellation()
+                try state.requireCurrent(owner)
+                stop(session: owner)
+                return result
+            } catch {
+                // The client has transferred its completed file to this wrapper,
+                // but the manager cannot own it until this method returns it.
+                try? FileManager.default.removeItem(at: result.audioURL)
+                throw error
+            }
         } catch {
-            stop()
+            stop(session: owner)
             throw error
         }
     }
 
     /// Schedules one arriving chunk, first waiting for playback headroom.
-    private func schedule(_ chunk: Data) async throws {
+    private func schedule(_ chunk: Data, owner: TTSProgressivePlaybackState.SessionID) async throws {
         await waitForHeadroom()
         try Task.checkCancellation()
+        try state.requireCurrent(owner)
         try enqueue(chunk)
     }
 }

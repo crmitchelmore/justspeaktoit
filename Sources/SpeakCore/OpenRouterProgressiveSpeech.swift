@@ -5,14 +5,18 @@ import Foundation
 /// current playback generation accepted this chunk, not merely decoded it.
 /// The caller must throw cancellation when that owner has been replaced.
 actor OpenRouterProgressiveSpeech {
-    private let decoder = IncrementalMP3Decoder()
+    private let decoder: IncrementalMP3Decoder
     private let onPCM: @Sendable (Data) async throws -> Void
     private var committed = false
     private var completedFileRequired = false
     private var busy = false
     private var finished = false
 
-    init(onPCM: @escaping @Sendable (Data) async throws -> Void) {
+    init(
+        decoder: IncrementalMP3Decoder = IncrementalMP3Decoder(),
+        onPCM: @escaping @Sendable (Data) async throws -> Void
+    ) {
+        self.decoder = decoder
         self.onPCM = onPCM
     }
 

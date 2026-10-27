@@ -77,7 +77,7 @@ final class GladiaLiveSnapshotTests: XCTestCase {
         Self.emit(socket, "First.", id: "1", final: true, confidence: 0.8)
         let armed = expectation(description: "existing whole finish deadline armed")
         let done = expectation(description: "owned finish returned")
-        let cleanedUp = expectation(description: "owned finish task exited")
+        let cleanedUp = XCTestExpectation(description: "owned finish task exited")
         harness.clock.whenScheduled(GladiaLive.finishBudget) { armed.fulfill() }
         let finishing = Task { () -> String? in
             defer { cleanedUp.fulfill() }
@@ -143,7 +143,7 @@ extension GladiaLiveSnapshotTests {
         let entered = expectation(description: "first transcript callback held")
         let returned = expectation(description: "owned receive thread returned")
         let release = DispatchSemaphore(value: 0)
-        let cleanedUp = expectation(description: "owned callback thread exited")
+        let cleanedUp = XCTestExpectation(description: "owned callback thread exited")
         addTeardownBlock {
             release.signal()
             client.cancel()
@@ -183,7 +183,7 @@ extension GladiaLiveSnapshotTests {
         let entered = expectation(description: "old callback held")
         let returned = expectation(description: "old receive thread returned")
         let release = DispatchSemaphore(value: 0)
-        let cleanedUp = expectation(description: "owned callback thread exited")
+        let cleanedUp = XCTestExpectation(description: "owned callback thread exited")
         addTeardownBlock {
             release.signal()
             client.cancel()
@@ -229,7 +229,7 @@ extension GladiaLiveSnapshotTests {
         let snapshots = SnapshotLog()
         let entered = expectation(description: "active callback held")
         let returned = expectation(description: "owned receive thread returned after cancellation")
-        let cleanedUp = expectation(description: "cancelled callback thread exited")
+        let cleanedUp = XCTestExpectation(description: "cancelled callback thread exited")
         let release = DispatchSemaphore(value: 0)
         addTeardownBlock {
             release.signal()
@@ -269,7 +269,7 @@ extension GladiaLiveSnapshotTests {
         let returned = expectation(description: "owned receive callback returned")
         let reported = expectation(description: "deferred input failure reported")
         let release = DispatchSemaphore(value: 0)
-        let cleanedUp = expectation(description: "owned callback thread exited")
+        let cleanedUp = XCTestExpectation(description: "owned callback thread exited")
         addTeardownBlock {
             release.signal()
             client.cancel()

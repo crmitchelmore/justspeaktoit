@@ -11,7 +11,7 @@ public final class OpenRouterIOSVoiceOutputClient: ObservableObject {
 
     private let session: URLSession
     private let progressiveSpeech: OpenRouterProgressiveSpeechOption
-    private let makeProgressivePlayback: () -> OpenRouterIOSProgressivePlayback
+    private let makeProgressivePlayback: @MainActor () -> OpenRouterIOSProgressivePlayback
     private var synthesisTask: Task<OpenRouterSpeechResult, Error>?
     private var playback: OpenRouterIOSAudioPlayback?
     private var progressiveTask: Task<OpenRouterProgressiveSpeechResult, Error>?
@@ -27,7 +27,7 @@ public final class OpenRouterIOSVoiceOutputClient: ObservableObject {
     init(
         session: URLSession,
         progressiveSpeech: OpenRouterProgressiveSpeechOption,
-        makeProgressivePlayback: @escaping () -> OpenRouterIOSProgressivePlayback = {
+        makeProgressivePlayback: @escaping @MainActor () -> OpenRouterIOSProgressivePlayback = {
             OpenRouterIOSProgressivePlayback()
         }
     ) {

@@ -38,7 +38,11 @@ final class OpenRouterIOSProgressivePlayback {
     private var lease: OpenRouterIOSAudioSessionLease?
     private var observers: [NSObjectProtocol] = []
 
-    init(dependencies: Dependencies = Dependencies()) { self.dependencies = dependencies }
+    convenience init() {
+        self.init(dependencies: Dependencies())
+    }
+
+    init(dependencies: Dependencies) { self.dependencies = dependencies }
 
     var onInterruption: (() -> Void)?
 

@@ -18,7 +18,11 @@ function fixture(t, executable, options = {}) {
 <key>CFBundleExecutable</key><string>${name}</string>
 <key>CFBundleIdentifier</key><string>com.example.launch-fixture</string></dict></plist>`);
   writeFileSync(join(app, 'Contents', 'MacOS', name), `#!/usr/bin/env bash
-export FIXTURE_LAUNCH_TIME="$(python3 -c 'from datetime import datetime; print(datetime.now().astimezone().isoformat())')"
+export FIXTURE_LAUNCH_TIME="$(LC_ALL=C python3 -c 'import subprocess,sys,time
+from datetime import datetime
+time.sleep(${options.delayTimestampStartup ? '1.25' : '0'})
+birth=subprocess.check_output(["ps","-p",sys.argv[1],"-o","lstart="],text=True).strip()
+print(datetime.strptime(birth,"%a %b %d %H:%M:%S %Y").astimezone().isoformat())' "$$")"
 ${executable}
 `, { mode: 0o755 });
   const home = join(directory, 'home');
@@ -44,7 +48,9 @@ mode=sys.argv[4] if len(sys.argv)>4 else ""
 if mode=="future": launch+=timedelta(seconds=60)
 reported_path="/Users/USER/*/"+"/".join(Path(path).parts[-4:]) if mode in ("redacted","wrong-identity") else path
 bundle_id="wrong.bundle" if mode=="wrong-identity" else "com.example.launch-fixture"
-capture=launch+timedelta(milliseconds=1)
+# Capture and launch are independent: ps birth time has whole-second precision,
+# while the report must describe a capture inside the actual failure interval.
+capture=datetime.fromisoformat(os.environ["FIXTURE_CAPTURE_TIME"]) if "FIXTURE_CAPTURE_TIME" in os.environ else datetime.now().astimezone()
 secret="PRIVATE_SIGNING_SENTINEL"
 if destination.endswith(".crash"):
  text=f"Process: fixture [{pid}]\\nPath: {path}\\nDate/Time: {capture.strftime('%Y-%m-%d %H:%M:%S.%f %z')}\\nException Type: EXC_BAD_ACCESS\\nSecret: {secret}\\n"
@@ -143,6 +149,8 @@ test('waits a bounded interval for delayed crash-report delivery after early exi
   const result = fixture(t, `
 pid=$$
 path="$0"
+# Capture occurs before exit; only delivery of this synthetic report is delayed.
+export FIXTURE_CAPTURE_TIME="$(python3 -c 'from datetime import datetime; print(datetime.now().astimezone().isoformat())')"
 (sleep 2.25; python3 "$REPORT_WRITER" "$pid" "$path" "$HOME/Library/Logs/DiagnosticReports/JustSpeakToIt-delayed.ips") &
 exit 42
 `, { wait: '1' });
@@ -274,8 +282,21 @@ python3 "$REPORT_WRITER" "$$" "$0" "$reports/JustSpeakToIt-wrong-identity.ips" w
 exit 42
 `);
   const stats = JSON.parse(readFileSync(join(result.diagnostics, 'collection.json'))).crashReports;
-  assert.equal(stats.reportsRetained, 1);
-  assert.equal(stats.identityRejected, 1);
+  assert.equal(stats.reportsRetained, 1, JSON.stringify(stats));
+  assert.equal(stats.identityRejected, 1, JSON.stringify(stats));
+});
+
+test('retains only the owned redacted report when timestamp initialization is delayed', t => {
+  const result = fixture(t, `
+reports="$HOME/Library/Logs/DiagnosticReports"
+python3 "$REPORT_WRITER" "$$" "$0" "$reports/JustSpeakToIt-redacted.ips" redacted
+python3 "$REPORT_WRITER" "$$" "$0" "$reports/JustSpeakToIt-wrong-identity.ips" wrong-identity
+exit 42
+`, { delayTimestampStartup: true, timeout: '3' });
+  assert.equal(result.status, 1, result.stderr);
+  const stats = JSON.parse(readFileSync(join(result.diagnostics, 'collection.json'))).crashReports;
+  assert.equal(stats.reportsRetained, 1, JSON.stringify(stats));
+  assert.equal(stats.identityRejected, 1, JSON.stringify(stats));
 });
 
 test('bounds report discovery and total reads before parsing a directory flood', t => {

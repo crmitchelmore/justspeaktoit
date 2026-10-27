@@ -51,7 +51,7 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
         var stop: @MainActor () async -> TranscriptionResult
         var cancel: @MainActor () -> Void
         var polish: @MainActor (String, KeyboardDictationProfileOption) async throws -> String
-        var save: @MainActor (String, TranscriptionResult) -> Void
+        var save: @MainActor (String, TranscriptionResult) async -> Void
         var resumeReadiness: @MainActor () async -> Void
     }
 
@@ -71,7 +71,7 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
         },
         cancel: { [unowned self] in self.recordingService.cancelRecording() },
         polish: { [unowned self] in try await self.polish($0, with: $1) },
-        save: { [unowned self] in self.saveToHistory($0, result: $1) },
+        save: { [unowned self] in await self.saveToHistory($0, result: $1) },
         resumeReadiness: { [unowned self] in await self.resumeReadinessAfterRequest() }
     )
 
@@ -461,8 +461,7 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
                 transcript = try await finalisation.polish(transcript, profile)
             } catch {
                 if canComplete(requestID) {
-                    finalisation.save(result.text, result)
-                    _ = try? handoffStore.fail(requestID: requestID, code: .profileUnavailable)
+                    await saveAndComplete(result.text, result: result, requestID: requestID, failedPolish: true)
                 }
                 await releaseRecording(for: requestID)
                 return
@@ -475,10 +474,22 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
         if transcript.isEmpty {
             _ = try? handoffStore.fail(requestID: requestID, code: .noSpeech)
         } else {
-            finalisation.save(transcript, result)
-            _ = try? handoffStore.complete(requestID: requestID, transcript: transcript)
+            await saveAndComplete(transcript, result: result, requestID: requestID, failedPolish: false)
         }
         await releaseRecording(for: requestID)
+    }
+
+    private func saveAndComplete(
+        _ transcript: String, result: TranscriptionResult, requestID: UUID, failedPolish: Bool
+    ) async {
+        await finalisation.save(transcript, result)
+        // Persisting suspends; a cancelled/replaced request must not receive this result.
+        guard canComplete(requestID) else { return }
+        if failedPolish {
+            _ = try? handoffStore.fail(requestID: requestID, code: .profileUnavailable)
+        } else {
+            _ = try? handoffStore.complete(requestID: requestID, transcript: transcript)
+        }
     }
 
     private func canComplete(_ requestID: UUID) -> Bool {
@@ -581,8 +592,8 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
         return polished
     }
 
-    private func saveToHistory(_ transcript: String, result: TranscriptionResult) {
-        iOSHistoryManager.shared.recordTranscription(
+    private func saveToHistory(_ transcript: String, result: TranscriptionResult) async {
+        _ = await iOSHistoryManager.shared.recordTranscriptionAndWait(
             text: transcript,
             model: result.modelIdentifier,
             duration: result.duration

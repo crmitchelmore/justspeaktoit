@@ -192,9 +192,9 @@ a default-device switch, rather than building an engine the next press will disc
 
 [SwitchingLiveTranscriber.swift](../Sources/SpeakApp/SwitchingLiveTranscriber.swift) is deliberately mixed today:
 
-- dedicated macOS controllers handle Deepgram, Modulate, AssemblyAI, ElevenLabs, Soniox, Cartesia, Gladia and OpenAI
+- dedicated macOS controllers handle Deepgram, Modulate, ElevenLabs, Soniox, Cartesia, Gladia and OpenAI
   Realtime;
-- `SharedClientLiveController` supplies macOS capture for the shared `SpeakCore` clients used by Gemini live, xAI,
+- `SharedClientLiveController` supplies macOS capture for the shared `SpeakCore` clients used by AssemblyAI, Gemini live, xAI,
   Azure, Meta, Speechmatics, Rev.ai and Mistral;
 - Apple legacy/analyzer, FluidAudio Parakeet, WhisperKit and the non-App-Store sherpa-onnx runtime have local controllers.
 
@@ -427,6 +427,8 @@ been eliminated.
   identifiers and public protocol surfaces are compatibility contracts.
 - New live clients implement the streaming/finalisation contracts used by the shared factory; providers that retain a
   dedicated controller must preserve that controller's audio, cancellation and transcript-shape semantics.
+  AssemblyAI's bounded shared-route fold and outstanding provider/device gates are recorded in
+  [the parity inventory](assemblyai-shared-live-parity.md).
 - New history fields require an explicit decision about local-only versus the nine-field sync projection and migrations
   on both platform stores.
 - New extension features require both manifest/source gates and separate entitlement, profile, transport, storage and

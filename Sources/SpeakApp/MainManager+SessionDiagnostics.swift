@@ -8,7 +8,7 @@ extension MainManager {
     func sessionProcessingShouldContinue(_ session: ActiveSession) -> Bool {
         guard activeSession === session else { return false }
         guard !Task.isCancelled else {
-            cleanupAfterFailure(message: "Recording cancelled", preserveFile: false)
+            cleanupAfterFailure(message: "Recording cancelled", preserveFile: false, transcriptPolicy: .discard)
             return false
         }
         return true
@@ -42,7 +42,10 @@ extension MainManager {
         activeSession = nil
     }
 
-    func cleanupAfterFailure(message: String, preserveFile: Bool) {
+    func cleanupAfterFailure(
+        message: String, preserveFile: Bool,
+        transcriptPolicy: ActiveSession.FailureTranscriptPolicy = .retainOwned
+    ) {
         lastErrorMessage = message
         hudManager.finishFailure(message: message)
         state = .failed(message)
@@ -53,6 +56,10 @@ extension MainManager {
         // them while dictation owns capture, and never a recording another
         // flow started (issue #673).
         let mayTearDownCapture = captureOwnership.mayTearDownCapture(.dictation)
+        activeSession?.retainFailedLiveTranscript(
+            transcriptionManager.liveTranscript, policy: transcriptPolicy,
+            mayTearDownCapture: mayTearDownCapture
+        )
         if isStreamingTranscriptionMode, mayTearDownCapture {
             transcriptionManager.cancelLiveTranscription()
         }

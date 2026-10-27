@@ -1,5 +1,6 @@
 #if os(iOS)
 import AVFoundation
+import Combine
 import SpeakCore
 import XCTest
 @testable import SpeakiOSLib
@@ -165,18 +166,44 @@ final class InterruptionFinalisationTests: XCTestCase {
 
     func testForegroundInterruption_finalisesOwnerAndPreservesPartialOnRealFailure() async throws {
         let harness = try Harness()
-        defer { harness.cleanUp() }
         let coordinator = harness.makeCoordinator()
+        let cleanup = HistoryFixtureCleanup(directory: harness.directory, defaults: harness.defaults,
+                                            suite: harness.suite, history: harness.history)
+        cleanup.register(on: self, terminal: coordinator.$state.map { $0 == .idle }.eraseToAnyPublisher()) {
+            harness.storage.release()
+            harness.service.cancelRecording()
+            coordinator.cancel()
+        }
         harness.session.finish = { throw TestFailure.drain }
         try await coordinator.start()
+        let writeEntered = expectation(description: "Foreground History write admitted")
+        harness.storage.holdWrite(writeEntered)
+        defer { harness.storage.release() }
+        let settled = expectation(description: "Foreground stop released its owner")
+        let observation = coordinator.$state
+            .drop(while: { $0 != .stopping })
+            .first(where: { $0 == .idle })
+            .sink { _ in settled.fulfill() }
+        defer { observation.cancel() }
         harness.session.emitPartial("Foreground words")
         harness.session.interrupt()
-        await settle()
+        await fulfillment(of: [writeEntered], timeout: 2)
+        XCTAssertEqual(coordinator.state, .stopping)
+        XCTAssertTrue(harness.history.items.isEmpty, "The held write has not published a receipt")
+        harness.storage.release()
+        await fulfillment(of: [settled], timeout: 2)
+        XCTAssertEqual(coordinator.state, .idle)
         XCTAssertFalse(coordinator.isRunning)
         XCTAssertFalse(harness.shared.isRecording)
         XCTAssertEqual(harness.session.stops, 1)
         XCTAssertEqual(harness.history.items.count, 1)
         XCTAssertEqual(harness.history.items.first?.transcription, "Foreground words")
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let persisted = try decoder.decode(
+            [iOSHistoryItem].self, from: Data(contentsOf: harness.directory.appendingPathComponent("history.json"))
+        )
+        XCTAssertEqual(persisted.map(\.transcription), ["Foreground words"])
         XCTAssertTrue(coordinator.error is TestFailure)
         XCTAssertEqual(coordinator.captureStopNotice, iOSTranscriptionError.interrupted.localizedDescription)
         XCTAssertEqual(harness.pasteboard.writes, 0)
@@ -185,27 +212,54 @@ final class InterruptionFinalisationTests: XCTestCase {
 
     func testForegroundSuccess_hasNoErrorAndIgnoresRetiredOwnerCallbacks() async throws {
         let harness = try Harness()
-        defer { harness.cleanUp() }
         let coordinator = harness.makeCoordinator()
+        let cleanup = HistoryFixtureCleanup(directory: harness.directory, defaults: harness.defaults,
+                                            suite: harness.suite, history: harness.history)
+        cleanup.register(on: self, terminal: coordinator.$state.map { $0 == .idle }.eraseToAnyPublisher()) {
+            harness.storage.release()
+            harness.service.cancelRecording()
+            coordinator.cancel()
+        }
         try await coordinator.start()
         let oldError = harness.session.onError
         let oldPartial = harness.session.onPartialResult
+        let writeEntered = expectation(description: "Successful foreground History write admitted")
+        harness.storage.holdWrite(writeEntered)
+        defer { harness.storage.release() }
+        let settled = expectation(description: "Successful foreground stop released its owner")
+        let observation = coordinator.$state.drop(while: { $0 != .stopping })
+            .first(where: { $0 == .idle })
+            .sink { _ in settled.fulfill() }
+        defer { observation.cancel() }
         harness.session.emitPartial("Foreground success")
         harness.session.interrupt()
-        await settle()
+        await fulfillment(of: [writeEntered], timeout: 2)
+        XCTAssertEqual(coordinator.state, .stopping)
+        XCTAssertTrue(harness.history.items.isEmpty, "The held write has not published a receipt")
+        harness.storage.release()
+        await fulfillment(of: [settled], timeout: 2)
+        XCTAssertEqual(coordinator.state, .idle)
         XCTAssertFalse(coordinator.isRunning)
         XCTAssertNil(coordinator.error)
         XCTAssertEqual(harness.history.items.count, 1)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let persisted = try decoder.decode(
+            [iOSHistoryItem].self, from: Data(contentsOf: harness.directory.appendingPathComponent("history.json"))
+        )
+        XCTAssertEqual(persisted.map(\.transcription), ["Foreground success"])
         let next = InterruptionSession()
         coordinator.makeSession = { next }
         try await coordinator.start()
         oldError?(iOSTranscriptionError.interrupted)
         oldPartial?("Retired words", false)
         harness.session.endInterruption()
-        await settle()
+        // Retired callbacks reject synchronously, and .ended is filtered before
+        // the observer's actor hop, so these actions admit no deferred work.
         XCTAssertTrue(coordinator.isRunning)
         XCTAssertEqual(coordinator.partialText, "")
         XCTAssertNil(coordinator.captureStopNotice)
+        XCTAssertNil(coordinator.error)
         await coordinator.cancelAndWait()
     }
 
@@ -230,6 +284,7 @@ private final class Harness {
     let defaults: UserDefaults
     let shared: SharedTranscriptionState
     let history: iOSHistoryManager
+    let storage: HistoryAsyncStorage
     let pasteboard = InterruptionPasteboard()
     let session = InterruptionSession()
     let service: TranscriptionRecordingService
@@ -238,8 +293,10 @@ private final class Harness {
         defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         shared = SharedTranscriptionState(defaults: defaults)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        history = iOSHistoryManager(fileURL: directory.appendingPathComponent("history.json"),
-                                    syncEnabled: false, userDefaults: defaults)
+        let historyFile = directory.appendingPathComponent("history.json")
+        storage = HistoryAsyncStorage(primary: historyFile)
+        history = iOSHistoryManager(fileURL: historyFile, syncEnabled: false, userDefaults: defaults,
+                                    storageIO: storage.storageIO)
         service = TranscriptionRecordingService(
             sharedState: shared, historyManager: history,
             polishClipboard: PolishClipboard(pasteboard: pasteboard),

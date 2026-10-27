@@ -102,263 +102,130 @@ struct CartesiaTranscriptionProvider: TranscriptionProvider {
   ) -> CartesiaLiveTranscriber {
     CartesiaLiveTranscriber(apiKey: apiKey, model: model, sampleRate: sampleRate, session: session)
   }
+
+  func createLiveTranscriber(
+    apiKey: String, model: String, sampleRate: Int,
+    postStopFinalizeBudget: TimeInterval, stopGracePeriod: TimeInterval
+  ) -> CartesiaLiveTranscriber {
+    CartesiaLiveTranscriber(client: CartesiaLiveClient(
+      apiKey: apiKey, model: model, sampleRate: sampleRate, session: session,
+      postStopFinalizeBudget: postStopFinalizeBudget, stopGracePeriod: stopGracePeriod
+    ))
+  }
+
 }
 
+/// One recording's capture adapter. Core owns the socket, bounded PCM queue,
+/// close control, trailing-turn drain and rich terminal transcript snapshot.
 final class CartesiaLiveTranscriber: @unchecked Sendable {
-  /// The Ink-2 stream's pinned version, owned by SpeakCore so this controller
-  /// and the shared client can never send different ones.
   static let apiVersion = CartesiaLiveClient.apiVersion
   static let preferredChunkBytes = 3_200
   static let minimumChunkBytes = 1_600
 
-  private let apiKey: String
-  private let model: String
-  private let sampleRate: Int
-  private let session: URLSession
-  private let logger = SpeakLogger.logger(category: "CartesiaLiveTranscriber")
-  private let stateLock = NSLock()
-  private let pendingSendGroup = DispatchGroup()
+  struct Snapshot: Sendable {
+    let transcript: StreamingTranscriptSnapshot
+    let error: Error?
+  }
 
-  private var webSocketTask: URLSessionWebSocketTask?
-  private var pendingAudio = Data()
-  private var onTranscript: ((String, Bool) -> Void)?
-  private var onError: ((Error) -> Void)?
-  private var isStopping = false
+  private let client: CartesiaLiveClient
+  private let lock = NSLock()
+  private enum State { case idle, started, retired }
+  private var state = State.idle
+  private var failure: Error?
+  private var reportedFailure = false
+  private var terminal: Snapshot?
+  private var finishing: Task<Snapshot, Never>?
+  private var finishCallers = 0
 
-  init(
-    apiKey: String,
-    model: String = "ink-2",
-    sampleRate: Int = 16_000,
-    session: URLSession = .shared
+  convenience init(
+    apiKey: String, model: String = "ink-2", sampleRate: Int = 16_000, session: URLSession = .shared
   ) {
-    self.apiKey = apiKey
-    self.model = model
-    self.sampleRate = sampleRate
-    self.session = session
+    self.init(client: CartesiaLiveClient(apiKey: apiKey, model: model, sampleRate: sampleRate, session: session))
   }
 
-  func start(
-    onTranscript: @escaping (String, Bool) -> Void,
-    onError: @escaping (Error) -> Void
-  ) {
-    withStateLock {
-      isStopping = false
-      self.onTranscript = onTranscript
-      self.onError = onError
+  init(client: CartesiaLiveClient) { self.client = client }
+
+  var finalisationBudget: TimeInterval { client.finalisationBudget ?? 0 }
+
+  var snapshot: Snapshot {
+    let transcript = client.transcriptSnapshot(captureDuration: 0)
+    return lock.withLock { terminal ?? Snapshot(transcript: transcript, error: failure) }
+  }
+
+  /// Actual adapter callers awaiting the one owned finish (including joiners).
+  var pendingFinishes: Int { lock.withLock { finishCallers } }
+
+  func start(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {
+    let begin = lock.withLock { () -> Bool in
+      guard state == .idle else { return false }
+      state = .started
+      return true
     }
-    connectWebSocket()
-  }
-
-  func sendAudio(_ audioData: Data) {
-    guard let task = currentWebSocketTask(), task.state == .running else {
-      bufferPendingAudio(audioData)
-      return
-    }
-    flushPendingAudio(to: task)
-    send(audioData, to: task)
-  }
-
-  private func send(_ audioData: Data, to task: URLSessionWebSocketTask) {
-    let sendGroup = pendingSendGroup
-    sendGroup.enter()
-    task.send(.data(audioData)) { [weak self] error in
-      defer { sendGroup.leave() }
+    guard begin else { return }
+    client.start(onTranscript: onTranscript, onError: { [weak self] error in
       guard let self else { return }
-      if let error {
-        if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
-        self.currentOnError()?(self.mapConnectionError(error))
-      }
-    }
+      self.lock.withLock { if self.failure == nil { self.failure = error } }
+      onError(error)
+    })
+    // A concurrent stop may have preceded the synchronous Core start call.
+    // Retire that owned connection too; this adapter cannot be restarted.
+    if lock.withLock({ state == .retired }) { client.stop() }
   }
 
-  func waitForPendingSends(timeout: TimeInterval = 1.5) async {
-    let sendGroup = pendingSendGroup
-    await withCheckedContinuation { continuation in
-      let lock = NSLock()
-      var didResume = false
-      let resumeOnce = {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !didResume else { return }
-        didResume = true
-        continuation.resume()
-      }
+  func sendAudio(_ data: Data) {
+    guard lock.withLock({ state != .retired }) else { return }
+    client.sendAudio(data)
+  }
 
-      sendGroup.notify(queue: .global()) {
-        resumeOnce()
+  func finishAndWait() async -> Snapshot {
+    if let terminal = lock.withLock({ terminal }) { return terminal }
+    lock.withLock { finishCallers += 1 }
+    defer { lock.withLock { finishCallers -= 1 } }
+    return await withTaskCancellationHandler {
+      let owned = lock.withLock { () -> Task<Snapshot, Never> in
+        if let finishing { return finishing }
+        // Unstructured ownership keeps a caller's cancellation from reaching
+        // Core before this adapter records the shared cancellation outcome.
+        let task = Task.detached(priority: Task.currentPriority) { [self] in
+          _ = await client.finishAndWait()
+          let transcript = client.transcriptSnapshot(captureDuration: 0)
+          return lock.withLock {
+            if let terminal { return terminal }
+            let result = Snapshot(transcript: transcript, error: failure)
+            terminal = result
+            state = .retired
+            return result
+          }
+        }
+        finishing = task
+        return task
       }
-      DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
-        resumeOnce()
-      }
+      return await owned.value
+    } onCancel: { [weak self] in self?.stop() }
+  }
+
+  func takeFailureForReporting() -> Error? {
+    lock.withLock {
+      guard !reportedFailure, let failure else { return nil }
+      reportedFailure = true
+      return failure
     }
   }
 
   func stop() {
-    let task = withStateLock { () -> URLSessionWebSocketTask? in
-      guard !isStopping else { return nil }
-      isStopping = true
-      return webSocketTask
+    lock.withLock {
+      state = .retired
+      // A late caller cannot retroactively change a published outcome.
+      if terminal == nil, failure == nil { failure = CancellationError() }
     }
-    guard let task else { return }
-    if task.state == .running {
-      task.cancel(with: .normalClosure, reason: nil)
-    }
-    withStateLock {
-      if webSocketTask === task { webSocketTask = nil }
-    }
+    client.stop()
   }
 
   nonisolated static func webSocketURL(model: String, sampleRate: Int) -> URL? {
     CartesiaLiveClient.webSocketURL(model: model, sampleRate: sampleRate)
   }
 
-  /// The canonical handshake the shared client also opens: bearer key and the
-  /// pinned version, built once in SpeakCore.
   nonisolated static func webSocketRequest(apiKey: String, model: String, sampleRate: Int) -> URLRequest? {
     CartesiaLiveClient.webSocketRequest(apiKey: apiKey, model: model, sampleRate: sampleRate)
-  }
-
-  nonisolated static func transcriptEvent(from json: String) -> (text: String, isFinal: Bool)? {
-    guard
-      let data = json.data(using: .utf8),
-      let response = try? JSONDecoder().decode(CartesiaTurnResponse.self, from: data)
-    else {
-      return nil
-    }
-    guard let transcript = response.transcriptText, !transcript.isEmpty else {
-      return nil
-    }
-    return (transcript, response.type == "turn.end")
-  }
-
-  private func connectWebSocket() {
-    guard let request = Self.webSocketRequest(apiKey: apiKey, model: model, sampleRate: sampleRate) else {
-      currentOnError()?(CartesiaLiveError.invalidURLComponents)
-      return
-    }
-
-    let task = session.webSocketTask(with: request)
-    let proceed = withStateLock { () -> Bool in
-      guard !isStopping else { return false }
-      webSocketTask = task
-      task.resume()
-      return true
-    }
-    guard proceed else {
-      task.cancel(with: .goingAway, reason: nil)
-      return
-    }
-    logger.info("Cartesia WebSocket connecting (model=\(self.model, privacy: .public))")
-    flushPendingAudio(to: task)
-    receiveMessages()
-  }
-
-  private func receiveMessages() {
-    guard let task = currentWebSocketTask() else { return }
-    task.receive { [weak self] result in
-      guard let self else { return }
-      switch result {
-      case .success(let message):
-        self.handleMessage(message)
-        self.receiveMessages()
-      case .failure(let error):
-        if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
-        self.currentOnError()?(self.mapConnectionError(error))
-      }
-    }
-  }
-
-  private func handleMessage(_ message: URLSessionWebSocketTask.Message) {
-    switch message {
-    case .string(let text):
-      parseResponse(text)
-    case .data(let data):
-      if let text = String(data: data, encoding: .utf8) {
-        parseResponse(text)
-      }
-    @unknown default:
-      break
-    }
-  }
-
-  private func parseResponse(_ json: String) {
-    guard let event = Self.transcriptEvent(from: json) else { return }
-    currentOnTranscript()?(event.text, event.isFinal)
-  }
-
-  private func mapConnectionError(_ error: Error) -> Error {
-    let nsError = error as NSError
-    let description = nsError.localizedDescription.lowercased()
-    if nsError.code == 401 || nsError.code == 403
-      || description.contains("401") || description.contains("403")
-      || description.contains("unauthorized") || description.contains("forbidden") {
-      return CartesiaLiveError.invalidAPIKey
-    }
-    return error
-  }
-
-  private func withStateLock<T>(_ block: () -> T) -> T {
-    stateLock.lock()
-    defer { stateLock.unlock() }
-    return block()
-  }
-
-  private func currentWebSocketTask() -> URLSessionWebSocketTask? {
-    withStateLock { webSocketTask }
-  }
-
-  private func isStoppingState() -> Bool {
-    withStateLock { isStopping }
-  }
-
-  private func currentOnTranscript() -> ((String, Bool) -> Void)? {
-    withStateLock { onTranscript }
-  }
-
-  private func currentOnError() -> ((Error) -> Void)? {
-    withStateLock { onError }
-  }
-
-  private func bufferPendingAudio(_ audioData: Data) {
-    withStateLock {
-      pendingAudio.append(audioData)
-      let maxBufferedBytes = Self.preferredChunkBytes * 20
-      if pendingAudio.count > maxBufferedBytes {
-        pendingAudio = Data(pendingAudio.suffix(maxBufferedBytes))
-      }
-    }
-  }
-
-  private func flushPendingAudio(to task: URLSessionWebSocketTask) {
-    let buffered = withStateLock { () -> Data in
-      let snapshot = pendingAudio
-      pendingAudio.removeAll(keepingCapacity: true)
-      return snapshot
-    }
-    guard !buffered.isEmpty else { return }
-    send(buffered, to: task)
-  }
-}
-
-private struct CartesiaTurnResponse: Decodable {
-  struct TurnResult: Decodable {
-    let transcript: String?
-  }
-
-  let type: String
-  let transcript: String?
-  let results: [TurnResult]?
-
-  private enum CodingKeys: String, CodingKey {
-    case type
-    case transcript
-    case results
-  }
-
-  var transcriptText: String? {
-    if let transcript {
-      return transcript
-    }
-    return results?.compactMap(\.transcript).first { !$0.isEmpty }
   }
 }

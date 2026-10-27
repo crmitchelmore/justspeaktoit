@@ -4,19 +4,11 @@ import CryptoKit
 
 /// A primary snapshot plus an atomic sidecar of pending mutations. Neither file
 /// may be replaced until it has been read successfully (or is positively absent).
-@MainActor
-final class IOSHistoryPersistence {
-    struct StorageIO {
-        var read: (URL) throws -> Data = { try Data(contentsOf: $0) }
-        var write: (Data, URL) throws -> Void = { data, url in
-            try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-        }
-        var remove: (URL) throws -> Void = { try FileManager.default.removeItem(at: $0) }
-    }
+final class IOSHistoryPersistenceState {
 
     let fileURL: URL
     let recoveryURL: URL
-    private let storageIO: StorageIO
+    private let storageIO: IOSHistoryPersistence.StorageIO
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private struct Recovery: Codable {
@@ -36,7 +28,7 @@ final class IOSHistoryPersistence {
     private(set) var errorMessage: String?
     private(set) var recoveredIDs: Set<UUID> = []
 
-    init(fileURL: URL, storageIO: StorageIO = StorageIO()) {
+    init(fileURL: URL, storageIO: IOSHistoryPersistence.StorageIO) {
         self.fileURL = fileURL
         self.recoveryURL = fileURL.appendingPathExtension("recovery")
         self.storageIO = storageIO
@@ -191,6 +183,23 @@ final class IOSHistoryPersistence {
             errorMessage = "New history is only in memory. Keep the app open and retry saving."
             return false
         }
+    }
+
+    /// A durable recovery-only save must contain this deletion's own tombstone,
+    /// not merely an unrelated pending row. A failed attempt restores mutation
+    /// intent so retry cannot silently apply a deletion rolled back in memory.
+    func saveDeleting(_ ids: Set<UUID>, items: [iOSHistoryItem]) -> Bool {
+        let previousPending = pending
+        let previousDeleted = pendingDeletedIDs
+        let previousRecovery = recovery
+        for id in ids { rememberDeletion(id) }
+        guard save(items) else {
+            pending = previousPending
+            pendingDeletedIDs = previousDeleted
+            recovery = previousRecovery
+            return false
+        }
+        return true
     }
 
     private func recoveryPayload() -> Recovery {

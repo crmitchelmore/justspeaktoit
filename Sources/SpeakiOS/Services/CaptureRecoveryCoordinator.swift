@@ -133,7 +133,7 @@ public final class CaptureRecoveryCoordinator: ObservableObject {
             // item's identity *is* the claim's run, so History already replaces
             // by id: retrying an interrupted recovery re-files the same row
             // rather than adding another.
-            iOSHistoryManager.shared.add(iOSHistoryItem(
+            let durable = await iOSHistoryManager.shared.upsertAndWait(iOSHistoryItem(
                 id: finding.run,
                 createdAt: finding.startedAt,
                 transcription: trimmed,
@@ -142,6 +142,10 @@ public final class CaptureRecoveryCoordinator: ObservableObject {
                 wordCount: trimmed.split(whereSeparator: \.isWhitespace).count,
                 originPlatform: Self.recoveredOrigin
             ))
+            guard durable else {
+                self.errorMessage = "History could not be saved. The audio is kept in Saved Recordings."
+                return
+            }
             // Bookkeeping only. The audio stays in Saved Recordings.
             self.claimStore.forget(recording: finding.run)
             self.refresh()

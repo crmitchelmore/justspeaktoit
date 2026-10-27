@@ -453,7 +453,7 @@ final class TranscriberCoordinator: ObservableObject {
         partialText = result.text
         wordCount = result.text.split(whereSeparator: \.isWhitespace).count
         updateActivityAfterStop(duration: duration, result: result, rearmHandsFree: rearmHandsFree)
-        return finishStop(with: result, recordingWarning: session.recordingLossSummary)
+        return await finishStop(with: result, recordingWarning: session.recordingLossSummary)
     }
 
     private func updateActivityAfterStop(
@@ -481,14 +481,14 @@ final class TranscriberCoordinator: ObservableObject {
 
     private func finishStop(
         with result: TranscriptionResult, recordingWarning: String?
-    ) -> TranscriptionResult {
+    ) async -> TranscriptionResult {
         // Live shared-state writes are throttled; commit the final transcript
         // once so the copy intents always see the complete text.
         sharedState.updateTranscript(result.text)
         // Onboarding progress is only ever earned by a transcript that really
         // arrived; a blank one is ignored by the policy.
         CaptureOnboardingStore.shared.recordDictation(trigger: .inApp, transcript: result.text)
-        historyManager.recordTranscription(
+        await historyManager.recordTranscriptionAndWait(
             text: result.text,
             model: currentModel,
             duration: result.duration,

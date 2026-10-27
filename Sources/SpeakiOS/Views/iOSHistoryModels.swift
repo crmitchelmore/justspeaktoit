@@ -6,7 +6,7 @@ import SpeakSync
 // MARK: - History Item Model
 
 /// A single transcription history entry for iOS.
-public struct iOSHistoryItem: Identifiable, Codable {
+public struct iOSHistoryItem: Identifiable, Codable, Sendable { // swiftlint:disable:this type_name
     public let id: UUID
     public let createdAt: Date
     public let updatedAt: Date

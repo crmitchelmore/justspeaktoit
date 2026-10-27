@@ -14,8 +14,9 @@ import Network
 /// it was removed because nothing ever called `sendTranscript` — pairing worked
 /// and no transcript was ever delivered. This type is retained deliberately as
 /// the client that `TransportLoopbackTests` drives against the real server, so
-/// the server the `speak` automation CLI depends on keeps its wire-protocol
-/// coverage. Do not delete it without replacing that coverage.
+/// the receiver keeps its wire-protocol coverage. The `speak` CLI and MCP instead
+/// use `UnixSocketAutomationClient` with the separate local `AutomationServer`.
+/// Do not delete this client without replacing the receiver's loopback coverage.
 @MainActor
 public final class MacConnection: ObservableObject {
     public enum ConnectionState: Equatable {

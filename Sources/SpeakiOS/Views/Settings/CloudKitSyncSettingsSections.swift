@@ -11,7 +11,7 @@ struct CloudKitSyncSettingsSection: View {
     /// an availability result that lands after the toggle flips would
     /// otherwise not refresh this section.
     @ObservedObject private var syncState = HistorySyncEngine.shared.state
-    @StateObject private var historyManager = iOSHistoryManager.shared
+    @ObservedObject private var historyManager = iOSHistoryManager.shared
     @State private var isSyncing = false
 
     var body: some View {
@@ -25,6 +25,7 @@ struct CloudKitSyncSettingsSection: View {
             Label("iCloud History Sync", systemImage: "icloud")
         }
         .accessibilityIdentifier("iCloudHistorySyncToggle")
+        .task { await historyManager.loadIfNeededAndWait() }
 
         if !syncEngine.isSyncEnabled {
             Text(PrivacyStorageDisclosure.historySyncOff)
@@ -96,12 +97,8 @@ struct CloudKitSyncSettingsSection: View {
             .disabled(isSyncing || syncEngine.state.isSyncing)
         } else {
             VStack(alignment: .leading, spacing: 4) {
-                Text(
-                    availability.transportAvailable
-                        ? "Sign in to iCloud to sync history automatically. Until then, Bonjour Transport "
-                            + "can send new sessions to a paired Mac on your local network."
-                        : "Sign in to iCloud in Settings to sync transcription history across your devices."
-                )
+                Text("Sign in to iCloud in Settings to sync History across your devices. "
+                    + "Until iCloud History Sync is available, History stays on this iPhone.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

@@ -398,7 +398,8 @@ extension SettingsView {
 
       SettingsCard(title: "Send to Mac", systemImage: "iphone.and.arrow.forward", tint: Color.green) {
         VStack(alignment: .leading, spacing: 12) {
-          Text("Allow iOS devices to send transcripts to this Mac over your local network.")
+          Text("Enable this Mac's local transport receiver for protocol clients. The iPhone app has no "
+            + "Bonjour sender; iPhone-to-Mac transcript delivery is unavailable.")
             .font(.callout)
             .foregroundStyle(.secondary)
 
@@ -424,7 +425,7 @@ extension SettingsView {
             tint: .green
           )
           .speakTooltip(
-            "When enabled, your Mac will advertise itself on the local network and accept connections from Speak iOS."
+            "Advertise the local transport receiver. The iPhone app has no Bonjour pairing or sending flow."
           )
 
           if let transportError = environment.transportServer.error,
@@ -456,7 +457,7 @@ extension SettingsView {
                 .speakTooltip("Copy pairing code to clipboard")
               }
 
-              Text("Enter this code on your iPhone when pairing.")
+              Text("Protocol clients authenticate with this code. The iPhone app has no pairing screen.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 

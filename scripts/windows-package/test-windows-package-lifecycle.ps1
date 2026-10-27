@@ -912,6 +912,10 @@ try {
     Invoke-StartMenuLaunch 'The base version after refused upgrades' $installed $rows $transcript | Out-Null
 
     # --- phase 4: upgrade -----------------------------------------------------------------------------
+    # Base-version exit and identity evidence is complete. Release only exited
+    # ledger-owned process handles before Windows replaces the installed files.
+    $released = Close-JstiExitedProcesses $script:ledger $ownershipOperations
+    Assert-Check 'The upgrade releases exited owned process handles' ($released.failures.Count -eq 0) $released
     # Read before the upgrade: the object's location follows the live registration.
     $previousLocation = [string] $installed.InstallLocation
     $deployment = Invoke-Deployment 'Upgrade to the next version' {

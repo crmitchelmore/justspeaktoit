@@ -1,4 +1,5 @@
 import AVFoundation
+import SpeakCore
 import XCTest
 
 @testable import SpeakApp

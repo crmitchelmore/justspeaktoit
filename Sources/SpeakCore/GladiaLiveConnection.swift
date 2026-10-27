@@ -9,12 +9,21 @@ extension GladiaLiveClient {
     /// Validates the configuration, then requests the session. Caller holds
     /// the lock.
     func begin(_ active: GladiaLiveRun, _ effects: inout GladiaLiveEffects) {
-        guard !apiKey.isEmpty else {
+        if !mode.isConfigured, apiKey.isEmpty {
             fail(StreamingClientError.missingAPIKey(provider: "Gladia"), active, &effects)
             return
         }
         guard GladiaLiveProtocol.supportedSampleRates.contains(sampleRate) else {
             fail(GladiaStreamingError.invalidSampleRate(sampleRate), active, &effects)
+            return
+        }
+        guard !mode.isConfigured || mode.timing?.isSchedulable() == true else {
+            fail(GladiaTimingConfigurationError(), active, &effects)
+            return
+        }
+        if mode.isConfigured { active.framer = GladiaPCMFramer(sampleRate: sampleRate) }
+        guard !apiKey.isEmpty else {
+            fail(StreamingClientError.missingAPIKey(provider: "Gladia"), active, &effects)
             return
         }
         guard let body = GladiaLiveProtocol.initBody(model: model, language: language, sampleRate: sampleRate) else {

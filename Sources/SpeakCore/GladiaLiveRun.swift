@@ -7,6 +7,10 @@ import Foundation
 /// HTTP, socket or timer callback.
 final class GladiaLiveRun: @unchecked Sendable {
     enum Stage { case idle, initiating, connecting, open, closed }
+    enum FinishPhase: Sendable { case none, draining, grace, control, finalEvents }
+    var finishPhase = FinishPhase.none
+    var finishPhaseGeneration: UInt64 = 0
+    var framer: GladiaPCMFramer?
 
     /// Admitted PCM stays raw in capture order; `stop_recording` follows the
     /// last admitted chunk, so it can only leave after every chunk completed.
@@ -86,7 +90,10 @@ final class GladiaLiveRun: @unchecked Sendable {
     /// Five seconds of PCM16 mono, the bound this route has always held
     /// before its socket was ready, now applied to everything admitted.
     init(sampleRate: Int) {
-        maximumAudioBytes = Int(Double(max(sampleRate, 1) * 2) * StreamingAudioPreroll.defaultBudgetSeconds)
+        // Initializer inputs are untrusted, including Int.min/max. No rate
+        // multiplication or framer construction occurs before validation.
+        maximumAudioBytes = GladiaLiveProtocol.supportedSampleRates.contains(sampleRate)
+            ? Int(Double(sampleRate * 2) * StreamingAudioPreroll.defaultBudgetSeconds) : 0
     }
 
     /// Confirmed finals only. A failed or cancelled run never folds its

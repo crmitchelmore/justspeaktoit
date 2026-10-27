@@ -39,9 +39,11 @@ public final class TranscriptionRecordingService: ObservableObject {
             // One funnel for every capture failure, so the health screen can
             // report how the last real run ended rather than only what is
             // true this second (issue #997). The journal keeps a closed-set
-            // label and a date — never the error's text.
+            // label, local diagnostic code and a date — never the error's text.
             guard let lastSessionError else { return }
-            CaptureOutcomeJournal.record(CaptureOutcomeJournal.outcome(for: lastSessionError))
+            CaptureOutcomeJournal.record(
+                CaptureOutcomeJournal.outcome(for: lastSessionError), failure: lastSessionError
+            )
         }
     }
     /// Identifies the *publication* of `lastSessionError`, not its text, so a
@@ -572,7 +574,10 @@ public final class TranscriptionRecordingService: ObservableObject {
             // it allocated. `transcriptionSession` is untouched — it is only
             // ever assigned after successful activation.
             startedSession?.cancel()
-            unwindCancelledStart(outcome: outcome(for: error), run: runID)
+            let terminalFailure = activityStarted && lifecycle.isCurrentStartRun(runID)
+                && !foregroundOwnership.isOwned && outcome(for: error) == .failed
+                ? CaptureStartFailurePresentation.make(for: error) : nil
+            unwindCancelledStart(outcome: outcome(for: error), run: runID, activityFailure: terminalFailure)
             throw error
         }
     }
@@ -943,7 +948,11 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// Reverts everything a cancelled startup run had published: timing,
     /// shared App Group recording state and the Live Activity. The run calls
     /// this itself so ownership never crosses runs.
-    private func unwindCancelledStart(outcome: StartupOutcome, run: UUID) {
+    private func unwindCancelledStart(
+        outcome: StartupOutcome,
+        run: UUID,
+        activityFailure: CaptureStartFailurePresentation? = nil
+    ) {
         disarmWatchdogs()
         disarmEndPointing()
         // A start that stopped short still reports what it did reach; the
@@ -955,7 +964,11 @@ public final class TranscriptionRecordingService: ObservableObject {
         wordCount = 0
         sharedState.clearRecordingState()
         presentation.finish()
-        activityManager.endActivity()
+        if let activityFailure {
+            activityManager.retireFailedActivity(activityFailure)
+        } else {
+            activityManager.endActivity()
+        }
         currentRunParameters = .none
         effectiveConfiguration = nil
         effectiveDestination = nil
@@ -1561,7 +1574,7 @@ public final class TranscriptionRecordingService: ObservableObject {
             captureStopNotice = error.localizedDescription
         } else {
             lastSessionError = error
-            activityManager.reportError(error.localizedDescription)
+            activityManager.reportClassifiedError(error)
         }
         guard lifecycle.state == .recording else { return }
         Task { [weak self] in

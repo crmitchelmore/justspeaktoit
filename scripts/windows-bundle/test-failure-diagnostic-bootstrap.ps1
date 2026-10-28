@@ -758,3 +758,88 @@ foreach ($mode in @('null', 'partial', 'bool', 'extra', 'duplicate', 'mixed', 'r
 
 Assert-That (-not ('JstiDiagnosticNative' -as [type])) 'pure-fakes-did-not-compile-or-load-native-type'
 Write-Output 'Diagnostic bootstrap pure-fake checks passed.'
+
+# Optional preparation facts are fixed call-entry labels, never error text or completion proof.
+function New-PreparationFactValue([string] $Phase = 'runtime-copy', [string] $Category = 'filesystem') {
+    return @{ schema = 1; status = 'unavailable'; cleanup = 'clean'; applicationError = @{ status = 'unavailable' }
+        debugger = @{ status = 'unavailable'; exceptionCode = $null; frames = @()
+            preparationFacts = @{ lastPhase = $Phase; errorCategory = $Category } } }
+}
+$preparationPhases = @('app-identity', 'host-identity', 'scratch-setup', 'event-query', 'event-project',
+    'cdb-identity', 'identity-recheck', 'runtime-layout', 'runtime-source', 'runtime-copy',
+    'runtime-recheck', 'cdb-runner', 'debugger-project')
+foreach ($phase in $preparationPhases) {
+    foreach ($category in @('validation', 'filesystem', 'unexpected')) {
+        $value = New-PreparationFactValue $phase $category
+        if ($phase -cin @('app-identity', 'host-identity', 'scratch-setup')) { $value.cleanup = 'not-started' }
+        $safe = ConvertTo-JstiDiagnosticProjection $value
+        Assert-That ($safe.debugger.preparationFacts.lastPhase -ceq $phase -and
+            $safe.debugger.preparationFacts.errorCategory -ceq $category -and $safe.status -ceq 'unavailable') 'closed-preparation-roundtrip'
+        Assert-That (([Text.Encoding]::UTF8.GetBytes(($safe | ConvertTo-Json -Depth 8 -Compress))).Length -lt 1024) 'preparation-bounded'
+    }
+}
+$safe = ConvertTo-JstiDiagnosticProjection (New-PreparationFactValue 'cdb-runner' 'returned-unavailable')
+Assert-That ($safe.debugger.preparationFacts.errorCategory -ceq 'returned-unavailable') 'exact-returned-unavailable'
+$mutations = @(
+    { param($v) $v.debugger.preparationFacts.extra = 'PRIVATE_PATH' },
+    { param($v) $v.debugger.preparationFacts.lastPhase = 'PRIVATE_PATH' },
+    { param($v) $v.debugger.preparationFacts.lastPhase = 'Runtime-copy' },
+    { param($v) $v.debugger.preparationFacts.lastPhase = $true },
+    { param($v) $v.debugger.preparationFacts.lastPhase = $null },
+    { param($v) $v.debugger.preparationFacts.errorCategory = 'Filesystem' },
+    { param($v) $v.debugger.preparationFacts.errorCategory = 'PRIVATE_ERROR' },
+    { param($v) $v.debugger.preparationFacts.errorCategory = $true },
+    { param($v) $v.debugger.preparationFacts.errorCategory = 1 },
+    { param($v) $v.debugger.preparationFacts.errorCategory = $null },
+    { param($v) $v.debugger.preparationFacts = @{ LastPhase = 'runtime-copy'; errorCategory = 'filesystem' } },
+    { param($v) $v.debugger.preparationFacts = $true },
+    { param($v) $v.debugger.preparationFacts = @('runtime-copy', 'filesystem') },
+    { param($v) $v.status = 'observed' },
+    { param($v) $v.debugger.status = 'invalid' },
+    { param($v) $v.cleanup = 'failed' },
+    { param($v) $v.cleanup = 'not-started' },
+    { param($v) $v.debugger.frames = @(@{ index = 0; module = 'app'; rva = '0x0' }) },
+    { param($v) $v.debugger.exceptionCode = '0xc0000005' },
+    { param($v) $v.debugger.refusalFacts = $null },
+    { param($v) $v.debugger.preparationFacts.errorCategory = 'returned-unavailable' },
+    { param($v) $v.debugger.preparationFacts.lastPhase = 'app-identity'; $v.cleanup = 'not-started'; $v.applicationError.status = 'invalid' },
+    { param($v) $v.debugger.preparationFacts.lastPhase = 'app-identity'; $v.cleanup = 'not-started'; $v.debugger.preparationFacts.errorCategory = 'returned-unavailable' }
+)
+foreach ($mutation in $mutations) {
+    $value = New-PreparationFactValue
+    & $mutation $value
+    $refused = $false
+    try { [void] (ConvertTo-JstiDiagnosticProjection $value) } catch { $refused = $true }
+    Assert-That $refused 'malformed-or-incoherent-preparation-refused'
+}
+foreach ($case in @('live', 'cutoff', 'streams', 'bootstrap', 'child-cleanup', 'early')) {
+    $value = New-PreparationFactValue
+    if ($case -ceq 'early') { $value.cleanup = 'not-started'; $value.debugger.preparationFacts.lastPhase = 'app-identity' }
+    $record = @{ diagnostic = $value; bootstrap = @{ cleanup = 'complete' }; status = 'unavailable' }
+    if ($case -ceq 'bootstrap') { $record.bootstrap.cleanup = 'incomplete' }
+    if ($case -ceq 'child-cleanup') { $value.cleanup = 'failed' }
+    $clock = if ($case -ceq 'cutoff') { 1000L } else { 999L }
+    Remove-JstiStaleRefusalFacts $record ($case -cne 'streams') $clock 1000
+    Assert-That (($null -ne $record.diagnostic.debugger.preparationFacts) -ceq ($case -cin @('live', 'early'))) 'preparation-retirement'
+    Assert-That ($record.status -ceq 'unavailable' -and $record.diagnostic.status -ceq 'unavailable') 'retirement-keeps-verdict'
+}
+
+# First three phases precede every collector: only not-started/unavailable is coherent.
+foreach ($phase in @('app-identity', 'host-identity', 'scratch-setup')) {
+    foreach ($combination in @(@('not-started', 'unavailable'), @('clean', 'unavailable'), @('clean', 'observed'))) {
+        $value = New-PreparationFactValue $phase 'filesystem'
+        $value.cleanup = $combination[0]; $value.applicationError.status = $combination[1]
+        if ($combination[1] -ceq 'observed') {
+            $value.applicationError.module = 'app'; $value.applicationError.version = '1'
+            $value.applicationError.exceptionCode = '0xc0000005'; $value.applicationError.faultOffset = '0x1'
+        }
+        $accepted = $combination[0] -ceq 'not-started' -and $combination[1] -ceq 'unavailable'
+        $projected = $false
+        try { [void] (ConvertTo-JstiDiagnosticProjection $value); $projected = $true } catch { }
+        Assert-That ($projected -ceq $accepted) 'exact-early-phase-projection-coherence'
+        $record = @{ diagnostic = $value; bootstrap = @{ cleanup = 'complete' }; status = 'unavailable' }
+        Remove-JstiStaleRefusalFacts $record $true 999 1000
+        Assert-That (($null -ne $value.debugger.preparationFacts) -ceq $accepted) 'exact-early-phase-retirement-coherence'
+        Assert-That ($record.status -ceq 'unavailable' -and $value.status -ceq 'unavailable') 'coherence-does-not-rewrite-verdict'
+    }
+}

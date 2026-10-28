@@ -616,6 +616,37 @@ DIAGNOSTIC_MODULES = {"speakwindows": "app", "ntdll": "ntdll", "kernel32": "kern
                       "ucrtbase": "ucrtbase", "swiftcore": "swiftCore", "swift_concurrency": "swift_Concurrency",
                       "swiftdispatch": "swiftDispatch"}
 STANDALONE_STATUSES = {"unavailable", "deadline", "observed", "no-reproduction", "invalid", "truncated"}
+PREPARATION_PHASES = {"app-identity", "host-identity", "scratch-setup", "event-query", "event-project",
+                      "cdb-identity", "identity-recheck", "runtime-layout", "runtime-source", "runtime-copy",
+                      "runtime-recheck", "cdb-runner", "debugger-project"}
+
+
+def _diagnostic_preparation_phase(budget, phase):
+    # Only an admitted operation owns this private tracker; old direct callers do not.
+    tracker = getattr(budget, "_diagnostic_preparation", None)
+    if type(tracker) is dict:
+        tracker["lastPhase"] = phase
+
+
+def _retire_preparation_facts(result, budget, preparation):
+    if "preparationFacts" not in result["debugger"]:
+        return
+    try:
+        facts = result["debugger"]["preparationFacts"]
+        early = {"app-identity", "host-identity", "scratch-setup"}
+        cleanup = (result["cleanup"] == "not-started" and result["applicationError"]["status"] == "unavailable") \
+            if facts.get("lastPhase") in early else result["cleanup"] == "clean"
+        if type(facts) is not dict or set(facts) != {"lastPhase", "errorCategory"} or \
+                type(facts["lastPhase"]) is not str or facts["lastPhase"] not in PREPARATION_PHASES or \
+                type(facts["errorCategory"]) is not str or \
+                facts["errorCategory"] not in {"validation", "filesystem", "unexpected", "returned-unavailable"} or \
+                (facts["errorCategory"] == "returned-unavailable" and facts["lastPhase"] != "cdb-runner") or \
+                not cleanup or result["status"] != "unavailable" or result["debugger"]["status"] != "unavailable" or \
+                result["debugger"]["exceptionCode"] is not None or result["debugger"]["frames"] or \
+                "refusalFacts" in result["debugger"] or not preparation.get("eligible", True) or budget.remaining() <= 2:
+            result["debugger"].pop("preparationFacts", None)
+    except Exception:
+        result["debugger"].pop("preparationFacts", None)
 
 
 def closed_module(name):
@@ -816,23 +847,29 @@ def diagnostic_runtime_bytes(path, row, budget):
 
 def prepare_diagnostic_runtime(rows, directory, budget):
     """Copy only pinned snapshots; never admit a user-writable source to PATH."""
+    _diagnostic_preparation_phase(budget, "runtime-layout")
     diagnostic_runtime_request(rows)
     version, layout = diagnostic_runtime_layout()
     parent = ntpath.dirname(rows[0]["path"])
     prefix = r'^[A-Za-z]:\\Users\\[^\\/:;"<>|?*\x00-\x1f]{1,128}\\AppData\\Local\\Programs\\Swift\\Runtimes\\'
     if not re.fullmatch(prefix + re.escape(version) + r'\\usr\\bin', parent, re.IGNORECASE):
         raise ValueError("runtime unavailable")
+    _diagnostic_preparation_phase(budget, "runtime-source")
     source_parent = pathlib.Path(parent)
     parent_stamp = diagnostic_runtime_stamp(source_parent, directory=True)
+    _diagnostic_preparation_phase(budget, "runtime-copy")
     private = pathlib.Path(directory) / "runtime"
     private.mkdir(mode=0o700)
     sources, copies = [], []
     for row in rows:
+        _diagnostic_preparation_phase(budget, "runtime-layout")
         pinned = layout.get(row["name"])
         if pinned is None or row["bytes"] != pinned["bytes"] or row["sha256"] != pinned["sha256"]:
             raise ValueError("runtime unavailable")
+        _diagnostic_preparation_phase(budget, "runtime-source")
         path = pathlib.Path(row["path"])
         data, source_stamp = diagnostic_runtime_bytes(path, row, budget)
+        _diagnostic_preparation_phase(budget, "runtime-copy")
         destination = private / row["name"]
         with destination.open("xb") as stream:
             for offset in range(0, len(data), 1 << 20):
@@ -841,6 +878,7 @@ def prepare_diagnostic_runtime(rows, directory, budget):
                 stream.write(memoryview(data)[offset:offset + (1 << 20)])
         sources.append((path, source_stamp))
         copies.append((destination, row, diagnostic_runtime_stamp(destination)))
+    _diagnostic_preparation_phase(budget, "runtime-recheck")
     if diagnostic_runtime_stamp(source_parent, directory=True) != parent_stamp or \
             any(diagnostic_runtime_stamp(path) != stamp for path, stamp in sources):
         raise ValueError("runtime unavailable")
@@ -1114,6 +1152,7 @@ def standalone_diagnostic(encoded, api_factory=StandaloneWindows, identity=diagn
                           runner=bounded_diagnostic_process):
     result = diagnostic_result("invalid")
     scratch = None
+    preparation = None
     try:
         request = diagnostic_request(encoded)
         api = api_factory()
@@ -1121,9 +1160,13 @@ def standalone_diagnostic(encoded, api_factory=StandaloneWindows, identity=diagn
         if not api.admitted(request):
             return result
         result = diagnostic_result()
+        preparation = {"lastPhase": "app-identity"}
+        budget._diagnostic_preparation = preparation
         app = identity(request["executable"], request["expectedSHA256"], 128 << 20, budget)
+        _diagnostic_preparation_phase(budget, "host-identity")
         host = identity(request["powershell"], request["powershellSHA256"], 32 << 20, budget)
         # Only fixed system/temp variables; no inherited OP/API/symbol/debugger configuration.
+        _diagnostic_preparation_phase(budget, "scratch-setup")
         scratch = tempfile.TemporaryDirectory(prefix="jsti-owned-diagnostic-")
         with scratch as directory:
             environment = {key: os.environ[key] for key in ("SystemRoot", "WINDIR") if key in os.environ}
@@ -1132,11 +1175,15 @@ def standalone_diagnostic(encoded, api_factory=StandaloneWindows, identity=diagn
                                APPDATA=directory, LOCALAPPDATA=directory)
             if budget.remaining() >= 7:
                 env = dict(environment, JSTI_EVENT_START=request["startedUTC"], JSTI_EVENT_END=request["endedUTC"])
+                _diagnostic_preparation_phase(budget, "event-query")
                 event = runner([request["powershell"], "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
                                 APPLICATION_ERROR_QUERY], env, directory, budget, 5, line_limit=65536)
                 result["cleanup"] = event["cleanup"]
+                if event["status"] not in ("complete", "unavailable"):
+                    preparation["eligible"] = False
                 if event["cleanup"] == "failed":
                     return result
+                _diagnostic_preparation_phase(budget, "event-project")
                 projection = {"status": "unavailable"}
                 if event["status"] == "complete" and event["exitCode"] == 0:
                     try:
@@ -1158,8 +1205,10 @@ def standalone_diagnostic(encoded, api_factory=StandaloneWindows, identity=diagn
             if budget.remaining() - 2 < 5:
                 result["status"] = result["debugger"]["status"] = "deadline"
                 return result
+            _diagnostic_preparation_phase(budget, "cdb-identity")
             identity(CDB_LOCATION, CDB_SHA256, 32 << 20, budget, version=CDB_VERSION)
             # Recheck the caller-admitted images after optional Event1000 work.
+            _diagnostic_preparation_phase(budget, "identity-recheck")
             if identity(request["executable"], request["expectedSHA256"], 128 << 20, budget) != app or \
                     identity(request["powershell"], request["powershellSHA256"], 32 << 20, budget) != host:
                 return result
@@ -1179,6 +1228,7 @@ def standalone_diagnostic(encoded, api_factory=StandaloneWindows, identity=diagn
                     result["status"] = result["debugger"]["status"] = "deadline"
                     return result
                 debugger_environment = dict(environment, PATH=environment["PATH"] + ";" + runtime)
+            _diagnostic_preparation_phase(budget, "cdb-runner")
             observed = runner(argv, debugger_environment, directory, budget, min(20, budget.remaining() - 2))
             result["cleanup"] = observed["cleanup"]
             if observed["cleanup"] == "failed":
@@ -1186,9 +1236,13 @@ def standalone_diagnostic(encoded, api_factory=StandaloneWindows, identity=diagn
             if observed["status"] != "complete":
                 status = observed["status"] if observed["status"] in STANDALONE_STATUSES else "unavailable"
                 result["status"] = result["debugger"]["status"] = status
+                if observed["status"] == "unavailable":
+                    result["debugger"]["preparationFacts"] = {"lastPhase": "cdb-runner",
+                                                               "errorCategory": "returned-unavailable"}
                 return result
             code = observed["exitCode"]
             completion = "zero" if type(code) is int and code == 0 else "nonzero" if type(code) is int else "unknown"
+            _diagnostic_preparation_phase(budget, "debugger-project")
             result["debugger"] = project_debugger(observed["output"], observed["exitCode"] == 0,
                                                   completion_class=completion)
             refusal = result["debugger"].get("refusalFacts")
@@ -1201,7 +1255,7 @@ def standalone_diagnostic(encoded, api_factory=StandaloneWindows, identity=diagn
                 result["status"] = "observed"
     except TimeoutError:
         result["status"] = result["debugger"]["status"] = "deadline"
-    except Exception:
+    except Exception as error:
         # Neither an unexpected optional collector error nor temporary cleanup
         # failure may leave a previously observed result looking completed.
         if scratch is not None:
@@ -1212,6 +1266,14 @@ def standalone_diagnostic(encoded, api_factory=StandaloneWindows, identity=diagn
                 result["cleanup"] = "failed"
         result["status"] = result["debugger"]["status"] = "unavailable"
         result["debugger"]["exceptionCode"], result["debugger"]["frames"] = None, []
+        if preparation is not None:
+            category = "validation" if isinstance(error, (ValueError, TypeError, KeyError, UnicodeError)) else \
+                "filesystem" if isinstance(error, OSError) else "unexpected"
+            result["debugger"]["preparationFacts"] = {"lastPhase": preparation["lastPhase"], "errorCategory": category}
+    finally:
+        # Optional facts are retired after context cleanup, including existing early returns.
+        if preparation is not None:
+            _retire_preparation_facts(result, budget, preparation)
     # Late cleanup/cutoff cannot leave parser facts looking current. This adds
     # no status, retry, budget or acceptance change to the original operation.
     if "refusalFacts" in result["debugger"]:

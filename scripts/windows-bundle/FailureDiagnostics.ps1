@@ -392,6 +392,27 @@ function ConvertTo-JstiDiagnosticProjection($Value) {
         if ($debugger.status -isnot [string] -or $debugger.status -cnotin $statuses) { throw 'unavailable' }
         $safe.debugger = [ordered]@{ status = $debugger.status }
         $debuggerNames = if ($debugger -is [System.Collections.IDictionary]) { @($debugger.Keys) } else { @($debugger.PSObject.Properties.Name) }
+        if ($debuggerNames -contains 'preparationFacts') {
+            if ($debuggerNames -cnotcontains 'preparationFacts' -or $debugger.status -cne 'unavailable' -or
+                    $Value.status -cne 'unavailable' -or $null -ne $debugger.exceptionCode -or
+                    @($debugger.frames).Count -ne 0 -or $debuggerNames -contains 'refusalFacts') { throw 'unavailable' }
+            $facts = $debugger.preparationFacts
+            $names = if ($facts -is [System.Collections.IDictionary]) { @($facts.Keys) } else { @($facts.PSObject.Properties.Name) }
+            $phases = @('app-identity', 'host-identity', 'scratch-setup', 'event-query', 'event-project',
+                'cdb-identity', 'identity-recheck', 'runtime-layout', 'runtime-source', 'runtime-copy',
+                'runtime-recheck', 'cdb-runner', 'debugger-project')
+            if ($names.Count -ne 2 -or $names -cnotcontains 'lastPhase' -or $names -cnotcontains 'errorCategory' -or
+                    $facts.lastPhase -isnot [string] -or $facts.lastPhase -cnotin $phases -or
+                    $facts.errorCategory -isnot [string] -or
+                    $facts.errorCategory -cnotin @('validation', 'filesystem', 'unexpected', 'returned-unavailable')) { throw 'unavailable' }
+            $early = $facts.lastPhase -cin @('app-identity', 'host-identity', 'scratch-setup')
+            $cleanup = if ($early) { $Value.cleanup -ceq 'not-started' -and $Value.applicationError.status -ceq 'unavailable' }
+                       else { $Value.cleanup -ceq 'clean' }
+            if (-not $cleanup -or
+                    ($facts.errorCategory -ceq 'returned-unavailable' -and
+                    ($facts.lastPhase -cne 'cdb-runner' -or $Value.cleanup -cne 'clean'))) { throw 'unavailable' }
+            $safe.debugger.preparationFacts = [ordered]@{ lastPhase = $facts.lastPhase; errorCategory = $facts.errorCategory }
+        }
         if ($debuggerNames -contains 'refusalFacts') {
             if ($debuggerNames -cnotcontains 'refusalFacts' -or $debugger.status -cne 'invalid' -or
                     $Value.status -cne 'invalid' -or $Value.cleanup -cne 'clean' -or
@@ -599,6 +620,13 @@ function Remove-JstiStaleRefusalFacts($Result, [bool] $StreamsClosed, [long] $Cu
                 $Result.diagnostic.cleanup -cne 'clean' -or $CurrentTicks -ge $WorkCutoff) {
             [void] $Result.diagnostic.debugger.Remove('refusalFacts')
         }
+        $early = $Result.diagnostic.debugger.preparationFacts.lastPhase -cin @('app-identity', 'host-identity', 'scratch-setup')
+        $cleanup = if ($early) { $Result.diagnostic.cleanup -ceq 'not-started' -and
+            $Result.diagnostic.applicationError.status -ceq 'unavailable' } else { $Result.diagnostic.cleanup -ceq 'clean' }
+        if (-not $StreamsClosed -or $Result.bootstrap.cleanup -cne 'complete' -or -not $cleanup -or
+                $CurrentTicks -ge $WorkCutoff) {
+            [void] $Result.diagnostic.debugger.Remove('preparationFacts')
+        }
     }
 }
 
@@ -700,6 +728,7 @@ function Invoke-JstiStandaloneDiagnostic($Setup, $Run, $Process, [string] $Execu
             } catch {
                 if ($null -ne $result.diagnostic -and $null -ne $result.diagnostic.debugger) {
                     [void] $result.diagnostic.debugger.Remove('refusalFacts')
+                    [void] $result.diagnostic.debugger.Remove('preparationFacts')
                 }
             }
         }
@@ -850,7 +879,8 @@ function Update-JstiNativeFailureEvidence($Setup, [string] $EvidencePath, [strin
                 [Convert]::ToBase64String($bytes)) { return }
         # Last finite sample before atomic replacement: facts known expired
         # here are never published. Clock sampling and Move are not atomic.
-        if ($null -ne $run.failureDiagnostic.diagnostic.debugger.refusalFacts -and
+        if (($null -ne $run.failureDiagnostic.diagnostic.debugger.refusalFacts -or
+                $null -ne $run.failureDiagnostic.diagnostic.debugger.preparationFacts) -and
                 [System.Diagnostics.Stopwatch]::GetTimestamp() -ge ($DeadlineTicks - 2 * $Frequency)) { return }
         [System.IO.File]::Move($temporary, $EvidencePath, $true)
         $temporary = $null

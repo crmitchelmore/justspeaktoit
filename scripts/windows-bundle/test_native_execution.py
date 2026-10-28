@@ -2025,5 +2025,182 @@ if('JstiDiagnosticNative' -as [type]){throw 'native load'}
             self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", errors="replace"))
 
 
+
+class DiagnosticPreparationFactsTests(unittest.TestCase):
+    def test_early_phase_cleanup_coherence_refuses_all_six_unreachable_combinations(self):
+        cases = 0
+        for phase in ("app-identity", "host-identity", "scratch-setup"):
+            for cleanup, event_status in (("not-started", "unavailable"), ("clean", "unavailable"), ("clean", "observed")):
+                value = NATIVE.diagnostic_result("unavailable", cleanup)
+                value["applicationError"]["status"] = event_status
+                value["debugger"]["preparationFacts"] = {"lastPhase": phase, "errorCategory": "filesystem"}
+                before = json.loads(json.dumps(value))
+                NATIVE._retire_preparation_facts(value, types.SimpleNamespace(remaining=lambda: 20), {})
+                accepted = cleanup == "not-started" and event_status == "unavailable"
+                self.assertEqual("preparationFacts" in value["debugger"], accepted)
+                before["debugger"].pop("preparationFacts")
+                value["debugger"].pop("preparationFacts", None)
+                self.assertEqual(value, before)
+                cases += 1
+        self.assertEqual(cases, 9)
+
+    def test_identity_exceptions_are_typed_only_after_admission_and_do_not_format_errors(self):
+        fixture = StandaloneDiagnosticTests()
+        class PrivateError(RuntimeError):
+            def __str__(self):
+                raise AssertionError("must not format private error")
+        for failure, category in ((ValueError("PRIVATE_PATH"), "validation"),
+                                  (PermissionError("PRIVATE_PATH"), "filesystem"), (PrivateError(), "unexpected")):
+            for failed_call, phase in ((1, "app-identity"), (2, "host-identity"), (3, "cdb-identity"),
+                                       (4, "identity-recheck"), (5, "identity-recheck")):
+                calls = []
+                def identity(path, *args, **kwargs):
+                    calls.append(path)
+                    if len(calls) == failed_call:
+                        raise failure
+                    return path, "snapshot"
+                value = fixture.request()
+                before = dict(value)
+                result = fixture.operate(value=value, identity=identity)
+                self.assertEqual(value, before)
+                self.assertEqual(result["status"], "unavailable")
+                self.assertEqual(result["debugger"]["preparationFacts"],
+                                 {"lastPhase": phase, "errorCategory": category})
+                self.assertEqual(result["cleanup"], "not-started" if failed_call < 3 else "clean")
+                self.assertNotIn("PRIVATE", json.dumps(result))
+        with mock.patch.object(NATIVE.tempfile, "TemporaryDirectory", side_effect=PermissionError("PRIVATE_DIRECTORY")):
+            result = fixture.operate()
+        self.assertEqual(result["debugger"]["preparationFacts"],
+                         {"lastPhase": "scratch-setup", "errorCategory": "filesystem"})
+        identity = mock.Mock(side_effect=PrivateError())
+        result = fixture.operate(identity=identity, api=fixture.api(admitted=lambda _: False))
+        identity.assert_not_called()
+        self.assertNotIn("preparationFacts", result["debugger"])
+
+    def test_exact_cdb_unavailable_return_and_mixed_event_paths_preserve_existing_results(self):
+        fixture = StandaloneDiagnosticTests()
+        for event_status in ("complete", "unavailable", "deadline", "truncated"):
+            for cdb_status in ("unavailable", "deadline", "truncated", "unknown"):
+                calls = []
+                def runner(argv, *args, **kwargs):
+                    calls.append(argv[0])
+                    return dict(status=event_status if len(calls) == 1 else cdb_status,
+                                cleanup="clean", exitCode=0, output=b'{"status":"unavailable"}')
+                result = fixture.operate(runner=runner)
+                self.assertEqual(calls, [fixture.request()["powershell"], NATIVE.CDB_LOCATION])
+                self.assertEqual(result["status"], cdb_status if cdb_status in NATIVE.STANDALONE_STATUSES else "unavailable")
+                facts = result["debugger"].get("preparationFacts")
+                if cdb_status == "unavailable" and event_status in ("complete", "unavailable"):
+                    self.assertEqual(facts, {"lastPhase": "cdb-runner", "errorCategory": "returned-unavailable"})
+                else:
+                    self.assertIsNone(facts)
+        for event_status in ("unavailable", "deadline", "truncated"):
+            def runner(argv, *args, **kwargs):
+                return dict(status=event_status, cleanup="clean", exitCode=0, output=b'{"status":"unavailable"}')
+            def identity(path, *args, **kwargs):
+                if path == NATIVE.CDB_LOCATION:
+                    raise OSError("PRIVATE_NATIVE_ERROR")
+                return path, "snapshot"
+            result = fixture.operate(identity=identity, runner=runner)
+            self.assertEqual(result["status"], "unavailable")
+            self.assertEqual("preparationFacts" in result["debugger"], event_status == "unavailable")
+
+    def test_runtime_read_copy_and_recheck_failures_use_actual_owned_payload_operations(self):
+        for operation, phase, category in (("read", "runtime-source", "filesystem"),
+                                           ("copy", "runtime-copy", "filesystem"),
+                                           ("recheck", "runtime-recheck", "validation")):
+            fixture = DiagnosticRuntimeClosureTests()
+            fixture.setUp()
+            try:
+                original_read = NATIVE.diagnostic_runtime_bytes
+                original_open = fixture.real_path.open
+                reads = []
+                def read(path, row, budget):
+                    reads.append(path)
+                    if operation == "read" and path.parent == fixture.source:
+                        raise PermissionError("PRIVATE_FILE")
+                    if operation == "recheck" and path.parent.name == "runtime":
+                        raise ValueError("PRIVATE_HASH")
+                    return original_read(path, row, budget)
+                def opened(path, *args, **kwargs):
+                    if operation == "copy" and args and args[0] == "xb":
+                        raise PermissionError("PRIVATE_DESTINATION")
+                    return original_open(path, *args, **kwargs)
+                with mock.patch.object(NATIVE, "diagnostic_runtime_bytes", side_effect=read), \
+                        mock.patch.object(fixture.real_path, "open", autospec=True, side_effect=opened):
+                    result = fixture.operate()
+                self.assertEqual(result["status"], "unavailable")
+                self.assertEqual(result["cleanup"], "clean")
+                self.assertEqual(result["debugger"]["preparationFacts"],
+                                 {"lastPhase": phase, "errorCategory": category})
+                self.assertNotIn("PRIVATE", json.dumps(result))
+                if operation == "recheck":
+                    self.assertEqual(len([x for x in reads if x.parent == fixture.source]), 14)
+                    self.assertTrue(reads[-1].parent.name == "runtime")
+                    self.assertFalse(reads[-1].parent.exists())
+            finally:
+                fixture.doCleanups()
+
+    def test_cdb_return_facts_are_retired_after_context_exit_and_cleanup_failure(self):
+        fixture = StandaloneDiagnosticTests()
+        original = NATIVE.tempfile.TemporaryDirectory
+        for outcome in ("cutoff", "cleanup"):
+            now = [10000]
+            class OwnedDirectory:
+                def __init__(self, *args, **kwargs):
+                    self.owned = original(*args, **kwargs)
+                    self.name = self.owned.name
+                def __enter__(self):
+                    return self.owned.__enter__()
+                def __exit__(self, *args):
+                    if outcome == "cleanup":
+                        raise PermissionError("PRIVATE_CLEANUP")
+                    self.owned.__exit__(*args)
+                    now[0] = 29000
+                def cleanup(self):
+                    self.owned.cleanup()
+            directories = []
+            def directory(*args, **kwargs):
+                owned = OwnedDirectory(*args, **kwargs)
+                directories.append(owned)
+                return owned
+            def runner(*args, **kwargs):
+                return dict(status="unavailable", cleanup="clean", exitCode=0, output=b"")
+            try:
+                with mock.patch.object(NATIVE.tempfile, "TemporaryDirectory", side_effect=directory):
+                    result = fixture.operate(api=fixture.api(ticks=lambda: now[0]), runner=runner)
+                self.assertEqual(result["status"], "unavailable")
+                self.assertNotIn("preparationFacts", result["debugger"])
+                if outcome == "cleanup":
+                    self.assertEqual(result["cleanup"], "failed")
+            finally:
+                for owned in directories:
+                    owned.cleanup()
+
+    def test_actual_python_exception_facts_roundtrip_through_strict_powershell_projection(self):
+        host = shutil.which("pwsh")
+        if host is None:
+            self.skipTest("PowerShell unavailable: preparation facts boundary not executed")
+        def identity(*args, **kwargs):
+            raise PermissionError("PRIVATE_CANARY")
+        value = StandaloneDiagnosticTests().operate(identity=identity)
+        script = r'''
+$ErrorActionPreference='Stop'
+. $env:JSTI_PROJECTOR
+$value=[Console]::In.ReadToEnd() | ConvertFrom-Json -Depth 8
+ConvertTo-JstiDiagnosticProjection $value | ConvertTo-Json -Depth 8 -Compress
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            environment = dict(os.environ, JSTI_PROJECTOR=str(HERE / "FailureDiagnostics.ps1"))
+            completed = subprocess.run([host, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
+                input=json.dumps(value).encode("utf-8"), cwd=directory, env=environment,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15, check=False)
+        self.assertEqual(completed.returncode, 0)
+        self.assertEqual(completed.stderr, b"")
+        projected = json.loads(completed.stdout)
+        self.assertEqual(projected["debugger"]["preparationFacts"], value["debugger"]["preparationFacts"])
+        self.assertEqual(projected["status"], "unavailable")
+        self.assertNotIn("PRIVATE", json.dumps(projected))
+
 if __name__ == "__main__":
     unittest.main()

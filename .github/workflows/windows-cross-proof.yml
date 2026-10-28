@@ -246,6 +246,30 @@ jobs:
             if (-not (Test-Path $directory)) { throw "Missing installed test runtime: $library" }
             $env:Path = "$directory;$env:Path"
           }
+          # Only the exact Process returned by Start-Process is touched. A
+          # joined parent is not evidence that descendant processes exited.
+          function Complete-CrossBuiltTimeoutCleanup($Process, [string] $Label) {
+            if ($Label -cnotin @('tests', 'native', 'ui')) { throw 'Invalid cleanup label.' }
+            $record = [ordered]@{
+              schema = 1; label = $Label; timedOut = $true
+              scope = 'returned-process-only'; waitMilliseconds = 5000
+              killStatus = 'failed'; waitStatus = 'failed'; disposeStatus = 'failed'
+            }
+            try {
+              try { [void] $Process.Kill(); $record.killStatus = 'requested' } catch { }
+              # Kill is asynchronous. Even a kill/exit race still gets one
+              # bounded join; no PID lookup, tree kill, retry or infinite wait.
+              try {
+                $joined = $Process.WaitForExit(5000)
+                if ($joined -is [bool]) {
+                  $record.waitStatus = if ($joined) { 'exited' } else { 'not-exited' }
+                }
+              } catch { }
+            } finally {
+              try { [void] $Process.Dispose(); $record.disposeStatus = 'disposed' } catch { }
+            }
+            return $record
+          }
           function Invoke-CrossBuilt([string] $name, [string] $arguments, [string] $label, [int] $seconds) {
             $parameters = @{
               FilePath = (Resolve-Path "app/$name").Path
@@ -257,7 +281,16 @@ jobs:
             if ($arguments) { $parameters.ArgumentList = $arguments }
             $process = Start-Process @parameters
             if (-not $process.WaitForExit($seconds * 1000)) {
-              $process.Kill()
+              try {
+                $cleanup = Complete-CrossBuiltTimeoutCleanup $process $label
+                $json = $cleanup | ConvertTo-Json -Depth 3 -Compress
+                # Finite facts are printed before best-effort file persistence.
+                # Neither cleanup nor receipt failure can mask the timeout.
+                Write-Host ("JSTI_CROSS_TIMEOUT_CLEANUP:" + $json)
+                Add-Content -LiteralPath 'app/windows-timeout-cleanup.log' -Value $json -Encoding utf8 -ErrorAction Stop
+              } catch {
+                try { Write-Host 'JSTI_CROSS_TIMEOUT_CLEANUP_UNAVAILABLE' } catch { }
+              }
               throw "$label exceeded $seconds seconds."
             }
             Get-Content "app/windows-$label.log"

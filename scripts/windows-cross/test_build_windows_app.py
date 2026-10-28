@@ -3,7 +3,9 @@
 import hashlib
 import importlib.util
 import io
+import json
 import pathlib
+import shutil
 import stat
 import subprocess
 import tarfile
@@ -308,6 +310,125 @@ class SymbolToolExtractionTests(unittest.TestCase):
                                                 symbols=records, source_commit="a" * 40)
             self.assertEqual([call.args[1].name for call in copies.call_args_list], ["SpeakWindows.exe", "speak.exe"])
             self.assertEqual(set(result), {"SpeakWindows.exe", "speak.exe"})
+
+
+class CrossBuiltTimeoutCleanupTests(unittest.TestCase):
+    def test_actual_workflow_functions_keep_timeout_and_bound_owned_cleanup(self):
+        host = shutil.which("pwsh")
+        if host is None:
+            self.skipTest("PowerShell unavailable: actual cross-workflow cleanup fakes not executed")
+        workflow = (HERE.parents[1] / ".github/workflows/windows-cross-proof.yml").read_text(encoding="utf-8")
+        start = workflow.index("          function Complete-CrossBuiltTimeoutCleanup(")
+        end = workflow.index("          # Independent checks all produce evidence;", start)
+        # Invoke the actual inline production functions, not a copied model.
+        functions = "\n".join(line[10:] for line in workflow[start:end].splitlines())
+        script = r'''
+$ErrorActionPreference = 'Stop'
+function Assert-That([bool] $condition, [string] $message) { if (-not $condition) { throw $message } }
+function New-FakeProcess([string] $mode) {
+    $fake = [pscustomobject]@{ Mode = $mode; Waits = [Collections.ArrayList]::new(); Events = [Collections.ArrayList]::new(); Kills = 0; Disposals = 0; ExitCode = 0 }
+    $fake | Add-Member ScriptMethod WaitForExit {
+        param($milliseconds)
+        [void] $this.Waits.Add($milliseconds)
+        [void] $this.Events.Add("wait:$milliseconds")
+        if ($this.Waits.Count -eq 1) { return $this.Mode -in @('success', 'natural-nonzero') }
+        if ($this.Mode -ceq 'wait-failure') { throw 'PRIVATE_CANARY' }
+        if ($this.Mode -ceq 'wait-invalid') { return 1 }
+        return $this.Mode -notin @('not-exited', 'kill-failure')
+    }
+    $fake | Add-Member ScriptMethod Kill {
+        $this.Kills++
+        [void] $this.Events.Add('kill')
+        if ($this.Mode -in @('kill-race', 'kill-failure')) { throw 'PRIVATE_CANARY' }
+        return 'PRIVATE_API_RETURN'
+    }
+    $fake | Add-Member ScriptMethod Dispose {
+        $this.Disposals++
+        [void] $this.Events.Add('dispose')
+        if ($this.Mode -ceq 'dispose-failure') { throw 'PRIVATE_CANARY' }
+        return 'PRIVATE_API_RETURN'
+    }
+    return $fake
+}
+$script:starts = 0
+function Start-Process {
+    param($FilePath, $PassThru, $NoNewWindow, $RedirectStandardOutput, $RedirectStandardError, $ArgumentList)
+    $script:starts += 1
+    return $script:fake
+}
+function Get-Process { throw 'PID lookup must never occur.' }
+$script:messages = [Collections.Generic.List[string]]::new()
+function Write-Host {
+    param($Object)
+    if ($script:fake.Mode -ceq 'host-write-failure') { throw 'PRIVATE_CANARY' }
+    [void] $script:messages.Add([string] $Object)
+}
+[void] [IO.Directory]::CreateDirectory('app')
+[IO.File]::WriteAllText((Join-Path (Get-Location) 'app/owned.exe'), '', [Text.Encoding]::UTF8)
+$tested = 0
+foreach ($mode in @('success', 'natural-nonzero', 'joined', 'kill-race', 'kill-failure', 'not-exited',
+        'wait-failure', 'wait-invalid', 'dispose-failure', 'receipt-write-failure', 'host-write-failure')) {
+    foreach ($label in @('tests', 'native', 'ui')) {
+        $seconds = switch ($label) { 'tests' { 180 } 'native' { 90 } 'ui' { 30 } }
+        $script:fake = New-FakeProcess $mode; $script:messages.Clear()
+        if ($mode -ceq 'natural-nonzero') { $script:fake.ExitCode = 9 }
+        $receiptPath = 'app/windows-timeout-cleanup.log'
+        Remove-Item -LiteralPath $receiptPath -ErrorAction SilentlyContinue
+        [IO.File]::WriteAllText((Join-Path (Get-Location) "app/windows-$label.log"), 'owned output', [Text.Encoding]::UTF8)
+        [IO.File]::WriteAllText((Join-Path (Get-Location) "app/windows-$label-errors.log"), '', [Text.Encoding]::UTF8)
+        if ($mode -ceq 'receipt-write-failure') {
+            function Add-Content { param($LiteralPath, $Value, $Encoding, $ErrorAction) throw 'PRIVATE_CANARY' }
+        }
+        $failure = $null
+        try { Invoke-CrossBuilt 'owned.exe' '' $label $seconds | Out-Null } catch { $failure = $_.Exception.Message }
+        if ($mode -ceq 'receipt-write-failure') { Remove-Item Function:Add-Content }
+        Assert-That ($script:fake.Waits[0] -eq $seconds * 1000) 'Original timeout budget changed.'
+        if ($mode -in @('success', 'natural-nonzero')) {
+            Assert-That ($script:fake.Kills -eq 0 -and $script:fake.Disposals -eq 0 -and $script:fake.Waits.Count -eq 1) 'Natural exit entered new timeout cleanup.'
+            Assert-That ($script:messages.Count -eq 0 -and -not (Test-Path -LiteralPath $receiptPath)) 'Natural exit added timeout evidence.'
+            Assert-That (($mode -ceq 'success' -and $null -eq $failure) -or
+                ($mode -ceq 'natural-nonzero' -and $failure -ceq "$label failed: 9")) 'Natural exit outcome changed.'
+        } else {
+            Assert-That ($failure -ceq "$label exceeded $seconds seconds.") 'Cleanup masked original timeout.'
+            Assert-That ($script:fake.Kills -eq 1 -and $script:fake.Waits.Count -eq 2 -and
+                $script:fake.Waits[1] -eq 5000 -and $script:fake.Disposals -eq 1 -and
+                (@($script:fake.Events) -join ',') -ceq "wait:$($seconds * 1000),kill,wait:5000,dispose") 'Owned cleanup order/count/bound changed.'
+            if ($mode -cne 'host-write-failure') {
+                $line = @($script:messages | Where-Object { $_.StartsWith('JSTI_CROSS_TIMEOUT_CLEANUP:') })
+                Assert-That ($line.Count -eq 1) 'Finite cleanup receipt missing.'
+                $json = $line[0].Substring('JSTI_CROSS_TIMEOUT_CLEANUP:'.Length)
+                Assert-That ([Text.Encoding]::UTF8.GetByteCount($json) -le 512 -and $json -notmatch 'PRIVATE|CANARY|owned.exe') 'Raw/private cleanup content escaped.'
+                $receipt = $json | ConvertFrom-Json
+                Assert-That ((@($receipt.PSObject.Properties.Name | Sort-Object) -join ',') -ceq
+                    'disposeStatus,killStatus,label,schema,scope,timedOut,waitMilliseconds,waitStatus') 'Cleanup schema changed.'
+                $kill = if ($mode -in @('kill-race', 'kill-failure')) { 'failed' } else { 'requested' }
+                $wait = if ($mode -in @('wait-failure', 'wait-invalid')) { 'failed' } elseif ($mode -in @('not-exited', 'kill-failure')) { 'not-exited' } else { 'exited' }
+                $dispose = if ($mode -ceq 'dispose-failure') { 'failed' } else { 'disposed' }
+                Assert-That ($receipt.schema -eq 1 -and $receipt.label -ceq $label -and $receipt.timedOut -ceq $true -and
+                    $receipt.scope -ceq 'returned-process-only' -and $receipt.waitMilliseconds -eq 5000 -and
+                    $receipt.killStatus -ceq $kill -and $receipt.waitStatus -ceq $wait -and $receipt.disposeStatus -ceq $dispose) 'Cleanup facts misreported.'
+                if ($mode -cne 'receipt-write-failure') {
+                    Assert-That ([IO.File]::ReadAllText((Join-Path (Get-Location) $receiptPath)).Trim() -ceq $json) 'Console/file receipt differs.'
+                }
+            }
+        }
+        $tested++
+    }
+}
+$script:fake = New-FakeProcess 'joined'
+$refused = $false
+try { Complete-CrossBuiltTimeoutCleanup $script:fake 'PRIVATE_CANARY' | Out-Null } catch { $refused = $true }
+Assert-That ($refused -and $script:fake.Kills -eq 0 -and $script:fake.Waits.Count -eq 0 -and $script:fake.Disposals -eq 0) 'Unknown cleanup label touched process.'
+Assert-That ($script:starts -eq 33) 'Actual caller did not start exactly one fake per case.'
+@{ cases = $tested; passed = $true; fakeStarts = $script:starts } | ConvertTo-Json -Compress
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            completed = subprocess.run([str(pathlib.Path(host).resolve()), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", functions + "\n" + script],
+                                       cwd=directory, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20, check=False)
+        self.assertEqual(completed.returncode, 0, "Actual inline timeout cleanup fakes failed")
+        self.assertEqual(completed.stderr, b"")
+        self.assertNotIn(b"PRIVATE", completed.stdout)
+        self.assertEqual(json.loads(completed.stdout), dict(cases=33, passed=True, fakeStarts=33))
 
 
 if __name__ == "__main__":

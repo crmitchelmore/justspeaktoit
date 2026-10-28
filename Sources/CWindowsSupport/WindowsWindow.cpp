@@ -32,6 +32,11 @@ static_assert(!(JSTI_EVENT_USER_ABSENT >= 100 && JSTI_EVENT_USER_ABSENT <= 109) 
     !(JSTI_EVENT_USER_ABSENT >= 120 && JSTI_EVENT_USER_ABSENT <= 129),
     "Session absence must not be routed as a comparison action.");
 
+bool jsti_issue_report_attach(HWND owner, JSTIWindowCallback callback, void *context);
+void jsti_issue_report_shutdown();
+bool jsti_issue_report_message(MSG *message);
+bool jsti_issue_report_self_test(std::string &error);
+
 bool jsti_postprocessing_available();
 void jsti_show_postprocessing(HWND owner);
 bool jsti_settings_self_test(HWND owner, std::string &error);
@@ -187,6 +192,7 @@ constexpr int sourceLabelID = 89;
 constexpr int localModelsID = 174;
 constexpr int historyFiltersID = 460;
 constexpr int historyDeleteID = 461, historyClearID = 462;
+constexpr int issueReportID = 492;
 constexpr int recordingsFolderLabelID = 463, recordingsFolderID = 464;
 constexpr int audioCleanupID = 465;
 constexpr int backupAudioID = 466, backupExportID = 467;
@@ -794,6 +800,7 @@ void updateHistoryControls(HWND window, int recording) {
     for (int id : {retryID, openAudioID}) EnableWindow(GetDlgItem(window, id), selected && recording == 0);
     EnableWindow(GetDlgItem(window, historyCorrectionsID), selected && recording == 0 && state.historyPresentationReady);
     EnableWindow(GetDlgItem(window, exportID), selected && recording == 0 && state.historyPresentationReady);
+    EnableWindow(GetDlgItem(window, issueReportID), selected && recording == 0 && state.historyPresentationReady);
     EnableWindow(GetDlgItem(window, readAloudID), selected && recording == 0 && state.historyPresentationReady &&
         jsti_voice_output_available());
     EnableWindow(GetDlgItem(window, voiceSettingsID), recording == 0 && jsti_voice_output_available());
@@ -813,6 +820,7 @@ void invalidateHistoryPresentation(HWND window, bool resetVersion) {
         ? L"Select a saved recording." : L"Loading saved transcript…");
     EnableWindow(GetDlgItem(window, copyID), FALSE);
     EnableWindow(GetDlgItem(window, exportID), FALSE);
+    EnableWindow(GetDlgItem(window, issueReportID), FALSE);
     EnableWindow(GetDlgItem(window, readAloudID), FALSE);
 }
 
@@ -873,7 +881,7 @@ unsigned pagesOf(int identifier) {
     case setupMicrophoneID: case setupModelID: case setupShortcutID: case setupOutputID:
         return page(dashboardPage);
     case searchLabelID: case searchID: case clearSearchID: case historyFiltersID:
-    case historyDeleteID: case historyClearID: case 93: case historyID: case historyDetailID:
+    case issueReportID: case historyDeleteID: case historyClearID: case 93: case historyID: case historyDetailID:
     case variantLabelID: case variantID: case retryID: case exportID: case openAudioID: case playbackLabelID:
     case playbackTimeID: case playPauseID: case historySessionsID: case historyErrorsID: case historyAverageID:
     case historySpendID: case historyCorrectionsID:
@@ -1205,6 +1213,8 @@ void layoutHistory(HWND window, const RECT &content) {
     setLabel(window, exportID, L"&Export...");
     actions += row + squeezedActionRowGap;
     place(window, historyDeleteID, cell(0, actions, 3));
+    const RECT issueStart = cell(1, actions, 3);
+    place(window, issueReportID, RECT{issueStart.left, actions, right, actions + row});
 }
 
 // A settings card: `rows` controls, top to bottom, with a description.
@@ -2047,6 +2057,7 @@ bool createControls(HWND window) {
         add(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, searchID) &&
         add(L"BUTTON", L"C&lear", BS_PUSHBUTTON | WS_TABSTOP, clearSearchID) &&
         add(L"BUTTON", L"Fil&ters...", BS_PUSHBUTTON | WS_TABSTOP, historyFiltersID) &&
+        add(L"BUTTON", L"Create issue with details...", BS_PUSHBUTTON | BS_MULTILINE | WS_TABSTOP, issueReportID) &&
         add(L"BUTTON", L"Delete...", BS_PUSHBUTTON | WS_TABSTOP, historyDeleteID) &&
         add(L"BUTTON", L"Clear history...", BS_PUSHBUTTON | WS_TABSTOP, historyClearID) &&
         add(L"STATIC", L"&History", 0, 93) &&
@@ -3043,6 +3054,10 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
                 jsti_show_action_shortcuts(window);
             }
             return 0;
+        case issueReportID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, issueReportID) &&
+                state.historyPresentationReady) emitHistory(window, JSTI_EVENT_HISTORY_ISSUE_REPORT);
+            return 0;
         case retryID: emitHistory(window, JSTI_EVENT_HISTORY_RETRY); return 0;
         case exportID:
             if (IsWindowEnabled(GetDlgItem(window, exportID))) emitHistory(window, JSTI_EVENT_HISTORY_EXPORT);
@@ -3256,11 +3271,13 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         }
         break;
     case WM_CLOSE:
+        jsti_issue_report_shutdown();
         jsti::globalEscape::publish(0);
         retireCleanupPreview();
         emit(window, JSTI_EVENT_CLOSING);
         DestroyWindow(window); return 0;
     case WM_DESTROY:
+        jsti_issue_report_shutdown();
         retireCleanupPreview();
         {
             std::string failure;
@@ -3730,6 +3747,8 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
             initialDensity = state.densityDelivery.claimInitial();
             initialShell = state.shellDelivery.claimInitial();
         }
+        // Optional report UI may be unavailable without preventing dictation.
+        jsti_issue_report_attach(window, callback, context);
         if (initialSidebar) state.sidebar = std::move(*initialSidebar);
         initialSidebar.reset();
         if (initialDensity) { visualDensity = *initialDensity; layout(window); }
@@ -3759,7 +3778,7 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
             if (cancelKeyMessage(window, message)) continue;
             if (sidebarKeyMessage(window, message)) continue;
             if (jsti_action_shortcut_key_message(window, message)) continue;
-            if (!jsti_history_filters_message(&message) && !jsti_guide_message(&message) &&
+            if (!jsti_issue_report_message(&message) && !jsti_history_filters_message(&message) && !jsti_guide_message(&message) &&
                 !jsti_permissions_message(&message) && !IsDialogMessageW(window, &message)) {
                 TranslateMessage(&message); DispatchMessageW(&message);
             }
@@ -3776,6 +3795,7 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
                 failure.empty() ? "The active-only Escape listener could not be removed." : failure, error, capacity);
         }
     }
+    jsti_issue_report_shutdown();
     jsti::hud::destroy();
     releaseShell();
     state.font = nullptr;
@@ -4494,6 +4514,8 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             !onPage(aboutLinkBaseID + static_cast<int>(i), aboutPage))
             return jsti::fail("About link labels or page scope failed.", error, errorCapacity);
     }
+    { std::string failure;
+      if (!jsti_issue_report_self_test(failure)) return jsti::fail(failure, error, errorCapacity); }
     if (!cleanupPreviewSelfTest(window))
         return jsti::fail("Cleanup preview bounds, coalescing, navigation or retirement failed.", error, errorCapacity);
     if (!sidebarStartupSelfTest())

@@ -779,6 +779,134 @@ ConvertTo-JstiDiagnosticProjection $value | ConvertTo-Json -Depth 8 -Compress
             self.assertEqual(result["cleanup"], "failed")
             self.assertNotIn("private", json.dumps(result))
 
+    def test_refusal_facts_keep_original_parser_outcomes_for_each_reachable_guard(self):
+        original = self.fixture()
+        cases = [
+            (original.replace(b"JSTI_DIAG_READY\n", b""), "ready-marker-count"),
+            (original.replace(b"JSTI_DIAG_END", b""), "fault-boundary"),
+            (original.replace(b"c0000374", b"deadbeef"), "fault-code-order"),
+            (original.replace(b"JSTI_DIAG_STACK", b"JSTI_DIAG_MODULES"), "section-boundary"),
+            (original.replace(b"JSTI_DIAG_IP 00000001`00000042\n", b""), "ip-count"),
+            (original.replace(b"00000001`00001000 SpeakWindows", b"00000001`00000000 SpeakWindows"), "module-range"),
+            (original.replace(b"00 00000003", b"05 00000003"), "stack-row-order"),
+            (b"\n".join(line for line in original.split(b"\n") if not line.startswith((b"00 ", b"01 "))), "stack-row-count"),
+            (original.replace(b"JSTI_DIAG_IP 00000001`00000042", b"JSTI_DIAG_IP 00000009`00000042"), "frame-range"),
+        ]
+        for data, reason in cases:
+            with self.subTest(reason=reason):
+                projected = NATIVE.project_debugger(data, completion_class="nonzero")
+                facts = projected.pop("refusalFacts")
+                self.assertEqual(projected, {"status": "invalid", "exceptionCode": None, "frames": []})
+                self.assertEqual(facts["reason"], reason)
+                self.assertEqual(facts["completionClass"], "nonzero")
+                self.assertEqual(set(facts["counts"]), {"ready", "fault", "end", "modules", "stack", "ip", "moduleRanges", "stackRows"})
+                self.assertTrue(all(type(count) is int and 0 <= count <= 17 for count in facts["counts"].values()))
+        for data in (original, b"JSTI_DIAG_READY\n", b"x" * 65537, b"x" * 2049):
+            self.assertNotIn("refusalFacts", NATIVE.project_debugger(data))
+
+    def test_refusal_facts_saturate_counts_without_canaries_utf8_or_raw_fragments(self):
+        data = b"JSTI_DIAG_READY\n" * 40 + b"JSTI_DIAG_FAULT 0xc0000374\n" * 35
+        data += b"JSTI_DIAG_END\n" * 20 + b"JSTI_DIAG_MODULES\n" * 30 + b"JSTI_DIAG_STACK\n" * 18
+        data += b"C:\\PRIVATE_CANARY !private_function 00000001`00000042 \xff " + "ιδιωτικό".encode("utf-8")
+        facts = NATIVE.project_debugger(data)["refusalFacts"]
+        self.assertEqual(facts["counts"], dict(ready=17, fault=17, end=17, modules=17, stack=17,
+                                              ip=0, moduleRanges=0, stackRows=0))
+        serialized = json.dumps(facts)
+        for private in ("PRIVATE", "private_function", "00000001", "ιδιωτικό", "C:\\", "JSTI_DIAG"):
+            self.assertNotIn(private, serialized)
+        for value in (True, 0, None, "ZERO", "zero\n", "PRIVATE_CANARY"):
+            with self.assertRaises(ValueError):
+                NATIVE.project_debugger(data, completion_class=value)
+
+    def test_actual_operation_attaches_completion_class_and_retires_late_refusal_facts(self):
+        for code, expected in ((0, "zero"), (42, "nonzero"), (None, "unknown"), (True, "unknown")):
+            def runner(argv, *args, **kwargs):
+                return dict(status="complete", cleanup="clean", exitCode=code if argv[0] == NATIVE.CDB_LOCATION else 0,
+                            output=b"PRIVATE_CANARY" if argv[0] == NATIVE.CDB_LOCATION else b'{"status":"unavailable"}')
+            result = self.operate(runner=runner)
+            self.assertEqual(result["debugger"]["refusalFacts"]["completionClass"], expected)
+            self.assertNotIn("PRIVATE", json.dumps(result))
+        for mode in ("cutoff", "scratch", "child-cleanup", "clock"):
+            now = [10000]
+            def ticks():
+                if now[0] is None:
+                    raise OSError("PRIVATE_CANARY")
+                return now[0]
+            with tempfile.TemporaryDirectory() as directory:
+                class LateScratch:
+                    name = directory
+                    def __enter__(self):
+                        return self.name
+                    def __exit__(self, *args):
+                        if mode == "scratch":
+                            raise OSError("PRIVATE_CANARY")
+                        now[0] = None if mode == "clock" else 28000
+                def runner(argv, *args, **kwargs):
+                    return dict(status="complete", cleanup="failed" if mode == "child-cleanup" else "clean",
+                                exitCode=0, output=b"PRIVATE_CANARY" if argv[0] == NATIVE.CDB_LOCATION
+                                else b'{"status":"unavailable"}')
+                with mock.patch.object(NATIVE.tempfile, "TemporaryDirectory", return_value=LateScratch()):
+                    result = self.operate(api=self.api(ticks=ticks), runner=runner)
+                self.assertNotIn("refusalFacts", result["debugger"])
+                self.assertNotIn("PRIVATE", json.dumps(result))
+
+    def test_actual_refusal_facts_python_to_powershell_boundary_rejects_malicious_shapes(self):
+        host = shutil.which("pwsh")
+        if host is None:
+            self.skipTest("PowerShell unavailable: actual refusal-facts boundary not executed")
+        value = NATIVE.diagnostic_result("invalid", "clean")
+        value["debugger"] = NATIVE.project_debugger(b"PRIVATE_CANARY\xff", completion_class="nonzero")
+        values = [value]
+        def changed(change):
+            clone = json.loads(json.dumps(value))
+            change(clone)
+            values.append(clone)
+        for key, item in (("reason", "PRIVATE_CANARY"), ("reason", "READY-MARKER-COUNT"),
+                          ("completionClass", "zero\n"), ("completionClass", True), ("extra", "PRIVATE_CANARY")):
+            changed(lambda clone, key=key, item=item: clone["debugger"]["refusalFacts"].update({key: item}))
+        for count in (True, False, -1, 18, 1.5, "1", "PRIVATE_CANARY", "x" * 9000):
+            changed(lambda clone, count=count: clone["debugger"]["refusalFacts"]["counts"].update(ready=count))
+        for field in ("reason", "completionClass", "counts"):
+            changed(lambda clone, field=field: clone["debugger"]["refusalFacts"].pop(field))
+        changed(lambda clone: clone["debugger"]["refusalFacts"]["counts"].pop("ready"))
+        changed(lambda clone: clone["debugger"]["refusalFacts"]["counts"].update(extra=0))
+        changed(lambda clone: clone["debugger"]["refusalFacts"].update(Counts={}))
+        changed(lambda clone: clone["debugger"].update(status="observed"))
+        changed(lambda clone: clone.update(cleanup="failed"))
+        changed(lambda clone: clone.update(status="observed"))
+        changed(lambda clone: clone["debugger"].update(refusalFacts=None))
+        changed(lambda clone: clone["debugger"].update(exceptionCode="0xc0000374"))
+        changed(lambda clone: clone["debugger"].update(frames=[dict(index=0, module="app", rva="0x1")]))
+        script = """
+$ErrorActionPreference='Stop'
+. $env:JSTI_PROJECTOR
+$values=[Console]::In.ReadToEnd() | ConvertFrom-Json -Depth 8
+foreach ($encodedValue in $values) {
+    try {
+        $value = $encodedValue | ConvertFrom-Json -Depth 8
+        ConvertTo-JstiDiagnosticProjection $value | ConvertTo-Json -Depth 8 -Compress
+    }
+    catch { [Console]::WriteLine('refused') }
+}
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            environment = {key: val for key, val in os.environ.items()
+                           if key.upper() in {"PATH", "SYSTEMROOT", "WINDIR", "HOME"}}
+            environment.update(TEMP=directory, TMP=directory, TMPDIR=directory,
+                               JSTI_PROJECTOR=str(HERE / "FailureDiagnostics.ps1"))
+            completed = subprocess.run([os.path.abspath(host), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
+                                       input=json.dumps([json.dumps(value) for value in values]).encode("utf-8"), env=environment, cwd=directory,
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15, check=False)
+        self.assertEqual(completed.returncode, 0, "actual pure refusal-facts projector failed")
+        self.assertEqual(completed.stderr, b"")
+        rows = completed.stdout.decode("utf-8").splitlines()
+        expected = json.loads(json.dumps(value))
+        expected["debugger"].pop("exceptionCode")  # Existing PS projection omits null optional codes.
+        self.assertEqual(json.loads(rows[0]), expected)
+        self.assertEqual(rows[1:], ["refused"] * (len(values) - 1))
+        self.assertNotIn(b"PRIVATE", completed.stdout + completed.stderr)
+        self.assertLessEqual(len(rows[0].encode("utf-8")), 8192)
+
     def test_actual_identity_checks_hash_pe_alias_version_and_between_read_change(self):
         budget = types.SimpleNamespace(remaining=lambda: 20)
         with tempfile.TemporaryDirectory() as directory:

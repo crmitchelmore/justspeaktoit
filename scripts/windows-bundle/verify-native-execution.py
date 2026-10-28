@@ -881,8 +881,10 @@ def bounded_diagnostic_process(argv, environment, directory, budget, seconds, li
             "exitCode": process.returncode if process else None}
 
 
-def project_debugger(data, completed=True):
+def project_debugger(data, completed=True, *, completion_class="unknown"):
     """Only addresses within one unambiguous module range become closed RVAs."""
+    if type(completion_class) is not str or completion_class not in ("zero", "nonzero", "unknown"):
+        raise ValueError("invalid completion class")
     unknown = {"status": "invalid", "exceptionCode": None, "frames": []}
     if not isinstance(data, bytes) or len(data) > 65536 or any(len(line) > 2048 for line in data.splitlines()):
         return {**unknown, "status": "truncated"}
@@ -890,56 +892,71 @@ def project_debugger(data, completed=True):
     # exported; only the strict ASCII grammar below contributes any output.
     text = data.decode("ascii", errors="replace")
     lines = text.splitlines()
+    # Counts describe bounded input markers and parsed-prefix row matches, not
+    # raw text. Seventeen is a saturation value meaning seventeen or more.
+    counts = {"ready": min(17, lines.count("JSTI_DIAG_READY")),
+              "fault": min(17, sum(line.startswith("JSTI_DIAG_FAULT ") for line in lines)),
+              "end": min(17, lines.count("JSTI_DIAG_END")),
+              "modules": min(17, lines.count("JSTI_DIAG_MODULES")),
+              "stack": min(17, lines.count("JSTI_DIAG_STACK")),
+              "ip": 0, "moduleRanges": 0, "stackRows": 0}
+
+    def refuse(reason):
+        return {**unknown, "refusalFacts": {"reason": reason, "completionClass": completion_class,
+                                           "counts": dict(counts)}}
     if lines.count("JSTI_DIAG_READY") != 1:
-        return unknown
+        return refuse("ready-marker-count")
     begins = [index for index, line in enumerate(lines) if line.startswith("JSTI_DIAG_FAULT ")]
     if not begins:
         return {**unknown, "status": "no-reproduction" if completed else "unavailable"}
     if len(begins) != 1 or lines.count("JSTI_DIAG_END") != 1:
-        return unknown
+        return refuse("fault-boundary")
     first, last = begins[0], lines.index("JSTI_DIAG_END")
     if first >= last or not re.fullmatch(r"JSTI_DIAG_FAULT 0x(?:c0000005|c0000374|c0000409)", lines[first]):
-        return unknown
+        return refuse("fault-code-order")
     body, ranges, addresses = lines[first + 1:last], [], []
     if body.count("JSTI_DIAG_MODULES") != 1 or body.count("JSTI_DIAG_STACK") != 1:
-        return unknown
+        return refuse("section-boundary")
     modules_at, stack_at = body.index("JSTI_DIAG_MODULES"), body.index("JSTI_DIAG_STACK")
     if modules_at >= stack_at:
-        return unknown
+        return refuse("section-boundary")
     for line in body[:modules_at]:
         match = re.fullmatch(r"JSTI_DIAG_IP ([0-9a-fA-F`]{1,17})", line)
         if match:
+            counts["ip"] = min(17, counts["ip"] + 1)
             addresses.append(int(match[1].replace("`", ""), 16))
     if len(addresses) != 1:
-        return unknown
+        return refuse("ip-count")
     for line in body[modules_at + 1:stack_at]:
         match = re.match(r"^([0-9a-fA-F`]{1,17})\s+([0-9a-fA-F`]{1,17})\s+([A-Za-z0-9_.-]{1,128})(?:\s|$)", line)
         if match:
+            counts["moduleRanges"] = min(17, counts["moduleRanges"] + 1)
             low, high = (int(match[n].replace("`", ""), 16) for n in (1, 2))
             if not 0 <= low < high < (1 << 64):
-                return unknown
+                return refuse("module-range")
             ranges.append((low, high, closed_module(match[3])))
     stack_count = 0
     for line in body[stack_at + 1:]:
         match = re.match(r"^\s*([0-9a-fA-F]{2})\s+([0-9a-fA-F`]{1,17})\s+([0-9a-fA-F`]{1,17})(?:\s|$)", line)
         if match:
+            counts["stackRows"] = min(17, counts["stackRows"] + 1)
             if int(match[1], 16) != stack_count or stack_count >= 16:
-                return unknown
+                return refuse("stack-row-order")
             stack_count += 1
             returned = int(match[3].replace("`", ""), 16)
             if returned:
                 addresses.append(returned)  # Return PC, never a function displacement.
     if not stack_count:
-        return unknown
+        return refuse("stack-row-count")
     frames = []
     for address in addresses[:16]:
         owned = [(low, high, name) for low, high, name in ranges if low <= address < high]
         if len(owned) != 1:
-            return unknown
+            return refuse("frame-range")
         low, _, name = owned[0]
         frames.append({"index": len(frames), "module": name, "rva": "0x%x" % (address - low)})
     if not frames:
-        return unknown
+        return refuse("frame-count")
     return {"status": "observed", "exceptionCode": lines[first].split()[1], "frames": frames}
 
 
@@ -1023,7 +1040,10 @@ def standalone_diagnostic(encoded, api_factory=StandaloneWindows, identity=diagn
                 status = observed["status"] if observed["status"] in STANDALONE_STATUSES else "unavailable"
                 result["status"] = result["debugger"]["status"] = status
                 return result
-            result["debugger"] = project_debugger(observed["output"], observed["exitCode"] == 0)
+            code = observed["exitCode"]
+            completion = "zero" if type(code) is int and code == 0 else "nonzero" if type(code) is int else "unknown"
+            result["debugger"] = project_debugger(observed["output"], observed["exitCode"] == 0,
+                                                  completion_class=completion)
             result["status"] = result["debugger"]["status"]
             if result["applicationError"]["status"] == "observed" and result["status"] == "no-reproduction":
                 result["status"] = "observed"
@@ -1040,6 +1060,14 @@ def standalone_diagnostic(encoded, api_factory=StandaloneWindows, identity=diagn
                 result["cleanup"] = "failed"
         result["status"] = result["debugger"]["status"] = "unavailable"
         result["debugger"]["exceptionCode"], result["debugger"]["frames"] = None, []
+    # Late cleanup/cutoff cannot leave parser facts looking current. This adds
+    # no status, retry, budget or acceptance change to the original operation.
+    if "refusalFacts" in result["debugger"]:
+        try:
+            if result["cleanup"] != "clean" or result["status"] != "invalid" or budget.remaining() <= 2:
+                result["debugger"].pop("refusalFacts", None)
+        except Exception:
+            result["debugger"].pop("refusalFacts", None)
     return result
 
 

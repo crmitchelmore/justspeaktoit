@@ -391,6 +391,34 @@ function ConvertTo-JstiDiagnosticProjection($Value) {
         $debugger = $Value.debugger
         if ($debugger.status -isnot [string] -or $debugger.status -cnotin $statuses) { throw 'unavailable' }
         $safe.debugger = [ordered]@{ status = $debugger.status }
+        $debuggerNames = if ($debugger -is [System.Collections.IDictionary]) { @($debugger.Keys) } else { @($debugger.PSObject.Properties.Name) }
+        if ($debuggerNames -contains 'refusalFacts') {
+            if ($debuggerNames -cnotcontains 'refusalFacts' -or $debugger.status -cne 'invalid' -or
+                    $Value.status -cne 'invalid' -or $Value.cleanup -cne 'clean' -or
+                    $null -ne $debugger.exceptionCode -or @($debugger.frames).Count -ne 0) { throw 'unavailable' }
+            $facts = $debugger.refusalFacts
+            $factNames = if ($facts -is [System.Collections.IDictionary]) { @($facts.Keys) } else { @($facts.PSObject.Properties.Name) }
+            $required = @('reason', 'completionClass', 'counts')
+            if ($factNames.Count -ne 3) { throw 'unavailable' }
+            foreach ($name in $required) { if ($factNames -cnotcontains $name) { throw 'unavailable' } }
+            $reasons = @('ready-marker-count', 'fault-boundary', 'fault-code-order', 'section-boundary',
+                'ip-count', 'module-range', 'stack-row-order', 'stack-row-count', 'frame-range', 'frame-count')
+            if ($facts.reason -isnot [string] -or $facts.reason -cnotin $reasons -or
+                    $facts.completionClass -isnot [string] -or $facts.completionClass -cnotin @('zero', 'nonzero', 'unknown')) { throw 'unavailable' }
+            $counts = $facts.counts
+            $countNames = if ($counts -is [System.Collections.IDictionary]) { @($counts.Keys) } else { @($counts.PSObject.Properties.Name) }
+            $requiredCounts = @('ready', 'fault', 'end', 'modules', 'stack', 'ip', 'moduleRanges', 'stackRows')
+            if ($countNames.Count -ne 8) { throw 'unavailable' }
+            $safeCounts = [ordered]@{}
+            foreach ($name in $requiredCounts) {
+                if ($countNames -cnotcontains $name -or
+                        ($counts.$name -isnot [int] -and $counts.$name -isnot [long]) -or
+                        $counts.$name -lt 0 -or $counts.$name -gt 17) { throw 'unavailable' }
+                $safeCounts[$name] = $counts.$name
+            }
+            $safe.debugger.refusalFacts = [ordered]@{ reason = $facts.reason
+                completionClass = $facts.completionClass; counts = $safeCounts }
+        }
         if ($null -ne $debugger.exceptionCode) {
             if ($debugger.exceptionCode -isnot [string] -or
                     $debugger.exceptionCode -cnotin @('0xc0000005', '0xc0000374', '0xc0000409')) { throw 'unavailable' }
@@ -545,6 +573,16 @@ function Invoke-JstiPackagedEventDiagnostic($Setup, $Run, $Context, [string] $Ex
     return $result
 }
 
+# Pure retirement boundary; clock acquisition stays with the owning caller.
+function Remove-JstiStaleRefusalFacts($Result, [bool] $StreamsClosed, [long] $CurrentTicks, [long] $WorkCutoff) {
+    if ($null -ne $Result.diagnostic -and $null -ne $Result.diagnostic.debugger) {
+        if (-not $StreamsClosed -or $Result.bootstrap.cleanup -cne 'complete' -or
+                $Result.diagnostic.cleanup -cne 'clean' -or $CurrentTicks -ge $WorkCutoff) {
+            [void] $Result.diagnostic.debugger.Remove('refusalFacts')
+        }
+    }
+}
+
 function Invoke-JstiStandaloneDiagnostic($Setup, $Run, $Process, [string] $Executable, [string] $ExpectedSHA256,
         [long] $DeadlineTicks, [long] $Frequency, [datetime] $StartedUTC, [datetime] $EndedUTC) {
     $result = [ordered]@{ status = 'unavailable'; originalFailurePreserved = $true }
@@ -601,7 +639,22 @@ function Invoke-JstiStandaloneDiagnostic($Setup, $Run, $Process, [string] $Execu
     } catch {
         # Optional evidence cannot replace the original abnormal-exit throw.
         $result.status = 'unavailable'
-    } finally { if ($null -ne $state) { $state.Output.Dispose() } }
+    } finally {
+        $streamsClosed = $false
+        try {
+            if ($null -ne $state) { $state.Output.Dispose() }
+            $streamsClosed = $true
+        } finally {
+            # Retire only optional facts; original statuses/verdicts are untouched.
+            try {
+                Remove-JstiStaleRefusalFacts $result $streamsClosed ([System.Diagnostics.Stopwatch]::GetTimestamp()) ($DeadlineTicks - 2 * $Frequency)
+            } catch {
+                if ($null -ne $result.diagnostic -and $null -ne $result.diagnostic.debugger) {
+                    [void] $result.diagnostic.debugger.Remove('refusalFacts')
+                }
+            }
+        }
+    }
     return $result
 }
 
@@ -733,6 +786,10 @@ function Update-JstiNativeFailureEvidence($Setup, [string] $EvidencePath, [strin
         # bridge was running. Both reads are capped and refuse reparse files.
         if ([Convert]::ToBase64String((Read-JstiNativeEvidence $EvidencePath)) -cne
                 [Convert]::ToBase64String($bytes)) { return }
+        # Last finite sample before atomic replacement: facts known expired
+        # here are never published. Clock sampling and Move are not atomic.
+        if ($null -ne $run.failureDiagnostic.diagnostic.debugger.refusalFacts -and
+                [System.Diagnostics.Stopwatch]::GetTimestamp() -ge ($DeadlineTicks - 2 * $Frequency)) { return }
         [System.IO.File]::Move($temporary, $EvidencePath, $true)
         $temporary = $null
     } catch {

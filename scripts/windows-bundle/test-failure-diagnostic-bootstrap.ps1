@@ -576,5 +576,139 @@ try {
     [IO.Directory]::Delete($packagedRoot, $true)
 }
 
+# Finite parser refusal facts cross the actual closed projector, never raw output.
+$parserValue = '{"schema":1,"status":"invalid","cleanup":"clean","applicationError":{"status":"unavailable"},"debugger":{"status":"invalid","frames":[],"refusalFacts":{"reason":"ready-marker-count","completionClass":"nonzero","counts":{"ready":0,"fault":1,"end":1,"modules":1,"stack":1,"ip":0,"moduleRanges":0,"stackRows":0}}}}' | ConvertFrom-Json
+$parserProjection = ConvertTo-JstiDiagnosticProjection $parserValue
+Assert-That ($parserProjection.debugger.refusalFacts.reason -ceq 'ready-marker-count' -and
+    $parserProjection.debugger.refusalFacts.counts.ready -eq 0) 'finite-refusal-facts-preserved'
+$parserBaseline = $parserValue | ConvertTo-Json -Depth 8 -Compress
+foreach ($mutation in @('unknown-reason', 'unknown-class', 'unknown-field', 'missing-field', 'unknown-count',
+        'missing-count', 'bool-count', 'negative-count', 'oversize-count', 'fraction-count', 'case-count', 'not-invalid', 'cleanup-failed')) {
+    $candidate = $parserBaseline | ConvertFrom-Json
+    switch ($mutation) {
+        'unknown-reason' { $candidate.debugger.refusalFacts.reason = 'PRIVATE_CANARY' }
+        'unknown-class' { $candidate.debugger.refusalFacts.completionClass = 'ZERO' }
+        'unknown-field' { $candidate.debugger.refusalFacts | Add-Member extra 'PRIVATE_CANARY' }
+        'missing-field' { $candidate.debugger.refusalFacts.PSObject.Properties.Remove('reason') }
+        'unknown-count' { $candidate.debugger.refusalFacts.counts | Add-Member extra 1 }
+        'missing-count' { $candidate.debugger.refusalFacts.counts.PSObject.Properties.Remove('ready') }
+        'bool-count' { $candidate.debugger.refusalFacts.counts.ready = $true }
+        'negative-count' { $candidate.debugger.refusalFacts.counts.ready = -1 }
+        'oversize-count' { $candidate.debugger.refusalFacts.counts.ready = 18 }
+        'fraction-count' { $candidate.debugger.refusalFacts.counts.ready = 1.5 }
+        'case-count' { $candidate.debugger.refusalFacts.counts.PSObject.Properties.Remove('ready'); $candidate.debugger.refusalFacts.counts | Add-Member Ready 1 }
+        'not-invalid' { $candidate.debugger.status = 'observed' }
+        'cleanup-failed' { $candidate.cleanup = 'failed' }
+    }
+    $refused = $false
+    try { [void] (ConvertTo-JstiDiagnosticProjection $candidate) } catch { $refused = $true }
+    Assert-That $refused 'malicious-parser-facts-refused'
+}
+
+# Exercise retirement in the real parent wrapper, with no native preparation.
+$parserRoot = Join-Path ([IO.Path]::GetTempPath()) ('jsti-parser-facts-fake-' + [guid]::NewGuid().ToString('N'))
+[void] [IO.Directory]::CreateDirectory($parserRoot)
+$parserIdentity = (Get-Item Function:Get-JstiDiagnosticIdentity).ScriptBlock
+$parserAdapter = (Get-Item Function:New-JstiDiagnosticAdapter).ScriptBlock
+$parserBootstrap = (Get-Item Function:Invoke-JstiDiagnosticBootstrap).ScriptBlock
+$parserOldWorkspace = $workspace; $parserOldSystemRoot = $systemRoot; $parserOldIsolatedPath = $isolatedPath
+$parserFake = @{ State = $null; Mode = ''; Original = $parserBaseline }
+Set-Item Function:Get-JstiDiagnosticIdentity -Value { param($path, $names) return @{ Path = $path; Hash = '0' * 64 } }
+Set-Item Function:New-JstiDiagnosticAdapter -Value {
+    param($frequency, $state)
+    $parserFake.State = $state
+    return @{}
+}.GetNewClosure()
+Set-Item Function:Invoke-JstiDiagnosticBootstrap -Value {
+    param($adapter, $launch, [long] $deadline, [long] $frequency)
+    $value = $parserFake.Original | ConvertFrom-Json
+    if ($parserFake.Mode -ceq 'child-cleanup') { $value.cleanup = 'failed' }
+    $bytes = [Text.Encoding]::UTF8.GetBytes(($value | ConvertTo-Json -Depth 8 -Compress))
+    $parserFake.State.Output.Write($bytes, 0, $bytes.Length)
+    if ($parserFake.Mode -ceq 'stream-cleanup') {
+        $parserFake.State.Output.Dispose()
+        $replacement = [pscustomobject] @{ Bytes = $bytes }
+        $replacement | Add-Member ScriptMethod ToArray { return ,$this.Bytes }
+        $replacement | Add-Member ScriptMethod Dispose { throw 'PRIVATE_CANARY' }
+        $parserFake.State.Output = $replacement
+    }
+    return @{ status = 'finished'; cleanup = $(if ($parserFake.Mode -ceq 'parent-cleanup') { 'incomplete' } else { 'complete' }) }
+}.GetNewClosure()
+try {
+    $workspace = $parserRoot; $systemRoot = 'C:\Windows'; $isolatedPath = 'C:\Windows\System32'
+    $setup = @{ Host = @{ Path = 'C:\Owned\pwsh.exe'; Hash = '0' * 64 }; Python = @{ Path = 'C:\Owned\python.exe'; Hash = '0' * 64 } }
+    $run = @{ label = 'ui-smoke'; arguments = '--ui-smoke-test'; exitCode = -1073740940; processMachine = '0xAA64' }
+    foreach ($mode in @('clean', 'child-cleanup', 'parent-cleanup', 'cutoff', 'stream-cleanup')) {
+        $parserFake.Mode = $mode
+        $frequency = [Diagnostics.Stopwatch]::Frequency
+        $deadline = [Diagnostics.Stopwatch]::GetTimestamp() + 30 * $frequency
+        $outcome = $null; $thrown = $false
+        try { $outcome = Invoke-JstiStandaloneDiagnostic $setup $run @{ Id = 314 } 'C:\Owned\SpeakWindows.exe' ('0' * 64) $deadline $frequency ([datetime]::UtcNow) ([datetime]::UtcNow) }
+        catch { $thrown = $true }
+        if ($mode -ceq 'cutoff') {
+            # Actual pure retirement boundary uses an injected numeric clock;
+            # no sleep, changed production clock or new wrapper seam.
+            Remove-JstiStaleRefusalFacts $outcome $true 30 30
+        }
+        if ($mode -ceq 'clean') {
+            Assert-That ($outcome.status -ceq 'invalid' -and $outcome.diagnostic.debugger.refusalFacts.reason -ceq 'ready-marker-count') 'parent-preserves-current-clean-facts'
+        } elseif ($mode -ceq 'stream-cleanup') {
+            Assert-That ($thrown -and $null -eq $outcome) 'stream-cleanup-cannot-return-facts'
+        } else {
+            Assert-That ((($outcome | ConvertTo-Json -Depth 8 -Compress) -notmatch 'refusalFacts') -and
+                $run.exitCode -eq -1073740940) ("late-failure-retires-refusal-facts-original-failure-preserved-$mode")
+        }
+    }
+} finally {
+    Set-Item Function:Get-JstiDiagnosticIdentity -Value $parserIdentity
+    Set-Item Function:New-JstiDiagnosticAdapter -Value $parserAdapter
+    Set-Item Function:Invoke-JstiDiagnosticBootstrap -Value $parserBootstrap
+    $workspace = $parserOldWorkspace; $systemRoot = $parserOldSystemRoot; $isolatedPath = $parserOldIsolatedPath
+    [IO.Directory]::Delete($parserRoot, $true)
+}
+
+# The actual atomic publication owner refuses only expired new facts; legacy
+# no-facts publication remains byte/behavior compatible. All files are owned.
+$publicationRoot = Join-Path ([IO.Path]::GetTempPath()) ('jsti-parser-publication-' + [guid]::NewGuid().ToString('N'))
+[void] [IO.Directory]::CreateDirectory($publicationRoot)
+$publicationNative = (Get-Item Function:Invoke-JstiNativeFailureDiagnostic).ScriptBlock
+$publication = @{ Facts = $true; Called = 0; Value = $parserBaseline }
+Set-Item Function:Invoke-JstiNativeFailureDiagnostic -Value {
+    param($setup, $run, $executable, $hash, $deadline, $frequency)
+    $publication.Called++
+    $projection = ConvertTo-JstiDiagnosticProjection ($publication.Value | ConvertFrom-Json)
+    if (-not $publication.Facts) { [void] $projection.debugger.Remove('refusalFacts') }
+    return @{ status = 'invalid'; bootstrap = @{ cleanup = 'complete' }; diagnostic = $projection }
+}.GetNewClosure()
+try {
+    foreach ($mode in @('fresh-facts', 'expired-facts', 'legacy-no-facts')) {
+        $publication.Facts = $mode -cne 'legacy-no-facts'; $publication.Called = 0
+        $path = Join-Path $publicationRoot 'owned-evidence.json'
+        $original = [Text.Encoding]::UTF8.GetBytes('{"schemaVersion":1,"architecture":"arm64","runs":[{"label":"ui-smoke-test","exitCode":3221226356}]}')
+        [IO.File]::WriteAllBytes($path, $original)
+        $frequency = [Diagnostics.Stopwatch]::Frequency
+        # One-second original remaining makes the derived work cutoff already
+        # expired without sleeping; fake late helper still supplies facts.
+        $deadline = [Diagnostics.Stopwatch]::GetTimestamp() + $(if ($mode -ceq 'fresh-facts') { 30 } else { 1 }) * $frequency
+        Update-JstiNativeFailureEvidence @{} $path 'C:\Owned\SpeakWindows.exe' ('0' * 64) $deadline $frequency
+        Assert-That ($publication.Called -eq 1) 'publication-reached-fake-diagnostic-once'
+        $bytes = [IO.File]::ReadAllBytes($path)
+        if ($mode -ceq 'expired-facts') {
+            Assert-That ([Convert]::ToBase64String($bytes) -ceq [Convert]::ToBase64String($original)) 'expired-optional-replacement-preserves-original-bytes'
+        } else {
+            $value = [Text.Encoding]::UTF8.GetString($bytes) | ConvertFrom-Json -Depth 16
+            Assert-That ($value.runs[0].failureDiagnostic.status -ceq 'invalid' -and
+                $value.runs[0].exitCode -eq 3221226356) 'fresh-and-legacy-publication-preserve-original-exit'
+            if ($mode -ceq 'fresh-facts') {
+                Assert-That ($value.runs[0].failureDiagnostic.diagnostic.debugger.refusalFacts.reason -ceq 'ready-marker-count') 'fresh-refusal-facts-published'
+            }
+        }
+        Assert-That (@(Get-ChildItem -LiteralPath $publicationRoot).Count -eq 1) 'owned-publication-temp-cleaned'
+    }
+} finally {
+    Set-Item Function:Invoke-JstiNativeFailureDiagnostic -Value $publicationNative
+    [IO.Directory]::Delete($publicationRoot, $true)
+}
+
 Assert-That (-not ('JstiDiagnosticNative' -as [type])) 'pure-fakes-did-not-compile-or-load-native-type'
 Write-Output 'Diagnostic bootstrap pure-fake checks passed.'

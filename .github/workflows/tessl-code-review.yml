@@ -1,9 +1,7 @@
 name: Tessl Code Review
 
-# Review once when a pull request is ready, then only when explicitly asked.
+# Advisory review is on demand; repeated service failures should not start on every PR.
 on:
-  pull_request:
-    types: [opened, reopened, ready_for_review]
   issue_comment:
     types: [created]
   pull_request_review_comment:
@@ -31,9 +29,6 @@ jobs:
     # the association is also checked here so a stranger's comment never starts
     # a job that holds TESSL_TOKEN and a write-scoped GITHUB_TOKEN.
     if: >-
-      (github.event_name == 'pull_request' &&
-        github.event.pull_request.draft == false &&
-        github.event.pull_request.user.login != 'dependabot[bot]') ||
       github.event_name == 'workflow_dispatch' ||
       ((github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') &&
         (github.event_name != 'issue_comment' || github.event.issue.pull_request != null) &&

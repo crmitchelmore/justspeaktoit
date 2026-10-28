@@ -1,22 +1,33 @@
 name: Reconcile Apple release delivery
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Optional immutable Alpha/Stable candidate tag to reconcile explicitly
+        type: string
+        default: ''
   schedule:
     - cron: '47 * * * *'
 permissions:
   contents: write
 concurrency:
   group: apple-release-observation
-  queue: max
   cancel-in-progress: false
 jobs:
   observe:
-    runs-on: macos-15
-    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          fetch-depth: 0
+          fetch-depth: 1
+      - name: Fetch only the immutable release ledger
+        run: >-
+          git fetch --no-tags --depth=1 origin
+          '+refs/tags/alpha-build-*:refs/tags/alpha-build-*'
+          '+refs/tags/stable-candidate-*:refs/tags/stable-candidate-*'
+      - name: Test reconciliation policy
+        run: ruby scripts/tests/apple_reconciliation_test.rb
       - name: Install existing Apple API key
         env:
           KEY_DATA: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
@@ -26,6 +37,7 @@ jobs:
           printf '%s' "$KEY_DATA" | base64 --decode > "$HOME/.appstoreconnect/private_keys/AuthKey_S747NJ9DZY.p8"
       - name: Reconcile beta processing and public Stable boundaries
         env:
+          RECONCILE_TAG: ${{ inputs.tag }}
           GH_TOKEN: ${{ github.token }}
           APP_STORE_CONNECT_KEY_ID: S747NJ9DZY
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}

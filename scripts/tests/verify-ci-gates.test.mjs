@@ -174,8 +174,8 @@ test('UI jobs cannot be admitted to a native runner by repository variables', ()
   }
 });
 
-test('Tessl does not request unavailable secrets for Dependabot pull requests', () => {
-  assert.match(tesslWorkflow, /github\.event\.pull_request\.user\.login != 'dependabot\[bot\]'/);
+test('Tessl is on demand and preserves trusted-author secret restrictions', () => {
+  assert.doesNotMatch(tesslWorkflow, /^  pull_request:/m);
   assert.match(tesslWorkflow, /github\.event_name == 'issue_comment'/);
   assert.match(tesslWorkflow, /github\.event_name == 'workflow_dispatch'/);
   assert.match(tesslWorkflow, /allowed-associations: OWNER,MEMBER,COLLABORATOR/);

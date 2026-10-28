@@ -64,7 +64,7 @@ module IOSProfileBootstrap
       request["Authorization"] = "Bearer #{@token}"
       request["Content-Type"] = "application/json"
       request.body = JSON.generate(body) if body
-      response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true) { |http| http.request(request) }
+      response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true, open_timeout: 10, read_timeout: 60, write_timeout: 60, max_retries: 0) { |http| http.request(request) }
       [Integer(response.code), response.body]
     end
   end

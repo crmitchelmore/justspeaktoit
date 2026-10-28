@@ -45,7 +45,7 @@ final class IOSIssueReportFlowTests: XCTestCase {
         XCTAssertEqual(model["identifier"] as? String, identifier)
         XCTAssertNil(payload["context"])
         XCTAssertEqual(payload["contextState"] as? String, "missingLegacyContext")
-        XCTAssertTrue(snapshot.full.body.contains("Recorded model IDs are not verified handoffs"))
+        XCTAssertTrue(snapshot.full.body.contains("Admission and recorded model IDs are not verified handoffs."))
         XCTAssertNil(try object(snapshot.withoutDetails)["recordedModels"])
         XCTAssertFalse(snapshot.withoutDetails.body.contains(identifier))
         XCTAssertEqual((try object(IOSIssueReporter.failedRequest().full)["recordedModels"] as? [Any])?.count, 0)

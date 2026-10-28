@@ -8,6 +8,7 @@ package struct DesktopHostIssueReportPreview: Sendable {
     package let report: IssueDiagnosticReport
     package let includesDiagnostics: Bool
     package let isExporting: Bool
+    package let isOpening: Bool
     package let status: DesktopHostIssueReportStatus?
 }
 
@@ -18,7 +19,7 @@ package enum DesktopHostIssueReportStatus: Equatable, Sendable {
         switch self {
         case .copied: return "Draft copied."
         case .exported: return "Diagnostics saved. Attach the JSON yourself in GitHub."
-        case .opened: return "GitHub opened. Nothing has been attached or submitted."
+        case .opened: return "Your system accepted the browser request. Nothing has been attached or submitted."
         case .copyFailed: return "Could not copy the draft. Try saving the JSON instead."
         case .exportFailed: return "Could not save diagnostics. Try another destination."
         case .browserFailed: return "Could not open GitHub. You can copy the draft instead."
@@ -31,20 +32,24 @@ package enum DesktopHostIssueReportExportOutcome: Equatable, Sendable {
     case saved, retiredAfterAdmission, cancelled, failed, unavailable
 }
 
+package enum DesktopHostIssueReportDestination: Equatable, Sendable {
+    case selected(URL), cancelled, failed
+}
+
 /// Hosts install these only when their native preview is implemented. Construction has no effects.
 package struct DesktopHostIssueReportActions: Sendable {
     package let present: @Sendable (DesktopHostIssueReportPreview) -> Bool
     package let dismiss: @Sendable (UUID) -> Void
-    package let chooseDestination: @Sendable (String) async -> URL?
+    package let chooseDestination: @Sendable (String) async -> DesktopHostIssueReportDestination
     package let copy: @Sendable (String) throws -> Void
-    package let open: @Sendable (URL) -> Bool
+    package let open: @Sendable (URL) async -> Bool
 
     package init(
         present: @escaping @Sendable (DesktopHostIssueReportPreview) -> Bool,
         dismiss: @escaping @Sendable (UUID) -> Void,
-        chooseDestination: @escaping @Sendable (String) async -> URL?,
+        chooseDestination: @escaping @Sendable (String) async -> DesktopHostIssueReportDestination,
         copy: @escaping @Sendable (String) throws -> Void,
-        open: @escaping @Sendable (URL) -> Bool
+        open: @escaping @Sendable (URL) async -> Bool
     ) {
         self.present = present
         self.dismiss = dismiss
@@ -77,6 +82,7 @@ struct DesktopHostIssueReportSession: Sendable {
     let removed: IssueDiagnosticReport
     let actions: DesktopHostIssueReportActions
     var includesDiagnostics = true
+    var isOpening = false
     var exportLease: DesktopHostIssueReportExportLease?
     var status: DesktopHostIssueReportStatus?
 
@@ -95,7 +101,8 @@ struct DesktopHostIssueReportSession: Sendable {
 
     var preview: DesktopHostIssueReportPreview {
         .init(ticket: ticket, report: includesDiagnostics ? full : removed,
-              includesDiagnostics: includesDiagnostics, isExporting: exportLease != nil, status: status)
+              includesDiagnostics: includesDiagnostics, isExporting: exportLease != nil,
+              isOpening: isOpening, status: status)
     }
 }
 
@@ -128,7 +135,7 @@ extension DesktopHostController {
 
     package func setIssueReportIncludesDiagnostics(_ included: Bool, ticket: UUID) {
         guard !closed, !Task.isCancelled, issueReportSession?.ticket == ticket,
-              issueReportSession?.exportLease == nil else { return }
+              issueReportSession?.exportLease == nil, issueReportSession?.isOpening == false else { return }
         issueReportSession?.includesDiagnostics = included
         issueReportSession?.status = nil
         publishIssueReport(ticket)
@@ -147,7 +154,8 @@ extension DesktopHostController {
     }
 
     package func copyIssueReport(_ ticket: UUID) {
-        guard !closed, !Task.isCancelled, let session = issueReportSession, session.ticket == ticket else { return }
+        guard !closed, !Task.isCancelled, let session = issueReportSession,
+              session.ticket == ticket, !session.isOpening else { return }
         do {
             try session.actions.copy(session.preview.report.body)
             issueReportSession?.status = .copied
@@ -155,21 +163,37 @@ extension DesktopHostController {
         publishIssueReport(ticket)
     }
 
-    package func openIssueReport(_ ticket: UUID) {
-        guard !closed, !Task.isCancelled, let session = issueReportSession, session.ticket == ticket else { return }
+    package func openIssueReport(_ ticket: UUID) async {
+        guard !closed, !Task.isCancelled, let session = issueReportSession,
+              session.ticket == ticket, !session.isOpening, session.exportLease == nil else { return }
         guard let url = session.preview.report.issueURL, Self.isIssueDraftURL(url) else {
             issueReportSession?.status = .browserUnavailable
             publishIssueReport(ticket)
             return
         }
-        issueReportSession?.status = session.actions.open(url) ? .opened : .browserFailed
+        issueReportSession?.isOpening = true
+        issueReportSession?.status = nil
+        defer {
+            if issueReportSession?.ticket == ticket {
+                issueReportSession?.isOpening = false
+                publishIssueReport(ticket)
+            }
+        }
         publishIssueReport(ticket)
+        guard !closed, !Task.isCancelled, issueReportSession?.ticket == ticket else { return }
+        // The platform awaits actual OS launch completion and owns cancellation
+        // of its native request. Queue admission alone must not return true.
+        let opened = await session.actions.open(url)
+        guard !closed, !Task.isCancelled, issueReportSession?.ticket == ticket else { return }
+        issueReportSession?.status = opened ? .opened : .browserFailed
     }
 
     @discardableResult
     package func exportIssueReport(_ ticket: UUID) async -> DesktopHostIssueReportExportOutcome {
         guard !closed, !Task.isCancelled, let session = issueReportSession, session.ticket == ticket,
-              session.exportLease == nil else { return Task.isCancelled ? .cancelled : .unavailable }
+              session.exportLease == nil, !session.isOpening else {
+            return Task.isCancelled ? .cancelled : .unavailable
+        }
         let lease = DesktopHostIssueReportExportLease()
         let json = session.preview.report.jsonString
         issueReportSession?.exportLease = lease
@@ -183,8 +207,15 @@ extension DesktopHostController {
         }
         return await withTaskCancellationHandler {
             guard !closed, !Task.isCancelled, issueReportSession?.ticket == ticket else { return .cancelled }
-            guard let destination = await session.actions.chooseDestination(IssueDiagnosticReport.attachmentFilename),
-                  !closed, !Task.isCancelled, issueReportSession?.ticket == ticket else { return .cancelled }
+            let chosen = await session.actions.chooseDestination(IssueDiagnosticReport.attachmentFilename)
+            guard !closed, !Task.isCancelled, issueReportSession?.ticket == ticket else { return .cancelled }
+            guard case .selected(let destination) = chosen else {
+                if chosen == .failed {
+                    issueReportSession?.status = .exportFailed
+                    return .failed
+                }
+                return .cancelled
+            }
             do {
                 // The store preserves its canonical History/audio path refusal.
                 // Retirement before admission refuses a queued write; an atomic

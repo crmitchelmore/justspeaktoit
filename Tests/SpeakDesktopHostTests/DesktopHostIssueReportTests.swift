@@ -308,6 +308,174 @@ extension DesktopHostIssueReportTests {
         return task
     }
 }
+extension DesktopHostIssueReportTests {
+    func testHeldBrowserCompletionBlocksOtherActionsWithoutPrematureSuccess() async throws {
+        let fixture = try self.fixture()
+        let record = self.record()
+        await fixture.seed(record)
+        let ticket = try await fixture.ticket(record.id)
+        let frozen = try XCTUnwrap(fixture.effects.previews.last).report
+        let entered = expectation(description: "owned browser request entered")
+        await fixture.effects.browser.hold(entered)
+        let task = self.open(fixture, ticket: ticket)
+        await fulfillment(of: [entered], timeout: 2)
+        XCTAssertEqual(fixture.effects.previews.last?.isOpening, true)
+        XCTAssertNil(fixture.effects.previews.last?.status)
+        await fixture.controller.openIssueReport(ticket)
+        await fixture.controller.copyIssueReport(ticket)
+        await fixture.controller.setIssueReportIncludesDiagnostics(false, ticket: ticket)
+        let export = await fixture.controller.exportIssueReport(ticket)
+        XCTAssertEqual(export, .unavailable)
+        XCTAssertEqual(fixture.effects.urls, [try XCTUnwrap(frozen.issueURL)])
+        XCTAssertTrue(fixture.effects.copies.isEmpty)
+        XCTAssertEqual(fixture.effects.previews.last?.includesDiagnostics, true)
+        XCTAssertEqual(fixture.effects.previews.last?.report.jsonData, frozen.jsonData)
+        let names = await fixture.effects.chooser.filenames
+        XCTAssertTrue(names.isEmpty)
+        await fixture.effects.browser.release()
+        await task.value
+        XCTAssertEqual(fixture.effects.previews.last?.isOpening, false)
+        XCTAssertEqual(fixture.effects.previews.last?.status, .opened)
+        XCTAssertTrue(DesktopHostIssueReportStatus.opened.message.contains("system accepted"))
+        XCTAssertTrue(DesktopHostIssueReportStatus.opened.message.contains("Nothing has been attached or submitted"))
+    }
+
+    func testRetiredReplacedAndClosedBrowserCallbacksCannotPublishOldSuccessOrFailure() async throws {
+        for action in 0...2 {
+            let fixture = try self.fixture()
+            let record = self.record()
+            await fixture.seed(record)
+            let ticket = try await fixture.ticket(record.id)
+            fixture.effects.refuseBrowser = action == 1
+            let entered = expectation(description: "browser admitted before retirement")
+            await fixture.effects.browser.hold(entered)
+            let task = self.open(fixture, ticket: ticket)
+            await fulfillment(of: [entered], timeout: 2)
+            if action == 0 { await fixture.controller.cancelIssueReport(ticket) }
+            if action == 1 { let replacement = await fixture.begin(record.id); XCTAssertNotNil(replacement) }
+            if action == 2 { await fixture.controller.close() }
+            let count = fixture.effects.previews.count
+            await fixture.effects.browser.release()
+            await task.value
+            XCTAssertEqual(fixture.effects.previews.count, count)
+            XCTAssertFalse(fixture.effects.previews.contains {
+                $0.ticket == ticket && ($0.status == .opened || $0.status == .browserFailed)
+            })
+            XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.destination.path))
+        }
+    }
+
+    func testCancelledBrowserTaskCannotClaimSuccessAndCurrentPreviewCanRetry() async throws {
+        let fixture = try self.fixture()
+        let record = self.record()
+        await fixture.seed(record)
+        let ticket = try await fixture.ticket(record.id)
+        let entered = expectation(description: "cancelled browser was admitted")
+        await fixture.effects.browser.hold(entered)
+        let task = self.open(fixture, ticket: ticket)
+        await fulfillment(of: [entered], timeout: 2)
+        task.cancel()
+        await fixture.effects.browser.release()
+        await task.value
+        XCTAssertNil(fixture.effects.previews.last?.status)
+        XCTAssertEqual(fixture.effects.previews.last?.isOpening, false)
+        XCTAssertEqual(fixture.effects.urls.count, 1, "An admitted OS request cannot be retracted by this owner")
+        await fixture.controller.openIssueReport(ticket)
+        XCTAssertEqual(fixture.effects.previews.last?.status, .opened)
+        XCTAssertEqual(fixture.effects.urls.count, 2)
+    }
+
+    func testOldBrowserResultCannotClearReplacementOpeningFlag() async throws {
+        let fixture = try self.fixture()
+        let record = self.record()
+        await fixture.seed(record)
+        let first = try await fixture.ticket(record.id)
+        let firstEntered = expectation(description: "first browser held")
+        await fixture.effects.browser.hold(firstEntered)
+        let firstTask = self.open(fixture, ticket: first)
+        await fulfillment(of: [firstEntered], timeout: 2)
+        let second = try await fixture.ticket(record.id)
+        let secondEntered = expectation(description: "replacement browser held")
+        await fixture.effects.browser.hold(secondEntered)
+        let secondTask = self.open(fixture, ticket: second)
+        await fulfillment(of: [secondEntered], timeout: 2)
+        await fixture.effects.browser.releaseFirst()
+        await firstTask.value
+        XCTAssertEqual(fixture.effects.previews.last?.ticket, second)
+        XCTAssertEqual(fixture.effects.previews.last?.isOpening, true)
+        XCTAssertNil(fixture.effects.previews.last?.status)
+        await fixture.effects.browser.releaseFirst()
+        await secondTask.value
+        XCTAssertEqual(fixture.effects.previews.last?.ticket, second)
+        XCTAssertEqual(fixture.effects.previews.last?.isOpening, false)
+        XCTAssertEqual(fixture.effects.previews.last?.status, .opened)
+    }
+
+    func testChooserFailureAndCancellationHaveDistinctOutcomesWithoutWriting() async throws {
+        for failed in [false, true] {
+            let fixture = try self.fixture()
+            let record = self.record()
+            await fixture.seed(record)
+            let ticket = try await fixture.ticket(record.id)
+            await fixture.effects.chooser.setResult(failed ? .failed : .cancelled)
+            let result = await fixture.controller.exportIssueReport(ticket)
+            XCTAssertEqual(result, failed ? .failed : .cancelled)
+            XCTAssertEqual(fixture.effects.previews.last?.status, failed ? .exportFailed : nil)
+            XCTAssertEqual(fixture.effects.previews.last?.isExporting, false)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.destination.path))
+            XCTAssertTrue(fixture.effects.urls.isEmpty)
+            XCTAssertTrue(fixture.effects.copies.isEmpty)
+        }
+    }
+
+    func testLateChooserFailureAfterReplacementCannotMarkNewPreviewFailed() async throws {
+        let fixture = try self.fixture()
+        let record = self.record()
+        await fixture.seed(record)
+        let ticket = try await fixture.ticket(record.id)
+        let entered = expectation(description: "old chooser held before failure")
+        await fixture.effects.chooser.hold(entered)
+        let task = self.export(fixture, ticket: ticket)
+        await fulfillment(of: [entered], timeout: 2)
+        let replacement = try await fixture.ticket(record.id)
+        await fixture.effects.chooser.setResult(.failed)
+        await fixture.effects.chooser.release()
+        await task.value
+        XCTAssertEqual(fixture.effects.outcomes.last, .cancelled)
+        XCTAssertEqual(fixture.effects.previews.last?.ticket, replacement)
+        XCTAssertNil(fixture.effects.previews.last?.status)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.destination.path))
+    }
+
+    func testBrowserCannotStartWhileDestinationChooserOwnsExport() async throws {
+        let fixture = try self.fixture()
+        let record = self.record()
+        await fixture.seed(record)
+        let ticket = try await fixture.ticket(record.id)
+        let entered = expectation(description: "export chooser admitted")
+        await fixture.effects.chooser.hold(entered)
+        let task = self.export(fixture, ticket: ticket)
+        await fulfillment(of: [entered], timeout: 2)
+        await fixture.controller.openIssueReport(ticket)
+        XCTAssertTrue(fixture.effects.urls.isEmpty)
+        XCTAssertEqual(fixture.effects.previews.last?.isExporting, true)
+        XCTAssertEqual(fixture.effects.previews.last?.isOpening, false)
+        await fixture.effects.chooser.release()
+        await task.value
+        XCTAssertEqual(fixture.effects.outcomes.last, .saved)
+    }
+
+    private func open(_ fixture: IssueReportFixture, ticket: UUID) -> Task<Void, Never> {
+        let exit = XCTestExpectation(description: "owned preview browser exited")
+        let task = Task {
+            defer { exit.fulfill() }
+            await fixture.controller.openIssueReport(ticket)
+        }
+        fixture.own(task, exit: exit)
+        return task
+    }
+}
+
 private final class IssueReportFixture: @unchecked Sendable {
     let root: URL
     let controller: DesktopHostController<FakePlatform>
@@ -332,6 +500,7 @@ private final class IssueReportFixture: @unchecked Sendable {
     func own(_ task: Task<Void, Never>, exit: XCTestExpectation) { lock.withLock { tasks.append((task, exit)) } }
     func clean() async {
         await effects.chooser.release()
+        await effects.browser.release()
         let owned = lock.withLock { tasks }
         owned.forEach { $0.0.cancel() }
         for (_, exit) in owned {
@@ -345,24 +514,56 @@ private final class IssueReportFixture: @unchecked Sendable {
     }
 }
 private actor IssueReportChooser {
-    private var destination: URL?
+    private var result: DesktopHostIssueReportDestination = .cancelled
     private var entered: XCTestExpectation?
     private var continuation: CheckedContinuation<Void, Never>?
     private var released = false
     private(set) var filenames: [String] = []
-    func setDestination(_ value: URL?) { destination = value }
+    func setDestination(_ value: URL?) { result = value.map { .selected($0) } ?? .cancelled }
+    func setResult(_ value: DesktopHostIssueReportDestination) { result = value }
     func hold(_ receipt: XCTestExpectation) { entered = receipt; released = false }
-    func choose(_ name: String) async -> URL? {
+    func choose(_ name: String) async -> DesktopHostIssueReportDestination {
         filenames.append(name)
         if let entered, !released {
             await withCheckedContinuation { continuation in self.continuation = continuation; entered.fulfill() }
         }
-        return destination
+        return result
     }
     func release() { released = true; let pending = continuation; continuation = nil; pending?.resume() }
 }
+/// Synthetic only: holds at most the two requests admitted by the replacement test.
+private actor IssueReportBrowser {
+    private var entered: XCTestExpectation?
+    private var pending: [(CheckedContinuation<Bool, Never>, Bool)] = []
+    private var released = false
+
+    func hold(_ receipt: XCTestExpectation) { entered = receipt; released = false }
+
+    func open(result: Bool) async -> Bool {
+        guard let entered, !released else { return result }
+        self.entered = nil
+        return await withCheckedContinuation { continuation in
+            pending.append((continuation, result))
+            entered.fulfill()
+        }
+    }
+
+    func releaseFirst() {
+        guard !pending.isEmpty else { return }
+        let (continuation, result) = pending.removeFirst()
+        continuation.resume(returning: result)
+    }
+
+    func release() {
+        released = true
+        entered = nil
+        while !pending.isEmpty { releaseFirst() }
+    }
+}
+
 private final class IssueReportEffects: @unchecked Sendable {
     let chooser = IssueReportChooser()
+    let browser = IssueReportBrowser()
     private let lock = NSLock()
     private var snapshots: [DesktopHostIssueReportPreview] = []
     private var clipboard: [String] = []
@@ -381,7 +582,10 @@ private final class IssueReportEffects: @unchecked Sendable {
               dismiss: { _ in }, chooseDestination: { [self] name in await chooser.choose(name) },
               copy: { [self] value in
                   try lock.withLock { if refuseCopy { throw CocoaError(.fileWriteUnknown) }; clipboard.append(value) }
-              }, open: { [self] url in lock.withLock { opened.append(url); return !refuseBrowser } })
+              }, open: { [self] url in
+                  let result = lock.withLock { opened.append(url); return !refuseBrowser }
+                  return await browser.open(result: result)
+              })
     }
 }
 
@@ -397,4 +601,4 @@ private extension DesktopRecordingStore {
         entered.fulfill()
         if release.wait(timeout: .now() + 3) != .success { XCTFail("Owned queue hold was not released") }
     }
-}
+} // swiftlint:disable:this file_length

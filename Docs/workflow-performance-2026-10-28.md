@@ -46,3 +46,12 @@ The reconciliation workflow keeps one active run and the newest pending request,
 rather than queueing every stale scheduled snapshot. Test and review gates remain
 unchanged for publication. Speedups require hosted measurements after merge;
 local tests do not establish Apple readiness or native-platform success.
+
+## Additional optimizations before merge
+
+- Keep production website deployments serial, with only the newest pending
+  revision. Do not interrupt an active publication.
+- Cancel superseded PR icon checks and give the resource job a finite budget.
+- Cache benchmark dependency repository sources across runs while preserving
+  clean compiled shipping and benchmark graphs and their separate checks.
+- Pin added/touched checkout, cache and Node actions to verified commit SHAs.

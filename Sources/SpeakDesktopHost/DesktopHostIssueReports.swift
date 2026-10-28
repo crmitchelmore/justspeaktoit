@@ -9,6 +9,7 @@ package struct DesktopHostIssueReportPreview: Sendable {
     package let includesDiagnostics: Bool
     package let isExporting: Bool
     package let isOpening: Bool
+    package let isCopying: Bool
     package let status: DesktopHostIssueReportStatus?
 }
 
@@ -41,14 +42,14 @@ package struct DesktopHostIssueReportActions: Sendable {
     package let present: @Sendable (DesktopHostIssueReportPreview) -> Bool
     package let dismiss: @Sendable (UUID) -> Void
     package let chooseDestination: @Sendable (String) async -> DesktopHostIssueReportDestination
-    package let copy: @Sendable (String) throws -> Void
+    package let copy: @Sendable (String) async throws -> Void
     package let open: @Sendable (URL) async -> Bool
 
     package init(
         present: @escaping @Sendable (DesktopHostIssueReportPreview) -> Bool,
         dismiss: @escaping @Sendable (UUID) -> Void,
         chooseDestination: @escaping @Sendable (String) async -> DesktopHostIssueReportDestination,
-        copy: @escaping @Sendable (String) throws -> Void,
+        copy: @escaping @Sendable (String) async throws -> Void,
         open: @escaping @Sendable (URL) async -> Bool
     ) {
         self.present = present
@@ -83,6 +84,7 @@ struct DesktopHostIssueReportSession: Sendable {
     let actions: DesktopHostIssueReportActions
     var includesDiagnostics = true
     var isOpening = false
+    var isCopying = false
     var exportLease: DesktopHostIssueReportExportLease?
     var status: DesktopHostIssueReportStatus?
 
@@ -102,7 +104,7 @@ struct DesktopHostIssueReportSession: Sendable {
     var preview: DesktopHostIssueReportPreview {
         .init(ticket: ticket, report: includesDiagnostics ? full : removed,
               includesDiagnostics: includesDiagnostics, isExporting: exportLease != nil,
-              isOpening: isOpening, status: status)
+              isOpening: isOpening, isCopying: isCopying, status: status)
     }
 }
 
@@ -135,7 +137,8 @@ extension DesktopHostController {
 
     package func setIssueReportIncludesDiagnostics(_ included: Bool, ticket: UUID) {
         guard !closed, !Task.isCancelled, issueReportSession?.ticket == ticket,
-              issueReportSession?.exportLease == nil, issueReportSession?.isOpening == false else { return }
+              issueReportSession?.exportLease == nil, issueReportSession?.isOpening == false,
+              issueReportSession?.isCopying == false else { return }
         issueReportSession?.includesDiagnostics = included
         issueReportSession?.status = nil
         publishIssueReport(ticket)
@@ -153,19 +156,37 @@ extension DesktopHostController {
         session.actions.dismiss(session.ticket)
     }
 
-    package func copyIssueReport(_ ticket: UUID) {
+    package func copyIssueReport(_ ticket: UUID) async {
         guard !closed, !Task.isCancelled, let session = issueReportSession,
-              session.ticket == ticket, !session.isOpening else { return }
-        do {
-            try session.actions.copy(session.preview.report.body)
-            issueReportSession?.status = .copied
-        } catch { issueReportSession?.status = .copyFailed }
+              session.ticket == ticket, !session.isOpening, !session.isCopying,
+              session.exportLease == nil else { return }
+        let body = session.preview.report.body
+        issueReportSession?.isCopying = true
+        issueReportSession?.status = nil
+        defer {
+            if issueReportSession?.ticket == ticket {
+                issueReportSession?.isCopying = false
+                publishIssueReport(ticket)
+            }
+        }
         publishIssueReport(ticket)
+        guard !closed, !Task.isCancelled, issueReportSession?.ticket == ticket else { return }
+        do {
+            // The platform owns native admission/cancellation and returns only
+            // after the exact frozen draft was accepted by the clipboard.
+            try await session.actions.copy(body)
+            guard !closed, !Task.isCancelled, issueReportSession?.ticket == ticket else { return }
+            issueReportSession?.status = .copied
+        } catch {
+            guard !closed, !Task.isCancelled, issueReportSession?.ticket == ticket else { return }
+            issueReportSession?.status = .copyFailed
+        }
     }
 
     package func openIssueReport(_ ticket: UUID) async {
         guard !closed, !Task.isCancelled, let session = issueReportSession,
-              session.ticket == ticket, !session.isOpening, session.exportLease == nil else { return }
+              session.ticket == ticket, !session.isOpening, !session.isCopying,
+              session.exportLease == nil else { return }
         guard let url = session.preview.report.issueURL, Self.isIssueDraftURL(url) else {
             issueReportSession?.status = .browserUnavailable
             publishIssueReport(ticket)
@@ -191,7 +212,7 @@ extension DesktopHostController {
     @discardableResult
     package func exportIssueReport(_ ticket: UUID) async -> DesktopHostIssueReportExportOutcome {
         guard !closed, !Task.isCancelled, let session = issueReportSession, session.ticket == ticket,
-              session.exportLease == nil, !session.isOpening else {
+              session.exportLease == nil, !session.isOpening, !session.isCopying else {
             return Task.isCancelled ? .cancelled : .unavailable
         }
         let lease = DesktopHostIssueReportExportLease()

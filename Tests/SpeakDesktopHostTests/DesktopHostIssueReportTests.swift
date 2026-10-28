@@ -244,7 +244,7 @@ final class DesktopHostIssueReportTests: XCTestCase {
 extension DesktopHostIssueReportTests {
     func testStoreGuardRefusesRegisteredAudioAndItsSymlinkWithoutChangingBytes() async throws {
         #if os(Linux) && canImport(Glibc)
-        let fixture = try self.fixture()
+        let fixture = try self.fixture(privateCaptureRoot: true)
         let store = await fixture.controller.store
         let history = await store.directory
         let audioRoot = fixture.root.appendingPathComponent("Audio")
@@ -291,9 +291,9 @@ extension DesktopHostIssueReportTests {
         record.migrationMetadata = AnyCodable(.object(["requestContext": .string(Self.canary)]))
         return record
     }
-    private func fixture() throws -> IssueReportFixture {
+    private func fixture(privateCaptureRoot: Bool = false) throws -> IssueReportFixture {
         FakeLog.shared.installKeyReadHook { _ in XCTFail("Issue preview must never request credentials") }
-        let fixture = try IssueReportFixture()
+        let fixture = try IssueReportFixture(privateCaptureRoot: privateCaptureRoot)
         addTeardownBlock { await fixture.clean() }
         return fixture
     }
@@ -476,6 +476,163 @@ extension DesktopHostIssueReportTests {
     }
 }
 
+extension DesktopHostIssueReportTests {
+    func testHeldCopyFreezesReviewedBodyAndBlocksOtherActionsWithoutPrematureSuccess() async throws {
+        let fixture = try self.fixture()
+        let record = self.record()
+        await fixture.seed(record)
+        let ticket = try await fixture.ticket(record.id)
+        let frozen = try XCTUnwrap(fixture.effects.previews.last).report
+        let entered = expectation(description: "owned copy completion held")
+        await fixture.effects.copier.hold(entered)
+        let task = self.copy(fixture, ticket: ticket)
+        await fulfillment(of: [entered], timeout: 2)
+        var changed = record
+        changed.failure = "private replacement error"
+        await fixture.controller.indexHistory(changed)
+        XCTAssertEqual(fixture.effects.previews.last?.isCopying, true)
+        XCTAssertNil(fixture.effects.previews.last?.status)
+        await fixture.controller.copyIssueReport(ticket)
+        await fixture.controller.openIssueReport(ticket)
+        await fixture.controller.setIssueReportIncludesDiagnostics(false, ticket: ticket)
+        let export = await fixture.controller.exportIssueReport(ticket)
+        XCTAssertEqual(export, .unavailable)
+        XCTAssertEqual(fixture.effects.copyRequests, [frozen.body])
+        XCTAssertTrue(fixture.effects.copies.isEmpty)
+        XCTAssertTrue(fixture.effects.urls.isEmpty)
+        XCTAssertEqual(fixture.effects.previews.last?.includesDiagnostics, true)
+        XCTAssertEqual(fixture.effects.previews.last?.report.jsonData, frozen.jsonData)
+        let names = await fixture.effects.chooser.filenames
+        XCTAssertTrue(names.isEmpty)
+        await fixture.effects.copier.release()
+        await task.value
+        XCTAssertEqual(fixture.effects.previews.last?.isCopying, false)
+        XCTAssertEqual(fixture.effects.previews.last?.status, .copied)
+        XCTAssertEqual(fixture.effects.copies, [frozen.body])
+    }
+
+    func testRetiredReplacedAndClosedCopyCallbacksCannotPublishOldSuccessOrFailure() async throws {
+        for action in 0...2 {
+            let fixture = try self.fixture()
+            let record = self.record()
+            await fixture.seed(record)
+            let ticket = try await fixture.ticket(record.id)
+            fixture.effects.refuseCopy = action == 1
+            let entered = expectation(description: "copy admitted before retirement")
+            await fixture.effects.copier.hold(entered)
+            let task = self.copy(fixture, ticket: ticket)
+            await fulfillment(of: [entered], timeout: 2)
+            if action == 0 { await fixture.controller.cancelIssueReport(ticket) }
+            if action == 1 { let replacement = await fixture.begin(record.id); XCTAssertNotNil(replacement) }
+            if action == 2 { await fixture.controller.close() }
+            let count = fixture.effects.previews.count
+            await fixture.effects.copier.release()
+            await task.value
+            XCTAssertEqual(fixture.effects.previews.count, count)
+            XCTAssertFalse(fixture.effects.previews.contains {
+                $0.ticket == ticket && ($0.status == .copied || $0.status == .copyFailed)
+            })
+            XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.destination.path))
+        }
+    }
+
+    func testCancelledCopyTaskCannotClaimSuccessAndCurrentPreviewCanRetry() async throws {
+        let fixture = try self.fixture()
+        let record = self.record()
+        await fixture.seed(record)
+        let ticket = try await fixture.ticket(record.id)
+        let entered = expectation(description: "cancelled copy was admitted")
+        await fixture.effects.copier.hold(entered)
+        let task = self.copy(fixture, ticket: ticket)
+        await fulfillment(of: [entered], timeout: 2)
+        task.cancel()
+        await fixture.effects.copier.release()
+        await task.value
+        XCTAssertNil(fixture.effects.previews.last?.status)
+        XCTAssertEqual(fixture.effects.previews.last?.isCopying, false)
+        XCTAssertEqual(fixture.effects.copyRequests.count, 1)
+        // This fake deliberately completes an admitted copy after cancellation;
+        // the shared owner can suppress status but cannot retract native effects.
+        await fixture.controller.copyIssueReport(ticket)
+        XCTAssertEqual(fixture.effects.previews.last?.status, .copied)
+        XCTAssertEqual(fixture.effects.copyRequests.count, 2)
+    }
+
+    func testOldCopyResultCannotClearReplacementCopyingFlag() async throws {
+        let fixture = try self.fixture()
+        let record = self.record()
+        await fixture.seed(record)
+        let first = try await fixture.ticket(record.id)
+        let firstEntered = expectation(description: "first copy held")
+        await fixture.effects.copier.hold(firstEntered)
+        let firstTask = self.copy(fixture, ticket: first)
+        await fulfillment(of: [firstEntered], timeout: 2)
+        let second = try await fixture.ticket(record.id)
+        let secondEntered = expectation(description: "replacement copy held")
+        await fixture.effects.copier.hold(secondEntered)
+        let secondTask = self.copy(fixture, ticket: second)
+        await fulfillment(of: [secondEntered], timeout: 2)
+        await fixture.effects.copier.releaseFirst()
+        await firstTask.value
+        XCTAssertEqual(fixture.effects.previews.last?.ticket, second)
+        XCTAssertEqual(fixture.effects.previews.last?.isCopying, true)
+        XCTAssertNil(fixture.effects.previews.last?.status)
+        await fixture.effects.copier.releaseFirst()
+        await secondTask.value
+        XCTAssertEqual(fixture.effects.previews.last?.ticket, second)
+        XCTAssertEqual(fixture.effects.previews.last?.isCopying, false)
+        XCTAssertEqual(fixture.effects.previews.last?.status, .copied)
+    }
+
+    func testCopyFailureUsesFixedStatusWithoutClaimingClipboardAcceptance() async throws {
+        let fixture = try self.fixture()
+        let record = self.record()
+        await fixture.seed(record)
+        let ticket = try await fixture.ticket(record.id)
+        fixture.effects.refuseCopy = true
+        await fixture.controller.copyIssueReport(ticket)
+        XCTAssertEqual(fixture.effects.previews.last?.status, .copyFailed)
+        XCTAssertEqual(fixture.effects.previews.last?.isCopying, false)
+        XCTAssertEqual(fixture.effects.copyRequests.count, 1)
+        XCTAssertTrue(fixture.effects.copies.isEmpty)
+        XCTAssertEqual(DesktopHostIssueReportStatus.copyFailed.message,
+                       "Could not copy the draft. Try saving the JSON instead.")
+    }
+
+    func testCopyCannotStartWhileBrowserOrChooserOwnsSharingState() async throws {
+        for opening in [false, true] {
+            let fixture = try self.fixture()
+            let record = self.record()
+            await fixture.seed(record)
+            let ticket = try await fixture.ticket(record.id)
+            let entered = expectation(description: "other sharing operation admitted")
+            if opening {
+                await fixture.effects.browser.hold(entered)
+            } else {
+                await fixture.effects.chooser.hold(entered)
+            }
+            let task = opening ? self.open(fixture, ticket: ticket) : self.export(fixture, ticket: ticket)
+            await fulfillment(of: [entered], timeout: 2)
+            await fixture.controller.copyIssueReport(ticket)
+            XCTAssertTrue(fixture.effects.copyRequests.isEmpty)
+            XCTAssertEqual(fixture.effects.previews.last?.isCopying, false)
+            await fixture.effects.browser.release()
+            await fixture.effects.chooser.release()
+            await task.value
+        }
+    }
+
+    private func copy(_ fixture: IssueReportFixture, ticket: UUID) -> Task<Void, Never> {
+        let exit = XCTestExpectation(description: "owned preview copy exited")
+        let task = Task {
+            defer { exit.fulfill() }
+            await fixture.controller.copyIssueReport(ticket)
+        }
+        fixture.own(task, exit: exit)
+        return task
+    }
+}
+
 private final class IssueReportFixture: @unchecked Sendable {
     let root: URL
     let controller: DesktopHostController<FakePlatform>
@@ -483,8 +640,21 @@ private final class IssueReportFixture: @unchecked Sendable {
     private let lock = NSLock()
     private var tasks: [(Task<Void, Never>, XCTestExpectation)] = []
     var destination: URL { root.appendingPathComponent(IssueDiagnosticReport.attachmentFilename) }
-    init() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("issue-report-\(UUID().uuidString)")
+    init(privateCaptureRoot: Bool = false) throws {
+        let root: URL
+        if privateCaptureRoot {
+            // The held POSIX writer refuses writable ancestors such as /tmp.
+            // Match the existing recording-location fixture's private root.
+            root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                .appendingPathComponent(".build", isDirectory: true)
+                .resolvingSymlinksInPath()
+                .appendingPathComponent("issue-report-capture-\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.createDirectory(
+                at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]
+            )
+        } else {
+            root = FileManager.default.temporaryDirectory.appendingPathComponent("issue-report-\(UUID().uuidString)")
+        }
         self.root = root
         controller = try DesktopHostController(directory: root, effects: SyntheticEffects())
     }
@@ -501,6 +671,7 @@ private final class IssueReportFixture: @unchecked Sendable {
     func clean() async {
         await effects.chooser.release()
         await effects.browser.release()
+        await effects.copier.release()
         let owned = lock.withLock { tasks }
         owned.forEach { $0.0.cancel() }
         for (_, exit) in owned {
@@ -532,14 +703,14 @@ private actor IssueReportChooser {
     func release() { released = true; let pending = continuation; continuation = nil; pending?.resume() }
 }
 /// Synthetic only: holds at most the two requests admitted by the replacement test.
-private actor IssueReportBrowser {
+private actor IssueReportCompletionGate {
     private var entered: XCTestExpectation?
     private var pending: [(CheckedContinuation<Bool, Never>, Bool)] = []
     private var released = false
 
     func hold(_ receipt: XCTestExpectation) { entered = receipt; released = false }
 
-    func open(result: Bool) async -> Bool {
+    func wait(result: Bool) async -> Bool {
         guard let entered, !released else { return result }
         self.entered = nil
         return await withCheckedContinuation { continuation in
@@ -563,10 +734,12 @@ private actor IssueReportBrowser {
 
 private final class IssueReportEffects: @unchecked Sendable {
     let chooser = IssueReportChooser()
-    let browser = IssueReportBrowser()
+    let browser = IssueReportCompletionGate()
+    let copier = IssueReportCompletionGate()
     private let lock = NSLock()
     private var snapshots: [DesktopHostIssueReportPreview] = []
     private var clipboard: [String] = []
+    private var requestedCopies: [String] = []
     private var opened: [URL] = []
     private var exportOutcomes: [DesktopHostIssueReportExportOutcome] = []
     var refusePresentation = false
@@ -574,6 +747,7 @@ private final class IssueReportEffects: @unchecked Sendable {
     var refuseBrowser = false
     var previews: [DesktopHostIssueReportPreview] { lock.withLock { snapshots } }
     var copies: [String] { lock.withLock { clipboard } }
+    var copyRequests: [String] { lock.withLock { requestedCopies } }
     var urls: [URL] { lock.withLock { opened } }
     var outcomes: [DesktopHostIssueReportExportOutcome] { lock.withLock { exportOutcomes } }
     func record(_ outcome: DesktopHostIssueReportExportOutcome) { lock.withLock { exportOutcomes.append(outcome) } }
@@ -581,10 +755,12 @@ private final class IssueReportEffects: @unchecked Sendable {
         .init(present: { [self] value in lock.withLock { snapshots.append(value); return !refusePresentation } },
               dismiss: { _ in }, chooseDestination: { [self] name in await chooser.choose(name) },
               copy: { [self] value in
-                  try lock.withLock { if refuseCopy { throw CocoaError(.fileWriteUnknown) }; clipboard.append(value) }
+                  let accepted = lock.withLock { requestedCopies.append(value); return !refuseCopy }
+                  guard await copier.wait(result: accepted) else { throw CocoaError(.fileWriteUnknown) }
+                  lock.withLock { clipboard.append(value) }
               }, open: { [self] url in
                   let result = lock.withLock { opened.append(url); return !refuseBrowser }
-                  return await browser.open(result: result)
+                  return await browser.wait(result: result)
               })
     }
 }

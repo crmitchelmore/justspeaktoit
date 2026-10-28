@@ -602,6 +602,31 @@ function Remove-JstiStaleRefusalFacts($Result, [bool] $StreamsClosed, [long] $Cu
     }
 }
 
+# Internal request-only locator projection. No runtime path enters a receipt.
+function ConvertTo-JstiDiagnosticRuntimeModules($Rows) {
+    $rowsArray = @($Rows)
+    if ($null -eq $Rows -or $rowsArray.Count -ne 14) { throw 'unavailable' }
+    $safe = @(); $names = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $parent = $null; $total = 0L
+    foreach ($row in $rowsArray) {
+        $keys = if ($row -is [Collections.IDictionary]) { @($row.Keys) } else { @($row.PSObject.Properties.Name) }
+        if ($keys.Count -ne 4 -or @($keys | Where-Object { $_ -cnotin @('name', 'path', 'bytes', 'sha256') }).Count -ne 0 -or
+                $row.name -isnot [string] -or $row.name -cnotmatch '^[A-Za-z_][A-Za-z0-9_]*\.dll\z' -or
+                -not $names.Add($row.name) -or $row.path -isnot [string] -or $row.path.Length -gt 4096 -or
+                $row.path -cnotmatch '^[A-Za-z]:\\' -or $row.path -cmatch '[\x00-\x1f";/]' -or
+                $row.path.Substring(2).Contains(':') -or $row.path -cmatch '(^|\\)\.{1,2}(\\|$)' -or
+                $row.path.Split('\')[-1] -cne $row.name -or
+                ($row.bytes -isnot [int] -and $row.bytes -isnot [long]) -or $row.bytes -le 0 -or $row.bytes -gt 67108864 -or
+                $row.sha256 -isnot [string] -or $row.sha256 -cnotmatch '^[0-9a-f]{64}\z') { throw 'unavailable' }
+        $currentParent = $row.path.Substring(0, $row.path.LastIndexOf('\'))
+        if ($null -ne $parent -and $currentParent -ine $parent) { throw 'unavailable' }
+        $parent = $currentParent; $total += $row.bytes
+        if ($total -gt 67108864) { throw 'unavailable' }
+        $safe += [ordered]@{ name = $row.name; path = $row.path; bytes = $row.bytes; sha256 = $row.sha256 }
+    }
+    return ,$safe
+}
+
 function Invoke-JstiStandaloneDiagnostic($Setup, $Run, $Process, [string] $Executable, [string] $ExpectedSHA256,
         [long] $DeadlineTicks, [long] $Frequency, [datetime] $StartedUTC, [datetime] $EndedUTC) {
     $result = [ordered]@{ status = 'unavailable'; originalFailurePreserved = $true }
@@ -626,7 +651,12 @@ function Invoke-JstiStandaloneDiagnostic($Setup, $Run, $Process, [string] $Execu
             # Derived bridge work cutoff; Python reserves its own2s inside it.
             parentPid = $PID; deadlineTicks = $DeadlineTicks - (2 * $Frequency); frequency = $Frequency
         }
-        $bytes = [System.Text.Encoding]::UTF8.GetBytes(($request | ConvertTo-Json -Compress))
+        $runKeys = if ($Run -is [Collections.IDictionary]) { @($Run.Keys) } else { @($Run.PSObject.Properties.Name) }
+        if ($runKeys -contains 'runtimeModules') {
+            if ($runKeys -cnotcontains 'runtimeModules') { return $result }
+            $request.runtimeModules = ConvertTo-JstiDiagnosticRuntimeModules $Run.runtimeModules
+        }
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes(($request | ConvertTo-Json -Depth 4 -Compress))
         if ($bytes.Length -gt 8192) { return $result }
         $encoded = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
         $private = Join-Path $workspace ('failure-diagnostic-' + [guid]::NewGuid().ToString('N'))
@@ -724,6 +754,19 @@ function Invoke-JstiNativeFailureDiagnostic($Setup, $Run, [string] $Executable, 
         if (($moments[1] - $moments[0]).TotalSeconds -lt 0 -or
                 ($moments[1] - $moments[0]).TotalSeconds -gt 30) { return $unavailable }
         $adapted = @{ label = 'ui-smoke'; arguments = '--ui-smoke-test'; exitCode = $signed; processMachine = '0xAA64' }
+        $runtime = @()
+        $nativeKeys = if ($Run -is [Collections.IDictionary]) { @($Run.Keys) } else { @($Run.PSObject.Properties.Name) }
+        if ($nativeKeys -contains 'modulesOutsideSystemRoot') {
+            if ($nativeKeys -cnotcontains 'modulesOutsideSystemRoot' -or $null -eq $Run.modulesOutsideSystemRoot) { return $unavailable }
+            foreach ($module in @($Run.modulesOutsideSystemRoot)) {
+                if ($null -eq $module) { return $unavailable }
+                if ($module.path -ceq $Executable) { continue }
+                if ($module.dll -isnot [bool] -or -not $module.dll -or $module.native -isnot [bool] -or
+                        -not $module.native -or $module.architecture -cne 'arm64') { return $unavailable }
+                $runtime += [ordered]@{ name = $module.name; path = $module.path; bytes = $module.bytes; sha256 = $module.sha256 }
+            }
+        }
+        if ($runtime.Count -gt 0) { $adapted.runtimeModules = ConvertTo-JstiDiagnosticRuntimeModules $runtime }
         return Invoke-JstiStandaloneDiagnostic $Setup $adapted @{ Id = $context.originalPid } `
             $Executable $ExpectedSHA256 $DeadlineTicks $Frequency $moments[0].UtcDateTime $moments[1].UtcDateTime
     } catch { return $unavailable }

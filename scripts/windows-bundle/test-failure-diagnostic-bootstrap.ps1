@@ -730,5 +730,31 @@ foreach ($mode in @('fresh', 'streams', 'bootstrap', 'child-cleanup', 'cutoff'))
     Assert-That ($outcome.diagnostic.status -ceq 'invalid') 'process-facts-retirement-does-not-change-verdict'
 }
 
+# Request-only runtime locators use the canonical name policy; no real DLL is
+# opened or native adapter invoked in these closed-shape boundary checks.
+$runtimePolicy = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'runtime-policy.json') -Raw | ConvertFrom-Json
+$runtimeRows = @($runtimePolicy.swiftRuntimeModules | Select-Object -First 14 | ForEach-Object {
+    [ordered]@{ name = $_; path = ('C:\Users\Owned\AppData\Local\Programs\Swift\Runtimes\6.2.3\usr\bin\' + $_)
+        bytes = 1024; sha256 = ('0' * 64) }
+})
+$runtimeSafe = ConvertTo-JstiDiagnosticRuntimeModules $runtimeRows
+Assert-That ($runtimeSafe.Count -eq 14 -and ($runtimeSafe | ConvertTo-Json -Depth 4 -Compress) -ceq
+    ($runtimeRows | ConvertTo-Json -Depth 4 -Compress)) 'closed-runtime-locators-preserved'
+foreach ($mode in @('null', 'partial', 'bool', 'extra', 'duplicate', 'mixed', 'range')) {
+    $candidate = ($runtimeRows | ConvertTo-Json -Depth 4 -Compress) | ConvertFrom-Json
+    switch ($mode) {
+        'null' { $candidate = $null }
+        'partial' { $candidate = @($candidate | Select-Object -First 13) }
+        'bool' { $candidate[0].bytes = $true }
+        'extra' { $candidate[0] | Add-Member private 'PRIVATE_CANARY' }
+        'duplicate' { $candidate[1] = $candidate[0] }
+        'mixed' { $candidate[0].path = $candidate[0].path.Replace('Owned', 'Other') }
+        'range' { $candidate[0].bytes = 67108865 }
+    }
+    $refused = $false
+    try { [void] (ConvertTo-JstiDiagnosticRuntimeModules $candidate) } catch { $refused = $true }
+    Assert-That $refused 'malformed-runtime-locators-refused'
+}
+
 Assert-That (-not ('JstiDiagnosticNative' -as [type])) 'pure-fakes-did-not-compile-or-load-native-type'
 Write-Output 'Diagnostic bootstrap pure-fake checks passed.'

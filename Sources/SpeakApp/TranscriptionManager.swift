@@ -203,6 +203,18 @@ final class TranscriptionManager: ObservableObject {
     analyzerFallbackAllowed: Bool = true,
     primedInput: PrimedLiveInput? = nil
   ) async throws {
+    try await startLiveTranscription(
+      preRollBuffers: preRollBuffers, analyzerFallbackAllowed: analyzerFallbackAllowed,
+      primedInput: primedInput, onDiagnostic: nil
+    )
+  }
+
+  func startLiveTranscription(
+    preRollBuffers: [AVAudioPCMBuffer],
+    analyzerFallbackAllowed: Bool = true,
+    primedInput: PrimedLiveInput? = nil,
+    onDiagnostic: ((LiveDiagnosticReceipt) -> Void)?
+  ) async throws {
         guard !isLiveTranscribing, startupGeneration == nil else {
             throw TranscriptionManagerError.liveSessionAlreadyRunning
         }
@@ -225,12 +237,13 @@ final class TranscriptionManager: ObservableObject {
       model: model
     )
     let startupTask = Task { @MainActor in
-      try Task.checkCancellation()
-      try await self.liveController.start(
-        preRollBuffers: preRollBuffers,
-        analyzerFallbackAllowed: analyzerFallbackAllowed,
-        primedInput: primedInput
-      )
+      try await Self.performLiveInvocation(model: model, language: language, onDiagnostic: onDiagnostic) {
+        try await self.liveController.start(
+          preRollBuffers: preRollBuffers,
+          analyzerFallbackAllowed: analyzerFallbackAllowed,
+          primedInput: primedInput
+        )
+      }
     }
     self.startupTask = startupTask
     do {
@@ -251,6 +264,26 @@ final class TranscriptionManager: ObservableObject {
       throw error
     }
     isLiveTranscribing = true
+  }
+
+  // This receipt observes the configured Switching controller call only. Its
+  // internal provider/backend/fallback is opaque, including injected controllers.
+  typealias LiveDiagnosticReceipt = BatchDiagnosticReceipt
+
+  static func performLiveInvocation(
+    model: String, language: String?, onDiagnostic: ((LiveDiagnosticReceipt) -> Void)?,
+    start: () async throws -> Void
+  ) async throws {
+    try Task.checkCancellation()
+    onDiagnostic?(.handoff(RequestDiagnosticContext(
+      provenance: .observedHandoff, model: .project(model), mode: .live, language: .project(language)
+    )))
+    do {
+      try await start()
+    } catch {
+      onDiagnostic?(.failure(Self.batchFailure(error, stage: .request)))
+      throw error
+    }
   }
 
   func stopLiveTranscription() async throws -> TranscriptionResult {

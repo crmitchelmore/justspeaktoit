@@ -766,7 +766,10 @@ final class MainManager: ObservableObject {
           try await transcriptionManager.startLiveTranscription(
             preRollBuffers: preRollBuffers,
             analyzerFallbackAllowed: trigger != .handsFree,
-            primedInput: primedCapture
+            primedInput: primedCapture,
+            onDiagnostic: { [weak self] receipt in
+              Self.retainBatchDiagnostic(receipt, for: session, activeSession: self?.activeSession)
+            }
           )
           guard self?.activeSession === session else { return }
           session.liveTranscriptSessionID = transcriptionManager.liveTranscript.sessionID

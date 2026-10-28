@@ -5,9 +5,15 @@ import SpeakCore
 /// never establish effective settings or authorize exporting private diagnostic strings.
 enum HistoryIssueReporter {
     static func report(for item: HistoryItem, includeDiagnostics: Bool = true) -> IssueDiagnosticReport {
-        IssueDiagnosticReport(context: item.diagnosticContext?.requestContext, failures: item.errors.map { error in
+        let legacyPhases = item.errors.map { error in
             RequestDiagnosticContext.Failure(stage: safeStage(for: error.phase), domain: .unknown)
-        }, omittedSections: includeDiagnostics ? [] : Set(IssueDiagnosticReport.Section.allCases))
+        }
+        let failures = item.diagnosticContext?.requestFailure.map { [$0] + legacyPhases } ?? legacyPhases
+        return IssueDiagnosticReport(
+            context: item.diagnosticContext?.requestContext, failures: failures,
+            omittedSections: includeDiagnostics ? [] : Set(IssueDiagnosticReport.Section.allCases),
+            observedHandoff: item.diagnosticContext?.observedHandoff
+        )
     }
 
     private static func safeStage(for phase: HistoryError.Phase) -> RequestDiagnosticContext.Stage {

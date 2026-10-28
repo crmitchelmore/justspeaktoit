@@ -16,6 +16,9 @@ public struct ApplicationHistoryDiagnosticContext: Codable, Hashable, Sendable {
     public let speedMode: String
     /// Requested configuration at admission; never an inferred provider handoff.
     public let requestContext: RequestDiagnosticContext?
+    /// Observed client invocation only; not proof of remote acceptance or wrapped transport.
+    public let observedHandoff: RequestDiagnosticContext?
+    public let requestFailure: RequestDiagnosticContext.Failure?
 
     public init(
         capturedAt: Date = Date(), appVersion: String, appBuild: String, operatingSystem: String,
@@ -38,6 +41,23 @@ public struct ApplicationHistoryDiagnosticContext: Codable, Hashable, Sendable {
         latencyTier: String, transcriptionMode: String, transcriptionModel: String, postProcessingModel: String,
         speedMode: String, requestContext: RequestDiagnosticContext?
     ) {
+        self.init(
+            capturedAt: capturedAt, appVersion: appVersion, appBuild: appBuild, operatingSystem: operatingSystem,
+            processIdentifier: processIdentifier, microphonePermission: microphonePermission,
+            inputDeviceName: inputDeviceName, providerLabel: providerLabel, latencyTier: latencyTier,
+            transcriptionMode: transcriptionMode, transcriptionModel: transcriptionModel,
+            postProcessingModel: postProcessingModel, speedMode: speedMode, requestContext: requestContext,
+            observedHandoff: nil, requestFailure: nil
+        )
+    }
+
+    public init(
+        capturedAt: Date = Date(), appVersion: String, appBuild: String, operatingSystem: String,
+        processIdentifier: Int, microphonePermission: String, inputDeviceName: String, providerLabel: String,
+        latencyTier: String, transcriptionMode: String, transcriptionModel: String, postProcessingModel: String,
+        speedMode: String, requestContext: RequestDiagnosticContext?, observedHandoff: RequestDiagnosticContext?,
+        requestFailure: RequestDiagnosticContext.Failure?
+    ) {
         self.capturedAt = capturedAt
         self.appVersion = appVersion
         self.appBuild = appBuild
@@ -52,6 +72,8 @@ public struct ApplicationHistoryDiagnosticContext: Codable, Hashable, Sendable {
         self.postProcessingModel = postProcessingModel
         self.speedMode = speedMode
         self.requestContext = requestContext
+        self.observedHandoff = observedHandoff?.provenance == .observedHandoff ? observedHandoff : nil
+        self.requestFailure = requestFailure
     }
 
     public init(from decoder: Decoder) throws {
@@ -71,19 +93,21 @@ public struct ApplicationHistoryDiagnosticContext: Codable, Hashable, Sendable {
             postProcessingModel: try values.decode(String.self, forKey: .postProcessingModel),
             speedMode: try values.decode(String.self, forKey: .speedMode),
             // Future/invalid diagnostics must not discard otherwise valid user History.
-            requestContext: try? values.decodeIfPresent(RequestDiagnosticContext.self, forKey: .requestContext)
+            requestContext: try? values.decodeIfPresent(RequestDiagnosticContext.self, forKey: .requestContext),
+            observedHandoff: try? values.decodeIfPresent(RequestDiagnosticContext.self, forKey: .observedHandoff),
+            requestFailure: try? values.decodeIfPresent(RequestDiagnosticContext.Failure.self, forKey: .requestFailure)
         )
     }
 
     private enum CodingKeys: String, CodingKey {
         case capturedAt, appVersion, appBuild, operatingSystem, processIdentifier, microphonePermission
         case inputDeviceName, providerLabel, latencyTier, transcriptionMode, transcriptionModel
-        case postProcessingModel, speedMode, requestContext
+        case postProcessingModel, speedMode, requestContext, observedHandoff, requestFailure
     }
 
     public func hash(into hasher: inout Hasher) {
         // Keep the existing Hashable API while the shared request value is Equatable.
-        // Equality includes requestContext; unequal snapshots may share a hash.
+        // Equality includes optional request metadata; unequal snapshots may share a hash.
         hasher.combine(capturedAt)
         hasher.combine(appVersion)
         hasher.combine(appBuild)

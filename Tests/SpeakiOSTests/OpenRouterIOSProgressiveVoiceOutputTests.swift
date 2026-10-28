@@ -187,31 +187,35 @@ final class OpenRouterIOSProgressiveVoiceOutputTests: XCTestCase {
         let transportStopped = expectation(description: "Explicit stop cancelled prior transport")
         let observation = ProgressiveTransportObservation()
         StubURLProtocol.handler = { _ in .hang }
-        StubURLProtocol.onStartLoading = { started.fulfill() }
+        StubURLProtocol.onStartLoading = { observation.note(.requestStarted); started.fulfill() }
         StubURLProtocol.onStopLoading = { observation.stop(); transportStopped.fulfill() }
         defer { session.invalidateAndCancel(); StubURLProtocol.reset() }
         let prior = Task {
-            defer { firstReturned.fulfill() }
+            defer { observation.note(.priorReturned); firstReturned.fulfill() }
             do { try await speak(); XCTFail("Held prior request must cancel") } catch {
                 XCTAssertTrue(error is CancellationError)
             }
         }
         defer { prior.cancel(); stop() }
         let startResult = await XCTWaiter.fulfillment(of: [started], timeout: 2)
+        observation.reportFailure(startResult, wait: .requestStart)
         XCTAssertEqual(startResult, .completed)
         let queued = Task { @MainActor in
-            defer { queuedReturned.fulfill() }
+            defer { observation.note(.queuedReturned); queuedReturned.fulfill() }
             do { try await speak(); XCTFail("Cancelled queued start must refuse") } catch {
                 XCTAssertTrue(error is CancellationError)
             }
         }
         queued.cancel()
         let queuedResult = await XCTWaiter.fulfillment(of: [queuedReturned], timeout: 2)
+        observation.reportFailure(queuedResult, wait: .queuedReturn)
         XCTAssertEqual(queuedResult, .completed)
         XCTAssertEqual(observation.stops, 0, "Refused caller must not stop the prior transport")
         XCTAssertEqual(StubURLProtocol.recordedRequests.count, 1)
+        observation.note(.explicitStopIssued)
         stop()
         let stopResult = await XCTWaiter.fulfillment(of: [transportStopped, firstReturned], timeout: 2)
+        observation.reportFailure(stopResult, wait: .explicitStop)
         XCTAssertEqual(stopResult, .completed)
         XCTAssertEqual(observation.stops, 1)
     }
@@ -227,8 +231,27 @@ final class OpenRouterIOSProgressiveVoiceOutputTests: XCTestCase {
 
 private final class ProgressiveTransportObservation: @unchecked Sendable {
     private let lock = NSLock()
+    enum Phase: Hashable { case requestStarted, priorReturned, queuedReturned, explicitStopIssued, transportStopped }
+    enum Wait: String { case requestStart, queuedReturn, explicitStop }
     private var count = 0
+    private var phases: Set<Phase> = []
     var stops: Int { lock.withLock { count } }
-    func stop() { lock.withLock { count += 1 } }
+    func stop() { lock.withLock { count += 1; _ = phases.insert(.transportStopped) } }
+    func note(_ phase: Phase) { lock.withLock { _ = phases.insert(phase) } }
+
+    // Snapshot after the failed wait returns; not a deadline-time or event-order proof.
+    func reportFailure(_ result: XCTWaiter.Result, wait: Wait) {
+        guard result != .completed else { return }
+        let facts = lock.withLock {
+            ["requestStarted": phases.contains(.requestStarted), "priorReturned": phases.contains(.priorReturned),
+             "queuedReturned": phases.contains(.queuedReturned),
+             "explicitStopIssued": phases.contains(.explicitStopIssued),
+             "transportStopped": phases.contains(.transportStopped)]
+        }
+        let payload: [String: Any] = ["schema": 1, "fixture": "queuedVoiceStart", "wait": wait.rawValue, "facts": facts]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+              data.count <= 1024 else { return }
+        try? FileHandle.standardError.write(contentsOf: data + Data([10]))
+    }
 }
 #endif

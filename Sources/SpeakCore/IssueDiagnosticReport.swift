@@ -24,9 +24,24 @@ public struct IssueDiagnosticReport: Sendable {
         events: [RequestDiagnosticContext.Event] = [],
         omittedSections: Set<Section> = []
     ) {
+        self.init(
+            context: context, recordedModels: recordedModels, environment: environment,
+            failures: failures, events: events, omittedSections: omittedSections, observedHandoff: nil
+        )
+    }
+
+    public init(
+        context: RequestDiagnosticContext? = nil,
+        recordedModels: [RequestDiagnosticContext.ModelSelection] = [],
+        environment: RequestDiagnosticContext.Environment = .unavailable,
+        failures: [RequestDiagnosticContext.Failure] = [],
+        events: [RequestDiagnosticContext.Event] = [],
+        omittedSections: Set<Section> = [],
+        observedHandoff: RequestDiagnosticContext?
+    ) {
         let payload = Payload(
             context: context, recordedModels: recordedModels, environment: environment,
-            failures: failures, events: events, omittedSections: omittedSections
+            failures: failures, events: events, omittedSections: omittedSections, observedHandoff: observedHandoff
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .prettyPrinted, .withoutEscapingSlashes]
@@ -44,7 +59,9 @@ public struct IssueDiagnosticReport: Sendable {
         ## Request diagnostics
         These details contain only recorded allowlisted fields. Missing or invalid values are omitted.
         Legacy records do not establish request-time effective configuration.
-        Recorded model IDs are not verified handoffs.
+        Admission and recorded model IDs are not verified handoffs.
+        An observed handoff means a client call, not remote acceptance or its wrapped transport.
+        Failure observations may overlap; they are not a request count.
         No transcript, audio, raw errors, logs, persistent IDs or absolute timestamps are included.
 
         ```json
@@ -79,6 +96,7 @@ private extension IssueDiagnosticReport {
         let schemaVersion = 1
         let contextState: String
         let context: RequestDiagnosticContext?
+        let observedHandoff: RequestDiagnosticContext?
         let recordedModels: [RequestDiagnosticContext.ModelSelection]?
         let environment: RequestDiagnosticContext.Environment?
         let failures: [RequestDiagnosticContext.Failure]?
@@ -90,20 +108,14 @@ private extension IssueDiagnosticReport {
         init(
             context: RequestDiagnosticContext?, recordedModels: [RequestDiagnosticContext.ModelSelection],
             environment: RequestDiagnosticContext.Environment, failures: [RequestDiagnosticContext.Failure],
-            events: [RequestDiagnosticContext.Event], omittedSections: Set<Section>
+            events: [RequestDiagnosticContext.Event], omittedSections: Set<Section>,
+            observedHandoff: RequestDiagnosticContext?
         ) {
             let removeAll = omittedSections == Set(Section.allCases)
             self.contextState = removeAll ? "userRemoved" : context?.provenance.rawValue ?? "missingLegacyContext"
-            self.context = (removeAll ? nil : context).map { value in
-                let safe = value.sanitized
-                return RequestDiagnosticContext(
-                    provenance: safe.provenance, model: omittedSections.contains(.models) ? .project(nil) : safe.model,
-                    postProcessingModel: omittedSections.contains(.models) ? .project(nil) : safe.postProcessingModel,
-                    observedProvider: omittedSections.contains(.models) ? nil : safe.observedProvider,
-                    mode: safe.mode, origin: safe.origin, language: safe.language, destination: safe.destination,
-                    options: omittedSections.contains(.options) ? .init() : safe.options
-                )
-            }
+            self.context = Self.projectContext(removeAll ? nil : context, omittedSections: omittedSections)
+            let handoff = observedHandoff?.provenance == .observedHandoff ? observedHandoff : nil
+            self.observedHandoff = Self.projectContext(removeAll ? nil : handoff, omittedSections: omittedSections)
             self.recordedModels = omittedSections.contains(.models) ? nil : recordedModels.prefix(8).map(\.sanitized)
             self.environment = omittedSections.contains(.environment) ? nil : .init(
                 platform: environment.platform, architecture: environment.architecture, channel: environment.channel,
@@ -125,11 +137,27 @@ private extension IssueDiagnosticReport {
             )
         }
 
+        private static func projectContext(
+            _ context: RequestDiagnosticContext?, omittedSections: Set<Section>
+        ) -> RequestDiagnosticContext? {
+            context.map { value in
+                let safe = value.sanitized
+                return RequestDiagnosticContext(
+                    provenance: safe.provenance, model: omittedSections.contains(.models) ? .project(nil) : safe.model,
+                    postProcessingModel: omittedSections.contains(.models) ? .project(nil) : safe.postProcessingModel,
+                    observedProvider: omittedSections.contains(.models) ? nil : safe.observedProvider,
+                    mode: safe.mode, origin: safe.origin, language: safe.language, destination: safe.destination,
+                    options: omittedSections.contains(.options) ? .init() : safe.options
+                )
+            }
+        }
+
         func encode(to encoder: Encoder) throws {
             var values = encoder.container(keyedBy: IssueDiagnosticPayloadKeys.self)
             try values.encode(schemaVersion, forKey: .schemaVersion)
             try values.encode(contextState, forKey: .contextState)
             try values.encodeIfPresent(context, forKey: .context)
+            try values.encodeIfPresent(observedHandoff, forKey: .observedHandoff)
             try values.encodeIfPresent(recordedModels, forKey: .recordedModels)
             try values.encodeIfPresent(environment, forKey: .environment)
             try values.encodeIfPresent(failures, forKey: .failures)
@@ -142,6 +170,6 @@ private extension IssueDiagnosticReport {
 }
 
 private enum IssueDiagnosticPayloadKeys: String, CodingKey {
-    case schemaVersion, contextState, context, recordedModels, environment, failures, timeline
+    case schemaVersion, contextState, context, observedHandoff, recordedModels, environment, failures, timeline
     case omittedSections, omissionReason, truncated
 }

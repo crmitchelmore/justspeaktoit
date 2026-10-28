@@ -99,6 +99,10 @@ enum LinuxHostPlatform: DesktopHostAutomationPlatform {
         set { runtime.lock.withLock { runtime.shortcut = newValue } }
     }
 
+    package static var issueReportActions: DesktopHostIssueReportActions? {
+        LinuxIssueReportBridge().actions
+    }
+
     // MARK: Window presenter
 
     package static func update(_ status: String, transcript: String?, state: Int32) {
@@ -248,4 +252,105 @@ enum LinuxHostPlatform: DesktopHostAutomationPlatform {
         case .other: return "Select Stop recording to finish."
         }
     }
+}
+
+/// One native handle per shared preview. Native callbacks never capture the app
+/// event context and complete exactly once, including cancellation/loop exit.
+private final class LinuxIssueReportBridge: @unchecked Sendable {
+    private let handle: OpaquePointer
+
+    init() { self.handle = jsti_issue_report_create()! }
+    deinit { jsti_issue_report_destroy(self.handle) }
+
+    var actions: DesktopHostIssueReportActions {
+        DesktopHostIssueReportActions(
+            present: { [self] preview in self.present(preview) },
+            dismiss: { [self] _ in jsti_issue_report_dismiss(self.handle) },
+            chooseDestination: { [self] _ in
+                let result = await self.request(url: nil)
+                switch result.code {
+                case 1:
+                    guard let path = result.path, path.hasPrefix("/") else { return .failed }
+                    return .selected(URL(fileURLWithPath: path))
+                case 0: return .cancelled
+                default: return .failed
+                }
+            },
+            copy: { [self] text in
+                let result = await self.request(url: nil, copying: text)
+                guard !Task.isCancelled, result.code != 0 else { throw CancellationError() }
+                guard result.code == 1 else { throw DesktopHostError(message: "Could not copy the issue draft.") }
+            },
+            open: { [self] url in await self.request(url: url).code == 1 }
+        )
+    }
+
+    private func present(_ preview: DesktopHostIssueReportPreview) -> Bool {
+        guard let json = String(data: preview.report.jsonData, encoding: .utf8) else { return false }
+        return jsti_issue_report_present(
+            self.handle, preview.ticket.uuidString, preview.report.title, preview.report.body, json,
+            preview.includesDiagnostics ? 1 : 0, preview.isExporting ? 1 : 0,
+            (preview.isOpening || preview.isCopying) ? 1 : 0,
+            preview.report.issueURL != nil ? 1 : 0,
+            preview.status?.message ?? ""
+        ) == 0
+    }
+
+    private func request(url: URL?, copying text: String? = nil) async -> LinuxIssueReportResult {
+        let request = UUID().uuidString
+        let cancellation = LinuxIssueReportCancellation { [self] in
+            jsti_issue_report_cancel_request(self.handle, request)
+        }
+        return await withTaskCancellationHandler {
+            guard !Task.isCancelled else { return .init(code: 0, path: nil) }
+            return await withCheckedContinuation { continuation in
+                let box = Unmanaged.passRetained(LinuxIssueReportReply(continuation))
+                if let text {
+                    jsti_issue_report_copy(self.handle, request, text, linuxIssueReportCompleted, box.toOpaque())
+                } else if let url {
+                    jsti_issue_report_open(
+                        self.handle, request, url.absoluteString, linuxIssueReportCompleted, box.toOpaque()
+                    )
+                } else {
+                    jsti_issue_report_choose(self.handle, request, linuxIssueReportCompleted, box.toOpaque())
+                }
+                // Cancellation before native registration must not strand the reply.
+                cancellation.cancelIfRequested()
+            }
+        } onCancel: {
+            cancellation.cancel()
+        }
+    }
+}
+
+private struct LinuxIssueReportResult: Sendable {
+    let code: Int32
+    let path: String?
+}
+
+private final class LinuxIssueReportReply: @unchecked Sendable {
+    let continuation: CheckedContinuation<LinuxIssueReportResult, Never>
+    init(_ continuation: CheckedContinuation<LinuxIssueReportResult, Never>) { self.continuation = continuation }
+}
+
+private final class LinuxIssueReportCancellation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var requested = false
+    private let nativeCancel: @Sendable () -> Void
+    init(nativeCancel: @escaping @Sendable () -> Void) { self.nativeCancel = nativeCancel }
+    func cancel() {
+        self.lock.withLock { self.requested = true }
+        self.nativeCancel()
+    }
+    func cancelIfRequested() {
+        if self.lock.withLock({ self.requested }) { self.nativeCancel() }
+    }
+}
+
+private func linuxIssueReportCompleted(
+    _ result: Int32, _ path: UnsafePointer<CChar>?, _ context: UnsafeMutableRawPointer?
+) {
+    guard let context else { return }
+    let box = Unmanaged<LinuxIssueReportReply>.fromOpaque(context).takeRetainedValue()
+    box.continuation.resume(returning: .init(code: result, path: path.map(String.init(cString:))))
 }

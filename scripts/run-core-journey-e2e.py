@@ -2,6 +2,7 @@
 """Run the required macOS contract suites and reject silent coverage loss."""
 
 import collections
+import heapq
 import json
 import os
 from pathlib import Path
@@ -41,10 +42,23 @@ CASE_RESULT = re.compile(
     re.MULTILINE,
 )
 
+# XCTest and the Apple console can write concurrently without a newline. Only
+# recover complete Apple results after a typed console prefix, not arbitrary
+# embedded/quoted examples. Keep the original line-start formats unchanged.
+INTERLEAVED_CASE_RESULT = re.compile(
+    r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{1,9}[+-]\d{4} "
+    r"[^\s\[\]]+\[\d+:\d+\] \[[^\]\r\n]+\] [^'\"\r\n]*?"
+    + CASE_RESULT.pattern[1:]
+    + r" \([0-9]+(?:\.[0-9]+)? seconds\)\.\r?$",
+    re.MULTILINE,
+)
+
 
 def case_results(output):
     """Yield completed XCTest cases, retaining module identity when emitted."""
-    for match in CASE_RESULT.finditer(output):
+    interleaved = (match for match in INTERLEAVED_CASE_RESULT.finditer(output)
+                   if match.group("apple") and not any(char in match.group("apple_case") for char in "\r\n"))
+    for match in heapq.merge(CASE_RESULT.finditer(output), interleaved, key=lambda result: result.start()):
         yield {
             "module": match.group("apple_module") or match.group("portable_module"),
             "suite": match.group("apple") or match.group("portable"),

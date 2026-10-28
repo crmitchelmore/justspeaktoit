@@ -8,6 +8,7 @@
 #include <vector>
 #include <cwchar>
 #include <exception>
+#include <cstdio>
 
 namespace {
 constexpr UINT retirementMessage = WM_APP + 2;
@@ -606,7 +607,15 @@ void jsti_issue_report_cancel(JSTIIssueReport *report, const char *requestID) {
 }
 } // extern C
 
+static void jsti_smoke_stage(const char *stage) {
+    std::fputs("jsti-ui-smoke-stage: ", stderr);
+    std::fputs(stage, stderr);
+    std::fputc('\n', stderr);
+    std::fflush(stderr);
+}
+
 bool jsti_issue_report_self_test(std::string &error) {
+    jsti_smoke_stage("issue.self-test.enter");
     // No clipboard/browser/chooser side effects. These run inside the existing
     // owned synthetic --ui-smoke-test and exercise actual native owner helpers.
     auto state = std::make_shared<State>();
@@ -615,10 +624,12 @@ bool jsti_issue_report_self_test(std::string &error) {
     if (jsti_issue_report_present(&report, id, "Safe report", "Safe draft", "{}", "", "", 1, 0, 0) != 0) {
         error = "Issue report native presentation queue admission failed."; return false;
     }
+    jsti_smoke_stage("issue.creation.begin");
     if (!presentUI(state)) {
         state->retire(); retireUI(state);
         error = "Issue report native preview creation failed."; return false;
     }
+    jsti_smoke_stage("issue.creation.returned");
     if (!state->window || !IsWindow(state->window) || state->isRetired()) {
         state->retire(); retireUI(state);
         error = "Issue report native preview retired during initial presentation."; return false;
@@ -640,6 +651,7 @@ bool jsti_issue_report_self_test(std::string &error) {
         observed->event = event; observed->included = included; observed->ticket = ticket;
     };
     actionContext = &observed;
+    jsti_smoke_stage("issue.focus.begin");
     const HWND focusedWindow = state->window;
     for (int control : {draftText, jsonText}) {
         const HWND edit = GetDlgItem(focusedWindow, control);
@@ -648,6 +660,7 @@ bool jsti_issue_report_self_test(std::string &error) {
         SendMessageW(focusedWindow, WM_COMMAND, MAKEWPARAM(control, EN_UPDATE), reinterpret_cast<LPARAM>(edit));
     }
     actionCallback = originalCallback; actionContext = originalContext;
+    jsti_smoke_stage("issue.focus.returned");
     if (!IsWindow(focusedWindow) || state->window != focusedWindow || state->isRetired() || observed.event != 0) {
         state->retire(); retireUI(state);
         error = "Issue report edit notifications retired the active preview."; return false;
@@ -657,6 +670,7 @@ bool jsti_issue_report_self_test(std::string &error) {
         observed->event = event; observed->included = included; observed->ticket = ticket;
     };
     actionContext = &observed;
+    jsti_smoke_stage("issue.consent.begin");
     SendDlgItemMessageW(state->window, includeBox, BM_CLICK, 0, 0);
     actionCallback = originalCallback; actionContext = originalContext;
     if (observed.event != JSTI_EVENT_ISSUE_REPORT_INCLUDE || observed.included != 0 || observed.ticket != id) {
@@ -669,6 +683,7 @@ bool jsti_issue_report_self_test(std::string &error) {
         IsWindowEnabled(GetDlgItem(state->window, jsonText))) {
         state->retire(); retireUI(state); error = "Issue report pending removal exposed the old draft."; return false;
     }
+    jsti_smoke_stage("issue.consent.returned");
     // A real Save click must fence a fast Copy before any shared busy ack.
     // This callback only records the event; it never opens an OS chooser.
     if (jsti_issue_report_present(&report, id, "Safe report", "Removed draft", "{\"removed\":true}", "", "", 0, 0, 0) != 0 ||
@@ -696,6 +711,7 @@ bool jsti_issue_report_self_test(std::string &error) {
         IsWindowEnabled(GetDlgItem(state->window, includeBox)) || IsWindowEnabled(GetDlgItem(state->window, saveButton))) {
         state->retire(); retireUI(state); error = "Issue report removal/busy parity failed."; return false;
     }
+    jsti_smoke_stage("issue.save-copy.returned");
     const std::string oversized(65537, 'x');
     if (jsti_issue_report_present(&report, id, "Safe report", oversized.c_str(), "{}", "", "", 1, 0, 0) == 0 ||
         jsti_issue_report_present(&report, id, "\xff", "Safe draft", "{}", "", "", 1, 0, 0) == 0) {
@@ -705,6 +721,7 @@ bool jsti_issue_report_self_test(std::string &error) {
     auto callback = [](int32_t result, const char *, void *context) {
         auto *count = static_cast<Count *>(context); ++count->calls; count->result = result;
     };
+    jsti_smoke_stage("issue.cancel.begin");
     const char *requestID = "22222222-2222-4222-8222-222222222222";
     if (jsti_issue_report_choose(&report, requestID, "justspeaktoit-diagnostics.json", callback, &count) != 0) {
         state->retire(); retireUI(state); error = "Issue report chooser queue admission failed."; return false;
@@ -718,12 +735,14 @@ bool jsti_issue_report_self_test(std::string &error) {
     if (count.calls != 1 || count.result != 1 || request->pending() || !IsWindow(state->window)) {
         state->retire(); retireUI(state); error = "Issue report queued cancellation did not settle once."; return false;
     }
+    jsti_smoke_stage("issue.cancel.returned");
     Count copied;
     if (jsti_issue_report_copy(&report, requestID, "Removed draft", callback, &copied) != 0) {
         state->retire(); retireUI(state); error = "Issue report copy queue admission failed."; return false;
     }
     std::shared_ptr<Request> queuedCopy;
     { std::lock_guard<std::mutex> lock(state->mutex); queuedCopy = state->copyRequest; }
+    jsti_smoke_stage("issue.retire.begin");
     state->retire();
     copyUI(state, queuedCopy);
     if (copied.calls != 1 || copied.result != 1) {
@@ -738,10 +757,12 @@ bool jsti_issue_report_self_test(std::string &error) {
         retireUI(state); error = "Issue report retirement/once-only/origin validation failed."; return false;
     }
     retireUI(state);
+    jsti_smoke_stage("issue.retire.returned");
     // Standard cancellation and the real Close button still retire only their
     // own preview. Record the callback without touching the host controller.
     const HWND healthyOwner = ownerWindow;
     for (int command : {IDCANCEL, static_cast<int>(closeButton)}) {
+        jsti_smoke_stage(command == closeButton ? "issue.close-button.begin" : "issue.idcancel.begin");
         auto closing = std::make_shared<State>();
         JSTIIssueReport closingReport{closing};
         struct CloseObservation { int calls = 0, event = 0; std::string ticket; } closed;
@@ -767,6 +788,7 @@ bool jsti_issue_report_self_test(std::string &error) {
             error = "Issue report explicit close lost preview or host ownership."; return false;
         }
     }
+    jsti_smoke_stage("issue.explicit-closes.returned");
     // A distinct pending session proves loop shutdown settles an accepted
     // callback without dispatching it. Restore the owned smoke host afterwards.
     const HWND owner = ownerWindow;
@@ -777,10 +799,13 @@ bool jsti_issue_report_self_test(std::string &error) {
         jsti_issue_report_choose(&pending, requestID, "justspeaktoit-diagnostics.json", callback, &shutdown) != 0) {
         pending.state->retire(); error = "Issue report pending shutdown fixture failed."; return false;
     }
+    jsti_smoke_stage("issue.shutdown.begin");
     jsti_issue_report_shutdown();
+    jsti_smoke_stage("issue.shutdown.returned");
     const bool settled = shutdown.calls == 1 && shutdown.result == 1;
     if (!jsti_issue_report_attach(owner, savedCallback, savedContext) || !settled) {
         error = "Issue report loop shutdown did not settle queued ownership."; return false;
     }
+    jsti_smoke_stage("issue.self-test.returning");
     return true;
 }

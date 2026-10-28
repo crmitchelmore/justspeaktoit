@@ -4481,12 +4481,21 @@ static bool cleanupPreviewSelfTest(HWND window) {
     return okay;
 }
 
+static void jsti_smoke_stage(const char *stage) {
+    std::fputs("jsti-ui-smoke-stage: ", stderr);
+    std::fputs(stage, stderr);
+    std::fputc('\n', stderr);
+    std::fflush(stderr);
+}
+
 int jsti_window_self_test(char *error, size_t errorCapacity) {
+    jsti_smoke_stage("window.self-test.enter");
     HWND window;
     { std::lock_guard<std::mutex> lock(state.mutex); window = state.window; }
     if (!window || GetWindowThreadProcessId(window, nullptr) != GetCurrentThreadId()) {
         return jsti::fail("Window checks must run on the UI thread after READY.", error, errorCapacity);
     }
+    jsti_smoke_stage("window.escape.begin");
     std::string escapeFailure;
     if (!jsti::globalEscape::selfTest(window, escapeFailure)) {
         return jsti::fail(escapeFailure, error, errorCapacity);
@@ -4495,10 +4504,12 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         jsti_window_global_escape_is_current(0) != 0) {
         return jsti::fail("Global Escape configuration or invalid-token admission lost its guard.", error, errorCapacity);
     }
+    jsti_smoke_stage("window.troubleshooting.begin");
     if (!GetDlgItem(window, troubleshootingID) || !onPage(troubleshootingID, aboutPage) ||
         onPage(troubleshootingID, dashboardPage) || !jsti_troubleshooting_self_test(window))
         return jsti::fail("Troubleshooting entry, independent report state or stale-result checks failed.",
                           error, errorCapacity);
+    jsti_smoke_stage("window.troubleshooting.returned");
     const JSTIAboutLink lateAboutLink{"Late", "https://example.com/"};
     if (!onPage(configurationID, correctionsPage) || onPage(configurationID, pronunciationPage))
         return jsti::fail("Correction learning preferences lost their page scope.", error, errorCapacity);
@@ -4514,13 +4525,17 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             !onPage(aboutLinkBaseID + static_cast<int>(i), aboutPage))
             return jsti::fail("About link labels or page scope failed.", error, errorCapacity);
     }
+    jsti_smoke_stage("window.issue-helper.begin");
     { std::string failure;
       if (!jsti_issue_report_self_test(failure)) return jsti::fail(failure, error, errorCapacity); }
+    jsti_smoke_stage("window.issue-helper.returned");
+    jsti_smoke_stage("window.cleanup-sidebar.begin");
     if (!cleanupPreviewSelfTest(window))
         return jsti::fail("Cleanup preview bounds, coalescing, navigation or retirement failed.", error, errorCapacity);
     if (!sidebarStartupSelfTest())
         return jsti::fail("Sidebar pre-window retention, real control application or delivery ownership failed.",
                           error, errorCapacity);
+    jsti_smoke_stage("window.cleanup-sidebar.returned");
     const JSTISidebarShortcut unknownSidebar[] = {{"unknown-page", 1, "Ctrl+1"}};
     if (jsti_window_set_sidebar_shortcuts(unknownSidebar, 1, 1) != -1)
         return jsti::fail("An unrecognized sidebar destination was accepted.", error, errorCapacity);
@@ -5592,6 +5607,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             return static_cast<Event *>(context)->event == before;
         };
         auto observe = [](void *context) { return static_cast<Event *>(context)->event; };
+        jsti_smoke_stage("window.later-helpers.begin");
         return jsti_settings_self_test(window, failure) && jsti_profiles_self_test(window, failure) &&
             jsti_history_filters_self_test(window, failure) &&
             jsti_vocabulary_self_test(window, failure) &&
@@ -5607,6 +5623,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     bool passed = false;
     try { passed = check(); }
     catch (const std::exception &) { failure = "Window smoke test could not allocate its temporary state."; }
+    jsti_smoke_stage("window.later-check.returned");
     state.microphones = originalMicrophones;
     state.microphoneSelection = originalMicrophoneID;
     populateMicrophones(window);
@@ -5657,10 +5674,12 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         originalBounds.right - originalBounds.left, originalBounds.bottom - originalBounds.top,
         SWP_NOZORDER | SWP_NOACTIVATE);
     showPage(window, originalPage);
+    jsti_smoke_stage("window.final-helpers.begin");
     if (passed) passed = jsti::hud::selfTest(failure);
     if (passed) passed = jsti::appIcon::selfTest(window, failure);
     if (passed) passed = jsti::tray::selfTest(failure);
     if (passed) passed = shellSelfTest(failure);
+    jsti_smoke_stage("window.self-test.returning");
     return passed ? 0 : jsti::fail(failure, error, errorCapacity);
 }
 

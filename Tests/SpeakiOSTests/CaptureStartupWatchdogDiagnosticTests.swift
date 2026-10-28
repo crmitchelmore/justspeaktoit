@@ -5,6 +5,7 @@ import XCTest
 @testable import SpeakCore
 @testable import SpeakiOSLib
 
+@available(iOS 18, *)
 @MainActor
 final class CaptureStartupWatchdogDiagnosticTests: XCTestCase {
     func testRealWatchdogTickPreservesTimeoutThroughCancelledSessionAndIntentJournal() async throws {
@@ -91,7 +92,7 @@ final class CaptureStartupWatchdogDiagnosticTests: XCTestCase {
         guard await self.completed(run.session.entered, timeout: 2) else { return }
         // Only this fixture's existing monitor seam has an immediate no-input bound.
         // The actual one-second service tick and typed trip/cancellation path run unchanged.
-        run.service.watchdog = CaptureWatchdogMonitor(budget: CaptureWatchdogBudget(firstInputDeadline: 0))
+        run.service.watchdog = CaptureWatchdogMonitor(CaptureWatchdogBudget(firstInputDeadline: 0))
         run.session.onStartupObservation?(.stage(.engineStarted))
         guard await self.completed(run.done, timeout: 4) else { return }
         XCTAssertTrue(run.error is CancellationError)
@@ -107,6 +108,7 @@ final class CaptureStartupWatchdogDiagnosticTests: XCTestCase {
     }
 }
 
+@available(iOS 18, *)
 @MainActor
 private final class StartupDiagnosticRun {
     let harness: DependencyHarness

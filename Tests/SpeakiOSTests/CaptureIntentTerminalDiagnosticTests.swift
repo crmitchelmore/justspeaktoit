@@ -4,6 +4,7 @@ import XCTest
 @testable import SpeakCore
 @testable import SpeakiOSLib
 
+@available(iOS 18, *)
 @MainActor
 final class CaptureIntentTerminalDiagnosticTests: XCTestCase {
     func testActualFailedAdmissionsKeepDistinctCodesWithoutPersistingPrivateErrors() async throws {

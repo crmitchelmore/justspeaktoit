@@ -206,7 +206,7 @@ final class PostDiagnosticClient: StreamingChatLLMClient {
                            temperature: Double) -> AsyncThrowingStream<String, Error> {
         self.lock.withLock { self.recordedStreamCalls.append(.init(model: model, temperature: temperature)) }
         return AsyncThrowingStream { continuation in
-            let completion = self.lock.withLock {
+            let completion = self.lock.withLock { () -> Result<Void, Error>? in
                 if let completion = self.completion { return completion }
                 self.continuation = continuation
                 return nil as Result<Void, Error>?
@@ -229,7 +229,7 @@ final class PostDiagnosticClient: StreamingChatLLMClient {
         // Intentionally no cancellation handler: this owned client can ignore
         // cancellation until explicit release, including release-before-arrival.
         return try await withCheckedThrowingContinuation { continuation in
-            let completed = self.lock.withLock {
+            let completed = self.lock.withLock { () -> Result<ChatResponse, Error>? in
                 if let completed = self.chatCompletion { return completed }
                 self.chatContinuation = continuation
                 return nil as Result<ChatResponse, Error>?

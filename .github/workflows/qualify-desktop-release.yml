@@ -1,0 +1,27 @@
+name: Qualify desktop release source
+on:
+  workflow_call:
+    inputs:
+      manifest:
+        description: Immutable Alpha or Stable candidate manifest tag
+        required: true
+        type: string
+permissions:
+  contents: write
+  actions: write
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 250
+    concurrency:
+      group: desktop-release-${{ inputs.manifest }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Build and qualify Windows x64, Windows ARM64 and Linux at the manifest source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MANIFEST: ${{ inputs.manifest }}
+        run: node scripts/qualify-desktop-release.mjs "$MANIFEST"

@@ -16,7 +16,7 @@ on:
         type: string
 permissions:
   contents: write
-  actions: read
+  actions: write
 jobs:
   prepare:
     if: github.actor == github.repository_owner && github.ref == 'refs/heads/main'
@@ -56,3 +56,9 @@ jobs:
     with:
       manifest: ${{ needs.prepare.outputs.tag }}
     secrets: inherit
+  desktop-qualification:
+    needs: prepare
+    if: needs.prepare.outputs.tag != ''
+    uses: ./.github/workflows/qualify-desktop-release.yml
+    with:
+      manifest: ${{ needs.prepare.outputs.tag }}

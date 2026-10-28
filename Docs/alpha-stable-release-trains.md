@@ -210,3 +210,30 @@ disabled is the commissioning exception; Stable publication remains owner-only.
 Required Alpha signing secrets are selected in the reusable Apple workflows.
 No signing material belongs in source control. Use the existing secure API key
 and local Apple Developer authentication for provisioning.
+
+## Windows and Linux release qualification
+
+New Alpha and Stable candidate manifests carry `desktopQualification: 1`.
+Both controllers run `qualify-desktop-release.yml`, which dispatches the existing
+Windows x64, Windows ARM64, Mac-to-Windows bundle/MSIX, Linux GTK and Linux
+Flatpak workflows at the immutable manifest tag. This preserves their native
+execution, packaging and installed-runtime checks. Each run checks out the same
+source as the Apple builds, including its pinned runtime dependencies.
+
+The controller records exact workflow run IDs, source, tag and build in
+`desktop-qualification.json` only after every workflow succeeds. Publish Stable
+requires that matching receipt for new manifests. Existing frozen manifests are
+unchanged. These builds remain CI developer artifacts; qualification does not
+publish installers or establish signing, physical-device acceptance, update
+channels, feature parity or separate Alpha/Stable Windows and Linux identities.
+No separate public Windows/Linux version inputs are introduced yet: the
+immutable manifest tag and build identify the developer qualification source.
+Public platform versions and download links belong with those distribution
+contracts, rather than being inferred from Apple's marketing versions.
+
+If Prepare Stable reports an unverified Apple Alpha receipt, run **Reconcile
+Apple release delivery** and inspect the updated receipt. `BETA_APPROVED` alone
+is not the `IN_BETA_TESTING` or `READY_FOR_BETA_TESTING` state required by the
+existing public-beta gate. Retry Prepare Stable after verification; do not edit
+the receipt or bypass the gate. A new Alpha/Stable workflow definition takes
+effect after merge; it does not modify a candidate already being prepared.

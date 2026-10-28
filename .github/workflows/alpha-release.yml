@@ -82,3 +82,9 @@ jobs:
     with:
       manifest: ${{ needs.allocate.outputs.tag }}
     secrets: inherit
+  desktop-qualification:
+    needs: allocate
+    if: needs.allocate.outputs.tag != ''
+    uses: ./.github/workflows/qualify-desktop-release.yml
+    with:
+      manifest: ${{ needs.allocate.outputs.tag }}

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
+import { validateDesktopReceipt } from './desktop-release-lib.mjs';
 import { runReleaseCommand } from './release-command.mjs';
 import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -72,7 +73,12 @@ if(command === 'allocate' || command === 'prepare') {
             const asset=release?.assets.find(a=>a.name===`${surface}-receipt.json`);
             if(!asset) throw Error(`Selected Alpha has no delivery receipt: ${surface}`);
             const receipt=JSON.parse(gh('api',`repos/${repo}/releases/assets/${asset.id}`,'-H','Accept: application/octet-stream'));
-            if(receipt.status !== 'verified' || receipt.source !== alpha.source || receipt.build !== alpha.surfaces[surface].build || receipt.notesHash !== alpha.surfaces[surface].notesHash) throw Error(`Selected Alpha is not verified: ${surface}`);
+            if(receipt.status !== 'verified' || receipt.source !== alpha.source || receipt.build !== alpha.surfaces[surface].build || receipt.notesHash !== alpha.surfaces[surface].notesHash) throw Error(`Selected Alpha is not verified: ${surface} (status: ${receipt.status}). Run Reconcile Apple release delivery and retry once the receipt is verified.`);
+        }
+        if (alpha.desktopQualification === 1) {
+            const asset = release?.assets.find(a => a.name === 'desktop-qualification.json');
+            if (!asset) throw Error('Selected Alpha has no desktop qualification receipt');
+            validateDesktopReceipt(alpha, JSON.parse(gh('api', `repos/${repo}/releases/assets/${asset.id}`, '-H', 'Accept: application/octet-stream')));
         }
     }
     const tagNames=git('tag','--list',train === 'alpha'?'alpha-build-*':'stable-candidate-*').split('\n').filter(Boolean);
@@ -90,7 +96,7 @@ if(command === 'allocate' || command === 'prepare') {
     const config=json('Config/ReleasePipeline.json');
     const versions=train === 'alpha' ? config.versions : {mac:required('mac-version'),ios:required('ios-version')};
     const manifest={schema:1,train,tag,source,...allocation,createdAt:new Date().toISOString(),ci:proof,
-        selectedAlpha:alpha?.tag ?? null,toolchain:'Xcode 26.2',dependenciesHash:digest(git('show',`${source}:Package.resolved`)),surfaces:{}};
+        desktopQualification:1,selectedAlpha:alpha?.tag ?? null,toolchain:'Xcode 26.2',dependenciesHash:digest(git('show',`${source}:Package.resolved`)),surfaces:{}};
     for(const surface of surfaces) {
         const platform=surface === 'ios'?'ios':'mac';
         const base=train === 'alpha' ? git('rev-parse', `${source}^1`) : baseline(all,surface);
@@ -202,6 +208,7 @@ if(command === 'allocate' || command === 'prepare') {
             if(digest(readFileSync(join(directory,asset))) !== hash) throw Error(`Candidate asset changed: ${asset}`);
         }
     }
+    if (manifest.desktopQualification === 1) validateDesktopReceipt(manifest, json(join(directory, 'desktop-qualification.json')));
     const direct=json(join(directory,'mac-direct-receipt.json'));
     if(Object.keys(direct.assets).length !== 8) throw Error('Direct Mac candidate must have both DMGs, feeds and signed CLI');
     const tag=`mac-v${manifest.surfaces['mac-direct'].version}`;

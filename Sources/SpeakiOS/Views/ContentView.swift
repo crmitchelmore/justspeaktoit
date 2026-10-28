@@ -849,6 +849,7 @@ public struct ContentView: View {
     @StateObject private var handsFree: IOSHandsFreeDictationCoordinator
     @ObservedObject private var settings = AppSettings.shared
     @State private var showingError = false
+    @State private var issueReport: IOSIssueReportController?
     @State private var errorMessage = ""
     @State private var startFailureRecovery: CaptureStartFailureRecovery?
     @State private var recoveryDestination: CaptureStartFailureRecovery?
@@ -1121,6 +1122,10 @@ public struct ContentView: View {
                     Button(recovery.buttonTitle) { self.performStartFailureRecovery(recovery) }
                         .accessibilityIdentifier("captureStartRecoveryButton")
                 }
+                Button("Create Issue with Details…") {
+                    self.issueReport = IOSIssueReportController(snapshot: IOSIssueReporter.failedRequest())
+                    self.startFailureRecovery = nil
+                }
                 Button("OK", role: .cancel) { self.startFailureRecovery = nil }
             } message: {
                 Text(errorMessage)
@@ -1220,6 +1225,7 @@ public struct ContentView: View {
                     displayText = processedResult
                 }
             }
+            .sheet(item: $issueReport) { IOSIssueReportPreview(controller: $0) }
             // Swiping the sheet away counts as finishing it, so first run is
             // offered exactly once and never nags. Auto-start is considered on
             // the way out, so enabling it before onboarding still takes effect

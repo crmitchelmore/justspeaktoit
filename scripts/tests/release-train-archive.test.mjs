@@ -20,6 +20,11 @@ test('archive verifier accepts duplicate extension resources and rejects Stable 
  writeFileSync(join(root,'codesign'),'#!/usr/bin/env python3\nimport sys,pathlib\nsys.stdout.buffer.write((pathlib.Path(sys.argv[-1])/"signed.plist").read_bytes())\n');chmodSync(join(root,'codesign'),0o755);
  const verify=()=>execFileSync('python3',['scripts/verify-release-train-archive.py',app,manifest,'ios'],{env:{...process.env,PATH:root+':'+process.env.PATH},stdio:'pipe'});
  assert.match(verify().toString(),/Verified ios alpha/);
+ for(const [key,value] of [['NSLocalNetworkUsageDescription','Internal OpenClaw gateway'],['NSBonjourServices',['_jsti._tcp']]]){
+  plist(join(app,'Info.plist'),{...info,[key]:value});
+  assert.throws(verify,error=>error.stderr.toString().includes('unavailable local-network feature'));
+ }
+ plist(join(app,'Info.plist'),info);assert.match(verify().toString(),/Verified ios alpha/);
  plist(join(app,'signed.plist'),{...entitlements,'com.apple.developer.ubiquity-kvstore-identifier':'TEAM.com.justspeaktoit.ios'});
  assert.throws(verify,error=>error.stderr.toString().includes('wrong iCloud key-value store'));
  plist(join(app,'signed.plist'),entitlements);catalogue.entries[0].markdown='Changed';writeFileSync(join(ext,'ReleaseNotes.json'),JSON.stringify(catalogue));

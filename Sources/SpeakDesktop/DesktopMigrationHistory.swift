@@ -72,7 +72,7 @@ public enum DesktopMigrationHistory {
             object = try initialValue(record)
         }
         object["id"] = .string(record.id.uuidString)
-        object["createdAt"] = .string(ISO8601DateFormatter().string(from: record.createdAt))
+        object["createdAt"] = try DataMigrationCoding.value(record.createdAt).storage
         object["recordingDuration"] = .double(record.recordingDuration ?? 0)
         object["rawTranscription"] = record.originalText.map(AnyCodable.JSONValue.string)
         object["postProcessedTranscription"] = record.processedText.map(AnyCodable.JSONValue.string)

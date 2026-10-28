@@ -960,6 +960,19 @@ def project_debugger(data, completed=True, *, completion_class="unknown"):
     return {"status": "observed", "exceptionCode": lines[first].split()[1], "frames": frames}
 
 
+def pre_ready_process_facts(code, data):
+    """Closed exit-value facts, never a claim about why the debugger exited."""
+    if type(code) is not int or not -(1 << 31) <= code <= (1 << 32) - 1 or not isinstance(data, bytes) or len(data) > 65536:
+        return None
+    # Microsoft MS-ERREF defines these exact NTSTATUS values. ExitProcess/main
+    # can also return them, so their names classify the value, not its cause:
+    # https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-erref/596a1078-e883-4972-9bbc-49e60bebca55
+    known = {0: "zero", 0xC0000135: "dllNotFoundStatus", 0xC000007B: "invalidImageFormatStatus",
+             0xC0000139: "entryPointNotFoundStatus"}
+    return {"exitStatusClass": known.get(code & 0xFFFFFFFF, "otherNonzero"),
+            "outputClass": "nonempty" if data else "empty"}
+
+
 def cdb_commands():
     lines = []
     for code in CRASH_CODES.values():
@@ -1044,6 +1057,11 @@ def standalone_diagnostic(encoded, api_factory=StandaloneWindows, identity=diagn
             completion = "zero" if type(code) is int and code == 0 else "nonzero" if type(code) is int else "unknown"
             result["debugger"] = project_debugger(observed["output"], observed["exitCode"] == 0,
                                                   completion_class=completion)
+            refusal = result["debugger"].get("refusalFacts")
+            if refusal is not None and refusal["reason"] == "ready-marker-count" and refusal["counts"]["ready"] == 0:
+                process_facts = pre_ready_process_facts(code, observed["output"])
+                if process_facts is not None:
+                    refusal["processFacts"] = process_facts
             result["status"] = result["debugger"]["status"]
             if result["applicationError"]["status"] == "observed" and result["status"] == "no-reproduction":
                 result["status"] = "observed"

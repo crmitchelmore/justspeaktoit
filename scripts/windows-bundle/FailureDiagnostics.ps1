@@ -399,7 +399,7 @@ function ConvertTo-JstiDiagnosticProjection($Value) {
             $facts = $debugger.refusalFacts
             $factNames = if ($facts -is [System.Collections.IDictionary]) { @($facts.Keys) } else { @($facts.PSObject.Properties.Name) }
             $required = @('reason', 'completionClass', 'counts')
-            if ($factNames.Count -ne 3) { throw 'unavailable' }
+            if ($factNames.Count -ne 3 -and ($factNames.Count -ne 4 -or $factNames -cnotcontains 'processFacts')) { throw 'unavailable' }
             foreach ($name in $required) { if ($factNames -cnotcontains $name) { throw 'unavailable' } }
             $reasons = @('ready-marker-count', 'fault-boundary', 'fault-code-order', 'section-boundary',
                 'ip-count', 'module-range', 'stack-row-order', 'stack-row-count', 'frame-range', 'frame-count')
@@ -418,6 +418,25 @@ function ConvertTo-JstiDiagnosticProjection($Value) {
             }
             $safe.debugger.refusalFacts = [ordered]@{ reason = $facts.reason
                 completionClass = $facts.completionClass; counts = $safeCounts }
+            if ($factNames -ccontains 'processFacts') {
+                $process = $facts.processFacts
+                $processNames = if ($process -is [System.Collections.IDictionary]) { @($process.Keys) } else { @($process.PSObject.Properties.Name) }
+                if ($processNames.Count -ne 2 -or $processNames -cnotcontains 'exitStatusClass' -or
+                        $processNames -cnotcontains 'outputClass' -or $facts.reason -cne 'ready-marker-count' -or
+                        $safeCounts.ready -ne 0 -or $process.exitStatusClass -isnot [string] -or
+                        $process.exitStatusClass -cnotin @('zero', 'dllNotFoundStatus', 'invalidImageFormatStatus',
+                            'entryPointNotFoundStatus', 'otherNonzero') -or
+                        $process.outputClass -isnot [string] -or $process.outputClass -cnotin @('empty', 'nonempty')) { throw 'unavailable' }
+                if ($process.outputClass -ceq 'empty') {
+                    foreach ($name in $requiredCounts) {
+                        if ($safeCounts[$name] -ne 0) { throw 'unavailable' }
+                    }
+                }
+                $expectedCompletion = if ($process.exitStatusClass -ceq 'zero') { 'zero' } else { 'nonzero' }
+                if ($facts.completionClass -cne $expectedCompletion) { throw 'unavailable' }
+                $safe.debugger.refusalFacts.processFacts = [ordered]@{
+                    exitStatusClass = $process.exitStatusClass; outputClass = $process.outputClass }
+            }
         }
         if ($null -ne $debugger.exceptionCode) {
             if ($debugger.exceptionCode -isnot [string] -or

@@ -710,5 +710,25 @@ try {
     [IO.Directory]::Delete($publicationRoot, $true)
 }
 
+# Optional process facts remain a closed projection of an existing completed
+# collector. Numeric status classes do not establish a loader failure cause.
+$processValue = $parserBaseline | ConvertFrom-Json -Depth 8
+$processValue.debugger.refusalFacts.counts = [pscustomobject]@{
+    ready = 0; fault = 0; end = 0; modules = 0; stack = 0; ip = 0; moduleRanges = 0; stackRows = 0 }
+$processValue.debugger.refusalFacts | Add-Member -NotePropertyName processFacts -NotePropertyValue ([pscustomobject]@{
+    exitStatusClass = 'dllNotFoundStatus'; outputClass = 'empty' })
+$processProjection = ConvertTo-JstiDiagnosticProjection $processValue
+Assert-That ($processProjection.debugger.refusalFacts.processFacts.exitStatusClass -ceq 'dllNotFoundStatus' -and
+    $processProjection.debugger.refusalFacts.processFacts.outputClass -ceq 'empty') 'closed-process-facts-projected'
+foreach ($mode in @('fresh', 'streams', 'bootstrap', 'child-cleanup', 'cutoff')) {
+    $projection = ConvertTo-JstiDiagnosticProjection $processValue
+    $outcome = @{ bootstrap = @{ cleanup = $(if ($mode -ceq 'bootstrap') { 'incomplete' } else { 'complete' }) }
+        diagnostic = $projection }
+    if ($mode -ceq 'child-cleanup') { $outcome.diagnostic.cleanup = 'failed' }
+    Remove-JstiStaleRefusalFacts $outcome ($mode -cne 'streams') $(if ($mode -ceq 'cutoff') { 30 } else { 10 }) 30
+    Assert-That ($outcome.diagnostic.debugger.Contains('refusalFacts') -eq ($mode -ceq 'fresh')) 'process-facts-retire-with-entire-refusal'
+    Assert-That ($outcome.diagnostic.status -ceq 'invalid') 'process-facts-retirement-does-not-change-verdict'
+}
+
 Assert-That (-not ('JstiDiagnosticNative' -as [type])) 'pure-fakes-did-not-compile-or-load-native-type'
 Write-Output 'Diagnostic bootstrap pure-fake checks passed.'

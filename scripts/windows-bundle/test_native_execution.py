@@ -907,6 +907,127 @@ foreach ($encodedValue in $values) {
         self.assertNotIn(b"PRIVATE", completed.stdout + completed.stderr)
         self.assertLessEqual(len(rows[0].encode("utf-8")), 8192)
 
+    def test_completed_pre_ready_collector_classifies_exact_exit_values_without_replaying(self):
+        cases = [(0, "zero"), (42, "otherNonzero"), (-2147483648, "otherNonzero"), (4294967295, "otherNonzero")]
+        for code, label in ((0xC0000135, "dllNotFoundStatus"), (0xC000007B, "invalidImageFormatStatus"),
+                            (0xC0000139, "entryPointNotFoundStatus")):
+            cases.extend(((code, label), (code - (1 << 32), label)))
+        for code, label in cases:
+            for output in (b"", b"PRIVATE_OUTPUT_CANARY\xff"):
+                with self.subTest(code=code, empty=not output):
+                    calls = []
+                    def runner(argv, environment, directory, budget, seconds, **kwargs):
+                        calls.append(argv)
+                        if argv[0] != NATIVE.CDB_LOCATION:
+                            return dict(status="complete", cleanup="clean", exitCode=0, output=b'{"status":"unavailable"}')
+                        self.assertEqual(argv[1:8], ["-hd", "-G", "-sins", "-noshell", "-nosqm", "-netsyms:no", "-cf"])
+                        self.assertEqual(pathlib.Path(argv[8]).read_text(encoding="ascii"), NATIVE.cdb_commands())
+                        self.assertEqual(argv[-2:], [self.request()["executable"], "--ui-smoke-test"])
+                        self.assertEqual(seconds, 18)
+                        return dict(status="complete", cleanup="clean", exitCode=code, output=output)
+                    result = self.operate(runner=runner)
+                    self.assertEqual([call[0] for call in calls], [self.request()["powershell"], NATIVE.CDB_LOCATION])
+                    self.assertEqual((result["status"], result["cleanup"]), ("invalid", "clean"))
+                    facts = result["debugger"]["refusalFacts"]
+                    self.assertEqual(facts.pop("processFacts"), {"exitStatusClass": label,
+                                                               "outputClass": "nonempty" if output else "empty"})
+                    expected = NATIVE.project_debugger(output, code == 0, completion_class="zero" if code == 0 else "nonzero")
+                    self.assertEqual(result["debugger"], expected)
+                    self.assertNotIn("PRIVATE", json.dumps(result))
+
+    def test_pre_ready_process_facts_omit_non_integer_or_out_of_range_status(self):
+        for code in (None, True, False, 0.0, 3221225781.0, "3221225781", -(1 << 31) - 1, 1 << 32):
+            with self.subTest(kind=type(code).__name__):
+                def runner(argv, *args, **kwargs):
+                    return dict(status="complete", cleanup="clean", exitCode=code,
+                                output=b"PRIVATE_CANARY" if argv[0] == NATIVE.CDB_LOCATION else b'{"status":"unavailable"}')
+                result = self.operate(runner=runner)
+                self.assertEqual(result["status"], "invalid")
+                self.assertNotIn("processFacts", result["debugger"]["refusalFacts"])
+                self.assertNotIn("PRIVATE", json.dumps(result))
+
+    def test_process_facts_are_absent_after_ready_or_incomplete_or_failed_collector(self):
+        cases = [("complete", "clean", b"JSTI_DIAG_READY\n"),
+                 ("complete", "clean", b"JSTI_DIAG_READY\nJSTI_DIAG_READY\n"),
+                 ("complete", "clean", self.fixture().replace(b"JSTI_DIAG_END", b"")),
+                 ("complete", "clean", b"x" * 65537), ("deadline", "clean", b""),
+                 ("truncated", "clean", b""), ("complete", "failed", b"")]
+        expected = ("no-reproduction", "invalid", "invalid", "truncated", "deadline", "truncated", "unavailable")
+        for (status, cleanup, output), expected_status in zip(cases, expected):
+            calls = []
+            def runner(argv, *args, **kwargs):
+                calls.append(argv[0])
+                if argv[0] != NATIVE.CDB_LOCATION:
+                    return dict(status="complete", cleanup="clean", exitCode=0, output=b'{"status":"unavailable"}')
+                return dict(status=status, cleanup=cleanup, exitCode=0, output=output)
+            result = self.operate(runner=runner)
+            self.assertEqual(result["status"], expected_status)
+            self.assertEqual(calls, [self.request()["powershell"], NATIVE.CDB_LOCATION])
+            self.assertNotIn("processFacts", result["debugger"].get("refusalFacts", {}))
+
+    def test_actual_pre_ready_process_facts_roundtrip_and_fail_closed_at_powershell_boundary(self):
+        host = shutil.which("pwsh")
+        if host is None:
+            self.skipTest("PowerShell unavailable: actual process-facts boundary not executed")
+        accepted = []
+        for code in (0, 42, 0xC0000135, -1073741701, 0xC0000139):
+            for output in (b"", b"PRIVATE_CANARY"):
+                def runner(argv, *args, **kwargs):
+                    return dict(status="complete", cleanup="clean", exitCode=code if argv[0] == NATIVE.CDB_LOCATION else 0,
+                                output=output if argv[0] == NATIVE.CDB_LOCATION else b'{"status":"unavailable"}')
+                accepted.append(self.operate(runner=runner))
+        values = list(accepted)
+        def changed(change):
+            value = json.loads(json.dumps(accepted[-1]))
+            change(value)
+            values.append(value)
+        for key in ("exitStatusClass", "outputClass"):
+            for invalid in (None, True, False, 1, -1, 1.5, [], {}, "PRIVATE_CANARY", "nonempty\n", "ZERO"):
+                changed(lambda v, key=key, invalid=invalid: v["debugger"]["refusalFacts"]["processFacts"].update({key: invalid}))
+            changed(lambda v, key=key: v["debugger"]["refusalFacts"]["processFacts"].pop(key))
+        for invalid in (None, True, [], "PRIVATE_CANARY"):
+            changed(lambda v, invalid=invalid: v["debugger"]["refusalFacts"].update(processFacts=invalid))
+        changed(lambda v: v["debugger"]["refusalFacts"]["processFacts"].update(schema=1))
+        changed(lambda v: v["debugger"]["refusalFacts"]["processFacts"].update(OutputClass="nonempty"))
+        changed(lambda v: v["debugger"]["refusalFacts"].update(ProcessFacts={}))
+        changed(lambda v: v["debugger"]["refusalFacts"].update(completionClass="zero"))
+        changed(lambda v: v["debugger"]["refusalFacts"]["processFacts"].update(exitStatusClass="zero"))
+        changed(lambda v: v["debugger"]["refusalFacts"].update(reason="fault-boundary"))
+        changed(lambda v: v["debugger"]["refusalFacts"]["counts"].update(ready=1))
+        for field in ("fault", "end", "modules", "stack", "ip", "moduleRanges", "stackRows"):
+            for count in (1, 17):
+                def impossible_empty(value, field=field, count=count):
+                    value["debugger"]["refusalFacts"]["processFacts"]["outputClass"] = "empty"
+                    value["debugger"]["refusalFacts"]["counts"][field] = count
+                changed(impossible_empty)
+        changed(lambda v: v.update(schema=True))
+        script = """
+$ErrorActionPreference='Stop'
+. $env:JSTI_PROJECTOR
+foreach ($encoded in ([Console]::In.ReadToEnd() | ConvertFrom-Json -Depth 8)) {
+    try { ConvertTo-JstiDiagnosticProjection ($encoded | ConvertFrom-Json -Depth 8) | ConvertTo-Json -Depth 8 -Compress }
+    catch { [Console]::WriteLine('refused') }
+}
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            environment = {key: val for key, val in os.environ.items()
+                           if key.upper() in {"PATH", "SYSTEMROOT", "WINDIR", "HOME"}}
+            environment.update(TEMP=directory, TMP=directory, TMPDIR=directory,
+                               JSTI_PROJECTOR=str(HERE / "FailureDiagnostics.ps1"))
+            completed = subprocess.run([os.path.abspath(host), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
+                                       input=json.dumps([json.dumps(v) for v in values]).encode("utf-8"), env=environment,
+                                       cwd=directory, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15, check=False)
+        self.assertEqual(completed.returncode, 0, "actual pure process-facts projection failed")
+        self.assertEqual(completed.stderr, b"")
+        rows = completed.stdout.decode("utf-8").splitlines()
+        expected = json.loads(json.dumps(accepted))
+        for value in expected:
+            value["debugger"].pop("exceptionCode")
+        self.assertEqual([json.loads(row) for row in rows[:len(accepted)]], expected)
+        self.assertEqual(rows[len(accepted):], ["refused"] * (len(values) - len(accepted)))
+        self.assertNotIn(b"PRIVATE", completed.stdout + completed.stderr)
+        self.assertTrue(all(len(row.encode("utf-8")) <= 8192 for row in rows))
+
     def test_actual_identity_checks_hash_pe_alias_version_and_between_read_change(self):
         budget = types.SimpleNamespace(remaining=lambda: 20)
         with tempfile.TemporaryDirectory() as directory:

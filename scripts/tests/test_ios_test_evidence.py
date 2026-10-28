@@ -38,6 +38,40 @@ def interleaved_completion(suite, method="testResult", status="passed", target="
 
 
 class IOSCoverageTests(unittest.TestCase):
+    def test_module_splice_recovers_exact_target_and_deduplicates_mixed_replay(self):
+        console = "2026-10-28 02:58:13.934192+0000 JustSpeakToIt[6608:33822] [api] Updating content"
+        ordinary = completion("TranscriptionRecordingServiceTextTests", "testStopWhenNotRunningReturnsEmptyNoOpResult")
+        for newline in ("\n", "\r\n"):
+            with self.subTest(newline=newline):
+                spliced = ordinary.replace("SpeakiOSTests", f"Spe{console}{newline}akiOSTests")
+                baseline = gate.summarize(passing_log() + ordinary, "success")
+                self.assertEqual(gate.summarize(passing_log() + spliced, "success"), baseline)
+                self.assertEqual(gate.summarize(passing_log() + spliced + ordinary + spliced, "success"), baseline)
+
+    def test_module_splice_failure_skip_and_failed_command_still_reject(self):
+        console = "2026-10-28 02:58:13.934192+0000 JustSpeakToIt[6608:33822] [api] Updating content"
+        for status in ("failed", "skipped"):
+            with self.subTest(status=status):
+                ordinary = completion("OpenRouterAudioSettingsTests", "testSelection", status)
+                spliced = ordinary.replace("SpeakiOSTests", f"Spe{console}\nakiOSTests")
+                result = gate.summarize(spliced + passing_log(), "success")
+                self.assertEqual(result["unique_cases"], 5)
+                self.assertEqual(result["counts"][status], 1)
+                self.assertTrue(result["errors"])
+        recovered = completion("AnotherSuite").replace("SpeakiOSTests", f"Spe{console}\nakiOSTests")
+        self.assertTrue(gate.summarize(passing_log() + recovered, "failure")["errors"])
+
+    def test_module_splice_cannot_supply_coverage_from_foreign_or_incomplete_identity(self):
+        console = "2026-10-28 02:58:13.934192+0000 JustSpeakToIt[6608:33822] [api] Updating content"
+        ordinary = completion("OpenRouterAudioSettingsTests")
+        for replacement in (f"Oth{console}\nerTests", f"Spe{console}\nakiOSUITests",
+                            f"Spe{console}\nakiOSTests\nextra", f"Spe{console}\nakiOSTests\rextra",
+                            "Spe arbitrary output\nakiOSTests", f"Spe{console}\n\nakiOSTests"):
+            with self.subTest(replacement=replacement):
+                result = gate.summarize(ordinary.replace("SpeakiOSTests", replacement), "success")
+                self.assertEqual(result["targets"]["SpeakiOSTests"]["unique_cases"], 0)
+                self.assertTrue(result["errors"])
+
     def test_spliced_results_preserve_target_and_deduplicate_normal_replay(self):
         console = "2026-10-28 00:56:23.431664+0000 JustSpeakToIt[7390:29376] [api] Updating content"
         ordinary = completion("InterruptionFinalisationTests", "testEmptyInterruption_keepsClipboardAndDoesNotInventText")

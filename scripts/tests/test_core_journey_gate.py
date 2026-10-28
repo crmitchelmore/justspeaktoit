@@ -20,6 +20,63 @@ SPEC.loader.exec_module(gate)
 
 
 class CoverageTests(unittest.TestCase):
+    def test_module_token_splice_preserves_status_identity_and_mixed_order(self):
+        console = "2026-10-28 02:58:13.934192+0000 JustSpeakToIt[6608:33822] [api] Updating content"
+        for newline in ("\n", "\r\n"):
+            with self.subTest(newline=newline):
+                output = "Test Case '-[Module.Required testBefore]' passed (0.001 seconds).\n"
+                output += "".join(
+                    f"Test Case '-[Mod{console}{newline}ule.Required test{status}]' "
+                    f"{status} (0.001 seconds).{newline}" for status in ("passed", "failed", "skipped")
+                )
+                output += "Test Case 'Module.Required.testAfter' passed (0.001 seconds).\n"
+                self.assertEqual(list(gate.case_results(output)), [
+                    {"module": "Module", "suite": "Required", "case": method, "status": status}
+                    for method, status in (("testBefore", "passed"), ("testpassed", "passed"),
+                                           ("testfailed", "failed"), ("testskipped", "skipped"),
+                                           ("testAfter", "passed"))
+                ])
+                errors, counts = gate.coverage_errors(output, ["Required"])
+                self.assertTrue(errors)
+                self.assertEqual(dict(counts["Required"]), {"passed": 3, "failed": 1, "skipped": 1})
+
+    def test_module_token_splice_requires_typed_single_physical_console_record(self):
+        console = "2026-10-28 02:58:13.934192+0000 JustSpeakToIt[6608:33822] [api] Updating content"
+        valid = f"Test Case '-[Mod{console}\nule.Required testResult]' passed (0.001 seconds).\n"
+        invalid = (
+            valid.replace(console, "arbitrary-output"),
+            valid.replace(console, "2026-10-28 not a typed console record"),
+            valid.replace("[6608:33822]", "[not:a-thread]"),
+            valid.replace(console, console + ' "quoted example"'),
+            valid.replace("\nule.", "\nextra line\nule."),
+            valid.replace("\nule.", "\rule."),
+            valid.replace("-[Mod", "-["),
+            valid.replace("\nule.", "\n."),
+            valid.replace("Test Case", "example: Test Case"),
+            valid.replace("testResult]", "testResult\nincomplete]"),
+            valid.replace("testResult]", "testResult\rincomplete]"),
+            valid.replace("(0.001 seconds).", ""),
+            valid.replace("(0.001 seconds).", "(0.001 seconds). trailing text"),
+            valid.replace("' passed", "' started"),
+        )
+        for output in invalid:
+            with self.subTest(output=output):
+                self.assertEqual(list(gate.case_results(output)), [])
+                self.assertTrue(gate.coverage_errors(output, ["Required"])[0])
+        # The unchanged legacy regex can parse this as an unrelated unqualified
+        # suite. It must never gain the reconstructed module/required identity.
+        arbitrary = valid.replace(console, "arbitrary output")
+        self.assertEqual(list(gate.MODULE_SPLICED_CASE_RESULT.finditer(arbitrary)), [])
+        self.assertTrue(gate.coverage_errors(arbitrary, ["Required"])[0])
+
+    def test_module_splice_does_not_recover_suite_heading_or_wrong_required_suite(self):
+        console = "2026-10-28 02:58:13.934192+0000 JustSpeakToIt[6608:33822] [api] Updating content"
+        for output in (f"Test Suite 'Mod{console}\nule.Required' passed (0.001 seconds).\n",
+                       f"Executed 1 tests{console}\nule.Required testResult]' passed (0.001 seconds).\n",
+                       f"Test Case '-[Mod{console}\nule.RequiredExtra testResult]' passed (0.001 seconds).\n"):
+            with self.subTest(output=output):
+                self.assertTrue(gate.coverage_errors(output, ["Required"])[0])
+
     def test_typed_console_splice_recovers_apple_identity_status_and_order(self):
         console = "2026-10-28 00:56:23.431664+0000 JustSpeakToIt[7390:29376] [api] Updating content"
         for newline in ("\n", "\r\n"):

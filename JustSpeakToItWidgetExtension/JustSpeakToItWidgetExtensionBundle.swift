@@ -19,6 +19,5 @@ struct JustSpeakToItWidgetExtensionBundle: WidgetBundle {
             JustSpeakToItWidgetExtensionControl()
         }
         JustSpeakToItWidgetExtensionLiveActivity()
-        OpenClawLiveActivity()
     }
 }

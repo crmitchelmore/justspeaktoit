@@ -14,11 +14,11 @@ needs it and where the data goes.
 | `NSMicrophoneUsageDescription` | Recording for transcription; discloses that audio reaches the chosen provider |
 | `NSSpeechRecognitionUsageDescription` | Apple speech recognition, including its server-side path |
 | `NSCameraUsageDescription` | `QRScannerCoordinator`, reading the configuration QR code the Mac app shows |
-| `NSLocalNetworkUsageDescription` | Only internal `SHOW_OPENCLAW_TAB` builds connecting to a local OpenClaw gateway; omitted from public builds |
 
-The iPhone app has no Bonjour transcript sender or browser, so its generated
-Info.plist does not declare `NSBonjourServices`. Public archive verification
-rejects both unused local-network declarations; the Mac receiver is separate.
+The iPhone app has no local-network gateway, Bonjour transcript sender, or
+browser, so its generated Info.plist declares neither
+`NSLocalNetworkUsageDescription` nor `NSBonjourServices`. Public archive
+verification rejects both unused declarations; the Mac receiver is separate.
 
 Two failure modes to avoid. A string that denies using the capability at all
 ("a linked library requires this declaration") is a rejection. So is one that
@@ -130,9 +130,7 @@ No violence, profanity, horror, gambling, contests, medical or drug content, no
 in-app purchases and no unrestricted web access. Two answers to watch:
 
 - **User-generated content: No.** Transcripts never travel between users.
-- **Chat or AI chat: No.** The OpenClaw chat surface is behind the
-  `SHOW_OPENCLAW_TAB` build flag and is absent from release builds. If that flag
-  is ever switched on for a shipping build, re-answer this question first.
+- **Chat or AI chat: No.** The app does not include a chat or AI-chat interface.
 
 ### Content rights
 

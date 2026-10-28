@@ -29,7 +29,7 @@ final class OpenRouterAudioSettingsTests: XCTestCase {
     }
 
     func testDynamicSpeechSelection_PersistsAndIsNeverReplacedByValidation() {
-        let settings = OpenClawSettings.shared
+        let settings = IOSVoiceOutputSettings.shared
         let originalProvider = settings.ttsProvider
         let originalModel = settings.ttsModel
         let originalVoice = settings.ttsVoice

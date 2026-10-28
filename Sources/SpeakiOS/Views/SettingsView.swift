@@ -27,7 +27,6 @@ public struct SettingsView: View {
     /// Observed so the Sync section's status rows follow the iCloud History switch.
     @ObservedObject private var historySync = HistorySyncEngine.shared
     @Environment(\.openURL) private var openURL
-    @Environment(\.openClawEnabled) private var openClawEnabled
     @Environment(\.iOSKeyboardEnabled) private var iOSKeyboardEnabled
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var showingAPIKeys = false
@@ -508,22 +507,6 @@ public struct SettingsView: View {
                         + "History stays on this iPhone. The iPhone app has no Bonjour transcript sender.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                }
-            }
-
-            if openClawEnabled {
-                Section("OpenClaw") {
-                    NavigationLink {
-                        OpenClawSettingsView()
-                    } label: {
-                        Label("Configure OpenClaw", systemImage: "bolt.horizontal.icloud")
-                    }
-
-                    if OpenClawSettings.shared.isConfigured {
-                        Label("Connected", systemImage: "checkmark.circle")
-                            .font(.caption)
-                            .foregroundStyle(.green)
-                    }
                 }
             }
 

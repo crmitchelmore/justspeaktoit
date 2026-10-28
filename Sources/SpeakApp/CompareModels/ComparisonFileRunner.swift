@@ -72,7 +72,15 @@ struct ComparisonFileRunner {
         )
         let started = Date()
         do {
-            let result = try await transcribeFile(request, with: candidate, transport: transport)
+            let result: TranscriptionResult
+            switch candidate.engine {
+            case .appleSpeechAnalyzer, .downloadedLocal:
+                result = try await ComparisonLocalWorkGate.shared.run(modelID: candidate.modelID) {
+                    try await self.transcribeFile(request, with: candidate, transport: transport)
+                }
+            case .cloudBatch, .sharedStreamingClient:
+                result = try await transcribeFile(request, with: candidate, transport: transport)
+            }
             entry.timeToFinalMs = SessionLatencyMetrics.milliseconds(from: started, to: Date())
             entry.transcript = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
             entry.estimatedCostUSD = Self.cost(

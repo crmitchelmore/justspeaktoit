@@ -285,7 +285,7 @@ final class SonioxRealtimeTTSClient: ObservableObject {
         let chunks = SonioxTTSRealtimeTextChunker.chunks(text)
         guard !chunks.isEmpty else { return }
         let generation = UUID()
-        let streamID = "openclaw-\(generation.uuidString.lowercased())"
+        let streamID = "speech-\(generation.uuidString.lowercased())"
         let connection = webSocketFactory.makeConnection(to: region.webSocketEndpoint)
         activeStream = ActiveStream(generation: generation, streamID: streamID, connection: connection)
         firstAudioLatencySeconds = nil

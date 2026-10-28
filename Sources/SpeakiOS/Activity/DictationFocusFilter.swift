@@ -1,5 +1,6 @@
 #if os(iOS)
 import AppIntents
+import Foundation
 import SpeakCore
 
 /// Opt-in through Settings > Focus. Defaults also represent native deactivation.
@@ -123,5 +124,7 @@ private final class FocusNativeLookup {
 @MainActor
 final class CaptureConfigurationRequest {
     var configuration: EffectiveCaptureConfiguration?
+    var admittedRunID: UUID?
+    var serviceStartReturnedNormally = false
 }
 #endif

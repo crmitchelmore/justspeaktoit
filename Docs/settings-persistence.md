@@ -32,7 +32,7 @@ follows.
 | Dictation profiles | `DictationProfileStore` | JSON on disk |
 | Personal lexicon, pronunciation, auto-corrections | `PersonalLexiconService`, `PronunciationManager`, `AutoCorrectionTracker` | JSON on disk |
 | History | `HistoryManager` / `HistoryWALStore` (iOS: `iOSHistoryManager`) | Write-ahead log + JSON |
-| OpenClaw (iOS) | `OpenClawSettings` | `UserDefaults` (`openclaw.*`) |
+| iOS voice-output selections | `IOSVoiceOutputSettings` | `UserDefaults` (seven existing provider/model/voice/name/speed/language/region keys retained for compatibility) |
 
 `SessionProfileApplier` applies session-scoped dictation-profile overrides with
 `suppressesPersistence`, so those temporary values never reach `UserDefaults`

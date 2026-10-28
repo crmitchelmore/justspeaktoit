@@ -346,7 +346,7 @@ final class DependencyHarness {
             ensureKeysLoaded: ensureKeysLoaded,
             networkSnapshot: networkSnapshot,
             localRecognitionCapability: capability,
-            dependencies: dependencies
+            dependencies: dependencies, outcomeJournalDefaults: { [unowned self] in self.defaults }
         )
         self.service = service
         return service

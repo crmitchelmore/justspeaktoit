@@ -10,17 +10,16 @@ import UIKit
 ///
 /// **Paid routing is not wired up on iOS.** `PaidAccessStore` can hold a valid
 /// entitlement and a routing policy, but nothing consults it when work is
-/// actually dispatched — these three call sites all go straight to the user's
+/// actually dispatched — these call sites all go straight to the user's
 /// own API key or an on-device model:
 ///
 ///   * `Sources/SpeakiOS/Services/iOSBatchTranscriber.swift`
-///   * `Sources/SpeakiOS/Services/VoiceSummariser.swift`
 ///   * `Sources/SpeakiOS/Views/PostProcessingView.swift`
 ///
 /// Selling a subscription in that state would charge for routing that does not
 /// exist, and hiding the model pickers would strand the user with neither a
 /// picker nor a paid route. So the purchase and routing UI is switched off
-/// here, including automatic StoreKit observation. Routing those three call
+/// here, including automatic StoreKit observation. Routing those call
 /// sites through a proxy client is still required. Supported identity, signing,
 /// products and staging qualification are separate commissioning gates.
 public enum PaidAccessFeature {

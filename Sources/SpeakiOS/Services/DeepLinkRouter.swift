@@ -7,9 +7,7 @@ import SwiftUI
 
 /// Centralised deep link handling for the app.
 /// Supports URLs like:
-///   justspeaktoit://openclaw                     → OpenClaw tab
-///   justspeaktoit://openclaw/conversation/<id>   → specific conversation
-///   justspeaktoit://transcribe                   → Transcribe tab
+///   justspeaktoit://transcribe                   → transcription screen
 ///   justspeaktoit://start                        → start recording
 ///   justspeaktoit://stop                         → stop recording
 ///   justspeaktoit://toggle                       → start, or stop if running
@@ -36,12 +34,6 @@ import SwiftUI
 public final class DeepLinkRouter: ObservableObject {
     public static let shared = DeepLinkRouter()
 
-    /// Which tab to select (0 = Transcribe, 1 = OpenClaw).
-    @Published public var selectedTab: Int = 0
-
-    /// When set, navigates to this conversation in the OpenClaw tab.
-    @Published public var pendingConversationId: String?
-
     /// Set when a capture deep link arrived and has not been performed yet.
     @Published public var pendingCaptureAction: CaptureDeepLink?
 
@@ -54,8 +46,6 @@ public final class DeepLinkRouter: ObservableObject {
     public func openHistory(identifier: UUID) {
         if let previous = self.pendingCaptureAction { self.reportSupersededCapture(previous) }
         self.pendingCaptureAction = nil
-        self.pendingConversationId = nil
-        self.selectedTab = 0
         self.pendingHistoryID = identifier
     }
 
@@ -74,8 +64,6 @@ public final class DeepLinkRouter: ObservableObject {
         // tab link and a command, and the command is the point of it.
         if let capture = CaptureDeepLink.parse(url) {
             self.pendingHistoryID = nil
-            selectedTab = 0
-            pendingConversationId = nil
             // Latest wins. Two capture links can only race inside the cold-launch
             // window before the scene is active, and the newer one is the better
             // guess at what the user last asked for; queueing both would replay a
@@ -93,23 +81,8 @@ public final class DeepLinkRouter: ObservableObject {
         }
 
         switch url.host?.lowercased() {
-        case "openclaw":
-            self.pendingHistoryID = nil
-            selectedTab = 1
-            // Check for /conversation/<id> path
-            let components = url.pathComponents.filter { $0 != "/" }
-            if components.count >= 2,
-               components[0] == "conversation" {
-                pendingConversationId = components[1]
-            } else {
-                pendingConversationId = nil
-            }
-            return true
-
         case "transcribe":
             self.pendingHistoryID = nil
-            selectedTab = 0
-            pendingConversationId = nil
             return true
 
         default:
@@ -132,13 +105,6 @@ public final class DeepLinkRouter: ObservableObject {
             "Queued capture link superseded before the scene was active; answering its caller"
         )
         self.reportSupersededCapture(previous)
-    }
-
-    /// Consumes and returns the pending conversation ID (if any).
-    public func consumePendingConversation() -> String? {
-        let cid = pendingConversationId
-        pendingConversationId = nil
-        return cid
     }
 
     /// Consumes and returns the pending capture command (if any), so a link can

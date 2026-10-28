@@ -42,7 +42,8 @@ public final class TranscriptionRecordingService: ObservableObject {
             // label, local diagnostic code and a date — never the error's text.
             guard let lastSessionError else { return }
             CaptureOutcomeJournal.record(
-                CaptureOutcomeJournal.outcome(for: lastSessionError), failure: lastSessionError
+                CaptureOutcomeJournal.outcome(for: lastSessionError), failure: lastSessionError,
+                defaults: outcomeJournalDefaults()
             )
         }
     }
@@ -166,6 +167,8 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// capture's text. Tagging also lets an empty result stay empty instead of
     /// being satisfied by an older non-empty one.
     private var lastRunCompletion: CaptureRunCompletion?
+    /// Closed typed cause retained while this startup owns cancellation cleanup.
+    private var startupWatchdogFailure: (runID: UUID, error: iOSTranscriptionError)?
     /// Run-identity state machine for cancellable startup (issue #701); the
     /// pure mechanics live in SpeakCore so they are testable on every
     /// platform. `state` mirrors it for observers.
@@ -208,6 +211,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     private let completeActivity: ActivityCompletion
     private let completeOwnedActivity: OwnedActivityCompletion?
     private let sessionFactory: (() throws -> IOSTranscriptionSession)?
+    private let outcomeJournalDefaults: @MainActor () -> UserDefaults?
 
     private convenience init() {
         let settings = AppSettings.shared
@@ -244,7 +248,8 @@ public final class TranscriptionRecordingService: ObservableObject {
         networkSnapshot: @escaping CaptureNetworkPathMonitor.SnapshotProvider = { .unknown },
         localRecognitionCapability: @escaping @MainActor (String) -> AppleLocalRecognitionCapability =
             { _ in .available },
-        dependencies: RecordingServiceDependencies? = nil
+        dependencies: RecordingServiceDependencies? = nil,
+        outcomeJournalDefaults: @escaping @MainActor () -> UserDefaults? = { CaptureOutcomeJournal.defaults }
     ) {
         // Injected constructors without dependencies retain a no-op Focus seam.
         self.focusOverride = dependencies?.focusOverride ?? { _ in .none }
@@ -253,6 +258,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         self.settings = dependencies.settings
         self.activityManager = dependencies.activity
         self.sessionFactory = sessionFactory
+        self.outcomeJournalDefaults = outcomeJournalDefaults
         self.foregroundOwnership = foregroundOwnership ?? .shared
         self.ensureKeysLoaded = ensureKeysLoaded ?? { await dependencies.settings.ensureKeysLoaded() }
         self.networkSnapshot = networkSnapshot
@@ -353,6 +359,8 @@ public final class TranscriptionRecordingService: ObservableObject {
     ) async throws {
         try foregroundOwnership.requireUnowned()
         guard let runID = lifecycle.beginStart() else { return }
+        startupWatchdogFailure = nil
+        configurationRequest?.admittedRunID = runID
         presentation.begin(run: runID)
         diagnostics.begin(run: runID, entry: entry, localOrigin: .service)
         // Armed before the first suspension point, so the start deadline covers
@@ -544,8 +552,7 @@ public final class TranscriptionRecordingService: ObservableObject {
             // cleanup below tears down exactly what this run owns without
             // touching any replacement run's session (issue #701).
             guard lifecycle.activate(runID) else {
-                session.cancel()
-                unwindCancelledStart(outcome: .cancelled, run: runID)
+                // The catch owns cleanup, including a watchdog's real terminal cause.
                 throw CancellationError()
             }
             transcriptionSession = session
@@ -574,10 +581,14 @@ public final class TranscriptionRecordingService: ObservableObject {
             // it allocated. `transcriptionSession` is untouched — it is only
             // ever assigned after successful activation.
             startedSession?.cancel()
-            let terminalFailure = activityStarted && lifecycle.isCurrentStartRun(runID)
-                && !foregroundOwnership.isOwned && outcome(for: error) == .failed
-                ? CaptureStartFailurePresentation.make(for: error) : nil
-            unwindCancelledStart(outcome: outcome(for: error), run: runID, activityFailure: terminalFailure)
+            let watchdogFailure = startupWatchdogFailure.flatMap { $0.runID == runID ? $0.error : nil }
+            let failure: Error = (watchdogFailure as Error?) ?? error
+            let ownsCleanup = currentRunID == runID && lifecycle.state == .starting
+                && (lifecycle.isCurrentStartRun(runID) || watchdogFailure != nil)
+            let terminalFailure = activityStarted && ownsCleanup
+                && !foregroundOwnership.isOwned && outcome(for: failure) == .failed
+                ? CaptureStartFailurePresentation.make(for: failure) : nil
+            unwindCancelledStart(outcome: outcome(for: failure), run: runID, activityFailure: terminalFailure)
             throw error
         }
     }
@@ -926,6 +937,26 @@ public final class TranscriptionRecordingService: ObservableObject {
         return lastRunCompletion.text
     }
 
+    func retainStartupWatchdogFailure(_ error: iOSTranscriptionError, run: UUID) {
+        guard currentRunID == run, lifecycle.isCurrentStartRun(run) else { return }
+        startupWatchdogFailure = (run, error)
+    }
+
+    /// A final intent failure may only annotate its own failed, fully settled admission.
+    /// A late framework error after a successful start cannot rewrite even that same run's result.
+    func recordTerminalStartupFailure(
+        _ error: Error,
+        request: CaptureConfigurationRequest
+    ) {
+        guard !request.serviceStartReturnedNormally, let run = request.admittedRunID,
+              state == .idle, !foregroundOwnership.isOwned, lastRunCompletion?.runID == run else { return }
+        let cause = startupWatchdogFailure.flatMap { $0.runID == run ? $0.error : nil }
+        let failure: Error = (cause as Error?) ?? error
+        CaptureOutcomeJournal.record(
+            CaptureOutcomeJournal.outcome(for: failure), failure: failure, defaults: outcomeJournalDefaults()
+        )
+    }
+
     private func validateCredentialAvailability(
         settings: AppSettings,
         usesBatchTranscription: Bool,
@@ -1222,7 +1253,9 @@ public final class TranscriptionRecordingService: ObservableObject {
             dependencies.markDelivered(recording)
         }
         if lastSessionError == nil {
-            CaptureOutcomeJournal.record(text.isEmpty ? .cancelled : .delivered)
+            CaptureOutcomeJournal.record(
+                text.isEmpty ? .cancelled : .delivered, failure: nil, defaults: outcomeJournalDefaults()
+            )
         }
 
         // The receipt is built from what every lane reported, never from what

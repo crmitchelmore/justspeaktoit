@@ -43,6 +43,7 @@ done
 gdbus wait --session --timeout 15 org.freedesktop.portal.Flatpak
 
 command -v xvfb-run >/dev/null
+command -v readelf >/dev/null || { echo 'readelf from binutils is required.' >&2; exit 1; }
 flatpak install --user -y --noninteractive --reinstall --bundle "$bundle"
 
 echo '== Flatpak Spawn portal (required by the sandboxed PNG loader)'

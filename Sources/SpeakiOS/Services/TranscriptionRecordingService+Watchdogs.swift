@@ -133,7 +133,7 @@ extension TranscriptionRecordingService {
     private func abandonStart(_ error: iOSTranscriptionError, run: UUID) async {
         guard state == .starting else { return }
         retainStartupWatchdogFailure(error, run: run)
-        lastSessionError = error
+        publishRequestFailure(error, failure: .init(stage: .admission, code: .timeout, domain: .application))
         await stopRecording(selection: resolvedStopSelection())
     }
 
@@ -144,7 +144,10 @@ extension TranscriptionRecordingService {
     /// written. A start that has not gone live yet has nothing to finalise and
     /// is retired instead.
     private func handleSilentMicrophone(run: UUID) async {
-        lastSessionError = iOSTranscriptionError.microphoneDeliveredNoAudio
+        publishRequestFailure(
+            iOSTranscriptionError.microphoneDeliveredNoAudio,
+            failure: .init(stage: .request, code: .unavailable, domain: .application)
+        )
         if state == .recording {
             await finishCaptureAfterDisruption(
                 stoppedMessage: iOSTranscriptionError.microphoneDeliveredNoAudio.localizedDescription
@@ -208,7 +211,10 @@ extension TranscriptionRecordingService {
         duration: Int
     ) -> TranscriptionResult {
         session.cancel()
-        lastSessionError = iOSTranscriptionError.finalisationTimedOut
+        publishRequestFailure(
+            iOSTranscriptionError.finalisationTimedOut,
+            failure: .init(stage: .finalization, code: .timeout, domain: .application)
+        )
         SpeakLogger.transcription.error(
             """
             Capture watchdog: finalisation exceeded \

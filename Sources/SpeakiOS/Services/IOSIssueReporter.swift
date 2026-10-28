@@ -4,8 +4,8 @@ import Foundation
 import SpeakCore
 import UIKit
 
-/// Only error presence and a canonical recorded model are projected. Neither
-/// establishes effective settings or a provider handoff for this request.
+/// Legacy History projects only error presence and canonical recorded models.
+/// Live failures can instead supply an already frozen, run-owned safe snapshot.
 enum IOSIssueReporter {
     static func snapshot(for item: iOSHistoryItem) -> IOSIssueReportSnapshot {
         IOSIssueReportSnapshot(hasFailure: item.errorMessage != nil, recordedModels: [.project(item.model)])
@@ -21,12 +21,133 @@ struct IOSIssueReportSnapshot {
     let withoutDetails: IssueDiagnosticReport
 
     init(hasFailure: Bool, recordedModels: [RequestDiagnosticContext.ModelSelection] = []) {
-        let failures: [RequestDiagnosticContext.Failure] = hasFailure ? [.init(domain: .unknown)] : []
-        self.full = IssueDiagnosticReport(recordedModels: recordedModels, failures: failures)
-        self.withoutDetails = IssueDiagnosticReport(
-            recordedModels: recordedModels, failures: failures,
-            omittedSections: Set(IssueDiagnosticReport.Section.allCases)
+        self.init(context: nil, recordedModels: recordedModels, observedHandoff: nil,
+                  requestFailure: hasFailure ? .init(domain: .unknown) : nil)
+    }
+
+    init(
+        context: RequestDiagnosticContext?, recordedModels: [RequestDiagnosticContext.ModelSelection] = [],
+        observedHandoff: RequestDiagnosticContext?, requestFailure: RequestDiagnosticContext.Failure?
+    ) {
+        let failures = requestFailure.map { [$0] } ?? []
+        self.full = IssueDiagnosticReport(
+            context: context, recordedModels: recordedModels, failures: failures, observedHandoff: observedHandoff
         )
+        self.withoutDetails = IssueDiagnosticReport(
+            context: context, recordedModels: recordedModels, failures: failures,
+            omittedSections: Set(IssueDiagnosticReport.Section.allCases), observedHandoff: observedHandoff
+        )
+    }
+}
+
+/// Pure projection of values already consumed by this run. No settings, errors,
+/// credentials, provider strings, request text or reverse locale mapping enter it.
+enum IOSRequestDiagnosticProjection {
+    static func admission(
+        _ configuration: EffectiveCaptureConfiguration, keyboardProfile: Bool
+    ) -> RequestDiagnosticContext {
+        let origin: RequestDiagnosticContext.Origin
+        if keyboardProfile || configuration.modelOrigin != configuration.languageOrigin
+            || configuration.modelOrigin != configuration.destinationOrigin {
+            origin = .unknown
+        } else {
+            switch configuration.modelOrigin {
+            case .global: origin = .global
+            case .focus: origin = .focusOverride
+            case .explicit: origin = .explicitOverride
+            }
+        }
+        let destination: RequestDiagnosticContext.Destination
+        switch HardwareTriggerDestination(rawValue: configuration.destinationID) {
+        case .historyOnly: destination = .history
+        case .clipboard, .clipboardAndPostProcess: destination = .clipboard
+        case .auto, .none: destination = .unknown
+        }
+        return RequestDiagnosticContext(
+            model: .project(configuration.modelID), mode: configuration.usesBatch ? .batch : .live,
+            origin: origin, language: .project(configuration.languageIdentifier), destination: destination
+        )
+    }
+
+    static func foreground(modelID: String) -> RequestDiagnosticContext {
+        // Only this selected value was captured at the existing read boundary.
+        RequestDiagnosticContext(model: .project(modelID))
+    }
+
+    static func handoff(_ resolution: IOSTranscriptionSession.Resolution) -> RequestDiagnosticContext {
+        // A default local session call is not remote acceptance or proof of its
+        // wrapped provider, language conversion, advanced flags or final budget.
+        RequestDiagnosticContext(
+            provenance: .observedHandoff, model: .project(resolution.modelID),
+            mode: resolution.isBatch ? .batch : .live
+        )
+    }
+}
+
+/// One active run and one published error episode, never a journal/attempt map.
+/// Retiring current state must not replace the snapshot of a still-visible error.
+struct IOSRequestDiagnosticState {
+    private var runID: UUID?
+    private var context: RequestDiagnosticContext?
+    private var handoff: RequestDiagnosticContext?
+    private var failedRunID: UUID?
+    private var failedRunSnapshot: IOSIssueReportSnapshot?
+    private var publicationToken: UUID?
+    private var publishedSnapshot: IOSIssueReportSnapshot?
+
+    mutating func begin(_ run: UUID) {
+        runID = run
+        context = nil
+        handoff = nil
+        failedRunID = nil
+        failedRunSnapshot = nil
+    }
+
+    mutating func admit(_ value: RequestDiagnosticContext, run: UUID) {
+        guard runID == run, value.provenance == .admission else { return }
+        context = value
+    }
+
+    mutating func observe(_ resolution: IOSTranscriptionSession.Resolution, run: UUID, defaultSession: Bool) {
+        guard runID == run, defaultSession else { return }
+        handoff = IOSRequestDiagnosticProjection.handoff(resolution)
+    }
+
+    @discardableResult
+    mutating func freezeFailure(_ failure: RequestDiagnosticContext.Failure, run: UUID?) -> IOSIssueReportSnapshot? {
+        guard let run, runID == run else { return nil }
+        let snapshot = IOSIssueReportSnapshot(context: context, observedHandoff: handoff, requestFailure: failure)
+        failedRunID = run
+        failedRunSnapshot = snapshot
+        return snapshot
+    }
+
+    mutating func publish(_ snapshot: IOSIssueReportSnapshot?, token: UUID?) {
+        publicationToken = token
+        publishedSnapshot = token == nil ? nil : snapshot ?? IOSIssueReporter.failedRequest()
+    }
+
+    func snapshot(for token: UUID?) -> IOSIssueReportSnapshot {
+        guard let token, publicationToken == token else { return IOSIssueReporter.failedRequest() }
+        return publishedSnapshot ?? IOSIssueReporter.failedRequest()
+    }
+
+    func failedStartSnapshot(for run: UUID?) -> IOSIssueReportSnapshot {
+        guard let run, failedRunID == run else { return IOSIssueReporter.failedRequest() }
+        return failedRunSnapshot ?? IOSIssueReporter.failedRequest()
+    }
+
+    mutating func discardFailure(_ run: UUID) {
+        guard failedRunID == run else { return }
+        failedRunID = nil
+        failedRunSnapshot = nil
+    }
+
+    mutating func retire(_ run: UUID?) {
+        guard let run, runID == run else { return }
+        runID = nil
+        context = nil
+        handoff = nil
     }
 }
 

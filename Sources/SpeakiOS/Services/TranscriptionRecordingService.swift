@@ -35,7 +35,10 @@ public final class TranscriptionRecordingService: ObservableObject {
             // repeats an earlier failure word for word — a presenter that
             // de-duplicated on the message would swallow the later one, with no
             // intervening `nil` to tell the two apart (#1084).
-            sessionErrorToken = lastSessionError == nil ? nil : UUID()
+            let token = lastSessionError == nil ? nil : UUID()
+            requestDiagnostics.publish(pendingIssueFailure, token: token)
+            pendingIssueFailure = nil
+            sessionErrorToken = token
             // One funnel for every capture failure, so the health screen can
             // report how the last real run ended rather than only what is
             // true this second (issue #997). The journal keeps a closed-set
@@ -157,6 +160,16 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// Identity of the capture in flight, so a caller that started one can
     /// recognise its own result. `nil` once that capture has settled.
     private var currentRunID: UUID?
+    private var requestDiagnostics = IOSRequestDiagnosticState()
+    private var pendingIssueFailure: IOSIssueReportSnapshot?
+
+    func issueSnapshot(for token: UUID?) -> IOSIssueReportSnapshot { requestDiagnostics.snapshot(for: token) }
+
+    func publishRequestFailure(_ error: Error, failure: RequestDiagnosticContext.Failure) {
+        pendingIssueFailure = error is CancellationError ? nil
+            : requestDiagnostics.freezeFailure(failure, run: currentRunID)
+        lastSessionError = error
+    }
     /// The transcript the most recent capture committed, tagged with the
     /// capture it belongs to.
     ///
@@ -371,6 +384,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         // publishes an empty completion for *this* run rather than leaving a
         // waiter to read an older one.
         currentRunID = runID
+        requestDiagnostics.begin(runID)
         recordingWarningRunID = UUID()
         state = lifecycle.state
         defer { state = lifecycle.state }
@@ -381,6 +395,9 @@ public final class TranscriptionRecordingService: ObservableObject {
             request: configurationRequest, run: runID
         )
         effectiveConfiguration = configuration
+        requestDiagnostics.admit(
+            IOSRequestDiagnosticProjection.admission(configuration, keyboardProfile: keyboardProfile != nil), run: runID
+        )
         effectiveDestination = CaptureDestinationSelection(
             configuration: configuration, keyboardProfile: keyboardProfile != nil
         )
@@ -545,6 +562,9 @@ public final class TranscriptionRecordingService: ObservableObject {
             guard lifecycle.installStartCancellation(for: runID, cancel: { session.cancel() }) else {
                 throw CancellationError()
             }
+            requestDiagnostics.observe(
+                session.resolution, run: runID, defaultSession: makeSession == nil && sessionFactory == nil
+            )
             try await session.start()
             diagnostics.note(.stage(.sessionStarted), run: runID)
             // The session this run allocated is published only while the run
@@ -1015,6 +1035,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     private func completeRun(with text: String) {
         guard let currentRunID else { return }
         lastRunCompletion = CaptureRunCompletion(runID: currentRunID, text: text)
+        requestDiagnostics.retire(currentRunID)
         self.currentRunID = nil
     }
 
@@ -1606,7 +1627,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         if (error as? iOSTranscriptionError)?.isControlledInterruption == true {
             captureStopNotice = error.localizedDescription
         } else {
-            lastSessionError = error
+            publishRequestFailure(error, failure: .init(stage: .request))
             activityManager.reportClassifiedError(error)
         }
         guard lifecycle.state == .recording else { return }

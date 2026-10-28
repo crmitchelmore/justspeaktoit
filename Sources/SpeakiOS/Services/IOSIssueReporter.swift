@@ -8,7 +8,10 @@ import UIKit
 /// Live failures can instead supply an already frozen, run-owned safe snapshot.
 enum IOSIssueReporter {
     static func snapshot(for item: iOSHistoryItem) -> IOSIssueReportSnapshot {
-        IOSIssueReportSnapshot(hasFailure: item.errorMessage != nil, recordedModels: [.project(item.model)])
+        IOSIssueReportSnapshot(
+            context: item.requestContext, recordedModels: [.project(item.model)], observedHandoff: nil,
+            requestFailure: item.errorMessage == nil ? nil : .init(domain: .unknown)
+        )
     }
 
     static func failedRequest() -> IOSIssueReportSnapshot {
@@ -106,6 +109,11 @@ struct IOSRequestDiagnosticState {
     mutating func admit(_ value: RequestDiagnosticContext, run: UUID) {
         guard runID == run, value.provenance == .admission else { return }
         context = value
+    }
+
+    func admission(for run: UUID?) -> RequestDiagnosticContext? {
+        guard let run, runID == run else { return nil }
+        return RequestDiagnosticContext.admissionOnly(context)
     }
 
     mutating func observe(_ resolution: IOSTranscriptionSession.Resolution, run: UUID, defaultSession: Bool) {

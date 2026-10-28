@@ -11,6 +11,7 @@ public enum DataMigrationHistoryValue {
         object.removeValue(forKey: "audioFileURL")
         object["networkExchanges"] = .array([])
         object.removeValue(forKey: "diagnosticContext")
+        object.removeValue(forKey: "requestContext")
         if let audioURL { object["audioFileURL"] = .string(audioURL.absoluteString) }
         if let id { object["id"] = .string(id) }
         object["desktopHistory"] = redactedDesktop(object["desktopHistory"], audioOnly: audioOnly, id: id)

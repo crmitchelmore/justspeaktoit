@@ -1,8 +1,6 @@
-# Pure fakes ONLY. Dot-source returns before imports, Add-Type or verifier work.
+# Pure fakes ONLY. The shared helper import defines functions without native work.
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'verify-windows-bundle.ps1') `
-    -BundleDirectory '__jsti_bootstrap_fake__' -Workspace '__jsti_bootstrap_fake__' `
-    -ExpectedCommit '__jsti_bootstrap_fake__'
+. (Join-Path $PSScriptRoot 'FailureDiagnostics.ps1')
 
 function Assert-That([bool] $Condition, [string] $Case) {
     if (-not $Condition) { throw "Bootstrap fake failed: $Case" }
@@ -326,6 +324,110 @@ try {
     Set-Item Function:New-JstiDiagnosticAdapter -Value $adapterFunction
     [System.IO.Directory]::Delete($ownedRoot, $true)
 }
+
+# Native workflow translation uses the actual shared wrapper, never a debugger.
+function New-NativeFailureFixture([long] $Deadline, [long] $Frequency) {
+    $moment = [datetime]::UtcNow.ToString('o')
+    return @{
+        label = 'ui-smoke-test'; arguments = @('--ui-smoke-test'); timedOut = $false
+        processMachine = 'arm64'; nativeMachine = 'arm64'; exitCode = [long] 3221226356
+        failures = @('exited with 3221226356')
+        executable = @{ name = 'SpeakWindows.exe'; path = 'C:\Owned\SpeakWindows.exe'
+            architecture = 'arm64'; native = $true; dll = $false; sha256 = '0' * 64 }
+        diagnosticOwnerContext = @{ schema = 1; originalPid = 314; startedUTC = $moment; endedUTC = $moment
+            deadlineTicks = $Deadline; frequency = $Frequency; exitCode = -1073740940 }
+    }
+}
+
+$standaloneFunction = (Get-Item Function:Invoke-JstiStandaloneDiagnostic).ScriptBlock
+$nativeCalls = @{ Count = 0; Last = $null; Status = 'no-reproduction' }
+Set-Item Function:Invoke-JstiStandaloneDiagnostic -Value {
+    param($setup, $run, $process, $exe, $sha, $deadline, $frequency, $started, $ended)
+    $nativeCalls.Count++
+    $nativeCalls.Last = @{ Run = $run; Process = $process; Executable = $exe; SHA256 = $sha
+        Deadline = $deadline; Frequency = $frequency; Started = $started; Ended = $ended }
+    return @{ status = $nativeCalls.Status; originalFailurePreserved = $true }
+}.GetNewClosure()
+try {
+    $frequency = [System.Diagnostics.Stopwatch]::Frequency
+    $deadline = [System.Diagnostics.Stopwatch]::GetTimestamp() + 30 * $frequency
+    $setup = @{ Host = @{ Path = 'C:\Owned\pwsh.exe'; Hash = '0' * 64 }; Python = @{ Path = 'C:\Owned\python.exe'; Hash = '0' * 64 } }
+    foreach ($code in @(0xC0000005L, 0xC0000374L, 0xC0000409L)) {
+        $record = New-NativeFailureFixture $deadline $frequency
+        $record.exitCode = $code
+        $record.diagnosticOwnerContext.exitCode = [int] ($code - 4294967296L)
+        $before = $record | ConvertTo-Json -Depth 12 -Compress
+        $result = Invoke-JstiNativeFailureDiagnostic $setup $record 'C:\Owned\SpeakWindows.exe' ('0' * 64) $deadline $frequency
+        Assert-That ($result.status -ceq 'no-reproduction' -and $result.originalFailurePreserved) 'native-eligible-reaches-same-confined-bridge'
+        Assert-That ($nativeCalls.Last.Run.exitCode -eq [int] ($code - 4294967296L) -and
+            $nativeCalls.Last.Run.label -ceq 'ui-smoke' -and $nativeCalls.Last.Run.arguments -ceq '--ui-smoke-test' -and
+            $nativeCalls.Last.Run.processMachine -ceq '0xAA64' -and $nativeCalls.Last.Process.Id -eq 314 -and
+            $nativeCalls.Last.Deadline -eq $deadline -and $nativeCalls.Last.Frequency -eq $frequency) 'native-typed-shapes-and-original-clock'
+        Assert-That (($record | ConvertTo-Json -Depth 12 -Compress) -ceq $before) 'native-original-record-unchanged'
+    }
+    foreach ($mutate in @(
+        { param($r) $r.label = 'self-test' },
+        { param($r) $r.arguments = @('--self-test') },
+        { param($r) $r.arguments = @('--ui-smoke-test', 'PRIVATE_CANARY') },
+        { param($r) $r.timedOut = $true },
+        { param($r) $r.processMachine = 'x64' },
+        { param($r) $r.nativeMachine = 'x64' },
+        { param($r) $r.failures = @() },
+        { param($r) $r.exitCode = 1 },
+        { param($r) $r.executable.sha256 = '1' * 64 },
+        { param($r) $r.executable.path = 'C:\Other\SpeakWindows.exe' },
+        { param($r) $r.diagnosticOwnerContext.private = 'PRIVATE_CANARY' },
+        { param($r) $r.diagnosticOwnerContext.originalPid = $true },
+        { param($r) $r.diagnosticOwnerContext.deadlineTicks-- },
+        { param($r) $r.diagnosticOwnerContext.frequency-- },
+        { param($r) $r.diagnosticOwnerContext.exitCode = -1073741819 },
+        { param($r) $r.diagnosticOwnerContext.startedUTC = '2026-10-28T12:00:00+01:00' },
+        { param($r) $r.diagnosticOwnerContext.startedUTC = '2026-10-28T12:00:00Z'; $r.diagnosticOwnerContext.endedUTC = '2026-10-28T12:00:31Z' }
+    )) {
+        $record = New-NativeFailureFixture $deadline $frequency
+        & $mutate $record
+        $before = $nativeCalls.Count
+        $result = Invoke-JstiNativeFailureDiagnostic $setup $record 'C:\Owned\SpeakWindows.exe' ('0' * 64) $deadline $frequency
+        Assert-That ($nativeCalls.Count -eq $before -and $result.status -ceq 'unavailable' -and
+            $result.originalFailurePreserved -and ($result | ConvertTo-Json) -notmatch 'PRIVATE_CANARY') 'invalid-native-context-never-launches'
+    }
+    foreach ($status in @('deadline', 'unavailable', 'observed')) {
+        $nativeCalls.Status = $status
+        $record = New-NativeFailureFixture $deadline $frequency
+        $result = Invoke-JstiNativeFailureDiagnostic $setup $record 'C:\Owned\SpeakWindows.exe' ('0' * 64) $deadline $frequency
+        Assert-That ($result.status -ceq $status -and $record.exitCode -eq 3221226356 -and
+            $record.failures.Count -eq 1) 'diagnostic-result-never-promotes-original-failure'
+    }
+
+    # Actual bounded evidence update preserves UTC strings, other runs and all
+    # original native fields, with only the finite diagnostic field appended.
+    $root = Join-Path ([System.IO.Path]::GetTempPath()) ('jsti-native-receipt-fake-' + [guid]::NewGuid().ToString('N'))
+    [void] [System.IO.Directory]::CreateDirectory($root)
+    try {
+        $path = Join-Path $root 'native.json'
+        $record = New-NativeFailureFixture $deadline $frequency
+        $evidence = @{ schemaVersion = 1; architecture = 'arm64'; host = @{ fixed = 'kept' }
+            runs = @(@{ label = 'self-test'; exitCode = 0 }, $record) }
+        $json = $evidence | ConvertTo-Json -Depth 12 -Compress
+        [System.IO.File]::WriteAllText($path, $json, [System.Text.UTF8Encoding]::new($false))
+        Update-JstiNativeFailureEvidence $setup $path 'C:\Owned\SpeakWindows.exe' ('0' * 64) $deadline $frequency
+        $document = [System.Text.Json.JsonDocument]::Parse([System.IO.File]::ReadAllText($path))
+        try {
+            $saved = ConvertFrom-JstiEvidenceElement $document.RootElement
+            Assert-That ($saved.runs[1].failureDiagnostic.status -ceq 'observed' -and
+                $saved.runs[1].diagnosticOwnerContext.startedUTC -is [string] -and
+                $saved.runs[1].diagnosticOwnerContext.startedUTC -ceq $record.diagnosticOwnerContext.startedUTC -and
+                $saved.runs[0].exitCode -eq 0 -and $saved.host.fixed -ceq 'kept') 'native-json-preserves-original-types-and-other-receipts'
+            $saved.runs[1].Remove('failureDiagnostic') | Out-Null
+            Assert-That (($saved.runs[1] | ConvertTo-Json -Depth 12 -Compress) -ceq
+                ($record | ConvertTo-Json -Depth 12 -Compress)) 'native-json-all-original-fields-exact'
+        } finally { $document.Dispose() }
+        Assert-That (@(Get-ChildItem -LiteralPath $root).Count -eq 1) 'native-no-owned-temp-leftover'
+        [System.IO.File]::WriteAllText($path, 'INVALID_PRIVATE_CANARY')
+        Update-JstiNativeFailureEvidence $setup $path 'C:\Owned\SpeakWindows.exe' ('0' * 64) $deadline $frequency
+        Assert-That ([System.IO.File]::ReadAllText($path) -ceq 'INVALID_PRIVATE_CANARY') 'invalid-json-original-preserved'
+    } finally { [System.IO.Directory]::Delete($root, $true) }
+} finally { Set-Item Function:Invoke-JstiStandaloneDiagnostic -Value $standaloneFunction }
 
 Assert-That (-not ('JstiDiagnosticNative' -as [type])) 'pure-fakes-did-not-compile-or-load-native-type'
 Write-Output 'Diagnostic bootstrap pure-fake checks passed.'

@@ -258,10 +258,39 @@ jobs:
           # Window checks are independent of adapter assertions. Run both while
           # retaining a failing job if either result fails.
           $env:JSTI_UI_SNAPSHOT_PATH = Join-Path $env:GITHUB_WORKSPACE 'windows-arm64-ui-smoke.bmp'
+          # Prepare optional ownership primitives before the original UI budget.
+          # No diagnostic process or target starts on this path.
+          $diagnosticSetup = $null
+          $expectedSHA256 = $null
+          try {
+            . (Join-Path $env:GITHUB_WORKSPACE 'scripts/windows-bundle/FailureDiagnostics.ps1')
+            $currentHost = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+            $pythonHost = (Get-Command python -CommandType Application -ErrorAction Stop).Source
+            $hostIdentity = Get-JstiDiagnosticIdentity $currentHost @('pwsh.exe', 'powershell.exe')
+            $pythonIdentity = Get-JstiDiagnosticIdentity $pythonHost @('python.exe', 'python3.exe')
+            $expectedSHA256 = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+            if (Initialize-JstiDiagnosticNative) { $diagnosticSetup = @{ Host = $hostIdentity; Python = $pythonIdentity } }
+          } catch { }
+          $workspace = $env:GITHUB_WORKSPACE
+          $systemRoot = $env:SystemRoot
+          $isolatedPath = "$systemRoot\System32;$systemRoot;$systemRoot\System32\Wbem;$systemRoot\System32\WindowsPowerShell\v1.0"
+          $diagnosticFrequency = [System.Diagnostics.Stopwatch]::Frequency
+          $diagnosticDeadline = [System.Diagnostics.Stopwatch]::GetTimestamp() + 30 * $diagnosticFrequency
           python -B scripts/windows-bundle/verify-native-execution.py --architecture arm64 --evidence $env:NATIVE_EVIDENCE `
-            run --label ui-smoke-test --timeout 30 --stdout windows-arm64-ui-smoke.log --stderr windows-arm64-ui-smoke-errors.log `
+            run --label ui-smoke-test --timeout 30 --diagnostic-owner-context `
+            --deadline-ticks $diagnosticDeadline --deadline-frequency $diagnosticFrequency `
+            --stdout windows-arm64-ui-smoke.log --stderr windows-arm64-ui-smoke-errors.log `
             --expect-output 'Native window creation and shutdown passed' -- $exe --ui-smoke-test
-          if ($LASTEXITCODE -ne 0) { $failures.Add("Native window smoke test failed: $LASTEXITCODE") }
+          $originalUIExit = $LASTEXITCODE
+          if ($originalUIExit -ne 0) {
+            if ($null -ne $diagnosticSetup) {
+              try {
+                Update-JstiNativeFailureEvidence $diagnosticSetup $env:NATIVE_EVIDENCE $exe `
+                  $expectedSHA256 $diagnosticDeadline $diagnosticFrequency
+              } catch { }
+            }
+            $failures.Add("Native window smoke test failed: $originalUIExit")
+          }
           if (-not (Test-Path $env:JSTI_UI_SNAPSHOT_PATH)) { $failures.Add('Native client snapshot missing.') }
           if ($failures.Count) { throw ($failures -join '; ') }
 

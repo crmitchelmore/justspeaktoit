@@ -639,11 +639,11 @@ class StandaloneDiagnosticTests(unittest.TestCase):
             self.skipTest("PowerShell unavailable: actual cross-language projection not executed")
         value = NATIVE.diagnostic_result("observed", "clean")
         value["debugger"] = NATIVE.project_debugger(self.fixture())
-        # Explicit inert dot-source returns before native preparation or the
-        # original verifier; only its pure closed JSON projection is called.
+        # Definitions-only shared helper has no verifier or native preparation;
+        # only its pure closed JSON projection is called.
         script = """
 $ErrorActionPreference='Stop'
-. $env:JSTI_PROJECTOR -BundleDirectory '__jsti_bootstrap_fake__' -Workspace '__jsti_bootstrap_fake__' -ExpectedCommit '__jsti_bootstrap_fake__'
+. $env:JSTI_PROJECTOR
 $value=[Console]::In.ReadToEnd() | ConvertFrom-Json -Depth 8
 ConvertTo-JstiDiagnosticProjection $value | ConvertTo-Json -Depth 8 -Compress
 """
@@ -651,7 +651,7 @@ ConvertTo-JstiDiagnosticProjection $value | ConvertTo-Json -Depth 8 -Compress
             environment = {key: val for key, val in os.environ.items()
                            if key.upper() in {"PATH", "SYSTEMROOT", "WINDIR", "HOME"}}
             environment.update(TEMP=directory, TMP=directory, TMPDIR=directory,
-                               JSTI_PROJECTOR=str(HERE / "verify-windows-bundle.ps1"))
+                               JSTI_PROJECTOR=str(HERE / "FailureDiagnostics.ps1"))
             completed = subprocess.run([os.path.abspath(host), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
                                        input=json.dumps(value).encode(), env=environment, cwd=directory,
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15, check=False)
@@ -978,6 +978,274 @@ class CommandLineTests(unittest.TestCase):
     def test_process_checks_refuse_to_run_off_windows(self):
         with self.assertRaisesRegex(NATIVE.ExecutionError, "runs on Windows only"):
             NATIVE.main(["--architecture", "arm64", "--evidence", str(self.evidence), "host"])
+
+
+
+class NativeOwnerRoutingTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory(prefix="owned-routing-")
+        self.addCleanup(self.directory.cleanup)
+        self.root = pathlib.Path(self.directory.name)
+        self.executable = self.root / "SpeakWindows.exe"
+        self.executable.write_bytes(BUNDLE_TESTS.build_pe(machine=ARM64))
+        self.launches = []
+
+    def operate(self, code=3221226356, polls=2, ticks=(1000, 11000), frequency=1000,
+                context=True, deadline=31000, target_frequency=1000, launch_hook=None, **changes):
+        samples, events = iter(ticks), []
+        def next_tick():
+            events.append("ticks")
+            sample = next(samples)
+            if isinstance(sample, Exception):
+                raise sample
+            return sample
+        api_clock = types.SimpleNamespace(frequency=lambda: frequency, ticks=mock.Mock(side_effect=next_tick),
+                                          events=events)
+        process = FakeProcess(polls=polls, exit_code=code)
+        event_reader = mock.Mock(side_effect=AssertionError("no optional process launch"))
+        def launch(arguments, stdout, stderr):
+            self.launches.append(arguments)
+            events.append("launch")
+            if launch_hook:
+                launch_hook()
+            return process
+        launcher = mock.Mock(side_effect=launch)
+        original_observe = NATIVE.observe
+        observer = mock.Mock(side_effect=lambda process, api, timeout: original_observe(
+            process, api, timeout=timeout, clock=Clock(step=0.25), sleep=lambda _: None))
+        host = changes.pop("host", "nt")
+        executable = changes.pop("executable", self.executable)
+        argv = changes.pop("argv", ["--ui-smoke-test"])
+        label = changes.pop("label", "ui-smoke-test")
+        architecture = changes.pop("architecture", "arm64")
+        timeout = changes.pop("timeout", 30)
+        with mock.patch.object(NATIVE, "os", types.SimpleNamespace(name=host, path=os.path, environ=os.environ)), \
+                mock.patch.object(NATIVE, "observe", observer), \
+                mock.patch.object(NATIVE.subprocess, "run", side_effect=AssertionError("no PS/CDB")):
+            result = NATIVE.run([str(executable)] + argv, FakeAPI(modules=[[str(executable)]]),
+                                architecture, label, timeout, self.root / "out", self.root / "err", (),
+                                "C:\\Windows", launcher, native_image, event_reader,
+                                diagnostic_owner_context=context, deadline_ticks=deadline,
+                                deadline_frequency=target_frequency, deadline_api_factory=lambda: api_clock,
+                                **changes)
+        return result, process, observer, api_clock, event_reader
+
+    def test_actual_run_caps_after_popen_and_emits_closed_owned_context_without_launching_diagnostics(self):
+        marker = []
+        record, process, observer, clock, reader = self.operate(launch_hook=lambda: marker.append("launched"))
+        self.assertEqual(marker, ["launched"])
+        self.assertEqual(observer.call_args.kwargs["timeout"], 20)
+        self.assertEqual(clock.ticks.call_count, 2)
+        self.assertEqual(clock.events, ["ticks", "launch", "ticks"])
+        self.assertEqual(len(self.launches), 1)
+        self.assertEqual(record["exitCode"], 3221226356)
+        self.assertEqual(record["failures"], ["exited with 3221226356"])
+        context = record["diagnosticOwnerContext"]
+        self.assertEqual(set(context), {"schema", "originalPid", "startedUTC", "endedUTC",
+                                        "deadlineTicks", "frequency", "exitCode"})
+        self.assertEqual((context["schema"], context["originalPid"], context["deadlineTicks"],
+                          context["frequency"], context["exitCode"]), (1, process.pid, 31000, 1000, -1073740940))
+        self.assertLessEqual(datetime.datetime.fromisoformat(context["startedUTC"]),
+                             datetime.datetime.fromisoformat(context["endedUTC"]))
+        self.assertNotIn(str(self.root), json.dumps(context))
+        reader.assert_not_called()
+        self.assertNotIn("applicationError", record)
+
+    def test_known_signed_and_unsigned_crashes_preserve_original_exit_and_failure(self):
+        for signed in NATIVE.CRASH_CODES:
+            for code in (signed, signed + 0x100000000):
+                with self.subTest(code=code):
+                    record, _, _, _, _ = self.operate(code=code)
+                    self.assertEqual(record["diagnosticOwnerContext"]["exitCode"], signed)
+                    self.assertEqual(record["exitCode"], code)
+                    self.assertEqual(record["failures"], ["exited with %s" % code])
+
+    def test_unknown_success_and_noninteger_crash_codes_do_not_normalize(self):
+        for code in (None, True, False, 0, 1, "3221226356", 3221226356.0, 3221226356 + 0x100000000,
+                     -1073740940 - 0x100000000):
+            with self.subTest(code=code):
+                self.assertIsNone(NATIVE.normalize_native_crash(code))
+        for code in (0, 1, 0xc000001d, 0x100000000 + 0xc0000374):
+            record, _, _, _, reader = self.operate(code=code)
+            self.assertNotIn("diagnosticOwnerContext", record)
+            reader.assert_not_called()
+
+    def test_exhausted_after_launch_kills_owned_process_and_preserves_timeout_without_context(self):
+        result, process, observer, _, reader = self.operate(polls=1000, ticks=(1000, 32000))
+        self.assertEqual(observer.call_args.kwargs["timeout"], 0)
+        self.assertTrue(process.killed)
+        self.assertTrue(result["timedOut"])
+        self.assertIn("did not exit before its deadline", result["failures"])
+        self.assertNotIn("diagnosticOwnerContext", result)
+        reader.assert_not_called()
+
+    def test_clock_error_after_launch_still_observes_and_reaps_owned_process(self):
+        result, process, observer, _, _ = self.operate(polls=1000, ticks=(1000, OSError("private-canary")))
+        self.assertEqual(observer.call_args.kwargs["timeout"], 0)
+        self.assertTrue(process.killed)
+        self.assertTrue(result["timedOut"])
+        self.assertNotIn("private-canary", json.dumps(result))
+        self.assertNotIn("diagnosticOwnerContext", result)
+
+    def test_fast_natural_exit_after_qpc_error_retains_failure_without_optional_context(self):
+        result, process, observer, _, reader = self.operate(polls=1, ticks=(1000, OSError("private-canary")))
+        self.assertEqual(observer.call_args.kwargs["timeout"], 0)
+        self.assertFalse(process.killed)
+        self.assertFalse(result["timedOut"])
+        self.assertEqual(result["failures"], ["exited with 3221226356"])
+        self.assertNotIn("diagnosticOwnerContext", result)
+        reader.assert_not_called()
+
+    def test_qpc_remaining_cannot_extend_original_timeout(self):
+        record, _, observer, _, _ = self.operate(timeout=7, ticks=(1000, 2000))
+        self.assertEqual(observer.call_args.kwargs["timeout"], 7)
+        self.assertEqual(record["diagnosticOwnerContext"]["deadlineTicks"], 31000)
+
+    def test_invalid_qpc_frequency_bounds_and_missing_fields_refuse_before_launch(self):
+        invalid = [dict(deadline=None), dict(deadline=True), dict(deadline=0), dict(deadline=1 << 63),
+                   dict(target_frequency=None), dict(target_frequency=0), dict(target_frequency=True),
+                   dict(target_frequency=1 << 63), dict(frequency=2000), dict(ticks=(1000,), deadline=32001),
+                   dict(ticks=(31000,)), dict(ticks=(32000,))]
+        for changes in invalid:
+            with self.subTest(changes=changes), \
+                    mock.patch.object(NATIVE, "observe", side_effect=AssertionError("no child observation")), \
+                    mock.patch.object(NATIVE.subprocess, "Popen", side_effect=AssertionError("no launch")):
+                # Factory admission happens before the fixture's launcher; output files aren't opened.
+                with self.assertRaises(NATIVE.ExecutionError):
+                    self.operate(**changes)
+                self.assertFalse((self.root / "out").exists())
+                self.assertEqual(self.launches, [])
+
+    def test_optin_wrong_host_target_label_program_arguments_or_timeout_refuses_before_launch(self):
+        other = self.root / "Other.exe"
+        other.write_bytes(BUNDLE_TESTS.build_pe(machine=ARM64))
+        x64 = self.root / "x64" / "SpeakWindows.exe"
+        x64.parent.mkdir()
+        x64.write_bytes(BUNDLE_TESTS.build_pe(machine=AMD64))
+        for changes in [dict(host="posix"), dict(architecture="x64", executable=x64),
+                        dict(label="self-test"), dict(executable=other), dict(argv=["--self-test"]),
+                        dict(argv=["--ui-smoke-test", "private-canary"]), dict(timeout=31),
+                        dict(timeout=0), dict(timeout=float("nan"))]:
+            with self.subTest(changes=changes), self.assertRaises(NATIVE.ExecutionError):
+                self.operate(**changes)
+            self.assertFalse((self.root / "out").exists())
+            self.assertEqual(self.launches, [])
+
+    def test_deadline_without_optin_refuses_but_no_flags_preserve_legacy_arm_behavior(self):
+        with self.assertRaises(NATIVE.ExecutionError):
+            self.operate(context=False)
+        record, _, observer, clock, _ = self.operate(context=False, deadline=None, target_frequency=None,
+                                                   host="posix", code=0)
+        self.assertEqual(observer.call_args.kwargs["timeout"], 30)
+        clock.ticks.assert_not_called()
+        self.assertEqual(record["failures"], [])
+        self.assertNotIn("diagnosticOwnerContext", record)
+
+    def test_context_refuses_wrong_machine_bad_pid_timeout_or_invalid_utc_interval(self):
+        start = datetime.datetime(2026, 10, 28, tzinfo=datetime.timezone.utc)
+        observation = {"exitCode": 0xc0000374, "timedOut": False, "processMachine": ARM64, "nativeMachine": ARM64}
+        deadline = types.SimpleNamespace(end=31000, frequency=1000)
+        for pid, changes, seconds in [(True, {}, 1), (0, {}, 1), (1 << 32, {}, 1),
+                                     (1, {"processMachine": AMD64}, 1), (1, {"nativeMachine": AMD64}, 1),
+                                     (1, {"timedOut": True}, 1), (1, {}, -1), (1, {}, 30.001)]:
+            with self.subTest(pid=pid, changes=changes, seconds=seconds):
+                self.assertIsNone(NATIVE.native_owner_context(types.SimpleNamespace(pid=pid),
+                    {**observation, **changes}, start, start + datetime.timedelta(seconds=seconds), deadline))
+
+    def test_actual_python_owned_record_roundtrips_through_shared_powershell_native_adapter(self):
+        host = shutil.which("pwsh")
+        if host is None:
+            self.skipTest("PowerShell unavailable: actual native context boundary not executed")
+        with tempfile.TemporaryDirectory() as directory:
+            environment = {key: value for key, value in os.environ.items()
+                           if key.upper() in {"PATH", "SYSTEMROOT", "WINDIR", "HOME"}}
+            environment.update(TEMP=directory, TMP=directory, TMPDIR=directory,
+                               JSTI_PROJECTOR=str(HERE / "FailureDiagnostics.ps1"))
+            query = subprocess.run([os.path.abspath(host), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
+                                    "@{frequency=[System.Diagnostics.Stopwatch]::Frequency;ticks=[System.Diagnostics.Stopwatch]::GetTimestamp()} | ConvertTo-Json -Compress"],
+                                   env=environment, cwd=directory, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, timeout=10, check=False)
+            self.assertEqual(query.returncode, 0)
+            self.assertEqual(query.stderr, b"")
+            clock = json.loads(query.stdout)
+            frequency, ticks = clock["frequency"], clock["ticks"]
+            self.assertTrue(0 < frequency <= 1000000000)
+            self.assertTrue(ticks > 0)
+            image = {"path": APP, "name": "SpeakWindows.exe", "architecture": "arm64", "native": True,
+                     "dll": False, "sha256": "a" * 64}
+            with mock.patch.object(NATIVE, "check_images", return_value=[image]):
+                record, _, _, _, _ = self.operate(executable=APP, frequency=frequency,
+                    target_frequency=frequency, deadline=ticks + 30 * frequency, ticks=(ticks, ticks + 10 * frequency))
+            script = r"""
+$ErrorActionPreference='Stop'
+. $env:JSTI_PROJECTOR
+$document=[System.Text.Json.JsonDocument]::Parse([Console]::In.ReadToEnd())
+$run=ConvertFrom-JstiEvidenceElement $document.RootElement
+$original=(Get-Item Function:Invoke-JstiStandaloneDiagnostic).ScriptBlock
+try {
+    Set-Item Function:Invoke-JstiStandaloneDiagnostic {
+        param($Setup,$Run,$Process,$Executable,$ExpectedSHA256,$DeadlineTicks,$Frequency,$StartedUTC,$EndedUTC)
+        $script:handoff=@{adapted=$Run;pid=$Process.Id;deadline=$DeadlineTicks;frequency=$Frequency;
+            executable=$Executable;hash=$ExpectedSHA256;start=$StartedUTC.ToString('o');end=$EndedUTC.ToString('o')}
+        return @{status='unavailable'}
+    }
+    $result=Invoke-JstiNativeFailureDiagnostic @{Host=@{};Python=@{}} $run $run.executable.path `
+        $run.executable.sha256 $run.diagnosticOwnerContext.deadlineTicks $run.diagnosticOwnerContext.frequency
+    @{result=$result;handoff=$script:handoff;originalExit=$run.exitCode;failures=$run.failures} |
+        ConvertTo-Json -Depth 12 -Compress
+} finally {
+    Set-Item Function:Invoke-JstiStandaloneDiagnostic $original
+    $document.Dispose()
+}
+"""
+            completed = subprocess.run([os.path.abspath(host), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
+                                       input=json.dumps(record).encode(), env=environment, cwd=directory,
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15, check=False)
+        self.assertEqual(completed.returncode, 0, "actual shared native adapter failed")
+        self.assertEqual(completed.stderr, b"")
+        self.assertLessEqual(len(completed.stdout), 8192)
+        actual = json.loads(completed.stdout)
+        self.assertEqual(actual["result"], {"status": "unavailable"})
+        self.assertEqual(actual["originalExit"], record["exitCode"])
+        self.assertEqual(actual["failures"], record["failures"])
+        handoff = actual["handoff"]
+        self.assertEqual(handoff["adapted"], {"label": "ui-smoke", "arguments": "--ui-smoke-test",
+                                              "exitCode": -1073740940, "processMachine": "0xAA64"})
+        self.assertEqual((handoff["pid"], handoff["deadline"], handoff["frequency"]),
+                         (4242, ticks + 30 * frequency, frequency))
+        self.assertEqual((handoff["executable"], handoff["hash"]), (APP, "a" * 64))
+        for key, context_key in (("start", "startedUTC"), ("end", "endedUTC")):
+            self.assertEqual(datetime.datetime.fromisoformat(handoff[key]),
+                             datetime.datetime.fromisoformat(record["diagnosticOwnerContext"][context_key]))
+
+    def test_actual_cli_forwards_owned_deadline_and_persists_original_failed_record(self):
+        stdout, stderr, evidence = self.root / "out", self.root / "err", self.root / "evidence.json"
+        stdout.write_text("owned smoke output", encoding="utf-8")
+        stderr.write_text("", encoding="utf-8")
+        record = {"label": "ui-smoke-test", "processMachine": "arm64", "exitCode": 3221226356,
+                  "modulesObserved": 1, "seconds": 1, "failures": ["exited with 3221226356"],
+                  "diagnosticOwnerContext": {"schema": 1, "originalPid": 4242}}
+        windows = types.SimpleNamespace(name="nt", path=os.path, environ=os.environ, replace=os.replace)
+        with mock.patch.object(NATIVE, "os", windows), mock.patch.object(NATIVE, "WindowsAPI", return_value=FakeAPI()), \
+                mock.patch.object(NATIVE, "run", return_value=record) as invoke, contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(NATIVE.ExecutionError, "exited with 3221226356"):
+                NATIVE.main(["--architecture", "arm64", "--evidence", str(evidence), "run",
+                    "--label", "ui-smoke-test", "--timeout", "30", "--stdout", str(stdout), "--stderr", str(stderr),
+                    "--diagnostic-owner-context", "--deadline-ticks", "31000", "--deadline-frequency", "1000",
+                    "--", str(self.executable), "--ui-smoke-test"])
+        self.assertEqual(invoke.call_args.kwargs, {"diagnostic_owner_context": True,
+                                                   "deadline_ticks": 31000, "deadline_frequency": 1000})
+        self.assertEqual(invoke.call_args.args[0], [str(self.executable), "--ui-smoke-test"])
+        self.assertEqual(json.loads(evidence.read_text(encoding="utf-8"))["runs"], [record])
+
+    def test_parser_carries_exact_context_options_without_consuming_program_arguments(self):
+        args = NATIVE.parse_arguments(["--architecture", "arm64", "--evidence", "owned.json", "run",
+            "--label", "ui-smoke-test", "--timeout", "30", "--stdout", "out", "--stderr", "err",
+            "--diagnostic-owner-context", "--deadline-ticks", "31000", "--deadline-frequency", "1000",
+            "--", "SpeakWindows.exe", "--ui-smoke-test"])
+        self.assertTrue(args.diagnostic_owner_context)
+        self.assertEqual((args.deadline_ticks, args.deadline_frequency), (31000, 1000))
+        self.assertEqual(args.arguments, ["SpeakWindows.exe", "--ui-smoke-test"])
 
 
 if __name__ == "__main__":

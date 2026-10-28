@@ -507,8 +507,43 @@ def application_error(pid, executable, started, ended, query=subprocess.run):
         return {"status": "unavailable"}
 
 
+class NativeOwnerDeadline:
+    """Trusted PS caller's existing original-process QPC deadline; never launches a diagnostic."""
+    def __init__(self, ticks, frequency, api):
+        if any(type(value) is not int or not 0 < value <= 0x7fffffffffffffff for value in (ticks, frequency)):
+            raise ExecutionError("invalid diagnostic deadline")
+        self.end, self.frequency, self.api = ticks, frequency, api
+        if api.frequency() != frequency or not 0 < self.remaining() <= 30:
+            raise ExecutionError("invalid diagnostic deadline")
+
+    def remaining(self):
+        return max(0.0, (self.end - self.api.ticks()) / self.frequency)
+
+
+def normalize_native_crash(code):
+    """Only the three admitted signed/UINT32 spellings; never truncate arbitrary integers."""
+    if type(code) is not int:
+        return None
+    for signed in CRASH_CODES:
+        if code in (signed, signed + 0x100000000):
+            return signed
+    return None
+
+
+def native_owner_context(process, observation, started, ended, deadline):
+    code = normalize_native_crash(observation["exitCode"])
+    if (code is None or observation["timedOut"] or observation["processMachine"] != 0xaa64 or
+            observation["nativeMachine"] != 0xaa64 or type(process.pid) is not int or
+            not 0 < process.pid <= 0xffffffff or not 0 <= (ended - started).total_seconds() <= 30):
+        return None
+    return {"schema": 1, "originalPid": process.pid, "startedUTC": started.isoformat(),
+            "endedUTC": ended.isoformat(), "deadlineTicks": deadline.end,
+            "frequency": deadline.frequency, "exitCode": code}
+
+
 def run(arguments, api, architecture, label, timeout, stdout_path, stderr_path, expected_output=(),
-        system_root=None, launch=subprocess.Popen, read_image=describe_image, event_reader=application_error):
+        system_root=None, launch=subprocess.Popen, read_image=describe_image, event_reader=application_error, *,
+        diagnostic_owner_context=False, deadline_ticks=None, deadline_frequency=None, deadline_api_factory=None):
     """Run ``arguments`` and return its evidence record; ``failures`` lists what was not native or successful.
 
     A program that is not a native image is refused before it starts.
@@ -517,10 +552,30 @@ def run(arguments, api, architecture, label, timeout, stdout_path, stderr_path, 
     main_image = check_images([executable], architecture)[0]
     crash_candidate = (os.name == "nt" and label == "ui-smoke-test" and arguments[1:] == ["--ui-smoke-test"]
                        and ntpath.basename(executable).casefold() == "speakwindows.exe")
+    deadline = None
+    if diagnostic_owner_context:
+        if not crash_candidate or architecture != "arm64" or not 0 < timeout <= 30:
+            raise ExecutionError("diagnostic owner context requires the native ARM64 UI smoke command")
+        try:
+            deadline = NativeOwnerDeadline(deadline_ticks, deadline_frequency,
+                                           (deadline_api_factory or StandaloneWindows)())
+        except (OSError, ValueError, TypeError):
+            raise ExecutionError("diagnostic clock unavailable") from None
+    elif deadline_ticks is not None or deadline_frequency is not None:
+        raise ExecutionError("diagnostic deadline requires owner context")
     started = datetime.datetime.now(datetime.timezone.utc) if crash_candidate else None
     with open(stdout_path, "wb") as stdout, open(stderr_path, "wb") as stderr:
         process = launch([executable] + list(arguments[1:]), stdout=stdout, stderr=stderr)
-        observation = observe(process, api, timeout=timeout)
+        # Re-sample AFTER Popen: executable validation/launch time consumes the
+        # same caller deadline. A clock failure cannot leave a fresh child unobserved.
+        remaining, deadline_clock_valid = timeout, True
+        if deadline is not None:
+            try:
+                remaining = min(timeout, deadline.remaining())
+            except OSError:
+                remaining, deadline_clock_valid = 0, False
+        observation = observe(process, api, timeout=remaining)
+    ended = datetime.datetime.now(datetime.timezone.utc) if crash_candidate else None
     system_root = system_root or os.environ.get("SystemRoot", r"C:\Windows")
     failures, images = assess_run(observation, architecture, system_root, read_image)
     output = pathlib.Path(stdout_path).read_bytes() + pathlib.Path(stderr_path).read_bytes()
@@ -534,7 +589,11 @@ def run(arguments, api, architecture, label, timeout, stdout_path, stderr_path, 
               "exitCode": observation["exitCode"], "timedOut": observation["timedOut"], "seconds": observation["seconds"],
               "modulesObserved": len(observation["modules"]), "modulesOutsideSystemRoot": images,
               "queryErrors": observation["queryErrors"], "failures": failures}
-    if crash_candidate and observation["exitCode"] not in (None, 0) and not observation["timedOut"]:
+    if deadline is not None and deadline_clock_valid:
+        context = native_owner_context(process, observation, started, ended, deadline)
+        if context is not None:
+            record["diagnosticOwnerContext"] = context
+    if deadline is None and crash_candidate and observation["exitCode"] not in (None, 0) and not observation["timedOut"]:
         try:
             record["applicationError"] = event_reader(process.pid, os.path.abspath(executable), started,
                                                       datetime.datetime.now(datetime.timezone.utc))
@@ -1013,6 +1072,10 @@ def parse_arguments(argv=None):
     execute.add_argument("--stdout", required=True, type=pathlib.Path)
     execute.add_argument("--stderr", required=True, type=pathlib.Path)
     execute.add_argument("--expect-output", action="append", default=[], help="text stdout or stderr must contain")
+    execute.add_argument("--diagnostic-owner-context", action="store_true",
+                         help="trusted ARM64 UI caller owns optional diagnostics within the same QPC deadline")
+    execute.add_argument("--deadline-ticks", type=int)
+    execute.add_argument("--deadline-frequency", type=int)
     execute.add_argument("arguments", nargs=argparse.REMAINDER, help="-- program [arguments]")
     args = parser.parse_args(argv)
     if args.command == "run":
@@ -1038,7 +1101,8 @@ def main(argv=None):
             print(json.dumps(evidence["host"], indent=2, sort_keys=True))
             return
         record = run(args.arguments, api, args.architecture, args.label, args.timeout, args.stdout, args.stderr,
-                     args.expect_output)
+                     args.expect_output, diagnostic_owner_context=args.diagnostic_owner_context,
+                     deadline_ticks=args.deadline_ticks, deadline_frequency=args.deadline_frequency)
         evidence["runs"].append(record)
         for path in (args.stdout, args.stderr):
             sys.stdout.write(pathlib.Path(path).read_text(encoding="utf-8", errors="replace"))

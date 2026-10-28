@@ -89,6 +89,8 @@ package protocol DesktopHostPlatform: Sendable {
     static func historyInsights(all: DesktopHistoryInsights, visible: DesktopHistoryInsights)
     static func historyFilters(models: [String], selection: DesktopHistoryFilter)
     static func historyManagement(identifiers: [UUID])
+    /// Nil until this host implements the explicit, local issue preview UI.
+    static var issueReportActions: DesktopHostIssueReportActions? { get }
     /// The recording HUD's phase for the dictation it follows; `.hidden` hides it.
     static func hud(_ state: DesktopHUDState)
     static func historyPresentation(
@@ -210,6 +212,7 @@ package protocol DesktopHostPlatform: Sendable {
 }
 
 package extension DesktopHostPlatform {
+    static var issueReportActions: DesktopHostIssueReportActions? { nil }
     static func publishLocalModelPreferences(batch: String?, live: String?) throws {
         throw DesktopHostError(message: "Updating Local model choices is unavailable on this host.")
     }

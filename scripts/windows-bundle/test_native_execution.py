@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Unit tests for verify-native-execution.py; Windows process calls are faked."""
 import contextlib
+import datetime
 import importlib.util
 import io
 import json
@@ -8,7 +9,9 @@ import os
 import pathlib
 import sys
 import tempfile
+import types
 import unittest
+from unittest import mock
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
@@ -199,6 +202,148 @@ class ImageAndHostTests(unittest.TestCase):
         with self.assertRaisesRegex(NATIVE.ExecutionError, "not native arm64 images"):
             NATIVE.run([str(self.write("x64.exe"))], api, "arm64", "x", 30, stdout, stderr, (), "C:\\Windows",
                        launch, native_image)
+
+
+class ApplicationErrorTests(unittest.TestCase):
+    def setUp(self):
+        self.started = datetime.datetime(2026, 10, 28, 7, 20, 0, tzinfo=datetime.timezone.utc)
+        self.ended = self.started + datetime.timedelta(seconds=2)
+
+    def event(self, **changes):
+        data = {"AppName": "SpeakWindows.exe", "AppPath": APP, "ProcessId": "0x1092",
+                "ModuleName": "ntdll.dll", "ModuleVersion": "10.0.26100.1",
+                "ExceptionCode": "c0000374", "FaultingOffset": "0000000000012345"}
+        data.update(changes)
+        return {"time": "2026-10-28T07:20:01Z", "data": data}
+
+    def project(self, events):
+        return NATIVE.project_application_error(events, 4242, APP, self.started, self.ended)
+
+    def query(self, payload, **changes):
+        def child(arguments, **options):
+            self.assertEqual(arguments[:5], ["pwsh", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command"])
+            self.assertIn("-MaxEvents 16", arguments[5])
+            self.assertNotIn(".Message", arguments[5])
+            self.assertNotIn("Execution", arguments[5])
+            self.assertEqual(options["timeout"], 5)
+            self.assertEqual(options["stdin"], NATIVE.subprocess.DEVNULL)
+            self.assertEqual(options["stderr"], NATIVE.subprocess.DEVNULL)
+            self.assertNotIn("EVENT_TEST_SECRET", options["env"])
+            result = {"returncode": 0, "stdout": json.dumps(payload).encode()}
+            result.update(changes)
+            return types.SimpleNamespace(**result)
+        with mock.patch.dict(os.environ, {"EVENT_TEST_SECRET": "private-canary"}):
+            return NATIVE.application_error(4242, APP, self.started, self.ended, query=child)
+
+    def test_exact_owned_crash_projects_only_finite_fields(self):
+        result = self.query({"status": "ok", "events": [self.event()]})
+        self.assertEqual(result, {"status": "observed", "module": "ntdll.dll", "version": "10.0.26100.1",
+                                  "exceptionCode": "0xc0000374", "faultOffset": "0x0000000000012345",
+                                  "timeUTC": "2026-10-28T07:20:01+00:00"})
+        self.assertNotIn(APP, json.dumps(result))
+
+    def test_wrong_process_path_application_and_time_do_not_match(self):
+        for changes in ({"ProcessId": "4243"}, {"AppPath": r"C:\other\SpeakWindows.exe"},
+                        {"AppName": "other.exe"}):
+            with self.subTest(changes=changes):
+                self.assertEqual(self.project([self.event(**changes)]), {"status": "no-match"})
+        event = self.event()
+        event["time"] = "2026-10-28T07:20:03Z"
+        self.assertEqual(self.project([event]), {"status": "no-match"})
+
+    def test_faulting_process_alias_is_explicit_and_conflict_is_unknown(self):
+        event = self.event()
+        del event["data"]["ProcessId"]
+        event["data"]["FaultingProcessId"] = "4242"
+        self.assertEqual(self.project([event])["status"], "observed")
+        self.assertEqual(self.project([self.event(FaultingProcessId="4243")]), {"status": "invalid"})
+        event = self.event()
+        del event["data"]["ProcessId"]
+        event["data"]["ExecutionProcessID"] = "4242"
+        self.assertEqual(self.project([event]), {"status": "invalid"})
+
+    def test_ambiguous_missing_and_oversized_sets_remain_unknown(self):
+        self.assertEqual(self.project([]), {"status": "no-match"})
+        self.assertEqual(self.project([self.event(), self.event()]), {"status": "ambiguous"})
+        self.assertEqual(self.project([self.event()] * 17), {"status": "invalid"})
+
+    def test_raw_messages_paths_and_invalid_numeric_values_cannot_escape(self):
+        for changes in ({"ModuleName": r"C:\private-canary\ntdll.dll"}, {"ModuleVersion": "private-canary"},
+                        {"ExceptionCode": "private-canary"}, {"FaultingOffset": "0x" + "f" * 17},
+                        {"ProcessId": "0xprivate-canary"}, {"Message": "private-canary"}):
+            with self.subTest(changes=changes):
+                result = self.project([self.event(**changes)])
+                self.assertEqual(result, {"status": "invalid"})
+                self.assertNotIn("private-canary", json.dumps(result))
+        for time in ("invalid", "2026-10-28T07:20:01", None):
+            event = self.event()
+            event["time"] = time
+            self.assertEqual(self.project([event]), {"status": "invalid"})
+
+    def test_query_failure_output_and_timeout_remain_fixed_unknown(self):
+        for payload, options, expected in [({"status": "unavailable"}, {}, "unavailable"),
+                                           ({"private-canary": "raw-response"}, {}, "invalid"),
+                                           ({}, {"returncode": 1, "stdout": b"private-canary"}, "unavailable"),
+                                           ({}, {"stdout": b"private-canary"}, "unavailable"),
+                                           ({}, {"stdout": b"x" * 65537}, "invalid")]:
+            with self.subTest(options=list(options), expected=expected):
+                self.assertEqual(self.query(payload, **options), {"status": expected})
+        for error, expected in [(NATIVE.subprocess.TimeoutExpired("private-canary", 5), "timeout"),
+                                (PermissionError("private-canary"), "unavailable"),
+                                (RuntimeError("private-canary"), "unavailable")]:
+            with self.subTest(type=type(error).__name__):
+                self.assertEqual(NATIVE.application_error(4242, APP, self.started, self.ended,
+                                                         query=mock.Mock(side_effect=error)), {"status": expected})
+
+    def test_run_queries_only_abnormal_owned_windows_smoke_without_changing_failures(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            executable = root / "SpeakWindows.exe"
+            executable.write_bytes(BUNDLE_TESTS.build_pe(machine=ARM64))
+            stdout, stderr = root / "out", root / "err"
+            reader = mock.Mock(return_value={"status": "observed", "module": "ntdll.dll"})
+            windows = types.SimpleNamespace(name="nt", path=os.path, environ=os.environ)
+            def launch(arguments, stdout, stderr):
+                return FakeProcess(exit_code=3221226356)
+            with mock.patch.object(NATIVE, "os", windows):
+                result = NATIVE.run([str(executable), "--ui-smoke-test"], FakeAPI(modules=[[str(executable)]]),
+                                    "arm64", "ui-smoke-test", 30, stdout, stderr, ["window passed"],
+                                    "C:\\Windows", launch, native_image, reader)
+            self.assertEqual(result["exitCode"], 3221226356)
+            self.assertFalse(result["timedOut"])
+            self.assertEqual(result["failures"], ["exited with 3221226356", "output lacks 'window passed'"])
+            self.assertEqual(result["applicationError"]["module"], "ntdll.dll")
+            self.assertEqual(reader.call_args.args[:2], (4242, str(executable.resolve())))
+            self.assertLessEqual(reader.call_args.args[2], reader.call_args.args[3])
+            reader.side_effect = RuntimeError("private-canary")
+            with mock.patch.object(NATIVE, "os", windows):
+                failed = NATIVE.run([str(executable), "--ui-smoke-test"], FakeAPI(modules=[[str(executable)]]),
+                                    "arm64", "ui-smoke-test", 30, stdout, stderr, ["window passed"],
+                                    "C:\\Windows", launch, native_image, reader)
+            self.assertEqual(failed["failures"], result["failures"])
+            self.assertEqual(failed["applicationError"], {"status": "unavailable"})
+
+    def test_success_other_commands_nonwindows_and_intentional_timeout_never_query(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            executable = root / "SpeakWindows.exe"
+            executable.write_bytes(BUNDLE_TESTS.build_pe(machine=ARM64))
+            for host, label, arguments, polls, code, timeout in [
+                    ("nt", "ui-smoke-test", ["--ui-smoke-test"], 2, 0, 30),
+                    ("nt", "self-test", ["--self-test"], 2, 1, 30),
+                    ("nt", "ui-smoke-test", ["--self-test"], 2, 1, 30),
+                    ("posix", "ui-smoke-test", ["--ui-smoke-test"], 2, 1, 30),
+                    ("nt", "ui-smoke-test", ["--ui-smoke-test"], 100, 1, -1)]:
+                with self.subTest(host=host, label=label, polls=polls):
+                    reader = mock.Mock(side_effect=AssertionError("must not query"))
+                    process = FakeProcess(polls=polls, exit_code=code)
+                    environment = types.SimpleNamespace(name=host, path=os.path, environ=os.environ)
+                    with mock.patch.object(NATIVE, "os", environment):
+                        result = NATIVE.run([str(executable)] + arguments, FakeAPI(modules=[[str(executable)]]),
+                                            "arm64", label, timeout, root / "out", root / "err", (),
+                                            "C:\\Windows", lambda *a, **kw: process, native_image, reader)
+                    reader.assert_not_called()
+                    self.assertNotIn("applicationError", result)
 
 
 class CommandLineTests(unittest.TestCase):

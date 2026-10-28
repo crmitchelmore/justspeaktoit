@@ -21,11 +21,14 @@ An ARM64 image cannot be emulated on Windows, so native ``images`` on a native
 ``host`` already exclude x64 emulation; ``run`` observes it directly.
 """
 import argparse
+import datetime
 import hashlib
 import json
+import ntpath
 import os
 import pathlib
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -283,14 +286,128 @@ def assess_run(observation, architecture, system_root, read_image=describe_image
     return failures, images
 
 
+# Read only named crash fields; never render Message, complete XML or an error.
+APPLICATION_ERROR_QUERY = r"""
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+try {
+    $events = @(Get-WinEvent -FilterHashtable @{
+        LogName='Application'; ProviderName='Application Error'; Id=1000
+        StartTime=[DateTime]::Parse($env:JSTI_EVENT_START).ToUniversalTime()
+        EndTime=[DateTime]::Parse($env:JSTI_EVENT_END).ToUniversalTime()
+    } -MaxEvents 16 -ErrorAction Stop)
+    $rows = @()
+    foreach ($event in $events) {
+        [xml]$xml = $event.ToXml()
+        $data = @{}
+        foreach ($entry in $xml.Event.EventData.Data) {
+            if ($entry.Name -cin @('AppName','AppPath','ProcessId','FaultingProcessId',
+                                  'ModuleName','ModuleVersion','ExceptionCode','FaultingOffset')) {
+                if ($data.ContainsKey([string]$entry.Name) -or ([string]$entry.InnerText).Length -gt 4096) {
+                    throw 'Invalid crash field'
+                }
+                $data[[string]$entry.Name] = [string]$entry.InnerText
+            }
+        }
+        $rows += @{time=$event.TimeCreated.ToUniversalTime().ToString('o'); data=$data}
+    }
+    @{status='ok'; events=@($rows)} | ConvertTo-Json -Depth 4 -Compress
+} catch {
+    @{status='unavailable'} | ConvertTo-Json -Compress
+}
+"""
+
+
+def project_application_error(events, pid, executable, started, ended):
+    """Project one exact owned crash; private path/identity fields never escape."""
+    if not isinstance(events, list) or len(events) > 16:
+        return {"status": "invalid"}
+    matches = []
+    fields = {"AppName", "AppPath", "ProcessId", "FaultingProcessId", "ModuleName", "ModuleVersion",
+              "ExceptionCode", "FaultingOffset"}
+    for event in events:
+        if not isinstance(event, dict) or set(event) != {"time", "data"} or not isinstance(event["data"], dict):
+            return {"status": "invalid"}
+        data = event["data"]
+        if set(data) - fields or any(not isinstance(v, str) or len(v) > 4096 for v in data.values()):
+            return {"status": "invalid"}
+        if data.get("AppName", "").casefold() != ntpath.basename(executable).casefold():
+            continue
+        process_ids = [data[key] for key in ("ProcessId", "FaultingProcessId") if key in data]
+        if not process_ids or any(not re.fullmatch(r"(?:0x[0-9a-fA-F]{1,16}|[0-9]{1,20})", v)
+                                  for v in process_ids):
+            return {"status": "invalid"}
+        if len({int(v, 16 if v.startswith("0x") else 10) for v in process_ids}) != 1:
+            return {"status": "invalid"}
+        if int(process_ids[0], 16 if process_ids[0].startswith("0x") else 10) != pid:
+            continue
+        if not ntpath.isabs(data.get("AppPath", "")):
+            return {"status": "invalid"}
+        if ntpath.normcase(ntpath.normpath(data["AppPath"])) != ntpath.normcase(ntpath.normpath(executable)):
+            continue
+        if not isinstance(event["time"], str) or len(event["time"]) > 40:
+            return {"status": "invalid"}
+        try:
+            moment = datetime.datetime.fromisoformat(event["time"].replace("Z", "+00:00"))
+        except ValueError:
+            return {"status": "invalid"}
+        if moment.tzinfo is None:
+            return {"status": "invalid"}
+        if not started <= moment <= ended:
+            continue
+        patterns = {"ModuleName": r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}",
+                    "ModuleVersion": r"[0-9]{1,10}(?:\.[0-9]{1,10}){0,3}",
+                    "ExceptionCode": r"(?:0x)?[0-9a-fA-F]{8}",
+                    "FaultingOffset": r"(?:0x)?[0-9a-fA-F]{1,16}"}
+        if any(not re.fullmatch(pattern, data.get(key, "")) for key, pattern in patterns.items()):
+            return {"status": "invalid"}
+        matches.append({"module": data["ModuleName"], "version": data["ModuleVersion"],
+                        "exceptionCode": "0x%08x" % int(data["ExceptionCode"], 16),
+                        "faultOffset": "0x%016x" % int(data["FaultingOffset"], 16),
+                        "timeUTC": moment.astimezone(datetime.timezone.utc).isoformat()})
+    if len(matches) != 1:
+        return {"status": "ambiguous" if matches else "no-match"}
+    return {"status": "observed", **matches[0]}
+
+
+def application_error(pid, executable, started, ended, query=subprocess.run):
+    """Optional five-second query; collector failures cannot replace runtime evidence."""
+    try:
+        environment = {key: os.environ[key] for key in ("PATH", "SystemRoot", "WINDIR", "TEMP", "TMP")
+                       if key in os.environ}
+        environment.update(JSTI_EVENT_START=started.isoformat(), JSTI_EVENT_END=ended.isoformat())
+        result = query(["pwsh", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", APPLICATION_ERROR_QUERY],
+                       stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                       env=environment, timeout=5, check=False)
+        if result.returncode != 0:
+            return {"status": "unavailable"}
+        if len(result.stdout) > 65536:
+            return {"status": "invalid"}
+        payload = json.loads(result.stdout.decode("utf-8-sig"))
+        if payload == {"status": "unavailable"}:
+            return payload
+        if not isinstance(payload, dict) or set(payload) != {"status", "events"} or payload["status"] != "ok":
+            return {"status": "invalid"}
+        return project_application_error(payload["events"], pid, executable, started, ended)
+    except subprocess.TimeoutExpired:
+        return {"status": "timeout"}
+    except Exception:
+        # Neither exception text nor captured output is safe diagnostic content.
+        return {"status": "unavailable"}
+
+
 def run(arguments, api, architecture, label, timeout, stdout_path, stderr_path, expected_output=(),
-        system_root=None, launch=subprocess.Popen, read_image=describe_image):
+        system_root=None, launch=subprocess.Popen, read_image=describe_image, event_reader=application_error):
     """Run ``arguments`` and return its evidence record; ``failures`` lists what was not native or successful.
 
     A program that is not a native image is refused before it starts.
     """
     executable = shutil.which(arguments[0]) or arguments[0]
     main_image = check_images([executable], architecture)[0]
+    crash_candidate = (os.name == "nt" and label == "ui-smoke-test" and arguments[1:] == ["--ui-smoke-test"]
+                       and ntpath.basename(executable).casefold() == "speakwindows.exe")
+    started = datetime.datetime.now(datetime.timezone.utc) if crash_candidate else None
     with open(stdout_path, "wb") as stdout, open(stderr_path, "wb") as stderr:
         process = launch([executable] + list(arguments[1:]), stdout=stdout, stderr=stderr)
         observation = observe(process, api, timeout=timeout)
@@ -307,6 +424,12 @@ def run(arguments, api, architecture, label, timeout, stdout_path, stderr_path, 
               "exitCode": observation["exitCode"], "timedOut": observation["timedOut"], "seconds": observation["seconds"],
               "modulesObserved": len(observation["modules"]), "modulesOutsideSystemRoot": images,
               "queryErrors": observation["queryErrors"], "failures": failures}
+    if crash_candidate and observation["exitCode"] not in (None, 0) and not observation["timedOut"]:
+        try:
+            record["applicationError"] = event_reader(process.pid, os.path.abspath(executable), started,
+                                                      datetime.datetime.now(datetime.timezone.utc))
+        except Exception:
+            record["applicationError"] = {"status": "unavailable"}
     return record
 
 

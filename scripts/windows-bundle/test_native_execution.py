@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Unit tests for verify-native-execution.py; Windows process calls are faked."""
+import base64
 import contextlib
 import datetime
 import importlib.util
@@ -7,6 +8,8 @@ import io
 import json
 import os
 import pathlib
+import shutil
+import subprocess
 import sys
 import tempfile
 import types
@@ -516,6 +519,418 @@ class ApplicationErrorTests(unittest.TestCase):
                                             "C:\\Windows", lambda *a, **kw: process, native_image, reader)
                     reader.assert_not_called()
                     self.assertNotIn("applicationError", result)
+
+
+class StandaloneDiagnosticTests(unittest.TestCase):
+    def request(self, **changes):
+        value = {"schema": 1, "architecture": "arm64", "label": "ui-smoke", "arguments": ["--ui-smoke-test"],
+                 "exitCode": -1073740940, "originalPid": 321, "startedUTC": "2026-10-28T12:00:00+00:00",
+                 "endedUTC": "2026-10-28T12:00:03+00:00", "executable": r"C:\Owned κόσμε\SpeakWindows.exe",
+                 "expectedSHA256": "a" * 64, "powershell": r"C:\Owned\pwsh.exe", "powershellSHA256": "b" * 64,
+                 "parentPid": 123, "deadlineTicks": 30000, "frequency": 1000}
+        value.update(changes)
+        return value
+
+    def encode(self, value):
+        return base64.urlsafe_b64encode(json.dumps(value).encode()).decode().rstrip("=")
+
+    def api(self, **changes):
+        values = dict(frequency=lambda: 1000, ticks=lambda: 10000, admitted=lambda request: True)
+        values.update(changes)
+        return types.SimpleNamespace(**values)
+
+    def fixture(self):
+        # Deliberately private paths, symbols and absolute PCs must never escape.
+        return (b"C:\\private-canary\\secret.pdb\nJSTI_DIAG_READY\nJSTI_DIAG_FAULT 0xc0000374\n"
+                b"JSTI_DIAG_IP 00000001`00000042\nJSTI_DIAG_MODULES\n"
+                b"00000001`00000000 00000001`00001000 SpeakWindows (export symbols) C:\\private-canary\n"
+                b"00000002`00000000 00000002`00001000 private_module (deferred)\n"
+                b"JSTI_DIAG_STACK\n00 00000003`00000000 00000002`00000024 SpeakWindows!private_function+0xbad\n"
+                b"01 00000003`00000080 00000000`00000000 private_module!private_function+0xfeed\nJSTI_DIAG_END\n")
+
+    def operate(self, value=None, api=None, identity=None, runner=None):
+        identity = identity or (lambda path, *args, **kwargs: (path, "same-snapshot"))
+        runner = runner or (lambda *args, **kwargs: {"status": "complete", "cleanup": "clean", "exitCode": 0,
+                                                   "output": self.fixture() if args[0][0] == NATIVE.CDB_LOCATION
+                                                   else b'{"status":"unavailable"}'})
+        return NATIVE.standalone_diagnostic(self.encode(value or self.request()), lambda: api or self.api(), identity, runner)
+
+    def test_closed_request_refuses_unowned_or_arbitrary_operation_before_any_effect(self):
+        mutations = [dict(extra="private-canary"), dict(schema=True), dict(originalPid=True), dict(parentPid=0),
+                     dict(label="ui-smoke-test"), dict(arguments=["--help"]), dict(exitCode=0), dict(architecture="x64"),
+                     dict(executable=r"\\server\SpeakWindows.exe"), dict(executable=r"C:\a\..\SpeakWindows.exe"),
+                     dict(executable=r"C:\a\SpeakWindows.exe:stream"), dict(powershell=r"C:\a\cmd.exe"),
+                     dict(expectedSHA256="X" * 64), dict(powershellSHA256="wrong"),
+                     dict(startedUTC="2026-10-28T12:00:00"), dict(endedUTC="2026-10-28T12:00:31Z")]
+        for changes in mutations:
+            with self.subTest(changes=tuple(changes)):
+                with self.assertRaises(ValueError):
+                    NATIVE.diagnostic_request(self.encode(self.request(**changes)))
+        for encoded in ("", "a" * 10925, "e30=", self.encode({"private-canary": "never"}),
+                        base64.urlsafe_b64encode(b'{"schema":1,"schema":1}').decode().rstrip("=")):
+            with self.assertRaises((ValueError, UnicodeError)):
+                NATIVE.diagnostic_request(encoded)
+        identity, runner = mock.Mock(), mock.Mock()
+        result = self.operate(api=self.api(admitted=lambda _: False), identity=identity, runner=runner)
+        self.assertEqual(result["status"], "invalid")
+        identity.assert_not_called()
+        runner.assert_not_called()
+
+    def test_qpc_frequency_deadline_and_cleanup_reserve_refuse_before_launch(self):
+        for api in (self.api(frequency=lambda: 999), self.api(ticks=lambda: 30000), self.api(ticks=lambda: -1)):
+            with self.assertRaises(ValueError):
+                NATIVE.DiagnosticBudget(self.request(), api)
+        calls = []
+        result = self.operate(api=self.api(ticks=lambda: 26000), runner=lambda *a, **k: calls.append(a))
+        self.assertEqual(result["status"], "deadline")
+        self.assertEqual(calls, [])
+
+    def test_child_job_checks_only_defend_trusted_parent_and_exact_kill_flags(self):
+        import ctypes
+        for member, flags, parent, query_ok in ((1, 0x2000, 123, True), (0, 0x2000, 123, True),
+                                                (1, 0x2800, 123, True), (1, 0x3000, 123, True),
+                                                (1, 0x2000, 124, True), (1, 0x2000, 123, False)):
+            def in_job(process, job, result):
+                self.assertIsNone(job)
+                result._obj.value = member
+                return 1
+            def info(job, kind, limits, size, returned):
+                self.assertIsNone(job)
+                self.assertEqual(kind, 9)
+                limits._obj.basic.flags = flags
+                returned._obj.value = size
+                return int(query_ok)
+            api = NATIVE.StandaloneWindows.__new__(NATIVE.StandaloneWindows)
+            api.ctypes = ctypes
+            api.api = types.SimpleNamespace(GetCurrentProcess=lambda: -1, IsProcessInJob=in_job,
+                                            QueryInformationJobObject=info)
+            with mock.patch.object(NATIVE.os, "getppid", return_value=parent):
+                self.assertEqual(bool(api.admitted(self.request())), member == 1 and flags == 0x2000 and
+                                 parent == 123 and query_ok)
+
+    def test_parser_emits_only_unique_module_rvas_not_raw_paths_symbols_or_addresses(self):
+        expected = {"status": "observed", "exceptionCode": "0xc0000374", "frames": [
+            {"index": 0, "module": "app", "rva": "0x42"}, {"index": 1, "module": "unknown", "rva": "0x24"}]}
+        self.assertEqual(NATIVE.project_debugger(self.fixture()), expected)
+        self.assertEqual(NATIVE.project_debugger(self.fixture().replace(b"private-canary", "ιδιωτικό".encode())), expected)
+        serialized = json.dumps(expected)
+        for private in ("private", "function", "00000001", "00000002", "C:\\", "bad", "feed"):
+            self.assertNotIn(private, serialized)
+        for suffix in (b"", b"arbitrary target output\n"):
+            self.assertEqual(NATIVE.project_debugger(b"JSTI_DIAG_READY\n" + suffix)["status"], "no-reproduction")
+        self.assertEqual(NATIVE.project_debugger(b"JSTI_DIAG_READY\n", False)["status"], "unavailable")
+
+    def test_parser_refuses_ambiguous_missing_malformed_spoofed_and_oversized_frames(self):
+        original = self.fixture()
+        variants = [original.replace(b"JSTI_DIAG_READY\n", b""), original + b"JSTI_DIAG_READY\n",
+                    original.replace(b"JSTI_DIAG_END", b""), original.replace(b"c0000374", b"deadbeef"),
+                    original.replace(b"JSTI_DIAG_STACK", b"JSTI_DIAG_MODULES"),
+                    original.replace(b"00 00000003", b"05 00000003"),
+                    original.replace(b"JSTI_DIAG_IP 00000001`00000042", b"JSTI_DIAG_IP 00000009`00000042"),
+                    original.replace(b"JSTI_DIAG_STACK", b"00000001`00000000 00000001`00001000 ntdll\nJSTI_DIAG_STACK")]
+        for data in variants:
+            self.assertEqual(NATIVE.project_debugger(data)["status"], "invalid")
+        for data in (b"x" * 65537, b"x" * 2049 + b"\n"):
+            self.assertEqual(NATIVE.project_debugger(data)["status"], "truncated")
+
+    def test_actual_python_projection_roundtrips_through_actual_powershell_closed_projector(self):
+        host = shutil.which("pwsh")
+        if host is None:
+            self.skipTest("PowerShell unavailable: actual cross-language projection not executed")
+        value = NATIVE.diagnostic_result("observed", "clean")
+        value["debugger"] = NATIVE.project_debugger(self.fixture())
+        # Explicit inert dot-source returns before native preparation or the
+        # original verifier; only its pure closed JSON projection is called.
+        script = """
+$ErrorActionPreference='Stop'
+. $env:JSTI_PROJECTOR -BundleDirectory '__jsti_bootstrap_fake__' -Workspace '__jsti_bootstrap_fake__' -ExpectedCommit '__jsti_bootstrap_fake__'
+$value=[Console]::In.ReadToEnd() | ConvertFrom-Json -Depth 8
+ConvertTo-JstiDiagnosticProjection $value | ConvertTo-Json -Depth 8 -Compress
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            environment = {key: val for key, val in os.environ.items()
+                           if key.upper() in {"PATH", "SYSTEMROOT", "WINDIR", "HOME"}}
+            environment.update(TEMP=directory, TMP=directory, TMPDIR=directory,
+                               JSTI_PROJECTOR=str(HERE / "verify-windows-bundle.ps1"))
+            completed = subprocess.run([os.path.abspath(host), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
+                                       input=json.dumps(value).encode(), env=environment, cwd=directory,
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15, check=False)
+        self.assertEqual(completed.returncode, 0, "actual pure projector failed")
+        self.assertEqual(completed.stderr, b"")
+        self.assertLessEqual(len(completed.stdout), 8192)
+        self.assertEqual(json.loads(completed.stdout), value)
+
+    def test_actual_operation_keeps_fixed_argv_private_environment_once_and_owned_temp(self):
+        calls, snapshots = [], []
+        def identity(path, digest, maximum, budget, **kwargs):
+            snapshots.append((path, digest, kwargs))
+            return path, digest
+        def runner(argv, environment, directory, budget, seconds, **kwargs):
+            calls.append(argv)
+            self.assertNotIn("OP_SERVICE_ACCOUNT_TOKEN", environment)
+            self.assertNotIn("_NT_SYMBOL_PATH", environment)
+            self.assertNotIn("ICU_DATA", environment)
+            self.assertEqual(environment["TEMP"], directory)
+            self.assertEqual(environment["USERPROFILE"], directory)
+            self.assertTrue(pathlib.Path(directory).is_dir())
+            if argv[0] != NATIVE.CDB_LOCATION:
+                self.assertEqual(argv[:4], [self.request()["powershell"], "-NoLogo", "-NoProfile", "-NonInteractive"])
+                return dict(status="complete", cleanup="clean", output=b'{"status":"unavailable"}', exitCode=0)
+            self.assertLessEqual(seconds, 20)
+            self.assertEqual(argv[1:7], ["-hd", "-G", "-sins", "-noshell", "-nosqm", "-netsyms:no"])
+            self.assertEqual(argv[-2:], [self.request()["executable"], "--ui-smoke-test"])
+            self.assertNotIn("-pd", argv)
+            script = pathlib.Path(argv[argv.index("-cf") + 1])
+            self.assertEqual(script.read_text(), NATIVE.cdb_commands())
+            self.assertEqual(list(pathlib.Path(argv[argv.index("-y") + 1]).iterdir()), [])
+            self.assertEqual(script.parent, pathlib.Path(directory))
+            return dict(status="complete", cleanup="clean", output=self.fixture(), exitCode=0)
+        with mock.patch.dict(NATIVE.os.environ, {"OP_SERVICE_ACCOUNT_TOKEN": "private-canary", "_NT_SYMBOL_PATH": "https://private", "ICU_DATA": "private"}):
+            result = self.operate(identity=identity, runner=runner)
+        self.assertEqual(result["status"], "observed")
+        self.assertEqual(result["cleanup"], "clean")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual([item[0] for item in snapshots], [self.request()["executable"], self.request()["powershell"],
+                                                        NATIVE.CDB_LOCATION, self.request()["executable"], self.request()["powershell"]])
+        self.assertEqual(snapshots[2][1], NATIVE.CDB_SHA256)
+        self.assertEqual(snapshots[2][2], {"version": [10, 0, 26100, 6584]})
+        self.assertNotIn("private", json.dumps(result))
+        self.assertNotIn("JSTI_DIAG", json.dumps(result))
+
+    def test_event1000_uses_absolute_host_and_original_owned_identity_then_reprojects(self):
+        value = self.request()
+        event = {"time": "2026-10-28T12:00:02Z", "data": {"AppName": "SpeakWindows.exe", "AppPath": value["executable"],
+                 "ProcessId": "321", "ModuleName": "private_module.dll", "ModuleVersion": "1.2.3.4",
+                 "ExceptionCode": "c0000374", "FaultingOffset": "0x123"}}
+        def runner(argv, environment, *args, **kwargs):
+            if argv[0] == value["powershell"]:
+                self.assertEqual(environment["JSTI_EVENT_START"], value["startedUTC"])
+                self.assertEqual(environment["JSTI_EVENT_END"], value["endedUTC"])
+                return dict(status="complete", cleanup="clean", exitCode=0,
+                            output=json.dumps({"status": "ok", "events": [event]}).encode())
+            return dict(status="complete", cleanup="clean", exitCode=0, output=b"JSTI_DIAG_READY\n")
+        result = self.operate(runner=runner)
+        self.assertEqual(result["applicationError"], {"status": "observed", "module": "unknown", "version": "1.2.3.4",
+                                                     "exceptionCode": "0xc0000374", "faultOffset": "0x0000000000000123"})
+        self.assertEqual(result["status"], "observed")
+        self.assertNotIn("timeUTC", json.dumps(result))
+        self.assertNotIn("private_module", json.dumps(result))
+        event["data"]["ProcessId"] = "999"
+        self.assertEqual(self.operate(runner=runner)["applicationError"], {"status": "no-match"})
+
+    def test_identity_or_reader_cleanup_failure_never_launches_or_reports_observed(self):
+        for location in (self.request()["executable"], self.request()["powershell"], NATIVE.CDB_LOCATION):
+            launches = []
+            def identity(path, *args, **kwargs):
+                if path == location:
+                    raise PermissionError("private-canary")
+                return path, "same"
+            def runner(*args, **kwargs):
+                launches.append(args[0][0])
+                return dict(status="complete", cleanup="clean", output=b'{"status":"unavailable"}', exitCode=0)
+            result = self.operate(identity=identity, runner=runner)
+            self.assertEqual(result["status"], "unavailable")
+            self.assertEqual(result["cleanup"], "clean" if location == NATIVE.CDB_LOCATION else "not-started")
+            self.assertNotIn(NATIVE.CDB_LOCATION, launches)
+            self.assertNotIn("private", json.dumps(result))
+        result = self.operate(runner=lambda *a, **k: dict(status="complete", cleanup="failed", output=self.fixture(), exitCode=0))
+        self.assertEqual(result["cleanup"], "failed")
+        self.assertNotEqual(result["status"], "observed")
+
+    def test_event_work_consumes_same_deadline_and_image_replacement_refuses_cdb(self):
+        now, calls = [10000], []
+        def query(argv, *args, **kwargs):
+            calls.append(argv[0])
+            now[0] = 26000
+            return dict(status="complete", cleanup="clean", output=b'{"status":"unavailable"}', exitCode=0)
+        result = self.operate(api=self.api(ticks=lambda: now[0]), runner=query)
+        self.assertEqual(result["status"], "deadline")
+        self.assertEqual(calls, [self.request()["powershell"]])
+        copies, calls = {}, []
+        def identity(path, *args, **kwargs):
+            copies[path] = copies.get(path, 0) + 1
+            return path, copies[path]
+        result = self.operate(identity=identity, runner=lambda argv, *a, **k: calls.append(argv[0]) or
+                              dict(status="complete", cleanup="clean", output=b'{"status":"unavailable"}', exitCode=0))
+        self.assertEqual(result["status"], "unavailable")
+        self.assertEqual(calls, [self.request()["powershell"]])
+
+    def test_collector_faults_and_truncation_are_finite_and_cannot_become_observed(self):
+        for status in ("deadline", "truncated", "unavailable", "private-canary"):
+            def runner(argv, *args, **kwargs):
+                return dict(status=status if argv[0] == NATIVE.CDB_LOCATION else "complete", cleanup="clean",
+                            output=b'{"status":"unavailable"}', exitCode=0)
+            result = self.operate(runner=runner)
+            self.assertEqual(result["status"], status if status in NATIVE.STANDALONE_STATUSES else "unavailable")
+            self.assertNotIn("private", json.dumps(result))
+        result = self.operate(runner=lambda *a, **k: (_ for _ in ()).throw(OSError("private-canary")))
+        self.assertEqual(result["status"], "unavailable")
+        self.assertNotIn("private", json.dumps(result))
+        with tempfile.TemporaryDirectory() as directory:
+            class FailedScratchCleanup:
+                name = directory
+                def __enter__(self):
+                    return self.name
+                def __exit__(self, *args):
+                    raise OSError("private-canary")
+            with mock.patch.object(NATIVE.tempfile, "TemporaryDirectory", return_value=FailedScratchCleanup()):
+                result = self.operate()
+            self.assertEqual(result["status"], "unavailable")
+            self.assertEqual(result["cleanup"], "failed")
+            self.assertNotIn("private", json.dumps(result))
+
+    def test_actual_identity_checks_hash_pe_alias_version_and_between_read_change(self):
+        budget = types.SimpleNamespace(remaining=lambda: 20)
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "SpeakWindows.exe"
+            data = BUNDLE_TESTS.build_pe(["KERNEL32.dll"], machine=ARM64)
+            path.write_bytes(data)
+            digest = NATIVE.hashlib.sha256(data).hexdigest()
+            self.assertEqual(NATIVE.diagnostic_identity(str(path), digest, 1 << 20, budget)[2], len(data))
+            with self.assertRaises(ValueError):
+                NATIVE.diagnostic_identity(str(path), "a" * 64, 1 << 20, budget)
+            path.write_bytes(BUNDLE_TESTS.build_pe(["KERNEL32.dll"], machine=AMD64))
+            with self.assertRaises(ValueError):
+                NATIVE.diagnostic_identity(str(path), NATIVE.sha256_file(path), 1 << 20, budget)
+            path.write_bytes(data)
+            alias = pathlib.Path(directory) / "alias.exe"
+            alias.symlink_to(path)
+            with self.assertRaises(ValueError):
+                NATIVE.diagnostic_identity(str(alias), digest, 1 << 20, budget)
+            def changed(_):
+                path.write_bytes(data + b"changed")
+                return NATIVE.CDB_VERSION
+            with mock.patch.object(NATIVE, "numeric_file_version", side_effect=changed):
+                with self.assertRaises(ValueError):
+                    NATIVE.diagnostic_identity(str(path), digest, 1 << 20, budget, version=NATIVE.CDB_VERSION)
+
+    def test_peek_adapter_reads_only_available_bytes_and_maps_closed_not_idle(self):
+        import ctypes
+        stream = types.SimpleNamespace(fileno=lambda: 7)
+        reader = NATIVE.DiagnosticPipeReader.__new__(NATIVE.DiagnosticPipeReader)
+        reader.ctypes, reader.handle = ctypes, lambda fd: fd + 10
+        def peek(handle, data, size, read, available, left):
+            self.assertEqual(handle, 17)
+            available._obj.value = 9
+            return 1
+        reader.peek = peek
+        with mock.patch.object(NATIVE.os, "read", return_value=b"available") as read:
+            self.assertEqual(reader.read(stream), (b"available", False))
+            read.assert_called_once_with(7, 9)
+        with mock.patch.object(NATIVE.os, "read", return_value=b"ava") as read:
+            self.assertEqual(reader.read(stream, 3), (b"ava", False))
+            read.assert_called_once_with(7, 3)
+        with mock.patch.object(NATIVE.os, "read") as read:
+            with self.assertRaises(OverflowError):
+                reader.read(stream, 0)
+            read.assert_not_called()
+        reader.peek = lambda *args: 0
+        with mock.patch.object(ctypes, "get_last_error", return_value=109, create=True):
+            self.assertEqual(reader.read(stream), (b"", True))
+        with mock.patch.object(ctypes, "get_last_error", return_value=5, create=True):
+            with self.assertRaises(OSError):
+                reader.read(stream)
+
+    def test_actual_bounded_runner_caps_splits_drains_both_and_preserves_child_cleanup(self):
+        class Process:
+            def __init__(self, running=False, fail_wait=False):
+                self.stdout, self.stderr = io.BytesIO(), io.BytesIO()
+                self.returncode, self.fail_wait, self.killed = (None if running else 0), fail_wait, False
+            def poll(self):
+                return self.returncode
+            def kill(self):
+                self.killed, self.returncode = True, -9
+            def wait(self, timeout):
+                if self.fail_wait or self.returncode is None:
+                    raise subprocess.TimeoutExpired("fixed-owned-child", timeout)
+                return self.returncode
+        budget = types.SimpleNamespace(remaining=lambda: 10)
+        row = b"a" * 1023 + b"\n"
+        for data, error, expected in ((b"a" * 2048 + b"\n", b"stderr\n", "complete"),
+                                      (b"a" * 2049, b"stderr\n", "truncated"),
+                                      (row * 65, b"stderr\n", "truncated"),
+                                      (row * 33, row * 33, "truncated"),
+                                      (row * 32, row * 32, "complete")):
+            process = Process()
+            remaining, consumed = {process.stdout: data, process.stderr: error}, []
+            def read(stream, maximum):
+                if not remaining[stream]:
+                    return b"", True
+                if maximum == 0:
+                    raise OverflowError()
+                chunk = remaining[stream][:min(1024, maximum)]
+                remaining[stream] = remaining[stream][len(chunk):]
+                consumed.append(len(chunk))
+                return chunk, False
+            def launch(argv, **options):
+                self.assertEqual(options["creationflags"], 0)
+                self.assertEqual(options["executable"], argv[0])
+                self.assertTrue(options["close_fds"])
+                self.assertEqual(options["bufsize"], 0)
+                return process
+            result = NATIVE.bounded_diagnostic_process(["fixed-owned-cdb"], {}, "owned", budget, 5,
+                     launch=launch, pipe_factory=lambda: types.SimpleNamespace(read=read))
+            self.assertEqual(result["status"], expected)
+            self.assertLessEqual(len(result["output"]), 65536)
+            self.assertLessEqual(sum(consumed), 65536)
+            if len(data) + len(error) >= 65536 and expected == "complete":
+                self.assertEqual(sum(consumed), 65536)
+            if len(data) + len(error) > 65536 and not any(len(line) > 2048 for line in data.splitlines()):
+                self.assertEqual(sum(consumed), 65536)
+                self.assertTrue(any(remaining.values()))
+            self.assertEqual(result["cleanup"], "clean")
+            self.assertTrue(process.stdout.closed and process.stderr.closed)
+        for fail_wait in (False, True):
+            process = Process(running=True, fail_wait=fail_wait)
+            result = NATIVE.bounded_diagnostic_process(["fixed"], {}, "owned", budget, .03,
+                     launch=lambda *a, **k: process,
+                     pipe_factory=lambda: types.SimpleNamespace(read=lambda *_: (b"", False)),
+                     clock=Clock(.01), sleep=lambda _: None)
+            self.assertEqual(result["status"], "deadline")
+            self.assertTrue(process.killed)
+            self.assertEqual(result["cleanup"], "failed" if fail_wait else "clean")
+        # Child exit is not pipe EOF / descendant cleanup. The outer PS job is
+        # still authoritative even when this one exact child already exited.
+        process = Process()
+        result = NATIVE.bounded_diagnostic_process(["fixed"], {}, "owned", budget, .03,
+                 launch=lambda *a, **k: process,
+                 pipe_factory=lambda: types.SimpleNamespace(read=lambda *_: (b"", False)),
+                 clock=Clock(.01), sleep=lambda _: None)
+        self.assertEqual(result["status"], "deadline")
+        self.assertFalse(process.killed)
+        self.assertTrue(process.stdout.closed and process.stderr.closed)
+
+    def test_cli_invalid_input_is_one_bounded_closed_json_without_private_error(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            NATIVE.dispatch_main(["standalone-diagnostic", "--request", "private-canary"])
+        self.assertEqual(len(output.getvalue().splitlines()), 1)
+        result = json.loads(output.getvalue())
+        self.assertEqual(set(result), {"schema", "status", "cleanup", "applicationError", "debugger"})
+        self.assertIn(result["status"], NATIVE.STANDALONE_STATUSES)
+        self.assertLess(len(output.getvalue()), 8192)
+        self.assertNotIn("private", output.getvalue())
+
+
+class DiagnosticBootstrapTests(unittest.TestCase):
+    def test_actual_powershell_ownership_controller_with_pure_fake_adapter(self):
+        host = shutil.which("pwsh")
+        if host is None:
+            self.skipTest("PowerShell unavailable: actual bootstrap fake checks not executed")
+        # No native adapter, Add-Type, debugger or target is reachable in this
+        # explicit inert import. Keep the fixture's environment and temp owned.
+        with tempfile.TemporaryDirectory() as directory:
+            environment = {key: value for key, value in os.environ.items()
+                           if key.upper() in {"PATH", "SYSTEMROOT", "WINDIR", "HOME"}}
+            environment.update(TEMP=directory, TMP=directory, TMPDIR=directory)
+            completed = subprocess.run([
+                os.path.abspath(host), "-NoLogo", "-NoProfile", "-NonInteractive", "-File",
+                str(HERE / "test-failure-diagnostic-bootstrap.ps1")],
+                cwd=directory, env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                timeout=30, check=False)
+        self.assertEqual(completed.returncode, 0, "actual PowerShell bootstrap fake checks failed")
+        self.assertEqual(completed.stdout.strip(), b"Diagnostic bootstrap pure-fake checks passed.")
+        self.assertEqual(completed.stderr, b"")
 
 
 class CommandLineTests(unittest.TestCase):

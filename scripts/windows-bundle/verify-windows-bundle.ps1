@@ -29,6 +29,469 @@ param(
     [string] $LocalModelDirectory
 )
 
+# Private control flow for optional diagnostics; adapters are explicit and owned. Adapter operations must use the SAME QPC tick basis,
+# respect the supplied absolute deadlines, and return only owned handles. A
+# Resource-creation exceptions must clean up handles not returned to this owner.
+function Invoke-JstiDiagnosticBootstrap {
+    param([hashtable] $Adapter, $Request, [long] $DeadlineTicks, [long] $Frequency)
+    $receipt = [ordered]@{ status = 'skipped'; streamBytes = 0; resumed = $false; cleanup = 'notStarted' }
+    $job = $null; $child = $null; $pipes = $null; $assigned = $false
+    $cleanupOK = $true
+    $acquiring = $false
+    $closedEarly = [System.Collections.Generic.HashSet[object]]::new()
+    try {
+        foreach ($operation in @('Now', 'CreateJob', 'CreatePipes', 'CreateSuspended', 'Assign', 'Resume',
+                'ReadChunk', 'TerminateJob', 'TerminateProcess', 'Wait', 'JobEmpty', 'Close')) {
+            if ($Adapter[$operation] -isnot [scriptblock]) { return $receipt }
+        }
+        # Reject invalid/future-unbounded arithmetic before acquiring resources.
+        if ($Frequency -le 0 -or $Frequency -gt 1000000000) { return $receipt }
+        $now = [long] (& $Adapter.Now)
+        if ($now -lt 0 -or $now -gt ([long]::MaxValue - (30 * $Frequency)) -or $DeadlineTicks -le $now -or
+                ($DeadlineTicks - $now) -gt (30 * $Frequency)) { return $receipt }
+        $cleanupReserve = 2 * $Frequency
+        if (($DeadlineTicks - $now) -lt (7 * $Frequency)) { return $receipt }
+        $runDeadline = $DeadlineTicks - $cleanupReserve
+        $receipt.status = 'failed'
+        # Adapter must enforce kill-on-last-close and NONINHERITANCE on this job.
+        $acquiring = $true
+        $job = & $Adapter.CreateJob $true $false
+        if ($null -eq $job) { throw 'unavailable' }
+        $acquiring = $false
+        $receipt.cleanup = 'incomplete'
+        $acquiring = $true
+        $pipes = & $Adapter.CreatePipes
+        if ($null -eq $pipes) { throw 'unavailable' }
+        $handles = @($pipes.StdinRead, $pipes.StdinWrite, $pipes.StdoutRead, $pipes.StdoutWrite, $pipes.StderrRead, $pipes.StderrWrite)
+        $identities = [System.Collections.Generic.HashSet[object]]::new()
+        foreach ($handle in $handles) { if ($null -ne $handle) { [void] $identities.Add($handle) } }
+        if (@($handles | Where-Object { $null -eq $_ }).Count -ne 0 -or
+                $identities.Count -ne 6 -or $identities.Contains($job)) {
+            throw 'unavailable'
+        }
+        $acquiring = $false
+        if ([long] (& $Adapter.Now) -ge $runDeadline) { $receipt.status = 'deadline'; return $receipt }
+        # Explicit allowlist: stdin pipe reader and output writers ONLY.
+        $inherited = @($pipes.StdinRead, $pipes.StdoutWrite, $pipes.StderrWrite)
+        $acquiring = $true
+        $child = & $Adapter.CreateSuspended $Request $inherited $job $pipes $DeadlineTicks $Frequency
+        if ($null -eq $child -or $null -eq $child.Process -or $null -eq $child.Thread) { throw 'unavailable' }
+        $acquiring = $false
+        # Native CreateSuspended atomically applies JOB_LIST; Assign verifies it.
+        $assignment = & $Adapter.Assign $job $child.Process
+        if ($assignment -isnot [bool]) { throw 'unavailable' }
+        $assigned = $assignment
+        if (-not $assigned) { throw 'unavailable' }
+        if ([long] (& $Adapter.Now) -ge $runDeadline) { $receipt.status = 'deadline'; return $receipt }
+        # EOF stdin and no parent-held output writers before first instruction.
+        # Track wrapper identity, never a recycled raw HANDLE value.
+        foreach ($writer in @($pipes.StdinWrite, $pipes.StdoutWrite, $pipes.StderrWrite)) {
+            if (-not (& $Adapter.Close $writer)) { throw 'unavailable' }
+            [void] $closedEarly.Add($writer)
+        }
+        if ([long] (& $Adapter.Now) -ge $runDeadline) { $receipt.status = 'deadline'; return $receipt }
+        $resumed = & $Adapter.Resume $child.Thread
+        if ($resumed -isnot [bool] -or -not $resumed) { throw 'unavailable' }
+        $receipt.resumed = $true
+        # One adapter read covers both nonblocking pipe readers, bounded by the
+        # requested bytes and deadline. The prerequisite discards ALL raw bytes.
+        for ($sample = 0; $sample -lt 4096; $sample++) {
+            if ([long] (& $Adapter.Now) -ge $runDeadline) { $receipt.status = 'deadline'; return $receipt }
+            $remaining = 65536 - $receipt.streamBytes
+            if ($remaining -le 0) { $receipt.status = 'streamLimit'; return $receipt }
+            $maximum = [Math]::Min(4096, $remaining)
+            $chunk = & $Adapter.ReadChunk $child.Process @($pipes.StdoutRead, $pipes.StderrRead) $maximum $runDeadline
+            if ($null -eq $chunk -or $chunk.Bytes -isnot [byte[]] -or $chunk.Bytes.Length -gt $maximum -or
+                    $chunk.Exited -isnot [bool]) {
+                throw 'unavailable'
+            }
+            $receipt.streamBytes += $chunk.Bytes.Length
+            if ($chunk.Exited -ceq $true) { $receipt.status = 'finished'; return $receipt }
+        }
+        $receipt.status = 'sampleLimit'
+    } catch {
+        # No exception text, native values, request, stream, or handle identities.
+        $receipt.status = 'failed'
+    } finally {
+        # A factory may have failed after acquiring an unreturned resource.
+        # Clean all known ownership but never certify that unknown cleanup.
+        if ($acquiring) { $cleanupOK = $false }
+        if ($null -ne $job -and ($assigned -or $acquiring)) {
+            try { if (-not (& $Adapter.TerminateJob $job)) { $cleanupOK = $false } }
+            catch { $cleanupOK = $false }
+        }
+        if ($null -ne $child -and $null -ne $child.Process) {
+            if (-not $assigned) {
+                try { if (-not (& $Adapter.TerminateProcess $child.Process)) { $cleanupOK = $false } }
+                catch { $cleanupOK = $false }
+            }
+            try { if (-not (& $Adapter.Wait $child.Process $DeadlineTicks)) { $cleanupOK = $false } }
+            catch { $cleanupOK = $false }
+        }
+        if ($null -ne $job) {
+            try { if (-not (& $Adapter.JobEmpty $job $DeadlineTicks)) { $cleanupOK = $false } }
+            catch { $cleanupOK = $false }
+        }
+        $owned = @()
+        if ($null -ne $child) { $owned += @($child.Thread, $child.Process) }
+        if ($null -ne $pipes) { $owned += @($pipes.StdinRead, $pipes.StdinWrite, $pipes.StdoutRead, $pipes.StdoutWrite, $pipes.StderrRead, $pipes.StderrWrite) }
+        if ($null -ne $job) { $owned += $job }
+        $seen = [System.Collections.Generic.HashSet[object]]::new()
+        foreach ($handle in $owned) {
+            if ($null -eq $handle -or -not $seen.Add($handle) -or $closedEarly.Contains($handle)) { continue }
+            try { if (-not (& $Adapter.Close $handle)) { $cleanupOK = $false } }
+            catch { $cleanupOK = $false }
+        }
+        if ($acquiring -or $null -ne $job -or $null -ne $child -or $null -ne $pipes) {
+            $receipt.cleanup = if ($cleanupOK) { 'complete' } else { 'incomplete' }
+        }
+    }
+    return $receipt
+}
+
+# Prepared before original-run deadline capture. Merely loading this type has no
+# native side effects; actual Win32 calls occur only in the failure-only adapter.
+function Initialize-JstiDiagnosticNative {
+    try {
+        if (-not ('JstiDiagnosticNative' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+using System.Threading;
+using Microsoft.Win32.SafeHandles;
+
+public static class JstiDiagnosticNative {
+    // No static initializer or native call occurs while compiling/loading this type.
+    public sealed class Owned : SafeHandleZeroOrMinusOneIsInvalid {
+        static long next; readonly long identity; bool succeeded = true;
+        public Owned(IntPtr value) : base(true) { identity = Interlocked.Increment(ref next); SetHandle(value); }
+        protected override bool ReleaseHandle() { succeeded = CloseHandle(handle); return succeeded; }
+        public bool CloseChecked() { Dispose(); return succeeded; }
+        public IntPtr Raw { get { if (IsClosed || IsInvalid) throw new InvalidOperationException(); return DangerousGetHandle(); } }
+        public override string ToString() { return "owned-" + identity; }
+    }
+    public sealed class Pipes { public Owned StdinRead, StdinWrite, StdoutRead, StdoutWrite, StderrRead, StderrWrite; }
+    public sealed class Child { public Owned Process, Thread; }
+    public sealed class Chunk { public byte[] Bytes, Stdout; public bool Exited; }
+    [StructLayout(LayoutKind.Sequential)] struct SA { public int Length; public IntPtr Descriptor; [MarshalAs(UnmanagedType.Bool)] public bool Inherit; }
+    [StructLayout(LayoutKind.Sequential)] struct SI {
+        public uint cb; public IntPtr reserved, desktop, title;
+        public uint x,y,xSize,ySize,xChars,yChars,fill,flags; public ushort show, reserved2;
+        public IntPtr reservedPointer, stdin, stdout, stderr;
+    }
+    [StructLayout(LayoutKind.Sequential)] struct SIX { public SI Startup; public IntPtr Attributes; }
+    [StructLayout(LayoutKind.Sequential)] struct PI { public IntPtr Process, Thread; public uint ProcessId, ThreadId; }
+    [StructLayout(LayoutKind.Sequential)] struct Limits {
+        public long ProcessTime, JobTime; public uint Flags; public UIntPtr Min, Max; public uint Active;
+        public UIntPtr Affinity; public uint Priority, Scheduling;
+    }
+    [StructLayout(LayoutKind.Sequential)] struct IO { public ulong a,b,c,d,e,f; }
+    [StructLayout(LayoutKind.Sequential)] struct Extended { public Limits Basic; public IO Counters; public UIntPtr a,b,c,d; }
+    [DllImport("kernel32.dll", SetLastError=true)] static extern bool CloseHandle(IntPtr h);
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern IntPtr CreateJobObjectW(IntPtr sa, string name);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern bool SetHandleInformation(IntPtr h, uint mask, uint flags);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern bool GetHandleInformation(IntPtr h, out uint flags);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern bool SetInformationJobObject(IntPtr h, int info, ref Extended data, uint size);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern bool QueryInformationJobObject(IntPtr h, int info, IntPtr data, uint size, IntPtr result);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern bool CreatePipe(out IntPtr read, out IntPtr write, ref SA sa, uint size);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern bool InitializeProcThreadAttributeList(IntPtr list, int count, int flags, ref IntPtr size);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern bool UpdateProcThreadAttribute(IntPtr list, uint flags, IntPtr attribute, IntPtr value, IntPtr size, IntPtr previous, IntPtr returned);
+    [DllImport("kernel32.dll")] static extern void DeleteProcThreadAttributeList(IntPtr list);
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern bool CreateProcessW(string app, StringBuilder command, IntPtr processSA, IntPtr threadSA, bool inherit, uint flags, IntPtr environment, string directory, ref SIX si, out PI pi);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern bool IsProcessInJob(IntPtr process, IntPtr job, out bool result);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern uint ResumeThread(IntPtr thread);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern bool TerminateProcess(IntPtr process, uint code);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern bool TerminateJobObject(IntPtr job, uint code);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern uint WaitForSingleObject(IntPtr process, uint ms);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern bool PeekNamedPipe(IntPtr pipe, IntPtr buffer, uint length, IntPtr read, out uint available, IntPtr left);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern bool ReadFile(IntPtr pipe, byte[] bytes, uint length, out uint read, IntPtr overlapped);
+    static void Require(bool value) { if (!value) throw new InvalidOperationException(); }
+    public static Owned NewJob() {
+        IntPtr raw=CreateJobObjectW(IntPtr.Zero,null); Owned job=null; bool transferred=false;
+        try {
+            Require(raw!=IntPtr.Zero); job=new Owned(raw); raw=IntPtr.Zero;
+            Require(SetHandleInformation(job.Raw, 1, 0)); uint flags;
+            Require(GetHandleInformation(job.Raw, out flags) && (flags & 1) == 0);
+            // ONLY KILL_ON_JOB_CLOSE: no breakaway/silent-breakaway permission.
+            Extended limits = new Extended(); limits.Basic.Flags = 0x2000;
+            Require(SetInformationJobObject(job.Raw, 9, ref limits, (uint)Marshal.SizeOf<Extended>()));
+            transferred=true; return job;
+        } finally { if(!transferred) { if(job!=null) job.Dispose(); if(raw!=IntPtr.Zero) CloseHandle(raw); } }
+    }
+    static void Pipe(out Owned read, out Owned write, bool childReads) {
+        SA sa=new SA { Length=Marshal.SizeOf<SA>(), Inherit=true }; IntPtr r=IntPtr.Zero,w=IntPtr.Zero;
+        read=null; write=null; bool transferred=false;
+        try {
+            Require(CreatePipe(out r,out w,ref sa,0));
+            read=new Owned(r); r=IntPtr.Zero;
+            write=new Owned(w); w=IntPtr.Zero;
+            Require(SetHandleInformation((childReads ? write : read).Raw,1,0)); transferred=true;
+        } finally {
+            if(!transferred) { if(read!=null) read.Dispose(); if(write!=null) write.Dispose();
+                if(r!=IntPtr.Zero) CloseHandle(r); if(w!=IntPtr.Zero) CloseHandle(w); }
+        }
+    }
+    public static Pipes NewPipes() {
+        Pipes p = new Pipes();
+        try { Pipe(out p.StdinRead,out p.StdinWrite,true); Pipe(out p.StdoutRead,out p.StdoutWrite,false); Pipe(out p.StderrRead,out p.StderrWrite,false); return p; }
+        catch { foreach (Owned h in new[]{p.StdinRead,p.StdinWrite,p.StdoutRead,p.StdoutWrite,p.StderrRead,p.StderrWrite}) if(h!=null) h.Dispose(); throw; }
+    }
+    static string Quote(string value) {
+        StringBuilder b=new StringBuilder("\""); int slashes=0;
+        foreach(char c in value) { if(c=='\\') {slashes++;continue;} if(c=='"') b.Append('\\',slashes*2+1); else b.Append('\\',slashes); b.Append(c); slashes=0; }
+        b.Append('\\',slashes*2); return b.Append('"').ToString();
+    }
+    public static Child Start(string application, string[] arguments, string directory, string environment, Owned job, Pipes pipes, long deadline, long frequency) {
+        IntPtr list=IntPtr.Zero, inherit=IntPtr.Zero, jobs=IntPtr.Zero, env=IntPtr.Zero; bool initialized=false, transferred=false; PI pi=new PI(); Owned processOwner=null, threadOwner=null;
+        try {
+            IntPtr size=IntPtr.Zero; InitializeProcThreadAttributeList(IntPtr.Zero,2,0,ref size);
+            Require(size.ToInt64()>0 && size.ToInt64()<=4096); list=Marshal.AllocHGlobal(size);
+            Require(InitializeProcThreadAttributeList(list,2,0,ref size)); initialized=true;
+            Owned[] children={pipes.StdinRead,pipes.StdoutWrite,pipes.StderrWrite}; inherit=Marshal.AllocHGlobal(IntPtr.Size*3);
+            for(int i=0;i<3;i++) { Require(!Object.ReferenceEquals(children[i],job)); Marshal.WriteIntPtr(inherit,i*IntPtr.Size,children[i].Raw); }
+            jobs=Marshal.AllocHGlobal(IntPtr.Size); Marshal.WriteIntPtr(jobs,job.Raw);
+            Require(UpdateProcThreadAttribute(list,0,new IntPtr(0x20002),inherit,new IntPtr(IntPtr.Size*3),IntPtr.Zero,IntPtr.Zero));
+            // Atomic job membership at creation: unsupported/nested-job failure has NO fallback.
+            Require(UpdateProcThreadAttribute(list,0,new IntPtr(0x2000D),jobs,new IntPtr(IntPtr.Size),IntPtr.Zero,IntPtr.Zero));
+            SIX si=new SIX(); si.Startup.cb=(uint)Marshal.SizeOf<SIX>(); si.Startup.flags=0x100;
+            si.Startup.stdin=pipes.StdinRead.Raw; si.Startup.stdout=pipes.StdoutWrite.Raw; si.Startup.stderr=pipes.StderrWrite.Raw; si.Attributes=list;
+            StringBuilder command=new StringBuilder(Quote(application)); foreach(string arg in arguments) command.Append(' ').Append(Quote(arg));
+            env=Marshal.StringToHGlobalUni(environment);
+            Require(CreateProcessW(application,command,IntPtr.Zero,IntPtr.Zero,true,0x08080404,env,directory,ref si,out pi));
+            // Each raw handle transfers ONCE; no raw finally-close may overlap a wrapper finalizer.
+            processOwner=new Owned(pi.Process); pi.Process=IntPtr.Zero;
+            threadOwner=new Owned(pi.Thread); pi.Thread=IntPtr.Zero;
+            Child child=new Child { Process=processOwner, Thread=threadOwner }; transferred=true; return child;
+        } finally {
+            if(!transferred) {
+                IntPtr ownedProcess=processOwner!=null ? processOwner.Raw : pi.Process;
+                if(ownedProcess!=IntPtr.Zero) { TerminateProcess(ownedProcess,1); long ticks=deadline-System.Diagnostics.Stopwatch.GetTimestamp(); WaitForSingleObject(ownedProcess,(uint)Math.Max(0,Math.Min(2000,ticks*1000/frequency))); }
+                if(processOwner!=null) processOwner.Dispose(); else if(pi.Process!=IntPtr.Zero) CloseHandle(pi.Process);
+                if(threadOwner!=null) threadOwner.Dispose(); else if(pi.Thread!=IntPtr.Zero) CloseHandle(pi.Thread);
+            }
+            GC.KeepAlive(job); GC.KeepAlive(pipes);
+            if(initialized) DeleteProcThreadAttributeList(list);
+            foreach(IntPtr block in new[]{list,inherit,jobs,env}) if(block!=IntPtr.Zero) Marshal.FreeHGlobal(block);
+        }
+    }
+    public static bool Verify(Owned job, Owned process) { bool inside; return IsProcessInJob(process.Raw,job.Raw,out inside) && inside; }
+    public static bool Resume(Owned thread) { return ResumeThread(thread.Raw)==1; }
+    public static bool StopJob(Owned job) { return TerminateJobObject(job.Raw,1); }
+    public static bool StopProcess(Owned process) { return TerminateProcess(process.Raw,1); }
+    public static bool Wait(Owned process,long deadline,long frequency) {
+        long remaining=deadline-System.Diagnostics.Stopwatch.GetTimestamp(); uint ms=(uint)Math.Max(0,Math.Min(2000,remaining*1000/frequency));
+        return WaitForSingleObject(process.Raw,ms)==0;
+    }
+    static uint Available(Owned pipe) {
+        uint count; if(PeekNamedPipe(pipe.Raw,IntPtr.Zero,0,IntPtr.Zero,out count,IntPtr.Zero)) return count;
+        if(Marshal.GetLastWin32Error()==109) return 0; throw new InvalidOperationException();
+    }
+    static byte[] Read(Owned pipe,int maximum) {
+        uint length=Math.Min((uint)maximum,Available(pipe)); if(length==0) return new byte[0];
+        byte[] bytes=new byte[length]; uint read; Require(ReadFile(pipe.Raw,bytes,length,out read,IntPtr.Zero));
+        if(read!=length) Array.Resize(ref bytes,(int)read); return bytes;
+    }
+    public static Chunk ReadChunk(Owned process,Pipes pipes,int maximum,long deadline,long frequency) {
+        byte[] output=Read(pipes.StdoutRead,maximum), error=Read(pipes.StderrRead,maximum-output.Length);
+        byte[] combined=new byte[output.Length+error.Length]; output.CopyTo(combined,0);error.CopyTo(combined,output.Length);
+        uint wait=WaitForSingleObject(process.Raw,0); Require(wait==0 || wait==258);
+        bool drained=wait==0 && Available(pipes.StdoutRead)==0 && Available(pipes.StderrRead)==0;
+        if(combined.Length==0 && !drained) { long ticks=deadline-System.Diagnostics.Stopwatch.GetTimestamp(); uint ms=(uint)Math.Max(0,Math.Min(5,ticks*1000/frequency)); if(ms>0) { uint poll=WaitForSingleObject(process.Raw,ms); Require(poll==0 || poll==258); } }
+        return new Chunk { Bytes=combined, Stdout=output, Exited=drained };
+    }
+    public static bool Empty(Owned job,long deadline) {
+        IntPtr buffer=Marshal.AllocHGlobal(48);
+        try { do { Require(QueryInformationJobObject(job.Raw,1,buffer,48,IntPtr.Zero)); if(Marshal.ReadInt32(buffer,40)==0) return true;
+                if(System.Diagnostics.Stopwatch.GetTimestamp()>=deadline) return false; Thread.Sleep(1); } while(true); }
+        finally { Marshal.FreeHGlobal(buffer); }
+    }
+}
+
+'@ -ErrorAction Stop
+        }
+        return $true
+    } catch { return $false }
+}
+
+function New-JstiDiagnosticAdapter([long] $Frequency, [hashtable] $State) {
+    return @{
+        Now = { [System.Diagnostics.Stopwatch]::GetTimestamp() }
+        CreateJob = { param($kill, $inherit)
+            if ($kill -cne $true -or $inherit -cne $false) { throw 'unavailable' }
+            [JstiDiagnosticNative]::NewJob()
+        }
+        CreatePipes = { $State.Pipes = [JstiDiagnosticNative]::NewPipes(); return $State.Pipes }.GetNewClosure()
+        CreateSuspended = { param($request, $inherited, $job, $pipes, $deadline, $frequency)
+            $expected = @($pipes.StdinRead, $pipes.StdoutWrite, $pipes.StderrWrite)
+            if ($inherited.Count -ne 3) { throw 'unavailable' }
+            for ($index = 0; $index -lt 3; $index++) {
+                if (-not [object]::ReferenceEquals($inherited[$index], $expected[$index])) { throw 'unavailable' }
+            }
+            [JstiDiagnosticNative]::Start($request.Application, $request.Arguments, $request.Directory,
+                $request.Environment, $job, $pipes, $deadline, $frequency)
+        }
+        Assign = { param($job, $process) [JstiDiagnosticNative]::Verify($job, $process) }
+        Resume = { param($thread) [JstiDiagnosticNative]::Resume($thread) }
+        ReadChunk = { param($process, $readers, $maximum, $deadline)
+            $chunk = [JstiDiagnosticNative]::ReadChunk($process, $State.Pipes, $maximum, $deadline, $Frequency)
+            if ($State.Output.Length + $chunk.Stdout.Length -gt 8192) { throw 'unavailable' }
+            $State.Output.Write($chunk.Stdout, 0, $chunk.Stdout.Length)
+            return $chunk
+        }.GetNewClosure()
+        TerminateJob = { param($job) [JstiDiagnosticNative]::StopJob($job) }
+        TerminateProcess = { param($process) [JstiDiagnosticNative]::StopProcess($process) }
+        Wait = { param($process, $deadline) [JstiDiagnosticNative]::Wait($process, $deadline, $Frequency) }.GetNewClosure()
+        JobEmpty = { param($job, $deadline) [JstiDiagnosticNative]::Empty($job, $deadline) }
+        Close = { param($handle) $handle.CloseChecked() }
+    }
+}
+
+function Get-JstiDiagnosticIdentity([string] $Path, [string[]] $Names) {
+    if (-not [System.IO.Path]::IsPathFullyQualified($Path) -or
+            [System.IO.Path]::GetFileName($Path).ToLowerInvariant() -cnotin $Names) { throw 'unavailable' }
+    $item = Get-Item -LiteralPath $Path -ErrorAction Stop
+    if ($item.PSIsContainer -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -or
+            $item.Length -lt 256 -or $item.Length -gt 16777216) { throw 'unavailable' }
+    $stream = $null; $hasher = $null; $reader = $null
+    try {
+        $stream = [System.IO.File]::Open($item.FullName, 'Open', 'Read', 'Read')
+        $hasher = [System.Security.Cryptography.SHA256]::Create()
+        $reader = [System.IO.BinaryReader]::new($stream, [System.Text.Encoding]::UTF8, $true)
+        if ($reader.ReadUInt16() -ne 0x5A4D) { throw 'unavailable' }
+        $stream.Position = 0x3C; $offset = $reader.ReadUInt32()
+        if ($offset -gt 1048576 -or $offset + 24 -gt $stream.Length) { throw 'unavailable' }
+        $stream.Position = $offset
+        if ($reader.ReadUInt32() -ne 0x4550 -or $reader.ReadUInt16() -notin @(0x8664, 0xAA64)) { throw 'unavailable' }
+        $stream.Position = $offset + 22
+        if ($reader.ReadUInt16() -band 0x2000) { throw 'unavailable' }
+        $stream.Position = 0
+        $hash = [System.BitConverter]::ToString($hasher.ComputeHash($stream)).Replace('-', '').ToLowerInvariant()
+        return @{ Path = $item.FullName; Hash = $hash }
+    } finally {
+        if ($null -ne $reader) { $reader.Dispose() }
+        if ($null -ne $hasher) { $hasher.Dispose() }
+        if ($null -ne $stream) { $stream.Dispose() }
+    }
+}
+
+# Strictly reproject: no request, arbitrary JSON string, raw stderr, path, timestamp,
+# address or unknown field from the optional child enters the bundle receipt.
+function ConvertTo-JstiDiagnosticProjection($Value) {
+    $statuses = @('unavailable', 'deadline', 'observed', 'no-reproduction', 'invalid', 'truncated')
+    $modules = @('app', 'ntdll', 'kernel32', 'kernelbase', 'ucrtbase', 'swiftCore', 'swift_Concurrency', 'swiftDispatch', 'unknown')
+    if (($Value.schema -isnot [int] -and $Value.schema -isnot [long]) -or $Value.schema -ne 1 -or $Value.status -isnot [string] -or $Value.status -cnotin $statuses) { throw 'unavailable' }
+    $safe = [ordered]@{ schema = 1; status = $Value.status }
+    if ($Value.cleanup -is [string] -and $Value.cleanup -cin @('clean', 'failed', 'not-started')) { $safe.cleanup = $Value.cleanup }
+    if ($null -ne $Value.applicationError) {
+        $event = $Value.applicationError
+        if ($event.status -isnot [string] -or
+                $event.status -cnotin @('observed', 'no-match', 'ambiguous', 'timeout', 'unavailable', 'invalid')) { throw 'unavailable' }
+        $safe.applicationError = [ordered]@{ status = $event.status }
+        if ($event.status -ceq 'observed') {
+            if ($event.module -isnot [string] -or $event.module -cnotin $modules -or
+                    $event.version -isnot [string] -or $event.version -cnotmatch '^[0-9]{1,10}(\.[0-9]{1,10}){0,3}\z' -or
+                    $event.exceptionCode -isnot [string] -or $event.exceptionCode -cnotmatch '^0x[0-9a-f]{8}\z' -or
+                    $event.faultOffset -isnot [string] -or $event.faultOffset -cnotmatch '^0x[0-9a-f]{1,16}\z') { throw 'unavailable' }
+            foreach ($name in @('module', 'version', 'exceptionCode', 'faultOffset')) { $safe.applicationError[$name] = $event.$name }
+        }
+    }
+    if ($null -ne $Value.debugger) {
+        $debugger = $Value.debugger
+        if ($debugger.status -isnot [string] -or $debugger.status -cnotin $statuses) { throw 'unavailable' }
+        $safe.debugger = [ordered]@{ status = $debugger.status }
+        if ($null -ne $debugger.exceptionCode) {
+            if ($debugger.exceptionCode -isnot [string] -or
+                    $debugger.exceptionCode -cnotin @('0xc0000005', '0xc0000374', '0xc0000409')) { throw 'unavailable' }
+            $safe.debugger.exceptionCode = $debugger.exceptionCode
+        }
+        $frames = @($debugger.frames)
+        if ($null -eq $debugger.frames) { $frames = @() }
+        if ($frames.Count -gt 16) { throw 'unavailable' }
+        $safe.debugger.frames = @()
+        foreach ($frame in $frames) {
+            if (($frame.index -isnot [int] -and $frame.index -isnot [long]) -or
+                    $frame.index -ne $safe.debugger.frames.Count -or $frame.index -gt 15 -or
+                    $frame.module -isnot [string] -or $frame.module -cnotin $modules) { throw 'unavailable' }
+            $entry = [ordered]@{ index = $frame.index; module = $frame.module }
+            if ($null -ne $frame.rva) {
+                if ($frame.rva -isnot [string] -or $frame.rva -cnotmatch '^0x[0-9a-f]{1,16}\z') { throw 'unavailable' }
+                $entry.rva = $frame.rva
+            }
+            $safe.debugger.frames += $entry
+        }
+    }
+    if ([System.Text.Encoding]::UTF8.GetByteCount(($safe | ConvertTo-Json -Depth 8 -Compress)) -gt 8192) { throw 'unavailable' }
+    return $safe
+}
+
+function Invoke-JstiStandaloneDiagnostic($Setup, $Run, $Process, [string] $Executable, [string] $ExpectedSHA256,
+        [long] $DeadlineTicks, [long] $Frequency, [datetime] $StartedUTC, [datetime] $EndedUTC) {
+    $result = [ordered]@{ status = 'unavailable'; originalFailurePreserved = $true }
+    $state = $null
+    try {
+        if ($null -eq $Setup -or $Run.label -cne 'ui-smoke' -or $Run.arguments -cne '--ui-smoke-test' -or
+                $Run.processMachine -cne '0xAA64' -or
+                [uint32]([long] $Run.exitCode -band 0xffffffffL) -notin @(0xC0000005L, 0xC0000374L, 0xC0000409L)) { return $result }
+        if ($DeadlineTicks - [System.Diagnostics.Stopwatch]::GetTimestamp() -lt 7 * $Frequency) {
+            $result.status = 'deadline'; return $result
+        }
+        # Re-admit the captured absolute hosts, never search the isolated PATH.
+        $hostNow = Get-JstiDiagnosticIdentity $Setup.Host.Path @('pwsh.exe', 'powershell.exe')
+        $pythonNow = Get-JstiDiagnosticIdentity $Setup.Python.Path @('python.exe', 'python3.exe')
+        if ($hostNow.Hash -cne $Setup.Host.Hash -or $pythonNow.Hash -cne $Setup.Python.Hash) { return $result }
+        $request = [ordered]@{
+            schema = 1; architecture = 'arm64'; label = 'ui-smoke'; arguments = @('--ui-smoke-test')
+            exitCode = [int] $Run.exitCode; originalPid = $Process.Id
+            startedUTC = $StartedUTC.ToUniversalTime().ToString('o'); endedUTC = $EndedUTC.ToUniversalTime().ToString('o')
+            executable = $Executable; expectedSHA256 = $ExpectedSHA256
+            powershell = $Setup.Host.Path; powershellSHA256 = $Setup.Host.Hash
+            # Derived bridge work cutoff; Python reserves its own2s inside it.
+            parentPid = $PID; deadlineTicks = $DeadlineTicks - (2 * $Frequency); frequency = $Frequency
+        }
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes(($request | ConvertTo-Json -Compress))
+        if ($bytes.Length -gt 8192) { return $result }
+        $encoded = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+        $private = Join-Path $workspace ('failure-diagnostic-' + [guid]::NewGuid().ToString('N'))
+        [void] [System.IO.Directory]::CreateDirectory($private)
+        # No inherited debugger/provider/toolchain configuration or personal profile.
+        $environment = [ordered]@{
+            SystemRoot = $systemRoot; WINDIR = $systemRoot; PATH = $isolatedPath
+            TEMP = $private; TMP = $private; USERPROFILE = $private
+            APPDATA = $private; LOCALAPPDATA = $private
+            DOTNET_CLI_TELEMETRY_OPTOUT = '1'; POWERSHELL_TELEMETRY_OPTOUT = '1'
+        }
+        $block = ''
+        foreach ($key in @($environment.Keys | Sort-Object)) { $block += "$key=$($environment[$key])" + [char]0 }
+        $block += [char]0
+        $launch = @{
+            Application = $Setup.Python.Path; Directory = $private; Environment = $block
+            Arguments = [string[]] @('-I', '-B', (Join-Path $PSScriptRoot 'verify-native-execution.py'),
+                'standalone-diagnostic', '--request', $encoded)
+        }
+        $state = @{ Output = [System.IO.MemoryStream]::new(); Pipes = $null }
+        $adapter = New-JstiDiagnosticAdapter $Frequency $state
+        $bootstrap = Invoke-JstiDiagnosticBootstrap $adapter $launch $DeadlineTicks $Frequency
+        $result.bootstrap = $bootstrap
+        if ($bootstrap.status -cne 'finished' -or $bootstrap.cleanup -cne 'complete') { return $result }
+        $utf8 = [System.Text.UTF8Encoding]::new($false, $true)
+        $value = $utf8.GetString($state.Output.ToArray()) | ConvertFrom-Json -Depth 8 -ErrorAction Stop
+        $result.diagnostic = ConvertTo-JstiDiagnosticProjection $value
+        $result.status = if ($result.diagnostic.cleanup -ceq 'failed') { 'unavailable' } else { $result.diagnostic.status }
+    } catch {
+        # Optional evidence cannot replace the original abnormal-exit throw.
+        $result.status = 'unavailable'
+    } finally { if ($null -ne $state) { $state.Output.Dispose() } }
+    return $result
+}
+
+# Test-only import requires explicit inert mandatory arguments. Normal invocations
+# execute the original verifier below unchanged; no environment switch is added.
+if ($MyInvocation.InvocationName -eq '.' -and
+        $BundleDirectory -ceq '__jsti_bootstrap_fake__' -and
+        $Workspace -ceq '__jsti_bootstrap_fake__' -and
+        $ExpectedCommit -ceq '__jsti_bootstrap_fake__') { return }
+
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'BundleEnvironment.ps1')
 . (Join-Path $PSScriptRoot 'BundleCLI.ps1')
@@ -190,6 +653,19 @@ try {
         throw 'Native x64 CLI verification requires an x64 host, not an emulated x64 process.'
     }
 
+    # Optional preparation happens before original-run deadline capture. No
+    # diagnostic target/job/debugger starts on this path or on a passing run.
+    $diagnosticSetup = $null
+    if ($architecture -ceq 'arm64') {
+        try {
+            $currentHost = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+            $pythonHost = (Get-Command python -CommandType Application -ErrorAction Stop).Source
+            $hostIdentity = Get-JstiDiagnosticIdentity $currentHost @('pwsh.exe', 'powershell.exe')
+            $pythonIdentity = Get-JstiDiagnosticIdentity $pythonHost @('python.exe', 'python3.exe')
+            if (Initialize-JstiDiagnosticNative) { $diagnosticSetup = @{ Host = $hostIdentity; Python = $pythonIdentity } }
+        } catch { }
+    }
+
     # --- 3. Isolate the environment ----------------------------------------------
     $systemRoot = $env:SystemRoot
     $isolatedPath = "$systemRoot\System32;$systemRoot;$systemRoot\System32\Wbem;$systemRoot\System32\WindowsPowerShell\v1.0"
@@ -281,6 +757,10 @@ try {
         $probeRelease = Join-Path $evidenceDirectory ('module-probe-' + $label + '.ready')
         Remove-Item -LiteralPath $probeRelease -Force -ErrorAction SilentlyContinue
         $env:JSTI_BUNDLE_PROBE_RELEASE_PATH = $probeRelease
+        # Diagnostic-only QPC boundary; original stopwatch/timer stays unchanged.
+        $diagnosticFrequency = [System.Diagnostics.Stopwatch]::Frequency
+        $diagnosticDeadline = [System.Diagnostics.Stopwatch]::GetTimestamp() + ([long] $seconds * $diagnosticFrequency)
+        $diagnosticStartedUTC = [datetime]::UtcNow
         $process = Start-Process @parameters
         $loaded = @{}
         $processMachine = $null
@@ -346,6 +826,19 @@ try {
             staticallyImportedModulesNotObserved = $missing
         }
         $script:report.runs += $run
+        # At most one optional attempt after the frozen original natural failure.
+        # Timeout throws above and cannot reach this hook. Original verdict follows.
+        if ($architecture -ceq 'arm64' -and $label -ceq 'ui-smoke' -and $arguments -ceq '--ui-smoke-test' -and
+                ([long] $process.ExitCode -band 0xffffffffL) -in @(0xC0000005L, 0xC0000374L, 0xC0000409L)) {
+            try {
+                $image = @($report.productionImages | Where-Object { $_.name -ceq 'SpeakWindows.exe' })
+                if ($image.Count -eq 1) {
+                    $run.failureDiagnostic = Invoke-JstiStandaloneDiagnostic $diagnosticSetup $run $process `
+                        (Join-Path $bundle 'SpeakWindows.exe') $image[0].sha256 $diagnosticDeadline `
+                        $diagnosticFrequency $diagnosticStartedUTC ([datetime]::UtcNow)
+                }
+            } catch { $run.failureDiagnostic = @{ status = 'unavailable'; originalFailurePreserved = $true } }
+        }
         if ($process.ExitCode -ne 0) { throw "$label failed with exit code $($process.ExitCode)." }
         if ($fromBundle.Count -lt 2) { throw "$label module evidence was not captured." }
         if ($foreign.Count) { throw "$label loaded modules from outside the bundle and Windows: $($foreign -join '; ')" }

@@ -21,6 +21,7 @@ An ARM64 image cannot be emulated on Windows, so native ``images`` on a native
 ``host`` already exclude x64 emulation; ``run`` observes it directly.
 """
 import argparse
+import base64
 import datetime
 import hashlib
 import json
@@ -33,6 +34,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -541,6 +543,457 @@ def run(arguments, api, architecture, label, timeout, stdout_path, stderr_path, 
     return record
 
 
+# --- Private failure-only standalone diagnostic -------------------------------------
+# This is not an authenticated service or a qualification retry. The trusted PS
+# caller owns the exact unnamed JOB_LIST job before this bridge can execute.
+STANDALONE_KEYS = {"schema", "architecture", "label", "arguments", "exitCode", "originalPid", "startedUTC",
+                   "endedUTC", "executable", "expectedSHA256", "powershell", "powershellSHA256", "parentPid",
+                   "deadlineTicks", "frequency"}
+CRASH_CODES = {-1073741819: "0xc0000005", -1073740940: "0xc0000374", -1073740791: "0xc0000409"}
+CDB_LOCATION = r"C:\Program Files (x86)\Windows Kits\10\Debuggers\arm64\cdb.exe"
+CDB_SHA256 = "efda8a8d73116ba97189e1bc638d888f41b592fcc1ba11d8a9039ff2a2472a75"
+CDB_VERSION = [10, 0, 26100, 6584]
+DIAGNOSTIC_MODULES = {"speakwindows": "app", "ntdll": "ntdll", "kernel32": "kernel32", "kernelbase": "kernelbase",
+                      "ucrtbase": "ucrtbase", "swiftcore": "swiftCore", "swift_concurrency": "swift_Concurrency",
+                      "swiftdispatch": "swiftDispatch"}
+STANDALONE_STATUSES = {"unavailable", "deadline", "observed", "no-reproduction", "invalid", "truncated"}
+
+
+def closed_module(name):
+    return DIAGNOSTIC_MODULES.get(ntpath.splitext(ntpath.basename(name))[0].casefold(), "unknown")
+
+
+def diagnostic_result(status="unavailable", cleanup="not-started"):
+    return {"schema": 1, "status": status, "cleanup": cleanup, "applicationError": {"status": "unavailable"},
+            "debugger": {"status": status, "exceptionCode": None, "frames": []}}
+
+
+def unique_json(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("duplicate field")
+        value[key] = item
+    return value
+
+
+def diagnostic_request(encoded):
+    """Decode the exact internal request. Never format a supplied field/error."""
+    if not isinstance(encoded, str) or not 0 < len(encoded) <= 10924 or not re.fullmatch(r"[A-Za-z0-9_-]+", encoded):
+        raise ValueError("invalid request")
+    raw = base64.b64decode(encoded + "=" * (-len(encoded) % 4), altchars=b"-_", validate=True)
+    if len(raw) > 8192:
+        raise ValueError("invalid request")
+    value = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_json)
+    if not isinstance(value, dict) or set(value) != STANDALONE_KEYS:
+        raise ValueError("invalid request")
+    if type(value["schema"]) is not int or value["schema"] != 1 or value["architecture"] != "arm64" or \
+            value["label"] != "ui-smoke" or value["arguments"] != ["--ui-smoke-test"] or \
+            type(value["exitCode"]) is not int or value["exitCode"] not in CRASH_CODES:
+        raise ValueError("invalid request")
+    for key in ("originalPid", "parentPid", "deadlineTicks", "frequency"):
+        if type(value[key]) is not int or not 0 < value[key] < (1 << (32 if key.endswith("Pid") else 63)):
+            raise ValueError("invalid request")
+    for key in ("expectedSHA256", "powershellSHA256"):
+        if not isinstance(value[key], str) or not re.fullmatch(r"[0-9a-f]{64}", value[key]):
+            raise ValueError("invalid request")
+    for key, names in (("executable", {"speakwindows.exe"}), ("powershell", {"pwsh.exe", "powershell.exe"})):
+        text = value[key]
+        if not isinstance(text, str) or len(text) > 4096 or not re.match(r"^[A-Za-z]:\\", text) or \
+                any(ord(c) < 32 for c in text) or '"' in text or ":" in text[2:] or \
+                ntpath.basename(text).casefold() not in names or ntpath.normpath(text) != text:
+            raise ValueError("invalid request")
+    for key in ("startedUTC", "endedUTC"):
+        if not isinstance(value[key], str) or len(value[key]) > 40:
+            raise ValueError("invalid request")
+        moment = datetime.datetime.fromisoformat(value[key].replace("Z", "+00:00"))
+        if moment.tzinfo is None or moment.utcoffset() != datetime.timedelta(0):
+            raise ValueError("invalid request")
+    start = datetime.datetime.fromisoformat(value["startedUTC"].replace("Z", "+00:00"))
+    end = datetime.datetime.fromisoformat(value["endedUTC"].replace("Z", "+00:00"))
+    if not 0 <= (end - start).total_seconds() <= 30:
+        raise ValueError("invalid request")
+    return value
+
+
+class StandaloneWindows:
+    """Small read-only job/QPC checks; parent alone owns/terminates the job."""
+    def __init__(self):
+        if os.name != "nt":
+            raise OSError("unsupported")
+        import ctypes
+        self.ctypes = ctypes
+        api = ctypes.WinDLL("kernel32", use_last_error=True, winmode=0x800)
+        self.api = api
+        api.GetCurrentProcess.restype = ctypes.c_void_p
+        api.IsProcessInJob.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_int32)]
+        api.IsProcessInJob.restype = ctypes.c_int32
+        api.QueryInformationJobObject.argtypes = [ctypes.c_void_p, ctypes.c_int32, ctypes.c_void_p,
+                                                  ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32)]
+        api.QueryInformationJobObject.restype = ctypes.c_int32
+        api.QueryPerformanceCounter.argtypes = [ctypes.POINTER(ctypes.c_int64)]
+        api.QueryPerformanceCounter.restype = ctypes.c_int32
+        api.QueryPerformanceFrequency.argtypes = [ctypes.POINTER(ctypes.c_int64)]
+        api.QueryPerformanceFrequency.restype = ctypes.c_int32
+
+    def frequency(self):
+        value = self.ctypes.c_int64()
+        if not self.api.QueryPerformanceFrequency(self.ctypes.byref(value)):
+            raise OSError("clock unavailable")
+        return value.value
+
+    def ticks(self):
+        value = self.ctypes.c_int64()
+        if not self.api.QueryPerformanceCounter(self.ctypes.byref(value)):
+            raise OSError("clock unavailable")
+        return value.value
+
+    def admitted(self, request):
+        c = self.ctypes
+        # Explicit fixed-width DWORD/LARGE_INTEGER and pointer-sized SIZE_T.
+        class Basic(c.Structure):
+            _fields_ = [("processTime", c.c_int64), ("jobTime", c.c_int64), ("flags", c.c_uint32),
+                        ("minimum", c.c_size_t), ("maximum", c.c_size_t), ("active", c.c_uint32),
+                        ("affinity", c.c_size_t), ("priority", c.c_uint32), ("scheduling", c.c_uint32)]
+        class Extended(c.Structure):
+            _fields_ = [("basic", Basic), ("io", c.c_uint64 * 6), ("processMemory", c.c_size_t),
+                        ("jobMemory", c.c_size_t), ("peakProcess", c.c_size_t), ("peakJob", c.c_size_t)]
+        member, limits, size = c.c_int32(), Extended(), c.c_uint32()
+        return (request["parentPid"] == os.getppid() and
+                self.api.IsProcessInJob(self.api.GetCurrentProcess(), None, c.byref(member)) != 0 and member.value == 1 and
+                self.api.QueryInformationJobObject(None, 9, c.byref(limits), c.sizeof(limits), c.byref(size)) != 0 and
+                size.value == c.sizeof(limits) and limits.basic.flags == 0x2000)  # KILL_ON_JOB_CLOSE only.
+
+
+class DiagnosticBudget:
+    def __init__(self, request, api):
+        # Parent supplies its original-deadline-minus-2s bridge cutoff. This
+        # child reserves another 2s inside that cutoff for exact-child cleanup.
+        self.api, self.end, self.frequency = api, request["deadlineTicks"], request["frequency"]
+        if api.frequency() != self.frequency or not 0 < self.remaining() <= 30:
+            raise ValueError("invalid deadline")
+
+    def remaining(self):
+        return max(0.0, (self.end - self.api.ticks()) / self.frequency)
+
+
+def diagnostic_identity(location, digest, maximum, budget, version=None):
+    """Fresh regular non-reparse image snapshot; no image is loaded/executed."""
+    path = pathlib.Path(location)
+    for component in (path, *path.parents):
+        info = component.lstat()
+        if getattr(info, "st_file_attributes", 0) & 0x400 or stat.S_ISLNK(info.st_mode):
+            raise ValueError("alias refused")
+    before = path.lstat()
+    if not stat.S_ISREG(before.st_mode) or not 0 < before.st_size <= maximum:
+        raise ValueError("image refused")
+    stamp = lambda info: (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+    with path.open("rb") as stream:
+        if stamp(os.fstat(stream.fileno())) != stamp(before):
+            raise ValueError("image changed")
+        data = bytearray()
+        while len(data) < before.st_size:
+            if budget.remaining() <= 2:
+                raise TimeoutError()
+            chunk = stream.read(min(1 << 20, before.st_size - len(data)))
+            if not chunk:
+                raise ValueError("short image")
+            data.extend(chunk)
+        after = os.fstat(stream.fileno())
+    if stamp(after) != stamp(before) or stamp(path.lstat()) != stamp(before) or \
+            hashlib.sha256(data).hexdigest() != digest:
+        raise ValueError("image changed")
+    image = windows_pe.PEImage(data, "owned-diagnostic-image")
+    if image.is_dll or (ntpath.basename(location).casefold() in ("speakwindows.exe", "cdb.exe") and
+                        image.architecture != "arm64") or (version is not None and numeric_file_version(path) != version):
+        raise ValueError("image refused")
+    if stamp(path.lstat()) != stamp(before):
+        raise ValueError("image changed")
+    return stamp(before)
+
+
+class DiagnosticPipeReader:
+    """Peek first: no blocking read-to-EOF and no reader threads/daemon lifetime."""
+    def __init__(self):
+        if os.name != "nt":
+            raise OSError("unsupported")
+        import ctypes
+        import msvcrt
+        self.ctypes, self.handle = ctypes, msvcrt.get_osfhandle
+        api = ctypes.WinDLL("kernel32", use_last_error=True, winmode=0x800)
+        self.peek = api.PeekNamedPipe
+        self.peek.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32,
+                              ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32), ctypes.c_void_p]
+        self.peek.restype = ctypes.c_int32
+
+    def read(self, stream, maximum=4096):
+        available = self.ctypes.c_uint32()
+        if not self.peek(self.handle(stream.fileno()), None, 0, None, self.ctypes.byref(available), None):
+            if self.ctypes.get_last_error() in (109, 232):  # Broken pipe / no-data pipe closing.
+                return b"", True
+            raise OSError("pipe unavailable")
+        if not available.value:
+            return b"", False
+        if maximum <= 0:
+            raise OverflowError()  # Peek proves extra output; consume nothing beyond the combined cap.
+        return os.read(stream.fileno(), min(available.value, 4096, maximum)), False
+
+
+def bounded_diagnostic_process(argv, environment, directory, budget, seconds, line_limit=2048,
+                               launch=subprocess.Popen, pipe_factory=DiagnosticPipeReader,
+                               clock=time.monotonic, sleep=time.sleep):
+    """Only local CreateProcess descendants; bounded memory, no raw persistence.
+
+    Parent job is the ultimate tree owner. Exact child wait is not represented
+    as a verified tree reap; the PS owner independently terminates/accounts it.
+    """
+    if min(seconds, budget.remaining() - 2) <= 0:
+        return {"status": "deadline", "cleanup": "not-started", "output": b"", "exitCode": None}
+    end = clock() + min(seconds, budget.remaining() - 2)
+    process, output, total, lines = None, [bytearray(), bytearray()], 0, [0, 0]
+    status, cleanup = "unavailable", "not-started"
+    try:
+        pipes = pipe_factory()
+        process = launch(argv, executable=argv[0], cwd=directory, env=environment, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0, close_fds=True,
+                         creationflags=0)  # No shell, alternate parent or BREAKAWAY.
+        cleanup, closed = "clean", set()
+        while True:
+            if clock() >= end or budget.remaining() <= 2:
+                status = "deadline"
+                break
+            progress = False
+            for index, stream in enumerate((process.stdout, process.stderr)):
+                if index in closed:
+                    continue
+                maximum = min(4096, 65536 - total)
+                chunk, eof = pipes.read(stream, maximum)
+                if not isinstance(chunk, bytes) or len(chunk) > maximum or type(eof) is not bool:
+                    raise ValueError("invalid pipe projection")
+                if eof:
+                    closed.add(index)
+                if not chunk:
+                    continue
+                progress, total = True, total + len(chunk)
+                for byte in chunk:
+                    lines[index] = 0 if byte in (10, 13) else lines[index] + 1
+                    if lines[index] > line_limit:
+                        status = "truncated"
+                        break
+                if total > 65536 or status == "truncated":
+                    status = "truncated"
+                    break
+                output[index].extend(chunk)
+            if status == "truncated":
+                break
+            if len(closed) == 2 and process.poll() is not None:
+                status = "complete"
+                break
+            if not progress:
+                wait = max(0.0, min(0.005, budget.remaining() - 2, end - clock()))
+                if wait:
+                    if process.poll() is None:
+                        try:
+                            process.wait(timeout=wait)
+                        except subprocess.TimeoutExpired:
+                            pass
+                    else:
+                        sleep(wait)  # Held descendant pipe: keep checking cap/deadline, never EOF-read.
+    except OverflowError:
+        status = "truncated"
+    except Exception:
+        status = "unavailable"
+    finally:
+        if process is not None:
+            try:
+                if process.poll() is None:
+                    process.kill()  # Exact returned child; PS separately terminates the whole private job.
+                process.wait(timeout=max(0.001, min(1.0, budget.remaining())))
+            except Exception:
+                cleanup = "failed"
+            for stream in (process.stdout, process.stderr):
+                if stream:
+                    try:
+                        stream.close()  # Raw FileIO only; there is no concurrent reader/BufferedReader lock.
+                    except Exception:
+                        cleanup = "failed"
+    return {"status": status, "cleanup": cleanup,
+            "output": bytes(output[0]) + bytes(output[1]),
+            "exitCode": process.returncode if process else None}
+
+
+def project_debugger(data, completed=True):
+    """Only addresses within one unambiguous module range become closed RVAs."""
+    unknown = {"status": "invalid", "exceptionCode": None, "frames": []}
+    if not isinstance(data, bytes) or len(data) > 65536 or any(len(line) > 2048 for line in data.splitlines()):
+        return {**unknown, "status": "truncated"}
+    # Paths/function text may use the local console encoding. They are never
+    # exported; only the strict ASCII grammar below contributes any output.
+    text = data.decode("ascii", errors="replace")
+    lines = text.splitlines()
+    if lines.count("JSTI_DIAG_READY") != 1:
+        return unknown
+    begins = [index for index, line in enumerate(lines) if line.startswith("JSTI_DIAG_FAULT ")]
+    if not begins:
+        return {**unknown, "status": "no-reproduction" if completed else "unavailable"}
+    if len(begins) != 1 or lines.count("JSTI_DIAG_END") != 1:
+        return unknown
+    first, last = begins[0], lines.index("JSTI_DIAG_END")
+    if first >= last or not re.fullmatch(r"JSTI_DIAG_FAULT 0x(?:c0000005|c0000374|c0000409)", lines[first]):
+        return unknown
+    body, ranges, addresses = lines[first + 1:last], [], []
+    if body.count("JSTI_DIAG_MODULES") != 1 or body.count("JSTI_DIAG_STACK") != 1:
+        return unknown
+    modules_at, stack_at = body.index("JSTI_DIAG_MODULES"), body.index("JSTI_DIAG_STACK")
+    if modules_at >= stack_at:
+        return unknown
+    for line in body[:modules_at]:
+        match = re.fullmatch(r"JSTI_DIAG_IP ([0-9a-fA-F`]{1,17})", line)
+        if match:
+            addresses.append(int(match[1].replace("`", ""), 16))
+    if len(addresses) != 1:
+        return unknown
+    for line in body[modules_at + 1:stack_at]:
+        match = re.match(r"^([0-9a-fA-F`]{1,17})\s+([0-9a-fA-F`]{1,17})\s+([A-Za-z0-9_.-]{1,128})(?:\s|$)", line)
+        if match:
+            low, high = (int(match[n].replace("`", ""), 16) for n in (1, 2))
+            if not 0 <= low < high < (1 << 64):
+                return unknown
+            ranges.append((low, high, closed_module(match[3])))
+    stack_count = 0
+    for line in body[stack_at + 1:]:
+        match = re.match(r"^\s*([0-9a-fA-F]{2})\s+([0-9a-fA-F`]{1,17})\s+([0-9a-fA-F`]{1,17})(?:\s|$)", line)
+        if match:
+            if int(match[1], 16) != stack_count or stack_count >= 16:
+                return unknown
+            stack_count += 1
+            returned = int(match[3].replace("`", ""), 16)
+            if returned:
+                addresses.append(returned)  # Return PC, never a function displacement.
+    if not stack_count:
+        return unknown
+    frames = []
+    for address in addresses[:16]:
+        owned = [(low, high, name) for low, high, name in ranges if low <= address < high]
+        if len(owned) != 1:
+            return unknown
+        low, _, name = owned[0]
+        frames.append({"index": len(frames), "module": name, "rva": "0x%x" % (address - low)})
+    if not frames:
+        return unknown
+    return {"status": "observed", "exceptionCode": lines[first].split()[1], "frames": frames}
+
+
+def cdb_commands():
+    lines = []
+    for code in CRASH_CODES.values():
+        command = ('.printf \\"JSTI_DIAG_FAULT %s\\n\\"; .printf \\"JSTI_DIAG_IP %%p\\n\\", @$ip; '
+                   '.printf \\"JSTI_DIAG_MODULES\\n\\"; lmon; .printf \\"JSTI_DIAG_STACK\\n\\"; '
+                   'kL 0n16; .printf \\"JSTI_DIAG_END\\n\\"; q') % code
+        lines.append('sxd -c2 "%s" %s' % (command, code))
+    return "\n".join(lines) + '\n.printf "JSTI_DIAG_READY\\n"\ng\n'
+
+
+def standalone_diagnostic(encoded, api_factory=StandaloneWindows, identity=diagnostic_identity,
+                          runner=bounded_diagnostic_process):
+    result = diagnostic_result("invalid")
+    scratch = None
+    try:
+        request = diagnostic_request(encoded)
+        api = api_factory()
+        budget = DiagnosticBudget(request, api)
+        if not api.admitted(request):
+            return result
+        result = diagnostic_result()
+        app = identity(request["executable"], request["expectedSHA256"], 128 << 20, budget)
+        host = identity(request["powershell"], request["powershellSHA256"], 32 << 20, budget)
+        # Only fixed system/temp variables; no inherited OP/API/symbol/debugger configuration.
+        scratch = tempfile.TemporaryDirectory(prefix="jsti-owned-diagnostic-")
+        with scratch as directory:
+            environment = {key: os.environ[key] for key in ("SystemRoot", "WINDIR") if key in os.environ}
+            environment.update(PATH=ntpath.join(environment.get("SystemRoot", r"C:\Windows"), "System32"),
+                               TEMP=directory, TMP=directory, USERPROFILE=directory, HOME=directory,
+                               APPDATA=directory, LOCALAPPDATA=directory)
+            if budget.remaining() >= 7:
+                env = dict(environment, JSTI_EVENT_START=request["startedUTC"], JSTI_EVENT_END=request["endedUTC"])
+                event = runner([request["powershell"], "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
+                                APPLICATION_ERROR_QUERY], env, directory, budget, 5, line_limit=65536)
+                result["cleanup"] = event["cleanup"]
+                if event["cleanup"] == "failed":
+                    return result
+                projection = {"status": "unavailable"}
+                if event["status"] == "complete" and event["exitCode"] == 0:
+                    try:
+                        payload = json.loads(event["output"].decode("utf-8-sig"), object_pairs_hook=unique_json)
+                        if isinstance(payload, dict) and set(payload) == {"status", "events"} and payload["status"] == "ok":
+                            start = datetime.datetime.fromisoformat(request["startedUTC"].replace("Z", "+00:00"))
+                            end = datetime.datetime.fromisoformat(request["endedUTC"].replace("Z", "+00:00"))
+                            projection = project_application_error(payload["events"], request["originalPid"],
+                                                                   request["executable"], start, end)
+                    except Exception:
+                        projection = {"status": "invalid"}
+                elif event["status"] in ("deadline", "truncated"):
+                    projection = {"status": "timeout" if event["status"] == "deadline" else "invalid"}
+                if projection["status"] == "observed":
+                    module = closed_module(projection["module"])
+                    projection = {key: projection[key] for key in ("status", "version", "exceptionCode", "faultOffset")}
+                    projection["module"] = module
+                result["applicationError"] = projection
+            if budget.remaining() - 2 < 5:
+                result["status"] = result["debugger"]["status"] = "deadline"
+                return result
+            identity(CDB_LOCATION, CDB_SHA256, 32 << 20, budget, version=CDB_VERSION)
+            # Recheck the caller-admitted images after optional Event1000 work.
+            if identity(request["executable"], request["expectedSHA256"], 128 << 20, budget) != app or \
+                    identity(request["powershell"], request["powershellSHA256"], 32 << 20, budget) != host:
+                return result
+            if budget.remaining() - 2 < 5:
+                result["status"] = result["debugger"]["status"] = "deadline"
+                return result
+            symbols = pathlib.Path(directory) / "symbols"
+            symbols.mkdir()
+            command = pathlib.Path(directory) / "fixed-cdb.txt"
+            command.write_text(cdb_commands(), encoding="ascii")
+            argv = [CDB_LOCATION, "-hd", "-G", "-sins", "-noshell", "-nosqm", "-netsyms:no", "-cf", str(command),
+                    "-y", str(symbols), request["executable"], "--ui-smoke-test"]
+            observed = runner(argv, environment, directory, budget, min(20, budget.remaining() - 2))
+            result["cleanup"] = observed["cleanup"]
+            if observed["cleanup"] == "failed":
+                return result
+            if observed["status"] != "complete":
+                status = observed["status"] if observed["status"] in STANDALONE_STATUSES else "unavailable"
+                result["status"] = result["debugger"]["status"] = status
+                return result
+            result["debugger"] = project_debugger(observed["output"], observed["exitCode"] == 0)
+            result["status"] = result["debugger"]["status"]
+            if result["applicationError"]["status"] == "observed" and result["status"] == "no-reproduction":
+                result["status"] = "observed"
+    except TimeoutError:
+        result["status"] = result["debugger"]["status"] = "deadline"
+    except Exception:
+        # Neither an unexpected optional collector error nor temporary cleanup
+        # failure may leave a previously observed result looking completed.
+        if scratch is not None:
+            try:
+                if pathlib.Path(scratch.name).exists():
+                    result["cleanup"] = "failed"
+            except Exception:
+                result["cleanup"] = "failed"
+        result["status"] = result["debugger"]["status"] = "unavailable"
+        result["debugger"]["exceptionCode"], result["debugger"]["frames"] = None, []
+    return result
+
+
+def standalone_main(argv):
+    result = diagnostic_result("invalid")
+    if len(argv) == 3 and argv[1] == "--request":
+        result = standalone_diagnostic(argv[2])
+    serialized = json.dumps(result, separators=(",", ":"), ensure_ascii=True)
+    if len(serialized.encode("ascii")) > 8192:
+        serialized = json.dumps(diagnostic_result("invalid"), separators=(",", ":"))
+    print(serialized)
+
+
 def parse_arguments(argv=None):
     # No abbreviations: the program's own options (for example --expect) follow
     # "--" and must reach it unchanged.
@@ -597,8 +1050,15 @@ def main(argv=None):
         save_evidence(args.evidence, evidence)
 
 
+def dispatch_main(argv=None):
+    arguments = sys.argv[1:] if argv is None else argv
+    if arguments[:1] == ["standalone-diagnostic"]:
+        return standalone_main(arguments)
+    return main(arguments)
+
+
 if __name__ == "__main__":
     try:
-        main()
+        dispatch_main()
     except (ExecutionError, windows_pe.PEFormatError, OSError, ValueError) as error:
         raise SystemExit("native execution: " + str(error))

@@ -59,6 +59,32 @@ final class IOSIssueReportFlowTests: XCTestCase {
         XCTAssertEqual(payload["contextState"] as? String, "missingLegacyContext")
     }
 
+    func testOwnedFailureUsesOneImmutablePayloadForPreviewCopyURLAndExport() throws {
+        let snapshot = IOSIssueReportSnapshot(
+            context: .init(model: .project("gladia/solaria-1-streaming")),
+            observedHandoff: .init(provenance: .observedHandoff, model: .project("openai/gpt-4o-transcribe")),
+            requestFailure: .init(stage: .request)
+        )
+        let effects = IssueReportEffects()
+        let controller = IOSIssueReportController(snapshot: snapshot, dependencies: .init(
+            copy: { effects.copied.append($0); return true }, open: { effects.opened.append($0); return true }
+        ))
+        controller.copyDraft()
+        XCTAssertEqual(effects.copied, [snapshot.full.body])
+        let export = try XCTUnwrap(controller.beginExport())
+        XCTAssertEqual(export.document.makeFileWrapper().regularFileContents, snapshot.full.jsonData)
+        let url = try XCTUnwrap(snapshot.full.issueURL)
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
+        XCTAssertEqual(query?.first(where: { $0.name == "body" })?.value, snapshot.full.body)
+        controller.completeExport(export.id, outcome: .cancelled)
+        controller.setIncludesDiagnostics(false)
+        let removed = try object(controller.report)
+        XCTAssertEqual(removed["contextState"] as? String, "userRemoved")
+        XCTAssertNil(removed["context"])
+        XCTAssertNil(removed["observedHandoff"])
+        XCTAssertNil(removed["failures"])
+    }
+
     func testConstructionAndRemovalHaveNoExternalEffects() throws {
         let effects = IssueReportEffects()
         let controller = makeController(effects)

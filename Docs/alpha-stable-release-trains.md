@@ -237,3 +237,10 @@ is not the `IN_BETA_TESTING` or `READY_FOR_BETA_TESTING` state required by the
 existing public-beta gate. Retry Prepare Stable after verification; do not edit
 the receipt or bypass the gate. A new Alpha/Stable workflow definition takes
 effect after merge; it does not modify a candidate already being prepared.
+
+Desktop qualification reuses completed successful same-repository main-push
+runs only when the source SHA and workflow path match exactly. A newer failed
+run prevents reuse. Other sources, PR merge refs and fork runs never qualify a
+release. Missing evidence dispatches the immutable release tag. Hourly Alpha
+reconciliation includes the desktop receipt in its completion check, so missing
+or invalid qualification stays eligible for recovery.

@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {desktopWorkflows, latestDesktopRun, validateDesktopReceipt} from '../desktop-release-lib.mjs';
+import {desktopWorkflows, latestDesktopRun, reusableDesktopRun, desktopQualificationComplete, validateDesktopReceipt} from '../desktop-release-lib.mjs';
 const manifest = {source: 'a'.repeat(40), tag: 'stable-candidate-2', build: '202610281200'};
 const run = {id: 3, head_sha: manifest.source, head_branch: manifest.tag,
     event: 'workflow_dispatch', status: 'completed', conclusion: 'success', created_at: '2026-10-28T12:00:01Z'};
-const receipt = () => ({...manifest, status: 'verified', runs: Object.fromEntries(desktopWorkflows.map(w => [w, {...run}]))});
+const repo = 'crmitchelmore/justspeaktoit';
+const receipt = () => ({...manifest, status: 'verified', runs: Object.fromEntries(desktopWorkflows.map(w => [w, {...run, repository: repo, path: `.github/workflows/${w}`}]))});
 test('requires all native and packaged desktop workflows at the frozen source', () => {
     assert.equal(validateDesktopReceipt(manifest, receipt()).status, 'verified');
     for (const workflow of desktopWorkflows) {
@@ -25,4 +26,25 @@ test('polling rejects old runs, other tags and sources; chooses the newest dispa
         {head_sha: 'b'.repeat(40)}, {event: 'push'}]) {
         assert.equal(latestDesktopRun([{...run, ...patch}], manifest, start), undefined);
     }
+});
+
+test('only completed main push evidence from the exact source/workflow/repository can be reused', () => {
+    const workflow = desktopWorkflows[0];
+    const main = {...run, event:'push', head_branch:'main', head_repository:{full_name:repo}, path:`.github/workflows/${workflow}`};
+    assert.equal(reusableDesktopRun([main], manifest, workflow, repo), main);
+    const proof = receipt(); proof.runs[workflow] = {...main, repository:repo};
+    assert.equal(validateDesktopReceipt(manifest, proof), proof);
+    for (const patch of [{event:'pull_request'}, {head_sha:'b'.repeat(40)}, {head_branch:'branch'},
+        {head_repository:{full_name:'fork/repo'}}, {path:'.github/workflows/other.yml'},
+        {conclusion:'failure'}, {status:'in_progress'}]) {
+        assert.equal(reusableDesktopRun([{...main,...patch}],manifest,workflow,repo), undefined);
+    }
+    assert.equal(reusableDesktopRun([main,{...main,id:4,conclusion:'failure'}],manifest,workflow,repo),undefined);
+});
+test('missing or mismatched desktop evidence stays eligible for Alpha recovery', () => {
+    const required = {...manifest, desktopQualification:1};
+    assert.equal(desktopQualificationComplete(required, undefined), false);
+    assert.equal(desktopQualificationComplete(required, {...receipt(),source:'b'.repeat(40)}), false);
+    assert.equal(desktopQualificationComplete(required, receipt()), true);
+    assert.equal(desktopQualificationComplete(manifest, undefined), true);
 });

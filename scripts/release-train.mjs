@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
-import { validateDesktopReceipt } from './desktop-release-lib.mjs';
+import { validateDesktopReceipt, desktopQualificationComplete } from './desktop-release-lib.mjs';
 import { runReleaseCommand } from './release-command.mjs';
 import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -276,6 +276,11 @@ if(command === 'allocate' || command === 'prepare') {
                 const matches=receipt.source === allocatedManifest.source && receipt.build === item.build && receipt.notesHash === item.notesHash;
                 if(matches && surface !== 'mac-direct' && receipt.status === 'invalid') invalidAppleUpload=true;
                 if(receipt.status !== 'verified' || !matches) complete=false;
+            }
+            if (allocatedManifest.desktopQualification === 1) {
+                const asset = allocatedRelease.assets.find(a => a.name === 'desktop-qualification.json');
+                const receipt = asset ? JSON.parse(gh('api', `repos/${repo}/releases/assets/${asset.id}`, '-H', 'Accept: application/octet-stream')) : null;
+                if (!desktopQualificationComplete(allocatedManifest, receipt)) complete = false;
             }
             // A frozen rejected binary cannot be repaired by uploading it again.
             // Keep its evidence; explicit --rebuild allocates a fresh attempt.

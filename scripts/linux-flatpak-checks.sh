@@ -68,6 +68,12 @@ flatpak run --command=sh "$app" -ec '
   ls /app/lib/justspeaktoit/libggml-cpu-*.so
 '
 
+# Inspect installed ELF files from the build host, using its existing readelf.
+# Nothing is added to the runtime and the normal sandbox receives no override.
+installed_root=$(flatpak info --user --show-location "$app")
+python3 "$(dirname "$0")/../packaging/linux/verify-flatpak-manifest.py" \
+  --runtime-directory "$installed_root/files/lib/justspeaktoit"
+
 echo '== real on-device transcription, live folding, silence and cancellation'
 # Transfer this public-domain fixture over stdin; no access to host files is
 # added to the app. The app downloads and verifies its canonical tiny model.

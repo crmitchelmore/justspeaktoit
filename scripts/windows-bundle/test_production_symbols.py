@@ -286,7 +286,7 @@ class OwnedTransformTests(unittest.TestCase):
         metadata = {"host": "Darwin", "target": "x86_64-unknown-windows-msvc", "configuration": "release",
                     "appBuiltForTesting": False, "executables": {
                         "SpeakWindows.exe": result["transformedSHA256"], "speak.exe": SYMBOLS.sha256(cli.read_bytes())}}
-        (self.root / "app-build-metadata.json").write_text(json.dumps(metadata))
+        (self.root / "app-build-metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
         loaded = FIXTURES.BUILD.load_application(self.root, FIXTURES.BUILD.Policy.load())
         self.assertEqual(set(loaded["executables"]), {"SpeakWindows.exe", "speak.exe"})
         self.assertEqual(loaded["resources"], {})

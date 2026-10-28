@@ -19,12 +19,12 @@ final class BatchRequestDiagnosticReceiptTests: XCTestCase {
         }
         self.cleanup(task: task, client: fixture.client, exit: exit, host: fixture.host)
         await fulfillment(of: [fixture.entered], timeout: 2)
-        fixture.settings.preferredLocaleIdentifier = "fr"
+        fixture.settings.preferredLocaleIdentifier = "fr_FR"
         fixture.settings.batchTranscriptionModel = ModelCatalog.defaultBatchTranscriptionModel
         let requests = await fixture.client.requests
         XCTAssertEqual(requests.count, 1)
         XCTAssertEqual(requests.first?.model, Self.model)
-        XCTAssertEqual(requests.first?.language, "en")
+        XCTAssertEqual(requests.first?.language, "en_GB")
         let handoff = try XCTUnwrap(session.diagnosticContext?.observedHandoff)
         XCTAssertEqual(handoff.model.identifier, requests.first?.model)
         XCTAssertEqual(handoff.language.identifier, requests.first?.language)
@@ -167,7 +167,7 @@ final class BatchRequestDiagnosticReceiptTests: XCTestCase {
         let requests = await fixture.client.requests
         XCTAssertEqual(requests.count, 1)
         XCTAssertEqual(requests.first?.model, Self.model)
-        XCTAssertEqual(requests.first?.language, "en")
+        XCTAssertEqual(requests.first?.language, "en_GB")
     }
 
     func testReportKeepsAdmissionSeparateAndAppliesAllRemovalPoliciesToHandoff() throws {
@@ -255,16 +255,49 @@ extension BatchRequestDiagnosticReceiptTests {
         self.cleanup(task: task, client: fixture.client, exit: exit, host: fixture.host, lookup: lookup)
         await fulfillment(of: [lookupEntered], timeout: 2)
         fixture.settings.batchTranscriptionModel = ModelCatalog.defaultBatchTranscriptionModel
-        fixture.settings.preferredLocaleIdentifier = "fr"
+        fixture.settings.preferredLocaleIdentifier = "fr_FR"
         await lookup.release()
         await fulfillment(of: [fixture.entered], timeout: 2)
         let requests = await fixture.client.requests
         XCTAssertEqual(requests.count, 1)
         XCTAssertEqual(requests.first?.model, Self.model)
-        XCTAssertEqual(requests.first?.language, "fr")
+        XCTAssertEqual(requests.first?.language, "fr_FR")
         XCTAssertEqual(session.diagnosticContext?.observedHandoff?.model.identifier, requests.first?.model)
         XCTAssertEqual(session.diagnosticContext?.observedHandoff?.language.identifier, requests.first?.language)
         XCTAssertNil(session.diagnosticContext?.observedHandoff?.observedProvider)
+        await fixture.client.finish(.success(Self.result))
+        let result = try await task.value
+        XCTAssertEqual(result, Self.result)
+    }
+
+    func testNoncanonicalLanguageStillReachesClientButNeverSerializedDiagnostics() async throws {
+        let fixture = try await self.fixture()
+        let languageCanary = "PRIVATE_LANGUAGE_" + Self.canary
+        fixture.settings.preferredLocaleIdentifier = languageCanary
+        let session = self.session()
+        let exit = XCTestExpectation(description: "owned noncanonical language request exited")
+        let task = Task { @MainActor in
+            defer { exit.fulfill() }
+            return try await self.transcribe(fixture) { receipt in
+                MainManager.retainBatchDiagnostic(receipt, for: session, activeSession: session)
+            }
+        }
+        self.cleanup(task: task, client: fixture.client, exit: exit, host: fixture.host)
+        await fulfillment(of: [fixture.entered], timeout: 2)
+        let requests = await fixture.client.requests
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.first?.language, languageCanary)
+        let handoff = try XCTUnwrap(session.diagnosticContext?.observedHandoff)
+        XCTAssertNil(handoff.language.identifier)
+        XCTAssertEqual(handoff.model.identifier, requests.first?.model)
+        let report = HistoryIssueReporter.report(for: session.buildHistoryItem(finalText: nil))
+        let outputs = report.title + report.body + report.jsonString
+            + (report.issueURL?.absoluteString ?? "") + IssueDiagnosticReport.attachmentFilename
+        XCTAssertFalse(outputs.contains(languageCanary))
+        XCTAssertFalse(outputs.contains(Self.canary))
+        let json = try self.object(report.jsonData)
+        let observed = try XCTUnwrap(json["observedHandoff"] as? [String: Any])
+        XCTAssertNil((observed["language"] as? [String: Any])?["identifier"])
         await fixture.client.finish(.success(Self.result))
         let result = try await task.value
         XCTAssertEqual(result, Self.result)
@@ -276,7 +309,7 @@ extension BatchRequestDiagnosticReceiptTests {
         settings.localStreamingModelSource = "local/streaming/diagnostic-fixture-uninstalled"
         settings.transcriptionMode = .batchRemote
         settings.batchTranscriptionModel = Self.model
-        settings.preferredLocaleIdentifier = "en"
+        settings.preferredLocaleIdentifier = "en_GB"
         let entered = expectation(description: "production batch delegate admitted owned fake client")
         let client = HeldDiagnosticBatchClient(entered: entered)
         return BatchDiagnosticFixture(settings: settings, client: client, entered: entered, host: host)
@@ -335,7 +368,7 @@ extension BatchRequestDiagnosticReceiptTests {
     private static let canary = "PRIVATE_CANARY_token=user@example.com"
     private static var handoff: RequestDiagnosticContext {
         RequestDiagnosticContext(provenance: .observedHandoff, model: .project(model), mode: .batch,
-                                 language: .project("en"), options: .init(streamingEnabled: false))
+                                 language: .project("en_GB"), options: .init(streamingEnabled: false))
     }
     private static var result: TranscriptionResult {
         TranscriptionResult(text: canary, segments: [], confidence: nil, duration: 1, modelIdentifier: model,
@@ -396,4 +429,4 @@ private actor HeldDiagnosticBatchClient: BatchTranscriptionClient {
         self.continuation = nil
         continuation.resume(with: result)
     }
-}
+} // swiftlint:disable:this file_length

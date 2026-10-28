@@ -345,7 +345,8 @@ jobs:
         run: |
           # The combined upload below succeeds if either variant has files, so
           # check each shipped variant on its own and name the missing one.
-          for dsyms in "$ARCHIVE_PATH/dSYMs" "$LEGACY_ARCHIVE_PATH/dSYMs"; do
+          for dsyms in "$ARCHIVE_PATH/dSYMs" "$LEGACY_ARCHIVE_PATH/dSYMs" \
+            "${{ steps.cli.outputs.symbols-dir }}/arm64" "${{ steps.cli.outputs.symbols-dir }}/x86_64"; do
             if ! compgen -G "$dsyms/*.dSYM" > /dev/null; then
               echo "::warning::No dSYMs in $dsyms; crashes from that variant will not be symbolicated."
             fi
@@ -365,11 +366,11 @@ jobs:
           name: ${{ steps.sentry.outputs.artifact }}
           retention-days: 7
           if-no-files-found: error
-          # Both paths live under $RUNNER_TEMP/<variant>/, so the artefact keeps
-          # them apart as arm64/… and universal/….
+          # Keep app archives and standalone CLI architecture directories apart.
           path: |
             ${{ env.ARCHIVE_PATH }}/dSYMs
             ${{ env.LEGACY_ARCHIVE_PATH }}/dSYMs
+            ${{ steps.cli.outputs.symbols-dir }}
 
       - name: Cleanup Keychain
         if: always()

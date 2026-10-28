@@ -317,9 +317,30 @@ function New-JstiDiagnosticAdapter([long] $Frequency, [hashtable] $State) {
     }
 }
 
-function Get-JstiDiagnosticIdentity([string] $Path, [string[]] $Names) {
-    if (-not [System.IO.Path]::IsPathFullyQualified($Path) -or
+function Assert-JstiDiagnosticAncestors([string] $Path) {
+    # Called only after normalized absolute Windows-drive admission. Inspect
+    # every parent including the drive root, without following a reparse link.
+    $parent = $Path.Substring(0, $Path.LastIndexOf('\'))
+    for ($depth = 0; $depth -lt 64; $depth++) {
+        if ($parent.Length -eq 2) { $parent += '\' }
+        $item = Get-Item -LiteralPath $parent -ErrorAction Stop
+        if (-not $item.PSIsContainer -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+            throw 'unavailable'
+        }
+        if ($parent.Length -eq 3) { return }
+        $parent = $parent.Substring(0, $parent.LastIndexOf('\'))
+    }
+    throw 'unavailable'
+}
+
+function Get-JstiDiagnosticIdentity([string] $Path, [string[]] $Names, [switch] $FrameworkPath) {
+    $qualified = if ($FrameworkPath) {
+        $Path.Length -le 4096 -and $Path -cmatch '^[A-Za-z]:\\' -and $Path.Substring(2).IndexOf(':') -lt 0 -and
+            [System.IO.Path]::GetFullPath($Path) -ceq $Path
+    } else { [System.IO.Path]::IsPathFullyQualified($Path) }
+    if (-not $qualified -or
             [System.IO.Path]::GetFileName($Path).ToLowerInvariant() -cnotin $Names) { throw 'unavailable' }
+    if ($FrameworkPath) { Assert-JstiDiagnosticAncestors $Path }
     $item = Get-Item -LiteralPath $Path -ErrorAction Stop
     if ($item.PSIsContainer -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -or
             $item.Length -lt 256 -or $item.Length -gt 16777216) { throw 'unavailable' }
@@ -393,6 +414,135 @@ function ConvertTo-JstiDiagnosticProjection($Value) {
     }
     if ([System.Text.Encoding]::UTF8.GetByteCount(($safe | ConvertTo-Json -Depth 8 -Compress)) -gt 8192) { throw 'unavailable' }
     return $safe
+}
+
+function ConvertTo-JstiPackagedEventProjection($Value) {
+    $names = @($Value.PSObject.Properties.Name)
+    if ($names.Count -ne 4 -or @($names | Where-Object {
+            $_ -cnotin @('schema', 'status', 'cleanup', 'applicationError') }).Count -ne 0) { throw 'unavailable' }
+    if ($Value.cleanup -isnot [string] -or $Value.cleanup -cnotin @('clean', 'failed', 'not-started') -or
+            $null -eq $Value.applicationError) { throw 'unavailable' }
+    $eventNames = @($Value.applicationError.PSObject.Properties.Name)
+    $expected = if ($Value.applicationError.status -ceq 'observed') {
+        @('status', 'module', 'version', 'exceptionCode', 'faultOffset')
+    } else { @('status') }
+    if ($eventNames.Count -ne $expected.Count -or
+            @($eventNames | Where-Object { $_ -cnotin $expected }).Count -ne 0) { throw 'unavailable' }
+    $safe = ConvertTo-JstiDiagnosticProjection $Value
+    if ($safe.status -ceq 'observed' -and
+            ($safe.cleanup -cne 'clean' -or $safe.applicationError.status -cne 'observed')) { throw 'unavailable' }
+    if ($safe.applicationError.status -ceq 'observed' -and
+            ($safe.cleanup -cne 'clean' -or $safe.status -cne 'observed')) { throw 'unavailable' }
+    return $safe
+}
+
+function New-JstiPackagedEventSetup([string] $Python) {
+    try {
+        $fixedHost = $env:SystemRoot.TrimEnd('\') + '\System32\WindowsPowerShell\v1.0\powershell.exe'
+        $currentHost = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+        if ($currentHost -ine $fixedHost) { return $null }
+        $hostIdentity = Get-JstiDiagnosticIdentity $fixedHost @('powershell.exe') -FrameworkPath
+        $pythonIdentity = Get-JstiDiagnosticIdentity $Python @('python.exe', 'python3.exe') -FrameworkPath
+        if (Initialize-JstiDiagnosticNative) { return @{ Host = $hostIdentity; Python = $pythonIdentity } }
+    } catch { }
+    return $null
+}
+
+function Invoke-JstiPackagedEventDiagnostic($Setup, $Run, $Context, [string] $Executable,
+        [string] $ExpectedSHA256, [string] $ExpectedPackageFullName,
+        [scriptblock] $Timestamp = { [System.Diagnostics.Stopwatch]::GetTimestamp() }) {
+    $result = [ordered]@{ status = 'unavailable'; originalFailurePreserved = $true }
+    $state = $null; $private = $null; $bootstrap = $null
+    try {
+        if ($null -eq $Setup -or $Run.label -cne 'base-ui-smoke-test' -or
+                $Run.arguments -cne '--ui-smoke-test' -or $Run.identityError -or
+                [string]::IsNullOrWhiteSpace($ExpectedPackageFullName) -or
+                $Run.packageFullName -cne $ExpectedPackageFullName -or $Run.modules.passed -isnot [bool] -or
+                -not $Run.modules.passed -or
+                $Run.exitCode -isnot [int] -or
+                $Run.exitCode -notin @(-1073741819, -1073740940, -1073740791)) { return $result }
+        $keys = @($Context.Keys)
+        if ($keys.Count -ne 7 -or @($keys | Where-Object { $_ -cnotin @('originalPid', 'startedUTC', 'endedUTC',
+                'startedTicks', 'endedTicks', 'originalDeadlineTicks', 'frequency') }).Count -ne 0) { return $result }
+        $frequency = [System.Diagnostics.Stopwatch]::Frequency
+        if ($Context.frequency -isnot [long] -or $Context.frequency -ne $frequency -or $frequency -gt 1000000000 -or
+                $Context.originalPid -isnot [int] -or $Context.originalPid -le 0 -or
+                $Context.startedTicks -isnot [long] -or $Context.endedTicks -isnot [long] -or
+                $Context.originalDeadlineTicks -isnot [long] -or $Context.startedTicks -le 0 -or
+                $Context.startedTicks -gt ([long]::MaxValue - 60 * $frequency) -or
+                $Context.originalDeadlineTicks -ne ($Context.startedTicks + 60 * $frequency) -or
+                $Context.endedTicks -lt $Context.startedTicks -or $Context.endedTicks -gt $Context.originalDeadlineTicks -or
+                $Context.startedUTC -isnot [datetime] -or $Context.endedUTC -isnot [datetime] -or
+                $Context.startedUTC.Kind -ne [DateTimeKind]::Utc -or $Context.endedUTC.Kind -ne [DateTimeKind]::Utc -or
+                ($Context.endedUTC - $Context.startedUTC).TotalSeconds -lt 0 -or
+                ($Context.endedUTC - $Context.startedUTC).TotalSeconds -gt 60 -or
+                $ExpectedSHA256 -cnotmatch '^[0-9a-f]{64}\z' -or
+                $Executable -cnotmatch '^[A-Za-z]:\\(?:[^\\]+\\)*SpeakWindows[.]exe\z') { return $result }
+        $now = [long] (& $Timestamp)
+        if ($now -lt $Context.endedTicks -or $now -gt ([long]::MaxValue - 10 * $frequency)) { return $result }
+        $cutoff = [Math]::Min($Context.originalDeadlineTicks, $now + 10 * $frequency)
+        if ($cutoff - $now -lt 9 * $frequency) { $result.status = 'deadline'; return $result }
+        $fixedHost = $env:SystemRoot.TrimEnd('\') + '\System32\WindowsPowerShell\v1.0\powershell.exe'
+        if ($Setup.Host.Path -ine $fixedHost) { return $result }
+        $hostNow = Get-JstiDiagnosticIdentity $Setup.Host.Path @('powershell.exe') -FrameworkPath
+        $pythonNow = Get-JstiDiagnosticIdentity $Setup.Python.Path @('python.exe', 'python3.exe') -FrameworkPath
+        if ($hostNow.Hash -cne $Setup.Host.Hash -or $pythonNow.Hash -cne $Setup.Python.Hash) { return $result }
+        $request = [ordered]@{
+            schema = 1; architecture = 'arm64'; label = 'base-ui-smoke-test'; exitCode = $Run.exitCode
+            originalPid = $Context.originalPid; parentPid = $PID
+            startedUTC = $Context.startedUTC.ToString('o'); endedUTC = $Context.endedUTC.ToString('o')
+            executable = $Executable; expectedSHA256 = $ExpectedSHA256
+            powershell = $Setup.Host.Path; powershellSHA256 = $Setup.Host.Hash
+            startedTicks = $Context.startedTicks; endedTicks = $Context.endedTicks
+            originalDeadlineTicks = $Context.originalDeadlineTicks; deadlineTicks = $cutoff - 2 * $frequency
+            frequency = $frequency
+        }
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes(($request | ConvertTo-Json -Compress))
+        if ($bytes.Length -gt 8192) { return $result }
+        $encoded = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+        $private = Join-Path $workspace ('packaged-event-' + [guid]::NewGuid().ToString('N'))
+        [void] [System.IO.Directory]::CreateDirectory($private)
+        $environment = [ordered]@{
+            SystemRoot = $systemRoot; WINDIR = $systemRoot; PATH = $isolatedPath
+            TEMP = $private; TMP = $private; USERPROFILE = $private; HOME = $private
+            APPDATA = $private; LOCALAPPDATA = $private
+            DOTNET_CLI_TELEMETRY_OPTOUT = '1'; POWERSHELL_TELEMETRY_OPTOUT = '1'
+        }
+        $block = ''
+        foreach ($key in @($environment.Keys | Sort-Object)) { $block += "$key=$($environment[$key])" + [char]0 }
+        $block += [char]0
+        $launch = @{ Application = $Setup.Python.Path; Directory = $private; Environment = $block
+            Arguments = [string[]] @('-I', '-B', (Join-Path $PSScriptRoot 'verify-native-execution.py'),
+                'packaged-application-error', '--request', $encoded) }
+        $state = @{ Output = [System.IO.MemoryStream]::new(); Pipes = $null }
+        $adapter = New-JstiDiagnosticAdapter $frequency $state
+        $bootstrap = Invoke-JstiDiagnosticBootstrap $adapter $launch $cutoff $frequency
+        $result.bootstrap = $bootstrap
+        if ($bootstrap.status -cne 'finished' -or $bootstrap.cleanup -cne 'complete') { return $result }
+        $utf8 = [System.Text.UTF8Encoding]::new($false, $true)
+        # PS5.1 supports this bounded response; no -Depth or System.Text.Json.
+        $value = $utf8.GetString($state.Output.ToArray()) | ConvertFrom-Json -ErrorAction Stop
+        $result.applicationErrorEvidence = ConvertTo-JstiPackagedEventProjection $value
+        $result.status = if ($result.applicationErrorEvidence.cleanup -ceq 'failed') {
+            'unavailable'
+        } else { $result.applicationErrorEvidence.status }
+    } catch { $result.status = 'unavailable' }
+    finally {
+        if ($null -ne $state) { try { $state.Output.Dispose() } catch { $result.status = 'unavailable' } }
+        if ($private -and $null -ne $bootstrap -and $bootstrap.cleanup -ceq 'complete') {
+            try { [System.IO.Directory]::Delete($private, $true) } catch { $result.status = 'unavailable' }
+        }
+        if ($result.status -ceq 'observed') {
+            try { if ([long] (& $Timestamp) -ge $cutoff) { $result.status = 'deadline' } }
+            catch { $result.status = 'unavailable' }
+        }
+        if ($result.status -cne 'observed' -and $result.Contains('applicationErrorEvidence') -and
+                ($result.applicationErrorEvidence.status -ceq 'observed' -or
+                 $result.applicationErrorEvidence.applicationError.status -ceq 'observed')) {
+            [void] $result.Remove('applicationErrorEvidence')
+        }
+    }
+    return $result
 }
 
 function Invoke-JstiStandaloneDiagnostic($Setup, $Run, $Process, [string] $Executable, [string] $ExpectedSHA256,

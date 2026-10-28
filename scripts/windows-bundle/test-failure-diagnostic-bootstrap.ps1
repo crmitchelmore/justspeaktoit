@@ -429,5 +429,152 @@ try {
     } finally { [System.IO.Directory]::Delete($root, $true) }
 } finally { Set-Item Function:Invoke-JstiStandaloneDiagnostic -Value $standaloneFunction }
 
+
+# Every normalized Windows parent is admitted before the event host is launched.
+$ancestorFixture = @{ Seen = @(); Reparse = ''; Missing = '' }
+function Get-Item {
+    param([string] $LiteralPath, $ErrorAction)
+    $ancestorFixture.Seen += $LiteralPath
+    if ($LiteralPath -ceq $ancestorFixture.Missing) { throw 'PRIVATE_CANARY' }
+    return @{ PSIsContainer = $true; Attributes = $(if ($LiteralPath -ceq $ancestorFixture.Reparse) { 1024 } else { 0 }) }
+}
+try {
+    Assert-JstiDiagnosticAncestors 'C:\Windows\System32\powershell.exe'
+    Assert-That (($ancestorFixture.Seen -join ',') -ceq 'C:\Windows\System32,C:\Windows,C:\') 'all-host-ancestors-including-root'
+    foreach ($field in @('Reparse', 'Missing')) {
+        $ancestorFixture[$field] = 'C:\Windows'; $refused = $false
+        try { Assert-JstiDiagnosticAncestors 'C:\Windows\System32\powershell.exe' } catch { $refused = $true }
+        Assert-That $refused 'reparse-or-inaccessible-parent-refused'
+        $ancestorFixture[$field] = ''
+    }
+} finally { Remove-Item Function:Get-Item }
+
+# Event-only packaged path uses the same private bootstrap, never a target replay.
+$packagedIdentityFunction = (Get-Item Function:Get-JstiDiagnosticIdentity).ScriptBlock
+$packagedAdapterFunction = (Get-Item Function:New-JstiDiagnosticAdapter).ScriptBlock
+$packagedBootstrapFunction = (Get-Item Function:Invoke-JstiDiagnosticBootstrap).ScriptBlock
+$packagedSystemRoot = $env:SystemRoot
+$packagedWorkspace = $workspace
+$packagedRoot = Join-Path ([IO.Path]::GetTempPath()) ('jsti-packaged-fake-' + [guid]::NewGuid().ToString('N'))
+[void] [IO.Directory]::CreateDirectory($packagedRoot)
+$packagedFake = @{ Calls = 0; State = $null; Mode = 'clean'; Request = $null; Launch = $null; Cutoff = [long] 0 }
+Set-Item Function:Get-JstiDiagnosticIdentity -Value {
+    param($path, $names, [switch] $FrameworkPath)
+    Assert-That $FrameworkPath 'packaged-framework-path-opt-in'
+    return @{ Path = $path; Hash = '0' * 64 }
+}
+Set-Item Function:New-JstiDiagnosticAdapter -Value {
+    param($frequency, $state)
+    if ($packagedFake.Mode -ceq 'stream-cleanup') {
+        $wrapper = [pscustomobject]@{ Inner = $state.Output }
+        $wrapper | Add-Member ScriptMethod Write { param($b,$i,$n); $this.Inner.Write($b,$i,$n) }
+        $wrapper | Add-Member ScriptMethod ToArray { return ,$this.Inner.ToArray() }
+        $wrapper | Add-Member ScriptMethod Dispose { $this.Inner.Dispose(); throw 'PRIVATE_CANARY' }
+        $state.Output = $wrapper
+    }
+    $packagedFake.State = $state
+    return @{}
+}
+Set-Item Function:Invoke-JstiDiagnosticBootstrap -Value {
+    param($adapter, $launch, [long] $cutoff, [long] $frequency)
+    $packagedFake.Calls++; $packagedFake.Launch = $launch; $packagedFake.Cutoff = $cutoff
+    Assert-That (($launch.Arguments[0..3] -join ',') -like '-I,-B,*,packaged-application-error') 'event-only-exact-command'
+    Assert-That ($launch.Arguments[4] -ceq '--request' -and $launch.Arguments.Count -eq 6) 'event-only-no-extra-args'
+    $encoded = $launch.Arguments[5].Replace('-', '+').Replace('_', '/')
+    $encoded += '=' * ((4 - $encoded.Length % 4) % 4)
+    $request = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encoded)) | ConvertFrom-Json
+    $packagedFake.Request = $request
+    Assert-That ($request.deadlineTicks -eq ($cutoff - 2 * $frequency)) 'packaged-derived-child-cutoff'
+    Assert-That ($request.label -ceq 'base-ui-smoke-test' -and $request.exitCode -eq -1073741819 -and
+        $request.originalPid -eq 4242 -and $request.parentPid -eq $PID -and
+        $request.originalDeadlineTicks - $request.startedTicks -eq 60 * $frequency) 'packaged-original-binding'
+    Assert-That ($cutoff -le $request.originalDeadlineTicks -and
+        $cutoff - [Diagnostics.Stopwatch]::GetTimestamp() -le 10 * $frequency) 'packaged-no-added-budget'
+    Assert-That ($launch.Environment -notmatch 'PRIVATE_PARENT|OP_|API_KEY' -and
+        $launch.Environment.Contains('USERPROFILE=')) 'packaged-private-environment'
+    $projection = @{ schema = 1; status = 'observed'; cleanup = 'clean'
+        applicationError = @{ status = 'observed'; module = 'app'; version = '1.2.3.4'
+            exceptionCode = '0xc0000005'; faultOffset = '0x123' } }
+    if ($packagedFake.Mode -ceq 'debugger') { $projection.debugger = @{ status = 'observed'; frames = @() } }
+    if ($packagedFake.Mode -ceq 'private') { $projection.applicationError.private = 'PRIVATE_CANARY' }
+    if ($packagedFake.Mode -ceq 'child-cleanup') { $projection.cleanup = 'failed' }
+    if ($packagedFake.Mode -ceq 'malformed') { $text = 'PRIVATE_CANARY' }
+    else { $text = $projection | ConvertTo-Json -Depth 8 -Compress }
+    $bytes = [Text.Encoding]::UTF8.GetBytes($text)
+    $packagedFake.State.Output.Write($bytes, 0, $bytes.Length)
+    if ($packagedFake.Mode -ceq 'scratch-cleanup') {
+        [IO.Directory]::Delete($launch.Directory, $true)
+        [IO.File]::WriteAllText($launch.Directory, 'owned fake')
+    }
+    if ($packagedFake.Mode -ceq 'parent-cleanup') { return @{ status = 'finished'; cleanup = 'incomplete' } }
+    return @{ status = 'finished'; cleanup = 'complete' }
+}
+try {
+    $env:SystemRoot = 'C:\Windows'; $workspace = $packagedRoot
+    $systemRoot = 'C:\Windows'; $isolatedPath = 'C:\Windows\System32'
+    $setup = @{ Host = @{ Path = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'; Hash = '0' * 64 }
+        Python = @{ Path = 'C:\Owned\python.exe'; Hash = '0' * 64 } }
+    $frequency = [Diagnostics.Stopwatch]::Frequency
+    $now = [Diagnostics.Stopwatch]::GetTimestamp()
+    $context = @{ originalPid = 4242; startedUTC = [datetime]::UtcNow.AddSeconds(-2); endedUTC = [datetime]::UtcNow.AddSeconds(-1)
+        startedTicks = $now - 2 * $frequency; endedTicks = $now - $frequency
+        originalDeadlineTicks = $now + 58 * $frequency; frequency = $frequency }
+    $run = @{ label = 'base-ui-smoke-test'; arguments = '--ui-smoke-test'; exitCode = -1073741819
+        packageFullName = 'owned-package'; identityError = $null; modules = @{ passed = $true }; original = 'kept' }
+    $original = $run | ConvertTo-Json -Depth 8 -Compress
+    foreach ($mode in @('clean', 'debugger', 'private', 'child-cleanup', 'malformed', 'parent-cleanup', 'stream-cleanup', 'scratch-cleanup', 'cutoff')) {
+        $packagedFake.Mode = $mode
+        $clockState = @{ Calls = 0; Start = [Diagnostics.Stopwatch]::GetTimestamp() }
+        $fakeMode = $mode
+        $clock = {
+            $clockState.Calls++
+            if ($fakeMode -ceq 'cutoff' -and $clockState.Calls -gt 1) { return $clockState.Start + 11 * $frequency }
+            return $clockState.Start
+        }.GetNewClosure()
+        $result = Invoke-JstiPackagedEventDiagnostic $setup $run $context 'C:\Owned\SpeakWindows.exe' ('0' * 64) 'owned-package' $clock
+        Assert-That (($run | ConvertTo-Json -Depth 8 -Compress) -ceq $original) 'packaged-original-failure-unchanged'
+        Assert-That ($result.originalFailurePreserved -ceq $true) 'packaged-failure-preserved'
+        if ($mode -ceq 'clean') {
+            Assert-That ($result.status -ceq 'observed' -and $result.applicationErrorEvidence.applicationError.faultOffset -ceq '0x123') 'packaged-observed-event'
+            Assert-That ($packagedFake.Request.PSObject.Properties.Name.Count -eq 17) 'packaged-closed-request'
+        } else {
+            Assert-That ($result.status -cne 'observed') 'packaged-malformed-or-unclean-refuses'
+            Assert-That ($result.applicationErrorEvidence.status -cne 'observed' -and
+                $result.applicationErrorEvidence.applicationError.status -cne 'observed') 'packaged-no-stale-observed-child'
+        }
+        Assert-That (($result | ConvertTo-Json -Depth 8 -Compress) -notmatch 'PRIVATE_CANARY|C:\\Owned|originalPid|startedUTC') 'packaged-closed-output'
+    }
+    $before = $packagedFake.Calls
+    foreach ($replacement in @(0, 42, 3221225477L)) {
+        $run.exitCode = $replacement
+        [void] (Invoke-JstiPackagedEventDiagnostic $setup $run $context 'C:\Owned\SpeakWindows.exe' ('0' * 64) 'owned-package')
+    }
+    $run.exitCode = -1073741819
+    foreach ($field in @('label', 'arguments', 'packageFullName')) {
+        $saved = $run[$field]; $run[$field] = 'foreign'
+        [void] (Invoke-JstiPackagedEventDiagnostic $setup $run $context 'C:\Owned\SpeakWindows.exe' ('0' * 64) 'owned-package')
+        $run[$field] = $saved
+    }
+    $run.modules.passed = $false
+    [void] (Invoke-JstiPackagedEventDiagnostic $setup $run $context 'C:\Owned\SpeakWindows.exe' ('0' * 64) 'owned-package')
+    $run.modules.passed = $true
+    $context.extra = 'PRIVATE_CANARY'
+    [void] (Invoke-JstiPackagedEventDiagnostic $setup $run $context 'C:\Owned\SpeakWindows.exe' ('0' * 64) 'owned-package')
+    $context.Remove('extra')
+    Assert-That ($packagedFake.Calls -eq $before) 'packaged-noncandidate-no-diagnostic-launch'
+    # The optional child must skip when the original remaining budget is small.
+    $now = [Diagnostics.Stopwatch]::GetTimestamp()
+    $context.startedTicks = $now - 55 * $frequency; $context.endedTicks = $now - $frequency
+    $context.originalDeadlineTicks = $now + 5 * $frequency
+    $result = Invoke-JstiPackagedEventDiagnostic $setup $run $context 'C:\Owned\SpeakWindows.exe' ('0' * 64) 'owned-package'
+    Assert-That ($result.status -ceq 'deadline' -and $packagedFake.Calls -eq $before) 'packaged-insufficient-original-budget'
+} finally {
+    Set-Item Function:Get-JstiDiagnosticIdentity -Value $packagedIdentityFunction
+    Set-Item Function:New-JstiDiagnosticAdapter -Value $packagedAdapterFunction
+    Set-Item Function:Invoke-JstiDiagnosticBootstrap -Value $packagedBootstrapFunction
+    $env:SystemRoot = $packagedSystemRoot; $workspace = $packagedWorkspace
+    [IO.Directory]::Delete($packagedRoot, $true)
+}
+
 Assert-That (-not ('JstiDiagnosticNative' -as [type])) 'pure-fakes-did-not-compile-or-load-native-type'
 Write-Output 'Diagnostic bootstrap pure-fake checks passed.'

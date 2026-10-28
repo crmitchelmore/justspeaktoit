@@ -75,7 +75,7 @@ jobs:
         # cached .build that the coverage-enabled swift test below cannot reuse
         # (coverage instrumentation changes compiler flags for every target),
         # forcing a second full rebuild of the whole module graph inside the
-        # 30-minute job budget.
+        # 45-minute job budget.
         run: SWIFT_FLAGS=--enable-code-coverage make build
 
       - name: Verify brand asset sizes and appearance variants

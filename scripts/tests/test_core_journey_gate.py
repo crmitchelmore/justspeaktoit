@@ -358,5 +358,284 @@ class RunnerTests(unittest.TestCase):
             self.assertFalse(marker.exists(), "The timed-out test command leaked a running descendant")
 
 
+
+class BuildObservationTests(unittest.TestCase):
+    def test_projection_exports_only_complete_bounded_progress_and_closed_phases(self):
+        project = gate.BuildProgressObserver.project_progress
+        for action, phase in ((b"Compiling ", "compiling"), (b"Emitting module ", "emittingModule"),
+                              (b"Linking ", "linking"), (b"Copying ", "copying"),
+                              (b"Wrapping AST ", "wrappingAST"), (b"PRIVATE-action ", "other")):
+            with self.subTest(phase=phase):
+                projected = project(b"[12/34] " + action + b"PRIVATE-path-secret-\xff\r\n", 0)
+                self.assertEqual(projected, {"completed": 12, "total": 34, "phase": phase})
+                self.assertNotIn("PRIVATE", json.dumps(projected))
+        for raw in (b"[1/2] Compiling PRIVATE", b"'[1/2] Compiling PRIVATE'\n",
+                    b"example: [1/2] Compiling PRIVATE\n", b"[3/2] Compiling PRIVATE\n",
+                    b"[1/0] Compiling PRIVATE\n", b"[1/1000001] Compiling PRIVATE\n",
+                    b"[10000000/10000000] Compiling PRIVATE\n", b"[x/2] Compiling PRIVATE\n"):
+            with self.subTest(raw=raw):
+                self.assertIsNone(project(raw, 0))
+        self.assertIsNone(project(b"[1/2] Compiling PRIVATE\n", 10), "The cut first edge is not a record")
+        self.assertEqual(project(b"cut\n[1/2] Compiling PRIVATE\n[2/2] Linking incomplete", 10),
+                         {"completed": 1, "total": 2, "phase": "compiling"})
+
+    def test_observations_use_monotonic_sample_time_and_byte_growth_not_line_timestamps(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "test.log"
+            log.write_bytes(b"[1/2] Compiling PRIVATE\n")
+            with mock.patch.object(gate.time, "monotonic", side_effect=[10, 15, 14, 20]):
+                observer = gate.BuildProgressObserver(log)
+                with log.open("rb") as stream:
+                    self.assertTrue(observer.sample(stream.fileno()))
+                    with log.open("ab") as writer:
+                        writer.write(b"[2/2] Linking PRIVATE\n")
+                    self.assertTrue(observer.sample(stream.fileno()))
+                    self.assertTrue(observer.sample(stream.fileno()))
+            observer.finish(Path(directory))
+            payload = json.loads((Path(directory) / "progress.json").read_text())
+            self.assertEqual([x["elapsedMilliseconds"] for x in payload["samples"]], [5000, 5000, 10000])
+            self.assertEqual([x["logGrowth"] for x in payload["samples"]], [False, True, False])
+            self.assertFalse(payload["compilerActivityObserved"])
+            self.assertEqual(payload["timeOrigin"], "observerBootstrap")
+            self.assertNotIn("PRIVATE", json.dumps(payload))
+
+    def test_read_attempt_and_json_caps_are_independent_of_log_size(self):
+        observer = gate.BuildProgressObserver(Path("unused"))
+        pause = mock.Mock()
+        with mock.patch.object(gate.os, "open", return_value=9), \
+                mock.patch.object(gate.os, "fstat", return_value=mock.Mock(st_size=2 ** 40, st_mode=0o100600)), \
+                mock.patch.object(gate.os, "pread", side_effect=lambda fd, count, offset: b"x" * count) as read, \
+                mock.patch.object(gate.os, "close") as close, \
+                mock.patch.object(gate.threading, "Event", return_value=pause):
+            observer.run()
+        self.assertEqual(read.call_count, 192)
+        self.assertEqual(sum(call.args[1] for call in read.call_args_list), 3 * 1024 * 1024)
+        self.assertTrue(all(call.args[1] <= 16 * 1024 for call in read.call_args_list))
+        self.assertTrue(all(x["tailTruncated"] for x in observer.samples))
+        self.assertTrue(all(call.args == (5,) for call in pause.wait.call_args_list))
+        close.assert_called_once_with(9)
+        with tempfile.TemporaryDirectory() as directory:
+            observer.finish(Path(directory))
+            output = (Path(directory) / "progress.json").read_bytes()
+            self.assertLessEqual(len(output), 64 * 1024)
+            payload = json.loads(output)
+            self.assertTrue(payload["sampleCapReached"])
+            self.assertEqual(payload["reservedReadBytes"], 3 * 1024 * 1024)
+            self.assertTrue(payload["workerExitObserved"])
+
+    def test_partial_read_error_keeps_reservation_and_never_exports_error_text(self):
+        observer = gate.BuildProgressObserver(Path("unused"))
+        observer.maximum_total_read = observer.remaining = 16
+        with mock.patch.object(gate.os, "fstat", return_value=mock.Mock(st_size=9, st_mode=0o100600)), \
+                mock.patch.object(gate.os, "pread", side_effect=OSError("PRIVATE-path-token")) as read:
+            with self.assertRaises(OSError):
+                observer.sample(9)
+        self.assertEqual(observer.remaining, 7)
+        self.assertEqual(read.call_args.args[1], 9)
+        with mock.patch.object(gate.os, "fstat", return_value=mock.Mock(st_size=9, st_mode=0o100600)), \
+                mock.patch.object(gate.os, "pread", side_effect=lambda fd, count, offset: b"x" * count) as read:
+            self.assertTrue(observer.sample(9))
+            self.assertFalse(observer.sample(9))
+        self.assertEqual(read.call_count, 1)
+        self.assertEqual(read.call_args.args[1], 7)
+        self.assertEqual(observer.remaining, 0)
+        failed = gate.BuildProgressObserver(Path("unused"))
+        with mock.patch.object(gate.os, "open", side_effect=OSError("PRIVATE-path-token")):
+            failed.run()
+        with tempfile.TemporaryDirectory() as directory:
+            failed.finish(Path(directory))
+            output = (Path(directory) / "progress.json").read_text()
+            self.assertNotIn("PRIVATE", output)
+            self.assertEqual(json.loads(output)["readStatus"], "unavailable")
+
+    def test_worker_does_not_hold_snapshot_lock_during_file_io_and_owns_close(self):
+        observer = gate.BuildProgressObserver(Path("unused"))
+
+        def read(fd, count, offset):
+            self.assertTrue(observer.lock.acquire(blocking=False))
+            observer.lock.release()
+            observer.stopped = True
+            return b"[1/2] Compiling PRIVATE\n"
+
+        with mock.patch.object(gate.os, "open", return_value=9), \
+                mock.patch.object(gate.os, "fstat", return_value=mock.Mock(st_size=26, st_mode=0o100600)), \
+                mock.patch.object(gate.os, "pread", side_effect=read), \
+                mock.patch.object(gate.os, "close") as close, \
+                mock.patch.object(gate.threading, "Event"):
+            observer.run()
+        close.assert_called_once_with(9)
+        self.assertTrue(observer.exited)
+
+    def test_nonregular_or_replaced_log_is_refused_before_reading(self):
+        for mode, device, inode in ((0o010600, 1, 2), (0o100600, 3, 2), (0o100600, 1, 3)):
+            with self.subTest(mode=mode, device=device, inode=inode):
+                observer = gate.BuildProgressObserver(Path("unused"), (1, 2))
+                metadata = mock.Mock(st_mode=mode, st_dev=device, st_ino=inode, st_size=9)
+                with mock.patch.object(gate.os, "fstat", return_value=metadata), \
+                        mock.patch.object(gate.os, "pread") as read:
+                    with self.assertRaises(ValueError):
+                        observer.sample(9)
+                read.assert_not_called()
+
+    def test_busy_snapshot_never_waits_or_requires_worker_exit(self):
+        observer = gate.BuildProgressObserver(Path("unused"))
+        with tempfile.TemporaryDirectory() as directory:
+            with observer.lock:
+                observer.finish(Path(directory))
+            payload = json.loads((Path(directory) / "progress.json").read_text())
+        self.assertEqual(payload["snapshotStatus"], "lockBusy")
+        self.assertEqual(payload["readStatus"], "unknown")
+        self.assertIsNone(payload["samples"])
+        self.assertFalse(payload["workerExitObserved"])
+        self.assertTrue(observer.stopped)
+
+    def test_blocked_read_cannot_block_snapshot_and_is_released_by_owned_cleanup(self):
+        import threading
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "test.log"
+            log.write_bytes(b"[1/2] Compiling PRIVATE\n")
+            observer = gate.BuildProgressObserver(log)
+            entered, release = threading.Event(), threading.Event()
+            original = gate.os.pread
+
+            def held_read(*args):
+                entered.set()
+                if not release.wait(2):
+                    raise OSError("owned fixture release absent")
+                return original(*args)
+
+            worker = threading.Thread(target=observer.run, daemon=True)
+            with mock.patch.object(gate.os, "pread", side_effect=held_read):
+                try:
+                    worker.start()
+                    self.assertTrue(entered.wait(2))
+                    observer.finish(Path(directory))
+                    payload = json.loads((Path(directory) / "progress.json").read_text())
+                    self.assertFalse(payload["workerExitObserved"])
+                    self.assertEqual(payload["samples"], [])
+                finally:
+                    release.set()
+                    worker.join(2)  # Only this fixture joins; the production owner never does.
+            self.assertFalse(worker.is_alive())
+            self.assertTrue(observer.exited)
+
+    def test_observer_thread_is_daemon_and_diagnostic_write_failure_is_optional(self):
+        observer = gate.BuildProgressObserver(Path("unused"))
+        with mock.patch.object(gate.threading, "Thread") as thread:
+            observer.start()
+        self.assertTrue(thread.call_args.kwargs["daemon"])
+        thread.return_value.start.assert_called_once_with()
+        thread.return_value.join.assert_not_called()
+        with mock.patch.object(Path, "write_text", side_effect=OSError("PRIVATE-path-token")):
+            observer.finish(Path("unused"))
+        self.assertTrue(observer.stopped)
+
+    def run_fake_command(self, outcome=0, stage="build", command=None, observer_start_error=None):
+        events = []
+        process = mock.Mock(pid=123)
+        process.poll.return_value = None if isinstance(outcome, BaseException) else outcome
+        process.wait.side_effect = outcome if isinstance(outcome, BaseException) else None
+        process.wait.return_value = outcome
+        observer = mock.Mock()
+        observer.start.side_effect = observer_start_error
+        observer.finish.side_effect = lambda directory: events.append("observer-finish")
+
+        def launch(*args, **kwargs):
+            events.append("popen")
+            self.assertEqual(kwargs["start_new_session"], True)
+            self.assertEqual(kwargs["stderr"], subprocess.STDOUT)
+            return process
+
+        def stop(owned):
+            self.assertIs(owned, process)
+            events.append("kill-reap")
+            process.poll.return_value = 0
+
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(gate.subprocess, "Popen", side_effect=launch), \
+                mock.patch.object(gate, "stop_process_group", side_effect=stop), \
+                mock.patch.object(gate.BuildProgressObserver, "start", side_effect=observer.start), \
+                mock.patch.object(gate.BuildProgressObserver, "finish", side_effect=observer.finish), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            code = gate.run_gate(command or list(gate.BuildProgressObserver.command), directory, 7, [], stage)
+            result = json.loads((Path(directory) / "result.json").read_text())
+        process.wait.assert_called_once_with(timeout=7)
+        return code, result, events, observer
+
+    def test_timeout_and_interruption_kill_reap_before_optional_snapshot(self):
+        for error, expected in ((subprocess.TimeoutExpired("fixture", 7), 124), (InterruptedError("fixture"), 1)):
+            with self.subTest(expected=expected):
+                code, result, events, observer = self.run_fake_command(error)
+                self.assertEqual(code, expected)
+                self.assertEqual(result["exit_code"], expected)
+                self.assertEqual(events, ["popen", "kill-reap", "observer-finish"])
+                observer.start.assert_called_once_with()
+
+    def test_exact_build_admission_preserves_success_failure_and_startup_failure(self):
+        for outcome in (0, 17):
+            for startup_error in (None, RuntimeError("PRIVATE-path-token")):
+                with self.subTest(outcome=outcome, startup_error=startup_error):
+                    code, result, events, _ = self.run_fake_command(outcome, observer_start_error=startup_error)
+                    self.assertEqual(code, outcome)
+                    self.assertEqual(result["exit_code"], outcome)
+                    self.assertEqual(events[-1], "observer-finish")
+                    self.assertNotIn("PRIVATE", json.dumps(result))
+        for stage, command in (("test", None), ("build", ["swift", "build"]),
+                               ("build", ["/private/swift", "build", "--build-tests", "--enable-code-coverage"])):
+            with self.subTest(stage=stage, command=command):
+                _, _, _, observer = self.run_fake_command(stage=stage, command=command)
+                observer.start.assert_not_called()
+                observer.finish.assert_not_called()
+
+    def test_snapshot_setup_failure_does_not_replace_original_gate_outcome(self):
+        with mock.patch.object(gate.BuildProgressObserver, "finish", side_effect=RuntimeError("PRIVATE-snapshot")):
+            for expected in (0, 17):
+                with tempfile.TemporaryDirectory() as directory, \
+                        mock.patch.object(gate.BuildProgressObserver, "start"), \
+                        mock.patch.object(gate.subprocess, "Popen") as launch, \
+                        contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    launch.return_value.wait.return_value = expected
+                    launch.return_value.poll.return_value = expected
+                    code = gate.run_gate(list(gate.BuildProgressObserver.command), directory, 7, [], "build")
+                    result = json.loads((Path(directory) / "result.json").read_text())
+                self.assertEqual(code, expected)
+                self.assertEqual(result["exit_code"], expected)
+                self.assertNotIn("PRIVATE", json.dumps(result))
+
+    def test_launch_failure_stops_observer_after_original_command_timing(self):
+        events = []
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(gate.BuildProgressObserver, "start"), \
+                mock.patch.object(gate.BuildProgressObserver, "finish", side_effect=lambda path: events.append("finish")), \
+                mock.patch.object(gate.subprocess, "Popen", side_effect=OSError("fixture launch")), \
+                mock.patch.object(gate, "stop_process_group") as stop, \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            code = gate.run_gate(list(gate.BuildProgressObserver.command), directory, 7, [], "build")
+            result = json.loads((Path(directory) / "result.json").read_text())
+        self.assertEqual(code, 1)
+        self.assertIsNotNone(result["command_elapsed_seconds"])
+        self.assertEqual(events, ["finish"])
+        stop.assert_not_called()
+
+    def test_build_timing_excludes_bootstrap_and_finish_follows_both_timing_captures(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(gate.time, "monotonic", side_effect=[0, 1, 10, 10.1, 20]) as clock, \
+                mock.patch.object(gate.BuildProgressObserver, "start"), \
+                mock.patch.object(gate.BuildProgressObserver, "finish") as finish, \
+                mock.patch.object(gate.subprocess, "Popen") as launch, \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            launch.return_value.wait.return_value = 0
+            launch.return_value.poll.return_value = 0
+            finish.side_effect = lambda path: self.assertEqual(clock.call_count, 5)
+            command = list(gate.BuildProgressObserver.command)
+            code = gate.run_gate(command, directory, 7, [], "build")
+            result = json.loads((Path(directory) / "result.json").read_text())
+        self.assertEqual(code, 0)
+        self.assertAlmostEqual(result["command_elapsed_seconds"], 0.1)
+        self.assertEqual(result["elapsed_seconds"], 20)
+        self.assertEqual(launch.call_args.args[0], command)
+        launch.return_value.wait.assert_called_once_with(timeout=7)
+
+
 if __name__ == "__main__":
     unittest.main()

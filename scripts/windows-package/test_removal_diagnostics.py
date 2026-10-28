@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -61,15 +62,35 @@ function Get-AppxPackage {
 function Get-AppxProvisionedPackage { throw 'Removal diagnostics must not collect provisioning' }
 function Get-Process { throw 'Removal diagnostics must not sample processes' }
 ''' + helper + r'''
+[Console]::Error.WriteLine('JSTI_REMOVAL_FIXTURE:before-first')
 $first = Get-PreviousPackageDiagnostics 'owned' 'owned_1' $Location -RemovalOnly
+[Console]::Error.WriteLine('JSTI_REMOVAL_FIXTURE:after-first')
 function Get-AppxPackage { throw ('synthetic-read-error-' + ('x' * 1000)) }
 $second = Get-PreviousPackageDiagnostics 'owned' 'owned_1' $Location -RemovalOnly
+[Console]::Error.WriteLine('JSTI_REMOVAL_FIXTURE:after-second')
 [ordered]@{ first = $first; second = $second; removedJob = $script:removedJob
     waitSeconds = $script:waitSeconds } | ConvertTo-Json -Depth 12 -Compress
 ''', encoding='utf-8')
-            completed = subprocess.run([POWERSHELL, '-NoProfile', '-NonInteractive', '-File', str(fixture),
-                                        '-Location', str(payload)], capture_output=True, text=True,
-                                       encoding='utf-8', timeout=30, check=True)
+            try:
+                completed = subprocess.run([POWERSHELL, '-NoProfile', '-NonInteractive', '-File', str(fixture),
+                                            '-Location', str(payload)], capture_output=True, text=True,
+                                           encoding='utf-8', timeout=30, check=True)
+            except subprocess.TimeoutExpired as error:
+                try:
+                    captured = error.stderr
+                    if isinstance(captured, str):
+                        captured = captured[:16384].encode('utf-8', errors='replace')
+                    lines = captured[:65536].splitlines() if isinstance(captured, bytes) else []
+                    # Presence in this bounded failure-time capture does not prove event order.
+                    facts = {
+                        'beforeFirstObserved': b'JSTI_REMOVAL_FIXTURE:before-first' in lines,
+                        'afterFirstObserved': b'JSTI_REMOVAL_FIXTURE:after-first' in lines,
+                        'afterSecondObserved': b'JSTI_REMOVAL_FIXTURE:after-second' in lines,
+                    }
+                    sys.stderr.write('JSTI_REMOVAL_FIXTURE_FACTS ' + json.dumps(facts, sort_keys=True) + '\n')
+                except Exception:
+                    pass  # Optional diagnostics must not replace the original timeout.
+                raise
             result = json.loads(completed.stdout)
             self.assertTrue(result['removedJob'])
             self.assertEqual(result['waitSeconds'], 30)

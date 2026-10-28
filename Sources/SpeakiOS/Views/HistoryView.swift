@@ -102,8 +102,12 @@ public struct HistoryView: View {
             await historyManager.triggerSync()
         }
         .task { await historyManager.loadIfNeededAndWait() }
-        .task(id: refreshKey) {
-            refreshDerivedState()
+        .onReceive(historyManager.$items) { items in
+            // Published emits before the manager's stored value changes.
+            refreshDerivedState(items: items)
+        }
+        .onChange(of: filterKey) { _, _ in
+            refreshDerivedState(items: historyManager.items)
         }
         .confirmationDialog(
             "Clear History",
@@ -279,9 +283,8 @@ public struct HistoryView: View {
         )
     }
 
-    private var refreshKey: HistoryRefreshKey {
-        HistoryRefreshKey(
-            items: historyManager.items.map(\.presentationItem),
+    private var filterKey: HistoryViewFilterKey {
+        HistoryViewFilterKey(
             searchText: searchText,
             errorsOnly: errorsOnly,
             selectedModel: selectedModel,
@@ -291,14 +294,11 @@ public struct HistoryView: View {
         )
     }
 
-    private func refreshDerivedState() {
-        let currentQuery = query
-        let newItems = historyManager.items.filter { currentQuery.matches($0.presentationItem) }
-        filteredItems = newItems
-        statistics = HistoryPresentationStatistics(items: newItems.map(\.presentationItem))
-        availableModels = Array(Set(historyManager.items.map(\.model))).sorted {
-            ModelCatalog.friendlyName(for: $0) < ModelCatalog.friendlyName(for: $1)
-        }
+    private func refreshDerivedState(items: [iOSHistoryItem]) {
+        let state = HistoryViewDerivedState(items: items, query: query)
+        filteredItems = state.filteredItems
+        statistics = state.statistics
+        availableModels = state.availableModels
         derivedStateReady = true
     }
 
@@ -316,14 +316,29 @@ public struct HistoryView: View {
     }
 }
 
-private struct HistoryRefreshKey: Hashable {
-    let items: [HistoryPresentationItem]
+struct HistoryViewFilterKey: Equatable {
     let searchText: String
     let errorsOnly: Bool
     let selectedModel: String?
     let dateRangeEnabled: Bool
     let startDate: Date
     let endDate: Date
+}
+
+/// Derived rows belong to the view lifecycle and rebuild only from emitted rows or filter changes.
+struct HistoryViewDerivedState {
+    let filteredItems: [iOSHistoryItem]
+    let statistics: HistoryPresentationStatistics
+    let availableModels: [String]
+
+    init(items: [iOSHistoryItem], query: HistorySearchQuery) {
+        let newItems = items.filter { query.matches($0.presentationItem) }
+        filteredItems = newItems
+        statistics = HistoryPresentationStatistics(items: newItems.map(\.presentationItem))
+        availableModels = Array(Set(items.map(\.model))).sorted {
+            ModelCatalog.friendlyName(for: $0) < ModelCatalog.friendlyName(for: $1)
+        }
+    }
 }
 
 private struct HistoryFilterSheet: View {

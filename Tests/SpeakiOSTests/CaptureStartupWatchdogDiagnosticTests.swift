@@ -8,6 +8,8 @@ import XCTest
 @available(iOS 18, *)
 @MainActor
 final class CaptureStartupWatchdogDiagnosticTests: XCTestCase {
+    private weak var observedRun: StartupDiagnosticRun?
+
     func testRealWatchdogTickPreservesTimeoutThroughCancelledSessionAndIntentJournal() async throws {
         let run = try StartupDiagnosticRun()
         addTeardownBlock { @MainActor in await run.cleanUp() }
@@ -69,8 +71,12 @@ final class CaptureStartupWatchdogDiagnosticTests: XCTestCase {
 
     func testForegroundClaimDuringWatchdogCancellationCannotReceiveOldFailureMetadata() async throws {
         let run = try StartupDiagnosticRun()
+        self.observedRun = run
         let owner = UUID()
-        run.session.onCancel = { XCTAssertTrue(run.ownership.claim(owner)) }
+        run.session.onCancel = {
+            run.foregroundClaimCallbackEntered = true
+            XCTAssertTrue(run.ownership.claim(owner))
+        }
         addTeardownBlock { @MainActor in
             run.session.onCancel = nil
             await run.cleanUp()
@@ -103,7 +109,10 @@ final class CaptureStartupWatchdogDiagnosticTests: XCTestCase {
 
     private func completed(_ receipt: XCTestExpectation, timeout: TimeInterval) async -> Bool {
         let completed = await XCTWaiter.fulfillment(of: [receipt], timeout: timeout) == .completed
-        if !completed { XCTFail("Owned startup did not reach its bounded receipt: \(receipt.expectationDescription)") }
+        if !completed {
+            self.observedRun?.reportFailure(receipt: receipt)
+            XCTFail("Owned startup did not reach its bounded receipt: \(receipt.expectationDescription)")
+        }
         return completed
     }
 }
@@ -119,6 +128,11 @@ private final class StartupDiagnosticRun {
     let done = XCTestExpectation(description: "owned intent operation finished")
     let exited = XCTestExpectation(description: "owned intent task exited")
     var error: Error?
+    var foregroundClaimCallbackEntered = false
+    private var taskStarted = false
+    private var taskCaught = false
+    private var doneFulfillReturned = false
+    private var exitDeferEntered = false
     private var task: Task<Void, Never>?
 
     init() throws {
@@ -141,9 +155,14 @@ private final class StartupDiagnosticRun {
 
     func start(entry: StartupEntry) {
         self.task = Task {
-            defer { self.exited.fulfill() }
-            do { try await self.startAnotherAttempt(entry: entry) } catch { self.error = error }
+            self.taskStarted = true
+            defer { self.exitDeferEntered = true; self.exited.fulfill() }
+            do { try await self.startAnotherAttempt(entry: entry) } catch {
+                self.taskCaught = true
+                self.error = error
+            }
             self.done.fulfill()
+            self.doneFulfillReturned = true
         }
     }
 
@@ -151,6 +170,23 @@ private final class StartupDiagnosticRun {
         try await startRecordingWithForegroundRecovery(service: self.service, start: { request in
             try await self.service.startRecording(destination: nil, entry: entry, configurationRequest: request)
         }, continueInForeground: { _ in XCTFail("A watchdog failure must not request foreground recovery") })
+    }
+
+    // Snapshot after the failed wait returns; not a deadline-time or event-order proof.
+    func reportFailure(receipt: XCTestExpectation) {
+        let payload: [String: Any] = [
+            "schema": 1, "fixture": "foregroundWatchdogCompletion",
+            "facts": [
+                "enteredWaitFailed": receipt === session.entered, "doneWaitFailed": receipt === done,
+                "taskStarted": taskStarted, "taskCaught": taskCaught, "doneFulfillReturned": doneFulfillReturned,
+                "exitDeferEntered": exitDeferEntered, "sessionEntered": session.startEntered,
+                "sessionCancelEntered": session.cancelEntered, "continuationResumeIssued": session.resumeIssued,
+                "foregroundClaimCallbackEntered": foregroundClaimCallbackEntered
+            ]
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+              data.count <= 1024 else { return }
+        try? FileHandle.standardError.write(contentsOf: data + Data([10]))
     }
 
     func cleanUp() async {
@@ -198,6 +234,9 @@ private final class StartupDiagnosticSession: IOSRecordingSession {
     var onCancel: (() -> Void)?
     var returnsNormallyOnCancel = false
     var cancellations = 0
+    private(set) var startEntered = false
+    private(set) var cancelEntered = false
+    private(set) var resumeIssued = false
     private var cancelled = false
     private var continuation: CheckedContinuation<Void, Error>?
 
@@ -210,12 +249,14 @@ private final class StartupDiagnosticSession: IOSRecordingSession {
     func start() async throws {
         try await withCheckedThrowingContinuation { continuation in
             self.continuation = continuation
+            self.startEntered = true
             self.entered.fulfill()
             if self.cancelled { self.resume() }
         }
     }
     func stop() async throws -> TranscriptionResult { throw CancellationError() }
     func cancel() {
+        self.cancelEntered = true
         self.cancellations += 1
         if !self.cancelled { self.onCancel?() }
         self.cancelled = true
@@ -227,6 +268,7 @@ private final class StartupDiagnosticSession: IOSRecordingSession {
         if self.returnsNormallyOnCancel { continuation?.resume() } else {
             continuation?.resume(throwing: CancellationError())
         }
+        if continuation != nil { self.resumeIssued = true }
     }
 }
 #endif

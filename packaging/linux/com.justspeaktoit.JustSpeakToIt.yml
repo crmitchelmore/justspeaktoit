@@ -94,6 +94,11 @@ modules:
           cp -L /app/lib/justspeaktoit/$name /app/lib/justspeaktoit/$name.tmp &&
           mv -f /app/lib/justspeaktoit/$name.tmp /app/lib/justspeaktoit/$name || exit 1;
         done
+      # Verify and remove duplicate names before the builder gives each path
+      # its own stripped debug link. Policy is shared with the native runtime.
+      - python3 "$FLATPAK_BUILDER_BUILDDIR/jsti-flatpak-runtime.py"
+        --runtime-directory /app/lib/justspeaktoit
+        --runtime-policy "$FLATPAK_BUILDER_BUILDDIR/jsti-linux-runtime-policy.json" --cleanup-runtime
       - install -Dm644 "$FLATPAK_BUILDER_BUILDDIR/LICENSE"
         /app/share/licenses/com.justspeaktoit.JustSpeakToIt/whisper.cpp/LICENSE
     cleanup:
@@ -103,13 +108,18 @@ modules:
       # Development links; the app loads the SONAMEs.
       - /lib/justspeaktoit/libggml.so
       - /lib/justspeaktoit/libggml-base.so
-      - /lib/justspeaktoit/libparakeet.so
       - /lib/justspeaktoit/libwhisper.so
     sources:
       - type: git
         url: https://github.com/ggml-org/whisper.cpp.git
         tag: v1.9.4
         commit: 927cfce34f31707e17f2bff35c349632fb9e2c3a
+      - type: file
+        path: verify-flatpak-manifest.py
+        dest-filename: jsti-flatpak-runtime.py
+      - type: file
+        path: ../../scripts/linux-local-runtime/dependencies.json
+        dest-filename: jsti-linux-runtime-policy.json
 
   - name: justspeaktoit
     buildsystem: simple

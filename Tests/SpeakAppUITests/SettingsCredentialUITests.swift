@@ -120,12 +120,12 @@ final class SettingsCredentialUITests: XCTestCase {
                            file: file, line: line)
         }
         let pane = panes[0]
-        // Reuse the original 15-second row-readiness bound. Eight 300-pixel
-        // scrolls cover the configuration/storage cards above the filtered row
-        // on the observed 1024x768 host without changing density or window size.
+        // Spend the original reveal bound scrolling, rather than repeatedly
+        // hit-testing controls that are still outside the pane. Geometry only
+        // admits the final full usability check; it cannot satisfy that check.
         let deadline = ProcessInfo.processInfo.systemUptime + 15
         for _ in 0..<8 {
-            if alibabaControlsAreHittable(app) { return }
+            if alibabaControlsFitViewport(app, pane: pane) { break }
             guard ProcessInfo.processInfo.systemUptime < deadline else { break }
             pane.scroll(byDeltaX: 0, deltaY: -300)
         }
@@ -133,6 +133,22 @@ final class SettingsCredentialUITests: XCTestCase {
             try failSettings(app, stage: "Alibaba row, secure field and credential actions were not revealed",
                            file: file, line: line)
         }
+    }
+
+    @MainActor
+    private func alibabaControlsFitViewport(_ app: XCUIApplication, pane: XCUIElement) -> Bool {
+        let field = app.secureTextFields["Alibaba Model Studio API Key"]
+        guard field.exists else { return false }
+        let action = app.buttons[app.buttons["Replace Key"].exists ? "Replace Key" : "Save Key"]
+        guard action.exists else { return false }
+        let viewport = pane.frame
+        let fieldFrame = field.frame
+        let actionFrame = action.frame
+        guard [viewport, fieldFrame, actionFrame].allSatisfy({ frame in
+            !frame.isEmpty && frame.minX.isFinite && frame.minY.isFinite
+                && frame.maxX.isFinite && frame.maxY.isFinite
+        }) else { return false }
+        return viewport.contains(fieldFrame) && viewport.contains(actionFrame)
     }
 
     @MainActor

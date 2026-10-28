@@ -337,7 +337,8 @@ def load_application(app_dir, policy, architecture="x64"):
     for directory in sorted(app_dir.iterdir()):
         if not directory.name.endswith(".resources") or directory.is_symlink() or not directory.is_dir():
             continue
-        if directory.name[:-len(".resources")].endswith("Tests"):
+        target = directory.name[:-len(".resources")]
+        if target.endswith("Tests") or target == "SpeakTestSupport" or target.endswith("_SpeakTestSupport"):
             continue
         for path in sorted(directory.rglob("*")):
             relative = path.relative_to(app_dir).as_posix()

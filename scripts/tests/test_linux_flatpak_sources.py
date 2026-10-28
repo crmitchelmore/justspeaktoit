@@ -1,5 +1,8 @@
 """Regression checks for the Flatpak's pinned offline SwiftPM mirror setup."""
 import hashlib
+import contextlib
+import copy
+import io
 import json
 import os
 import runpy
@@ -361,6 +364,194 @@ class BuildRecordLifecycleTests(unittest.TestCase):
         self.assertIn("metadata = verify(run, sha, repo, run_id", workflow)
         self.assertIn("parents = helper['checkout_parents'](git, built_sha)", workflow)
         self.assertIn("metadata, record, helper['file_digest'](bundle)", workflow)
+
+
+FLATPAK = runpy.run_path(str(ROOT / 'packaging/linux/verify-flatpak-manifest.py'))
+
+
+class RuntimeCleanupTests(unittest.TestCase):
+    def setUp(self):
+        self.policy = json.loads((ROOT / 'scripts/linux-local-runtime/dependencies.json').read_text())
+        self.target = self.policy['architectures']['x86_64']
+
+    def fixture(self, root):
+        for name in self.target['requiredModules']:
+            data = ('owned bytes ' + name).encode()
+            (root / name).write_bytes(data)
+            (root / (name + '.23.0')).write_bytes(data)
+            (root / (name.split('.so.')[0] + '.so')).symlink_to(name + '.23.0')
+        for index in range(self.target['minimumCpuVariants']):
+            (root / ('libggml-cpu-test_%d.so' % index)).write_bytes(b'owned CPU module')
+        (root / self.policy['vulkan']['module']).write_bytes(b'owned Vulkan module')
+        (root / 'libparakeet.so.1.9.4').write_bytes(b'owned unused module')
+        (root / 'libparakeet.so.1').symlink_to('libparakeet.so.1.9.4')
+        (root / 'libparakeet.so').symlink_to('libparakeet.so.1')
+
+    def inspect(self, path):
+        return {'type': 'DYN', 'machine': self.target['elfMachine'], 'soname': path.name,
+                'needed': ['libggml-base.so.0'] if path.name != 'libggml-base.so.0' else ['libc.so.6'],
+                'searchPaths': ['$ORIGIN']}
+
+    def verify(self, root, cleanup=False, inspect=None):
+        with contextlib.redirect_stdout(io.StringIO()):
+            FLATPAK['verify_runtime'](root, self.policy, cleanup, inspect or self.inspect)
+
+    def test_actual_cleanup_preserves_canonical_bytes_all_backends_and_external_symlink_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / 'runtime'
+            root.mkdir()
+            self.fixture(root)
+            outside = Path(directory) / 'owned-license'
+            outside.write_bytes(b'preserve external target')
+            (root / 'libparakeet.so').unlink()
+            (root / 'libparakeet.so').symlink_to(outside)
+            kept = {p.name: p.read_bytes() for p in root.iterdir()
+                    if not p.is_symlink() and not p.name.endswith('.23.0') and 'parakeet' not in p.name}
+            self.verify(root, cleanup=True)
+            for name, data in kept.items():
+                self.assertFalse((root / name).is_symlink())
+                self.assertEqual((root / name).read_bytes(), data)
+            self.assertEqual(outside.read_bytes(), b'preserve external target')
+            self.assertFalse(any('parakeet' in p.name or p.name.endswith('.23.0') for p in root.iterdir()))
+            # Existing manifest cleanup still owns only the three development links.
+            for name in self.target['requiredModules']:
+                (root / (name.split('.so.')[0] + '.so')).unlink()
+            self.verify(root)
+            self.assertEqual(set(p.name for p in root.iterdir()), set(kept))
+
+    def test_needed_parakeet_fullversion_or_missing_edge_refuses_before_any_delete(self):
+        for needed in ['libparakeet.so.1', 'libwhisper.so.1.23.0', 'libmissing.so.1']:
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.fixture(root)
+                before = set(root.iterdir())
+                def inspect(path):
+                    elf = self.inspect(path)
+                    elf['needed'] = [needed]
+                    return elf
+                with self.assertRaisesRegex(ValueError, 'NEEDED'):
+                    self.verify(root, True, inspect)
+                self.assertEqual(set(root.iterdir()), before)
+
+    def test_nonidentical_fullversion_original_refuses_without_removing_anything(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.fixture(root)
+            (root / 'libwhisper.so.1.23.0').write_bytes(b'different bytes')
+            before = set(root.iterdir())
+            with self.assertRaisesRegex(ValueError, 'differs'):
+                self.verify(root, True)
+            self.assertEqual(set(root.iterdir()), before)
+
+    def test_missing_canonical_cpu_or_vulkan_module_refuses(self):
+        for name in ['libwhisper.so.1', 'libggml-cpu-test_0.so', self.policy['vulkan']['module']]:
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.fixture(root)
+                (root / name).unlink()
+                with self.assertRaisesRegex(ValueError, 'missing'):
+                    self.verify(root, True)
+                self.assertTrue((root / 'libparakeet.so.1.9.4').exists())
+
+    def test_canonical_symlink_unknown_library_and_oversized_inventory_refuse(self):
+        for variant in ['symlink', 'unknown', 'inventory']:
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.fixture(root)
+                if variant == 'symlink':
+                    (root / 'libwhisper.so.1').unlink()
+                    (root / 'libwhisper.so.1').symlink_to('libwhisper.so.1.23.0')
+                elif variant == 'unknown':
+                    (root / 'libunexpected.so.1').write_bytes(b'unknown')
+                else:
+                    for index in range(65):
+                        (root / ('extra-%d' % index)).touch()
+                with self.assertRaises(ValueError):
+                    self.verify(root, True)
+                self.assertTrue((root / 'libparakeet.so.1.9.4').exists())
+
+    def test_wrong_machine_type_soname_or_search_path_refuses(self):
+        for change in [{'machine': 'wrong'}, {'type': 'EXEC'}, {'soname': 'libother.so.1'},
+                       {'searchPaths': ['/usr/local/lib']}]:
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.fixture(root)
+                with self.assertRaises(ValueError):
+                    self.verify(root, True, lambda path: dict(self.inspect(path), **change))
+                self.assertTrue((root / 'libparakeet.so.1.9.4').exists())
+
+    def test_installed_check_refuses_leftovers_and_never_performs_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.fixture(root)
+            before = set(root.iterdir())
+            with self.assertRaisesRegex(ValueError, 'remain installed'):
+                self.verify(root)
+            self.assertEqual(set(root.iterdir()), before)
+
+    def test_readelf_adapter_parses_needed_soname_and_origin_with_bounded_host_tool(self):
+        text = ('  Type: DYN (Shared object file)\n  Machine: Advanced Micro Devices X86-64\n'
+                ' 0 (SONAME) Library soname: [libwhisper.so.1]\n'
+                ' 0 (NEEDED) Shared library: [libggml.so.0]\n'
+                ' 0 (RUNPATH) Library runpath: [$ORIGIN]\n')
+        def execute(argv, **options):
+            self.assertEqual(argv[:4], ['readelf', '--wide', '--file-header', '--dynamic'])
+            self.assertLessEqual(options['timeout'], 10)
+            self.assertTrue(callable(options['preexec_fn']))
+            options['stdout'].write(text.encode())
+        with mock.patch('subprocess.run', side_effect=execute):
+            elf = FLATPAK['inspect_runtime_elf'](Path('owned-library'), FLATPAK['time'].monotonic() + 60)
+        self.assertEqual(elf, {'type': 'DYN', 'machine': self.target['elfMachine'],
+                             'soname': 'libwhisper.so.1', 'needed': ['libggml.so.0'], 'searchPaths': ['$ORIGIN']})
+
+    def test_manifest_contract_accepts_only_checkout_local_verifier_and_policy(self):
+        pin = json.loads((ROOT / 'scripts/windows-local-runtime/dependencies.json').read_text())['whisperCpp']
+        manifest = {'finish-args': [
+            '--share=network', '--share=ipc', '--socket=wayland', '--socket=fallback-x11',
+            '--socket=pulseaudio', '--device=dri', '--talk-name=org.kde.StatusNotifierWatcher',
+            '--env=JSTI_WHISPER_RUNTIME_DIRECTORY=/app/lib/justspeaktoit', '--env=GGML_NO_BACKTRACE=1'],
+            'modules': [{'name': 'whisper-cpp', 'sources': [dict(type='git', **pin),
+                {'type': 'file', 'path': 'verify-flatpak-manifest.py', 'dest-filename': 'jsti-flatpak-runtime.py'},
+                {'type': 'file', 'path': '../../scripts/linux-local-runtime/dependencies.json',
+                 'dest-filename': 'jsti-linux-runtime-policy.json'}],
+                'config-opts': ['-DCMAKE_INSTALL_LIBDIR=lib/justspeaktoit', '-DGGML_NATIVE=OFF',
+                                '-DGGML_CPU_ALL_VARIANTS=ON', '-DGGML_VULKAN=ON'],
+                'post-install': ['cp -L /app/lib/justspeaktoit/$name',
+                    'python3 "$FLATPAK_BUILDER_BUILDDIR/jsti-flatpak-runtime.py" '
+                    '--runtime-directory /app/lib/justspeaktoit '
+                    '--runtime-policy "$FLATPAK_BUILDER_BUILDDIR/jsti-linux-runtime-policy.json" --cleanup-runtime'],
+                'cleanup': []}]}
+        with contextlib.redirect_stdout(io.StringIO()):
+            FLATPAK['verify'](manifest)
+            absolute = copy.deepcopy(manifest)
+            for source in absolute['modules'][0]['sources'][1:]:
+                source['path'] = str((ROOT / 'packaging/linux' / source['path']).resolve())
+            FLATPAK['verify'](absolute)
+        for mutation in ['foreign-policy', 'missing-policy', 'vulkan-off', 'guard-before-copy']:
+            candidate = copy.deepcopy(manifest)
+            module = candidate['modules'][0]
+            if mutation == 'foreign-policy':
+                module['sources'][2]['path'] = '/tmp/unowned-policy.json'
+            elif mutation == 'missing-policy':
+                module['sources'].pop()
+            elif mutation == 'vulkan-off':
+                module['config-opts'].remove('-DGGML_VULKAN=ON')
+            else:
+                module['post-install'].reverse()
+            with self.subTest(mutation=mutation), self.assertRaises(AssertionError):
+                FLATPAK['verify'](candidate)
+
+    def test_pinned_manifest_runs_guard_after_copy_before_strip_with_local_offline_policy(self):
+        text = (ROOT / 'packaging/linux/com.justspeaktoit.JustSpeakToIt.yml').read_text()
+        self.assertLess(text.index('cp -L /app/lib/justspeaktoit/$name'), text.index('python3 "$FLATPAK_BUILDER_BUILDDIR/jsti'))
+        self.assertLess(text.index('python3 "$FLATPAK_BUILDER_BUILDDIR/jsti'), text.index('    cleanup:', text.index('- name: whisper-cpp')))
+        for value in ['path: verify-flatpak-manifest.py', 'path: ../../scripts/linux-local-runtime/dependencies.json',
+                      '-DGGML_CPU_ALL_VARIANTS=ON', '-DGGML_VULKAN=ON', 'whisper.cpp/LICENSE']:
+            self.assertIn(value, text)
+        self.assertNotIn('- /lib/justspeaktoit/libparakeet.so', text)
+        checks = (ROOT / 'scripts/linux-flatpak-checks.sh').read_text()
+        self.assertIn('flatpak info --user --show-location "$app"', checks)
+        self.assertIn('--runtime-directory "$installed_root/files/lib/justspeaktoit"', checks)
 
 
 if __name__ == '__main__':

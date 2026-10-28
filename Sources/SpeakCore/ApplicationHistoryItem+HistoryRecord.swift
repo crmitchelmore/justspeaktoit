@@ -30,7 +30,7 @@ public extension ApplicationHistoryItem {
     /// Refuses values the legacy Mac shape cannot represent instead of dropping
     /// iOS-only fields or inventing a trigger/capture timeline.
     init?(historyRecord record: HistoryRecord) {
-        guard record.model == nil, record.wordCount == nil, record.errorMessage == nil,
+        guard record.model == nil, record.wordCount == nil, record.errorMessage == nil, record.requestContext == nil,
               record.originPlatform == "macos",
               let phaseTimestamps = record.phaseTimestamps, let trigger = record.trigger else { return nil }
         self.init(

@@ -156,6 +156,13 @@ public struct RequestDiagnosticContext: Codable, Equatable, Sendable {
         }
     }
 
+    /// Validate native History admission without inventing observed handoffs.
+    /// Shared by local codecs; report serialization still validates again.
+    public static func admissionOnly(_ value: Self?) -> Self? {
+        guard let value, value.provenance == .admission else { return nil }
+        return value.sanitized
+    }
+
     /// Reconstruct through validated boundaries immediately before export.
     /// Synthesized Decodable is intentionally not trusted as a privacy boundary.
     var sanitized: Self {

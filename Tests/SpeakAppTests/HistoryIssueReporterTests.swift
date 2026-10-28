@@ -77,8 +77,41 @@ final class HistoryIssueReporterTests: XCTestCase {
     XCTAssertEqual(ordinary.issueURL, hostile.issueURL)
   }
 
+  func testRecordedAdmissionUsesOnlyItsSafeContextAlongsideLegacyPrivateFields() throws {
+    let model = try XCTUnwrap(ModelCatalog.allOptions.first)
+    let context = RequestDiagnosticContext(
+      model: .project(model.id), postProcessingModel: .project("PRIVATE_CUSTOM_MODEL_CANARY"), mode: .batch,
+      options: .init(postProcessingEnabled: true, streamingEnabled: false)
+    )
+    let report = HistoryIssueReporter.report(for: makeErrorItem(requestContext: context))
+    let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: report.jsonData) as? [String: Any])
+    XCTAssertEqual(payload["contextState"] as? String, "admission")
+    let recorded = try XCTUnwrap(payload["context"] as? [String: Any])
+    XCTAssertEqual((recorded["model"] as? [String: Any])?["identifier"] as? String, model.id)
+    XCTAssertNil(recorded["observedProvider"])
+    XCTAssertEqual(recorded["mode"] as? String, "batch")
+    XCTAssertEqual((recorded["options"] as? [String: Any])?["postProcessingEnabled"] as? Bool, true)
+    let outputs = report.title + report.body + report.jsonString + (report.issueURL?.absoluteString ?? "")
+    for excluded in ["PRIVATE_CUSTOM_MODEL_CANARY", "secret dictated transcript", "private.m4a", "real-token-value"] {
+      XCTAssertFalse(outputs.contains(excluded))
+    }
+  }
+
+  func testRemovingRecordedAdmissionRemovesItsContextFromEveryActionPayload() throws {
+    let model = try XCTUnwrap(ModelCatalog.allOptions.first)
+    let item = makeErrorItem(requestContext: .init(model: .project(model.id), mode: .batch))
+    let report = HistoryIssueReporter.report(for: item, includeDiagnostics: false)
+    let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: report.jsonData) as? [String: Any])
+    XCTAssertNil(payload["context"])
+    XCTAssertEqual(payload["contextState"] as? String, "userRemoved")
+    XCTAssertFalse(report.body.contains(model.id))
+    XCTAssertFalse(report.issueURL?.absoluteString.contains(model.id) ?? false)
+  }
+
   // swiftlint:disable:next function_body_length
-  private func makeErrorItem(errorMessage: String = "The selected microphone is unavailable") -> HistoryItem {
+  private func makeErrorItem(
+    errorMessage: String = "The selected microphone is unavailable", requestContext: RequestDiagnosticContext? = nil
+  ) -> HistoryItem {
     let date = Date(timeIntervalSince1970: 1_717_171_717)
     let diagnostic = HistoryDiagnosticContext(
       capturedAt: date,
@@ -93,7 +126,7 @@ final class HistoryIssueReporterTests: XCTestCase {
       transcriptionMode: "Remote Streaming",
       transcriptionModel: "deepgram/nova-3-streaming",
       postProcessingModel: "inception/mercury",
-      speedMode: "Instant"
+      speedMode: "Instant", requestContext: requestContext
     )
 
     return HistoryItem(

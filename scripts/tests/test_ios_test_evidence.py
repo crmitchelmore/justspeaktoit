@@ -32,6 +32,11 @@ def passing_log():
     )
 
 
+def interleaved_completion(suite, method="testResult", status="passed", target="SpeakiOSTests"):
+    prefix = "2026-10-28 00:07:27.446622+0000 JustSpeakToIt[100:200] [api] Updating activity 0000-"
+    return prefix + completion(suite, method, status, target) + "0000\n"
+
+
 class IOSCoverageTests(unittest.TestCase):
     def test_observed_apple_ios_format_retains_target_identity(self):
         # Actual iOS runner completion from CI run 33679755480, retained in its
@@ -55,6 +60,36 @@ class IOSCoverageTests(unittest.TestCase):
         self.assertEqual(unit["suites"]["OpenRouterAudioSettingsTests"]["passed"], 2)
         self.assertEqual(unit["suites"]["OpenRouterVoiceCancellationTests"]["passed"], 1)
         self.assertEqual(result["targets"]["SpeakiOSUITests"]["counts"]["passed"], 2)
+
+    def test_interleaved_pass_counts_once_with_exact_unit_target_identity(self):
+        method = "testConcurrentStopAndDrainFailure_keepsPartialAndReportsRealError"
+        line = interleaved_completion("InterruptionFinalisationTests", method)
+        result = gate.summarize(passing_log() + line, "success")
+        self.assertEqual(result["errors"], [])
+        self.assertEqual(result["unique_cases"], 6)
+        self.assertEqual(result["targets"]["SpeakiOSTests"]["unique_cases"], 4)
+        self.assertEqual(result["targets"]["SpeakiOSTests"]["suites"]["InterruptionFinalisationTests"],
+                         {"passed": 1, "failed": 0, "skipped": 0})
+        self.assertEqual(gate.summarize(passing_log() + line * 2, "success"), result)
+
+    def test_interleaved_failure_or_required_skip_still_rejects_success(self):
+        for status in ("failed", "skipped"):
+            with self.subTest(status=status):
+                output = passing_log() + interleaved_completion("OpenRouterAudioSettingsTests", status=status)
+                result = gate.summarize(output, "success")
+                self.assertEqual(result["counts"][status], 1)
+                self.assertTrue(any("OpenRouterAudioSettingsTests" in error for error in result["errors"]))
+        output = passing_log() + interleaved_completion("OtherUI", status="failed", target="SpeakiOSUITests")
+        self.assertTrue(gate.summarize(output, "success")["errors"])
+
+    def test_interleaved_retry_cannot_hide_failure_and_foreign_target_cannot_satisfy_gate(self):
+        output = passing_log() + interleaved_completion("OpenRouterAudioSettingsTests", "testSelection", "failed")
+        result = gate.summarize(output, "success")
+        self.assertEqual(result["unique_cases"], 5)
+        self.assertEqual(result["counts"]["failed"], 1)
+        self.assertTrue(result["errors"])
+        foreign = interleaved_completion("OpenRouterAudioSettingsTests", target="UnrelatedTests")
+        self.assertEqual(gate.summarize(foreign, "success")["unique_cases"], 0)
 
     def test_zero_cases_and_suite_headings_do_not_prove_execution(self):
         for output in ("", "Executed 0 tests, with 0 failures\n", "** TEST SUCCEEDED **\n",

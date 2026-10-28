@@ -30,6 +30,45 @@ class CoverageTests(unittest.TestCase):
         errors, _ = gate.coverage_errors("Executed 0 tests, with 0 failures\n", ["Required"])
         self.assertTrue(errors)
 
+    def test_interleaved_apple_completion_preserves_order_identity_and_failure(self):
+        prefix = "2026-10-28 00:07:27.446622+0000 JustSpeakToIt[100:200] [api] Updating activity 0000-"
+        output = "Test Case '-[Module.Required testFirst]' passed (0.001 seconds).\n"
+        output += prefix + "Test Case '-[Module.Required testSecond]' failed (0.219 seconds).\n0000\n"
+        output += "Test Case '-[Module.Required testThird]' passed (0.001 seconds).\n"
+        cases = list(gate.case_results(output))
+        self.assertEqual([case["case"] for case in cases], ["testFirst", "testSecond", "testThird"])
+        self.assertEqual(cases[1], {"module": "Module", "suite": "Required",
+                                    "case": "testSecond", "status": "failed"})
+        errors, counts = gate.coverage_errors(output, ["Required"])
+        self.assertEqual(counts["Required"]["failed"], 1)
+        self.assertTrue(errors, "An interleaved failure must still fail the required gate")
+
+    def test_embedded_examples_and_incomplete_console_records_do_not_prove_execution(self):
+        result = "Test Case '-[Module.Required testExample]' passed (0.219 seconds)."
+        prefix = "2026-10-28 00:07:27.446622+0000 JustSpeakToIt[100:200] [api] "
+        for line in ("arbitrary prefix " + result, 'print("' + result + '")',
+                     prefix + '"example ' + result + '"',
+                     "2026-10-28 JustSpeakToIt [api] " + result,
+                     prefix + result.removesuffix(" (0.219 seconds)."),
+                     prefix + result + " trailing text",
+                     prefix + "Test Case 'Module.Required.testExample' passed (0.219 seconds)."):
+            with self.subTest(line=line):
+                self.assertEqual(list(gate.case_results(line + "\n")), [])
+                self.assertTrue(gate.coverage_errors(line + "\n", ["Required"])[0])
+
+    def test_interleaved_completion_cannot_cross_physical_lines_but_accepts_terminal_crlf(self):
+        prefix = "2026-10-28 00:07:27.446622+0000 JustSpeakToIt[100:200] [api] Updating activity 0000-"
+        for separator in ("\n", "\r"):
+            with self.subTest(separator=repr(separator)):
+                output = (prefix + "Test Case '-[Module.Required testExample" + separator
+                          + "not a complete physical record]' passed (0.219 seconds).\n")
+                self.assertEqual(list(gate.case_results(output)), [])
+                self.assertTrue(gate.coverage_errors(output, ["Required"])[0])
+        output = prefix + "Test Case '-[Module.Required testComplete]' passed (0.219 seconds).\r\n"
+        self.assertEqual(list(gate.case_results(output)), [{
+            "module": "Module", "suite": "Required", "case": "testComplete", "status": "passed",
+        }])
+
     def test_unrelated_or_similarly_named_suite_does_not_satisfy_requirement(self):
         output = "Test Case '-[Module.RequiredExtra testResult]' passed (0.001 seconds).\n"
         errors, _ = gate.coverage_errors(output, ["Required"])

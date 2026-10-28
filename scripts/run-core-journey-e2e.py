@@ -65,15 +65,29 @@ SPLICED_CASE_RESULT = re.compile(
     re.MULTILINE,
 )
 
+# The observed console splice can also divide the module token itself. Require
+# two nonempty token fragments around exactly one typed physical console record;
+# the second line must finish a complete Apple XCTest result.
+MODULE_SPLICED_CASE_RESULT = re.compile(
+    r"^Test Case '-\[(?P<module_prefix>\w+)"
+    r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{1,9}[+-]\d{4} "
+    r"[^\s\[\]]+\[\d+:\d+\] \[[^\]\r\n]+\] [^'\"\r\n]*\r?\n"
+    r"(?P<module_suffix>\w+)\.(?P<apple>\w+) (?P<apple_case>[^\]\r\n]+)\]' "
+    r"(?P<status>passed|failed|skipped) \([0-9]+(?:\.[0-9]+)? seconds\)\.\r?$",
+    re.MULTILINE,
+)
+
 
 def case_results(output):
     """Yield completed XCTest cases, retaining module identity when emitted."""
     interleaved = (match for match in INTERLEAVED_CASE_RESULT.finditer(output)
                    if match.group("apple") and not any(char in match.group("apple_case") for char in "\r\n"))
-    for match in heapq.merge(CASE_RESULT.finditer(output), interleaved, SPLICED_CASE_RESULT.finditer(output), key=lambda result: result.start()):
+    for match in heapq.merge(CASE_RESULT.finditer(output), interleaved, SPLICED_CASE_RESULT.finditer(output),
+                            MODULE_SPLICED_CASE_RESULT.finditer(output), key=lambda result: result.start()):
         groups = match.groupdict()
         yield {
-            "module": groups.get("apple_module") or groups.get("portable_module"),
+            "module": (groups.get("module_prefix", "") + groups.get("module_suffix", "")
+                       or groups.get("apple_module") or groups.get("portable_module")),
             "suite": groups.get("apple") or groups.get("portable"),
             "case": groups.get("apple_case") or groups.get("portable_case"),
             "status": match.group("status"),

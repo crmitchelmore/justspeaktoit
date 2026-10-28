@@ -1,6 +1,7 @@
 #if os(iOS)
 import Foundation
 import Combine
+import SpeakCore
 import XCTest
 @testable import SpeakiOSLib
 
@@ -17,6 +18,9 @@ final class HistoryAsyncStorage: @unchecked Sendable {
     private var primaryWritesFail = false
     private var mainThreadObserved = false
     private var holdTimedOut = false
+    private var releaseCalled = false
+    private var primaryWriteReturnedSuccess = false
+    private var primaryWriteReturnedFailure = false
 
     init(primary: URL) { self.primary = primary }
 
@@ -27,9 +31,12 @@ final class HistoryAsyncStorage: @unchecked Sendable {
                 return try Data(contentsOf: url)
             },
             write: { [self] data, url in
+                var succeeded = false
+                defer { recordWriteReturn(url: url, succeeded: succeeded) }
                 observe(url: url, isWrite: true)
                 if failWrites || (url == primary && failPrimaryWrites) { throw CocoaError(.fileWriteOutOfSpace) }
                 try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+                succeeded = true
             },
             remove: { [self] url in
                 condition.lock()
@@ -80,14 +87,46 @@ final class HistoryAsyncStorage: @unchecked Sendable {
         condition.lock()
         writeEntered = expectation
         released = false
+        releaseCalled = false
+        primaryWriteReturnedSuccess = false
+        primaryWriteReturnedFailure = false
         condition.unlock()
     }
 
     func release() {
         condition.lock()
         released = true
+        releaseCalled = true
         condition.broadcast()
         condition.unlock()
+    }
+
+    /// Called only after the original owner wait failed; no user values enter this fixed snapshot.
+    func emitForegroundSettlementDiagnosticIfNeeded(
+        ownerReleaseObserved: Bool, ownedRowEmitted: Bool, state: RecordingServiceState
+    ) {
+        guard !ownerReleaseObserved else { return }
+        condition.lock()
+        let snapshot = ForegroundSettlementDiagnostic(
+            primaryWriteReturnedSuccess: primaryWriteReturnedSuccess,
+            primaryWriteReturnedFailure: primaryWriteReturnedFailure,
+            releaseCalled: releaseCalled, holdTimedOut: holdTimedOut,
+            ownerReleaseObserved: ownerReleaseObserved, ownedRowEmitted: ownedRowEmitted,
+            ownerState: .init(state)
+        )
+        condition.unlock()
+        guard let data = try? JSONEncoder().encode(snapshot), data.count <= 1_024 else { return }
+        var line = Data("JSTI_FOREGROUND_HISTORY_DIAGNOSTIC ".utf8)
+        line.append(data)
+        line.append(0x0a)
+        try? FileHandle.standardError.write(contentsOf: line)
+    }
+
+    private func recordWriteReturn(url: URL, succeeded: Bool) {
+        condition.lock()
+        defer { condition.unlock() }
+        guard url == primary else { return }
+        if succeeded { primaryWriteReturnedSuccess = true } else { primaryWriteReturnedFailure = true }
     }
 
     private func observe(url: URL, isWrite: Bool) {
@@ -102,6 +141,29 @@ final class HistoryAsyncStorage: @unchecked Sendable {
         let deadline = Date().addingTimeInterval(3)
         while !released {
             if !condition.wait(until: deadline) { holdTimedOut = true; break }
+        }
+    }
+}
+
+private struct ForegroundSettlementDiagnostic: Encodable {
+    let primaryWriteReturnedSuccess: Bool
+    let primaryWriteReturnedFailure: Bool
+    let releaseCalled: Bool
+    let holdTimedOut: Bool
+    let ownerReleaseObserved: Bool
+    let ownedRowEmitted: Bool
+    let ownerState: OwnerState
+
+    enum OwnerState: String, Encodable {
+        case idle, starting, recording, stopping
+
+        init(_ state: RecordingServiceState) {
+            switch state {
+            case .idle: self = .idle
+            case .starting: self = .starting
+            case .recording: self = .recording
+            case .stopping: self = .stopping
+            }
         }
     }
 }

@@ -4,13 +4,17 @@ import Foundation
 import SpeakCore
 import UIKit
 
-/// Legacy History projects only error presence and canonical recorded models.
+/// History uses stored safe request values; legacy facts stay unknown.
 /// Live failures can instead supply an already frozen, run-owned safe snapshot.
 enum IOSIssueReporter {
     static func snapshot(for item: iOSHistoryItem) -> IOSIssueReportSnapshot {
-        IOSIssueReportSnapshot(
+        var failures = item.requestFailure.map { [$0] } ?? []
+        // Legacy error presence may describe another phase. Keep both facts;
+        // these bounded observations can overlap and are not request counts.
+        if item.errorMessage != nil { failures.append(.init(domain: .unknown)) }
+        return IOSIssueReportSnapshot(
             context: item.requestContext, recordedModels: [.project(item.model)], observedHandoff: nil,
-            requestFailure: item.errorMessage == nil ? nil : .init(domain: .unknown)
+            failures: failures
         )
     }
 
@@ -32,7 +36,14 @@ struct IOSIssueReportSnapshot {
         context: RequestDiagnosticContext?, recordedModels: [RequestDiagnosticContext.ModelSelection] = [],
         observedHandoff: RequestDiagnosticContext?, requestFailure: RequestDiagnosticContext.Failure?
     ) {
-        let failures = requestFailure.map { [$0] } ?? []
+        self.init(context: context, recordedModels: recordedModels, observedHandoff: observedHandoff,
+                  failures: requestFailure.map { [$0] } ?? [])
+    }
+
+    init(
+        context: RequestDiagnosticContext?, recordedModels: [RequestDiagnosticContext.ModelSelection] = [],
+        observedHandoff: RequestDiagnosticContext?, failures: [RequestDiagnosticContext.Failure]
+    ) {
         self.full = IssueDiagnosticReport(
             context: context, recordedModels: recordedModels, failures: failures, observedHandoff: observedHandoff
         )
@@ -93,6 +104,7 @@ struct IOSRequestDiagnosticState {
     private var runID: UUID?
     private var context: RequestDiagnosticContext?
     private var handoff: RequestDiagnosticContext?
+    private var terminalFailure: RequestDiagnosticContext.Failure?
     private var failedRunID: UUID?
     private var failedRunSnapshot: IOSIssueReportSnapshot?
     private var publicationToken: UUID?
@@ -102,6 +114,7 @@ struct IOSRequestDiagnosticState {
         runID = run
         context = nil
         handoff = nil
+        terminalFailure = nil
         failedRunID = nil
         failedRunSnapshot = nil
     }
@@ -116,6 +129,11 @@ struct IOSRequestDiagnosticState {
         return RequestDiagnosticContext.admissionOnly(context)
     }
 
+    func failure(for run: UUID?) -> RequestDiagnosticContext.Failure? {
+        guard let run, runID == run else { return nil }
+        return terminalFailure
+    }
+
     mutating func observe(_ resolution: IOSTranscriptionSession.Resolution, run: UUID, defaultSession: Bool) {
         guard runID == run, defaultSession else { return }
         handoff = IOSRequestDiagnosticProjection.handoff(resolution)
@@ -124,6 +142,7 @@ struct IOSRequestDiagnosticState {
     @discardableResult
     mutating func freezeFailure(_ failure: RequestDiagnosticContext.Failure, run: UUID?) -> IOSIssueReportSnapshot? {
         guard let run, runID == run else { return nil }
+        terminalFailure = failure
         let snapshot = IOSIssueReportSnapshot(context: context, observedHandoff: handoff, requestFailure: failure)
         failedRunID = run
         failedRunSnapshot = snapshot
@@ -156,6 +175,7 @@ struct IOSRequestDiagnosticState {
         runID = nil
         context = nil
         handoff = nil
+        terminalFailure = nil
     }
 }
 

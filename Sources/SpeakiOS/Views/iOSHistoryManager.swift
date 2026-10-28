@@ -276,8 +276,18 @@ public final class iOSHistoryManager: ObservableObject { // swiftlint:disable:th
         text: String, model: String, duration: TimeInterval, errorMessage: String? = nil,
         requestContext: RequestDiagnosticContext?
     ) async -> iOSHistoryItem? {
+        await recordTranscriptionAndWait(
+            text: text, model: model, duration: duration, errorMessage: errorMessage,
+            requestContext: requestContext, requestFailure: nil
+        )
+    }
+
+    func recordTranscriptionAndWait(
+        text: String, model: String, duration: TimeInterval, errorMessage: String? = nil,
+        requestContext: RequestDiagnosticContext? = nil, requestFailure: RequestDiagnosticContext.Failure?
+    ) async -> iOSHistoryItem? {
         guard let item = makeItem(text: text, model: model, duration: duration, errorMessage: errorMessage,
-                                  requestContext: requestContext),
+                                  requestContext: requestContext, requestFailure: requestFailure),
               await upsertAndWait(item) else { return nil }
         return item
     }
@@ -290,12 +300,13 @@ public final class iOSHistoryManager: ObservableObject { // swiftlint:disable:th
 
     private func makeItem(
         text: String, model: String, duration: TimeInterval, errorMessage: String?,
-        requestContext: RequestDiagnosticContext?
+        requestContext: RequestDiagnosticContext?, requestFailure: RequestDiagnosticContext.Failure? = nil
     ) -> iOSHistoryItem? {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         return iOSHistoryItem(
             transcription: text, model: model, duration: duration,
-            wordCount: text.split(separator: " ").count, errorMessage: errorMessage, requestContext: requestContext
+            wordCount: text.split(separator: " ").count, errorMessage: errorMessage, requestContext: requestContext,
+            requestFailure: requestFailure
         )
     }
 

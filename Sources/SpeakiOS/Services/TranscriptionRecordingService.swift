@@ -1196,6 +1196,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         // kept for the polish that may follow.
         let completedRunID = currentRunID
         let completedRequestContext = requestDiagnostics.admission(for: completedRunID)
+        let completedRequestFailure = requestDiagnostics.failure(for: completedRunID)
         completeRun(with: text)
         partialText = text
         wordCount = text.split(whereSeparator: \.isWhitespace).count
@@ -1209,7 +1210,7 @@ public final class TranscriptionRecordingService: ObservableObject {
                 errorMessage: endingSession?.recordingLossSummary.map { warning in
                     [warning, lastSessionError?.localizedDescription].compactMap { $0 }.joined(separator: " ")
                 },
-                requestContext: completedRequestContext
+                requestContext: completedRequestContext, requestFailure: completedRequestFailure
             )
             : nil
         // Cancellation can retire this completion while its admitted History write

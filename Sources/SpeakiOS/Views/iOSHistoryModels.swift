@@ -23,9 +23,11 @@ public struct iOSHistoryItem: Identifiable, Codable, Sendable { // swiftlint:dis
 
     /// Optional local admission; never synchronized or treated as an observed provider.
     public let requestContext: RequestDiagnosticContext?
+    /// Original typed capture outcome; not a post-processing result or provider claim.
+    public let requestFailure: RequestDiagnosticContext.Failure?
 
-    // Rich display metadata remains in memory only. The optional admission key
-    // is persisted separately; nil keeps the original ten-key iOS encoding.
+    // Rich display metadata remains in memory only. Local admission and typed
+    // failure keys persist separately; nil keeps the original ten-key encoding.
     private let sourceHistoryRecord: HistoryRecord?
 
     public init(
@@ -60,6 +62,28 @@ public struct iOSHistoryItem: Identifiable, Codable, Sendable { // swiftlint:dis
         errorMessage: String? = nil,
         requestContext: RequestDiagnosticContext?
     ) {
+        self.init(
+            id: id, createdAt: createdAt, updatedAt: updatedAt, transcription: transcription,
+            postProcessedTranscription: postProcessedTranscription, model: model, duration: duration,
+            wordCount: wordCount, originPlatform: originPlatform, errorMessage: errorMessage,
+            requestContext: requestContext, requestFailure: nil
+        )
+    }
+
+    public init(
+        id: UUID = UUID(),
+        createdAt: Date = Date(),
+        updatedAt: Date? = nil,
+        transcription: String,
+        postProcessedTranscription: String? = nil,
+        model: String,
+        duration: TimeInterval,
+        wordCount: Int,
+        originPlatform: String = "ios",
+        errorMessage: String? = nil,
+        requestContext: RequestDiagnosticContext? = nil,
+        requestFailure: RequestDiagnosticContext.Failure?
+    ) {
         self.id = id
         self.createdAt = createdAt
         self.updatedAt = updatedAt ?? createdAt
@@ -71,6 +95,9 @@ public struct iOSHistoryItem: Identifiable, Codable, Sendable { // swiftlint:dis
         self.originPlatform = originPlatform
         self.errorMessage = errorMessage
         self.requestContext = RequestDiagnosticContext.admissionOnly(requestContext)
+        self.requestFailure = requestFailure.map {
+            .init(stage: $0.stage, code: $0.code, domain: $0.domain, httpStatus: $0.httpStatus)
+        }
         self.sourceHistoryRecord = nil
     }
 
@@ -141,6 +168,7 @@ public struct iOSHistoryItem: Identifiable, Codable, Sendable { // swiftlint:dis
         case originPlatform
         case errorMessage
         case requestContext
+        case requestFailure
     }
 
     public init(from decoder: Decoder) throws {
@@ -158,13 +186,14 @@ public struct iOSHistoryItem: Identifiable, Codable, Sendable { // swiftlint:dis
         requestContext = RequestDiagnosticContext.admissionOnly(
             try? container.decodeIfPresent(RequestDiagnosticContext.self, forKey: .requestContext)
         )
+        requestFailure = try? container.decodeIfPresent(RequestDiagnosticContext.Failure.self, forKey: .requestFailure)
         sourceHistoryRecord = nil
     }
 }
 
 extension iOSHistoryItem {
     /// Rich metadata is lossless while this display adapter remains in memory.
-    /// Native encoding persists only the original fields plus optional admission;
+    /// Native encoding persists only the original fields plus optional admission/failure;
     /// other rich metadata still requires the source record's own local encoding.
     public init(historyRecord record: HistoryRecord) {
         self.init(retaining: record, wordCount: record.wordCount ?? record.presentation.wordCount)
@@ -182,6 +211,7 @@ extension iOSHistoryItem {
         self.originPlatform = record.originPlatform
         self.errorMessage = record.errorMessage
         self.requestContext = RequestDiagnosticContext.admissionOnly(record.requestContext)
+        self.requestFailure = record.requestFailure
         self.sourceHistoryRecord = record
     }
 
@@ -190,7 +220,8 @@ extension iOSHistoryItem {
             id: self.id, createdAt: self.createdAt, updatedAt: self.updatedAt,
             rawTranscription: self.transcription, postProcessedTranscription: self.postProcessedTranscription,
             recordingDuration: self.duration, model: self.model, wordCount: self.wordCount,
-            originPlatform: self.originPlatform, errorMessage: self.errorMessage, requestContext: self.requestContext
+            originPlatform: self.originPlatform, errorMessage: self.errorMessage, requestContext: self.requestContext,
+            requestFailure: self.requestFailure
         )
     }
 

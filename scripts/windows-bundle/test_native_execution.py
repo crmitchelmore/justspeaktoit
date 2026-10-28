@@ -681,7 +681,7 @@ ConvertTo-JstiDiagnosticProjection $value | ConvertTo-Json -Depth 8 -Compress
             self.assertEqual(argv[-2:], [self.request()["executable"], "--ui-smoke-test"])
             self.assertNotIn("-pd", argv)
             script = pathlib.Path(argv[argv.index("-cf") + 1])
-            self.assertEqual(script.read_text(), NATIVE.cdb_commands())
+            self.assertEqual(script.read_text(encoding="utf-8"), NATIVE.cdb_commands())
             self.assertEqual(list(pathlib.Path(argv[argv.index("-y") + 1]).iterdir()), [])
             self.assertEqual(script.parent, pathlib.Path(directory))
             return dict(status="complete", cleanup="clean", output=self.fixture(), exitCode=0)
@@ -782,7 +782,7 @@ ConvertTo-JstiDiagnosticProjection $value | ConvertTo-Json -Depth 8 -Compress
     def test_actual_identity_checks_hash_pe_alias_version_and_between_read_change(self):
         budget = types.SimpleNamespace(remaining=lambda: 20)
         with tempfile.TemporaryDirectory() as directory:
-            path = pathlib.Path(directory) / "SpeakWindows.exe"
+            path = pathlib.Path(directory).resolve() / "SpeakWindows.exe"
             data = BUNDLE_TESTS.build_pe(["KERNEL32.dll"], machine=ARM64)
             path.write_bytes(data)
             digest = NATIVE.hashlib.sha256(data).hexdigest()
@@ -793,7 +793,7 @@ ConvertTo-JstiDiagnosticProjection $value | ConvertTo-Json -Depth 8 -Compress
             with self.assertRaises(ValueError):
                 NATIVE.diagnostic_identity(str(path), NATIVE.sha256_file(path), 1 << 20, budget)
             path.write_bytes(data)
-            alias = pathlib.Path(directory) / "alias.exe"
+            alias = pathlib.Path(directory).resolve() / "alias.exe"
             alias.symlink_to(path)
             with self.assertRaises(ValueError):
                 NATIVE.diagnostic_identity(str(alias), digest, 1 << 20, budget)

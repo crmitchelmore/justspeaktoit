@@ -2,7 +2,7 @@ import Foundation
 
 /// Immutable local history value. Existing stores keep encoding their platform adapters.
 /// Local URLs, diagnostics and network payloads are not a cross-device disclosure policy.
-public struct HistoryRecord: Codable, Identifiable, Hashable, Sendable {
+public struct HistoryRecord: Codable, Identifiable, Hashable, Sendable { // swiftlint:disable:this type_body_length
     public static let currentSchemaVersion = 1
     public let schemaVersion: Int
     public let id: UUID
@@ -24,6 +24,10 @@ public struct HistoryRecord: Codable, Identifiable, Hashable, Sendable {
     public let source: ApplicationHistoryItemSource?
     public let postProcessingPrompt: ApplicationPostProcessingPromptPayload?
     public let diagnosticContext: ApplicationHistoryDiagnosticContext?
+    /// Original native request admission only; no fabricated legacy machine metadata.
+    public let requestContext: RequestDiagnosticContext?
+    /// Original typed transcription failure, independent of later polish results.
+    public let requestFailure: RequestDiagnosticContext.Failure?
     public let latency: SessionLatencyMetrics?
     public let desktopHistory: AnyCodable?
     public let model: String?
@@ -58,6 +62,87 @@ public struct HistoryRecord: Codable, Identifiable, Hashable, Sendable {
         originPlatform: String = "macos",
         errorMessage: String? = nil
     ) {
+        self.init(
+            id: id, createdAt: createdAt, updatedAt: updatedAt, modelsUsed: modelsUsed, modelUsages: modelUsages,
+            rawTranscription: rawTranscription, postProcessedTranscription: postProcessedTranscription,
+            recordingDuration: recordingDuration, cost: cost, audioFileURL: audioFileURL,
+            networkExchanges: networkExchanges, events: events, phaseTimestamps: phaseTimestamps,
+            trigger: trigger, personalCorrections: personalCorrections, errors: errors, source: source,
+            postProcessingPrompt: postProcessingPrompt, diagnosticContext: diagnosticContext, latency: latency,
+            desktopHistory: desktopHistory, model: model, wordCount: wordCount, originPlatform: originPlatform,
+            errorMessage: errorMessage, requestContext: nil
+        )
+    }
+
+    public init(
+        id: UUID = UUID(),
+        createdAt: Date = Date(),
+        updatedAt: Date? = nil,
+        modelsUsed: [String] = [],
+        modelUsages: [ApplicationModelUsage] = [],
+        rawTranscription: String? = nil,
+        postProcessedTranscription: String? = nil,
+        recordingDuration: TimeInterval,
+        cost: ApplicationHistoryCost? = nil,
+        audioFileURL: URL? = nil,
+        networkExchanges: [ApplicationHistoryNetworkExchange] = [],
+        events: [ApplicationHistoryEvent] = [],
+        phaseTimestamps: ApplicationPhaseTimestamps? = nil,
+        trigger: ApplicationHistoryTrigger? = nil,
+        personalCorrections: PersonalLexiconHistorySummary? = nil,
+        errors: [ApplicationHistoryError] = [],
+        source: ApplicationHistoryItemSource? = nil,
+        postProcessingPrompt: ApplicationPostProcessingPromptPayload? = nil,
+        diagnosticContext: ApplicationHistoryDiagnosticContext? = nil,
+        latency: SessionLatencyMetrics? = nil,
+        desktopHistory: AnyCodable? = nil,
+        model: String? = nil,
+        wordCount: Int? = nil,
+        originPlatform: String = "macos",
+        errorMessage: String? = nil,
+        requestContext: RequestDiagnosticContext?
+    ) {
+        self.init(
+            id: id, createdAt: createdAt, updatedAt: updatedAt, modelsUsed: modelsUsed, modelUsages: modelUsages,
+            rawTranscription: rawTranscription, postProcessedTranscription: postProcessedTranscription,
+            recordingDuration: recordingDuration, cost: cost, audioFileURL: audioFileURL,
+            networkExchanges: networkExchanges, events: events, phaseTimestamps: phaseTimestamps,
+            trigger: trigger, personalCorrections: personalCorrections, errors: errors, source: source,
+            postProcessingPrompt: postProcessingPrompt, diagnosticContext: diagnosticContext, latency: latency,
+            desktopHistory: desktopHistory, model: model, wordCount: wordCount, originPlatform: originPlatform,
+            errorMessage: errorMessage, requestContext: requestContext, requestFailure: nil
+        )
+    }
+
+    public init(
+        id: UUID = UUID(),
+        createdAt: Date = Date(),
+        updatedAt: Date? = nil,
+        modelsUsed: [String] = [],
+        modelUsages: [ApplicationModelUsage] = [],
+        rawTranscription: String? = nil,
+        postProcessedTranscription: String? = nil,
+        recordingDuration: TimeInterval,
+        cost: ApplicationHistoryCost? = nil,
+        audioFileURL: URL? = nil,
+        networkExchanges: [ApplicationHistoryNetworkExchange] = [],
+        events: [ApplicationHistoryEvent] = [],
+        phaseTimestamps: ApplicationPhaseTimestamps? = nil,
+        trigger: ApplicationHistoryTrigger? = nil,
+        personalCorrections: PersonalLexiconHistorySummary? = nil,
+        errors: [ApplicationHistoryError] = [],
+        source: ApplicationHistoryItemSource? = nil,
+        postProcessingPrompt: ApplicationPostProcessingPromptPayload? = nil,
+        diagnosticContext: ApplicationHistoryDiagnosticContext? = nil,
+        latency: SessionLatencyMetrics? = nil,
+        desktopHistory: AnyCodable? = nil,
+        model: String? = nil,
+        wordCount: Int? = nil,
+        originPlatform: String = "macos",
+        errorMessage: String? = nil,
+        requestContext: RequestDiagnosticContext? = nil,
+        requestFailure: RequestDiagnosticContext.Failure?
+    ) {
         self.schemaVersion = Self.currentSchemaVersion
         self.id = id
         self.createdAt = createdAt
@@ -78,12 +163,24 @@ public struct HistoryRecord: Codable, Identifiable, Hashable, Sendable {
         self.source = source
         self.postProcessingPrompt = postProcessingPrompt
         self.diagnosticContext = diagnosticContext
+        self.requestContext = RequestDiagnosticContext.admissionOnly(requestContext)
+        self.requestFailure = requestFailure.map {
+            .init(stage: $0.stage, code: $0.code, domain: $0.domain, httpStatus: $0.httpStatus)
+        }
         self.latency = latency
         self.desktopHistory = desktopHistory
         self.model = model
         self.wordCount = wordCount
         self.originPlatform = originPlatform
         self.errorMessage = errorMessage
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        // Equality includes request metadata. Hashing stable identity/date
+        // fields preserves equal-value hashing without persisting a hash value.
+        hasher.combine(self.id)
+        hasher.combine(self.createdAt)
+        hasher.combine(self.updatedAt)
     }
 
     /// Native records keep their original platform's presentation choices.
@@ -149,7 +246,8 @@ public struct HistoryRecord: Codable, Identifiable, Hashable, Sendable {
             model: self.model,
             wordCount: self.wordCount,
             originPlatform: self.originPlatform,
-            errorMessage: errorMessage
+            errorMessage: errorMessage,
+            requestContext: self.requestContext, requestFailure: self.requestFailure
         )
     }
 
@@ -174,6 +272,8 @@ public struct HistoryRecord: Codable, Identifiable, Hashable, Sendable {
         case source
         case postProcessingPrompt
         case diagnosticContext
+        case requestContext
+        case requestFailure
         case latency
         case desktopHistory
         case model

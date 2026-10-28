@@ -117,5 +117,36 @@ class StageTests(unittest.TestCase):
             self.stage()
 
 
+    def test_optional_symbols_transform_records_final_hashes_and_retains_originals(self):
+        symbols_tests = load("native_symbols_fixtures", "test_production_symbols.py")
+        from unittest import mock
+        original = symbols_tests.image(machine=ARM64)
+        for name in STAGE.EXECUTABLES:
+            (self.bin / name).write_bytes(original)
+        tool = pathlib.Path(self.directory.name).resolve() / "llvm-objcopy"
+        tool.write_bytes(b"fixture tool")
+        def execute(command, **kwargs):
+            if command[1] == "--version":
+                return symbols_tests.subprocess.CompletedProcess(command, 0, stdout=b"LLVM fixture")
+            pathlib.Path(command[3]).write_bytes(symbols_tests.without_debug(
+                pathlib.Path(command[2]).read_bytes(), arm_padding=True))
+            return symbols_tests.subprocess.CompletedProcess(command, 0)
+        with mock.patch.object(STAGE.production_symbols.subprocess, "run", side_effect=execute):
+            metadata = STAGE.stage(self.bin, self.output, "arm64", "a" * 40, VERSIONS, strip_tool=tool)
+        for name in STAGE.EXECUTABLES:
+            result = metadata["productionSymbols"][name]
+            self.assertEqual(result["status"], "optimized")
+            self.assertNotEqual(metadata["executables"][name], hashlib.sha256(original).hexdigest())
+            self.assertEqual(metadata["executables"][name], hashlib.sha256((self.output / name).read_bytes()).hexdigest())
+            self.assertEqual((self.output / result["retainedPath"]).read_bytes(), original)
+            self.assertEqual((self.bin / name).read_bytes(), original)
+
+    def test_no_tool_explicitly_records_unoptimized_original_baseline(self):
+        metadata = self.stage()
+        self.assertEqual(metadata["productionSymbols"], {
+            name: {"status": "not-optimized", "reason": "tool-not-provided"} for name in STAGE.EXECUTABLES})
+        self.assertFalse((self.output / "diagnostic-symbols").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

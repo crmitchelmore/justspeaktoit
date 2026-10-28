@@ -2,9 +2,11 @@
 """Lightweight lockfile regression tests; no SDK download or compiler execution."""
 import hashlib
 import importlib.util
+import io
 import pathlib
 import stat
 import subprocess
+import tarfile
 import tempfile
 import unittest
 from unittest import mock
@@ -236,6 +238,76 @@ class ProductionImageTests(unittest.TestCase):
                     BUILD.copy_executable(self.source, self.destination, self.root / "clang", self.root / "log")
                 self.assertFalse(self.destination.exists())
                 inspect.assert_not_called()
+
+
+    def test_optional_transform_precedes_final_hash_and_never_changes_original(self):
+        spec = importlib.util.spec_from_file_location("cross_symbols_fixtures",
+                                                     HERE.parent / "windows-bundle/test_production_symbols.py")
+        fixtures = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fixtures)
+        original = fixtures.image()
+        self.source.write_bytes(original)
+        tool = self.root.resolve() / "llvm-objcopy"
+        tool.write_bytes(b"fixture tool")
+        symbols = {}
+        def execute(command, **kwargs):
+            if command[1] == "--version":
+                return subprocess.CompletedProcess(command, 0, stdout=b"LLVM fixture")
+            pathlib.Path(command[3]).write_bytes(fixtures.without_debug(pathlib.Path(command[2]).read_bytes()))
+            return subprocess.CompletedProcess(command, 0)
+        with mock.patch.object(BUILD.production_symbols.subprocess, "run", side_effect=execute), \
+                mock.patch.object(BUILD.BOOTSTRAP, "run"):
+            digest = BUILD.copy_executable(self.source, self.destination, self.root / "clang", self.root / "log",
+                                           strip_tool=tool, symbols=symbols, source_commit="b" * 40)
+            repeated = BUILD.copy_executable(self.source, self.destination, self.root / "clang", self.root / "log",
+                                             strip_tool=tool, symbols=symbols, source_commit="b" * 40)
+        self.assertEqual(digest, repeated)
+        self.assertEqual(digest, hashlib.sha256(self.destination.read_bytes()).hexdigest())
+        self.assertNotEqual(digest, hashlib.sha256(original).hexdigest())
+        self.assertEqual(symbols["speak.exe"]["transformedSHA256"], digest)
+        self.assertEqual(symbols["speak.exe"]["sourceCommit"], "b" * 40)
+        self.assertEqual(self.source.read_bytes(), original)
+        self.assertEqual((self.root / symbols["speak.exe"]["retainedPath"]).read_bytes(), original)
+
+    def test_opted_in_transform_never_accepts_a_test_executable(self):
+        self.source.write_bytes(PE_FIXTURES.build_pe())
+        with self.assertRaises(BUILD.production_symbols.SymbolsError):
+            BUILD.copy_executable(self.source, self.root / "SpeakAppPackageTests.exe", self.root / "clang",
+                                  self.root / "log", strip_tool=self.root / "llvm-objcopy")
+
+
+class SymbolToolExtractionTests(unittest.TestCase):
+    def test_pinned_compiler_archive_extracts_objcopy_without_unrelated_tools(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            archive = root / "llvm.tar.xz"
+            prefix = "LLVM-20.1.8-macOS-ARM64/"
+            with tarfile.open(archive, "w:xz") as writer:
+                for name in ["bin/llvm-objcopy", "bin/clang-20", "bin/unrelated-debugger"]:
+                    entry = tarfile.TarInfo(prefix + name)
+                    body = name.encode()
+                    entry.size = len(body)
+                    writer.addfile(entry, io.BytesIO(body))
+            tools = BUILD.extract_compiler(archive, root / "private")
+            self.assertEqual((tools / "llvm-objcopy").read_bytes(), b"bin/llvm-objcopy")
+            self.assertFalse((tools / "unrelated-debugger").exists())
+
+    def test_optional_tool_is_forwarded_to_both_production_products_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            records = {}
+            def retain(source, destination, *args, **kwargs):
+                self.assertEqual(kwargs["strip_tool"], root / "llvm-objcopy")
+                self.assertIs(kwargs["symbols"], records)
+                self.assertEqual(kwargs["source_commit"], "a" * 40)
+                return "hash-" + source.name
+            with mock.patch.object(BUILD, "run_package_build"), \
+                    mock.patch.object(BUILD, "copy_executable", side_effect=retain) as copies:
+                result = BUILD.build_production(["swift", "build"], {}, root / "log", root, root / "built",
+                                                root / "out", root / "clang", strip_tool=root / "llvm-objcopy",
+                                                symbols=records, source_commit="a" * 40)
+            self.assertEqual([call.args[1].name for call in copies.call_args_list], ["SpeakWindows.exe", "speak.exe"])
+            self.assertEqual(set(result), {"SpeakWindows.exe", "speak.exe"})
 
 
 if __name__ == "__main__":

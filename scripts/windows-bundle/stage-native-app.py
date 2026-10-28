@@ -26,6 +26,7 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 import windows_pe  # noqa: E402
 import windows_targets  # noqa: E402
+import production_symbols  # noqa: E402
 
 APPLICATION = "SpeakWindows.exe"
 EXECUTABLES = (APPLICATION, "speak.exe")
@@ -45,7 +46,7 @@ def tool_version(command):
     return (result.stdout or result.stderr).strip() or None
 
 
-def stage(bin_path, output, architecture, commit, versions=None):
+def stage(bin_path, output, architecture, commit, versions=None, *, strip_tool=None):
     target = windows_targets.target(architecture)
     bin_path, output = pathlib.Path(bin_path).resolve(), pathlib.Path(output).resolve()
     # SwiftPM places a build in <scratch>/<triple>/<configuration>.
@@ -71,8 +72,15 @@ def stage(bin_path, output, architecture, commit, versions=None):
             raise StageError(name + " imports " + ", ".join(tests) + "; stage it before building tests")
         images[name], hashes[name] = image, hashlib.sha256(data).hexdigest()
     output.mkdir(parents=True, exist_ok=True)
+    symbols = {}
     for name in EXECUTABLES:
-        shutil.copy2(bin_path / name, output / name)
+        if strip_tool is None:
+            shutil.copy2(bin_path / name, output / name)
+            symbols[name] = {"status": "not-optimized", "reason": "tool-not-provided"}
+        else:
+            symbols[name] = production_symbols.transform(
+                bin_path / name, output / name, strip_tool, architecture, commit)
+            hashes[name] = symbols[name]["transformedSHA256"]
     resources = []
     for directory in sorted(bin_path.glob("*.resources")):
         if not directory.is_dir() or directory.is_symlink() or directory.name[:-len(".resources")].endswith("Tests"):
@@ -88,7 +96,7 @@ def stage(bin_path, output, architecture, commit, versions=None):
                 "imageArchitectures": {name: image.architecture for name, image in images.items()},
                 "swiftCompiler": versions["swiftCompiler"], "nativeCompiler": versions["nativeCompiler"],
                 "executables": hashes, "resources": resources,
-                "runtimeStatus": "Windows execution evidence is recorded separately"}
+                "runtimeStatus": "Windows execution evidence is recorded separately", "productionSymbols": symbols}
     (output / "app-build-metadata.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
     return metadata
 
@@ -99,8 +107,9 @@ def main(argv=None):
     parser.add_argument("--bin-path", required=True, type=pathlib.Path, help="swift build --show-bin-path output")
     parser.add_argument("--output", required=True, type=pathlib.Path)
     parser.add_argument("--commit", default=os.environ.get("GITHUB_SHA"), help="source commit (default: GITHUB_SHA)")
+    parser.add_argument("--strip-tool", type=pathlib.Path, help="explicit native swift toolchain llvm-objcopy.exe")
     args = parser.parse_args(argv)
-    metadata = stage(args.bin_path, args.output, args.architecture, args.commit)
+    metadata = stage(args.bin_path, args.output, args.architecture, args.commit, strip_tool=args.strip_tool)
     print(json.dumps({key: metadata[key] for key in ("target", "hostArchitecture", "imageArchitecture", "executables")},
                      indent=2, sort_keys=True))
 

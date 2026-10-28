@@ -57,6 +57,9 @@ jobs:
       - name: Test XCTest crash-report collector
         run: python3 -B -m unittest discover -s scripts/tests -p test_macos_xctest_crashes.py -v
 
+      - name: Test CLI debug-symbol packaging contracts
+        run: python3 -B -m unittest discover -s scripts/tests -p test_mac_cli_symbols.py -v
+
       # Swift build state embeds absolute paths. Scope both exact and fallback
       # keys to the architecture, stable host identity and checkout workspace.
       - name: Cache Swift packages

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, readdirSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
@@ -300,12 +300,36 @@ exit 42
 });
 
 test('bounds report discovery and total reads before parsing a directory flood', t => {
-  const result = fixture(t, `
-reports="$HOME/Library/Logs/DiagnosticReports"
-for index in {1..400}; do printf '{"pid":999999}' > "$reports/JustSpeakToIt-$index.ips"; done
-exit 42
-`, { wait: '1' });
-  const stats = JSON.parse(readFileSync(join(result.diagnostics, 'collection.json'))).crashReports;
+  const directory = mkdtempSync(join(tmpdir(), 'launch-flood-test-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const home = join(directory, 'home');
+  const reports = join(home, 'Library', 'Logs', 'DiagnosticReports');
+  mkdirSync(reports, { recursive: true });
+  const marker = join(directory, 'marker');
+  writeFileSync(marker, '');
+  for (let index = 1; index <= 400; index++) {
+    writeFileSync(join(reports, `JustSpeakToIt-${index}.ips`), '{"pid":999999}');
+  }
+  const stdout = join(directory, 'stdout.json');
+  writeFileSync(stdout, JSON.stringify({ bytesDiscarded: 0 }));
+  // Resolve the owned fake to a fixed no-op executable; never invoke system logs.
+  symlinkSync('/usr/bin/true', join(directory, 'log'));
+  const diagnostics = join(directory, 'diagnostics');
+  const collector = fileURLToPath(new URL('../collect-launch-diagnostics.py', import.meta.url));
+  const result = spawnSync('python3', ['-B', collector,
+    '--pid', String(process.pid), '--name', 'JustSpeakToIt',
+    '--executable', join(directory, 'JustSpeakToIt'), '--marker', marker,
+    '--stdout', stdout, '--output', diagnostics,
+    '--start-ns', '0', '--end-ns', '1000000000', '--wait', '1'], {
+    encoding: 'utf8', timeout: 15000,
+    env: { ...process.env, HOME: home, PATH: `${directory}:${process.env.PATH}` },
+  });
+  assert.equal(result.error, undefined, result.error?.message);
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(existsSync(join(diagnostics, 'collection.json')), 'collector must write its receipt');
+  const receipt = JSON.parse(readFileSync(join(diagnostics, 'collection.json')));
+  assert.equal(receipt.systemLog.exitStatus, 0, 'owned no-op log must finish successfully');
+  const stats = receipt.crashReports;
   assert.ok(stats.entriesScanned <= 256);
   assert.ok(stats.reportsRead <= 8);
   assert.equal(stats.discoveryTruncated, true);

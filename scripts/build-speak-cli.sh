@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Build the `speak` automation CLI and embed it inside JustSpeakToIt.app.
 #
-# Usage: ./scripts/build-speak-cli.sh <path-to-JustSpeakToIt.app> [signing-identity] [arm64|universal]
+# Usage: build-speak-cli.sh <app> [signing-identity] [arm64|universal] [symbols-directory]
 #
 # The CLI is a thin client for the automation socket the app exposes, so it must
-# ship with the app rather than as an independent download: the Homebrew cask
-# links `Contents/MacOS/speak` onto the user's PATH.
+# remain embedded in the legacy universal app. The primary arm64 app uses
+# the separately published CLI assets instead.
 #
-# The embedded CLI always matches the app's own slices (issue #774): the arm64
-# primary download embeds an arm64-only CLI and the universal legacy download
-# embeds a universal one. The default is universal.
+# The embedded CLI matches the requested app slices (issue #774). Release
+# packaging embeds it only in the universal legacy download. Manual arm64
+# embedding remains supported; the default is universal.
 
 set -euo pipefail
 TRAIN_SWIFT_FLAGS=()
@@ -23,9 +23,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_PATH="${1:-}"
 SIGN_IDENTITY="${2:-}"
 VARIANT="${3:-universal}"
+SYMBOLS_DIR="${4:-}"
 
 if [[ -z "$APP_PATH" ]]; then
-    echo "Usage: $0 <path-to-JustSpeakToIt.app> [signing-identity] [arm64|universal]" >&2
+    echo "Usage: $0 <app> [signing-identity] [arm64|universal] [symbols-directory]" >&2
     exit 1
 fi
 
@@ -46,23 +47,29 @@ esac
 # Resolve before the cd below, so a relative app path keeps pointing at the
 # bundle the caller meant.
 APP_PATH="$(cd "$APP_PATH" && pwd -P)"
+SYMBOLS_DIR="${SYMBOLS_DIR:-$(dirname "$APP_PATH")/symbols/$VARIANT}"
+mkdir -p "$SYMBOLS_DIR"
+SYMBOLS_DIR="$(cd "$SYMBOLS_DIR" && pwd -P)"
 
 cd "$ROOT_DIR"
+# The guarded array expansion also works with an empty array under Bash 3 + nounset.
 # The slices are built separately and joined with lipo: a single swift build
 # invocation passing both arch flags fails to plan the package graph
 # ("duplicate key found: ID(moduleName: \"CommandLineTool\", packageIdentity:
 # swiftformat)") because the SwiftFormat plugin dependency is modelled once
 # per architecture (issue #759).
 echo "==> Building speak (release, arm64)"
-xcrun swift build "${TRAIN_SWIFT_FLAGS[@]}" --product speak --configuration release --arch arm64
-ARM64_BINARY="$(xcrun swift build "${TRAIN_SWIFT_FLAGS[@]}" --product speak --configuration release \
+xcrun swift build ${TRAIN_SWIFT_FLAGS[@]+"${TRAIN_SWIFT_FLAGS[@]}"} --product speak --configuration release --arch arm64
+ARM64_BINARY="$(xcrun swift build ${TRAIN_SWIFT_FLAGS[@]+"${TRAIN_SWIFT_FLAGS[@]}"} --product speak --configuration release \
     --arch arm64 --show-bin-path)/speak"
 
-BINARY_PATH="$(mktemp -d)/speak"
+BINARY_WORK="$(mktemp -d "${TMPDIR:-/tmp}/speak-cli.XXXXXX")"
+trap 'rm -rf "$BINARY_WORK"' EXIT
+BINARY_PATH="$BINARY_WORK/speak"
 if [[ "$VARIANT" == "universal" ]]; then
     echo "==> Building speak (release, x86_64)"
-    xcrun swift build "${TRAIN_SWIFT_FLAGS[@]}" --product speak --configuration release --arch x86_64
-    X86_64_BINARY="$(xcrun swift build "${TRAIN_SWIFT_FLAGS[@]}" --product speak --configuration release \
+    xcrun swift build ${TRAIN_SWIFT_FLAGS[@]+"${TRAIN_SWIFT_FLAGS[@]}"} --product speak --configuration release --arch x86_64
+    X86_64_BINARY="$(xcrun swift build ${TRAIN_SWIFT_FLAGS[@]+"${TRAIN_SWIFT_FLAGS[@]}"} --product speak --configuration release \
         --arch x86_64 --show-bin-path)/speak"
 
     for slice in "$ARM64_BINARY" "$X86_64_BINARY"; do
@@ -100,6 +107,10 @@ for present_arch in $EMBEDDED_ARCHS; do
     fi
 done
 echo "==> $VARIANT binary contains: $EMBEDDED_ARCHS"
+
+# The merged binary still names the fresh per-architecture object files.
+# Retain its matching dSYM outside the app, then strip before any signing.
+bash "$ROOT_DIR/scripts/prepare-mac-cli-symbols.sh" "$BINARY_PATH" "$SYMBOLS_DIR/speak.dSYM"
 
 DESTINATION="$APP_PATH/Contents/MacOS/speak"
 echo "==> Embedding $BINARY_PATH -> $DESTINATION"

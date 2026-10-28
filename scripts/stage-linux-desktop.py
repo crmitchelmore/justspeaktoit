@@ -15,7 +15,8 @@ import local_llm_package
 def resource_bundles(directory):
     bundles = []
     for bundle in sorted(pathlib.Path(directory).glob("*.resources")):
-        if bundle.name.removesuffix(".resources").endswith("Tests"):
+        target = bundle.name.removesuffix(".resources")
+        if target.endswith("Tests") or target == "SpeakTestSupport" or target.endswith("_SpeakTestSupport"):
             continue
         if bundle.is_symlink() or not bundle.is_dir():
             raise ValueError(f"the production resource bundle must be a regular directory: {bundle.name}")

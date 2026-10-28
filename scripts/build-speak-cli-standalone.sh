@@ -57,12 +57,13 @@ VERSION_FILE="$SCRATCH/speak_ver"
 printf '%s' "$VERSION" > "$VERSION_FILE"
 
 cd "$ROOT_DIR"
+# The guarded array expansion also works with an empty array under Bash 3 + nounset.
 # Each slice is built on its own, as build-speak-cli.sh does (issue #759); the
 # linker flags create the version section in this product's executable only.
 echo "==> Building speak (release, $ARCH, version $VERSION)"
-xcrun swift build "${TRAIN_SWIFT_FLAGS[@]}" --product speak --configuration release --arch "$ARCH" \
+xcrun swift build ${TRAIN_SWIFT_FLAGS[@]+"${TRAIN_SWIFT_FLAGS[@]}"} --product speak --configuration release --arch "$ARCH" \
     -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __speak_ver -Xlinker "$VERSION_FILE"
-BUILT_BINARY="$(xcrun swift build "${TRAIN_SWIFT_FLAGS[@]}" --product speak --configuration release --arch "$ARCH" \
+BUILT_BINARY="$(xcrun swift build ${TRAIN_SWIFT_FLAGS[@]+"${TRAIN_SWIFT_FLAGS[@]}"} --product speak --configuration release --arch "$ARCH" \
     -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __speak_ver -Xlinker "$VERSION_FILE" \
     --show-bin-path)/speak"
 if [[ ! -f "$BUILT_BINARY" ]]; then
@@ -75,6 +76,11 @@ mkdir -p "$STAGE"
 BINARY="$STAGE/speak"
 cp "$BUILT_BINARY" "$BINARY"
 chmod 755 "$BINARY"
+
+# Keep debug information out of the end-user ZIP, while the fresh build's
+# object files are still available to dsymutil. Signing must follow stripping.
+bash "$ROOT_DIR/scripts/prepare-mac-cli-symbols.sh" \
+    "$BINARY" "$OUTPUT_DIR/symbols/$ARCH/speak.dSYM"
 
 # Exactly one slice: the installer refuses anything else, so fail here instead.
 BUILT_ARCHS="$(lipo -archs "$BINARY")"

@@ -428,6 +428,16 @@ extension TranscriptionManager {
   }
 
   private func liveTranscriptionModelForCurrentMode() throws -> String {
+    try Self.resolvedLiveTranscriptionModel(
+      transcriptionMode: appSettings.transcriptionMode,
+      localTranscriptionMode: appSettings.localTranscriptionMode,
+      localStreamingModelSource: appSettings.localStreamingModelSource,
+      liveTranscriptionModel: appSettings.liveTranscriptionModel,
+      availableStreamingSourceIDs: availableLocalStreamingSourceIDs()
+    )
+  }
+
+  private func availableLocalStreamingSourceIDs() -> Set<String> {
     var availableStreamingSourceIDs = Set(
       LocalModelManager.shared.availableModels
         .filter(\.supportsLiveStreaming)
@@ -441,13 +451,7 @@ extension TranscriptionManager {
     availableStreamingSourceIDs.formUnion(LocalModelManager.recommendedStreamingModelSources.map(\.id))
     availableStreamingSourceIDs.formUnion(LocalModelManager.shared.streamingModelSources.map(\.id))
     #endif
-    return try Self.resolvedLiveTranscriptionModel(
-      transcriptionMode: appSettings.transcriptionMode,
-      localTranscriptionMode: appSettings.localTranscriptionMode,
-      localStreamingModelSource: appSettings.localStreamingModelSource,
-      liveTranscriptionModel: appSettings.liveTranscriptionModel,
-      availableStreamingSourceIDs: availableStreamingSourceIDs
-    )
+    return availableStreamingSourceIDs
   }
 
   nonisolated static func resolvedLiveTranscriptionModel(
@@ -455,14 +459,14 @@ extension TranscriptionManager {
     localTranscriptionMode: AppSettings.LocalTranscriptionMode,
     localStreamingModelSource: String,
     liveTranscriptionModel: String,
-    availableStreamingSourceIDs: Set<String>
+    availableStreamingSourceIDs: @autoclosure () -> Set<String>
   ) throws -> String {
     guard transcriptionMode == .localModel, localTranscriptionMode == .streaming else {
       return liveTranscriptionModel
     }
 
     guard localStreamingModelSource.hasPrefix("local/streaming/"),
-      availableStreamingSourceIDs.contains(localStreamingModelSource)
+      availableStreamingSourceIDs().contains(localStreamingModelSource)
     else {
       throw TranscriptionManagerError.invalidLocalStreamingSource(localStreamingModelSource)
     }

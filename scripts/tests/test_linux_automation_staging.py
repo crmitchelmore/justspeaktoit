@@ -39,6 +39,22 @@ class LinuxAutomationStagingTests(unittest.TestCase):
                 STAGE.stage(binary, output, cli=root / "absent")
             self.assertFalse(output.exists())
 
+    def test_test_support_is_excluded_only_from_production_layout(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            root = pathlib.Path(scratch)
+            binary = self.fixture(root)
+            for name in ("SpeakTestSupport", "SpeakApp_SpeakTestSupport", "SpeakApp_SpeakTestSupportTools"):
+                directory = root / (name + ".resources")
+                directory.mkdir()
+                (directory / "fixture.json").write_bytes(b"fixture bytes")
+            output = root / "layout"
+            STAGE.stage(binary, output)
+            for name in ("SpeakTestSupport", "SpeakApp_SpeakTestSupport"):
+                self.assertFalse((output / "bin" / (name + ".resources")).exists())
+                self.assertEqual((root / (name + ".resources") / "fixture.json").read_bytes(), b"fixture bytes")
+            self.assertEqual((output / "bin/SpeakApp_SpeakTestSupportTools.resources/fixture.json").read_bytes(),
+                             b"fixture bytes")
+
     def test_flatpak_explicitly_builds_and_stages_the_cli(self):
         manifest = (ROOT / "packaging/linux/com.justspeaktoit.JustSpeakToIt.yml").read_text()
         self.assertIn("--product speak --static-swift-stdlib", manifest)

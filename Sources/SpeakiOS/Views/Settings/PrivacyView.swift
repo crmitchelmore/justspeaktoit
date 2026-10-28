@@ -6,15 +6,13 @@ import SwiftUI
 // MARK: - Privacy View
 
 struct PrivacyView: View {
-    /// Both settings objects are observed so the "right now" section re-renders
-    /// the moment a model, post-processing toggle or voice is changed elsewhere.
+    /// Re-render the current workflow when transcription or post-processing settings change.
     @ObservedObject private var settings = AppSettings.shared
-    @ObservedObject private var openClaw = OpenClawSettings.shared
     @ObservedObject private var historySync = HistorySyncEngine.shared
 
     /// The user's effective workflow, projected from the live settings.
     private var summary: PrivacyWorkflowSummary {
-        PrivacyWorkflowSummary.make(settings: settings, voiceOutput: openClaw)
+        PrivacyWorkflowSummary.make(settings: settings, voiceOutputEnabled: false, voiceOutputProvider: .deepgram)
     }
 
     private var transcriptionProviders: [LiveTranscriptionProviderID] {

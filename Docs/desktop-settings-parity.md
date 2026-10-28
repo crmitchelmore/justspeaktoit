@@ -3042,12 +3042,8 @@ deliberately not `speak.exe`), no Mac-style CLI installer or "Copy PATH
 command", and Windows still persists the legacy `automationEnabled` switch
 rather than Linux's shared `enableAutomationServer` + device-local consent.
 
-OpenClaw remains blocked: macOS has no OpenClaw settings journey to match, and
-the client (`OpenClawClient*.swift`) is Apple-only, using
-`URLSessionWebSocketTask`/os.log, with its conversation UI only in SpeakiOS.
-Windows would need an injected WinHTTP WebSocket transport like the realtime
-clients plus a native UI. The package alias test passed locally; native
-execution and the dialog self-test are **NOT_RUN** here.
+The package alias test passed locally; native execution and the dialog
+self-test are **NOT_RUN** here.
 
 ## Individual action shortcuts
 

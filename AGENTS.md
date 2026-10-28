@@ -324,26 +324,6 @@ version/baseline authority. `VERSION` is a build hint only.
 - `AccessibilityInsertionMode`: `.insertAtCursor` (default) or `.replaceAll`
 - Only relevant when `TextOutputMethod` is `.smart` or `.accessibilityOnly`
 
-## OpenClaw Hands-Free Voice Mode (iOS)
-
-### Conversation loop
-- Keep Conversation Mode user-configurable and available directly on the OpenClaw chat screen.
-- In Conversation Mode, use the loop: record → send → speak → auto-resume listening.
-- Auto-resume must remain configurable so users can opt out.
-
-### Acknowledge controls
-- Support multiple acknowledgement paths: on-screen tap, headset single-tap (remote command), and optional keyword.
-- Treat acknowledgement keywords as control input and trim them from transcript text before sending.
-
-### Latency rules
-- Avoid fixed sleeps for connection readiness; wait for connection state with timeout and explicit error.
-- Provide a low-latency speech option that skips summarisation before TTS when enabled.
-
-### iOS control ergonomics
-- Prefer native iOS controls (for example, `Toggle` with switch style) over custom checkbox-like controls in chat/input surfaces.
-- Keep interactive controls at least 44pt high/wide, and size message composer inputs to a comfortable HIG-aligned minimum (around 50pt).
-- If acknowledgement hints are shown, make the interaction target explicit (for example, “Tap the chat area…”).
-
 ## Downloaded Local Models (macOS)
 
 - Treat downloaded local models as a distinct feature from Apple Speech: use `local/...` identifiers for downloaded models and keep Apple Speech under `apple/local/...`.

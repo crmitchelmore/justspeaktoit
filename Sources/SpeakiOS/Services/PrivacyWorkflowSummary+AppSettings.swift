@@ -27,15 +27,5 @@ public extension PrivacyWorkflowSummary {
         return make(inputs)
     }
 
-    /// Voice output on iOS runs through the OpenClaw gateway, so it only speaks
-    /// when both the gateway and "Read Responses Aloud" are on.
-    @MainActor
-    static func make(settings: AppSettings, voiceOutput: OpenClawSettings) -> PrivacyWorkflowSummary {
-        make(
-            settings: settings,
-            voiceOutputEnabled: voiceOutput.enabled && voiceOutput.ttsEnabled,
-            voiceOutputProvider: voiceOutput.ttsProvider
-        )
-    }
 }
 #endif

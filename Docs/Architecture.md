@@ -98,7 +98,7 @@ and tests it without model inference, and fails if its `Package.resolved` drifts
 | `SpeakiOSUITests` | iOS UI tests, 17.0 | Always; depends on `SpeakiOS`. |
 | `SpeakiOSTests` | iOS unit tests, 17.0 | Always; depends on `SpeakiOS`, package `SpeakCore` and `SpeakiOSLib`; adds selected keyboard sources when its gate is on. |
 
-`SHOW_OPENCLAW_TAB` adds its iOS compilation condition. `TUIST_APP_STORE` selects the sandboxed macOS App Store
+`TUIST_APP_STORE` selects the sandboxed macOS App Store
 identity and entitlement set; it is independent of `TUIST_RELEASE_TRAIN`, which selects Stable or Alpha identities.
 The Watch targets consume the dependency-free `SpeakWatchCore` package product instead of `SpeakCore`, whose
 transitive package manifests do not declare watchOS support. Their `Project.swift` source lists include each

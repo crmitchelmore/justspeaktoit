@@ -232,14 +232,10 @@ final class CaptureDeepLinkTests: XCTestCase {
     // MARK: - Router integration
 
     @MainActor
-    func testRouterQueuesTheCommandAndSelectsTheTranscribeTab() {
+    func testRouterQueuesTheCaptureCommand() {
         let router = DeepLinkRouter()
-        router.selectedTab = 1
-        router.pendingConversationId = "abc"
 
         XCTAssertTrue(router.handle(URL(string: "justspeaktoit://start?destination=history")!))
-        XCTAssertEqual(router.selectedTab, 0)
-        XCTAssertNil(router.pendingConversationId)
         XCTAssertEqual(router.pendingCaptureAction?.action, .start)
         XCTAssertEqual(router.pendingCaptureAction?.destination, .historyOnly)
     }
@@ -254,12 +250,36 @@ final class CaptureDeepLinkTests: XCTestCase {
     }
 
     @MainActor
-    func testRouterStillHandlesTabLinks() {
+    func testRouterStillHandlesTranscriptionScreenLinks() {
         let router = DeepLinkRouter()
-        XCTAssertTrue(router.handle(URL(string: "justspeaktoit://openclaw/conversation/xyz")!))
-        XCTAssertEqual(router.selectedTab, 1)
-        XCTAssertEqual(router.pendingConversationId, "xyz")
+        XCTAssertTrue(router.handle(URL(string: "justspeaktoit://transcribe")!))
         XCTAssertNil(router.pendingCaptureAction)
+    }
+
+    @MainActor
+    func testRetiredChatLinksAreInertAndDoNotReplaceCaptureOrHistory() throws {
+        let router = DeepLinkRouter()
+        let activeScheme = ReleaseTrain.current.urlScheme
+        let queued = try XCTUnwrap(URL(string: "\(activeScheme)://start?destination=history"))
+        XCTAssertTrue(router.handle(queued))
+        let capture = router.pendingCaptureAction
+        let retired = ["openclaw://", "openclaw://chat", "justspeaktoit://openclaw",
+                       "justspeaktoit://openclaw/chat", "justspeaktoit://openclaw/conversation/abc",
+                       "justspeaktoit-alpha://openclaw", "justspeaktoit-alpha://openclaw/chat"]
+        for address in retired {
+            let url = try XCTUnwrap(URL(string: address))
+            XCTAssertFalse(router.handle(url), address)
+            XCTAssertNil(CaptureDeepLink.parse(url), address)
+            XCTAssertEqual(router.pendingCaptureAction, capture, address)
+            XCTAssertNil(router.pendingHistoryID, address)
+        }
+        let historyID = UUID()
+        router.openHistory(identifier: historyID)
+        for address in retired {
+            XCTAssertFalse(router.handle(try XCTUnwrap(URL(string: address))), address)
+            XCTAssertNil(router.pendingCaptureAction, address)
+            XCTAssertEqual(router.pendingHistoryID, historyID, address)
+        }
     }
 
     @MainActor
@@ -309,10 +329,9 @@ final class CaptureDeepLinkTests: XCTestCase {
     }
 
     @MainActor
-    func testTabLinkHostIsCaseInsensitive() {
+    func testTranscriptionScreenLinkHostIsCaseInsensitive() {
         let router = DeepLinkRouter()
-        XCTAssertTrue(router.handle(URL(string: "justspeaktoit://OpenClaw")!))
-        XCTAssertEqual(router.selectedTab, 1)
+        XCTAssertTrue(router.handle(URL(string: "justspeaktoit://Transcribe")!))
     }
 }
 #endif

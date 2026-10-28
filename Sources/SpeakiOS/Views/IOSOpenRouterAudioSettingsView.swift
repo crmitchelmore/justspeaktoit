@@ -19,7 +19,7 @@ struct IOSOpenRouterAudioSettingsLink: View {
 struct IOSOpenRouterAudioSettingsView: View {
     let forSpeech: Bool
     @ObservedObject private var settings = AppSettings.shared
-    @ObservedObject private var voiceSettings = OpenClawSettings.shared
+    @ObservedObject private var voiceSettings = IOSVoiceOutputSettings.shared
 
     var body: some View {
         OpenRouterAudioBrowser(
@@ -54,7 +54,7 @@ struct IOSOpenRouterSpeechSelectionLabel: View {
     }
 }
 
-extension OpenClawSettings {
+extension IOSVoiceOutputSettings {
     func selectOpenRouterSpeech(_ identifier: String) {
         guard let selection = OpenRouterSpeechSelection(id: identifier) else { return }
         ttsModel = selection.id

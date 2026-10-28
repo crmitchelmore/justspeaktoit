@@ -246,7 +246,7 @@ extension DesktopHostIssueReportTests {
         #if os(Linux) && canImport(Glibc)
         let fixture = try self.fixture()
         let store = await fixture.controller.store
-        let history = fixture.root.appendingPathComponent("History")
+        let history = await store.directory
         let audioRoot = fixture.root.appendingPathComponent("Audio")
         try FileManager.default.createDirectory(at: audioRoot, withIntermediateDirectories: true)
         let locations = try DesktopRecordingLocations(historyDirectory: history, persistence: IssueReportRegistration())

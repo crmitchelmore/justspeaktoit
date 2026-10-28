@@ -33,6 +33,41 @@ def passing_log():
 
 
 class IOSCoverageTests(unittest.TestCase):
+    def test_spliced_results_preserve_target_and_deduplicate_normal_replay(self):
+        console = "2026-10-28 00:56:23.431664+0000 JustSpeakToIt[7390:29376] [api] Updating content"
+        ordinary = completion("InterruptionFinalisationTests", "testEmptyInterruption_keepsClipboardAndDoesNotInventText")
+        spliced = ordinary.replace("]' passed", f"]{console}\n' passed")
+        baseline = gate.summarize(passing_log() + ordinary, "success")
+        self.assertEqual(gate.summarize(passing_log() + spliced + ordinary + spliced, "success"), baseline)
+        result = gate.summarize(passing_log() + spliced, "success")
+        self.assertEqual(result["unique_cases"], 6)
+        self.assertEqual(result["errors"], [])
+        self.assertEqual(result["targets"]["SpeakiOSTests"]["suites"]["InterruptionFinalisationTests"]["passed"], 1)
+
+    def test_spliced_failure_or_critical_skip_cannot_be_hidden_by_passing_retry(self):
+        console = "2026-10-28 00:56:23.431664+0000 JustSpeakToIt[7390:29376] [api] Updating content"
+        for status in ("failed", "skipped"):
+            with self.subTest(status=status):
+                ordinary = completion("OpenRouterAudioSettingsTests", "testSelection", status)
+                spliced = ordinary.replace(f"]' {status}", f"]{console}\n' {status}")
+                result = gate.summarize(spliced + passing_log(), "success")
+                self.assertEqual(result["unique_cases"], 5)
+                self.assertEqual(result["counts"][status], 1)
+                self.assertTrue(result["errors"])
+        ui_failure = completion("AnotherSuite", status="failed", target="SpeakiOSUITests").replace(
+            "]' failed", f"]{console}\n' failed")
+        self.assertTrue(gate.summarize(passing_log() + ui_failure, "success")["errors"])
+
+    def test_spliced_foreign_target_cannot_supply_required_ios_coverage(self):
+        console = "2026-10-28 00:56:23.431664+0000 JustSpeakToIt[7390:29376] [api] Updating content"
+        for target in ("OtherTests", ""):
+            with self.subTest(target=target):
+                output = passing_log().replace("SpeakiOSTests.", target + "." if target else "")
+                output = output.replace("]' passed", f"]{console}\n' passed")
+                result = gate.summarize(output, "success")
+                self.assertTrue(result["errors"])
+                self.assertEqual(result["targets"]["SpeakiOSTests"]["unique_cases"], 0)
+
     def test_observed_apple_ios_format_retains_target_identity(self):
         # Actual iOS runner completion from CI run 33679755480, retained in its
         # xcresult console attachment (the old -quiet host log omitted it).

@@ -20,6 +20,57 @@ SPEC.loader.exec_module(gate)
 
 
 class CoverageTests(unittest.TestCase):
+    def test_typed_console_splice_recovers_apple_identity_status_and_order(self):
+        console = "2026-10-28 00:56:23.431664+0000 JustSpeakToIt[7390:29376] [api] Updating content"
+        for newline in ("\n", "\r\n"):
+            with self.subTest(newline=newline):
+                output = "Test Case '-[Module.Required testBefore]' passed (0.001 seconds).\n"
+                output += "".join(
+                    f"Test Case '-[Module.Required test{status}]{console}{newline}"
+                    f"' {status} (0.087 seconds).{newline}"
+                    for status in ("passed", "failed", "skipped")
+                )
+                output += "Test Case 'Module.Required.testAfter' passed (0.001 seconds).\n"
+                self.assertEqual(list(gate.case_results(output)), [
+                    {"module": "Module", "suite": "Required", "case": method, "status": status}
+                    for method, status in (("testBefore", "passed"), ("testpassed", "passed"),
+                                           ("testfailed", "failed"), ("testskipped", "skipped"),
+                                           ("testAfter", "passed"))
+                ])
+                errors, counts = gate.coverage_errors(output, ["Required"])
+                self.assertTrue(errors)
+                self.assertEqual(dict(counts["Required"]), {"passed": 3, "failed": 1, "skipped": 1})
+
+    def test_splice_rejects_untyped_quoted_incomplete_and_extra_physical_records(self):
+        console = "2026-10-28 00:56:23.431664+0000 JustSpeakToIt[7390:29376] [api] Updating content"
+        valid = f"Test Case '-[Module.Required testResult]{console}\n' passed (0.087 seconds).\n"
+        invalid = (
+            valid.replace(console, "arbitrary output"),
+            valid.replace(console, "2026-10-28 not a console record"),
+            valid.replace(console, console + ' "quoted payload"'),
+            valid.replace("\n' passed", "\nextra line\n' passed"),
+            valid.replace("\n' passed", "\r' passed"),
+            valid.replace("testResult]", "testResult\nnot a physical record]"),
+            valid.replace("testResult]", "testResult\rnot a physical record]"),
+            valid.replace("-[Module.Required testResult]", "Module.Required.testResult"),
+            valid.replace("Test Case", "example: Test Case"),
+            valid.replace("(0.087 seconds).", ""),
+            valid.replace("(0.087 seconds).", "(0.087 seconds). trailing text"),
+            valid.replace("' passed", "' started"),
+        )
+        for output in invalid:
+            with self.subTest(output=output):
+                self.assertEqual(list(gate.case_results(output)), [])
+                self.assertTrue(gate.coverage_errors(output, ["Required"])[0])
+
+    def test_spliced_suite_or_summary_cannot_replace_required_case(self):
+        console = "2026-10-28 00:56:23.431664+0000 JustSpeakToIt[7390:29376] [api] Updating content"
+        for output in (f"Test Suite 'Required{console}\n' passed (0.087 seconds).\n",
+                       f"Executed 1 tests{console}\n' passed (0.087 seconds).\n",
+                       f"Test Case '-[Module.RequiredExtra testResult]{console}\n' passed (0.087 seconds).\n"):
+            with self.subTest(output=output):
+                self.assertTrue(gate.coverage_errors(output, ["Required"])[0])
+
     def test_apple_and_portable_case_formats(self):
         for case in ("-[SpeakAppTests.Required testResult]", "SpeakAppTests.Required.testResult", "Required.testResult"):
             errors, counts = gate.coverage_errors(f"Test Case '{case}' passed (0.001 seconds).\n", ["Required"])

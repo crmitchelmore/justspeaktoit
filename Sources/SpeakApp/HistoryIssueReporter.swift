@@ -12,7 +12,8 @@ enum HistoryIssueReporter {
         return IssueDiagnosticReport(
             context: item.diagnosticContext?.requestContext, failures: failures,
             omittedSections: includeDiagnostics ? [] : Set(IssueDiagnosticReport.Section.allCases),
-            observedHandoff: item.diagnosticContext?.observedHandoff
+            observedHandoff: item.diagnosticContext?.observedHandoff,
+            postProcessingObservation: item.diagnosticContext?.postProcessingObservation
         )
     }
 

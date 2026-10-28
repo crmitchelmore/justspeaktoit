@@ -19,6 +19,8 @@ public struct ApplicationHistoryDiagnosticContext: Codable, Hashable, Sendable {
     /// Observed client invocation only; not proof of remote acceptance or wrapped transport.
     public let observedHandoff: RequestDiagnosticContext?
     public let requestFailure: RequestDiagnosticContext.Failure?
+    /// Separate remote post-processing observation; never replaces transcription receipts.
+    public let postProcessingObservation: RequestDiagnosticContext.PostProcessingObservation?
 
     public init(
         capturedAt: Date = Date(), appVersion: String, appBuild: String, operatingSystem: String,
@@ -58,6 +60,24 @@ public struct ApplicationHistoryDiagnosticContext: Codable, Hashable, Sendable {
         speedMode: String, requestContext: RequestDiagnosticContext?, observedHandoff: RequestDiagnosticContext?,
         requestFailure: RequestDiagnosticContext.Failure?
     ) {
+        self.init(
+            capturedAt: capturedAt, appVersion: appVersion, appBuild: appBuild, operatingSystem: operatingSystem,
+            processIdentifier: processIdentifier, microphonePermission: microphonePermission,
+            inputDeviceName: inputDeviceName, providerLabel: providerLabel, latencyTier: latencyTier,
+            transcriptionMode: transcriptionMode, transcriptionModel: transcriptionModel,
+            postProcessingModel: postProcessingModel, speedMode: speedMode, requestContext: requestContext,
+            observedHandoff: observedHandoff, requestFailure: requestFailure, postProcessingObservation: nil
+        )
+    }
+
+    public init(
+        capturedAt: Date = Date(), appVersion: String, appBuild: String, operatingSystem: String,
+        processIdentifier: Int, microphonePermission: String, inputDeviceName: String, providerLabel: String,
+        latencyTier: String, transcriptionMode: String, transcriptionModel: String, postProcessingModel: String,
+        speedMode: String, requestContext: RequestDiagnosticContext?, observedHandoff: RequestDiagnosticContext?,
+        requestFailure: RequestDiagnosticContext.Failure?,
+        postProcessingObservation: RequestDiagnosticContext.PostProcessingObservation?
+    ) {
         self.capturedAt = capturedAt
         self.appVersion = appVersion
         self.appBuild = appBuild
@@ -74,6 +94,7 @@ public struct ApplicationHistoryDiagnosticContext: Codable, Hashable, Sendable {
         self.requestContext = requestContext
         self.observedHandoff = observedHandoff?.provenance == .observedHandoff ? observedHandoff : nil
         self.requestFailure = requestFailure
+        self.postProcessingObservation = postProcessingObservation?.sanitized
     }
 
     public init(from decoder: Decoder) throws {
@@ -95,14 +116,17 @@ public struct ApplicationHistoryDiagnosticContext: Codable, Hashable, Sendable {
             // Future/invalid diagnostics must not discard otherwise valid user History.
             requestContext: try? values.decodeIfPresent(RequestDiagnosticContext.self, forKey: .requestContext),
             observedHandoff: try? values.decodeIfPresent(RequestDiagnosticContext.self, forKey: .observedHandoff),
-            requestFailure: try? values.decodeIfPresent(RequestDiagnosticContext.Failure.self, forKey: .requestFailure)
+            requestFailure: try? values.decodeIfPresent(RequestDiagnosticContext.Failure.self, forKey: .requestFailure),
+            postProcessingObservation: try? values.decodeIfPresent(
+                RequestDiagnosticContext.PostProcessingObservation.self, forKey: .postProcessingObservation
+            )
         )
     }
 
     private enum CodingKeys: String, CodingKey {
         case capturedAt, appVersion, appBuild, operatingSystem, processIdentifier, microphonePermission
         case inputDeviceName, providerLabel, latencyTier, transcriptionMode, transcriptionModel
-        case postProcessingModel, speedMode, requestContext, observedHandoff, requestFailure
+        case postProcessingModel, speedMode, requestContext, observedHandoff, requestFailure, postProcessingObservation
     }
 
     public func hash(into hasher: inout Hasher) {

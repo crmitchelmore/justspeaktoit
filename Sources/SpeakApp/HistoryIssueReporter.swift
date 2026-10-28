@@ -1,11 +1,11 @@
 import Foundation
 import SpeakCore
 
-/// Legacy History has no proven effective request snapshot. Never substitute current settings
-/// or export its private diagnostic strings as public report fields.
+/// Use only the request-owned allowlisted snapshot when recorded. Legacy History fields
+/// never establish effective settings or authorize exporting private diagnostic strings.
 enum HistoryIssueReporter {
     static func report(for item: HistoryItem, includeDiagnostics: Bool = true) -> IssueDiagnosticReport {
-        IssueDiagnosticReport(failures: item.errors.map { error in
+        IssueDiagnosticReport(context: item.diagnosticContext?.requestContext, failures: item.errors.map { error in
             RequestDiagnosticContext.Failure(stage: safeStage(for: error.phase), domain: .unknown)
         }, omittedSections: includeDiagnostics ? [] : Set(IssueDiagnosticReport.Section.allCases))
     }

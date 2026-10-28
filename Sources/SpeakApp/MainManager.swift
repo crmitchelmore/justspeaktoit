@@ -716,7 +716,7 @@ final class MainManager: ObservableObject {
       triggerTiming: triggerTiming
     )
     session.outputTarget = TextOutputTarget.capture()
-    session.diagnosticContext = makeHistoryDiagnosticContext()
+    session.diagnosticContext = makeHistoryDiagnosticContext(includeRequestedContext: true)
     session.isLocalAutomationCapture = true
     activeSession = session
     lastErrorMessage = nil

@@ -313,7 +313,7 @@ class ApplicationErrorTests(unittest.TestCase):
             self.assertFalse(result["timedOut"])
             self.assertEqual(result["failures"], ["exited with 3221226356", "output lacks 'window passed'"])
             self.assertEqual(result["applicationError"]["module"], "ntdll.dll")
-            self.assertEqual(reader.call_args.args[:2], (4242, str(executable.resolve())))
+            self.assertEqual(reader.call_args.args[:2], (4242, os.path.abspath(executable)))
             self.assertLessEqual(reader.call_args.args[2], reader.call_args.args[3])
             reader.side_effect = RuntimeError("private-canary")
             with mock.patch.object(NATIVE, "os", windows):

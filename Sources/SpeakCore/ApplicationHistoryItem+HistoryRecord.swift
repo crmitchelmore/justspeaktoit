@@ -31,6 +31,7 @@ public extension ApplicationHistoryItem {
     /// iOS-only fields or inventing a trigger/capture timeline.
     init?(historyRecord record: HistoryRecord) {
         guard record.model == nil, record.wordCount == nil, record.errorMessage == nil, record.requestContext == nil,
+              record.requestFailure == nil,
               record.originPlatform == "macos",
               let phaseTimestamps = record.phaseTimestamps, let trigger = record.trigger else { return nil }
         self.init(

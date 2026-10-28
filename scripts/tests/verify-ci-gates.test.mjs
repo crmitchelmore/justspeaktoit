@@ -96,7 +96,7 @@ test('macOS Debug and Core Journey share coverage instrumentation and cache keys
     assert.ok(producer && consumer, 'Debug and Core Journey must declare matching cache keys');
     assert.equal(consumer[1].trim(), producer[1].trim());
   }
-  assert.match(body, /^\s+timeout-minutes: 30$/m);
+  assert.match(body, /^\s+timeout-minutes: 45$/m);
   assert.match(body, /name: Build\n(?:\s+#[^\n]*\n)*\s+run: SWIFT_FLAGS=--enable-code-coverage make build/);
   assert.match(body, /name: Test \(Debug\)\n(?:\s+id: [\w-]+\n)?\s+run: python3 scripts\/with-test-keychain.py swift test --enable-code-coverage/);
   assert.ok(body.indexOf('name: Build') < body.indexOf('name: Test (Debug)'),

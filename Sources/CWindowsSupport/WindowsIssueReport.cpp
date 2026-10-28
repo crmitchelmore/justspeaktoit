@@ -766,27 +766,35 @@ bool jsti_issue_report_self_test(std::string &error) {
         auto closing = std::make_shared<State>();
         JSTIIssueReport closingReport{closing};
         struct CloseObservation { int calls = 0, event = 0; std::string ticket; } closed;
+        jsti_smoke_stage("issue.explicit-close.state-ready");
         actionCallback = [](int event, const char *ticket, int, void *context) {
             auto *closed = static_cast<CloseObservation *>(context);
             ++closed->calls; closed->event = event; closed->ticket = ticket;
         };
         actionContext = &closed;
+        jsti_smoke_stage("issue.explicit-close.callback-ready");
+        jsti_smoke_stage("issue.explicit-close.presentation.begin");
         if (jsti_issue_report_present(&closingReport, id, "Close fixture", "Safe draft", "{}", "", "", 1, 0, 0) != 0 ||
             !presentUI(closing) || !closing->window) {
             actionCallback = originalCallback; actionContext = originalContext;
             closing->retire(); retireUI(closing);
             error = "Issue report explicit-close fixture presentation failed."; return false;
         }
+        jsti_smoke_stage("issue.explicit-close.presentation-validated");
         const HWND closingWindow = closing->window;
+        jsti_smoke_stage("issue.explicit-close.dispatch.begin");
         if (command == closeButton) SendDlgItemMessageW(closingWindow, closeButton, BM_CLICK, 0, 0);
         else SendMessageW(closingWindow, WM_COMMAND, MAKEWPARAM(IDCANCEL, 0), 0);
+        jsti_smoke_stage("issue.explicit-close.dispatch.returned");
         actionCallback = originalCallback; actionContext = originalContext;
+        jsti_smoke_stage("issue.explicit-close.callback-restored");
         if (!closing->isRetired() || closing->window || IsWindow(closingWindow) ||
             closed.calls != 1 || closed.event != JSTI_EVENT_ISSUE_REPORT_CLOSE || closed.ticket != id ||
             ownerWindow != healthyOwner || !IsWindow(healthyOwner)) {
             closing->retire(); retireUI(closing);
             error = "Issue report explicit close lost preview or host ownership."; return false;
         }
+        jsti_smoke_stage("issue.explicit-close.validated.before-local-destruction");
     }
     jsti_smoke_stage("issue.explicit-closes.returned");
     // A distinct pending session proves loop shutdown settles an accepted

@@ -6,7 +6,7 @@ import XCTest
 @testable import SpeakiOSLib
 
 @MainActor
-final class InterruptionFinalisationTests: XCTestCase {
+final class InterruptionFinalisationTests: XCTestCase { // swiftlint:disable:this type_body_length
     func testInterruption_destinationsKeepOneResultWithoutDeferredError() async throws {
         for destination: HardwareTriggerDestination in [.historyOnly, .clipboard, .clipboardAndPostProcess] {
             let harness = try Harness()
@@ -180,11 +180,15 @@ final class InterruptionFinalisationTests: XCTestCase {
         harness.storage.holdWrite(writeEntered)
         defer { harness.storage.release() }
         let settled = expectation(description: "Foreground stop released its owner")
+        var ownerReleaseObserved = false, ownedRowEmitted = false
         let observation = coordinator.$state
             .drop(while: { $0 != .stopping })
             .first(where: { $0 == .idle })
-            .sink { _ in settled.fulfill() }
-        defer { observation.cancel() }
+            .sink { _ in ownerReleaseObserved = true; settled.fulfill() }
+        let rowObservation = harness.history.$items
+            .first(where: { $0.contains { $0.transcription == "Foreground words" } })
+            .sink { _ in ownedRowEmitted = true }
+        defer { observation.cancel(); rowObservation.cancel() }
         harness.session.emitPartial("Foreground words")
         harness.session.interrupt()
         await fulfillment(of: [writeEntered], timeout: 2)
@@ -192,6 +196,9 @@ final class InterruptionFinalisationTests: XCTestCase {
         XCTAssertTrue(harness.history.items.isEmpty, "The held write has not published a receipt")
         harness.storage.release()
         await fulfillment(of: [settled], timeout: 2)
+        harness.storage.emitForegroundSettlementDiagnosticIfNeeded(
+            ownerReleaseObserved: ownerReleaseObserved, ownedRowEmitted: ownedRowEmitted, state: coordinator.state
+        )
         XCTAssertEqual(coordinator.state, .idle)
         XCTAssertFalse(coordinator.isRunning)
         XCTAssertFalse(harness.shared.isRecording)
@@ -394,4 +401,4 @@ private final class InterruptionPasteboard: PolishPasteboard {
         writes += 1
     }
 }
-#endif
+#endif // swiftlint:disable:this file_length

@@ -13,8 +13,10 @@ namespace {
 constexpr UINT retirementMessage = WM_APP + 2;
 constexpr UINT deliveryMessage = WM_APP + 1; // Private message-only window.
 enum class CommandKind { present, choose, open, copy };
-enum Control { draftLabel = 1, draftText, jsonLabel, jsonText, includeBox, copyButton,
+enum Control { draftLabel = 1001, draftText, jsonLabel, jsonText, includeBox, copyButton,
                saveButton, openButton, closeButton, statusText, privacyText };
+static_assert(draftLabel > IDCONTINUE && privacyText < IDTIMEOUT,
+              "Issue report controls must not overlap standard dialog command IDs.");
 struct Preview {
     std::string ticket, title, body, json, url, status;
     bool includes = true, exporting = false, opening = false;
@@ -610,8 +612,17 @@ bool jsti_issue_report_self_test(std::string &error) {
     auto state = std::make_shared<State>();
     const char *id = "11111111-1111-4111-8111-111111111111";
     JSTIIssueReport report{state};
-    if (jsti_issue_report_present(&report, id, "Safe report", "Safe draft", "{}", "", "", 1, 0, 0) != 0 ||
-        !presentUI(state) || !state->window) { error = "Issue report native presentation failed."; return false; }
+    if (jsti_issue_report_present(&report, id, "Safe report", "Safe draft", "{}", "", "", 1, 0, 0) != 0) {
+        error = "Issue report native presentation queue admission failed."; return false;
+    }
+    if (!presentUI(state)) {
+        state->retire(); retireUI(state);
+        error = "Issue report native preview creation failed."; return false;
+    }
+    if (!state->window || !IsWindow(state->window) || state->isRetired()) {
+        state->retire(); retireUI(state);
+        error = "Issue report native preview retired during initial presentation."; return false;
+    }
     const auto text = [&](int control) {
         HWND child = GetDlgItem(state->window, control);
         const int count = GetWindowTextLengthW(child);
@@ -624,6 +635,23 @@ bool jsti_issue_report_self_test(std::string &error) {
     }
     struct Observation { int event = 0, included = -1; std::string ticket; } observed;
     const auto originalCallback = actionCallback; void *originalContext = actionContext;
+    actionCallback = [](int event, const char *ticket, int included, void *context) {
+        auto *observed = static_cast<Observation *>(context);
+        observed->event = event; observed->included = included; observed->ticket = ticket;
+    };
+    actionContext = &observed;
+    const HWND focusedWindow = state->window;
+    for (int control : {draftText, jsonText}) {
+        const HWND edit = GetDlgItem(focusedWindow, control);
+        SetFocus(edit);
+        SendMessageW(focusedWindow, WM_COMMAND, MAKEWPARAM(control, EN_SETFOCUS), reinterpret_cast<LPARAM>(edit));
+        SendMessageW(focusedWindow, WM_COMMAND, MAKEWPARAM(control, EN_UPDATE), reinterpret_cast<LPARAM>(edit));
+    }
+    actionCallback = originalCallback; actionContext = originalContext;
+    if (!IsWindow(focusedWindow) || state->window != focusedWindow || state->isRetired() || observed.event != 0) {
+        state->retire(); retireUI(state);
+        error = "Issue report edit notifications retired the active preview."; return false;
+    }
     actionCallback = [](int event, const char *ticket, int included, void *context) {
         auto *observed = static_cast<Observation *>(context);
         observed->event = event; observed->included = included; observed->ticket = ticket;
@@ -710,6 +738,35 @@ bool jsti_issue_report_self_test(std::string &error) {
         retireUI(state); error = "Issue report retirement/once-only/origin validation failed."; return false;
     }
     retireUI(state);
+    // Standard cancellation and the real Close button still retire only their
+    // own preview. Record the callback without touching the host controller.
+    const HWND healthyOwner = ownerWindow;
+    for (int command : {IDCANCEL, static_cast<int>(closeButton)}) {
+        auto closing = std::make_shared<State>();
+        JSTIIssueReport closingReport{closing};
+        struct CloseObservation { int calls = 0, event = 0; std::string ticket; } closed;
+        actionCallback = [](int event, const char *ticket, int, void *context) {
+            auto *closed = static_cast<CloseObservation *>(context);
+            ++closed->calls; closed->event = event; closed->ticket = ticket;
+        };
+        actionContext = &closed;
+        if (jsti_issue_report_present(&closingReport, id, "Close fixture", "Safe draft", "{}", "", "", 1, 0, 0) != 0 ||
+            !presentUI(closing) || !closing->window) {
+            actionCallback = originalCallback; actionContext = originalContext;
+            closing->retire(); retireUI(closing);
+            error = "Issue report explicit-close fixture presentation failed."; return false;
+        }
+        const HWND closingWindow = closing->window;
+        if (command == closeButton) SendDlgItemMessageW(closingWindow, closeButton, BM_CLICK, 0, 0);
+        else SendMessageW(closingWindow, WM_COMMAND, MAKEWPARAM(IDCANCEL, 0), 0);
+        actionCallback = originalCallback; actionContext = originalContext;
+        if (!closing->isRetired() || closing->window || IsWindow(closingWindow) ||
+            closed.calls != 1 || closed.event != JSTI_EVENT_ISSUE_REPORT_CLOSE || closed.ticket != id ||
+            ownerWindow != healthyOwner || !IsWindow(healthyOwner)) {
+            closing->retire(); retireUI(closing);
+            error = "Issue report explicit close lost preview or host ownership."; return false;
+        }
+    }
     // A distinct pending session proves loop shutdown settles an accepted
     // callback without dispatching it. Restore the owned smoke host afterwards.
     const HWND owner = ownerWindow;

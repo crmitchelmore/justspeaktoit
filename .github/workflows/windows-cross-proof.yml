@@ -200,6 +200,29 @@ jobs:
       - name: Verify artifact identity and run Foundation assertions
         shell: pwsh
         run: |
+          # Only the exact Process returned by Start-Process is touched. A
+          # joined parent is not evidence that descendant processes exited.
+          function Complete-FoundationTimeoutCleanup($Process) {
+            $record = [ordered]@{
+              schema = 1; label = 'foundation'; timedOut = $true
+              scope = 'returned-process-only'; waitMilliseconds = 5000
+              killStatus = 'failed'; waitStatus = 'failed'; disposeStatus = 'failed'
+            }
+            try {
+              try { [void] $Process.Kill(); $record.killStatus = 'requested' } catch { }
+              # Kill is asynchronous. Even a kill/exit race still gets one
+              # bounded join; no PID lookup, tree kill, retry or infinite wait.
+              try {
+                $joined = $Process.WaitForExit(5000)
+                if ($joined -is [bool]) {
+                  $record.waitStatus = if ($joined) { 'exited' } else { 'not-exited' }
+                }
+              } catch { }
+            } finally {
+              try { [void] $Process.Dispose(); $record.disposeStatus = 'disposed' } catch { }
+            }
+            return $record
+          }
           $metadata = Get-Content proof/build-metadata.json -Raw | ConvertFrom-Json
           if ($metadata.host -ne 'Darwin' -or $metadata.target -ne 'x86_64-unknown-windows-msvc') {
             throw 'Unexpected build provenance.'
@@ -213,7 +236,15 @@ jobs:
             -PassThru -NoNewWindow -RedirectStandardOutput proof/windows-proof.log `
             -RedirectStandardError proof/windows-proof-errors.log
           if (-not $process.WaitForExit(30000)) {
-            $process.Kill()
+            try {
+              $cleanup = Complete-FoundationTimeoutCleanup $process
+              $json = $cleanup | ConvertTo-Json -Depth 3 -Compress
+              # Cleanup and evidence cannot replace the original timeout.
+              Write-Host ("JSTI_CROSS_TIMEOUT_CLEANUP:" + $json)
+              Add-Content -LiteralPath 'proof/windows-timeout-cleanup.log' -Value $json -Encoding utf8 -ErrorAction Stop
+            } catch {
+              try { Write-Host 'JSTI_CROSS_TIMEOUT_CLEANUP_UNAVAILABLE' } catch { }
+            }
             throw 'Foundation runtime proof exceeded 30 seconds.'
           }
           Get-Content proof/windows-proof.log

@@ -1162,6 +1162,9 @@ final class MainManager: ObservableObject {
             Task { @MainActor in
               self?.hudManager.updateStreamingText(accumulatedText)
             }
+          },
+          onDiagnostic: { [weak self] in
+            Self.retainPostProcessingDiagnostic($0, for: session, activeSession: self?.activeSession)
           }
         )
         guard sessionProcessingShouldContinue(session) else { return }
@@ -1557,7 +1560,10 @@ final class MainManager: ObservableObject {
     let outcomeResult = await postProcessingManager.process(
       rawText: postProcessingInput,
       context: retryData.lexiconContext,
-      corrections: retryData.personalCorrections
+      corrections: retryData.personalCorrections,
+      onDiagnostic: { [weak self] in
+        Self.retainPostProcessingDiagnostic($0, for: session, activeSession: self?.activeSession)
+      }
     )
 
     switch outcomeResult {
@@ -1845,6 +1851,9 @@ final class MainManager: ObservableObject {
             Task { @MainActor in
               self?.hudManager.updateStreamingText(accumulatedText)
             }
+          },
+          onDiagnostic: { [weak self] in
+            Self.retainPostProcessingDiagnostic($0, for: session, activeSession: self?.activeSession)
           }
         )
         switch outcomeResult {
@@ -1958,7 +1967,25 @@ extension MainManager {
       providerLabel: context.providerLabel, latencyTier: context.latencyTier,
       transcriptionMode: context.transcriptionMode, transcriptionModel: context.transcriptionModel,
       postProcessingModel: context.postProcessingModel, speedMode: context.speedMode,
-      requestContext: context.requestContext, observedHandoff: handoff, requestFailure: failure
+      requestContext: context.requestContext, observedHandoff: handoff, requestFailure: failure,
+      postProcessingObservation: context.postProcessingObservation
+    )
+  }
+
+  static func retainPostProcessingDiagnostic(
+    _ observation: RequestDiagnosticContext.PostProcessingObservation,
+    for session: ActiveSession, activeSession: ActiveSession?
+  ) {
+    guard activeSession === session, !Task.isCancelled, let context = session.diagnosticContext else { return }
+    session.diagnosticContext = HistoryDiagnosticContext(
+      capturedAt: context.capturedAt, appVersion: context.appVersion, appBuild: context.appBuild,
+      operatingSystem: context.operatingSystem, processIdentifier: context.processIdentifier,
+      microphonePermission: context.microphonePermission, inputDeviceName: context.inputDeviceName,
+      providerLabel: context.providerLabel, latencyTier: context.latencyTier,
+      transcriptionMode: context.transcriptionMode, transcriptionModel: context.transcriptionModel,
+      postProcessingModel: context.postProcessingModel, speedMode: context.speedMode,
+      requestContext: context.requestContext, observedHandoff: context.observedHandoff,
+      requestFailure: context.requestFailure, postProcessingObservation: observation
     )
   }
 

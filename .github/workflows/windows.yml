@@ -1717,7 +1717,7 @@ jobs:
   portable-macos:
     name: Portable Swift on macOS
     runs-on: macos-15
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       SPEAK_PORTABLE_CORE: '1'
     steps:

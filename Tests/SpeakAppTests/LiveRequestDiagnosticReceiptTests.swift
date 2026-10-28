@@ -8,7 +8,7 @@ final class LiveRequestDiagnosticReceiptTests: XCTestCase {
     func testActualInvocationFreezesConfiguredArgumentsBeforeHeldStart() async throws {
         let held = LiveDiagnosticHeldStart()
         var selectedModel = "deepgram/nova-3-streaming"
-        var selectedLanguage = "en"
+        var selectedLanguage = "en_GB"
         let configuredModel = selectedModel
         let configuredLanguage = selectedLanguage
         var observations: [RequestDiagnosticContext] = []
@@ -24,7 +24,7 @@ final class LiveRequestDiagnosticReceiptTests: XCTestCase {
         self.own(task, held: held, exit: exit)
         await fulfillment(of: [held.entered], timeout: 2)
         selectedModel = "openai/gpt-live-transcribe-streaming"
-        selectedLanguage = "fr"
+        selectedLanguage = "fr_FR"
         XCTAssertNotEqual(selectedModel, configuredModel)
         XCTAssertNotEqual(selectedLanguage, configuredLanguage)
         XCTAssertEqual(held.calls, 1)

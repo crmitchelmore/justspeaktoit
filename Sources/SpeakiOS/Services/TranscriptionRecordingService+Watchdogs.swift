@@ -85,10 +85,10 @@ extension TranscriptionRecordingService {
             SpeakLogger.transcription.error(
                 "Capture watchdog: start stalled after \(stage?.rawValue ?? "no boundary", privacy: .public)"
             )
-            await abandonStart(iOSTranscriptionError.startTimedOut(after: stage))
+            await abandonStart(iOSTranscriptionError.startTimedOut(after: stage), run: run)
         case .noInput:
             SpeakLogger.transcription.error("Capture watchdog: the input tap delivered no buffer")
-            await handleSilentMicrophone()
+            await handleSilentMicrophone(run: run)
         case .maximumDurationWarning:
             publishMaximumDurationWarning()
             // The warning is not terminal, so the tick has to keep running.
@@ -130,8 +130,9 @@ extension TranscriptionRecordingService {
     /// path: it retires the run and waits for it to release everything it
     /// allocated. The error is published first so the app raises it on next
     /// foreground rather than leaving the user with a card that simply vanished.
-    private func abandonStart(_ error: Error) async {
+    private func abandonStart(_ error: iOSTranscriptionError, run: UUID) async {
         guard state == .starting else { return }
+        retainStartupWatchdogFailure(error, run: run)
         lastSessionError = error
         await stopRecording(selection: resolvedStopSelection())
     }
@@ -142,13 +143,14 @@ extension TranscriptionRecordingService {
     /// transcribed are finalised, the destination is honoured and History is
     /// written. A start that has not gone live yet has nothing to finalise and
     /// is retired instead.
-    private func handleSilentMicrophone() async {
+    private func handleSilentMicrophone(run: UUID) async {
         lastSessionError = iOSTranscriptionError.microphoneDeliveredNoAudio
         if state == .recording {
             await finishCaptureAfterDisruption(
                 stoppedMessage: iOSTranscriptionError.microphoneDeliveredNoAudio.localizedDescription
             )
         } else if state == .starting {
+            retainStartupWatchdogFailure(.microphoneDeliveredNoAudio, run: run)
             await stopRecording(selection: resolvedStopSelection())
         }
     }

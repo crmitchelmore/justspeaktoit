@@ -1,5 +1,6 @@
 #if os(iOS)
 import AppIntents
+import Foundation
 import SpeakCore
 
 // App Intent declarations intentionally stay together so Shortcuts metadata and
@@ -100,27 +101,50 @@ func startRecordingContinuingInForegroundIfNeeded(
     endPointing: CaptureEndPointingRequest? = nil
 ) async throws {
     let service = await TranscriptionRecordingService.shared
-    let configurationRequest = await CaptureConfigurationRequest()
-    do {
-        try await service.startRecording(
-            trigger: trigger,
-            parameters: parameters,
-            endPointing: endPointing,
-            destination: nil,
-            entry: entry,
-            configurationRequest: configurationRequest
-        )
-    } catch iOSTranscriptionError.liveActivityUnavailable {
-        try await intent.requestToContinueInForeground {
-            try await TranscriptionRecordingService.shared.startRecording(
+    try await startRecordingWithForegroundRecovery(
+        service: service,
+        start: { request in
+            try await service.startRecording(
                 trigger: trigger,
                 parameters: parameters,
                 endPointing: endPointing,
                 destination: nil,
                 entry: entry,
-                configurationRequest: configurationRequest
+                configurationRequest: request
             )
+        },
+        continueInForeground: { continuation in
+            try await intent.requestToContinueInForeground(continuation: continuation)
         }
+    )
+}
+
+/// The same two-attempt owner, with private operations injectable for local lifecycle tests.
+/// A foreground-framework error is not evidence that the user declined permission.
+@available(iOS 18, *)
+@MainActor
+func startRecordingWithForegroundRecovery(
+    service: TranscriptionRecordingService,
+    start: @escaping @MainActor (CaptureConfigurationRequest) async throws -> Void,
+    continueInForeground: (@escaping @MainActor () async throws -> Void) async throws -> Void
+) async throws {
+    let request = CaptureConfigurationRequest()
+    @MainActor func attempt() async throws {
+        // Configuration remains frozen across recovery; admission belongs to each attempt.
+        request.admittedRunID = nil
+        request.serviceStartReturnedNormally = false
+        try await start(request)
+        request.serviceStartReturnedNormally = true
+    }
+    do {
+        do {
+            try await attempt()
+        } catch iOSTranscriptionError.liveActivityUnavailable {
+            try await continueInForeground { try await attempt() }
+        }
+    } catch {
+        service.recordTerminalStartupFailure(error, request: request)
+        throw error
     }
 }
 

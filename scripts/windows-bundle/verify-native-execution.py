@@ -30,6 +30,7 @@ import pathlib
 import platform
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -172,6 +173,109 @@ def save_evidence(path, evidence):
     os.replace(temporary, path)
 
 
+# Fixed local SDK/system candidates only: no PATH search, registry or directory scan.
+DIAGNOSTIC_CANDIDATES = tuple(
+    ("sdk10-%s-%s" % (arch, tool), r"C:\Program Files (x86)\Windows Kits\10\Debuggers" +
+     "\\" + arch + "\\" + tool + ".exe")
+    for arch in ("arm64", "x64", "x86") for tool in ("gflags", "cdb", "windbg")
+) + (("system32-appverif", r"C:\Windows\System32\appverif.exe"),
+     ("syswow64-appverif", r"C:\Windows\SysWOW64\appverif.exe"))
+DIAGNOSTIC_FILE_LIMIT = 32 * 1024 * 1024
+DIAGNOSTIC_TOTAL_LIMIT = 64 * 1024 * 1024
+
+
+def numeric_file_version(path):
+    """Read numeric VS_FIXEDFILEINFO only; never load/execute the candidate image."""
+    if os.name != "nt":
+        return None
+    import ctypes
+    from ctypes import wintypes
+    api = ctypes.WinDLL("version.dll", winmode=0x800)  # LOAD_LIBRARY_SEARCH_SYSTEM32
+    api.GetFileVersionInfoSizeW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(wintypes.DWORD)]
+    api.GetFileVersionInfoSizeW.restype = wintypes.DWORD
+    api.GetFileVersionInfoW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p]
+    api.GetFileVersionInfoW.restype = wintypes.BOOL
+    api.VerQueryValueW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR,
+                                  ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(wintypes.UINT)]
+    api.VerQueryValueW.restype = wintypes.BOOL
+    size = api.GetFileVersionInfoSizeW(str(path), None)
+    if not 0 < size <= 65536:
+        return None
+    buffer = ctypes.create_string_buffer(size)
+    if not api.GetFileVersionInfoW(str(path), 0, size, buffer):
+        return None
+    address, length = ctypes.c_void_p(), wintypes.UINT()
+    if not api.VerQueryValueW(buffer, "\\", ctypes.byref(address), ctypes.byref(length)):
+        return None
+    # VS_FIXEDFILEINFO is thirteen DWORDs. Validate the returned in-buffer view.
+    byte_count = 13 * ctypes.sizeof(wintypes.DWORD)
+    if length.value < byte_count or not address.value or not (
+            ctypes.addressof(buffer) <= address.value <= ctypes.addressof(buffer) + size - byte_count):
+        return None
+    values = (wintypes.DWORD * 13).from_address(address.value)
+    if values[0] != 0xFEEF04BD:
+        return None
+    return [values[2] >> 16, values[2] & 65535, values[3] >> 16, values[3] & 65535]
+
+
+def diagnostic_tools(read_version=numeric_file_version, clock=time.monotonic):
+    """Optional fixed-path metadata; absence never asserts global tool absence."""
+    if os.name != "nt":
+        return {"status": "unsupported", "tools": []}
+    rows, remaining, started = [], DIAGNOSTIC_TOTAL_LIMIT, clock()
+    for candidate, location in DIAGNOSTIC_CANDIDATES:
+        row = {"candidate": candidate, "status": "unknown", "present": None}
+        rows.append(row)
+        if clock() - started > 3 or remaining <= 0:
+            continue
+        try:
+            path = pathlib.Path(location)
+            before = path.lstat()
+            if not stat.S_ISREG(before.st_mode) or getattr(before, "st_file_attributes", 0) & 0x400:
+                continue  # No reparse-point/alias candidates or directory traversal.
+            row["present"] = True
+            limit = min(DIAGNOSTIC_FILE_LIMIT, remaining)
+            if not 0 < before.st_size <= limit:
+                continue
+            with path.open("rb") as stream:
+                requested = min(before.st_size + 1, limit)
+                remaining -= requested  # Failed reads may have consumed bytes; retain their reservation.
+                data = stream.read(requested)
+                remaining = max(0, remaining + requested - len(data))
+                after = os.fstat(stream.fileno())
+            if len(data) != before.st_size or (before.st_ino, before.st_mtime_ns, before.st_size) != (
+                    after.st_ino, after.st_mtime_ns, after.st_size):
+                continue
+            row.update(status="present", bytes=len(data), sha256=hashlib.sha256(data).hexdigest(),
+                       architecture="unknown", version=None)
+            try:
+                image = windows_pe.PEImage(data, "diagnostic-tool")
+                if image.architecture in ("x86", "x64", "arm", "arm64", "arm64ec", "arm64x"):
+                    row["architecture"] = image.architecture
+            except (windows_pe.PEFormatError, ValueError):
+                pass
+            try:
+                version = read_version(path)
+                if isinstance(version, (list, tuple)) and len(version) == 4 and all(
+                        type(v) is int and 0 <= v <= 65535 for v in version):
+                    row["version"] = list(version)
+            except Exception:
+                pass  # No version/error strings are evidence.
+            final = path.stat()
+            if (after.st_ino, after.st_mtime_ns, after.st_size) != (
+                    final.st_ino, final.st_mtime_ns, final.st_size):
+                row.clear()
+                row.update(candidate=candidate, status="unknown", present=None)
+        except (FileNotFoundError, PermissionError) as error:
+            row.clear()
+            row.update(candidate=candidate, status="absent" if isinstance(error, FileNotFoundError) else "denied",
+                       present=False if isinstance(error, FileNotFoundError) else None)
+        except Exception:
+            row.clear()
+            row.update(candidate=candidate, status="unknown", present=None)
+    return {"status": "inspected", "coverage": "fixed-sdk10-system-candidates-only", "tools": rows}
+
+
 def check_host(api, architecture, toolchain=()):
     """The OS must be native ``architecture``; toolchain images are recorded, not required."""
     expected = windows_targets.target(architecture)["processMachine"]
@@ -187,6 +291,10 @@ def check_host(api, architecture, toolchain=()):
               "toolchain": [describe_image(path, architecture) for path in toolchain]}
     if native != expected:
         raise ExecutionError("the host's native machine is %s, not %s" % (machine_name(native), machine_name(expected)))
+    try:
+        record["diagnosticTools"] = diagnostic_tools()
+    except Exception:
+        record["diagnosticTools"] = {"status": "unavailable", "tools": []}
     return record
 
 

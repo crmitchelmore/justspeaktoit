@@ -172,7 +172,17 @@ jobs:
         run: |
           $bin = (swift build --configuration release --show-bin-path).Trim()
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -B scripts/windows-bundle/stage-native-app.py --architecture arm64 --bin-path $bin --output windows-arm64-app
+          # Only the installed Swift toolchain's sibling is eligible; no PATH/tool download fallback.
+          $swiftPath = (Get-Command swift.exe -ErrorAction Stop).Source
+          $objcopy = Join-Path (Split-Path -Parent $swiftPath) 'llvm-objcopy.exe'
+          $symbols = @()
+          if (Test-Path -LiteralPath $objcopy -PathType Leaf) {
+            # The stager verifies regular-file/native-PE identity before execution and hashes after validation.
+            $symbols = @('--strip-tool', $objcopy)
+          } else {
+            Write-Host 'Production symbols: not-optimized (Swift sibling llvm-objcopy.exe absent).'
+          }
+          python -B scripts/windows-bundle/stage-native-app.py --architecture arm64 --bin-path $bin --output windows-arm64-app @symbols
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -B scripts/windows-bundle/verify-native-execution.py --architecture arm64 --evidence $env:NATIVE_EVIDENCE `
             images windows-arm64-app/SpeakWindows.exe windows-arm64-app/speak.exe

@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 import { runReleaseCommand as run } from './release-command.mjs';
 import { validateManifest } from './release-train-lib.mjs';
-import { desktopWorkflows, latestDesktopRun, reusableDesktopRun, validateDesktopReceipt } from './desktop-release-lib.mjs';
+import { desktopDownloads, desktopWorkflows, latestDesktopRun, liveArtifact, reusableDesktopRun, validateDesktopReceipt } from './desktop-release-lib.mjs';
+import { publishDesktopDownloads } from './publish-desktop-downloads.mjs';
 
 const repo = process.env.GITHUB_REPOSITORY ?? 'crmitchelmore/justspeaktoit';
 const tag = process.argv[2];
@@ -24,7 +25,11 @@ const project = observed => ({...Object.fromEntries(
 for (const workflow of desktopWorkflows) {
     const pages = JSON.parse(gh('api', '--paginate', '--slurp',
         `repos/${repo}/actions/workflows/${workflow}/runs?event=push&branch=main&head_sha=${manifest.source}&per_page=100`));
-    const existing = reusableDesktopRun(pages.flatMap(page => page.workflow_runs), manifest, workflow, repo);
+    let existing = reusableDesktopRun(pages.flatMap(page => page.workflow_runs), manifest, workflow, repo);
+    // Published downloads come from the qualifying run, so its bundle must not have expired.
+    const download = desktopDownloads.find(spec => spec.workflow === workflow);
+    if (existing && download && !liveArtifact(JSON.parse(gh('api',
+        `repos/${repo}/actions/runs/${existing.id}/artifacts?per_page=100`)).artifacts, download.artifact)) existing = undefined;
     if (existing) {
         runs[workflow] = project(existing);
         pending.delete(workflow);
@@ -46,8 +51,9 @@ while (pending.size) {
     }
     if (pending.size) await setTimeout(30_000);
 }
+const downloads = publishDesktopDownloads(manifest, runs);
 const receipt = validateDesktopReceipt(manifest, {status: 'verified', source: manifest.source,
-    tag, build: manifest.build, checkedAt: new Date().toISOString(), runs});
+    tag, build: manifest.build, checkedAt: new Date().toISOString(), runs, downloads});
 const directory = mkdtempSync(join(tmpdir(), 'desktop-release-'));
 const path = join(directory, 'desktop-qualification.json');
 writeFileSync(path, JSON.stringify(receipt, null, 2) + '\n');

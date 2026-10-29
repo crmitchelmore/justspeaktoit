@@ -10,6 +10,9 @@ export default {
       '/alpha/download/universal': 'JustSpeakToItAlpha-universal.dmg',
       '/alpha/cli/speak-cli-manifest.json': 'speak-cli-manifest.json',
       '/alpha/cli/speak-cli-manifest.json.sig': 'speak-cli-manifest.json.sig',
+      '/alpha/download/windows-x64': 'JustSpeakToIt-windows-x64-developer.zip',
+      '/alpha/download/windows-arm64': 'JustSpeakToIt-windows-arm64-developer.zip',
+      '/alpha/download/linux-x86_64': 'JustSpeakToIt-linux-x86_64.flatpak',
     };
     if (!Object.hasOwn(assets, path)) return env.ASSETS.fetch(request);
     const response = await fetch('https://github.com/crmitchelmore/justspeaktoit/releases/download/alpha-latest/alpha-pointer.json', {
@@ -21,8 +24,15 @@ export default {
       return new Response('Invalid Alpha pointer', {status: 503});
     }
     if (!pointer || typeof pointer !== 'object' || !/^alpha-build-[1-9][0-9]*$/.test(pointer.tag)) return new Response('Invalid Alpha pointer', {status: 503});
+    const location = `https://github.com/crmitchelmore/justspeaktoit/releases/download/${pointer.tag}/${assets[path]}`;
+    // Windows and Linux downloads exist only on Alphas whose desktop qualification
+    // published them; never redirect to a missing asset.
+    if (/^\/alpha\/download\/(windows|linux)-/.test(path)) {
+      const probe = await fetch(location, {method: 'HEAD', redirect: 'manual', cf: {cacheTtl: 30}});
+      if (probe.status !== 302) return new Response('Desktop Alpha build not yet available', {status: 503});
+    }
     return new Response(null, {status: 302, headers: {
-      Location: `https://github.com/crmitchelmore/justspeaktoit/releases/download/${pointer.tag}/${assets[path]}`,
+      Location: location,
       'Cache-Control': 'public, max-age=30',
     }});
   },

@@ -223,9 +223,22 @@ source as the Apple builds, including its pinned runtime dependencies.
 The controller records exact workflow run IDs, source, tag and build in
 `desktop-qualification.json` only after every workflow succeeds. Publish Stable
 requires that matching receipt for new manifests. Existing frozen manifests are
-unchanged. These builds remain CI developer artifacts; qualification does not
-publish installers or establish signing, physical-device acceptance, update
-channels, feature parity or separate Alpha/Stable Windows and Linux identities.
+unchanged. Before writing the receipt, the controller copies the qualifying
+runs' Windows x64 and ARM64 runtime bundles and the Linux x86_64 Flatpak onto
+the manifest release as `JustSpeakToIt-windows-x64-developer.zip`,
+`JustSpeakToIt-windows-arm64-developer.zip` and
+`JustSpeakToIt-linux-x86_64.flatpak`, after checking each file's SHA-256 and
+source commit against that run's own bundle evidence or Flatpak provenance.
+The receipt records each download's run, architecture, size and digest. Workflow
+artifacts expire after 14 days, so a reusable main run whose bundle has expired
+is dispatched again rather than reused. `node scripts/publish-desktop-downloads.mjs <tag>`
+backfills an already verified release from its receipt's runs. The website's
+`/alpha/download/windows-x64`, `/alpha/download/windows-arm64` and
+`/alpha/download/linux-x86_64` follow the Alpha pointer and answer 503 when that
+Alpha has no published desktop download. These remain unsigned developer
+builds; qualification does not publish installers or establish signing,
+physical-device acceptance, update channels, feature parity or separate
+Alpha/Stable Windows and Linux identities.
 No separate public Windows/Linux version inputs are introduced yet: the
 immutable manifest tag and build identify the developer qualification source.
 Public platform versions and download links belong with those distribution

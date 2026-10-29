@@ -4453,11 +4453,15 @@ static bool cleanupPreviewSelfTest(HWND window) {
     applyUpdate(window);
     jsti_smoke_stage("window.cleanup-preview.initial-update.returned");
     const uint64_t first = jsti_window_begin_cleanup_preview();
+    jsti_smoke_stage("window.cleanup-preview.first-begin.returned");
     bool okay = jsti_window_cleanup_preview("first", first) == 0 &&
         jsti_window_cleanup_preview("latest", first) == 0;
+    jsti_smoke_stage("window.cleanup-preview.first-pair.returned");
     applyUpdate(window);
+    jsti_smoke_stage("window.cleanup-preview.first-update.returned");
     wchar_t actual[128] = {};
     GetDlgItemTextW(window, transcriptID, actual, 128);
+    jsti_smoke_stage("window.cleanup-preview.first-read.returned");
     okay = okay && wcscmp(actual, L"latest") == 0 && !IsWindowEnabled(GetDlgItem(window, copyID));
     jsti_smoke_stage("window.cleanup-preview.first-preview.returned");
     showPage(window, generalPage);

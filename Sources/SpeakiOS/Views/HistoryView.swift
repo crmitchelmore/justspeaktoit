@@ -14,6 +14,7 @@ public struct HistoryView: View {
     @State private var showingClearConfirmation = false
     @State private var showSkeletonLoading = false
     @State private var showingFilters = false
+    @State private var issueReport: IOSIssueReportController?
     @State private var searchText = ""
     @State private var errorsOnly = false
     @State private var selectedModel: String?
@@ -101,6 +102,7 @@ public struct HistoryView: View {
         .refreshable {
             await historyManager.triggerSync()
         }
+        .sheet(item: $issueReport) { IOSIssueReportPreview(controller: $0) }
         .task { await historyManager.loadIfNeededAndWait() }
         .onReceive(historyManager.$items) { items in
             // Published emits before the manager's stored value changes.
@@ -203,7 +205,10 @@ public struct HistoryView: View {
                             )
                         },
                         onReprocess: { Task { await historyManager.reprocess(item) } },
-                        onDelete: { Task { await historyManager.removeAndWait(item) } }
+                        onDelete: { Task { await historyManager.removeAndWait(item) } },
+                        onReport: {
+                            issueReport = IOSIssueReportController(snapshot: IOSIssueReporter.snapshot(for: item))
+                        }
                     )
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         Button(role: .destructive) {

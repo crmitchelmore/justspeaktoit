@@ -28,6 +28,8 @@ enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPla
     typealias LocalModelsState = WindowsLocalModelsState
     typealias LocalRuntime = WindowsWhisperRuntime
 
+    package static var issueReportActions: DesktopHostIssueReportActions? { WindowsIssueReportBridge.actions() }
+
     package static let displayName = "Windows"
     package static let credentialStoreName = "Windows Credential Manager"
     package static func requireVoiceAudioFormat(_ format: VoiceAudioFormat, sampleRate: Int) async throws {

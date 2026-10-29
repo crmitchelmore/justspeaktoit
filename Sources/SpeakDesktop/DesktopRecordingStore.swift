@@ -245,6 +245,14 @@ public actor DesktopRecordingStore {
     /// Exports text captured from the visible transcript before an async action
     /// or save dialog. Later retries cannot change the content the user chose.
     public func exportTranscriptSnapshot(_ text: String, to destination: URL) throws {
+        _ = try exportTranscriptSnapshot(text, to: destination, admitting: { true })
+    }
+
+    /// A retired request may refuse a queued write after protected-path validation.
+    /// Admission is synchronous: an atomic write already admitted may finish.
+    package func exportTranscriptSnapshot(
+        _ text: String, to destination: URL, admitting: @Sendable () -> Bool
+    ) throws -> Bool {
         // A save dialog can accept a manually typed path. Never replace the
         // retained audio/metadata with its exported transcript.
         let root = directory.resolvingSymlinksInPath().standardizedFileURL
@@ -254,7 +262,9 @@ public actor DesktopRecordingStore {
         }), audioLocations?.protectsAudioDestination(target) != true else {
             throw CocoaError(.fileWriteNoPermission)
         }
+        guard admitting() else { return false }
         try Data(text.utf8).write(to: destination, options: .atomic)
+        return true
     }
 
     /// Called once at launch, before capture starts. Recoverable recordings are

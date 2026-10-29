@@ -76,7 +76,7 @@ def parse_response(response):
 
 def plain(value):
     # Model text is untrusted: prevent HTML, images, links and notification mentions.
-    return str(value).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('@', '@\u200b').replace('[', '\\[').replace('`', "'")
+    return str(value).replace(chr(92), chr(92) * 2).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('@', '@\u200b').replace('[', '\\[').replace('`', "'")
 
 
 def render(data, selected, omitted, sha, usage):

@@ -1868,7 +1868,9 @@ private extension TranscriptionRecordingService {
             // than one that was merely attempted (issue #945). Re-writing
             // after another app copied is the clipboard theft #1031 removed.
             polishClipboard.copyRaw(clipboardText)
-            clipboardWriteSucceeded = await Self.clipboardHolds(clipboardText)
+            clipboardWriteSucceeded = await Self.clipboardHolds(clipboardText) { [polishClipboard] in
+                polishClipboard.string
+            }
         }
 
         // Keyboard handoffs keep their result solely in the nonce-scoped store.
@@ -1889,9 +1891,9 @@ private extension TranscriptionRecordingService {
     ///
     /// - Returns: whether the value was read back. A `false` here is the only
     ///   thing that stops the receipt saying "Copied".
-    static func clipboardHolds(_ text: String) async -> Bool {
+    static func clipboardHolds(_ text: String, read: () -> String?) async -> Bool {
         for attempt in 0..<3 {
-            if UIPasteboard.general.string == text { return true }
+            if read() == text { return true }
             await Task.yield()
             if attempt < 2 {
                 try? await Task.sleep(for: .milliseconds(80))

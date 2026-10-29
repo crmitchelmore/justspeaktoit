@@ -5,6 +5,8 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import signal
+import threading
 import sys
 import tempfile
 import textwrap
@@ -18,7 +20,8 @@ MANIFEST = "// swift-tools-version: 5.9\n// SpeakWatchCore is mentioned, but thi
 
 class APICompatibilityTests(unittest.TestCase):
     def run_gate(self, products=None, raw_json=None, dump_status=0, diagnose_status=0,
-                 diagnostic="Compatible", title="fix: preserve API", missing_baseline=False):
+                 diagnostic="Compatible", title="fix: preserve API", missing_baseline=False,
+                 stream_before_release=False, logging_failure=None):
         with tempfile.TemporaryDirectory(prefix="api gate ") as directory:
             root = Path(directory)
             repository = root / "repository"
@@ -68,10 +71,30 @@ class APICompatibilityTests(unittest.TestCase):
                     raise SystemExit("Unexpected Swift command: " + repr(args))
                 with open(os.environ["CALLS"], "a", encoding="utf-8") as stream:
                     stream.write(json.dumps(call) + "\\n")
+                release = os.environ.get("STREAM_RELEASE")
+                if args[:2] == ["package", "diagnose-api-breaking-changes"] and release:
+                    import time
+                    print("streaming-fixture-prefix", flush=True)
+                    deadline = time.monotonic() + 5
+                    while not Path(release).exists():
+                        if time.monotonic() >= deadline:
+                            raise SystemExit(19)
+                        time.sleep(0.01)
                 print(result)
                 raise SystemExit(status)
             """))
             swift.chmod(0o755)
+            if logging_failure:
+                failed_tool = binaries / ("tee" if logging_failure == "write" else "cat")
+                failed_tool.write_text(f"#!{sys.executable}\n" + textwrap.dedent("""\
+                    import sys
+                    if len(sys.argv) == 2 and sys.argv[0].endswith("tee"):
+                        data = sys.stdin.buffer.read()
+                        sys.stdout.buffer.write(data)
+                        sys.stdout.buffer.flush()
+                    raise SystemExit(23)
+                """), encoding="utf-8")
+                failed_tool.chmod(0o755)
             calls_file = root / "calls.jsonl"
             diagnostic_file = root / "diagnostic.txt"
             diagnostic_file.write_text(diagnostic)
@@ -89,16 +112,84 @@ class APICompatibilityTests(unittest.TestCase):
                 "DIAGNOSTIC_PATH": str(diagnostic_file),
                 "PR_TITLE": title,
             }
-            result = subprocess.run(
-                ["bash", str(SCRIPT), baseline], cwd=repository, env=environment,
-                capture_output=True, text=True, timeout=10
-            )
+            if stream_before_release:
+                release = root / "release"
+                environment["STREAM_RELEASE"] = str(release)
+                result = self.observe_stream_before_release(repository, baseline, environment, release)
+            else:
+                result = subprocess.run(
+                    ["bash", str(SCRIPT), baseline], cwd=repository, env=environment,
+                    capture_output=True, text=True, timeout=10
+                )
             calls = [json.loads(line) for line in calls_file.read_text().splitlines()] if calls_file.exists() else []
             for call in calls:
                 if "directory" in call:
                     self.assertEqual(call["manifest"], MANIFEST, "must evaluate the actual baseline manifest")
                     self.assertFalse(Path(call["directory"]).exists(), "disposable manifest must be removed")
             return result, calls
+
+    def observe_stream_before_release(self, repository, baseline, environment, release):
+        lines = []
+        prefix_seen = threading.Event()
+        process = subprocess.Popen(
+            ["bash", str(SCRIPT), baseline], cwd=repository, env=environment,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+            start_new_session=os.name != "nt"
+        )
+
+        def read_output():
+            for line in process.stdout:
+                lines.append(line)
+                if line.rstrip("\n") == "streaming-fixture-prefix":
+                    prefix_seen.set()
+
+        reader = threading.Thread(target=read_output)
+        reader.start()
+        try:
+            self.assertTrue(prefix_seen.wait(2), "wrapper must stream before the owned tool is released")
+            self.assertIsNone(process.poll(), "the diagnostic tool must still be held")
+        finally:
+            release.write_text("release", encoding="utf-8")
+            try:
+                process.wait(timeout=7)
+            except subprocess.TimeoutExpired:
+                if os.name == "nt":
+                    process.kill()
+                else:
+                    os.killpg(process.pid, signal.SIGKILL)
+                process.wait(timeout=2)
+            reader.join(timeout=2)
+            process.stdout.close()
+        self.assertFalse(reader.is_alive(), "owned output reader must exit after the owned process")
+        return subprocess.CompletedProcess(process.args, process.returncode, "".join(lines), "")
+
+    def test_live_diagnostics_precede_owned_tool_release_without_duplicate_output(self):
+        diagnostic = "API breakage: removed WatchCaptureEnvelope\nerror: incomplete bounded fixture"
+        result, calls = self.run_gate(
+            diagnose_status=1, diagnostic=diagnostic, title="chore!: declared migration", stream_before_release=True
+        )
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.count("streaming-fixture-prefix"), 1)
+        self.assertEqual(result.stdout.count(diagnostic), 1)
+        self.assertIn("tool error; comparison is incomplete", result.stdout)
+        self.assertNotIn("allowing the declared migration", result.stdout)
+        self.assert_products(calls, EXISTING_PRODUCTS)
+
+    def test_logging_failures_refuse_success_or_waiver_and_preserve_nonzero_tool_status(self):
+        allowed = "API breakage: enumelement ConfigTransferError.payloadTooLarge has been added as a new enum case"
+        for failure in ["write", "read"]:
+            for status in [0, 1, 17]:
+                with self.subTest(failure=failure, status=status):
+                    result, _ = self.run_gate(
+                        diagnose_status=status, diagnostic=allowed, title="chore!: declared migration",
+                        logging_failure=failure
+                    )
+                    self.assertEqual(result.returncode, status or 1, result.stdout + result.stderr)
+                    message = "Unable to retain" if failure == "write" else "Unable to read retained"
+                    self.assertIn(message + " public API diagnostics", result.stderr)
+                    self.assertNotIn("Public API is compatible", result.stdout)
+                    self.assertNotIn("No unreviewed public API breakage", result.stdout)
+                    self.assertNotIn("allowing the declared migration", result.stdout)
 
     def assert_products(self, calls, expected):
         arguments = calls[-1]["arguments"]

@@ -31,3 +31,23 @@ test('Mac Alpha routes do not probe and unknown paths fall through to static ass
   assert.equal(mac.headers.get('Location'), `${release}/alpha-build-7/JustSpeakToItAlpha-arm64.dmg`);
   assert.equal(await (await serve('/alpha/other', [])).text(), 'static');
 });
+
+
+test('desktop Alpha routes return unavailable when the asset HEAD request rejects', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (url, init = {}) => {
+      if (url.endsWith('/alpha-latest/alpha-pointer.json')) return Response.json({tag: 'alpha-build-7'});
+      assert.equal(init.method, 'HEAD');
+      throw new TypeError('Network unavailable');
+    };
+    for (const platform of ['windows-x64', 'windows-arm64', 'linux-x86_64']) {
+      const response = await worker.fetch(new Request(`https://justspeaktoit.com/alpha/download/${platform}`), {});
+      assert.equal(response.status, 503);
+      assert.equal(response.headers.get('Location'), null);
+      assert.equal(await response.text(), 'Desktop Alpha build not yet available');
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

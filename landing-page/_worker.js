@@ -28,8 +28,12 @@ export default {
     // Windows and Linux downloads exist only on Alphas whose desktop qualification
     // published them; never redirect to a missing asset.
     if (/^\/alpha\/download\/(windows|linux)-/.test(path)) {
-      const probe = await fetch(location, {method: 'HEAD', redirect: 'manual', cf: {cacheTtl: 30}});
-      if (probe.status !== 302) return new Response('Desktop Alpha build not yet available', {status: 503});
+      try {
+        const probe = await fetch(location, {method: 'HEAD', redirect: 'manual', cf: {cacheTtl: 30}});
+        if (probe.status !== 302) return new Response('Desktop Alpha build not yet available', {status: 503});
+      } catch {
+        return new Response('Desktop Alpha build not yet available', {status: 503});
+      }
     }
     return new Response(null, {status: 302, headers: {
       Location: location,

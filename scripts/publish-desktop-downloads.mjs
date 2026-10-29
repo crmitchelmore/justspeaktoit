@@ -80,11 +80,24 @@ export function backfillDesktopDownloads(tag, command = run) {
     try {
         gh('release', 'download', tag, '--repo', repo, '--pattern', 'desktop-qualification.json', '--dir', directory);
         const path = join(directory, 'desktop-qualification.json');
-        const receipt = validateDesktopReceipt(manifest, json(path), repo);
+        const previousBytes = readFileSync(path);
+        const receipt = validateDesktopReceipt(manifest, JSON.parse(previousBytes), repo);
         const publication = publishDesktopDownloads(manifest, receipt.runs, command);
         const updated = validateDesktopReceipt(manifest, {...receipt, ...publication, checkedAt: new Date().toISOString()}, repo);
         writeFileSync(path, JSON.stringify(updated, null, 2) + '\n');
-        gh('release', 'upload', tag, path, '--repo', repo, '--clobber');
+        try {
+            gh('release', 'upload', tag, path, '--repo', repo, '--clobber');
+        } catch (uploadError) {
+            // --clobber deletes the old asset first; restore its exact bytes if
+            // replacement fails, while keeping the failed publication visible.
+            try {
+                writeFileSync(path, previousBytes);
+                gh('release', 'upload', tag, path, '--repo', repo, '--clobber');
+            } catch (restoreError) {
+                throw new AggregateError([uploadError, restoreError], 'Desktop receipt upload and restoration failed');
+            }
+            throw uploadError;
+        }
         return updated;
     } finally {
         rmSync(directory, {recursive: true, force: true});

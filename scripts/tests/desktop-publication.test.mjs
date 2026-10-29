@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
+import {chmodSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {basename, join} from 'node:path';
 import {backfillDesktopDownloads, publishDesktopDownloads} from '../publish-desktop-downloads.mjs';
 import {desktopDownloads, desktopWorkflows} from '../desktop-release-lib.mjs';
@@ -35,7 +35,7 @@ function fixture() {
     }));
     const state = {manifest, runs, live, artifacts, target:source,
         receipt:{status:'verified', source, tag:manifest.tag, build:manifest.build, runs},
-        commands:[], uploads:[], failUpload:undefined};
+        commands:[], uploads:[], failUpload:undefined, receiptFailures:0};
     state.command = (command, args) => {
         state.commands.push([command, ...args]);
         if (command === 'git' && args[0] === 'for-each-ref') return JSON.stringify(state.manifest);
@@ -64,6 +64,12 @@ function fixture() {
         if (args[0] === 'release' && args[1] === 'upload') {
             const name = basename(args[3]);
             if (state.failUpload === name) throw Error('Synthetic upload failure');
+            if (name === 'desktop-qualification.json' && state.receiptFailures > 0) {
+                state.receiptFailures--;
+                if (state.blockRestoreWrite) chmodSync(args[3], 0o400);
+                state.receipt = undefined; // Model gh --clobber deleting the old asset first.
+                throw Error('Synthetic receipt upload failure');
+            }
             const bytes = readFileSync(args[3]);
             state.uploads.push({tag:args[2], name, bytes});
             if (name === 'desktop-qualification.json') state.receipt = JSON.parse(bytes);
@@ -155,4 +161,43 @@ test('a failed asset upload never publishes a successful receipt', () => {
     assert.throws(() => backfillDesktopDownloads(f.manifest.tag, f.command), /Synthetic upload failure/);
     assert.equal(f.uploads.filter(x => x.name === 'desktop-qualification.json').length, 0);
     assert.equal(f.receipt.downloads, undefined);
+});
+
+
+test('failed replacement restores the exact prior receipt bytes and still fails publication', () => {
+    const f = fixture();
+    const original = JSON.stringify(f.receipt);
+    f.receiptFailures = 1;
+    assert.throws(() => backfillDesktopDownloads(f.manifest.tag, f.command), /Synthetic receipt upload failure/);
+    assert.equal(JSON.stringify(f.receipt), original);
+    assert.equal(f.uploads.at(-1).bytes.toString(), original);
+    assert.equal(f.commands.filter(x => x[1] === 'release' && x[2] === 'upload' &&
+        x[4].endsWith('/desktop-qualification.json')).length, 2);
+});
+
+test('failed receipt restoration reports both failures without returning a verified receipt', () => {
+    const f = fixture();
+    f.receiptFailures = 2;
+    assert.throws(() => backfillDesktopDownloads(f.manifest.tag, f.command), error => {
+        assert.ok(error instanceof AggregateError);
+        assert.equal(error.errors.length, 2);
+        assert.ok(error.errors.every(item => item.message === 'Synthetic receipt upload failure'));
+        return true;
+    });
+    assert.equal(f.receipt, undefined);
+});
+
+
+test('failed local receipt restoration retains the original upload failure', () => {
+    const f = fixture();
+    f.receiptFailures = 1;
+    f.blockRestoreWrite = true;
+    assert.throws(() => backfillDesktopDownloads(f.manifest.tag, f.command), error => {
+        assert.ok(error instanceof AggregateError);
+        assert.equal(error.errors.length, 2);
+        assert.equal(error.errors[0].message, 'Synthetic receipt upload failure');
+        assert.equal(error.errors[1].code, 'EACCES');
+        return true;
+    });
+    assert.equal(f.receipt, undefined);
 });

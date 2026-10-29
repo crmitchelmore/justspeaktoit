@@ -32,6 +32,11 @@ static_assert(!(JSTI_EVENT_USER_ABSENT >= 100 && JSTI_EVENT_USER_ABSENT <= 109) 
     !(JSTI_EVENT_USER_ABSENT >= 120 && JSTI_EVENT_USER_ABSENT <= 129),
     "Session absence must not be routed as a comparison action.");
 
+bool jsti_issue_report_attach(HWND owner, JSTIWindowCallback callback, void *context);
+void jsti_issue_report_shutdown();
+bool jsti_issue_report_message(MSG *message);
+bool jsti_issue_report_self_test(std::string &error);
+
 bool jsti_postprocessing_available();
 void jsti_show_postprocessing(HWND owner);
 bool jsti_settings_self_test(HWND owner, std::string &error);
@@ -187,6 +192,7 @@ constexpr int sourceLabelID = 89;
 constexpr int localModelsID = 174;
 constexpr int historyFiltersID = 460;
 constexpr int historyDeleteID = 461, historyClearID = 462;
+constexpr int issueReportID = 492;
 constexpr int recordingsFolderLabelID = 463, recordingsFolderID = 464;
 constexpr int audioCleanupID = 465;
 constexpr int backupAudioID = 466, backupExportID = 467;
@@ -794,6 +800,7 @@ void updateHistoryControls(HWND window, int recording) {
     for (int id : {retryID, openAudioID}) EnableWindow(GetDlgItem(window, id), selected && recording == 0);
     EnableWindow(GetDlgItem(window, historyCorrectionsID), selected && recording == 0 && state.historyPresentationReady);
     EnableWindow(GetDlgItem(window, exportID), selected && recording == 0 && state.historyPresentationReady);
+    EnableWindow(GetDlgItem(window, issueReportID), selected && recording == 0 && state.historyPresentationReady);
     EnableWindow(GetDlgItem(window, readAloudID), selected && recording == 0 && state.historyPresentationReady &&
         jsti_voice_output_available());
     EnableWindow(GetDlgItem(window, voiceSettingsID), recording == 0 && jsti_voice_output_available());
@@ -813,6 +820,7 @@ void invalidateHistoryPresentation(HWND window, bool resetVersion) {
         ? L"Select a saved recording." : L"Loading saved transcript…");
     EnableWindow(GetDlgItem(window, copyID), FALSE);
     EnableWindow(GetDlgItem(window, exportID), FALSE);
+    EnableWindow(GetDlgItem(window, issueReportID), FALSE);
     EnableWindow(GetDlgItem(window, readAloudID), FALSE);
 }
 
@@ -873,7 +881,7 @@ unsigned pagesOf(int identifier) {
     case setupMicrophoneID: case setupModelID: case setupShortcutID: case setupOutputID:
         return page(dashboardPage);
     case searchLabelID: case searchID: case clearSearchID: case historyFiltersID:
-    case historyDeleteID: case historyClearID: case 93: case historyID: case historyDetailID:
+    case issueReportID: case historyDeleteID: case historyClearID: case 93: case historyID: case historyDetailID:
     case variantLabelID: case variantID: case retryID: case exportID: case openAudioID: case playbackLabelID:
     case playbackTimeID: case playPauseID: case historySessionsID: case historyErrorsID: case historyAverageID:
     case historySpendID: case historyCorrectionsID:
@@ -1205,6 +1213,8 @@ void layoutHistory(HWND window, const RECT &content) {
     setLabel(window, exportID, L"&Export...");
     actions += row + squeezedActionRowGap;
     place(window, historyDeleteID, cell(0, actions, 3));
+    const RECT issueStart = cell(1, actions, 3);
+    place(window, issueReportID, RECT{issueStart.left, actions, right, actions + row});
 }
 
 // A settings card: `rows` controls, top to bottom, with a description.
@@ -2047,6 +2057,7 @@ bool createControls(HWND window) {
         add(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, searchID) &&
         add(L"BUTTON", L"C&lear", BS_PUSHBUTTON | WS_TABSTOP, clearSearchID) &&
         add(L"BUTTON", L"Fil&ters...", BS_PUSHBUTTON | WS_TABSTOP, historyFiltersID) &&
+        add(L"BUTTON", L"Create issue with details...", BS_PUSHBUTTON | BS_MULTILINE | WS_TABSTOP, issueReportID) &&
         add(L"BUTTON", L"Delete...", BS_PUSHBUTTON | WS_TABSTOP, historyDeleteID) &&
         add(L"BUTTON", L"Clear history...", BS_PUSHBUTTON | WS_TABSTOP, historyClearID) &&
         add(L"STATIC", L"&History", 0, 93) &&
@@ -3043,6 +3054,10 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
                 jsti_show_action_shortcuts(window);
             }
             return 0;
+        case issueReportID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, issueReportID) &&
+                state.historyPresentationReady) emitHistory(window, JSTI_EVENT_HISTORY_ISSUE_REPORT);
+            return 0;
         case retryID: emitHistory(window, JSTI_EVENT_HISTORY_RETRY); return 0;
         case exportID:
             if (IsWindowEnabled(GetDlgItem(window, exportID))) emitHistory(window, JSTI_EVENT_HISTORY_EXPORT);
@@ -3256,11 +3271,13 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         }
         break;
     case WM_CLOSE:
+        jsti_issue_report_shutdown();
         jsti::globalEscape::publish(0);
         retireCleanupPreview();
         emit(window, JSTI_EVENT_CLOSING);
         DestroyWindow(window); return 0;
     case WM_DESTROY:
+        jsti_issue_report_shutdown();
         retireCleanupPreview();
         {
             std::string failure;
@@ -3730,6 +3747,8 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
             initialDensity = state.densityDelivery.claimInitial();
             initialShell = state.shellDelivery.claimInitial();
         }
+        // Optional report UI may be unavailable without preventing dictation.
+        jsti_issue_report_attach(window, callback, context);
         if (initialSidebar) state.sidebar = std::move(*initialSidebar);
         initialSidebar.reset();
         if (initialDensity) { visualDensity = *initialDensity; layout(window); }
@@ -3759,7 +3778,7 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
             if (cancelKeyMessage(window, message)) continue;
             if (sidebarKeyMessage(window, message)) continue;
             if (jsti_action_shortcut_key_message(window, message)) continue;
-            if (!jsti_history_filters_message(&message) && !jsti_guide_message(&message) &&
+            if (!jsti_issue_report_message(&message) && !jsti_history_filters_message(&message) && !jsti_guide_message(&message) &&
                 !jsti_permissions_message(&message) && !IsDialogMessageW(window, &message)) {
                 TranslateMessage(&message); DispatchMessageW(&message);
             }
@@ -3776,6 +3795,7 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
                 failure.empty() ? "The active-only Escape listener could not be removed." : failure, error, capacity);
         }
     }
+    jsti_issue_report_shutdown();
     jsti::hud::destroy();
     releaseShell();
     state.font = nullptr;
@@ -4461,12 +4481,21 @@ static bool cleanupPreviewSelfTest(HWND window) {
     return okay;
 }
 
+static void jsti_smoke_stage(const char *stage) {
+    std::fputs("jsti-ui-smoke-stage: ", stderr);
+    std::fputs(stage, stderr);
+    std::fputc('\n', stderr);
+    std::fflush(stderr);
+}
+
 int jsti_window_self_test(char *error, size_t errorCapacity) {
+    jsti_smoke_stage("window.self-test.enter");
     HWND window;
     { std::lock_guard<std::mutex> lock(state.mutex); window = state.window; }
     if (!window || GetWindowThreadProcessId(window, nullptr) != GetCurrentThreadId()) {
         return jsti::fail("Window checks must run on the UI thread after READY.", error, errorCapacity);
     }
+    jsti_smoke_stage("window.escape.begin");
     std::string escapeFailure;
     if (!jsti::globalEscape::selfTest(window, escapeFailure)) {
         return jsti::fail(escapeFailure, error, errorCapacity);
@@ -4475,10 +4504,12 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         jsti_window_global_escape_is_current(0) != 0) {
         return jsti::fail("Global Escape configuration or invalid-token admission lost its guard.", error, errorCapacity);
     }
+    jsti_smoke_stage("window.troubleshooting.begin");
     if (!GetDlgItem(window, troubleshootingID) || !onPage(troubleshootingID, aboutPage) ||
         onPage(troubleshootingID, dashboardPage) || !jsti_troubleshooting_self_test(window))
         return jsti::fail("Troubleshooting entry, independent report state or stale-result checks failed.",
                           error, errorCapacity);
+    jsti_smoke_stage("window.troubleshooting.returned");
     const JSTIAboutLink lateAboutLink{"Late", "https://example.com/"};
     if (!onPage(configurationID, correctionsPage) || onPage(configurationID, pronunciationPage))
         return jsti::fail("Correction learning preferences lost their page scope.", error, errorCapacity);
@@ -4494,11 +4525,19 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             !onPage(aboutLinkBaseID + static_cast<int>(i), aboutPage))
             return jsti::fail("About link labels or page scope failed.", error, errorCapacity);
     }
+    jsti_smoke_stage("window.issue-helper.begin");
+    { std::string failure;
+      if (!jsti_issue_report_self_test(failure)) return jsti::fail(failure, error, errorCapacity); }
+    jsti_smoke_stage("window.issue-helper.returned");
+    jsti_smoke_stage("window.cleanup-sidebar.begin");
     if (!cleanupPreviewSelfTest(window))
         return jsti::fail("Cleanup preview bounds, coalescing, navigation or retirement failed.", error, errorCapacity);
+    jsti_smoke_stage("window.cleanup-preview.returned");
     if (!sidebarStartupSelfTest())
         return jsti::fail("Sidebar pre-window retention, real control application or delivery ownership failed.",
                           error, errorCapacity);
+    jsti_smoke_stage("window.sidebar-startup.returned");
+    jsti_smoke_stage("window.cleanup-sidebar.returned");
     const JSTISidebarShortcut unknownSidebar[] = {{"unknown-page", 1, "Ctrl+1"}};
     if (jsti_window_set_sidebar_shortcuts(unknownSidebar, 1, 1) != -1)
         return jsti::fail("An unrecognized sidebar destination was accepted.", error, errorCapacity);
@@ -5570,6 +5609,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             return static_cast<Event *>(context)->event == before;
         };
         auto observe = [](void *context) { return static_cast<Event *>(context)->event; };
+        jsti_smoke_stage("window.later-helpers.begin");
         return jsti_settings_self_test(window, failure) && jsti_profiles_self_test(window, failure) &&
             jsti_history_filters_self_test(window, failure) &&
             jsti_vocabulary_self_test(window, failure) &&
@@ -5585,6 +5625,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     bool passed = false;
     try { passed = check(); }
     catch (const std::exception &) { failure = "Window smoke test could not allocate its temporary state."; }
+    jsti_smoke_stage("window.later-check.returned");
     state.microphones = originalMicrophones;
     state.microphoneSelection = originalMicrophoneID;
     populateMicrophones(window);
@@ -5635,10 +5676,12 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         originalBounds.right - originalBounds.left, originalBounds.bottom - originalBounds.top,
         SWP_NOZORDER | SWP_NOACTIVATE);
     showPage(window, originalPage);
+    jsti_smoke_stage("window.final-helpers.begin");
     if (passed) passed = jsti::hud::selfTest(failure);
     if (passed) passed = jsti::appIcon::selfTest(window, failure);
     if (passed) passed = jsti::tray::selfTest(failure);
     if (passed) passed = shellSelfTest(failure);
+    jsti_smoke_stage("window.self-test.returning");
     return passed ? 0 : jsti::fail(failure, error, errorCapacity);
 }
 

@@ -14,6 +14,7 @@ public struct HistoryView: View {
     @State private var showingClearConfirmation = false
     @State private var showSkeletonLoading = false
     @State private var showingFilters = false
+    @State private var issueReport: IOSIssueReportController?
     @State private var searchText = ""
     @State private var errorsOnly = false
     @State private var selectedModel: String?
@@ -101,6 +102,7 @@ public struct HistoryView: View {
         .refreshable {
             await historyManager.triggerSync()
         }
+        .sheet(item: $issueReport) { IOSIssueReportPreview(controller: $0) }
         .task { await historyManager.loadIfNeededAndWait() }
         .onReceive(historyManager.$items) { items in
             // Published emits before the manager's stored value changes.
@@ -203,7 +205,10 @@ public struct HistoryView: View {
                             )
                         },
                         onReprocess: { Task { await historyManager.reprocess(item) } },
-                        onDelete: { Task { await historyManager.removeAndWait(item) } }
+                        onDelete: { Task { await historyManager.removeAndWait(item) } },
+                        onReport: {
+                            issueReport = IOSIssueReportController(snapshot: IOSIssueReporter.snapshot(for: item))
+                        }
                     )
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         Button(role: .destructive) {
@@ -313,31 +318,6 @@ public struct HistoryView: View {
             return "\(minutes)m \(secs)s"
         }
         return "\(secs)s"
-    }
-}
-
-struct HistoryViewFilterKey: Equatable {
-    let searchText: String
-    let errorsOnly: Bool
-    let selectedModel: String?
-    let dateRangeEnabled: Bool
-    let startDate: Date
-    let endDate: Date
-}
-
-/// Derived rows belong to the view lifecycle and rebuild only from emitted rows or filter changes.
-struct HistoryViewDerivedState {
-    let filteredItems: [iOSHistoryItem]
-    let statistics: HistoryPresentationStatistics
-    let availableModels: [String]
-
-    init(items: [iOSHistoryItem], query: HistorySearchQuery) {
-        let newItems = items.filter { query.matches($0.presentationItem) }
-        filteredItems = newItems
-        statistics = HistoryPresentationStatistics(items: newItems.map(\.presentationItem))
-        availableModels = Array(Set(items.map(\.model))).sorted {
-            ModelCatalog.friendlyName(for: $0) < ModelCatalog.friendlyName(for: $1)
-        }
     }
 }
 

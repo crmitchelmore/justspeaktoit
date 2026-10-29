@@ -55,13 +55,15 @@ extension HistoryRecord {
             model: try values.decodeIfPresent(String.self, forKey: .model),
             wordCount: try values.decodeIfPresent(Int.self, forKey: .wordCount),
             originPlatform: try values.decodeIfPresent(String.self, forKey: .originPlatform) ?? "macos",
-            errorMessage: try values.decodeIfPresent(String.self, forKey: .errorMessage)
+            errorMessage: try values.decodeIfPresent(String.self, forKey: .errorMessage),
+            requestContext: try? values.decodeIfPresent(RequestDiagnosticContext.self, forKey: .requestContext),
+            requestFailure: try? values.decodeIfPresent(RequestDiagnosticContext.Failure.self, forKey: .requestFailure)
         )
     }
 
     private enum IOSLegacyKeys: String, CodingKey {
         case id, createdAt, updatedAt, transcription, postProcessedTranscription
-        case model, duration, wordCount, originPlatform, errorMessage
+        case model, duration, wordCount, originPlatform, errorMessage, requestContext, requestFailure
     }
 
     private static func decodeIOSLegacy(_ values: KeyedDecodingContainer<IOSLegacyKeys>) throws -> Self {
@@ -76,7 +78,9 @@ extension HistoryRecord {
             model: try values.decode(String.self, forKey: .model),
             wordCount: try values.decode(Int.self, forKey: .wordCount),
             originPlatform: try values.decodeIfPresent(String.self, forKey: .originPlatform) ?? "ios",
-            errorMessage: try values.decodeIfPresent(String.self, forKey: .errorMessage)
+            errorMessage: try values.decodeIfPresent(String.self, forKey: .errorMessage),
+            requestContext: try? values.decodeIfPresent(RequestDiagnosticContext.self, forKey: .requestContext),
+            requestFailure: try? values.decodeIfPresent(RequestDiagnosticContext.Failure.self, forKey: .requestFailure)
         )
     }
 }

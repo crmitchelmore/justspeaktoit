@@ -716,7 +716,7 @@ final class MainManager: ObservableObject {
       triggerTiming: triggerTiming
     )
     session.outputTarget = TextOutputTarget.capture()
-    session.diagnosticContext = makeHistoryDiagnosticContext()
+    session.diagnosticContext = makeHistoryDiagnosticContext(includeRequestedContext: true)
     session.isLocalAutomationCapture = true
     activeSession = session
     lastErrorMessage = nil
@@ -766,7 +766,10 @@ final class MainManager: ObservableObject {
           try await transcriptionManager.startLiveTranscription(
             preRollBuffers: preRollBuffers,
             analyzerFallbackAllowed: trigger != .handsFree,
-            primedInput: primedCapture
+            primedInput: primedCapture,
+            onDiagnostic: { [weak self] receipt in
+              Self.retainBatchDiagnostic(receipt, for: session, activeSession: self?.activeSession)
+            }
           )
           guard self?.activeSession === session else { return }
           session.liveTranscriptSessionID = transcriptionManager.liveTranscript.sessionID
@@ -1067,7 +1070,9 @@ final class MainManager: ObservableObject {
             return
           }
         }
-        let result = try await transcriptionManager.transcribeFile(at: summary.url)
+        let result = try await transcriptionManager.transcribeFile(at: summary.url) { [weak self] receipt in
+          Self.retainBatchDiagnostic(receipt, for: session, activeSession: self?.activeSession)
+        }
         guard sessionProcessingShouldContinue(session) else { return }
         session.transcriptionEnded = Date()
         session.transcriptionResult = result
@@ -1157,6 +1162,9 @@ final class MainManager: ObservableObject {
             Task { @MainActor in
               self?.hudManager.updateStreamingText(accumulatedText)
             }
+          },
+          onDiagnostic: { [weak self] in
+            Self.retainPostProcessingDiagnostic($0, for: session, activeSession: self?.activeSession)
           }
         )
         guard sessionProcessingShouldContinue(session) else { return }
@@ -1552,7 +1560,10 @@ final class MainManager: ObservableObject {
     let outcomeResult = await postProcessingManager.process(
       rawText: postProcessingInput,
       context: retryData.lexiconContext,
-      corrections: retryData.personalCorrections
+      corrections: retryData.personalCorrections,
+      onDiagnostic: { [weak self] in
+        Self.retainPostProcessingDiagnostic($0, for: session, activeSession: self?.activeSession)
+      }
     )
 
     switch outcomeResult {
@@ -1749,7 +1760,9 @@ final class MainManager: ObservableObject {
           description: isLocalTranscription ? "Submitting to local model" : "Submitting to batch model"
         )
       )
-      let result = try await transcriptionManager.transcribeFile(at: url)
+      let result = try await transcriptionManager.transcribeFile(at: url) { [weak self] receipt in
+        Self.retainBatchDiagnostic(receipt, for: session, activeSession: self?.activeSession)
+      }
       session.transcriptionEnded = Date()
       session.transcriptionResult = result
       session.modelsUsed.insert(result.modelIdentifier)
@@ -1838,6 +1851,9 @@ final class MainManager: ObservableObject {
             Task { @MainActor in
               self?.hudManager.updateStreamingText(accumulatedText)
             }
+          },
+          onDiagnostic: { [weak self] in
+            Self.retainPostProcessingDiagnostic($0, for: session, activeSession: self?.activeSession)
           }
         )
         switch outcomeResult {
@@ -1931,6 +1947,48 @@ final class MainManager: ObservableObject {
 }
 // swiftlint:enable type_body_length
 extension MainManager {
+  static func retainBatchDiagnostic(
+    _ receipt: TranscriptionManager.BatchDiagnosticReceipt, for session: ActiveSession, activeSession: ActiveSession?
+  ) {
+    guard activeSession === session, !Task.isCancelled, let context = session.diagnosticContext else { return }
+    var handoff = context.observedHandoff
+    var failure = context.requestFailure
+    switch receipt {
+    case .handoff(let observed):
+      guard observed.provenance == .observedHandoff else { return }
+      handoff = observed
+    case .failure(let observed):
+      failure = observed
+    }
+    session.diagnosticContext = HistoryDiagnosticContext(
+      capturedAt: context.capturedAt, appVersion: context.appVersion, appBuild: context.appBuild,
+      operatingSystem: context.operatingSystem, processIdentifier: context.processIdentifier,
+      microphonePermission: context.microphonePermission, inputDeviceName: context.inputDeviceName,
+      providerLabel: context.providerLabel, latencyTier: context.latencyTier,
+      transcriptionMode: context.transcriptionMode, transcriptionModel: context.transcriptionModel,
+      postProcessingModel: context.postProcessingModel, speedMode: context.speedMode,
+      requestContext: context.requestContext, observedHandoff: handoff, requestFailure: failure,
+      postProcessingObservation: context.postProcessingObservation
+    )
+  }
+
+  static func retainPostProcessingDiagnostic(
+    _ observation: RequestDiagnosticContext.PostProcessingObservation,
+    for session: ActiveSession, activeSession: ActiveSession?
+  ) {
+    guard activeSession === session, !Task.isCancelled, let context = session.diagnosticContext else { return }
+    session.diagnosticContext = HistoryDiagnosticContext(
+      capturedAt: context.capturedAt, appVersion: context.appVersion, appBuild: context.appBuild,
+      operatingSystem: context.operatingSystem, processIdentifier: context.processIdentifier,
+      microphonePermission: context.microphonePermission, inputDeviceName: context.inputDeviceName,
+      providerLabel: context.providerLabel, latencyTier: context.latencyTier,
+      transcriptionMode: context.transcriptionMode, transcriptionModel: context.transcriptionModel,
+      postProcessingModel: context.postProcessingModel, speedMode: context.speedMode,
+      requestContext: context.requestContext, observedHandoff: context.observedHandoff,
+      requestFailure: context.requestFailure, postProcessingObservation: observation
+    )
+  }
+
   fileprivate func makeRecordingSummary(from url: URL, fallbackDuration: TimeInterval)
     -> RecordingSummary {
     let attributes = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]

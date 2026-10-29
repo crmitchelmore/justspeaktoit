@@ -286,6 +286,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     /// The one History Play or Read aloud request that may still start audio or report.
     package var playbackRequests = DesktopPlaybackRequests()
     package var history: [UUID: DesktopRecordingStore.Record] = [:]
+    var issueReportSession: DesktopHostIssueReportSession?
     /// Folded search text per record, refreshed only when a record is saved so
     /// each keystroke filters cached strings instead of re-normalising transcripts.
     package var historySearchText: [UUID: String] = [:]

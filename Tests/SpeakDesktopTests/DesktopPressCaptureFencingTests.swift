@@ -158,11 +158,20 @@ final class DesktopPressCaptureFencingTests: XCTestCase {
         await worker.waitForOpens()
         try await lease.reserve(token, identity: identity, admission: admission)
         let waiter = Task { try await lease.waitUntilReady(token) }
-        waiter.cancel()
-        for _ in 0..<1_000 {
-            if await lease.phase == .closing { break }
-            await Task.yield()
+        let closing = expectation(description: "Cancelled readiness begins closing before open completes")
+        let observation = Task {
+            while !Task.isCancelled {
+                if await lease.phase == .closing {
+                    closing.fulfill()
+                    return
+                }
+                await Task.yield()
+            }
         }
+        waiter.cancel()
+        await fulfillment(of: [closing], timeout: 2)
+        observation.cancel()
+        await observation.value
         await assertPressPhase(lease, .closing)
         await worker.releaseOpens()
         do { try await waiter.value; XCTFail("Cancelled reservation became ready") } catch is CancellationError {

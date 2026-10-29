@@ -11,8 +11,9 @@ on:
 
 # Serialize production publication; keep the current deployment and only the
 # newest pending revision instead of deploying every intermediate main merge.
+# Manual preview refs must not replace a pending production deployment.
 concurrency:
-  group: landing-page-production
+  group: landing-page-${{ github.ref == 'refs/heads/main' && 'production' || github.ref }}
   cancel-in-progress: false
 
 jobs:

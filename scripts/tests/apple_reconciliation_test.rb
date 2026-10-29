@@ -1,4 +1,5 @@
 require 'minitest/autorun'
+require 'open3'
 require_relative '../apple-reconciliation'
 require_relative '../release-apple'
 
@@ -262,6 +263,91 @@ class AppleReconciliationTest < Minitest::Test
     end
     assert_raises(AppleRelease::ReconciliationInputError) do
       reader.send(:capture, [RbConfig.ruby, '-e', 'STDERR.write("PRIVATE_CANARY"); exit 1'], 64)
+    end
+  end
+
+  def run_manifest_loading(ledger, annotations, requested:)
+    reads = []
+    client_calls = 0
+    snapshot_calls = 0
+    client_boundary = RuntimeError.new('Test stopped before constructing Apple client')
+    previous = ENV['RECONCILE_TAG']
+    ENV['RECONCILE_TAG'] = requested
+    command = ->(*arguments) do
+      if arguments == ['git', 'for-each-ref', '--format=%(refname:short)',
+          'refs/tags/alpha-build-*', 'refs/tags/stable-candidate-*']
+        [ledger.join("\n") + "\n", Struct.new(:success?).new(true)]
+      else
+        tag = arguments.fetch(3).delete_prefix('refs/tags/')
+        assert_equal ['git', 'for-each-ref', '--format=%(contents)', "refs/tags/#{tag}"], arguments
+        reads << tag
+        data, success = annotations.fetch(tag)
+        [data, Struct.new(:success?).new(success)]
+      end
+    end
+    error = nil
+    capture_io do
+      Open3.stub(:capture2, command) do
+        AppleRelease.stub(:reconciliation_state, ->(*_args) { snapshot_calls += 1; raise 'Unexpected snapshot acquisition' }) do
+          AppleRelease::Client.stub(:new, -> { client_calls += 1; raise client_boundary }) do
+            begin
+              load File.expand_path('../reconcile-apple-releases.rb', __dir__)
+            rescue StandardError, SystemExit => caught
+              error = caught
+            end
+          end
+        end
+      end
+    end
+    {error: error, reads: reads, client_calls: client_calls, snapshot_calls: snapshot_calls,
+      client_boundary: client_boundary}
+  ensure
+    previous.nil? ? ENV.delete('RECONCILE_TAG') : ENV['RECONCILE_TAG'] = previous
+  end
+
+  def test_explicit_runner_reads_only_requested_annotation_before_client_boundary
+    [alpha(42, age: 91), manifest(1, train: 'stable')].each do |value|
+      tag = value.fetch('tag')
+      result = run_manifest_loading([tag, 'alpha-build-999', 'stable-candidate-999'],
+        {tag => [JSON.generate(value), true], 'alpha-build-999' => ['{broken', true],
+          'stable-candidate-999' => ['{broken', true]}, requested: " #{tag} ")
+      assert_same result[:client_boundary], result[:error]
+      assert_equal [tag], result[:reads]
+      assert_equal 1, result[:client_calls]
+      assert_equal 0, result[:snapshot_calls]
+    end
+  end
+
+  def test_explicit_runner_rejects_invalid_missing_malformed_mismatched_or_unreadable_target
+    value = alpha(42)
+    tag = value.fetch('tag')
+    cases = [
+      {requested: '../PRIVATE_CANARY', annotation: [JSON.generate(value), true], error: RuntimeError, reads: []},
+      {requested: 'alpha-build-41', annotation: [JSON.generate(value), true], error: RuntimeError, reads: []},
+      {requested: tag, annotation: ['{broken', true], error: JSON::ParserError, reads: [tag]},
+      {requested: tag, annotation: [JSON.generate(alpha(43)), true], error: RuntimeError, reads: [tag]},
+      {requested: tag, annotation: [JSON.generate(value), false], error: SystemExit, reads: [tag]}
+    ]
+    cases.each do |entry|
+      result = run_manifest_loading([tag], {tag => entry[:annotation]}, requested: entry[:requested])
+      assert_instance_of entry[:error], result[:error]
+      refute_same result[:client_boundary], result[:error]
+      refute_includes result[:error].message, 'PRIVATE_CANARY'
+      assert_equal entry[:reads], result[:reads]
+      assert_equal 0, result[:client_calls]
+      assert_equal 0, result[:snapshot_calls]
+    end
+  end
+
+  def test_scheduled_runner_still_rejects_any_malformed_annotation_before_snapshot_or_client
+    value = alpha(42)
+    %w[alpha-build-41 stable-candidate-1].each do |malformed|
+      result = run_manifest_loading([value.fetch('tag'), malformed],
+        {value.fetch('tag') => [JSON.generate(value), true], malformed => ['{broken', true]}, requested: ' ')
+      assert_instance_of JSON::ParserError, result[:error]
+      assert_equal [value.fetch('tag'), malformed], result[:reads]
+      assert_equal 0, result[:snapshot_calls]
+      assert_equal 0, result[:client_calls]
     end
   end
 

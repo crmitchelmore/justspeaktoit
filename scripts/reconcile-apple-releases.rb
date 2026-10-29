@@ -6,12 +6,14 @@ output, status = Open3.capture2('git','for-each-ref','--format=%(refname:short)'
 abort 'Cannot read release ledger' unless status.success?
 require_relative 'apple-reconciliation'
 failures=[]
-manifests=output.lines.map(&:strip).map do |tag|
+tag = ENV['RECONCILE_TAG'].to_s.strip
+tags = output.lines.map(&:strip)
+tags.select! { |candidate| candidate == tag } unless tag.empty?
+manifests=tags.map do |tag|
   data, result = Open3.capture2('git','for-each-ref','--format=%(contents)',"refs/tags/#{tag}")
   abort "Cannot read release manifest: #{tag}" unless result.success?
   JSON.parse(data)
 end
-tag = ENV['RECONCILE_TAG'].to_s.strip
 begin
   now = Time.now
   state = AppleRelease.reconciliation_state(manifests, now: now) if tag.empty?
